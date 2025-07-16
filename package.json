@@ -1,0 +1,53 @@
+{
+  "name": "ezhealthkonnect",
+  "version": "1.0.0",
+  "description": "AI-Powered Healthcare Integration Platform",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "dictionary": "node services/hl7_dictionary_service.js",
+    "dictionary:dev": "nodemon services/hl7_dictionary_service.js",
+    "test:dictionary": "node test_dictionary.js",
+    "start:all": "concurrently \"npm run dictionary\" \"go run main.go\"",
+    "dev:all": "concurrently \"npm run dictionary:dev\" \"go run main.go\""
+  },
+  "keywords": [
+    "hl7",
+    "healthcare",
+    "fhir",
+    "integration",
+    "ai",
+    "interoperability"
+  ],
+  "author": "ezHealthKonnect Team",
+  "license": "ISC",
+  "dependencies": {
+    "@redoxengine/redox-hl7-v2": "^1.0.1",
+    "bcryptjs": "^2.4.3",
+    "bull": "^4.16.5",
+    "cors": "^2.8.5",
+    "dotenv": "^16.6.1",
+    "express": "^4.21.2",
+    "express-session": "^1.17.3",
+    "fast-xml-parser": "^5.2.5",
+    "helmet": "^8.1.0",
+    "hl7-dictionary": "^1.0.1",
+    "ioredis": "^5.6.1",
+    "jsonwebtoken": "^9.0.2",
+    "morgan": "^1.10.0",
+    "multer": "^2.0.1",
+    "node-fetch": "^2.7.0",
+    "p-limit": "^2.3.0",
+    "pg": "^8.16.2",
+    "puppeteer": "^24.11.2",
+    "redis": "^5.5.6",
+    "sequelize": "^6.37.7",
+    "xml2js": "^0.6.2"
+  },
+  "devDependencies": {
+    "axios": "^1.10.0",
+    "cheerio": "^1.1.0",
+    "concurrently": "^9.0.0",
+    "nodemon": "^3.0.1"
+  }
+}

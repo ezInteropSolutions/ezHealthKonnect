@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard - ezHealthKonnect</title>
+    <link rel="stylesheet" href="css/dashboard.css">
+</head>
+<body>
+    <div class="dashboard-container">
+        <!-- Sidebar Navigation -->
+        <nav class="sidebar" id="sidebar">
+            <!-- Collapse Toggle -->
+            <button class="sidebar-toggle" id="sidebarToggle">
+                <span class="toggle-icon">‹</span>
+            </button>
+
+            <!-- Logo Section -->
+            <div class="logo-container">
+                <img src="/assets/logos/ezHealthKonnect.jpeg" alt="ezHealthKonnect" class="logo-image">
+                <div class="logo-text">
+                    <h3 class="brand-name">ez<span class="brand-accent">Health</span>Konnect</h3>
+                    <p class="brand-tagline">Healthcare Integration</p>
+                </div>
+            </div>
+
+            <!-- Navigation Menu -->
+            <div class="nav-menu">
+                <!-- Main Section -->
+                <div class="nav-section">
+                    <div class="section-header">
+                        <span class="section-title">Main</span>
+                    </div>
+                    <div class="nav-items">
+                        <a href="#dashboard" class="nav-item active">
+                            <span class="nav-icon">🏠</span>
+                            <span class="nav-label">Dashboard</span>
+                        </a>
+                        <a href="#interfaces" class="nav-item">
+                            <span class="nav-icon">🔗</span>
+                            <span class="nav-label">Interfaces</span>
+                        </a>
+                        <a href="#messages" class="nav-item">
+                            <span class="nav-icon">📧</span>
+                            <span class="nav-label">Messages</span>
+                        </a>
+                        <a href="#templates" class="nav-item">
+                            <span class="nav-icon">📄</span>
+                            <span class="nav-label">Templates</span>
+                        </a>
+                    </div>
+                </div>
+
+                <!-- Analytics Section -->
+                <div class="nav-section">
+                    <div class="section-header">
+                        <span class="section-title">Analytics</span>
+                    </div>
+                    <div class="nav-items">
+                        <a href="#monitoring" class="nav-item">
+                            <span class="nav-icon">📊</span>
+                            <span class="nav-label">Monitor</span>
+                        </a>
+                        <a href="#reports" class="nav-item">
+                            <span class="nav-icon">📈</span>
+                            <span class="nav-label">Reports</span>
+                        </a>
+                    </div>
+                </div>
+
+                <!-- Admin Section (hidden by default) -->
+                <div class="nav-section admin-section" id="adminSection" style="display: none;">
+                    <div class="section-header">
+                        <span class="section-title">Admin</span>
+                    </div>
+                    <div class="nav-items">
+                        <a href="#users" class="nav-item">
+                            <span class="nav-icon">👥</span>
+                            <span class="nav-label">Users</span>
+                        </a>
+                        <a href="#settings" class="nav-item">
+                            <span class="nav-icon">⚙️</span>
+                            <span class="nav-label">Settings</span>
+                        </a>
+                    </div>
+                </div>
+            </div>
+
+            <!-- User Profile -->
+            <div class="user-profile">
+                <div class="user-info">
+                    <div class="user-avatar" id="userAvatar">S</div>
+                    <div class="user-details">
+                        <span class="user-name" id="userName">System User</span>
+                        <span class="user-role" id="userRole">ADMIN</span>
+                    </div>
+                </div>
+                <button class="logout-btn" onclick="logout()" title="Logout">
+                    <span class="nav-icon">🚪</span>
+                    <span class="nav-label">Logout</span>
+                </button>
+            </div>
+        </nav>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Header -->
+            <header class="content-header">
+                <div class="header-left">
+                    <h1 class="page-title">Welcome back!</h1>
+                    <span class="current-time" id="currentTime">10:07 AM</span>
+                </div>
+                <div class="header-stats">
+                    <div class="stat-item">
+                        <span class="stat-value">0</span>
+                        <span class="stat-label">Active</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-value">0</span>
+                        <span class="stat-label">Messages</span>
+                    </div>
+                    <div class="stat-item success">
+                        <span class="stat-value">99.9%</span>
+                        <span class="stat-label">Uptime</span>
+                    </div>
+                </div>
+            </header>
+
+            <!-- Dashboard Grid -->
+            <div class="dashboard-grid">
+                <!-- Quick Actions -->
+                <div class="dashboard-card">
+                    <h3 class="card-title">Quick Actions</h3>
+                    <div class="action-grid">
+                        <a href="#interfaces" class="action-tile primary">
+                            <span class="tile-icon">🔗</span>
+                            <div class="tile-content">
+                                <span class="tile-title">Interfaces</span>
+                                <span class="tile-count">0</span>
+                            </div>
+                        </a>
+                        <a href="#messages" class="action-tile primary">
+                            <span class="tile-icon">📧</span>
+                            <div class="tile-content">
+                                <span class="tile-title">Messages</span>
+                                <span class="tile-count">0</span>
+                            </div>
+                        </a>
+                        <a href="#templates" class="action-tile">
+                            <span class="tile-icon">📄</span>
+                            <div class="tile-content">
+                                <span class="tile-title">Templates</span>
+                                <span class="tile-count">5</span>
+                            </div>
+                        </a>
+                        <a href="#monitoring" class="action-tile">
+                            <span class="tile-icon">📊</span>
+                            <div class="tile-content">
+                                <span class="tile-title">Monitor</span>
+                                <span class="tile-count success">✓</span>
+                            </div>
+                        </a>
+                    </div>
+                </div>
+
+                <!-- System Status -->
+                <div class="dashboard-card">
+                    <h3 class="card-title">System Status</h3>
+                    <div class="status-grid">
+                        <div class="status-item">
+                            <span class="status-icon">💾</span>
+                            <div class="status-info">
+                                <span class="status-label">Database</span>
+                                <span class="status-value success">Connected</span>
+                            </div>
+                        </div>
+                        <div class="status-item">
+                            <span class="status-icon">🔄</span>
+                            <div class="status-info">
+                                <span class="status-label">Queue</span>
+                                <span class="status-value success">Ready</span>
+                            </div>
+                        </div>
+                        <div class="status-item">
+                            <span class="status-icon">🤖</span>
+                            <div class="status-info">
+                                <span class="status-label">AI Claude</span>
+                                <span class="status-value success">Available</span>
+                            </div>
+                        </div>
+                        <div class="status-item">
+                            <span class="status-icon">📊</span>
+                            <div class="status-info">
+                                <span class="status-label">Memory</span>
+                                <span class="status-value">45%</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Admin Actions (hidden by default) -->
+                <div class="dashboard-card admin-card" id="adminCard" style="display: none;">
+                    <h3 class="card-title">Administration</h3>
+                    <div class="action-grid">
+                        <a href="#users" class="action-tile admin">
+                            <span class="tile-icon">👥</span>
+                            <div class="tile-content">
+                                <span class="tile-title">Users</span>
+                                <span class="tile-count" id="userCount">2</span>
+                            </div>
+                        </a>
+                        <a href="#settings" class="action-tile admin">
+                            <span class="tile-icon">⚙️</span>
+                            <div class="tile-content">
+                                <span class="tile-title">Settings</span>
+                                <span class="tile-count">✓</span>
+                            </div>
+                        </a>
+                    </div>
+                </div>
+
+                <!-- Recent Activity -->
+                <div class="dashboard-card">
+                    <h3 class="card-title">Recent Activity</h3>
+                    <div class="activity-list">
+                        <div class="activity-item">
+                            <span class="activity-dot success"></span>
+                            <div class="activity-content">
+                                <span class="activity-text">System started successfully</span>
+                                <span class="activity-time">Just now</span>
+                            </div>
+                        </div>
+                        <div class="activity-item">
+                            <span class="activity-dot"></span>
+                            <div class="activity-content">
+                                <span class="activity-text">Ready to configure interfaces</span>
+                                <span class="activity-time">Ready</span>
+                            </div>
+                        </div>
+                        <div class="activity-item">
+                            <span class="activity-dot"></span>
+                            <div class="activity-content">
+                                <span class="activity-text">AI assistant initialized</span>
+                                <span class="activity-time">System</span>
+                            </div>
+                        </div>
+                        <div class="activity-item">
+                            <span class="activity-dot"></span>
+                            <div class="activity-content">
+                                <span class="activity-text">Database connection established</span>
+                                <span class="activity-time">System</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- External JavaScript -->
+    <script src="js/dashboard.js"></script>
+</body>
+</html>

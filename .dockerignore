@@ -1,0 +1,14 @@
+node_modules
+.git
+.env
+*.log
+logs/
+uploads/
+.automation/
+dist/
+.github/
+README.md
+CHANGELOG.md
+docs/
+.dockerignore
+docker-entrypoint.sh

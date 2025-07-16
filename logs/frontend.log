@@ -1,0 +1,58 @@
+
+> ezhealthkonnect@1.0.0 start
+> node server.js
+
+🔧 Loading Complete Debug Interfaces Controller...
+🔍 About to create InterfacesController instance...
+🔍 Constructor called...
+🔍 Requiring database module...
+🔍 Database.js - Environment variables loaded:
+   DB_HOST: localhost
+   DB_PORT: 5432
+   DB_NAME: ezhealthkonnect
+   DB_USER: ezhealth_user
+   DB_PASSWORD: ***SET***
+🔍 Database module type: object
+🔍 Database module keys: [ 'sequelize', 'models', 'isConnected' ]
+🔍 Database.sequelize exists: false
+🔍 Database.isConnected: false
+✅ Complete Debug Interfaces Controller initialized
+🔍 Controller instance created: true
+🔍 Controller instance.database: true
+🔄 Initializing UserService storage (PostgreSQL only)...
+📦 Database module loaded successfully
+🔗 Database connection config:
+   host: localhost
+   port: 5432
+   database: ezhealthkonnect
+   username: ezhealth_user
+   password: ***SET***
+✅ PostgreSQL audit logging enabled
+node:internal/modules/cjs/loader:1404
+  throw err;
+  ^
+
+Error: Cannot find module 'bull'
+Require stack:
+- C:\Projects\ezHealthKonnect\routes\hl7Routes.js
+- C:\Projects\ezHealthKonnect\app.js
+- C:\Projects\ezHealthKonnect\server.js
+    at Function._resolveFilename (node:internal/modules/cjs/loader:1401:15)
+    at defaultResolveImpl (node:internal/modules/cjs/loader:1057:19)
+    at resolveForCJSWithHooks (node:internal/modules/cjs/loader:1062:22)
+    at Function._load (node:internal/modules/cjs/loader:1211:37)
+    at TracingChannel.traceSync (node:diagnostics_channel:322:14)
+    at wrapModuleLoad (node:internal/modules/cjs/loader:235:24)
+    at Module.require (node:internal/modules/cjs/loader:1487:12)
+    at require (node:internal/modules/helpers:135:16)
+    at Object.<anonymous> (C:\Projects\ezHealthKonnect\routes\hl7Routes.js:4:14)
+    at Module._compile (node:internal/modules/cjs/loader:1730:14) {
+  code: 'MODULE_NOT_FOUND',
+  requireStack: [
+    'C:\\Projects\\ezHealthKonnect\\routes\\hl7Routes.js',
+    'C:\\Projects\\ezHealthKonnect\\app.js',
+    'C:\\Projects\\ezHealthKonnect\\server.js'
+  ]
+}
+
+Node.js v22.16.0

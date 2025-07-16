@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>User Management - ezHealthKonnect</title>
+    <link rel="stylesheet" href="css/dashboard.css">
+    <link rel="stylesheet" href="css/user-management.css">
+</head>
+<body>
+    <div class="dashboard-container">
+        <!-- Sidebar Navigation (same as dashboard) -->
+        <nav class="sidebar" id="sidebar">
+            <!-- Collapse Toggle -->
+            <button class="sidebar-toggle" id="sidebarToggle">
+                <span class="toggle-icon">‹</span>
+            </button>
+
+            <!-- Logo Section -->
+            <div class="logo-container">
+                <img src="/assets/logos/ezHealthKonnect.jpeg" alt="ezHealthKonnect" class="logo-image">
+                <div class="logo-text">
+                    <h3 class="brand-name">ez<span class="brand-accent">Health</span>Konnect</h3>
+                    <p class="brand-tagline">Healthcare Integration</p>
+                </div>
+            </div>
+
+            <!-- Navigation Menu -->
+            <div class="nav-menu">
+                <!-- Main Section -->
+                <div class="nav-section">
+                    <div class="section-header">
+                        <span class="section-title">Main</span>
+                    </div>
+                    <div class="nav-items">
+                        <a href="dashboard.html" class="nav-item">
+                            <span class="nav-icon">🏠</span>
+                            <span class="nav-label">Dashboard</span>
+                        </a>
+                        <a href="#interfaces" class="nav-item">
+                            <span class="nav-icon">🔗</span>
+                            <span class="nav-label">Interfaces</span>
+                        </a>
+                        <a href="#messages" class="nav-item">
+                            <span class="nav-icon">📧</span>
+                            <span class="nav-label">Messages</span>
+                        </a>
+                        <a href="#templates" class="nav-item">
+                            <span class="nav-icon">📄</span>
+                            <span class="nav-label">Templates</span>
+                        </a>
+                    </div>
+                </div>
+
+                <!-- Analytics Section -->
+                <div class="nav-section">
+                    <div class="section-header">
+                        <span class="section-title">Analytics</span>
+                    </div>
+                    <div class="nav-items">
+                        <a href="#monitoring" class="nav-item">
+                            <span class="nav-icon">📊</span>
+                            <span class="nav-label">Monitor</span>
+                        </a>
+                        <a href="#reports" class="nav-item">
+                            <span class="nav-icon">📈</span>
+                            <span class="nav-label">Reports</span>
+                        </a>
+                    </div>
+                </div>
+
+                <!-- Admin Section -->
+                <div class="nav-section admin-section" id="adminSection">
+                    <div class="section-header">
+                        <span class="section-title">Admin</span>
+                    </div>
+                    <div class="nav-items">
+                        <a href="user-management.html" class="nav-item active">
+                            <span class="nav-icon">👥</span>
+                            <span class="nav-label">Users</span>
+                        </a>
+                        <a href="#settings" class="nav-item">
+                            <span class="nav-icon">⚙️</span>
+                            <span class="nav-label">Settings</span>
+                        </a>
+                    </div>
+                </div>
+            </div>
+
+            <!-- User Profile -->
+            <div class="user-profile">
+                <div class="user-info">
+                    <div class="user-avatar" id="userAvatar">S</div>
+                    <div class="user-details">
+                        <span class="user-name" id="userName">System User</span>
+                        <span class="user-role" id="userRole">ADMIN</span>
+                    </div>
+                </div>
+                <button class="logout-btn" onclick="logout()" title="Logout">
+                    <span class="nav-icon">🚪</span>
+                    <span class="nav-label">Logout</span>
+                </button>
+            </div>
+        </nav>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Header -->
+            <header class="content-header">
+                <div class="header-left">
+                    <h1 class="page-title">User Management</h1>
+                    <span class="current-time" id="currentTime">10:07 AM</span>
+                </div>
+                <div class="header-stats">
+                    <div class="stat-item">
+                        <span class="stat-value" id="totalUsers">0</span>
+                        <span class="stat-label">Total Users</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-value" id="activeUsers">0</span>
+                        <span class="stat-label">Active</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-value" id="adminUsers">0</span>
+                        <span class="stat-label">Admins</span>
+                    </div>
+                </div>
+            </header>
+
+            <!-- User Management Content -->
+            <div class="user-management-content">
+                <a href="dashboard.html" class="back-button">
+                    <span>←</span>
+                    <span>Back to Dashboard</span>
+                </a>
+
+                <div class="actions-bar">
+                    <div>
+                        <button class="btn btn-primary" onclick="showCreateUserModal()">
+                            <span>➕</span>
+                            <span>Create User</span>
+                        </button>
+                        <button class="btn btn-secondary" onclick="refreshUsers()">
+                            <span>🔄</span>
+                            <span>Refresh</span>
+                        </button>
+                    </div>
+                </div>
+
+                <div id="alertContainer"></div>
+
+                <div class="users-table-container">
+                    <div class="table-header">
+                        <h3 class="table-title">System Users</h3>
+                    </div>
+                    <div class="users-table">
+                        <table class="table">
+                            <thead>
+                                <tr>
+                                    <th>Name</th>
+                                    <th>Email</th>
+                                    <th>Role</th>
+                                    <th>Status</th>
+                                    <th>Created</th>
+                                    <th>Last Login</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="usersTableBody">
+                                <tr>
+                                    <td colspan="7">
+                                        <div class="empty-state">
+                                            <div class="empty-icon">⏳</div>
+                                            <div>Loading users...</div>
+                                        </div>
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Create User Modal -->
+    <div id="createUserModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 class="modal-title">Create New User</h3>
+            </div>
+            <form id="createUserForm">
+                <div class="form-group">
+                    <label for="userName">Full Name</label>
+                    <input type="text" id="userName" name="name" required placeholder="Enter full name">
+                </div>
+                <div class="form-group">
+                    <label for="userEmail">Email Address</label>
+                    <input type="email" id="userEmail" name="email" required placeholder="Enter email address">
+                </div>
+                <div class="form-group">
+                    <label for="userPassword">Password</label>
+                    <input type="password" id="userPassword" name="password" required minlength="6" placeholder="Enter password (min 6 characters)">
+                </div>
+                <div class="form-group">
+                    <label for="userRole">Role</label>
+                    <select id="userRole" name="role" required>
+                        <option value="">Select Role</option>
+                        <option value="user">User</option>
+                        <option value="admin">Administrator</option>
+                    </select>
+                </div>
+                <div class="modal-buttons">
+                    <button type="button" class="btn btn-secondary" onclick="closeCreateUserModal()">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Create User</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Edit User Modal -->
+    <div id="editUserModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 class="modal-title">Edit User Profile</h3>
+            </div>
+            <form id="editUserForm">
+                <input type="hidden" id="editUserId" name="id">
+                <div class="form-group">
+                    <label for="editUserName">Full Name</label>
+                    <input type="text" id="editUserName" name="name" required placeholder="Enter full name">
+                </div>
+                <div class="form-group">
+                    <label for="editUserEmail">Email Address</label>
+                    <input type="email" id="editUserEmail" name="email" required placeholder="Enter email address">
+                </div>
+                <div class="form-group">
+                    <label for="editUserRole">Role</label>
+                    <select id="editUserRole" name="role" required>
+                        <option value="">Select Role</option>
+                        <option value="user">User</option>
+                        <option value="admin">Administrator</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="editUserPassword">New Password (Optional)</label>
+                    <input type="password" id="editUserPassword" name="password" minlength="6" placeholder="Leave blank to keep current password">
+                </div>
+                <div class="modal-buttons">
+                    <button type="button" class="btn btn-secondary" onclick="closeEditUserModal()">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Update User</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- External JavaScript -->
+    <script src="js/user-management.js"></script>
+</body>
+</html>

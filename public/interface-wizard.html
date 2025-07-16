@@ -1,0 +1,447 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard with Interface Builder Modal - ezHealthKonnect</title>
+    <link rel="stylesheet" href="css/dashboard.css">
+    <link rel="stylesheet" href="css/interfaces.css">
+    <link rel="stylesheet" href="css/interface-wizard.css">
+</head>
+<body>
+    <div class="dashboard-container">
+        <!-- Sidebar Navigation -->
+        <nav class="sidebar" id="sidebar">
+            <!-- Collapse Toggle -->
+            <button class="sidebar-toggle" id="sidebarToggle">
+                <span class="toggle-icon">‹</span>
+            </button>
+
+            <!-- Logo Section -->
+            <div class="logo-container">
+                <img src="/assets/logos/ezHealthKonnect.jpeg" alt="ezHealthKonnect" class="logo-image">
+                <div class="logo-text">
+                    <h3 class="brand-name">ez<span class="brand-accent">Health</span>Konnect</h3>
+                    <p class="brand-tagline">Healthcare Integration</p>
+                </div>
+            </div>
+
+            <!-- Navigation Menu -->
+            <div class="nav-menu">
+                <!-- Main Section -->
+                <div class="nav-section">
+                    <div class="section-header">
+                        <span class="section-title">Main</span>
+                    </div>
+                    <div class="nav-items">
+                        <a href="dashboard.html" class="nav-item">
+                            <span class="nav-icon">🏠</span>
+                            <span class="nav-label">Dashboard</span>
+                        </a>
+                        <a href="interfaces.html" class="nav-item active">
+                            <span class="nav-icon">🔗</span>
+                            <span class="nav-label">Interfaces</span>
+                        </a>
+                        <a href="#messages" class="nav-item">
+                            <span class="nav-icon">📧</span>
+                            <span class="nav-label">Messages</span>
+                        </a>
+                        <a href="#templates" class="nav-item">
+                            <span class="nav-icon">📄</span>
+                            <span class="nav-label">Templates</span>
+                        </a>
+                    </div>
+                </div>
+
+                <!-- Analytics Section -->
+                <div class="nav-section">
+                    <div class="section-header">
+                        <span class="section-title">Analytics</span>
+                    </div>
+                    <div class="nav-items">
+                        <a href="#monitoring" class="nav-item">
+                            <span class="nav-icon">📊</span>
+                            <span class="nav-label">Monitor</span>
+                        </a>
+                        <a href="#reports" class="nav-item">
+                            <span class="nav-icon">📈</span>
+                            <span class="nav-label">Reports</span>
+                        </a>
+                    </div>
+                </div>
+
+                <!-- Admin Section -->
+                <div class="nav-section admin-section" id="adminSection" style="display: none;">
+                    <div class="section-header">
+                        <span class="section-title">Admin</span>
+                    </div>
+                    <div class="nav-items">
+                        <a href="user-management.html" class="nav-item">
+                            <span class="nav-icon">👥</span>
+                            <span class="nav-label">Users</span>
+                        </a>
+                        <a href="#settings" class="nav-item">
+                            <span class="nav-icon">⚙️</span>
+                            <span class="nav-label">Settings</span>
+                        </a>
+                    </div>
+                </div>
+            </div>
+
+            <!-- User Profile -->
+            <div class="user-profile">
+                <div class="user-info">
+                    <div class="user-avatar" id="userAvatar">S</div>
+                    <div class="user-details">
+                        <span class="user-name" id="userName">System User</span>
+                        <span class="user-role" id="userRole">ADMIN</span>
+                    </div>
+                </div>
+                <button class="logout-btn" onclick="logout()" title="Logout">
+                    <span class="nav-icon">🚪</span>
+                    <span class="nav-label">Logout</span>
+                </button>
+            </div>
+        </nav>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Header -->
+            <header class="content-header">
+                <div class="header-left">
+                    <h1 class="page-title">Interface Management</h1>
+                    <span class="current-time" id="currentTime">10:07 AM</span>
+                </div>
+                <div class="header-actions">
+                    <button class="header-btn primary" onclick="openInterfaceWizard()">
+                        <span class="btn-icon">🧙‍♂️</span>
+                        <span class="btn-label">Create Interface</span>
+                    </button>
+                </div>
+            </header>
+
+            <!-- Interface Cards Content -->
+            <div class="interfaces-content">
+                <div class="interface-stats">
+                    <div class="stat-card">
+                        <div class="stat-value">12</div>
+                        <div class="stat-label">Active Interfaces</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value">1,247</div>
+                        <div class="stat-label">Messages Today</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value">99.2%</div>
+                        <div class="stat-label">Success Rate</div>
+                    </div>
+                </div>
+
+                <div class="interface-grid">
+                    <div class="interface-card">
+                        <div class="interface-header">
+                            <h3>ADT Patient Registration</h3>
+                            <span class="interface-status active">Active</span>
+                        </div>
+                        <div class="interface-type">HL7 v2.x → FHIR R4</div>
+                        <div class="interface-stats-mini">
+                            <span>342/day</span>
+                            <span>99.1% success</span>
+                        </div>
+                    </div>
+
+                    <div class="interface-card">
+                        <div class="interface-header">
+                            <h3>Lab Results Integration</h3>
+                            <span class="interface-status active">Active</span>
+                        </div>
+                        <div class="interface-type">HL7 v2.x → FHIR R4</div>
+                        <div class="interface-stats-mini">
+                            <span>156/day</span>
+                            <span>99.8% success</span>
+                        </div>
+                    </div>
+
+                    <div class="interface-card">
+                        <div class="interface-header">
+                            <h3>CCD Clinical Summary</h3>
+                            <span class="interface-status testing">Testing</span>
+                        </div>
+                        <div class="interface-type">C-CDA → FHIR R4</div>
+                        <div class="interface-stats-mini">
+                            <span>23/day</span>
+                            <span>95.4% success</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- WIZARD MODAL OVERLAY -->
+    <!-- WIZARD MODAL OVERLAY -->
+    <div class="wizard-modal-overlay" id="wizardModalOverlay">
+        <div class="wizard-modal-container" id="wizardModalContainer">
+            <!-- Modal Control Buttons - MUST BE INCLUDED -->
+            <!-- FIXED: Modal Control Buttons - Add this to your HTML -->
+<div class="wizard-modal-controls">
+    <button class="wizard-modal-control maximize-btn" id="wizardModalMaximize" title="Maximize">
+        <span id="maximizeIcon">⛶</span>
+    </button>
+    <button class="wizard-modal-control close-btn" id="wizardModalClose" title="Close">×</button>
+</div>
+
+            <!-- Wizard Header -->
+            <div class="wizard-header">
+                <h2 class="wizard-title">🧙‍♂️ Create New HL7 Interface</h2>
+                <p class="wizard-subtitle">AI-powered interface builder for seamless healthcare data integration</p>
+            </div>
+
+            <!-- Enhanced Step Indicator -->
+            <div class="step-indicator-container">
+                <div class="step-indicators">
+                    <div class="step-indicator active" id="stepIndicator1">
+                        <div class="step-circle active" id="stepCircle1">1</div>
+                        <div class="step-label">Configure</div>
+                    </div>
+                    <div class="step-connector" id="connector1"></div>
+                    <div class="step-indicator" id="stepIndicator2">
+                        <div class="step-circle" id="stepCircle2">2</div>
+                        <div class="step-label">Upload</div>
+                    </div>
+                    <div class="step-connector" id="connector2"></div>
+                    <div class="step-indicator" id="stepIndicator3">
+                        <div class="step-circle" id="stepCircle3">3</div>
+                        <div class="step-label">Review</div>
+                    </div>
+                    <div class="step-connector" id="connector3"></div>
+                    <div class="step-indicator" id="stepIndicator4">
+                        <div class="step-circle" id="stepCircle4">4</div>
+                        <div class="step-label">Mapping</div>
+                    </div>
+                    <div class="step-connector" id="connector4"></div>
+                    <div class="step-indicator" id="stepIndicator5">
+                        <div class="step-circle" id="stepCircle5">5</div>
+                        <div class="step-label">Deploy</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Wizard Content -->
+            <div class="wizard-content">
+                <!-- Step 1: Interface Configuration -->
+                <div class="wizard-step active" id="step1">
+                    <div class="step-header">
+                        <div class="step-progress">Step 1 of 5</div>
+                        <h3 class="step-title">Interface Configuration</h3>
+                        <p class="step-description">Set up the basic configuration for your HL7 interface</p>
+                    </div>
+
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label for="wizardInterfaceName" class="required">Interface Name</label>
+                            <input type="text" id="wizardInterfaceName" class="form-control" placeholder="e.g., ADT Patient Admissions" required>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="wizardInterfaceDescription">Description</label>
+                            <textarea id="wizardInterfaceDescription" class="form-control" rows="3" placeholder="Brief description of this interface and its purpose"></textarea>
+                        </div>
+
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="wizardSourceType" class="required">Source Type</label>
+                                <select id="wizardSourceType" class="form-control" required>
+                                    <option value="">Select source...</option>
+                                    <option value="file">📁 File System</option>
+                                    <option value="tcp">🌐 TCP Listener</option>
+                                    <option value="http">🔗 HTTP Endpoint</option>
+                                    <option value="manual">✋ Manual Input</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="wizardTargetType" class="required">Target Type</label>
+                                <select id="wizardTargetType" class="form-control" required>
+                                    <option value="">Select target...</option>
+                                    <option value="fhir">🏥 FHIR Server</option>
+                                    <option value="database">🗄️ Database</option>
+                                    <option value="file">📄 File Output</option>
+                                    <option value="http">📡 HTTP POST</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="wizardMessageType">Message Type</label>
+                            <select id="wizardMessageType" class="form-control">
+                                <option value="auto-detect">🔍 Auto-detect</option>
+                                <option value="ADT^A01">🏥 ADT - Admit Patient</option>
+                                <option value="ADT^A02">🔄 ADT - Transfer Patient</option>
+                                <option value="ADT^A03">📤 ADT - Discharge Patient</option>
+                                <option value="ORU^R01">🧪 ORU - Lab Results</option>
+                                <option value="ORM^O01">📋 ORM - Order Message</option>
+                                <option value="MDM^T02">📄 MDM - Document</option>
+                                <option value="CCD">📋 CCD - Clinical Document</option>
+                            </select>
+                        </div>
+
+                        <!-- Dynamic Configuration Sections -->
+                        <div id="wizardSourceConfig" class="form-group" style="display: none;">
+                            <!-- Source configuration will be populated by JavaScript -->
+                        </div>
+
+                        <div id="wizardTargetConfig" class="form-group" style="display: none;">
+                            <!-- Target configuration will be populated by JavaScript -->
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Step 2: Upload HL7 Sample -->
+                <div class="wizard-step" id="step2">
+                    <div class="step-header">
+                        <div class="step-progress">Step 2 of 5</div>
+                        <h3 class="step-title">Upload HL7 Sample</h3>
+                        <p class="step-description">Upload a sample HL7 message to analyze and validate</p>
+                    </div>
+
+                    <div class="upload-zone" id="uploadZone">
+                        <div class="upload-icon">📁</div>
+                        <div class="upload-text">Click to upload or drag HL7 file here</div>
+                        <div class="upload-hint">Supports .hl7, .txt files up to 5MB</div>
+                    </div>
+
+                    <input type="file" id="hl7FileUpload" style="display: none;" accept=".hl7,.txt,.dat">
+                    
+                    <div id="fileInfo"></div>
+
+                    <div style="text-align: center; margin-top: 24px;">
+                        <button id="parseBtn" class="wizard-btn primary" style="display: none;">
+                            <span>🔍</span>
+                            Parse HL7 Message
+                        </button>
+                    </div>
+
+                    <div id="parseResults"></div>
+                </div>
+
+                <!-- Step 3: Review Parsed Data -->
+                <div class="wizard-step" id="step3">
+                    <div class="step-header">
+                        <div class="step-progress">Step 3 of 5</div>
+                        <h3 class="step-title">Review Parsed Data</h3>
+                        <p class="step-description">Review the parsed HL7 segments and handle any custom Z-segments</p>
+                    </div>
+
+                    <div id="parsedDataReview">
+                        <!-- Will be populated after successful parsing -->
+                    </div>
+                </div>
+
+                <!-- Step 4: HL7→FHIR Mapping -->
+                <div class="wizard-step" id="step4">
+                    <div class="step-header">
+                        <div class="step-progress">Step 4 of 5</div>
+                        <h3 class="step-title">HL7 → FHIR Mapping</h3>
+                        <p class="step-description">Configure field mappings from HL7 to FHIR resources (AI-assisted)</p>
+                    </div>
+
+                    <div style="text-align: center; margin-bottom: 24px;">
+                        <button id="generateMappingBtn" class="wizard-btn primary">
+                            <span>🤖</span>
+                            Generate AI Mapping Suggestions
+                        </button>
+                    </div>
+
+                    <div id="mappingResults">
+                        <div class="mapping-preview">
+                            <h4>🎯 Ready for AI-Powered Mapping</h4>
+                            <p>Click the button above to generate intelligent mapping suggestions based on your HL7 message structure.</p>
+                            <div style="margin-top: 20px; padding: 16px; background: white; border-radius: 8px; border: 1px solid var(--pink-200);">
+                                <div style="font-size: 12px; color: var(--gray-500); margin-bottom: 8px;">COMING SOON IN PHASE 2</div>
+                                <div style="font-weight: 600; color: var(--navy-primary);">🚀 Claude AI Integration</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Step 5: Review & Deploy -->
+                <div class="wizard-step" id="step5">
+                    <div class="step-header">
+                        <div class="step-progress">Step 5 of 5</div>
+                        <h3 class="step-title">Review & Deploy</h3>
+                        <p class="step-description">Review your interface configuration and deploy</p>
+                    </div>
+
+                    <div class="summary-grid">
+                        <div class="summary-card">
+                            <h5>📋 Interface Details</h5>
+                            <div class="summary-content">
+                                <div><strong>Name:</strong> <span id="summaryName">-</span></div>
+                                <div><strong>Type:</strong> <span id="summaryType">-</span></div>
+                                <div><strong>Message:</strong> <span id="summaryMessage">-</span></div>
+                            </div>
+                        </div>
+
+                        <div class="summary-card">
+                            <h5>🔄 Data Flow</h5>
+                            <div class="summary-content">
+                                <div><strong>Source:</strong> <span id="summarySource">-</span></div>
+                                <div><strong>Target:</strong> <span id="summaryTarget">-</span></div>
+                                <div><strong>Processing:</strong> Real-time</div>
+                            </div>
+                        </div>
+
+                        <div class="summary-card">
+                            <h5>📊 Parsed Data</h5>
+                            <div class="summary-content">
+                                <div><strong>Segments:</strong> <span id="summarySegments">0</span></div>
+                                <div><strong>Z-Segments:</strong> <span id="summaryZSegments">0</span></div>
+                                <div><strong>Status:</strong> <span class="success-checkmark">✓</span> Validated</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="alert alert-success">
+                        <h5>🚀 Ready to Deploy</h5>
+                        <p>Your interface is configured and ready for deployment. Click "Create Interface" to make it live and start processing messages.</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Enhanced Navigation -->
+            <div class="wizard-navigation">
+                <div class="nav-info">
+                    <div class="nav-step" id="navStep">Step 1 of 5 • Configure</div>
+                    <div class="nav-title" id="navTitle">Interface Configuration</div>
+                </div>
+                <div class="nav-buttons">
+                    <button id="prevBtn" class="wizard-btn secondary" style="display: none;">
+                        <span>←</span>
+                        Previous
+                    </button>
+                    <button id="nextBtn" class="wizard-btn primary">
+                        Next
+                        <span>→</span>
+                    </button>
+                    <button id="finishBtn" class="wizard-btn primary" style="display: none;">
+                        <span>✓</span>
+                        Create Interface
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Loading Overlay -->
+    <div class="loading-overlay" id="loadingOverlay">
+        <div class="loading-content">
+            <div class="loading-spinner"></div>
+            <div class="loading-text" id="loadingText">Processing...</div>
+            <div class="loading-subtext" id="loadingSubtext">Please wait</div>
+        </div>
+    </div>
+
+    <!-- Include Scripts -->
+    <script src="js/interface-wizard.js"></script>
+</body>
+</html>
