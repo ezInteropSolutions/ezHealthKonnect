@@ -53,6 +53,8 @@ services:
 
       #EZHEALTHKONNECT_SCHEMA_DIR: /app/schemas
       EZHEALTHKONNECT_SCHEMA_DIR: /app/schemas/hl7
+      FHIR_SCHEMA_DIR: /app/schemas/fhir             # Add this line
+
 
 
       

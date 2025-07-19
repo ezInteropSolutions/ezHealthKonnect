@@ -82,8 +82,10 @@ var fhirSchemaLoader *FHIRSchemaLoader
 func InitFHIRSchemaLoader(schemaDirectory string) {
 	fmt.Printf("🔍 DEBUG: InitFHIRSchemaLoader called with directory: %s\n", schemaDirectory)
 
-	// Ensure FHIR schema directory exists
-	fhirSchemaDir := filepath.Join(schemaDirectory, "fhir")
+	// Use the directory directly (it should already be the FHIR directory)
+	fhirSchemaDir := schemaDirectory
+
+	// Check if it exists, if not create it
 	if _, err := os.Stat(fhirSchemaDir); os.IsNotExist(err) {
 		fmt.Printf("⚠️ WARNING: FHIR schema directory does not exist: %s\n", fhirSchemaDir)
 		if err := os.MkdirAll(fhirSchemaDir, 0755); err != nil {

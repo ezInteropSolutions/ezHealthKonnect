@@ -82,7 +82,7 @@ func main() {
 
 		// Initialize FHIR Schema System
 		fmt.Printf("🏥 Initializing FHIR Schema System...\n")
-		fhir.InitFHIRSchemaLoader(cfg.GetSchemaDirectory())
+		fhir.InitFHIRSchemaLoader(cfg.GetFHIRSchemaDirectory())
 
 		// Verify FHIR schema loader
 		fhirLoader := fhir.GetFHIRSchemaLoader()
@@ -545,8 +545,9 @@ func main() {
 
 				// ADD: FHIR Transformation endpoints
 				if db != nil {
-					fhirCtrl := controllers.NewFHIRTransformController(db, cfg)
-					fhirCtrl.RegisterRoutes(api)
+					//fhirCtrl := controllers.NewFHIRTransformController(db, cfg)
+					schemaFhirCtrl := controllers.NewSchemaFHIRTransformController(db, cfg)
+					schemaFhirCtrl.RegisterRoutes(api)
 					log.Printf("✅ FHIR transformation endpoints enabled at /api/fhir/transform")
 				} else {
 					// Provide helpful endpoint when database not configured
