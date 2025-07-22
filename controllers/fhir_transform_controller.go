@@ -14,6 +14,7 @@ import (
 
 	"ezhealthkonnect/config"
 	"ezhealthkonnect/fhir"
+	"ezhealthkonnect/hl7" // Added for HL7 parsing
 
 	"github.com/gin-gonic/gin"
 	_ "github.com/lib/pq" // PostgreSQL driver
@@ -250,6 +251,10 @@ func (tc *FHIRTransformController) Transform(c *gin.Context) {
 		request.FHIRVersion = "R4"
 	}
 
+	if tc.config.VerboseLogging {
+		fmt.Printf("🔄 Processing HL7→FHIR transformation (Request: %s, Profile: %s)\n", response.RequestID, request.TargetProfile)
+	}
+
 	// Convert HL7 message to enhanced format if needed
 	enhancedHL7, messageType, err := tc.processHL7Input(request.HL7Message)
 	if err != nil {
@@ -259,6 +264,10 @@ func (tc *FHIRTransformController) Transform(c *gin.Context) {
 		return
 	}
 	response.MessageType = messageType
+
+	if tc.config.VerboseLogging {
+		fmt.Printf("📋 Extracted message type: %s\n", messageType)
+	}
 
 	// Load transformation rules
 	rules, err := tc.loadTransformationRules(messageType, request.TargetProfile)
@@ -271,6 +280,10 @@ func (tc *FHIRTransformController) Transform(c *gin.Context) {
 
 	if len(rules) == 0 {
 		response.Warnings = append(response.Warnings, fmt.Sprintf("No transformation rules found for %s with profile %s", messageType, request.TargetProfile))
+	}
+
+	if tc.config.VerboseLogging {
+		fmt.Printf("📊 Loaded %d transformation rules from database\n", len(rules))
 	}
 
 	// Load FHIR schemas
@@ -323,6 +336,8 @@ func (tc *FHIRTransformController) Transform(c *gin.Context) {
 		"transformTime":    time.Now().Format(time.RFC3339),
 		"resourcesCreated": len(resources),
 		"validationMode":   request.ValidationMode,
+		"databaseRules":    true,
+		"engine":           "database-driven-v1",
 	}
 
 	// Async audit logging
@@ -827,15 +842,13 @@ func (tc *FHIRTransformController) GetAnalytics(c *gin.Context) {
 	// Total transformations
 	var totalTransformations int
 	tc.db.QueryRowContext(ctx,
-		"SELECT COUNT(*) FROM fhir_transformation_logs WHERE created_at >= CURRENT_DATE - INTERVAL '%s days'",
-		days).Scan(&totalTransformations)
+		"SELECT COUNT(*) FROM fhir_transformation_logs WHERE created_at >= CURRENT_DATE - INTERVAL '"+days+" days'").Scan(&totalTransformations)
 	analytics["totalTransformations"] = totalTransformations
 
 	// Success rate
 	var successfulTransformations int
 	tc.db.QueryRowContext(ctx,
-		"SELECT COUNT(*) FROM fhir_transformation_logs WHERE transformation_status = 'success' AND created_at >= CURRENT_DATE - INTERVAL '%s days'",
-		days).Scan(&successfulTransformations)
+		"SELECT COUNT(*) FROM fhir_transformation_logs WHERE transformation_status = 'success' AND created_at >= CURRENT_DATE - INTERVAL '"+days+" days'").Scan(&successfulTransformations)
 
 	successRate := 0.0
 	if totalTransformations > 0 {
@@ -846,8 +859,7 @@ func (tc *FHIRTransformController) GetAnalytics(c *gin.Context) {
 	// Average processing time
 	var avgProcessingTime sql.NullFloat64
 	tc.db.QueryRowContext(ctx,
-		"SELECT AVG(processing_time_ms) FROM fhir_transformation_logs WHERE created_at >= CURRENT_DATE - INTERVAL '%s days'",
-		days).Scan(&avgProcessingTime)
+		"SELECT AVG(processing_time_ms) FROM fhir_transformation_logs WHERE created_at >= CURRENT_DATE - INTERVAL '"+days+" days'").Scan(&avgProcessingTime)
 
 	if avgProcessingTime.Valid {
 		analytics["avgProcessingTime"] = fmt.Sprintf("%.0f ms", avgProcessingTime.Float64)
@@ -942,57 +954,478 @@ func (tc *FHIRTransformController) getStatCount(query string) int {
 	return count
 }
 
-// Additional helper methods for transformation logic would continue here...
-// This includes processHL7Input, loadTransformationRules, loadRequiredSchemas,
-// applyTransformationRules, validateResources, createBundle, etc.
+// =====================================
+// ACTUAL IMPLEMENTATION METHODS
+// =====================================
 
-// Placeholder implementations for core transformation logic
+// Process HL7 input (string or object) to enhanced format
 func (tc *FHIRTransformController) processHL7Input(hl7Input interface{}) (map[string]interface{}, string, error) {
-	// Implementation depends on your HL7 processing logic
-	// This should convert string HL7 to enhanced JSON format
-	return map[string]interface{}{}, "ADT^A01", nil
+	var hl7Data map[string]interface{}
+	var messageType string = "UNKNOWN"
+
+	switch v := hl7Input.(type) {
+	case string:
+		// Parse HL7 string using existing parser
+		parsed := hl7.ParseHL7Enhanced(v)
+		if parsed == nil || !parsed.Success {
+			return nil, "", fmt.Errorf("invalid HL7 format: %s", parsed.Error)
+		}
+
+		// Convert to map format
+		hl7Data = make(map[string]interface{})
+		for segName, segment := range parsed.EnhancedSegments {
+			segmentData := make(map[string]interface{})
+			for i, field := range segment.Fields {
+				fieldKey := fmt.Sprintf("%d", i+1)
+				segmentData[fieldKey] = field.Value
+			}
+			hl7Data[segName] = segmentData
+		}
+		messageType = parsed.MessageType.Name
+
+	case map[string]interface{}:
+		hl7Data = v
+		// Extract message type from MSH segment
+		if msh, exists := hl7Data["MSH"].(map[string]interface{}); exists {
+			if msgTypeField, exists := msh["9"].(string); exists {
+				messageType = msgTypeField
+			}
+		}
+
+	default:
+		return nil, "", fmt.Errorf("HL7 message must be either a string or structured object")
+	}
+
+	return hl7Data, messageType, nil
 }
 
+// Load transformation rules from database
 func (tc *FHIRTransformController) loadTransformationRules(messageType, profile string) ([]TransformationRule, error) {
-	// Implementation to load rules from database
-	return []TransformationRule{}, nil
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	query := `
+		SELECT id, hl7_version, hl7_message_type, hl7_segment, hl7_field, hl7_component,
+		       fhir_resource, fhir_profile, fhir_path, transformation_rule,
+		       condition_expression, is_required, priority, created_at
+		FROM hl7_fhir_mappings 
+		WHERE hl7_message_type = $1 AND (fhir_profile = $2 OR fhir_profile = 'base')
+		  AND is_active = true
+		ORDER BY priority ASC, id ASC
+	`
+
+	rows, err := tc.db.QueryContext(ctx, query, messageType, profile)
+	if err != nil {
+		return nil, fmt.Errorf("database query failed: %v", err)
+	}
+	defer rows.Close()
+
+	var rules []TransformationRule
+	for rows.Next() {
+		var rule TransformationRule
+		var transformRuleJSON []byte
+		var component, condition sql.NullString
+
+		err := rows.Scan(
+			&rule.ID, &rule.HL7Version, &rule.HL7MessageType, &rule.HL7Segment,
+			&rule.HL7Field, &component, &rule.FHIRResource, &rule.FHIRProfile,
+			&rule.FHIRPath, &transformRuleJSON, &condition, &rule.IsRequired,
+			&rule.Priority, &rule.CreatedAt,
+		)
+		if err != nil {
+			continue
+		}
+
+		// Parse optional fields
+		if component.Valid {
+			rule.HL7Component = &component.String
+		}
+		if condition.Valid {
+			rule.ConditionExpr = &condition.String
+		}
+
+		// Parse transformation logic JSON
+		if len(transformRuleJSON) > 0 {
+			json.Unmarshal(transformRuleJSON, &rule.TransformRule)
+		}
+
+		rules = append(rules, rule)
+	}
+
+	return rules, nil
 }
 
+// Load required FHIR schemas based on rules
 func (tc *FHIRTransformController) loadRequiredSchemas(rules []TransformationRule, version, profile string) map[string]*fhir.FHIRSchema {
-	// Implementation to load FHIR schemas
-	return map[string]*fhir.FHIRSchema{}
+	schemaLoader := fhir.GetFHIRSchemaLoader()
+	if schemaLoader == nil {
+		return map[string]*fhir.FHIRSchema{}
+	}
+
+	schemas := make(map[string]*fhir.FHIRSchema)
+	uniqueResources := make(map[string]bool)
+
+	// Collect unique resource types from rules
+	for _, rule := range rules {
+		uniqueResources[rule.FHIRResource] = true
+	}
+
+	// Load schema for each resource type
+	for resourceType := range uniqueResources {
+		schema, err := schemaLoader.LoadFHIRSchema(resourceType, profile, version)
+		if err != nil {
+			// Try fallback to base profile
+			if profile != "base" {
+				schema, err = schemaLoader.LoadFHIRSchema(resourceType, "base", version)
+			}
+			if err != nil {
+				if tc.config.VerboseLogging {
+					fmt.Printf("⚠️ Could not load FHIR schema for %s/%s/%s: %v\n", resourceType, profile, version, err)
+				}
+				continue
+			}
+		}
+		schemas[resourceType] = schema
+	}
+
+	return schemas
 }
 
+// Apply transformation rules to create FHIR resources
 func (tc *FHIRTransformController) applyTransformationRules(hl7Message map[string]interface{}, rules []TransformationRule, schemas map[string]*fhir.FHIRSchema) ([]map[string]interface{}, []string, error) {
-	// Implementation for transformation logic
-	return []map[string]interface{}{}, []string{}, nil
+	resourcesMap := make(map[string]map[string]interface{})
+	warnings := []string{}
+
+	// Group rules by resource type
+	rulesByResource := make(map[string][]TransformationRule)
+	for _, rule := range rules {
+		rulesByResource[rule.FHIRResource] = append(rulesByResource[rule.FHIRResource], rule)
+	}
+
+	// Process each resource type
+	for resourceType, resourceRules := range rulesByResource {
+		resource := tc.initializeFHIRResource(resourceType)
+		appliedRules := 0
+
+		// Apply each rule to the resource
+		for _, rule := range resourceRules {
+			err := tc.applyRule(hl7Message, rule, resource)
+			if err != nil {
+				if rule.IsRequired {
+					warnings = append(warnings, fmt.Sprintf("Required field %s.%s failed: %v", rule.HL7Segment, rule.HL7Field, err))
+				}
+				continue
+			}
+			appliedRules++
+		}
+
+		// Only include resources that have data beyond the basic structure
+		if appliedRules > 0 && tc.hasContent(resource) {
+			resourcesMap[resourceType] = resource
+		}
+	}
+
+	// Convert map to array
+	var fhirResources []map[string]interface{}
+	for _, resource := range resourcesMap {
+		fhirResources = append(fhirResources, resource)
+	}
+
+	return fhirResources, warnings, nil
 }
 
-func (tc *FHIRTransformController) validateResources(resources []map[string]interface{}, schemas map[string]*fhir.FHIRSchema) []string {
-	// Implementation for validation
-	return []string{}
-}
-
-func (tc *FHIRTransformController) validateRuleAgainstSchema(request RuleManagementRequest) bool {
-	// Implementation for rule validation
-	return true
-}
-
-func (tc *FHIRTransformController) loadSchemasForResources(resources []map[string]interface{}, version, profile string) map[string]*fhir.FHIRSchema {
-	// Implementation to load schemas for specific resources
-	return map[string]*fhir.FHIRSchema{}
-}
-
-func (tc *FHIRTransformController) createBundle(resources []map[string]interface{}, requestID string) map[string]interface{} {
-	// Implementation for bundle creation
+// Initialize a FHIR resource with basic structure
+func (tc *FHIRTransformController) initializeFHIRResource(resourceType string) map[string]interface{} {
 	return map[string]interface{}{
-		"resourceType": "Bundle",
-		"id":           fmt.Sprintf("bundle-%s", requestID),
-		"type":         "transaction",
-		"entry":        []interface{}{},
+		"resourceType": resourceType,
+		"id":           fmt.Sprintf("%s-%d", strings.ToLower(resourceType), time.Now().Unix()),
+		"meta": map[string]interface{}{
+			"profile": []string{fmt.Sprintf("http://hl7.org/fhir/R4/StructureDefinition/%s", resourceType)},
+		},
 	}
 }
 
+// Apply a single mapping rule to a FHIR resource
+func (tc *FHIRTransformController) applyRule(hl7Message map[string]interface{}, rule TransformationRule, resource map[string]interface{}) error {
+	// Extract HL7 value
+	hl7Value, found := tc.extractHL7Value(hl7Message, rule.HL7Segment, rule.HL7Field, rule.HL7Component)
+	if !found || hl7Value == "" {
+		if rule.IsRequired {
+			return fmt.Errorf("required field not found or empty")
+		}
+		return fmt.Errorf("field not found")
+	}
+
+	// Transform value based on rule
+	transformedValue, err := tc.transformValue(hl7Value, rule.TransformRule)
+	if err != nil {
+		return fmt.Errorf("transformation failed: %v", err)
+	}
+
+	// Set value in FHIR resource
+	err = tc.setFHIRPath(resource, rule.FHIRPath, transformedValue)
+	if err != nil {
+		return fmt.Errorf("failed to set FHIR path: %v", err)
+	}
+
+	if tc.config.VerboseLogging {
+		fmt.Printf("✅ Applied rule: %s.%s → %s.%s\n", rule.HL7Segment, rule.HL7Field, rule.FHIRResource, rule.FHIRPath)
+	}
+
+	return nil
+}
+
+// Extract HL7 value from parsed data
+func (tc *FHIRTransformController) extractHL7Value(hl7Message map[string]interface{}, segment, field string, component *string) (string, bool) {
+	segmentData, exists := hl7Message[segment].(map[string]interface{})
+	if !exists {
+		return "", false
+	}
+
+	fieldValue, exists := segmentData[field].(string)
+	if !exists {
+		return "", false
+	}
+
+	// Handle component extraction if specified
+	if component != nil && *component != "" {
+		// For components, split by ^ and extract the specific component
+		components := strings.Split(fieldValue, "^")
+		compIndex, err := strconv.Atoi(*component)
+		if err != nil || compIndex < 1 || compIndex > len(components) {
+			return "", false
+		}
+		return components[compIndex-1], true
+	}
+
+	return fieldValue, true
+}
+
+// Transform HL7 value based on transformation rule
+func (tc *FHIRTransformController) transformValue(hl7Value string, transformRule map[string]interface{}) (interface{}, error) {
+	if transformRule == nil {
+		return hl7Value, nil // Direct mapping
+	}
+
+	transformType, exists := transformRule["type"].(string)
+	if !exists {
+		return hl7Value, nil
+	}
+
+	switch transformType {
+	case "direct":
+		return hl7Value, nil
+
+	case "identifier":
+		return []map[string]interface{}{
+			{
+				"use":   "usual",
+				"value": hl7Value,
+			},
+		}, nil
+
+	case "humanName":
+		components := strings.Split(hl7Value, "^")
+		name := map[string]interface{}{"use": "official"}
+
+		if len(components) > 0 && components[0] != "" {
+			name["family"] = components[0]
+		}
+		if len(components) > 1 && components[1] != "" {
+			name["given"] = []string{components[1]}
+		}
+
+		return []map[string]interface{}{name}, nil
+
+	case "date", "hl7_date_to_fhir_date":
+		// Convert YYYYMMDD to YYYY-MM-DD
+		if len(hl7Value) >= 8 {
+			return fmt.Sprintf("%s-%s-%s", hl7Value[0:4], hl7Value[4:6], hl7Value[6:8]), nil
+		}
+		return hl7Value, nil
+
+	case "code", "hl7_code_to_fhir_code":
+		// Handle coded values with value set mapping
+		if valueSet, exists := transformRule["valueSet"].(string); exists {
+			// Look up code mapping in database
+			mappedCode := tc.lookupCodeMapping(hl7Value, valueSet)
+			if mappedCode != "" {
+				return mappedCode, nil
+			}
+		}
+		return hl7Value, nil
+
+	default:
+		return hl7Value, nil
+	}
+}
+
+// Set value in FHIR resource at specified path
+func (tc *FHIRTransformController) setFHIRPath(resource map[string]interface{}, path string, value interface{}) error {
+	// Simple path setting - can be enhanced for complex paths like "name[0].given"
+	resource[path] = value
+	return nil
+}
+
+// Check if resource has content beyond basic structure
+func (tc *FHIRTransformController) hasContent(resource map[string]interface{}) bool {
+	// Check if resource has content beyond resourceType, id, and meta
+	return len(resource) > 3
+}
+
+// Look up code mapping in custom value sets
+func (tc *FHIRTransformController) lookupCodeMapping(hl7Code, valueSet string) string {
+	if tc.db == nil {
+		return ""
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	var fhirCode string
+	query := `
+		SELECT fhir_code 
+		FROM fhir_custom_value_sets 
+		WHERE value_set_name = $1 AND hl7_code = $2 AND is_active = true
+		ORDER BY mapping_confidence DESC, is_default_mapping DESC
+		LIMIT 1
+	`
+
+	err := tc.db.QueryRowContext(ctx, query, valueSet, hl7Code).Scan(&fhirCode)
+	if err != nil {
+		return "" // No mapping found
+	}
+
+	return fhirCode
+}
+
+// Validate resources against FHIR schemas
+func (tc *FHIRTransformController) validateResources(resources []map[string]interface{}, schemas map[string]*fhir.FHIRSchema) []string {
+	var validationErrors []string
+
+	// Basic validation - check resource type exists and has required fields
+	for _, resource := range resources {
+		resourceType, exists := resource["resourceType"].(string)
+		if !exists {
+			validationErrors = append(validationErrors, "Resource missing resourceType")
+			continue
+		}
+
+		schema, hasSchema := schemas[resourceType]
+		if !hasSchema {
+			continue // Skip validation if no schema
+		}
+
+		// Check required fields
+		for _, requiredField := range schema.Required {
+			if _, exists := resource[requiredField]; !exists {
+				validationErrors = append(validationErrors, fmt.Sprintf("%s missing required field: %s", resourceType, requiredField))
+			}
+		}
+	}
+
+	return validationErrors
+}
+
+// Validate rule against FHIR schema
+func (tc *FHIRTransformController) validateRuleAgainstSchema(request RuleManagementRequest) bool {
+	// Basic validation - can be enhanced with actual schema checking
+	return request.FHIRResource != "" && request.FHIRPath != ""
+}
+
+// Load schemas for specific resources
+func (tc *FHIRTransformController) loadSchemasForResources(resources []map[string]interface{}, version, profile string) map[string]*fhir.FHIRSchema {
+	schemaLoader := fhir.GetFHIRSchemaLoader()
+	if schemaLoader == nil {
+		return map[string]*fhir.FHIRSchema{}
+	}
+
+	schemas := make(map[string]*fhir.FHIRSchema)
+	uniqueResources := make(map[string]bool)
+
+	// Collect unique resource types
+	for _, resource := range resources {
+		if resourceType, exists := resource["resourceType"].(string); exists {
+			uniqueResources[resourceType] = true
+		}
+	}
+
+	// Load schema for each resource type
+	for resourceType := range uniqueResources {
+		schema, err := schemaLoader.LoadFHIRSchema(resourceType, profile, version)
+		if err != nil {
+			continue
+		}
+		schemas[resourceType] = schema
+	}
+
+	return schemas
+}
+
+// Create FHIR Bundle from resources
+func (tc *FHIRTransformController) createBundle(resources []map[string]interface{}, requestID string) map[string]interface{} {
+	entries := make([]map[string]interface{}, len(resources))
+
+	for i, resource := range resources {
+		entries[i] = map[string]interface{}{
+			"resource": resource,
+		}
+	}
+
+	return map[string]interface{}{
+		"resourceType": "Bundle",
+		"id":           fmt.Sprintf("bundle-%s", requestID),
+		"type":         "message",
+		"timestamp":    time.Now().Format(time.RFC3339),
+		"entry":        entries,
+	}
+}
+
+// Log transformation for audit purposes
 func (tc *FHIRTransformController) logTransformation(request TransformRequest, response TransformResponse) {
-	// Implementation for audit logging
+	if tc.db == nil {
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	status := "success"
+	if !response.Success {
+		status = "error"
+	}
+
+	query := `
+		INSERT INTO fhir_transformation_logs 
+		(request_id, hl7_message_type, transformation_status, resources_created,
+		 processing_time_ms, warnings_count, errors_count, source_system, user_id)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+	`
+
+	// Extract processing time in milliseconds
+	processingTimeMs := 0 // Default value
+	if totalTimeStr, exists := response.Performance["totalTime"].(string); exists {
+		// Parse duration string like "123.456ms" or "1.23s"
+		if strings.HasSuffix(totalTimeStr, "ms") {
+			if ms, err := strconv.ParseFloat(strings.TrimSuffix(totalTimeStr, "ms"), 64); err == nil {
+				processingTimeMs = int(ms)
+			}
+		} else if strings.HasSuffix(totalTimeStr, "s") {
+			if s, err := strconv.ParseFloat(strings.TrimSuffix(totalTimeStr, "s"), 64); err == nil {
+				processingTimeMs = int(s * 1000) // Convert seconds to milliseconds
+			}
+		}
+	}
+
+	tc.db.ExecContext(ctx, query,
+		response.RequestID,
+		response.MessageType,
+		status,
+		len(response.Resources),
+		processingTimeMs,
+		len(response.Warnings),
+		len(response.Errors),
+		request.SourceSystem,
+		request.UserID,
+	)
 }

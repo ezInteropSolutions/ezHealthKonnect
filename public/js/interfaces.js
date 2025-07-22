@@ -29,6 +29,130 @@ async function initializeInterfacesPage() {
     await loadInterfaces();
     setupEventListeners();
     setupAutoRefresh();
+    
+    // FIX: Add tooltip setup
+    setupTooltips();
+}
+
+// REPLACE your setupTooltips function with this JavaScript-based solution:
+
+function setupTooltips() {
+    console.log('🔧 Setting up JavaScript tooltips...');
+    
+    // Tooltip data
+    const tooltips = {
+        'Dashboard': 'Dashboard - Overview and statistics',
+        'Interfaces': 'Interfaces - Manage HL7 integrations', 
+        'Messages': 'Messages - View and track messages',
+        'Templates': 'Templates - Pre-built configurations',
+        'Monitoring': 'Monitoring - System performance',
+        'Reports': 'Reports - Analytics and insights',
+        'Alerts': 'Alerts - System notifications',
+        'Validation': 'Validation - Test and verify',
+        'Testing': 'Testing - Interface testing tools',
+        'Mapping': 'Mapping - Data transformation',
+        'Configuration': 'Configuration - System settings',
+        'Audit': 'Audit - Activity logs',
+        'Users': 'User Management - Manage users',
+        'Settings': 'Settings - System configuration'
+    };
+    
+    // Create tooltip element
+    let tooltip = document.getElementById('js-tooltip');
+    if (!tooltip) {
+        tooltip = document.createElement('div');
+        tooltip.id = 'js-tooltip';
+        tooltip.style.cssText = `
+            position: fixed;
+            background: #1e3a8a;
+            color: white;
+            padding: 8px 12px;
+            border-radius: 6px;
+            font-size: 12px;
+            font-weight: 500;
+            white-space: nowrap;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+            border: 1px solid #1e40af;
+            z-index: 9999;
+            opacity: 0;
+            visibility: hidden;
+            transition: all 0.2s ease;
+            pointer-events: none;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        `;
+        document.body.appendChild(tooltip);
+    }
+    
+    // Setup tooltips for nav items
+    document.querySelectorAll('.nav-item').forEach(navItem => {
+        const label = navItem.querySelector('.nav-label')?.textContent.trim();
+        const tooltipText = tooltips[label] || label;
+        
+        if (label) {
+            // Remove any existing listeners
+            navItem.removeEventListener('mouseenter', showTooltip);
+            navItem.removeEventListener('mouseleave', hideTooltip);
+            navItem.removeEventListener('mousemove', moveTooltip);
+            
+            // Add new listeners
+            navItem.addEventListener('mouseenter', function(e) {
+                showTooltip(e, tooltipText);
+            });
+            navItem.addEventListener('mouseleave', hideTooltip);
+            navItem.addEventListener('mousemove', moveTooltip);
+        }
+    });
+    
+    // Setup logout button tooltip
+    const logoutBtn = document.querySelector('.logout-btn');
+    if (logoutBtn) {
+        logoutBtn.removeEventListener('mouseenter', showTooltip);
+        logoutBtn.removeEventListener('mouseleave', hideTooltip);
+        logoutBtn.removeEventListener('mousemove', moveTooltip);
+        
+        logoutBtn.addEventListener('mouseenter', function(e) {
+            showTooltip(e, 'Logout');
+        });
+        logoutBtn.addEventListener('mouseleave', hideTooltip);
+        logoutBtn.addEventListener('mousemove', moveTooltip);
+    }
+    
+    function showTooltip(e, text) {
+        const sidebar = document.getElementById('sidebar');
+        
+        // Only show tooltip when sidebar is collapsed
+        if (!sidebar || !sidebar.classList.contains('collapsed')) {
+            return;
+        }
+        
+        tooltip.textContent = text;
+        tooltip.style.opacity = '1';
+        tooltip.style.visibility = 'visible';
+        
+        // Position tooltip
+        const rect = e.target.closest('.nav-item, .logout-btn').getBoundingClientRect();
+        tooltip.style.left = (rect.right + 12) + 'px';
+        tooltip.style.top = (rect.top + rect.height / 2 - tooltip.offsetHeight / 2) + 'px';
+    }
+    
+    function hideTooltip() {
+        tooltip.style.opacity = '0';
+        tooltip.style.visibility = 'hidden';
+    }
+    
+    function moveTooltip(e) {
+        const sidebar = document.getElementById('sidebar');
+        if (!sidebar || !sidebar.classList.contains('collapsed')) {
+            return;
+        }
+        
+        // Update position on mouse move
+        const rect = e.target.closest('.nav-item, .logout-btn').getBoundingClientRect();
+        tooltip.style.left = (rect.right + 12) + 'px';
+        tooltip.style.top = (rect.top + rect.height / 2 - tooltip.offsetHeight / 2) + 'px';
+    }
+    
+    console.log('✅ JavaScript tooltips set up successfully');
 }
 
 // Load user info
@@ -129,38 +253,221 @@ function setupAutoRefresh() {
     console.log(`🔄 Auto-refresh enabled: ${refreshRate / 1000}s interval`);
 }
 
-// Add visual indicator for auto-refresh
+// FIXED: Add visual indicator for auto-refresh
 function addAutoRefreshIndicator() {
-    const header = document.querySelector('.header-actions');
+    // FIX: Use correct header selector based on your HTML structure
+    const headerRight = document.querySelector('.header-right');
+    const headerLeft = document.querySelector('.header-left');
+    
+    // Try multiple possible locations for the indicator
+    let targetContainer = null;
+    
+    if (headerRight) {
+        targetContainer = headerRight;
+    } else if (headerLeft) {
+        targetContainer = headerLeft;
+    } else {
+        // Fallback: create container if none exists
+        const mainHeader = document.querySelector('.main-header');
+        if (mainHeader) {
+            const fallbackContainer = document.createElement('div');
+            fallbackContainer.className = 'header-actions';
+            fallbackContainer.style.cssText = 'display: flex; align-items: center; gap: 8px;';
+            mainHeader.appendChild(fallbackContainer);
+            targetContainer = fallbackContainer;
+        }
+    }
+    
+    // Exit if no suitable container found
+    if (!targetContainer) {
+        console.warn('⚠️ Could not find suitable container for auto-refresh indicator');
+        return;
+    }
+
+    // Remove existing indicator if present
+    const existingIndicator = document.getElementById('autoRefreshIndicator');
+    if (existingIndicator) {
+        existingIndicator.remove();
+    }
+
     const indicator = document.createElement('div');
     indicator.id = 'autoRefreshIndicator';
+    indicator.className = 'status-tile'; // Use existing status-tile styling
     indicator.style.cssText = `
-        display: flex; align-items: center; gap: 4px; font-size: 10px; 
-        color: #64748b; padding: 4px 8px; border: 1px solid #f8bbd9; 
-        border-radius: 4px; background: white; margin-right: 8px;
+        display: flex; 
+        align-items: center; 
+        gap: 6px; 
+        font-size: 9px; 
+        color: #6b7280; 
+        padding: 4px 8px; 
+        border: 1px solid #f8bbd9; 
+        border-radius: 4px; 
+        background: #f9fafb; 
+        margin-right: 8px;
+        min-width: 90px;
+        height: 32px;
     `;
+    
     indicator.innerHTML = `
-        <span style="width: 6px; height: 6px; background: #22c55e; border-radius: 50%; animation: pulse 2s infinite;"></span>
-        <span>Auto-refresh: ${refreshRate / 1000}s</span>
+        <span class="status-tile-icon" style="width: 6px; height: 6px; background: #22c55e; border-radius: 50%; animation: pulse 2s infinite;"></span>
+        <span class="status-tile-label">Auto: ${refreshRate / 1000}s</span>
     `;
     
-    // Add CSS animation
-    const style = document.createElement('style');
-    style.textContent = `
-        @keyframes pulse {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.3; }
-        }
-        .refreshing { animation: spin 1s linear infinite; }
-        @keyframes spin {
-            from { transform: rotate(0deg); }
-            to { transform: rotate(360deg); }
-        }
-    `;
-    document.head.appendChild(style);
+    // Add CSS animation if not already present
+    if (!document.getElementById('auto-refresh-styles')) {
+        const style = document.createElement('style');
+        style.id = 'auto-refresh-styles';
+        style.textContent = `
+            @keyframes pulse {
+                0%, 100% { opacity: 1; }
+                50% { opacity: 0.3; }
+            }
+            .refreshing { 
+                animation: spin 1s linear infinite; 
+            }
+            @keyframes spin {
+                from { transform: rotate(0deg); }
+                to { transform: rotate(360deg); }
+            }
+        `;
+        document.head.appendChild(style);
+    }
     
-    header.insertBefore(indicator, header.firstChild);
+    // Insert the indicator
+    try {
+        if (targetContainer.className.includes('header-right')) {
+            // If adding to header-right, add before the create button
+            const createBtn = targetContainer.querySelector('.create-btn');
+            if (createBtn) {
+                targetContainer.insertBefore(indicator, createBtn);
+            } else {
+                targetContainer.appendChild(indicator);
+            }
+        } else {
+            // If adding to header-left or other container, append to end
+            targetContainer.appendChild(indicator);
+        }
+        
+        console.log('✅ Auto-refresh indicator added successfully');
+    } catch (error) {
+        console.error('❌ Error adding auto-refresh indicator:', error);
+    }
 }
+
+// ENHANCED: Sidebar toggle with better error handling
+function setupEventListeners() {
+    // Filter event listeners
+    const statusFilter = document.getElementById('statusFilter');
+    const typeFilter = document.getElementById('typeFilter');
+    const pageSize = document.getElementById('pageSize');
+    const createForm = document.getElementById('createInterfaceForm');
+    
+    if (statusFilter) statusFilter.addEventListener('change', applyFilters);
+    if (typeFilter) typeFilter.addEventListener('change', applyFilters);
+    if (pageSize) pageSize.addEventListener('change', handlePageSizeChange);
+    if (createForm) createForm.addEventListener('submit', handleCreateInterface);
+    
+    // User interaction detection (pause auto-refresh when user is active)
+    const interactionEvents = ['click', 'keydown', 'scroll', 'mousemove'];
+    interactionEvents.forEach(event => {
+        document.addEventListener(event, handleUserInteraction, { passive: true });
+    });
+    
+    // Page visibility API (pause when tab not active)
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    
+    // FIXED: Sidebar toggle with better error handling
+    const sidebarToggle = document.getElementById('sidebarToggle');
+    const sidebar = document.getElementById('sidebar');
+    
+    if (sidebarToggle && sidebar) {
+        sidebarToggle.addEventListener('click', function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            
+            const toggleIcon = document.querySelector('.toggle-icon');
+            let sidebarCollapsed = sidebar.classList.contains('collapsed');
+            sidebarCollapsed = !sidebarCollapsed;
+            
+            if (sidebarCollapsed) {
+                sidebar.classList.add('collapsed');
+                if (toggleIcon) toggleIcon.style.transform = 'rotate(180deg)';
+                localStorage.setItem('sidebarCollapsed', 'true');
+            } else {
+                sidebar.classList.remove('collapsed');
+                if (toggleIcon) toggleIcon.style.transform = 'rotate(0deg)';
+                localStorage.setItem('sidebarCollapsed', 'false');
+            }
+        });
+        
+        // Restore saved state
+        const savedState = localStorage.getItem('sidebarCollapsed');
+        if (savedState === 'true') {
+            sidebar.classList.add('collapsed');
+            const toggleIcon = document.querySelector('.toggle-icon');
+            if (toggleIcon) toggleIcon.style.transform = 'rotate(180deg)';
+        }
+    } else {
+        console.warn('⚠️ Sidebar toggle elements not found');
+    }
+}
+
+// ENHANCED: Setup auto-refresh with better error handling
+function setupAutoRefresh() {
+    try {
+        // Add auto-refresh indicator to page
+        addAutoRefreshIndicator();
+        
+        // Determine optimal refresh rate based on interface states
+        updateRefreshRate();
+        
+        // Start auto-refresh
+        startAutoRefresh();
+        
+        console.log(`🔄 Auto-refresh enabled: ${refreshRate / 1000}s interval`);
+    } catch (error) {
+        console.error('❌ Error setting up auto-refresh:', error);
+        // Continue without auto-refresh rather than breaking the page
+        autoRefreshEnabled = false;
+    }
+}
+
+// ENHANCED: Update refresh rate with better error handling
+function updateRefreshRate() {
+    try {
+        const hasErrors = interfaces.some(i => i.status === 'error');
+        const hasRunning = interfaces.some(i => i.status === 'running');
+        const totalInterfaces = interfaces.length;
+        
+        // Determine optimal refresh rate
+        if (hasErrors) {
+            refreshRate = 15000; // 15 seconds if there are errors
+        } else if (hasRunning && totalInterfaces > 5) {
+            refreshRate = 30000; // 30 seconds for active systems
+        } else if (hasRunning) {
+            refreshRate = 45000; // 45 seconds for smaller systems
+        } else {
+            refreshRate = 60000; // 60 seconds for idle systems
+        }
+        
+        // Update indicator safely
+        const indicator = document.getElementById('autoRefreshIndicator');
+        if (indicator) {
+            const textSpan = indicator.querySelector('.status-tile-label');
+            if (textSpan) {
+                textSpan.textContent = `Auto: ${refreshRate / 1000}s`;
+            }
+        }
+        
+        // Restart with new rate
+        if (autoRefreshInterval) {
+            startAutoRefresh();
+        }
+    } catch (error) {
+        console.error('❌ Error updating refresh rate:', error);
+    }
+}
+
 
 // Start auto-refresh interval
 function startAutoRefresh() {
@@ -1024,7 +1331,214 @@ document.addEventListener('keydown', function(event) {
     }
 });
 
+
+
 // Cleanup auto-refresh when page unloads
 window.addEventListener('beforeunload', function() {
     stopAutoRefresh();
 });
+
+// AUTOMATIC TOOLTIP SETUP - Add to your interfaces.js or main JS file
+function setupSidebarTooltips() {
+    console.log('🔧 Setting up sidebar tooltips...');
+    
+    // Auto-generate tooltips from existing nav labels
+    const navItems = document.querySelectorAll('.nav-item');
+    
+    navItems.forEach(navItem => {
+        const navLabel = navItem.querySelector('.nav-label');
+        if (navLabel) {
+            const tooltipText = navLabel.textContent.trim();
+            navItem.setAttribute('data-tooltip', tooltipText);
+        }
+    });
+    
+    // Special tooltips for specific items
+    const specialTooltips = {
+        '🏠': 'Dashboard - Overview and statistics',
+        '🔗': 'Interfaces - Manage HL7 integrations', 
+        '📧': 'Messages - View and track messages',
+        '📄': 'Templates - Pre-built configurations',
+        '📊': 'Monitoring - System performance',
+        '📈': 'Reports - Analytics and insights',
+        '🔔': 'Alerts - System notifications',
+        '✓': 'Validation - Test and verify',
+        '🧪': 'Testing - Interface testing tools',
+        '🗺️': 'Mapping - Data transformation',
+        '⚙️': 'Configuration - System settings',
+        '📋': 'Audit - Activity logs',
+        '👥': 'User Management - Manage users'
+    };
+    
+    // Apply enhanced tooltips
+    navItems.forEach(navItem => {
+        const icon = navItem.querySelector('.nav-icon');
+        if (icon && specialTooltips[icon.textContent]) {
+            navItem.setAttribute('data-tooltip', specialTooltips[icon.textContent]);
+        }
+    });
+    
+    console.log(`✅ Tooltips configured for ${navItems.length} navigation items`);
+}
+
+// CSS Injection for Tooltips (if you haven't added the CSS to your stylesheet)
+function injectTooltipStyles() {
+    // Check if styles already exist
+    if (document.getElementById('sidebar-tooltip-styles')) return;
+    
+    const style = document.createElement('style');
+    style.id = 'sidebar-tooltip-styles';
+    style.textContent = `
+        /* Sidebar Collapsed Tooltips */
+        .sidebar.collapsed .nav-item {
+            position: relative;
+        }
+        
+        .sidebar.collapsed .nav-item::after {
+            content: attr(data-tooltip);
+            position: absolute;
+            left: 100%;
+            top: 50%;
+            transform: translateY(-50%);
+            margin-left: 12px;
+            background: #1e3a8a;
+            color: white;
+            padding: 8px 12px;
+            border-radius: 6px;
+            font-size: 12px;
+            font-weight: 500;
+            white-space: nowrap;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+            border: 1px solid #1e40af;
+            opacity: 0;
+            visibility: hidden;
+            pointer-events: none;
+            transition: all 0.2s ease;
+            z-index: 9999;
+        }
+        
+        .sidebar.collapsed .nav-item::before {
+            content: '';
+            position: absolute;
+            left: 100%;
+            top: 50%;
+            transform: translateY(-50%);
+            margin-left: 6px;
+            width: 0;
+            height: 0;
+            border-top: 6px solid transparent;
+            border-bottom: 6px solid transparent;
+            border-right: 6px solid #1e3a8a;
+            opacity: 0;
+            visibility: hidden;
+            pointer-events: none;
+            transition: all 0.2s ease;
+            z-index: 9998;
+        }
+        
+        .sidebar.collapsed .nav-item:hover::after,
+        .sidebar.collapsed .nav-item:hover::before {
+            opacity: 1;
+            visibility: visible;
+        }
+        
+        .sidebar.collapsed .nav-item:hover {
+            background: rgba(248, 187, 217, 0.1);
+            transform: translateX(2px);
+            transition: all 0.2s ease;
+        }
+        
+        .sidebar.collapsed .nav-icon {
+            transition: all 0.2s ease;
+        }
+        
+        .sidebar.collapsed .nav-item:hover .nav-icon {
+            transform: scale(1.1);
+            color: #1e3a8a;
+        }
+        
+        /* Hide on mobile */
+        @media (max-width: 768px) {
+            .sidebar.collapsed .nav-item::after,
+            .sidebar.collapsed .nav-item::before {
+                display: none;
+            }
+        }
+        
+        /* Logout button tooltip */
+        .sidebar.collapsed .logout-btn {
+            position: relative;
+        }
+        
+        .sidebar.collapsed .logout-btn::after {
+            content: "Logout";
+            position: absolute;
+            left: 100%;
+            top: 50%;
+            transform: translateY(-50%);
+            margin-left: 12px;
+            background: #dc2626;
+            color: white;
+            padding: 8px 12px;
+            border-radius: 6px;
+            font-size: 12px;
+            font-weight: 500;
+            white-space: nowrap;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+            border: 1px solid #ef4444;
+            opacity: 0;
+            visibility: hidden;
+            pointer-events: none;
+            transition: all 0.2s ease;
+            z-index: 9999;
+        }
+        
+        .sidebar.collapsed .logout-btn::before {
+            content: '';
+            position: absolute;
+            left: 100%;
+            top: 50%;
+            transform: translateY(-50%);
+            margin-left: 6px;
+            width: 0;
+            height: 0;
+            border-top: 6px solid transparent;
+            border-bottom: 6px solid transparent;
+            border-right: 6px solid #dc2626;
+            opacity: 0;
+            visibility: hidden;
+            pointer-events: none;
+            transition: all 0.2s ease;
+            z-index: 9998;
+        }
+        
+        .sidebar.collapsed .logout-btn:hover::after,
+        .sidebar.collapsed .logout-btn:hover::before {
+            opacity: 1;
+            visibility: visible;
+        }
+    `;
+    
+    document.head.appendChild(style);
+    console.log('✅ Tooltip styles injected');
+}
+
+// Initialize tooltips when page loads
+function initializeSidebarTooltips() {
+    // Wait for DOM to be ready
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', function() {
+            injectTooltipStyles();
+            setupSidebarTooltips();
+        });
+    } else {
+        injectTooltipStyles();
+        setupSidebarTooltips();
+    }
+}
+
+// Call initialization
+initializeSidebarTooltips();
+
+// Re-setup tooltips if content changes dynamically
+window.refreshSidebarTooltips = setupSidebarTooltips;

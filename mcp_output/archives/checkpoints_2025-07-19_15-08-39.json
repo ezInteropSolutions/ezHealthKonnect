@@ -1,0 +1,68 @@
+[
+  {
+    "timestamp": "2025-07-19T14:59:15.113651",
+    "file": "controllers\\interface_controller.go",
+    "note": "// TODO: Save to database (for now, we'll simulate)",
+    "line": 60
+  },
+  {
+    "timestamp": "2025-07-19T14:59:15.113659",
+    "file": "controllers\\interface_controller.go",
+    "note": "// TODO: Fetch from database",
+    "line": 87
+  },
+  {
+    "timestamp": "2025-07-19T14:59:15.113662",
+    "file": "controllers\\interface_controller.go",
+    "note": "// TODO: Fetch from database",
+    "line": 140
+  },
+  {
+    "timestamp": "2025-07-19T14:59:15.113663",
+    "file": "controllers\\interface_controller.go",
+    "note": "// TODO: Update in database",
+    "line": 190
+  },
+  {
+    "timestamp": "2025-07-19T14:59:15.113665",
+    "file": "controllers\\interface_controller.go",
+    "note": "// TODO: Delete from database",
+    "line": 215
+  },
+  {
+    "timestamp": "2025-07-19T14:59:15.113667",
+    "file": "controllers\\interface_controller.go",
+    "note": "// TODO: Implement interface start logic",
+    "line": 230
+  },
+  {
+    "timestamp": "2025-07-19T14:59:15.113668",
+    "file": "controllers\\interface_controller.go",
+    "note": "// TODO: Implement interface stop logic",
+    "line": 246
+  },
+  {
+    "timestamp": "2025-07-19T14:59:15.113669",
+    "file": "controllers\\interface_controller.go",
+    "note": "// TODO: Implement interface pause logic",
+    "line": 262
+  },
+  {
+    "timestamp": "2025-07-19T14:59:15.116017",
+    "file": "controllers\\system_controller.go",
+    "note": "\"status\": \"connected\", // TODO: Actual health check",
+    "line": 84
+  },
+  {
+    "timestamp": "2025-07-19T14:59:15.116022",
+    "file": "controllers\\system_controller.go",
+    "note": "\"status\": \"connected\", // TODO: Actual health check",
+    "line": 88
+  },
+  {
+    "timestamp": "2025-07-19T14:59:15.116023",
+    "file": "controllers\\system_controller.go",
+    "note": "// TODO: Implement actual metrics collection",
+    "line": 97
+  }
+]

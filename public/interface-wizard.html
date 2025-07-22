@@ -3,445 +3,795 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Dashboard with Interface Builder Modal - ezHealthKonnect</title>
-    <link rel="stylesheet" href="css/dashboard.css">
-    <link rel="stylesheet" href="css/interfaces.css">
-    <link rel="stylesheet" href="css/interface-wizard.css">
+    <title>HL7 Interface Wizard - Left Sidebar Layout</title>
+    <style>
+        /* Interface Wizard Modal CSS - Left Sidebar Layout */
+        /* Navy Blue + Prominent Pastel Pink Theme with Left Sidebar */
+        
+        :root {
+            --wizard-navy: #1e3a8a;
+            --wizard-pink: #f8bbd9;
+            --wizard-pink-light: #fdf2f8;
+            --wizard-success: #22c55e;
+            --wizard-warning: #f59e0b;
+            --wizard-error: #ef4444;
+            --navy-primary: #1e3a8a;
+            --navy-secondary: #1e40af;
+            --pink-200: #f8bbd9;
+            --pink-100: #fce7f3;
+            --gray-50: #f9fafb;
+            --gray-100: #f3f4f6;
+            --gray-500: #6b7280;
+            --gray-600: #4b5563;
+        }
+
+        /* Modal Overlay */
+        .wizard-modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.7);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 10000;
+            backdrop-filter: blur(4px);
+            padding: 20px;
+            box-sizing: border-box;
+            animation: modalFadeIn 0.3s ease-out;
+        }
+
+        .wizard-modal-overlay.show {
+            display: flex;
+        }
+
+        @keyframes modalFadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+
+        /* Modal Container - Now with sidebar layout */
+        .wizard-modal-container {
+            background: white;
+            border-radius: 16px;
+            width: 100%;
+            max-width: 1200px;
+            max-height: 90vh;
+            overflow: hidden;
+            box-shadow: 0 25px 50px rgba(0, 0, 0, 0.3);
+            border: 2px solid var(--pink-200);
+            position: relative;
+            display: flex;
+            flex-direction: row; /* Changed to row for sidebar */
+            animation: modalSlideIn 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        @keyframes modalSlideIn {
+            from {
+                opacity: 0;
+                transform: translateY(50px) scale(0.95);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0) scale(1);
+            }
+        }
+
+        /* Left Sidebar for Steps */
+        .wizard-sidebar {
+            width: 280px;
+            background: linear-gradient(180deg, var(--navy-primary) 0%, var(--navy-secondary) 100%);
+            display: flex;
+            flex-direction: column;
+            position: relative;
+            overflow: hidden;
+            flex-shrink: 0;
+        }
+
+        .wizard-sidebar::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            right: 0;
+            width: 80px;
+            height: 100%;
+            background: linear-gradient(45deg, transparent 0%, rgba(248, 187, 217, 0.1) 100%);
+            pointer-events: none;
+        }
+
+        /* Sidebar Header */
+        .sidebar-header {
+            padding: 24px 20px;
+            border-bottom: 1px solid rgba(248, 187, 217, 0.2);
+            position: relative;
+            z-index: 2;
+        }
+
+        .sidebar-title {
+            font-size: 18px;
+            font-weight: 700;
+            color: white;
+            margin: 0 0 6px 0;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .sidebar-subtitle {
+            font-size: 12px;
+            color: rgba(255, 255, 255, 0.8);
+            margin: 0;
+            line-height: 1.4;
+        }
+
+        /* Step Navigation List */
+        .step-navigation {
+            flex: 1;
+            padding: 16px 0;
+            position: relative;
+            z-index: 2;
+        }
+
+        .step-list {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+
+        .step-item {
+            position: relative;
+            transition: all 0.3s ease;
+        }
+
+        .step-link {
+            display: flex;
+            align-items: center;
+            padding: 16px 20px;
+            color: rgba(255, 255, 255, 0.7);
+            text-decoration: none;
+            border-left: 4px solid transparent;
+            transition: all 0.3s ease;
+            position: relative;
+            cursor: pointer;
+        }
+
+        .step-link:hover {
+            background: rgba(248, 187, 217, 0.1);
+            color: rgba(255, 255, 255, 0.9);
+        }
+
+        /* Active Step */
+        .step-item.active .step-link {
+            background: rgba(248, 187, 217, 0.15);
+            border-left-color: var(--wizard-pink);
+            color: white;
+        }
+
+        /* Completed Step */
+        .step-item.completed .step-link {
+            color: rgba(34, 197, 94, 0.9);
+        }
+
+        .step-item.completed .step-number {
+            background: var(--wizard-success);
+            color: white;
+        }
+
+        .step-item.completed .step-number::after {
+            content: '✓';
+            font-size: 12px;
+            font-weight: 900;
+        }
+
+        /* Step Number Circle */
+        .step-number {
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            background: rgba(255, 255, 255, 0.1);
+            border: 2px solid rgba(255, 255, 255, 0.2);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 12px;
+            font-weight: 700;
+            margin-right: 12px;
+            transition: all 0.3s ease;
+            flex-shrink: 0;
+        }
+
+        .step-item.active .step-number {
+            background: var(--wizard-pink);
+            border-color: var(--wizard-pink);
+            color: var(--navy-primary);
+            transform: scale(1.1);
+            box-shadow: 0 4px 12px rgba(248, 187, 217, 0.4);
+        }
+
+        /* Step Content */
+        .step-content {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .step-title {
+            font-size: 13px;
+            font-weight: 600;
+            margin: 0 0 2px 0;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .step-description {
+            font-size: 11px;
+            opacity: 0.8;
+            margin: 0;
+            line-height: 1.3;
+        }
+
+        /* Main Content Area */
+        .wizard-main {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        /* Header in Main Area */
+        .wizard-header {
+            background: linear-gradient(135deg, var(--gray-50) 0%, white 100%);
+            border-bottom: 1px solid var(--pink-200);
+            padding: 20px 24px;
+            position: relative;
+            flex-shrink: 0;
+        }
+
+        .wizard-title {
+            font-size: 24px;
+            font-weight: 700;
+            color: var(--navy-primary);
+            margin: 0 0 8px 0;
+            padding-right: 100px;
+        }
+
+        .wizard-subtitle {
+            color: var(--gray-500);
+            font-size: 14px;
+            margin: 0;
+            padding-right: 100px;
+        }
+
+        /* Content Area */
+        .wizard-content {
+            flex: 1;
+            overflow-y: auto;
+            padding: 24px;
+            background: white;
+        }
+
+        .wizard-step {
+            display: none;
+            animation: fadeInUp 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .wizard-step.active {
+            display: block;
+        }
+
+        @keyframes fadeInUp {
+            from {
+                opacity: 0;
+                transform: translateY(20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        /* Navigation Footer */
+        .wizard-navigation {
+            background: linear-gradient(135deg, var(--gray-50) 0%, white 100%);
+            border-top: 1px solid var(--pink-200);
+            padding: 16px 24px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-shrink: 0;
+        }
+
+        .nav-info {
+            font-size: 12px;
+            color: var(--gray-500);
+            font-weight: 500;
+        }
+
+        .nav-buttons {
+            display: flex;
+            gap: 12px;
+        }
+
+        .wizard-btn {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 6px;
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .wizard-btn.primary {
+            background: var(--navy-primary);
+            color: white;
+        }
+
+        .wizard-btn.primary:hover {
+            background: var(--navy-secondary);
+            transform: translateY(-1px);
+        }
+
+        .wizard-btn.secondary {
+            background: white;
+            color: var(--navy-primary);
+            border: 2px solid var(--pink-200);
+        }
+
+        .wizard-btn.secondary:hover {
+            background: var(--wizard-pink-light);
+            border-color: var(--wizard-pink);
+        }
+
+        /* Modal Control Buttons */
+        .wizard-modal-controls {
+            position: absolute;
+            top: 16px;
+            right: 16px;
+            display: flex;
+            gap: 8px;
+            z-index: 10001;
+        }
+
+        .wizard-modal-control {
+            width: 36px;
+            height: 36px;
+            border: none;
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 50%;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 16px;
+            color: var(--gray-600);
+            transition: all 0.2s ease;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+            border: 1px solid var(--pink-200);
+        }
+
+        .wizard-modal-control:hover {
+            background: white;
+            transform: scale(1.1);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+        }
+
+        /* Maximized State */
+        .wizard-modal-overlay.maximized {
+            padding: 0 !important;
+            align-items: stretch !important;
+            justify-content: stretch !important;
+        }
+
+        .wizard-modal-overlay.maximized .wizard-modal-container {
+            width: 100vw !important;
+            height: 100vh !important;
+            max-width: none !important;
+            max-height: none !important;
+            margin: 0 !important;
+            border-radius: 0 !important;
+            border: none !important;
+        }
+
+        .wizard-modal-overlay.maximized .wizard-sidebar {
+            width: 320px; /* Slightly wider when maximized */
+        }
+
+        /* Responsive Design */
+        @media (max-width: 1024px) {
+            .wizard-sidebar {
+                width: 240px;
+            }
+            
+            .wizard-modal-overlay.maximized .wizard-sidebar {
+                width: 280px;
+            }
+        }
+
+        @media (max-width: 768px) {
+            .wizard-modal-container {
+                flex-direction: column;
+                max-height: 95vh;
+            }
+            
+            .wizard-sidebar {
+                width: 100%;
+                height: auto;
+                max-height: 200px;
+                overflow-y: auto;
+            }
+            
+            .step-navigation {
+                padding: 8px 0;
+            }
+            
+            .step-link {
+                padding: 12px 20px;
+            }
+            
+            .step-list {
+                display: flex;
+                overflow-x: auto;
+                gap: 4px;
+            }
+            
+            .step-item {
+                flex-shrink: 0;
+                min-width: 140px;
+            }
+        }
+
+        /* Form Styling */
+        .form-grid {
+            display: grid;
+            gap: 16px;
+            max-width: 100%;
+        }
+
+        .form-group {
+            margin-bottom: 16px;
+        }
+
+        .form-label {
+            display: block;
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--navy-primary);
+            margin-bottom: 6px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .form-input, .form-select, .form-textarea {
+            width: 100%;
+            padding: 10px 12px;
+            border: 2px solid var(--pink-200);
+            border-radius: 6px;
+            font-size: 14px;
+            transition: all 0.2s ease;
+            box-sizing: border-box;
+        }
+
+        .form-input:focus, .form-select:focus, .form-textarea:focus {
+            outline: none;
+            border-color: var(--wizard-pink);
+            box-shadow: 0 0 0 3px rgba(248, 187, 217, 0.2);
+        }
+
+        .form-textarea {
+            resize: vertical;
+            min-height: 80px;
+        }
+
+        /* Sample content styling */
+        .step-header {
+            text-align: center;
+            margin-bottom: 24px;
+        }
+
+        .step-title {
+            font-size: 20px;
+            font-weight: 700;
+            color: var(--navy-primary);
+            margin-bottom: 8px;
+        }
+
+        .step-description {
+            color: var(--gray-500);
+            font-size: 14px;
+        }
+
+        .demo-content {
+            background: var(--wizard-pink-light);
+            border: 2px dashed var(--wizard-pink);
+            border-radius: 8px;
+            padding: 24px;
+            text-align: center;
+            color: var(--navy-primary);
+            font-weight: 500;
+        }
+    </style>
 </head>
 <body>
-    <div class="dashboard-container">
-        <!-- Sidebar Navigation -->
-        <nav class="sidebar" id="sidebar">
-            <!-- Collapse Toggle -->
-            <button class="sidebar-toggle" id="sidebarToggle">
-                <span class="toggle-icon">‹</span>
-            </button>
-
-            <!-- Logo Section -->
-            <div class="logo-container">
-                <img src="/assets/logos/ezHealthKonnect.jpeg" alt="ezHealthKonnect" class="logo-image">
-                <div class="logo-text">
-                    <h3 class="brand-name">ez<span class="brand-accent">Health</span>Konnect</h3>
-                    <p class="brand-tagline">Healthcare Integration</p>
-                </div>
-            </div>
-
-            <!-- Navigation Menu -->
-            <div class="nav-menu">
-                <!-- Main Section -->
-                <div class="nav-section">
-                    <div class="section-header">
-                        <span class="section-title">Main</span>
-                    </div>
-                    <div class="nav-items">
-                        <a href="dashboard.html" class="nav-item">
-                            <span class="nav-icon">🏠</span>
-                            <span class="nav-label">Dashboard</span>
-                        </a>
-                        <a href="interfaces.html" class="nav-item active">
-                            <span class="nav-icon">🔗</span>
-                            <span class="nav-label">Interfaces</span>
-                        </a>
-                        <a href="#messages" class="nav-item">
-                            <span class="nav-icon">📧</span>
-                            <span class="nav-label">Messages</span>
-                        </a>
-                        <a href="#templates" class="nav-item">
-                            <span class="nav-icon">📄</span>
-                            <span class="nav-label">Templates</span>
-                        </a>
-                    </div>
-                </div>
-
-                <!-- Analytics Section -->
-                <div class="nav-section">
-                    <div class="section-header">
-                        <span class="section-title">Analytics</span>
-                    </div>
-                    <div class="nav-items">
-                        <a href="#monitoring" class="nav-item">
-                            <span class="nav-icon">📊</span>
-                            <span class="nav-label">Monitor</span>
-                        </a>
-                        <a href="#reports" class="nav-item">
-                            <span class="nav-icon">📈</span>
-                            <span class="nav-label">Reports</span>
-                        </a>
-                    </div>
-                </div>
-
-                <!-- Admin Section -->
-                <div class="nav-section admin-section" id="adminSection" style="display: none;">
-                    <div class="section-header">
-                        <span class="section-title">Admin</span>
-                    </div>
-                    <div class="nav-items">
-                        <a href="user-management.html" class="nav-item">
-                            <span class="nav-icon">👥</span>
-                            <span class="nav-label">Users</span>
-                        </a>
-                        <a href="#settings" class="nav-item">
-                            <span class="nav-icon">⚙️</span>
-                            <span class="nav-label">Settings</span>
-                        </a>
-                    </div>
-                </div>
-            </div>
-
-            <!-- User Profile -->
-            <div class="user-profile">
-                <div class="user-info">
-                    <div class="user-avatar" id="userAvatar">S</div>
-                    <div class="user-details">
-                        <span class="user-name" id="userName">System User</span>
-                        <span class="user-role" id="userRole">ADMIN</span>
-                    </div>
-                </div>
-                <button class="logout-btn" onclick="logout()" title="Logout">
-                    <span class="nav-icon">🚪</span>
-                    <span class="nav-label">Logout</span>
-                </button>
-            </div>
-        </nav>
-
-        <!-- Main Content -->
-        <main class="main-content">
-            <!-- Header -->
-            <header class="content-header">
-                <div class="header-left">
-                    <h1 class="page-title">Interface Management</h1>
-                    <span class="current-time" id="currentTime">10:07 AM</span>
-                </div>
-                <div class="header-actions">
-                    <button class="header-btn primary" onclick="openInterfaceWizard()">
-                        <span class="btn-icon">🧙‍♂️</span>
-                        <span class="btn-label">Create Interface</span>
-                    </button>
-                </div>
-            </header>
-
-            <!-- Interface Cards Content -->
-            <div class="interfaces-content">
-                <div class="interface-stats">
-                    <div class="stat-card">
-                        <div class="stat-value">12</div>
-                        <div class="stat-label">Active Interfaces</div>
-                    </div>
-                    <div class="stat-card">
-                        <div class="stat-value">1,247</div>
-                        <div class="stat-label">Messages Today</div>
-                    </div>
-                    <div class="stat-card">
-                        <div class="stat-value">99.2%</div>
-                        <div class="stat-label">Success Rate</div>
-                    </div>
-                </div>
-
-                <div class="interface-grid">
-                    <div class="interface-card">
-                        <div class="interface-header">
-                            <h3>ADT Patient Registration</h3>
-                            <span class="interface-status active">Active</span>
-                        </div>
-                        <div class="interface-type">HL7 v2.x → FHIR R4</div>
-                        <div class="interface-stats-mini">
-                            <span>342/day</span>
-                            <span>99.1% success</span>
-                        </div>
-                    </div>
-
-                    <div class="interface-card">
-                        <div class="interface-header">
-                            <h3>Lab Results Integration</h3>
-                            <span class="interface-status active">Active</span>
-                        </div>
-                        <div class="interface-type">HL7 v2.x → FHIR R4</div>
-                        <div class="interface-stats-mini">
-                            <span>156/day</span>
-                            <span>99.8% success</span>
-                        </div>
-                    </div>
-
-                    <div class="interface-card">
-                        <div class="interface-header">
-                            <h3>CCD Clinical Summary</h3>
-                            <span class="interface-status testing">Testing</span>
-                        </div>
-                        <div class="interface-type">C-CDA → FHIR R4</div>
-                        <div class="interface-stats-mini">
-                            <span>23/day</span>
-                            <span>95.4% success</span>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </main>
-    </div>
-
-    <!-- WIZARD MODAL OVERLAY -->
-    <!-- WIZARD MODAL OVERLAY -->
-    <div class="wizard-modal-overlay" id="wizardModalOverlay">
+    <!-- Wizard Modal with Left Sidebar Layout -->
+    <div class="wizard-modal-overlay show" id="wizardModalOverlay">
         <div class="wizard-modal-container" id="wizardModalContainer">
-            <!-- Modal Control Buttons - MUST BE INCLUDED -->
-            <!-- FIXED: Modal Control Buttons - Add this to your HTML -->
-<div class="wizard-modal-controls">
-    <button class="wizard-modal-control maximize-btn" id="wizardModalMaximize" title="Maximize">
-        <span id="maximizeIcon">⛶</span>
-    </button>
-    <button class="wizard-modal-control close-btn" id="wizardModalClose" title="Close">×</button>
-</div>
-
-            <!-- Wizard Header -->
-            <div class="wizard-header">
-                <h2 class="wizard-title">🧙‍♂️ Create New HL7 Interface</h2>
-                <p class="wizard-subtitle">AI-powered interface builder for seamless healthcare data integration</p>
+            
+            <!-- Modal Control Buttons -->
+            <div class="wizard-modal-controls">
+                <button class="wizard-modal-control maximize-btn" id="wizardModalMaximize" title="Maximize">
+                    <span id="maximizeIcon">⛶</span>
+                </button>
+                <button class="wizard-modal-control close-btn" id="wizardModalClose" title="Close">×</button>
             </div>
 
-            <!-- Enhanced Step Indicator -->
-            <div class="step-indicator-container">
-                <div class="step-indicators">
-                    <div class="step-indicator active" id="stepIndicator1">
-                        <div class="step-circle active" id="stepCircle1">1</div>
-                        <div class="step-label">Configure</div>
-                    </div>
-                    <div class="step-connector" id="connector1"></div>
-                    <div class="step-indicator" id="stepIndicator2">
-                        <div class="step-circle" id="stepCircle2">2</div>
-                        <div class="step-label">Upload</div>
-                    </div>
-                    <div class="step-connector" id="connector2"></div>
-                    <div class="step-indicator" id="stepIndicator3">
-                        <div class="step-circle" id="stepCircle3">3</div>
-                        <div class="step-label">Review</div>
-                    </div>
-                    <div class="step-connector" id="connector3"></div>
-                    <div class="step-indicator" id="stepIndicator4">
-                        <div class="step-circle" id="stepCircle4">4</div>
-                        <div class="step-label">Mapping</div>
-                    </div>
-                    <div class="step-connector" id="connector4"></div>
-                    <div class="step-indicator" id="stepIndicator5">
-                        <div class="step-circle" id="stepCircle5">5</div>
-                        <div class="step-label">Deploy</div>
-                    </div>
+            <!-- Left Sidebar -->
+            <div class="wizard-sidebar">
+                <div class="sidebar-header">
+                    <h2 class="sidebar-title">
+                        🧙‍♂️ HL7 Interface
+                    </h2>
+                    <p class="sidebar-subtitle">AI-powered interface builder for seamless healthcare data integration</p>
                 </div>
+
+                <nav class="step-navigation">
+                    <ul class="step-list">
+                        <li class="step-item active" id="stepIndicator1">
+                            <a href="#" class="step-link" onclick="showStep(1)">
+                                <div class="step-number" id="stepCircle1">1</div>
+                                <div class="step-content">
+                                    <div class="step-title">Configure</div>
+                                    <div class="step-description">Set up basic configuration</div>
+                                </div>
+                            </a>
+                        </li>
+                        <li class="step-item" id="stepIndicator2">
+                            <a href="#" class="step-link" onclick="showStep(2)">
+                                <div class="step-number" id="stepCircle2">2</div>
+                                <div class="step-content">
+                                    <div class="step-title">Upload</div>
+                                    <div class="step-description">Upload HL7 message files</div>
+                                </div>
+                            </a>
+                        </li>
+                        <li class="step-item" id="stepIndicator3">
+                            <a href="#" class="step-link" onclick="showStep(3)">
+                                <div class="step-number" id="stepCircle3">3</div>
+                                <div class="step-content">
+                                    <div class="step-title">Review</div>
+                                    <div class="step-description">Review parsed content</div>
+                                </div>
+                            </a>
+                        </li>
+                        <li class="step-item" id="stepIndicator4">
+                            <a href="#" class="step-link" onclick="showStep(4)">
+                                <div class="step-number" id="stepCircle4">4</div>
+                                <div class="step-content">
+                                    <div class="step-title">Mapping</div>
+                                    <div class="step-description">Configure data mapping</div>
+                                </div>
+                            </a>
+                        </li>
+                        <li class="step-item" id="stepIndicator5">
+                            <a href="#" class="step-link" onclick="showStep(5)">
+                                <div class="step-number" id="stepCircle5">5</div>
+                                <div class="step-content">
+                                    <div class="step-title">Deploy</div>
+                                    <div class="step-description">Deploy and finalize</div>
+                                </div>
+                            </a>
+                        </li>
+                    </ul>
+                </nav>
             </div>
 
-            <!-- Wizard Content -->
-            <div class="wizard-content">
-                <!-- Step 1: Interface Configuration -->
-                <div class="wizard-step active" id="step1">
-                    <div class="step-header">
-                        <div class="step-progress">Step 1 of 5</div>
-                        <h3 class="step-title">Interface Configuration</h3>
-                        <p class="step-description">Set up the basic configuration for your HL7 interface</p>
+            <!-- Main Content Area -->
+            <div class="wizard-main">
+                <!-- Header -->
+                <div class="wizard-header">
+                    <h2 class="wizard-title">Interface Configuration</h2>
+                    <p class="wizard-subtitle">Set up the basic configuration for your HL7 interface</p>
+                </div>
+
+                <!-- Content -->
+                <div class="wizard-content">
+                    <!-- Step 1: Configure -->
+                    <div class="wizard-step active" id="step1">
+                        <div class="step-header">
+                            <div class="step-progress">STEP 1 OF 5</div>
+                            <h3 class="step-title">Interface Configuration</h3>
+                            <p class="step-description">Set up the basic configuration for your HL7 interface</p>
+                        </div>
+
+                        <div class="form-grid">
+                            <div class="form-group">
+                                <label class="form-label" for="interfaceName">Interface Name *</label>
+                                <input type="text" id="interfaceName" class="form-input" placeholder="e.g., ADT Patient Admissions" required>
+                            </div>
+
+                            <div class="form-group">
+                                <label class="form-label" for="interfaceDescription">Description</label>
+                                <textarea id="interfaceDescription" class="form-textarea" placeholder="Brief description of this interface and its purpose"></textarea>
+                            </div>
+
+                            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+                                <div class="form-group">
+                                    <label class="form-label" for="sourceType">Source Type *</label>
+                                    <select id="sourceType" class="form-select" required>
+                                        <option value="">Select source...</option>
+                                        <option value="hl7v2">HL7 v2.x</option>
+                                        <option value="hl7v3">HL7 v3</option>
+                                        <option value="fhir">FHIR</option>
+                                        <option value="ccda">C-CDA</option>
+                                    </select>
+                                </div>
+
+                                <div class="form-group">
+                                    <label class="form-label" for="targetType">Target Type *</label>
+                                    <select id="targetType" class="form-select" required>
+                                        <option value="">Select target...</option>
+                                        <option value="fhir">FHIR R4</option>
+                                        <option value="hl7v2">HL7 v2.x</option>
+                                        <option value="ccda">C-CDA</option>
+                                        <option value="custom">Custom Format</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
                     </div>
 
-                    <div class="form-grid">
-                        <div class="form-group">
-                            <label for="wizardInterfaceName" class="required">Interface Name</label>
-                            <input type="text" id="wizardInterfaceName" class="form-control" placeholder="e.g., ADT Patient Admissions" required>
+                    <!-- Step 2: Upload -->
+                    <div class="wizard-step" id="step2">
+                        <div class="step-header">
+                            <div class="step-progress">STEP 2 OF 5</div>
+                            <h3 class="step-title">Upload HL7 Message</h3>
+                            <p class="step-description">Upload your HL7 message file for parsing and analysis</p>
                         </div>
-
-                        <div class="form-group">
-                            <label for="wizardInterfaceDescription">Description</label>
-                            <textarea id="wizardInterfaceDescription" class="form-control" rows="3" placeholder="Brief description of this interface and its purpose"></textarea>
+                        <div class="demo-content">
+                            <p>📁 Upload Zone - Drag and drop your HL7 files here</p>
+                            <p>Supported formats: .hl7, .txt, .msg</p>
                         </div>
+                    </div>
 
-                        <div class="form-row">
-                            <div class="form-group">
-                                <label for="wizardSourceType" class="required">Source Type</label>
-                                <select id="wizardSourceType" class="form-control" required>
-                                    <option value="">Select source...</option>
-                                    <option value="file">📁 File System</option>
-                                    <option value="tcp">🌐 TCP Listener</option>
-                                    <option value="http">🔗 HTTP Endpoint</option>
-                                    <option value="manual">✋ Manual Input</option>
-                                </select>
-                            </div>
-                            <div class="form-group">
-                                <label for="wizardTargetType" class="required">Target Type</label>
-                                <select id="wizardTargetType" class="form-control" required>
-                                    <option value="">Select target...</option>
-                                    <option value="fhir">🏥 FHIR Server</option>
-                                    <option value="database">🗄️ Database</option>
-                                    <option value="file">📄 File Output</option>
-                                    <option value="http">📡 HTTP POST</option>
-                                </select>
-                            </div>
+                    <!-- Step 3: Review -->
+                    <div class="wizard-step" id="step3">
+                        <div class="step-header">
+                            <div class="step-progress">STEP 3 OF 5</div>
+                            <h3 class="step-title">Review Parsed Content</h3>
+                            <p class="step-description">Review the parsed HL7 message segments and fields</p>
                         </div>
-
-                        <div class="form-group">
-                            <label for="wizardMessageType">Message Type</label>
-                            <select id="wizardMessageType" class="form-control">
-                                <option value="auto-detect">🔍 Auto-detect</option>
-                                <option value="ADT^A01">🏥 ADT - Admit Patient</option>
-                                <option value="ADT^A02">🔄 ADT - Transfer Patient</option>
-                                <option value="ADT^A03">📤 ADT - Discharge Patient</option>
-                                <option value="ORU^R01">🧪 ORU - Lab Results</option>
-                                <option value="ORM^O01">📋 ORM - Order Message</option>
-                                <option value="MDM^T02">📄 MDM - Document</option>
-                                <option value="CCD">📋 CCD - Clinical Document</option>
-                            </select>
+                        <div class="demo-content">
+                            <p>📋 Parsed Message Review</p>
+                            <p>MSH, PID, PV1, OBX segments will be displayed here</p>
                         </div>
+                    </div>
 
-                        <!-- Dynamic Configuration Sections -->
-                        <div id="wizardSourceConfig" class="form-group" style="display: none;">
-                            <!-- Source configuration will be populated by JavaScript -->
+                    <!-- Step 4: Mapping -->
+                    <div class="wizard-step" id="step4">
+                        <div class="step-header">
+                            <div class="step-progress">STEP 4 OF 5</div>
+                            <h3 class="step-title">Configure Data Mapping</h3>
+                            <p class="step-description">Map source fields to target format</p>
                         </div>
+                        <div class="demo-content">
+                            <p>🔗 Field Mapping Configuration</p>
+                            <p>Source → Target field mappings will be configured here</p>
+                        </div>
+                    </div>
 
-                        <div id="wizardTargetConfig" class="form-group" style="display: none;">
-                            <!-- Target configuration will be populated by JavaScript -->
+                    <!-- Step 5: Deploy -->
+                    <div class="wizard-step" id="step5">
+                        <div class="step-header">
+                            <div class="step-progress">STEP 5 OF 5</div>
+                            <h3 class="step-title">Deploy Interface</h3>
+                            <p class="step-description">Review and deploy your new HL7 interface</p>
+                        </div>
+                        <div class="demo-content">
+                            <p>🚀 Ready for Deployment</p>
+                            <p>Final review and interface deployment options</p>
                         </div>
                     </div>
                 </div>
 
-                <!-- Step 2: Upload HL7 Sample -->
-                <div class="wizard-step" id="step2">
-                    <div class="step-header">
-                        <div class="step-progress">Step 2 of 5</div>
-                        <h3 class="step-title">Upload HL7 Sample</h3>
-                        <p class="step-description">Upload a sample HL7 message to analyze and validate</p>
-                    </div>
-
-                    <div class="upload-zone" id="uploadZone">
-                        <div class="upload-icon">📁</div>
-                        <div class="upload-text">Click to upload or drag HL7 file here</div>
-                        <div class="upload-hint">Supports .hl7, .txt files up to 5MB</div>
-                    </div>
-
-                    <input type="file" id="hl7FileUpload" style="display: none;" accept=".hl7,.txt,.dat">
-                    
-                    <div id="fileInfo"></div>
-
-                    <div style="text-align: center; margin-top: 24px;">
-                        <button id="parseBtn" class="wizard-btn primary" style="display: none;">
-                            <span>🔍</span>
-                            Parse HL7 Message
+                <!-- Navigation Footer -->
+                <div class="wizard-navigation">
+                    <div class="nav-info" id="navStep">Step 1 of 5 • Interface Configuration</div>
+                    <div class="nav-buttons">
+                        <button type="button" class="wizard-btn secondary" id="prevBtn" onclick="prevStep()" style="display: none;">
+                            ← Previous
+                        </button>
+                        <button type="button" class="wizard-btn primary" id="nextBtn" onclick="nextStep()">
+                            Next →
+                        </button>
+                        <button type="button" class="wizard-btn primary" id="finishBtn" onclick="finishWizard()" style="display: none;">
+                            🚀 Deploy Interface
                         </button>
                     </div>
-
-                    <div id="parseResults"></div>
-                </div>
-
-                <!-- Step 3: Review Parsed Data -->
-                <div class="wizard-step" id="step3">
-                    <div class="step-header">
-                        <div class="step-progress">Step 3 of 5</div>
-                        <h3 class="step-title">Review Parsed Data</h3>
-                        <p class="step-description">Review the parsed HL7 segments and handle any custom Z-segments</p>
-                    </div>
-
-                    <div id="parsedDataReview">
-                        <!-- Will be populated after successful parsing -->
-                    </div>
-                </div>
-
-                <!-- Step 4: HL7→FHIR Mapping -->
-                <div class="wizard-step" id="step4">
-                    <div class="step-header">
-                        <div class="step-progress">Step 4 of 5</div>
-                        <h3 class="step-title">HL7 → FHIR Mapping</h3>
-                        <p class="step-description">Configure field mappings from HL7 to FHIR resources (AI-assisted)</p>
-                    </div>
-
-                    <div style="text-align: center; margin-bottom: 24px;">
-                        <button id="generateMappingBtn" class="wizard-btn primary">
-                            <span>🤖</span>
-                            Generate AI Mapping Suggestions
-                        </button>
-                    </div>
-
-                    <div id="mappingResults">
-                        <div class="mapping-preview">
-                            <h4>🎯 Ready for AI-Powered Mapping</h4>
-                            <p>Click the button above to generate intelligent mapping suggestions based on your HL7 message structure.</p>
-                            <div style="margin-top: 20px; padding: 16px; background: white; border-radius: 8px; border: 1px solid var(--pink-200);">
-                                <div style="font-size: 12px; color: var(--gray-500); margin-bottom: 8px;">COMING SOON IN PHASE 2</div>
-                                <div style="font-weight: 600; color: var(--navy-primary);">🚀 Claude AI Integration</div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Step 5: Review & Deploy -->
-                <div class="wizard-step" id="step5">
-                    <div class="step-header">
-                        <div class="step-progress">Step 5 of 5</div>
-                        <h3 class="step-title">Review & Deploy</h3>
-                        <p class="step-description">Review your interface configuration and deploy</p>
-                    </div>
-
-                    <div class="summary-grid">
-                        <div class="summary-card">
-                            <h5>📋 Interface Details</h5>
-                            <div class="summary-content">
-                                <div><strong>Name:</strong> <span id="summaryName">-</span></div>
-                                <div><strong>Type:</strong> <span id="summaryType">-</span></div>
-                                <div><strong>Message:</strong> <span id="summaryMessage">-</span></div>
-                            </div>
-                        </div>
-
-                        <div class="summary-card">
-                            <h5>🔄 Data Flow</h5>
-                            <div class="summary-content">
-                                <div><strong>Source:</strong> <span id="summarySource">-</span></div>
-                                <div><strong>Target:</strong> <span id="summaryTarget">-</span></div>
-                                <div><strong>Processing:</strong> Real-time</div>
-                            </div>
-                        </div>
-
-                        <div class="summary-card">
-                            <h5>📊 Parsed Data</h5>
-                            <div class="summary-content">
-                                <div><strong>Segments:</strong> <span id="summarySegments">0</span></div>
-                                <div><strong>Z-Segments:</strong> <span id="summaryZSegments">0</span></div>
-                                <div><strong>Status:</strong> <span class="success-checkmark">✓</span> Validated</div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div class="alert alert-success">
-                        <h5>🚀 Ready to Deploy</h5>
-                        <p>Your interface is configured and ready for deployment. Click "Create Interface" to make it live and start processing messages.</p>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Enhanced Navigation -->
-            <div class="wizard-navigation">
-                <div class="nav-info">
-                    <div class="nav-step" id="navStep">Step 1 of 5 • Configure</div>
-                    <div class="nav-title" id="navTitle">Interface Configuration</div>
-                </div>
-                <div class="nav-buttons">
-                    <button id="prevBtn" class="wizard-btn secondary" style="display: none;">
-                        <span>←</span>
-                        Previous
-                    </button>
-                    <button id="nextBtn" class="wizard-btn primary">
-                        Next
-                        <span>→</span>
-                    </button>
-                    <button id="finishBtn" class="wizard-btn primary" style="display: none;">
-                        <span>✓</span>
-                        Create Interface
-                    </button>
                 </div>
             </div>
         </div>
     </div>
 
-    <!-- Loading Overlay -->
-    <div class="loading-overlay" id="loadingOverlay">
-        <div class="loading-content">
-            <div class="loading-spinner"></div>
-            <div class="loading-text" id="loadingText">Processing...</div>
-            <div class="loading-subtext" id="loadingSubtext">Please wait</div>
-        </div>
-    </div>
+    <script>
+        // Simple demo functionality
+        let currentStep = 1;
+        const totalSteps = 5;
+        const stepTitles = [
+            'Interface Configuration',
+            'Upload HL7 Message', 
+            'Review Parsed Content',
+            'Configure Data Mapping',
+            'Deploy Interface'
+        ];
 
-    <!-- Include Scripts -->
-    <script src="js/interface-wizard.js"></script>
+        function showStep(step) {
+            // Hide all steps
+            document.querySelectorAll('.wizard-step').forEach(el => el.classList.remove('active'));
+            document.querySelectorAll('.step-item').forEach(el => el.classList.remove('active', 'completed'));
+            
+            // Show current step
+            document.getElementById(`step${step}`).classList.add('active');
+            document.getElementById(`stepIndicator${step}`).classList.add('active');
+            
+            // Mark previous steps as completed
+            for (let i = 1; i < step; i++) {
+                document.getElementById(`stepIndicator${i}`).classList.add('completed');
+            }
+            
+            currentStep = step;
+            updateNavigation();
+        }
+
+        function nextStep() {
+            if (currentStep < totalSteps) {
+                showStep(currentStep + 1);
+            }
+        }
+
+        function prevStep() {
+            if (currentStep > 1) {
+                showStep(currentStep - 1);
+            }
+        }
+
+        function updateNavigation() {
+            const prevBtn = document.getElementById('prevBtn');
+            const nextBtn = document.getElementById('nextBtn');
+            const finishBtn = document.getElementById('finishBtn');
+            const navStep = document.getElementById('navStep');
+            
+            navStep.textContent = `Step ${currentStep} of ${totalSteps} • ${stepTitles[currentStep - 1]}`;
+            
+            prevBtn.style.display = currentStep === 1 ? 'none' : 'flex';
+            nextBtn.style.display = currentStep === totalSteps ? 'none' : 'flex';
+            finishBtn.style.display = currentStep === totalSteps ? 'flex' : 'none';
+        }
+
+        function finishWizard() {
+            alert('🎉 Interface deployment initiated!');
+        }
+
+        // Maximize functionality
+        document.getElementById('wizardModalMaximize').addEventListener('click', function() {
+            const overlay = document.getElementById('wizardModalOverlay');
+            const icon = document.getElementById('maximizeIcon');
+            
+            overlay.classList.toggle('maximized');
+            icon.textContent = overlay.classList.contains('maximized') ? '🗗' : '⛶';
+        });
+
+        // Close functionality  
+        document.getElementById('wizardModalClose').addEventListener('click', function() {
+            document.getElementById('wizardModalOverlay').classList.remove('show');
+        });
+
+        // Initialize
+        updateNavigation();
+    </script>
 </body>
 </html>

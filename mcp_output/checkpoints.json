@@ -1,0 +1,116 @@
+[
+  {
+    "timestamp": "2025-07-22T11:13:15.755551",
+    "file": "controllers\\interface_controller.go",
+    "note": "// TODO: Save to database (for now, we'll simulate)",
+    "line": 60
+  },
+  {
+    "timestamp": "2025-07-22T11:13:15.755565",
+    "file": "controllers\\interface_controller.go",
+    "note": "// TODO: Fetch from database",
+    "line": 87
+  },
+  {
+    "timestamp": "2025-07-22T11:13:15.755570",
+    "file": "controllers\\interface_controller.go",
+    "note": "// TODO: Fetch from database",
+    "line": 140
+  },
+  {
+    "timestamp": "2025-07-22T11:13:15.755573",
+    "file": "controllers\\interface_controller.go",
+    "note": "// TODO: Update in database",
+    "line": 190
+  },
+  {
+    "timestamp": "2025-07-22T11:13:15.755576",
+    "file": "controllers\\interface_controller.go",
+    "note": "// TODO: Delete from database",
+    "line": 215
+  },
+  {
+    "timestamp": "2025-07-22T11:13:15.755579",
+    "file": "controllers\\interface_controller.go",
+    "note": "// TODO: Implement interface start logic",
+    "line": 230
+  },
+  {
+    "timestamp": "2025-07-22T11:13:15.755582",
+    "file": "controllers\\interface_controller.go",
+    "note": "// TODO: Implement interface stop logic",
+    "line": 246
+  },
+  {
+    "timestamp": "2025-07-22T11:13:15.755585",
+    "file": "controllers\\interface_controller.go",
+    "note": "// TODO: Implement interface pause logic",
+    "line": 262
+  },
+  {
+    "timestamp": "2025-07-22T11:13:15.757484",
+    "file": "controllers\\schema_fhir_transform_controller.go",
+    "note": "// TODO: Implement using your HL7 schema system",
+    "line": 590
+  },
+  {
+    "timestamp": "2025-07-22T11:13:15.757496",
+    "file": "controllers\\schema_fhir_transform_controller.go",
+    "note": "// TODO: Implement using your FHIR schema system",
+    "line": 621
+  },
+  {
+    "timestamp": "2025-07-22T11:13:15.758509",
+    "file": "controllers\\system_controller.go",
+    "note": "\"status\": \"connected\", // TODO: Actual health check",
+    "line": 84
+  },
+  {
+    "timestamp": "2025-07-22T11:13:15.758520",
+    "file": "controllers\\system_controller.go",
+    "note": "\"status\": \"connected\", // TODO: Actual health check",
+    "line": 88
+  },
+  {
+    "timestamp": "2025-07-22T11:13:15.758523",
+    "file": "controllers\\system_controller.go",
+    "note": "// TODO: Implement actual metrics collection",
+    "line": 97
+  },
+  {
+    "timestamp": "2025-07-22T11:13:15.761183",
+    "file": "controllers\\wizard_api_controller.go",
+    "note": "// TODO: Load from your database/storage",
+    "line": 311
+  },
+  {
+    "timestamp": "2025-07-22T11:13:15.761192",
+    "file": "controllers\\wizard_api_controller.go",
+    "note": "// TODO: Save to your database/storage",
+    "line": 345
+  },
+  {
+    "timestamp": "2025-07-22T11:13:15.761194",
+    "file": "controllers\\wizard_api_controller.go",
+    "note": "// TODO: Use your existing FHIR transformation engine",
+    "line": 385
+  },
+  {
+    "timestamp": "2025-07-22T11:13:15.761196",
+    "file": "controllers\\wizard_api_controller.go",
+    "note": "// TODO: Save to your database using existing interface controller logic",
+    "line": 429
+  },
+  {
+    "timestamp": "2025-07-22T11:13:15.761197",
+    "file": "controllers\\wizard_api_controller.go",
+    "note": "// TODO: Implement AI suggestions based on your schema analysis",
+    "line": 470
+  },
+  {
+    "timestamp": "2025-07-22T11:13:15.761199",
+    "file": "controllers\\wizard_api_controller.go",
+    "note": "// TODO: Use your existing FHIR validation logic",
+    "line": 511
+  }
+]

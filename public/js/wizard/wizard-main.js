@@ -250,10 +250,7 @@ class InterfaceWizardModal {
             console.log('🖥️ Modal maximized for enhanced segment viewing');
         }
         
-        // Enhanced viewing notification for segment drilling
-        if (modal.classList.contains('maximized')) {
-            this.notificationService.show('Enhanced viewing mode - Perfect for segment drilling!', 'info');
-        }
+        
     }
 
     resetWizard() {

@@ -1,0 +1,978 @@
+[
+  {
+    "path": "app.js",
+    "last_modified": "2025-07-13T09:58:05.712736",
+    "hash": "17a43ea505733ebe4abb953f0e4b1802877a8908cb6b25eb43e125663fe64b53",
+    "functions": [],
+    "todos": []
+  },
+  {
+    "path": "fhir_converter.go",
+    "last_modified": "2025-07-15T08:21:06.717704",
+    "hash": "65112b570aa62960c68ecd54dd3e4ca6ff1e117fa700441e4617313237109706",
+    "functions": [
+      "func NewFHIRConverter(inputDir, outputDir, version string) *FHIRConverter {",
+      "func (c *FHIRConverter) ConvertAll() error {",
+      "func (c *FHIRConverter) createOutputStructure() error {",
+      "func (c *FHIRConverter) processBaseResources() error {",
+      "func (c *FHIRConverter) processUSCoreProfiles() error {",
+      "func (c *FHIRConverter) convertStructureDefinition(structDef FHIRStructureDefinition, profile string",
+      "func (c *FHIRConverter) convertElement(element FHIRElementDefinition) OptimizedElement {",
+      "func (c *FHIRConverter) saveSchema(schema *OptimizedFHIRSchema, category string) error {",
+      "func (c *FHIRConverter) printStats() {",
+      "func main() {"
+    ],
+    "todos": []
+  },
+  {
+    "path": "main.go",
+    "last_modified": "2025-07-21T11:13:29.577290",
+    "hash": "f59c11256ffeb15f4ae5310d14671f9de8820e46f905db01c2d0e94790b578f7",
+    "functions": [
+      "func main() {",
+      "func setupWizardAPI() {",
+      "func corsHandler(next http.HandlerFunc) http.HandlerFunc {",
+      "func handleMappingRules(w http.ResponseWriter, r *http.Request) {"
+    ],
+    "todos": []
+  },
+  {
+    "path": "reset-password.js",
+    "last_modified": "2025-06-24T22:31:00.682528",
+    "hash": "2e2f46e13b880f215fd0c3daa4b7ce42a8606351c883236b759e2ae9d29345ff",
+    "functions": [
+      "async function resetPassword() {"
+    ],
+    "todos": []
+  },
+  {
+    "path": "server.js",
+    "last_modified": "2025-06-24T23:24:47.450598",
+    "hash": "c717c754bfd7583744d6abfbc1f2e9e4a5d1b44658158da039f607bc2da26709",
+    "functions": [
+      "async function startServer() {"
+    ],
+    "todos": []
+  },
+  {
+    "path": "config\\config.go",
+    "last_modified": "2025-07-15T21:46:46.981366",
+    "hash": "9162d880d60142c9b282bdd4201870eb9c940832167262b58a578c8c02ff749d",
+    "functions": [
+      "func Load() *Config {",
+      "func getEnv(key, defaultValue string) string {",
+      "func getBoolEnv(key string, defaultValue bool) bool {",
+      "func getIntEnv(key string, defaultValue int) int {",
+      "func getStringSlice(key, defaultValue string) []string {",
+      "func (c *Config) IsDevelopment() bool {",
+      "func (c *Config) IsProduction() bool {",
+      "func (c *Config) UseFilesystemSchema() bool {",
+      "func (c *Config) UseLegacyDictionary() bool {",
+      "func (c *Config) GetSchemaDirectory() string {",
+      "func (c *Config) GetFHIRSchemaDirectory() string {",
+      "func (c *Config) GetDictionaryURL() string {",
+      "func (c *Config) GetSchemaConfig() map[string]interface{} {",
+      "func (c *Config) GetFHIRConfig() map[string]interface{} {",
+      "func (c *Config) ValidateSchemaConfig() {",
+      "// Replace the validateHL7Schemas() function with this:",
+      "func (c *Config) validateHL7Schemas() {",
+      "func (c *Config) validateFHIRSchemas() {",
+      "func (c *Config) LogConfiguration() {"
+    ],
+    "todos": []
+  },
+  {
+    "path": "config\\database.js",
+    "last_modified": "2025-07-01T17:26:06.929936",
+    "hash": "cf4c23659f2aae734624a530492ac6bc8b8f850187d2134b7deb8fb09a09e2a3",
+    "functions": [],
+    "todos": []
+  },
+  {
+    "path": "config\\environment.js",
+    "last_modified": "2025-06-24T22:46:10.225762",
+    "hash": "e47ddedf01b34cefaff181d6780c22ba3c05f052607cb15b86cca1475306bd49",
+    "functions": [],
+    "todos": []
+  },
+  {
+    "path": "config\\session.js",
+    "last_modified": "2025-06-24T22:46:28.103930",
+    "hash": "56c20bf4114fbe34413d33661efecc2aa4b713ddc38be947318de3a490bd9e69",
+    "functions": [],
+    "todos": []
+  },
+  {
+    "path": "controllers\\fhir_transform_controller.go",
+    "last_modified": "2025-07-21T11:14:13.767589",
+    "hash": "17ca87c4b3a64bcfdb3e1194295a649c71e2d60e340edce967e0534e05b4ba30",
+    "functions": [
+      "func NewFHIRTransformController(database *sql.DB, cfg *config.Config) *FHIRTransformController {",
+      "func (tc *FHIRTransformController) RegisterRoutes(api *gin.RouterGroup) {",
+      "func (tc *FHIRTransformController) GetStatus(c *gin.Context) {",
+      "func (tc *FHIRTransformController) Transform(c *gin.Context) {",
+      "func (tc *FHIRTransformController) GetRules(c *gin.Context) {",
+      "func (tc *FHIRTransformController) CreateRule(c *gin.Context) {",
+      "func (tc *FHIRTransformController) UpdateRule(c *gin.Context) {",
+      "func (tc *FHIRTransformController) DeleteRule(c *gin.Context) {",
+      "func (tc *FHIRTransformController) GetSchemas(c *gin.Context) {",
+      "func (tc *FHIRTransformController) GetSchemaDetails(c *gin.Context) {",
+      "func (tc *FHIRTransformController) ValidateResources(c *gin.Context) {",
+      "func (tc *FHIRTransformController) TestValidation(c *gin.Context) {",
+      "func (tc *FHIRTransformController) GetAnalytics(c *gin.Context) {",
+      "func (tc *FHIRTransformController) GetTransformationLogs(c *gin.Context) {",
+      "func (tc *FHIRTransformController) generateRequestID() string {",
+      "func (tc *FHIRTransformController) getStatCount(query string) int {",
+      "func (tc *FHIRTransformController) processHL7Input(hl7Input interface{}) (map[string]interface{}, st",
+      "func (tc *FHIRTransformController) loadTransformationRules(messageType, profile string) ([]Transform",
+      "func (tc *FHIRTransformController) loadRequiredSchemas(rules []TransformationRule, version, profile ",
+      "func (tc *FHIRTransformController) applyTransformationRules(hl7Message map[string]interface{}, rules",
+      "func (tc *FHIRTransformController) initializeFHIRResource(resourceType string) map[string]interface{",
+      "func (tc *FHIRTransformController) applyRule(hl7Message map[string]interface{}, rule TransformationR",
+      "func (tc *FHIRTransformController) extractHL7Value(hl7Message map[string]interface{}, segment, field",
+      "func (tc *FHIRTransformController) transformValue(hl7Value string, transformRule map[string]interfac",
+      "func (tc *FHIRTransformController) setFHIRPath(resource map[string]interface{}, path string, value i",
+      "func (tc *FHIRTransformController) hasContent(resource map[string]interface{}) bool {",
+      "func (tc *FHIRTransformController) lookupCodeMapping(hl7Code, valueSet string) string {",
+      "func (tc *FHIRTransformController) validateResources(resources []map[string]interface{}, schemas map",
+      "func (tc *FHIRTransformController) validateRuleAgainstSchema(request RuleManagementRequest) bool {",
+      "func (tc *FHIRTransformController) loadSchemasForResources(resources []map[string]interface{}, versi",
+      "func (tc *FHIRTransformController) createBundle(resources []map[string]interface{}, requestID string",
+      "func (tc *FHIRTransformController) logTransformation(request TransformRequest, response TransformRes"
+    ],
+    "todos": []
+  },
+  {
+    "path": "controllers\\hl7_contoller.go",
+    "last_modified": "2025-07-10T19:45:44.882569",
+    "hash": "71c836bad95a0d5efa86740f546a63758161bfc5fa38d893ff714a38cbd6fa1e",
+    "functions": [
+      "func NewHL7Controller(cfg *config.Config) *HL7Controller {",
+      "func (ctrl *HL7Controller) ParseMessage(c *gin.Context) {",
+      "func (ctrl *HL7Controller) ValidateMessage(c *gin.Context) {",
+      "func (ctrl *HL7Controller) GetStats(c *gin.Context) {",
+      "func (ctrl *HL7Controller) convertBasicToEnhanced(basicResult *hl7.BasicParsedMessage) *hl7.Enhanced",
+      "// Use the existing ConvertBasicToEnhanced function and convert to map format",
+      "func (ctrl *HL7Controller) getSchemaLoaderStats() gin.H {",
+      "func (ctrl *HL7Controller) ListSchemas(c *gin.Context) {",
+      "func (ctrl *HL7Controller) GetSchemaStatus(c *gin.Context) {",
+      "func (ctrl *HL7Controller) extractMessageTypeCode(messageType string) string {",
+      "func (ctrl *HL7Controller) extractMessageTypeEvent(messageType string) string {",
+      "func (ctrl *HL7Controller) getMessageDescription(messageType string) string {"
+    ],
+    "todos": []
+  },
+  {
+    "path": "controllers\\interfacesController.js",
+    "last_modified": "2025-07-01T18:27:56.164870",
+    "hash": "14c355e79f3f4c6e1b9f064c58eaab93a743e2a1e984eea630eaabf9308d154d",
+    "functions": [],
+    "todos": []
+  },
+  {
+    "path": "controllers\\interface_controller.go",
+    "last_modified": "2025-07-06T22:33:30.736287",
+    "hash": "5940f45220da75f3c7792608d09538393cad4c23ee95435156260e33e942f2f8",
+    "functions": [
+      "func NewInterfaceController(cfg *config.Config) *InterfaceController {",
+      "func (ctrl *InterfaceController) CreateInterface(c *gin.Context) {",
+      "func (ctrl *InterfaceController) GetInterfaces(c *gin.Context) {",
+      "func (ctrl *InterfaceController) GetInterface(c *gin.Context) {",
+      "func (ctrl *InterfaceController) UpdateInterface(c *gin.Context) {",
+      "func (ctrl *InterfaceController) DeleteInterface(c *gin.Context) {",
+      "func (ctrl *InterfaceController) StartInterface(c *gin.Context) {",
+      "func (ctrl *InterfaceController) StopInterface(c *gin.Context) {",
+      "func (ctrl *InterfaceController) PauseInterface(c *gin.Context) {",
+      "func (ctrl *InterfaceController) generateInterfaceID() string {"
+    ],
+    "todos": [
+      {
+        "line": 60,
+        "note": "// TODO: Save to database (for now, we'll simulate)"
+      },
+      {
+        "line": 87,
+        "note": "// TODO: Fetch from database"
+      },
+      {
+        "line": 140,
+        "note": "// TODO: Fetch from database"
+      },
+      {
+        "line": 190,
+        "note": "// TODO: Update in database"
+      },
+      {
+        "line": 215,
+        "note": "// TODO: Delete from database"
+      },
+      {
+        "line": 230,
+        "note": "// TODO: Implement interface start logic"
+      },
+      {
+        "line": 246,
+        "note": "// TODO: Implement interface stop logic"
+      },
+      {
+        "line": 262,
+        "note": "// TODO: Implement interface pause logic"
+      }
+    ]
+  },
+  {
+    "path": "controllers\\schema_fhir_transform_controller.go",
+    "last_modified": "2025-07-21T10:14:15.063878",
+    "hash": "3b04d28ad42bd1e0d77f98006429fb6c1de6aea2a2cf821f87cb2938938697f9",
+    "functions": [
+      "func NewSchemaFHIRTransformController(database *sql.DB, cfg *config.Config) *SchemaFHIRTransformCont",
+      "func (c *SchemaFHIRTransformController) RegisterRoutes(router *gin.RouterGroup) {",
+      "func (c *SchemaFHIRTransformController) GetStatus(ctx *gin.Context) {",
+      "func (c *SchemaFHIRTransformController) ListSchemas(ctx *gin.Context) {",
+      "func (c *SchemaFHIRTransformController) Transform(ctx *gin.Context) {",
+      "func (c *SchemaFHIRTransformController) ValidateOnly(ctx *gin.Context) {",
+      "func (c *SchemaFHIRTransformController) GetRules(ctx *gin.Context) {",
+      "func (c *SchemaFHIRTransformController) BatchUpdateRules(ctx *gin.Context) {",
+      "func (c *SchemaFHIRTransformController) GetUIConfiguration(ctx *gin.Context) {",
+      "func (c *SchemaFHIRTransformController) GetMappingSuggestions(ctx *gin.Context) {",
+      "func (c *SchemaFHIRTransformController) GetHL7Structure(ctx *gin.Context) {",
+      "func (c *SchemaFHIRTransformController) GetFHIRStructure(ctx *gin.Context) {",
+      "func (c *SchemaFHIRTransformController) loadMappingRulesFromDB(messageType, profile string) ([]Mappi",
+      "func (c *SchemaFHIRTransformController) saveRulesToDB(messageType, profile string, rules []MappingRu",
+      "func (c *SchemaFHIRTransformController) getHL7StructureForMessageType(messageType string) (map[strin",
+      "func (c *SchemaFHIRTransformController) getFHIRStructureForProfile(profile string) (map[string]FHIRR",
+      "func (c *SchemaFHIRTransformController) getMappingStatistics(rules []MappingRule) map[string]interfa",
+      "func (c *SchemaFHIRTransformController) validateMappingCompleteness(rules []MappingRule, hl7Structur",
+      "func (c *SchemaFHIRTransformController) generateFieldMappingSuggestions(messageType, hl7Field, profi",
+      "func (c *SchemaFHIRTransformController) validateRulesAgainstSchemas(rules []MappingRule, messageType",
+      "func (c *SchemaFHIRTransformController) autoFixMappingIssues(rules []MappingRule, validationResults ",
+      "func (c *SchemaFHIRTransformController) getDefaultMappingsForMessageType(messageType, profile string",
+      "func (c *SchemaFHIRTransformController) CreateRule(ctx *gin.Context) {",
+      "func (c *SchemaFHIRTransformController) UpdateRule(ctx *gin.Context) {",
+      "func (c *SchemaFHIRTransformController) DeleteRule(ctx *gin.Context) {",
+      "func (c *SchemaFHIRTransformController) GetAnalytics(ctx *gin.Context) {",
+      "func (c *SchemaFHIRTransformController) GetTransformationLogs(ctx *gin.Context) {",
+      "func (c *SchemaFHIRTransformController) UpdateConfiguration(ctx *gin.Context) {",
+      "func (c *SchemaFHIRTransformController) PreviewTransformation(ctx *gin.Context) {",
+      "func (c *SchemaFHIRTransformController) ValidateMapping(ctx *gin.Context) {"
+    ],
+    "todos": [
+      {
+        "line": 590,
+        "note": "// TODO: Implement using your HL7 schema system"
+      },
+      {
+        "line": 621,
+        "note": "// TODO: Implement using your FHIR schema system"
+      }
+    ]
+  },
+  {
+    "path": "controllers\\system_controller.go",
+    "last_modified": "2025-07-06T22:33:45.670685",
+    "hash": "0f96f927e644996136a365339954749fa451b35aac7b00d295597a43ea25fb13",
+    "functions": [
+      "func NewSystemController(cfg *config.Config) *SystemController {",
+      "func (ctrl *SystemController) HealthCheck(c *gin.Context) {",
+      "func (ctrl *SystemController) GetInfo(c *gin.Context) {",
+      "func (ctrl *SystemController) GetMetrics(c *gin.Context) {"
+    ],
+    "todos": [
+      {
+        "line": 84,
+        "note": "\"status\": \"connected\", // TODO: Actual health check"
+      },
+      {
+        "line": 88,
+        "note": "\"status\": \"connected\", // TODO: Actual health check"
+      },
+      {
+        "line": 97,
+        "note": "// TODO: Implement actual metrics collection"
+      }
+    ]
+  },
+  {
+    "path": "controllers\\userController.js",
+    "last_modified": "2025-06-24T22:47:38.127532",
+    "hash": "3bcd205914f3fa231ba967fa36fb350a23b0b3d900e95b2b56467e726cfa69c4",
+    "functions": [],
+    "todos": []
+  },
+  {
+    "path": "controllers\\wizard_api_controller.go",
+    "last_modified": "2025-07-21T10:41:55.919201",
+    "hash": "ebdd0d0de8911579ab95a074cf9d62ed1e052a79380be910b94affb109e9b695",
+    "functions": [
+      "func NewWizardController(cfg *config.Config) *WizardController {",
+      "func (ctrl *WizardController) toWizardView(rule fhir.MappingRule) WizardMappingRuleView {",
+      "func (ctrl *WizardController) fromWizardView(view WizardMappingRuleView) fhir.MappingRule {",
+      "func (ctrl *WizardController) getHL7FieldName(segment, field string) string {",
+      "func (ctrl *WizardController) RegisterRoutes(router *gin.RouterGroup) {",
+      "func (ctrl *WizardController) ParseHL7(c *gin.Context) {",
+      "func (ctrl *WizardController) GetMappingRules(c *gin.Context) {",
+      "func (ctrl *WizardController) SaveMappingRules(c *gin.Context) {",
+      "func (ctrl *WizardController) TestTransformation(c *gin.Context) {",
+      "func (ctrl *WizardController) CreateInterface(c *gin.Context) {",
+      "func (ctrl *WizardController) GenerateAISuggestions(c *gin.Context) {",
+      "func (ctrl *WizardController) ValidateFHIRResource(c *gin.Context) {",
+      "func (ctrl *WizardController) countTotalFields(segments map[string]hl7.EnhancedSegment) int {",
+      "func (ctrl *WizardController) getDefaultMappingRules(messageType string) []WizardMappingRuleView {"
+    ],
+    "todos": [
+      {
+        "line": 311,
+        "note": "// TODO: Load from your database/storage"
+      },
+      {
+        "line": 345,
+        "note": "// TODO: Save to your database/storage"
+      },
+      {
+        "line": 385,
+        "note": "// TODO: Use your existing FHIR transformation engine"
+      },
+      {
+        "line": 429,
+        "note": "// TODO: Save to your database using existing interface controller logic"
+      },
+      {
+        "line": 470,
+        "note": "// TODO: Implement AI suggestions based on your schema analysis"
+      },
+      {
+        "line": 511,
+        "note": "// TODO: Use your existing FHIR validation logic"
+      }
+    ]
+  },
+  {
+    "path": "database\\002_fhir_transformation_tables.sql",
+    "last_modified": "2025-07-16T21:21:38.822984",
+    "hash": "415fb8ba671d93d88bb09001bd09964026ac678ecc9f0096c83e65ff55148b9b",
+    "functions": [],
+    "todos": []
+  },
+  {
+    "path": "fhir\\schema_loader.go",
+    "last_modified": "2025-07-17T00:51:45.541112",
+    "hash": "0437dc0d4f6ef96c3a5204c38d958552bcbadd5a176a8b59e273f01865e0d641",
+    "functions": [
+      "func InitFHIRSchemaLoader(schemaDirectory string) {",
+      "func GetFHIRSchemaLoader() *FHIRSchemaLoader {",
+      "func (fsl *FHIRSchemaLoader) LoadFHIRSchema(resourceType, profile, version string) (*FHIRSchema, err",
+      "func (fsl *FHIRSchemaLoader) resolveSchemaPath(resourceType, profile, version string) string {",
+      "func (fsl *FHIRSchemaLoader) tryAlternativePaths(resourceType, profile, version string) string {",
+      "func (fsl *FHIRSchemaLoader) loadAndParseFHIRSchema(filePath string) (*FHIRSchema, error) {",
+      "func (fsl *FHIRSchemaLoader) validateFHIRSchema(schema *FHIRSchema) error {",
+      "func (fsl *FHIRSchemaLoader) GetStats() FHIRSchemaStats {",
+      "func (fsl *FHIRSchemaLoader) ClearCache() {",
+      "func (fsl *FHIRSchemaLoader) ListAvailableSchemas() ([]string, error) {",
+      "func scanForFHIRSchemas(baseDir string) ([]string, error) {",
+      "func createSampleFHIRSchema(baseDir string) {",
+      "func writeFHIRSchemaToFile(filePath string, schema *FHIRSchema) error {"
+    ],
+    "todos": []
+  },
+  {
+    "path": "fhir\\transformation_engine.go",
+    "last_modified": "2025-07-16T22:09:35.389179",
+    "hash": "dcfc1d82e3f2f1634a3a7ed719340fce2fe9b364ab95276555f7532f9af56250",
+    "functions": [
+      "func NewTransformationEngine(db *sql.DB, config *TransformationConfig) *TransformationEngine {",
+      "func (te *TransformationEngine) Transform(ctx context.Context, request *TransformationRequest) (*Tra",
+      "func (te *TransformationEngine) loadRequiredSchemas(ctx context.Context, rules []MappingRule, versio",
+      "func (te *TransformationEngine) applyTransformationRules(hl7Message map[string]interface{}, rules []",
+      "func (te *TransformationEngine) initializeResourceFromSchema(resourceType string, schema *FHIRSchema",
+      "func (te *TransformationEngine) getDefaultValueForDataType(dataType string) interface{} {",
+      "func (te *TransformationEngine) extractMessageType(hl7Message map[string]interface{}) (string, error",
+      "func (te *TransformationEngine) loadMappingRules(ctx context.Context, messageType, profile string) (",
+      "func (te *TransformationEngine) errorResponse(response *TransformationResponse, code, message string",
+      "func getVersionOrDefault(version, defaultVersion string) string {",
+      "func getProfileOrDefault(profile, defaultProfile string) string {",
+      "func getKeys(m map[string]bool) []string {"
+    ],
+    "todos": []
+  },
+  {
+    "path": "fhir\\validation_bundle.go",
+    "last_modified": "2025-07-16T22:08:44.063136",
+    "hash": "8f763ce2a6da61cffd14d7863e3e4d9185cabcafeb135d0d2d5784b0cdfb9cbd",
+    "functions": [
+      "func (te *TransformationEngine) validateResourcesAgainstSchemas(resources []map[string]interface{}, ",
+      "func (te *TransformationEngine) validateResourceAgainstSchema(resource map[string]interface{}, schem",
+      "func (te *TransformationEngine) validateRequiredElement(resource map[string]interface{}, requiredPat",
+      "func (te *TransformationEngine) validateMustSupportElement(resource map[string]interface{}, mustSupp",
+      "func (te *TransformationEngine) validateFieldAgainstElement(fieldValue interface{}, element *FHIREle",
+      "func (te *TransformationEngine) validateCardinality(fieldValue interface{}, element *FHIRElement, el",
+      "func (te *TransformationEngine) validateDataType(fieldValue interface{}, element *FHIRElement, eleme",
+      "func (te *TransformationEngine) validateConstraints(fieldValue interface{}, element *FHIRElement, el",
+      "func (te *TransformationEngine) validateValueSetBinding(fieldValue interface{}, element *FHIRElement",
+      "func (te *TransformationEngine) isEmpty(value interface{}) bool {",
+      "func (te *TransformationEngine) createFHIRBundle(resources []map[string]interface{}, requestID strin",
+      "func (te *TransformationEngine) logTransformation(request *TransformationRequest, response *Transfor",
+      "func (te *TransformationEngine) GetStatus() map[string]interface{} {",
+      "func (te *TransformationEngine) UpdateConfiguration(updates map[string]interface{}) error {"
+    ],
+    "todos": []
+  },
+  {
+    "path": "fhir\\value_transformers.go",
+    "last_modified": "2025-07-16T22:09:09.745455",
+    "hash": "88d3cc417c2ec78b493521ec76327c7b7fd3d7da8abedd511c4724a9e3c6930b",
+    "functions": [
+      "func (te *TransformationEngine) extractHL7Value(hl7Message map[string]interface{}, segment, field, c",
+      "func (te *TransformationEngine) transformValue(hl7Value interface{}, transformLogic map[string]inter",
+      "func (te *TransformationEngine) transformToFHIRIdentifier(hl7Value string, logic map[string]interfac",
+      "func (te *TransformationEngine) transformToFHIRHumanName(hl7Value string, logic map[string]interface",
+      "func (te *TransformationEngine) transformToFHIRAddress(hl7Value string, logic map[string]interface{}",
+      "func (te *TransformationEngine) transformToFHIRContactPoint(hl7Value string, logic map[string]interf",
+      "func (te *TransformationEngine) transformToFHIRDate(hl7Value string) string {",
+      "func (te *TransformationEngine) transformToFHIRDateTime(hl7Value string) string {",
+      "func (te *TransformationEngine) transformToFHIRCode(hl7Value string, logic map[string]interface{}, s",
+      "func (te *TransformationEngine) transformToFHIRCoding(hl7Value string, logic map[string]interface{},",
+      "func (te *TransformationEngine) transformToFHIRCodeableConcept(hl7Value string, logic map[string]int",
+      "func (te *TransformationEngine) transformToBoolean(hl7Value string) bool {",
+      "func (te *TransformationEngine) transformToInteger(hl7Value string) interface{} {",
+      "func (te *TransformationEngine) transformToDecimal(hl7Value string) interface{} {",
+      "func (te *TransformationEngine) mapAssigningAuthorityToSystem(authority string) string {",
+      "func (te *TransformationEngine) mapCodingSystemToFHIR(hl7System string) string {",
+      "func (te *TransformationEngine) mapValueSetCode(hl7Code, valueSet string) string {",
+      "func (te *TransformationEngine) evaluateCondition(condition string, hl7Message map[string]interface{",
+      "func (te *TransformationEngine) setFHIRValue(resource map[string]interface{}, fhirPath string, value",
+      "func (te *TransformationEngine) isResourcePopulated(resource map[string]interface{}) bool {",
+      "func (te *TransformationEngine) ensureRequiredFields(resource map[string]interface{}, schema *FHIRSc"
+    ],
+    "todos": []
+  },
+  {
+    "path": "hl7\\parser.go",
+    "last_modified": "2025-07-14T08:51:46.586190",
+    "hash": "806d76153fa6779e8f2c513c7e97c9f80eec352310e1028ec3da9eaad3e101d8",
+    "functions": [
+      "func ParseHL7Message(rawMessage string) *BasicParsedMessage {",
+      "func extractMessageType(mshSegment string) string {",
+      "func ConvertBasicToEnhanced(basicSegments map[string]BasicSegment) []EnhancedSegment {",
+      "// Helper function to extract field position from field key",
+      "func extractFieldPosition(fieldKey string) (int, error) {",
+      "func parseFieldComponents(fieldValue, fieldKey, segmentName string, position int) []SubfieldInfo {",
+      "func getComponentName(segmentName string, fieldPosition, componentPosition int) string {",
+      "func getComponentDataType(segmentName string, fieldPosition, componentPosition int) string {",
+      "func getComponentDescription(segmentName string, fieldPosition, componentPosition int) string {",
+      "func getBasicHL7SegmentOrder(basicSegments map[string]BasicSegment) []string {",
+      "func getFieldName(segmentName string, position int) string {",
+      "func getFieldDescription(segmentName string, position int) string {",
+      "func getFieldDataType(segmentName string, position int) string {",
+      "func getFieldOptionality(segmentName string, position int) string {"
+    ],
+    "todos": []
+  },
+  {
+    "path": "hl7\\real_schema_parser.go",
+    "last_modified": "2025-07-14T08:17:37.814400",
+    "hash": "970b8318384c3584a5c6bfcd5098f1fe752e6e7d0afa780406f049f0da1a3cb4",
+    "functions": [
+      "func InitRealSchemaLoader(schemaDirectory string) {",
+      "func GetRealSchemaLoader() *RealSchemaLoader {",
+      "func scanForSchemaFiles(baseDir string) ([]string, error) {",
+      "func createSampleSchema(baseDir string) {",
+      "func (rsl *RealSchemaLoader) LoadRealSchema(version, messageType, triggerEvent string) (*RealHL7Sche",
+      "func normalizeVersionForSchema(version string) string {",
+      "func (rsl *RealSchemaLoader) loadAndParseSchemaFile(filePath string) (*RealHL7Schema, error) {",
+      "func (rsl *RealSchemaLoader) convertOrderedRawSchema(raw *orderedmap.OrderedMap[string, interface{}]",
+      "func (rsl *RealSchemaLoader) convertOrderedSegment(segmentName string, raw map[string]interface{}, d",
+      "// Helper function for min",
+      "func min(a, b int) int {",
+      "func (rsl *RealSchemaLoader) convertOrderedField(fieldKey string, raw map[string]interface{}, defaul",
+      "func (rsl *RealSchemaLoader) convertComponent(compKey string, raw map[string]interface{}, defaultSeq",
+      "func extractSequenceFromRaw(raw map[string]interface{}, defaultSeq int) int {",
+      "func extractComponentPosition(compKey string) (int, error) {",
+      "func extractComponentValue(fieldValue string, componentPosition int) string {",
+      "func (rsl *RealSchemaLoader) GetStats() RealSchemaStats {",
+      "func ParseWithRealSchema(rawMessage string) *EnhancedParsedMessage {",
+      "// \u2705 FIXED: Use the corrected enhancement function with validation",
+      "func enhanceWithRealSchema(basicSegments map[string]BasicSegment, schema *RealHL7Schema) (map[string",
+      "// Helper function to create enhanced segment (uses schema if available, falls back to basic convers",
+      "func createEnhancedSegmentFromBasic(segmentName string, basicSeg BasicSegment, schema *RealHL7Schema",
+      "// \u2705 ENHANCED: Helper function to create enhanced segment using schema definition with FIXED positio",
+      "func createEnhancedSegmentWithSchema(segmentName string, basicSeg BasicSegment, segmentDef RealSegme",
+      "func getBasicHL7Order(basicSegments map[string]BasicSegment) []string {",
+      "func createMessageTypeInfo(messageType, triggerEvent string) MessageTypeInfo {",
+      "func extractMessageInfoSimple(rawMessage string) (version, messageType, triggerEvent string) {",
+      "func validateRequiredFields(enhancedSegments map[string]EnhancedSegment, schema *RealHL7Schema) []Va"
+    ],
+    "todos": []
+  },
+  {
+    "path": "hl7\\types.go",
+    "last_modified": "2025-07-14T08:57:50.360127",
+    "hash": "65dba82ca4edb86bd6a5c2010f5a2a1a7fe333e678fa91f39a6f6782a5c3c34e",
+    "functions": [],
+    "todos": []
+  },
+  {
+    "path": "hl7\\unified_parser.go",
+    "last_modified": "2025-07-14T09:41:34.169583",
+    "hash": "5943f391c1c6c184332eb37722c7295e33bfbd47b26720e9395fb4a74e745f91",
+    "functions": [
+      "// Replace the InitSchemaLoader function in unified_parser.go with this fixed version:",
+      "func InitSchemaLoader(schemaDirectory string) {",
+      "func GetSchemaLoader() *SchemaLoader {",
+      "// SetMaxCacheSize - Stub function (does nothing)",
+      "func (sl *SchemaLoader) SetMaxCacheSize(maxSize int) {",
+      "// ClearCache - Stub function (does nothing)",
+      "func (sl *SchemaLoader) ClearCache() {",
+      "func (sl *SchemaLoader) GetCacheStats() CacheStats {",
+      "func (sl *SchemaLoader) ListAvailableSchemas() ([]string, error) {",
+      "func ParseHL7Enhanced(rawMessage string) *EnhancedParsedMessage {",
+      "// \u2705 Call the function from real_schema_parser.go",
+      "func convertBasicArrayToMapFormatFixed(basicSegments map[string]BasicSegment) (map[string]EnhancedSe",
+      "// Use FIXED ConvertBasicToEnhanced function from parser.go",
+      "func sortFieldsByPosition(fields []FieldInfo) []FieldInfo {",
+      "func validateAndFixFieldPositioning(result *EnhancedParsedMessage) *EnhancedParsedMessage {",
+      "func isValidFieldKey(fieldKey, segmentName string) bool {",
+      "func countErrorsBySeverity(errors []ValidationError, severity string) int {",
+      "func extractMessageInfoForParsing(rawMessage string) (version, messageType, triggerEvent string) {",
+      "func createMessageTypeInfoForParsing(messageType, triggerEvent string) MessageTypeInfo {",
+      "// ParseHL7MessageEnhanced - Compatibility function for existing controller",
+      "func ParseHL7MessageEnhanced(rawMessage string, dictionaryURL string) *EnhancedParsedMessage {",
+      "// ConvertBasicToEnhancedMap - Wrapper for existing function with map format conversion",
+      "func ConvertBasicToEnhancedMap(basicSegments map[string]BasicSegment) (map[string]EnhancedSegment, [",
+      "func GetSchemaLoaderStatus() map[string]interface{} {"
+    ],
+    "todos": []
+  },
+  {
+    "path": "middleware\\auth.js",
+    "last_modified": "2025-06-24T22:53:51.516744",
+    "hash": "9e3552aa3571da615062b53e4e96554e90b552b36dcfcde8e1f08e9872d52ee4",
+    "functions": [
+      "function requireAuth(req, res, next) {",
+      "function requireAdmin(req, res, next) {",
+      "function verifyToken(req, res, next) {"
+    ],
+    "todos": []
+  },
+  {
+    "path": "migrations\\mongodb\\init_collections.js",
+    "last_modified": "2025-07-15T08:39:01.129543",
+    "hash": "9d2cca51fb489e453e24e3cd98ae926455f094ef8d2d22f4253f5377c090c9c5",
+    "functions": [],
+    "todos": []
+  },
+  {
+    "path": "migrations\\postgres\\001_create_fhir_tables.sql",
+    "last_modified": "2025-07-15T08:38:07.230484",
+    "hash": "0d9947033d5abd08f6dad47d5bfec42c2b06bcd4503b7979f0879c75e3ba1ed9",
+    "functions": [],
+    "todos": []
+  },
+  {
+    "path": "migrations\\postgres\\002_create_indexes.sql",
+    "last_modified": "2025-07-15T08:38:36.933657",
+    "hash": "3ed5a9ba6aae6b1dd377d5c3e0c085de74629833485676341c6c8393a23e4062",
+    "functions": [],
+    "todos": []
+  },
+  {
+    "path": "node-api\\hl7-dictionary-service.js",
+    "last_modified": "2025-07-05T00:27:09.253532",
+    "hash": "1e5a4cdf28d88101e1678e66670d0c24f26a9611941dd94485942189e908baa3",
+    "functions": [
+      "function getSmartFieldInfo(field, index, segmentName) {"
+    ],
+    "todos": []
+  },
+  {
+    "path": "public\\js\\dashboard.js",
+    "last_modified": "2025-06-30T20:04:06.591859",
+    "hash": "acac709fcc3339036d413f2de7aaf8e87fb33e34cb512851b33533f2d1742bc4",
+    "functions": [
+      "function updateTime() {",
+      "async function loadUserInfo() {",
+      "// Logout function - using your backend's /api/logout endpoint",
+      "async function logout() {",
+      "function handleNavigation(target) {",
+      "function showDashboardContent() {",
+      "function showInterfacesContent() {",
+      "function showMessagesContent() {",
+      "function showTemplatesContent() {",
+      "function showMonitoringContent() {",
+      "function showReportsContent() {",
+      "function showUserManagementContent() {",
+      "function showSettingsContent() {",
+      "// New function for access denied",
+      "function showAccessDenied(sectionName, message) {",
+      "function showNotImplemented(route) {",
+      "// Helper function to update page title",
+      "function updatePageTitle(title, subtitle) {",
+      "// Helper function to show placeholder content",
+      "function showPlaceholderContent(title, description) {",
+      "// Helper function to get appropriate icons",
+      "function getIconForSection(title) {",
+      "function showDashboard() {"
+    ],
+    "todos": []
+  },
+  {
+    "path": "public\\js\\hl7Service.js",
+    "last_modified": "2025-07-20T11:20:14.706257",
+    "hash": "9fb6d550e6871323826e49867297bbf972057632ca7dbe681e24faaa79d47b0d",
+    "functions": [],
+    "todos": []
+  },
+  {
+    "path": "public\\js\\interface-wizard.js",
+    "last_modified": "2025-07-21T16:36:48.483161",
+    "hash": "4bcbb97ffa86e16214d36bb7d03e4d508e635f8ad1cd889f73ddf1ac21f93421",
+    "functions": [],
+    "todos": []
+  },
+  {
+    "path": "public\\js\\interfaces.js",
+    "last_modified": "2025-07-21T18:15:18.462194",
+    "hash": "e72bd9f09584c6d00c7961bfc7c4506ae57c268a25f0ec91fcb74b00f02b79cb",
+    "functions": [
+      "async function initializeInterfacesPage() {",
+      "async function loadUserInfo() {",
+      "function updateTime() {",
+      "async function loadInterfaces() {",
+      "function updateSummaryCards() {",
+      "function setupEventListeners() {",
+      "function setupAutoRefresh() {",
+      "function startAutoRefresh() {",
+      "function stopAutoRefresh() {",
+      "async function refreshInterfaces() {",
+      "function applyFilters() {",
+      "function renderInterfacesTable() {",
+      "function createInterfaceRow(interface) {",
+      "function createActionButtons(interface) {",
+      "function updatePagination() {",
+      "function goToPage(page) {",
+      "function goToPreviousPage() {",
+      "function goToNextPage() {",
+      "async function startInterface(interfaceId) {",
+      "async function stopInterface(interfaceId) {",
+      "async function pauseInterface(interfaceId) {",
+      "async function deleteInterface(interfaceId) {",
+      "async function logout() {",
+      "function updateElement(id, value) {",
+      "function getElementValue(id, defaultValue = '') {",
+      "function formatNumber(num) {",
+      "function formatTimeAgo(date) {",
+      "function showSuccess(message) {",
+      "function showError(message) {",
+      "function showNotification(message, type = 'info') {",
+      "// NOTE: openInterfaceWizard() function is handled by wizard-opener.js"
+    ],
+    "todos": []
+  },
+  {
+    "path": "public\\js\\login.js",
+    "last_modified": "2025-06-29T19:05:42.919971",
+    "hash": "ad0ba4fb6254e2c94dace2446583feed753a944b8d188820ddacb7bfc4f67177",
+    "functions": [
+      "function showMessage(message, type) {",
+      "function showRegister() {",
+      "function showForgotPassword() {"
+    ],
+    "todos": []
+  },
+  {
+    "path": "public\\js\\user-management.js",
+    "last_modified": "2025-06-29T19:17:55.299893",
+    "hash": "11cb0b5555ca1e9a168bd9ac2064cf53d9a6467bd54a79eb9f112774eb10235c",
+    "functions": [
+      "function updateTime() {",
+      "async function loadCurrentUser() {",
+      "async function loadUsers() {",
+      "function getMockUsers() {",
+      "function updateUserStats() {",
+      "function renderUsersTable() {",
+      "function formatDate(dateString) {",
+      "function showCreateUserModal() {",
+      "function closeCreateUserModal() {",
+      "function showEditUserModal(userId) {",
+      "function closeEditUserModal() {",
+      "async function toggleUserStatus(userId, newStatus) {",
+      "function refreshUsers() {",
+      "function showAlert(message, type) {",
+      "function showLoading(show) {",
+      "// Logout function - using correct backend endpoint /api/logout",
+      "function logout() {"
+    ],
+    "todos": []
+  },
+  {
+    "path": "public\\js\\modules\\healthcare-rules.js",
+    "last_modified": "2025-07-07T16:03:53.729109",
+    "hash": "ed2e7c6be254aac3b915e21ef390178e69f0fa5e6e4c0ee9bd2626a487c2a5f1",
+    "functions": [],
+    "todos": []
+  },
+  {
+    "path": "public\\js\\modules\\hl7-schemas.js",
+    "last_modified": "2025-07-07T16:03:38.186669",
+    "hash": "0591f3471dd8242bcc8631786e2d379689f9de43f7b4192a7f3184779c667355",
+    "functions": [],
+    "todos": []
+  },
+  {
+    "path": "public\\js\\modules\\hl7-validator.js",
+    "last_modified": "2025-07-07T16:03:15.237458",
+    "hash": "42c2237bb11df439d895c8ca8c838508e7fabc04bc2d9a5a5d4a0464dff3485b",
+    "functions": [],
+    "todos": []
+  },
+  {
+    "path": "public\\js\\modules\\validation-integration.js",
+    "last_modified": "2025-07-07T16:11:00.800292",
+    "hash": "c12a4921b39e06042ba911bf105abad8a5975721a7d9c2b04add709e08c7afc9",
+    "functions": [],
+    "todos": []
+  },
+  {
+    "path": "public\\js\\modules\\validation-ui.js",
+    "last_modified": "2025-07-07T16:10:40.530868",
+    "hash": "23678d1eda67b76fcfa15db1275f4150993374b6a5db09d38c2eaad1ff980d9c",
+    "functions": [],
+    "todos": []
+  },
+  {
+    "path": "public\\js\\wizard\\module-loader.js",
+    "last_modified": "2025-07-20T19:30:47.854330",
+    "hash": "3693d6e1a810bccf3ff88871fe6f2d15636b2bed8d27bc25d851ee6f712c17af",
+    "functions": [
+      "function initializeWizardLoader() {"
+    ],
+    "todos": []
+  },
+  {
+    "path": "public\\js\\wizard\\segment-viewer.js",
+    "last_modified": "2025-07-20T19:32:52.156819",
+    "hash": "a45f7d3f4d2e03a1e8bbfe9eada1925a28f16ff42ff7f7e59af7aa5d05bb755d",
+    "functions": [],
+    "todos": []
+  },
+  {
+    "path": "public\\js\\wizard\\step-handlers.js",
+    "last_modified": "2025-07-19T19:40:34.768533",
+    "hash": "117bccc40172cde6f68f1bd3c619be7c0696850a7fb03e54795aecdda4925686",
+    "functions": [],
+    "todos": []
+  },
+  {
+    "path": "public\\js\\wizard\\wizard-main.js",
+    "last_modified": "2025-07-21T20:59:03.762296",
+    "hash": "ca2bf4bccf43c24539757555b5461ee6c561c93ab61c10741a46bbaf05f2b191",
+    "functions": [],
+    "todos": []
+  },
+  {
+    "path": "public\\js\\wizard\\wizard-opener.js",
+    "last_modified": "2025-07-21T20:56:31.326012",
+    "hash": "f4dd0d6bf0f57c69f58917c2ecef32f69f2bc6d914b746d4f59eb305940f5be7",
+    "functions": [
+      "function openInterfaceWizard() {",
+      "function closeWizardModal() {",
+      "function openWizardModal() {"
+    ],
+    "todos": []
+  },
+  {
+    "path": "public\\js\\wizard\\wizard-services.js",
+    "last_modified": "2025-07-20T11:18:29.293930",
+    "hash": "a90bc9febdebfb5d77cd0a0cb57f0dae17ee12e33f6ce96cdd416c5c0c1f372b",
+    "functions": [],
+    "todos": []
+  },
+  {
+    "path": "public\\js\\wizard\\handlers\\base-step-handler.js",
+    "last_modified": "2025-07-20T10:20:42.826406",
+    "hash": "9a98da5c7b68a82b484761b30676afb7f5509b7e21ac8b3cce22d0937f6aca95",
+    "functions": [],
+    "todos": []
+  },
+  {
+    "path": "public\\js\\wizard\\handlers\\configuration-step-handler.js",
+    "last_modified": "2025-07-20T11:32:28.991797",
+    "hash": "858d2fb687bee3845d1dfe54b7508e3da4ec4cf1846adf2edadc57eab3650dc9",
+    "functions": [],
+    "todos": []
+  },
+  {
+    "path": "public\\js\\wizard\\handlers\\review-step-handler.js",
+    "last_modified": "2025-07-20T17:14:13.150054",
+    "hash": "636235097d05c15ebe1cf44ed6f4c1ef41cc11ff5f461e759c990e297536415b",
+    "functions": [],
+    "todos": []
+  },
+  {
+    "path": "public\\js\\wizard\\handlers\\summary-step-handler.js",
+    "last_modified": "2025-07-19T21:25:54.394385",
+    "hash": "713197108d72a78049d01473b8fb5ea62f399dac3c5c87627350091b74e40001",
+    "functions": [],
+    "todos": []
+  },
+  {
+    "path": "public\\js\\wizard\\handlers\\upload-step-handler.js",
+    "last_modified": "2025-07-20T17:00:18.432093",
+    "hash": "4d11c205115945e3832e893a2e27fdba560e6639875315043b805efdab4d0123",
+    "functions": [],
+    "todos": []
+  },
+  {
+    "path": "public\\js\\wizard\\handlers\\mapping\\mapping-api.js",
+    "last_modified": "2025-07-20T18:49:12.309736",
+    "hash": "eadbda34ad7141c788c1cc63e6469f356df2c87ccd7dd0b112669cad93df1833",
+    "functions": [],
+    "todos": []
+  },
+  {
+    "path": "public\\js\\wizard\\handlers\\mapping\\mapping-step-handler.js",
+    "last_modified": "2025-07-21T12:08:28.613532",
+    "hash": "639223f3faedb4963e56cfe12311c50be599595f55e2646efce4162a14385aac",
+    "functions": [],
+    "todos": []
+  },
+  {
+    "path": "public\\js\\wizard\\handlers\\mapping\\mapping-ui-integration.js",
+    "last_modified": "2025-07-21T01:06:32.148371",
+    "hash": "97b28e1ec0604f07b5a883c2cea2fa4a85a3ca786003e8606be9d6d6f6b22fb2",
+    "functions": [],
+    "todos": []
+  },
+  {
+    "path": "public\\js\\wizard\\handlers\\mapping\\mapping-ui.js",
+    "last_modified": "2025-07-21T01:05:23.046918",
+    "hash": "9fe4026436925d031bfa7f92ce03d6e259e6dd709c0784d9651c212002800dc8",
+    "functions": [],
+    "todos": []
+  },
+  {
+    "path": "public\\js\\wizard\\segment-viewer\\data-analyzer.js",
+    "last_modified": "2025-07-20T19:07:53.894954",
+    "hash": "f20f143bd180604841fdc5f93587fc330ac6a7d5bf1bcfad33c904c76d6d32ca",
+    "functions": [],
+    "todos": []
+  },
+  {
+    "path": "public\\js\\wizard\\segment-viewer\\field-validator.js",
+    "last_modified": "2025-07-20T19:06:34.921497",
+    "hash": "0646a1a6a33fb34937db4368ee017a9b665806864d3b913dfcb64ab03a4bb3dd",
+    "functions": [],
+    "todos": []
+  },
+  {
+    "path": "public\\js\\wizard\\segment-viewer\\modular-loader.js",
+    "last_modified": "2025-07-20T19:08:37.273546",
+    "hash": "659b8edcd09268ff8118db9a424dc66bbb0e6aba111dbae056d41b58c4643abe",
+    "functions": [],
+    "todos": []
+  },
+  {
+    "path": "public\\js\\wizard\\segment-viewer\\segment-data-cache.js",
+    "last_modified": "2025-07-20T19:05:46.246154",
+    "hash": "764fadb118344a4a435327c62025189491934200bb835838996bd17fe2045415",
+    "functions": [],
+    "todos": []
+  },
+  {
+    "path": "public\\js\\wizard\\segment-viewer\\segment-event-handler.js",
+    "last_modified": "2025-07-20T19:07:22.434534",
+    "hash": "61ed53f160209b9bb8033d3f33112fcc03f92e02988a1d663694caa44b204c5c",
+    "functions": [],
+    "todos": []
+  },
+  {
+    "path": "public\\js\\wizard\\segment-viewer\\segment-renderer.js",
+    "last_modified": "2025-07-20T19:06:50.504182",
+    "hash": "2245066f235b30400e73c15a8cd3ff24508fd9682ba9d14c00a51524d7298a5b",
+    "functions": [],
+    "todos": []
+  },
+  {
+    "path": "public\\js\\wizard\\segment-viewer\\segment-viewer-main.js",
+    "last_modified": "2025-07-20T19:05:27.642747",
+    "hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "functions": [],
+    "todos": []
+  },
+  {
+    "path": "public\\js\\wizard\\segment-viewer\\view-manager.js",
+    "last_modified": "2025-07-20T19:07:04.449484",
+    "hash": "c419df09e7c43e8d5235388f0cf5d1ca0931c19205cfc8f756e818be8ada4ccd",
+    "functions": [],
+    "todos": []
+  },
+  {
+    "path": "routes\\auth.js",
+    "last_modified": "2025-06-24T22:54:50.283997",
+    "hash": "52da39937bc8ef2676acc0e37573c1205ed405d8f01a6cdd6977a5727ae6c481",
+    "functions": [],
+    "todos": []
+  },
+  {
+    "path": "routes\\index.js",
+    "last_modified": "2025-06-24T22:48:11.275673",
+    "hash": "048d051b7f0487d838a24702852b04409c5549acc3f4677a8cc4a9df135b3d34",
+    "functions": [],
+    "todos": []
+  },
+  {
+    "path": "routes\\interfacesRoutes.js",
+    "last_modified": "2025-07-01T18:48:41.918394",
+    "hash": "21566f7fc30a5577240d24ac1a07175ae0d5930fef66832ddd12fa28ed2ce593",
+    "functions": [],
+    "todos": []
+  },
+  {
+    "path": "routes\\users.js",
+    "last_modified": "2025-06-29T17:53:05.704799",
+    "hash": "2ce674e3ac41f4e5f4869d8e564165f3f01244172fec81472aeb21dddee1f78b",
+    "functions": [],
+    "todos": []
+  },
+  {
+    "path": "scripts\\migrate-interfaces.js",
+    "last_modified": "2025-07-01T17:45:08.145873",
+    "hash": "3f97bcaac018da33f551545c9f0e2350c028c8233f94a78029f26f3085ee56bf",
+    "functions": [
+      "async function runMigration() {"
+    ],
+    "todos": []
+  },
+  {
+    "path": "services\\auditService.js",
+    "last_modified": "2025-06-24T23:22:05.352806",
+    "hash": "0f1b9e03c32b18bd686db31ce812e9376c20eccaab678f8ee43bf9998bfac51f",
+    "functions": [],
+    "todos": []
+  },
+  {
+    "path": "services\\userService.js",
+    "last_modified": "2025-06-24T23:21:42.177830",
+    "hash": "5caea2a81e4758aa418efa0f60705a6b4ff1cc2a4e2afd8a63a618f73dfb8ad3",
+    "functions": [],
+    "todos": []
+  },
+  {
+    "path": "tests\\debug_schema.go",
+    "last_modified": "2025-07-10T08:53:58.816777",
+    "hash": "7b7db7f123b58a583e5c5bde5937c1a4ec489953c1fcb307f52e7c2bebd82df4",
+    "functions": [
+      "func main() {"
+    ],
+    "todos": []
+  },
+  {
+    "path": "tests\\inspect_schema.go",
+    "last_modified": "2025-07-10T10:49:22.941060",
+    "hash": "8c2d67d4e43cc1a463006723c8e743eaba7b4ec080fe68f7f712c9c6efc5e2c5",
+    "functions": [
+      "func main() {",
+      "func runInteractiveInspector(schemaDir string) {"
+    ],
+    "todos": []
+  }
+]
