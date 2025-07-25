@@ -26,8 +26,8 @@
   },
   {
     "path": "main.go",
-    "last_modified": "2025-07-21T11:13:29.577290",
-    "hash": "f59c11256ffeb15f4ae5310d14671f9de8820e46f905db01c2d0e94790b578f7",
+    "last_modified": "2025-07-23T09:49:58.584547",
+    "hash": "80d73b9365124c6a785c4a770cd3c8842b58911801fd92dc5491a263ccc66ccc",
     "functions": [
       "func main() {",
       "func setupWizardAPI() {",
@@ -56,8 +56,8 @@
   },
   {
     "path": "config\\config.go",
-    "last_modified": "2025-07-15T21:46:46.981366",
-    "hash": "9162d880d60142c9b282bdd4201870eb9c940832167262b58a578c8c02ff749d",
+    "last_modified": "2025-07-23T08:22:18.072880",
+    "hash": "9d833262d24d652195c5926f96726b9ffd174b9aa9bf3396dfc5bfe1ccb78ef5",
     "functions": [
       "func Load() *Config {",
       "func getEnv(key, defaultValue string) string {",
@@ -77,7 +77,9 @@
       "// Replace the validateHL7Schemas() function with this:",
       "func (c *Config) validateHL7Schemas() {",
       "func (c *Config) validateFHIRSchemas() {",
-      "func (c *Config) LogConfiguration() {"
+      "func (c *Config) LogConfiguration() {",
+      "func (c *Config) GetDatabaseURL() string {",
+      "func (c *Config) HasDatabaseConfig() bool {"
     ],
     "todos": []
   },
@@ -222,8 +224,8 @@
   },
   {
     "path": "controllers\\schema_fhir_transform_controller.go",
-    "last_modified": "2025-07-21T10:14:15.063878",
-    "hash": "3b04d28ad42bd1e0d77f98006429fb6c1de6aea2a2cf821f87cb2938938697f9",
+    "last_modified": "2025-07-23T10:32:25.360983",
+    "hash": "f64e9ea83742ba2cd90e46c6eb2aaa34eee4c1a519edce7c5bfa1efdbb1aaa2a",
     "functions": [
       "func NewSchemaFHIRTransformController(database *sql.DB, cfg *config.Config) *SchemaFHIRTransformCont",
       "func (c *SchemaFHIRTransformController) RegisterRoutes(router *gin.RouterGroup) {",
@@ -232,11 +234,19 @@
       "func (c *SchemaFHIRTransformController) Transform(ctx *gin.Context) {",
       "func (c *SchemaFHIRTransformController) ValidateOnly(ctx *gin.Context) {",
       "func (c *SchemaFHIRTransformController) GetRules(ctx *gin.Context) {",
+      "func (c *SchemaFHIRTransformController) CreateRule(ctx *gin.Context) {",
+      "func (c *SchemaFHIRTransformController) UpdateRule(ctx *gin.Context) {",
+      "func (c *SchemaFHIRTransformController) DeleteRule(ctx *gin.Context) {",
       "func (c *SchemaFHIRTransformController) BatchUpdateRules(ctx *gin.Context) {",
       "func (c *SchemaFHIRTransformController) GetUIConfiguration(ctx *gin.Context) {",
       "func (c *SchemaFHIRTransformController) GetMappingSuggestions(ctx *gin.Context) {",
+      "func (c *SchemaFHIRTransformController) PreviewTransformation(ctx *gin.Context) {",
+      "func (c *SchemaFHIRTransformController) ValidateMapping(ctx *gin.Context) {",
       "func (c *SchemaFHIRTransformController) GetHL7Structure(ctx *gin.Context) {",
       "func (c *SchemaFHIRTransformController) GetFHIRStructure(ctx *gin.Context) {",
+      "func (c *SchemaFHIRTransformController) GetAnalytics(ctx *gin.Context) {",
+      "func (c *SchemaFHIRTransformController) GetTransformationLogs(ctx *gin.Context) {",
+      "func (c *SchemaFHIRTransformController) UpdateConfiguration(ctx *gin.Context) {",
       "func (c *SchemaFHIRTransformController) loadMappingRulesFromDB(messageType, profile string) ([]Mappi",
       "func (c *SchemaFHIRTransformController) saveRulesToDB(messageType, profile string, rules []MappingRu",
       "func (c *SchemaFHIRTransformController) getHL7StructureForMessageType(messageType string) (map[strin",
@@ -246,24 +256,16 @@
       "func (c *SchemaFHIRTransformController) generateFieldMappingSuggestions(messageType, hl7Field, profi",
       "func (c *SchemaFHIRTransformController) validateRulesAgainstSchemas(rules []MappingRule, messageType",
       "func (c *SchemaFHIRTransformController) autoFixMappingIssues(rules []MappingRule, validationResults ",
-      "func (c *SchemaFHIRTransformController) getDefaultMappingsForMessageType(messageType, profile string",
-      "func (c *SchemaFHIRTransformController) CreateRule(ctx *gin.Context) {",
-      "func (c *SchemaFHIRTransformController) UpdateRule(ctx *gin.Context) {",
-      "func (c *SchemaFHIRTransformController) DeleteRule(ctx *gin.Context) {",
-      "func (c *SchemaFHIRTransformController) GetAnalytics(ctx *gin.Context) {",
-      "func (c *SchemaFHIRTransformController) GetTransformationLogs(ctx *gin.Context) {",
-      "func (c *SchemaFHIRTransformController) UpdateConfiguration(ctx *gin.Context) {",
-      "func (c *SchemaFHIRTransformController) PreviewTransformation(ctx *gin.Context) {",
-      "func (c *SchemaFHIRTransformController) ValidateMapping(ctx *gin.Context) {"
+      "func (c *SchemaFHIRTransformController) getDefaultMappingsForMessageType(messageType, profile string"
     ],
     "todos": [
       {
-        "line": 590,
-        "note": "// TODO: Implement using your HL7 schema system"
+        "line": 660,
+        "note": "// TODO: Integrate with your existing HL7 schema system (hl7/parser.go, real_schema_parser.go)"
       },
       {
-        "line": 621,
-        "note": "// TODO: Implement using your FHIR schema system"
+        "line": 691,
+        "note": "// TODO: Integrate with your existing FHIR schema system (fhir/schema_loader.go)"
       }
     ]
   },
@@ -347,9 +349,9 @@
     ]
   },
   {
-    "path": "database\\002_fhir_transformation_tables.sql",
-    "last_modified": "2025-07-16T21:21:38.822984",
-    "hash": "415fb8ba671d93d88bb09001bd09964026ac678ecc9f0096c83e65ff55148b9b",
+    "path": "database\\init\\01-initalize database.sql",
+    "last_modified": "2025-07-23T08:16:06.763142",
+    "hash": "cf468123d281fe4ac21ab3eeb43a303d07ca6eaf139637875e7dbdba99733347",
     "functions": [],
     "todos": []
   },
@@ -616,46 +618,37 @@
   },
   {
     "path": "public\\js\\hl7Service.js",
-    "last_modified": "2025-07-02T22:02:14.848192",
-    "hash": "d0ab1eac22c4d0debe006ea3934461764992fe3abac90d1f8d8cbef7a688813d",
+    "last_modified": "2025-07-24T23:30:57.475098",
+    "hash": "b90b018ff2f476de62919858b4d0bc6afd9fc440b6cdb8a3034c34b9ca7b6d8b",
     "functions": [],
     "todos": []
   },
   {
-    "path": "public\\js\\interface-wizard.js",
-    "last_modified": "2025-07-07T10:34:08.782761",
-    "hash": "3216c447cfed9ddfe63212b0e2e8fae5bafac901e0681ae0c75cb31083f3af39",
-    "functions": [
-      "function openInterfaceWizard() {",
-      "console.log('\ud83d\udd0d openInterfaceWizard() function called');",
-      "function closeWizardModal() {",
-      "console.log('\ud83d\udd0d closeWizardModal() function called');",
-      "function logout() {",
-      "function initializeWizard() {",
-      "// Enhanced manual test function for maximize",
-      "function testMaximize() {",
-      "// Export enhanced test function to global scope"
-    ],
-    "todos": []
-  },
-  {
     "path": "public\\js\\interfaces.js",
-    "last_modified": "2025-07-01T11:44:54.174152",
-    "hash": "62822f9f0a1f9dde73f02c8e8b75ca2e96979e74dd034d64d10527262a0f5902",
+    "last_modified": "2025-07-24T00:16:57.782594",
+    "hash": "f0f21524cd9ddd208d90f497f5acfda34e2969f3e949b1649cd27e5df3aa3b34",
     "functions": [
       "async function initializeInterfacesPage() {",
+      "// REPLACE your setupTooltips function with this JavaScript-based solution:",
+      "function setupTooltips() {",
+      "function showTooltip(e, text) {",
+      "function hideTooltip() {",
+      "function moveTooltip(e) {",
       "async function loadUserInfo() {",
       "function updateTime() {",
       "async function logout() {",
       "function setupEventListeners() {",
+      "function setupPaginationListener() {",
+      "function handlePageSizeChange() {",
+      "function setupSidebarToggle() {",
       "function setupAutoRefresh() {",
       "function addAutoRefreshIndicator() {",
+      "function updateRefreshRate() {",
       "function startAutoRefresh() {",
       "function stopAutoRefresh() {",
       "function handleUserInteraction() {",
       "function handleVisibilityChange() {",
       "async function performAutoRefresh() {",
-      "function updateRefreshRate() {",
       "async function loadInterfaces() {",
       "async function refreshInterfaces() {",
       "function updateSummaryCards() {",
@@ -666,7 +659,6 @@
       "function formatCompactTime(date) {",
       "function formatCompactNumber(num) {",
       "function applyFilters() {",
-      "function handlePageSizeChange() {",
       "function goToPage(page) {",
       "function goToPreviousPage() {",
       "function goToNextPage() {",
@@ -685,7 +677,10 @@
       "function createDetailsContent(interface) {",
       "async function handleCreateInterface(event) {",
       "function showSuccess(message) {",
-      "function showError(message) {"
+      "function showError(message) {",
+      "function setupSidebarTooltips() {",
+      "function injectTooltipStyles() {",
+      "function initializeSidebarTooltips() {"
     ],
     "todos": []
   },
@@ -726,6 +721,93 @@
     "todos": []
   },
   {
+    "path": "public\\js\\components\\header-component.js",
+    "last_modified": "2025-07-23T23:33:39.352311",
+    "hash": "a485dcb71389e27dd9aa3d3406cbaf872abd0381d045eb374c317b8d6b8efa05",
+    "functions": [
+      "function loadHeaderComponent() {"
+    ],
+    "todos": []
+  },
+  {
+    "path": "public\\js\\components\\modal-components.js",
+    "last_modified": "2025-07-23T23:34:27.316056",
+    "hash": "e225c47cbdb56d12331012e12be57e3349d5d4e21a23942d960a5806e6420b43",
+    "functions": [
+      "function loadModalComponents() {",
+      "function loadCreateModal() {",
+      "function loadEditModal() {",
+      "function loadDetailsModal() {"
+    ],
+    "todos": []
+  },
+  {
+    "path": "public\\js\\components\\table-component.js",
+    "last_modified": "2025-07-23T23:34:02.827142",
+    "hash": "112869d5ba903b09b038a19189ba19d29e67856b5be2c53fe204639496d45b6e",
+    "functions": [
+      "function loadTableComponent() {"
+    ],
+    "todos": []
+  },
+  {
+    "path": "public\\js\\components\\wizard-component.js",
+    "last_modified": "2025-07-23T23:34:58.296501",
+    "hash": "bc74242833b259dff26a92b40669b620e65c9fc9b6ebfcf1b1b77d4a34a46cf8",
+    "functions": [
+      "function loadWizardComponent() {",
+      "function setupWizardModalEvents() {"
+    ],
+    "todos": []
+  },
+  {
+    "path": "public\\js\\core\\env-config.js",
+    "last_modified": "2025-07-23T23:33:08.079526",
+    "hash": "fcf5ca2e0e1cd3cc0bdb0c538daf4a3c534e63ed359fc1237678facc529997fe",
+    "functions": [],
+    "todos": []
+  },
+  {
+    "path": "public\\js\\core\\wizard-functions.js",
+    "last_modified": "2025-07-23T23:32:38.685083",
+    "hash": "bec07e66fa924cec81f24a31fccc653ece240efd54632f383c91825960a3758c",
+    "functions": [
+      "function openInterfaceWizard() {",
+      "function closeWizard() {",
+      "function toggleResourceCard(button) {",
+      "function openMappingDialog(fhirPath) {",
+      "function closeMappingDialog() {",
+      "function saveMapping() {",
+      "function closeLoadConfigModal() {",
+      "function closeSaveConfigModal() {",
+      "function selectConfiguration(configId) {",
+      "function loadSelectedConfig() {",
+      "function saveConfigurationToDb() {",
+      "function closeCreateModal() {",
+      "function closeEditModal() {",
+      "function closeDetailsModal() {",
+      "function logout() {",
+      "function getApiBaseUrl() {",
+      "async function loadHL7Structure(messageType) {",
+      "async function loadDefaultConfiguration(messageType) {",
+      "function FHIRFocusedMapping(messageType = null) {"
+    ],
+    "todos": []
+  },
+  {
+    "path": "public\\js\\core\\wizard-navigation.js",
+    "last_modified": "2025-07-24T22:47:11.193188",
+    "hash": "79a3409916c32b4e2d980e22a61231b8accdfee00459a51827934c5bf374ac02",
+    "functions": [
+      "// Replace the existing validateStep1() function with this enhanced version:",
+      "// FIX: Enhanced next step function with better error handling",
+      "// FIX: Enhanced toggleMaximize function with better DOM detection and CSS handling",
+      "// Refresh interface table if function exists",
+      "function initWizardNavigation() {"
+    ],
+    "todos": []
+  },
+  {
     "path": "public\\js\\modules\\healthcare-rules.js",
     "last_modified": "2025-07-07T16:03:53.729109",
     "hash": "ed2e7c6be254aac3b915e21ef390178e69f0fa5e6e4c0ee9bd2626a487c2a5f1",
@@ -747,6 +829,15 @@
     "todos": []
   },
   {
+    "path": "public\\js\\modules\\step4-integration.js",
+    "last_modified": "2025-07-23T09:40:51.757946",
+    "hash": "efabdb91434a0c619047e5447b718c928b3adc995e9ffdc3959634dae8841ed6",
+    "functions": [
+      "// Test function for debugging"
+    ],
+    "todos": []
+  },
+  {
     "path": "public\\js\\modules\\validation-integration.js",
     "last_modified": "2025-07-07T16:11:00.800292",
     "hash": "c12a4921b39e06042ba911bf105abad8a5975721a7d9c2b04add709e08c7afc9",
@@ -762,10 +853,9 @@
   },
   {
     "path": "public\\js\\wizard\\module-loader.js",
-    "last_modified": "2025-07-08T23:50:24.720973",
-    "hash": "2b05dec80e93d90970dc7a9f0854ea1256269b2ad2b22fa2c63c539f72ce862e",
+    "last_modified": "2025-07-25T11:56:31.713710",
+    "hash": "752a74d9008973af212eac3ecdb5f82b822b047d4304bd5d4fb61758b74df461",
     "functions": [
-      "* @param {Function} callback - Callback function to execute",
       "function initializeWizardLoader() {"
     ],
     "todos": []
@@ -779,16 +869,19 @@
   },
   {
     "path": "public\\js\\wizard\\step-handlers.js",
-    "last_modified": "2025-07-08T23:52:55.936955",
-    "hash": "45a56bdad4908b70e594a8ec2dbf8443dfed67d2eca7af76c0273af26078be81",
-    "functions": [],
+    "last_modified": "2025-07-25T10:30:06.359234",
+    "hash": "883861a5b756a8ee88e0397d11b8db9e208988f7ae47047f9a2b9e06bdb23b2b",
+    "functions": [
+      "// \u2705 DEBUGGING: Test function to verify file upload setup"
+    ],
     "todos": []
   },
   {
     "path": "public\\js\\wizard\\wizard-main.js",
-    "last_modified": "2025-07-08T23:54:05.882950",
-    "hash": "692742f7f983c5864fb15c3180c648411a76fa6a50d7647ed1556f71b5f20a47",
+    "last_modified": "2025-07-25T12:01:55.109988",
+    "hash": "194cd98cfb4ffa8535396ce74c79978a7b582cf26eda6362a53f5a1dbc30eb9a",
     "functions": [
+      "// Refresh interface table if function exists",
       "function openInterfaceWizard() {",
       "function closeWizardModal() {",
       "function initializeWizard() {"

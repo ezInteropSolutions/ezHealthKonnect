@@ -1,4 +1,4 @@
-// Ultra Compact Interfaces Management
+// Ultra Compact Interfaces Management - FIXED VERSION
 let interfaces = [];
 let filteredInterfaces = [];
 let currentUser = null;
@@ -200,17 +200,32 @@ async function logout() {
     }
 }
 
-// Set up event listeners
+// FIXED: Clean event listeners setup
 function setupEventListeners() {
+    console.log('🔧 Setting up event listeners...');
+    
     // Filter event listeners
-    document.getElementById('statusFilter').addEventListener('change', applyFilters);
-    document.getElementById('typeFilter').addEventListener('change', applyFilters);
+    const statusFilter = document.getElementById('statusFilter');
+    const typeFilter = document.getElementById('typeFilter');
+    const createForm = document.getElementById('createInterfaceForm');
     
-    // Page size selector
-    document.getElementById('pageSize').addEventListener('change', handlePageSizeChange);
+    if (statusFilter) {
+        statusFilter.addEventListener('change', applyFilters);
+        console.log('✅ Status filter listener attached');
+    }
     
-    // Form submission
-    document.getElementById('createInterfaceForm').addEventListener('submit', handleCreateInterface);
+    if (typeFilter) {
+        typeFilter.addEventListener('change', applyFilters);
+        console.log('✅ Type filter listener attached');
+    }
+    
+    if (createForm) {
+        createForm.addEventListener('submit', handleCreateInterface);
+        console.log('✅ Create form listener attached');
+    }
+    
+    // FIX: Single, clean pagination setup
+    setupPaginationListener();
     
     // User interaction detection (pause auto-refresh when user is active)
     const interactionEvents = ['click', 'keydown', 'scroll', 'mousemove'];
@@ -222,35 +237,127 @@ function setupEventListeners() {
     document.addEventListener('visibilitychange', handleVisibilityChange);
     
     // Sidebar toggle
-    document.getElementById('sidebarToggle').addEventListener('click', function() {
-        const sidebar = document.getElementById('sidebar');
+    setupSidebarToggle();
+    
+    console.log('✅ All event listeners set up');
+}
+
+// FIX: Dedicated pagination setup function
+function setupPaginationListener() {
+    const pageSizeSelect = document.getElementById('pageSize');
+    
+    if (!pageSizeSelect) {
+        console.warn('⚠️ Page size select element not found');
+        return;
+    }
+    
+    // FIX: Set the current value to show in dropdown
+    pageSizeSelect.value = pageSize.toString();
+    
+    // FIX: Clean event listener setup (remove duplicates)
+    const newHandler = function(event) {
+        console.log('🔄 Page size change triggered:', event.target.value);
+        handlePageSizeChange();
+    };
+    
+    // Remove any existing listeners
+    pageSizeSelect.removeEventListener('change', handlePageSizeChange);
+    
+    // Add new listener
+    pageSizeSelect.addEventListener('change', newHandler);
+    
+    console.log('✅ Pagination dropdown setup complete, current value:', pageSizeSelect.value);
+}
+
+// FIX: Enhanced handlePageSizeChange with better error handling
+function handlePageSizeChange() {
+    const pageSizeSelect = document.getElementById('pageSize');
+    
+    if (!pageSizeSelect) {
+        console.error('❌ Page size select element not found during change');
+        return;
+    }
+    
+    const selectedValue = pageSizeSelect.value;
+    const newPageSize = parseInt(selectedValue);
+    
+    console.log('🔍 Page size change:', { selectedValue, newPageSize, isValid: !isNaN(newPageSize) });
+    
+    if (isNaN(newPageSize) || newPageSize <= 0) {
+        console.error('❌ Invalid page size:', selectedValue);
+        // Reset to default
+        pageSizeSelect.value = '25';
+        pageSize = 25;
+    } else {
+        pageSize = newPageSize;
+    }
+    
+    currentPage = 1;
+    calculatePagination();
+    renderInterfacesTable();
+    
+    console.log('✅ Page size updated to:', pageSize);
+}
+
+// FIX: Separate sidebar toggle setup
+function setupSidebarToggle() {
+    const sidebarToggle = document.getElementById('sidebarToggle');
+    const sidebar = document.getElementById('sidebar');
+    
+    if (!sidebarToggle || !sidebar) {
+        console.warn('⚠️ Sidebar toggle elements not found');
+        return;
+    }
+    
+    sidebarToggle.addEventListener('click', function(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        
         const toggleIcon = document.querySelector('.toggle-icon');
+        const isCollapsed = sidebar.classList.contains('collapsed');
         
-        let sidebarCollapsed = sidebar.classList.contains('collapsed');
-        sidebarCollapsed = !sidebarCollapsed;
-        
-        if (sidebarCollapsed) {
-            sidebar.classList.add('collapsed');
-            toggleIcon.textContent = '›';
-        } else {
+        if (isCollapsed) {
             sidebar.classList.remove('collapsed');
-            toggleIcon.textContent = '‹';
+            if (toggleIcon) toggleIcon.textContent = '‹';
+            localStorage.setItem('sidebarCollapsed', 'false');
+        } else {
+            sidebar.classList.add('collapsed');
+            if (toggleIcon) toggleIcon.textContent = '›';
+            localStorage.setItem('sidebarCollapsed', 'true');
         }
+        
+        console.log('🔄 Sidebar toggled:', isCollapsed ? 'expanded' : 'collapsed');
     });
+    
+    // Restore saved state
+    const savedState = localStorage.getItem('sidebarCollapsed');
+    if (savedState === 'true') {
+        sidebar.classList.add('collapsed');
+        const toggleIcon = document.querySelector('.toggle-icon');
+        if (toggleIcon) toggleIcon.textContent = '›';
+    }
+    
+    console.log('✅ Sidebar toggle setup complete');
 }
 
 // Setup smart auto-refresh system
 function setupAutoRefresh() {
-    // Add auto-refresh indicator to page
-    addAutoRefreshIndicator();
-    
-    // Determine optimal refresh rate based on interface states
-    updateRefreshRate();
-    
-    // Start auto-refresh
-    startAutoRefresh();
-    
-    console.log(`🔄 Auto-refresh enabled: ${refreshRate / 1000}s interval`);
+    try {
+        // Add auto-refresh indicator to page
+        addAutoRefreshIndicator();
+        
+        // Determine optimal refresh rate based on interface states
+        updateRefreshRate();
+        
+        // Start auto-refresh
+        startAutoRefresh();
+        
+        console.log(`🔄 Auto-refresh enabled: ${refreshRate / 1000}s interval`);
+    } catch (error) {
+        console.error('❌ Error setting up auto-refresh:', error);
+        // Continue without auto-refresh rather than breaking the page
+        autoRefreshEnabled = false;
+    }
 }
 
 // FIXED: Add visual indicator for auto-refresh
@@ -351,84 +458,6 @@ function addAutoRefreshIndicator() {
         console.log('✅ Auto-refresh indicator added successfully');
     } catch (error) {
         console.error('❌ Error adding auto-refresh indicator:', error);
-    }
-}
-
-// ENHANCED: Sidebar toggle with better error handling
-function setupEventListeners() {
-    // Filter event listeners
-    const statusFilter = document.getElementById('statusFilter');
-    const typeFilter = document.getElementById('typeFilter');
-    const pageSize = document.getElementById('pageSize');
-    const createForm = document.getElementById('createInterfaceForm');
-    
-    if (statusFilter) statusFilter.addEventListener('change', applyFilters);
-    if (typeFilter) typeFilter.addEventListener('change', applyFilters);
-    if (pageSize) pageSize.addEventListener('change', handlePageSizeChange);
-    if (createForm) createForm.addEventListener('submit', handleCreateInterface);
-    
-    // User interaction detection (pause auto-refresh when user is active)
-    const interactionEvents = ['click', 'keydown', 'scroll', 'mousemove'];
-    interactionEvents.forEach(event => {
-        document.addEventListener(event, handleUserInteraction, { passive: true });
-    });
-    
-    // Page visibility API (pause when tab not active)
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-    
-    // FIXED: Sidebar toggle with better error handling
-    const sidebarToggle = document.getElementById('sidebarToggle');
-    const sidebar = document.getElementById('sidebar');
-    
-    if (sidebarToggle && sidebar) {
-        sidebarToggle.addEventListener('click', function(e) {
-            e.preventDefault();
-            e.stopPropagation();
-            
-            const toggleIcon = document.querySelector('.toggle-icon');
-            let sidebarCollapsed = sidebar.classList.contains('collapsed');
-            sidebarCollapsed = !sidebarCollapsed;
-            
-            if (sidebarCollapsed) {
-                sidebar.classList.add('collapsed');
-                if (toggleIcon) toggleIcon.style.transform = 'rotate(180deg)';
-                localStorage.setItem('sidebarCollapsed', 'true');
-            } else {
-                sidebar.classList.remove('collapsed');
-                if (toggleIcon) toggleIcon.style.transform = 'rotate(0deg)';
-                localStorage.setItem('sidebarCollapsed', 'false');
-            }
-        });
-        
-        // Restore saved state
-        const savedState = localStorage.getItem('sidebarCollapsed');
-        if (savedState === 'true') {
-            sidebar.classList.add('collapsed');
-            const toggleIcon = document.querySelector('.toggle-icon');
-            if (toggleIcon) toggleIcon.style.transform = 'rotate(180deg)';
-        }
-    } else {
-        console.warn('⚠️ Sidebar toggle elements not found');
-    }
-}
-
-// ENHANCED: Setup auto-refresh with better error handling
-function setupAutoRefresh() {
-    try {
-        // Add auto-refresh indicator to page
-        addAutoRefreshIndicator();
-        
-        // Determine optimal refresh rate based on interface states
-        updateRefreshRate();
-        
-        // Start auto-refresh
-        startAutoRefresh();
-        
-        console.log(`🔄 Auto-refresh enabled: ${refreshRate / 1000}s interval`);
-    } catch (error) {
-        console.error('❌ Error setting up auto-refresh:', error);
-        // Continue without auto-refresh rather than breaking the page
-        autoRefreshEnabled = false;
     }
 }
 
@@ -553,38 +582,6 @@ async function performAutoRefresh() {
     } finally {
         // Remove visual feedback
         if (refreshIcon) refreshIcon.classList.remove('refreshing');
-    }
-}
-
-// Update refresh rate based on interface states
-function updateRefreshRate() {
-    const hasErrors = interfaces.some(i => i.status === 'error');
-    const hasRunning = interfaces.some(i => i.status === 'running');
-    const totalInterfaces = interfaces.length;
-    
-    // Determine optimal refresh rate
-    if (hasErrors) {
-        refreshRate = 15000; // 15 seconds if there are errors
-    } else if (hasRunning && totalInterfaces > 5) {
-        refreshRate = 30000; // 30 seconds for active systems
-    } else if (hasRunning) {
-        refreshRate = 45000; // 45 seconds for smaller systems
-    } else {
-        refreshRate = 60000; // 60 seconds for idle systems
-    }
-    
-    // Update indicator
-    const indicator = document.getElementById('autoRefreshIndicator');
-    if (indicator) {
-        const textSpan = indicator.querySelector('span:last-child');
-        if (textSpan) {
-            textSpan.textContent = `Auto-refresh: ${refreshRate / 1000}s`;
-        }
-    }
-    
-    // Restart with new rate
-    if (autoRefreshInterval) {
-        startAutoRefresh();
     }
 }
 
@@ -938,14 +935,6 @@ function applyFilters() {
         return statusMatch && typeMatch;
     });
     
-    currentPage = 1;
-    calculatePagination();
-    renderInterfacesTable();
-}
-
-// Pagination functions
-function handlePageSizeChange() {
-    pageSize = parseInt(document.getElementById('pageSize').value);
     currentPage = 1;
     calculatePagination();
     renderInterfacesTable();
@@ -1331,8 +1320,6 @@ document.addEventListener('keydown', function(event) {
     }
 });
 
-
-
 // Cleanup auto-refresh when page unloads
 window.addEventListener('beforeunload', function() {
     stopAutoRefresh();
@@ -1542,3 +1529,15 @@ initializeSidebarTooltips();
 
 // Re-setup tooltips if content changes dynamically
 window.refreshSidebarTooltips = setupSidebarTooltips;
+
+// FIX: Add this after page load to ensure dropdown shows correct value
+window.addEventListener('load', function() {
+    // Ensure pagination dropdown shows the correct value after everything is loaded
+    setTimeout(function() {
+        const pageSizeSelect = document.getElementById('pageSize');
+        if (pageSizeSelect && pageSizeSelect.value !== pageSize.toString()) {
+            pageSizeSelect.value = pageSize.toString();
+            console.log('🔄 Corrected pagination dropdown value:', pageSize);
+        }
+    }, 100);
+});

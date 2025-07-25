@@ -93,56 +93,58 @@ class SegmentViewer {
      * ✅ NEW: Validate field positioning across all segments
      */
     validateFieldPositioning(segments) {
-        console.log('🔍 Validating field positioning for segments:', segments.length);
+    console.log('🔍 Validating field positioning for segments:', segments.length);
+    
+    segments.forEach(([segmentName, segment]) => {
+        // ✅ CRITICAL FIX: More robust field validation
+        if (!segment || !segment.fields || !Array.isArray(segment.fields) || segment.fields.length === 0) {
+            console.log(`📋 Skipping ${segmentName} - ${!segment ? 'no segment data' : !segment.fields ? 'no fields property' : !Array.isArray(segment.fields) ? 'fields is not array' : 'empty fields'}`);
+            return;
+        }
+
+        console.log(`📋 Validating ${segmentName} with ${segment.fields.length} fields`);
+
+        const positionIssues = [];
+        const positionMap = new Map();
         
-        segments.forEach(([segmentName, segment]) => {
-            if (!segment.fields || segment.fields.length === 0) {
-                return;
-            }
-
-            console.log(`📋 Validating ${segmentName} with ${segment.fields.length} fields`);
-
-            const positionIssues = [];
-            const positionMap = new Map();
+        segment.fields.forEach((field, arrayIndex) => {
+            const expectedPosition = arrayIndex + 1;
+            const actualPosition = field.position;
             
-            segment.fields.forEach((field, arrayIndex) => {
-                const expectedPosition = arrayIndex + 1;
-                const actualPosition = field.position;
-                
-                if (actualPosition !== expectedPosition) {
-                    positionIssues.push({
-                        fieldKey: field.key,
-                        arrayIndex: arrayIndex,
-                        expectedPosition: expectedPosition,
-                        actualPosition: actualPosition,
-                        hasValue: field.hasValue
-                    });
-                }
-                
-                if (positionMap.has(actualPosition)) {
-                    console.warn(`❌ Duplicate position ${actualPosition} in ${segmentName}: ${field.key} and ${positionMap.get(actualPosition)}`);
-                } else {
-                    positionMap.set(actualPosition, field.key);
-                }
-                
-                console.log(`  [${arrayIndex}] ${field.key} -> Position: ${actualPosition} (Expected: ${expectedPosition}) ${field.hasValue ? '✓' : '○'}`);
-            });
-
-            if (positionIssues.length > 0) {
-                console.warn(`⚠️ Position issues found in ${segmentName}:`, positionIssues);
-                
-                // ✅ AUTO-FIX: Sort fields by position to correct display order
-                segment.fields.sort((a, b) => {
-                    if (a.position !== b.position) {
-                        return a.position - b.position;
-                    }
-                    return (a.sequence || 0) - (b.sequence || 0);
+            if (actualPosition !== expectedPosition) {
+                positionIssues.push({
+                    fieldKey: field.key,
+                    arrayIndex: arrayIndex,
+                    expectedPosition: expectedPosition,
+                    actualPosition: actualPosition,
+                    hasValue: field.hasValue
                 });
-                
-                console.log(`✅ Auto-fixed field ordering for ${segmentName}`);
             }
+            
+            if (positionMap.has(actualPosition)) {
+                console.warn(`❌ Duplicate position ${actualPosition} in ${segmentName}: ${field.key} and ${positionMap.get(actualPosition)}`);
+            } else {
+                positionMap.set(actualPosition, field.key);
+            }
+            
+            console.log(`  [${arrayIndex}] ${field.key} -> Position: ${actualPosition} (Expected: ${expectedPosition}) ${field.hasValue ? '✓' : '○'}`);
         });
-    }
+
+        if (positionIssues.length > 0) {
+            console.warn(`⚠️ Position issues found in ${segmentName}:`, positionIssues);
+            
+            // ✅ AUTO-FIX: Sort fields by position to correct display order
+            segment.fields.sort((a, b) => {
+                if (a.position !== b.position) {
+                    return a.position - b.position;
+                }
+                return (a.sequence || 0) - (b.sequence || 0);
+            });
+            
+            console.log(`✅ Auto-fixed field ordering for ${segmentName}`);
+        }
+    });
+}
 
     /**
      * ✅ ENHANCED: Compact header with dynamic metrics

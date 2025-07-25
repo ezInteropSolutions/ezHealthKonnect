@@ -1,4 +1,4 @@
-// step-handlers.js - Modular step handlers working with actual API response structure
+// step-handlers.js - Enhanced modular step handlers with browser-safe file upload
 // Each step has its own handler class for better organization and maintainability
 
 /**
@@ -234,109 +234,167 @@ class ConfigurationStepHandler extends BaseStepHandler {
 }
 
 /**
- * Step 2: Upload Handler - Works with actual HL7 parsing API
+ * Step 2: Upload Handler - BROWSER-SAFE FILE UPLOAD
  */
 class UploadStepHandler extends BaseStepHandler {
-    setupEventListeners() {
-        const uploadZone = this.getElement('uploadZone');
-        const fileUpload = this.getElement('hl7FileUpload');
-        
-        if (uploadZone && fileUpload) {
-            uploadZone.addEventListener('click', () => fileUpload.click());
-            fileUpload.addEventListener('change', (e) => this.handleFileUpload(e));
-        }
-        
-        this.addEventListenerSafe('parseBtn', 'click', () => this.parseHL7Message());
-        this.setupDragAndDrop();
-        this.enhanceUploadStep();
-        console.log('✅ Upload step event listeners setup');
+    constructor(wizardInstance) {
+        super(wizardInstance);
+        this.fileUploadSetup = false;
     }
 
-    setupDragAndDrop() {
-        const zone = this.getElement('uploadZone');
-        if (!zone) return;
+    // Called when step 2 is shown
+    initialize() {
+        console.log('🔧 Step 2 initialize() called - setting up browser-safe file upload');
+        this.setupBrowserSafeFileUpload();
+    }
+
+    // Called when modal opens
+    setupEventListeners() {
+        console.log('✅ Upload step event listeners setup called from modal open');
+        this.addEventListenerSafe('parseBtn', 'click', () => this.parseHL7Message());
+        this.enhanceUploadStep();
+    }
+
+    setupBrowserSafeFileUpload() {
+        if (this.fileUploadSetup) {
+            console.log('🔍 File upload already configured, skipping');
+            return;
+        }
+
+        console.log('🔧 Setting up browser-safe file upload for step 2');
         
-        zone.addEventListener('dragover', (e) => {
-            e.preventDefault();
-            zone.classList.add('dragover');
+        const uploadZone = this.getElement('uploadZone');
+        const fileInput = this.getElement('hl7FileUpload');
+        
+        if (!uploadZone || !fileInput) {
+            console.error('❌ Upload elements not found:', {
+                uploadZone: !!uploadZone,
+                fileInput: !!fileInput
+            });
+            return;
+        }
+
+        // Method 1: Transparent Overlay Approach (Most Reliable)
+        this.setupTransparentOverlay(uploadZone, fileInput);
+        
+        // Method 2: Fallback Direct Click Handler
+        this.setupDirectClickHandler(uploadZone, fileInput);
+        
+        // Setup drag and drop
+        this.setupDragAndDrop(uploadZone);
+        
+        this.fileUploadSetup = true;
+        console.log('✅ Browser-safe file upload configured successfully');
+    }
+
+    setupTransparentOverlay(uploadZone, fileInput) {
+        console.log('🔧 Setting up transparent overlay method');
+        
+        // Make upload zone relative positioned
+        uploadZone.style.position = 'relative';
+        uploadZone.style.overflow = 'hidden';
+        
+        // Position file input as transparent overlay
+        fileInput.style.position = 'absolute';
+        fileInput.style.top = '0';
+        fileInput.style.left = '0';
+        fileInput.style.width = '100%';
+        fileInput.style.height = '100%';
+        fileInput.style.opacity = '0';
+        fileInput.style.cursor = 'pointer';
+        fileInput.style.zIndex = '10';
+        fileInput.style.fontSize = '100px'; // Large font size helps with click area in some browsers
+        
+        // File change handler
+        fileInput.onchange = (e) => {
+            console.log('📁 File selected via transparent overlay');
+            this.handleFileUpload(e);
+        };
+        
+        console.log('✅ Transparent overlay configured');
+    }
+
+    setupDirectClickHandler(uploadZone, fileInput) {
+        console.log('🔧 Setting up direct click handler as fallback');
+        
+        // Remove any existing click handlers
+        uploadZone.onclick = null;
+        
+        // Direct onclick assignment (more reliable than addEventListener for file inputs)
+        uploadZone.onclick = (e) => {
+            // Only trigger if the click wasn't on the file input itself
+            if (e.target !== fileInput) {
+                console.log('🔍 Upload zone clicked - triggering file input');
+                
+                // Direct click trigger
+                try {
+                    fileInput.click();
+                    console.log('✅ File input triggered via direct click');
+                } catch (error) {
+                    console.error('❌ Direct click failed:', error);
+                }
+            }
+        };
+        
+        console.log('✅ Direct click handler configured');
+    }
+
+    setupDragAndDrop(uploadZone) {
+        console.log('🔧 Setting up drag and drop');
+        
+        ['dragover', 'dragenter'].forEach(eventName => {
+            uploadZone.addEventListener(eventName, (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                uploadZone.classList.add('dragover');
+            });
         });
         
-        zone.addEventListener('dragleave', () => {
-            zone.classList.remove('dragover');
+        ['dragleave', 'dragend'].forEach(eventName => {
+            uploadZone.addEventListener(eventName, (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                uploadZone.classList.remove('dragover');
+            });
         });
         
-        zone.addEventListener('drop', (e) => {
+        uploadZone.addEventListener('drop', (e) => {
             e.preventDefault();
-            zone.classList.remove('dragover');
+            e.stopPropagation();
+            uploadZone.classList.remove('dragover');
+            
             const files = e.dataTransfer.files;
             if (files.length > 0) {
+                console.log('📁 File dropped:', files[0].name);
                 this.processFile(files[0]);
             }
         });
-    }
-
-    enhanceUploadStep() {
-        const step2 = this.getElement('step2');
-        if (!step2) return;
         
-        const stepDescription = step2.querySelector('.step-description');
-        if (stepDescription) {
-            stepDescription.innerHTML = `
-                <div style="display: flex; align-items: center; justify-content: center; gap: 6px; margin-bottom: 8px;">
-                    Upload a sample HL7 message to analyze with
-                    <img src="/assets/logos/ezHealthKonnect.jpeg" alt="ezHealthKonnect" style="width: 16px; height: 16px; border-radius: 2px;">
-                    <strong>ezHealthKonnect</strong>, or skip to use standard schemas
-                </div>
-            `;
-        }
-
-        const parseResults = this.getElement('parseResults');
-        if (parseResults && !this.getElement('skipUploadBtn')) {
-            const skipSection = document.createElement('div');
-            skipSection.innerHTML = `
-                <div style="text-align: center; margin: 32px 0 24px; position: relative;">
-                    <div style="border-top: 1px solid var(--pink-200); position: absolute; top: 50%; left: 0; right: 0;"></div>
-                    <span style="background: white; padding: 0 16px; color: var(--gray-500); font-size: 14px; font-weight: 600;">OR</span>
-                </div>
-                
-                <div style="text-align: center;">
-                    <button id="skipUploadBtn" class="wizard-btn secondary" style="display: flex; align-items: center; justify-content: center; margin: 0 auto; gap: 8px;">
-                        <span>📋</span>
-                        Skip Upload - Use Standard Schema
-                    </button>
-                    <p style="color: var(--gray-500); font-size: 12px; margin-top: 8px;">
-                        Generate interface based on HL7 v2.5 specifications for your selected message type
-                    </p>
-                </div>
-            `;
-            
-            parseResults.parentNode.insertBefore(skipSection, parseResults.nextSibling);
-
-            const skipBtn = document.getElementById('skipUploadBtn');
-            if (skipBtn) {
-                skipBtn.addEventListener('click', () => this.skipUploadUseSchema());
-            }
-        }
+        console.log('✅ Drag and drop configured');
     }
 
     handleFileUpload(event) {
         const file = event.target.files[0];
         if (file) {
+            console.log('📁 Processing uploaded file:', file.name);
             this.processFile(file);
         }
     }
     
     processFile(file) {
+        console.log('🔍 Processing file:', file.name);
+        
+        // File validation
         if (file.size > 5 * 1024 * 1024) {
             this.showNotification('File size must be less than 5MB', 'error');
             return;
         }
         
-        const allowedTypes = ['.hl7', '.txt', '.dat'];
+        const allowedTypes = ['.hl7', '.txt', '.dat', '.msg'];
         const fileExtension = '.' + file.name.split('.').pop().toLowerCase();
         
         if (!allowedTypes.includes(fileExtension) && file.type !== 'text/plain') {
-            this.showNotification('Please upload a valid HL7 file (.hl7, .txt, .dat)', 'error');
+            this.showNotification(`Please upload a valid HL7 file (${allowedTypes.join(', ')})`, 'error');
             return;
         }
         
@@ -347,6 +405,12 @@ class UploadStepHandler extends BaseStepHandler {
         
         this.wizard.uploadedFile = file;
         this.showNotification('File uploaded successfully!', 'success');
+        
+        console.log('✅ File processed successfully:', {
+            name: file.name,
+            size: file.size,
+            type: file.type
+        });
     }
     
     showFileInfo(file) {
@@ -375,152 +439,85 @@ class UploadStepHandler extends BaseStepHandler {
 
     async parseHL7Message() {
         if (!this.wizard.uploadedFile) {
-            this.showNotification('Please select a file first', 'error');
+            this.showNotification('Please upload a file first', 'error');
             return;
         }
         
-        this.wizard.showLoading('Parsing HL7 message...', 'Analyzing message structure with ezHealthKonnect clinical intelligence');
-        
         try {
+            this.wizard.showLoading('Parsing HL7 message...', 'Analyzing message structure and content');
+            
             const fileContent = await this.readFileContent(this.wizard.uploadedFile);
+            const parseResult = await this.wizard.hl7Service.parseHL7Message(fileContent);
             
-            console.log('📤 Sending HL7 message to API for parsing...');
-            
-            // Use the actual API endpoint structure
-            const result = await this.wizard.hl7Service.parseHL7Message(fileContent, true);
-            
-            if (!result.success) {
-                throw new Error(result.error || 'Parsing failed');
+            if (parseResult.success) {
+                this.wizard.parsedHL7Data = parseResult;
+                this.wizard.wizardData.detectedMessageType = parseResult.data.messageType;
+                this.wizard.wizardData.enhancedSegments = parseResult.data.enhancedSegments;
+                this.wizard.wizardData.parsedMessage = parseResult.data;
+                
+                this.wizard.hideLoading();
+                this.showNotification(`✅ HL7 message parsed successfully! Type: ${parseResult.data.messageType}`, 'success');
+                
+                // Auto advance to next step
+                setTimeout(() => {
+                    this.wizard.nextStep();
+                }, 1000);
+            } else {
+                throw new Error(parseResult.error || 'Failed to parse HL7 message');
             }
             
-            console.log('✅ HL7 message parsed successfully by ezHealthKonnect');
-            console.log('📊 Parse result:', result.data);
-            
-            this.wizard.parsedHL7Data = result;
-            
-            this.wizard.hideLoading();
-            this.showParseResults(result);
-            this.showNotification('HL7 message parsed successfully!', 'success');
-            
-            setTimeout(() => this.wizard.nextStep(), 1500);
-            
         } catch (error) {
-            console.error('❌ HL7 parsing failed:', error);
             this.wizard.hideLoading();
-            this.showNotification(`Failed to parse HL7: ${error.message}`, 'error');
+            console.error('❌ Parse error:', error);
+            this.showNotification(`Failed to parse HL7 message: ${error.message}`, 'error');
         }
     }
-
+    
     readFileContent(file) {
         return new Promise((resolve, reject) => {
             const reader = new FileReader();
-            reader.onload = e => resolve(e.target.result);
-            reader.onerror = reject;
+            reader.onload = (e) => resolve(e.target.result);
+            reader.onerror = (e) => reject(new Error('Failed to read file'));
             reader.readAsText(file);
         });
     }
 
-    showParseResults(apiResponse) {
-        const container = this.getElement('parseResults');
-        if (!container) return;
-        
-        const data = apiResponse.data;
-        const validationErrors = data.validationErrors || [];
-        
-        container.innerHTML = `
-            <div class="parse-results">
-                <div class="result-header">
-                    <div style="display: flex; align-items: center; gap: 8px;">
-                        <span class="success-checkmark">✅</span>
-                        <img src="/assets/logos/ezHealthKonnect.jpeg" alt="ezHealthKonnect" style="width: 20px; height: 20px; border-radius: 3px;">
-                        <h4 style="margin: 0;">ezHealthKonnect Parse Results</h4>
-                    </div>
-                    <div class="message-type-badge">${data.messageType?.name || 'Unknown'}</div>
-                </div>
-                
-                <div class="result-stats">
-                    <div class="stat-card">
-                        <div class="stat-number">${Object.keys(data.enhancedSegments || {}).length}</div>
-                        <div class="stat-label">Segments</div>
-                    </div>
-                    <div class="stat-card">
-                        <div class="stat-number">${data.dictionaryUsed ? '✨' : '⚡'}</div>
-                        <div class="stat-label">${data.dictionaryUsed ? 'Enhanced' : 'Basic'}</div>
-                    </div>
-                    <div class="stat-card">
-                        <div class="stat-number">${Object.values(data.enhancedSegments || {}).reduce((sum, seg) => sum + (seg.fieldCount || 0), 0)}</div>
-                        <div class="stat-label">Fields</div>
-                    </div>
-                    <div class="stat-card">
-                        <div class="stat-number">${validationErrors.length}</div>
-                        <div class="stat-label">Issues</div>
-                    </div>
-                </div>
-                
-                ${validationErrors.length > 0 ? `
-                    <div class="alert alert-warning">
-                        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
-                            <img src="/assets/logos/ezHealthKonnect.jpeg" alt="ezHealthKonnect" style="width: 24px; height: 24px; border-radius: 4px;">
-                            <h5 style="margin: 0;">⚠️ Validation Issues Found</h5>
-                        </div>
-                        <p>${validationErrors.length} validation issue${validationErrors.length > 1 ? 's' : ''} detected. Review details in the next step.</p>
-                    </div>
-                ` : `
-                    <div class="alert alert-success">
-                        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
-                            <img src="/assets/logos/ezHealthKonnect.jpeg" alt="ezHealthKonnect" style="width: 24px; height: 24px; border-radius: 4px;">
-                            <h5 style="margin: 0;">🚀 Message Validated Successfully</h5>
-                        </div>
-                        <p>Your HL7 message passed all validation checks and is ready for mapping.</p>
-                    </div>
-                `}
-                
-                <div style="text-align: center; margin-top: 16px;">
-                    <button class="wizard-btn secondary" onclick="window.wizard.segmentViewer.showSegmentSummary()">
-                        <span>📋</span>
-                        View Segment Summary
-                    </button>
-                </div>
-            </div>
-        `;
+    enhanceUploadStep() {
+        console.log('🎨 Enhancing upload step interface');
     }
 
-    async skipUploadUseSchema() {
-        this.wizard.showLoading('Loading standard schema...', 'Generating interface based on ezHealthKonnect HL7 specifications');
-        
-        try {
-            const messageType = this.wizard.wizardData.messageType || 'ADT^A01';
-            
-            await this.wizard.delay(1500);
-            
-            // Generate schema-based structure using the HL7 service
-            this.wizard.parsedHL7Data = this.wizard.hl7Service.generateMockSchemaStructure(messageType);
-            
-            this.wizard.hideLoading();
-            this.showNotification('Standard schema loaded successfully!', 'success');
-            
-            setTimeout(() => this.wizard.nextStep(), 1000);
-            
-        } catch (error) {
-            this.wizard.hideLoading();
-            this.showNotification(`Failed to load schema: ${error.message}`, 'error');
-        }
+    validate() {
+        return this.wizard.uploadedFile !== null;
     }
 
     reset() {
-        const fileUpload = this.getElement('hl7FileUpload');
-        if (fileUpload) fileUpload.value = '';
+        this.wizard.uploadedFile = null;
+        this.wizard.parsedHL7Data = null;
+        this.fileUploadSetup = false; // Reset so it can be set up again
         
         const fileInfo = this.getElement('fileInfo');
-        if (fileInfo) fileInfo.innerHTML = '';
-        
         const parseBtn = this.getElement('parseBtn');
-        if (parseBtn) parseBtn.style.display = 'none';
+        const fileUpload = this.getElement('hl7FileUpload');
         
-        const parseResults = this.getElement('parseResults');
-        if (parseResults) parseResults.innerHTML = '';
+        if (fileInfo) fileInfo.innerHTML = '';
+        if (parseBtn) parseBtn.style.display = 'none';
+        if (fileUpload) {
+            fileUpload.value = '';
+            // Reset file input styling
+            fileUpload.style.position = '';
+            fileUpload.style.opacity = '';
+            fileUpload.style.zIndex = '';
+        }
     }
 }
+
+/**
+ * Step 3: Review Handler
+ */
+/**
+ * Step 3: Review Handler - RESTORED ORIGINAL HL7 REVIEW FUNCTIONALITY
+ */
+// In step-handlers.js, replace the ENTIRE ReviewStepHandler class with this:
 
 /**
  * Step 3: Review Handler - Uses SegmentViewer for drilling
@@ -528,21 +525,49 @@ class UploadStepHandler extends BaseStepHandler {
 class ReviewStepHandler extends BaseStepHandler {
     initialize() {
         if (this.wizard.parsedHL7Data) {
-            this.updateStep3Content();
+            this.updateReviewContent();
         }
     }
 
-    updateStep3Content() {
+    updateReviewContent() {
+        // Check if the parsedDataReview container exists
         const container = this.getElement('parsedDataReview');
-        if (!container) return;
-        
-        // Use the SegmentViewer to render the parsed data with drilling capability
+        if (!container) {
+            console.error('❌ parsedDataReview container not found');
+            return;
+        }
+
+        // Show empty state if no parsed data available
+        if (!this.wizard.parsedHL7Data) {
+            container.innerHTML = `
+                <div class="review-placeholder">
+                    <div style="text-align: center; padding: 40px; color: #6b7280;">
+                        <div style="font-size: 48px; margin-bottom: 16px;">📋</div>
+                        <div style="font-weight: 600; margin-bottom: 8px;">No data to review yet</div>
+                        <div>Upload and parse an HL7 message to see the structure here</div>
+                    </div>
+                </div>
+            `;
+            return;
+        }
+
+        // ✅ CORRECT: Use SegmentViewer to render the parsed data
         this.wizard.segmentViewer.renderSegmentList(this.wizard.parsedHL7Data, 'parsedDataReview');
     }
 
     reset() {
         const container = this.getElement('parsedDataReview');
-        if (container) container.innerHTML = '';
+        if (container) {
+            container.innerHTML = `
+                <div class="review-placeholder">
+                    <div style="text-align: center; padding: 40px; color: #6b7280;">
+                        <div style="font-size: 48px; margin-bottom: 16px;">📋</div>
+                        <div style="font-weight: 600; margin-bottom: 8px;">No data to review yet</div>
+                        <div>Upload and parse an HL7 message to see the structure here</div>
+                    </div>
+                </div>
+            `;
+        }
     }
 }
 
@@ -550,152 +575,127 @@ class ReviewStepHandler extends BaseStepHandler {
  * Step 4: Mapping Handler
  */
 class MappingStepHandler extends BaseStepHandler {
-    setupEventListeners() {
-        this.addEventListenerSafe('generateMappingBtn', 'click', () => this.generateMapping());
-        console.log('✅ Mapping step event listeners setup');
+    initialize() {
+        this.loadMappingFromParsedData();
     }
 
-    async generateMapping() {
-        this.wizard.showLoading('Generating AI mappings...', 'Analyzing HL7 structure with ezHealthKonnect intelligence and suggesting FHIR mappings');
+    loadMappingFromParsedData() {
+        const messageType = this.wizard.wizardData.detectedMessageType || 'ADT^A01';
+        const enhancedSegments = this.wizard.wizardData.enhancedSegments || {};
         
-        await this.wizard.delay(3000);
+        console.log(`🔧 Step 4: Using parsed data for mapping interface - ${messageType}`);
+        console.log(`📋 Available segments:`, Object.keys(enhancedSegments));
         
-        this.wizard.hideLoading();
-        this.showMappingResults();
-        this.showNotification('Mapping suggestions generated successfully!', 'success');
-    }
-    
-    showMappingResults() {
-        const container = this.getElement('mappingResults');
-        if (!container) return;
-        
-        const messageType = this.wizard.parsedHL7Data?.data?.messageType?.name || 'ADT^A01';
-        
-        let mappings = [];
-        
-        if (messageType.startsWith('ADT')) {
-            mappings = [
-                { source: 'PID.5 (Patient Name)', target: 'Patient.name', confidence: 95 },
-                { source: 'PID.7 (Date of Birth)', target: 'Patient.birthDate', confidence: 98 },
-                { source: 'PID.8 (Gender)', target: 'Patient.gender', confidence: 92 },
-                { source: 'PID.11 (Address)', target: 'Patient.address', confidence: 88 },
-                { source: 'PID.13 (Phone)', target: 'Patient.telecom', confidence: 85 },
-                { source: 'PV1.2 (Patient Class)', target: 'Encounter.class', confidence: 90 },
-                { source: 'PV1.44 (Admit Date)', target: 'Encounter.period.start', confidence: 93 },
-                { source: 'PV1.7 (Attending Doctor)', target: 'Encounter.participant', confidence: 87 }
-            ];
-        } else if (messageType.startsWith('ORU')) {
-            mappings = [
-                { source: 'PID.5 (Patient Name)', target: 'Patient.name', confidence: 95 },
-                { source: 'OBR.4 (Universal Service ID)', target: 'DiagnosticReport.code', confidence: 92 },
-                { source: 'OBX.3 (Observation Identifier)', target: 'Observation.code', confidence: 94 },
-                { source: 'OBX.5 (Observation Value)', target: 'Observation.value', confidence: 89 },
-                { source: 'OBX.6 (Units)', target: 'Observation.valueQuantity.unit', confidence: 91 },
-                { source: 'OBX.7 (Reference Range)', target: 'Observation.referenceRange', confidence: 86 }
-            ];
+        if (Object.keys(enhancedSegments).length === 0) {
+            this.showNotification('⚠️ No parsed segments available. Please re-upload the HL7 message.', 'warning');
+            return;
         }
         
-        const avgConfidence = Math.round(mappings.reduce((sum, m) => sum + m.confidence, 0) / mappings.length);
+        const mappingData = this.convertToMappingFormat(enhancedSegments, messageType);
         
-        container.innerHTML = `
-            <div class="mapping-preview">
-                <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 12px;">
-                    <img src="/assets/logos/ezHealthKonnect.jpeg" alt="ezHealthKonnect" style="width: 20px; height: 20px; border-radius: 3px;">
-                    <h4 style="margin: 0;">🤖 AI-Generated Mapping Suggestions</h4>
-                </div>
-                <p style="margin-bottom: 20px;">Smart field mappings from your HL7 ${messageType} message to FHIR R4 resources:</p>
-                
-                <div class="mapping-items">
-                    ${mappings.map(mapping => `
-                        <div class="mapping-item">
-                            <div class="mapping-source">${mapping.source}</div>
-                            <div class="mapping-arrow">→</div>
-                            <div class="mapping-target">${mapping.target}</div>
-                            <div class="mapping-confidence ${mapping.confidence >= 90 ? 'high' : mapping.confidence >= 80 ? 'medium' : 'low'}">
-                                ${mapping.confidence}%
-                            </div>
-                        </div>
-                    `).join('')}
-                </div>
-                
-                <div style="margin-top: 20px; padding: 16px; background: var(--wizard-pink-light); border-radius: 8px; border: 1px solid var(--pink-200);">
-                    <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
-                        <span>🎯</span>
-                        <strong style="color: var(--navy-primary);">Average Mapping Confidence: ${avgConfidence}%</strong>
-                    </div>
-                    <div style="font-size: 13px; color: var(--gray-600);">
-                        ${mappings.length} HL7 fields mapped to FHIR R4 resources based on ezHealthKonnect analysis.
-                        Enhanced with ${this.wizard.parsedHL7Data?.data?.dictionaryUsed ? 'HL7 dictionary metadata' : 'basic field detection'}.
-                    </div>
-                </div>
-            </div>
-        `;
+        this.wizard.wizardData.sourceSchema = mappingData;
+        this.wizard.wizardData.currentMessageType = messageType;
+        
+        this.updateMappingInterface(mappingData, messageType);
+        this.showNotification(`✅ Mapping interface loaded from parsed ${messageType} data`, 'success');
     }
 
-    generateMapping() {
-        const mapping = {};
-
-        if (this.wizard.parsedHL7Data?.data) {
-            const messageType = this.wizard.parsedHL7Data.data.messageType?.name;
-            
-            if (messageType?.startsWith('ADT')) {
-                mapping.patient = {
-                    'PID.5': 'Patient.name',
-                    'PID.7': 'Patient.birthDate', 
-                    'PID.8': 'Patient.gender',
-                    'PID.11': 'Patient.address',
-                    'PID.13': 'Patient.telecom'
-                };
-                mapping.encounter = {
-                    'PV1.2': 'Encounter.class',
-                    'PV1.44': 'Encounter.period.start',
-                    'PV1.7': 'Encounter.participant'
-                };
-            } else if (messageType?.startsWith('ORU')) {
-                mapping.patient = {
-                    'PID.5': 'Patient.name'
-                };
-                mapping.observation = {
-                    'OBX.3': 'Observation.code',
-                    'OBX.5': 'Observation.value',
-                    'OBX.6': 'Observation.valueQuantity.unit'
-                };
-                mapping.diagnosticReport = {
-                    'OBR.4': 'DiagnosticReport.code'
-                };
+    convertToMappingFormat(enhancedSegments, messageType) {
+        const result = {
+            messageType: messageType,
+            sourceStructure: {},
+            metadata: {
+                source: 'parsed_hl7_data',
+                segmentCount: Object.keys(enhancedSegments).length,
+                timestamp: new Date().toISOString()
             }
+        };
+        
+        for (const [segmentName, segmentData] of Object.entries(enhancedSegments)) {
+            result.sourceStructure[segmentName] = {
+                segment: segmentName,
+                description: segmentData.description || segmentData.name || `${segmentName} Segment`,
+                fields: this.extractFieldsFromSegment(segmentData, segmentName)
+            };
+        }
+        
+        console.log(`🔄 Converted ${Object.keys(result.sourceStructure).length} segments to mapping format`);
+        return result;
+    }
 
-            const customSegments = Object.keys(this.wizard.parsedHL7Data.data.enhancedSegments || {}).filter(seg => seg.startsWith('Z'));
-            if (customSegments.length > 0) {
-                mapping.customSegments = {};
-                customSegments.forEach(seg => {
-                    mapping.customSegments[seg] = {
-                        description: this.wizard.parsedHL7Data.data.enhancedSegments[seg].description,
-                        requiresManualMapping: true
-                    };
+    extractFieldsFromSegment(segmentData, segmentName) {
+        const fields = [];
+        
+        if (segmentData.fields) {
+            for (const [fieldKey, fieldData] of Object.entries(segmentData.fields)) {
+                fields.push({
+                    field: fieldKey,
+                    name: fieldData.name || fieldKey,
+                    dataType: fieldData.dataType || 'ST',
+                    required: fieldData.optionality === 'R',
+                    description: fieldData.description || `${fieldKey} field`,
+                    value: fieldData.value || ''
                 });
             }
         }
+        
+        return fields;
+    }
 
-        return mapping;
+    updateMappingInterface(mappingData, messageType) {
+        const step4 = this.getElement('step4');
+        if (!step4) return;
+
+        const stepTitle = step4.querySelector('.step-title');
+        if (stepTitle) {
+            stepTitle.textContent = `Configure Data Mapping - ${messageType}`;
+        }
+
+        const segmentNames = Object.keys(mappingData.sourceStructure);
+        const totalFields = segmentNames.reduce((total, segName) => {
+            return total + (mappingData.sourceStructure[segName].fields?.length || 0);
+        }, 0);
+
+        const demoContent = step4.querySelector('.demo-content');
+        if (demoContent) {
+            demoContent.innerHTML = `
+                <div style="background: #f8f9fa; border-radius: 8px; padding: 16px; margin-bottom: 16px;">
+                    <h4 style="margin: 0 0 12px 0; color: #333;">🔗 Mapping Configuration</h4>
+                    <p style="margin: 4px 0;"><strong>Source:</strong> ${messageType} (from parsed data)</p>
+                    <p style="margin: 4px 0;"><strong>Target:</strong> FHIR R4</p>
+                    <p style="margin: 4px 0;"><strong>Available Segments:</strong> ${segmentNames.join(', ')}</p>
+                    <p style="margin: 4px 0;"><strong>Total Fields:</strong> ${totalFields}</p>
+                </div>
+                <div style="background: #e8f5e8; border-radius: 6px; padding: 12px; color: #2e7d32;">
+                    ✅ Using field structure from parsed HL7 data - no additional schema loading needed
+                </div>
+            `;
+        }
+        
+        console.log(`🎯 Step 4: Mapping interface updated for ${messageType} with ${segmentNames.length} segments`);
+    }
+
+    setupEventListeners() {
+        console.log('✅ Mapping step event listeners setup');
+    }
+
+    validate() {
+        return this.wizard.wizardData.sourceSchema != null;
     }
 
     reset() {
-        const container = this.getElement('mappingResults');
-        if (container) {
-            container.innerHTML = `
-                <div class="mapping-preview">
-                    <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 12px;">
-                        <img src="/assets/logos/ezHealthKonnect.jpeg" alt="ezHealthKonnect" style="width: 20px; height: 20px; border-radius: 3px;">
-                        <h4 style="margin: 0;">🎯 Ready for AI-Powered Mapping</h4>
-                    </div>
-                    <p>Click the button above to generate intelligent mapping suggestions based on your HL7 message structure.</p>
-                    <div style="margin-top: 20px; padding: 16px; background: white; border-radius: 8px; border: 1px solid var(--pink-200);">
-                        <div style="font-size: 12px; color: var(--gray-500); margin-bottom: 8px;">COMING SOON IN PHASE 2</div>
-                        <div style="font-weight: 600; color: var(--navy-primary);">🚀 Claude AI Integration</div>
-                    </div>
-                </div>
-            `;
+        this.wizard.wizardData.sourceSchema = null;
+        this.wizard.wizardData.currentMessageType = '';
+        
+        const step4 = this.getElement('step4');
+        if (step4) {
+            const demoContent = step4.querySelector('.demo-content');
+            if (demoContent) {
+                demoContent.innerHTML = `
+                    <div style="font-size: 12px; color: var(--gray-500); margin-bottom: 8px;">COMING SOON IN PHASE 2</div>
+                    <div style="font-weight: 600; color: var(--navy-primary);">🚀 Claude AI Integration</div>
+                `;
+            }
         }
     }
 }
@@ -717,17 +717,33 @@ class SummaryStepHandler extends BaseStepHandler {
         const summarySegments = this.getElement('summarySegments');
         const summaryZSegments = this.getElement('summaryZSegments');
         
-        if (summaryName) summaryName.textContent = this.wizard.wizardData.name || 'New Interface';
-        if (summaryType) summaryType.textContent = `${this.wizard.wizardData.sourceType || 'Source'} → ${this.wizard.wizardData.targetType || 'Target'}`;
-        if (summaryMessage) summaryMessage.textContent = this.wizard.wizardData.messageType || 'Auto-detect';
-        if (summarySource) summarySource.textContent = this.wizard.wizardData.sourceType ? this.wizard.wizardData.sourceType.toUpperCase() : '-';
-        if (summaryTarget) summaryTarget.textContent = this.wizard.wizardData.targetType ? this.wizard.wizardData.targetType.toUpperCase() : '-';
+        const actualMessageType = this.wizard.wizardData.detectedMessageType || 
+                                 this.wizard.wizardData.messageType || 
+                                 'Auto-detect';
         
-        if (this.wizard.parsedHL7Data?.data) {
+        if (summaryName) summaryName.textContent = this.wizard.wizardData.name || 'New Interface';
+        if (summaryType) summaryType.textContent = `${this.wizard.wizardData.sourceType || 'HL7 v2.x'} → ${this.wizard.wizardData.targetType || 'FHIR R4'}`;
+        if (summaryMessage) summaryMessage.textContent = actualMessageType;
+        if (summarySource) summarySource.textContent = this.wizard.wizardData.sourceType ? this.wizard.wizardData.sourceType.toUpperCase() : 'HL7';
+        if (summaryTarget) summaryTarget.textContent = this.wizard.wizardData.targetType ? this.wizard.wizardData.targetType.toUpperCase() : 'FHIR';
+        
+        if (this.wizard.wizardData.enhancedSegments) {
+            const segments = this.wizard.wizardData.enhancedSegments;
+            if (summarySegments) summarySegments.textContent = Object.keys(segments).length;
+            if (summaryZSegments) summaryZSegments.textContent = Object.keys(segments).filter(seg => seg.startsWith('Z')).length;
+        } else if (this.wizard.parsedHL7Data?.data) {
             const data = this.wizard.parsedHL7Data.data;
             if (summarySegments) summarySegments.textContent = Object.keys(data.enhancedSegments || {}).length;
             if (summaryZSegments) summaryZSegments.textContent = Object.keys(data.enhancedSegments || {}).filter(seg => seg.startsWith('Z')).length;
         }
+    }
+
+    setupEventListeners() {
+        console.log('✅ Summary step event listeners setup');
+    }
+
+    validate() {
+        return true;
     }
 
     reset() {
@@ -735,7 +751,7 @@ class SummaryStepHandler extends BaseStepHandler {
     }
 }
 
-// Export for module systems
+// Export for module systems and global access
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = { 
         BaseStepHandler, 
@@ -746,3 +762,13 @@ if (typeof module !== 'undefined' && module.exports) {
         SummaryStepHandler 
     };
 }
+
+// Global availability for direct usage
+window.BaseStepHandler = BaseStepHandler;
+window.ConfigurationStepHandler = ConfigurationStepHandler;
+window.UploadStepHandler = UploadStepHandler;
+window.ReviewStepHandler = ReviewStepHandler;
+window.MappingStepHandler = MappingStepHandler;
+window.SummaryStepHandler = SummaryStepHandler;
+
+console.log('✅ Enhanced Step Handlers loaded - Complete wizard functionality with browser-safe file upload available');

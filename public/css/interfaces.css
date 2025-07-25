@@ -301,7 +301,10 @@
     font-size: 8px;
     background: white;
     color: var(--navy-primary);
-    height: 16px;
+    height: 40px;           /* Increased from 16px */
+    line-height: 1.2;       /* Added for text clarity */
+    min-height: 20px;       /* Fallback */
+    box-sizing: border-box; /* Ensure padding is included */
 }
 
 /* FIXED: Table container fills all remaining space */

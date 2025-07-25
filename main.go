@@ -217,8 +217,8 @@ func main() {
 		// FHIR ROUTES (Your existing code - keep as is)
 		// =====================================
 		fhirGroup := api.Group("/fhir")
-		//fhirCtrl := controllers.NewSchemaFHIRTransformController(db, cfg)
-		fhirCtrl := controllers.NewFHIRTransformController(db, cfg)
+		fhirCtrl := controllers.NewSchemaFHIRTransformController(db, cfg)
+		//fhirCtrl := controllers.NewFHIRTransformController(db, cfg)
 		fhirCtrl.RegisterRoutes(fhirGroup)
 
 		// =====================================

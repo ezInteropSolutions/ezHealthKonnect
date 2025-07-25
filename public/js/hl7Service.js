@@ -18,65 +18,85 @@ class HL7Service {
      * @param {Object} options - Parsing options
      * @returns {Promise<Object>} Parsed HL7 data in wizard format
      */
-    async parseMessage(hl7Content, options = {}) {
-        console.log('🧬 HL7Service: Parsing message...');
-        this.stats.requests++;
+    // In public/js/services/hl7Service.js
+// Replace the parseMessage method in HL7Service class
 
-        try {
-            // Check cache first
-            const cacheKey = this.generateCacheKey(hl7Content, options);
-            if (this.cache.has(cacheKey) && !options.skipCache) {
-                console.log('📋 Using cached result');
-                this.stats.cacheHits++;
-                return this.cache.get(cacheKey);
-            }
+async parseMessage(hl7Content, options = {}) {
+    console.log('🧬 HL7Service: Parsing message...');
+    this.stats.requests++;
 
-            // Prepare request body
-            const requestBody = {
-                hl7Content: hl7Content.trim(),
-                validateStrict: options.validateStrict !== false,
-                includeRaw: options.includeRaw === true,
-                skipCache: options.skipCache === true
-            };
-
-            // Call backend API
-            const response = await fetch(`${this.baseUrl}/parse`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify(requestBody)
-            });
-
-            const result = await response.json();
-
-            if (!response.ok) {
-                throw new Error(result.error || `HTTP ${response.status}: ${response.statusText}`);
-            }
-
-            if (!result.success) {
-                throw new Error(result.error || 'Failed to parse HL7 message');
-            }
-
-            // Transform backend response to wizard format
-            const wizardData = this.transformToWizardFormat(result.data, result.meta);
-
-            // Cache the result
-            this.cache.set(cacheKey, wizardData);
-            if (this.cache.size > 100) { // Limit cache size
-                const firstKey = this.cache.keys().next().value;
-                this.cache.delete(firstKey);
-            }
-
-            console.log('✅ HL7 message parsed successfully');
-            return wizardData;
-
-        } catch (error) {
-            console.error('❌ HL7 parsing failed:', error);
-            this.stats.errors++;
-            throw new Error(this.formatErrorMessage(error));
+    try {
+        // Check cache first
+        const cacheKey = this.generateCacheKey(hl7Content, options);
+        if (this.cache.has(cacheKey) && !options.skipCache) {
+            console.log('📋 Using cached result');
+            this.stats.cacheHits++;
+            return this.cache.get(cacheKey);
         }
+
+        // FIX 1: Prepare request body with correct field names for Go backend
+        const requestBody = {
+            RawMessage: hl7Content.trim(),  // Changed from hl7Content to RawMessage
+            UseEnhanced: options.validateStrict !== false,
+            IncludeValidation: true,  // Changed from includeRaw
+            Timestamp: new Date().toISOString()
+        };
+
+        // FIX 2: Use correct base URL construction
+        const apiUrl = this.baseUrl.startsWith('http') 
+            ? `${this.baseUrl}/parse` 
+            : `http://localhost:8080${this.baseUrl}/parse`;
+
+        // Call backend API
+        const response = await fetch(apiUrl, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(requestBody)
+        });
+
+        const result = await response.json();
+
+        if (!response.ok) {
+            throw new Error(result.Error || `HTTP ${response.status}: ${response.statusText}`);
+        }
+
+        // FIX 3: Check Success field (capitalized from Go)
+        if (!result.Success) {
+            throw new Error(result.Error || 'Failed to parse HL7 message');
+        }
+
+        // FIX 4: Transform backend response to wizard format
+        const wizardData = this.transformToWizardFormat(result.Data, result.Meta);
+
+        // Cache the result
+        this.cache.set(cacheKey, wizardData);
+        if (this.cache.size > 100) { // Limit cache size
+            const firstKey = this.cache.keys().next().value;
+            this.cache.delete(firstKey);
+        }
+
+        console.log('✅ HL7 message parsed successfully');
+        return wizardData;
+
+    } catch (error) {
+        console.error('❌ HL7 parsing failed:', error);
+        this.stats.errors++;
+        throw new Error(this.formatErrorMessage(error));
     }
+}
+
+// FIX 5: Update constructor to use correct base URL
+constructor() {
+    this.baseUrl = 'http://localhost:8080/api/hl7';  // Full URL instead of relative
+    this.cache = new Map();
+    this.stats = {
+        requests: 0,
+        errors: 0,
+        cacheHits: 0
+    };
+}
 
     /**
      * Parse HL7 file

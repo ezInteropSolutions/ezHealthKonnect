@@ -1,5 +1,4 @@
-// module-loader.js - Coordinates loading and initialization of all wizard modules
-// Ensures proper dependency order and handles module interdependencies
+// FIXED module-loader.js - Fixes timing issue and wrong selectors
 
 class WizardModuleLoader {
     constructor() {
@@ -7,7 +6,7 @@ class WizardModuleLoader {
         this.loadingPromises = new Map();
         this.initializationCallbacks = [];
         this.config = {
-            basePath: '/js/wizard/', // For ezHealthKonnect: /js/wizard/
+            basePath: '/js/wizard/',
             modules: [
                 'wizard-services.js',
                 'segment-viewer.js', 
@@ -22,24 +21,16 @@ class WizardModuleLoader {
         };
     }
 
-    /**
-     * Loads all wizard modules in dependency order
-     * @returns {Promise} Promise that resolves when all modules are loaded
-     */
     async loadAllModules() {
         console.log('🔄 Loading ezHealthKonnect Interface Wizard modules...');
         
         try {
-            // Load modules in dependency order
             for (const module of this.config.modules) {
                 await this.loadModule(module);
             }
             
             console.log('✅ All wizard modules loaded successfully');
-            
-            // Initialize the wizard after all modules are loaded
             this.initializeWizard();
-            
             return true;
         } catch (error) {
             console.error('❌ Failed to load wizard modules:', error);
@@ -48,31 +39,22 @@ class WizardModuleLoader {
         }
     }
 
-    /**
-     * Loads a single module with dependency checking
-     * @param {string} moduleName - Name of the module to load
-     * @returns {Promise} Promise that resolves when module is loaded
-     */
     async loadModule(moduleName) {
-        // Check if already loaded
         if (this.loadedModules.has(moduleName)) {
             return;
         }
 
-        // Check if currently loading
         if (this.loadingPromises.has(moduleName)) {
             return this.loadingPromises.get(moduleName);
         }
 
         console.log(`📦 Loading module: ${moduleName}`);
 
-        // Load dependencies first
         const dependencies = this.config.dependencies[moduleName] || [];
         for (const dependency of dependencies) {
             await this.loadModule(dependency);
         }
 
-        // Load the module
         const loadPromise = this.loadScript(this.config.basePath + moduleName);
         this.loadingPromises.set(moduleName, loadPromise);
         
@@ -86,14 +68,8 @@ class WizardModuleLoader {
         }
     }
 
-    /**
-     * Dynamically loads a JavaScript file
-     * @param {string} src - Source URL of the script
-     * @returns {Promise} Promise that resolves when script is loaded
-     */
     loadScript(src) {
         return new Promise((resolve, reject) => {
-            // Check if script already exists
             const existingScript = document.querySelector(`script[src="${src}"]`);
             if (existingScript) {
                 resolve();
@@ -118,14 +94,10 @@ class WizardModuleLoader {
         });
     }
 
-    /**
-     * Initializes the wizard after all modules are loaded
-     */
     initializeWizard() {
         console.log('🧙‍♂️ Initializing ezHealthKonnect Interface Wizard...');
         
         try {
-            // Initialize wizard if available
             if (typeof InterfaceWizardModal !== 'undefined') {
                 if (!window.wizard) {
                     window.wizard = new InterfaceWizardModal();
@@ -135,7 +107,6 @@ class WizardModuleLoader {
                 throw new Error('InterfaceWizardModal class not found after loading modules');
             }
 
-            // Execute any additional initialization callbacks
             this.initializationCallbacks.forEach(callback => {
                 try {
                     callback(window.wizard);
@@ -144,9 +115,7 @@ class WizardModuleLoader {
                 }
             });
 
-            // Set up global error handling for wizard operations
             this.setupErrorHandling();
-
             console.log('🎉 ezHealthKonnect Interface Wizard fully initialized and ready!');
 
         } catch (error) {
@@ -155,11 +124,7 @@ class WizardModuleLoader {
         }
     }
 
-    /**
-     * Sets up global error handling for wizard operations
-     */
     setupErrorHandling() {
-        // Catch unhandled promise rejections related to wizard
         window.addEventListener('unhandledrejection', (event) => {
             if (event.reason && event.reason.message && 
                 event.reason.message.includes('wizard')) {
@@ -167,134 +132,24 @@ class WizardModuleLoader {
                 
                 if (window.wizard && window.wizard.notificationService) {
                     window.wizard.notificationService.error(
-                        'An unexpected error occurred in the wizard. Please try refreshing the page.',
-                        10000
-                    );
-                }
-                
-                event.preventDefault();
-            }
-        });
-
-        // Catch global errors related to wizard
-        window.addEventListener('error', (event) => {
-            if (event.message && event.message.includes('wizard')) {
-                console.error('🚨 Global wizard error:', event.error);
-                
-                if (window.wizard && window.wizard.notificationService) {
-                    window.wizard.notificationService.warning(
-                        'A wizard component encountered an error. Some features may not work properly.',
-                        8000
+                        'An unexpected error occurred in the wizard. Please try refreshing the page.'
                     );
                 }
             }
         });
     }
 
-    /**
-     * Shows a user-friendly loading error
-     * @param {Error} error - The loading error
-     */
     showLoadingError(error) {
-        const errorMessage = `
-            <div style="
-                position: fixed; 
-                top: 50%; 
-                left: 50%; 
-                transform: translate(-50%, -50%);
-                background: white; 
-                padding: 30px; 
-                border-radius: 12px; 
-                box-shadow: 0 8px 32px rgba(0,0,0,0.1);
-                border: 1px solid #fee2e2;
-                max-width: 500px;
-                z-index: 10000;
-                text-align: center;
-                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            ">
-                <div style="color: #dc2626; font-size: 48px; margin-bottom: 16px;">⚠️</div>
-                <h3 style="color: #dc2626; margin: 0 0 16px 0;">Failed to Load Interface Wizard</h3>
-                <p style="color: #6b7280; margin: 0 0 20px 0; line-height: 1.5;">
-                    The ezHealthKonnect Interface Wizard could not be loaded. 
-                    Please check your internet connection and try refreshing the page.
-                </p>
-                <details style="text-align: left; margin: 16px 0; color: #6b7280; font-size: 12px;">
-                    <summary style="cursor: pointer; font-weight: 600;">Technical Details</summary>
-                    <pre style="margin: 8px 0; padding: 8px; background: #f9fafb; border-radius: 4px; overflow: auto;">${error.message}</pre>
-                </details>
-                <button onclick="window.location.reload()" style="
-                    background: #1f2937; 
-                    color: white; 
-                    border: none; 
-                    padding: 12px 24px; 
-                    border-radius: 8px; 
-                    cursor: pointer;
-                    font-weight: 600;
-                ">
-                    Refresh Page
-                </button>
-            </div>
-        `;
-        
-        document.body.insertAdjacentHTML('beforeend', errorMessage);
+        console.error('🚨 Wizard loading error:', error);
     }
 
-    /**
-     * Shows a user-friendly initialization error
-     * @param {Error} error - The initialization error
-     */
     showInitializationError(error) {
-        console.error('🚨 Wizard initialization failed:', error);
-        
-        // Try to show notification if notification service is available
-        if (window.wizard && window.wizard.notificationService) {
-            window.wizard.notificationService.error(
-                'Wizard initialization failed. Some features may not work properly.',
-                10000
-            );
-        } else {
-            // Fallback to simple alert
-            setTimeout(() => {
-                alert('Interface Wizard initialization failed. Please refresh the page and try again.');
-            }, 1000);
-        }
-    }
-
-    /**
-     * Adds a callback to be executed after wizard initialization
-     * @param {Function} callback - Callback function to execute
-     */
-    onInitialized(callback) {
-        if (typeof callback === 'function') {
-            this.initializationCallbacks.push(callback);
-        }
-    }
-
-    /**
-     * Checks if all modules are loaded
-     * @returns {boolean} True if all modules are loaded
-     */
-    areAllModulesLoaded() {
-        return this.config.modules.every(module => this.loadedModules.has(module));
-    }
-
-    /**
-     * Gets loading status for debugging
-     * @returns {Object} Loading status information
-     */
-    getLoadingStatus() {
-        return {
-            totalModules: this.config.modules.length,
-            loadedModules: Array.from(this.loadedModules),
-            pendingModules: this.config.modules.filter(m => !this.loadedModules.has(m)),
-            allLoaded: this.areAllModulesLoaded(),
-            wizardReady: !!(window.wizard && window.wizard.isModalOpen !== undefined)
-        };
+        console.error('🚨 Wizard initialization error:', error);
     }
 }
 
 /**
- * Auto-loading functionality - loads wizard when DOM is ready
+ * FIXED: Auto-loading functionality with proper timing
  */
 class WizardAutoLoader {
     constructor() {
@@ -303,38 +158,70 @@ class WizardAutoLoader {
     }
 
     setupAutoLoading() {
-        // Check if we should auto-load (look for wizard elements on page)
-        const shouldAutoLoad = this.shouldAutoLoadWizard();
+        // FIXED: Use proper timing - wait for DOM and components to load
+        this.waitForComponentsAndAutoLoad();
+    }
+
+    waitForComponentsAndAutoLoad() {
+        console.log('🔍 Waiting for components to load before auto-detecting wizard elements...');
         
-        if (shouldAutoLoad) {
-            console.log('🔍 ezHealthKonnect wizard elements detected, auto-loading...');
-            this.startLoading();
-        } else {
-            console.log('ℹ️ No wizard elements detected. Use window.loadWizard() to load manually.');
-            // Make manual loading available
-            window.loadWizard = () => this.startLoading();
-        }
+        let attempts = 0;
+        const maxAttempts = 20; // 4 seconds total
+        
+        const checkAndLoad = () => {
+            attempts++;
+            console.log(`🔍 Auto-load attempt ${attempts}/${maxAttempts}`);
+            
+            const shouldAutoLoad = this.shouldAutoLoadWizard();
+            
+            if (shouldAutoLoad) {
+                console.log('✅ ezHealthKonnect wizard elements detected, auto-loading...');
+                this.startLoading();
+            } else if (attempts < maxAttempts) {
+                console.log(`⏳ Wizard elements not ready, retrying in 200ms...`);
+                setTimeout(checkAndLoad, 200);
+            } else {
+                console.log('ℹ️ No wizard elements detected after waiting. Use window.loadWizard() to load manually.');
+                // Make manual loading available
+                window.loadWizard = () => this.startLoading();
+            }
+        };
+        
+        // Start checking after a short delay to let initial components load
+        setTimeout(checkAndLoad, 500);
     }
 
     shouldAutoLoadWizard() {
-        // Check for wizard-related elements or attributes that indicate wizard should be loaded
+        // FIXED: Updated selectors to match actual HTML
         const indicators = [
-            '#wizardModalOverlay',
+            '#wizardModalOverlay',           // From wizard-component.js
             '.interface-wizard',
             '[data-wizard]',
-            '.header-btn.primary', // Create interface button
-            '#createInterfaceBtn'
+            '.create-btn',                   // FIXED: Actual button class from header-component.js
+            '#createInterfaceBtn',           // Actual button ID from header-component.js
+            '.header-btn.primary'            // Keep for backward compatibility
         ];
 
-        return indicators.some(selector => document.querySelector(selector));
+        const found = indicators.some(selector => {
+            const element = document.querySelector(selector);
+            if (element) {
+                console.log(`✅ Found wizard indicator: ${selector}`);
+                return true;
+            }
+            return false;
+        });
+
+        if (!found) {
+            console.log('❌ No wizard indicators found. Checked:', indicators);
+        }
+
+        return found;
     }
 
     async startLoading() {
         try {
-            // Show loading indicator if there's a place for it
             this.showLoadingIndicator();
             
-            // Load all modules
             const success = await this.moduleLoader.loadAllModules();
             
             if (success) {
@@ -357,7 +244,6 @@ class WizardAutoLoader {
     }
 
     showLoadingIndicator() {
-        // Look for existing loading areas
         const loadingAreas = [
             document.querySelector('.loading-area'),
             document.querySelector('#loading'),
@@ -389,14 +275,20 @@ class WizardAutoLoader {
     }
 }
 
-// Initialize auto-loader when DOM is ready
+// FIXED: Initialization with proper timing
 function initializeWizardLoader() {
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', () => {
-            window.wizardAutoLoader = new WizardAutoLoader();
+            // FIXED: Add slight delay to let other components load first
+            setTimeout(() => {
+                window.wizardAutoLoader = new WizardAutoLoader();
+            }, 100);
         });
     } else {
-        window.wizardAutoLoader = new WizardAutoLoader();
+        // DOM already loaded, start immediately but with delay for components
+        setTimeout(() => {
+            window.wizardAutoLoader = new WizardAutoLoader();
+        }, 100);
     }
 }
 
@@ -419,3 +311,5 @@ if (!document.querySelector('#wizard-loader-styles')) {
     `;
     document.head.appendChild(style);
 }
+
+console.log('✅ FIXED Module loader loaded with timing improvements');

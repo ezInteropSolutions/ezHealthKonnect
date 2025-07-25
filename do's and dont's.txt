@@ -7,6 +7,7 @@ Do’s (Best Practices)
 - check dependencies of files
 - stick to the directroty structure
 - give logical file names
+- check for dependencies on external files before making any change
 
 Write tests alongside features
 Ensure every module or function has basic unit tests or integration tests.
@@ -42,6 +43,7 @@ Improves readability and reduces LLM hallucination in type inference.
 - No illogical file naming convetions
 - No hard coding
 - do not create unncecessary files and folders
+- do not restucture with out consulting
 Don't rely on the LLM without reviewing output
 Always test and inspect LLM-generated code critically.
 

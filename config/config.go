@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"log"
 	"os"
 	"path/filepath"
@@ -333,4 +334,39 @@ func (c *Config) LogConfiguration() {
 		log.Printf("   HIPAA Compliance: %v", c.HIPAAComplianceMode)
 		log.Printf("   Verbose Logging: %v", c.VerboseLogging)
 	}
+}
+
+// ADD: This method to the config.go file to support database URL retrieval
+// Add this to the Config struct methods section
+
+// GetDatabaseURL constructs and returns the database connection string
+func (c *Config) GetDatabaseURL() string {
+	// First check for DATABASE_URL environment variable
+	if dbURL := os.Getenv("DATABASE_URL"); dbURL != "" {
+		return dbURL
+	}
+
+	// If no DATABASE_URL, construct from individual components
+	if c.DBHost != "" && c.DBName != "" && c.DBUser != "" {
+		sslMode := c.DBSSLMode
+		if sslMode == "" {
+			sslMode = "disable"
+		}
+
+		port := c.DBPort
+		if port == "" {
+			port = "5432"
+		}
+
+		return fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=%s",
+			c.DBHost, port, c.DBUser, c.DBPassword, c.DBName, sslMode)
+	}
+
+	// No database configuration found
+	return ""
+}
+
+// HasDatabaseConfig returns true if database configuration is available
+func (c *Config) HasDatabaseConfig() bool {
+	return c.GetDatabaseURL() != ""
 }

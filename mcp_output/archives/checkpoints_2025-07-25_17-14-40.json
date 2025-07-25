@@ -1,104 +1,116 @@
 [
   {
-    "timestamp": "2025-07-20T09:27:32.253394",
+    "timestamp": "2025-07-23T23:48:43.255165",
     "file": "controllers\\interface_controller.go",
     "note": "// TODO: Save to database (for now, we'll simulate)",
     "line": 60
   },
   {
-    "timestamp": "2025-07-20T09:27:32.253404",
+    "timestamp": "2025-07-23T23:48:43.255172",
     "file": "controllers\\interface_controller.go",
     "note": "// TODO: Fetch from database",
     "line": 87
   },
   {
-    "timestamp": "2025-07-20T09:27:32.253407",
+    "timestamp": "2025-07-23T23:48:43.255175",
     "file": "controllers\\interface_controller.go",
     "note": "// TODO: Fetch from database",
     "line": 140
   },
   {
-    "timestamp": "2025-07-20T09:27:32.253409",
+    "timestamp": "2025-07-23T23:48:43.255176",
     "file": "controllers\\interface_controller.go",
     "note": "// TODO: Update in database",
     "line": 190
   },
   {
-    "timestamp": "2025-07-20T09:27:32.253410",
+    "timestamp": "2025-07-23T23:48:43.255177",
     "file": "controllers\\interface_controller.go",
     "note": "// TODO: Delete from database",
     "line": 215
   },
   {
-    "timestamp": "2025-07-20T09:27:32.253417",
+    "timestamp": "2025-07-23T23:48:43.255179",
     "file": "controllers\\interface_controller.go",
     "note": "// TODO: Implement interface start logic",
     "line": 230
   },
   {
-    "timestamp": "2025-07-20T09:27:32.253418",
+    "timestamp": "2025-07-23T23:48:43.255180",
     "file": "controllers\\interface_controller.go",
     "note": "// TODO: Implement interface stop logic",
     "line": 246
   },
   {
-    "timestamp": "2025-07-20T09:27:32.253419",
+    "timestamp": "2025-07-23T23:48:43.255181",
     "file": "controllers\\interface_controller.go",
     "note": "// TODO: Implement interface pause logic",
     "line": 262
   },
   {
-    "timestamp": "2025-07-20T09:27:32.255896",
+    "timestamp": "2025-07-23T23:48:43.256226",
+    "file": "controllers\\schema_fhir_transform_controller.go",
+    "note": "// TODO: Integrate with your existing HL7 schema system (hl7/parser.go, real_schema_parser.go)",
+    "line": 660
+  },
+  {
+    "timestamp": "2025-07-23T23:48:43.256231",
+    "file": "controllers\\schema_fhir_transform_controller.go",
+    "note": "// TODO: Integrate with your existing FHIR schema system (fhir/schema_loader.go)",
+    "line": 691
+  },
+  {
+    "timestamp": "2025-07-23T23:48:43.256859",
     "file": "controllers\\system_controller.go",
     "note": "\"status\": \"connected\", // TODO: Actual health check",
     "line": 84
   },
   {
-    "timestamp": "2025-07-20T09:27:32.255902",
+    "timestamp": "2025-07-23T23:48:43.256864",
     "file": "controllers\\system_controller.go",
     "note": "\"status\": \"connected\", // TODO: Actual health check",
     "line": 88
   },
   {
-    "timestamp": "2025-07-20T09:27:32.255903",
+    "timestamp": "2025-07-23T23:48:43.256865",
     "file": "controllers\\system_controller.go",
     "note": "// TODO: Implement actual metrics collection",
     "line": 97
   },
   {
-    "timestamp": "2025-07-20T09:27:32.258082",
+    "timestamp": "2025-07-23T23:48:43.258554",
     "file": "controllers\\wizard_api_controller.go",
     "note": "// TODO: Load from your database/storage",
-    "line": 219
+    "line": 311
   },
   {
-    "timestamp": "2025-07-20T09:27:32.258087",
+    "timestamp": "2025-07-23T23:48:43.258558",
     "file": "controllers\\wizard_api_controller.go",
     "note": "// TODO: Save to your database/storage",
-    "line": 253
+    "line": 345
   },
   {
-    "timestamp": "2025-07-20T09:27:32.258089",
+    "timestamp": "2025-07-23T23:48:43.258560",
     "file": "controllers\\wizard_api_controller.go",
     "note": "// TODO: Use your existing FHIR transformation engine",
-    "line": 289
+    "line": 385
   },
   {
-    "timestamp": "2025-07-20T09:27:32.258090",
+    "timestamp": "2025-07-23T23:48:43.258561",
     "file": "controllers\\wizard_api_controller.go",
     "note": "// TODO: Save to your database using existing interface controller logic",
-    "line": 329
+    "line": 429
   },
   {
-    "timestamp": "2025-07-20T09:27:32.258092",
+    "timestamp": "2025-07-23T23:48:43.258563",
     "file": "controllers\\wizard_api_controller.go",
     "note": "// TODO: Implement AI suggestions based on your schema analysis",
-    "line": 370
+    "line": 470
   },
   {
-    "timestamp": "2025-07-20T09:27:32.258093",
+    "timestamp": "2025-07-23T23:48:43.258564",
     "file": "controllers\\wizard_api_controller.go",
     "note": "// TODO: Use your existing FHIR validation logic",
-    "line": 411
+    "line": 511
   }
 ]

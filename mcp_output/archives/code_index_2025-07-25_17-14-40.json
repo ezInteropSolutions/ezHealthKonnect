@@ -26,8 +26,8 @@
   },
   {
     "path": "main.go",
-    "last_modified": "2025-07-19T23:22:08.938545",
-    "hash": "92dd190974044e18686cdf05652389e991c4165564407b55fc0e9546850cec8b",
+    "last_modified": "2025-07-23T09:49:58.584547",
+    "hash": "80d73b9365124c6a785c4a770cd3c8842b58911801fd92dc5491a263ccc66ccc",
     "functions": [
       "func main() {",
       "func setupWizardAPI() {",
@@ -56,8 +56,8 @@
   },
   {
     "path": "config\\config.go",
-    "last_modified": "2025-07-15T21:46:46.981366",
-    "hash": "9162d880d60142c9b282bdd4201870eb9c940832167262b58a578c8c02ff749d",
+    "last_modified": "2025-07-23T08:22:18.072880",
+    "hash": "9d833262d24d652195c5926f96726b9ffd174b9aa9bf3396dfc5bfe1ccb78ef5",
     "functions": [
       "func Load() *Config {",
       "func getEnv(key, defaultValue string) string {",
@@ -77,7 +77,9 @@
       "// Replace the validateHL7Schemas() function with this:",
       "func (c *Config) validateHL7Schemas() {",
       "func (c *Config) validateFHIRSchemas() {",
-      "func (c *Config) LogConfiguration() {"
+      "func (c *Config) LogConfiguration() {",
+      "func (c *Config) GetDatabaseURL() string {",
+      "func (c *Config) HasDatabaseConfig() bool {"
     ],
     "todos": []
   },
@@ -104,8 +106,8 @@
   },
   {
     "path": "controllers\\fhir_transform_controller.go",
-    "last_modified": "2025-07-16T22:17:51.857111",
-    "hash": "5c498dd6aff5f9b30b457ad066bd167c2924d1d83b1d8643da449a75eab7f3cc",
+    "last_modified": "2025-07-21T11:14:13.767589",
+    "hash": "17ca87c4b3a64bcfdb3e1194295a649c71e2d60e340edce967e0534e05b4ba30",
     "functions": [
       "func NewFHIRTransformController(database *sql.DB, cfg *config.Config) *FHIRTransformController {",
       "func (tc *FHIRTransformController) RegisterRoutes(api *gin.RouterGroup) {",
@@ -127,6 +129,13 @@
       "func (tc *FHIRTransformController) loadTransformationRules(messageType, profile string) ([]Transform",
       "func (tc *FHIRTransformController) loadRequiredSchemas(rules []TransformationRule, version, profile ",
       "func (tc *FHIRTransformController) applyTransformationRules(hl7Message map[string]interface{}, rules",
+      "func (tc *FHIRTransformController) initializeFHIRResource(resourceType string) map[string]interface{",
+      "func (tc *FHIRTransformController) applyRule(hl7Message map[string]interface{}, rule TransformationR",
+      "func (tc *FHIRTransformController) extractHL7Value(hl7Message map[string]interface{}, segment, field",
+      "func (tc *FHIRTransformController) transformValue(hl7Value string, transformRule map[string]interfac",
+      "func (tc *FHIRTransformController) setFHIRPath(resource map[string]interface{}, path string, value i",
+      "func (tc *FHIRTransformController) hasContent(resource map[string]interface{}) bool {",
+      "func (tc *FHIRTransformController) lookupCodeMapping(hl7Code, valueSet string) string {",
       "func (tc *FHIRTransformController) validateResources(resources []map[string]interface{}, schemas map",
       "func (tc *FHIRTransformController) validateRuleAgainstSchema(request RuleManagementRequest) bool {",
       "func (tc *FHIRTransformController) loadSchemasForResources(resources []map[string]interface{}, versi",
@@ -215,8 +224,8 @@
   },
   {
     "path": "controllers\\schema_fhir_transform_controller.go",
-    "last_modified": "2025-07-17T01:54:20.364108",
-    "hash": "58f5238f449bc7183d610e7fcfa1541db19bdb6e485ae2da3001211ac0255fd7",
+    "last_modified": "2025-07-23T10:32:25.360983",
+    "hash": "f64e9ea83742ba2cd90e46c6eb2aaa34eee4c1a519edce7c5bfa1efdbb1aaa2a",
     "functions": [
       "func NewSchemaFHIRTransformController(database *sql.DB, cfg *config.Config) *SchemaFHIRTransformCont",
       "func (c *SchemaFHIRTransformController) RegisterRoutes(router *gin.RouterGroup) {",
@@ -228,12 +237,37 @@
       "func (c *SchemaFHIRTransformController) CreateRule(ctx *gin.Context) {",
       "func (c *SchemaFHIRTransformController) UpdateRule(ctx *gin.Context) {",
       "func (c *SchemaFHIRTransformController) DeleteRule(ctx *gin.Context) {",
+      "func (c *SchemaFHIRTransformController) BatchUpdateRules(ctx *gin.Context) {",
+      "func (c *SchemaFHIRTransformController) GetUIConfiguration(ctx *gin.Context) {",
+      "func (c *SchemaFHIRTransformController) GetMappingSuggestions(ctx *gin.Context) {",
+      "func (c *SchemaFHIRTransformController) PreviewTransformation(ctx *gin.Context) {",
+      "func (c *SchemaFHIRTransformController) ValidateMapping(ctx *gin.Context) {",
+      "func (c *SchemaFHIRTransformController) GetHL7Structure(ctx *gin.Context) {",
+      "func (c *SchemaFHIRTransformController) GetFHIRStructure(ctx *gin.Context) {",
       "func (c *SchemaFHIRTransformController) GetAnalytics(ctx *gin.Context) {",
       "func (c *SchemaFHIRTransformController) GetTransformationLogs(ctx *gin.Context) {",
-      "func (c *SchemaFHIRTransformController) GetConfiguration(ctx *gin.Context) {",
-      "func (c *SchemaFHIRTransformController) UpdateConfiguration(ctx *gin.Context) {"
+      "func (c *SchemaFHIRTransformController) UpdateConfiguration(ctx *gin.Context) {",
+      "func (c *SchemaFHIRTransformController) loadMappingRulesFromDB(messageType, profile string) ([]Mappi",
+      "func (c *SchemaFHIRTransformController) saveRulesToDB(messageType, profile string, rules []MappingRu",
+      "func (c *SchemaFHIRTransformController) getHL7StructureForMessageType(messageType string) (map[strin",
+      "func (c *SchemaFHIRTransformController) getFHIRStructureForProfile(profile string) (map[string]FHIRR",
+      "func (c *SchemaFHIRTransformController) getMappingStatistics(rules []MappingRule) map[string]interfa",
+      "func (c *SchemaFHIRTransformController) validateMappingCompleteness(rules []MappingRule, hl7Structur",
+      "func (c *SchemaFHIRTransformController) generateFieldMappingSuggestions(messageType, hl7Field, profi",
+      "func (c *SchemaFHIRTransformController) validateRulesAgainstSchemas(rules []MappingRule, messageType",
+      "func (c *SchemaFHIRTransformController) autoFixMappingIssues(rules []MappingRule, validationResults ",
+      "func (c *SchemaFHIRTransformController) getDefaultMappingsForMessageType(messageType, profile string"
     ],
-    "todos": []
+    "todos": [
+      {
+        "line": 660,
+        "note": "// TODO: Integrate with your existing HL7 schema system (hl7/parser.go, real_schema_parser.go)"
+      },
+      {
+        "line": 691,
+        "note": "// TODO: Integrate with your existing FHIR schema system (fhir/schema_loader.go)"
+      }
+    ]
   },
   {
     "path": "controllers\\system_controller.go",
@@ -269,10 +303,13 @@
   },
   {
     "path": "controllers\\wizard_api_controller.go",
-    "last_modified": "2025-07-19T23:16:58.256474",
-    "hash": "2f122517f7954558d25230a7d5a29b78a5c54ae178e9a62890a67afbfc9c81e9",
+    "last_modified": "2025-07-21T10:41:55.919201",
+    "hash": "ebdd0d0de8911579ab95a074cf9d62ed1e052a79380be910b94affb109e9b695",
     "functions": [
       "func NewWizardController(cfg *config.Config) *WizardController {",
+      "func (ctrl *WizardController) toWizardView(rule fhir.MappingRule) WizardMappingRuleView {",
+      "func (ctrl *WizardController) fromWizardView(view WizardMappingRuleView) fhir.MappingRule {",
+      "func (ctrl *WizardController) getHL7FieldName(segment, field string) string {",
       "func (ctrl *WizardController) RegisterRoutes(router *gin.RouterGroup) {",
       "func (ctrl *WizardController) ParseHL7(c *gin.Context) {",
       "func (ctrl *WizardController) GetMappingRules(c *gin.Context) {",
@@ -282,39 +319,39 @@
       "func (ctrl *WizardController) GenerateAISuggestions(c *gin.Context) {",
       "func (ctrl *WizardController) ValidateFHIRResource(c *gin.Context) {",
       "func (ctrl *WizardController) countTotalFields(segments map[string]hl7.EnhancedSegment) int {",
-      "func (ctrl *WizardController) getDefaultMappingRules(messageType string) []MappingRule {"
+      "func (ctrl *WizardController) getDefaultMappingRules(messageType string) []WizardMappingRuleView {"
     ],
     "todos": [
       {
-        "line": 219,
+        "line": 311,
         "note": "// TODO: Load from your database/storage"
       },
       {
-        "line": 253,
+        "line": 345,
         "note": "// TODO: Save to your database/storage"
       },
       {
-        "line": 289,
+        "line": 385,
         "note": "// TODO: Use your existing FHIR transformation engine"
       },
       {
-        "line": 329,
+        "line": 429,
         "note": "// TODO: Save to your database using existing interface controller logic"
       },
       {
-        "line": 370,
+        "line": 470,
         "note": "// TODO: Implement AI suggestions based on your schema analysis"
       },
       {
-        "line": 411,
+        "line": 511,
         "note": "// TODO: Use your existing FHIR validation logic"
       }
     ]
   },
   {
-    "path": "database\\002_fhir_transformation_tables.sql",
-    "last_modified": "2025-07-16T21:21:38.822984",
-    "hash": "415fb8ba671d93d88bb09001bd09964026ac678ecc9f0096c83e65ff55148b9b",
+    "path": "database\\init\\01-initalize database.sql",
+    "last_modified": "2025-07-23T08:16:06.763142",
+    "hash": "cf468123d281fe4ac21ab3eeb43a303d07ca6eaf139637875e7dbdba99733347",
     "functions": [],
     "todos": []
   },
@@ -605,16 +642,24 @@
   },
   {
     "path": "public\\js\\interfaces.js",
-    "last_modified": "2025-07-01T11:44:54.174152",
-    "hash": "62822f9f0a1f9dde73f02c8e8b75ca2e96979e74dd034d64d10527262a0f5902",
+    "last_modified": "2025-07-22T17:55:11.284215",
+    "hash": "b84782916f5022c03062215bcd5bbe68c0b9e6af3dcc8bde421cd749868e2317",
     "functions": [
       "async function initializeInterfacesPage() {",
+      "// REPLACE your setupTooltips function with this JavaScript-based solution:",
+      "function setupTooltips() {",
+      "function showTooltip(e, text) {",
+      "function hideTooltip() {",
+      "function moveTooltip(e) {",
       "async function loadUserInfo() {",
       "function updateTime() {",
       "async function logout() {",
       "function setupEventListeners() {",
       "function setupAutoRefresh() {",
       "function addAutoRefreshIndicator() {",
+      "function setupEventListeners() {",
+      "function setupAutoRefresh() {",
+      "function updateRefreshRate() {",
       "function startAutoRefresh() {",
       "function stopAutoRefresh() {",
       "function handleUserInteraction() {",
@@ -650,7 +695,10 @@
       "function createDetailsContent(interface) {",
       "async function handleCreateInterface(event) {",
       "function showSuccess(message) {",
-      "function showError(message) {"
+      "function showError(message) {",
+      "function setupSidebarTooltips() {",
+      "function injectTooltipStyles() {",
+      "function initializeSidebarTooltips() {"
     ],
     "todos": []
   },
@@ -691,6 +739,90 @@
     "todos": []
   },
   {
+    "path": "public\\js\\components\\header-component.js",
+    "last_modified": "2025-07-23T23:33:39.352311",
+    "hash": "a485dcb71389e27dd9aa3d3406cbaf872abd0381d045eb374c317b8d6b8efa05",
+    "functions": [
+      "function loadHeaderComponent() {"
+    ],
+    "todos": []
+  },
+  {
+    "path": "public\\js\\components\\modal-components.js",
+    "last_modified": "2025-07-23T23:34:27.316056",
+    "hash": "e225c47cbdb56d12331012e12be57e3349d5d4e21a23942d960a5806e6420b43",
+    "functions": [
+      "function loadModalComponents() {",
+      "function loadCreateModal() {",
+      "function loadEditModal() {",
+      "function loadDetailsModal() {"
+    ],
+    "todos": []
+  },
+  {
+    "path": "public\\js\\components\\table-component.js",
+    "last_modified": "2025-07-23T23:34:02.827142",
+    "hash": "112869d5ba903b09b038a19189ba19d29e67856b5be2c53fe204639496d45b6e",
+    "functions": [
+      "function loadTableComponent() {"
+    ],
+    "todos": []
+  },
+  {
+    "path": "public\\js\\components\\wizard-component.js",
+    "last_modified": "2025-07-23T23:34:58.296501",
+    "hash": "bc74242833b259dff26a92b40669b620e65c9fc9b6ebfcf1b1b77d4a34a46cf8",
+    "functions": [
+      "function loadWizardComponent() {",
+      "function setupWizardModalEvents() {"
+    ],
+    "todos": []
+  },
+  {
+    "path": "public\\js\\core\\env-config.js",
+    "last_modified": "2025-07-23T23:33:08.079526",
+    "hash": "fcf5ca2e0e1cd3cc0bdb0c538daf4a3c534e63ed359fc1237678facc529997fe",
+    "functions": [],
+    "todos": []
+  },
+  {
+    "path": "public\\js\\core\\wizard-functions.js",
+    "last_modified": "2025-07-23T23:32:38.685083",
+    "hash": "bec07e66fa924cec81f24a31fccc653ece240efd54632f383c91825960a3758c",
+    "functions": [
+      "function openInterfaceWizard() {",
+      "function closeWizard() {",
+      "function toggleResourceCard(button) {",
+      "function openMappingDialog(fhirPath) {",
+      "function closeMappingDialog() {",
+      "function saveMapping() {",
+      "function closeLoadConfigModal() {",
+      "function closeSaveConfigModal() {",
+      "function selectConfiguration(configId) {",
+      "function loadSelectedConfig() {",
+      "function saveConfigurationToDb() {",
+      "function closeCreateModal() {",
+      "function closeEditModal() {",
+      "function closeDetailsModal() {",
+      "function logout() {",
+      "function getApiBaseUrl() {",
+      "async function loadHL7Structure(messageType) {",
+      "async function loadDefaultConfiguration(messageType) {",
+      "function FHIRFocusedMapping(messageType = null) {"
+    ],
+    "todos": []
+  },
+  {
+    "path": "public\\js\\core\\wizard-navigation.js",
+    "last_modified": "2025-07-23T23:48:09.324904",
+    "hash": "e0a22806af71ece974764f6204be101d68a30fb04f9868037c753c6a91f2f0b6",
+    "functions": [
+      "// Refresh interface table if function exists",
+      "function initWizardNavigation() {"
+    ],
+    "todos": []
+  },
+  {
     "path": "public\\js\\modules\\healthcare-rules.js",
     "last_modified": "2025-07-07T16:03:53.729109",
     "hash": "ed2e7c6be254aac3b915e21ef390178e69f0fa5e6e4c0ee9bd2626a487c2a5f1",
@@ -712,6 +844,15 @@
     "todos": []
   },
   {
+    "path": "public\\js\\modules\\step4-integration.js",
+    "last_modified": "2025-07-23T09:40:51.757946",
+    "hash": "efabdb91434a0c619047e5447b718c928b3adc995e9ffdc3959634dae8841ed6",
+    "functions": [
+      "// Test function for debugging"
+    ],
+    "todos": []
+  },
+  {
     "path": "public\\js\\modules\\validation-integration.js",
     "last_modified": "2025-07-07T16:11:00.800292",
     "hash": "c12a4921b39e06042ba911bf105abad8a5975721a7d9c2b04add709e08c7afc9",
@@ -727,9 +868,10 @@
   },
   {
     "path": "public\\js\\wizard\\module-loader.js",
-    "last_modified": "2025-07-19T21:26:09.786479",
-    "hash": "8f37b0a865ca7dac7c2fe8043529465878b47dc8fe983ea0cf591e32bace334d",
+    "last_modified": "2025-07-08T23:50:24.720973",
+    "hash": "2b05dec80e93d90970dc7a9f0854ea1256269b2ad2b22fa2c63c539f72ce862e",
     "functions": [
+      "* @param {Function} callback - Callback function to execute",
       "function initializeWizardLoader() {"
     ],
     "todos": []
@@ -743,78 +885,26 @@
   },
   {
     "path": "public\\js\\wizard\\step-handlers.js",
-    "last_modified": "2025-07-19T19:40:34.768533",
-    "hash": "117bccc40172cde6f68f1bd3c619be7c0696850a7fb03e54795aecdda4925686",
+    "last_modified": "2025-07-23T23:04:00.771270",
+    "hash": "a3c47b2dab08baa928ca0cbb0bdf1d8b9fb2bf74ebf1b22387f440f83b8466a3",
     "functions": [],
     "todos": []
   },
   {
     "path": "public\\js\\wizard\\wizard-main.js",
-    "last_modified": "2025-07-19T21:26:20.340169",
-    "hash": "34ef9b7988cd55938c65872f28e58f32c47ea4aef8b331a598db9512572e561a",
-    "functions": [],
+    "last_modified": "2025-07-22T18:28:09.372547",
+    "hash": "4ff230f63073ad0caab1149a6011a94a848866fd94065d0b06fc71d3b5a1e132",
+    "functions": [
+      "function openInterfaceWizard() {",
+      "function closeWizardModal() {",
+      "function initializeWizard() {"
+    ],
     "todos": []
   },
   {
     "path": "public\\js\\wizard\\wizard-services.js",
-    "last_modified": "2025-07-19T15:31:21.237050",
-    "hash": "bebe0a23618001c52b9da7e2900daa37867c7c9915f1263feff864702453b1f7",
-    "functions": [],
-    "todos": []
-  },
-  {
-    "path": "public\\js\\wizard\\handlers\\base-step-handler.js",
-    "last_modified": "2025-07-19T21:24:06.714097",
-    "hash": "1792fcb182bc54d77a35e5e6b6ace638762c52b51147aed17dc4e4ad43813a58",
-    "functions": [],
-    "todos": []
-  },
-  {
-    "path": "public\\js\\wizard\\handlers\\configuration-step-handler.js",
-    "last_modified": "2025-07-19T21:24:23.206946",
-    "hash": "1f853c9013f6ad5b8ff36519e10e86ce35a0985b0a7becf241c638afeb089996",
-    "functions": [],
-    "todos": []
-  },
-  {
-    "path": "public\\js\\wizard\\handlers\\review-step-handler.js",
-    "last_modified": "2025-07-19T21:25:04.729054",
-    "hash": "5f777c8997c22d52684883cd47824dd88f045c6d698a1c47e585c5419cbff101",
-    "functions": [],
-    "todos": []
-  },
-  {
-    "path": "public\\js\\wizard\\handlers\\summary-step-handler.js",
-    "last_modified": "2025-07-19T21:25:54.394385",
-    "hash": "713197108d72a78049d01473b8fb5ea62f399dac3c5c87627350091b74e40001",
-    "functions": [],
-    "todos": []
-  },
-  {
-    "path": "public\\js\\wizard\\handlers\\upload-step-handler.js",
-    "last_modified": "2025-07-19T21:24:50.079474",
-    "hash": "78427d0d4928722f9dbf00c9ee2e3f214e8fdf6bc3810d91827ab01243f34d0c",
-    "functions": [],
-    "todos": []
-  },
-  {
-    "path": "public\\js\\wizard\\handlers\\mapping\\mapping-api.js",
-    "last_modified": "2025-07-19T21:25:20.643950",
-    "hash": "8b6aa28fb980d7087aad83e53c49c36f715e9eb6465c5ceb6ef2c66b89f4e9af",
-    "functions": [],
-    "todos": []
-  },
-  {
-    "path": "public\\js\\wizard\\handlers\\mapping\\mapping-step-handler.js",
-    "last_modified": "2025-07-19T21:25:44.707889",
-    "hash": "3cb61ce54148ef23ef955c6d180211cb65bbf38abbaeba98cf368bc90dffc520",
-    "functions": [],
-    "todos": []
-  },
-  {
-    "path": "public\\js\\wizard\\handlers\\mapping\\mapping-ui.js",
-    "last_modified": "2025-07-19T21:25:35.226323",
-    "hash": "50db9e471a1b00d18cef7ce66f360b8a449aa1aca8c29b765234265d73d44337",
+    "last_modified": "2025-07-08T23:51:54.813011",
+    "hash": "e87ed913a8acd49f7a1214a8ded839269bd4c522b98f6bdf7ef08e92897f3008",
     "functions": [],
     "todos": []
   },

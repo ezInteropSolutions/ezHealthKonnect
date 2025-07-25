@@ -9,7 +9,7 @@
   },
   {
     "file": "main.go",
-    "hash": "f59c11256ffeb15f4ae5310d14671f9de8820e46f905db01c2d0e94790b578f7"
+    "hash": "80d73b9365124c6a785c4a770cd3c8842b58911801fd92dc5491a263ccc66ccc"
   },
   {
     "file": "reset-password.js",
@@ -21,7 +21,7 @@
   },
   {
     "file": "config\\config.go",
-    "hash": "9162d880d60142c9b282bdd4201870eb9c940832167262b58a578c8c02ff749d"
+    "hash": "9d833262d24d652195c5926f96726b9ffd174b9aa9bf3396dfc5bfe1ccb78ef5"
   },
   {
     "file": "config\\database.js",
@@ -53,7 +53,7 @@
   },
   {
     "file": "controllers\\schema_fhir_transform_controller.go",
-    "hash": "3b04d28ad42bd1e0d77f98006429fb6c1de6aea2a2cf821f87cb2938938697f9"
+    "hash": "f64e9ea83742ba2cd90e46c6eb2aaa34eee4c1a519edce7c5bfa1efdbb1aaa2a"
   },
   {
     "file": "controllers\\system_controller.go",
@@ -68,8 +68,8 @@
     "hash": "ebdd0d0de8911579ab95a074cf9d62ed1e052a79380be910b94affb109e9b695"
   },
   {
-    "file": "database\\002_fhir_transformation_tables.sql",
-    "hash": "415fb8ba671d93d88bb09001bd09964026ac678ecc9f0096c83e65ff55148b9b"
+    "file": "database\\init\\01-initalize database.sql",
+    "hash": "cf468123d281fe4ac21ab3eeb43a303d07ca6eaf139637875e7dbdba99733347"
   },
   {
     "file": "fhir\\schema_loader.go",
@@ -129,15 +129,15 @@
   },
   {
     "file": "public\\js\\hl7Service.js",
-    "hash": "9fb6d550e6871323826e49867297bbf972057632ca7dbe681e24faaa79d47b0d"
+    "hash": "d0ab1eac22c4d0debe006ea3934461764992fe3abac90d1f8d8cbef7a688813d"
   },
   {
     "file": "public\\js\\interface-wizard.js",
-    "hash": "4bcbb97ffa86e16214d36bb7d03e4d508e635f8ad1cd889f73ddf1ac21f93421"
+    "hash": "3216c447cfed9ddfe63212b0e2e8fae5bafac901e0681ae0c75cb31083f3af39"
   },
   {
     "file": "public\\js\\interfaces.js",
-    "hash": "e72bd9f09584c6d00c7961bfc7c4506ae57c268a25f0ec91fcb74b00f02b79cb"
+    "hash": "b84782916f5022c03062215bcd5bbe68c0b9e6af3dcc8bde421cd749868e2317"
   },
   {
     "file": "public\\js\\login.js",
@@ -146,6 +146,34 @@
   {
     "file": "public\\js\\user-management.js",
     "hash": "11cb0b5555ca1e9a168bd9ac2064cf53d9a6467bd54a79eb9f112774eb10235c"
+  },
+  {
+    "file": "public\\js\\components\\header-component.js",
+    "hash": "a485dcb71389e27dd9aa3d3406cbaf872abd0381d045eb374c317b8d6b8efa05"
+  },
+  {
+    "file": "public\\js\\components\\modal-components.js",
+    "hash": "e225c47cbdb56d12331012e12be57e3349d5d4e21a23942d960a5806e6420b43"
+  },
+  {
+    "file": "public\\js\\components\\table-component.js",
+    "hash": "112869d5ba903b09b038a19189ba19d29e67856b5be2c53fe204639496d45b6e"
+  },
+  {
+    "file": "public\\js\\components\\wizard-component.js",
+    "hash": "bc74242833b259dff26a92b40669b620e65c9fc9b6ebfcf1b1b77d4a34a46cf8"
+  },
+  {
+    "file": "public\\js\\core\\env-config.js",
+    "hash": "fcf5ca2e0e1cd3cc0bdb0c538daf4a3c534e63ed359fc1237678facc529997fe"
+  },
+  {
+    "file": "public\\js\\core\\wizard-functions.js",
+    "hash": "bec07e66fa924cec81f24a31fccc653ece240efd54632f383c91825960a3758c"
+  },
+  {
+    "file": "public\\js\\core\\wizard-navigation.js",
+    "hash": "e0a22806af71ece974764f6204be101d68a30fb04f9868037c753c6a91f2f0b6"
   },
   {
     "file": "public\\js\\modules\\healthcare-rules.js",
@@ -160,6 +188,10 @@
     "hash": "42c2237bb11df439d895c8ca8c838508e7fabc04bc2d9a5a5d4a0464dff3485b"
   },
   {
+    "file": "public\\js\\modules\\step4-integration.js",
+    "hash": "efabdb91434a0c619047e5447b718c928b3adc995e9ffdc3959634dae8841ed6"
+  },
+  {
     "file": "public\\js\\modules\\validation-integration.js",
     "hash": "c12a4921b39e06042ba911bf105abad8a5975721a7d9c2b04add709e08c7afc9"
   },
@@ -169,95 +201,23 @@
   },
   {
     "file": "public\\js\\wizard\\module-loader.js",
-    "hash": "3693d6e1a810bccf3ff88871fe6f2d15636b2bed8d27bc25d851ee6f712c17af"
+    "hash": "2b05dec80e93d90970dc7a9f0854ea1256269b2ad2b22fa2c63c539f72ce862e"
   },
   {
     "file": "public\\js\\wizard\\segment-viewer.js",
-    "hash": "a45f7d3f4d2e03a1e8bbfe9eada1925a28f16ff42ff7f7e59af7aa5d05bb755d"
+    "hash": "ab57028372953cca4ba64fdc448e5ba4c5818f3756448595a9c914da6e988d3a"
   },
   {
     "file": "public\\js\\wizard\\step-handlers.js",
-    "hash": "117bccc40172cde6f68f1bd3c619be7c0696850a7fb03e54795aecdda4925686"
+    "hash": "a3c47b2dab08baa928ca0cbb0bdf1d8b9fb2bf74ebf1b22387f440f83b8466a3"
   },
   {
     "file": "public\\js\\wizard\\wizard-main.js",
-    "hash": "ca2bf4bccf43c24539757555b5461ee6c561c93ab61c10741a46bbaf05f2b191"
-  },
-  {
-    "file": "public\\js\\wizard\\wizard-opener.js",
-    "hash": "f4dd0d6bf0f57c69f58917c2ecef32f69f2bc6d914b746d4f59eb305940f5be7"
+    "hash": "4ff230f63073ad0caab1149a6011a94a848866fd94065d0b06fc71d3b5a1e132"
   },
   {
     "file": "public\\js\\wizard\\wizard-services.js",
-    "hash": "a90bc9febdebfb5d77cd0a0cb57f0dae17ee12e33f6ce96cdd416c5c0c1f372b"
-  },
-  {
-    "file": "public\\js\\wizard\\handlers\\base-step-handler.js",
-    "hash": "9a98da5c7b68a82b484761b30676afb7f5509b7e21ac8b3cce22d0937f6aca95"
-  },
-  {
-    "file": "public\\js\\wizard\\handlers\\configuration-step-handler.js",
-    "hash": "858d2fb687bee3845d1dfe54b7508e3da4ec4cf1846adf2edadc57eab3650dc9"
-  },
-  {
-    "file": "public\\js\\wizard\\handlers\\review-step-handler.js",
-    "hash": "636235097d05c15ebe1cf44ed6f4c1ef41cc11ff5f461e759c990e297536415b"
-  },
-  {
-    "file": "public\\js\\wizard\\handlers\\summary-step-handler.js",
-    "hash": "713197108d72a78049d01473b8fb5ea62f399dac3c5c87627350091b74e40001"
-  },
-  {
-    "file": "public\\js\\wizard\\handlers\\upload-step-handler.js",
-    "hash": "4d11c205115945e3832e893a2e27fdba560e6639875315043b805efdab4d0123"
-  },
-  {
-    "file": "public\\js\\wizard\\handlers\\mapping\\mapping-api.js",
-    "hash": "eadbda34ad7141c788c1cc63e6469f356df2c87ccd7dd0b112669cad93df1833"
-  },
-  {
-    "file": "public\\js\\wizard\\handlers\\mapping\\mapping-step-handler.js",
-    "hash": "639223f3faedb4963e56cfe12311c50be599595f55e2646efce4162a14385aac"
-  },
-  {
-    "file": "public\\js\\wizard\\handlers\\mapping\\mapping-ui-integration.js",
-    "hash": "97b28e1ec0604f07b5a883c2cea2fa4a85a3ca786003e8606be9d6d6f6b22fb2"
-  },
-  {
-    "file": "public\\js\\wizard\\handlers\\mapping\\mapping-ui.js",
-    "hash": "9fe4026436925d031bfa7f92ce03d6e259e6dd709c0784d9651c212002800dc8"
-  },
-  {
-    "file": "public\\js\\wizard\\segment-viewer\\data-analyzer.js",
-    "hash": "f20f143bd180604841fdc5f93587fc330ac6a7d5bf1bcfad33c904c76d6d32ca"
-  },
-  {
-    "file": "public\\js\\wizard\\segment-viewer\\field-validator.js",
-    "hash": "0646a1a6a33fb34937db4368ee017a9b665806864d3b913dfcb64ab03a4bb3dd"
-  },
-  {
-    "file": "public\\js\\wizard\\segment-viewer\\modular-loader.js",
-    "hash": "659b8edcd09268ff8118db9a424dc66bbb0e6aba111dbae056d41b58c4643abe"
-  },
-  {
-    "file": "public\\js\\wizard\\segment-viewer\\segment-data-cache.js",
-    "hash": "764fadb118344a4a435327c62025189491934200bb835838996bd17fe2045415"
-  },
-  {
-    "file": "public\\js\\wizard\\segment-viewer\\segment-event-handler.js",
-    "hash": "61ed53f160209b9bb8033d3f33112fcc03f92e02988a1d663694caa44b204c5c"
-  },
-  {
-    "file": "public\\js\\wizard\\segment-viewer\\segment-renderer.js",
-    "hash": "2245066f235b30400e73c15a8cd3ff24508fd9682ba9d14c00a51524d7298a5b"
-  },
-  {
-    "file": "public\\js\\wizard\\segment-viewer\\segment-viewer-main.js",
-    "hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
-  },
-  {
-    "file": "public\\js\\wizard\\segment-viewer\\view-manager.js",
-    "hash": "c419df09e7c43e8d5235388f0cf5d1ca0931c19205cfc8f756e818be8ada4ccd"
+    "hash": "e87ed913a8acd49f7a1214a8ded839269bd4c522b98f6bdf7ef08e92897f3008"
   },
   {
     "file": "routes\\auth.js",

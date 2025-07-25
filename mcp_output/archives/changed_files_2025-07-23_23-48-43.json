@@ -129,15 +129,15 @@
   },
   {
     "file": "public\\js\\hl7Service.js",
-    "hash": "9fb6d550e6871323826e49867297bbf972057632ca7dbe681e24faaa79d47b0d"
+    "hash": "d0ab1eac22c4d0debe006ea3934461764992fe3abac90d1f8d8cbef7a688813d"
   },
   {
     "file": "public\\js\\interface-wizard.js",
-    "hash": "15c031832c2026ab46f19c3d85f5814ea3dee937406ab67598889db37b7c3927"
+    "hash": "3216c447cfed9ddfe63212b0e2e8fae5bafac901e0681ae0c75cb31083f3af39"
   },
   {
     "file": "public\\js\\interfaces.js",
-    "hash": "0c2091b33c5aa91b423db4564c1babaf3cae35b045994a715a8eb5cc8ce54cd5"
+    "hash": "62822f9f0a1f9dde73f02c8e8b75ca2e96979e74dd034d64d10527262a0f5902"
   },
   {
     "file": "public\\js\\login.js",
@@ -169,95 +169,23 @@
   },
   {
     "file": "public\\js\\wizard\\module-loader.js",
-    "hash": "3693d6e1a810bccf3ff88871fe6f2d15636b2bed8d27bc25d851ee6f712c17af"
+    "hash": "2b05dec80e93d90970dc7a9f0854ea1256269b2ad2b22fa2c63c539f72ce862e"
   },
   {
     "file": "public\\js\\wizard\\segment-viewer.js",
-    "hash": "a45f7d3f4d2e03a1e8bbfe9eada1925a28f16ff42ff7f7e59af7aa5d05bb755d"
+    "hash": "ab57028372953cca4ba64fdc448e5ba4c5818f3756448595a9c914da6e988d3a"
   },
   {
     "file": "public\\js\\wizard\\step-handlers.js",
-    "hash": "117bccc40172cde6f68f1bd3c619be7c0696850a7fb03e54795aecdda4925686"
+    "hash": "45a56bdad4908b70e594a8ec2dbf8443dfed67d2eca7af76c0273af26078be81"
   },
   {
     "file": "public\\js\\wizard\\wizard-main.js",
-    "hash": "8b195ce0064916b87af224b66c691020c8ed6843130a8f9ae474dc55c5966479"
-  },
-  {
-    "file": "public\\js\\wizard\\wizard-opener.js",
-    "hash": "8379e6925524876a86a8543d7c60f96197b79aebb3d53706c97be28cef738adb"
+    "hash": "692742f7f983c5864fb15c3180c648411a76fa6a50d7647ed1556f71b5f20a47"
   },
   {
     "file": "public\\js\\wizard\\wizard-services.js",
-    "hash": "a90bc9febdebfb5d77cd0a0cb57f0dae17ee12e33f6ce96cdd416c5c0c1f372b"
-  },
-  {
-    "file": "public\\js\\wizard\\handlers\\base-step-handler.js",
-    "hash": "9a98da5c7b68a82b484761b30676afb7f5509b7e21ac8b3cce22d0937f6aca95"
-  },
-  {
-    "file": "public\\js\\wizard\\handlers\\configuration-step-handler.js",
-    "hash": "858d2fb687bee3845d1dfe54b7508e3da4ec4cf1846adf2edadc57eab3650dc9"
-  },
-  {
-    "file": "public\\js\\wizard\\handlers\\review-step-handler.js",
-    "hash": "636235097d05c15ebe1cf44ed6f4c1ef41cc11ff5f461e759c990e297536415b"
-  },
-  {
-    "file": "public\\js\\wizard\\handlers\\summary-step-handler.js",
-    "hash": "713197108d72a78049d01473b8fb5ea62f399dac3c5c87627350091b74e40001"
-  },
-  {
-    "file": "public\\js\\wizard\\handlers\\upload-step-handler.js",
-    "hash": "4d11c205115945e3832e893a2e27fdba560e6639875315043b805efdab4d0123"
-  },
-  {
-    "file": "public\\js\\wizard\\handlers\\mapping\\mapping-api.js",
-    "hash": "eadbda34ad7141c788c1cc63e6469f356df2c87ccd7dd0b112669cad93df1833"
-  },
-  {
-    "file": "public\\js\\wizard\\handlers\\mapping\\mapping-step-handler.js",
-    "hash": "308b42cda81f420ffc572674c5c9d21556ed442e11738ba0ba98d3f4ef7093b8"
-  },
-  {
-    "file": "public\\js\\wizard\\handlers\\mapping\\mapping-ui-integration.js",
-    "hash": "97b28e1ec0604f07b5a883c2cea2fa4a85a3ca786003e8606be9d6d6f6b22fb2"
-  },
-  {
-    "file": "public\\js\\wizard\\handlers\\mapping\\mapping-ui.js",
-    "hash": "9fe4026436925d031bfa7f92ce03d6e259e6dd709c0784d9651c212002800dc8"
-  },
-  {
-    "file": "public\\js\\wizard\\segment-viewer\\data-analyzer.js",
-    "hash": "f20f143bd180604841fdc5f93587fc330ac6a7d5bf1bcfad33c904c76d6d32ca"
-  },
-  {
-    "file": "public\\js\\wizard\\segment-viewer\\field-validator.js",
-    "hash": "0646a1a6a33fb34937db4368ee017a9b665806864d3b913dfcb64ab03a4bb3dd"
-  },
-  {
-    "file": "public\\js\\wizard\\segment-viewer\\modular-loader.js",
-    "hash": "659b8edcd09268ff8118db9a424dc66bbb0e6aba111dbae056d41b58c4643abe"
-  },
-  {
-    "file": "public\\js\\wizard\\segment-viewer\\segment-data-cache.js",
-    "hash": "764fadb118344a4a435327c62025189491934200bb835838996bd17fe2045415"
-  },
-  {
-    "file": "public\\js\\wizard\\segment-viewer\\segment-event-handler.js",
-    "hash": "61ed53f160209b9bb8033d3f33112fcc03f92e02988a1d663694caa44b204c5c"
-  },
-  {
-    "file": "public\\js\\wizard\\segment-viewer\\segment-renderer.js",
-    "hash": "2245066f235b30400e73c15a8cd3ff24508fd9682ba9d14c00a51524d7298a5b"
-  },
-  {
-    "file": "public\\js\\wizard\\segment-viewer\\segment-viewer-main.js",
-    "hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
-  },
-  {
-    "file": "public\\js\\wizard\\segment-viewer\\view-manager.js",
-    "hash": "c419df09e7c43e8d5235388f0cf5d1ca0931c19205cfc8f756e818be8ada4ccd"
+    "hash": "e87ed913a8acd49f7a1214a8ded839269bd4c522b98f6bdf7ef08e92897f3008"
   },
   {
     "file": "routes\\auth.js",
