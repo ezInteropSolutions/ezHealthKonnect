@@ -175,7 +175,7 @@ func (c *Config) GetSchemaDirectory() string {
 	return c.SchemaDirectory
 }
 
-// NEW: GetFHIRSchemaDirectory returns the FHIR schema directory path
+// GetFHIRSchemaDirectory returns the FHIR schema directory path
 func (c *Config) GetFHIRSchemaDirectory() string {
 	return c.FHIRSchemaDir
 }
@@ -196,7 +196,7 @@ func (c *Config) GetSchemaConfig() map[string]interface{} {
 	}
 }
 
-// NEW: GetFHIRConfig returns FHIR-related configuration for logging/status
+// GetFHIRConfig returns FHIR-related configuration for logging/status
 func (c *Config) GetFHIRConfig() map[string]interface{} {
 	return map[string]interface{}{
 		"fhirSchemaDir":      c.FHIRSchemaDir,
@@ -207,51 +207,48 @@ func (c *Config) GetFHIRConfig() map[string]interface{} {
 	}
 }
 
-// ENHANCED: ValidateSchemaConfig validates both HL7 and FHIR schema configuration
+// ValidateSchemaConfig validates both HL7 and FHIR schema configuration - SILENT
 func (c *Config) ValidateSchemaConfig() {
 	if c.UseFilesystemSchema() {
-		// Validate main schema directory
+		// Validate main schema directory - SILENT unless verbose
 		if _, err := os.Stat(c.SchemaDirectory); os.IsNotExist(err) {
-			log.Printf("⚠️ WARNING: Schema directory does not exist: %s", c.SchemaDirectory)
-			log.Printf("   Create directory: mkdir -p %s", c.SchemaDirectory)
-			log.Printf("   Or set EZHEALTHKONNECT_SCHEMA_DIR environment variable")
-		} else {
-			log.Printf("✅ ezHealthKonnect Schema directory found: %s", c.SchemaDirectory)
+			if c.VerboseLogging {
+				log.Printf("⚠️ WARNING: Schema directory does not exist: %s", c.SchemaDirectory)
+				log.Printf("   Create directory: mkdir -p %s", c.SchemaDirectory)
+				log.Printf("   Or set EZHEALTHKONNECT_SCHEMA_DIR environment variable")
+			}
 		}
+		// Silent success - no logging when directory exists
 
-		// Validate HL7 schemas
+		// Validate HL7 and FHIR schemas - now silent
 		c.validateHL7Schemas()
-
-		// NEW: Validate FHIR schemas
 		c.validateFHIRSchemas()
 	}
 
-	if c.UseLegacyDictionary() {
+	if c.UseLegacyDictionary() && c.VerboseLogging {
 		log.Printf("📡 Using legacy HTTP dictionary service: %s", c.GetDictionaryURL())
 		log.Printf("   Consider migrating to ezHealthKonnect Schema System for better performance")
 	}
 }
 
-// validateHL7Schemas validates HL7 schema configuration
-// Fix for config/config.go
-// Replace the validateHL7Schemas() function with this:
-
+// validateHL7Schemas validates HL7 schema configuration - SILENT
 func (c *Config) validateHL7Schemas() {
-	// Check for HL7 schema files in HL7 subdirectory (NEW - correct path)
 	hl7SchemaDir := filepath.Join(c.SchemaDirectory, "hl7")
 
 	entries, err := os.ReadDir(hl7SchemaDir)
 	if err != nil {
-		log.Printf("⚠️ WARNING: HL7 schema directory not found: %s", hl7SchemaDir)
-		log.Printf("   Create directory: mkdir -p %s", hl7SchemaDir)
-		log.Printf("   Add your HL7 schema files (.gz) to version subdirectories")
+		// Only log if verbose logging is enabled
+		if c.VerboseLogging {
+			log.Printf("⚠️ WARNING: HL7 schema directory not found: %s", hl7SchemaDir)
+			log.Printf("   Create directory: mkdir -p %s", hl7SchemaDir)
+			log.Printf("   Add your HL7 schema files (.gz) to version subdirectories")
+		}
 		return
 	}
 
 	schemaCount := 0
 	for _, entry := range entries {
 		if entry.IsDir() {
-			// Check version directories like v2.5.1, v2.6, etc.
 			versionDir := filepath.Join(hl7SchemaDir, entry.Name())
 			if versionFiles, err := filepath.Glob(filepath.Join(versionDir, "*.gz")); err == nil {
 				schemaCount += len(versionFiles)
@@ -261,50 +258,50 @@ func (c *Config) validateHL7Schemas() {
 		}
 	}
 
-	if schemaCount == 0 {
+	if schemaCount == 0 && c.VerboseLogging {
 		log.Printf("⚠️ WARNING: No HL7 schema files found in %s", hl7SchemaDir)
 		log.Printf("   Add your compressed HL7 schema files (.gz) to version subdirectories")
 		log.Printf("   Expected structure: %s/v2.5/*.gz", hl7SchemaDir)
-	} else {
-		log.Printf("✅ Found %d HL7 schema files in %s", schemaCount, hl7SchemaDir)
 	}
+	// Silent success - no logging when schemas are found
 }
 
-// NEW: validateFHIRSchemas validates FHIR schema configuration
+// validateFHIRSchemas validates FHIR schema configuration - SILENT
 func (c *Config) validateFHIRSchemas() {
 	if _, err := os.Stat(c.FHIRSchemaDir); os.IsNotExist(err) {
-		log.Printf("⚠️ WARNING: FHIR schema directory does not exist: %s", c.FHIRSchemaDir)
-		log.Printf("   Create directory structure:")
-		log.Printf("     mkdir -p %s/R4/resources", c.FHIRSchemaDir)
-		log.Printf("     mkdir -p %s/R4/profiles/us-core", c.FHIRSchemaDir)
-	} else {
-		log.Printf("✅ FHIR schema directory found: %s", c.FHIRSchemaDir)
-
-		// Check for FHIR schema files
-		r4ResourcesDir := filepath.Join(c.FHIRSchemaDir, "R4", "resources")
-		r4ProfilesDir := filepath.Join(c.FHIRSchemaDir, "R4", "profiles", "us-core")
-
-		resourceCount := 0
-		profileCount := 0
-
-		if resourceFiles, err := filepath.Glob(filepath.Join(r4ResourcesDir, "*.gz")); err == nil {
-			resourceCount = len(resourceFiles)
+		// Only log warnings if verbose logging is enabled
+		if c.VerboseLogging {
+			log.Printf("⚠️ WARNING: FHIR schema directory does not exist: %s", c.FHIRSchemaDir)
+			log.Printf("   Create directory structure:")
+			log.Printf("     mkdir -p %s/R4/resources", c.FHIRSchemaDir)
+			log.Printf("     mkdir -p %s/R4/profiles/us-core", c.FHIRSchemaDir)
 		}
-
-		if profileFiles, err := filepath.Glob(filepath.Join(r4ProfilesDir, "*.gz")); err == nil {
-			profileCount = len(profileFiles)
-		}
-
-		if resourceCount == 0 && profileCount == 0 {
-			log.Printf("⚠️ WARNING: No FHIR schema files found in %s", c.FHIRSchemaDir)
-			log.Printf("   Add your FHIR schema files (.gz) to resources/ and profiles/us-core/")
-		} else {
-			log.Printf("✅ Found %d FHIR resources, %d US Core profiles", resourceCount, profileCount)
-		}
+		return
 	}
+
+	// Silent when directory exists
+	r4ResourcesDir := filepath.Join(c.FHIRSchemaDir, "R4", "resources")
+	r4ProfilesDir := filepath.Join(c.FHIRSchemaDir, "R4", "profiles", "us-core")
+
+	resourceCount := 0
+	profileCount := 0
+
+	if resourceFiles, err := filepath.Glob(filepath.Join(r4ResourcesDir, "*.gz")); err == nil {
+		resourceCount = len(resourceFiles)
+	}
+
+	if profileFiles, err := filepath.Glob(filepath.Join(r4ProfilesDir, "*.gz")); err == nil {
+		profileCount = len(profileFiles)
+	}
+
+	if resourceCount == 0 && profileCount == 0 && c.VerboseLogging {
+		log.Printf("⚠️ WARNING: No FHIR schema files found in %s", c.FHIRSchemaDir)
+		log.Printf("   Add your FHIR schema files (.gz) to resources/ and profiles/us-core/")
+	}
+	// Silent success - no logging about found schema counts
 }
 
-// ENHANCED: LogConfiguration logs both HL7 and FHIR configuration
+// LogConfiguration logs both HL7 and FHIR configuration - ONLY IF VERBOSE
 func (c *Config) LogConfiguration() {
 	if c.VerboseLogging {
 		log.Println("🔧 ezHealthKonnect Configuration:")
@@ -322,7 +319,7 @@ func (c *Config) LogConfiguration() {
 		log.Printf("   HL7 Validation Level: %s", c.HL7ValidationLevel)
 		log.Printf("   Default HL7 Version: %s", c.DefaultHL7Version)
 
-		// NEW: FHIR Configuration
+		// FHIR Configuration
 		log.Println("🏥 FHIR Configuration:")
 		log.Printf("   FHIR Schema Directory: %s", c.FHIRSchemaDir)
 		log.Printf("   Default FHIR Version: %s", c.DefaultFHIRVersion)
@@ -334,10 +331,8 @@ func (c *Config) LogConfiguration() {
 		log.Printf("   HIPAA Compliance: %v", c.HIPAAComplianceMode)
 		log.Printf("   Verbose Logging: %v", c.VerboseLogging)
 	}
+	// Silent when VerboseLogging is false
 }
-
-// ADD: This method to the config.go file to support database URL retrieval
-// Add this to the Config struct methods section
 
 // GetDatabaseURL constructs and returns the database connection string
 func (c *Config) GetDatabaseURL() string {
@@ -348,10 +343,7 @@ func (c *Config) GetDatabaseURL() string {
 
 	// If no DATABASE_URL, construct from individual components
 	if c.DBHost != "" && c.DBName != "" && c.DBUser != "" {
-		sslMode := c.DBSSLMode
-		if sslMode == "" {
-			sslMode = "disable"
-		}
+		sslMode := normalizeSSLMode(c.DBSSLMode)
 
 		port := c.DBPort
 		if port == "" {
@@ -364,6 +356,21 @@ func (c *Config) GetDatabaseURL() string {
 
 	// No database configuration found
 	return ""
+}
+
+// normalizeSSLMode converts common boolean-like values to valid lib/pq sslmode values
+// "false", "0", "no", "disable", "disabled" -> "disable"
+// "true", "1", "yes", "enable", "enabled", "require" -> "require"
+func normalizeSSLMode(input string) string {
+	v := strings.ToLower(strings.TrimSpace(input))
+	switch v {
+	case "", "false", "0", "no", "disable", "disabled":
+		return "disable"
+	case "true", "1", "yes", "enable", "enabled", "require":
+		return "require"
+	default:
+		return v
+	}
 }
 
 // HasDatabaseConfig returns true if database configuration is available

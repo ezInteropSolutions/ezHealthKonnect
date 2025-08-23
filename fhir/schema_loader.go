@@ -1,5 +1,5 @@
 // fhir/schema_loader.go
-// Enterprise-grade FHIR schema loader following ezHealthKonnect HL7 patterns
+// Enterprise-grade FHIR schema loader with ERROR-ONLY logging
 package fhir
 
 import (
@@ -75,57 +75,109 @@ type FHIRSchemaLoader struct {
 var fhirSchemaLoader *FHIRSchemaLoader
 
 // =====================================
-// INITIALIZATION - Enterprise Pattern
+// INITIALIZATION - SILENT
 // =====================================
 
 // InitFHIRSchemaLoader initializes the FHIR schema loader
 func InitFHIRSchemaLoader(schemaDirectory string) {
-	fmt.Printf("🔍 DEBUG: InitFHIRSchemaLoader called with directory: %s\n", schemaDirectory)
-
-	// Use the directory directly (it should already be the FHIR directory)
 	fhirSchemaDir := schemaDirectory
 
-	// Check if it exists, if not create it
+	// REMOVED: Auto-directory creation logic
+	// The schema directory MUST exist as part of FHIR package setup
 	if _, err := os.Stat(fhirSchemaDir); os.IsNotExist(err) {
-		fmt.Printf("⚠️ WARNING: FHIR schema directory does not exist: %s\n", fhirSchemaDir)
-		if err := os.MkdirAll(fhirSchemaDir, 0755); err != nil {
-			fmt.Printf("❌ ERROR: Failed to create FHIR schema directory: %v\n", err)
-			return
-		}
-
-		// Create standard FHIR directory structure
-		versions := []string{"R4", "R5"}
-		for _, version := range versions {
-			versionPath := filepath.Join(fhirSchemaDir, version)
-			os.MkdirAll(filepath.Join(versionPath, "resources"), 0755)
-			os.MkdirAll(filepath.Join(versionPath, "profiles", "us-core"), 0755)
-			fmt.Printf("📁 Created FHIR structure: %s\n", versionPath)
-		}
+		fmt.Printf("❌ FATAL: FHIR schema directory does not exist: %s\n", fhirSchemaDir)
+		fmt.Printf("💡 HINT: Download and extract FHIR packages to this directory first\n")
+		fmt.Printf("💡 Expected structure: %s/R4/resources/*.gz\n", fhirSchemaDir)
+		fmt.Printf("💡 Expected structure: %s/R4/profiles/us-core/*.gz\n", fhirSchemaDir)
+		return // Fail initialization
 	}
 
+	// Create the loader instance
 	fhirSchemaLoader = &FHIRSchemaLoader{
 		schemaDir: fhirSchemaDir,
 		cache:     make(map[string]*FHIRSchema),
 	}
 
-	fmt.Printf("🚀 FHIR Schema Loader initialized successfully: %s\n", fhirSchemaDir)
-
-	// Scan for existing FHIR schemas
-	schemaFiles, err := scanForFHIRSchemas(fhirSchemaDir)
+	// FIXED: Scan for existing FHIR schemas using VERSION-AWARE scanning
+	schemaFiles, err := scanVersionAwareFHIRSchemas(fhirSchemaDir)
 	if err != nil {
-		fmt.Printf("⚠️ Warning: Error scanning for FHIR schemas: %v\n", err)
-	} else {
-		fmt.Printf("📊 Found %d FHIR schema files\n", len(schemaFiles))
-		if len(schemaFiles) == 0 {
-			createSampleFHIRSchema(fhirSchemaDir)
-		} else {
-			fmt.Printf("✅ FHIR schema files found:\n")
-			for _, file := range schemaFiles {
-				rel, _ := filepath.Rel(fhirSchemaDir, file)
-				fmt.Printf("  📄 %s\n", rel)
+		fmt.Printf("❌ ERROR: Failed to scan FHIR schemas: %v\n", err)
+		return
+	}
+
+	if len(schemaFiles) == 0 {
+		fmt.Printf("❌ FATAL: No FHIR schema files found in expected locations\n")
+		fmt.Printf("💡 Expected files in: %s/R4/resources/*.gz\n", fhirSchemaDir)
+		fmt.Printf("💡 Expected files in: %s/R4/profiles/*/*.gz\n", fhirSchemaDir)
+
+		// List what directories actually exist
+		if entries, err := os.ReadDir(fhirSchemaDir); err == nil {
+			fmt.Printf("📁 Found directories: ")
+			for _, entry := range entries {
+				if entry.IsDir() {
+					fmt.Printf("%s ", entry.Name())
+				}
+			}
+			fmt.Printf("\n")
+		}
+
+		return // Fail initialization instead of creating samples
+	}
+
+	fmt.Printf("✅ FHIR schema loader initialized with %d schema files\n", len(schemaFiles))
+}
+
+func scanVersionAwareFHIRSchemas(baseDir string) ([]string, error) {
+	var schemaFiles []string
+
+	// Define expected FHIR versions and their paths
+	versionPaths := []struct {
+		version string
+		paths   []string
+	}{
+		{
+			version: "R4",
+			paths: []string{
+				filepath.Join(baseDir, "R4", "resources"),           // /app/schemas/fhir/R4/resources/
+				filepath.Join(baseDir, "R4", "profiles", "us-core"), // /app/schemas/fhir/R4/profiles/us-core/
+				filepath.Join(baseDir, "R4", "profiles", "base"),    // /app/schemas/fhir/R4/profiles/base/
+			},
+		},
+		{
+			version: "R5",
+			paths: []string{
+				filepath.Join(baseDir, "R5", "resources"),           // /app/schemas/fhir/R5/resources/
+				filepath.Join(baseDir, "R5", "profiles", "us-core"), // /app/schemas/fhir/R5/profiles/us-core/
+			},
+		},
+	}
+
+	// Scan each version-specific path
+	for _, versionInfo := range versionPaths {
+		for _, scanPath := range versionInfo.paths {
+			// Check if path exists
+			if _, err := os.Stat(scanPath); os.IsNotExist(err) {
+				continue // Skip non-existent paths (not an error)
+			}
+
+			// Scan for .gz files in this specific path
+			pattern := filepath.Join(scanPath, "*.gz")
+			files, err := filepath.Glob(pattern)
+			if err != nil {
+				fmt.Printf("⚠️ WARNING: Error scanning %s: %v\n", pattern, err)
+				continue
+			}
+
+			// Add found files
+			schemaFiles = append(schemaFiles, files...)
+
+			if len(files) > 0 {
+				fmt.Printf("📁 Found %d schema files in %s\n", len(files), scanPath)
 			}
 		}
 	}
+
+	return schemaFiles, nil
 }
 
 // GetFHIRSchemaLoader returns the FHIR schema loader instance
@@ -134,7 +186,7 @@ func GetFHIRSchemaLoader() *FHIRSchemaLoader {
 }
 
 // =====================================
-// CORE LOADING FUNCTIONS - Enterprise Grade
+// CORE LOADING FUNCTIONS - SILENT
 // =====================================
 
 // LoadFHIRSchema loads a FHIR schema by resource type, profile, and version
@@ -165,7 +217,7 @@ func (fsl *FHIRSchemaLoader) LoadFHIRSchema(resourceType, profile, version strin
 		fsl.stats.CacheHits++
 		fsl.statsMux.Unlock()
 
-		fmt.Printf("✅ CACHE HIT: Using cached FHIR schema for %s\n", cacheKey)
+		// Silent cache hit - no logging
 		return schema, nil
 	}
 	fsl.cacheMux.RUnlock()
@@ -176,34 +228,29 @@ func (fsl *FHIRSchemaLoader) LoadFHIRSchema(resourceType, profile, version strin
 
 	// Resolve schema file path
 	schemaPath := fsl.resolveSchemaPath(resourceType, profile, version)
-	fmt.Printf("🔍 DEBUG: Looking for FHIR schema file: %s\n", schemaPath)
 
 	// Check if file exists
 	if _, err := os.Stat(schemaPath); os.IsNotExist(err) {
-		// Try alternative paths
+		// Try alternative paths - SILENT
 		alternativePath := fsl.tryAlternativePaths(resourceType, profile, version)
 		if alternativePath != "" {
 			schemaPath = alternativePath
-			fmt.Printf("✅ Found alternative FHIR schema: %s\n", schemaPath)
 		} else {
 			fsl.statsMux.Lock()
 			fsl.stats.LoadErrors++
 			fsl.statsMux.Unlock()
 
-			fmt.Printf("❌ No FHIR schema file found for %s\n", cacheKey)
 			return nil, fmt.Errorf("FHIR schema file not found: %s", schemaPath)
 		}
 	}
 
-	// Load and parse schema
-	fmt.Printf("✅ Loading FHIR schema from: %s\n", schemaPath)
+	// Load and parse schema - SILENT
 	schema, err := fsl.loadAndParseFHIRSchema(schemaPath)
 	if err != nil {
 		fsl.statsMux.Lock()
 		fsl.stats.LoadErrors++
 		fsl.statsMux.Unlock()
 
-		fmt.Printf("❌ Failed to load FHIR schema %s: %v\n", cacheKey, err)
 		return nil, fmt.Errorf("failed to load FHIR schema %s: %v", cacheKey, err)
 	}
 
@@ -221,13 +268,12 @@ func (fsl *FHIRSchemaLoader) LoadFHIRSchema(resourceType, profile, version strin
 	fsl.stats.LastLoadTime = time.Now()
 	fsl.statsMux.Unlock()
 
-	fmt.Printf("✅ Successfully loaded and cached FHIR schema: %s (elements: %d)\n",
-		cacheKey, len(schema.Elements))
+	// Silent success - no logging
 	return schema, nil
 }
 
 // =====================================
-// PATH RESOLUTION - Enterprise Logic
+// PATH RESOLUTION - SILENT
 // =====================================
 
 // resolveSchemaPath resolves the file path for a FHIR schema
@@ -270,7 +316,7 @@ func (fsl *FHIRSchemaLoader) tryAlternativePaths(resourceType, profile, version 
 }
 
 // =====================================
-// FILE LOADING - Enterprise Grade
+// FILE LOADING - SILENT
 // =====================================
 
 // loadAndParseFHIRSchema loads and parses a FHIR schema from .gz file
@@ -297,12 +343,11 @@ func (fsl *FHIRSchemaLoader) loadAndParseFHIRSchema(filePath string) (*FHIRSchem
 	schema.LoadedAt = time.Now()
 	schema.FilePath = filePath
 
-	fmt.Printf("✅ FHIR schema loaded: %s v%s (elements: %d, required: %d)\n",
-		schema.ResourceType, schema.Version, len(schema.Elements), len(schema.Required))
+	// Silent success - no logging
 
-	// Validate schema structure
+	// Validate schema structure - only log errors
 	if err := fsl.validateFHIRSchema(&schema); err != nil {
-		fmt.Printf("⚠️ WARNING: FHIR schema validation issues: %v\n", err)
+		fmt.Printf("❌ ERROR: FHIR schema validation failed: %v\n", err)
 		// Don't fail on validation warnings, just log them
 	}
 
@@ -310,7 +355,7 @@ func (fsl *FHIRSchemaLoader) loadAndParseFHIRSchema(filePath string) (*FHIRSchem
 }
 
 // =====================================
-// VALIDATION - Enterprise Quality
+// VALIDATION - ERROR-ONLY
 // =====================================
 
 // validateFHIRSchema performs basic validation on loaded schema
@@ -351,7 +396,7 @@ func (fsl *FHIRSchemaLoader) validateFHIRSchema(schema *FHIRSchema) error {
 }
 
 // =====================================
-// UTILITY FUNCTIONS - Enterprise Support
+// UTILITY FUNCTIONS - SILENT
 // =====================================
 
 // GetStats returns current loader statistics
@@ -370,17 +415,15 @@ func (fsl *FHIRSchemaLoader) ClearCache() {
 	fsl.cacheMux.Lock()
 	defer fsl.cacheMux.Unlock()
 
-	oldSize := len(fsl.cache)
 	fsl.cache = make(map[string]*FHIRSchema)
-
-	fmt.Printf("🔄 FHIR schema cache cleared (was: %d schemas)\n", oldSize)
+	// Silent cache clear - no logging
 }
 
 // ListAvailableSchemas returns list of available FHIR schemas
 func (fsl *FHIRSchemaLoader) ListAvailableSchemas() ([]string, error) {
 	var schemas []string
 
-	// Scan R4 resources
+	// Scan R4 resources - CORRECT
 	r4ResourcesDir := filepath.Join(fsl.schemaDir, "R4", "resources")
 	if files, err := filepath.Glob(filepath.Join(r4ResourcesDir, "*.gz")); err == nil {
 		for _, file := range files {
@@ -389,7 +432,7 @@ func (fsl *FHIRSchemaLoader) ListAvailableSchemas() ([]string, error) {
 		}
 	}
 
-	// Scan R4 US Core profiles
+	// Scan R4 US Core profiles - CORRECT
 	r4ProfilesDir := filepath.Join(fsl.schemaDir, "R4", "profiles", "us-core")
 	if files, err := filepath.Glob(filepath.Join(r4ProfilesDir, "*.gz")); err == nil {
 		for _, file := range files {
@@ -398,13 +441,20 @@ func (fsl *FHIRSchemaLoader) ListAvailableSchemas() ([]string, error) {
 		}
 	}
 
-	// Future: Add R5 when available
+	// Add R5 support
+	r5ResourcesDir := filepath.Join(fsl.schemaDir, "R5", "resources")
+	if files, err := filepath.Glob(filepath.Join(r5ResourcesDir, "*.gz")); err == nil {
+		for _, file := range files {
+			resourceType := strings.TrimSuffix(filepath.Base(file), ".gz")
+			schemas = append(schemas, fmt.Sprintf("R5_base_%s", resourceType))
+		}
+	}
 
 	return schemas, nil
 }
 
 // =====================================
-// HELPER FUNCTIONS
+// HELPER FUNCTIONS - SILENT
 // =====================================
 
 // scanForFHIRSchemas scans directory for FHIR .gz schema files
@@ -420,84 +470,4 @@ func scanForFHIRSchemas(baseDir string) ([]string, error) {
 		return nil
 	})
 	return schemaFiles, err
-}
-
-// createSampleFHIRSchema creates sample FHIR schemas for testing
-func createSampleFHIRSchema(baseDir string) {
-	fmt.Printf("🛠️ Creating sample FHIR schemas for testing...\n")
-
-	// Create sample Patient schema
-	r4ResourcesDir := filepath.Join(baseDir, "R4", "resources")
-	if err := os.MkdirAll(r4ResourcesDir, 0755); err != nil {
-		fmt.Printf("❌ Failed to create R4 resources directory: %v\n", err)
-		return
-	}
-
-	samplePatientSchema := FHIRSchema{
-		ResourceType: "Patient",
-		Version:      "R4",
-		Name:         "Patient",
-		Description:  "Demographics and other administrative information about an individual or animal receiving care.",
-		BaseResource: "DomainResource",
-		Elements: map[string]*FHIRElement{
-			"Patient.id": {
-				Path:        "Patient.id",
-				Name:        "Logical id of this artifact",
-				Description: "The logical id of the resource, as used in the URL for the resource.",
-				DataType:    "id",
-				Cardinality: "0..1",
-				Required:    false,
-				MustSupport: false,
-				IsSummary:   true,
-			},
-			"Patient.identifier": {
-				Path:        "Patient.identifier",
-				Name:        "An identifier for this patient",
-				Description: "An identifier for this patient.",
-				DataType:    "Identifier",
-				Cardinality: "0..*",
-				Required:    false,
-				MustSupport: false,
-				IsSummary:   true,
-			},
-			"Patient.name": {
-				Path:        "Patient.name",
-				Name:        "A name associated with the patient",
-				Description: "A name associated with the individual.",
-				DataType:    "HumanName",
-				Cardinality: "0..*",
-				Required:    false,
-				MustSupport: false,
-				IsSummary:   true,
-			},
-		},
-		Required:   []string{},
-		LoadedAt:   time.Now(),
-		SourceFile: "Patient",
-	}
-
-	// Write sample schema
-	patientPath := filepath.Join(r4ResourcesDir, "Patient.gz")
-	if err := writeFHIRSchemaToFile(patientPath, &samplePatientSchema); err != nil {
-		fmt.Printf("❌ Failed to write sample Patient schema: %v\n", err)
-	} else {
-		fmt.Printf("✅ Created sample FHIR schema: %s\n", patientPath)
-	}
-}
-
-// writeFHIRSchemaToFile writes a FHIR schema to a compressed file
-func writeFHIRSchemaToFile(filePath string, schema *FHIRSchema) error {
-	file, err := os.Create(filePath)
-	if err != nil {
-		return err
-	}
-	defer file.Close()
-
-	gzipWriter := gzip.NewWriter(file)
-	defer gzipWriter.Close()
-
-	encoder := json.NewEncoder(gzipWriter)
-	encoder.SetIndent("", "  ")
-
-	return encoder.Encode(schema)
 }

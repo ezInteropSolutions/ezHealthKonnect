@@ -32,6 +32,7 @@
     "fast-xml-parser": "^5.2.5",
     "helmet": "^8.1.0",
     "hl7-dictionary": "^1.0.1",
+    "http-proxy-middleware": "^3.0.5",
     "ioredis": "^5.6.1",
     "jsonwebtoken": "^9.0.2",
     "morgan": "^1.10.0",

@@ -1,5 +1,5 @@
-// FILE: hl7/parser.go
-// Fixed version with correct package declaration and structure
+// FILE: hl7/enhanced_parser.go
+// Enhanced HL7 parser with proper handling of ^, &, and ~ delimiters
 package hl7
 
 import (
@@ -10,8 +10,40 @@ import (
 	"time"
 )
 
-// ParseHL7Message performs complete HL7 parsing with components and repetitions
-func ParseHL7Message(rawMessage string) *BasicParsedMessage {
+// HL7 Delimiters - these are standard in HL7 messages
+const (
+	FieldSeparator        = "|"
+	ComponentSeparator    = "^"
+	RepetitionSeparator   = "~"
+	EscapeCharacter       = "\\"
+	SubcomponentSeparator = "&"
+)
+
+// EnhancedFieldData represents a fully parsed HL7 field with all its components
+type EnhancedFieldData struct {
+	RawValue       string            `json:"rawValue"`
+	Repetitions    []FieldRepetition `json:"repetitions"`
+	ComponentCount int               `json:"componentCount"`
+	HasRepetitions bool              `json:"hasRepetitions"`
+}
+
+// FieldRepetition represents one repetition of a field (separated by ~)
+type FieldRepetition struct {
+	Index      int              `json:"index"`
+	RawValue   string           `json:"rawValue"`
+	Components []FieldComponent `json:"components"`
+}
+
+// FieldComponent represents one component of a field (separated by ^)
+type FieldComponent struct {
+	Index            int      `json:"index"`
+	RawValue         string   `json:"rawValue"`
+	Subcomponents    []string `json:"subcomponents"`
+	HasSubcomponents bool     `json:"hasSubcomponents"`
+}
+
+// ParseHL7MessageEnhanced performs complete HL7 parsing with full delimiter support
+func ParseHL7MessageEnhanced(rawMessage string) *BasicParsedMessage {
 	// Normalize line endings
 	normalizedMessage := strings.ReplaceAll(rawMessage, "\r\n", "\n")
 	normalizedMessage = strings.ReplaceAll(normalizedMessage, "\r", "\n")
@@ -28,22 +60,22 @@ func ParseHL7Message(rawMessage string) *BasicParsedMessage {
 		if len(line) >= 3 {
 			segmentName := line[:3]
 
-			// Parse segment fields with complete HL7 structure
-			fields := strings.Split(line, "|")
+			// Parse segment fields with enhanced HL7 structure
+			fields := strings.Split(line, FieldSeparator)
 			segmentFields := make(map[string]string)
 
-			// ✅ Handle MSH segment specially + ensure all positions are filled
+			// Handle MSH segment specially
 			if segmentName == "MSH" {
 				// MSH.1 is the field separator "|" itself (implicit)
-				segmentFields["MSH.1"] = "|"
+				segmentFields["MSH.1"] = FieldSeparator
 
-				// MSH fields start at MSH.2, but we need to ensure proper positioning
+				// MSH fields start at MSH.2
 				for i := 1; i < len(fields); i++ {
 					fieldKey := fmt.Sprintf("MSH.%d", i+1)
 					segmentFields[fieldKey] = fields[i]
 				}
 			} else {
-				// ✅ All other segments - ensure 1-based indexing with gap handling
+				// All other segments - 1-based indexing
 				for i := 1; i < len(fields); i++ {
 					fieldKey := fmt.Sprintf("%s.%d", segmentName, i)
 					segmentFields[fieldKey] = fields[i]
@@ -71,18 +103,73 @@ func ParseHL7Message(rawMessage string) *BasicParsedMessage {
 	}
 }
 
-// extractMessageType extracts message type from MSH segment
-func extractMessageType(mshSegment string) string {
-	fields := strings.Split(mshSegment, "|")
-	// MSH.9 is at index 8 (since MSH.1 is implicit)
-	if len(fields) > 8 {
-		return fields[8]
+// ParseHL7Field parses a single HL7 field with all delimiters
+func ParseHL7Field(fieldValue string) *EnhancedFieldData {
+	if fieldValue == "" {
+		return &EnhancedFieldData{
+			RawValue:       "",
+			Repetitions:    []FieldRepetition{},
+			ComponentCount: 0,
+			HasRepetitions: false,
+		}
 	}
-	return "UNKNOWN"
+
+	result := &EnhancedFieldData{
+		RawValue:       fieldValue,
+		Repetitions:    []FieldRepetition{},
+		HasRepetitions: strings.Contains(fieldValue, RepetitionSeparator),
+	}
+
+	// Split by repetition separator (~)
+	repetitions := strings.Split(fieldValue, RepetitionSeparator)
+	maxComponents := 0
+
+	for repIndex, repetition := range repetitions {
+		if strings.TrimSpace(repetition) == "" && len(repetitions) > 1 {
+			continue // Skip empty repetitions unless it's the only one
+		}
+
+		fieldRep := FieldRepetition{
+			Index:      repIndex + 1,
+			RawValue:   repetition,
+			Components: []FieldComponent{},
+		}
+
+		// Split by component separator (^)
+		components := strings.Split(repetition, ComponentSeparator)
+
+		// Track maximum number of components across all repetitions
+		if len(components) > maxComponents {
+			maxComponents = len(components)
+		}
+
+		for compIndex, component := range components {
+			fieldComp := FieldComponent{
+				Index:            compIndex + 1,
+				RawValue:         component,
+				Subcomponents:    []string{},
+				HasSubcomponents: strings.Contains(component, SubcomponentSeparator),
+			}
+
+			// Split by subcomponent separator (&)
+			if fieldComp.HasSubcomponents {
+				fieldComp.Subcomponents = strings.Split(component, SubcomponentSeparator)
+			} else {
+				fieldComp.Subcomponents = []string{component}
+			}
+
+			fieldRep.Components = append(fieldRep.Components, fieldComp)
+		}
+
+		result.Repetitions = append(result.Repetitions, fieldRep)
+	}
+
+	result.ComponentCount = maxComponents
+	return result
 }
 
-// ConvertBasicToEnhanced converts basic segments to enhanced format
-func ConvertBasicToEnhanced(basicSegments map[string]BasicSegment) []EnhancedSegment {
+// ConvertBasicToEnhancedWithDelimiters converts basic segments to enhanced format with proper delimiter parsing
+func ConvertBasicToEnhancedWithDelimiters(basicSegments map[string]BasicSegment) []EnhancedSegment {
 	enhancedList := make([]EnhancedSegment, 0)
 
 	segmentDescriptions := map[string]string{
@@ -104,28 +191,13 @@ func ConvertBasicToEnhanced(basicSegments map[string]BasicSegment) []EnhancedSeg
 		"PR1": "Procedures - Surgical and medical procedures performed",
 	}
 
-	segmentPurposes := map[string]string{
-		"MSH": "Establishes message routing and control parameters",
-		"EVN": "Documents when and why this healthcare event occurred",
-		"PID": "Uniquely identifies the patient across healthcare systems",
-		"NK1": "Provides emergency contacts and patient relationships",
-		"PV1": "Tracks patient location and care team assignments",
-		"PV2": "Extends visit information with additional clinical context",
-		"OBX": "Communicates clinical findings and test results",
-		"OBR": "Orders diagnostic studies and procedures",
-		"ORC": "Controls order workflow and status tracking",
-		"AL1": "Alerts providers to patient safety considerations",
-		"DG1": "Documents medical conditions for care planning",
-		"NTE": "Adds contextual information not captured elsewhere",
-	}
-
 	segmentNames := getBasicHL7SegmentOrder(basicSegments)
 
 	// Process segments in sorted order
 	for _, segName := range segmentNames {
 		basicSeg := basicSegments[segName]
 
-		// Convert fields with proper position-based ordering
+		// Convert fields with enhanced delimiter parsing
 		fieldsList := make([]FieldInfo, 0)
 
 		// Create a complete position map to handle gaps properly
@@ -157,8 +229,9 @@ func ConvertBasicToEnhanced(basicSegments map[string]BasicSegment) []EnhancedSeg
 			dataType := getFieldDataType(segName, position)
 			optionality := getFieldOptionality(segName, position)
 
-			// Parse field components and repetitions
-			subfields := parseFieldComponents(fieldValue, fieldKey, segName, position)
+			// Parse field with enhanced delimiter support
+			enhancedFieldData := ParseHL7Field(fieldValue)
+			subfields := convertEnhancedFieldToSubfields(enhancedFieldData, fieldKey, segName, position)
 
 			field := FieldInfo{
 				Key:         fieldKey,
@@ -179,13 +252,10 @@ func ConvertBasicToEnhanced(basicSegments map[string]BasicSegment) []EnhancedSeg
 
 		description := segmentDescriptions[segName]
 		if description == "" {
-			description = fmt.Sprintf("%s Segment - Parsed by ezHealthKonnect", segName)
+			description = fmt.Sprintf("%s Segment - Parsed by ezHealthKonnect Enhanced Engine", segName)
 		}
 
-		purpose := segmentPurposes[segName]
-		if purpose == "" {
-			purpose = fmt.Sprintf("Processed by ezHealthKonnect high-performance engine")
-		}
+		purpose := fmt.Sprintf("Processed by ezHealthKonnect high-performance engine with full delimiter support")
 
 		enhancedSeg := EnhancedSegment{
 			Key:              segName,
@@ -195,7 +265,7 @@ func ConvertBasicToEnhanced(basicSegments map[string]BasicSegment) []EnhancedSeg
 			Purpose:          purpose,
 			Fields:           fieldsList,
 			FieldCount:       len(fieldsList),
-			DictionarySource: "ezHealthKonnect_enhanced_parser",
+			DictionarySource: "ezHealthKonnect_enhanced_delimiter_parser",
 			Required:         (segName == "MSH" || segName == "PID"),
 			Repeating:        false,
 		}
@@ -206,7 +276,99 @@ func ConvertBasicToEnhanced(basicSegments map[string]BasicSegment) []EnhancedSeg
 	return enhancedList
 }
 
-// Helper function to extract field position from field key
+// convertEnhancedFieldToSubfields converts enhanced field data to subfield info
+func convertEnhancedFieldToSubfields(enhancedField *EnhancedFieldData, fieldKey, segmentName string, position int) []SubfieldInfo {
+	var subfields []SubfieldInfo
+
+	if enhancedField == nil || len(enhancedField.Repetitions) == 0 {
+		return subfields
+	}
+
+	for repIndex, repetition := range enhancedField.Repetitions {
+		for compIndex, component := range repetition.Components {
+			componentPosition := compIndex + 1
+
+			// Build subfield key
+			subfieldKey := fmt.Sprintf("%s.%d", fieldKey, componentPosition)
+			if enhancedField.HasRepetitions {
+				subfieldKey = fmt.Sprintf("%s[%d].%d", fieldKey, repIndex+1, componentPosition)
+			}
+
+			// Get component name based on field type and position
+			componentName := getComponentName(segmentName, position, componentPosition)
+
+			// Build description with subcomponent info
+			description := getComponentDescription(segmentName, position, componentPosition)
+			if component.HasSubcomponents {
+				description += fmt.Sprintf(" (Has %d subcomponents: %s)",
+					len(component.Subcomponents),
+					strings.Join(component.Subcomponents, " & "))
+			}
+
+			subfield := SubfieldInfo{
+				Key:         subfieldKey,
+				Name:        componentName,
+				DataType:    getComponentDataType(segmentName, position, componentPosition),
+				Usage:       "O",
+				Length:      len(component.RawValue),
+				Position:    componentPosition,
+				Description: description,
+				HasValue:    component.RawValue != "",
+				Value:       component.RawValue,
+				Sequence:    compIndex,
+			}
+
+			subfields = append(subfields, subfield)
+		}
+	}
+
+	return subfields
+}
+
+// demonstrateDelimiterParsing shows how the enhanced parser handles delimiters
+func DemonstrateDelimiterParsing() {
+	// Test cases for delimiter parsing
+	testFields := []string{
+		"(407)939-1289^^^theMainMouse@disney.com ^", // Your example
+		"Smith^John^M^^Dr^MD",                       // Patient name with components
+		"Home~Work~Mobile",                          // Repetitions
+		"123&456&789^Component2",                    // Subcomponents
+		"Simple field",                              // No delimiters
+		"",                                          // Empty field
+		"^^^",                                       // Empty components
+		"Rep1~Rep2~Rep3",                            // Multiple repetitions
+	}
+
+	fmt.Println("=== Enhanced HL7 Delimiter Parsing Demonstration ===\n")
+
+	for i, fieldValue := range testFields {
+		fmt.Printf("Test %d: \"%s\"\n", i+1, fieldValue)
+
+		enhancedField := ParseHL7Field(fieldValue)
+
+		fmt.Printf("  Raw Value: \"%s\"\n", enhancedField.RawValue)
+		fmt.Printf("  Has Repetitions: %t\n", enhancedField.HasRepetitions)
+		fmt.Printf("  Component Count: %d\n", enhancedField.ComponentCount)
+		fmt.Printf("  Repetitions: %d\n", len(enhancedField.Repetitions))
+
+		for repIndex, repetition := range enhancedField.Repetitions {
+			fmt.Printf("    Repetition %d: \"%s\"\n", repIndex+1, repetition.RawValue)
+
+			for compIndex, component := range repetition.Components {
+				fmt.Printf("      Component %d: \"%s\"", compIndex+1, component.RawValue)
+				if component.HasSubcomponents {
+					fmt.Printf(" [Subcomponents: %s]", strings.Join(component.Subcomponents, " & "))
+				}
+				fmt.Println()
+			}
+		}
+		fmt.Println()
+	}
+}
+
+// Helper functions (keeping existing ones and adding new ones as needed)
+
+// extractFieldPosition - keeping the existing implementation
 func extractFieldPosition(fieldKey string) (int, error) {
 	parts := strings.Split(fieldKey, ".")
 	if len(parts) >= 2 {
@@ -222,182 +384,59 @@ func extractFieldPosition(fieldKey string) (int, error) {
 	return 0, fmt.Errorf("invalid field key format: %s (expected format: SEGMENT.POSITION)", fieldKey)
 }
 
-// Parse field components, repetitions, and subcomponents
-func parseFieldComponents(fieldValue, fieldKey, segmentName string, position int) []SubfieldInfo {
-	if fieldValue == "" {
-		return []SubfieldInfo{}
-	}
+// TestSpecificExample tests your specific delimiter example
+func TestSpecificExample() {
+	example := "(407)939-1289^^^theMainMouse@disney.com ^"
 
-	var subfields []SubfieldInfo
+	fmt.Printf("=== Testing Your Specific Example ===\n")
+	fmt.Printf("Input: \"%s\"\n\n", example)
 
-	// Handle field repetitions (separated by ~)
-	repetitions := strings.Split(fieldValue, "~")
+	parsed := ParseHL7Field(example)
 
-	for repIndex, repetition := range repetitions {
-		if strings.TrimSpace(repetition) == "" {
-			continue
-		}
+	fmt.Printf("Parsing Results:\n")
+	fmt.Printf("- Raw Value: \"%s\"\n", parsed.RawValue)
+	fmt.Printf("- Has Repetitions: %t\n", parsed.HasRepetitions)
+	fmt.Printf("- Component Count: %d\n", parsed.ComponentCount)
+	fmt.Printf("- Number of Repetitions: %d\n\n", len(parsed.Repetitions))
 
-		// Parse components within this repetition (separated by ^)
-		components := strings.Split(repetition, "^")
+	if len(parsed.Repetitions) > 0 {
+		rep := parsed.Repetitions[0]
+		fmt.Printf("Repetition 1 Components:\n")
 
-		for compIndex, component := range components {
-			if component == "" && compIndex > 0 {
-				continue // Skip empty trailing components
+		for i, comp := range rep.Components {
+			fmt.Printf("  Component %d: \"%s\"", i+1, comp.RawValue)
+			if comp.RawValue == "" {
+				fmt.Printf(" (empty)")
 			}
-
-			componentPosition := compIndex + 1
-			subfieldKey := fmt.Sprintf("%s.%d", fieldKey, componentPosition)
-
-			if len(repetitions) > 1 {
-				subfieldKey = fmt.Sprintf("%s[%d].%d", fieldKey, repIndex+1, componentPosition)
+			if comp.HasSubcomponents && len(comp.Subcomponents) > 1 {
+				fmt.Printf(" [Subcomponents: %s]", strings.Join(comp.Subcomponents, " & "))
 			}
-
-			// Get component name based on field type and position
-			componentName := getComponentName(segmentName, position, componentPosition)
-
-			// Parse subcomponents within this component (separated by &)
-			subcomponents := strings.Split(component, "&")
-			hasSubcomponents := len(subcomponents) > 1
-
-			subfield := SubfieldInfo{
-				Key:         subfieldKey,
-				Name:        componentName,
-				DataType:    getComponentDataType(segmentName, position, componentPosition),
-				Usage:       "O",
-				Length:      len(component),
-				Position:    componentPosition,
-				Description: getComponentDescription(segmentName, position, componentPosition),
-				HasValue:    component != "",
-				Value:       component,
-				Sequence:    compIndex,
-			}
-
-			// Add subcomponent info if present
-			if hasSubcomponents {
-				subfield.Description += fmt.Sprintf(" (Has %d subcomponents)", len(subcomponents))
-			}
-
-			subfields = append(subfields, subfield)
+			fmt.Println()
 		}
 	}
 
-	return subfields
+	fmt.Printf("\nThis would be interpreted as:\n")
+	fmt.Printf("- Component 1: Phone number \"(407)939-1289\"\n")
+	fmt.Printf("- Component 2: Empty (reserved/unused)\n")
+	fmt.Printf("- Component 3: Empty (reserved/unused)\n")
+	fmt.Printf("- Component 4: Empty (reserved/unused)\n")
+	fmt.Printf("- Component 5: Email \"theMainMouse@disney.com \"\n")
 }
 
-// Get component names based on HL7 standards
-func getComponentName(segmentName string, fieldPosition, componentPosition int) string {
-	componentMap := map[string]map[int]map[int]string{
-		"PID": {
-			5: { // Patient Name (XPN)
-				1: "Family Name",
-				2: "Given Name",
-				3: "Second/Middle Name",
-				4: "Suffix",
-				5: "Prefix",
-				6: "Degree",
-			},
-			11: { // Patient Address (XAD)
-				1: "Street Address",
-				2: "Other Designation",
-				3: "City",
-				4: "State/Province",
-				5: "Zip/Postal Code",
-				6: "Country",
-			},
-		},
-		"MSH": {
-			9: { // Message Type (MSG)
-				1: "Message Code",
-				2: "Trigger Event",
-				3: "Message Structure",
-			},
-		},
-		"PV1": {
-			3: { // Assigned Patient Location (PL)
-				1: "Point of Care",
-				2: "Room",
-				3: "Bed",
-				4: "Facility",
-			},
-			7: { // Attending Doctor (XCN)
-				1: "ID Number",
-				2: "Family Name",
-				3: "Given Name",
-				4: "Middle Initial",
-				5: "Suffix",
-			},
-		},
-	}
+// Keep existing helper functions from original parser.go:
+// getFieldName, getFieldDescription, getFieldDataType, getFieldOptionality,
+// getComponentName, getComponentDataType, getComponentDescription,
+// getBasicHL7SegmentOrder, extractMessageType
 
-	if segmentMap, exists := componentMap[segmentName]; exists {
-		if fieldMap, exists := segmentMap[fieldPosition]; exists {
-			if name, exists := fieldMap[componentPosition]; exists {
-				return name
-			}
-		}
+func extractMessageType(mshSegment string) string {
+	fields := strings.Split(mshSegment, "|")
+	// MSH.9 is at index 8 (since MSH.1 is implicit)
+	if len(fields) > 8 {
+		return fields[8]
 	}
-
-	return fmt.Sprintf("Component %d", componentPosition)
+	return "UNKNOWN"
 }
 
-// Get component data types
-func getComponentDataType(segmentName string, fieldPosition, componentPosition int) string {
-	dataTypeMap := map[string]map[int]map[int]string{
-		"PID": {
-			5: {1: "FN", 2: "ST", 3: "ST", 4: "ST", 5: "ST", 6: "ST"},
-			7: {1: "TS"},
-		},
-		"MSH": {
-			9: {1: "ID", 2: "ID", 3: "ID"},
-		},
-	}
-
-	if segmentMap, exists := dataTypeMap[segmentName]; exists {
-		if fieldMap, exists := segmentMap[fieldPosition]; exists {
-			if dataType, exists := fieldMap[componentPosition]; exists {
-				return dataType
-			}
-		}
-	}
-
-	return "ST"
-}
-
-// Get component descriptions
-func getComponentDescription(segmentName string, fieldPosition, componentPosition int) string {
-	descMap := map[string]map[int]map[int]string{
-		"PID": {
-			5: {
-				1: "Patient's family name (surname)",
-				2: "Patient's given name (first name)",
-				3: "Patient's middle name or initial",
-				4: "Name suffix (Jr., Sr., III, etc.)",
-				5: "Name prefix (Dr., Mr., Ms., etc.)",
-				6: "Professional degree (MD, RN, etc.)",
-			},
-		},
-		"MSH": {
-			9: {
-				1: "Message type code (ADT, ORU, etc.)",
-				2: "Trigger event code (A01, R01, etc.)",
-				3: "Message structure identifier",
-			},
-		},
-	}
-
-	if segmentMap, exists := descMap[segmentName]; exists {
-		if fieldMap, exists := segmentMap[fieldPosition]; exists {
-			if desc, exists := fieldMap[componentPosition]; exists {
-				return desc
-			}
-		}
-	}
-
-	return fmt.Sprintf("Component %d of %s.%d", componentPosition, segmentName, fieldPosition)
-}
-
-// getBasicHL7SegmentOrder returns segments in basic HL7 order
 func getBasicHL7SegmentOrder(basicSegments map[string]BasicSegment) []string {
 	standardOrder := []string{
 		"MSH", "EVN", "PID", "NK1", "PV1", "PV2", "ROL",
@@ -429,7 +468,6 @@ func getBasicHL7SegmentOrder(basicSegments map[string]BasicSegment) []string {
 	return orderedSegments
 }
 
-// getFieldName returns intelligent field names based on HL7 standards
 func getFieldName(segmentName string, position int) string {
 	fieldNames := map[string]map[int]string{
 		"MSH": {
@@ -441,7 +479,8 @@ func getFieldName(segmentName string, position int) string {
 		"PID": {
 			1: "Set ID", 2: "Patient ID", 3: "Patient Identifier List",
 			5: "Patient Name", 7: "Date/Time of Birth", 8: "Administrative Sex",
-			11: "Patient Address", 13: "Phone Number - Home", 18: "Patient Account Number",
+			11: "Patient Address", 13: "Phone Number - Home", 14: "Phone Number - Business",
+			18: "Patient Account Number",
 		},
 		"PV1": {
 			1: "Set ID", 2: "Patient Class", 3: "Assigned Patient Location",
@@ -464,7 +503,6 @@ func getFieldName(segmentName string, position int) string {
 	return fmt.Sprintf("Field %d", position)
 }
 
-// getFieldDescription returns detailed field descriptions
 func getFieldDescription(segmentName string, position int) string {
 	descriptions := map[string]map[int]string{
 		"MSH": {
@@ -502,29 +540,6 @@ func getFieldDescription(segmentName string, position int) string {
 			18: "Patient account number",
 			19: "Social security number",
 		},
-		"EVN": {
-			1: "Event type code",
-			2: "Date/time when event occurred",
-			3: "Date/time when event was planned",
-			4: "Event reason code",
-			5: "Operator ID",
-			6: "Date/time event started",
-		},
-		"PV1": {
-			1:  "Set ID for patient visit",
-			2:  "Patient class (I=Inpatient, O=Outpatient, E=Emergency, etc.)",
-			3:  "Assigned patient location",
-			4:  "Admission type",
-			5:  "Preadmit number",
-			6:  "Prior patient location",
-			7:  "Attending doctor",
-			8:  "Referring doctor",
-			9:  "Consulting doctor",
-			10: "Hospital service",
-			19: "Visit number",
-			44: "Admit date/time",
-			45: "Discharge date/time",
-		},
 	}
 
 	if segFields, exists := descriptions[segmentName]; exists {
@@ -536,11 +551,10 @@ func getFieldDescription(segmentName string, position int) string {
 	return fmt.Sprintf("%s field %d", segmentName, position)
 }
 
-// getFieldDataType returns HL7 data types
 func getFieldDataType(segmentName string, position int) string {
 	dataTypes := map[string]map[int]string{
 		"MSH": {3: "HD", 4: "HD", 7: "TS", 9: "MSG", 10: "ST", 11: "PT", 12: "VID"},
-		"PID": {3: "CX", 5: "XPN", 7: "TS", 8: "IS", 11: "XAD", 13: "XTN"},
+		"PID": {3: "CX", 5: "XPN", 7: "TS", 8: "IS", 11: "XAD", 13: "XTN", 14: "XTN"},
 		"PV1": {2: "IS", 3: "PL", 7: "XCN", 8: "XCN", 19: "CX"},
 		"OBX": {2: "ID", 3: "CE", 5: "varies", 6: "CE", 8: "IS", 11: "ID"},
 	}
@@ -554,7 +568,6 @@ func getFieldDataType(segmentName string, position int) string {
 	return "ST"
 }
 
-// getFieldOptionality returns field requirement status
 func getFieldOptionality(segmentName string, position int) string {
 	required := map[string]map[int]string{
 		"MSH": {1: "R", 2: "R", 9: "R", 10: "R", 11: "R", 12: "R"},
@@ -569,4 +582,132 @@ func getFieldOptionality(segmentName string, position int) string {
 	}
 
 	return "O"
+}
+
+func getComponentName(segmentName string, fieldPosition, componentPosition int) string {
+	componentMap := map[string]map[int]map[int]string{
+		"PID": {
+			5: { // Patient Name (XPN)
+				1: "Family Name",
+				2: "Given Name",
+				3: "Second/Middle Name",
+				4: "Suffix",
+				5: "Prefix",
+				6: "Degree",
+			},
+			11: { // Patient Address (XAD)
+				1: "Street Address",
+				2: "Other Designation",
+				3: "City",
+				4: "State/Province",
+				5: "Zip/Postal Code",
+				6: "Country",
+			},
+			13: { // Phone Number (XTN)
+				1: "Telephone Number",
+				2: "Telecommunication Use Code",
+				3: "Telecommunication Equipment Type",
+				4: "Email Address",
+			},
+			14: { // Business Phone (XTN)
+				1: "Telephone Number",
+				2: "Telecommunication Use Code",
+				3: "Telecommunication Equipment Type",
+				4: "Email Address",
+			},
+		},
+		"MSH": {
+			9: { // Message Type (MSG)
+				1: "Message Code",
+				2: "Trigger Event",
+				3: "Message Structure",
+			},
+		},
+		"PV1": {
+			3: { // Assigned Patient Location (PL)
+				1: "Point of Care",
+				2: "Room",
+				3: "Bed",
+				4: "Facility",
+			},
+			7: { // Attending Doctor (XCN)
+				1: "ID Number",
+				2: "Family Name",
+				3: "Given Name",
+				4: "Middle Initial",
+				5: "Suffix",
+			},
+		},
+	}
+
+	if segmentMap, exists := componentMap[segmentName]; exists {
+		if fieldMap, exists := segmentMap[fieldPosition]; exists {
+			if name, exists := fieldMap[componentPosition]; exists {
+				return name
+			}
+		}
+	}
+
+	return fmt.Sprintf("Component %d", componentPosition)
+}
+
+func getComponentDataType(segmentName string, fieldPosition, componentPosition int) string {
+	dataTypeMap := map[string]map[int]map[int]string{
+		"PID": {
+			5:  {1: "FN", 2: "ST", 3: "ST", 4: "ST", 5: "ST", 6: "ST"},
+			7:  {1: "TS"},
+			13: {1: "ST", 2: "ID", 3: "ID", 4: "ST"},
+		},
+		"MSH": {
+			9: {1: "ID", 2: "ID", 3: "ID"},
+		},
+	}
+
+	if segmentMap, exists := dataTypeMap[segmentName]; exists {
+		if fieldMap, exists := segmentMap[fieldPosition]; exists {
+			if dataType, exists := fieldMap[componentPosition]; exists {
+				return dataType
+			}
+		}
+	}
+
+	return "ST"
+}
+
+func getComponentDescription(segmentName string, fieldPosition, componentPosition int) string {
+	descMap := map[string]map[int]map[int]string{
+		"PID": {
+			5: {
+				1: "Patient's family name (surname)",
+				2: "Patient's given name (first name)",
+				3: "Patient's middle name or initial",
+				4: "Name suffix (Jr., Sr., III, etc.)",
+				5: "Name prefix (Dr., Mr., Ms., etc.)",
+				6: "Professional degree (MD, RN, etc.)",
+			},
+			13: {
+				1: "Telephone number (with area code)",
+				2: "Telecommunication use code (PRN=Primary, WPN=Work, etc.)",
+				3: "Equipment type (PH=Phone, CP=Cell, etc.)",
+				4: "Email address",
+			},
+		},
+		"MSH": {
+			9: {
+				1: "Message type code (ADT, ORU, etc.)",
+				2: "Trigger event code (A01, R01, etc.)",
+				3: "Message structure identifier",
+			},
+		},
+	}
+
+	if segmentMap, exists := descMap[segmentName]; exists {
+		if fieldMap, exists := segmentMap[fieldPosition]; exists {
+			if desc, exists := fieldMap[componentPosition]; exists {
+				return desc
+			}
+		}
+	}
+
+	return fmt.Sprintf("Component %d of %s.%d", componentPosition, segmentName, fieldPosition)
 }

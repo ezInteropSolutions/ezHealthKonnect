@@ -1,0 +1,160 @@
+{
+  "success": true,
+  "requestId": "test_20250729_234851",
+  "messageType": "ADT^A04",
+  "fhirResources": [
+    {
+      "entry.request.method": "",
+      "entry.request.url": [],
+      "entry.response.status": "",
+      "id": "bundle-1753813131886084116",
+      "link.relation": "",
+      "link.url": [],
+      "resourceType": "Bundle",
+      "type": ""
+    },
+    {
+      "destination.endpoint": [],
+      "event[x]": [],
+      "id": "messageheader-1753813131894294011",
+      "resourceType": "MessageHeader",
+      "response.code": "",
+      "response.identifier": "",
+      "source": [],
+      "source.endpoint": []
+    },
+    {
+      "agent": [],
+      "agent.who": [],
+      "entity.role": "",
+      "entity.what": [],
+      "id": "provenance-1753813131902191479",
+      "recorded": [],
+      "resourceType": "Provenance",
+      "target": []
+    },
+    {
+      "communication.language": [],
+      "id": "patient-1753813131909646764",
+      "link.other": [],
+      "link.type": "",
+      "resourceType": "Patient"
+    },
+    {
+      "coverage.coverage": [],
+      "guarantor.party": [],
+      "id": "account-1753813131915307058",
+      "resourceType": "Account",
+      "status": ""
+    }
+  ],
+  "bundle": {
+    "entry": [
+      {
+        "fullUrl": "urn:uuid:bundle-1753813131886084116",
+        "resource": {
+          "entry.request.method": "",
+          "entry.request.url": [],
+          "entry.response.status": "",
+          "id": "bundle-1753813131886084116",
+          "link.relation": "",
+          "link.url": [],
+          "resourceType": "Bundle",
+          "type": ""
+        }
+      },
+      {
+        "fullUrl": "urn:uuid:messageheader-1753813131894294011",
+        "resource": {
+          "destination.endpoint": [],
+          "event[x]": [],
+          "id": "messageheader-1753813131894294011",
+          "resourceType": "MessageHeader",
+          "response.code": "",
+          "response.identifier": "",
+          "source": [],
+          "source.endpoint": []
+        }
+      },
+      {
+        "fullUrl": "urn:uuid:provenance-1753813131902191479",
+        "resource": {
+          "agent": [],
+          "agent.who": [],
+          "entity.role": "",
+          "entity.what": [],
+          "id": "provenance-1753813131902191479",
+          "recorded": [],
+          "resourceType": "Provenance",
+          "target": []
+        }
+      },
+      {
+        "fullUrl": "urn:uuid:patient-1753813131909646764",
+        "resource": {
+          "communication.language": [],
+          "id": "patient-1753813131909646764",
+          "link.other": [],
+          "link.type": "",
+          "resourceType": "Patient"
+        }
+      },
+      {
+        "fullUrl": "urn:uuid:account-1753813131915307058",
+        "resource": {
+          "coverage.coverage": [],
+          "guarantor.party": [],
+          "id": "account-1753813131915307058",
+          "resourceType": "Account",
+          "status": ""
+        }
+      }
+    ],
+    "id": "bundle-test_20250729_234851",
+    "meta": {
+      "profile": [
+        "http://hl7.org/fhir/StructureDefinition/Bundle"
+      ],
+      "tag": [
+        {
+          "code": "HTEST",
+          "display": "test health data",
+          "system": "http://terminology.hl7.org/CodeSystem/v3-ActReason"
+        }
+      ]
+    },
+    "resourceType": "Bundle",
+    "timestamp": "2025-07-29T18:18:51Z",
+    "type": "message"
+  },
+  "resourceCounts": {
+    "Account": 1,
+    "Bundle": 1,
+    "MessageHeader": 1,
+    "Patient": 1,
+    "Provenance": 1
+  },
+  "mappingStats": {
+    "totalFieldsMapped": 0,
+    "requiredFieldsMapped": 0,
+    "optionalFieldsMapped": 0,
+    "unmappedFields": 0,
+    "valueSetTransforms": 0,
+    "dataTypeTransforms": 0
+  },
+  "warnings": [
+    "Required field MSH.MSH.10 not found",
+    "Required field MSH.MSH.7 not found",
+    "Required field MSH.MSH.9 not found",
+    "Required field PID.PID.3 not found",
+    "Required field PID.PID.5 not found"
+  ],
+  "errors": [],
+  "performance": {
+    "totalTime": "48.314082ms",
+    "databaseTime": "11.576655ms",
+    "transformTime": "36.521303ms",
+    "validationTime": "40.954\u00b5s",
+    "resourcesCreated": 5
+  }
+}

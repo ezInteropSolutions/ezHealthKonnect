@@ -1,5 +1,5 @@
 // FILE: unified_parser.go
-// Complete unified parser with FIXED schema detection and no fallbacks
+// Fixed unified parser that properly uses existing functions from parser.go
 package hl7
 
 import (
@@ -27,118 +27,70 @@ type SchemaLoader struct {
 var globalSchemaLoader *SchemaLoader
 
 // InitSchemaLoader - Clean initialization with environment detection
-// Replace the InitSchemaLoader function in unified_parser.go with this fixed version:
-
-// InitSchemaLoader - Clean initialization with FIXED environment variable priority
 func InitSchemaLoader(schemaDirectory string) {
-	fmt.Printf("🔍 DEBUG: InitSchemaLoader called with: %s\n", schemaDirectory)
-
 	var finalSchemaDir string
 
-	// ✅ PRIORITY FIX: Check environment variable FIRST
+	// Priority: Environment variable first
 	envSchemaDir := os.Getenv("EZHEALTHKONNECT_SCHEMA_DIR")
 	if envSchemaDir != "" {
 		finalSchemaDir = envSchemaDir
-		fmt.Printf("🌍 ENVIRONMENT: Using env variable schema path: %s\n", finalSchemaDir)
 	} else if _, err := os.Stat(CONTAINER_SCHEMA_PATH); err == nil {
-		// We're in a container - use standard mounted path
 		finalSchemaDir = CONTAINER_SCHEMA_PATH
-		fmt.Printf("🐳 CONTAINER: Using standard schema path: %s\n", finalSchemaDir)
 	} else if schemaDirectory != "" {
 		finalSchemaDir = schemaDirectory
-		fmt.Printf("💻 DEVELOPMENT: Using passed schema path: %s\n", finalSchemaDir)
 	} else {
-		finalSchemaDir = "./schemas" // Local development fallback
-		fmt.Printf("💻 DEVELOPMENT: Using default schema path: %s\n", finalSchemaDir)
+		finalSchemaDir = "./schemas"
 	}
 
-	// ✅ CRITICAL DEBUG: Show what path we're actually using
-	fmt.Printf("🎯 FINAL SCHEMA PATH: %s\n", finalSchemaDir)
-
-	// ✅ Ensure directory exists
+	// Ensure directory exists
 	if _, err := os.Stat(finalSchemaDir); os.IsNotExist(err) {
-		fmt.Printf("⚠️ WARNING: Schema directory does not exist: %s\n", finalSchemaDir)
 		if err := os.MkdirAll(finalSchemaDir, 0755); err != nil {
 			fmt.Printf("❌ ERROR: Failed to create schema directory: %v\n", err)
 			return
 		}
-		fmt.Printf("✅ Created schema directory: %s\n", finalSchemaDir)
 	}
 
-	// ✅ DEBUG: List what's actually in the directory
-	fmt.Printf("🔍 DEBUG: Scanning directory contents: %s\n", finalSchemaDir)
-	if entries, err := os.ReadDir(finalSchemaDir); err == nil {
-		fmt.Printf("📁 Directory entries:\n")
-		for _, entry := range entries {
-			if entry.IsDir() {
-				fmt.Printf("  📁 %s/\n", entry.Name())
-				// List files in subdirectory
-				if subEntries, err := os.ReadDir(filepath.Join(finalSchemaDir, entry.Name())); err == nil {
-					for _, subEntry := range subEntries {
-						fmt.Printf("    📄 %s\n", subEntry.Name())
-					}
-				}
-			} else {
-				fmt.Printf("  📄 %s\n", entry.Name())
-			}
-		}
-	} else {
-		fmt.Printf("❌ ERROR: Cannot read directory: %v\n", err)
-	}
-
-	// ✅ Initialize loaders
+	// Initialize loaders
 	globalSchemaLoader = &SchemaLoader{
 		schemaDir: finalSchemaDir,
 	}
 
-	fmt.Printf("🔍 DEBUG: Initializing real schema loader with: %s\n", finalSchemaDir)
 	InitRealSchemaLoader(finalSchemaDir)
 
-	// ✅ Verify initialization
+	// Verify initialization - only log if failed
 	realLoader := GetRealSchemaLoader()
-	if realLoader != nil {
-		fmt.Printf("✅ SUCCESS: Schema system initialized with: %s\n", finalSchemaDir)
-
-		// Quick validation
-		schemaFiles, err := scanForSchemaFiles(finalSchemaDir)
-		if err == nil {
-			fmt.Printf("📊 Found %d schema files\n", len(schemaFiles))
-			if len(schemaFiles) == 0 {
-				fmt.Printf("⚠️ No schema files found - will create sample schemas\n")
-			} else {
-				fmt.Printf("✅ Schema files found:\n")
-				for _, file := range schemaFiles {
-					rel, _ := filepath.Rel(finalSchemaDir, file)
-					fmt.Printf("  📄 %s\n", rel)
-				}
-			}
-		}
-	} else {
+	if realLoader == nil {
 		fmt.Printf("❌ ERROR: Schema loader initialization failed\n")
+		return
+	}
+
+	// Silent validation - only check for empty directory warning
+	schemaFiles, err := scanForSchemaFiles(finalSchemaDir)
+	if err != nil {
+		fmt.Printf("❌ ERROR: Failed to scan schema files: %v\n", err)
+	} else if len(schemaFiles) == 0 {
+		fmt.Printf("⚠️ WARNING: No schema files found in %s\n", finalSchemaDir)
 	}
 }
 
 // GetSchemaLoader - Return stub for main.go compatibility
 func GetSchemaLoader() *SchemaLoader {
-	fmt.Printf("🔍 DEBUG: GetSchemaLoader called, returning: %p\n", globalSchemaLoader)
 	return globalSchemaLoader
 }
 
 // SetMaxCacheSize - Stub function (does nothing)
 func (sl *SchemaLoader) SetMaxCacheSize(maxSize int) {
-	fmt.Printf("🔍 DEBUG: SetMaxCacheSize called with: %d\n", maxSize)
+	// No-op
 }
 
 // ClearCache - Stub function (does nothing)
 func (sl *SchemaLoader) ClearCache() {
-	fmt.Printf("🔍 DEBUG: ClearCache called\n")
+	// No-op
 }
 
 // GetCacheStats - Return real stats from real loader
 func (sl *SchemaLoader) GetCacheStats() CacheStats {
-	fmt.Printf("🔍 DEBUG: GetCacheStats called\n")
 	if realLoader := GetRealSchemaLoader(); realLoader != nil {
-		fmt.Printf("🔍 DEBUG: Real loader exists, getting stats...\n")
 		realStats := realLoader.GetStats()
 		return CacheStats{
 			TotalLoads:  realStats.TotalLoads,
@@ -150,7 +102,6 @@ func (sl *SchemaLoader) GetCacheStats() CacheStats {
 		}
 	}
 
-	fmt.Printf("🔍 DEBUG: Real loader is nil, returning empty stats\n")
 	return CacheStats{
 		TotalLoads:  0,
 		CacheHits:   0,
@@ -163,63 +114,48 @@ func (sl *SchemaLoader) GetCacheStats() CacheStats {
 
 // ListAvailableSchemas - Return actual available schemas by scanning directory
 func (sl *SchemaLoader) ListAvailableSchemas() ([]string, error) {
-	fmt.Printf("🔍 DEBUG: ListAvailableSchemas called\n")
 	schemas := []string{}
 
-	// ✅ FIX: Use environment variable if available
+	// Use environment variable if available
 	schemaDir := sl.schemaDir
 	envSchemaDir := os.Getenv("EZHEALTHKONNECT_SCHEMA_DIR")
 	if envSchemaDir != "" {
 		schemaDir = envSchemaDir
-		fmt.Printf("✅ Using schema directory from environment: %s\n", schemaDir)
 	}
 
 	// Scan the actual schema directory structure
 	versionDirs, err := filepath.Glob(filepath.Join(schemaDir, "v*"))
 	if err != nil {
-		fmt.Printf("🔍 DEBUG: Error scanning schema directory: %v\n", err)
-		return schemas, err
+		return schemas, fmt.Errorf("failed to scan schema directory: %w", err)
 	}
-
-	fmt.Printf("🔍 DEBUG: Found %d version directories\n", len(versionDirs))
 
 	for _, versionDir := range versionDirs {
 		version := filepath.Base(versionDir)
-		fmt.Printf("🔍 DEBUG: Scanning version directory: %s\n", version)
 
 		// Find all .gz files in this version directory
 		schemaFiles, err := filepath.Glob(filepath.Join(versionDir, "*.gz"))
 		if err != nil {
-			fmt.Printf("🔍 DEBUG: Error scanning files in %s: %v\n", versionDir, err)
-			continue // Skip this version if error
+			fmt.Printf("❌ ERROR: Failed to scan files in %s: %v\n", versionDir, err)
+			continue
 		}
-
-		fmt.Printf("🔍 DEBUG: Found %d schema files in %s\n", len(schemaFiles), version)
 
 		for _, schemaFile := range schemaFiles {
 			filename := filepath.Base(schemaFile)
-			// Remove .gz extension: ADT_A04.gz -> ADT_A04
 			schemaName := strings.TrimSuffix(filename, ".gz")
-			// Create full identifier: v2.5.1_ADT_A04
 			fullSchema := fmt.Sprintf("%s_%s", version, schemaName)
 			schemas = append(schemas, fullSchema)
-			fmt.Printf("🔍 DEBUG: Added schema: %s\n", fullSchema)
 		}
 	}
 
-	fmt.Printf("🔍 DEBUG: Total schemas found: %d\n", len(schemas))
 	return schemas, nil
 }
 
 // =====================================
-// UNIFIED PARSING - CLEAN VERSION WITH FIXED SCHEMA DETECTION
+// UNIFIED PARSING - USING EXISTING FUNCTIONS
 // =====================================
 
-// ParseHL7Enhanced - Enhanced version that ALWAYS tries schema first with better detection
+// ParseHL7Enhanced - Enhanced version that tries schema first
 func ParseHL7Enhanced(rawMessage string) *EnhancedParsedMessage {
-	startTime := time.Now()
-	fmt.Printf("🔍 DEBUG: ParseHL7Enhanced called\n")
-
 	// Validate input
 	if strings.TrimSpace(rawMessage) == "" {
 		return &EnhancedParsedMessage{
@@ -230,89 +166,42 @@ func ParseHL7Enhanced(rawMessage string) *EnhancedParsedMessage {
 		}
 	}
 
-	// ✅ DOCKER FIX: Check environment and schema loader status
-	envSchemaDir := os.Getenv("EZHEALTHKONNECT_SCHEMA_DIR")
-	fmt.Printf("🐳 DOCKER DEBUG: Environment EZHEALTHKONNECT_SCHEMA_DIR = '%s'\n", envSchemaDir)
-
+	// Try schema parsing first
 	realLoader := GetRealSchemaLoader()
-	fmt.Printf("🐳 DOCKER DEBUG: Real schema loader exists: %v\n", realLoader != nil)
-
 	if realLoader != nil {
-		stats := realLoader.GetStats()
-		fmt.Printf("🐳 DOCKER DEBUG: Schema loader stats - TotalLoads: %d, CacheHits: %d, LoadErrors: %d\n",
-			stats.TotalLoads, stats.CacheHits, stats.LoadErrors)
-	}
-
-	// ✅ CRITICAL: Always try schema first with detailed debugging
-	if realLoader != nil {
-		version, messageType, triggerEvent := extractMessageInfoForParsing(rawMessage)
-		fmt.Printf("🔍 DOCKER DEBUG: Attempting schema loading for %s^%s v%s\n", messageType, triggerEvent, version)
-
-		// ✅ Call the function from real_schema_parser.go
 		realResult := ParseWithRealSchema(rawMessage)
 
-		// ✅ DETAILED DEBUG: Show exactly what happened
-		if realResult != nil {
-			fmt.Printf("✅ DOCKER DEBUG: Schema parsing returned result\n")
-			fmt.Printf("   📊 Success: %v\n", realResult.Success)
-			fmt.Printf("   📊 Error: %s\n", realResult.Error)
-			fmt.Printf("   📊 SchemaLoaded: %v\n", realResult.SchemaLoaded)
-			fmt.Printf("   📊 DictionaryUsed: %v\n", realResult.DictionaryUsed)
-			fmt.Printf("   📊 Segments: %d\n", len(realResult.EnhancedSegments))
-
-			// ✅ Check each segment's dictionary source
+		if realResult != nil && realResult.Success {
+			// Check if we actually got schema-enhanced segments
 			schemaSegmentCount := 0
-			for segName, segment := range realResult.EnhancedSegments {
-				fmt.Printf("   🔍 Segment %s: DictionarySource = '%s'\n", segName, segment.DictionarySource)
+			for _, segment := range realResult.EnhancedSegments {
 				if strings.Contains(segment.DictionarySource, "RealSchemaLoader") ||
 					strings.Contains(segment.DictionarySource, "Schema") {
 					schemaSegmentCount++
 				}
 			}
 
-			fmt.Printf("   📊 Schema-enhanced segments: %d/%d\n", schemaSegmentCount, len(realResult.EnhancedSegments))
-
-			// ✅ FIXED: Use result if successful AND has schema segments OR if explicitly marked as schema-loaded
-			if realResult.Success && (schemaSegmentCount > 0 || realResult.SchemaLoaded) {
-				fmt.Printf("✅ DOCKER SUCCESS: Using schema result (schemaSegments: %d, schemaLoaded: %v)\n",
-					schemaSegmentCount, realResult.SchemaLoaded)
-
+			// Use schema result if we have schema segments or explicit schema loading
+			if schemaSegmentCount > 0 || realResult.SchemaLoaded {
 				validatedResult := validateAndFixFieldPositioning(realResult)
 				validatedResult.SchemaLoaded = true
 				validatedResult.DictionaryUsed = true
-
-				fmt.Printf("✅ Schema parsing completed in %v\n", time.Since(startTime))
 				return validatedResult
-			} else {
-				fmt.Printf("⚠️ DOCKER DEBUG: Schema result not suitable - falling back to basic\n")
-				fmt.Printf("   📊 Reason: Success=%v, SchemaSegments=%d, SchemaLoaded=%v\n",
-					realResult.Success, schemaSegmentCount, realResult.SchemaLoaded)
 			}
-		} else {
-			fmt.Printf("❌ DOCKER DEBUG: ParseWithRealSchema returned nil\n")
 		}
 	} else {
-		fmt.Printf("❌ DOCKER DEBUG: Real schema loader is nil - check initialization\n")
-
-		// ✅ DOCKER DIAGNOSTIC: Check why schema loader is nil
-		if envSchemaDir == "" {
-			fmt.Printf("❌ DOCKER ISSUE: EZHEALTHKONNECT_SCHEMA_DIR environment variable not set\n")
-		} else {
-			fmt.Printf("🔍 DOCKER INFO: Schema directory set to: %s\n", envSchemaDir)
-			// Check if directory exists in container
+		// Only log if environment should have schemas but doesn't
+		envSchemaDir := os.Getenv("EZHEALTHKONNECT_SCHEMA_DIR")
+		if envSchemaDir != "" {
 			if _, err := os.Stat(envSchemaDir); os.IsNotExist(err) {
-				fmt.Printf("❌ DOCKER ISSUE: Schema directory does not exist in container: %s\n", envSchemaDir)
-			} else {
-				fmt.Printf("✅ DOCKER INFO: Schema directory exists in container\n")
+				fmt.Printf("❌ ERROR: Schema directory does not exist: %s\n", envSchemaDir)
 			}
 		}
 	}
 
-	// ✅ Fallback to basic parsing
-	fmt.Printf("🔄 DOCKER DEBUG: Using basic parsing fallback\n")
-
+	// Fallback to basic parsing using CORRECT function name
 	version, messageType, triggerEvent := extractMessageInfoForParsing(rawMessage)
-	basicResult := ParseHL7Message(rawMessage)
+	basicResult := ParseHL7MessageEnhanced(rawMessage) // ✅ CORRECT function name
 	if basicResult == nil {
 		return &EnhancedParsedMessage{
 			Raw:      rawMessage,
@@ -322,7 +211,8 @@ func ParseHL7Enhanced(rawMessage string) *EnhancedParsedMessage {
 		}
 	}
 
-	enhancedSegments, segmentOrder := convertBasicArrayToMapFormatFixed(basicResult.Segments)
+	// Convert using CORRECT function name
+	enhancedSegments, segmentOrder := convertBasicToMapFormatFixed(basicResult.Segments)
 
 	result := &EnhancedParsedMessage{
 		Raw:              rawMessage,
@@ -339,52 +229,43 @@ func ParseHL7Enhanced(rawMessage string) *EnhancedParsedMessage {
 	}
 
 	validatedResult := validateAndFixFieldPositioning(result)
-	fmt.Printf("✅ Basic parsing completed in %v\n", time.Since(startTime))
 	return validatedResult
 }
 
 // =====================================
-// HELPER FUNCTIONS WITH FIXES
+// HELPER FUNCTIONS WITH ERROR-ONLY LOGGING
 // =====================================
 
-// ✅ FIXED: convertBasicArrayToMapFormatFixed - Convert with proper position handling
-func convertBasicArrayToMapFormatFixed(basicSegments map[string]BasicSegment) (map[string]EnhancedSegment, []string) {
-	// Use FIXED ConvertBasicToEnhanced function from parser.go
-	enhancedArray := ConvertBasicToEnhanced(basicSegments)
+// convertBasicToMapFormatFixed - Convert using existing ConvertBasicToEnhanced function
+func convertBasicToMapFormatFixed(basicSegments map[string]BasicSegment) (map[string]EnhancedSegment, []string) {
+	// Use the CORRECT function name from parser.go
+	enhancedArray := ConvertBasicToEnhancedWithDelimiters(basicSegments) // ✅ CORRECT function name
 
-	// Convert array result to map format
 	enhancedMap := make(map[string]EnhancedSegment)
 	segmentOrder := make([]string, 0, len(enhancedArray))
 
-	// ✅ CRITICAL FIX: Ensure fields are properly sorted by position
 	for _, enhancedSeg := range enhancedArray {
 		enhancedSeg.Fields = sortFieldsByPosition(enhancedSeg.Fields)
 		enhancedMap[enhancedSeg.Key] = enhancedSeg
 		segmentOrder = append(segmentOrder, enhancedSeg.Key)
-
-		fmt.Printf("✅ Converted segment %s with %d fields (using %s)\n",
-			enhancedSeg.Key, len(enhancedSeg.Fields), enhancedSeg.DictionarySource)
 	}
 
 	return enhancedMap, segmentOrder
 }
 
-// ✅ NEW: Sort fields by their HL7 position to ensure correct order
+// sortFieldsByPosition - Sort fields by their HL7 position to ensure correct order
 func sortFieldsByPosition(fields []FieldInfo) []FieldInfo {
-	// Create a copy to avoid modifying the original
 	sortedFields := make([]FieldInfo, len(fields))
 	copy(sortedFields, fields)
 
-	// Sort by position (primary) and sequence (secondary)
+	// Simple bubble sort by position (primary) and sequence (secondary)
 	for i := 0; i < len(sortedFields)-1; i++ {
 		for j := i + 1; j < len(sortedFields); j++ {
 			shouldSwap := false
 
-			// Primary sort: by position
 			if sortedFields[i].Position > sortedFields[j].Position {
 				shouldSwap = true
 			} else if sortedFields[i].Position == sortedFields[j].Position {
-				// Secondary sort: by sequence if positions are equal
 				if sortedFields[i].Sequence > sortedFields[j].Sequence {
 					shouldSwap = true
 				}
@@ -399,20 +280,15 @@ func sortFieldsByPosition(fields []FieldInfo) []FieldInfo {
 	return sortedFields
 }
 
-// ✅ ENHANCED: Validate and fix field positioning issues with detailed reporting
+// validateAndFixFieldPositioning - Validate and fix field positioning issues
 func validateAndFixFieldPositioning(result *EnhancedParsedMessage) *EnhancedParsedMessage {
 	if result == nil || result.EnhancedSegments == nil {
 		return result
 	}
 
-	fmt.Printf("🔍 DEBUG: Validating field positioning for %d segments\n", len(result.EnhancedSegments))
-
 	validationErrors := []ValidationError{}
 
 	for segName, segment := range result.EnhancedSegments {
-		fmt.Printf("  📋 Validating segment %s with %d fields\n", segName, len(segment.Fields))
-
-		// Check for position issues
 		positionMap := make(map[int][]string)
 		maxPosition := 0
 
@@ -431,7 +307,7 @@ func validateAndFixFieldPositioning(result *EnhancedParsedMessage) *EnhancedPars
 				})
 			}
 
-			// Check for position consistency
+			// Check for invalid positions
 			if field.Position < 1 {
 				validationErrors = append(validationErrors, ValidationError{
 					Severity:   SeverityError,
@@ -445,16 +321,13 @@ func validateAndFixFieldPositioning(result *EnhancedParsedMessage) *EnhancedPars
 				})
 			}
 
-			// Track position usage
 			positionMap[field.Position] = append(positionMap[field.Position], field.Key)
 			if field.Position > maxPosition {
 				maxPosition = field.Position
 			}
-
-			fmt.Printf("    [%d] %s -> Position %d (HasValue: %v)\n", i, field.Key, field.Position, field.HasValue)
 		}
 
-		// Check for duplicate positions
+		// Check for duplicate positions - ERROR level
 		for position, fieldKeys := range positionMap {
 			if len(fieldKeys) > 1 {
 				validationErrors = append(validationErrors, ValidationError{
@@ -469,22 +342,7 @@ func validateAndFixFieldPositioning(result *EnhancedParsedMessage) *EnhancedPars
 			}
 		}
 
-		// Check for position gaps
-		for pos := 1; pos <= maxPosition; pos++ {
-			if _, exists := positionMap[pos]; !exists {
-				validationErrors = append(validationErrors, ValidationError{
-					Severity:   SeverityWarning,
-					Code:       ErrorCodePositionGap,
-					Message:    fmt.Sprintf("Missing field at position %d in segment %s", pos, segName),
-					Segment:    segName,
-					Position:   pos,
-					Suggestion: "Consider if this field should be present",
-					RuleId:     fmt.Sprintf("GAP_%s_%d", segName, pos),
-				})
-			}
-		}
-
-		// ✅ CRITICAL FIX: Ensure fields are sorted by position
+		// Fix field ordering
 		fixedSegment := segment
 		fixedSegment.Fields = sortFieldsByPosition(segment.Fields)
 		result.EnhancedSegments[segName] = fixedSegment
@@ -493,14 +351,16 @@ func validateAndFixFieldPositioning(result *EnhancedParsedMessage) *EnhancedPars
 	// Add validation errors to result
 	result.ValidationErrors = append(result.ValidationErrors, validationErrors...)
 
-	fmt.Printf("✅ Field positioning validation complete: %d errors, %d warnings\n",
-		countErrorsBySeverity(validationErrors, SeverityError),
-		countErrorsBySeverity(validationErrors, SeverityWarning))
+	// Only log if there are actual errors (not warnings)
+	errorCount := countErrorsBySeverity(validationErrors, SeverityError)
+	if errorCount > 0 {
+		fmt.Printf("❌ Validation errors found: %d errors\n", errorCount)
+	}
 
 	return result
 }
 
-// ✅ NEW: Validate field key format
+// isValidFieldKey - Validate field key format
 func isValidFieldKey(fieldKey, segmentName string) bool {
 	parts := strings.Split(fieldKey, ".")
 	if len(parts) != 2 {
@@ -511,12 +371,11 @@ func isValidFieldKey(fieldKey, segmentName string) bool {
 		return false
 	}
 
-	// Check if position part is a valid number
 	_, err := extractFieldPosition(fieldKey)
 	return err == nil
 }
 
-// ✅ NEW: Count errors by severity
+// countErrorsBySeverity - Count errors by severity
 func countErrorsBySeverity(errors []ValidationError, severity string) int {
 	count := 0
 	for _, err := range errors {
@@ -599,27 +458,20 @@ func createMessageTypeInfoForParsing(messageType, triggerEvent string) MessageTy
 // COMPATIBILITY FUNCTIONS
 // =====================================
 
-// ParseHL7MessageEnhanced - Compatibility function for existing controller
-func ParseHL7MessageEnhanced(rawMessage string, dictionaryURL string) *EnhancedParsedMessage {
-	// Use the new unified parser, ignore dictionary URL (we use schema instead)
-	fmt.Printf("🔍 DEBUG: ParseHL7MessageEnhanced called (compatibility function)\n")
-	return ParseHL7Enhanced(rawMessage)
-}
-
 // ConvertBasicToEnhancedMap - Wrapper for existing function with map format conversion
 func ConvertBasicToEnhancedMap(basicSegments map[string]BasicSegment) (map[string]EnhancedSegment, []string) {
-	return convertBasicArrayToMapFormatFixed(basicSegments)
+	return convertBasicToMapFormatFixed(basicSegments)
 }
 
+// REMOVED ParseHL7MessageEnhanced from this file to avoid duplicate declaration
+// The function already exists in parser.go and should be used from there
+
 // =====================================
-// DEBUGGING AND TESTING FUNCTIONS
+// DEBUGGING AND STATUS FUNCTIONS
 // =====================================
 
 // GetSchemaLoaderStatus returns current status of schema loader
 func GetSchemaLoaderStatus() map[string]interface{} {
-	fmt.Printf("🔍 DEBUG: GetSchemaLoaderStatus called\n")
-
-	// ✅ DEBUG: Show environment variable status
 	envSchemaDir := os.Getenv("EZHEALTHKONNECT_SCHEMA_DIR")
 
 	status := map[string]interface{}{
@@ -645,7 +497,7 @@ func GetSchemaLoaderStatus() map[string]interface{} {
 		}
 	}
 
-	// ✅ Check if schema directory exists
+	// Check if schema directory exists
 	if envSchemaDir != "" {
 		if _, err := os.Stat(envSchemaDir); err == nil {
 			status["schemaDirectoryExists"] = true

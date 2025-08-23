@@ -6,6 +6,7 @@ import (
 	"ezhealthkonnect/controllers"
 	"ezhealthkonnect/fhir"
 	"ezhealthkonnect/hl7"
+	"ezhealthkonnect/services"
 	"fmt"
 	"log"
 	"net/http"
@@ -29,74 +30,79 @@ func main() {
 	// Load configuration
 	cfg := config.Load()
 
-	// Log configuration for debugging
-	cfg.LogConfiguration()
+	// Log configuration for debugging - only if verbose mode
+	if cfg.VerboseLogging {
+		cfg.LogConfiguration()
+	}
 
-	// Validate configuration first
-	cfg.ValidateSchemaConfig()
-
-	// ADD: Database connection for FHIR transformations
+	// Database connection for FHIR transformations
 	var db *sql.DB
 	var err error
 
-	dbConnectionString := os.Getenv("DATABASE_URL")
+	// Use centralized config to build connection string (supports defaults and normalization)
+	dbConnectionString := cfg.GetDatabaseURL()
 	if dbConnectionString == "" {
-		dbConnectionString = fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=disable",
-			os.Getenv("DB_HOST"), os.Getenv("DB_PORT"), os.Getenv("DB_USER"),
-			os.Getenv("DB_PASSWORD"), os.Getenv("DB_NAME"))
-	}
-
-	if dbConnectionString != "" && dbConnectionString != "host= port= user= password= dbname= sslmode=disable" {
+		log.Printf("⚠️ WARNING: No database configuration found; DB-backed transformations will be disabled")
+	} else {
 		db, err = sql.Open("postgres", dbConnectionString)
 		if err != nil {
-			log.Printf("⚠️ Failed to connect to database for FHIR transformations: %v", err)
+			log.Printf("❌ ERROR: Failed to connect to database for FHIR transformations: %v", err)
 		} else if err = db.Ping(); err != nil {
-			log.Printf("⚠️ Database ping failed: %v", err)
+			log.Printf("❌ ERROR: Database ping failed: %v", err)
 			db = nil
-		} else {
-			log.Printf("✅ Database connected for FHIR transformations")
 		}
-	} else {
-		log.Printf("💡 No database configured for FHIR transformations (set DATABASE_URL to enable)")
+		// Silent success - no logging when database connects properly
 	}
 
-	// Initialize schema systems if schemas are available
+	// Initialize schema systems if schemas are available - ENHANCED
 	if cfg.UseFilesystemSchema() {
-		fmt.Printf("🚀 Initializing ezHealthKonnect Schema Systems...\n")
-
-		// Initialize HL7 Schema System
-		fmt.Printf("📋 Initializing HL7 Schema System...\n")
+		// Initialize HL7 Schema System - SILENT
 		hl7SchemaPath := filepath.Join(cfg.GetSchemaDirectory(), "hl7")
-		fmt.Printf("🔍 HL7 Schema Path: %s\n", hl7SchemaPath)
 		hl7.InitSchemaLoader(hl7SchemaPath)
 
-		// Configure HL7 schema loader
+		// Configure HL7 schema loader - SILENT
 		schemaLoader := hl7.GetSchemaLoader()
 		if schemaLoader != nil {
 			schemaLoader.SetMaxCacheSize(cfg.SchemaCacheSize)
-			fmt.Printf("✅ HL7 Schema System ready (cache: %v, size: %d)\n",
-				cfg.EnableSchemaCache, cfg.SchemaCacheSize)
+			// Silent success - no logging
 		} else {
-			fmt.Printf("⚠️ Failed to initialize HL7 schema loader\n")
+			log.Printf("❌ ERROR: Failed to initialize HL7 schema loader")
 		}
 
-		// Initialize FHIR Schema System
-		fmt.Printf("🏥 Initializing FHIR Schema System...\n")
-		fhir.InitFHIRSchemaLoader(cfg.GetFHIRSchemaDirectory())
+		// Initialize FHIR Schema System - ENHANCED WITH FAIL-FAST
+		fhirSchemaDir := cfg.GetFHIRSchemaDirectory()
+		log.Printf("🔧 Initializing FHIR schema system from: %s", fhirSchemaDir)
 
-		// Verify FHIR schema loader
+		fhir.InitFHIRSchemaLoader(fhirSchemaDir)
+
+		// Verify FHIR schema loader initialization - ENHANCED
 		fhirLoader := fhir.GetFHIRSchemaLoader()
-		if fhirLoader != nil {
-			fmt.Printf("✅ FHIR Schema System ready (cache: %v, size: %d)\n",
-				cfg.EnableFHIRCache, cfg.FHIRCacheSize)
+		if fhirLoader == nil {
+			log.Printf("❌ FATAL: FHIR schema loader failed to initialize")
+			log.Printf("💡 SOLUTION: Download FHIR packages to %s", fhirSchemaDir)
+			log.Printf("💡 Expected structure:")
+			log.Printf("   %s/R4/resources/Patient.gz", fhirSchemaDir)
+			log.Printf("   %s/R4/resources/Organization.gz", fhirSchemaDir)
+			log.Printf("   %s/R4/profiles/us-core/Patient.gz", fhirSchemaDir)
+			log.Printf("🚨 Server will start but FHIR transformations will be limited")
 		} else {
-			fmt.Printf("⚠️ Failed to initialize FHIR schema loader\n")
+			// Check available schemas
+			if available, err := fhirLoader.ListAvailableSchemas(); err == nil {
+				if len(available) > 0 {
+					log.Printf("✅ FHIR schema system initialized with %d schemas", len(available))
+					if cfg.VerboseLogging {
+						log.Printf("📋 Available FHIR schemas: %v", available[:min(5, len(available))])
+					}
+				} else {
+					log.Printf("⚠️ WARNING: FHIR schema loader initialized but no schemas found")
+					log.Printf("💡 Check that .gz files exist in expected directories")
+				}
+			} else {
+				log.Printf("❌ ERROR: Cannot list FHIR schemas: %v", err)
+			}
 		}
-
-		fmt.Printf("🎉 ezHealthKonnect Schema Systems initialized successfully!\n")
 	} else {
-		fmt.Printf("📡 Using legacy HTTP dictionary service: %s\n", cfg.GetDictionaryURL())
-		fmt.Printf("💡 Tip: Add schema files to %s to enable enhanced performance\n", cfg.GetSchemaDirectory())
+		log.Printf("📋 Using legacy HTTP-based schema system")
 	}
 
 	// Initialize Gin router
@@ -121,7 +127,7 @@ func main() {
 	router.Static("/static", "./public")
 	router.StaticFile("/", "./public/index.html")
 
-	// ENHANCED: Health check endpoint with both HL7 and FHIR status
+	// Health check endpoint with both HL7 and FHIR status - ENHANCED
 	router.GET("/health", func(c *gin.Context) {
 		health := gin.H{
 			"status":    "healthy",
@@ -138,7 +144,7 @@ func main() {
 			},
 		}
 
-		// ADD: Database status
+		// Database status
 		if db != nil {
 			health["database"] = gin.H{
 				"connected": true,
@@ -166,15 +172,42 @@ func main() {
 				}
 			}
 
-			// FHIR Schema System Status
+			// FHIR Schema System Status - ENHANCED
 			fhirLoader := fhir.GetFHIRSchemaLoader()
 			if fhirLoader != nil {
 				fhirStats := fhirLoader.GetStats()
+				available, err := fhirLoader.ListAvailableSchemas()
+
+				fhirStatus := gin.H{
+					"enabled":     true,
+					"source":      "filesystem",
+					"directory":   cfg.GetFHIRSchemaDirectory(),
+					"cacheStats":  fhirStats,
+					"initialized": true,
+				}
+
+				if err == nil {
+					fhirStatus["availableSchemas"] = len(available)
+					fhirStatus["schemasReady"] = len(available) > 0
+					if len(available) > 0 {
+						fhirStatus["status"] = "operational"
+						fhirStatus["sampleSchemas"] = available[:min(3, len(available))]
+					} else {
+						fhirStatus["status"] = "no_schemas"
+						fhirStatus["message"] = "Loader initialized but no schema files found"
+					}
+				} else {
+					fhirStatus["status"] = "error"
+					fhirStatus["error"] = err.Error()
+				}
+
+				health["fhirSchemaSystem"] = fhirStatus
+			} else {
 				health["fhirSchemaSystem"] = gin.H{
-					"enabled":    true,
-					"source":     "filesystem",
-					"directory":  cfg.GetFHIRSchemaDirectory(),
-					"cacheStats": fhirStats,
+					"enabled":   false,
+					"status":    "failed_to_initialize",
+					"directory": cfg.GetFHIRSchemaDirectory(),
+					"message":   "FHIR schema loader not initialized - check directory structure",
 				}
 			}
 		} else {
@@ -191,9 +224,7 @@ func main() {
 	// API routes
 	api := router.Group("/api")
 	{
-		// =====================================
-		// HL7 ROUTES (Existing - Maintained)
-		// =====================================
+		// HL7 ROUTES
 		hl7Group := api.Group("/hl7")
 		hl7Ctrl := controllers.NewHL7Controller(cfg)
 		{
@@ -202,9 +233,7 @@ func main() {
 			hl7Group.GET("/stats", hl7Ctrl.GetStats)
 		}
 
-		// =====================================
-		// SYSTEM ROUTES (Fixed controller signature)
-		// =====================================
+		// SYSTEM ROUTES
 		systemCtrl := controllers.NewSystemController(cfg)
 		systemGroup := api.Group("/system")
 		{
@@ -213,17 +242,266 @@ func main() {
 			systemGroup.GET("/metrics", systemCtrl.GetMetrics)
 		}
 
-		// =====================================
-		// FHIR ROUTES (Your existing code - keep as is)
-		// =====================================
-		fhirGroup := api.Group("/fhir")
-		fhirCtrl := controllers.NewSchemaFHIRTransformController(db, cfg)
-		//fhirCtrl := controllers.NewFHIRTransformController(db, cfg)
-		fhirCtrl.RegisterRoutes(fhirGroup)
+		// FHIR ROUTES
+		fhirResourceService := services.NewMessageResourceIdentifierService(db)
+		fhirResourceController := controllers.NewFHIRResourceController(fhirResourceService)
 
-		// =====================================
-		// INTERFACE ROUTES (Fixed controller signature)
-		// =====================================
+		fhirGroup := api.Group("/fhir")
+		{
+			// EXISTING: Primary HL7→FHIR transformation using existing controller
+			newFHIRController := controllers.NewHL7FHIRTransformationController(db, cfg)
+			newFHIRController.RegisterRoutes(api) // This adds /api/fhir/transform routes
+
+			// EXISTING: Resource identification (keep this)
+			fhirResourceController.RegisterRoutes(api)
+
+			// EXISTING: Schema-driven transformation (keep as alternative/advanced)
+			schemaFHIRCtrl := controllers.NewSchemaFHIRTransformController(db, cfg)
+			schemaFHIRGroup := fhirGroup.Group("/schema") // Move to /api/fhir/schema/
+			schemaFHIRCtrl.RegisterRoutes(schemaFHIRGroup)
+
+			// ADDED: Schema listing endpoint
+			fhirGroup.GET("/transform/schemas", func(c *gin.Context) {
+				fhirLoader := fhir.GetFHIRSchemaLoader()
+				if fhirLoader == nil {
+					c.JSON(http.StatusServiceUnavailable, gin.H{
+						"success": false,
+						"error":   "FHIR schema loader not initialized",
+					})
+					return
+				}
+
+				available, err := fhirLoader.ListAvailableSchemas()
+				if err != nil {
+					c.JSON(http.StatusInternalServerError, gin.H{
+						"success": false,
+						"error":   "Failed to list schemas",
+						"details": err.Error(),
+					})
+					return
+				}
+
+				// Parse and structure schema information
+				schemas := make([]map[string]interface{}, 0, len(available))
+				versionCount := make(map[string]int)
+				profileCount := make(map[string]int)
+
+				for _, schemaID := range available {
+					parts := strings.Split(schemaID, "_")
+					if len(parts) >= 3 {
+						version := parts[0]
+						profile := parts[1]
+						resourceType := parts[2]
+
+						versionCount[version]++
+						profileCount[profile]++
+
+						schemas = append(schemas, map[string]interface{}{
+							"id":           schemaID,
+							"version":      version,
+							"profile":      profile,
+							"resourceType": resourceType,
+							"displayName":  fmt.Sprintf("%s %s (%s)", resourceType, profile, version),
+						})
+					}
+				}
+
+				c.JSON(http.StatusOK, gin.H{
+					"success": true,
+					"schemas": schemas,
+					"summary": gin.H{
+						"total":    len(schemas),
+						"versions": versionCount,
+						"profiles": profileCount,
+					},
+					"loader": gin.H{
+						"status": "operational",
+						"stats":  fhirLoader.GetStats(),
+					},
+				})
+			})
+
+			// ADDED: Individual schema endpoint
+			fhirGroup.GET("/transform/schemas/:resourceType", func(c *gin.Context) {
+				resourceType := c.Param("resourceType")
+				profile := c.DefaultQuery("profile", "base")
+				version := c.DefaultQuery("version", "R4")
+
+				fhirLoader := fhir.GetFHIRSchemaLoader()
+				if fhirLoader == nil {
+					c.JSON(http.StatusServiceUnavailable, gin.H{
+						"success": false,
+						"error":   "FHIR schema loader not initialized",
+					})
+					return
+				}
+
+				schema, err := fhirLoader.LoadFHIRSchema(resourceType, profile, version)
+				if err != nil {
+					c.JSON(http.StatusNotFound, gin.H{
+						"success":      false,
+						"error":        "Schema not found",
+						"resourceType": resourceType,
+						"profile":      profile,
+						"version":      version,
+						"details":      err.Error(),
+						"suggestion":   "Try with profile=base or check available schemas at /api/fhir/transform/schemas",
+					})
+					return
+				}
+
+				c.JSON(http.StatusOK, gin.H{
+					"success": true,
+					"schema":  schema,
+					"info": gin.H{
+						"resourceType": resourceType,
+						"profile":      profile,
+						"version":      version,
+						"elements":     len(schema.Elements),
+						"required":     len(schema.Required),
+						"mustSupport":  len(schema.MustSupport),
+						"loadTime":     schema.LoadTime.String(),
+					},
+				})
+			})
+
+			// Add this to your existing fhirGroup in main.go:
+
+			// TEST ENDPOINT - USE V3 SCHEMA-DRIVEN SERVICE
+			fhirGroup.POST("/test-transform-v3", func(c *gin.Context) {
+				log.Printf("🧪 TEST: Schema-driven V3 service endpoint hit!")
+
+				// Parse request
+				var request services.TransformRequest
+				if err := c.ShouldBindJSON(&request); err != nil {
+					log.Printf("🧪 TEST: JSON binding failed: %v", err)
+					c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+					return
+				}
+
+				log.Printf("🧪 TEST: Creating V3 Schema-Driven service instance...")
+
+				// CREATE V3 SERVICE INSTANCE - TRUE SCHEMA-DRIVEN!
+				transformServiceV3 := services.NewHL7FHIRTransformServiceV3(db)
+
+				log.Printf("🧪 TEST: Calling V3 Transform method (schema-driven)...")
+
+				// Call V3 service method
+				response, err := transformServiceV3.Transform(c.Request.Context(), &request)
+				if err != nil {
+					log.Printf("🧪 TEST: V3 Transform failed: %v", err)
+					c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+					return
+				}
+
+				log.Printf("🧪 TEST: V3 Transform completed, returning response")
+				c.JSON(http.StatusOK, response)
+			})
+
+			// DEBUG ENDPOINT - FIXED TO LOOK FOR .GZ FILES IN CORRECT PATHS
+			fhirGroup.GET("/debug-schema", func(c *gin.Context) {
+				debug := gin.H{}
+
+				// Check what FHIR loader you actually have
+				fhirLoader := fhir.GetFHIRSchemaLoader()
+				if fhirLoader == nil {
+					debug["fhirLoader"] = "NOT AVAILABLE"
+				} else {
+					debug["fhirLoader"] = "AVAILABLE"
+					debug["loaderType"] = fmt.Sprintf("%T", fhirLoader)
+
+					// Get stats
+					stats := fhirLoader.GetStats()
+					debug["fhirStats"] = stats
+				}
+
+				// Check FHIR directory
+				fhirDir := cfg.GetFHIRSchemaDirectory()
+				debug["fhirDirectory"] = fhirDir
+
+				// FIXED: Check for .gz files in version-specific directories
+				var allSchemaFiles []string
+				schemaCount := 0
+
+				// Check R4 resources directory
+				r4ResourcesDir := filepath.Join(fhirDir, "R4", "resources")
+				if r4Files, err := filepath.Glob(filepath.Join(r4ResourcesDir, "*.gz")); err == nil {
+					allSchemaFiles = append(allSchemaFiles, r4Files...)
+					schemaCount += len(r4Files)
+					debug["r4ResourcesFound"] = len(r4Files)
+				} else {
+					debug["r4ResourcesError"] = err.Error()
+				}
+
+				// Check R4 US Core profiles directory
+				r4ProfilesDir := filepath.Join(fhirDir, "R4", "profiles", "us-core")
+				if r4ProfileFiles, err := filepath.Glob(filepath.Join(r4ProfilesDir, "*.gz")); err == nil {
+					allSchemaFiles = append(allSchemaFiles, r4ProfileFiles...)
+					schemaCount += len(r4ProfileFiles)
+					debug["r4ProfilesFound"] = len(r4ProfileFiles)
+				} else {
+					debug["r4ProfilesError"] = err.Error()
+				}
+
+				debug["schemaFiles"] = schemaCount
+				if len(allSchemaFiles) > 0 {
+					// Show first 5 files (basenames only)
+					maxFiles := len(allSchemaFiles)
+					if maxFiles > 5 {
+						maxFiles = 5
+					}
+					sampleFiles := make([]string, maxFiles)
+					for i := 0; i < maxFiles; i++ {
+						sampleFiles[i] = filepath.Base(allSchemaFiles[i])
+					}
+					debug["sampleFiles"] = sampleFiles
+				}
+
+				// Check if directories exist
+				if stat, err := os.Stat(fhirDir); err != nil {
+					debug["directoryError"] = err.Error()
+					debug["directoryExists"] = false
+				} else {
+					debug["directoryExists"] = true
+					debug["directoryMode"] = stat.Mode().String()
+				}
+
+				c.JSON(http.StatusOK, debug)
+			})
+
+			// TEST ENDPOINT - USE V2 SERVICE DIRECTLY
+			fhirGroup.POST("/test-transform", func(c *gin.Context) {
+				log.Printf("🧪 TEST: Direct V2 service call endpoint hit!")
+
+				// Parse request
+				var request services.TransformRequest
+				if err := c.ShouldBindJSON(&request); err != nil {
+					log.Printf("🧪 TEST: JSON binding failed: %v", err)
+					c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+					return
+				}
+
+				log.Printf("🧪 TEST: Creating V2 service instance...")
+
+				// CREATE V2 SERVICE INSTANCE - THIS IS THE KEY!
+				transformService := services.NewHL7FHIRTransformServiceV2(db)
+
+				log.Printf("🧪 TEST: Calling V2 Transform method...")
+
+				// Call your V2 service method directly
+				response, err := transformService.Transform(c.Request.Context(), &request)
+				if err != nil {
+					log.Printf("🧪 TEST: V2 Transform failed: %v", err)
+					c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+					return
+				}
+
+				log.Printf("🧪 TEST: V2 Transform completed, returning response")
+				c.JSON(http.StatusOK, response)
+			})
+		}
+
+		// INTERFACE ROUTES
 		interfaceCtrl := controllers.NewInterfaceController(cfg)
 		interfaceGroup := api.Group("/interfaces")
 		{
@@ -237,14 +515,12 @@ func main() {
 			interfaceGroup.POST("/:id/pause", interfaceCtrl.PauseInterface)
 		}
 
-		// =====================================
-		// WIZARD API CONTROLLER (Your integration - MOVED INSIDE API GROUP)
-		// =====================================
+		// WIZARD API CONTROLLER
 		wizardCtrl := controllers.NewWizardController(cfg)
 		wizardCtrl.RegisterRoutes(api)
-		log.Printf("✅ Wizard API routes registered")
+		// Silent success - no logging
 
-		// HL7 Schema management routes (existing - maintained)
+		// HL7 Schema management routes
 		if cfg.UseFilesystemSchema() {
 			schemaGroup := api.Group("/schema")
 			{
@@ -327,7 +603,7 @@ func main() {
 			}
 		}
 
-		// Transformation Routes (Future HL7→FHIR)
+		// Transformation Routes
 		transformGroup := api.Group("/transform")
 		{
 			transformGroup.POST("/hl7-to-fhir", func(c *gin.Context) {
@@ -371,23 +647,31 @@ func main() {
 		port = "8080"
 	}
 
-	fmt.Printf("🚀 Starting ezHealthKonnect Server on port %s\n", port)
-	fmt.Printf("🌐 Server URL: http://localhost:%s\n", port)
-	fmt.Printf("📊 API Health: http://localhost:%s/api/system/health\n", port)
-	fmt.Printf("🔧 System Info: http://localhost:%s/api/system/info\n", port)
+	// Start server - SILENT (no startup logging unless verbose)
+	if cfg.VerboseLogging {
+		fmt.Printf("🚀 Starting ezHealthKonnect Server on port %s\n", port)
+		fmt.Printf("🌐 Server URL: http://localhost:%s\n", port)
+		fmt.Printf("📊 API Health: http://localhost:%s/api/system/health\n", port)
+		fmt.Printf("🔧 System Info: http://localhost:%s/api/system/info\n", port)
+	}
 
-	// Start server
 	log.Printf("Starting ezHealthKonnect server on :%s", port)
 	if err := router.Run(":" + port); err != nil {
 		log.Fatal("Failed to start server:", err)
 	}
 }
 
+// Helper function for min calculation
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
 // setupWizardAPI sets up additional HTTP handlers for the wizard API
 func setupWizardAPI() {
-	log.Printf("🔧 Setting up additional wizard API handlers")
-
-	// Add wizard-specific HTTP handlers here if needed
+	// Silent setup - only log if there are errors
 	http.HandleFunc("/api/wizard/health", corsHandler(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)

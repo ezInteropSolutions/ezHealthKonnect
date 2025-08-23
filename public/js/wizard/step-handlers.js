@@ -1,4 +1,4 @@
-// step-handlers.js - Enhanced modular step handlers with browser-safe file upload
+// step-handlers.js - Enhanced modular step handlers with FHIR Transform Integration
 // Each step has its own handler class for better organization and maintainability
 
 /**
@@ -231,6 +231,39 @@ class ConfigurationStepHandler extends BaseStepHandler {
         if (sourceConfig) sourceConfig.style.display = 'none';
         if (targetConfig) targetConfig.style.display = 'none';
     }
+
+    showNotification(message, type = 'info') {
+        console.log(`[${type.toUpperCase()}] ${message}`);
+        
+        // Create notification element
+        const notification = document.createElement('div');
+        notification.style.cssText = `
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: ${
+                type === 'success' ? '#10b981' : 
+                type === 'error' ? '#ef4444' : 
+                type === 'warning' ? '#f59e0b' : 
+                '#3b82f6'
+            };
+            color: white;
+            padding: 12px 20px;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+            z-index: 10000;
+            animation: slideIn 0.3s ease;
+            max-width: 350px;
+            font-size: 14px;
+        `;
+        notification.textContent = message;
+        document.body.appendChild(notification);
+        
+        setTimeout(() => {
+            notification.style.animation = 'slideOut 0.3s ease';
+            setTimeout(() => notification.remove(), 300);
+        }, 3000);
+    }
 }
 
 /**
@@ -455,8 +488,11 @@ class UploadStepHandler extends BaseStepHandler {
                 this.wizard.wizardData.enhancedSegments = parseResult.data.enhancedSegments;
                 this.wizard.wizardData.parsedMessage = parseResult.data;
                 
+                // Store raw file content for Step 4 transform
+                this.wizard.uploadedFileContent = fileContent;
+                
                 this.wizard.hideLoading();
-                this.showNotification(`✅ HL7 message parsed successfully! Type: ${parseResult.data.messageType}`, 'success');
+                this.showNotification(`✅ HL7 message parsed successfully! Type: ${parseResult.data.messageType?.name || parseResult.data.messageType}`, 'success');
                 
                 // Auto advance to next step
                 setTimeout(() => {
@@ -493,6 +529,7 @@ class UploadStepHandler extends BaseStepHandler {
     reset() {
         this.wizard.uploadedFile = null;
         this.wizard.parsedHL7Data = null;
+        this.wizard.uploadedFileContent = null;
         this.fileUploadSetup = false; // Reset so it can be set up again
         
         const fileInfo = this.getElement('fileInfo');
@@ -509,15 +546,40 @@ class UploadStepHandler extends BaseStepHandler {
             fileUpload.style.zIndex = '';
         }
     }
-}
 
-/**
- * Step 3: Review Handler
- */
-/**
- * Step 3: Review Handler - RESTORED ORIGINAL HL7 REVIEW FUNCTIONALITY
- */
-// In step-handlers.js, replace the ENTIRE ReviewStepHandler class with this:
+    showNotification(message, type = 'info') {
+        console.log(`[${type.toUpperCase()}] ${message}`);
+        
+        // Create notification element
+        const notification = document.createElement('div');
+        notification.style.cssText = `
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: ${
+                type === 'success' ? '#10b981' : 
+                type === 'error' ? '#ef4444' : 
+                type === 'warning' ? '#f59e0b' : 
+                '#3b82f6'
+            };
+            color: white;
+            padding: 12px 20px;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+            z-index: 10000;
+            animation: slideIn 0.3s ease;
+            max-width: 350px;
+            font-size: 14px;
+        `;
+        notification.textContent = message;
+        document.body.appendChild(notification);
+        
+        setTimeout(() => {
+            notification.style.animation = 'slideOut 0.3s ease';
+            setTimeout(() => notification.remove(), 300);
+        }, 3000);
+    }
+}
 
 /**
  * Step 3: Review Handler - Uses SegmentViewer for drilling
@@ -569,134 +631,523 @@ class ReviewStepHandler extends BaseStepHandler {
             `;
         }
     }
+
+    showNotification(message, type = 'info') {
+        console.log(`[${type.toUpperCase()}] ${message}`);
+        
+        // Create notification element
+        const notification = document.createElement('div');
+        notification.style.cssText = `
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: ${
+                type === 'success' ? '#10b981' : 
+                type === 'error' ? '#ef4444' : 
+                type === 'warning' ? '#f59e0b' : 
+                '#3b82f6'
+            };
+            color: white;
+            padding: 12px 20px;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+            z-index: 10000;
+            animation: slideIn 0.3s ease;
+            max-width: 350px;
+            font-size: 14px;
+        `;
+        notification.textContent = message;
+        document.body.appendChild(notification);
+        
+        setTimeout(() => {
+            notification.style.animation = 'slideOut 0.3s ease';
+            setTimeout(() => notification.remove(), 300);
+        }, 3000);
+    }
+
 }
 
 /**
- * Step 4: Mapping Handler
+ * Step 4: FHIR Transform Handler - UPDATED FOR NEW ENDPOINT
  */
 class MappingStepHandler extends BaseStepHandler {
-    initialize() {
-        this.loadMappingFromParsedData();
+    constructor(wizard) {
+        super(wizard);
+        this.transformationResult = null;
+        this.initialized = false;
+        this.debugMode = true;
     }
 
-    loadMappingFromParsedData() {
-        const messageType = this.wizard.wizardData.detectedMessageType || 'ADT^A01';
-        const enhancedSegments = this.wizard.wizardData.enhancedSegments || {};
+    async initialize() {
+        console.log('🎯 Initializing FHIR Transform Step 4 (NEW ENDPOINT)...');
         
-        console.log(`🔧 Step 4: Using parsed data for mapping interface - ${messageType}`);
-        console.log(`📋 Available segments:`, Object.keys(enhancedSegments));
-        
-        if (Object.keys(enhancedSegments).length === 0) {
-            this.showNotification('⚠️ No parsed segments available. Please re-upload the HL7 message.', 'warning');
+        try {
+            const messageType = this.getMessageTypeFromParsedData();
+            console.log('✅ Message type:', messageType);
+            
+            if (!this.wizard.parsedHL7Data) {
+                throw new Error('No parsed HL7 data available for transformation');
+            }
+            
+            // Update Step 4 UI for transformation
+            this.updateStep4TransformInterface();
+            
+            this.initialized = true;
+            console.log('✅ Step 4 FHIR Transform initialization complete');
+        } catch (error) {
+            console.error('❌ Step 4 initialization failed:', error);
+            this.loadErrorState(error);
+        }
+    }
+
+    getMessageTypeFromParsedData() {
+        if (this.debugMode) {
+            console.log('🔍 Analyzing wizard data for message type:');
+            console.log('🔍 parsedHL7Data:', this.wizard.parsedHL7Data);
+        }
+
+        // Strategy 1: From wizard detected message type
+        if (this.wizard.wizardData.detectedMessageType) {
+            const msgType = this.wizard.wizardData.detectedMessageType;
+            if (typeof msgType === 'string' && msgType !== '[object Object]') {
+                console.log('✅ Strategy 1 - Using detectedMessageType:', msgType);
+                return msgType;
+            }
+        }
+
+        // Strategy 2: From parsed HL7 data message type
+        if (this.wizard.parsedHL7Data?.data?.messageType) {
+            const msgTypeObj = this.wizard.parsedHL7Data.data.messageType;
+            
+            if (typeof msgTypeObj === 'string') {
+                console.log('✅ Strategy 2a - Using messageType string:', msgTypeObj);
+                return msgTypeObj;
+            } else if (msgTypeObj.name && typeof msgTypeObj.name === 'string') {
+                console.log('✅ Strategy 2b - Using messageType.name:', msgTypeObj.name);
+                return msgTypeObj.name;
+            } else if (msgTypeObj.value && typeof msgTypeObj.value === 'string') {
+                console.log('✅ Strategy 2c - Using messageType.value:', msgTypeObj.value);
+                return msgTypeObj.value;
+            }
+        }
+
+        // Strategy 3: Extract from MSH.9 field
+        if (this.wizard.parsedHL7Data?.data?.enhancedSegments?.MSH?.fields) {
+            const mshFields = this.wizard.parsedHL7Data.data.enhancedSegments.MSH.fields;
+            
+            if (mshFields['MSH.9']?.value) {
+                const msgType = mshFields['MSH.9'].value;
+                console.log('✅ Strategy 3 - Using MSH.9 value:', msgType);
+                return msgType;
+            }
+        }
+
+        console.warn('⚠️ Could not determine message type, using default');
+        return 'ADT^A01';
+    }
+
+    updateStep4TransformInterface() {
+        const step4Element = document.getElementById('step4');
+        if (!step4Element) {
+            console.error('❌ Step 4 element not found');
             return;
         }
+
+        const demoContent = step4Element.querySelector('.demo-content');
+        if (demoContent) {
+            const messageType = this.getMessageTypeFromParsedData();
+            const segmentCount = Object.keys(this.wizard.parsedHL7Data?.data?.enhancedSegments || {}).length;
+            
+            demoContent.innerHTML = `
+                <div class="fhir-transform-interface">
+                    <div class="transform-header">
+                        <h4>🔄 HL7 to FHIR Transformation</h4>
+                        <p>Convert your parsed HL7 message to FHIR R4 format using our advanced transformation engine</p>
+                    </div>
+                    
+                    <div class="transform-preview">
+                        <div class="source-preview">
+                            <div class="preview-icon">📋</div>
+                            <h5>Source HL7 Message</h5>
+                            <div class="message-info">
+                                <span class="message-type">${messageType}</span>
+                                <span class="segment-count">${segmentCount} segments</span>
+                            </div>
+                            <div class="source-details">
+                                <div class="detail-item">
+                                    <span class="detail-label">Version:</span>
+                                    <span class="detail-value">${this.wizard.parsedHL7Data?.data?.version || '2.5'}</span>
+                                </div>
+                                <div class="detail-item">
+                                    <span class="detail-label">Parsed:</span>
+                                    <span class="detail-value">✅ Successfully</span>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="transform-arrow">
+                            <div class="arrow-icon">→</div>
+                            <div class="transform-label">Transform</div>
+                        </div>
+                        
+                        <div class="target-preview">
+                            <div class="preview-icon">🔥</div>
+                            <h5>FHIR R4 Resources</h5>
+                            <div id="fhir-resources-preview" class="resources-preview">
+                                <button class="transform-btn" onclick="window.step4Handler.transformToFHIR()">
+                                    <span class="btn-icon">🚀</span>
+                                    <span class="btn-text">Transform to FHIR</span>
+                                </button>
+                                <div class="transform-hint">
+                                    Click to generate FHIR resources from your HL7 message
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div id="transformation-results" class="transformation-results" style="display: none;">
+                        <!-- Results will be populated here -->
+                    </div>
+                </div>
+            `;
+            
+            demoContent.className = 'fhir-transform-content';
+        }
         
-        const mappingData = this.convertToMappingFormat(enhancedSegments, messageType);
-        
-        this.wizard.wizardData.sourceSchema = mappingData;
-        this.wizard.wizardData.currentMessageType = messageType;
-        
-        this.updateMappingInterface(mappingData, messageType);
-        this.showNotification(`✅ Mapping interface loaded from parsed ${messageType} data`, 'success');
+        // Make this handler available globally
+        window.step4Handler = this;
+        console.log('✅ Step 4 transform interface updated');
     }
 
-    convertToMappingFormat(enhancedSegments, messageType) {
-        const result = {
-            messageType: messageType,
-            sourceStructure: {},
-            metadata: {
-                source: 'parsed_hl7_data',
-                segmentCount: Object.keys(enhancedSegments).length,
-                timestamp: new Date().toISOString()
-            }
-        };
-        
-        for (const [segmentName, segmentData] of Object.entries(enhancedSegments)) {
-            result.sourceStructure[segmentName] = {
-                segment: segmentName,
-                description: segmentData.description || segmentData.name || `${segmentName} Segment`,
-                fields: this.extractFieldsFromSegment(segmentData, segmentName)
+    async transformToFHIR() {
+        try {
+            this.wizard.showLoading('Transforming HL7 to FHIR...', 'Converting your HL7 message to FHIR R4 format');
+            
+            // Prepare the data for the new endpoint
+            const requestData = {
+                ParsedHL7Data: JSON.stringify({
+                    success: true,
+                    data: this.wizard.parsedHL7Data.data
+                }),
+                createBundle: true,
+                validationMode: "strict"
             };
+            
+            console.log('📡 Sending transform request:', requestData);
+            
+            // Call the new transform endpoint
+            const response = await fetch('http://localhost:8080/api/fhir/test-transform-v3', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(requestData)
+            });
+            
+            if (!response.ok) {
+                const errorText = await response.text();
+                throw new Error(`HTTP ${response.status}: ${errorText}`);
+            }
+            
+            const transformResult = await response.json();
+            console.log('✅ Transform response:', transformResult);
+            
+            this.wizard.hideLoading();
+            
+            // Store transformation result
+            this.transformationResult = transformResult;
+            
+            if (transformResult.success !== false) {
+                this.displayTransformationResult(transformResult);
+                this.showNotification('✅ HL7 successfully transformed to FHIR!', 'success');
+                
+                // Store result in wizard data for Step 5
+                this.wizard.wizardData.fhirTransformResult = transformResult;
+            } else {
+                throw new Error(transformResult.error || 'Transformation failed');
+            }
+            
+        } catch (error) {
+            this.wizard.hideLoading();
+            console.error('❌ FHIR transformation failed:', error);
+            this.showNotification(`Transformation failed: ${error.message}`, 'error');
         }
-        
-        console.log(`🔄 Converted ${Object.keys(result.sourceStructure).length} segments to mapping format`);
-        return result;
     }
 
-    extractFieldsFromSegment(segmentData, segmentName) {
-        const fields = [];
+    displayTransformationResult(result) {
+        const resultsContainer = document.getElementById('transformation-results');
+        if (!resultsContainer) return;
         
-        if (segmentData.fields) {
-            for (const [fieldKey, fieldData] of Object.entries(segmentData.fields)) {
-                fields.push({
-                    field: fieldKey,
-                    name: fieldData.name || fieldKey,
-                    dataType: fieldData.dataType || 'ST',
-                    required: fieldData.optionality === 'R',
-                    description: fieldData.description || `${fieldKey} field`,
-                    value: fieldData.value || ''
-                });
+        const resourceCount = result.fhirResources ? result.fhirResources.length : 0;
+        const bundleResourceCount = result.bundle?.entry ? result.bundle.entry.length : 0;
+        const warningCount = result.warnings ? result.warnings.length : 0;
+        const errorCount = result.errors ? result.errors.length : 0;
+        
+        resultsContainer.innerHTML = `
+            <div class="transform-results">
+                <div class="results-header">
+                    <div class="results-title">
+                        <h4>✅ FHIR Transformation Complete</h4>
+                        <div class="results-subtitle">Your HL7 message has been successfully converted to FHIR R4 format</div>
+                    </div>
+                    <div class="results-stats">
+                        <div class="stat-item">
+                            <span class="stat-number">${resourceCount}</span>
+                            <span class="stat-label">Resources</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-number">${bundleResourceCount}</span>
+                            <span class="stat-label">Bundle Entries</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-number stat-warning">${warningCount}</span>
+                            <span class="stat-label">Warnings</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-number stat-error">${errorCount}</span>
+                            <span class="stat-label">Errors</span>
+                        </div>
+                    </div>
+                </div>
+                
+                ${resourceCount > 0 ? `
+                    <div class="fhir-resources">
+                        <div class="section-header">
+                            <h5>📦 Generated FHIR Resources</h5>
+                            <button class="toggle-all-btn" onclick="this.classList.toggle('expanded'); window.step4Handler.toggleAllResources(this.classList.contains('expanded'))">
+                                <span class="toggle-text">Expand All</span>
+                                <span class="toggle-icon">▼</span>
+                            </button>
+                        </div>
+                        <div class="resource-list">
+                            ${result.fhirResources.map((resource, index) => `
+                                <div class="resource-card" data-index="${index}">
+                                    <div class="resource-header" onclick="window.step4Handler.toggleResource(${index})">
+                                        <div class="resource-info">
+                                            <span class="resource-type">${resource.resourceType}</span>
+                                            <span class="resource-id">${resource.id || 'No ID'}</span>
+                                        </div>
+                                        <div class="resource-meta">
+                                            <span class="resource-size">${JSON.stringify(resource).length} chars</span>
+                                            <span class="toggle-icon">▼</span>
+                                        </div>
+                                    </div>
+                                    <div class="resource-content">
+                                        <div class="resource-preview">
+                                            <pre><code class="json">${JSON.stringify(resource, null, 2)}</code></pre>
+                                        </div>
+                                    </div>
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+                ` : '<div class="no-resources">No FHIR resources were generated</div>'}
+                
+                ${result.bundle ? `
+                    <div class="bundle-section">
+                        <div class="section-header">
+                            <h5>📋 FHIR Bundle</h5>
+                            <span class="bundle-type">Type: ${result.bundle.type || 'message'}</span>
+                        </div>
+                        <div class="bundle-info">
+                            <div class="bundle-stats">
+                                <span class="bundle-stat">ID: ${result.bundle.id || 'Generated'}</span>
+                                <span class="bundle-stat">Timestamp: ${result.bundle.timestamp || 'Not set'}</span>
+                                <span class="bundle-stat">Entries: ${result.bundle.entry ? result.bundle.entry.length : 0}</span>
+                            </div>
+                        </div>
+                    </div>
+                ` : ''}
+                
+                ${warningCount > 0 ? `
+                    <div class="warnings-section">
+                        <h5>⚠️ Warnings (${warningCount})</h5>
+                        <ul class="warnings-list">
+                            ${result.warnings.slice(0, 10).map(warning => `<li>${warning}</li>`).join('')}
+                            ${result.warnings.length > 10 ? `<li class="more-items">... and ${result.warnings.length - 10} more warnings</li>` : ''}
+                        </ul>
+                    </div>
+                ` : ''}
+                
+                ${errorCount > 0 ? `
+                    <div class="errors-section">
+                        <h5>❌ Errors (${errorCount})</h5>
+                        <ul class="errors-list">
+                            ${result.errors.slice(0, 10).map(error => `<li>${error}</li>`).join('')}
+                            ${result.errors.length > 10 ? `<li class="more-items">... and ${result.errors.length - 10} more errors</li>` : ''}
+                        </ul>
+                    </div>
+                ` : ''}
+                
+                ${result.mappingStats ? `
+                    <div class="mapping-stats">
+                        <h5>📊 Mapping Statistics</h5>
+                        <div class="stats-grid">
+                            <div class="stat-card">
+                                <span class="stat-label">Fields Mapped</span>
+                                <span class="stat-value">${result.mappingStats.totalFieldsMapped || 0}</span>
+                            </div>
+                            <div class="stat-card">
+                                <span class="stat-label">Data Transforms</span>
+                                <span class="stat-value">${result.mappingStats.dataTypeTransforms || 0}</span>
+                            </div>
+                            <div class="stat-card">
+                                <span class="stat-label">Value Sets</span>
+                                <span class="stat-value">${result.mappingStats.valueSetTransforms || 0}</span>
+                            </div>
+                        </div>
+                    </div>
+                ` : ''}
+                
+                <div class="results-actions">
+                    <button class="action-btn secondary" onclick="window.step4Handler.downloadFHIR('json')">
+                        <span class="btn-icon">📥</span>
+                        Download FHIR JSON
+                    </button>
+                    <button class="action-btn secondary" onclick="window.step4Handler.copyToClipboard()">
+                        <span class="btn-icon">📋</span>
+                        Copy to Clipboard
+                    </button>
+                    <button class="action-btn primary" onclick="window.step4Handler.validateFHIR()">
+                        <span class="btn-icon">✅</span>
+                        Validate FHIR
+                    </button>
+                </div>
+            </div>
+        `;
+        
+        resultsContainer.style.display = 'block';
+        
+        // Scroll to results
+        resultsContainer.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+
+    toggleResource(index) {
+        const resourceCard = document.querySelector(`[data-index="${index}"]`);
+        if (resourceCard) {
+            resourceCard.classList.toggle('expanded');
+        }
+    }
+
+    toggleAllResources(expanded) {
+        const resourceCards = document.querySelectorAll('.resource-card');
+        const toggleBtn = document.querySelector('.toggle-all-btn');
+        
+        resourceCards.forEach(card => {
+            if (expanded) {
+                card.classList.add('expanded');
+            } else {
+                card.classList.remove('expanded');
+            }
+        });
+        
+        if (toggleBtn) {
+            const toggleText = toggleBtn.querySelector('.toggle-text');
+            if (toggleText) {
+                toggleText.textContent = expanded ? 'Collapse All' : 'Expand All';
             }
         }
-        
-        return fields;
     }
 
-    updateMappingInterface(mappingData, messageType) {
-        const step4 = this.getElement('step4');
-        if (!step4) return;
+    downloadFHIR(format = 'json') {
+        if (!this.transformationResult) return;
+        
+        const data = format === 'json' ? 
+            JSON.stringify(this.transformationResult.fhirResources || this.transformationResult, null, 2) :
+            this.transformationResult;
+        
+        const blob = new Blob([data], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `fhir-transform-result-${Date.now()}.json`;
+        a.click();
+        URL.revokeObjectURL(url);
+        
+        this.showNotification('FHIR data downloaded successfully', 'success');
+    }
 
-        const stepTitle = step4.querySelector('.step-title');
-        if (stepTitle) {
-            stepTitle.textContent = `Configure Data Mapping - ${messageType}`;
+    async copyToClipboard() {
+        if (!this.transformationResult) return;
+        
+        try {
+            const data = JSON.stringify(this.transformationResult.fhirResources || this.transformationResult, null, 2);
+            await navigator.clipboard.writeText(data);
+            this.showNotification('FHIR data copied to clipboard', 'success');
+        } catch (error) {
+            console.error('Failed to copy to clipboard:', error);
+            this.showNotification('Failed to copy to clipboard', 'error');
         }
+    }
 
-        const segmentNames = Object.keys(mappingData.sourceStructure);
-        const totalFields = segmentNames.reduce((total, segName) => {
-            return total + (mappingData.sourceStructure[segName].fields?.length || 0);
-        }, 0);
+    validateFHIR() {
+        if (!this.transformationResult) return;
+        
+        // Simple validation check
+        const hasErrors = this.transformationResult.errors && this.transformationResult.errors.length > 0;
+        const hasResources = this.transformationResult.fhirResources && this.transformationResult.fhirResources.length > 0;
+        
+        if (hasResources && !hasErrors) {
+            this.showNotification('✅ FHIR resources appear to be valid', 'success');
+        } else if (hasErrors) {
+            this.showNotification(`⚠️ FHIR validation found ${this.transformationResult.errors.length} issues`, 'warning');
+        } else {
+            this.showNotification('❌ No FHIR resources to validate', 'error');
+        }
+    }
 
-        const demoContent = step4.querySelector('.demo-content');
+    loadErrorState(error) {
+        const step4Element = document.getElementById('step4');
+        const demoContent = step4Element?.querySelector('.demo-content');
+        
         if (demoContent) {
             demoContent.innerHTML = `
-                <div style="background: #f8f9fa; border-radius: 8px; padding: 16px; margin-bottom: 16px;">
-                    <h4 style="margin: 0 0 12px 0; color: #333;">🔗 Mapping Configuration</h4>
-                    <p style="margin: 4px 0;"><strong>Source:</strong> ${messageType} (from parsed data)</p>
-                    <p style="margin: 4px 0;"><strong>Target:</strong> FHIR R4</p>
-                    <p style="margin: 4px 0;"><strong>Available Segments:</strong> ${segmentNames.join(', ')}</p>
-                    <p style="margin: 4px 0;"><strong>Total Fields:</strong> ${totalFields}</p>
-                </div>
-                <div style="background: #e8f5e8; border-radius: 6px; padding: 12px; color: #2e7d32;">
-                    ✅ Using field structure from parsed HL7 data - no additional schema loading needed
+                <div class="error-state">
+                    <div class="error-icon">⚠️</div>
+                    <div class="error-title">FHIR Transform Interface Error</div>
+                    <div class="error-message">${error.message}</div>
+                    <button class="retry-btn" onclick="window.step4Handler.initialize()">
+                        🔄 Retry Initialization
+                    </button>
                 </div>
             `;
         }
-        
-        console.log(`🎯 Step 4: Mapping interface updated for ${messageType} with ${segmentNames.length} segments`);
     }
 
-    setupEventListeners() {
-        console.log('✅ Mapping step event listeners setup');
-    }
-
+    // BaseStepHandler interface implementation
     validate() {
-        return this.wizard.wizardData.sourceSchema != null;
+        if (!this.initialized) {
+            this.showNotification('Step 4 not fully initialized', 'error');
+            return false;
+        }
+        
+        if (!this.transformationResult) {
+            this.showNotification('Please transform the HL7 message to FHIR before proceeding', 'warning');
+            return false;
+        }
+        
+        // Check if transformation was successful
+        if (this.transformationResult.success === false) {
+            this.showNotification('HL7 to FHIR transformation failed. Please fix errors before proceeding.', 'error');
+            return false;
+        }
+        
+        return true;
     }
 
     reset() {
-        this.wizard.wizardData.sourceSchema = null;
-        this.wizard.wizardData.currentMessageType = '';
+        this.transformationResult = null;
+        this.initialized = false;
         
-        const step4 = this.getElement('step4');
-        if (step4) {
-            const demoContent = step4.querySelector('.demo-content');
-            if (demoContent) {
-                demoContent.innerHTML = `
-                    <div style="font-size: 12px; color: var(--gray-500); margin-bottom: 8px;">COMING SOON IN PHASE 2</div>
-                    <div style="font-weight: 600; color: var(--navy-primary);">🚀 Claude AI Integration</div>
-                `;
-            }
+        if (this.wizard.wizardData.fhirTransformResult) {
+            delete this.wizard.wizardData.fhirTransformResult;
         }
+        
+        console.log('✅ Step 4 reset complete');
+    }
+
+    setupEventListeners() {
+        console.log('✅ FHIR transform step event listeners setup');
     }
 }
 
@@ -716,6 +1167,7 @@ class SummaryStepHandler extends BaseStepHandler {
         const summaryTarget = this.getElement('summaryTarget');
         const summarySegments = this.getElement('summarySegments');
         const summaryZSegments = this.getElement('summaryZSegments');
+        const summaryTransform = this.getElement('summaryTransform');
         
         const actualMessageType = this.wizard.wizardData.detectedMessageType || 
                                  this.wizard.wizardData.messageType || 
@@ -735,6 +1187,15 @@ class SummaryStepHandler extends BaseStepHandler {
             const data = this.wizard.parsedHL7Data.data;
             if (summarySegments) summarySegments.textContent = Object.keys(data.enhancedSegments || {}).length;
             if (summaryZSegments) summaryZSegments.textContent = Object.keys(data.enhancedSegments || {}).filter(seg => seg.startsWith('Z')).length;
+        }
+        
+        // Show FHIR transformation results
+        if (summaryTransform && this.wizard.wizardData.fhirTransformResult) {
+            const result = this.wizard.wizardData.fhirTransformResult;
+            const resourceCount = result.fhirResources ? result.fhirResources.length : 0;
+            summaryTransform.textContent = `${resourceCount} FHIR Resources Generated`;
+        } else if (summaryTransform) {
+            summaryTransform.textContent = 'Not Transformed';
         }
     }
 
@@ -771,4 +1232,4 @@ window.ReviewStepHandler = ReviewStepHandler;
 window.MappingStepHandler = MappingStepHandler;
 window.SummaryStepHandler = SummaryStepHandler;
 
-console.log('✅ Enhanced Step Handlers loaded - Complete wizard functionality with browser-safe file upload available');
+console.log('✅ Enhanced Step Handlers loaded with FHIR Transform Integration');

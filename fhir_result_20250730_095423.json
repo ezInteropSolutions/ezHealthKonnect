@@ -1,0 +1,33 @@
+{
+  "success": true,
+  "requestId": "test_20250730_095423",
+  "messageType": "ADT^A04",
+  "fhirResources": null,
+  "resourceCounts": {},
+  "mappingStats": {
+    "totalFieldsMapped": 0,
+    "requiredFieldsMapped": 0,
+    "optionalFieldsMapped": 0,
+    "unmappedFields": 0,
+    "valueSetTransforms": 0,
+    "dataTypeTransforms": 0
+  },
+  "warnings": [
+    "Required field AL1.AL1.3 not found",
+    "Required field DG1.DG1.3 not found",
+    "Required field MSH.MSH.7 not found",
+    "Required field MSH.MSH.9 not found",
+    "Required field OBX.OBX.3 not found",
+    "Required field PID.PID.3 not found",
+    "Required field PID.PID.5 not found",
+    "Required field PV1.PV1.2 not found"
+  ],
+  "errors": [],
+  "performance": {
+    "totalTime": "4.461551ms",
+    "databaseTime": "",
+    "transformTime": "35.909\u00b5s",
+    "validationTime": "",
+    "resourcesCreated": 0
+  }
+}

@@ -1,17 +1,17 @@
-// wizard-main.js - Protected version against duplicate declarations
+// wizard-main.js - FIXED - Proper module loader integration
 
 // Wrap everything in an IIFE to allow early returns
 (function() {
     // Prevent multiple script loads and class redeclaration
     if (typeof window.InterfaceWizardModal !== 'undefined') {
         console.warn('⚠️ InterfaceWizardModal already exists, skipping redeclaration');
-        return; // Now this return is valid inside the function
+        return;
     }
 
     // Check if this script has already been loaded
     if (document.querySelector('script[data-wizard-main-loaded="true"]')) {
         console.warn('⚠️ wizard-main.js already loaded, skipping');
-        return; // Now this return is valid inside the function
+        return;
     }
 
     // Mark this script as loaded
@@ -46,34 +46,246 @@ class InterfaceWizardModal {
         this.init();
     }
 
-    initializeServices() {
-        // Initialize service modules - always create them directly
+    async initializeServices() {
         try {
-            this.notificationService = new NotificationService();
-            this.validationService = new ValidationService();
-            this.segmentViewer = new SegmentViewer(this);
-            this.hl7Service = new HL7Service(this.API_BASE_URL);
+            console.log('🔄 Initializing services...');
             
-            // Initialize step handlers
-            this.stepHandlers = {
-                1: new ConfigurationStepHandler(this),
-                2: new UploadStepHandler(this),
-                3: new ReviewStepHandler(this),
-                4: new MappingStepHandler(this),
-                5: new SummaryStepHandler(this)
-            };
+            // Initialize core services first
+            this.validationService = window.ValidationService ? new ValidationService() : null;
+            this.segmentViewer = window.SegmentViewer ? new SegmentViewer(this) : null;
+            this.hl7Service = window.HL7Service ? new HL7Service(this.API_BASE_URL) : null;
+
+            // Initialize step handlers with proper error handling
+            this.stepHandlers = {};
             
-            console.log('✅ Services initialized:', Object.keys(this.stepHandlers));
+            // Steps 1-3: Standard handlers (with fallback)
+            try {
+                this.stepHandlers[1] = window.ConfigurationStepHandler ? new ConfigurationStepHandler(this) : null;
+                this.stepHandlers[2] = window.UploadStepHandler ? new UploadStepHandler(this) : null;
+                this.stepHandlers[3] = window.ReviewStepHandler ? new ReviewStepHandler(this) : null;
+            } catch (error) {
+                console.warn('⚠️ Some standard step handlers not available:', error);
+            }
+
+            // Step 4: FHIR Mapping Handler with enhanced error handling and waiting
+            await this.initializeStep4Handler();
+
+            // Step 5: Summary Handler
+            try {
+                this.stepHandlers[5] = window.SummaryStepHandler ? new SummaryStepHandler(this) : null;
+            } catch (error) {
+                console.warn('⚠️ Summary step handler not available:', error);
+            }
+            
+            // Log successful handlers
+            const loadedHandlers = Object.keys(this.stepHandlers).filter(key => this.stepHandlers[key] !== null);
+            console.log('✅ Services initialized. Loaded handlers:', loadedHandlers);
+            console.log('✅ Step 4 handler type:', this.stepHandlers[4]?.constructor.name || 'None');
+            
         } catch (error) {
             console.error('❌ Error initializing services:', error);
-            // Fallback: create simple notification service
+            
+            // Create fallback notification service
             this.notificationService = {
                 show: (message, type) => {
                     console.log(`${type.toUpperCase()}: ${message}`);
-                    alert(`${type.toUpperCase()}: ${message}`);
+                    this.showNotification(message, type);
                 }
             };
         }
+    }
+
+    async initializeStep4Handler() {
+        try {
+            console.log('🔄 Initializing Step 4 handler...');
+            
+            // FIXED: Load Step 4 modules using the correct module loader method
+            if (!window.Step4ModulesLoaded) {
+                console.log('🔄 Loading Step 4 modules...');
+                await this.loadStep4Modules();
+                window.Step4ModulesLoaded = true;
+                console.log('✅ Step 4 modules loaded successfully');
+            }
+            
+            // Wait for FHIRMappingStepHandler to be available
+            await this.waitForFHIRMappingStepHandler();
+            
+            // Create Step 4 handler after modules are loaded
+            if (typeof window.FHIRMappingStepHandler !== 'undefined') {
+                console.log('✅ FHIRMappingStepHandler found, creating instance...');
+                this.stepHandlers[4] = new FHIRMappingStepHandler(this);
+                console.log('✅ Step 4 handler created:', this.stepHandlers[4].constructor.name);
+            } else {
+                throw new Error('FHIRMappingStepHandler not available after loading modules');
+            }
+            
+        } catch (error) {
+            console.error('❌ Error initializing Step 4 handler:', error);
+            this.createFallbackStep4Handler();
+        }
+    }
+
+    async loadStep4Modules() {
+        try {
+            // FIXED: Get the module loader instance properly
+            const loader = this.getModuleLoader();
+            
+            if (loader && typeof loader.loadStep4 === 'function') {
+                console.log('🔄 Using existing module loader for Step 4...');
+                await loader.loadStep4();
+            } else {
+                console.log('🔄 Creating temporary module loader for Step 4...');
+                await this.loadStep4ModulesManually();
+            }
+            
+        } catch (error) {
+            console.error('❌ Failed to load Step 4 modules:', error);
+            throw error;
+        }
+    }
+
+    getModuleLoader() {
+        // FIXED: Multiple ways to access the module loader
+        return window.wizardLoader || 
+               window.wizardAutoLoader?.moduleLoader || 
+               window.moduleLoader ||
+               null;
+    }
+
+    async loadStep4ModulesManually() {
+        // FIXED: Use the same module list as module-loader.js
+        const step4Path = '/js/step4/';
+        const modules = [
+            'step4-utils.js',
+            'step4-styles.js',
+            'step4-templates.js',
+            'step4-validation.js',
+            'step4-mapping.js',
+            'step4-resources.js',
+            'step4-json-viewer.js',
+            'step4-config-manager.js',
+            'step4-modals.js',
+            'step4-handler.js'  // Main handler loads last
+        ];
+        
+        for (const module of modules) {
+            try {
+                await this.loadScriptHelper(step4Path + module);
+                console.log(`✅ Loaded: ${module}`);
+            } catch (error) {
+                console.warn(`⚠️ Failed to load ${module}:`, error);
+                // Continue loading other modules
+            }
+        }
+    }
+
+    loadScriptHelper(src) {
+        return new Promise((resolve, reject) => {
+            // Check if already loaded
+            if (document.querySelector(`script[src="${src}"]`)) {
+                console.log(`ℹ️ Script already loaded: ${src}`);
+                resolve();
+                return;
+            }
+            
+            const script = document.createElement('script');
+            script.src = src;
+            script.onload = () => {
+                console.log(`📜 Script loaded: ${src}`);
+                resolve();
+            };
+            script.onerror = () => {
+                console.error(`❌ Failed to load: ${src}`);
+                reject(new Error(`Failed to load ${src}`));
+            };
+            document.head.appendChild(script);
+        });
+    }
+
+    async waitForFHIRMappingStepHandler() {
+        // Wait for FHIRMappingStepHandler to be available with timeout
+        let attempts = 0;
+        const maxAttempts = 50; // 10 seconds max wait
+        
+        while (attempts < maxAttempts) {
+            if (typeof window.FHIRMappingStepHandler !== 'undefined') {
+                console.log('✅ FHIRMappingStepHandler is now available');
+                return;
+            }
+            
+            console.log(`🔄 Waiting for FHIRMappingStepHandler... (${attempts + 1}/${maxAttempts})`);
+            await new Promise(resolve => setTimeout(resolve, 200));
+            attempts++;
+        }
+        
+        throw new Error('FHIRMappingStepHandler not available after waiting');
+    }
+
+    createFallbackStep4Handler() {
+        console.log('🔧 Creating fallback Step 4 handler...');
+        
+        // Create a minimal working handler
+        class FallbackStep4Handler {
+            constructor(wizard) {
+                this.wizard = wizard;
+                this.initialized = false;
+            }
+            
+            async initialize() {
+                console.log('🔧 Fallback Step 4 handler initializing...');
+                const step4Element = document.getElementById('step4');
+                if (step4Element) {
+                    step4Element.innerHTML = `
+                        <div class="step-header">
+                            <div class="step-progress">STEP 4 OF 5</div>
+                            <h3 class="step-title">HL7 → FHIR Transformation</h3>
+                            <p class="step-description">FHIR mapping functionality is loading...</p>
+                        </div>
+                        <div style="text-align: center; padding: 40px; color: #6b7280;">
+                            <div style="font-size: 24px; margin-bottom: 12px;">🔄</div>
+                            <div style="font-weight: 600; margin-bottom: 8px;">FHIR Mapping Module Loading</div>
+                            <div>The FHIR transformation module is being loaded. Please wait...</div>
+                            <button onclick="window.location.reload()" style="margin-top: 16px; padding: 8px 16px; background: #3b82f6; color: white; border: none; border-radius: 6px; cursor: pointer;">
+                                Refresh Page
+                            </button>
+                        </div>
+                    `;
+                }
+                this.initialized = true;
+                
+                // Try to load the proper handler after a delay
+                setTimeout(() => this.attemptProperHandlerLoad(), 3000);
+            }
+            
+            async attemptProperHandlerLoad() {
+                if (typeof window.FHIRMappingStepHandler !== 'undefined') {
+                    console.log('🔄 Proper handler now available, upgrading...');
+                    try {
+                        this.wizard.stepHandlers[4] = new FHIRMappingStepHandler(this.wizard);
+                        if (typeof this.wizard.stepHandlers[4].initialize === 'function') {
+                            await this.wizard.stepHandlers[4].initialize();
+                        }
+                        console.log('✅ Successfully upgraded to proper Step 4 handler');
+                        
+                        // Refresh the step if currently visible
+                        if (this.wizard.currentStep === 4) {
+                            this.wizard.showStep(4);
+                        }
+                    } catch (error) {
+                        console.error('❌ Failed to upgrade to proper handler:', error);
+                    }
+                }
+            }
+            
+            validate() { return true; }
+            reset() {}
+            getStepData() { return {}; }
+            onStepActivated() { 
+                if (!this.initialized) this.initialize(); 
+            }
+        }
+        
+        this.stepHandlers[4] = new FallbackStep4Handler(this);
     }
 
     init() {
@@ -399,10 +611,20 @@ class InterfaceWizardModal {
         const handler = this.stepHandlers[step];
         if (handler && handler.initialize) {
             try {
+                console.log(`🔧 Initializing step ${step} with handler:`, handler.constructor.name);
                 handler.initialize();
             } catch (error) {
                 console.error(`❌ Error initializing step ${step}:`, error);
             }
+        } else {
+            console.warn(`⚠️ No handler available for step ${step}`);
+        }
+        
+        // Special handling for Step 4 - activate FHIR transformation when user navigates to it
+        if (step === 4 && handler && handler.onStepActivated) {
+            setTimeout(() => {
+                handler.onStepActivated();
+            }, 500); // Small delay to ensure UI is ready
         }
     }
 

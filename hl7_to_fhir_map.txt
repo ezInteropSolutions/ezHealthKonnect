@@ -1,0 +1,225 @@
+{
+    "success": false,
+    "requestId": "transform_v3_1754489528966310167",
+    "messageType": "ADT^A04",
+    "fhirResources": [
+        {
+            "destination": [
+                {
+                    "endpoint": "RECEIVING_FACILITY",
+                    "name": "RECEIVING_APPLICATION"
+                }
+            ],
+            "eventCoding": {
+                "code": "A04",
+                "display": "ADT/ACK - Register a patient",
+                "system": "http://terminology.hl7.org/CodeSystem/v2-0003"
+            },
+            "id": "934576120110613083617",
+            "resourceType": "MessageHeader",
+            "source": {
+                "endpoint": "SENDING_FACILITY",
+                "name": "SENDING_APPLICATION"
+            },
+            "text": {
+                "div": "<div xmlns=\"http://www.w3.org/1999/xhtml\">MessageHeader resource created from HL7 message</div>",
+                "status": "generated"
+            }
+        },
+        {
+            "address": [
+                {
+                    "city": "Lake Buena Vista",
+                    "line": [
+                        "123 Main St."
+                    ],
+                    "postalCode": "32830",
+                    "state": "FL",
+                    "use": "home"
+                }
+            ],
+            "birthDate": "1928-11-18",
+            "gender": "male",
+            "id": "patient-1754489529251697785",
+            "identifier": [
+                {
+                    "use": "usual",
+                    "value": "1719"
+                },
+                {
+                    "use": "usual",
+                    "value": "135769"
+                }
+            ],
+            "name": [
+                {
+                    "family": "MOUSE",
+                    "given": [
+                        "MICKEY"
+                    ],
+                    "use": "official"
+                }
+            ],
+            "resourceType": "Patient",
+            "telecom": [
+                {
+                    "system": "phone",
+                    "use": "home",
+                    "value": "(407)939-1289"
+                },
+                {
+                    "system": "email",
+                    "use": "home",
+                    "value": "theMainMouse@disney.com"
+                }
+            ],
+            "text": {
+                "div": "<div xmlns=\"http://www.w3.org/1999/xhtml\">Patient resource created from HL7 message</div>",
+                "status": "generated"
+            }
+        }
+    ],
+    "bundle": {
+        "entry": [
+            {
+                "fullUrl": "urn:uuid:934576120110613083617",
+                "resource": {
+                    "destination": [
+                        {
+                            "endpoint": "RECEIVING_FACILITY",
+                            "name": "RECEIVING_APPLICATION"
+                        }
+                    ],
+                    "eventCoding": {
+                        "code": "A04",
+                        "display": "ADT/ACK - Register a patient",
+                        "system": "http://terminology.hl7.org/CodeSystem/v2-0003"
+                    },
+                    "id": "934576120110613083617",
+                    "resourceType": "MessageHeader",
+                    "source": {
+                        "endpoint": "SENDING_FACILITY",
+                        "name": "SENDING_APPLICATION"
+                    },
+                    "text": {
+                        "div": "<div xmlns=\"http://www.w3.org/1999/xhtml\">MessageHeader resource created from HL7 message</div>",
+                        "status": "generated"
+                    }
+                }
+            },
+            {
+                "fullUrl": "urn:uuid:patient-1754489529251697785",
+                "resource": {
+                    "address": [
+                        {
+                            "city": "Lake Buena Vista",
+                            "line": [
+                                "123 Main St."
+                            ],
+                            "postalCode": "32830",
+                            "state": "FL",
+                            "use": "home"
+                        }
+                    ],
+                    "birthDate": "1928-11-18",
+                    "gender": "male",
+                    "id": "patient-1754489529251697785",
+                    "identifier": [
+                        {
+                            "use": "usual",
+                            "value": "1719"
+                        },
+                        {
+                            "use": "usual",
+                            "value": "135769"
+                        }
+                    ],
+                    "name": [
+                        {
+                            "family": "MOUSE",
+                            "given": [
+                                "MICKEY"
+                            ],
+                            "use": "official"
+                        }
+                    ],
+                    "resourceType": "Patient",
+                    "telecom": [
+                        {
+                            "system": "phone",
+                            "use": "home",
+                            "value": "(407)939-1289"
+                        },
+                        {
+                            "system": "email",
+                            "use": "home",
+                            "value": "theMainMouse@disney.com"
+                        }
+                    ],
+                    "text": {
+                        "div": "<div xmlns=\"http://www.w3.org/1999/xhtml\">Patient resource created from HL7 message</div>",
+                        "status": "generated"
+                    }
+                }
+            }
+        ],
+        "id": "bundle-transform_v3_1754489528966310167",
+        "resourceType": "Bundle",
+        "timestamp": "2025-08-06T14:12:09Z",
+        "type": "message"
+    },
+    "resourceCounts": {
+        "MessageHeader": 1,
+        "Patient": 1
+    },
+    "mappingStats": {
+        "totalFieldsMapped": 22,
+        "requiredFieldsMapped": 0,
+        "optionalFieldsMapped": 0,
+        "unmappedFields": 0,
+        "valueSetTransforms": 0,
+        "dataTypeTransforms": 0
+    },
+    "warnings": [
+        "Required mapping AL1.3 → AllergyIntolerance.code has no HL7 data",
+        "Required mapping DG1.3 → Condition.code has no HL7 data",
+        "Required mapping PV1.2 → Encounter.class has no HL7 data",
+        "Failed to set identifier: field identifier not found in FHIR schema for MessageHeader",
+        "Failed to set focus.identifier: child field MessageHeader.focus.identifier not found in FHIR schema for MessageHeader",
+        "Failed to set meta.tag: child field MessageHeader.meta.tag not found in FHIR schema for MessageHeader",
+        "Failed to set meta.profile: child field MessageHeader.meta.profile not found in FHIR schema for MessageHeader",
+        "Failed to set timestamp: field timestamp not found in FHIR schema for MessageHeader",
+        "Failed to set timestamp: field timestamp not found in FHIR schema for MessageHeader",
+        "Required child field MessageHeader.destination.endpoint missing - need HL7 mapping",
+        "Required child field MessageHeader.source.endpoint missing - need HL7 mapping",
+        "Required field MessageHeader.event[x] missing from FHIR resource",
+        "Required field MessageHeader.destination.endpoint missing from FHIR resource",
+        "Required field MessageHeader.source.endpoint missing from FHIR resource",
+        "Required field MessageHeader.response.identifier missing from FHIR resource",
+        "Required field MessageHeader.response.code missing from FHIR resource",
+        "Required mapping OBX.11 → Observation.status has no HL7 data",
+        "Required mapping OBX.2 → Observation.value[x] has no HL7 data",
+        "Required mapping OBX.3 → Observation.code has no HL7 data",
+        "Required field Patient.communication.language missing from FHIR resource",
+        "Required field Patient.link.other missing from FHIR resource",
+        "Required field Patient.link.type missing from FHIR resource"
+    ],
+    "errors": [
+        "FHIR Validation: Required field MessageHeader.event[x] missing from resource",
+        "FHIR Validation: Required field MessageHeader.destination.endpoint missing from resource",
+        "FHIR Validation: Required field MessageHeader.source.endpoint missing from resource",
+        "FHIR Validation: Required field MessageHeader.response.identifier missing from resource",
+        "FHIR Validation: Required field MessageHeader.response.code missing from resource",
+        "FHIR Validation: Property eventCoding does not exist in MessageHeader schema",
+        "FHIR Validation: Required field Patient.communication.language missing from resource",
+        "FHIR Validation: Required field Patient.link.other missing from resource",
+        "FHIR Validation: Required field Patient.link.type missing from resource"
+    ],
+    "performance": {
+        "totalTime": "309.173053ms",
+        "databaseTime": "",
+        "transformTime": "268.161412ms",
+        "validationTime": "",
+        "resourcesCreated": 2
+    }
+}

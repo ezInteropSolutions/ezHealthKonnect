@@ -488,6 +488,38 @@
             min-height: 80px;
         }
 
+        /* ✅ NEW: Format + Connectivity specific styling */
+        .form-section {
+            background: var(--gray-50);
+            padding: 16px;
+            border-radius: 8px;
+            border: 1px solid var(--pink-200);
+            margin-bottom: 20px;
+        }
+
+        .form-section-title {
+            font-size: 14px;
+            font-weight: 700;
+            color: var(--navy-primary);
+            margin-bottom: 12px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .form-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+        }
+
+        .field-hint {
+            font-size: 11px;
+            color: var(--gray-500);
+            margin-top: 4px;
+            line-height: 1.3;
+        }
+
         /* Sample content styling */
         .step-header {
             text-align: center;
@@ -546,7 +578,7 @@
                                 <div class="step-number" id="stepCircle1">1</div>
                                 <div class="step-content">
                                     <div class="step-title">Configure</div>
-                                    <div class="step-description">Set up basic configuration</div>
+                                    <div class="step-description">Set up format and connectivity</div>
                                 </div>
                             </a>
                         </li>
@@ -595,51 +627,135 @@
                 <!-- Header -->
                 <div class="wizard-header">
                     <h2 class="wizard-title">Interface Configuration</h2>
-                    <p class="wizard-subtitle">Set up the basic configuration for your HL7 interface</p>
+                    <p class="wizard-subtitle">Set up message formats and connectivity for your HL7 interface</p>
                 </div>
 
                 <!-- Content -->
                 <div class="wizard-content">
-                    <!-- Step 1: Configure -->
+                    <!-- ✅ FIXED Step 1: Configure - Now with CORRECT ID fields -->
                     <div class="wizard-step active" id="step1">
                         <div class="step-header">
                             <div class="step-progress">STEP 1 OF 5</div>
                             <h3 class="step-title">Interface Configuration</h3>
-                            <p class="step-description">Set up the basic configuration for your HL7 interface</p>
+                            <p class="step-description">Configure message formats and connectivity for your interface</p>
                         </div>
 
                         <div class="form-grid">
-                            <div class="form-group">
-                                <label class="form-label" for="interfaceName">Interface Name *</label>
-                                <input type="text" id="interfaceName" class="form-input" placeholder="e.g., ADT Patient Admissions" required>
-                            </div>
-
-                            <div class="form-group">
-                                <label class="form-label" for="interfaceDescription">Description</label>
-                                <textarea id="interfaceDescription" class="form-textarea" placeholder="Brief description of this interface and its purpose"></textarea>
-                            </div>
-
-                            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+                            <!-- Basic Information -->
+                            <div class="form-section">
+                                <div class="form-section-title">
+                                    📋 Basic Information
+                                </div>
+                                
                                 <div class="form-group">
-                                    <label class="form-label" for="sourceType">Source Type *</label>
-                                    <select id="sourceType" class="form-select" required>
-                                        <option value="">Select source...</option>
-                                        <option value="hl7v2">HL7 v2.x</option>
-                                        <option value="hl7v3">HL7 v3</option>
-                                        <option value="fhir">FHIR</option>
-                                        <option value="ccda">C-CDA</option>
-                                    </select>
+                                    <label class="form-label" for="wizardInterfaceName">Interface Name *</label>
+                                    <input type="text" id="wizardInterfaceName" class="form-input" placeholder="e.g., ADT Patient Admissions" required>
+                                    <div class="field-hint">A descriptive name for this interface</div>
                                 </div>
 
                                 <div class="form-group">
-                                    <label class="form-label" for="targetType">Target Type *</label>
-                                    <select id="targetType" class="form-select" required>
-                                        <option value="">Select target...</option>
-                                        <option value="fhir">FHIR R4</option>
-                                        <option value="hl7v2">HL7 v2.x</option>
-                                        <option value="ccda">C-CDA</option>
-                                        <option value="custom">Custom Format</option>
+                                    <label class="form-label" for="wizardInterfaceDescription">Description</label>
+                                    <textarea id="wizardInterfaceDescription" class="form-textarea" placeholder="Brief description of this interface and its purpose"></textarea>
+                                    <div class="field-hint">Optional description for documentation purposes</div>
+                                </div>
+
+                                <div class="form-group">
+                                    <label class="form-label" for="wizardMessageType">Message Type</label>
+                                    <select id="wizardMessageType" class="form-select">
+                                        <option value="auto-detect">Auto-detect from file</option>
+                                        <option value="ADT^A01">ADT^A01 - Admit/Visit Notification</option>
+                                        <option value="ADT^A04">ADT^A04 - Register Patient</option>
+                                        <option value="ADT^A08">ADT^A08 - Update Patient Info</option>
+                                        <option value="ORU^R01">ORU^R01 - Observation Result</option>
+                                        <option value="ORM^O01">ORM^O01 - Order Message</option>
+                                        <option value="SIU^S12">SIU^S12 - Appointment Booking</option>
                                     </select>
+                                    <div class="field-hint">Select the HL7 message type or auto-detect from uploaded file</div>
+                                </div>
+                            </div>
+
+                            <!-- ✅ FIXED: Source Configuration -->
+                            <div class="form-section">
+                                <div class="form-section-title">
+                                    📥 Source Configuration (Where messages come from)
+                                </div>
+                                
+                                <div class="form-row">
+                                    <div class="form-group">
+                                        <label class="form-label" for="wizardSourceType">Source Format *</label>
+                                        <select id="wizardSourceType" class="form-select" required>
+                                            <option value="">Select format...</option>
+                                            <option value="hl7v2">HL7 v2.x</option>
+                                            <option value="hl7v3">HL7 v3.x</option>
+                                            <option value="fhir">FHIR</option>
+                                            <option value="ccda">C-CDA</option>
+                                            <option value="file">File Format</option>
+                                            <option value="database">Database</option>
+                                        </select>
+                                        <div class="field-hint">The message format you're receiving</div>
+                                    </div>
+
+                                    <div class="form-group">
+                                        <label class="form-label" for="wizardSourceConnectivity">Source Connectivity *</label>
+                                        <select id="wizardSourceConnectivity" class="form-select" required>
+                                            <option value="">Select method...</option>
+                                            <option value="tcp">TCP/IP Listener</option>
+                                            <option value="http">HTTP Endpoint</option>
+                                            <option value="file">File Polling</option>
+                                            <option value="database">Database Polling</option>
+                                            <option value="sftp">SFTP</option>
+                                            <option value="mq">Message Queue</option>
+                                        </select>
+                                        <div class="field-hint">How you'll receive the messages</div>
+                                    </div>
+                                </div>
+
+                                <!-- Dynamic Source Config Container -->
+                                <div id="wizardSourceConfig" style="display: none;">
+                                    <!-- Source-specific configuration will be populated here -->
+                                </div>
+                            </div>
+
+                            <!-- ✅ FIXED: Target Configuration -->
+                            <div class="form-section">
+                                <div class="form-section-title">
+                                    📤 Target Configuration (Where messages go)
+                                </div>
+                                
+                                <div class="form-row">
+                                    <div class="form-group">
+                                        <label class="form-label" for="wizardTargetType">Target Format *</label>
+                                        <select id="wizardTargetType" class="form-select" required>
+                                            <option value="">Select format...</option>
+                                            <option value="fhir">FHIR R4</option>
+                                            <option value="hl7v2">HL7 v2.x</option>
+                                            <option value="ccda">C-CDA</option>
+                                            <option value="database">Database</option>
+                                            <option value="flatfile">Flat File</option>
+                                            <option value="json">JSON</option>
+                                            <option value="xml">XML</option>
+                                        </select>
+                                        <div class="field-hint">The format you want to convert to</div>
+                                    </div>
+
+                                    <div class="form-group">
+                                        <label class="form-label" for="wizardTargetConnectivity">Target Connectivity *</label>
+                                        <select id="wizardTargetConnectivity" class="form-select" required>
+                                            <option value="">Select method...</option>
+                                            <option value="http">HTTP/REST API</option>
+                                            <option value="database">Database Insert</option>
+                                            <option value="file">File Output</option>
+                                            <option value="tcp">TCP/IP Send</option>
+                                            <option value="sftp">SFTP Upload</option>
+                                            <option value="mq">Message Queue</option>
+                                        </select>
+                                        <div class="field-hint">How you'll deliver the messages</div>
+                                    </div>
+                                </div>
+
+                                <!-- Dynamic Target Config Container -->
+                                <div id="wizardTargetConfig" style="display: none;">
+                                    <!-- Target-specific configuration will be populated here -->
                                 </div>
                             </div>
                         </div>
@@ -776,6 +892,52 @@
             alert('🎉 Interface deployment initiated!');
         }
 
+        // ✅ FIXED: Auto-configure connectivity based on format selection
+        document.addEventListener('DOMContentLoaded', function() {
+            const sourceTypeSelect = document.getElementById('wizardSourceType');
+            const sourceConnectivitySelect = document.getElementById('wizardSourceConnectivity');
+            const targetTypeSelect = document.getElementById('wizardTargetType');
+            const targetConnectivitySelect = document.getElementById('wizardTargetConnectivity');
+
+            // Auto-suggest connectivity when format is selected
+            if (sourceTypeSelect) {
+                sourceTypeSelect.addEventListener('change', function() {
+                    const format = this.value;
+                    const suggestions = {
+                        'hl7v2': 'tcp',
+                        'hl7v3': 'http',
+                        'fhir': 'http',
+                        'ccda': 'http',
+                        'file': 'file',
+                        'database': 'database'
+                    };
+                    
+                    if (suggestions[format] && sourceConnectivitySelect) {
+                        sourceConnectivitySelect.value = suggestions[format];
+                    }
+                });
+            }
+
+            if (targetTypeSelect) {
+                targetTypeSelect.addEventListener('change', function() {
+                    const format = this.value;
+                    const suggestions = {
+                        'fhir': 'http',
+                        'hl7v2': 'tcp',
+                        'ccda': 'http',
+                        'database': 'database',
+                        'flatfile': 'file',
+                        'json': 'http',
+                        'xml': 'http'
+                    };
+                    
+                    if (suggestions[format] && targetConnectivitySelect) {
+                        targetConnectivitySelect.value = suggestions[format];
+                    }
+                });
+            }
+        });
+
         // Maximize functionality
         document.getElementById('wizardModalMaximize').addEventListener('click', function() {
             const overlay = document.getElementById('wizardModalOverlay');
@@ -793,5 +955,6 @@
         // Initialize
         updateNavigation();
     </script>
+
 </body>
 </html>

@@ -24,7 +24,7 @@ func NewHL7Controller(cfg *config.Config) *HL7Controller {
 	}
 }
 
-// ParseMessage handles HL7 message parsing requests - FIXED
+// ParseMessage handles HL7 message parsing requests
 func (ctrl *HL7Controller) ParseMessage(c *gin.Context) {
 	var req hl7.ParseRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -44,15 +44,14 @@ func (ctrl *HL7Controller) ParseMessage(c *gin.Context) {
 		return
 	}
 
+	// Only log if verbose logging is enabled
 	if ctrl.config.VerboseLogging {
 		fmt.Printf("📄 Parsing HL7 message (enhanced: %v, length: %d chars)\n",
 			req.UseEnhanced, len(req.RawMessage))
 	}
 
-	var result *hl7.EnhancedParsedMessage
-
-	// ✅ SIMPLIFIED: Always use the enhanced parser (it has proper fallback)
-	result = hl7.ParseHL7Enhanced(req.RawMessage)
+	// Always use the enhanced parser (it has proper fallback)
+	result := hl7.ParseHL7Enhanced(req.RawMessage)
 
 	if result == nil {
 		c.JSON(http.StatusInternalServerError, hl7.ParseResponse{
@@ -70,11 +69,11 @@ func (ctrl *HL7Controller) ParseMessage(c *gin.Context) {
 		return
 	}
 
+	// Only log success details if verbose logging is enabled
 	if ctrl.config.VerboseLogging {
 		fmt.Printf("✅ Successfully parsed HL7 message: %s (segments: %d)\n",
 			result.MessageType.Name, len(result.EnhancedSegments))
 
-		// ✅ DEBUG: Log segment details
 		fmt.Printf("🔍 DEBUG: Enhanced segments in final result:\n")
 		for segName, segment := range result.EnhancedSegments {
 			fmt.Printf("  📋 Segment %s: %s (%d fields)\n", segName, segment.Name, len(segment.Fields))
@@ -154,17 +153,23 @@ func (ctrl *HL7Controller) GetStats(c *gin.Context) {
 // Helper method - uses existing ConvertBasicToEnhanced and converts to map format
 func (ctrl *HL7Controller) convertBasicToEnhanced(basicResult *hl7.BasicParsedMessage) *hl7.EnhancedParsedMessage {
 	if basicResult == nil {
-		fmt.Printf("❌ DEBUG: convertBasicToEnhanced called with nil basicResult\n")
+		// Only log errors, not debug info
+		if ctrl.config.VerboseLogging {
+			fmt.Printf("❌ ERROR: convertBasicToEnhanced called with nil basicResult\n")
+		}
 		return &hl7.EnhancedParsedMessage{
 			Success: false,
 			Error:   "Failed to parse HL7 message",
 		}
 	}
 
-	fmt.Printf("🔍 DEBUG: convertBasicToEnhanced called with %d basic segments\n", len(basicResult.Segments))
+	// Only log debug info if verbose logging is enabled
+	if ctrl.config.VerboseLogging {
+		fmt.Printf("🔍 DEBUG: convertBasicToEnhanced called with %d basic segments\n", len(basicResult.Segments))
+	}
 
 	// Use the existing ConvertBasicToEnhanced function and convert to map format
-	enhancedArray := hl7.ConvertBasicToEnhanced(basicResult.Segments)
+	enhancedArray := hl7.ConvertBasicToEnhancedWithDelimiters(basicResult.Segments)
 	enhancedSegments := make(map[string]hl7.EnhancedSegment)
 	segmentOrder := make([]string, 0, len(enhancedArray))
 
@@ -173,7 +178,10 @@ func (ctrl *HL7Controller) convertBasicToEnhanced(basicResult *hl7.BasicParsedMe
 		segmentOrder = append(segmentOrder, enhancedSeg.Key)
 	}
 
-	fmt.Printf("🔍 DEBUG: After conversion - Enhanced segments: %d, Order: %v\n", len(enhancedSegments), segmentOrder)
+	// Only log debug info if verbose logging is enabled
+	if ctrl.config.VerboseLogging {
+		fmt.Printf("🔍 DEBUG: After conversion - Enhanced segments: %d, Order: %v\n", len(enhancedSegments), segmentOrder)
+	}
 
 	result := &hl7.EnhancedParsedMessage{
 		Raw:     basicResult.Raw,
@@ -194,7 +202,10 @@ func (ctrl *HL7Controller) convertBasicToEnhanced(basicResult *hl7.BasicParsedMe
 		ValidationErrors: []hl7.ValidationError{},
 	}
 
-	fmt.Printf("✅ DEBUG: Final result has %d enhanced segments\n", len(result.EnhancedSegments))
+	// Only log debug info if verbose logging is enabled
+	if ctrl.config.VerboseLogging {
+		fmt.Printf("✅ DEBUG: Final result has %d enhanced segments\n", len(result.EnhancedSegments))
+	}
 	return result
 }
 

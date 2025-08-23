@@ -1,5 +1,5 @@
 // FILE: real_schema_parser.go
-// Complete real schema-based HL7 parser with FIXED field positioning and validation logic
+// Complete real schema-based HL7 parser with ERROR-ONLY logging
 package hl7
 
 import (
@@ -99,20 +99,16 @@ var realSchemaLoader *RealSchemaLoader
 
 // InitRealSchemaLoader initializes the real schema loader
 func InitRealSchemaLoader(schemaDirectory string) {
-	fmt.Printf("🔍 DEBUG: InitRealSchemaLoader called with directory: %s\n", schemaDirectory)
-
 	if _, err := os.Stat(schemaDirectory); os.IsNotExist(err) {
-		fmt.Printf("⚠️ WARNING: Schema directory does not exist: %s\n", schemaDirectory)
 		if err := os.MkdirAll(schemaDirectory, 0755); err != nil {
 			fmt.Printf("❌ ERROR: Failed to create schema directory: %v\n", err)
 			return
 		}
+		// Create version directories silently
 		versionDirs := []string{"v2.3", "v2.4", "v2.5", "v2.5.1", "v2.6", "v2.7", "v2.8"}
 		for _, version := range versionDirs {
 			versionPath := filepath.Join(schemaDirectory, version)
-			if err := os.MkdirAll(versionPath, 0755); err == nil {
-				fmt.Printf("📁 Created version directory: %s\n", versionPath)
-			}
+			os.MkdirAll(versionPath, 0755) // Silent creation
 		}
 	}
 
@@ -121,16 +117,12 @@ func InitRealSchemaLoader(schemaDirectory string) {
 		cache:     make(map[string]*RealHL7Schema),
 	}
 
-	fmt.Printf("🚀 Real Schema Loader initialized successfully: %s\n", schemaDirectory)
-
+	// Silent validation - only create sample if no schemas exist
 	schemaFiles, err := scanForSchemaFiles(schemaDirectory)
 	if err != nil {
-		fmt.Printf("⚠️ Warning: Error scanning for schema files: %v\n", err)
-	} else {
-		fmt.Printf("📊 Found %d schema files in directory\n", len(schemaFiles))
-		if len(schemaFiles) == 0 {
-			createSampleSchema(schemaDirectory)
-		}
+		fmt.Printf("❌ ERROR: Failed to scan schema files: %v\n", err)
+	} else if len(schemaFiles) == 0 {
+		createSampleSchema(schemaDirectory)
 	}
 }
 
@@ -156,11 +148,9 @@ func scanForSchemaFiles(baseDir string) ([]string, error) {
 
 // createSampleSchema creates a sample schema file for testing
 func createSampleSchema(baseDir string) {
-	fmt.Printf("🛠️ Creating sample schema for testing...\n")
-
 	versionDir := filepath.Join(baseDir, "v2.5.1")
 	if err := os.MkdirAll(versionDir, 0755); err != nil {
-		fmt.Printf("❌ Failed to create version directory: %v\n", err)
+		fmt.Printf("❌ ERROR: Failed to create version directory: %v\n", err)
 		return
 	}
 
@@ -270,7 +260,7 @@ func createSampleSchema(baseDir string) {
 	schemaPath := filepath.Join(versionDir, "ADT_A04.gz")
 	file, err := os.Create(schemaPath)
 	if err != nil {
-		fmt.Printf("❌ Failed to create sample schema file: %v\n", err)
+		fmt.Printf("❌ ERROR: Failed to create sample schema file: %v\n", err)
 		return
 	}
 	defer file.Close()
@@ -282,11 +272,10 @@ func createSampleSchema(baseDir string) {
 	encoder.SetIndent("", "  ")
 
 	if err := encoder.Encode(sampleSchema); err != nil {
-		fmt.Printf("❌ Failed to write sample schema: %v\n", err)
+		fmt.Printf("❌ ERROR: Failed to write sample schema: %v\n", err)
 		return
 	}
-
-	fmt.Printf("✅ Created sample schema file: %s\n", schemaPath)
+	// Silent success - no logging for sample schema creation
 }
 
 // LoadRealSchema loads and parses actual schema from .gz file
@@ -298,7 +287,6 @@ func (rsl *RealSchemaLoader) LoadRealSchema(version, messageType, triggerEvent s
 
 	if schema, exists := rsl.cache[cacheKey]; exists {
 		rsl.stats.CacheHits++
-		fmt.Printf("✅ CACHE HIT: Using cached schema for %s\n", cacheKey)
 		return schema, nil
 	}
 
@@ -309,11 +297,8 @@ func (rsl *RealSchemaLoader) LoadRealSchema(version, messageType, triggerEvent s
 	filename := fmt.Sprintf("%s_%s.gz", messageType, triggerEvent)
 	schemaPath := filepath.Join(rsl.schemaDir, normalizedVersion, filename)
 
-	fmt.Printf("🔍 DEBUG: Looking for schema file: %s\n", schemaPath)
-
 	if _, err := os.Stat(schemaPath); os.IsNotExist(err) {
-		fmt.Printf("⚠️ Schema file not found: %s, trying alternatives...\n", schemaPath)
-
+		// Try alternatives silently
 		alternates := []string{
 			fmt.Sprintf("%s^%s.gz", messageType, triggerEvent),
 			fmt.Sprintf("%s.gz", messageType),
@@ -322,26 +307,21 @@ func (rsl *RealSchemaLoader) LoadRealSchema(version, messageType, triggerEvent s
 
 		for _, altFilename := range alternates {
 			altPath := filepath.Join(rsl.schemaDir, normalizedVersion, altFilename)
-			fmt.Printf("🔍 DEBUG: Trying alternative: %s\n", altPath)
 			if _, err := os.Stat(altPath); err == nil {
 				schemaPath = altPath
-				fmt.Printf("✅ Found alternative schema file: %s\n", schemaPath)
 				break
 			}
 		}
 
 		if _, err := os.Stat(schemaPath); os.IsNotExist(err) {
 			rsl.stats.LoadErrors++
-			fmt.Printf("❌ No schema file found for %s\n", cacheKey)
 			return nil, fmt.Errorf("schema file not found: %s", schemaPath)
 		}
 	}
 
-	fmt.Printf("✅ Loading schema from: %s\n", schemaPath)
 	schema, err := rsl.loadAndParseSchemaFile(schemaPath)
 	if err != nil {
 		rsl.stats.LoadErrors++
-		fmt.Printf("❌ Failed to load schema %s: %v\n", cacheKey, err)
 		return nil, fmt.Errorf("failed to load schema %s: %v", cacheKey, err)
 	}
 
@@ -350,7 +330,6 @@ func (rsl *RealSchemaLoader) LoadRealSchema(version, messageType, triggerEvent s
 	rsl.stats.CacheSize = len(rsl.cache)
 	rsl.stats.LastLoadTime = time.Now()
 
-	fmt.Printf("✅ Successfully loaded and cached schema: %s\n", cacheKey)
 	return schema, nil
 }
 
@@ -393,7 +372,6 @@ func (rsl *RealSchemaLoader) loadAndParseSchemaFile(filePath string) (*RealHL7Sc
 	schema.LoadedAt = time.Now()
 	schema.FilePath = filePath
 
-	fmt.Printf("✅ Schema conversion complete: %d segments loaded\n", len(schema.Segments))
 	return schema, nil
 }
 
@@ -420,85 +398,45 @@ func (rsl *RealSchemaLoader) convertOrderedRawSchema(raw *orderedmap.OrderedMap[
 		}
 	}
 
-	fmt.Printf("🔍 DEBUG: Converting schema from %s\n", filePath)
-	fmt.Printf("   📋 Message Type: %s\n", schema.MessageType)
-	fmt.Printf("   📋 Description: %s\n", schema.Description)
-	fmt.Printf("   📋 Version: %s\n", schema.Version)
-
 	segmentCount := 0
 
-	// ✅ CRITICAL FIX: Look for "structure" key first, then "segments" as fallback
+	// Look for "structure" key first, then "segments" as fallback
 	if structureValue, exists := raw.Get("structure"); exists {
-		fmt.Printf("   ✅ Found 'structure' key in raw schema\n")
-
 		if structureMap, ok := structureValue.(map[string]interface{}); ok {
-			fmt.Printf("   ✅ Structure is a map with %d entries\n", len(structureMap))
-
 			// Process each segment in the structure
 			sequenceCounter := 0
 			for segKey, segValue := range structureMap {
-				fmt.Printf("   🔍 Processing segment: %s\n", segKey)
-
 				if segmentMap, ok := segValue.(map[string]interface{}); ok {
 					segmentDef, err := rsl.convertOrderedSegment(segKey, segmentMap, sequenceCounter)
 					if err != nil {
-						fmt.Printf("   ❌ Error converting segment %s: %v\n", segKey, err)
-						continue
+						continue // Skip on error, don't log
 					}
 					schema.Segments[segKey] = segmentDef
 					schema.SegmentOrder = append(schema.SegmentOrder, segKey)
 					segmentCount++
 					sequenceCounter++
-					fmt.Printf("   ✅ Successfully converted segment %s with %d fields\n", segKey, len(segmentDef.Fields))
-				} else {
-					fmt.Printf("   ❌ Segment %s value is not a map: %T\n", segKey, segValue)
 				}
 			}
-		} else {
-			fmt.Printf("   ❌ Structure value is not a map: %T\n", structureValue)
 		}
 	} else if segmentsValue, exists := raw.Get("segments"); exists {
 		// Fallback: also support "segments" key for backward compatibility
-		fmt.Printf("   ✅ Found 'segments' key in raw schema\n")
-
 		if segmentsMap, ok := segmentsValue.(map[string]interface{}); ok {
-			fmt.Printf("   ✅ Segments is a map with %d entries\n", len(segmentsMap))
-
 			// Process segments directly
 			sequenceCounter := 0
 			for segKey, segValue := range segmentsMap {
-				fmt.Printf("   🔍 Processing segment: %s\n", segKey)
-
 				if segmentMap, ok := segValue.(map[string]interface{}); ok {
 					segmentDef, err := rsl.convertOrderedSegment(segKey, segmentMap, sequenceCounter)
 					if err != nil {
-						fmt.Printf("   ❌ Error converting segment %s: %v\n", segKey, err)
-						continue
+						continue // Skip on error, don't log
 					}
 					schema.Segments[segKey] = segmentDef
 					schema.SegmentOrder = append(schema.SegmentOrder, segKey)
 					segmentCount++
 					sequenceCounter++
-					fmt.Printf("   ✅ Successfully converted segment %s with %d fields\n", segKey, len(segmentDef.Fields))
-				} else {
-					fmt.Printf("   ❌ Segment %s value is not a map: %T\n", segKey, segValue)
 				}
 			}
-		} else {
-			fmt.Printf("   ❌ Segments value is not a map: %T\n", segmentsValue)
 		}
-	} else {
-		fmt.Printf("   ❌ No 'structure' or 'segments' key found in raw schema\n")
-
-		// Show all available keys
-		fmt.Printf("   Available keys: ")
-		for pair := raw.Oldest(); pair != nil; pair = pair.Next() {
-			fmt.Printf("'%s' ", pair.Key)
-		}
-		fmt.Printf("\n")
 	}
-
-	fmt.Printf("   📊 Total segments converted: %d\n", segmentCount)
 
 	// Sort segments by sequence
 	if len(schema.SegmentOrder) > 0 {
@@ -532,8 +470,6 @@ func (rsl *RealSchemaLoader) convertOrderedRawSchema(raw *orderedmap.OrderedMap[
 
 // convertOrderedSegment converts segment definition
 func (rsl *RealSchemaLoader) convertOrderedSegment(segmentName string, raw map[string]interface{}, defaultSequence int) (RealSegmentDef, error) {
-	fmt.Printf("     🔍 Converting segment %s\n", segmentName)
-
 	extractedSequence := extractSequenceFromRaw(raw, defaultSequence)
 
 	segment := RealSegmentDef{
@@ -545,50 +481,40 @@ func (rsl *RealSchemaLoader) convertOrderedSegment(segmentName string, raw map[s
 
 	if name, ok := raw["name"].(string); ok {
 		segment.Name = name
-		fmt.Printf("     📋 Segment name: %s\n", name)
 	}
 	if desc, ok := raw["description"].(string); ok {
 		segment.Description = desc
-		fmt.Printf("     📋 Segment description: %s\n", desc[:min(100, len(desc))])
 	}
 	if usage, ok := raw["usage"].(string); ok {
 		segment.Usage = usage
-		fmt.Printf("     📋 Segment usage: %s\n", usage)
 	}
 	if maxUse, ok := raw["maxUse"].(string); ok {
 		segment.MaxUse = maxUse
 	}
 
-	// ✅ CRITICAL: Check if fields exist and process them with proper positioning
+	// Check if fields exist and process them with proper positioning
 	if fields, ok := raw["fields"].(map[string]interface{}); ok {
-		fmt.Printf("     ✅ Found %d fields for segment %s\n", len(fields), segmentName)
-
-		// ✅ KEY FIX: Create field position map to handle gaps
+		// Create field position map to handle gaps
 		fieldPositions := make(map[int]RealFieldDef)
 		maxPosition := 0
 
 		// First pass: collect all fields and their positions
 		fieldSequence := 0
 		for fieldKey, fieldValue := range fields {
-			fmt.Printf("       🔍 Processing field: %s\n", fieldKey)
-
 			if fieldData, ok := fieldValue.(map[string]interface{}); ok {
 				fieldDef, err := rsl.convertOrderedField(fieldKey, fieldData, fieldSequence)
 				if err != nil {
-					fmt.Printf("       ❌ Error converting field %s: %v\n", fieldKey, err)
-					continue
+					continue // Skip on error
 				}
 
-				// ✅ Extract and validate position
+				// Extract and validate position
 				if pos, err := extractFieldPosition(fieldKey); err == nil {
 					fieldDef.Position = pos
 					if pos > maxPosition {
 						maxPosition = pos
 					}
 					fieldPositions[pos] = fieldDef
-					fmt.Printf("       ✅ Field %s positioned at %d\n", fieldKey, pos)
 				} else {
-					fmt.Printf("       ⚠️ Could not extract position from %s: %v\n", fieldKey, err)
 					// Use sequence as fallback position
 					fieldDef.Position = fieldSequence + 1
 					fieldPositions[fieldSequence+1] = fieldDef
@@ -598,12 +524,10 @@ func (rsl *RealSchemaLoader) convertOrderedSegment(segmentName string, raw map[s
 				}
 
 				fieldSequence++
-			} else {
-				fmt.Printf("       ❌ Field %s value is not a map: %T\n", fieldKey, fieldValue)
 			}
 		}
 
-		// ✅ CRITICAL FIX: Generate ordered fields for ALL positions 1 to maxPosition
+		// Generate ordered fields for ALL positions 1 to maxPosition
 		for position := 1; position <= maxPosition; position++ {
 			fieldKey := fmt.Sprintf("%s.%d", segmentName, position)
 
@@ -611,9 +535,8 @@ func (rsl *RealSchemaLoader) convertOrderedSegment(segmentName string, raw map[s
 				// Use the actual field definition
 				segment.Fields[fieldKey] = fieldDef
 				segment.OrderedFields = append(segment.OrderedFields, fieldKey)
-				fmt.Printf("       ✅ Added field %s at position %d: %s\n", fieldKey, position, fieldDef.Name)
 			} else {
-				// ✅ Create placeholder field for missing positions to maintain alignment
+				// Create placeholder field for missing positions to maintain alignment
 				placeholderField := RealFieldDef{
 					Name:        fmt.Sprintf("Field %d", position),
 					DataType:    "ST",
@@ -626,21 +549,10 @@ func (rsl *RealSchemaLoader) convertOrderedSegment(segmentName string, raw map[s
 				}
 				segment.Fields[fieldKey] = placeholderField
 				segment.OrderedFields = append(segment.OrderedFields, fieldKey)
-				fmt.Printf("       ⚠️ Added placeholder field %s at position %d\n", fieldKey, position)
 			}
 		}
-	} else {
-		fmt.Printf("     ❌ No 'fields' found for segment %s (or not a map)\n", segmentName)
-
-		// Show what keys are available
-		fmt.Printf("     Available keys in segment: ")
-		for key := range raw {
-			fmt.Printf("'%s' ", key)
-		}
-		fmt.Printf("\n")
 	}
 
-	fmt.Printf("     ✅ Segment %s conversion complete: %d fields\n", segmentName, len(segment.Fields))
 	return segment, nil
 }
 
@@ -813,8 +725,6 @@ func extractComponentValue(fieldValue string, componentPosition int) string {
 	return ""
 }
 
-// ✅ NOTE: extractFieldPosition is defined in parser.go to avoid duplication
-
 func (rsl *RealSchemaLoader) GetStats() RealSchemaStats {
 	rsl.cacheMux.RLock()
 	defer rsl.cacheMux.RUnlock()
@@ -824,17 +734,13 @@ func (rsl *RealSchemaLoader) GetStats() RealSchemaStats {
 }
 
 // =====================================
-// PARSING FUNCTIONS WITH MAP-BASED SEGMENTS - FIXED
+// PARSING FUNCTIONS WITH MAP-BASED SEGMENTS
 // =====================================
 
 func ParseWithRealSchema(rawMessage string) *EnhancedParsedMessage {
-	startTime := time.Now()
-
 	version, messageType, triggerEvent := extractMessageInfoSimple(rawMessage)
-	fmt.Printf("🔍 DEBUG: ParseWithRealSchema - Message: %s^%s v%s\n", messageType, triggerEvent, version)
 
 	if realSchemaLoader == nil {
-		fmt.Printf("❌ DEBUG: realSchemaLoader is nil\n")
 		return &EnhancedParsedMessage{
 			Raw:      rawMessage,
 			Success:  false,
@@ -843,10 +749,8 @@ func ParseWithRealSchema(rawMessage string) *EnhancedParsedMessage {
 		}
 	}
 
-	fmt.Printf("🔍 DEBUG: Loading schema for %s^%s v%s...\n", messageType, triggerEvent, version)
 	schema, err := realSchemaLoader.LoadRealSchema(version, messageType, triggerEvent)
 	if err != nil {
-		fmt.Printf("❌ DEBUG: Schema loading failed: %v\n", err)
 		return &EnhancedParsedMessage{
 			Raw:      rawMessage,
 			Success:  false,
@@ -855,33 +759,8 @@ func ParseWithRealSchema(rawMessage string) *EnhancedParsedMessage {
 		}
 	}
 
-	// ✅ CRITICAL DEBUG: Show what was actually loaded
-	if schema != nil {
-		fmt.Printf("✅ DEBUG: Schema loaded successfully!\n")
-		fmt.Printf("   📋 Schema File: %s\n", schema.FilePath)
-		fmt.Printf("   📋 Schema Type: %s\n", schema.MessageType)
-		fmt.Printf("   📋 Schema Description: %s\n", schema.Description)
-		fmt.Printf("   📋 Schema Version: %s\n", schema.Version)
-		fmt.Printf("   📋 Schema Segments: %d\n", len(schema.Segments))
-		fmt.Printf("   📋 Schema Segment Order: %v\n", schema.SegmentOrder)
-
-		fmt.Printf("   📋 Schema Segment Details:\n")
-		for segName, segDef := range schema.Segments {
-			fmt.Printf("     - %s: %s (%d fields, usage: %s)\n",
-				segName, segDef.Name, len(segDef.Fields), segDef.Usage)
-		}
-	} else {
-		fmt.Printf("❌ DEBUG: Schema is nil after loading\n")
-		return &EnhancedParsedMessage{
-			Raw:      rawMessage,
-			Success:  false,
-			Error:    "Schema is nil after loading",
-			ParsedAt: time.Now().Format(time.RFC3339),
-		}
-	}
-
 	// Parse the message with basic parser first
-	basicResult := ParseHL7Message(rawMessage)
+	basicResult := ParseHL7MessageEnhanced(rawMessage)
 	if basicResult == nil {
 		return &EnhancedParsedMessage{
 			Raw:      rawMessage,
@@ -891,16 +770,10 @@ func ParseWithRealSchema(rawMessage string) *EnhancedParsedMessage {
 		}
 	}
 
-	fmt.Printf("✅ DEBUG: Basic parsing successful with %d segments\n", len(basicResult.Segments))
-	for segName := range basicResult.Segments {
-		fmt.Printf("  📋 Basic segment: %s\n", segName)
-	}
-
-	// ✅ FIXED: Use the corrected enhancement function with validation
-	fmt.Printf("🔍 DEBUG: Enhancing segments with loaded schema...\n")
+	// Enhance segments with loaded schema
 	enhancedSegments, segmentOrder := enhanceWithRealSchema(basicResult.Segments, schema)
 
-	// ✅ ENHANCED: Add validation for missing required fields
+	// Add validation for missing required fields
 	validationErrors := validateRequiredFields(enhancedSegments, schema)
 
 	result := &EnhancedParsedMessage{
@@ -917,59 +790,22 @@ func ParseWithRealSchema(rawMessage string) *EnhancedParsedMessage {
 		ValidationErrors: validationErrors,
 	}
 
-	fmt.Printf("✅ Real schema parsing completed in %v\n", time.Since(startTime))
 	return result
 }
 
-// ✅ FIXED: enhanceWithRealSchema - Enhanced with proper position handling
+// enhanceWithRealSchema - Enhanced with proper position handling
 func enhanceWithRealSchema(basicSegments map[string]BasicSegment, schema *RealHL7Schema) (map[string]EnhancedSegment, []string) {
-	fmt.Printf("🔍 DEBUG: enhanceWithRealSchema called with %d basic segments\n", len(basicSegments))
-
 	enhancedSegments := make(map[string]EnhancedSegment)
 	var segmentOrder []string
-
-	// ✅ CRITICAL DEBUG: Show what's actually in the schema
-	if schema != nil {
-		fmt.Printf("✅ SCHEMA LOADED:\n")
-		fmt.Printf("   📋 Schema Type: %s\n", schema.MessageType)
-		fmt.Printf("   📋 Schema Description: %s\n", schema.Description)
-		fmt.Printf("   📋 Schema Version: %s\n", schema.Version)
-		fmt.Printf("   📋 Total Segments in Schema: %d\n", len(schema.Segments))
-		fmt.Printf("   📋 Schema Segment Order: %v\n", schema.SegmentOrder)
-
-		// ✅ CRITICAL: List all segments that have schema definitions
-		fmt.Printf("   📋 Segments with Schema Definitions:\n")
-		for segName, segDef := range schema.Segments {
-			fmt.Printf("     - %s: %s (%d fields)\n", segName, segDef.Name, len(segDef.Fields))
-		}
-
-		// ✅ CRITICAL: Check if basic segments match schema segments
-		fmt.Printf("   📋 Basic vs Schema Segment Match:\n")
-		for basicSegName := range basicSegments {
-			if _, hasSchema := schema.Segments[basicSegName]; hasSchema {
-				fmt.Printf("     ✅ %s: HAS schema definition\n", basicSegName)
-			} else {
-				fmt.Printf("     ❌ %s: NO schema definition\n", basicSegName)
-			}
-		}
-	} else {
-		fmt.Printf("❌ NO SCHEMA PROVIDED TO ENHANCEMENT FUNCTION\n")
-	}
 
 	// Determine segment order from schema or use basic order
 	if schema != nil && len(schema.SegmentOrder) > 0 {
 		segmentOrder = schema.SegmentOrder
-		fmt.Printf("✅ USING SCHEMA SEGMENT ORDER: %v\n", segmentOrder)
 	} else {
 		segmentOrder = getBasicHL7Order(basicSegments)
-		if schema != nil {
-			fmt.Printf("⚠️ SCHEMA LOADED BUT NO SEGMENT ORDER DEFINED, using basic order: %v\n", segmentOrder)
-		} else {
-			fmt.Printf("⚠️ NO SCHEMA, using basic HL7 order: %v\n", segmentOrder)
-		}
 	}
 
-	// ✅ KEY FIX: Process ALL basic segments, ensuring none are missed
+	// Process ALL basic segments, ensuring none are missed
 	processedSegments := make(map[string]bool)
 
 	// First pass: Process segments in the determined order
@@ -978,20 +814,6 @@ func enhanceWithRealSchema(basicSegments map[string]BasicSegment, schema *RealHL
 			enhancedSeg := createEnhancedSegmentFromBasic(segmentName, basicSeg, schema)
 			enhancedSegments[segmentName] = enhancedSeg
 			processedSegments[segmentName] = true
-
-			// ✅ CRITICAL DEBUG: Show exactly what happened for this segment
-			if schema != nil {
-				if segDef, hasSchemaForSegment := schema.Segments[segmentName]; hasSchemaForSegment {
-					fmt.Printf("✅ Processed segment %s with REAL SCHEMA: %s (%d schema fields → %d enhanced fields)\n",
-						segmentName, segDef.Name, len(segDef.Fields), enhancedSeg.FieldCount)
-				} else {
-					fmt.Printf("⚠️ Processed segment %s with BASIC CONVERSION (no schema definition) (%d fields)\n",
-						segmentName, enhancedSeg.FieldCount)
-				}
-			} else {
-				fmt.Printf("⚠️ Processed segment %s with BASIC CONVERSION (no schema provided) (%d fields)\n",
-					segmentName, enhancedSeg.FieldCount)
-			}
 		}
 	}
 
@@ -1001,11 +823,9 @@ func enhanceWithRealSchema(basicSegments map[string]BasicSegment, schema *RealHL
 			enhancedSeg := createEnhancedSegmentFromBasic(segmentName, basicSeg, schema)
 			enhancedSegments[segmentName] = enhancedSeg
 			segmentOrder = append(segmentOrder, segmentName)
-			fmt.Printf("✅ Added remaining segment %s with %d fields\n", segmentName, enhancedSeg.FieldCount)
 		}
 	}
 
-	fmt.Printf("✅ Enhanced %d segments total\n", len(enhancedSegments))
 	return enhancedSegments, segmentOrder
 }
 
@@ -1014,27 +834,18 @@ func createEnhancedSegmentFromBasic(segmentName string, basicSeg BasicSegment, s
 	// If we have schema definition, use it
 	if schema != nil {
 		if segmentDef, hasSchema := schema.Segments[segmentName]; hasSchema {
-			fmt.Printf("   🎯 USING REAL SCHEMA for %s: %s (with %d field definitions)\n",
-				segmentName, segmentDef.Name, len(segmentDef.Fields))
 			return createEnhancedSegmentWithSchema(segmentName, basicSeg, segmentDef)
-		} else {
-			fmt.Printf("   ⚠️ NO SCHEMA DEFINITION found for %s, falling back to basic conversion\n", segmentName)
 		}
-	} else {
-		fmt.Printf("   ❌ NO SCHEMA provided for %s, using basic conversion\n", segmentName)
 	}
 
 	// Otherwise, fall back to existing basic conversion logic
-	enhancedArray := ConvertBasicToEnhanced(map[string]BasicSegment{segmentName: basicSeg})
+	enhancedArray := ConvertBasicToEnhancedWithDelimiters(map[string]BasicSegment{segmentName: basicSeg})
 	if len(enhancedArray) > 0 {
 		enhanced := enhancedArray[0]
-		fmt.Printf("   📝 BASIC CONVERSION for %s: %s (%d fields from basic parser)\n",
-			segmentName, enhanced.Name, len(enhanced.Fields))
 		return enhanced
 	}
 
 	// Last resort: create minimal enhanced segment
-	fmt.Printf("   ❌ MINIMAL CONVERSION for %s (fallback)\n", segmentName)
 	return EnhancedSegment{
 		Key:              segmentName,
 		Raw:              basicSeg.Raw,
@@ -1047,14 +858,8 @@ func createEnhancedSegmentFromBasic(segmentName string, basicSeg BasicSegment, s
 	}
 }
 
-// ✅ ENHANCED: Helper function to create enhanced segment using schema definition with FIXED positioning
+// Helper function to create enhanced segment using schema definition with FIXED positioning
 func createEnhancedSegmentWithSchema(segmentName string, basicSeg BasicSegment, segmentDef RealSegmentDef) EnhancedSegment {
-	fmt.Printf("   🎯 CREATING ENHANCED SEGMENT WITH SCHEMA for %s\n", segmentName)
-	fmt.Printf("     📋 Schema Name: %s\n", segmentDef.Name)
-	fmt.Printf("     📋 Schema Description: %s\n", segmentDef.Description)
-	fmt.Printf("     📋 Schema Fields Available: %d\n", len(segmentDef.Fields))
-	fmt.Printf("     📋 Schema Field Order: %v\n", segmentDef.OrderedFields)
-
 	enhancedSeg := EnhancedSegment{
 		Key:              segmentName,
 		Raw:              basicSeg.Raw,
@@ -1067,27 +872,19 @@ func createEnhancedSegmentWithSchema(segmentName string, basicSeg BasicSegment, 
 		Fields:           make([]FieldInfo, 0),
 	}
 
-	fmt.Printf("     📋 Basic Segment Fields Available: %d\n", len(basicSeg.Fields))
-	for basicFieldKey := range basicSeg.Fields {
-		fmt.Printf("       - Basic field: %s\n", basicFieldKey)
-	}
-
-	// ✅ CRITICAL FIX: Create fields for ALL positions to maintain order and use schema descriptions
+	// Create fields for ALL positions to maintain order and use schema descriptions
 	maxPosition := 0
 	schemaFieldPositions := make(map[int]RealFieldDef)
 
 	// First, map all schema fields by position
-	for fieldKey, fieldDef := range segmentDef.Fields {
+	for _, fieldDef := range segmentDef.Fields {
 		if fieldDef.Position > maxPosition {
 			maxPosition = fieldDef.Position
 		}
 		schemaFieldPositions[fieldDef.Position] = fieldDef
-		fmt.Printf("       📋 Schema field %s at position %d: %s\n", fieldKey, fieldDef.Position, fieldDef.Name)
 	}
 
-	// ✅ ENHANCED: Process ALL positions from 1 to maxPosition using schema definitions
-	fieldsProcessed := 0
-
+	// Process ALL positions from 1 to maxPosition using schema definitions
 	for position := 1; position <= maxPosition; position++ {
 		fieldKey := fmt.Sprintf("%s.%d", segmentName, position)
 
@@ -1099,16 +896,14 @@ func createEnhancedSegmentWithSchema(segmentName string, basicSeg BasicSegment, 
 			hasValue = (value != "")
 		}
 
-		// Use schema definition if available, otherwise create placeholder
+		// Use schema definition if available
 		if schemaDef, hasSchema := schemaFieldPositions[position]; hasSchema {
-			fmt.Printf("     ✅ SCHEMA FIELD %s: '%s' → %s\n", fieldKey, fieldValue, schemaDef.Name)
-
 			fieldInfo := FieldInfo{
 				Key:         fieldKey,
 				Value:       fieldValue,
-				Name:        schemaDef.Name,        // ✅ Use rich schema name
-				Description: schemaDef.Description, // ✅ Use rich schema description
-				DataType:    schemaDef.DataType,    // ✅ Use schema data type
+				Name:        schemaDef.Name,
+				Description: schemaDef.Description,
+				DataType:    schemaDef.DataType,
 				Optionality: schemaDef.Usage,
 				Cardinality: fmt.Sprintf("[%s]", schemaDef.Repeat),
 				Position:    position,
@@ -1118,7 +913,7 @@ func createEnhancedSegmentWithSchema(segmentName string, basicSeg BasicSegment, 
 				TableId:     schemaDef.TableId,
 			}
 
-			// ✅ ENHANCED: Add rich subfields with schema component information
+			// Add rich subfields with schema component information
 			if len(schemaDef.OrderedComponents) > 0 {
 				subfields := make([]SubfieldInfo, 0, len(schemaDef.OrderedComponents))
 				for _, compKey := range schemaDef.OrderedComponents {
@@ -1132,33 +927,28 @@ func createEnhancedSegmentWithSchema(segmentName string, basicSeg BasicSegment, 
 
 						subfield := SubfieldInfo{
 							Key:         compKey,
-							Name:        comp.Name,     // ✅ Rich schema component name
-							DataType:    comp.DataType, // ✅ Schema component data type
-							Usage:       comp.Usage,    // ✅ Schema component usage
-							Length:      comp.Length,   // ✅ Schema component length
+							Name:        comp.Name,
+							DataType:    comp.DataType,
+							Usage:       comp.Usage,
+							Length:      comp.Length,
 							Position:    comp.Position,
 							Sequence:    comp.Sequence,
-							Description: comp.Description, // ✅ Rich schema component description
-							TableId:     comp.TableId,     // ✅ Schema table reference
+							Description: comp.Description,
+							TableId:     comp.TableId,
 							HasValue:    componentHasValue,
 							Value:       componentValue,
 						}
 						subfields = append(subfields, subfield)
-						fmt.Printf("         🔍 Schema component %s: %s (%s)\n", compKey, comp.Name, comp.DataType)
 					}
 				}
 				fieldInfo.Subfields = subfields
-				fmt.Printf("       🔍 Added %d schema-enhanced subfields for %s\n", len(subfields), fieldKey)
 			} else {
 				fieldInfo.Subfields = []SubfieldInfo{}
 			}
 
 			enhancedSeg.Fields = append(enhancedSeg.Fields, fieldInfo)
-			fieldsProcessed++
 		} else if hasValue {
 			// Field has value but no schema definition - create basic field
-			fmt.Printf("     ⚠️ NO SCHEMA for %s but has value: '%s'\n", fieldKey, fieldValue)
-
 			fieldInfo := FieldInfo{
 				Key:         fieldKey,
 				Value:       fieldValue,
@@ -1175,8 +965,6 @@ func createEnhancedSegmentWithSchema(segmentName string, basicSeg BasicSegment, 
 	}
 
 	enhancedSeg.FieldCount = len(enhancedSeg.Fields)
-
-	fmt.Printf("     ✅ SCHEMA ENHANCEMENT COMPLETE: %d fields processed\n", fieldsProcessed)
 	return enhancedSeg
 }
 
@@ -1274,7 +1062,7 @@ func extractMessageInfoSimple(rawMessage string) (version, messageType, triggerE
 	return version, messageType, triggerEvent
 }
 
-// ✅ ENHANCED: Validate required fields and create specific validation errors
+// Validate required fields and create specific validation errors
 func validateRequiredFields(enhancedSegments map[string]EnhancedSegment, schema *RealHL7Schema) []ValidationError {
 	var validationErrors []ValidationError
 
@@ -1282,12 +1070,8 @@ func validateRequiredFields(enhancedSegments map[string]EnhancedSegment, schema 
 		return validationErrors
 	}
 
-	fmt.Printf("🔍 DEBUG: Validating required fields across %d segments\n", len(enhancedSegments))
-
 	for segmentName, enhancedSegment := range enhancedSegments {
 		if schemaDef, hasSchema := schema.Segments[segmentName]; hasSchema {
-			fmt.Printf("   📋 Validating required fields for %s\n", segmentName)
-
 			// Check each schema field for required status
 			for fieldKey, fieldDef := range schemaDef.Fields {
 				if fieldDef.Usage == "R" { // Required field
@@ -1314,7 +1098,6 @@ func validateRequiredFields(enhancedSegments map[string]EnhancedSegment, schema 
 							Suggestion: fmt.Sprintf("Add %s field to %s segment", fieldDef.Name, segmentName),
 							RuleId:     fmt.Sprintf("REQ_%s_%d", segmentName, fieldDef.Position),
 						})
-						fmt.Printf("     ❌ MISSING REQUIRED FIELD: %s (%s)\n", fieldKey, fieldDef.Name)
 					} else if !fieldHasValue {
 						validationErrors = append(validationErrors, ValidationError{
 							Severity:   SeverityWarning,
@@ -1326,13 +1109,11 @@ func validateRequiredFields(enhancedSegments map[string]EnhancedSegment, schema 
 							Suggestion: fmt.Sprintf("Provide a value for %s", fieldDef.Name),
 							RuleId:     fmt.Sprintf("EMPTY_%s_%d", segmentName, fieldDef.Position),
 						})
-						fmt.Printf("     ⚠️ EMPTY REQUIRED FIELD: %s (%s)\n", fieldKey, fieldDef.Name)
 					}
 				}
 			}
 		}
 	}
 
-	fmt.Printf("✅ Required field validation complete: %d validation errors found\n", len(validationErrors))
 	return validationErrors
 }

@@ -177,9 +177,10 @@
     </div>
 
     <!-- EXISTING JavaScript Dependencies (DO NOT CHANGE ORDER) -->
+
     <script src="js/interfaces.js"></script>
     <script src="js/wizard/module-loader.js"></script> 
-    
+    <!-- ADD THESE TWO LINES HERE - BEFORE other components -->
     <script src="js/core/wizard-navigation.js"></script>  <!-- ADD THIS -->
     
 
@@ -192,5 +193,9 @@
     
     <!-- PRESERVED: Core wizard functions (MUST STAY GLOBAL) -->
     <script src="js/core/wizard-functions.js"></script>
+    <!-- Add this script tag to your wizard page -->
+<script src="/js/wizard-config-integration.js"></script>
+<script src="/js/step4-complete-integration.js"></script>
+<script src="/js/step5-summary-fix.js"></script>
 </body>
 </html>

@@ -1,4 +1,4 @@
-// FIXED module-loader.js - Fixes timing issue and wrong selectors
+// FIXED module-loader.js - Fixes timing issue and proper Step 4 integration
 
 class WizardModuleLoader {
     constructor() {
@@ -19,6 +19,55 @@ class WizardModuleLoader {
                 'wizard-main.js': ['wizard-services.js', 'segment-viewer.js', 'step-handlers.js']
             }
         };
+    }
+
+    // FIXED: Step 4 module loading method with proper naming
+    async loadStep4() {
+        const step4Path = '/js/step4/';
+        const modules = [
+            'step4-utils.js',
+            'step4-styles.js',
+            'step4-templates.js',
+            'step4-validation.js',
+            'step4-mapping.js',
+            'step4-resources.js',
+            'step4-json-viewer.js',
+            'step4-config-manager.js',
+            'step4-modals.js',
+            // ADD THESE TWO NEW FILES HERE (before step4-handler.js)
+        'field-mapping-validator.js',        // NEW: Enhanced field validation
+        'enhanced-mapping-interface.js', 
+            'step4-handler.js'  // Main handler loads last - CRITICAL ORDER
+        ];
+
+        console.log('🔄 Loading Step 4 modules...');
+        
+        for (const module of modules) {
+            try {
+                await this.loadScript(step4Path + module);
+                console.log(`✅ Loaded: ${module}`);
+                
+                // Add small delay between critical modules to ensure proper initialization
+                if (module === 'step4-handler.js') {
+                    await new Promise(resolve => setTimeout(resolve, 100));
+                }
+            } catch (error) {
+                console.error(`❌ Failed to load ${module}:`, error);
+                // Continue loading other modules - some may be optional
+            }
+        }
+        
+        // Verify FHIRMappingStepHandler is available after loading
+        if (typeof window.FHIRMappingStepHandler !== 'undefined') {
+            console.log('✅ All Step 4 modules loaded successfully - FHIRMappingStepHandler available');
+        } else {
+            console.warn('⚠️ Step 4 modules loaded but FHIRMappingStepHandler not available');
+        }
+    }
+
+    // ALIAS: Alternative method name for compatibility
+    async loadStep4Modules() {
+        return this.loadStep4();
     }
 
     async loadAllModules() {
@@ -72,6 +121,7 @@ class WizardModuleLoader {
         return new Promise((resolve, reject) => {
             const existingScript = document.querySelector(`script[src="${src}"]`);
             if (existingScript) {
+                console.log(`ℹ️ Script already loaded: ${src}`);
                 resolve();
                 return;
             }
@@ -228,8 +278,9 @@ class WizardAutoLoader {
                 this.hideLoadingIndicator();
                 console.log('🎉 ezHealthKonnect Interface Wizard is ready to use!');
                 
-                // Make module loader available for debugging
+                // FIXED: Make module loader available globally for Step 4 access
                 window.wizardLoader = this.moduleLoader;
+                window.moduleLoader = this.moduleLoader; // Alternative reference
                 
                 // Fire a custom event to notify other scripts
                 window.dispatchEvent(new CustomEvent('wizardReady', {
@@ -295,6 +346,17 @@ function initializeWizardLoader() {
 // Start the loading process
 initializeWizardLoader();
 
+// FIXED: Global access to module loader methods
+window.loadStep4Modules = function() {
+    const loader = window.wizardLoader || window.wizardAutoLoader?.moduleLoader;
+    if (loader && typeof loader.loadStep4 === 'function') {
+        return loader.loadStep4();
+    } else {
+        console.error('❌ Module loader not available for Step 4 loading');
+        return Promise.reject(new Error('Module loader not available'));
+    }
+};
+
 // Export for module systems
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = { WizardModuleLoader, WizardAutoLoader };
@@ -312,4 +374,4 @@ if (!document.querySelector('#wizard-loader-styles')) {
     document.head.appendChild(style);
 }
 
-console.log('✅ FIXED Module loader loaded with timing improvements');
+console.log('✅ FIXED Module loader loaded with timing improvements and Step 4 integration');

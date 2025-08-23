@@ -44,6 +44,8 @@ Improves readability and reduces LLM hallucination in type inference.
 - No hard coding
 - do not create unncecessary files and folders
 - do not restucture with out consulting
+- do not rename existing functions and files
+- do not create debug or fallback methods or default methods
 Don't rely on the LLM without reviewing output
 Always test and inspect LLM-generated code critically.
 
