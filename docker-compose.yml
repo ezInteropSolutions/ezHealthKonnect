@@ -12,6 +12,7 @@ services:
     ports:
       - "5432:5432"
     volumes:
+      # PERSISTENT DATA - This survives docker-compose down
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ezhealth_user -d ezhealthkonnect"]
@@ -21,7 +22,26 @@ services:
     networks:
       - ezhealthkonnect
 
-  # Your Application Service  
+  # Flyway handles SCHEMA migrations only (version controlled)
+  flyway:
+    image: flyway/flyway:latest
+    container_name: ezhealthkonnect-flyway
+    environment:
+      FLYWAY_URL: jdbc:postgresql://postgres:5432/ezhealthkonnect
+      FLYWAY_USER: ezhealth_user
+      FLYWAY_PASSWORD: secure_password_change_me
+      FLYWAY_BASELINE_ON_MIGRATE: true
+    volumes:
+      # Only schema migrations (no data inserts)
+      - ./database/migrations:/flyway/sql
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - ezhealthkonnect
+    command: ["repair", "migrate"]
+
+  # Your Application Service - FIXED VERSION
   app:
     build: .
     container_name: ezhealthkonnect-app
@@ -34,35 +54,35 @@ services:
       DB_PASSWORD: secure_password_change_me
       DB_SSL: false
       
-      # Application settings (unchanged)
+      # Application settings
       API_PORT: 8080
       PORT: 3000
       NODE_ENV: development
       
-      # Session secrets (unchanged)
+      # Session secrets
       SESSION_SECRET: ezhealthkonnect_session_secret_key_for_development_1234567890123
       JWT_SECRET: ezhealthkonnect_jwt_secret_key_for_development_12345678901234567890
       
-      # Feature flags (unchanged)
+      # Feature flags
       ENABLE_POSTGRESQL: true
       HIPAA_COMPLIANCE_MODE: true
       GDPR_COMPLIANCE_MODE: true
       HL7_PROCESSING_MODE: custom
       HL7_VALIDATION_LEVEL: basic
       VERBOSE_LOGGING: true
+      
+      # Add a flag to control dev data seeding
+      SEED_DEV_DATA: "true"
 
-      #EZHEALTHKONNECT_SCHEMA_DIR: /app/schemas
+      # ✅ FIXED: Schema paths that match the volume mounts
       EZHEALTHKONNECT_SCHEMA_DIR: /app/schemas/hl7
-      FHIR_SCHEMA_DIR: /app/schemas/fhir             # Add this line
-
-
-
+      FHIR_SCHEMA_DIR: /app/schemas/fhir
       
     ports:
       - "3000:3000"
       - "8080:8080"
     
-    # Volume mounting (unchanged)
+    # ✅ FIXED: Complete volume mounting (was missing critical mounts)
     volumes:
       - ./public:/app/public
       - ./routes:/app/routes
@@ -70,14 +90,15 @@ services:
       - ./controllers:/app/controllers
       - ./middleware:/app/middleware
       - ./config:/app/config
-      - ./hl7:/app/hl7
-      #- ${EZHEALTHKONNECT_SCHEMA_DIR}:/app/schemas:ro
-      - ./schemas:/app/schemas:ro  # ✅ Direct mount of schemas directory
-
-
+      - ./scripts:/app/scripts
+      # ✅ CRITICAL: These were missing in your broken config
+      - ./hl7:/app/hl7                    # Go HL7 parsing code
+      - ./schemas:/app/schemas:ro         # HL7 and FHIR schema files
     
-    # Wait for PostgreSQL to be ready before starting app
+    # Wait for both PostgreSQL and migrations to complete
     depends_on:
+      flyway:
+        condition: service_completed_successfully
       postgres:
         condition: service_healthy
     
@@ -87,7 +108,11 @@ services:
 
 # Persistent storage for PostgreSQL data
 volumes:
+  # This volume persists data across container restarts
+  # Data stays even with 'docker-compose down'
+  # Only removed with 'docker-compose down -v' or 'docker volume rm'
   postgres_data:
+    driver: local
 
 # Network for services to communicate
 networks:

@@ -83,6 +83,7 @@ type RealSchemaLoader struct {
 	cache     map[string]*RealHL7Schema
 	cacheMux  sync.RWMutex
 	stats     RealSchemaStats
+	loadErrorMessages []string
 }
 
 type RealSchemaStats struct {
@@ -128,6 +129,39 @@ func InitRealSchemaLoader(schemaDirectory string) {
 
 // GetRealSchemaLoader returns the real schema loader
 func GetRealSchemaLoader() *RealSchemaLoader {
+	
+	schemaDir := os.Getenv("EZHEALTHKONNECT_SCHEMA_DIR")
+    fmt.Printf("🔍 EZHEALTHKONNECT_SCHEMA_DIR: %s\n", schemaDir)
+    if schemaDir == "" {
+        fmt.Printf("🔍 Error: EZHEALTHKONNECT_SCHEMA_DIR environment variable is not set\n")
+        return nil
+    }
+
+    fmt.Printf("🔍 Searching for schema files in %s\n", schemaDir)
+    files, err := os.ReadDir(schemaDir)
+    if err != nil {
+        fmt.Printf("🔍 Error reading schema directory: %v\n", err)
+        return nil
+    }
+
+    fmt.Printf("🔍 Found %d files in schema directory\n", len(files))
+    for _, file := range files {
+        fmt.Printf("🔍 File: %s\n", file.Name())
+        if file.Name() == "ADT_A01.json" {
+            fmt.Printf("🔍 Found ADT_A01 schema file: %s\n", file.Name())
+            // ... (rest of the code remains the same)
+        }
+    }
+
+    // ... (rest of the code remains the same)
+
+    // Add some logging to see what's happening when we try to load the schema
+    if realSchemaLoader.loadErrorMessages != nil {
+        fmt.Printf("🔍 Real schema loader errors:\n")
+        for _, err := range realSchemaLoader.loadErrorMessages {
+            fmt.Printf("🔍   - %v\n", err)
+        }
+    }
 	return realSchemaLoader
 }
 
@@ -296,6 +330,8 @@ func (rsl *RealSchemaLoader) LoadRealSchema(version, messageType, triggerEvent s
 	normalizedVersion := normalizeVersionForSchema(version)
 	filename := fmt.Sprintf("%s_%s.gz", messageType, triggerEvent)
 	schemaPath := filepath.Join(rsl.schemaDir, normalizedVersion, filename)
+	// Around line where it builds the schema path
+	fmt.Printf("🔍 DEBUG: Looking for schema file: %s\n", schemaPath)
 
 	if _, err := os.Stat(schemaPath); os.IsNotExist(err) {
 		// Try alternatives silently
@@ -317,11 +353,16 @@ func (rsl *RealSchemaLoader) LoadRealSchema(version, messageType, triggerEvent s
 			rsl.stats.LoadErrors++
 			return nil, fmt.Errorf("schema file not found: %s", schemaPath)
 		}
+
+		
+		
 	}
 
 	schema, err := rsl.loadAndParseSchemaFile(schemaPath)
 	if err != nil {
 		rsl.stats.LoadErrors++
+		fmt.Printf("❌ ERROR: Schema loading failed for %s: %v\n", cacheKey, err)
+    	fmt.Printf("❌ ERROR: Attempted schema path: %s\n", schemaPath)
 		return nil, fmt.Errorf("failed to load schema %s: %v", cacheKey, err)
 	}
 

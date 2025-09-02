@@ -1,4 +1,4 @@
-// Enhanced app.js with simple working proxy configuration
+// Enhanced app.js with working proxy configuration (database handled by server.js)
 const express = require('express');
 const path = require('path');
 const session = require('express-session');
@@ -15,12 +15,11 @@ const FRONTEND_PORT = process.env.PORT || 3000;
 const GO_BACKEND_PORT = process.env.API_PORT || 8080;
 const GO_BACKEND_URL = `http://localhost:${GO_BACKEND_PORT}`;
 
-console.log('🔧 === PROXY CONFIGURATION DEBUG ===');
-console.log(`📍 Frontend Port: ${FRONTEND_PORT}`);
-console.log(`📍 Go Backend Port: ${GO_BACKEND_PORT}`);
-console.log(`📍 Go Backend URL: ${GO_BACKEND_URL}`);
-console.log(`📍 Node Environment: ${process.env.NODE_ENV || 'development'}`);
-console.log('=====================================');
+console.log('Proxy configuration:');
+console.log(`Frontend Port: ${FRONTEND_PORT}`);
+console.log(`Go Backend Port: ${GO_BACKEND_PORT}`);
+console.log(`Go Backend URL: ${GO_BACKEND_URL}`);
+console.log(`Node Environment: ${process.env.NODE_ENV || 'development'}`);
 
 // Basic middleware FIRST
 app.use(express.json());
@@ -31,19 +30,19 @@ app.use('/uploads', express.static('uploads'));
 // REQUEST LOGGING MIDDLEWARE - Add this EARLY to catch all requests
 app.use((req, res, next) => {
     const timestamp = new Date().toISOString();
-    console.log(`🌐 [${timestamp}] ${req.method} ${req.originalUrl} - IP: ${req.ip}`);
+    console.log(`[${timestamp}] ${req.method} ${req.originalUrl} - IP: ${req.ip}`);
     
     // Log if this is an API request
     if (req.originalUrl.startsWith('/api/')) {
-        console.log(`🔍 API Request detected: ${req.method} ${req.originalUrl}`);
+        console.log(`API Request detected: ${req.method} ${req.originalUrl}`);
         
         // Check if this should be proxied
         if (req.originalUrl.startsWith('/api/fhir') || 
             req.originalUrl.startsWith('/api/hl7') || 
             req.originalUrl.startsWith('/api/system')) {
-            console.log(`🎯 Should be proxied to Go backend: ${GO_BACKEND_URL}${req.originalUrl}`);
+            console.log(`Should be proxied to Go backend: ${GO_BACKEND_URL}${req.originalUrl}`);
         } else {
-            console.log(`📝 Should be handled by Node.js locally`);
+            console.log(`Should be handled by Node.js locally`);
         }
     }
     
@@ -52,7 +51,7 @@ app.use((req, res, next) => {
 
 // TEST GO BACKEND CONNECTIVITY
 async function testGoBackendConnectivity() {
-    console.log('🧪 Testing Go backend connectivity...');
+    console.log('Testing Go backend connectivity...');
     
     try {
         // Try to use node-fetch, fallback to native fetch
@@ -73,14 +72,14 @@ async function testGoBackendConnectivity() {
         
         if (response.ok) {
             const data = await response.json();
-            console.log('✅ Go backend is responsive:', data);
+            console.log('Go backend is responsive:', data);
             return true;
         } else {
-            console.log(`⚠️ Go backend returned status ${response.status}`);
+            console.log(`Go backend returned status ${response.status}`);
             return false;
         }
     } catch (error) {
-        console.error('❌ Go backend connectivity test failed:', error.message);
+        console.error('Go backend connectivity test failed:', error.message);
         return false;
     }
 }
@@ -89,13 +88,13 @@ async function testGoBackendConnectivity() {
 // SIMPLE WORKING PROXY - NO EXTERNAL MIDDLEWARE
 // ========================================================================
 
-console.log('🔧 Setting up SIMPLE working proxy (no middleware dependencies)...');
+console.log('Setting up simple proxy...');
 
 // Helper function to forward requests to Go backend
 const forwardToGo = async (req, res) => {
     const targetUrl = `${GO_BACKEND_URL}${req.originalUrl}`;
     
-    console.log(`🎯 FORWARDING: ${req.method} ${req.originalUrl} -> ${targetUrl}`);
+    console.log(`FORWARDING: ${req.method} ${req.originalUrl} -> ${targetUrl}`);
     
     try {
         // Get fetch implementation
@@ -125,12 +124,10 @@ const forwardToGo = async (req, res) => {
             options.body = JSON.stringify(req.body);
         }
         
-        console.log(`📡 Request options:`, options);
-        
         // Make the request to Go backend
         const response = await fetch(targetUrl, options);
         
-        console.log(`📥 Response: ${response.status} ${response.statusText}`);
+        console.log(`Response: ${response.status} ${response.statusText}`);
         
         // Get response data
         let data;
@@ -159,10 +156,10 @@ const forwardToGo = async (req, res) => {
             res.json(data);
         }
         
-        console.log(`✅ PROXY SUCCESS: ${response.status} for ${req.originalUrl}`);
+        console.log(`PROXY SUCCESS: ${response.status} for ${req.originalUrl}`);
         
     } catch (error) {
-        console.error(`❌ PROXY ERROR for ${req.originalUrl}:`, error.message);
+        console.error(`PROXY ERROR for ${req.originalUrl}:`, error.message);
         res.status(500).json({
             error: 'Go backend service unavailable',
             details: error.message,
@@ -178,69 +175,7 @@ app.use('/api/fhir', forwardToGo);
 app.use('/api/hl7', forwardToGo);
 app.use('/api/system', forwardToGo);
 
-console.log('✅ Simple proxy configured successfully');
-console.log('📋 Proxy routes:');
-console.log('   /api/fhir/* -> Go Backend');
-console.log('   /api/hl7/* -> Go Backend');
-console.log('   /api/system/* -> Go Backend');
-console.log('   All other /api/* -> Node.js');
-
-// ========================================================================
-// END OF PROXY CONFIGURATION
-// ========================================================================
-
-// PROXY TEST ROUTES FOR DEBUGGING
-app.get('/api/proxy/test', async (req, res) => {
-    console.log('🧪 Proxy test endpoint called');
-    
-    const backendHealthy = await testGoBackendConnectivity();
-    
-    res.json({
-        success: true,
-        proxy: {
-            frontend_port: FRONTEND_PORT,
-            backend_port: GO_BACKEND_PORT,
-            backend_url: GO_BACKEND_URL,
-            backend_healthy: backendHealthy,
-            proxy_type: 'custom_simple',
-            timestamp: new Date().toISOString()
-        },
-        test_urls: {
-            fhir: `http://localhost:${FRONTEND_PORT}/api/fhir/transform/resources/test/ADT^A01`,
-            hl7: `http://localhost:${FRONTEND_PORT}/api/hl7/stats`,
-            system: `http://localhost:${FRONTEND_PORT}/api/system/health`
-        }
-    });
-});
-
-app.get('/api/proxy/test-direct-backend', async (req, res) => {
-    console.log('🧪 Testing direct backend connection...');
-    
-    try {
-        let fetch;
-        try {
-            fetch = require('node-fetch');
-        } catch {
-            fetch = global.fetch;
-        }
-        
-        const response = await fetch(`${GO_BACKEND_URL}/api/system/health`);
-        const data = await response.json();
-        
-        res.json({
-            success: true,
-            message: 'Direct backend connection successful',
-            backend_response: data,
-            backend_status: response.status
-        });
-    } catch (error) {
-        res.status(500).json({
-            success: false,
-            error: 'Direct backend connection failed',
-            details: error.message
-        });
-    }
-});
+console.log('Simple proxy configured successfully');
 
 // Session configuration
 const sessionConfig = {
@@ -265,29 +200,57 @@ app.use((req, res, next) => {
     next();
 });
 
-// IMPORTANT: All other routes AFTER proxy routes
+// Initialize services (database connection handled by server.js)
+const interfaceService = require('./services/interfaceService');
+const userService = require('./services/userService');
+const auditService = require('./services/auditService');
+
+// Load routes
+console.log('Loading local API routes...');
+
 const authRoutes = require('./routes/auth');
 const userRoutes = require('./routes/users');
 const interfacesRoutes = require('./routes/interfacesRoutes');
-
-console.log('📁 Loading local API routes...');
+const wizardRoutes = require('./routes/wizardRoutes');
 
 // Mount LOCAL API routes (these should NOT conflict with proxy routes)
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/interfaces', interfacesRoutes);
+app.use('/api/wizard', wizardRoutes);
 
-console.log('✅ Local API routes mounted');
+console.log('Local API routes mounted');
+
+// PROXY TEST ROUTES FOR DEBUGGING
+app.get('/api/proxy/test', async (req, res) => {
+    console.log('Proxy test endpoint called');
+    
+    const backendHealthy = await testGoBackendConnectivity();
+    
+    res.json({
+        success: true,
+        proxy: {
+            frontend_port: FRONTEND_PORT,
+            backend_port: GO_BACKEND_PORT,
+            backend_url: GO_BACKEND_URL,
+            backend_healthy: backendHealthy,
+            proxy_type: 'custom_simple',
+            timestamp: new Date().toISOString()
+        },
+        test_urls: {
+            fhir: `http://localhost:${FRONTEND_PORT}/api/fhir/transform/resources/test/ADT^A01`,
+            hl7: `http://localhost:${FRONTEND_PORT}/api/hl7/stats`,
+            system: `http://localhost:${FRONTEND_PORT}/api/system/health`
+        }
+    });
+});
 
 // Legacy login route
 app.post('/api/login', async (req, res) => {
     try {
-        const userService = require('./services/userService');
-        const auditService = require('./services/auditService');
-        
         const { email, password } = req.body;
         
-        console.log(`🔐 Login attempt for: ${email} (legacy route)`);
+        console.log(`Login attempt for: ${email} (legacy route)`);
         
         const user = await userService.findByEmail(email);
         if (!user) {
@@ -318,7 +281,7 @@ app.post('/api/login', async (req, res) => {
             role: user.role 
         };
         
-        console.log(`✅ Login successful for: ${user.name}`);
+        console.log(`Login successful for: ${user.name}`);
         
         res.json({
             message: 'Login successful',
@@ -401,35 +364,5 @@ app.use((error, req, res, next) => {
         error: process.env.NODE_ENV === 'development' ? error.message : 'Something went wrong'
     });
 });
-
-// Start server with connectivity test
-const startServer = async () => {
-    console.log('🚀 Starting ezHealthKonnect server...');
-    
-    // Test backend connectivity
-    const backendHealthy = await testGoBackendConnectivity();
-    if (!backendHealthy) {
-        console.warn('⚠️ Go backend is not responding. Proxy routes may not work.');
-        console.warn(`⚠️ Make sure Go backend is running on ${GO_BACKEND_URL}`);
-    }
-    
-    app.listen(FRONTEND_PORT, () => {
-        console.log(`✅ Frontend server running on port ${FRONTEND_PORT}`);
-        console.log(`🔗 Frontend URL: http://localhost:${FRONTEND_PORT}`);
-        console.log(`🎯 Backend URL: ${GO_BACKEND_URL}`);
-        console.log(`🧪 Test proxy: http://localhost:${FRONTEND_PORT}/api/proxy/test`);
-        console.log(`🧪 Test FHIR: http://localhost:${FRONTEND_PORT}/api/fhir/transform/resources/test/ADT^A01`);
-        console.log(`🧪 Test System: http://localhost:${FRONTEND_PORT}/api/system/health`);
-        console.log('='.repeat(80));
-        console.log('🎯 SIMPLE CUSTOM PROXY CONFIGURED');
-        console.log('📋 No external proxy middleware - direct HTTP forwarding');
-        console.log('✅ This eliminates all path stripping issues');
-        console.log('='.repeat(80));
-    });
-};
-
-if (require.main === module) {
-    startServer();
-}
 
 module.exports = app;

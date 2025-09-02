@@ -225,6 +225,115 @@ class DatabaseManager {
             ]
         });
 
+        // Interface Model - for wizard-created integrations
+        this.models.Interface = this.sequelize.define('Interface', {
+            id: {
+                type: DataTypes.UUID,
+                defaultValue: DataTypes.UUIDV4,
+                primaryKey: true
+            },
+            user_id: {
+                type: DataTypes.UUID,
+                allowNull: false,
+                references: {
+                    model: 'users',
+                    key: 'id'
+                }
+            },
+            name: {
+                type: DataTypes.STRING(255),
+                allowNull: false
+            },
+            description: {
+                type: DataTypes.TEXT,
+                allowNull: true
+            },
+            message_type: {
+                type: DataTypes.STRING(50),
+                allowNull: true
+            },
+            source_type: {
+                type: DataTypes.STRING(50),
+                allowNull: false
+            },
+            source_connectivity: {
+                type: DataTypes.STRING(50),
+                allowNull: false
+            },
+            target_type: {
+                type: DataTypes.STRING(50),
+                allowNull: false
+            },
+            target_connectivity: {
+                type: DataTypes.STRING(50),
+                allowNull: false
+            },
+            source_config: {
+                type: DataTypes.JSONB,
+                defaultValue: {}
+            },
+            target_config: {
+                type: DataTypes.JSONB,
+                defaultValue: {}
+            },
+            processing_rules: {
+                type: DataTypes.JSONB,
+                defaultValue: {}
+            },
+            transformation_mapping: {
+                type: DataTypes.JSONB,
+                defaultValue: {}
+            },
+            status: {
+                type: DataTypes.ENUM('draft', 'active', 'paused', 'stopped', 'error'),
+                defaultValue: 'draft',
+                allowNull: false
+            },
+            is_active: {
+                type: DataTypes.BOOLEAN,
+                defaultValue: true
+            },
+            version: {
+                type: DataTypes.INTEGER,
+                defaultValue: 1
+            },
+            total_processed: {
+                type: DataTypes.INTEGER,
+                defaultValue: 0
+            },
+            successful_processed: {
+                type: DataTypes.INTEGER,
+                defaultValue: 0
+            },
+            failed_processed: {
+                type: DataTypes.INTEGER,
+                defaultValue: 0
+            },
+            last_processed_at: {
+                type: DataTypes.DATE,
+                allowNull: true
+            },
+            created_by: {
+                type: DataTypes.UUID,
+                allowNull: true
+            },
+            updated_by: {
+                type: DataTypes.UUID,
+                allowNull: true
+            }
+        }, {
+            tableName: 'interfaces',
+            underscored: true,
+            timestamps: true,
+            indexes: [
+                { fields: ['user_id'] },
+                { fields: ['status'] },
+                { fields: ['source_type'] },
+                { fields: ['target_type'] },
+                { fields: ['created_at'] }
+            ]
+        });
+
         // Audit Log Model - matching actual schema
         this.models.AuditLog = this.sequelize.define('AuditLog', {
             id: {
@@ -311,6 +420,27 @@ class DatabaseManager {
             ]
         });
 
+        // Define associations
+        this.models.Interface.belongsTo(this.models.User, {
+            foreignKey: 'user_id',
+            as: 'owner'
+        });
+
+        this.models.User.hasMany(this.models.Interface, {
+            foreignKey: 'user_id',
+            as: 'interfaces'
+        });
+
+        this.models.AuditLog.belongsTo(this.models.User, {
+            foreignKey: 'user_id',
+            as: 'user'
+        });
+
+        this.models.User.hasMany(this.models.AuditLog, {
+            foreignKey: 'user_id',
+            as: 'auditLogs'
+        });
+
         // Helper methods
         this.models.User.findByEmail = function(email) {
             return this.findOne({ where: { email: email.toLowerCase() } });
@@ -330,22 +460,22 @@ class DatabaseManager {
             }
         };
 
-        console.log('✅ Database models defined (matching actual schema)');
+        console.log('✅ Database models defined (User, Interface, AuditLog)');
     }
 
-    // Don't sync - tables already exist
-    async sync() {
-        try {
-            if (!this.isConnected) return false;
-            
-            // Don't alter existing tables, just validate they exist
-            console.log('✅ Using existing database tables');
-            return true;
-        } catch (error) {
-            console.error('❌ Database validation failed:', error.message);
-            return false;
-        }
+    // In database.js, update the sync method:
+async sync() {
+    try {
+        if (!this.isConnected) return false;
+        
+        // Skip sync in all environments to avoid conflicts with Flyway
+        console.log('Skipping Sequelize sync - using Flyway-managed schema');
+        return true;
+    } catch (error) {
+        console.error('Database sync failed:', error.message);
+        return false;
     }
+}
 
     // Create default admin in PostgreSQL
     async createDefaultAdmin() {
@@ -409,11 +539,13 @@ class DatabaseManager {
             await this.sequelize.authenticate();
             
             const userCount = await this.models.User.count();
+            const interfaceCount = await this.models.Interface.count();
             const auditCount = await this.models.AuditLog.count();
             
             return {
                 status: 'healthy',
                 userCount,
+                interfaceCount,
                 auditCount,
                 lastCheck: new Date()
             };

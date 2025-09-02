@@ -156,6 +156,7 @@ func (sl *SchemaLoader) ListAvailableSchemas() ([]string, error) {
 
 // ParseHL7Enhanced - Enhanced version that tries schema first
 func ParseHL7Enhanced(rawMessage string) *EnhancedParsedMessage {
+	fmt.Printf("🔍 ParseHL7Enhanced called\n")
 	// Validate input
 	if strings.TrimSpace(rawMessage) == "" {
 		return &EnhancedParsedMessage{
@@ -168,10 +169,15 @@ func ParseHL7Enhanced(rawMessage string) *EnhancedParsedMessage {
 
 	// Try schema parsing first
 	realLoader := GetRealSchemaLoader()
+	fmt.Printf("🔍 Real schema loader available: %v\n", realLoader != nil)
+
 	if realLoader != nil {
+		fmt.Printf("🔍 Attempting real schema parsing...\n")
 		realResult := ParseWithRealSchema(rawMessage)
 
 		if realResult != nil && realResult.Success {
+			fmt.Printf("🔍 Real schema parsing success: %v, SchemaLoaded: %v\n", 
+                realResult.Success, realResult.SchemaLoaded)
 			// Check if we actually got schema-enhanced segments
 			schemaSegmentCount := 0
 			for _, segment := range realResult.EnhancedSegments {
@@ -180,6 +186,7 @@ func ParseHL7Enhanced(rawMessage string) *EnhancedParsedMessage {
 					schemaSegmentCount++
 				}
 			}
+			fmt.Printf("🔍 Schema-enhanced segments count: %d\n", schemaSegmentCount)
 
 			// Use schema result if we have schema segments or explicit schema loading
 			if schemaSegmentCount > 0 || realResult.SchemaLoaded {
@@ -190,6 +197,7 @@ func ParseHL7Enhanced(rawMessage string) *EnhancedParsedMessage {
 			}
 		}
 	} else {
+		fmt.Printf("🔍 Real schema parsing failed or returned nil\n")
 		// Only log if environment should have schemas but doesn't
 		envSchemaDir := os.Getenv("EZHEALTHKONNECT_SCHEMA_DIR")
 		if envSchemaDir != "" {

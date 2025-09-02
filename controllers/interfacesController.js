@@ -1,5 +1,5 @@
-// controllers/interfacesController.js - COMPLETE DEBUG VERSION (All Methods)
-console.log('🔧 Loading Complete Debug Interfaces Controller...');
+// controllers/interfacesController.js - UPDATED WITH CONNECTIVITY SUPPORT
+console.log('🔧 Loading Enhanced Interfaces Controller with Format + Connectivity Support...');
 
 class InterfacesController {
     constructor() {
@@ -12,7 +12,7 @@ class InterfacesController {
             console.log('🔍 Database module keys:', Object.keys(this.database));
             console.log('🔍 Database.sequelize exists:', !!this.database.sequelize);
             console.log('🔍 Database.isConnected:', this.database.isConnected);
-            console.log('✅ Complete Debug Interfaces Controller initialized');
+            console.log('✅ Enhanced Interfaces Controller initialized with Connectivity Support');
         } catch (error) {
             console.error('❌ Error in constructor:', error);
             throw error;
@@ -40,20 +40,23 @@ class InterfacesController {
 
     /**
      * Get all interfaces for the authenticated user
+     * ✅ UPDATED: Now returns connectivity fields
      */
     async getAllInterfaces(req, res) {
-        console.log('\n=== GET ALL INTERFACES (COMPLETE DEBUG) ===');
-        console.log('📍 Session user:', req.session?.user?.email);
+        console.log('\n=== GET ALL INTERFACES (WITH CONNECTIVITY) ===');
+        console.log('🔍 Session user:', req.session?.user?.email);
         console.log('🔍 this.database exists:', !!this.database);
         console.log('🔍 this.database.sequelize exists:', !!this.database?.sequelize);
-        
+
         try {
             await this.ensureDatabase();
             
             const userId = req.session.user.id;
-            console.log('🔍 User ID:', userId);
+            const userEmail = req.session.user.email;
             
-            console.log('🔍 About to execute query...');
+            console.log(`🔍 Fetching interfaces for user: ${userEmail} (ID: ${userId})`);
+
+            // ✅ UPDATED: Include connectivity fields in SELECT
             const interfaces = await this.database.sequelize.query(`
                 SELECT 
                     i.id,
@@ -61,8 +64,14 @@ class InterfacesController {
                     i.name,
                     i.description,
                     i.source_type,
+                    i.source_connectivity,
                     i.target_type,
+                    i.target_connectivity,
+                    i.source_config,
+                    i.target_config,
                     i.message_type,
+                    i.processing_rules,
+                    i.transformation_mapping,
                     i.status,
                     i.total_processed,
                     i.successful_processed,
@@ -71,7 +80,6 @@ class InterfacesController {
                     i.created_at,
                     i.updated_at,
                     i.version,
-                    COALESCE(u.first_name || ' ' || u.last_name, 'Unknown User') as created_by_name,
                     u.email as created_by_email
                 FROM interfaces i
                 LEFT JOIN users u ON i.created_by = u.id
@@ -81,22 +89,27 @@ class InterfacesController {
                 replacements: { userId },
                 type: this.database.sequelize.QueryTypes.SELECT
             });
+
+            console.log(`✅ Found ${interfaces.length} interfaces for user: ${userEmail}`);
             
-            console.log(`✅ Found ${interfaces.length} interfaces`);
-            
-            // Transform for frontend compatibility
+            // ✅ UPDATED: Transform data with connectivity fields
             const transformedInterfaces = interfaces.map(item => ({
                 id: item.id,
                 userId: item.user_id,
                 name: item.name,
                 description: item.description,
+                
+                // ✅ UPDATED: Include source and target connectivity
                 sourceType: item.source_type,
-                sourceConfig: item.source_config || {},
+                sourceConnectivity: item.source_connectivity,
                 targetType: item.target_type,
-                targetConfig: item.target_config || {},
+                targetConnectivity: item.target_connectivity,
+                
+                sourceConfig: this.parseJsonField(item.source_config),
+                targetConfig: this.parseJsonField(item.target_config),
                 messageType: item.message_type,
-                processingRules: item.processing_rules || {},
-                transformationMapping: item.transformation_mapping || {},
+                processingRules: this.parseJsonField(item.processing_rules),
+                transformationMapping: this.parseJsonField(item.transformation_mapping),
                 status: item.status,
                 statistics: {
                     totalProcessed: item.total_processed || 0,
@@ -132,23 +145,10 @@ class InterfacesController {
 
     /**
      * Create a new interface
+     * ✅ FIXED: Better connectivity field handling with defaults
      */
     async createInterface(req, res) {
-        console.log('\n=== CREATE INTERFACE (COMPLETE DEBUG) ===');
-        console.log('📍 Session user:', req.session?.user?.email);
-        console.log('📥 Request body:', JSON.stringify(req.body, null, 2));
-        
-        // Debug: Check all properties
-        console.log('🔍 DEBUG: this exists:', !!this);
-        console.log('🔍 DEBUG: this.database exists:', !!this.database);
-        console.log('🔍 DEBUG: typeof this.database:', typeof this.database);
-        
-        if (this.database) {
-            console.log('🔍 DEBUG: this.database.sequelize exists:', !!this.database.sequelize);
-            console.log('🔍 DEBUG: this.database.isConnected:', this.database.isConnected);
-        } else {
-            console.log('❌ DEBUG: this.database is null/undefined');
-        }
+        console.log('\n=== CREATE INTERFACE WITH CONNECTIVITY ===');
         
         try {
             await this.ensureDatabase();
@@ -156,72 +156,82 @@ class InterfacesController {
             const userId = req.session.user.id;
             const userEmail = req.session.user.email;
             
-            const { 
-                name, 
-                description, 
-                sourceType, 
-                sourceConfig, 
-                targetType, 
-                targetConfig,
+            const {
+                name,
+                description,
+                sourceType,
+                sourceConnectivity,  // ✅ NEW: From request
+                targetType,
+                targetConnectivity,  // ✅ NEW: From request
                 messageType,
+                sourceConfig,
+                targetConfig,
                 processingRules,
                 transformationMapping
             } = req.body;
 
-            console.log('🔍 Extracted data:');
-            console.log('   userId:', userId);
-            console.log('   userEmail:', userEmail);
-            console.log('   name:', name);
-            console.log('   sourceType:', sourceType);
-            console.log('   targetType:', targetType);
+            console.log(`🔍 Creating interface: ${name}`);
+            console.log(`   User: ${userEmail}`);
+            console.log(`   Source: ${sourceType} via ${sourceConnectivity || 'default'}`);
+            console.log(`   Target: ${targetType} via ${targetConnectivity || 'default'}`);
 
-            // Validate required fields
+            // ✅ ENHANCED: Apply defaults if connectivity not specified
+            const finalSourceConnectivity = sourceConnectivity || this.getDefaultConnectivity('source', sourceType);
+            const finalTargetConnectivity = targetConnectivity || this.getDefaultConnectivity('target', targetType);
+
+            console.log(`   Final Source Connectivity: ${finalSourceConnectivity}`);
+            console.log(`   Final Target Connectivity: ${finalTargetConnectivity}`);
+
+            // Validation
             if (!name || !sourceType || !targetType) {
-                console.log('❌ Validation failed: Missing required fields');
                 return res.status(400).json({
                     success: false,
-                    error: 'Name, source type, and target type are required'
+                    error: 'Missing required fields: name, sourceType, targetType'
                 });
             }
 
-            console.log('🔍 About to check for duplicates...');
-            // Check for duplicate interface name
-            const duplicateInterfaces = await this.database.sequelize.query(`
+            // Check for duplicate name
+            const existingInterface = await this.database.sequelize.query(`
                 SELECT id FROM interfaces 
                 WHERE user_id = :userId AND name = :name AND is_active = true
             `, {
                 replacements: { userId, name },
                 type: this.database.sequelize.QueryTypes.SELECT
             });
-            
-            if (duplicateInterfaces.length > 0) {
-                console.log('❌ Duplicate interface name:', name);
+
+            if (existingInterface.length > 0) {
                 return res.status(400).json({
                     success: false,
-                    error: 'Interface with this name already exists'
+                    error: `Interface with name "${name}" already exists`
                 });
             }
 
-            console.log('🔍 About to insert new interface...');
-            // Insert new interface
+            // ✅ UPDATED: Insert with connectivity fields
             const newInterfaces = await this.database.sequelize.query(`
                 INSERT INTO interfaces (
-                    user_id, name, description, source_type, target_type, message_type,
-                    source_config, target_config, processing_rules, transformation_mapping,
-                    created_by, updated_by
+                    user_id, name, description, 
+                    source_type, source_connectivity, 
+                    target_type, target_connectivity, 
+                    message_type, source_config, target_config, 
+                    processing_rules, transformation_mapping, 
+                    status, created_by, updated_by, created_at, updated_at, is_active
                 ) VALUES (
-                    :userId, :name, :description, :sourceType, :targetType, :messageType,
-                    :sourceConfig, :targetConfig, :processingRules, :transformationMapping,
-                    :userId, :userId
-                )
-                RETURNING *
+                    :userId, :name, :description, 
+                    :sourceType, :sourceConnectivity, 
+                    :targetType, :targetConnectivity, 
+                    :messageType, :sourceConfig, :targetConfig, 
+                    :processingRules, :transformationMapping, 
+                    'inactive', :userId, :userId, NOW(), NOW(), true
+                ) RETURNING *
             `, {
                 replacements: {
                     userId,
                     name,
                     description: description || '',
                     sourceType,
+                    sourceConnectivity: finalSourceConnectivity,  // ✅ Use final value
                     targetType,
+                    targetConnectivity: finalTargetConnectivity,  // ✅ Use final value
                     messageType: messageType || 'auto-detect',
                     sourceConfig: JSON.stringify(sourceConfig || {}),
                     targetConfig: JSON.stringify(targetConfig || {}),
@@ -233,20 +243,27 @@ class InterfacesController {
             
             const newInterfaceItem = newInterfaces[0];
             console.log(`✅ Interface Created - User: ${userEmail}, Interface: ${name} (${newInterfaceItem.id})`);
+            console.log(`   Source: ${newInterfaceItem.source_type} via ${newInterfaceItem.source_connectivity}`);
+            console.log(`   Target: ${newInterfaceItem.target_type} via ${newInterfaceItem.target_connectivity}`);
 
-            // Transform for frontend
+            // ✅ UPDATED: Transform for frontend with connectivity fields
             const responseInterface = {
                 id: newInterfaceItem.id,
                 userId: newInterfaceItem.user_id,
                 name: newInterfaceItem.name,
                 description: newInterfaceItem.description,
+                
+                // ✅ UPDATED: Include connectivity fields
                 sourceType: newInterfaceItem.source_type,
-                sourceConfig: newInterfaceItem.source_config,
+                sourceConnectivity: newInterfaceItem.source_connectivity,
                 targetType: newInterfaceItem.target_type,
-                targetConfig: newInterfaceItem.target_config,
+                targetConnectivity: newInterfaceItem.target_connectivity,
+                
+                sourceConfig: this.parseJsonField(newInterfaceItem.source_config),
+                targetConfig: this.parseJsonField(newInterfaceItem.target_config),
                 messageType: newInterfaceItem.message_type,
-                processingRules: newInterfaceItem.processing_rules,
-                transformationMapping: newInterfaceItem.transformation_mapping,
+                processingRules: this.parseJsonField(newInterfaceItem.processing_rules),
+                transformationMapping: this.parseJsonField(newInterfaceItem.transformation_mapping),
                 status: newInterfaceItem.status,
                 statistics: {
                     totalProcessed: 0,
@@ -256,27 +273,109 @@ class InterfacesController {
                 },
                 createdAt: newInterfaceItem.created_at,
                 updatedAt: newInterfaceItem.updated_at,
-                createdBy: userEmail,
-                version: newInterfaceItem.version
+                version: newInterfaceItem.version || 1
             };
 
             return res.status(201).json({
                 success: true,
                 interface: responseInterface,
-                message: 'Interface created successfully'
+                message: `Interface "${name}" created successfully`
             });
 
         } catch (error) {
             console.error('❌ Create Interface Error:', error);
-            console.error('❌ Error type:', error.constructor.name);
-            console.error('❌ Error message:', error.message);
-            console.error('❌ Error stack:', error.stack);
-            
             return res.status(500).json({
                 success: false,
                 error: 'Failed to create interface',
-                debug: error.message,
-                errorType: error.constructor.name
+                debug: error.message
+            });
+        }
+    }
+
+    /**
+     * Get a specific interface by ID
+     * ✅ UPDATED: Include connectivity fields
+     */
+    async getInterface(req, res) {
+        console.log('\n=== GET SPECIFIC INTERFACE ===');
+        
+        try {
+            await this.ensureDatabase();
+            
+            const userId = req.session.user.id;
+            const userEmail = req.session.user.email;
+            const interfaceId = req.params.interfaceId;
+
+            console.log(`🔍 Fetching interface ${interfaceId} for user: ${userEmail}`);
+
+            const interfaceData = await this.database.sequelize.query(`
+                SELECT 
+                    i.id, i.user_id, i.name, i.description,
+                    i.source_type, i.source_connectivity,
+                    i.target_type, i.target_connectivity,
+                    i.source_config, i.target_config,
+                    i.message_type, i.processing_rules, i.transformation_mapping,
+                    i.status, i.total_processed, i.successful_processed, i.failed_processed,
+                    i.last_processed_at, i.created_at, i.updated_at, i.version,
+                    u.email as created_by_email
+                FROM interfaces i
+                LEFT JOIN users u ON i.created_by = u.id
+                WHERE i.id = :interfaceId AND i.user_id = :userId AND i.is_active = true
+            `, {
+                replacements: { interfaceId, userId },
+                type: this.database.sequelize.QueryTypes.SELECT
+            });
+
+            if (interfaceData.length === 0) {
+                return res.status(404).json({
+                    success: false,
+                    error: 'Interface not found'
+                });
+            }
+
+            const item = interfaceData[0];
+            const transformedInterface = {
+                id: item.id,
+                userId: item.user_id,
+                name: item.name,
+                description: item.description,
+                
+                // ✅ Include connectivity fields
+                sourceType: item.source_type,
+                sourceConnectivity: item.source_connectivity,
+                targetType: item.target_type,
+                targetConnectivity: item.target_connectivity,
+                
+                sourceConfig: this.parseJsonField(item.source_config),
+                targetConfig: this.parseJsonField(item.target_config),
+                messageType: item.message_type,
+                processingRules: this.parseJsonField(item.processing_rules),
+                transformationMapping: this.parseJsonField(item.transformation_mapping),
+                status: item.status,
+                statistics: {
+                    totalProcessed: item.total_processed || 0,
+                    successful: item.successful_processed || 0,
+                    failed: item.failed_processed || 0,
+                    lastProcessed: item.last_processed_at
+                },
+                createdAt: item.created_at,
+                updatedAt: item.updated_at,
+                createdBy: item.created_by_email || 'Unknown',
+                version: item.version || 1
+            };
+
+            console.log(`✅ Found interface: ${item.name}`);
+            return res.json({
+                success: true,
+                interface: transformedInterface
+            });
+
+        } catch (error) {
+            console.error('❌ Get Interface Error:', error);
+            return res.status(500).json({
+                success: false,
+                error: 'Failed to retrieve interface',
+                debug: error.message
             });
         }
     }
@@ -285,39 +384,46 @@ class InterfacesController {
      * Start an interface
      */
     async startInterface(req, res) {
-        console.log('\n=== START INTERFACE (COMPLETE DEBUG) ===');
+        console.log('\n=== START INTERFACE ===');
         
         try {
             await this.ensureDatabase();
             
-            const { interfaceId } = req.params;
             const userId = req.session.user.id;
             const userEmail = req.session.user.email;
+            const interfaceId = req.params.interfaceId;
 
-            console.log('🔍 Starting interface:', interfaceId, 'for user:', userEmail);
+            console.log(`🔍 Starting interface ${interfaceId} for user: ${userEmail}`);
 
-            // Get and update interface
-            const interfaces = await this.database.sequelize.query(`
-                SELECT * FROM interfaces 
+            // Get current interface
+            const interfaceData = await this.database.sequelize.query(`
+                SELECT id, name, status FROM interfaces 
                 WHERE id = :interfaceId AND user_id = :userId AND is_active = true
             `, {
                 replacements: { interfaceId, userId },
                 type: this.database.sequelize.QueryTypes.SELECT
             });
-            
-            if (interfaces.length === 0) {
+
+            if (interfaceData.length === 0) {
                 return res.status(404).json({
                     success: false,
-                    error: 'Interface not found or access denied'
+                    error: 'Interface not found'
                 });
             }
 
-            const interfaceItem = interfaces[0];
+            const interfaceItem = interfaceData[0];
+            
+            if (interfaceItem.status === 'active') {
+                return res.status(400).json({
+                    success: false,
+                    error: 'Interface is already active'
+                });
+            }
 
-            // Update status
+            // Update status to active
             await this.database.sequelize.query(`
                 UPDATE interfaces 
-                SET status = 'running', updated_by = :userId, updated_at = NOW()
+                SET status = 'active', updated_by = :userId, updated_at = NOW()
                 WHERE id = :interfaceId
             `, {
                 replacements: { userId, interfaceId },
@@ -328,8 +434,8 @@ class InterfacesController {
 
             return res.json({
                 success: true,
-                interface: { ...interfaceItem, status: 'running' },
-                message: `Interface "${interfaceItem.name}" started successfully`
+                message: `Interface "${interfaceItem.name}" started successfully`,
+                status: 'active'
             });
 
         } catch (error) {
@@ -346,37 +452,46 @@ class InterfacesController {
      * Stop an interface
      */
     async stopInterface(req, res) {
-        console.log('\n=== STOP INTERFACE (COMPLETE DEBUG) ===');
+        console.log('\n=== STOP INTERFACE ===');
         
         try {
             await this.ensureDatabase();
             
-            const { interfaceId } = req.params;
             const userId = req.session.user.id;
             const userEmail = req.session.user.email;
+            const interfaceId = req.params.interfaceId;
 
-            console.log('🔍 Stopping interface:', interfaceId, 'for user:', userEmail);
+            console.log(`🔍 Stopping interface ${interfaceId} for user: ${userEmail}`);
 
-            const interfaces = await this.database.sequelize.query(`
-                SELECT * FROM interfaces 
+            // Get current interface
+            const interfaceData = await this.database.sequelize.query(`
+                SELECT id, name, status FROM interfaces 
                 WHERE id = :interfaceId AND user_id = :userId AND is_active = true
             `, {
                 replacements: { interfaceId, userId },
                 type: this.database.sequelize.QueryTypes.SELECT
             });
-            
-            if (interfaces.length === 0) {
+
+            if (interfaceData.length === 0) {
                 return res.status(404).json({
                     success: false,
-                    error: 'Interface not found or access denied'
+                    error: 'Interface not found'
                 });
             }
 
-            const interfaceItem = interfaces[0];
+            const interfaceItem = interfaceData[0];
+            
+            if (interfaceItem.status === 'inactive') {
+                return res.status(400).json({
+                    success: false,
+                    error: 'Interface is already inactive'
+                });
+            }
 
+            // Update status to inactive
             await this.database.sequelize.query(`
                 UPDATE interfaces 
-                SET status = 'stopped', updated_by = :userId, updated_at = NOW()
+                SET status = 'inactive', updated_by = :userId, updated_at = NOW()
                 WHERE id = :interfaceId
             `, {
                 replacements: { userId, interfaceId },
@@ -387,8 +502,8 @@ class InterfacesController {
 
             return res.json({
                 success: true,
-                interface: { ...interfaceItem, status: 'stopped' },
-                message: `Interface "${interfaceItem.name}" stopped successfully`
+                message: `Interface "${interfaceItem.name}" stopped successfully`,
+                status: 'inactive'
             });
 
         } catch (error) {
@@ -405,34 +520,50 @@ class InterfacesController {
      * Pause an interface
      */
     async pauseInterface(req, res) {
-        console.log('\n=== PAUSE INTERFACE (COMPLETE DEBUG) ===');
+        console.log('\n=== PAUSE INTERFACE ===');
         
         try {
             await this.ensureDatabase();
             
-            const { interfaceId } = req.params;
             const userId = req.session.user.id;
             const userEmail = req.session.user.email;
+            const interfaceId = req.params.interfaceId;
 
-            console.log('🔍 Pausing interface:', interfaceId, 'for user:', userEmail);
+            console.log(`🔍 Pausing interface ${interfaceId} for user: ${userEmail}`);
 
-            const interfaces = await this.database.sequelize.query(`
-                SELECT * FROM interfaces 
+            // Get current interface
+            const interfaceData = await this.database.sequelize.query(`
+                SELECT id, name, status FROM interfaces 
                 WHERE id = :interfaceId AND user_id = :userId AND is_active = true
             `, {
                 replacements: { interfaceId, userId },
                 type: this.database.sequelize.QueryTypes.SELECT
             });
-            
-            if (interfaces.length === 0) {
+
+            if (interfaceData.length === 0) {
                 return res.status(404).json({
                     success: false,
-                    error: 'Interface not found or access denied'
+                    error: 'Interface not found'
                 });
             }
 
-            const interfaceItem = interfaces[0];
+            const interfaceItem = interfaceData[0];
+            
+            if (interfaceItem.status === 'paused') {
+                return res.status(400).json({
+                    success: false,
+                    error: 'Interface is already paused'
+                });
+            }
 
+            if (interfaceItem.status === 'inactive') {
+                return res.status(400).json({
+                    success: false,
+                    error: 'Cannot pause an inactive interface. Please start it first.'
+                });
+            }
+
+            // Update status to paused
             await this.database.sequelize.query(`
                 UPDATE interfaces 
                 SET status = 'paused', updated_by = :userId, updated_at = NOW()
@@ -446,8 +577,8 @@ class InterfacesController {
 
             return res.json({
                 success: true,
-                interface: { ...interfaceItem, status: 'paused' },
-                message: `Interface "${interfaceItem.name}" paused successfully`
+                message: `Interface "${interfaceItem.name}" paused successfully`,
+                status: 'paused'
             });
 
         } catch (error) {
@@ -464,39 +595,40 @@ class InterfacesController {
      * Delete an interface (soft delete)
      */
     async deleteInterface(req, res) {
-        console.log('\n=== DELETE INTERFACE (COMPLETE DEBUG) ===');
+        console.log('\n=== DELETE INTERFACE ===');
         
         try {
             await this.ensureDatabase();
             
-            const { interfaceId } = req.params;
             const userId = req.session.user.id;
             const userEmail = req.session.user.email;
+            const interfaceId = req.params.interfaceId;
 
-            console.log('🔍 Deleting interface:', interfaceId, 'for user:', userEmail);
+            console.log(`🔍 Deleting interface ${interfaceId} for user: ${userEmail}`);
 
-            const interfaces = await this.database.sequelize.query(`
-                SELECT * FROM interfaces 
+            // Get current interface
+            const interfaceData = await this.database.sequelize.query(`
+                SELECT id, name, status FROM interfaces 
                 WHERE id = :interfaceId AND user_id = :userId AND is_active = true
             `, {
                 replacements: { interfaceId, userId },
                 type: this.database.sequelize.QueryTypes.SELECT
             });
-            
-            if (interfaces.length === 0) {
+
+            if (interfaceData.length === 0) {
                 return res.status(404).json({
                     success: false,
-                    error: 'Interface not found or access denied'
+                    error: 'Interface not found'
                 });
             }
 
-            const interfaceItem = interfaces[0];
-
-            // Don't allow deletion of running interfaces
-            if (interfaceItem.status === 'running') {
+            const interfaceItem = interfaceData[0];
+            
+            // Check if interface is running
+            if (interfaceItem.status === 'active') {
                 return res.status(400).json({
                     success: false,
-                    error: 'Cannot delete a running interface. Please stop it first.'
+                    error: 'Cannot delete an active interface. Please stop it first.'
                 });
             }
 
@@ -527,90 +659,138 @@ class InterfacesController {
         }
     }
 
+    // ✅ HELPER METHODS
+
     /**
-     * Get interface by ID
+     * Get default connectivity for a given type (same logic as wizard controller)
      */
-    async getInterface(req, res) {
-        console.log('\n=== GET INTERFACE (COMPLETE DEBUG) ===');
+    getDefaultConnectivity(direction, type) {
+        if (direction === 'source') {
+            const mappings = {
+                'hl7v2': 'tcp',
+                'hl7': 'tcp',
+                'file': 'file',
+                'http': 'http',
+                'database': 'database',
+                'manual': 'tcp'
+            };
+            return mappings[type] || 'tcp';
+        } else {
+            const mappings = {
+                'fhir': 'http',
+                'database': 'database',
+                'file': 'file',
+                'http': 'http',
+                'hl7': 'tcp'
+            };
+            return mappings[type] || 'http';
+        }
+    }
+
+    /**
+     * Safely parse JSON fields from database
+     */
+    parseJsonField(jsonString) {
+        if (!jsonString) return {};
         
         try {
-            await this.ensureDatabase();
-            
-            const { interfaceId } = req.params;
-            const userId = req.session.user.id;
-
-            console.log('🔍 Getting interface:', interfaceId, 'for user:', userId);
-
-            const interfaces = await this.database.sequelize.query(`
-                SELECT 
-                    i.*,
-                    COALESCE(u.first_name || ' ' || u.last_name, 'Unknown User') as created_by_name,
-                    u.email as created_by_email
-                FROM interfaces i
-                LEFT JOIN users u ON i.created_by = u.id
-                WHERE i.id = :interfaceId AND i.user_id = :userId AND i.is_active = true
-            `, {
-                replacements: { interfaceId, userId },
-                type: this.database.sequelize.QueryTypes.SELECT
-            });
-            
-            if (interfaces.length === 0) {
-                return res.status(404).json({
-                    success: false,
-                    error: 'Interface not found or access denied'
-                });
-            }
-
-            const interfaceItem = interfaces[0];
-
-            // Transform for frontend
-            const responseInterface = {
-                id: interfaceItem.id,
-                userId: interfaceItem.user_id,
-                name: interfaceItem.name,
-                description: interfaceItem.description,
-                sourceType: interfaceItem.source_type,
-                sourceConfig: interfaceItem.source_config,
-                targetType: interfaceItem.target_type,
-                targetConfig: interfaceItem.target_config,
-                messageType: interfaceItem.message_type,
-                processingRules: interfaceItem.processing_rules,
-                transformationMapping: interfaceItem.transformation_mapping,
-                status: interfaceItem.status,
-                statistics: {
-                    totalProcessed: interfaceItem.total_processed,
-                    successful: interfaceItem.successful_processed,
-                    failed: interfaceItem.failed_processed,
-                    lastProcessed: interfaceItem.last_processed_at
-                },
-                createdAt: interfaceItem.created_at,
-                updatedAt: interfaceItem.updated_at,
-                createdBy: interfaceItem.created_by_email,
-                version: interfaceItem.version
-            };
-
-            console.log('✅ Interface retrieved successfully');
-
-            return res.json({
-                success: true,
-                interface: responseInterface
-            });
-
+            return typeof jsonString === 'string' ? JSON.parse(jsonString) : jsonString;
         } catch (error) {
-            console.error('❌ Get Interface Error:', error);
-            return res.status(500).json({
-                success: false,
-                error: 'Failed to retrieve interface',
-                debug: error.message
-            });
+            console.warn('❌ Failed to parse JSON field:', jsonString);
+            return {};
         }
+    }
+
+    /**
+     * Validate interface configuration
+     * ✅ UPDATED: Include connectivity validation
+     */
+    validateInterfaceConfig(interfaceData) {
+        const errors = [];
+        
+        // Basic validation
+        if (!interfaceData.name) errors.push('Interface name is required');
+        if (!interfaceData.sourceType) errors.push('Source type is required');
+        if (!interfaceData.targetType) errors.push('Target type is required');
+        
+        // Connectivity validation
+        if (interfaceData.sourceConfig) {
+            const sourceErrors = this.validateConnectivityConfig(
+                interfaceData.sourceConnectivity || this.getDefaultConnectivity('source', interfaceData.sourceType),
+                interfaceData.sourceConfig,
+                'source'
+            );
+            errors.push(...sourceErrors);
+        }
+        
+        if (interfaceData.targetConfig) {
+            const targetErrors = this.validateConnectivityConfig(
+                interfaceData.targetConnectivity || this.getDefaultConnectivity('target', interfaceData.targetType),
+                interfaceData.targetConfig,
+                'target'
+            );
+            errors.push(...targetErrors);
+        }
+        
+        return {
+            isValid: errors.length === 0,
+            errors: errors.length > 0 ? errors.join('; ') : null
+        };
+    }
+
+    /**
+     * Validate specific connectivity configuration
+     */
+    validateConnectivityConfig(connectivityType, config, direction) {
+        const errors = [];
+        
+        switch (connectivityType) {
+            case 'tcp':
+                if (!config.host) errors.push(`${direction} TCP host not configured`);
+                if (!config.port || isNaN(parseInt(config.port))) {
+                    errors.push(`${direction} TCP port not configured or invalid`);
+                }
+                break;
+                
+            case 'http':
+                if (direction === 'target' && !config.targeturl && !config.endpoint) {
+                    errors.push(`${direction} HTTP endpoint not configured`);
+                }
+                break;
+                
+            case 'file':
+                if (direction === 'source' && !config.directory && !config.inputdirectory) {
+                    errors.push(`${direction} file directory not configured`);
+                }
+                if (direction === 'target' && !config.outputdirectory && !config.directory) {
+                    errors.push(`${direction} file output directory not configured`);
+                }
+                break;
+                
+            case 'database':
+                if (!config.connectionstring && !config.host) {
+                    errors.push(`${direction} database connection not configured`);
+                }
+                break;
+                
+            case 'sftp':
+                if (!config.sftphost && !config.host) {
+                    errors.push(`${direction} SFTP host not configured`);
+                }
+                if (!config.username) {
+                    errors.push(`${direction} SFTP username not configured`);
+                }
+                break;
+        }
+        
+        return errors;
     }
 }
 
 // Debug: Test module export
-console.log('🔍 About to create InterfacesController instance...');
+console.log('🔍 About to create enhanced InterfacesController instance...');
 const controllerInstance = new InterfacesController();
-console.log('🔍 Controller instance created:', !!controllerInstance);
-console.log('🔍 Controller instance.database:', !!controllerInstance.database);
+console.log('🔍 Enhanced Controller instance created:', !!controllerInstance);
+console.log('🔍 Enhanced Controller instance.database:', !!controllerInstance.database);
 
 module.exports = controllerInstance;

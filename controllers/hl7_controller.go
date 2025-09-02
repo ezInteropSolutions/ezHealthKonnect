@@ -26,71 +26,120 @@ func NewHL7Controller(cfg *config.Config) *HL7Controller {
 
 // ParseMessage handles HL7 message parsing requests
 func (ctrl *HL7Controller) ParseMessage(c *gin.Context) {
-	var req hl7.ParseRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, hl7.ParseResponse{
-			Success: false,
-			Error:   fmt.Sprintf("Invalid request: %v", err),
-		})
-		return
-	}
+    var req hl7.ParseRequest
+    if err := c.ShouldBindJSON(&req); err != nil {
+        c.JSON(http.StatusBadRequest, hl7.ParseResponse{
+            Success: false,
+            Error:   fmt.Sprintf("Invalid request: %v", err),
+        })
+        return
+    }
 
-	// Validate request
-	if strings.TrimSpace(req.RawMessage) == "" {
-		c.JSON(http.StatusBadRequest, hl7.ParseResponse{
-			Success: false,
-			Error:   "Empty HL7 message provided",
-		})
-		return
-	}
+    // Validate request
+    if strings.TrimSpace(req.RawMessage) == "" {
+        c.JSON(http.StatusBadRequest, hl7.ParseResponse{
+            Success: false,
+            Error:   "Empty HL7 message provided",
+        })
+        return
+    }
 
-	// Only log if verbose logging is enabled
-	if ctrl.config.VerboseLogging {
-		fmt.Printf("📄 Parsing HL7 message (enhanced: %v, length: %d chars)\n",
-			req.UseEnhanced, len(req.RawMessage))
-	}
+    // Track parsing start time
+    startTime := time.Now()
 
-	// Always use the enhanced parser (it has proper fallback)
-	result := hl7.ParseHL7Enhanced(req.RawMessage)
+    // Only log if verbose logging is enabled
+    if ctrl.config.VerboseLogging {
+        fmt.Printf("📄 Parsing HL7 message (enhanced: %v, length: %d chars)\n",
+            req.UseEnhanced, len(req.RawMessage))
+    }
 
-	if result == nil {
-		c.JSON(http.StatusInternalServerError, hl7.ParseResponse{
-			Success: false,
-			Error:   "Parser returned null result",
-		})
-		return
-	}
+    // Always use the enhanced parser (it has proper fallback)
+    result := hl7.ParseHL7Enhanced(req.RawMessage)
 
-	if !result.Success {
-		c.JSON(http.StatusBadRequest, hl7.ParseResponse{
-			Success: false,
-			Error:   result.Error,
-		})
-		return
-	}
+    // Debug logging for parsing flags
+    if ctrl.config.VerboseLogging {
+        fmt.Printf("🔍 DEBUG: Parsing result flags:\n")
+        fmt.Printf("  - result.Success: %v\n", result.Success)
+        fmt.Printf("  - result.SchemaLoaded: %v\n", result.SchemaLoaded)
+        fmt.Printf("  - result.DictionaryUsed: %v\n", result.DictionaryUsed)
+        fmt.Printf("  - Enhanced segments count: %d\n", len(result.EnhancedSegments))
+        
+        // Check what type of parsing was actually used
+        for segName, segment := range result.EnhancedSegments {
+            fmt.Printf("  - Segment %s source: %s\n", segName, segment.DictionarySource)
+            break // Just check the first one
+        }
+        
+        // Check if real schema loader is available
+        if realLoader := hl7.GetRealSchemaLoader(); realLoader != nil {
+            fmt.Printf("  - Real schema loader: AVAILABLE\n")
+            stats := realLoader.GetStats()
+            fmt.Printf("  - Schema loader stats: loads=%d, hits=%d, misses=%d, errors=%d\n", 
+                stats.TotalLoads, stats.CacheHits, stats.CacheMisses, stats.LoadErrors)
+        } else {
+            fmt.Printf("  - Real schema loader: NOT AVAILABLE\n")
+        }
+    }
 
-	// Only log success details if verbose logging is enabled
-	if ctrl.config.VerboseLogging {
-		fmt.Printf("✅ Successfully parsed HL7 message: %s (segments: %d)\n",
-			result.MessageType.Name, len(result.EnhancedSegments))
+    // Calculate parsing time
+    parsingTime := time.Since(startTime)
 
-		fmt.Printf("🔍 DEBUG: Enhanced segments in final result:\n")
-		for segName, segment := range result.EnhancedSegments {
-			fmt.Printf("  📋 Segment %s: %s (%d fields)\n", segName, segment.Name, len(segment.Fields))
-		}
-		fmt.Printf("🔍 DEBUG: Segment order: %v\n", result.SegmentOrder)
-	}
+    if result == nil {
+        c.JSON(http.StatusInternalServerError, hl7.ParseResponse{
+            Success: false,
+            Error:   "Parser returned null result",
+        })
+        return
+    }
 
-	c.JSON(http.StatusOK, hl7.ParseResponse{
-		Success: true,
-		Data:    result,
-		Meta: &hl7.ParseMeta{
-			DictionaryUsed:  result.DictionaryUsed,
-			ValidationLevel: ctrl.config.HL7ValidationLevel,
-			ParserVersion:   "1.0.0",
-			SchemaUsed:      result.SchemaLoaded,
-		},
-	})
+    if !result.Success {
+        c.JSON(http.StatusBadRequest, hl7.ParseResponse{
+            Success: false,
+            Error:   result.Error,
+        })
+        return
+    }
+
+    // Only log success details if verbose logging is enabled
+    if ctrl.config.VerboseLogging {
+        fmt.Printf("✅ Successfully parsed HL7 message: %s (segments: %d)\n",
+            result.MessageType.Name, len(result.EnhancedSegments))
+
+        fmt.Printf("🔍 DEBUG: Enhanced segments in final result:\n")
+        for segName, segment := range result.EnhancedSegments {
+            fmt.Printf("  📋 Segment %s: %s (%d fields)\n", segName, segment.Name, len(segment.Fields))
+        }
+        fmt.Printf("🔍 DEBUG: Segment order: %v\n", result.SegmentOrder)
+    }
+
+    // Determine parse method based on actual usage
+    parseMethod := "basic"
+    if result.SchemaLoaded {
+        parseMethod = "enhanced_schema"
+    } else if result.DictionaryUsed {
+        parseMethod = "enhanced_dictionary"
+    }
+
+    // Get cache stats if available
+    var cacheStats *hl7.CacheStats
+    if schemaLoader := hl7.GetSchemaLoader(); schemaLoader != nil {
+        stats := schemaLoader.GetCacheStats()
+        cacheStats = &stats
+    }
+
+    c.JSON(http.StatusOK, hl7.ParseResponse{
+        Success: true,
+        Data:    result,
+        Meta: &hl7.ParseMeta{
+            ParsingTime:     parsingTime,
+            DictionaryUsed:  result.DictionaryUsed,
+            ValidationLevel: ctrl.config.HL7ValidationLevel,
+            ParserVersion:   "1.0.0",
+            SchemaUsed:      result.SchemaLoaded,
+            ParseMethod:     parseMethod,
+            CacheStats:      cacheStats,
+        },
+    })
 }
 
 // ValidateMessage handles HL7 message validation requests
