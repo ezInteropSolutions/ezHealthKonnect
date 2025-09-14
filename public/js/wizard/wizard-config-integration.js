@@ -47,13 +47,13 @@ class InterfaceConfigManager {
             this.hideLoading();
             
             // Show success notification
-            this.showNotification('✅ Configuration saved successfully!', 'success');
+            this.showNotification('Configuration saved successfully!', 'success');
             
-            console.log('✅ Interface configuration saved:', result.data);
+            console.log('Interface configuration saved:', result.data);
             return result;
             
         } catch (error) {
-            console.error('❌ Failed to save configuration:', error);
+            console.error('Failed to save configuration:', error);
             this.hideLoading();
             this.showNotification(`Failed to save configuration: ${error.message}`, 'error');
             throw error;
@@ -61,34 +61,51 @@ class InterfaceConfigManager {
     }
 
     /**
-     * Complete wizard (save + activate in one call)
+     * CRITICAL: Enhanced completeWizard method to include Step 4 data
+     * This replaces the existing completeWizard method
      */
     async completeWizard() {
         try {
-            console.log('🏁 Completing wizard...');
+            console.log('🏁 Completing wizard with enhanced data collection...');
             
-            // Collect configuration from wizard
+            // STEP 1: Collect ALL wizard configuration including Step 4 data
             const wizardData = this.collectWizardConfiguration();
             
-            // Validate required data
+            // STEP 2: CRITICAL - Add Step 4 mapping data explicitly
+            const step4Handler = this.wizard.stepHandlers?.[4] || window.step4Handler;
+            if (step4Handler) {
+                console.log('📊 Adding Step 4 mapping data to wizard completion...');
+                
+                // Add Step 4 data to the wizard data
+                wizardData.atomicMappings = step4Handler.atomicMappings || [];
+                wizardData.fhirTransformResult = step4Handler.fhirTransformResult || null;
+                wizardData.transformationMapping = step4Handler.transformationMapping || {};
+                wizardData.parsedMessage = step4Handler.parsedMessage || this.wizard.parsedHL7Data?.data;
+                wizardData.enhancedSegments = this.wizard.parsedHL7Data?.data?.enhancedSegments || {};
+                
+                console.log('✅ Step 4 data added:', {
+                    atomicMappingsCount: wizardData.atomicMappings.length,
+                    hasFhirTransformResult: !!wizardData.fhirTransformResult,
+                    hasParsedMessage: !!wizardData.parsedMessage,
+                    segmentCount: Object.keys(wizardData.enhancedSegments).length
+                });
+            } else {
+                console.warn('⚠️ Step 4 handler not found - mapping data may be missing');
+            }
+            
+            // STEP 3: Validate configuration
             if (!this.validateConfiguration(wizardData)) {
                 throw new Error('Configuration validation failed');
             }
             
             console.log('✅ Configuration validation passed');
             
-            // Show progress indicator
+            // STEP 4: Show progress and send to backend
             this.showLoading('Creating Interface...', 'Saving configuration and activating interface...');
             
-            // Send complete request to your Node.js backend
-            const result = await this.sendToBackendWithRetry('/api/wizard/complete', {
+            const interfaceResult = await this.sendToBackendWithRetry('/api/wizard/complete', {
                 wizardData: wizardData
             });
-            
-            // Store interface ID
-            if (this.wizard.wizardData && result.data?.interfaceId) {
-                this.wizard.wizardData.interfaceId = result.data.interfaceId;
-            }
             
             // Hide loading indicator
             this.hideLoading();
@@ -96,9 +113,8 @@ class InterfaceConfigManager {
             // Show success notification
             this.showNotification('🎉 Interface created and activated successfully!', 'success');
             
-            console.log('✅ Wizard completed successfully:', result.data);
-
-            return result;
+            console.log('✅ Wizard completed:', interfaceResult.data);
+            return interfaceResult;
             
         } catch (error) {
             console.error('❌ Failed to complete wizard:', error);
@@ -108,67 +124,540 @@ class InterfaceConfigManager {
         }
     }
 
-    /**
-     * Collect configuration data from all wizard steps
-     * ✅ ARCHITECTURE: Format + Connectivity separation - backend handles mapping
-     */
-    collectWizardConfiguration() {
-        console.log('📋 Collecting wizard configuration data...');
-        
+    async saveMappingConfiguration(interfaceId, wizardData) {
         try {
-            // Get raw configuration values - backend will map to format + connectivity
-            const rawConfig = {
-                // Step 1: Basic Configuration (UI values)
-                name: this.getElementValue('wizardInterfaceName'),
-                description: this.getElementValue('wizardInterfaceDescription'),
-                sourceType: this.getElementValue('wizardSourceType'),  // UI: hl7v2, file, http, etc.
-                targetType: this.getElementValue('wizardTargetType'),  // UI: fhir, database, file, etc.
-                
-                // Step 2: Source Configuration
-                sourceSettings: {
-                    host: this.getElementValue('sourceHost'),
-                    port: this.getElementValue('sourcePort'),
-                    path: this.getElementValue('sourcePath'),
-                    username: this.getElementValue('sourceUsername'),
-                    password: this.getElementValue('sourcePassword'),
-                    timeout: this.getElementValue('sourceTimeout') || 30,
-                    ssl: this.getElementChecked('sourceSSL'),
-                    authMethod: this.getElementValue('sourceAuthMethod') || 'none'
-                },
-                
-                // Step 3: Target Configuration
-                targetSettings: {
-                    host: this.getElementValue('targetHost'),
-                    port: this.getElementValue('targetPort'),
-                    path: this.getElementValue('targetPath'),
-                    username: this.getElementValue('targetUsername'),
-                    password: this.getElementValue('targetPassword'),
-                    timeout: this.getElementValue('targetTimeout') || 30,
-                    ssl: this.getElementChecked('targetSSL'),
-                    authMethod: this.getElementValue('targetAuthMethod') || 'none',
-                    database: this.getElementValue('targetDatabase'),
-                    table: this.getElementValue('targetTable')
-                },
-                
-                // Step 4: Mapping Data (from wizard state)
-                mappingConfiguration: {
-                    mappingRuleIds: this.wizard.wizardData?.mappingRuleIds || [],
-                    fhirVersion: this.wizard.wizardData?.fhirVersion || 'R4',
-                    fhirProfile: this.wizard.wizardData?.fhirProfile || 'base',
-                    createBundle: this.wizard.wizardData?.createBundle || false,
-                    resourceOverrides: this.wizard.wizardData?.resourceOverrides || {}
+            console.log('💾 Saving HL7-FHIR mapping configuration to database...');
+            
+            if (!interfaceId) {
+                throw new Error('Interface ID is required for mapping save');
+            }
+            
+            // Extract Step 4 mapping data
+            const step4Handler = this.wizard.stepHandlers?.[4] || window.step4Handler;
+            
+            if (!step4Handler) {
+                console.warn('⚠️ Step 4 handler not found, mapping data may be incomplete');
+            }
+            
+            // Prepare mapping data for database save
+            const mappingData = {
+                interfaceId: interfaceId,
+                wizardData: {
+                    detectedMessageType: wizardData.messageType || 
+                                       this.wizard.parsedHL7Data?.data?.messageType?.name ||
+                                       this.wizard.wizardData?.detectedMessageType,
+                    
+                    enhancedSegments: this.wizard.parsedHL7Data?.data?.enhancedSegments || {},
+                    
+                    // CRITICAL: Extract atomic mappings from Step 4 handler
+                    atomicMappings: step4Handler?.atomicMappings || [],
+                    
+                    // Extract FHIR transformation result
+                    fhirTransformResult: step4Handler?.fhirTransformResult || null,
+                    
+                    // Include parsed message data
+                    parsedMessage: this.wizard.parsedHL7Data?.data || null
                 }
             };
-
-            // Remove empty values to avoid backend validation issues
-            const cleanConfig = this.removeEmptyValues(rawConfig);
             
-            console.log('📋 Collected configuration:', cleanConfig);
-            return cleanConfig;
+            console.log('📊 Mapping data to save:', {
+                interfaceId: mappingData.interfaceId,
+                messageType: mappingData.wizardData.detectedMessageType,
+                atomicMappingsCount: mappingData.wizardData.atomicMappings?.length || 0,
+                segmentsCount: Object.keys(mappingData.wizardData.enhancedSegments).length
+            });
+            
+            // Call our new mapping save endpoint
+            const response = await fetch('/api/wizard/save-mapping-config', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/json'
+                },
+                credentials: 'same-origin',
+                body: JSON.stringify(mappingData)
+            });
+            
+            if (!response.ok) {
+                const errorText = await response.text();
+                throw new Error(`HTTP ${response.status}: ${errorText}`);
+            }
+            
+            const result = await response.json();
+            
+            if (!result.success) {
+                throw new Error(result.error || 'Unknown mapping save error');
+            }
+            
+            console.log('✅ Mapping configuration saved to database:', result.data);
+            return result;
             
         } catch (error) {
-            console.error('❌ Error collecting wizard configuration:', error);
-            throw new Error('Failed to collect wizard configuration data');
+            console.error('❌ Failed to save mapping configuration:', error);
+            return {
+                success: false,
+                error: error.message
+            };
+        }
+    }
+
+    /**
+     * Collect configuration data from all wizard steps
+     * ENHANCED: Collects data from wizard state, DOM elements, and step handlers
+     */
+    collectWizardConfiguration() {
+    console.log('📊 Collecting enhanced wizard configuration data...');
+    
+    try {
+        // Get interface ID from wizard state
+        const interfaceId = this.wizard.wizardData?.interfaceId ||
+                           this.wizard.wizardData?.id;
+        
+        // STEP 1: Basic Configuration - Try multiple sources
+        const name = this.getElementValue('wizardInterfaceName') || 
+                    this.wizard.wizardData?.name || 
+                    this.getElementValue('interfaceName');
+        const description = this.getElementValue('wizardInterfaceDescription') || 
+                           this.wizard.wizardData?.description || 
+                           this.getElementValue('interfaceDescription') || '';
+        
+        // Source and Target Types
+        const sourceType = this.getElementValue('wizardSourceType') || 
+                          this.wizard.wizardData?.sourceType || 
+                          this.getSelectedValue('sourceType') || 'hl7v2';
+        const targetType = this.getElementValue('wizardTargetType') || 
+                          this.wizard.wizardData?.targetType || 
+                          this.getSelectedValue('targetType') || 'fhir';
+        
+        // Message Type - from Step 2 or file upload
+        const messageType = this.getElementValue('wizardMessageType') || 
+                           this.wizard.wizardData?.messageType || 
+                           this.getDetectedMessageType() || 'ADT^A01';
+
+        // STEP 2: Source Configuration - Enhanced collection
+        const sourceConfig = this.collectSourceConfiguration(sourceType);
+        
+        // STEP 3: Target Configuration - Enhanced collection  
+        const targetConfig = this.collectTargetConfiguration(targetType);
+        
+        // STEP 4: CRITICAL FIX - Extract Step 4 mapping data directly
+        const step4Handler = this.wizard.stepHandlers?.[4] || 
+                           this.wizard.stepHandlers?.['4'] ||
+                           window.fhirMappingStepHandler ||
+                           window.step4Handler;
+        
+        console.log('🔍 Step 4 handler found:', !!step4Handler);
+        console.log('🔍 Step 4 handler type:', step4Handler?.constructor?.name);
+        
+        let atomicMappings = [];
+        let fhirTransformResult = null;
+        let enhancedSegments = {};
+        let parsedMessage = null;
+        
+        if (step4Handler) {
+            atomicMappings = step4Handler.atomicMappings || [];
+            fhirTransformResult = step4Handler.fhirTransformResult || null;
+            parsedMessage = step4Handler.parsedMessage || this.wizard.wizardData?.parsedMessage;
+            
+            console.log('✅ Step 4 data extracted:', {
+                atomicMappingsCount: atomicMappings.length,
+                hasFhirTransformResult: !!fhirTransformResult,
+                step4HandlerType: step4Handler.constructor.name
+            });
+            
+            if (atomicMappings.length > 0) {
+                console.log('🔍 Sample atomic mapping:', atomicMappings[0]);
+            } else {
+                console.warn('⚠️ No atomic mappings found in Step 4 handler');
+                console.log('🔍 Step 4 handler.atomicMappings:', step4Handler.atomicMappings);
+            }
+        } else {
+            console.warn('⚠️ Step 4 handler not found - mapping data will be empty');
+        }
+        
+        // Get enhanced segments from wizard data (populated in Step 3)
+        enhancedSegments = this.wizard.wizardData?.enhancedSegments ||
+                          this.wizard.parsedHL7Data?.data?.enhancedSegments || 
+                          {};
+        
+        // Get parsed message from wizard data (populated in Step 2)
+        if (!parsedMessage) {
+            parsedMessage = this.wizard.wizardData?.parsedMessage ||
+                           this.wizard.parsedHL7Data?.data ||
+                           null;
+        }
+        
+        // Combine all configuration
+        const rawConfig = {
+            // Interface ID for mapping save
+            interfaceId: interfaceId,
+            
+            // Step 1: Basic Configuration
+            name: name,
+            description: description,
+            sourceType: sourceType,
+            targetType: targetType,
+            messageType: messageType,
+            
+            // FIXED: Step 2 & 3 - Complete Connection Configuration
+            sourceConfig: sourceConfig,
+            targetConfig: targetConfig,
+            
+            // FIXED: Step 4 - All Mapping Data (directly extracted from Step 4 handler)
+            atomicMappings: atomicMappings,
+            fhirTransformResult: fhirTransformResult,
+            enhancedSegments: enhancedSegments,
+            parsedMessage: parsedMessage,
+            
+            // Additional mapping configuration
+            mappingRuleIds: [],
+            fhirVersion: step4Handler?.fhirVersion || this.wizard.wizardData?.fhirVersion || 'R4',
+            fhirProfile: 'base',
+            createBundle: step4Handler?.createBundle !== false,
+            
+            // Processing rules
+            processingRules: this.collectProcessingRules(),
+            
+            // Transformation mapping for backend
+            transformationMapping: {
+                mappings: atomicMappings,
+                rules: step4Handler?.transformationRules || [],
+                profile: step4Handler?.fhirProfile || 'base',
+                version: step4Handler?.fhirVersion || 'R4'
+            },
+            
+            // Metadata
+            createdAt: new Date().toISOString(),
+            createdBy: this.wizard.wizardData?.userEmail || 'unknown'
+        };
+
+        const cleanConfig = this.removeEmptyValues(rawConfig);
+        
+        console.log('📊 Enhanced configuration collected:', {
+            name: cleanConfig.name,
+            sourceType: cleanConfig.sourceType,
+            targetType: cleanConfig.targetType,
+            messageType: cleanConfig.messageType,
+            atomicMappingsCount: cleanConfig.atomicMappings?.length || 0,
+            hasSourceConfig: !!cleanConfig.sourceConfig && Object.keys(cleanConfig.sourceConfig).length > 0,
+            hasTargetConfig: !!cleanConfig.targetConfig && Object.keys(cleanConfig.targetConfig).length > 0,
+            hasFhirTransformResult: !!cleanConfig.fhirTransformResult,
+            segmentsCount: Object.keys(cleanConfig.enhancedSegments || {}).length
+        });
+        
+        // CRITICAL: Alert if missing essential data
+        if (!cleanConfig.atomicMappings || cleanConfig.atomicMappings.length === 0) {
+            console.error('🚨 CRITICAL: No atomic mappings found!');
+            console.log('🔍 Debug info:', {
+                step4Handler: !!step4Handler,
+                step4HandlerType: step4Handler?.constructor?.name,
+                step4AtomicMappings: step4Handler?.atomicMappings,
+                wizardStepHandlers: Object.keys(this.wizard.stepHandlers || {})
+            });
+        }
+        
+        if (!cleanConfig.sourceConfig || Object.keys(cleanConfig.sourceConfig).length === 0) {
+            console.error('🚨 CRITICAL: No source configuration found!');
+        }
+        
+        if (!cleanConfig.targetConfig || Object.keys(cleanConfig.targetConfig).length === 0) {
+            console.error('🚨 CRITICAL: No target configuration found!');
+        }
+        
+        return cleanConfig;
+        
+    } catch (error) {
+        console.error('❌ Error collecting wizard configuration:', error);
+        throw new Error('Failed to collect wizard configuration data');
+    }
+}
+
+
+    /**
+     * Collect source configuration based on source type
+     */
+    collectSourceConfiguration(sourceType) {
+        console.log('🔧 Collecting source configuration for:', sourceType);
+        
+        const baseConfig = {
+            type: sourceType,
+            enabled: true
+        };
+        
+        switch (sourceType) {
+            case 'hl7v2':
+            case 'hl7':
+                return {
+                    ...baseConfig,
+                    connectivity: 'tcp',
+                    host: this.getElementValue('sourceHost') || 
+                          this.getElementValue('hl7SourceHost') || 
+                          'localhost',
+                    port: parseInt(this.getElementValue('sourcePort') || 
+                                  this.getElementValue('hl7SourcePort') || 
+                                  '2575'),
+                    timeout: parseInt(this.getElementValue('sourceTimeout') || '30000'),
+                    encoding: this.getElementValue('sourceEncoding') || 'UTF-8',
+                    validateIncoming: this.getCheckboxValue('validateIncoming') !== false
+                };
+                
+            case 'file':
+                return {
+                    ...baseConfig,
+                    connectivity: 'file',
+                    inputDirectory: this.getElementValue('sourceInputDir') || '/input',
+                    processedDirectory: this.getElementValue('sourceProcessedDir') || '/processed',
+                    errorDirectory: this.getElementValue('sourceErrorDir') || '/error',
+                    filePattern: this.getElementValue('sourceFilePattern') || '*.hl7',
+                    pollingInterval: parseInt(this.getElementValue('sourcePollingInterval') || '5000')
+                };
+                
+            case 'http':
+                return {
+                    ...baseConfig,
+                    connectivity: 'http',
+                    endpoint: this.getElementValue('sourceEndpoint') || '/api/hl7/receive',
+                    port: parseInt(this.getElementValue('sourceHttpPort') || '8080'),
+                    method: this.getElementValue('sourceHttpMethod') || 'POST',
+                    authentication: this.getElementValue('sourceAuth') || 'none'
+                };
+                
+            default:
+                return baseConfig;
+        }
+    }
+
+    /**
+     * Collect target configuration based on target type
+     */
+    collectTargetConfiguration(targetType) {
+        console.log('🔧 Collecting target configuration for:', targetType);
+        
+        const baseConfig = {
+            type: targetType,
+            enabled: true
+        };
+        
+        switch (targetType) {
+            case 'fhir':
+                return {
+                    ...baseConfig,
+                    connectivity: 'http',
+                    baseUrl: this.getElementValue('targetFhirUrl') || 
+                             this.getElementValue('targetHost') || 
+                             'http://localhost:8080/fhir',
+                    version: this.getElementValue('fhirVersion') || 'R4',
+                    authentication: {
+                        type: this.getElementValue('fhirAuthType') || 'none',
+                        username: this.getElementValue('fhirUsername') || '',
+                        password: this.getElementValue('fhirPassword') || '',
+                        token: this.getElementValue('fhirToken') || ''
+                    },
+                    timeout: parseInt(this.getElementValue('targetTimeout') || '30000'),
+                    validateOutput: this.getCheckboxValue('validateOutput') !== false,
+                    createBundle: this.getCheckboxValue('createBundle') !== false
+                };
+                
+            case 'database':
+                return {
+                    ...baseConfig,
+                    connectivity: 'database',
+                    connectionString: this.getElementValue('targetDbConnection') || '',
+                    schema: this.getElementValue('targetDbSchema') || 'public',
+                    table: this.getElementValue('targetDbTable') || 'fhir_resources',
+                    batchSize: parseInt(this.getElementValue('targetDbBatchSize') || '100')
+                };
+                
+            case 'file':
+                return {
+                    ...baseConfig,
+                    connectivity: 'file',
+                    outputDirectory: this.getElementValue('targetOutputDir') || '/output',
+                    filePattern: this.getElementValue('targetFilePattern') || '{messageType}_{timestamp}.json',
+                    createSubdirectories: this.getCheckboxValue('createSubdirs') !== false
+                };
+                
+            default:
+                return baseConfig;
+        }
+    }
+
+    /**
+     * Collect mapping configuration from Step 4 handler
+     */
+    collectMappingConfiguration() {
+    console.log('🗂️ Collecting mapping configuration...');
+    
+    try {
+        // CORRECTED: Get Step 4 handler from the correct location
+        const step4Handler = this.wizard.stepHandlers?.[4] || 
+                           this.wizard.stepHandlers?.['4'] ||
+                           window.fhirMappingStepHandler ||
+                           window.step4Handler;
+        
+        console.log('🔍 Step 4 handler found:', !!step4Handler);
+        console.log('🔍 Step 4 handler type:', step4Handler?.constructor?.name);
+        
+        if (step4Handler) {
+            // FIXED: Extract actual data from the Step 4 handler properties
+            const mappingData = {
+                fhirVersion: step4Handler.fhirVersion || this.wizard.wizardData?.fhirVersion || 'R4',
+                createBundle: step4Handler.createBundle !== false,
+                
+                // CRITICAL FIX: Get atomic mappings from the correct property
+                atomicMappings: step4Handler.atomicMappings || [],
+                
+                fhirTransformResult: step4Handler.fhirTransformResult || null,
+                transformationMapping: step4Handler.transformationMapping || {},
+                parsedMessage: step4Handler.parsedMessage || this.wizard.wizardData?.parsedMessage,
+                resourceTypes: step4Handler.resourceTypes || [],
+                fieldMappings: step4Handler.fieldMappings || []
+            };
+            
+            console.log('✅ Mapping data collected from Step 4 handler:', {
+                atomicMappingsCount: mappingData.atomicMappings.length,
+                hasFhirTransformResult: !!mappingData.fhirTransformResult,
+                resourceTypesCount: mappingData.resourceTypes.length,
+                step4HandlerType: step4Handler.constructor.name
+            });
+            
+            // DEBUG: Log actual atomic mappings if found
+            if (mappingData.atomicMappings.length > 0) {
+                console.log('🔍 Sample atomic mapping:', mappingData.atomicMappings[0]);
+                console.log('🔍 All atomic mappings:', mappingData.atomicMappings);
+            } else {
+                console.warn('⚠️ No atomic mappings found in Step 4 handler');
+                console.log('🔍 Step 4 handler properties:', Object.keys(step4Handler));
+                console.log('🔍 step4Handler.atomicMappings value:', step4Handler.atomicMappings);
+            }
+            
+            return mappingData;
+        }
+        
+        // ENHANCED: Fallback search with comprehensive logging
+        console.warn('⚠️ Step 4 handler not found, searching for mapping data...');
+        
+        // Search in multiple locations
+        const searchResults = {
+            wizardData: this.wizard.wizardData?.atomicMappings,
+            globalStep4: window.step4Handler?.atomicMappings,
+            globalFhir: window.fhirMappingStepHandler?.atomicMappings,
+            enhancedMapping: window.enhancedMappingInterface?.atomicMappings
+        };
+        
+        console.log('🔍 Fallback search results:', searchResults);
+        
+        let foundMappings = [];
+        for (const [source, mappings] of Object.entries(searchResults)) {
+            if (Array.isArray(mappings) && mappings.length > 0) {
+                foundMappings = mappings;
+                console.log(`✅ Found ${mappings.length} atomic mappings in ${source}`);
+                break;
+            }
+        }
+        
+        // Fallback mapping configuration
+        const fallbackMapping = {
+            fhirVersion: this.wizard.wizardData?.fhirVersion || 'R4',
+            createBundle: this.wizard.wizardData?.createBundle !== false,
+            atomicMappings: foundMappings,
+            transformationMapping: this.wizard.wizardData?.transformationMapping || {}
+        };
+        
+        console.log('⚠️ Using fallback mapping configuration:', {
+            atomicMappingsCount: fallbackMapping.atomicMappings.length
+        });
+        
+        return fallbackMapping;
+        
+    } catch (error) {
+        console.error('❌ Error collecting mapping configuration:', error);
+        return {
+            fhirVersion: 'R4',
+            createBundle: true,
+            atomicMappings: [],
+            transformationMapping: {}
+        };
+    }
+}
+
+
+    /**
+     * Collect processing rules configuration
+     */
+    collectProcessingRules() {
+        return {
+            validateInput: this.getCheckboxValue('validateInput') !== false,
+            validateOutput: this.getCheckboxValue('validateOutput') !== false,
+            retryFailures: this.getCheckboxValue('retryFailures') !== false,
+            maxRetries: parseInt(this.getElementValue('maxRetries') || '3'),
+            timeout: parseInt(this.getElementValue('processingTimeout') || '30000'),
+            batchSize: parseInt(this.getElementValue('batchSize') || '1'),
+            preserveOriginal: this.getCheckboxValue('preserveOriginal') !== false
+        };
+    }
+
+    /**
+     * Get detected message type from uploaded file
+     */
+    getDetectedMessageType() {
+        // Try to get from Step 2 upload results
+        const uploadResults = this.wizard.wizardData?.uploadResults;
+        if (uploadResults?.messageType) {
+            return uploadResults.messageType;
+        }
+        
+        // Try to get from parsed message
+        const parsedMessage = this.wizard.wizardData?.parsedMessage;
+        if (parsedMessage?.messageType) {
+            return parsedMessage.messageType;
+        }
+        
+        // Check DOM elements
+        const messageTypeElement = document.querySelector('#detectedMessageType, #messageType, .message-type');
+        if (messageTypeElement) {
+            return messageTypeElement.textContent || messageTypeElement.value;
+        }
+        
+        return null;
+    }
+
+    /**
+     * Get selected value from dropdown
+     */
+    getSelectedValue(fieldName) {
+        const element = document.querySelector(`#${fieldName}, select[name="${fieldName}"]`);
+        return element?.value || null;
+    }
+
+    /**
+     * Get checkbox value (returns boolean)
+     */
+    getCheckboxValue(fieldName) {
+        const element = document.querySelector(`#${fieldName}, input[name="${fieldName}"]`);
+        return element?.checked || false;
+    }
+
+    getStep4MappingData(dataType) {
+        try {
+            const step4Handler = this.wizard.stepHandlers?.[4] || window.step4Handler;
+            
+            if (!step4Handler) {
+                console.warn('⚠️ Step 4 handler not found, mapping data may be incomplete');
+                return null;
+            }
+            
+            switch (dataType) {
+                case 'atomicMappings':
+                    return step4Handler.atomicMappings || [];
+                case 'fhirTransformResult':
+                    return step4Handler.fhirTransformResult || null;
+                default:
+                    return null;
+            }
+        } catch (error) {
+            console.error(`❌ Error getting Step 4 ${dataType}:`, error);
+            return null;
         }
     }
 
@@ -734,3 +1223,5 @@ if (typeof module !== 'undefined' && module.exports) {
         EnhancedWizardMain
     };
 }
+
+console.log('✅ Wizard Configuration Integration loaded and ready');

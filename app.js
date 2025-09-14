@@ -22,8 +22,21 @@ console.log(`Go Backend URL: ${GO_BACKEND_URL}`);
 console.log(`Node Environment: ${process.env.NODE_ENV || 'development'}`);
 
 // Basic middleware FIRST
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+//app.use(express.json());
+//app.use(express.urlencoded({ extended: true }));
+// Basic middleware FIRST - Updated for HL7-FHIR mapping payloads
+app.use(express.json({ limit: '2mb' }));
+app.use(express.urlencoded({ limit: '2mb', extended: true }));
+// Monitor large requests for debugging
+app.use((req, res, next) => {
+    if (req.headers['content-length']) {
+        const sizeKB = Math.round(parseInt(req.headers['content-length']) / 1024);
+        if (sizeKB > 100) {
+            console.log(`Large request: ${req.method} ${req.path} - ${sizeKB}KB`);
+        }
+    }
+    next();
+});
 app.use(express.static('public'));
 app.use('/uploads', express.static('uploads'));
 
