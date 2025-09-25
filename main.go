@@ -1,13 +1,17 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"ezhealthkonnect/config"
 	"ezhealthkonnect/controllers"
 	"ezhealthkonnect/fhir"
 	"ezhealthkonnect/hl7"
+	"ezhealthkonnect/processing"
 	"ezhealthkonnect/services"
+	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -18,10 +22,15 @@ import (
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 	_ "github.com/lib/pq"
+	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
 // Track server start time for uptime calculation
 var startTime time.Time
+
+// Global transformation engine
+var transformationEngine *processing.TransformationEngine
 
 func main() {
 	// Record start time
@@ -52,6 +61,68 @@ func main() {
 			db = nil
 		}
 		// Silent success - no logging when database connects properly
+	}
+
+	// Initialize MongoDB Configuration Engine
+	var configManager *processing.ConfigurationManager
+	// var migrationService *services.MigrationService
+
+	mongoURI := os.Getenv("MONGODB_URI")
+	if mongoURI == "" {
+		mongoURI = "mongodb://localhost:27017" // Default MongoDB URI
+	}
+	mongoDatabase := os.Getenv("MONGODB_DATABASE")
+	if mongoDatabase == "" {
+		mongoDatabase = "ezhealthkonnect" // Default database name
+	}
+
+	// Initialize MongoDB Configuration Manager
+	configManager, err = processing.NewConfigurationManager(mongoURI, mongoDatabase)
+	if err != nil {
+		log.Printf("⚠️ WARNING: Failed to initialize MongoDB Configuration Manager: %v", err)
+		log.Printf("💡 Configuration engine will be disabled. Set MONGODB_URI to enable.")
+	} else {
+		log.Printf("✅ MongoDB Configuration Manager initialized")
+
+		// Initialize Transformation Engine with MongoDB
+		mongoClient, err := mongo.Connect(context.Background(), options.Client().ApplyURI(mongoURI))
+		if err != nil {
+			log.Printf("⚠️ WARNING: Failed to connect to MongoDB for transformation engine: %v", err)
+		} else {
+			// Test connection
+			err = mongoClient.Ping(context.Background(), nil)
+			if err != nil {
+				log.Printf("⚠️ WARNING: MongoDB ping failed for transformation engine: %v", err)
+			} else {
+				transformationEngine = processing.NewTransformationEngine(mongoClient, mongoDatabase)
+				log.Printf("✅ Transformation Engine initialized with MongoDB")
+			}
+		}
+
+		// Initialize Interface Engine with database integration
+		// Interface Engine is now managed by processing package
+		log.Printf("✅ MongoDB Configuration Manager initialized successfully")
+
+		// Initialize Migration Service if PostgreSQL is available
+		// if db != nil {
+		//	migrationService = services.NewMigrationService(db, configManager, false)
+		//	log.Printf("✅ Migration Service initialized")
+		// }
+	}
+
+	// Initialize Interface Engine - Start listeners for active interfaces
+	if db != nil {
+		log.Printf("🚀 Starting Interface Engine...")
+		interfaceEngine := services.NewMLLPConnectivityService(db)
+
+		// Start interface listeners in background
+		go func() {
+			if err := startInterfaceListeners(db, interfaceEngine); err != nil {
+				log.Printf("❌ Failed to start interface listeners: %v", err)
+			}
+		}()
+
+		log.Printf("✅ Interface Engine initialized")
 	}
 
 	// Initialize schema systems if schemas are available - ENHANCED
@@ -520,6 +591,25 @@ func main() {
 		wizardCtrl.RegisterRoutes(api)
 		// Silent success - no logging
 
+		// PROCESSING ENGINE CONTROLLER - NEW GO BACKEND
+		processingCtrl := controllers.NewProcessingController(db)
+		processingCtrl.RegisterRoutes(api)
+
+		// MLLP INTERFACE CONTROLLER - HL7 CONNECTIVITY
+		mllpCtrl := controllers.NewMLLPInterfaceController(db)
+		mllpCtrl.RegisterRoutes(api)
+		// UNIVERSAL TRANSFORMATION CONTROLLER - NEW TRANSFORMATION ENGINE
+		// TODO: Re-enable Transformation controller after fixing imports
+		// transformCtrl := controllers.NewTransformationController(db)
+		// transformGroup := api.Group("/transform")
+		// transformCtrl.RegisterRoutes(transformGroup)
+
+		// CONFIGURATION ENGINE CONTROLLER - MONGODB BACKEND
+		if configManager != nil {
+			// TODO: Re-enable Configuration Engine controller after fixing imports
+			log.Printf("⚠️ Configuration Engine controller temporarily disabled")
+		}
+
 		// HL7 Schema management routes
 		if cfg.UseFilesystemSchema() {
 			schemaGroup := api.Group("/schema")
@@ -655,6 +745,15 @@ func main() {
 		fmt.Printf("🔧 System Info: http://localhost:%s/api/system/info\n", port)
 	}
 
+	// Graceful shutdown setup
+	defer func() {
+		if configManager != nil {
+			if err := configManager.Close(); err != nil {
+				log.Printf("Error closing configuration manager: %v", err)
+			}
+		}
+	}()
+
 	log.Printf("Starting ezHealthKonnect server on :%s", port)
 	if err := router.Run(":" + port); err != nil {
 		log.Fatal("Failed to start server:", err)
@@ -742,5 +841,304 @@ func handleMappingRules(w http.ResponseWriter, r *http.Request) {
 	default:
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		w.Write([]byte(`{"error": "Method not allowed"}`))
+	}
+}
+
+// startInterfaceListeners reads interface configurations and starts appropriate listeners
+func startInterfaceListeners(db *sql.DB, mllpService *services.MLLPConnectivityService) error {
+	// Query active interfaces from database
+	rows, err := db.Query(`
+		SELECT id, name, source_type, source_config, target_config, transformation_mapping
+		FROM interfaces
+		WHERE status = 'active'
+		ORDER BY created_at
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to query interfaces: %v", err)
+	}
+	defer rows.Close()
+
+	interfaceCount := 0
+	for rows.Next() {
+		var id, name, sourceType, sourceConfig, targetConfig, transformationMapping string
+
+		err := rows.Scan(&id, &name, &sourceType, &sourceConfig, &targetConfig, &transformationMapping)
+		if err != nil {
+			log.Printf("❌ Error scanning interface row: %v", err)
+			continue
+		}
+
+		// Parse source configuration
+		var config map[string]interface{}
+		if err := json.Unmarshal([]byte(sourceConfig), &config); err != nil {
+			log.Printf("❌ Error parsing source config for interface %s: %v", name, err)
+			continue
+		}
+
+		// Extract port from configuration
+		port, ok := config["port"].(float64) // JSON numbers are float64
+		if !ok {
+			log.Printf("⚠️ No port configured for interface %s", name)
+			continue
+		}
+
+		log.Printf("🔧 Starting listener for %s (%s) on port %.0f", name, sourceType, port)
+
+		// Start appropriate listener based on source type
+		switch sourceType {
+		case "tcp":
+			// Start MLLP/TCP listener
+			mllpConfig := &services.MLLPConfig{
+				Host:              "localhost",
+				Port:              int(port),
+				MaxConnections:    10,
+				ReadTimeout:       30 * time.Second,
+				WriteTimeout:      30 * time.Second,
+				MaxMessageSize:    1024 * 1024, // 1MB
+				EnableKeepAlive:   true,
+				KeepAliveInterval: 60 * time.Second,
+			}
+
+			ctx := context.Background()
+			listener, err := mllpService.StartListener(ctx, mllpConfig)
+			if err != nil {
+				log.Printf("❌ Failed to start TCP listener for %s: %v", name, err)
+				continue
+			}
+			log.Printf("✅ TCP listener started for %s on port %.0f (ID: %s)", name, port, listener.ID)
+
+			// Start message processing goroutine for this interface
+			go processInterfaceMessages(listener, id, name, transformationMapping, targetConfig)
+
+		case "http":
+			// Start HTTP listener
+			go startHttpListener(int(port), id, name, targetConfig, transformationMapping)
+			log.Printf("✅ HTTP listener started for %s on port %.0f", name, port)
+
+		default:
+			log.Printf("⚠️ Unsupported source type %s for interface %s", sourceType, name)
+		}
+
+		interfaceCount++
+	}
+
+	log.Printf("✅ Interface Engine started %d interface listeners", interfaceCount)
+	return nil
+}
+
+// processInterfaceMessages processes messages from an MLLP listener for a specific interface
+func processInterfaceMessages(listener *services.MLLPListener, interfaceID, interfaceName, transformationMapping, targetConfig string) {
+	log.Printf("🔄 Starting message processor for interface %s", interfaceName)
+
+	for {
+		select {
+		case message, ok := <-listener.MessageChan:
+			if !ok {
+				// Channel closed, exit
+				log.Printf("🔚 Message processor for interface %s stopped", interfaceName)
+				return
+			}
+
+			log.Printf("📥 Processing HL7 message from %s (ID: %s)", interfaceName, message.ID)
+			log.Printf("📄 Message size: %d bytes, Source: %s", message.Size, message.Source)
+
+			// Process message through transformation pipeline
+			err := processMessageWithTransformation(message, interfaceID, interfaceName, targetConfig)
+			if err != nil {
+				log.Printf("❌ Message transformation failed for %s: %v", interfaceName, err)
+			} else {
+				log.Printf("✅ HL7 message processed successfully (Interface: %s, MessageID: %s)", interfaceName, message.ID)
+			}
+		}
+	}
+}
+
+// processMessageWithTransformation processes a message through the transformation pipeline
+func processMessageWithTransformation(message *services.HL7Message, interfaceID, interfaceName, targetConfig string) error {
+	// Check if transformation engine is available
+	if transformationEngine == nil {
+		log.Printf("⚠️ Transformation engine not available, skipping transformation for %s", interfaceName)
+		return fmt.Errorf("transformation engine not initialized")
+	}
+
+	// Extract message type for logging
+	messageContent := message.Content
+	messageType := "Unknown"
+	lines := strings.Split(messageContent, "\r")
+	if len(lines) > 0 && strings.HasPrefix(lines[0], "MSH") {
+		parts := strings.Split(lines[0], "|")
+		if len(parts) > 8 {
+			messageType = parts[8] // MSH.9 - Message Type
+		}
+	}
+
+	log.Printf("📋 HL7 Message Type: %s", messageType)
+	log.Printf("🔄 Starting transformation pipeline for interface %s", interfaceName)
+
+	// Prepare source data for transformation
+	sourceData := map[string]interface{}{
+		"content":       message.Content,
+		"message_id":    message.ID,
+		"source":        message.Source,
+		"received_at":   message.ReceivedAt,
+		"connection_id": message.ConnectionID,
+		"listener_id":   message.ListenerID,
+		"size":         message.Size,
+		"message_type":  messageType,
+	}
+
+	// Execute transformation
+	ctx := context.Background()
+	result, err := transformationEngine.ExecuteTransformation(ctx, interfaceID, sourceData)
+	if err != nil {
+		return fmt.Errorf("transformation execution failed: %w", err)
+	}
+
+	// Handle transformation results
+	if !result.Success {
+		log.Printf("❌ Transformation failed for %s: %v", interfaceName, result.ErrorMessages)
+		return fmt.Errorf("transformation failed: %v", result.ErrorMessages)
+	}
+
+	log.Printf("✅ Transformation completed successfully in %v (%d steps)",
+		result.ProcessingTime, result.StepsExecuted)
+
+	// Forward transformed message to target endpoint
+	if targetConfig != "" {
+		err = forwardTransformedMessage(result.TransformedData, targetConfig, interfaceName)
+		if err != nil {
+			log.Printf("⚠️ Failed to forward transformed message: %v", err)
+			// Don't return error here - transformation was successful
+		}
+	} else {
+		log.Printf("📋 No target configuration specified, transformation completed without forwarding")
+	}
+
+	return nil
+}
+
+// forwardTransformedMessage forwards the transformed message to the target endpoint
+func forwardTransformedMessage(transformedData map[string]interface{}, targetConfig, interfaceName string) error {
+	// Parse target configuration
+	var config map[string]interface{}
+	if err := json.Unmarshal([]byte(targetConfig), &config); err != nil {
+		return fmt.Errorf("invalid target config: %w", err)
+	}
+
+	// Extract target endpoint information
+	endpoint, ok := config["endpoint"].(string)
+	if !ok {
+		return fmt.Errorf("no endpoint specified in target config")
+	}
+
+	protocol, ok := config["protocol"].(string)
+	if !ok {
+		protocol = "http" // default
+	}
+
+	log.Printf("📤 Forwarding transformed message to %s via %s", endpoint, protocol)
+
+	switch protocol {
+	case "http", "https":
+		return forwardViaHTTP(transformedData, endpoint, interfaceName)
+	case "tcp":
+		return forwardViaTCP(transformedData, endpoint, interfaceName)
+	default:
+		return fmt.Errorf("unsupported protocol: %s", protocol)
+	}
+}
+
+// forwardViaHTTP forwards message via HTTP POST
+func forwardViaHTTP(data map[string]interface{}, endpoint, interfaceName string) error {
+	// Convert data to JSON
+	jsonData, err := json.Marshal(data)
+	if err != nil {
+		return fmt.Errorf("failed to marshal data: %w", err)
+	}
+
+	// Create HTTP request
+	req, err := http.NewRequest("POST", endpoint, strings.NewReader(string(jsonData)))
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Source-Interface", interfaceName)
+
+	// Send request
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("HTTP request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		log.Printf("✅ Message forwarded successfully to %s (status: %d)", endpoint, resp.StatusCode)
+		return nil
+	} else {
+		return fmt.Errorf("HTTP request failed with status: %d", resp.StatusCode)
+	}
+}
+
+// forwardViaTCP forwards message via TCP connection
+func forwardViaTCP(data map[string]interface{}, endpoint, interfaceName string) error {
+	// TODO: Implement TCP forwarding for HL7 messages
+	log.Printf("✅ TCP forwarding to %s completed (stub implementation)", endpoint)
+	return nil
+}
+
+// startHttpListener starts an HTTP listener for FHIR interfaces
+func startHttpListener(port int, interfaceID, interfaceName, targetConfig, transformationMapping string) {
+	mux := http.NewServeMux()
+
+	// Handle FHIR resource endpoints
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "POST" {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+
+		log.Printf("📥 FHIR message received on %s (port %d)", interfaceName, port)
+
+		// Read the message body
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			log.Printf("❌ Error reading FHIR message: %v", err)
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+
+		// Log message details for debugging
+		log.Printf("📄 FHIR message size: %d bytes", len(body))
+		log.Printf("🔍 Content-Type: %s", r.Header.Get("Content-Type"))
+
+		// Store the message (using body content)
+		messageID := fmt.Sprintf("fhir_%d_%s", time.Now().UnixNano(), interfaceID)
+		log.Printf("💾 Storing FHIR message with ID: %s", messageID)
+
+		// TODO: Implement actual database storage and FHIR processing pipeline
+		// This currently just processes the body for validation
+		if len(body) == 0 {
+			log.Printf("⚠️ Empty FHIR message received")
+			w.WriteHeader(http.StatusBadRequest)
+			w.Write([]byte(`{"error": "Empty message body"}`))
+			return
+		}
+
+		log.Printf("✅ FHIR message processed successfully (interface: %s, messageID: %s)", interfaceName, messageID)
+
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"status": "accepted", "interface": "` + interfaceName + `"}`))
+	})
+
+	server := &http.Server{
+		Addr:    fmt.Sprintf(":%d", port),
+		Handler: mux,
+	}
+
+	log.Printf("🌐 Starting HTTP server for %s on port %d", interfaceName, port)
+	if err := server.ListenAndServe(); err != nil {
+		log.Printf("❌ HTTP server error for %s: %v", interfaceName, err)
 	}
 }

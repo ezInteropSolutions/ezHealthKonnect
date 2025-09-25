@@ -74,19 +74,26 @@ async function logout() {
 // Navigation handling
 document.querySelectorAll('.nav-item, .action-tile').forEach(item => {
     item.addEventListener('click', function(e) {
-        e.preventDefault();
-        
         // Get the target from href or data attribute
         const target = this.getAttribute('href') || this.getAttribute('data-target');
-        
+
+        // Allow normal navigation for actual HTML pages
+        if (target && (target.endsWith('.html') || target.startsWith('http'))) {
+            // Don't prevent default - allow normal navigation
+            return;
+        }
+
+        // Only prevent default for hash-based navigation
+        e.preventDefault();
+
         // Remove active class from all nav items
         document.querySelectorAll('.nav-item').forEach(nav => nav.classList.remove('active'));
-        
+
         // Add active class to clicked nav item (if it's a nav item)
         if (this.classList.contains('nav-item')) {
             this.classList.add('active');
         }
-        
+
         // Handle different routes
         handleNavigation(target);
     });

@@ -32,7 +32,7 @@ class DatabaseManager {
                 username: process.env.DB_USER || 'postgres',
                 password: process.env.DB_PASSWORD || '',
                 dialect: 'postgres',
-                logging: process.env.NODE_ENV === 'development' ? console.log : false,
+                logging: false, // Disable SQL query logging to reduce noise
                 pool: {
                     max: 5,
                     min: 0,

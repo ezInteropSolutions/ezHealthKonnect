@@ -24,6 +24,21 @@ ezHealthKonnect is an AI-powered healthcare integration platform that transforms
 - **PostgreSQL**: Primary database for user data, audit logs, and configuration
 - **Sequelize ORM**: Used for Node.js database operations
 - **Go SQL**: Direct PostgreSQL connections for FHIR transformations
+- **Interface-Specific Tables**: Dedicated message tables per interface for performance isolation
+- **STANDARDIZED SCHEMA ONLY**: All interface tables use identical schema - NO LEGACY COMPATIBILITY
+
+## 🚨 CRITICAL ARCHITECTURAL PRINCIPLES 🚨
+
+### Schema Standards (NEVER COMPROMISE)
+**RULE**: We are building NEW - NO legacy compatibility layers, NO schema variations, NO backward compatibility hacks.
+
+**ENFORCEMENT**:
+- All interface tables MUST use identical standardized schema from `InterfaceTableManager.getMessageTableSchema()`
+- If any interface table has different schema → DROP and RECREATE with standard schema
+- Never add conditional column checking or dynamic schema adaptation
+- Standard columns: `id, message_id, correlation_id, interface_id, status, priority, received_at, source_type, source_endpoint, source_ip, message_type, message_size, message_encoding, raw_message, processing_completed_at, processing_time_ms, error_count, last_error_message, delivery_status, delivery_attempts, created_at, updated_at`
+
+**RATIONALE**: Clean architecture, predictable behavior, maintainable code. We're in development - no production legacy to worry about.
 
 ## Development Commands
 
@@ -73,6 +88,7 @@ Local Node.js routes:
 - `/api/users/*` → Node.js user management
 - `/api/interfaces/*` → Node.js interface management
 - `/api/wizard/*` → Node.js wizard functionality
+- `/api/messages/*` → Node.js message management (interface-specific only)
 
 ### Environment Configuration
 Key environment variables in `.env`:
@@ -89,6 +105,8 @@ Key environment variables in `.env`:
 - `interfaces`: Healthcare system interface configurations
 - `audit_logs`: HIPAA/GDPR compliance audit trail
 - `wizard_mappings`: HL7-FHIR field mappings
+- `interface_table_metadata`: Tracks interface-specific message tables
+- `messages_intf_*`: Interface-specific message tables (one per interface)
 - Migration files in `database/migrations/`
 
 ## File Structure Patterns
@@ -210,3 +228,57 @@ node tests/wizard-save-test.js
 2. **Automatic migration** of existing transformation_mapping data
 3. **Backward compatibility** maintained during transition
 4. **Go backend** can use new runtime mapping endpoints
+
+## Recent Fixes (2025)
+
+### Interface-Specific Message Architecture (V14-V15)
+- **Issue**: Global message viewing caused performance issues with large datasets and mixed interface types
+- **Solution**: Implemented dedicated table-per-interface architecture for ultimate performance isolation
+- **New Architecture**:
+  - Each interface gets its own dedicated message table (`messages_intf_*`)
+  - `interface_table_metadata` tracks all interface-specific tables
+  - `InterfaceTableManager` service handles dynamic table creation and management
+  - Adaptive schema handling for backward compatibility with existing tables
+
+### Message Viewing Modernization
+- **Removed**: Global message viewer (`/api/messages` endpoint now returns error)
+- **Implemented**: Interface-specific message viewing only
+- **Performance Benefits**:
+  - No cross-table joins required
+  - Isolated query performance per interface
+  - Better scalability for high-volume interfaces
+- **User Experience**: Users must select an interface to view messages (better workflow)
+
+### Table Schema Compatibility
+- **Backward Compatibility**: `InterfaceTableManager` automatically detects and adapts to existing table schemas
+- **Legacy Support**: Handles both old format (`source` column) and new format (`source_type` column)
+- **Dynamic Queries**: SELECT and INSERT queries adapt based on available columns in each table
+
+## Message Management System
+
+### Current Architecture
+- **Interface-Specific Storage**: Each interface has its own dedicated message table
+- **Performance Isolation**: No shared table bottlenecks between interfaces
+- **Scalable Design**: High-volume interfaces don't impact low-volume ones
+
+### Key Services
+- **InterfaceTableManager**: Core service for managing interface-specific tables
+  - Dynamic table creation for new interfaces
+  - Adaptive schema handling for existing tables
+  - Performance-optimized queries
+- **InterfaceTableMaintenanceService**: Automated maintenance for interface tables
+  - Table statistics updates
+  - Data retention cleanup
+  - Performance monitoring
+
+### API Endpoints (Message Management)
+- **Interface Messages**: `GET /api/messages/interface/:interfaceId` (gets messages for specific interface)
+- **Interface Stats**: `GET /api/messages/interface/:interfaceId/stats` (gets statistics for specific interface)
+- **Send Message**: `POST /api/messages/send/:interfaceId` (sends message to specific interface)
+- **Global Endpoints**: Removed for performance (redirects to interface selection)
+
+### Frontend Integration
+- **Navigation**: All message links now redirect to interface selection
+- **Interface Cards**: Each interface has a "View Messages" button (💬) linking to its message viewer
+- **URL Format**: `messages.html?interfaceId={interfaceId}` for interface-specific viewing
+- **No Global View**: Users must select an interface to view messages

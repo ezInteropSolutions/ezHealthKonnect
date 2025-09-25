@@ -1,0 +1,574 @@
+{
+  "sample_configurations": [
+    {
+      "name": "ADT Messages to FHIR R4",
+      "description": "Production-ready configuration for ADT message processing to FHIR R4 format",
+      "version": "1.0.0",
+      "status": "active",
+      "pipeline": {
+        "input": {
+          "type": "mllp",
+          "connector_config": {
+            "host": "0.0.0.0",
+            "port": 2575,
+            "max_connections": 100,
+            "read_timeout_ms": 30000,
+            "write_timeout_ms": 10000,
+            "enable_keep_alive": true,
+            "keep_alive_interval_ms": 60000,
+            "max_message_size": 10485760
+          },
+          "validation": {
+            "enabled": true,
+            "rules": [
+              {
+                "rule_type": "required_field",
+                "field_path": "MSH.3",
+                "error_action": "reject"
+              },
+              {
+                "rule_type": "required_field",
+                "field_path": "MSH.9",
+                "error_action": "reject"
+              }
+            ]
+          },
+          "preprocessing": {
+            "enabled": true,
+            "steps": [
+              {
+                "type": "normalize_encoding",
+                "config": {
+                  "target_encoding": "utf-8"
+                }
+              },
+              {
+                "type": "remove_whitespace",
+                "config": {
+                  "trim_lines": true
+                }
+              }
+            ]
+          }
+        },
+        "validation": {
+          "schema_validation": {
+            "enabled": true,
+            "schema_type": "hl7",
+            "strict_mode": false
+          },
+          "business_rules": [
+            {
+              "rule_id": "patient_id_required",
+              "condition": "PID.3 exists",
+              "validation": "PID.3 != ''",
+              "error_message": "Patient ID is required for ADT messages",
+              "severity": "error"
+            },
+            {
+              "rule_id": "message_type_adt",
+              "condition": "MSH.9 starts with 'ADT'",
+              "validation": "MSH.9 matches '^ADT\\^A\\d+'",
+              "error_message": "Invalid ADT message type",
+              "severity": "warning"
+            }
+          ],
+          "custom_validators": []
+        },
+        "transformation": {
+          "engine": "hl7_to_fhir",
+          "mapping_template": "standard_adt_v4",
+          "custom_mappings": [
+            {
+              "source_field": "MSH.3",
+              "target_field": "MessageHeader.source.name",
+              "transformation": {
+                "type": "direct_copy",
+                "config": {}
+              }
+            },
+            {
+              "source_field": "PID.5",
+              "target_field": "Patient.name[0]",
+              "transformation": {
+                "type": "hl7_name_to_fhir",
+                "config": {
+                  "name_use": "official"
+                }
+              }
+            }
+          ],
+          "post_processing": [
+            {
+              "type": "add_metadata",
+              "config": {
+                "processing_timestamp": "now",
+                "source_system": "Hospital ADT"
+              }
+            }
+          ]
+        },
+        "business_logic": {
+          "rules_engine": {
+            "enabled": true,
+            "rules": [
+              {
+                "rule_id": "duplicate_patient_check",
+                "condition": "Patient.identifier exists",
+                "action": {
+                  "type": "check_duplicate",
+                  "config": {
+                    "search_field": "identifier",
+                    "action_on_duplicate": "merge"
+                  }
+                }
+              }
+            ]
+          },
+          "workflow_automation": [
+            {
+              "trigger": "patient_admission",
+              "actions": [
+                {
+                  "type": "send_notification",
+                  "config": {
+                    "recipient": "nursing_station",
+                    "message": "New patient admission"
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        "destinations": [
+          {
+            "destination_id": "primary_fhir_server",
+            "type": "fhir_api",
+            "config": {
+              "base_url": "https://fhir.hospital.org/api/R4",
+              "timeout": 30000,
+              "auth_type": "oauth2",
+              "client_id": "interface_client",
+              "client_secret": "secure_secret"
+            },
+            "routing_rules": [
+              {
+                "condition": "resourceType == 'Patient'",
+                "resource_type": "Patient",
+                "operation": "create_or_update"
+              },
+              {
+                "condition": "resourceType == 'Encounter'",
+                "resource_type": "Encounter",
+                "operation": "create_or_update"
+              }
+            ],
+            "error_handling": {
+              "retry_count": 3,
+              "retry_delay": 5000,
+              "dead_letter_queue": true
+            }
+          },
+          {
+            "destination_id": "audit_database",
+            "type": "database",
+            "config": {
+              "table_name": "adt_messages_audit",
+              "connection_pool_size": 10
+            },
+            "routing_rules": [],
+            "error_handling": {
+              "retry_count": 2,
+              "retry_delay": 2000,
+              "dead_letter_queue": true
+            }
+          }
+        ]
+      },
+      "monitoring": {
+        "metrics_enabled": true,
+        "alert_thresholds": {
+          "error_rate": 0.02,
+          "processing_time_ms": 3000,
+          "queue_depth": 50,
+          "memory_usage_mb": 512
+        },
+        "retention_policy": {
+          "raw_messages": 90,
+          "processed_messages": 30,
+          "error_logs": 365,
+          "audit_logs": 2555
+        }
+      }
+    },
+    {
+      "name": "Lab Results (ORU) to FHIR",
+      "description": "Laboratory results processing from ORU messages to FHIR Observation resources",
+      "version": "1.0.0",
+      "status": "active",
+      "pipeline": {
+        "input": {
+          "type": "mllp",
+          "connector_config": {
+            "host": "0.0.0.0",
+            "port": 2576,
+            "max_connections": 50,
+            "read_timeout_ms": 45000,
+            "write_timeout_ms": 15000,
+            "enable_keep_alive": true,
+            "keep_alive_interval_ms": 90000
+          },
+          "validation": {
+            "enabled": true,
+            "rules": [
+              {
+                "rule_type": "required_field",
+                "field_path": "MSH.9",
+                "error_action": "reject"
+              },
+              {
+                "rule_type": "message_type",
+                "field_path": "MSH.9",
+                "error_action": "reject"
+              }
+            ]
+          },
+          "preprocessing": {
+            "enabled": false,
+            "steps": []
+          }
+        },
+        "validation": {
+          "schema_validation": {
+            "enabled": true,
+            "schema_type": "hl7",
+            "strict_mode": true
+          },
+          "business_rules": [
+            {
+              "rule_id": "oru_message_type",
+              "condition": "MSH.9 starts with 'ORU'",
+              "validation": "MSH.9 matches '^ORU\\^R\\d+'",
+              "error_message": "Only ORU message types are accepted",
+              "severity": "error"
+            },
+            {
+              "rule_id": "obx_segments_required",
+              "condition": "OBX segments exist",
+              "validation": "count(OBX) > 0",
+              "error_message": "At least one OBX segment is required",
+              "severity": "error"
+            }
+          ],
+          "custom_validators": []
+        },
+        "transformation": {
+          "engine": "hl7_to_fhir",
+          "mapping_template": "standard_oru_v4",
+          "custom_mappings": [
+            {
+              "source_field": "OBX.3",
+              "target_field": "Observation.code",
+              "transformation": {
+                "type": "code_lookup",
+                "config": {
+                  "code_system": "LOINC",
+                  "fallback_system": "local"
+                }
+              }
+            },
+            {
+              "source_field": "OBX.5",
+              "target_field": "Observation.value",
+              "transformation": {
+                "type": "typed_value",
+                "config": {
+                  "detect_type": true,
+                  "units_from": "OBX.6"
+                }
+              }
+            }
+          ],
+          "post_processing": [
+            {
+              "type": "validate_codes",
+              "config": {
+                "code_systems": ["LOINC", "SNOMED-CT"],
+                "strict_validation": false
+              }
+            }
+          ]
+        },
+        "business_logic": {
+          "rules_engine": {
+            "enabled": true,
+            "rules": [
+              {
+                "rule_id": "critical_value_alert",
+                "condition": "Observation.value > critical_threshold",
+                "action": {
+                  "type": "send_alert",
+                  "config": {
+                    "priority": "high",
+                    "recipients": ["physician", "lab_manager"]
+                  }
+                }
+              }
+            ]
+          },
+          "workflow_automation": []
+        },
+        "destinations": [
+          {
+            "destination_id": "lab_fhir_server",
+            "type": "fhir_api",
+            "config": {
+              "base_url": "https://lab.hospital.org/fhir/R4",
+              "timeout": 20000,
+              "auth_type": "basic",
+              "username": "lab_interface",
+              "password": "lab_password"
+            },
+            "routing_rules": [
+              {
+                "condition": "resourceType == 'Observation'",
+                "resource_type": "Observation",
+                "operation": "create"
+              },
+              {
+                "condition": "resourceType == 'DiagnosticReport'",
+                "resource_type": "DiagnosticReport",
+                "operation": "create"
+              }
+            ],
+            "error_handling": {
+              "retry_count": 5,
+              "retry_delay": 3000,
+              "dead_letter_queue": true
+            }
+          },
+          {
+            "destination_id": "lab_archive",
+            "type": "file",
+            "config": {
+              "output_directory": "/data/lab_results",
+              "filename_pattern": "lab_result_{timestamp}_{patient_id}.json",
+              "create_subdirectories": true,
+              "subdirectory_pattern": "{year}/{month}/{day}"
+            },
+            "routing_rules": [],
+            "error_handling": {
+              "retry_count": 2,
+              "retry_delay": 1000,
+              "dead_letter_queue": false
+            }
+          }
+        ]
+      },
+      "monitoring": {
+        "metrics_enabled": true,
+        "alert_thresholds": {
+          "error_rate": 0.01,
+          "processing_time_ms": 2000,
+          "queue_depth": 25,
+          "critical_values_per_hour": 5
+        },
+        "retention_policy": {
+          "raw_messages": 180,
+          "processed_messages": 90,
+          "error_logs": 365,
+          "audit_logs": 2555
+        }
+      }
+    },
+    {
+      "name": "File-Based Message Processing",
+      "description": "File-based input for batch processing of HL7 messages",
+      "version": "1.0.0",
+      "status": "draft",
+      "pipeline": {
+        "input": {
+          "type": "file",
+          "connector_config": {
+            "watch_directory": "/data/input",
+            "file_pattern": "*.hl7",
+            "polling_interval_ms": 5000,
+            "processed_directory": "/data/processed",
+            "error_directory": "/data/error",
+            "backup_processed": true
+          },
+          "validation": {
+            "enabled": true,
+            "rules": []
+          },
+          "preprocessing": {
+            "enabled": true,
+            "steps": [
+              {
+                "type": "split_batch",
+                "config": {
+                  "separator": "\r\n\r\n",
+                  "min_message_length": 100
+                }
+              }
+            ]
+          }
+        },
+        "validation": {
+          "schema_validation": {
+            "enabled": true,
+            "schema_type": "hl7",
+            "strict_mode": false
+          },
+          "business_rules": [],
+          "custom_validators": []
+        },
+        "transformation": {
+          "engine": "passthrough",
+          "mapping_template": "",
+          "custom_mappings": [],
+          "post_processing": []
+        },
+        "business_logic": {
+          "rules_engine": {
+            "enabled": false,
+            "rules": []
+          },
+          "workflow_automation": []
+        },
+        "destinations": [
+          {
+            "destination_id": "batch_output",
+            "type": "file",
+            "config": {
+              "output_directory": "/data/output",
+              "filename_pattern": "processed_{timestamp}.json",
+              "format": "json"
+            },
+            "routing_rules": [],
+            "error_handling": {
+              "retry_count": 1,
+              "retry_delay": 1000,
+              "dead_letter_queue": false
+            }
+          }
+        ]
+      },
+      "monitoring": {
+        "metrics_enabled": true,
+        "alert_thresholds": {
+          "error_rate": 0.05,
+          "processing_time_ms": 10000,
+          "files_per_hour": 100
+        },
+        "retention_policy": {
+          "raw_messages": 30,
+          "processed_messages": 14,
+          "error_logs": 90
+        }
+      }
+    }
+  ],
+  "mapping_templates": [
+    {
+      "template_id": "standard_adt_v4",
+      "name": "Standard ADT to FHIR R4",
+      "version": "4.0.0",
+      "message_types": ["ADT^A01", "ADT^A02", "ADT^A03", "ADT^A04", "ADT^A08"],
+      "mappings": [
+        {
+          "source_path": "MSH.3",
+          "target_path": "MessageHeader.source.name",
+          "transformation": "direct_copy",
+          "required": true
+        },
+        {
+          "source_path": "MSH.9",
+          "target_path": "MessageHeader.eventCoding.code",
+          "transformation": "direct_copy",
+          "required": true
+        },
+        {
+          "source_path": "PID.3[0]",
+          "target_path": "Patient.identifier[0].value",
+          "transformation": "extract_id",
+          "required": true
+        },
+        {
+          "source_path": "PID.5",
+          "target_path": "Patient.name[0]",
+          "transformation": "hl7_name_to_fhir",
+          "required": true
+        },
+        {
+          "source_path": "PID.7",
+          "target_path": "Patient.birthDate",
+          "transformation": "hl7_date_to_fhir",
+          "required": false
+        },
+        {
+          "source_path": "PID.8",
+          "target_path": "Patient.gender",
+          "transformation": "hl7_gender_to_fhir",
+          "required": false
+        },
+        {
+          "source_path": "PV1.2",
+          "target_path": "Encounter.class.code",
+          "transformation": "hl7_patient_class_to_fhir",
+          "required": true
+        }
+      ]
+    },
+    {
+      "template_id": "standard_oru_v4",
+      "name": "Standard ORU to FHIR R4",
+      "version": "4.0.0",
+      "message_types": ["ORU^R01"],
+      "mappings": [
+        {
+          "source_path": "MSH.3",
+          "target_path": "MessageHeader.source.name",
+          "transformation": "direct_copy",
+          "required": true
+        },
+        {
+          "source_path": "OBR.1",
+          "target_path": "DiagnosticReport.identifier[0].value",
+          "transformation": "direct_copy",
+          "required": true
+        },
+        {
+          "source_path": "OBR.4",
+          "target_path": "DiagnosticReport.code",
+          "transformation": "hl7_code_to_fhir",
+          "required": true
+        },
+        {
+          "source_path": "OBX.3",
+          "target_path": "Observation.code",
+          "transformation": "hl7_code_to_fhir",
+          "required": true
+        },
+        {
+          "source_path": "OBX.5",
+          "target_path": "Observation.value",
+          "transformation": "hl7_value_to_fhir",
+          "required": true
+        },
+        {
+          "source_path": "OBX.6",
+          "target_path": "Observation.valueQuantity.unit",
+          "transformation": "direct_copy",
+          "required": false
+        },
+        {
+          "source_path": "OBX.7",
+          "target_path": "Observation.referenceRange[0].text",
+          "transformation": "direct_copy",
+          "required": false
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,558 @@
+// controllers/transformation_controller.go
+// Transformation Controller for Universal Interface Engine
+//
+// 🎯 PURPOSE: HTTP API endpoints for transformation services
+package controllers
+
+import (
+	"database/sql"
+	"encoding/json"
+	"net/http"
+	"strconv"
+	"time"
+
+	"ezhealthkonnect/services"
+
+	"github.com/gin-gonic/gin"
+)
+
+// TransformationController handles transformation API endpoints
+type TransformationController struct {
+	db               *sql.DB
+	hl7Service       *services.HL7TransformationService
+	fhirService      *services.FHIRTransformationService
+	jsonService      *services.JSONTransformationService
+	xmlService       *services.XMLTransformationService
+	customService    *services.CustomTransformationService
+	pipelineService  *services.TransformationPipelineService
+}
+
+// NewTransformationController creates a new transformation controller
+func NewTransformationController(database *sql.DB) *TransformationController {
+	// Initialize transformation services
+	hl7Service := services.NewHL7TransformationService(database)
+	fhirService := services.NewFHIRTransformationService(database)
+	jsonService := services.NewJSONTransformationService(database)
+	xmlService := services.NewXMLTransformationService(database)
+	customService := services.NewCustomTransformationService(database)
+
+	// Initialize pipeline service with all transformation services
+	pipelineService := services.NewTransformationPipelineService(
+		database,
+		hl7Service,
+		fhirService,
+		jsonService,
+		xmlService,
+		customService,
+	)
+
+	return &TransformationController{
+		db:              database,
+		hl7Service:      hl7Service,
+		fhirService:     fhirService,
+		jsonService:     jsonService,
+		xmlService:      xmlService,
+		customService:   customService,
+		pipelineService: pipelineService,
+	}
+}
+
+// RegisterRoutes registers transformation routes
+func (c *TransformationController) RegisterRoutes(router *gin.RouterGroup) {
+	// Universal transformation endpoint
+	router.POST("/transform", c.UniversalTransform)
+
+	// Service-specific transformation endpoints
+	router.POST("/transform/hl7", c.TransformHL7)
+	router.POST("/transform/fhir", c.TransformFHIR)
+	router.POST("/transform/json", c.TransformJSON)
+	router.POST("/transform/xml", c.TransformXML)
+	router.POST("/transform/custom", c.TransformCustom)
+
+	// Pipeline endpoints
+	router.POST("/pipeline/execute", c.ExecutePipeline)
+	router.GET("/pipeline/history/:executionId", c.GetExecutionHistory)
+	router.POST("/pipeline/rollback/:executionId", c.PerformRollback)
+
+	// Service status and metrics
+	router.GET("/transform/status", c.GetTransformationStatus)
+	router.GET("/transform/metrics", c.GetTransformationMetrics)
+
+	// Configuration endpoints
+	router.GET("/transform/supported-types", c.GetSupportedTypes)
+	router.GET("/transform/service-info", c.GetServiceInfo)
+}
+
+// UniversalTransform handles universal transformation requests
+func (c *TransformationController) UniversalTransform(ctx *gin.Context) {
+	var request struct {
+		MessageID     string                    `json:"messageId"`
+		SourceFormat  services.MessageType      `json:"sourceFormat"`
+		TargetFormat  services.MessageType      `json:"targetFormat"`
+		Content       interface{}               `json:"content"`
+		Options       map[string]interface{}    `json:"options,omitempty"`
+	}
+
+	if err := ctx.ShouldBindJSON(&request); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"error":   "Invalid request format",
+			"details": err.Error(),
+		})
+		return
+	}
+
+	// Create universal message
+	contentBytes, _ := json.Marshal(request.Content)
+	message := services.NewUniversalMessage(
+		request.SourceFormat,
+		contentBytes,
+		"API_REQUEST",
+	)
+
+	if request.MessageID != "" {
+		message.ID = request.MessageID
+	}
+
+	// Parse content based on source format
+	switch request.SourceFormat {
+	case services.MessageTypeJSON:
+		if contentMap, ok := request.Content.(map[string]interface{}); ok {
+			message.ParsedContent = contentMap
+		}
+	case services.MessageTypeHL7:
+		// Raw HL7 content should be parsed by HL7 service
+	case services.MessageTypeXML:
+		// Raw XML content should be parsed by XML service
+	}
+
+	// Transform based on target format
+	var err error
+	switch request.TargetFormat {
+	case services.MessageTypeHL7:
+		err = c.hl7Service.Transform(ctx, message)
+	case services.MessageTypeFHIR:
+		err = c.fhirService.Transform(ctx, message)
+	case services.MessageTypeJSON:
+		err = c.jsonService.Transform(ctx, message)
+	case services.MessageTypeXML:
+		err = c.xmlService.Transform(ctx, message)
+	default:
+		ctx.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"error":   "Unsupported target format",
+			"targetFormat": request.TargetFormat,
+		})
+		return
+	}
+
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"error":   "Transformation failed",
+			"details": err.Error(),
+		})
+		return
+	}
+
+	ctx.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"messageId": message.ID,
+		"sourceFormat": request.SourceFormat,
+		"targetFormat": request.TargetFormat,
+		"transformedData": message.ParsedContent,
+		"transformationLineage": message.TransformationLineage,
+		"processingMetrics": message.GetProcessingSummary(),
+	})
+}
+
+// TransformHL7 handles HL7-specific transformations
+func (c *TransformationController) TransformHL7(ctx *gin.Context) {
+	var request services.HL7TransformRequest
+
+	if err := ctx.ShouldBindJSON(&request); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"error":   "Invalid HL7 request format",
+			"details": err.Error(),
+		})
+		return
+	}
+
+	response, err := c.hl7Service.TransformHL7Message(ctx, &request)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"error":   "HL7 transformation failed",
+			"details": err.Error(),
+		})
+		return
+	}
+
+	ctx.JSON(http.StatusOK, response)
+}
+
+// TransformFHIR handles FHIR-specific transformations
+func (c *TransformationController) TransformFHIR(ctx *gin.Context) {
+	var request services.FHIRTransformRequest
+
+	if err := ctx.ShouldBindJSON(&request); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"error":   "Invalid FHIR request format",
+			"details": err.Error(),
+		})
+		return
+	}
+
+	response, err := c.fhirService.TransformToFHIR(ctx, &request)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"error":   "FHIR transformation failed",
+			"details": err.Error(),
+		})
+		return
+	}
+
+	ctx.JSON(http.StatusOK, response)
+}
+
+// TransformJSON handles JSON-specific transformations
+func (c *TransformationController) TransformJSON(ctx *gin.Context) {
+	var request services.JSONTransformRequest
+
+	if err := ctx.ShouldBindJSON(&request); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"error":   "Invalid JSON request format",
+			"details": err.Error(),
+		})
+		return
+	}
+
+	response, err := c.jsonService.TransformJSON(ctx, &request)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"error":   "JSON transformation failed",
+			"details": err.Error(),
+		})
+		return
+	}
+
+	ctx.JSON(http.StatusOK, response)
+}
+
+// TransformXML handles XML-specific transformations
+func (c *TransformationController) TransformXML(ctx *gin.Context) {
+	var request services.XMLTransformRequest
+
+	if err := ctx.ShouldBindJSON(&request); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"error":   "Invalid XML request format",
+			"details": err.Error(),
+		})
+		return
+	}
+
+	response, err := c.xmlService.TransformXML(ctx, &request)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"error":   "XML transformation failed",
+			"details": err.Error(),
+		})
+		return
+	}
+
+	ctx.JSON(http.StatusOK, response)
+}
+
+// TransformCustom handles custom rule transformations
+func (c *TransformationController) TransformCustom(ctx *gin.Context) {
+	var request services.CustomTransformRequest
+
+	if err := ctx.ShouldBindJSON(&request); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"error":   "Invalid custom transform request format",
+			"details": err.Error(),
+		})
+		return
+	}
+
+	response, err := c.customService.ExecuteCustomRules(ctx, &request)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"error":   "Custom transformation failed",
+			"details": err.Error(),
+		})
+		return
+	}
+
+	ctx.JSON(http.StatusOK, response)
+}
+
+// ExecutePipeline handles pipeline execution requests
+func (c *TransformationController) ExecutePipeline(ctx *gin.Context) {
+	var request services.PipelineExecutionRequest
+
+	if err := ctx.ShouldBindJSON(&request); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"error":   "Invalid pipeline request format",
+			"details": err.Error(),
+		})
+		return
+	}
+
+	response, err := c.pipelineService.ExecutePipeline(ctx, &request)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"error":   "Pipeline execution failed",
+			"details": err.Error(),
+		})
+		return
+	}
+
+	ctx.JSON(http.StatusOK, response)
+}
+
+// GetExecutionHistory gets pipeline execution history
+func (c *TransformationController) GetExecutionHistory(ctx *gin.Context) {
+	executionID := ctx.Param("executionId")
+
+	history, exists := c.pipelineService.GetExecutionHistory(executionID)
+	if !exists {
+		ctx.JSON(http.StatusNotFound, gin.H{
+			"success": false,
+			"error":   "Execution history not found",
+			"executionId": executionID,
+		})
+		return
+	}
+
+	ctx.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"executionId": executionID,
+		"history": history,
+	})
+}
+
+// PerformRollback performs a pipeline rollback
+func (c *TransformationController) PerformRollback(ctx *gin.Context) {
+	executionID := ctx.Param("executionId")
+
+	plan, exists := c.pipelineService.GetRollbackPlan(executionID)
+	if !exists {
+		ctx.JSON(http.StatusNotFound, gin.H{
+			"success": false,
+			"error":   "Rollback plan not found",
+			"executionId": executionID,
+		})
+		return
+	}
+
+	ctx.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"executionId": executionID,
+		"rollbackPlan": plan,
+		"message": "Rollback information retrieved successfully",
+	})
+}
+
+// GetTransformationStatus gets overall transformation service status
+func (c *TransformationController) GetTransformationStatus(ctx *gin.Context) {
+	status := gin.H{
+		"success": true,
+		"timestamp": time.Now().Format(time.RFC3339),
+		"services": gin.H{
+			"hl7": gin.H{
+				"status": "operational",
+				"metrics": c.hl7Service.GetPerformanceMetrics(),
+			},
+			"fhir": gin.H{
+				"status": "operational",
+				"metrics": c.fhirService.GetPerformanceMetrics(),
+			},
+			"json": gin.H{
+				"status": "operational",
+				"metrics": c.jsonService.GetPerformanceMetrics(),
+			},
+			"xml": gin.H{
+				"status": "operational",
+				"metrics": c.xmlService.GetPerformanceMetrics(),
+			},
+			"custom": gin.H{
+				"status": "operational",
+				"metrics": c.customService.GetPerformanceMetrics(),
+			},
+			"pipeline": gin.H{
+				"status": "operational",
+				"metrics": c.pipelineService.GetPerformanceMetrics(),
+			},
+		},
+	}
+
+	ctx.JSON(http.StatusOK, status)
+}
+
+// GetTransformationMetrics gets aggregated transformation metrics
+func (c *TransformationController) GetTransformationMetrics(ctx *gin.Context) {
+	hl7Metrics := c.hl7Service.GetPerformanceMetrics()
+	fhirMetrics := c.fhirService.GetPerformanceMetrics()
+	jsonMetrics := c.jsonService.GetPerformanceMetrics()
+	xmlMetrics := c.xmlService.GetPerformanceMetrics()
+	customMetrics := c.customService.GetPerformanceMetrics()
+	pipelineMetrics := c.pipelineService.GetPerformanceMetrics()
+
+	totalMessages := hl7Metrics.MessagesProcessed + fhirMetrics.ResourcesProcessed +
+		jsonMetrics.MessagesProcessed + xmlMetrics.MessagesProcessed +
+		customMetrics.RulesExecuted
+
+	metrics := gin.H{
+		"success": true,
+		"timestamp": time.Now().Format(time.RFC3339),
+		"aggregated": gin.H{
+			"totalMessages": totalMessages,
+			"totalPipelines": pipelineMetrics.PipelinesExecuted,
+			"overallSuccessRate": (hl7Metrics.ErrorRate + fhirMetrics.ErrorRate +
+				jsonMetrics.ErrorRate + xmlMetrics.ErrorRate + customMetrics.SuccessRate) / 5.0,
+			"averageProcessingTime": gin.H{
+				"hl7": hl7Metrics.AverageParseTime.String(),
+				"fhir": fhirMetrics.AverageTransformTime.String(),
+				"json": jsonMetrics.AverageTransformTime.String(),
+				"xml": xmlMetrics.AverageTransformTime.String(),
+				"pipeline": pipelineMetrics.AverageExecutionTime.String(),
+			},
+		},
+		"services": gin.H{
+			"hl7": hl7Metrics,
+			"fhir": fhirMetrics,
+			"json": jsonMetrics,
+			"xml": xmlMetrics,
+			"custom": customMetrics,
+			"pipeline": pipelineMetrics,
+		},
+	}
+
+	ctx.JSON(http.StatusOK, metrics)
+}
+
+// GetSupportedTypes returns supported message types and formats
+func (c *TransformationController) GetSupportedTypes(ctx *gin.Context) {
+	supportedTypes := gin.H{
+		"success": true,
+		"messageTypes": []string{
+			string(services.MessageTypeHL7),
+			string(services.MessageTypeFHIR),
+			string(services.MessageTypeJSON),
+			string(services.MessageTypeXML),
+			string(services.MessageTypeBinary),
+		},
+		"transformationPairs": []gin.H{
+			{"from": services.MessageTypeHL7, "to": services.MessageTypeFHIR},
+			{"from": services.MessageTypeHL7, "to": services.MessageTypeJSON},
+			{"from": services.MessageTypeJSON, "to": services.MessageTypeFHIR},
+			{"from": services.MessageTypeJSON, "to": services.MessageTypeHL7},
+			{"from": services.MessageTypeJSON, "to": services.MessageTypeXML},
+			{"from": services.MessageTypeXML, "to": services.MessageTypeJSON},
+			{"from": services.MessageTypeXML, "to": services.MessageTypeFHIR},
+		},
+		"services": gin.H{
+			"hl7": gin.H{
+				"supportedMessageTypes": c.hl7Service.GetSupportedMessageTypes(),
+				"availableTransformations": c.hl7Service.GetCacheStats(),
+			},
+			"fhir": gin.H{
+				"supportedProfiles": c.fhirService.GetSupportedProfiles(),
+			},
+			"json": gin.H{
+				"supportedTransformations": c.jsonService.GetSupportedTransformations(),
+				"availableSchemas": c.jsonService.GetAvailableSchemas(),
+			},
+			"custom": gin.H{
+				"availableRules": len(c.customService.ListRules()),
+			},
+		},
+	}
+
+	ctx.JSON(http.StatusOK, supportedTypes)
+}
+
+// GetServiceInfo returns detailed service information
+func (c *TransformationController) GetServiceInfo(ctx *gin.Context) {
+	serviceInfo := gin.H{
+		"success": true,
+		"version": "1.0.0",
+		"description": "Universal Interface Engine Transformation Services",
+		"capabilities": gin.H{
+			"universalTransformation": true,
+			"pipelineOrchestration": true,
+			"customRules": true,
+			"historyTracking": true,
+			"rollbackSupport": true,
+			"performanceMetrics": true,
+		},
+		"services": gin.H{
+			"hl7": gin.H{
+				"description": "HL7 message parsing and transformation",
+				"features": []string{"parsing", "validation", "transformation", "format_conversion"},
+			},
+			"fhir": gin.H{
+				"description": "FHIR resource mapping and validation",
+				"features": []string{"resource_creation", "profile_validation", "bundle_management", "narrative_generation"},
+			},
+			"json": gin.H{
+				"description": "JSON message transformation and mapping",
+				"features": []string{"schema_validation", "data_type_conversion", "template_processing", "custom_mappings"},
+			},
+			"xml": gin.H{
+				"description": "XML parsing and transformation",
+				"features": []string{"xml_parsing", "namespace_handling", "xslt_processing", "format_conversion"},
+			},
+			"custom": gin.H{
+				"description": "User-defined transformation rules",
+				"features": []string{"custom_rules", "scripting_support", "condition_evaluation", "dynamic_transformations"},
+			},
+			"pipeline": gin.H{
+				"description": "Multi-step transformation orchestration",
+				"features": []string{"step_chaining", "error_handling", "rollback_support", "history_tracking", "parallel_execution"},
+			},
+		},
+		"endpoints": gin.H{
+			"universal": "/api/transform",
+			"hl7": "/api/transform/hl7",
+			"fhir": "/api/transform/fhir",
+			"json": "/api/transform/json",
+			"xml": "/api/transform/xml",
+			"custom": "/api/transform/custom",
+			"pipeline": "/api/pipeline/execute",
+			"status": "/api/transform/status",
+			"metrics": "/api/transform/metrics",
+		},
+	}
+
+	ctx.JSON(http.StatusOK, serviceInfo)
+}
+
+// Cleanup performs maintenance operations
+func (c *TransformationController) Cleanup(maxAge time.Duration) {
+	olderThan := time.Now().Add(-maxAge)
+
+	// Cleanup history and rollback plans
+	historyCount := c.pipelineService.CleanupHistory(olderThan)
+	rollbackCount := c.pipelineService.CleanupRollbackPlans(olderThan)
+
+	// Clear service caches
+	c.hl7Service.ClearCache()
+	c.fhirService.ClearCache()
+	c.jsonService.ClearCache()
+
+	log.Printf("✅ Transformation services cleanup completed: %d history entries, %d rollback plans removed",
+		historyCount, rollbackCount)
+}

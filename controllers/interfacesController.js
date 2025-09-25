@@ -659,6 +659,114 @@ class InterfacesController {
         }
     }
 
+    /**
+     * Update an existing interface
+     */
+    async updateInterface(req, res) {
+        console.log('\n=== UPDATE INTERFACE ===');
+
+        try {
+            await this.ensureDatabase();
+
+            const userId = req.session.user.id;
+            const userEmail = req.session.user.email;
+            const interfaceId = req.params.interfaceId;
+
+            const {
+                name,
+                description,
+                sourceType,
+                sourceConnectivity,
+                targetType,
+                targetConnectivity,
+                messageType,
+                sourceConfig,
+                targetConfig,
+                processingRules,
+                transformationMapping
+            } = req.body;
+
+            console.log(`🔍 Updating interface ${interfaceId} for user: ${userEmail}`);
+            console.log(`   New name: ${name}`);
+            console.log(`   Source Type: ${sourceType} | Target Type: ${targetType}`);
+            console.log(`   Source Config:`, sourceConfig);
+            console.log(`   Target Config:`, targetConfig);
+            console.log(`   Processing Rules:`, processingRules);
+
+            // Verify interface exists and belongs to user
+            const existingInterface = await this.database.sequelize.query(`
+                SELECT id, name, status FROM interfaces
+                WHERE id = :interfaceId AND user_id = :userId AND is_active = true
+            `, {
+                replacements: { interfaceId, userId },
+                type: this.database.sequelize.QueryTypes.SELECT
+            });
+
+            if (existingInterface.length === 0) {
+                return res.status(404).json({
+                    success: false,
+                    error: 'Interface not found or access denied'
+                });
+            }
+
+            // Apply connectivity defaults
+            const finalSourceConnectivity = sourceConnectivity || this.getDefaultConnectivity('source', sourceType);
+            const finalTargetConnectivity = targetConnectivity || this.getDefaultConnectivity('target', targetType);
+
+            // Update interface
+            await this.database.sequelize.query(`
+                UPDATE interfaces SET
+                    name = :name,
+                    description = :description,
+                    source_type = :sourceType,
+                    source_connectivity = :sourceConnectivity,
+                    target_type = :targetType,
+                    target_connectivity = :targetConnectivity,
+                    message_type = :messageType,
+                    source_config = :sourceConfig,
+                    target_config = :targetConfig,
+                    processing_rules = :processingRules,
+                    transformation_mapping = :transformationMapping,
+                    updated_by = :userId,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = :interfaceId
+            `, {
+                replacements: {
+                    interfaceId,
+                    name,
+                    description,
+                    sourceType,
+                    sourceConnectivity: finalSourceConnectivity,
+                    targetType,
+                    targetConnectivity: finalTargetConnectivity,
+                    messageType,
+                    sourceConfig: JSON.stringify(sourceConfig || {}),
+                    targetConfig: JSON.stringify(targetConfig || {}),
+                    processingRules: JSON.stringify(processingRules || {}),
+                    transformationMapping: JSON.stringify(transformationMapping || {}),
+                    userId
+                },
+                type: this.database.sequelize.QueryTypes.UPDATE
+            });
+
+            console.log(`✅ Interface ${interfaceId} updated successfully`);
+
+            return res.json({
+                success: true,
+                message: 'Interface updated successfully',
+                interfaceId: interfaceId
+            });
+
+        } catch (error) {
+            console.error('❌ Update Interface Error:', error);
+            return res.status(500).json({
+                success: false,
+                error: 'Failed to update interface',
+                debug: error.message
+            });
+        }
+    }
+
     // ✅ HELPER METHODS
 
     /**

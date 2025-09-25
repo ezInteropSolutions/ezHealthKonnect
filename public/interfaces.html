@@ -15,6 +15,8 @@
     <link rel="stylesheet" href="css/components/interface-cards.css">
     <link rel="stylesheet" href="css/components/wizard-modal.css">
     <link rel="stylesheet" href="css/components/fhir-mapping.css">
+    <link rel="stylesheet" href="css/components/enhanced-modal.css">
+    <link rel="stylesheet" href="css/components/modal-fix.css">
     <link rel="stylesheet" href="css/layout/main-layout.css">
 </head>
 <body>
@@ -49,7 +51,7 @@
                             <span class="nav-icon">🔗</span>
                             <span class="nav-label">Interfaces</span>
                         </a>
-                        <a href="#messages" class="nav-item">
+                        <a href="interfaces.html" class="nav-item" title="Select interface to view messages">
                             <span class="nav-icon">📧</span>
                             <span class="nav-label">Messages</span>
                         </a>
@@ -178,8 +180,10 @@
 
     <!-- EXISTING JavaScript Dependencies (DO NOT CHANGE ORDER) -->
 
+    <script src="js/components/interface-handlers.js"></script>
     <script src="js/interfaces.js"></script>
-    <script src="js/wizard/module-loader.js"></script> 
+    <script src="js/interface-config-manager.js"></script>
+    <script src="js/wizard/module-loader.js"></script>
     <!-- ADD THESE TWO LINES HERE - BEFORE other components -->
     <script src="js/core/wizard-navigation.js"></script>  <!-- ADD THIS -->
     
@@ -193,8 +197,7 @@
     
     <!-- PRESERVED: Core wizard functions (MUST STAY GLOBAL) -->
     <script src="js/core/wizard-functions.js"></script>
-    <!-- Add this script tag to your wizard page -->
-<script src="/js/wizard-config-integration.js"></script>
+    <!-- Note: wizard-config-integration.js removed to avoid InterfaceConfigManager conflict -->
 <script src="/js/step4-complete-integration.js"></script>
 <script src="/js/step5-summary-fix.js"></script>
 <script src="/js/wizard-modal-close-fix.js"></script>

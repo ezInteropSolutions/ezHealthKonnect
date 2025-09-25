@@ -50,15 +50,26 @@ app.use((req, res, next) => {
         console.log(`API Request detected: ${req.method} ${req.originalUrl}`);
         
         // Check if this should be proxied
-        if (req.originalUrl.startsWith('/api/fhir') || 
-            req.originalUrl.startsWith('/api/hl7') || 
-            req.originalUrl.startsWith('/api/system')) {
+        if (req.originalUrl.startsWith('/api/fhir') ||
+            req.originalUrl.startsWith('/api/hl7') ||
+            req.originalUrl.startsWith('/api/system') ||
+            req.originalUrl.startsWith('/api/processing') ||
+            req.originalUrl.startsWith('/api/mllp')) {
             console.log(`Should be proxied to Go backend: ${GO_BACKEND_URL}${req.originalUrl}`);
         } else {
             console.log(`Should be handled by Node.js locally`);
         }
     }
-    
+
+    // Special debugging for user-info requests
+    if (req.originalUrl.includes('user-info')) {
+        console.log('🔥🔥🔥 USER-INFO REQUEST DETECTED:');
+        console.log('🔥 Full URL:', req.originalUrl);
+        console.log('🔥 Method:', req.method);
+        console.log('🔥 Cookies:', req.headers.cookie);
+        console.log('🔥 Session middleware loaded:', typeof req.sessionID !== 'undefined' ? 'YES' : 'NO');
+    }
+
     next();
 });
 
@@ -187,6 +198,8 @@ const forwardToGo = async (req, res) => {
 app.use('/api/fhir', forwardToGo);
 app.use('/api/hl7', forwardToGo);
 app.use('/api/system', forwardToGo);
+app.use('/api/processing', forwardToGo);  // NEW: Processing engine routes
+app.use('/api/mllp', forwardToGo);        // NEW: MLLP connectivity routes
 
 console.log('Simple proxy configured successfully');
 
@@ -196,11 +209,11 @@ const sessionConfig = {
     resave: false,
     saveUninitialized: false,
     name: 'ezhealth.sid',
-    cookie: { 
+    cookie: {
         secure: process.env.NODE_ENV === 'production',
         httpOnly: true,
         maxAge: 24 * 60 * 60 * 1000,
-        sameSite: 'strict'
+        sameSite: 'lax' // Changed from 'strict' to 'lax' for better compatibility
     }
 };
 
@@ -226,13 +239,89 @@ const userRoutes = require('./routes/users');
 const interfacesRoutes = require('./routes/interfacesRoutes');
 const wizardRoutes = require('./routes/wizardRoutes');
 
-// Mount LOCAL API routes (these should NOT conflict with proxy routes)
+console.log('🔄 About to require messageRoutes...');
+try {
+    const messageRoutes = require('./routes/messageRoutes');
+    console.log('✅ messageRoutes loaded successfully');
+} catch (error) {
+    console.error('❌ Failed to load messageRoutes:', error.message);
+    console.error('❌ Stack:', error.stack);
+    throw error;
+}
+const messageRoutes = require('./routes/messageRoutes');
+
+// Mount essential routes first (before problematic ones)
+console.log('🔄 Mounting /api/auth...');
 app.use('/api/auth', authRoutes);
+console.log('🔄 Mounting /api/users...');
 app.use('/api/users', userRoutes);
+console.log('🔄 Mounting /api/interfaces...');
 app.use('/api/interfaces', interfacesRoutes);
+console.log('🔄 Mounting /api/wizard...');
 app.use('/api/wizard', wizardRoutes);
+console.log('🔄 Mounting /api/messages...');
+app.use('/api/messages', messageRoutes);
+console.log('✅ Essential routes mounted successfully');
+
+console.log('About to require interfaceLifecycle routes...');
+try {
+    const interfaceLifecycleRoutes = require('./routes/interfaceLifecycle');
+    console.log('✅ interfaceLifecycle routes loaded successfully');
+
+    console.log('About to mount /api/runtime routes...');
+    app.use('/api/runtime', interfaceLifecycleRoutes);
+    console.log('✅ /api/runtime routes mounted successfully');
+
+} catch (error) {
+    console.error('❌ Failed to load interfaceLifecycle routes:', error.message);
+    console.error('Stack:', error.stack);
+    console.log('⚠️ Continuing without /api/runtime routes');
+}
 
 console.log('Local API routes mounted');
+
+// DEBUG MIDDLEWARE - TRACE ALL REQUESTS TO USER-INFO
+app.use('/api/user-info', (req, res, next) => {
+    console.log('🚨 MIDDLEWARE: /api/user-info request intercepted');
+    console.log('🚨 Method:', req.method);
+    console.log('🚨 URL:', req.url);
+    console.log('🚨 Original URL:', req.originalUrl);
+    console.log('🚨 Headers:', req.headers);
+    next();
+});
+
+// TEST ROUTE TO VERIFY SERVER IS WORKING
+app.get('/api/test-route', (req, res) => {
+    console.log('🧪 TEST ROUTE HIT!');
+    res.json({ message: 'Test route works', timestamp: new Date().toISOString() });
+});
+
+// USER INFO ROUTE - MUST BE BEFORE MESSAGE ROUTES TO AVOID CONFLICTS
+app.get('/api/user-info', (req, res) => {
+    try {
+        console.log('🔍 /api/user-info called');
+        console.log('Session ID:', req.sessionID);
+        console.log('Session exists:', !!req.session);
+        console.log('Session user:', req.session ? req.session.user : 'No session');
+        console.log('Cookie header:', req.headers.cookie);
+
+        if (!req.session || !req.session.user) {
+            console.log('❌ No session user, returning 401');
+            return res.status(401).json({ message: 'Not authenticated' });
+        }
+
+        console.log('✅ User authenticated:', req.session.user.name);
+        res.json({
+            id: req.session.user.id,
+            name: req.session.user.name,
+            email: req.session.user.email,
+            role: req.session.user.role
+        });
+    } catch (error) {
+        console.error('❌ Error in /api/user-info:', error);
+        res.status(500).json({ message: 'Internal server error', error: error.message });
+    }
+});
 
 // PROXY TEST ROUTES FOR DEBUGGING
 app.get('/api/proxy/test', async (req, res) => {
@@ -319,19 +408,6 @@ app.get('/dashboard', (req, res) => {
         return res.redirect('/login.html');
     }
     res.sendFile(path.join(__dirname, 'public', 'dashboard.html'));
-});
-
-app.get('/api/user-info', (req, res) => {
-    if (!req.session.user) {
-        return res.status(401).json({ message: 'Not authenticated' });
-    }
-    
-    res.json({
-        id: req.session.user.id,
-        name: req.session.user.name,
-        email: req.session.user.email,
-        role: req.session.user.role
-    });
 });
 
 app.post('/api/logout', (req, res) => {

@@ -1,0 +1,8 @@
+{
+  "hl7Message": "MSH|^~\\&|TEST|TEST|TEST|TEST|20240320120000||ADT^A01|123|P|2.4\rPID|1||123^^^MR||DOE^JOHN^||19800101|M",
+  "targetFHIRVersion": "R4",
+  "interfaceId": "test-interface-123",
+  "messageType": "ADT^A01",
+  "useSchemaValidation": true,
+  "resourceTypes": ["Patient"]
+}

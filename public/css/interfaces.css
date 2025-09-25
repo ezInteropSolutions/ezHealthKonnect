@@ -324,13 +324,23 @@
     table-layout: fixed; /* Fixed layout for consistent sizing */
 }
 
-/* FIXED: Optimize column widths for maximum data */
-.interfaces-table th:nth-child(1) { width: 25%; } /* Interface Name */
-.interfaces-table th:nth-child(2) { width: 12%; } /* Status */
-.interfaces-table th:nth-child(3) { width: 15%; } /* Last Updated */
-.interfaces-table th:nth-child(4) { width: 20%; } /* Statistics */
-.interfaces-table th:nth-child(5) { width: 18%; } /* Last Activity */
-.interfaces-table th:nth-child(6) { width: 10%; } /* Actions */
+/* FIXED: Optimize column widths for maximum data - 7 COLUMNS */
+.interfaces-table th:nth-child(1) { width: 18% !important; } /* Interface Name */
+.interfaces-table th:nth-child(2) { width: 12% !important; } /* Config Status */
+.interfaces-table th:nth-child(3) { width: 12% !important; } /* Runtime Status */
+.interfaces-table th:nth-child(4) { width: 12% !important; } /* Last Updated */
+.interfaces-table th:nth-child(5) { width: 14% !important; } /* Statistics */
+.interfaces-table th:nth-child(6) { width: 12% !important; } /* Last Activity */
+.interfaces-table th:nth-child(7) { width: 20% !important; } /* Actions - The 7th column! */
+
+/* Ensure td columns match th columns - 7 COLUMNS */
+.interfaces-table td:nth-child(1) { width: 18% !important; } /* Interface Name */
+.interfaces-table td:nth-child(2) { width: 12% !important; } /* Config Status */
+.interfaces-table td:nth-child(3) { width: 12% !important; } /* Runtime Status */
+.interfaces-table td:nth-child(4) { width: 12% !important; } /* Last Updated */
+.interfaces-table td:nth-child(5) { width: 14% !important; } /* Statistics */
+.interfaces-table td:nth-child(6) { width: 12% !important; } /* Last Activity */
+.interfaces-table td:nth-child(7) { width: 20% !important; } /* Actions - Force visibility */
 
 .interfaces-table thead {
     background: white;
@@ -357,7 +367,13 @@
 
 .interfaces-table th:last-child {
     border-right: none;
-    width: 70px;
+    min-width: 150px !important; /* Ensure minimum width for action buttons */
+    /* Width set by nth-child selector above for better action button spacing */
+}
+
+.interfaces-table td:last-child {
+    border-right: none;
+    min-width: 150px !important; /* Ensure minimum width for action buttons */
 }
 
 /* FIXED: Table rows - optimal balance between density and usability */
@@ -378,8 +394,14 @@
     border-right: 1px solid rgba(248, 187, 217, 0.2);
     height: 40px; /* Increased from 18px */
     line-height: 1.3;
-    overflow: hidden;
+    overflow: hidden; /* Keep hidden for text columns */
     text-overflow: ellipsis;
+}
+
+/* Exception: Allow overflow for action column to show tooltips */
+.interfaces-table td:nth-child(7) {
+    overflow: visible !important;
+    position: relative;
 }
 
 .interfaces-table td:last-child {
@@ -485,37 +507,143 @@
 }
 
 .action-btn {
-    width: 24px; /* Increased from 14px */
-    height: 24px; /* Increased from 14px */
+    width: 28px; /* Increased for better visibility */
+    height: 28px;
     border: none;
-    border-radius: 3px;
+    border-radius: 4px;
     cursor: pointer;
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 10px; /* Increased from 7px */
+    font-size: 12px; /* Increased font size */
     transition: all 0.2s ease;
     line-height: 1;
-    margin: 1px;
+    margin: 2px; /* Increased margin */
+    position: relative;
+    background: #ffffff;
+    border: 1px solid #e2e8f0;
 }
 
 .action-btn:hover {
-    transform: scale(1.1);
+    transform: scale(1.05);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    border-color: #1e3a8a;
 }
 
-.action-btn.start {
+/* Action button tooltips - Fixed positioning to avoid clipping */
+.action-btn[data-tooltip]:hover::after {
+    content: attr(data-tooltip);
+    position: absolute;
+    top: -35px; /* Fixed position above the button */
+    left: 50%;
+    transform: translateX(-50%);
+
+    background: #1e3a8a;
+    color: white;
+    padding: 6px 10px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 500;
+    white-space: nowrap;
+    z-index: 9999;
+
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+    animation: tooltipFadeIn 0.2s ease-out;
+    pointer-events: none; /* Prevent tooltip from interfering with mouse events */
+}
+
+.action-btn[data-tooltip]:hover::before {
+    content: '';
+    position: absolute;
+    top: -10px; /* Position arrow between button and tooltip */
+    left: 50%;
+    transform: translateX(-50%);
+
+    width: 0;
+    height: 0;
+    border-left: 5px solid transparent;
+    border-right: 5px solid transparent;
+    border-top: 5px solid #1e3a8a;
+    z-index: 9998; /* Just below tooltip */
+}
+
+@keyframes tooltipFadeIn {
+    from {
+        opacity: 0;
+        transform: translateX(-50%) translateY(5px);
+    }
+    to {
+        opacity: 1;
+        transform: translateX(-50%) translateY(0);
+    }
+}
+
+/* Action buttons container */
+.action-buttons {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 3px; /* Increased gap for better spacing */
+    align-items: center;
+    justify-content: flex-start;
+    max-width: 100%;
+    padding: 2px;
+    overflow: visible; /* Allow tooltips to show */
+    position: relative; /* Enable absolute positioning for tooltips */
+}
+
+/* Ensure table cells don't clip tooltips */
+.interfaces-table td {
+    overflow: visible !important;
+    position: relative;
+}
+
+/* Action button specific styles with better aesthetics */
+.action-btn.edit {
+    background: #f0f8ff;
+    color: #1e3a8a;
+    border-color: #1e3a8a;
+}
+
+.action-btn.runtime-activate {
     background: #dcfce7;
     color: #166534;
+    border-color: #166534;
 }
 
-.action-btn.stop {
+.action-btn.runtime-deactivate {
     background: #fef2f2;
     color: #dc2626;
+    border-color: #dc2626;
+}
+
+.action-btn.delete {
+    background: #fef2f2;
+    color: #dc2626;
+    border-color: #dc2626;
+}
+
+.action-btn.restart {
+    background: #fef7f7;
+    color: #f472b6;
+    border-color: #f472b6;
+}
+
+.action-btn.messages {
+    background: #fef7f7;
+    color: #f472b6;
+    border-color: #f472b6;
+}
+
+.action-btn.monitor {
+    background: #f0f8ff;
+    color: #1e3a8a;
+    border-color: #1e3a8a;
 }
 
 .action-btn.details {
-    background: #dbeafe;
-    color: #2563eb;
+    background: #f8fafc;
+    color: #64748b;
+    border-color: #64748b;
 }
 
 /* Ultra minimal pagination */

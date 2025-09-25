@@ -19,25 +19,24 @@ ADD COLUMN IF NOT EXISTS retry_config JSONB DEFAULT '{"maxAttempts": 3, "backoff
 -- =========================================================================
 
 CREATE TABLE IF NOT EXISTS message_audit_log (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     message_id UUID NOT NULL,
     interface_id UUID NOT NULL REFERENCES interfaces(id) ON DELETE CASCADE,
     event_type VARCHAR(50) NOT NULL, -- INGESTION, TRANSFORMATION, DELIVERY, ERROR
     event_data JSONB NOT NULL,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-
-    -- Performance indexes
-    INDEX (message_id, created_at),
-    INDEX (interface_id, event_type, created_at),
-    INDEX (created_at) -- For time-based queries
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
+
+-- Create indexes for message audit log
+CREATE INDEX IF NOT EXISTS idx_message_audit_log_interface ON message_audit_log(interface_id, event_type, created_at);
+CREATE INDEX IF NOT EXISTS idx_message_audit_log_created ON message_audit_log(created_at);
 
 -- =========================================================================
 -- STEP 3: Create processing jobs table for job management
 -- =========================================================================
 
 CREATE TABLE IF NOT EXISTS processing_jobs (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     interface_id UUID NOT NULL REFERENCES interfaces(id) ON DELETE CASCADE,
     job_type VARCHAR(50) NOT NULL, -- 'message_processing', 'batch_processing', 'scheduled_run'
     job_status VARCHAR(20) NOT NULL DEFAULT 'pending'
@@ -70,7 +69,7 @@ CREATE TABLE IF NOT EXISTS processing_jobs (
 -- =========================================================================
 
 CREATE TABLE IF NOT EXISTS interface_processing_metrics (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     interface_id UUID NOT NULL REFERENCES interfaces(id) ON DELETE CASCADE,
     metric_date DATE NOT NULL DEFAULT CURRENT_DATE,
 
@@ -104,7 +103,7 @@ CREATE TABLE IF NOT EXISTS interface_processing_metrics (
 -- =========================================================================
 
 CREATE TABLE IF NOT EXISTS processing_queue_status (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     interface_id UUID NOT NULL REFERENCES interfaces(id) ON DELETE CASCADE,
     queue_name VARCHAR(100) NOT NULL,
 
@@ -266,7 +265,7 @@ BEGIN
             'avgProcessingTime', last_24h_metrics.avg_time_24h,
             'successRate', CASE
                 WHEN (last_24h_metrics.processed_24h + last_24h_metrics.failed_24h) > 0
-                THEN ROUND((last_24h_metrics.processed_24h::float /
+                THEN ROUND((last_24h_metrics.processed_24h::numeric /
                     (last_24h_metrics.processed_24h + last_24h_metrics.failed_24h)) * 100, 2)
                 ELSE 0
             END
@@ -315,7 +314,7 @@ SELECT
     COALESCE(m.avg_processing_time_ms, 0) as avg_processing_time,
     CASE
         WHEN COALESCE(m.messages_processed, 0) + COALESCE(m.messages_failed, 0) > 0
-        THEN ROUND((COALESCE(m.messages_processed, 0)::float /
+        THEN ROUND((COALESCE(m.messages_processed, 0)::numeric /
             (COALESCE(m.messages_processed, 0) + COALESCE(m.messages_failed, 0))) * 100, 2)
         ELSE 100
     END as success_rate_today

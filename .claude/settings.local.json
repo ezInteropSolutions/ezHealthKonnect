@@ -2,7 +2,8 @@
   "permissions": {
     "allow": [
       "Bash(docker exec:*)",
-      "Bash(node:*)"
+      "Bash(node:*)",
+      "Bash(docker-compose build:*)"
     ],
     "deny": [],
     "ask": []

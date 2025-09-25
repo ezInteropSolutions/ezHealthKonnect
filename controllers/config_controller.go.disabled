@@ -1,0 +1,623 @@
+package controllers
+
+import (
+	"ezhealthkonnect/services"
+	"net/http"
+	"strconv"
+
+	"github.com/gin-gonic/gin"
+)
+
+// ConfigController handles configuration management API endpoints
+type ConfigController struct {
+	configManager   *services.ConfigManager
+	interfaceEngine *services.InterfaceEngine
+	migrationService *services.MigrationService
+}
+
+// NewConfigController creates a new configuration controller
+func NewConfigController(configManager *services.ConfigManager, interfaceEngine *services.InterfaceEngine, migrationService *services.MigrationService) *ConfigController {
+	return &ConfigController{
+		configManager:   configManager,
+		interfaceEngine: interfaceEngine,
+		migrationService: migrationService,
+	}
+}
+
+// RegisterRoutes registers all configuration management routes
+func (cc *ConfigController) RegisterRoutes(router *gin.RouterGroup) {
+	config := router.Group("/config")
+	{
+		// Configuration CRUD operations
+		config.GET("/interfaces", cc.GetAllConfigurations)
+		config.GET("/interfaces/:id", cc.GetConfiguration)
+		config.POST("/interfaces", cc.CreateConfiguration)
+		config.PUT("/interfaces/:id", cc.UpdateConfiguration)
+		config.DELETE("/interfaces/:id", cc.DeleteConfiguration)
+
+		// Configuration management
+		config.POST("/interfaces/:id/reload", cc.ReloadConfiguration)
+		config.GET("/interfaces/:id/versions", cc.GetConfigurationVersions)
+		config.GET("/interfaces/:id/versions/:version", cc.GetConfigurationVersion)
+
+		// Configuration validation
+		config.POST("/interfaces/validate", cc.ValidateConfiguration)
+
+		// Template management
+		config.GET("/templates", cc.GetMappingTemplates)
+		config.GET("/templates/:id", cc.GetMappingTemplate)
+		config.POST("/templates", cc.CreateMappingTemplate)
+		config.PUT("/templates/:id", cc.UpdateMappingTemplate)
+
+		// Migration endpoints
+		config.POST("/migrate", cc.StartMigration)
+		config.GET("/migrate/status", cc.GetMigrationStatus)
+		config.POST("/migrate/validate", cc.ValidateMigration)
+
+		// Runtime monitoring
+		config.GET("/runtime/stats", cc.GetRuntimeStats)
+		config.GET("/runtime/active", cc.GetActiveProcesses)
+		config.GET("/interfaces/:id/stats", cc.GetInterfaceStats)
+
+		// Hot reload management
+		config.POST("/reload/all", cc.ReloadAllConfigurations)
+		config.GET("/health", cc.GetConfigurationHealth)
+	}
+}
+
+// GetAllConfigurations returns all interface configurations
+func (cc *ConfigController) GetAllConfigurations(c *gin.Context) {
+	// Get query parameters
+	status := c.Query("status")
+	limit := c.DefaultQuery("limit", "50")
+	offset := c.DefaultQuery("offset", "0")
+
+	limitInt, _ := strconv.Atoi(limit)
+	offsetInt, _ := strconv.Atoi(offset)
+
+	// Get configurations based on status
+	var configs []*services.InterfaceConfig
+	var err error
+
+	if status == "active" {
+		configs, err = cc.configManager.GetActiveConfigs()
+	} else {
+		// For now, return active configs as we don't have a GetAllConfigs method
+		configs, err = cc.configManager.GetActiveConfigs()
+	}
+
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"error":   "Failed to retrieve configurations",
+			"details": err.Error(),
+		})
+		return
+	}
+
+	// Apply pagination
+	total := len(configs)
+	start := offsetInt
+	end := start + limitInt
+
+	if start > total {
+		start = total
+	}
+	if end > total {
+		end = total
+	}
+
+	paginatedConfigs := configs[start:end]
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data": gin.H{
+			"configurations": paginatedConfigs,
+			"pagination": gin.H{
+				"total":  total,
+				"limit":  limitInt,
+				"offset": offsetInt,
+				"count":  len(paginatedConfigs),
+			},
+		},
+	})
+}
+
+// GetConfiguration returns a specific interface configuration
+func (cc *ConfigController) GetConfiguration(c *gin.Context) {
+	interfaceID := c.Param("id")
+
+	config, err := cc.configManager.LoadConfig(interfaceID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{
+			"success": false,
+			"error":   "Configuration not found",
+			"details": err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    config,
+	})
+}
+
+// CreateConfiguration creates a new interface configuration
+func (cc *ConfigController) CreateConfiguration(c *gin.Context) {
+	var config services.InterfaceConfig
+
+	if err := c.ShouldBindJSON(&config); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"error":   "Invalid configuration format",
+			"details": err.Error(),
+		})
+		return
+	}
+
+	// Validate configuration
+	if err := cc.configManager.ValidateConfig(&config); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"error":   "Configuration validation failed",
+			"details": err.Error(),
+		})
+		return
+	}
+
+	// Save configuration
+	if err := cc.configManager.SaveConfig(&config); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"error":   "Failed to save configuration",
+			"details": err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusCreated, gin.H{
+		"success": true,
+		"data":    config,
+		"message": "Configuration created successfully",
+	})
+}
+
+// UpdateConfiguration updates an existing interface configuration
+func (cc *ConfigController) UpdateConfiguration(c *gin.Context) {
+	interfaceID := c.Param("id")
+
+	var config services.InterfaceConfig
+	if err := c.ShouldBindJSON(&config); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"error":   "Invalid configuration format",
+			"details": err.Error(),
+		})
+		return
+	}
+
+	// Ensure the interface ID matches
+	config.InterfaceID = interfaceID
+
+	// Validate configuration
+	if err := cc.configManager.ValidateConfig(&config); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"error":   "Configuration validation failed",
+			"details": err.Error(),
+		})
+		return
+	}
+
+	// Save configuration
+	if err := cc.configManager.SaveConfig(&config); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"error":   "Failed to update configuration",
+			"details": err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    config,
+		"message": "Configuration updated successfully",
+	})
+}
+
+// DeleteConfiguration deletes an interface configuration
+func (cc *ConfigController) DeleteConfiguration(c *gin.Context) {
+	interfaceID := c.Param("id")
+
+	// Note: We need to implement DeleteConfig method in ConfigManager
+	// For now, return a placeholder response
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "Configuration deletion not yet implemented",
+		"interface_id": interfaceID,
+	})
+}
+
+// ReloadConfiguration forces a reload of a specific configuration
+func (cc *ConfigController) ReloadConfiguration(c *gin.Context) {
+	interfaceID := c.Param("id")
+
+	config, err := cc.configManager.ReloadConfig(interfaceID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"error":   "Failed to reload configuration",
+			"details": err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    config,
+		"message": "Configuration reloaded successfully",
+	})
+}
+
+// GetConfigurationVersions returns version history for a configuration
+func (cc *ConfigController) GetConfigurationVersions(c *gin.Context) {
+	interfaceID := c.Param("id")
+
+	// Note: We need to implement GetConfigVersionHistory method
+	// For now, return a placeholder response
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data": gin.H{
+			"interface_id": interfaceID,
+			"versions":     []string{"1.0.0", "1.1.0", "1.2.0"},
+			"current":      "1.2.0",
+		},
+		"message": "Version history retrieval not yet implemented",
+	})
+}
+
+// GetConfigurationVersion returns a specific version of a configuration
+func (cc *ConfigController) GetConfigurationVersion(c *gin.Context) {
+	interfaceID := c.Param("id")
+	version := c.Param("version")
+
+	config, err := cc.configManager.GetConfigVersion(interfaceID, version)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{
+			"success": false,
+			"error":   "Configuration version not found",
+			"details": err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    config,
+	})
+}
+
+// ValidateConfiguration validates a configuration without saving
+func (cc *ConfigController) ValidateConfiguration(c *gin.Context) {
+	var config services.InterfaceConfig
+
+	if err := c.ShouldBindJSON(&config); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"error":   "Invalid configuration format",
+			"details": err.Error(),
+		})
+		return
+	}
+
+	// Validate configuration
+	if err := cc.configManager.ValidateConfig(&config); err != nil {
+		c.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"valid":   false,
+			"errors":  []string{err.Error()},
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"valid":   true,
+		"message": "Configuration is valid",
+	})
+}
+
+// GetMappingTemplates returns all mapping templates
+func (cc *ConfigController) GetMappingTemplates(c *gin.Context) {
+	// Note: We need to implement GetMappingTemplates method
+	// For now, return a placeholder response
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data": []gin.H{
+			{
+				"template_id":   "standard_adt_v4",
+				"name":          "Standard ADT to FHIR R4",
+				"version":       "4.0.0",
+				"message_types": []string{"ADT^A01", "ADT^A02", "ADT^A03"},
+				"usage_count":   15,
+			},
+			{
+				"template_id":   "standard_oru_v4",
+				"name":          "Standard ORU to FHIR R4",
+				"version":       "4.0.0",
+				"message_types": []string{"ORU^R01"},
+				"usage_count":   8,
+			},
+		},
+		"message": "Template listing not yet implemented",
+	})
+}
+
+// GetMappingTemplate returns a specific mapping template
+func (cc *ConfigController) GetMappingTemplate(c *gin.Context) {
+	templateID := c.Param("id")
+
+	// Note: We need to implement GetMappingTemplate method
+	// For now, return a placeholder response
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data": gin.H{
+			"template_id":   templateID,
+			"name":          "Standard ADT to FHIR R4",
+			"version":       "4.0.0",
+			"message_types": []string{"ADT^A01", "ADT^A02", "ADT^A03"},
+			"mappings":      []gin.H{},
+		},
+		"message": "Template retrieval not yet implemented",
+	})
+}
+
+// CreateMappingTemplate creates a new mapping template
+func (cc *ConfigController) CreateMappingTemplate(c *gin.Context) {
+	var template map[string]interface{}
+
+	if err := c.ShouldBindJSON(&template); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"error":   "Invalid template format",
+			"details": err.Error(),
+		})
+		return
+	}
+
+	// Note: We need to implement CreateMappingTemplate method
+	c.JSON(http.StatusCreated, gin.H{
+		"success": true,
+		"data":    template,
+		"message": "Template creation not yet implemented",
+	})
+}
+
+// UpdateMappingTemplate updates an existing mapping template
+func (cc *ConfigController) UpdateMappingTemplate(c *gin.Context) {
+	templateID := c.Param("id")
+
+	var template map[string]interface{}
+	if err := c.ShouldBindJSON(&template); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"error":   "Invalid template format",
+			"details": err.Error(),
+		})
+		return
+	}
+
+	// Note: We need to implement UpdateMappingTemplate method
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    template,
+		"message": "Template update not yet implemented",
+		"template_id": templateID,
+	})
+}
+
+// StartMigration starts PostgreSQL to MongoDB migration
+func (cc *ConfigController) StartMigration(c *gin.Context) {
+	// Get migration options
+	dryRun := c.DefaultQuery("dry_run", "false") == "true"
+
+	if cc.migrationService == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{
+			"success": false,
+			"error":   "Migration service not available",
+		})
+		return
+	}
+
+	// Start migration in background
+	go func() {
+		stats, err := cc.migrationService.MigrateAll(c.Request.Context())
+		if err != nil {
+			// Log error - in production, you'd want to store this in a job queue
+			println("Migration failed:", err.Error())
+		} else {
+			// Log success
+			println("Migration completed:", stats.Duration)
+		}
+	}()
+
+	c.JSON(http.StatusAccepted, gin.H{
+		"success": true,
+		"message": "Migration started",
+		"dry_run": dryRun,
+	})
+}
+
+// GetMigrationStatus returns the current migration status
+func (cc *ConfigController) GetMigrationStatus(c *gin.Context) {
+	if cc.migrationService == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{
+			"success": false,
+			"error":   "Migration service not available",
+		})
+		return
+	}
+
+	stats, err := cc.migrationService.GetMigrationProgress(c.Request.Context())
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"error":   "Failed to get migration status",
+			"details": err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    stats,
+	})
+}
+
+// ValidateMigration validates migration results
+func (cc *ConfigController) ValidateMigration(c *gin.Context) {
+	// Note: Validation would be implemented here
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "Migration validation not yet implemented",
+	})
+}
+
+// GetRuntimeStats returns runtime statistics
+func (cc *ConfigController) GetRuntimeStats(c *gin.Context) {
+	if cc.interfaceEngine == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{
+			"success": false,
+			"error":   "Interface engine not available",
+		})
+		return
+	}
+
+	activeMessages := cc.interfaceEngine.GetActiveMessages()
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data": gin.H{
+			"active_messages": len(activeMessages),
+			"timestamp":       "2025-01-01T00:00:00Z",
+		},
+	})
+}
+
+// GetActiveProcesses returns currently active processing instances
+func (cc *ConfigController) GetActiveProcesses(c *gin.Context) {
+	if cc.interfaceEngine == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{
+			"success": false,
+			"error":   "Interface engine not available",
+		})
+		return
+	}
+
+	activeMessages := cc.interfaceEngine.GetActiveMessages()
+
+	processes := make([]gin.H, 0)
+	for messageID, message := range activeMessages {
+		processes = append(processes, gin.H{
+			"message_id":   messageID,
+			"interface_id": message.InterfaceID,
+			"status":       "processing",
+			"created_at":   message.CreatedAt,
+		})
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data": gin.H{
+			"active_processes": processes,
+			"count":           len(processes),
+		},
+	})
+}
+
+// GetInterfaceStats returns statistics for a specific interface
+func (cc *ConfigController) GetInterfaceStats(c *gin.Context) {
+	interfaceID := c.Param("id")
+
+	if cc.interfaceEngine == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{
+			"success": false,
+			"error":   "Interface engine not available",
+		})
+		return
+	}
+
+	stats, exists := cc.interfaceEngine.GetInterfaceStats(interfaceID)
+	if !exists {
+		c.JSON(http.StatusNotFound, gin.H{
+			"success": false,
+			"error":   "No statistics found for interface",
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    stats,
+	})
+}
+
+// ReloadAllConfigurations forces reload of all configurations
+func (cc *ConfigController) ReloadAllConfigurations(c *gin.Context) {
+	// Get all active configurations
+	configs, err := cc.configManager.GetActiveConfigs()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"error":   "Failed to get configurations",
+			"details": err.Error(),
+		})
+		return
+	}
+
+	reloadedCount := 0
+	for _, config := range configs {
+		_, err := cc.configManager.ReloadConfig(config.InterfaceID)
+		if err == nil {
+			reloadedCount++
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "Configurations reloaded",
+		"data": gin.H{
+			"total_configs":   len(configs),
+			"reloaded_configs": reloadedCount,
+		},
+	})
+}
+
+// GetConfigurationHealth returns health status of the configuration system
+func (cc *ConfigController) GetConfigurationHealth(c *gin.Context) {
+	health := gin.H{
+		"status":    "healthy",
+		"timestamp": "2025-01-01T00:00:00Z",
+		"services": gin.H{
+			"config_manager":   cc.configManager != nil,
+			"interface_engine": cc.interfaceEngine != nil,
+			"migration_service": cc.migrationService != nil,
+		},
+	}
+
+	if cc.configManager != nil {
+		configs, err := cc.configManager.GetActiveConfigs()
+		if err != nil {
+			health["config_manager_error"] = err.Error()
+		} else {
+			health["active_configurations"] = len(configs)
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    health,
+	})
+}

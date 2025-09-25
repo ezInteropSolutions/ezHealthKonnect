@@ -22,6 +22,28 @@ services:
     networks:
       - ezhealthkonnect
 
+  # MongoDB Database Service for Configuration Engine
+  mongodb:
+    image: mongo:7
+    container_name: ezhealthkonnect-mongodb
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ezhealth_user
+      MONGO_INITDB_ROOT_PASSWORD: secure_password_change_me
+      MONGO_INITDB_DATABASE: ezhealthkonnect
+    ports:
+      - "27017:27017"
+    volumes:
+      # Persistent data for MongoDB
+      - mongodb_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - ezhealthkonnect
+
   # Flyway handles SCHEMA migrations only (version controlled)
   flyway:
     image: flyway/flyway:latest
@@ -77,10 +99,26 @@ services:
       # ✅ FIXED: Schema paths that match the volume mounts
       EZHEALTHKONNECT_SCHEMA_DIR: /app/schemas/hl7
       FHIR_SCHEMA_DIR: /app/schemas/fhir
+
+      # MongoDB Configuration Engine
+      MONGODB_URI: mongodb://ezhealth_user:secure_password_change_me@mongodb:27017/ezhealthkonnect?authSource=admin
+      MONGODB_DATABASE: ezhealthkonnect
       
     ports:
-      - "3000:3000"
-      - "8080:8080"
+      - "3000:3000"    # Node.js frontend
+      - "8080:8080"    # Go backend API
+      # Interface ports (configured in database)
+      - "6661:6661"    # Interface 1: HL7 TCP Receiver
+      - "8081:8081"    # Interface 2: FHIR HTTP Receiver
+      # Reserved ports for additional interfaces
+      - "8090:8090"    # Interface 3
+      - "8091:8091"    # Interface 4
+      - "8092:8092"    # Interface 5
+      - "8093:8093"    # Interface 6
+      - "8094:8094"    # Interface 7
+      - "8095:8095"    # Interface 8
+      - "8096:8096"    # Interface 9
+      - "8097:8097"    # Interface 10
     
     # ✅ FIXED: Complete volume mounting (was missing critical mounts)
     volumes:
@@ -95,23 +133,27 @@ services:
       - ./hl7:/app/hl7                    # Go HL7 parsing code
       - ./schemas:/app/schemas:ro         # HL7 and FHIR schema files
     
-    # Wait for both PostgreSQL and migrations to complete
+    # Wait for PostgreSQL, MongoDB, and migrations to complete
     depends_on:
       flyway:
         condition: service_completed_successfully
       postgres:
+        condition: service_healthy
+      mongodb:
         condition: service_healthy
     
     restart: unless-stopped
     networks:
       - ezhealthkonnect
 
-# Persistent storage for PostgreSQL data
+# Persistent storage for database data
 volumes:
-  # This volume persists data across container restarts
-  # Data stays even with 'docker-compose down'
-  # Only removed with 'docker-compose down -v' or 'docker volume rm'
+  # PostgreSQL persistent data
   postgres_data:
+    driver: local
+
+  # MongoDB persistent data for Configuration Engine
+  mongodb_data:
     driver: local
 
 # Network for services to communicate

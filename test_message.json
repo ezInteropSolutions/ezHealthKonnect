@@ -1,0 +1,4 @@
+{
+  "messageType": "ADT^A01",
+  "content": "MSH|^~\\&|Test|System|FHIR|Receiver|20250921123000||ADT^A01|TEST001|P|2.5\nPID|1||123456||Doe^John||19800101|M"
+}

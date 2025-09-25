@@ -34,7 +34,7 @@ class MonitoringService extends EventEmitter {
         this.isStarted = false;
         this.metricsTimer = null;
 
-        this.initializeDatabase();
+        // Initialize database connection when needed
     }
 
     /**
@@ -42,17 +42,16 @@ class MonitoringService extends EventEmitter {
      */
     async initializeDatabase() {
         try {
-            // PostgreSQL for structured metrics
-            const { Pool } = require('pg');
-            this.pgPool = new Pool();
+            // Use existing database configuration
+            const database = require('../config/database');
+            this.pgPool = database.sequelize.connectionManager.pool;
 
-            // Test connection
-            await this.pgPool.query('SELECT NOW()');
-            console.log('✅ Monitoring service connected to PostgreSQL');
+            console.log('✅ Monitoring service using existing database connection');
 
         } catch (error) {
             console.error('❌ Failed to initialize monitoring database:', error);
-            throw error;
+            // Don't throw - monitoring should be optional
+            this.pgPool = null;
         }
     }
 

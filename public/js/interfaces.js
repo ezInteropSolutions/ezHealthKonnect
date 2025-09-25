@@ -25,13 +25,17 @@ async function initializeInterfacesPage() {
     await loadUserInfo();
     updateTime();
     setInterval(updateTime, 60000);
-    
+
     await loadInterfaces();
     setupEventListeners();
     setupAutoRefresh();
-    
+    setupRuntimeMonitoring();
+
     // FIX: Add tooltip setup
     setupTooltips();
+
+    // DEBUG: Check modal containers
+    debugModalContainers();
 }
 
 // REPLACE your setupTooltips function with this JavaScript-based solution:
@@ -153,6 +157,40 @@ function setupTooltips() {
     }
     
     console.log('✅ JavaScript tooltips set up successfully');
+}
+
+// DEBUG: Check modal containers
+function debugModalContainers() {
+    console.log('🔍 DEBUG: Checking modal containers...');
+
+    const containers = [
+        'create-modal-container',
+        'edit-modal-container',
+        'details-modal-container',
+        'wizard-modal-container'
+    ];
+
+    containers.forEach(containerId => {
+        const container = document.getElementById(containerId);
+        console.log(`📋 ${containerId}:`, {
+            exists: !!container,
+            hasContent: !!container?.innerHTML,
+            contentLength: container?.innerHTML?.length || 0
+        });
+    });
+
+    // Check for actual modals
+    const modals = ['createModal', 'editModal', 'detailsModal'];
+    modals.forEach(modalId => {
+        const modal = document.getElementById(modalId);
+        console.log(`🔲 ${modalId}:`, {
+            exists: !!modal,
+            classes: modal?.className,
+            display: modal?.style.display
+        });
+    });
+
+    console.log('✅ Modal container debug complete');
 }
 
 // Load user info
@@ -772,7 +810,7 @@ function renderInterfacesTable() {
     if (filteredInterfaces.length === 0) {
         tbody.innerHTML = `
             <tr>
-                <td colspan="6" class="empty-state">
+                <td colspan="7" class="empty-state">
                     <div class="empty-icon">🔗</div>
                     <div><strong>No interfaces found</strong></div>
                     <div>Create your first HL7 processing interface</div>
@@ -822,6 +860,14 @@ function createCompactTableRow(interface) {
                 <span class="interface-status status-${interface.status}">${interface.status}</span>
             </td>
             <td>
+                <div class="runtime-status-cell">
+                    <span class="runtime-status" id="runtime-${interface.id}">
+                        <span class="status-indicator checking">●</span>
+                        <span class="status-text">Checking...</span>
+                    </span>
+                </div>
+            </td>
+            <td>
                 <div class="date-cell">
                     <div class="date-time last-updated">${lastUpdated.time}</div>
                     <div class="date-day">${lastUpdated.date}</div>
@@ -863,36 +909,30 @@ function createCompactTableRow(interface) {
 // Get mini icon-only action buttons
 function getMiniActionButtons(interface) {
     const buttons = [];
-    
-    // Edit button always available (except when running)
-    if (interface.status !== 'running') {
-        buttons.push(`<button class="action-btn edit" data-tooltip="Edit" onclick="showEditModal('${interface.id}')">✏</button>`);
-    }
-    
+
+    // Edit button always available (enhanced with more debug info)
+    buttons.push(`<button class="action-btn edit" data-tooltip="Edit Configuration" onclick="console.log('🖱️ Edit button clicked for interface:', '${interface.id}', '${interface.name}'); console.log('🖱️ Button element:', this); showEditModal('${interface.id}')">⚙️</button>`);
+
+    // Runtime Processing Controls
+    buttons.push(`<button class="action-btn runtime-activate" data-tooltip="Start Processing" onclick="activateInterfaceProcessing('${interface.id}')" id="activate-${interface.id}">▶️</button>`);
+    buttons.push(`<button class="action-btn runtime-deactivate" data-tooltip="Stop Processing" onclick="deactivateInterfaceProcessing('${interface.id}')" id="deactivate-${interface.id}" style="display:none">⏹️</button>`);
+
+    // Traditional Interface Controls (if needed)
     switch (interface.status) {
         case 'stopped':
-            buttons.push(`<button class="action-btn start" data-tooltip="Start" onclick="startInterface('${interface.id}')">▶</button>`);
-            buttons.push(`<button class="action-btn delete" data-tooltip="Delete" onclick="deleteInterface('${interface.id}')">✕</button>`);
+            buttons.push(`<button class="action-btn delete" data-tooltip="Delete Interface" onclick="deleteInterface('${interface.id}')">🗑️</button>`);
             break;
-            
-        case 'running':
-            buttons.push(`<button class="action-btn stop" data-tooltip="Stop" onclick="stopInterface('${interface.id}')">⏹</button>`);
-            buttons.push(`<button class="action-btn pause" data-tooltip="Pause" onclick="pauseInterface('${interface.id}')">⏸</button>`);
-            break;
-            
-        case 'paused':
-            buttons.push(`<button class="action-btn start" data-tooltip="Resume" onclick="startInterface('${interface.id}')">▶</button>`);
-            buttons.push(`<button class="action-btn stop" data-tooltip="Stop" onclick="stopInterface('${interface.id}')">⏹</button>`);
-            break;
-            
+
         case 'error':
-            buttons.push(`<button class="action-btn start" data-tooltip="Restart" onclick="startInterface('${interface.id}')">↻</button>`);
-            buttons.push(`<button class="action-btn stop" data-tooltip="Stop" onclick="stopInterface('${interface.id}')">⏹</button>`);
+            buttons.push(`<button class="action-btn restart" data-tooltip="Reset Interface" onclick="resetInterface('${interface.id}')">🔄</button>`);
             break;
     }
-    
-    buttons.push(`<button class="action-btn details" data-tooltip="Details" onclick="showInterfaceDetails('${interface.id}')">⋯</button>`);
-    
+
+    // Messages and monitoring
+    buttons.push(`<button class="action-btn messages" data-tooltip="View Messages" onclick="viewInterfaceMessages('${interface.id}')">💬</button>`);
+    buttons.push(`<button class="action-btn monitor" data-tooltip="View Processing History" onclick="showProcessingHistory('${interface.id}')">📈</button>`);
+    buttons.push(`<button class="action-btn details" data-tooltip="Interface Details" onclick="showInterfaceDetails('${interface.id}')">ℹ️</button>`);
+
     return buttons.join('');
 }
 
@@ -1097,27 +1137,140 @@ function closeCreateModal() {
 
 function showEditModal(interfaceId) {
     const interface = interfaces.find(i => i.id === interfaceId);
-    if (!interface) return;
-    
-    // Populate form with existing data
-    document.getElementById('editInterfaceName').value = interface.name;
-    document.getElementById('editInterfaceDescription').value = interface.description || '';
-    document.getElementById('editSourceType').value = interface.sourceType;
-    document.getElementById('editTargetType').value = interface.targetType;
-    document.getElementById('editMessageType').value = interface.messageType;
-    
+    if (!interface) {
+        console.error('Interface not found:', interfaceId);
+        return;
+    }
+
+    console.log('🔧 Opening enhanced edit modal for:', interface.name);
+
+    // Check if modal exists
+    const editModal = document.getElementById('editModal');
+    if (!editModal) {
+        console.error('❌ Edit modal not found! Modal components may not be loaded yet.');
+
+        // Try to reload modal components
+        if (typeof loadModalComponents === 'function') {
+            console.log('🔄 Attempting to reload modal components...');
+            loadModalComponents();
+            // Retry after a brief delay
+            setTimeout(() => showEditModal(interfaceId), 500);
+            return;
+        }
+
+        alert('Edit modal not available. Please refresh the page and try again.');
+        return;
+    }
+
+    // Check if required form elements exist
+    const editForm = document.getElementById('editInterfaceForm');
+    const editInterfaceId = document.getElementById('editInterfaceId');
+    const editInterfaceName = document.getElementById('editInterfaceName');
+
+    if (!editForm || !editInterfaceId || !editInterfaceName) {
+        console.error('❌ Edit form elements not found!', {
+            form: !!editForm,
+            idField: !!editInterfaceId,
+            nameField: !!editInterfaceName
+        });
+        alert('Edit form not properly loaded. Please refresh the page and try again.');
+        return;
+    }
+
+    // Use the enhanced configuration manager to populate the form
+    if (window.interfaceConfigManager) {
+        console.log('✅ Using enhanced configuration manager');
+        window.interfaceConfigManager.populateEditForm(interface);
+    } else {
+        console.log('⚠️ Configuration manager not available, using basic population');
+        // Basic fallback only for essential fields
+        editInterfaceId.value = interface.id;
+        editInterfaceName.value = interface.name;
+        document.getElementById('editInterfaceDescription').value = interface.description || '';
+        document.getElementById('editSourceType').value = interface.sourceType || 'tcp';
+        document.getElementById('editTargetType').value = interface.targetType || 'fhir';
+    }
+
     // Store interface ID for submission
-    document.getElementById('editInterfaceForm').dataset.interfaceId = interfaceId;
-    
-    document.getElementById('editModal').classList.add('show');
-    document.getElementById('editInterfaceName').focus();
+    editForm.dataset.interfaceId = interfaceId;
+
+    // Show the modal
+    console.log('🔍 Modal before show:', {
+        exists: !!editModal,
+        classes: editModal?.className,
+        display: editModal?.style.display
+    });
+
+    // CRITICAL FIX: Clear any inline styles that prevent showing
+    editModal.removeAttribute('style');
+    editModal.classList.add('show');
+
+    console.log('🔍 Modal after show:', {
+        classes: editModal.className,
+        display: editModal.style.display,
+        visible: window.getComputedStyle(editModal).display
+    });
+
+    editInterfaceName.focus();
+
+    console.log('✅ Edit modal opened successfully for:', interface.name);
 }
 
 function closeEditModal() {
-    document.getElementById('editModal').classList.remove('show');
-    document.getElementById('editInterfaceForm').reset();
-    delete document.getElementById('editInterfaceForm').dataset.interfaceId;
+    console.log('🔄 Attempting to close edit modal...');
+
+    const editModal = document.getElementById('editModal');
+    const editForm = document.getElementById('editInterfaceForm');
+
+    console.log('🔍 Modal state before close:', {
+        modalExists: !!editModal,
+        hasShowClass: editModal?.classList?.contains('show'),
+        currentClasses: editModal?.className,
+        display: editModal?.style.display
+    });
+
+    if (editModal) {
+        // SIMPLE FIX: Just remove show class and let CSS handle the rest
+        editModal.classList.remove('show');
+
+        // Ensure the modal is immediately hidden without conflicting styles
+        editModal.style.display = 'none';
+
+        console.log('🔍 Modal state after close attempt:', {
+            hasShowClass: editModal.classList.contains('show'),
+            currentClasses: editModal.className,
+            display: editModal.style.display
+        });
+    }
+
+    if (editForm) {
+        // Clean reset without interference
+        editForm.reset();
+        delete editForm.dataset.interfaceId;
+
+        // Clear any dynamic content
+        const sourceConfigFields = document.getElementById('sourceConfigFields');
+        const fhirServerConfig = document.getElementById('fhirServerConfig');
+
+        if (sourceConfigFields) sourceConfigFields.innerHTML = '';
+        if (fhirServerConfig) fhirServerConfig.style.display = 'block';
+    }
+
+    console.log('✅ Edit modal close operation completed');
 }
+
+// Make closeEditModal globally accessible for debugging
+window.forceCloseEditModal = function() {
+    console.log('🔧 FORCE CLOSE: Manually closing edit modal...');
+    const editModal = document.getElementById('editModal');
+    if (editModal) {
+        editModal.classList.remove('show');
+        editModal.style.display = 'none !important';
+        editModal.style.visibility = 'hidden';
+        editModal.style.opacity = '0';
+        console.log('🔧 FORCE CLOSE: Modal forcibly hidden');
+    }
+};
 
 function showInterfaceDetails(interfaceId) {
     const interface = interfaces.find(i => i.id === interfaceId);
@@ -1130,6 +1283,14 @@ function showInterfaceDetails(interfaceId) {
 
 function closeDetailsModal() {
     document.getElementById('detailsModal').classList.remove('show');
+}
+
+/**
+ * Navigate to messages page filtered by interface
+ */
+function viewInterfaceMessages(interfaceId) {
+    // Navigate to messages page with interface filter
+    window.location.href = `messages.html?interfaceId=${interfaceId}`;
 }
 
 // Create detailed content for interface
@@ -1299,6 +1460,286 @@ function showError(message) {
     document.body.appendChild(notification);
     
     setTimeout(() => notification.remove(), 4000);
+}
+
+/**
+ * Collect all interface form data including configurations
+ */
+function collectInterfaceFormData() {
+    console.log('📋 Collecting interface form data...');
+
+    // Basic interface information
+    const interfaceData = {
+        id: document.getElementById('editInterfaceId')?.value,
+        name: document.getElementById('editInterfaceName')?.value,
+        description: document.getElementById('editInterfaceDescription')?.value,
+        sourceType: document.getElementById('editSourceType')?.value,
+        targetType: document.getElementById('editTargetType')?.value,
+        status: document.getElementById('editStatus')?.value,
+        format: document.getElementById('editFormat')?.value
+    };
+
+    // Source Configuration
+    const sourceConfig = {
+        host: document.getElementById('editSourceHost')?.value || 'localhost',
+        port: parseInt(document.getElementById('editSourcePort')?.value) || null,
+        connectivity: document.getElementById('editSourceConnectivity')?.value || 'inbound'
+    };
+
+    // Target Configuration - Enhanced Collection
+    const targetConfig = collectTargetConfiguration();
+
+    // Processing Rules and Additional Config
+    const processingRules = {
+        routingMode: document.getElementById('editRoutingMode')?.value || 'direct',
+        targetFhirInterface: document.getElementById('editTargetFhirInterface')?.value,
+        transformationEngine: document.getElementById('editTransformationEngine')?.value || 'go-engine',
+        retryPolicy: document.getElementById('editRetryPolicy')?.value || '3'
+    };
+
+    // Additional fields
+    const additionalConfig = {
+        sourceConnectivity: document.getElementById('editSourceConnectivity')?.value,
+        targetConnectivity: document.getElementById('editTargetConnectivity')?.value,
+        tableStrategy: document.getElementById('editTableStrategy')?.value || 'shared',
+        expectedVolume: document.getElementById('editExpectedVolume')?.value || 'low'
+    };
+
+    const formData = {
+        ...interfaceData,
+        sourceConfig: sourceConfig,
+        targetConfig: targetConfig,
+        processingRules: processingRules,
+        ...additionalConfig
+    };
+
+    console.log('✅ Form data collected:', formData);
+    return formData;
+}
+
+/**
+ * Collect target configuration from form
+ */
+function collectTargetConfiguration() {
+    console.log('🎯 Collecting target configuration...');
+
+    const targetConfig = {
+        // Basic FHIR Server Configuration
+        host: 'localhost',
+        port: 8080,
+        protocol: 'http',
+        path: '/Patient'
+    };
+
+    // Get FHIR Server URL and parse it
+    const fhirServerUrl = document.getElementById('editFhirServerUrl')?.value;
+    if (fhirServerUrl) {
+        try {
+            const url = new URL(fhirServerUrl);
+            targetConfig.protocol = url.protocol.replace(':', '');
+            targetConfig.host = url.hostname;
+            targetConfig.port = parseInt(url.port) || (url.protocol === 'https:' ? 443 : 80);
+            targetConfig.path = url.pathname.endsWith('/fhir') ?
+                url.pathname.replace('/fhir', '') : url.pathname;
+        } catch (error) {
+            console.warn('⚠️ Invalid FHIR Server URL, using parts:', fhirServerUrl);
+            // If URL parsing fails, try to extract meaningful parts
+            targetConfig.host = fhirServerUrl.includes('://') ?
+                fhirServerUrl.split('://')[1].split(':')[0].split('/')[0] :
+                fhirServerUrl.split(':')[0];
+        }
+    }
+
+    // Override port if specified separately
+    const targetPort = document.getElementById('editTargetPort')?.value;
+    if (targetPort) {
+        targetConfig.port = parseInt(targetPort);
+    }
+
+    // Resource endpoint
+    const resourceEndpoint = document.getElementById('editResourceEndpoint')?.value;
+    if (resourceEndpoint) {
+        targetConfig.path = resourceEndpoint.startsWith('/') ? resourceEndpoint : `/${resourceEndpoint}`;
+    }
+
+    // Target connectivity
+    const targetConnectivity = document.getElementById('editTargetConnectivity')?.value;
+    if (targetConnectivity) {
+        targetConfig.connectivity = targetConnectivity;
+    }
+
+    // Routing strategy and endpoints
+    const routingStrategy = document.getElementById('editRoutingStrategy')?.value;
+    if (routingStrategy) {
+        targetConfig.routing_strategy = routingStrategy;
+    }
+
+    // Multiple endpoints configuration
+    const multipleEndpointsEnabled = document.getElementById('enableMultipleEndpoints')?.checked;
+    if (multipleEndpointsEnabled) {
+        targetConfig.endpoints = collectMultipleEndpoints();
+    } else {
+        // Single endpoint configuration
+        targetConfig.endpoints = [{
+            id: 'primary_endpoint',
+            name: 'Primary Endpoint',
+            type: document.getElementById('editTargetType')?.value || 'fhir',
+            url: fhirServerUrl || `${targetConfig.protocol}://${targetConfig.host}:${targetConfig.port}/fhir`,
+            resource_endpoint: resourceEndpoint || 'Patient',
+            priority: 1,
+            weight: 100,
+            enabled: true
+        }];
+    }
+
+    // Routing rules (if any)
+    const routingRules = document.getElementById('editRoutingRules')?.value;
+    if (routingRules) {
+        try {
+            targetConfig.routing_rules = JSON.parse(routingRules);
+        } catch (error) {
+            console.warn('⚠️ Invalid routing rules JSON:', error.message);
+            targetConfig.routing_rules = [];
+        }
+    }
+
+    console.log('✅ Target configuration collected:', targetConfig);
+    return targetConfig;
+}
+
+/**
+ * Collect multiple endpoints configuration
+ */
+function collectMultipleEndpoints() {
+    const endpoints = [];
+    const endpointElements = document.querySelectorAll('.endpoint-item');
+
+    endpointElements.forEach((element, index) => {
+        const name = element.querySelector(`input[name="endpointName_${index}"]`)?.value;
+        const url = element.querySelector(`input[name="endpointUrl_${index}"]`)?.value;
+        const priority = parseInt(element.querySelector(`select[name="endpointPriority_${index}"]`)?.value) || 1;
+        const enabled = element.querySelector(`input[name="endpointEnabled_${index}"]`)?.checked;
+
+        if (name && url) {
+            endpoints.push({
+                id: `endpoint_${index}`,
+                name: name,
+                type: 'fhir',
+                url: url,
+                priority: priority,
+                weight: 100 / (priority || 1), // Higher priority = higher weight
+                enabled: enabled !== false
+            });
+        }
+    });
+
+    return endpoints;
+}
+
+// Enhanced edit interface handler
+async function handleEditInterface(event) {
+    event.preventDefault();
+
+    // Prevent multiple simultaneous submissions
+    if (handleEditInterface.isProcessing) {
+        console.log('⚠️ Edit submission already in progress, ignoring duplicate');
+        return;
+    }
+
+    handleEditInterface.isProcessing = true;
+    console.log('🔄 Handling interface edit submission');
+
+    // Provide immediate visual feedback
+    const saveButton = document.querySelector('#editModal .modal-btn.primary');
+    const originalText = saveButton?.textContent;
+    if (saveButton) {
+        saveButton.textContent = '💾 Saving...';
+        saveButton.disabled = true;
+    }
+
+    let interfaceData;
+
+    // Use enhanced config manager if available, otherwise fallback to basic collection
+    if (window.interfaceConfigManager) {
+        console.log('✅ Using enhanced configuration manager for data collection');
+        interfaceData = window.interfaceConfigManager.collectFormData();
+
+        // Validate configuration
+        const errors = window.interfaceConfigManager.validateConfiguration(interfaceData);
+        if (errors.length > 0) {
+            alert('Configuration errors:\n' + errors.join('\n'));
+            handleEditInterface.isProcessing = false; // Reset flag on validation error
+
+            // Reset button state
+            if (saveButton) {
+                saveButton.textContent = originalText || '💾 Save Changes';
+                saveButton.disabled = false;
+            }
+            return;
+        }
+    } else {
+        console.log('⚠️ Using basic form data collection');
+        interfaceData = collectInterfaceFormData();
+    }
+
+    console.log('🔄 Submitting interface update:', interfaceData);
+
+    try {
+        const response = await fetch(`/api/interfaces/${interfaceData.id}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(interfaceData)
+        });
+
+        if (response.ok) {
+            const result = await response.json();
+            console.log('✅ Interface updated successfully:', result);
+
+            showSuccess(`Interface "${interfaceData.name}" updated successfully!`);
+
+            console.log('🔄 About to close modal after successful save...');
+
+            // Ensure modal closes with error handling
+            try {
+                closeEditModal();
+                console.log('🔄 Modal close call completed successfully');
+            } catch (closeError) {
+                console.error('❌ Error closing modal:', closeError);
+                // Force close as fallback
+                const editModal = document.getElementById('editModal');
+                if (editModal) {
+                    editModal.classList.remove('show');
+                    editModal.style.display = 'none';
+                    console.log('🔧 Modal forcibly closed as fallback');
+                }
+            }
+
+            // Refresh interfaces list
+            setTimeout(async () => {
+                await loadInterfaces();
+            }, 500);
+
+        } else {
+            const error = await response.json();
+            console.error('❌ Failed to update interface:', error);
+
+            let errorMessage = 'Failed to update interface: ';
+            errorMessage += error.error || error.message || `HTTP ${response.status}`;
+
+            alert(errorMessage);
+        }
+    } catch (error) {
+        console.error('❌ Network error updating interface:', error);
+        alert('Network error updating interface: ' + error.message);
+    } finally {
+        // Reset processing flag and button state
+        handleEditInterface.isProcessing = false;
+
+        if (saveButton) {
+            saveButton.textContent = originalText || '💾 Save Changes';
+            saveButton.disabled = false;
+        }
+    }
 }
 
 // Close modals when clicking outside
@@ -1540,4 +1981,502 @@ window.addEventListener('load', function() {
             console.log('🔄 Corrected pagination dropdown value:', pageSize);
         }
     }, 100);
+});
+
+// ============================================================================
+// RUNTIME PROCESSING ENGINE INTEGRATION
+// ============================================================================
+
+// Runtime monitoring state
+let runtimeMonitoringInterval = null;
+let processingEngineStatus = 'unknown';
+
+/**
+ * Setup runtime monitoring system
+ */
+function setupRuntimeMonitoring() {
+    console.log('🔧 Setting up runtime monitoring...');
+
+    // Check engine status immediately
+    checkProcessingEngineStatus();
+
+    // Start periodic monitoring
+    runtimeMonitoringInterval = setInterval(() => {
+        checkProcessingEngineStatus();
+        updateInterfaceRuntimeStatuses();
+    }, 10000); // Every 10 seconds
+
+    console.log('✅ Runtime monitoring active');
+}
+
+/**
+ * Check processing engine status
+ */
+async function checkProcessingEngineStatus() {
+    try {
+        const response = await fetch('/api/runtime/engine/status', {
+            method: 'GET',
+            credentials: 'include'
+        });
+
+        if (response.ok) {
+            const data = await response.json();
+            processingEngineStatus = data.engine?.isRunning ? 'running' : 'stopped';
+            updateEngineStatusDisplay(data);
+        } else {
+            processingEngineStatus = 'error';
+            console.warn('❌ Engine status check failed:', response.status);
+            updateEngineStatusDisplay(null);
+        }
+    } catch (error) {
+        processingEngineStatus = 'offline';
+        console.warn('❌ Engine status check error:', error.message);
+        updateEngineStatusDisplay(null);
+    }
+}
+
+/**
+ * Update engine status display
+ */
+function updateEngineStatusDisplay(data) {
+    const engineLight = document.getElementById('engine-light');
+    const engineText = document.getElementById('engine-text');
+    const startBtn = document.getElementById('start-engine-btn');
+    const stopBtn = document.getElementById('stop-engine-btn');
+    const activeInterfacesCount = document.getElementById('active-interfaces-count');
+    const messagesTodayCount = document.getElementById('messages-today-count');
+    const successRate = document.getElementById('success-rate');
+
+    if (!engineLight || !engineText) return;
+
+    // Update engine status
+    switch (processingEngineStatus) {
+        case 'running':
+            engineLight.className = 'engine-light running';
+            engineText.textContent = 'Processing Engine: Running';
+            if (startBtn) startBtn.style.display = 'none';
+            if (stopBtn) stopBtn.style.display = 'inline-block';
+            break;
+        case 'stopped':
+            engineLight.className = 'engine-light stopped';
+            engineText.textContent = 'Processing Engine: Stopped';
+            if (startBtn) startBtn.style.display = 'inline-block';
+            if (stopBtn) stopBtn.style.display = 'none';
+            break;
+        case 'error':
+            engineLight.className = 'engine-light error';
+            engineText.textContent = 'Processing Engine: Error';
+            if (startBtn) startBtn.style.display = 'inline-block';
+            if (stopBtn) stopBtn.style.display = 'none';
+            break;
+        default:
+            engineLight.className = 'engine-light offline';
+            engineText.textContent = 'Processing Engine: Offline';
+            if (startBtn) startBtn.style.display = 'inline-block';
+            if (stopBtn) stopBtn.style.display = 'none';
+    }
+
+    // Update stats if data is available
+    if (data && data.engine) {
+        const dbStats = data.engine.database || {};
+        const todayStats = data.engine.today || {};
+
+        if (activeInterfacesCount) {
+            activeInterfacesCount.textContent = dbStats.active_interfaces || '0';
+        }
+        if (messagesTodayCount) {
+            messagesTodayCount.textContent = todayStats.messages_today || '0';
+        }
+        if (successRate && dbStats.total_messages_processed > 0) {
+            const rate = ((dbStats.total_messages_processed / (dbStats.total_messages_processed + (dbStats.total_messages_failed || 0))) * 100).toFixed(1);
+            successRate.textContent = rate + '%';
+        }
+    }
+}
+
+/**
+ * Start processing engine
+ */
+async function startProcessingEngine() {
+    const startBtn = document.getElementById('start-engine-btn');
+    if (startBtn) {
+        startBtn.disabled = true;
+        startBtn.textContent = '⏳ Starting...';
+    }
+
+    try {
+        console.log('🚀 Starting processing engine...');
+
+        const response = await fetch('/api/runtime/engine/start', {
+            method: 'POST',
+            credentials: 'include',
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        });
+
+        const data = await response.json();
+
+        if (response.ok) {
+            console.log('✅ Processing engine started:', data.message);
+            showSuccess('Processing engine started successfully');
+
+            // Update status immediately
+            await checkProcessingEngineStatus();
+        } else {
+            console.error('❌ Engine start failed:', data.message);
+            showError(data.message || 'Failed to start processing engine');
+        }
+    } catch (error) {
+        console.error('❌ Engine start error:', error);
+        showError('Failed to start processing engine: ' + error.message);
+    } finally {
+        if (startBtn) {
+            startBtn.disabled = false;
+            startBtn.textContent = '🚀 Start Engine';
+        }
+    }
+}
+
+/**
+ * Stop processing engine
+ */
+async function stopProcessingEngine() {
+    const stopBtn = document.getElementById('stop-engine-btn');
+    if (stopBtn) {
+        stopBtn.disabled = true;
+        stopBtn.textContent = '⏳ Stopping...';
+    }
+
+    try {
+        console.log('⏹️ Stopping processing engine...');
+
+        const response = await fetch('/api/runtime/engine/stop', {
+            method: 'POST',
+            credentials: 'include',
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        });
+
+        const data = await response.json();
+
+        if (response.ok) {
+            console.log('✅ Processing engine stopped:', data.message);
+            showSuccess('Processing engine stopped successfully');
+
+            // Update status immediately
+            await checkProcessingEngineStatus();
+        } else {
+            console.error('❌ Engine stop failed:', data.message);
+            showError(data.message || 'Failed to stop processing engine');
+        }
+    } catch (error) {
+        console.error('❌ Engine stop error:', error);
+        showError('Failed to stop processing engine: ' + error.message);
+    } finally {
+        if (stopBtn) {
+            stopBtn.disabled = false;
+            stopBtn.textContent = '⏹️ Stop Engine';
+        }
+    }
+}
+
+/**
+ * Update interface runtime statuses
+ */
+async function updateInterfaceRuntimeStatuses() {
+    for (const interface of interfaces) {
+        await updateInterfaceRuntimeStatus(interface.id);
+    }
+}
+
+/**
+ * Update individual interface runtime status
+ */
+async function updateInterfaceRuntimeStatus(interfaceId) {
+    const statusElement = document.getElementById(`runtime-${interfaceId}`);
+    if (!statusElement) return;
+
+    try {
+        const response = await fetch(`/api/runtime/interfaces/${interfaceId}/status`, {
+            method: 'GET',
+            credentials: 'include'
+        });
+
+        if (response.ok) {
+            const data = await response.json();
+            const isProcessing = data.interface?.processingActive || false;
+            const stats = data.interface?.processingStats;
+
+            updateRuntimeStatusDisplay(statusElement, isProcessing, stats);
+            updateActionButtonsVisibility(interfaceId, isProcessing);
+        } else if (response.status === 404) {
+            updateRuntimeStatusDisplay(statusElement, false, null, 'not_configured');
+        } else {
+            updateRuntimeStatusDisplay(statusElement, false, null, 'error');
+        }
+    } catch (error) {
+        updateRuntimeStatusDisplay(statusElement, false, null, 'offline');
+    }
+}
+
+/**
+ * Update runtime status display
+ */
+function updateRuntimeStatusDisplay(element, isProcessing, stats, errorState = null) {
+    const indicator = element.querySelector('.status-indicator');
+    const text = element.querySelector('.status-text');
+
+    if (errorState) {
+        switch (errorState) {
+            case 'offline':
+                indicator.className = 'status-indicator offline';
+                text.textContent = 'Offline';
+                break;
+            case 'error':
+                indicator.className = 'status-indicator error';
+                text.textContent = 'Error';
+                break;
+            case 'not_configured':
+                indicator.className = 'status-indicator stopped';
+                text.textContent = 'Not Active';
+                break;
+        }
+    } else if (isProcessing) {
+        indicator.className = 'status-indicator active';
+        text.textContent = stats ?
+            `Processing (${stats.processedCount || 0} msgs)` : 'Processing';
+    } else {
+        indicator.className = 'status-indicator stopped';
+        text.textContent = 'Stopped';
+    }
+}
+
+/**
+ * Update action button visibility
+ */
+function updateActionButtonsVisibility(interfaceId, isProcessing) {
+    const activateBtn = document.getElementById(`activate-${interfaceId}`);
+    const deactivateBtn = document.getElementById(`deactivate-${interfaceId}`);
+
+    if (activateBtn && deactivateBtn) {
+        if (isProcessing) {
+            activateBtn.style.display = 'none';
+            deactivateBtn.style.display = 'inline-block';
+        } else {
+            activateBtn.style.display = 'inline-block';
+            deactivateBtn.style.display = 'none';
+        }
+    }
+}
+
+/**
+ * Activate interface processing
+ */
+async function activateInterfaceProcessing(interfaceId) {
+    const activateBtn = document.getElementById(`activate-${interfaceId}`);
+    if (activateBtn) {
+        activateBtn.disabled = true;
+        activateBtn.textContent = '⏳';
+    }
+
+    try {
+        console.log(`🚀 Activating interface processing: ${interfaceId}`);
+
+        const response = await fetch(`/api/runtime/interfaces/${interfaceId}/activate`, {
+            method: 'POST',
+            credentials: 'include',
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        });
+
+        const data = await response.json();
+
+        if (response.ok) {
+            console.log('✅ Interface activated:', data.message);
+            showSuccess(`Interface activated successfully`);
+
+            // Immediately update status
+            await updateInterfaceRuntimeStatus(interfaceId);
+        } else {
+            console.error('❌ Activation failed:', data.message);
+            showError(data.message || 'Failed to activate interface');
+        }
+    } catch (error) {
+        console.error('❌ Activation error:', error);
+        showError('Failed to activate interface: ' + error.message);
+    } finally {
+        if (activateBtn) {
+            activateBtn.disabled = false;
+            activateBtn.textContent = '🚀';
+        }
+    }
+}
+
+/**
+ * Deactivate interface processing
+ */
+async function deactivateInterfaceProcessing(interfaceId) {
+    const deactivateBtn = document.getElementById(`deactivate-${interfaceId}`);
+    if (deactivateBtn) {
+        deactivateBtn.disabled = true;
+        deactivateBtn.textContent = '⏳';
+    }
+
+    try {
+        console.log(`⏸️ Deactivating interface processing: ${interfaceId}`);
+
+        const response = await fetch(`/api/runtime/interfaces/${interfaceId}/deactivate`, {
+            method: 'POST',
+            credentials: 'include',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                reason: 'manual_stop'
+            })
+        });
+
+        const data = await response.json();
+
+        if (response.ok) {
+            console.log('✅ Interface deactivated:', data.message);
+            showSuccess(`Interface processing stopped`);
+
+            // Immediately update status
+            await updateInterfaceRuntimeStatus(interfaceId);
+        } else {
+            console.error('❌ Deactivation failed:', data.message);
+            showError(data.message || 'Failed to deactivate interface');
+        }
+    } catch (error) {
+        console.error('❌ Deactivation error:', error);
+        showError('Failed to deactivate interface: ' + error.message);
+    } finally {
+        if (deactivateBtn) {
+            deactivateBtn.disabled = false;
+            deactivateBtn.textContent = '⏸️';
+        }
+    }
+}
+
+/**
+ * Show processing history for interface
+ */
+async function showProcessingHistory(interfaceId) {
+    try {
+        const response = await fetch(`/api/runtime/interfaces/${interfaceId}/history?limit=100`, {
+            method: 'GET',
+            credentials: 'include'
+        });
+
+        if (response.ok) {
+            const data = await response.json();
+            displayProcessingHistoryModal(interfaceId, data.history);
+        } else {
+            showError('Failed to load processing history');
+        }
+    } catch (error) {
+        console.error('❌ History error:', error);
+        showError('Failed to load processing history');
+    }
+}
+
+/**
+ * Display processing history modal
+ */
+function displayProcessingHistoryModal(interfaceId, history) {
+    // Create modal HTML
+    const modal = document.createElement('div');
+    modal.className = 'modal-overlay';
+    modal.innerHTML = `
+        <div class="modal-container processing-history-modal">
+            <div class="modal-header">
+                <h2>Processing History</h2>
+                <button class="close-btn" onclick="this.closest('.modal-overlay').remove()">×</button>
+            </div>
+            <div class="modal-content">
+                <div class="history-stats">
+                    <div class="stat-card">
+                        <div class="stat-number">${history.length}</div>
+                        <div class="stat-label">Total Messages</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-number">${history.filter(h => h.status === 'completed').length}</div>
+                        <div class="stat-label">Successful</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-number">${history.filter(h => h.status === 'failed').length}</div>
+                        <div class="stat-label">Failed</div>
+                    </div>
+                </div>
+                <div class="history-table">
+                    <table class="processing-history-table">
+                        <thead>
+                            <tr>
+                                <th>Message ID</th>
+                                <th>Status</th>
+                                <th>Processing Time</th>
+                                <th>Timestamp</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${history.map(h => `
+                                <tr class="history-row status-${h.status}">
+                                    <td class="message-id">${h.message_id}</td>
+                                    <td class="status">
+                                        <span class="status-badge ${h.status}">${h.status}</span>
+                                    </td>
+                                    <td class="processing-time">${h.transformation_time_ms || 0}ms</td>
+                                    <td class="timestamp">${new Date(h.created_at).toLocaleString()}</td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    `;
+
+    document.body.appendChild(modal);
+}
+
+/**
+ * Reset interface (clear error state)
+ */
+async function resetInterface(interfaceId) {
+    try {
+        console.log(`↻ Resetting interface: ${interfaceId}`);
+
+        const response = await fetch(`/api/interfaces/${interfaceId}`, {
+            method: 'PUT',
+            credentials: 'include',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                status: 'stopped'
+            })
+        });
+
+        if (response.ok) {
+            console.log('✅ Interface reset successfully');
+            showSuccess('Interface reset successfully');
+            await loadInterfaces(); // Refresh the list
+        } else {
+            showError('Failed to reset interface');
+        }
+    } catch (error) {
+        console.error('❌ Reset interface error:', error);
+        showError('Failed to reset interface: ' + error.message);
+    }
+}
+
+// Cleanup on page unload
+window.addEventListener('beforeunload', function() {
+    if (runtimeMonitoringInterval) {
+        clearInterval(runtimeMonitoringInterval);
+    }
 });

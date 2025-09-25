@@ -24,6 +24,7 @@ const sessionAuth = (req, res, next) => {
 router.get('/', sessionAuth, (req, res) => interfacesController.getAllInterfaces(req, res));
 router.post('/', sessionAuth, (req, res) => interfacesController.createInterface(req, res));
 router.get('/:interfaceId', sessionAuth, (req, res) => interfacesController.getInterface(req, res));
+router.put('/:interfaceId', sessionAuth, (req, res) => interfacesController.updateInterface(req, res));
 router.delete('/:interfaceId', sessionAuth, (req, res) => interfacesController.deleteInterface(req, res));
 router.post('/:interfaceId/start', sessionAuth, (req, res) => interfacesController.startInterface(req, res));
 router.post('/:interfaceId/stop', sessionAuth, (req, res) => interfacesController.stopInterface(req, res));
