@@ -19,6 +19,7 @@ type HTTPInputConnector struct {
 	host         string
 	port         int
 	path         string
+	interfaceID  string
 	server       *http.Server
 	router       *gin.Engine
 	messageChan  chan<- Message
@@ -45,6 +46,9 @@ func NewHTTPInputConnector(config map[string]interface{}) (InputConnector, error
 		path = "/fhir" // Default FHIR endpoint
 	}
 
+	// Extract interface_id if provided
+	interfaceID, _ := config["interface_id"].(string)
+
 	// Set up Gin router
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.New()
@@ -54,11 +58,12 @@ func NewHTTPInputConnector(config map[string]interface{}) (InputConnector, error
 		host:         host,
 		port:         int(port),
 		path:         path,
+		interfaceID:  interfaceID,
 		router:       router,
 		lastActivity: time.Now(),
 	}
 
-	fmt.Printf("✅ HTTP input connector initialized: %s:%d%s\n", host, int(port), path)
+	fmt.Printf("✅ HTTP input connector initialized: %s:%d%s (Interface: %s)\n", host, int(port), path, interfaceID)
 	return connector, nil
 }
 
@@ -118,12 +123,15 @@ func (h *HTTPInputConnector) handleMessage(c *gin.Context) {
 
 	// Create message
 	message := Message{
-		ID:        fmt.Sprintf("http-%d", time.Now().UnixNano()),
+		ID:        fmt.Sprintf("http_%d", time.Now().UnixNano()),
 		Content:   string(body),
 		Type:      "FHIR",
-		Source:    c.ClientIP(),
+		Source:    "http",
 		Timestamp: time.Now().Format(time.RFC3339),
 		Metadata: map[string]interface{}{
+			"interface_id": h.interfaceID,
+			"source_address": c.ClientIP(),
+			"message_size": len(body),
 			"method":      c.Request.Method,
 			"path":        c.Request.URL.Path,
 			"headers":     c.Request.Header,

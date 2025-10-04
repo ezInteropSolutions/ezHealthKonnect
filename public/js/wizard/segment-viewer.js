@@ -9,6 +9,14 @@ class SegmentViewer {
         this.expandedFields = new Set();
         this.viewMode = 'compact'; // compact, detailed, table
         this.fieldMetadataCache = new Map(); // Cache for dynamic field metadata
+
+        // Create global references for onclick handlers
+        window.toggleSegmentGlobal = (segName) => this.toggleSegment(segName);
+        window.toggleFieldGlobal = (segName, fieldKey) => this.toggleField(segName, fieldKey);
+        window.setViewModeGlobal = (mode) => this.setViewMode(mode);
+        window.toggleAllSegmentsGlobal = () => this.toggleAllSegments();
+        window.viewSegmentDetailsGlobal = (segName) => this.viewSegmentDetails(segName);
+        console.log('🚀 SegmentViewer global functions created');
     }
 
     /**
@@ -182,9 +190,9 @@ renderCompactHeader(validationErrors, messageType, segments, data) {
                 </div>
             </div>
             <div class="view-controls">
-                <button class="view-btn ${this.viewMode === 'compact' ? 'active' : ''}" onclick="window.wizard.segmentViewer.setViewMode('compact')">Compact</button>
-                <button class="view-btn ${this.viewMode === 'table' ? 'active' : ''}" onclick="window.wizard.segmentViewer.setViewMode('table')">Table</button>
-                <button class="expand-all-btn" onclick="window.wizard.segmentViewer.toggleAllSegments()">
+                <button class="view-btn ${this.viewMode === 'compact' ? 'active' : ''}" onclick="console.log('🔥 View mode compact clicked'); window.setViewModeGlobal('compact')">Compact</button>
+                <button class="view-btn ${this.viewMode === 'table' ? 'active' : ''}" onclick="console.log('🔥 View mode table clicked'); window.setViewModeGlobal('table')">Table</button>
+                <button class="expand-all-btn" onclick="console.log('🔥 Expand all clicked'); window.toggleAllSegmentsGlobal()">
                     ${hasExpandedImportant ? 'Collapse Key' : 'Expand Key'}
                 </button>
             </div>
@@ -305,7 +313,7 @@ renderCompactHeader(validationErrors, messageType, segments, data) {
 
         return `
             <div class="segment-compact ${hasIssues ? 'has-issues' : ''} ${isExpanded ? 'expanded' : ''} ${missingRequiredFields.length > 0 ? 'has-missing-required' : ''}">
-                <div class="segment-row" onclick="window.wizard.segmentViewer.toggleSegment('${segName}')">
+                <div class="segment-row" onclick="console.log('🔥 Click detected for segment:', '${segName}'); window.toggleSegmentGlobal('${segName}')">
                     <div class="segment-info">
                         <div class="segment-name-badge">
                             <span class="seg-name">${segName}</span>
@@ -466,7 +474,7 @@ renderCompactHeader(validationErrors, messageType, segments, data) {
         const keyFields = this.getKeyFields(segName, segment);
 
         return `
-            <tr class="segment-table-row ${hasIssues ? 'has-issues' : ''}" onclick="window.wizard.segmentViewer.viewSegmentDetails('${segName}')">
+            <tr class="segment-table-row ${hasIssues ? 'has-issues' : ''}" onclick="window.viewSegmentDetailsGlobal('${segName}')">
                 <td class="seg-name-cell">
                     <span class="seg-name">${segName}</span>
                     ${this.renderDynamicBadges(segName, segment, segmentErrors)}
@@ -481,7 +489,7 @@ renderCompactHeader(validationErrors, messageType, segments, data) {
                 </td>
                 <td class="key-values-cell">${keyFields.join(', ')}</td>
                 <td class="actions-cell">
-                    <button class="action-btn" onclick="event.stopPropagation(); window.wizard.segmentViewer.viewSegmentDetails('${segName}')">
+                    <button class="action-btn" onclick="event.stopPropagation(); window.viewSegmentDetailsGlobal('${segName}')">
                         <span>👁️</span> View Details
                     </button>
                 </td>
@@ -577,22 +585,24 @@ renderCompactHeader(validationErrors, messageType, segments, data) {
 
         return `
             <div class="field-compact ${hasIssues ? 'has-issues' : ''} ${isMissingRequired ? 'missing-required' : ''} ${isEmptyRequired ? 'empty-required' : ''} ${isRequired ? 'required-field' : ''}" 
-                 onclick="window.wizard.segmentViewer.toggleField('${segName}', '${field.key}')">
+                 onclick="console.log('🔥 Field click:', '${segName}', '${field.key}'); window.toggleFieldGlobal('${segName}', '${field.key}')">
                 <div class="field-header-compact">
                     <div class="field-label">
                         <span class="field-key">${field.key}</span>
                         ${isRequired ? '<span class="required-indicator">*</span>' : ''}
                         <span class="field-name">${this.truncateText(field.name || `Field ${field.position}`, 25)}</span>
+                        <span class="data-type-badge">${field.dataType || 'ST'}</span>
                         ${isMissingRequired ? '<span class="missing-required-icon" title="Required field is missing">❌</span>' : ''}
                         ${isEmptyRequired ? '<span class="empty-required-icon" title="Required field is empty">⚠️</span>' : ''}
                         ${hasIssues && !isMissingRequired && !isEmptyRequired ? '<span class="field-error-icon">!</span>' : ''}
                     </div>
                     <div class="field-value-preview">
-                        ${field.hasValue ? 
+                        ${field.hasValue ?
                             `<span class="value-text">${this.truncateValue(field.value, 35)}</span>` :
                             `<span class="no-value ${isMissingRequired || isEmptyRequired ? 'missing-required-value' : ''}">—</span>`
                         }
-                        ${field.dataType && field.dataType !== 'ST' ? `<span class="data-type">(${field.dataType})</span>` : ''}
+                        ${field.length ? `<span class="field-length">[${field.length}]</span>` : ''}
+                        ${field.tableId ? `<span class="table-id-badge">T${field.tableId}</span>` : ''}
                     </div>
                 </div>
                 
@@ -707,9 +717,7 @@ renderCompactHeader(validationErrors, messageType, segments, data) {
                         <span class="subfield-value ${isEmpty ? 'empty-value' : ''}">
                             ${subfield.hasValue ? this.escapeHtml(this.truncateValue(subfield.value, 20)) : '—'}
                         </span>
-                        ${subfield.dataType && subfield.dataType !== 'ST' ? 
-                            `<span class="subfield-datatype">(${subfield.dataType})</span>` : ''
-                        }
+                        <span class="subfield-datatype-badge">${subfield.dataType || 'ST'}</span>
                     </div>
                     
                     <span class="subfield-expand-indicator">▼</span>
@@ -828,18 +836,24 @@ renderCompactHeader(validationErrors, messageType, segments, data) {
      * ✅ DYNAMIC: Render table values if available from API data
      */
     renderTableValues(subfield) {
-        // ✅ NOTE: This could be enhanced to connect to actual table definitions from the API
-        // For now, we show the table ID and current value
-        if (subfield.tableId && subfield.value) {
-            return `
-                <div class="table-values">
+        if (!subfield.tableId) return '';
+
+        return `
+            <div class="table-values">
+                ${subfield.value ? `
                     <span class="table-value current-value">
-                        Current: ${subfield.value}
+                        Current: <strong>${subfield.value}</strong>
                     </span>
-                </div>
-            `;
-        }
-        return '';
+                ` : `
+                    <span class="table-value no-value">
+                        No value set
+                    </span>
+                `}
+                <span class="table-reference">
+                    📋 HL7 Table ${subfield.tableId}
+                </span>
+            </div>
+        `;
     }
 
     /**
@@ -926,12 +940,18 @@ renderCompactHeader(validationErrors, messageType, segments, data) {
      * Toggle segment expansion
      */
     toggleSegment(segName) {
+        console.log('🔄 toggleSegment called for:', segName);
+        console.log('🔍 Current expanded segments:', Array.from(this.expandedSegments));
+
         if (this.expandedSegments.has(segName)) {
             this.expandedSegments.delete(segName);
+            console.log('📤 Collapsed segment:', segName);
         } else {
             this.expandedSegments.add(segName);
+            console.log('📥 Expanded segment:', segName);
         }
-        
+
+        console.log('🔍 New expanded segments:', Array.from(this.expandedSegments));
         this.refreshView();
     }
 

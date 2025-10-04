@@ -10,7 +10,7 @@
     <link rel="stylesheet" href="css/interfaces.css">
     <link rel="stylesheet" href="css/interface-wizard.css">
     <link rel="stylesheet" href="css/segment-viewer.css">
-    
+
     <!-- NEW: Extracted CSS Files -->
     <link rel="stylesheet" href="css/components/interface-cards.css">
     <link rel="stylesheet" href="css/components/wizard-modal.css">
@@ -18,6 +18,9 @@
     <link rel="stylesheet" href="css/components/enhanced-modal.css">
     <link rel="stylesheet" href="css/components/modal-fix.css">
     <link rel="stylesheet" href="css/layout/main-layout.css">
+
+    <!-- OPTIMIZED WIZARD: New MVC wizard system -->
+    <link rel="stylesheet" href="css/wizard-optimized.css">
 </head>
 <body>
     <div class="dashboard-container">
@@ -179,6 +182,7 @@
     </div>
 
     <!-- EXISTING JavaScript Dependencies (DO NOT CHANGE ORDER) -->
+    <script src="js/core/env-config.js"></script>
 
     <script src="js/components/interface-handlers.js"></script>
     <script src="js/interfaces.js"></script>
@@ -197,10 +201,19 @@
     
     <!-- PRESERVED: Core wizard functions (MUST STAY GLOBAL) -->
     <script src="js/core/wizard-functions.js"></script>
-    <!-- Note: wizard-config-integration.js removed to avoid InterfaceConfigManager conflict -->
-<script src="/js/step4-complete-integration.js"></script>
-<script src="/js/step5-summary-fix.js"></script>
-<script src="/js/wizard-modal-close-fix.js"></script>
+
+    <!-- OPTIMIZED WIZARD: New MVC system -->
+    <script src="js/wizard/optimized/WizardModel.js"></script>
+    <script src="js/wizard/optimized/WizardView.js"></script>
+    <script src="js/wizard/optimized/WizardController.js"></script>
+    <script src="js/wizard/optimized/WizardFHIRTransform.js"></script>
+    <script src="js/wizard/wizard-optimized-integration.js"></script>
+
+    <!-- LEGACY: Keep as fallback (but optimized wizard takes priority) -->
+    <script src="js/wizard-config-integration.js"></script>
+    <script src="/js/step4-complete-integration.js"></script>
+    <script src="/js/step5-summary-fix.js"></script>
+    <script src="/js/wizard-modal-close-fix.js"></script>
 
 </body>
 </html>

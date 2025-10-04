@@ -16,7 +16,7 @@ RUN npm install --only=production && go mod download
 COPY . .
 
 # Build Go app with different name to avoid conflict
-RUN go build -o go-api main.go
+RUN go mod tidy && go build -o go-api main.go
 
 # Expose ports
 EXPOSE 3000 8080

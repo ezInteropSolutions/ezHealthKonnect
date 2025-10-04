@@ -2,18 +2,19 @@ package services
 
 import (
 	"database/sql"
-	"ezhealthkonnect/processing"
+	// TODO: Temporarily commented to avoid import cycle - uncomment when needed
+	// "ezhealthkonnect/processing"
 )
 
 // MigrationService handles PostgreSQL to MongoDB migration
 type MigrationService struct {
 	pgDB          *sql.DB
-	configManager *processing.ConfigurationManager
+	configManager interface{} // TODO: temporarily changed from *processing.ConfigurationManager
 	dryRun        bool
 }
 
 // NewMigrationService creates a new migration service
-func NewMigrationService(pgDB *sql.DB, configManager *processing.ConfigurationManager, dryRun bool) *MigrationService {
+func NewMigrationService(pgDB *sql.DB, configManager interface{}, dryRun bool) *MigrationService {
 	return &MigrationService{
 		pgDB:          pgDB,
 		configManager: configManager,

@@ -171,6 +171,7 @@ class WizardController {
             console.log('\n=== OPTIMIZED WIZARD COMPLETION ===');
             console.log('User:', userEmail);
             console.log('Interface name:', wizardData?.name);
+            console.log('Wizard data structure:', Object.keys(wizardData));
 
             // Validate required data
             if (!wizardData || !wizardData.name) {
@@ -178,6 +179,17 @@ class WizardController {
                     success: false,
                     error: 'Invalid wizard data: name is required'
                 });
+            }
+
+            // Handle both legacy and optimized wizard data formats
+            const isOptimizedFormat = wizardData.mappings && Array.isArray(wizardData.mappings);
+
+            if (isOptimizedFormat) {
+                console.log('📱 Processing optimized wizard format');
+                return await this.handleOptimizedWizard(req, res, wizardData, userId, userEmail);
+            } else {
+                console.log('🔧 Processing legacy wizard format');
+                // Continue with existing logic for legacy format
             }
 
             // Extract and clean mapping data
@@ -846,6 +858,264 @@ class WizardController {
         return wizardData.fhirTransformResult ||
                wizardData.transformationData?.fhirTransformResult ||
                null;
+    }
+
+    /**
+     * Get mapping templates for optimized wizard
+     */
+    async getMappingTemplates(req, res) {
+        try {
+            console.log('📋 Fetching mapping templates for optimized wizard');
+
+            // Get templates from the model's OOB templates
+            const oobTemplates = {
+                adt_a01_basic: {
+                    name: 'ADT^A01 - Patient Admission',
+                    messageType: 'ADT^A01',
+                    description: 'Standard patient admission message mapping',
+                    mappings: [
+                        { hl7Path: 'MSH.3', fhirPath: 'MessageHeader.source.name', required: true },
+                        { hl7Path: 'MSH.4', fhirPath: 'MessageHeader.source.endpoint', required: true },
+                        { hl7Path: 'PID.3', fhirPath: 'Patient.identifier[0].value', required: true },
+                        { hl7Path: 'PID.5.1', fhirPath: 'Patient.name[0].family', required: true },
+                        { hl7Path: 'PID.5.2', fhirPath: 'Patient.name[0].given[0]', required: true },
+                        { hl7Path: 'PID.7', fhirPath: 'Patient.birthDate', required: false },
+                        { hl7Path: 'PID.8', fhirPath: 'Patient.gender', required: false },
+                        { hl7Path: 'PV1.2', fhirPath: 'Encounter.class.code', required: true },
+                        { hl7Path: 'PV1.3', fhirPath: 'Encounter.location[0].location.reference', required: false }
+                    ]
+                },
+                oru_r01_basic: {
+                    name: 'ORU^R01 - Lab Results',
+                    messageType: 'ORU^R01',
+                    description: 'Standard lab results message mapping',
+                    mappings: [
+                        { hl7Path: 'MSH.3', fhirPath: 'MessageHeader.source.name', required: true },
+                        { hl7Path: 'PID.3', fhirPath: 'Patient.identifier[0].value', required: true },
+                        { hl7Path: 'PID.5.1', fhirPath: 'Patient.name[0].family', required: true },
+                        { hl7Path: 'PID.5.2', fhirPath: 'Patient.name[0].given[0]', required: true },
+                        { hl7Path: 'OBR.4.1', fhirPath: 'DiagnosticReport.code.coding[0].code', required: true },
+                        { hl7Path: 'OBX.3.1', fhirPath: 'Observation.code.coding[0].code', required: true },
+                        { hl7Path: 'OBX.5', fhirPath: 'Observation.valueString', required: true },
+                        { hl7Path: 'OBX.6', fhirPath: 'Observation.valueQuantity.unit', required: false }
+                    ]
+                },
+                adt_a03_basic: {
+                    name: 'ADT^A03 - Patient Discharge',
+                    messageType: 'ADT^A03',
+                    description: 'Standard patient discharge message mapping',
+                    mappings: [
+                        { hl7Path: 'MSH.3', fhirPath: 'MessageHeader.source.name', required: true },
+                        { hl7Path: 'PID.3', fhirPath: 'Patient.identifier[0].value', required: true },
+                        { hl7Path: 'PID.5.1', fhirPath: 'Patient.name[0].family', required: true },
+                        { hl7Path: 'PV1.36', fhirPath: 'Encounter.hospitalization.dischargeDisposition.coding[0].code', required: false },
+                        { hl7Path: 'PV1.45', fhirPath: 'Encounter.period.end', required: true }
+                    ]
+                }
+            };
+
+            res.json({
+                success: true,
+                templates: oobTemplates
+            });
+
+        } catch (error) {
+            console.error('❌ Failed to get mapping templates:', error);
+            res.status(500).json({
+                success: false,
+                error: 'Failed to load mapping templates'
+            });
+        }
+    }
+
+    /**
+     * Validate final configuration before interface creation
+     */
+    async validateFinalConfig(req, res) {
+        try {
+            const config = req.body;
+            console.log('🔍 Validating final configuration for interface creation');
+
+            const validation = {
+                isValid: true,
+                errors: [],
+                warnings: []
+            };
+
+            // Required field validation
+            if (!config.name || config.name.trim().length < 3) {
+                validation.errors.push('Interface name must be at least 3 characters');
+                validation.isValid = false;
+            }
+
+            if (!config.sourceType) {
+                validation.errors.push('Source type is required');
+                validation.isValid = false;
+            }
+
+            if (!config.targetType) {
+                validation.errors.push('Target type is required');
+                validation.isValid = false;
+            }
+
+            if (!config.messageType) {
+                validation.errors.push('Message type is required');
+                validation.isValid = false;
+            }
+
+            // Configuration validation
+            if (config.sourceConnectivity === 'tcp') {
+                if (!config.sourceConfig?.host) {
+                    validation.errors.push('Host is required for TCP connectivity');
+                    validation.isValid = false;
+                }
+                if (!config.sourceConfig?.port || config.sourceConfig.port < 1 || config.sourceConfig.port > 65535) {
+                    validation.errors.push('Valid port number (1-65535) is required');
+                    validation.isValid = false;
+                }
+            }
+
+            if (config.targetConnectivity === 'http') {
+                if (!config.targetConfig?.endpoint) {
+                    validation.errors.push('FHIR endpoint URL is required');
+                    validation.isValid = false;
+                } else {
+                    try {
+                        new URL(config.targetConfig.endpoint);
+                    } catch {
+                        validation.errors.push('Valid URL format required for FHIR endpoint');
+                        validation.isValid = false;
+                    }
+                }
+            }
+
+            // Mapping validation
+            if (!config.mappingTemplate && (!config.customMappings || config.customMappings.length === 0)) {
+                validation.errors.push('Either select a template or create custom mappings');
+                validation.isValid = false;
+            }
+
+            // Check for duplicate name
+            try {
+                const userId = req.session.user?.id;
+                if (userId) {
+                    const isDuplicate = await interfaceService.checkDuplicateName(config.name.trim(), userId);
+                    if (isDuplicate) {
+                        validation.errors.push(`Interface name "${config.name.trim()}" already exists. Please choose a different name.`);
+                        validation.isValid = false;
+                    }
+                }
+            } catch (error) {
+                console.warn('Could not check for duplicate name:', error.message);
+                validation.warnings.push('Could not verify name uniqueness');
+            }
+
+            res.json({
+                success: true,
+                validation: validation
+            });
+
+        } catch (error) {
+            console.error('❌ Configuration validation failed:', error);
+            res.status(500).json({
+                success: false,
+                error: 'Failed to validate configuration'
+            });
+        }
+    }
+
+    /**
+     * Handle optimized wizard format from MVC wizard system
+     */
+    async handleOptimizedWizard(req, res, wizardData, userId, userEmail) {
+        try {
+            console.log('🚀 Processing optimized wizard data');
+
+            // Build interface data from optimized format
+            const interfaceData = {
+                name: wizardData.name,
+                description: wizardData.description || `HL7 to FHIR interface for ${wizardData.name}`,
+                sourceType: wizardData.sourceType || 'hl7v2',
+                sourceConnectivity: wizardData.sourceConnectivity || 'tcp',
+                sourceConfig: wizardData.sourceConfig || {},
+                targetType: wizardData.targetType || 'fhir',
+                targetConnectivity: wizardData.targetConnectivity || 'http',
+                targetConfig: wizardData.targetConfig || {},
+                messageType: wizardData.messageType || 'ADT^A01',
+                mappings: wizardData.mappings || wizardData.customMappings || [],
+                status: wizardData.status || 'active'
+            };
+
+            console.log('Creating interface with optimized data:', {
+                name: interfaceData.name,
+                messageType: interfaceData.messageType,
+                mappingsCount: wizardData.mappings?.length || 0
+            });
+
+            // Create the interface using the service
+            const result = await interfaceService.createInterface(interfaceData, userId);
+            const createdInterface = result.interface || result;
+            const interfaceId = result.interfaceId || createdInterface.id;
+            console.log('✅ Interface created successfully:', interfaceId);
+
+            // Store message-type-specific mappings if provided
+            if (wizardData.mappings && Array.isArray(wizardData.mappings) && wizardData.mappings.length > 0) {
+                try {
+                    console.log(`📋 Storing ${wizardData.mappings.length} mappings for message type ${wizardData.messageType}`);
+
+                    await this.mappingService.storeInterfaceMessageMapping(
+                        interfaceId,
+                        wizardData.messageType || 'ADT^A01',
+                        wizardData.mappings,
+                        {
+                            templateUsed: wizardData.templateUsed,
+                            createdBy: userEmail,
+                            customTemplate: !wizardData.templateUsed // true if custom mappings
+                        }
+                    );
+
+                    console.log('✅ Message-type mappings stored successfully');
+                } catch (mappingError) {
+                    console.error('⚠️ Failed to store mappings (interface still created):', mappingError);
+                }
+            }
+
+            // Log audit trail
+            await auditService.logActivity({
+                userId: userId,
+                action: 'interface_created',
+                resource: 'Interface',
+                resourceId: interfaceId,
+                details: `Interface '${wizardData.name}' created via optimized wizard`,
+                metadata: {
+                    wizardType: 'optimized',
+                    messageType: wizardData.messageType,
+                    mappingsCount: wizardData.mappings?.length || 0
+                }
+            });
+
+            console.log('✅ Optimized wizard completion successful');
+
+            res.json({
+                success: true,
+                interfaceId: interfaceId,
+                interface: {
+                    id: interfaceId,
+                    name: createdInterface.name || wizardData.name,
+                    description: createdInterface.description || wizardData.description,
+                    messageType: createdInterface.message_type || wizardData.messageType,
+                    status: createdInterface.status || wizardData.status,
+                    mappingsCount: wizardData.mappings?.length || 0
+                }
+            });
+
+        } catch (error) {
+            console.error('❌ Optimized wizard completion failed:', error);
+            res.status(500).json({
+                success: false,
+                error: error.message || 'Failed to create interface'
+            });
+        }
     }
 }
 

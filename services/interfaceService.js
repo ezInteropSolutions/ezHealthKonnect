@@ -20,12 +20,40 @@ class InterfaceService {
         console.log('Database object exists:', !!this.database);
         console.log('Database models exist:', !!this.database?.models);
         console.log('Interface model exists:', !!this.database?.models?.Interface);
-        
+
         if (this.database?.sequelize) {
             console.log('Sequelize instance exists:', !!this.database.sequelize);
             console.log('Database name:', this.database.sequelize.getDatabaseName());
         } else {
             console.warn('⚠️ No Sequelize instance found');
+        }
+    }
+
+    /**
+     * Ensure database connection and models are initialized
+     */
+    async ensureDatabaseConnection() {
+        try {
+            // If not connected, connect now
+            if (!this.database.isConnected || !this.database.models.Interface) {
+                console.log('🔗 Database not connected, connecting now...');
+                await this.database.connect();
+
+                if (!this.database.isConnected) {
+                    throw new Error('Failed to establish database connection');
+                }
+
+                if (!this.database.models.Interface) {
+                    throw new Error('Interface model not available after connection');
+                }
+
+                console.log('✅ Database connection established and models loaded');
+            } else {
+                console.log('✅ Database already connected');
+            }
+        } catch (error) {
+            console.error('❌ Failed to ensure database connection:', error);
+            throw error;
         }
     }
 
@@ -42,6 +70,10 @@ class InterfaceService {
         });
 
         try {
+            // Step 0: Ensure database is connected and models are initialized
+            console.log('Step 0: Ensuring database connection...');
+            await this.ensureDatabaseConnection();
+
             // Step 1: Check database availability
             console.log('Step 1: Checking database models...');
             if (!this.database) {
@@ -107,7 +139,18 @@ class InterfaceService {
                 status: interfaceRecord.status
             });
 
-            // Step 4: Return result
+            // Step 4: Initialize interface tables (OOB requirement)
+            console.log('Step 4: Initializing interface tables (OOB)...');
+            try {
+                await this.initializeInterfaceTables(interfaceRecord.id, interfaceRecord.name);
+                console.log('✅ Interface tables initialized');
+            } catch (tableError) {
+                console.warn('⚠️ Failed to initialize tables (will retry on first message):', tableError.message);
+                // Don't fail interface creation if table creation fails
+                // Tables will be created on first message if needed
+            }
+
+            // Step 5: Return result
             const result = {
                 interfaceId: interfaceRecord.id,
                 interface: interfaceRecord.toJSON()
@@ -152,7 +195,10 @@ class InterfaceService {
     async checkDuplicateName(name, userId) {
         try {
             console.log(`🔍 Checking duplicate name "${name}" for user ${userId}`);
-            
+
+            // Ensure database connection
+            await this.ensureDatabaseConnection();
+
             if (!this.database || !this.database.models || !this.database.models.Interface) {
                 console.warn('⚠️ Database models not available, assuming name is unique');
                 return null;
@@ -286,6 +332,125 @@ class InterfaceService {
             console.error('Error getting user interfaces:', error);
             return { interfaces: [], pagination: { totalCount: 0 } };
         }
+    }
+
+    /**
+     * Initialize interface tables (OOB requirement)
+     * Creates input and output tables when interface is created
+     */
+    async initializeInterfaceTables(interfaceId, interfaceName) {
+        console.log(`🏗️ Initializing tables for interface: ${interfaceName} (${interfaceId})`);
+
+        try {
+            // Generate table names
+            const inputTableName = `messages_intf_${interfaceId.replace(/-/g, '_')}`;
+            const outputTableName = `output_intf_${interfaceId.replace(/-/g, '_')}`;
+
+            // Create input table (for received messages)
+            await this.createInputTable(inputTableName, interfaceId);
+
+            // Create output table (for transformed/delivered messages)
+            await this.createOutputTable(outputTableName, interfaceId);
+
+            console.log(`✅ Tables created: ${inputTableName}, ${outputTableName}`);
+            return { inputTableName, outputTableName };
+
+        } catch (error) {
+            console.error(`❌ Failed to initialize tables for interface ${interfaceId}:`, error);
+            throw error;
+        }
+    }
+
+    /**
+     * Create input message table
+     */
+    async createInputTable(tableName, interfaceId) {
+        const createTableSQL = `
+            CREATE TABLE IF NOT EXISTS ${tableName} (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                message_id VARCHAR(255) NOT NULL,
+                correlation_id VARCHAR(255),
+                interface_id UUID NOT NULL,
+                status VARCHAR(50) DEFAULT 'received',
+                priority INTEGER DEFAULT 5,
+                received_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                source_type VARCHAR(50),
+                source_endpoint VARCHAR(255),
+                source_ip VARCHAR(45),
+                message_type VARCHAR(100),
+                message_size INTEGER,
+                message_encoding VARCHAR(50) DEFAULT 'UTF-8',
+                raw_message TEXT,
+                processing_completed_at TIMESTAMP WITH TIME ZONE,
+                processing_time_ms BIGINT,
+                error_count INTEGER DEFAULT 0,
+                last_error_message TEXT,
+                delivery_status VARCHAR(50) DEFAULT 'pending',
+                delivery_attempts INTEGER DEFAULT 0,
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+            );
+        `;
+
+        const createIndexes = [
+            `CREATE INDEX IF NOT EXISTS idx_${tableName}_message_id ON ${tableName}(message_id);`,
+            `CREATE INDEX IF NOT EXISTS idx_${tableName}_received_at ON ${tableName}(received_at DESC);`,
+            `CREATE INDEX IF NOT EXISTS idx_${tableName}_status ON ${tableName}(status);`
+        ];
+
+        const registerMetadata = `
+            INSERT INTO interface_table_metadata (interface_id, table_name, created_at)
+            VALUES ($1, $2, CURRENT_TIMESTAMP)
+            ON CONFLICT (interface_id) DO UPDATE SET
+                table_name = $2, updated_at = CURRENT_TIMESTAMP;
+        `;
+
+        await this.database.sequelize.query(createTableSQL);
+        for (const indexSQL of createIndexes) {
+            await this.database.sequelize.query(indexSQL);
+        }
+        await this.database.sequelize.query(registerMetadata, {
+            bind: [interfaceId, tableName]
+        });
+
+        console.log(`✅ Input table created: ${tableName}`);
+    }
+
+    /**
+     * Create output message table
+     */
+    async createOutputTable(tableName, interfaceId) {
+        const createTableSQL = `
+            CREATE TABLE IF NOT EXISTS ${tableName} (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                message_id VARCHAR(255) NOT NULL,
+                interface_id UUID NOT NULL,
+                status VARCHAR(50) DEFAULT 'pending',
+                transformed_content TEXT,
+                delivery_status VARCHAR(50) DEFAULT 'pending',
+                delivery_attempts INTEGER DEFAULT 0,
+                last_delivery_error TEXT,
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                delivered_at TIMESTAMP WITH TIME ZONE
+            );
+        `;
+
+        const createIndex = `CREATE INDEX IF NOT EXISTS idx_${tableName}_message_id ON ${tableName}(message_id);`;
+
+        const registerMetadata = `
+            INSERT INTO output_table_metadata (interface_id, table_name, created_at)
+            VALUES ($1, $2, CURRENT_TIMESTAMP)
+            ON CONFLICT (interface_id) DO UPDATE SET
+                table_name = $2, updated_at = CURRENT_TIMESTAMP;
+        `;
+
+        await this.database.sequelize.query(createTableSQL);
+        await this.database.sequelize.query(createIndex);
+        await this.database.sequelize.query(registerMetadata, {
+            bind: [interfaceId, tableName]
+        });
+
+        console.log(`✅ Output table created: ${tableName}`);
     }
 }
 

@@ -282,3 +282,270 @@ node tests/wizard-save-test.js
 - **Interface Cards**: Each interface has a "View Messages" button (💬) linking to its message viewer
 - **URL Format**: `messages.html?interfaceId={interfaceId}` for interface-specific viewing
 - **No Global View**: Users must select an interface to view messages
+## JSON Conversion Pipeline (V19 - October 2025)
+
+### Overview
+Automatic JSON conversion system that converts all incoming messages to structured JSON as the first transformation step. Preserves full enhanced schema from HL7 parser.
+
+### Architecture
+- **Pattern**: MVC + OOB (Out-of-Box)
+- **Storage**: Hybrid (PostgreSQL metadata + MongoDB full content)
+- **Processing**: Asynchronous goroutine-based
+- **Code Reuse**: 100% reuse of existing `hl7.ParseWithRealSchema()`
+
+### Key Components
+```
+models/parser_models.go              # Data models
+services/format_detector.go          # Auto-detect message format
+services/parser_factory.go           # Parser registry (factory pattern)
+services/message_parser_service.go   # Main orchestrator
+services/parsers/hl7_parser_service.go  # HL7 adapter (wraps existing parser)
+processing/engine.go                 # Async conversion trigger
+```
+
+### Data Flow
+```
+Message Received
+    ↓
+Store Raw (PostgreSQL + MongoDB)
+    ↓
+Async Trigger: go pe.convertToJSON()
+    ↓
+Auto-detect Format → Get Parser → Parse to JSON
+    ↓
+Store Enhanced Schema in MongoDB (parsed_content field)
+    ↓
+Update PostgreSQL (parsing_status, parsed_at, parsing_time_ms)
+    ↓
+Ready for Transformation Pipeline
+```
+
+### MongoDB Storage Structure
+```javascript
+// Collection: raw_messages_intf_<interface-id>
+{
+  message_id: "tcp_...",
+  raw_content: "MSH|^~\&|...",  // Original HL7
+  
+  parsed_content: {  // FULL ENHANCED SCHEMA
+    enhancedSegments: {
+      "MSH": {
+        key: "MSH",
+        name: "Message Header",
+        fields: [
+          {
+            key: "MSH.3",
+            name: "Sending Application",
+            value: "...",
+            position: 3,
+            dataType: "HD",
+            description: "...",
+            subfields: [...]
+          }
+        ]
+      },
+      "PID": {...},
+      "PV1": {...}
+    },
+    segmentOrder: ["MSH", "PID", "PV1"],
+    messageType: { code: "ADT", event: "A01", ... },
+    version: "2.5",
+    dictionaryUsed: true,
+    schemaLoaded: true,
+    validationErrors: []
+  },
+  
+  parsed_at: ISODate("..."),
+  parsing_time_ms: 125,
+  parsed_format: "hl7v2"
+}
+```
+
+### PostgreSQL Tracking
+```sql
+-- Table: messages_intf_<interface-id>
+-- V19 Migration added columns:
+parsed_at TIMESTAMP WITH TIME ZONE
+parsing_status VARCHAR(50)
+parsing_time_ms INTEGER
+parsing_error TEXT
+```
+
+### OOB Initialization
+```go
+// processing/engine.go
+func NewProcessingEngine(db *sql.DB) *ProcessingEngine {
+    // Auto-detect MongoDB from environment
+    mongoService, err := services.NewMongoDBConnectionService()
+    
+    if err == nil {
+        // Hybrid storage with parser service
+        return createHybridStorageEngine(db, mongoService)
+    }
+    
+    // Fallback to PostgreSQL-only
+    return createPostgreSQLOnlyEngine(db)
+}
+```
+
+### Verification
+```bash
+# Check parser initialized
+docker-compose logs app | grep "Parser Service initialized"
+
+# Watch JSON conversion
+docker-compose logs -f app | grep "JSON conversion"
+
+# Query parsed JSON
+docker-compose exec mongodb mongosh ezhealthkonnect
+db.getCollection('raw_messages_intf_<id>').findOne(
+  { parsed_content: { $exists: true } },
+  { 'parsed_content.enhancedSegments': 1 }
+)
+```
+
+### Migration Status
+- **Migration**: V19__Add_Parsing_Columns.sql
+- **Applied**: Via Flyway on container startup
+- **Tracked**: flyway_schema_history table
+- **Status**: ✅ Production Ready
+
+### Documentation
+- **Master Reference**: [SYSTEM_DOCUMENTATION.md](SYSTEM_DOCUMENTATION.md) - Complete consolidated system documentation
+- **Architecture Details**: [JSON_CONVERSION_ARCHITECTURE.md](JSON_CONVERSION_ARCHITECTURE.md)
+- **Transformation Pipeline**: [TRANSFORMATION_PIPELINE_DESIGN.md](TRANSFORMATION_PIPELINE_DESIGN.md)
+- **Hybrid Storage**: [HYBRID_STORAGE_ARCHITECTURE.md](HYBRID_STORAGE_ARCHITECTURE.md)
+- **Scalability Design**: [SCALABILITY_AND_GUI_DESIGN.md](SCALABILITY_AND_GUI_DESIGN.md)
+
+
+## Transformation Pipeline Architecture (Design Phase - October 2025)
+
+### Overview
+Flexible, user-configurable transformation pipeline that applies business logic to parsed JSON messages in a user-defined sequence.
+
+### Three-Layer Model
+```
+Layer 1: System Transformations (Auto) - JSON conversion ✅ Complete
+Layer 2: Pre-Processing (User-defined) - Validation, enrichment, custom logic
+Layer 3: Core Mapping (Template-based) - HL7→FHIR using stored mappings
+Layer 4: Post-Processing (User-defined) - FHIR validation, anonymization
+```
+
+### How Mappings Get Applied
+```
+1. Message arrives with message_type (e.g., "ADT^A01")
+2. Lookup pipeline: WHERE interface_id AND message_type
+3. Execute steps in sequence order (10, 20, 100, 200, ...)
+4. Each step can be:
+   - Built-in executor (validation, enrichment)
+   - Template-based (reusable with parameters)
+   - Custom JavaScript (user-defined logic)
+```
+
+### User-Defined Logic Support
+
+**JavaScript Example**:
+```javascript
+function transform(input) {
+    var pid = input.enhancedSegments.PID;
+    if (pid.fields.find(f => f.key === "PID.5").value.includes("VIP")) {
+        input._metadata.priority = "high";
+    }
+    return input;
+}
+```
+
+**Stored in Database**:
+```sql
+transformation_steps table:
+- pipeline_id (which interface + message type)
+- sequence (execution order: 10, 20, 30, ...)
+- step_type (validation, enrichment, mapping, custom)
+- script_content (JavaScript code)
+- config (step-specific parameters)
+```
+
+### Sequence Management
+
+**Sequence Rules**:
+- Lower number = earlier execution
+- Ranges: 1-99 (pre), 100-199 (core), 200-299 (post)
+- Dependencies: Step B waits for Step A via `depends_on_steps` array
+
+**Example Pipeline**:
+```
+Seq 10:  Validate Patient ID (required)
+Seq 20:  Enrich from Epic API
+Seq 50:  Custom VIP detection (JavaScript)
+Seq 100: Apply HL7→FHIR template (core mapping)
+Seq 200: Validate FHIR bundle
+Seq 210: Anonymize PHI (custom JavaScript)
+```
+
+### Database Schema (V20 - Planned)
+
+**New Tables**:
+- `transformation_pipelines` - Pipeline configuration per interface + message type
+- `transformation_steps` - Individual steps with sequence, type, config
+- `transformation_executions` - Execution history and audit trail
+- `transformation_step_executions` - Detailed step-by-step tracking
+- `transformation_templates` - Reusable step templates
+
+### Integration with Existing System
+
+**Trigger Point** (processing/engine.go):
+```go
+// After JSON conversion completes
+if result.Success {
+    go pe.executeTransformationPipeline(
+        messageID,
+        interfaceID,
+        result.ParsedJSON,
+        result.Metadata.MessageType,
+    )
+}
+```
+
+**Data Flow**:
+```
+Parsed JSON (from MongoDB)
+    ↓
+Get Pipeline (transformation_pipelines)
+    ↓
+Execute Steps in Sequence (transformation_steps)
+    ↓
+Store Transformed Output (MongoDB: transformed_content)
+    ↓
+Deliver to Destination
+```
+
+### Implementation Status
+
+**Current**: Design Phase
+**Timeline**: 6-8 weeks estimated
+**Dependencies**: JSON Conversion Pipeline ✅ Complete
+
+**Next Steps**:
+1. Create V20 database migration (5 new tables)
+2. Implement TransformationPipelineService (execution engine)
+3. Add JavaScript runtime support (goja library)
+4. Build management API endpoints
+5. Design drag-and-drop UI for pipeline builder
+
+## Master Documentation
+
+### Primary References
+- 📚 **[SYSTEM_DOCUMENTATION.md](SYSTEM_DOCUMENTATION.md)** - Complete consolidated reference (all architecture, APIs, schemas)
+- 🤖 **[CLAUDE.md](CLAUDE.md)** - AI assistant project guide (this file)
+
+### Architecture Deep Dives
+- 🔄 **[JSON_CONVERSION_ARCHITECTURE.md](JSON_CONVERSION_ARCHITECTURE.md)** - JSON conversion pipeline details
+- 🔀 **[TRANSFORMATION_PIPELINE_DESIGN.md](TRANSFORMATION_PIPELINE_DESIGN.md)** - Transformation pipeline architecture
+- 💾 **[HYBRID_STORAGE_ARCHITECTURE.md](HYBRID_STORAGE_ARCHITECTURE.md)** - PostgreSQL + MongoDB storage design
+- 📈 **[SCALABILITY_AND_GUI_DESIGN.md](SCALABILITY_AND_GUI_DESIGN.md)** - Scale + UI architecture
+- 🏗️ **[ARCHITECTURE_REFERENCE.md](ARCHITECTURE_REFERENCE.md)** - Design patterns and principles
+- ⚙️ **[INTERFACE_CONFIGURATION_ENGINE.md](INTERFACE_CONFIGURATION_ENGINE.md)** - Configuration engine design
+
+### Archived Documentation
+- 📦 **[docs/archive/](docs/archive/)** - 20 legacy/redundant documentation files (consolidated into SYSTEM_DOCUMENTATION.md)
+

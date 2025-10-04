@@ -59,7 +59,7 @@
                 </div>
                 
                 <div class="header-right">
-                    <button class="create-btn" onclick="openInterfaceWizard()" id="createInterfaceBtn">
+                    <button class="create-btn" onclick="openWizard()" id="createInterfaceBtn">
                         <span class="btn-icon">+</span>
                         <span class="btn-text">Create Interface</span>
                     </button>

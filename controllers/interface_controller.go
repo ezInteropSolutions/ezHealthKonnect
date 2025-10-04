@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"ezhealthkonnect/config"
+	"ezhealthkonnect/processing"
 
 	"github.com/gin-gonic/gin"
 )
@@ -13,13 +14,20 @@ import (
 // InterfaceController handles interface management operations
 type InterfaceController struct {
 	config *config.Config
+	engine *processing.ProcessingEngine
 }
 
 // NewInterfaceController creates a new interface controller
 func NewInterfaceController(cfg *config.Config) *InterfaceController {
 	return &InterfaceController{
 		config: cfg,
+		engine: nil, // Will be set via SetEngine
 	}
+}
+
+// SetEngine sets the processing engine (called after initialization)
+func (ctrl *InterfaceController) SetEngine(engine *processing.ProcessingEngine) {
+	ctrl.engine = engine
 }
 
 // Interface request/response structures
@@ -227,11 +235,30 @@ func (ctrl *InterfaceController) StartInterface(c *gin.Context) {
 		fmt.Printf("▶️ Starting interface: %s\n", id)
 	}
 
-	// TODO: Implement interface start logic
+	// Check if engine is available
+	if ctrl.engine == nil {
+		c.JSON(http.StatusServiceUnavailable, map[string]interface{}{
+			"success": false,
+			"error":   "Processing engine not available",
+		})
+		return
+	}
+
+	// Activate the interface via processing engine
+	if err := ctrl.engine.ActivateInterface(id); err != nil {
+		fmt.Printf("❌ Failed to start interface %s: %v\n", id, err)
+		c.JSON(http.StatusInternalServerError, map[string]interface{}{
+			"success": false,
+			"error":   fmt.Sprintf("Failed to start interface: %v", err),
+		})
+		return
+	}
+
+	fmt.Printf("✅ Interface %s started successfully\n", id)
 	c.JSON(http.StatusOK, map[string]interface{}{
 		"success": true,
 		"message": fmt.Sprintf("Interface %s started", id),
-		"status":  "running",
+		"status":  "active",
 	})
 }
 
@@ -243,11 +270,30 @@ func (ctrl *InterfaceController) StopInterface(c *gin.Context) {
 		fmt.Printf("⏹️ Stopping interface: %s\n", id)
 	}
 
-	// TODO: Implement interface stop logic
+	// Check if engine is available
+	if ctrl.engine == nil {
+		c.JSON(http.StatusServiceUnavailable, map[string]interface{}{
+			"success": false,
+			"error":   "Processing engine not available",
+		})
+		return
+	}
+
+	// Deactivate the interface via processing engine
+	if err := ctrl.engine.DeactivateInterface(id); err != nil {
+		fmt.Printf("❌ Failed to stop interface %s: %v\n", id, err)
+		c.JSON(http.StatusInternalServerError, map[string]interface{}{
+			"success": false,
+			"error":   fmt.Sprintf("Failed to stop interface: %v", err),
+		})
+		return
+	}
+
+	fmt.Printf("✅ Interface %s stopped successfully\n", id)
 	c.JSON(http.StatusOK, map[string]interface{}{
 		"success": true,
 		"message": fmt.Sprintf("Interface %s stopped", id),
-		"status":  "stopped",
+		"status":  "inactive",
 	})
 }
 

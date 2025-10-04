@@ -9,11 +9,12 @@
     // Store original finishWizard if it exists
     let originalFinishWizard = null;
     
-    // Wait for wizard to be available
+    // Wait for wizard to be available and give time for proper setup
     const initFix = setInterval(() => {
         if (window.wizard && window.wizardNavigation) {
             clearInterval(initFix);
-            applyModalCloseFix();
+            // Add delay to allow wizard-config-integration to set up first
+            setTimeout(applyModalCloseFix, 500);
         }
     }, 100);
     
@@ -22,7 +23,15 @@
     
     function applyModalCloseFix() {
         console.log('🔧 Applying modal close fix...');
-        
+
+        // Check if wizard completion is already properly set up
+        if (window.wizard?.configManager?.completeWizardInterface) {
+            console.log('✅ Wizard completion already properly configured - skipping override');
+            return;
+        }
+
+        console.log('⚠️ Wizard completion not properly configured - applying fix');
+
         // Override the finishWizard method with a working version
         if (window.wizardNavigation && window.wizardNavigation.finishWizard) {
             originalFinishWizard = window.wizardNavigation.finishWizard.bind(window.wizardNavigation);
@@ -45,11 +54,26 @@
                 }
                 
                 try {
-                    // Call the original finish wizard logic
-                    if (window.wizard && window.wizard.configManager) {
-                        await window.wizard.configManager.completeWizard();
+                    // FIXED: Call the proper wizard completion method
+                    let completionResult = null;
+
+                    // Try multiple completion methods in order of preference
+                    if (window.wizard?.configManager?.completeWizardInterface) {
+                        console.log('🎯 Using completeWizardInterface method');
+                        completionResult = await window.wizard.configManager.completeWizardInterface();
+                    } else if (window.wizard?.configManager?.completeWizard) {
+                        console.log('🎯 Using completeWizard method');
+                        completionResult = await window.wizard.configManager.completeWizard();
+                    } else if (window.InterfaceConfigManager) {
+                        console.log('🎯 Creating new InterfaceConfigManager for completion');
+                        const configManager = new window.InterfaceConfigManager(window.wizard);
+                        completionResult = await configManager.completeWizardInterface();
+                    } else {
+                        throw new Error('No wizard completion method available');
                     }
-                    
+
+                    console.log('✅ Wizard completion result:', completionResult);
+
                     // Show success message
                     showSuccessNotification('Interface created successfully!');
                     

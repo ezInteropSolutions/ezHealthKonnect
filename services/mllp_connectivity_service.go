@@ -9,6 +9,7 @@ import (
 	"database/sql"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"strings"
 	"sync"
@@ -20,11 +21,14 @@ type MLLPConnectivityService struct {
 	db              *sql.DB
 	activeListeners map[string]*MLLPListener
 	mu              sync.RWMutex
+	hybridStorage   *HybridMessageStorage
+	parserService   *MessageParserService
 }
 
 // MLLPListener represents an active MLLP listener
 type MLLPListener struct {
 	ID           string
+	InterfaceID  string // Interface UUID from database
 	Host         string
 	Port         int
 	Listener     net.Listener
@@ -63,6 +67,7 @@ type HL7Message struct {
 
 // MLLPConfig represents MLLP configuration
 type MLLPConfig struct {
+	InterfaceID       string        `json:"interfaceId"`       // Interface UUID from database
 	Host              string        `json:"host"`
 	Port              int           `json:"port"`
 	MaxConnections    int           `json:"maxConnections"`
@@ -92,7 +97,25 @@ func NewMLLPConnectivityService(db *sql.DB) *MLLPConnectivityService {
 	return &MLLPConnectivityService{
 		db:              db,
 		activeListeners: make(map[string]*MLLPListener),
+		hybridStorage:   nil, // Set via SetHybridStorage
+		parserService:   nil, // Set via SetParserService
 	}
+}
+
+// SetHybridStorage sets the hybrid storage service for message persistence
+func (service *MLLPConnectivityService) SetHybridStorage(storage *HybridMessageStorage) {
+	service.mu.Lock()
+	defer service.mu.Unlock()
+	service.hybridStorage = storage
+	log.Printf("✅ MLLP Service: Hybrid storage configured")
+}
+
+// SetParserService sets the parser service for JSON conversion
+func (service *MLLPConnectivityService) SetParserService(parser *MessageParserService) {
+	service.mu.Lock()
+	defer service.mu.Unlock()
+	service.parserService = parser
+	log.Printf("✅ MLLP Service: Parser service configured")
 }
 
 // StartListener starts an MLLP listener on the specified configuration
@@ -119,12 +142,14 @@ func (service *MLLPConnectivityService) StartListener(ctx context.Context, confi
 		return nil, fmt.Errorf("failed to create listener on %s: %w", address, err)
 	}
 
-	// Create context for the listener
-	listenerCtx, cancel := context.WithCancel(ctx)
+	// Create context for the listener - use Background() not request context
+	// Request context will be cancelled when HTTP call completes
+	listenerCtx, cancel := context.WithCancel(context.Background())
 
 	// Create MLLP listener
 	mllpListener := &MLLPListener{
 		ID:          listenerID,
+		InterfaceID: config.InterfaceID, // Associate with interface
 		Host:        config.Host,
 		Port:        config.Port,
 		Listener:    listener,
@@ -269,19 +294,24 @@ func (service *MLLPConnectivityService) validateConfig(config *MLLPConfig) error
 }
 
 func (service *MLLPConnectivityService) acceptConnections(listener *MLLPListener, config *MLLPConfig) {
+	log.Printf("🔄 MLLP acceptConnections started for %s:%d", listener.Host, listener.Port)
 	for listener.IsActive {
 		select {
 		case <-listener.ctx.Done():
+			log.Printf("⏹️ MLLP listener context cancelled for %s:%d", listener.Host, listener.Port)
 			return
 		default:
+			log.Printf("⏳ Waiting for connection on %s:%d...", listener.Host, listener.Port)
 			conn, err := listener.Listener.Accept()
 			if err != nil {
+				log.Printf("❌ Accept error on %s:%d: %v", listener.Host, listener.Port, err)
 				if listener.IsActive {
 					// Log error but continue
 					continue
 				}
 				return
 			}
+			log.Printf("✅ Connection accepted from %s", conn.RemoteAddr().String())
 
 			// Check connection limit
 			listener.ConnMutex.RLock()
@@ -324,19 +354,80 @@ func (service *MLLPConnectivityService) acceptConnections(listener *MLLPListener
 func (service *MLLPConnectivityService) handleConnection(listener *MLLPListener, conn *MLLPConnection, config *MLLPConfig) {
 	defer service.closeConnection(listener, conn)
 
+	// Add panic recovery to always send NACK on any unexpected error
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("❌ PANIC in MLLP connection handler: %v", r)
+
+			// Create emergency NACK message
+			emergencyMsg := &HL7Message{
+				ID:           service.generateMessageID(),
+				Content:      "",
+				Source:       conn.RemoteAddr,
+				ReceivedAt:   time.Now(),
+				ConnectionID: conn.ID,
+				ListenerID:   listener.ID,
+				Size:         0,
+			}
+
+			nack := service.generateAcknowledgmentWithError(emergencyMsg, "AE", fmt.Sprintf("Internal error: %v", r))
+			service.sendAcknowledgment(conn, nack, config)
+		}
+	}()
+
 	for conn.IsActive && listener.IsActive {
 		// Set read timeout
 		if err := conn.Conn.SetReadDeadline(time.Now().Add(config.ReadTimeout)); err != nil {
+			// Send NACK for timeout error
+			errorMsg := &HL7Message{
+				ID:           service.generateMessageID(),
+				Content:      "",
+				Source:       conn.RemoteAddr,
+				ReceivedAt:   time.Now(),
+				ConnectionID: conn.ID,
+				ListenerID:   listener.ID,
+				Size:         0,
+			}
+			nack := service.generateAcknowledgmentWithError(errorMsg, "AE", fmt.Sprintf("Timeout error: %v", err))
+			service.sendAcknowledgment(conn, nack, config)
 			break
 		}
 
 		// Read MLLP message
 		messageData, err := service.readMLLPMessage(conn.Conn, config.MaxMessageSize)
+
+		// Always attempt to send ACK/NACK, even on error
+		var hl7Message *HL7Message
+		var ackCode string = "AA" // Application Accept (success)
+		var errorText string = ""
+
 		if err != nil {
-			if err != io.EOF {
-				// Log error
+			// Create minimal message structure for NACK
+			ackCode = "AE" // Application Error
+			errorText = fmt.Sprintf("Error reading message: %v", err)
+
+			hl7Message = &HL7Message{
+				ID:           service.generateMessageID(),
+				Content:      string(messageData),
+				Source:       conn.RemoteAddr,
+				ReceivedAt:   time.Now(),
+				ConnectionID: conn.ID,
+				ListenerID:   listener.ID,
+				Size:         len(messageData),
 			}
-			break
+
+			// Send NACK and log error
+			log.Printf("❌ Error reading MLLP message from %s: %v", conn.RemoteAddr, err)
+			nack := service.generateAcknowledgmentWithError(hl7Message, ackCode, errorText)
+			if sendErr := service.sendAcknowledgment(conn, nack, config); sendErr != nil {
+				log.Printf("❌ Failed to send NACK (connection likely closed by client): %v", sendErr)
+			}
+
+			if err == io.EOF {
+				log.Printf("ℹ️  Client %s disconnected (EOF) - connection closed before ACK could be sent", conn.RemoteAddr)
+				break // Connection closed cleanly
+			}
+			continue // Continue to next message
 		}
 
 		// Update connection activity
@@ -345,7 +436,7 @@ func (service *MLLPConnectivityService) handleConnection(listener *MLLPListener,
 		listener.MessageCount++
 
 		// Create HL7 message
-		hl7Message := &HL7Message{
+		hl7Message = &HL7Message{
 			ID:           service.generateMessageID(),
 			Content:      string(messageData),
 			Source:       conn.RemoteAddr,
@@ -355,18 +446,42 @@ func (service *MLLPConnectivityService) handleConnection(listener *MLLPListener,
 			Size:         len(messageData),
 		}
 
-		// Send to message channel (non-blocking)
-		select {
-		case listener.MessageChan <- hl7Message:
-			// Message sent successfully
-		default:
-			// Channel is full, skip message (could implement buffering)
+		// Validate message format
+		if !service.isValidHL7Message(hl7Message.Content) {
+			ackCode = "AR" // Application Reject
+			errorText = "Invalid HL7 message format"
+			log.Printf("⚠️  Invalid HL7 message from %s", conn.RemoteAddr)
 		}
 
-		// Send acknowledgment
-		ack := service.generateAcknowledgment(hl7Message)
+		// Send to message channel (non-blocking)
+		if ackCode == "AA" {
+			select {
+			case listener.MessageChan <- hl7Message:
+				// Message sent successfully
+			default:
+				// Channel is full
+				ackCode = "AE"
+				errorText = "Message queue full"
+				log.Printf("⚠️  Message channel full, cannot process message from %s", conn.RemoteAddr)
+			}
+		}
+
+		// Always send acknowledgment (ACK or NACK)
+		var ack string
+		if ackCode == "AA" {
+			ack = service.generateAcknowledgment(hl7Message)
+		} else {
+			ack = service.generateAcknowledgmentWithError(hl7Message, ackCode, errorText)
+		}
+
 		if err := service.sendAcknowledgment(conn, ack, config); err != nil {
-			break
+			log.Printf("❌ Failed to send ACK/NACK to %s: %v", conn.RemoteAddr, err)
+			break // Only break if we can't send the acknowledgment
+		}
+
+		// Store message in hybrid storage (asynchronously) only if accepted
+		if ackCode == "AA" {
+			go service.processAndStoreMessage(hl7Message, listener.InterfaceID)
 		}
 	}
 }
@@ -429,7 +544,7 @@ func (service *MLLPConnectivityService) frameMessage(content string) []byte {
 }
 
 func (service *MLLPConnectivityService) generateAcknowledgment(message *HL7Message) string {
-	// Generate a basic HL7 ACK message
+	// Generate a basic HL7 ACK message (AA - Application Accept)
 	timestamp := time.Now().Format("20060102150405")
 	messageControlId := service.extractMessageControlId(message.Content)
 
@@ -438,6 +553,47 @@ func (service *MLLPConnectivityService) generateAcknowledgment(message *HL7Messa
 	ack += fmt.Sprintf("MSA|AA|%s\r", messageControlId)
 
 	return ack
+}
+
+func (service *MLLPConnectivityService) generateAcknowledgmentWithError(message *HL7Message, ackCode string, errorText string) string {
+	// Generate HL7 NACK message with error details
+	// ackCode: AA (Accept), AE (Error), AR (Reject)
+	timestamp := time.Now().Format("20060102150405")
+	messageControlId := service.extractMessageControlId(message.Content)
+
+	ack := fmt.Sprintf("MSH|^~\\&|EZHEALTHKONNECT|SYSTEM|%s|%s|%s||ACK|%s|P|2.5\r",
+		"SENDER", "RECEIVER", timestamp, messageControlId)
+
+	// MSA segment with acknowledgment code and optional error text
+	if errorText != "" {
+		ack += fmt.Sprintf("MSA|%s|%s|%s\r", ackCode, messageControlId, errorText)
+	} else {
+		ack += fmt.Sprintf("MSA|%s|%s\r", ackCode, messageControlId)
+	}
+
+	// Add ERR segment for detailed error information if error exists
+	if errorText != "" && (ackCode == "AE" || ackCode == "AR") {
+		ack += fmt.Sprintf("ERR|||%s|E\r", errorText)
+	}
+
+	return ack
+}
+
+func (service *MLLPConnectivityService) isValidHL7Message(content string) bool {
+	// Basic HL7 validation - check for MSH segment
+	if !strings.HasPrefix(content, "MSH") {
+		return false
+	}
+
+	// Check for minimum required fields in MSH
+	lines := strings.Split(content, "\r")
+	if len(lines) == 0 {
+		return false
+	}
+
+	mshFields := strings.Split(lines[0], "|")
+	// MSH should have at least 12 fields
+	return len(mshFields) >= 12
 }
 
 func (service *MLLPConnectivityService) extractMessageControlId(hl7Content string) string {
@@ -493,4 +649,72 @@ func (service *MLLPConnectivityService) closeConnection(listener *MLLPListener, 
 
 func (service *MLLPConnectivityService) generateMessageID() string {
 	return fmt.Sprintf("msg_%d", time.Now().UnixNano())
+}
+
+// processAndStoreMessage handles message storage and triggers JSON conversion + transformation pipeline
+func (service *MLLPConnectivityService) processAndStoreMessage(hl7Message *HL7Message, interfaceID string) {
+	ctx := context.Background()
+
+	// Extract message type from HL7 message
+	messageType := service.extractMessageControlId(hl7Message.Content) // Reuse existing parsing logic
+
+	// Check if hybrid storage is available
+	if service.hybridStorage == nil {
+		log.Printf("⚠️ Hybrid storage not configured, message not persisted: %s", hl7Message.ID)
+		return
+	}
+
+	// Prepare hybrid message data
+	hybridData := &HybridMessageData{
+		MessageID:       hl7Message.ID,
+		CorrelationID:   hl7Message.ID,
+		InterfaceID:     interfaceID, // Use interface UUID from database
+		Status:          "received",
+		Priority:        5, // Default medium priority
+		ReceivedAt:      hl7Message.ReceivedAt,
+		SourceType:      "mllp",
+		SourceEndpoint:  hl7Message.Source,
+		SourceIP:        hl7Message.Source,
+		MessageType:     messageType,
+		MessageSize:     hl7Message.Size,
+		MessageEncoding: "UTF-8",
+		RawContent:      hl7Message.Content, // Raw HL7 → MongoDB
+		ParsedContent:   nil,                 // Will be populated by parser
+		Metadata:        make(map[string]interface{}),
+	}
+
+	// Store message in hybrid storage (MongoDB raw + PostgreSQL metadata)
+	log.Printf("💾 Storing message %s in hybrid storage...", hl7Message.ID)
+	err := service.hybridStorage.StoreMessage(ctx, hybridData)
+	if err != nil {
+		log.Printf("❌ Failed to store message %s: %v", hl7Message.ID, err)
+		return
+	}
+
+	log.Printf("✅ Message %s stored in hybrid storage (MongoDB + PostgreSQL)", hl7Message.ID)
+
+	// Trigger JSON conversion asynchronously (if parser service is configured)
+	if service.parserService != nil {
+		go service.convertMessageToJSON(hl7Message.ID, hybridData.InterfaceID, hl7Message.Content)
+	}
+}
+
+// convertMessageToJSON converts raw HL7 message to JSON asynchronously
+func (service *MLLPConnectivityService) convertMessageToJSON(messageID, interfaceID, rawContent string) {
+	ctx := context.Background()
+
+	log.Printf("🔄 Starting JSON conversion for message %s", messageID)
+
+	// Parse HL7 to JSON (messageID, interfaceID, rawContent)
+	result, err := service.parserService.ParseToJSON(ctx, messageID, interfaceID, rawContent)
+	if err != nil {
+		log.Printf("❌ JSON conversion failed for message %s: %v", messageID, err)
+		return
+	}
+
+	log.Printf("✅ JSON conversion completed for message %s (format: %s, time: %v)",
+		messageID, result.Format, result.ParsingTime)
+
+	// TODO: Trigger transformation pipeline here
+	// transformationService.ExecuteTransformation(ctx, interfaceID, result.ParsedJSON)
 }

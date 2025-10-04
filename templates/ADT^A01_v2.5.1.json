@@ -1,0 +1,342 @@
+{
+  "messageType": "ADT^A01",
+  "version": "2.5.1",
+  "generatedAt": "2024-09-26T12:00:00Z",
+  "coverage": {
+    "totalHL7Fields": 145,
+    "mappedFields": 47,
+    "coveragePercent": 32.4,
+    "requiredCoverage": 12
+  },
+  "resources": {
+    "Patient": {
+      "resourceType": "Patient",
+      "priority": 1,
+      "required": true,
+      "references": [],
+      "mappings": [
+        {
+          "hl7Path": "PID.3.1",
+          "fhirPath": "Patient.identifier[0].value",
+          "transform": "string_direct",
+          "required": true,
+          "confidence": 0.99,
+          "valueMap": {}
+        },
+        {
+          "hl7Path": "PID.3.4",
+          "fhirPath": "Patient.identifier[0].system",
+          "transform": "identifier_system",
+          "required": false,
+          "confidence": 0.95,
+          "valueMap": {}
+        },
+        {
+          "hl7Path": "PID.5.1",
+          "fhirPath": "Patient.name[0].family",
+          "transform": "name_component",
+          "required": true,
+          "confidence": 0.98,
+          "valueMap": {}
+        },
+        {
+          "hl7Path": "PID.5.2",
+          "fhirPath": "Patient.name[0].given[0]",
+          "transform": "name_component",
+          "required": false,
+          "confidence": 0.98,
+          "valueMap": {}
+        },
+        {
+          "hl7Path": "PID.5.3",
+          "fhirPath": "Patient.name[0].given[1]",
+          "transform": "name_component",
+          "required": false,
+          "confidence": 0.90,
+          "valueMap": {}
+        },
+        {
+          "hl7Path": "PID.7",
+          "fhirPath": "Patient.birthDate",
+          "transform": "hl7_date_to_fhir",
+          "required": false,
+          "confidence": 0.99,
+          "valueMap": {}
+        },
+        {
+          "hl7Path": "PID.8",
+          "fhirPath": "Patient.gender",
+          "transform": "hl7_table_0001_gender",
+          "required": false,
+          "confidence": 0.99,
+          "valueMap": {
+            "M": "male",
+            "F": "female",
+            "U": "unknown",
+            "O": "other",
+            "A": "other",
+            "N": "unknown"
+          }
+        },
+        {
+          "hl7Path": "PID.11.1",
+          "fhirPath": "Patient.address[0].line[0]",
+          "transform": "address_component",
+          "required": false,
+          "confidence": 0.95,
+          "valueMap": {}
+        },
+        {
+          "hl7Path": "PID.11.3",
+          "fhirPath": "Patient.address[0].city",
+          "transform": "address_component",
+          "required": false,
+          "confidence": 0.95,
+          "valueMap": {}
+        },
+        {
+          "hl7Path": "PID.11.4",
+          "fhirPath": "Patient.address[0].state",
+          "transform": "address_component",
+          "required": false,
+          "confidence": 0.95,
+          "valueMap": {}
+        },
+        {
+          "hl7Path": "PID.11.5",
+          "fhirPath": "Patient.address[0].postalCode",
+          "transform": "address_component",
+          "required": false,
+          "confidence": 0.95,
+          "valueMap": {}
+        },
+        {
+          "hl7Path": "PID.13.1",
+          "fhirPath": "Patient.telecom[0].value",
+          "transform": "telecom_value",
+          "required": false,
+          "confidence": 0.90,
+          "valueMap": {}
+        }
+      ]
+    },
+    "Encounter": {
+      "resourceType": "Encounter",
+      "priority": 2,
+      "required": true,
+      "references": [
+        {
+          "path": "subject",
+          "target": "Patient",
+          "field": "id"
+        }
+      ],
+      "mappings": [
+        {
+          "hl7Path": "PV1.2",
+          "fhirPath": "Encounter.class.code",
+          "transform": "hl7_table_0004_patient_class",
+          "required": false,
+          "confidence": 0.99,
+          "valueMap": {
+            "I": "IMP",
+            "O": "AMB",
+            "E": "EMER",
+            "P": "PRENC",
+            "R": "OBSENC",
+            "B": "OBSENC",
+            "N": "AMB"
+          }
+        },
+        {
+          "hl7Path": "PV1.19",
+          "fhirPath": "Encounter.identifier[0].value",
+          "transform": "string_direct",
+          "required": false,
+          "confidence": 0.95,
+          "valueMap": {}
+        },
+        {
+          "hl7Path": "PV1.3.1",
+          "fhirPath": "Encounter.location[0].location.display",
+          "transform": "location_mapping",
+          "required": false,
+          "confidence": 0.90,
+          "valueMap": {}
+        },
+        {
+          "hl7Path": "PV1.44",
+          "fhirPath": "Encounter.period.start",
+          "transform": "hl7_datetime_to_fhir",
+          "required": false,
+          "confidence": 0.95,
+          "valueMap": {}
+        },
+        {
+          "hl7Path": "PV1.45",
+          "fhirPath": "Encounter.period.end",
+          "transform": "hl7_datetime_to_fhir",
+          "required": false,
+          "confidence": 0.95,
+          "valueMap": {}
+        }
+      ]
+    },
+    "MessageHeader": {
+      "resourceType": "MessageHeader",
+      "priority": 3,
+      "required": true,
+      "references": [],
+      "mappings": [
+        {
+          "hl7Path": "MSH.3",
+          "fhirPath": "MessageHeader.source.name",
+          "transform": "string_direct",
+          "required": false,
+          "confidence": 0.90,
+          "valueMap": {}
+        },
+        {
+          "hl7Path": "MSH.4",
+          "fhirPath": "MessageHeader.source.software",
+          "transform": "string_direct",
+          "required": false,
+          "confidence": 0.85,
+          "valueMap": {}
+        },
+        {
+          "hl7Path": "MSH.9.1",
+          "fhirPath": "MessageHeader.eventCoding.code",
+          "transform": "string_direct",
+          "required": true,
+          "confidence": 0.99,
+          "valueMap": {}
+        },
+        {
+          "hl7Path": "MSH.9.2",
+          "fhirPath": "MessageHeader.eventCoding.display",
+          "transform": "string_direct",
+          "required": false,
+          "confidence": 0.95,
+          "valueMap": {}
+        },
+        {
+          "hl7Path": "MSH.7",
+          "fhirPath": "MessageHeader.meta.lastUpdated",
+          "transform": "hl7_datetime_to_fhir",
+          "required": false,
+          "confidence": 0.90,
+          "valueMap": {}
+        }
+      ]
+    }
+  },
+  "transforms": {
+    "string_direct": {
+      "name": "string_direct",
+      "type": "direct",
+      "description": "Direct string copy with null/empty validation",
+      "validation": "non_empty",
+      "parameters": {
+        "trim": "true"
+      }
+    },
+    "name_component": {
+      "name": "name_component",
+      "type": "string_transform",
+      "description": "Name component with proper case handling",
+      "validation": "non_empty",
+      "parameters": {
+        "case": "proper",
+        "trim": "true"
+      }
+    },
+    "hl7_date_to_fhir": {
+      "name": "hl7_date_to_fhir",
+      "type": "date_conversion",
+      "description": "Convert HL7 date (YYYYMMDD) to FHIR date",
+      "validation": "valid_date",
+      "parameters": {
+        "input_format": "YYYYMMDD",
+        "output_format": "YYYY-MM-DD"
+      }
+    },
+    "hl7_datetime_to_fhir": {
+      "name": "hl7_datetime_to_fhir",
+      "type": "datetime_conversion",
+      "description": "Convert HL7 timestamp to FHIR instant",
+      "validation": "valid_datetime",
+      "parameters": {
+        "input_format": "YYYYMMDDHHMMSS",
+        "output_format": "YYYY-MM-DDTHH:MM:SSZ"
+      }
+    },
+    "hl7_table_0001_gender": {
+      "name": "hl7_table_0001_gender",
+      "type": "valueset",
+      "description": "HL7 Table 0001 - Administrative Sex",
+      "validation": "known_value",
+      "parameters": {
+        "table": "0001",
+        "default": "unknown"
+      }
+    },
+    "hl7_table_0004_patient_class": {
+      "name": "hl7_table_0004_patient_class",
+      "type": "valueset",
+      "description": "HL7 Table 0004 - Patient Class",
+      "validation": "known_value",
+      "parameters": {
+        "table": "0004",
+        "default": "AMB"
+      }
+    },
+    "address_component": {
+      "name": "address_component",
+      "type": "string_transform",
+      "description": "Address component with case handling",
+      "validation": "non_empty",
+      "parameters": {
+        "case": "proper",
+        "trim": "true"
+      }
+    },
+    "telecom_value": {
+      "name": "telecom_value",
+      "type": "string_transform",
+      "description": "Telecom value with format validation",
+      "validation": "valid_phone_email",
+      "parameters": {
+        "format": "normalize"
+      }
+    },
+    "identifier_system": {
+      "name": "identifier_system",
+      "type": "system_mapping",
+      "description": "Map identifier authority to system URI",
+      "validation": "known_authority",
+      "parameters": {
+        "type": "identifier"
+      }
+    },
+    "location_mapping": {
+      "name": "location_mapping",
+      "type": "string_transform",
+      "description": "Location display with proper formatting",
+      "validation": "non_empty",
+      "parameters": {
+        "case": "proper",
+        "trim": "true"
+      }
+    }
+  },
+  "metadata": {
+    "totalMappings": 20,
+    "requiredMappings": 4,
+    "coverage": "core_demographics_encounter",
+    "generatedBy": "ezHealthKonnect OOB Template Generator v1.0",
+    "compatibleWith": ["2.5", "2.5.1"],
+    "targetFHIRVersion": "R4",
+    "confidence": "production_ready"
+  }
+}

@@ -856,6 +856,11 @@ getWizardNavigation() {
             }
 
             // Use SegmentViewer to render the parsed data
+            console.log('🔍 Debug: wizard instance:', this.wizard);
+            console.log('🔍 Debug: wizard.segmentViewer:', this.wizard.segmentViewer);
+            console.log('🔍 Debug: window.wizard:', window.wizard);
+            console.log('🔍 Debug: window.wizard.segmentViewer:', window.wizard?.segmentViewer);
+
             if (this.wizard.segmentViewer) {
                 this.wizard.segmentViewer.renderSegmentList(this.wizard.parsedHL7Data, 'parsedDataReview');
             } else {

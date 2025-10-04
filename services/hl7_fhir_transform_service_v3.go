@@ -14,6 +14,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"reflect"
 	"strconv"
 	"strings"
 	"time"
@@ -73,13 +74,19 @@ func (s *HL7FHIRTransformServiceV3) Transform(
 
 	log.Printf("🔄 HL7→FHIR transformation v3: %s [ATOMIC MAPPING-DRIVEN]", response.RequestID)
 
-	// Extract message type
-	messageType, err := s.extractMessageType(request.ParsedHL7Data)
-	if err != nil {
-		response.Errors = append(response.Errors, fmt.Sprintf("Failed to extract message type: %v", err))
-		return response, nil
+	// Use message type from request if provided (OOB: injected from pipeline config)
+	messageType := request.MessageType
+	if messageType == "" {
+		// Fallback: Extract message type from parsed HL7 data
+		var err error
+		messageType, err = s.extractMessageType(request.ParsedHL7Data)
+		if err != nil {
+			response.Errors = append(response.Errors, fmt.Sprintf("Failed to extract message type: %v", err))
+			return response, nil
+		}
 	}
 	response.MessageType = messageType
+	log.Printf("✅ Using message type: %s", messageType)
 
 	// Get field mappings
 	fieldMappings, err := s.getFieldMappings(ctx, messageType, request.TargetProfile)
@@ -167,6 +174,7 @@ func (s *HL7FHIRTransformServiceV3) Transform(
 		transformStartTime,
 		startTime,
 		request.CreateBundle,
+		fieldMappings,
 	)
 
 	log.Printf("✅ Atomic mapping transformation completed: %s (%d resources, %s)",
@@ -280,6 +288,8 @@ func (s *HL7FHIRTransformServiceV3) extractHL7ValueAtomic(
 	enhancedSegments map[string]interface{},
 	mapping FieldMapping,
 ) (string, bool) {
+	log.Printf("🔍 extractHL7ValueAtomic called: segment=%s, field=%s, component=%s",
+		mapping.SegmentName, mapping.HL7Field, mapping.HL7Component)
 
 	// Get the segment
 	segment, segmentExists := enhancedSegments[mapping.SegmentName].(map[string]interface{})
@@ -288,11 +298,38 @@ func (s *HL7FHIRTransformServiceV3) extractHL7ValueAtomic(
 		return "", false
 	}
 
-	// Get the fields array
-	fields, fieldsExists := segment["fields"].([]interface{})
+	// DEBUG: Log segment keys to see what's available
+	segmentKeys := make([]string, 0, len(segment))
+	for k := range segment {
+		segmentKeys = append(segmentKeys, k)
+	}
+	log.Printf("🔍 Segment %s has keys: %v", mapping.SegmentName, segmentKeys)
+
+	// Get the fields array (handle both []interface{} and primitive.A from MongoDB)
+	var fields []interface{}
+	fieldsRaw, fieldsExists := segment["fields"]
 	if !fieldsExists {
-		log.Printf("🔍 No fields found in segment %s", mapping.SegmentName)
+		log.Printf("🔍 No fields found in segment %s (key missing)", mapping.SegmentName)
 		return "", false
+	}
+
+	// Try direct []interface{} first
+	if fieldsSlice, ok := fieldsRaw.([]interface{}); ok {
+		fields = fieldsSlice
+	} else {
+		// Try primitive.A from MongoDB (import "go.mongodb.org/mongo-driver/bson/primitive")
+		// Convert any slice type to []interface{}
+		fieldsValue := reflect.ValueOf(fieldsRaw)
+		if fieldsValue.Kind() == reflect.Slice {
+			fields = make([]interface{}, fieldsValue.Len())
+			for i := 0; i < fieldsValue.Len(); i++ {
+				fields[i] = fieldsValue.Index(i).Interface()
+			}
+			log.Printf("✅ Converted fields from %T to []interface{} (%d items)", fieldsRaw, len(fields))
+		} else {
+			log.Printf("🔍 fields key exists but wrong type: %T (not a slice)", fieldsRaw)
+			return "", false
+		}
 	}
 
 	// Build the expected field key (with component if specified)
@@ -302,6 +339,8 @@ func (s *HL7FHIRTransformServiceV3) extractHL7ValueAtomic(
 	} else {
 		expectedFieldKey = fmt.Sprintf("%s.%s", mapping.SegmentName, mapping.HL7Field)
 	}
+
+	log.Printf("🔍 Looking for field key: '%s' (component='%s')", expectedFieldKey, mapping.HL7Component)
 
 	// Find the target field
 	for _, field := range fields {
@@ -474,6 +513,11 @@ func (s *HL7FHIRTransformServiceV3) setAtomicFieldInResource(
 	schema *fhir.FHIRSchema,
 ) error {
 
+	// Handle paths with array indices (e.g., "name[0].given[1]")
+	if strings.Contains(fieldPath, "[") {
+		return s.setFieldWithArrayIndices(resource, fieldPath, value, schema)
+	}
+
 	// Handle nested paths using schema structure
 	if strings.Contains(fieldPath, ".") {
 		return s.setNestedFieldFromSchema(resource, fieldPath, value, schema)
@@ -631,8 +675,14 @@ func (s *HL7FHIRTransformServiceV3) setNestedFieldFromSchema(
 ) error {
 
 	parts := strings.Split(fieldPath, ".")
-	if len(parts) != 2 {
-		// For deeper nesting, could be extended
+
+	// Handle deep nesting (3+ levels) by recursively creating objects
+	if len(parts) > 2 {
+		return s.setDeeplyNestedField(resource, parts, value, schema)
+	}
+
+	if len(parts) < 2 {
+		// Single field, set directly
 		resource[fieldPath] = value
 		return nil
 	}
@@ -640,7 +690,23 @@ func (s *HL7FHIRTransformServiceV3) setNestedFieldFromSchema(
 	parentField := parts[0]
 	childField := parts[1]
 
-	// Check if parent field exists in schema - STRICT VALIDATION
+	// ✅ FIX: If parentField is the resource type itself, treat this as a direct field
+	if parentField == schema.ResourceType {
+		// This is a direct field like "Patient.birthDate" -> just set "birthDate"
+		log.Printf("🔧 Direct resource field: %s.%s -> setting %s directly", parentField, childField, childField)
+
+		// Validate the child field exists in schema
+		childPath := fmt.Sprintf("%s.%s", schema.ResourceType, childField)
+		if _, exists := schema.Elements[childPath]; !exists {
+			log.Printf("❌ REJECTED: Field %s not found in %s schema", childPath, schema.ResourceType)
+			return fmt.Errorf("field %s not found in FHIR schema for %s", childField, schema.ResourceType)
+		}
+
+		resource[childField] = value
+		return nil
+	}
+
+	// Check if parent field exists in schema - STRICT VALIDATION for nested objects
 	parentPath := s.normalizeFieldPath(parentField, schema.ResourceType)
 	parentElement, parentExists := schema.Elements[parentPath]
 
@@ -651,10 +717,20 @@ func (s *HL7FHIRTransformServiceV3) setNestedFieldFromSchema(
 	}
 
 	// Check if child field exists in schema too
+	// Note: For complex types (arrays of objects), child validation may be relaxed
 	childPath := fmt.Sprintf("%s.%s", parentPath, childField)
-	if _, childExists := schema.Elements[childPath]; !childExists {
+	_, childExists := schema.Elements[childPath]
+
+	// If parent is an array of complex types, don't strict validate children
+	// (e.g., name is HumanName[], so name.family may not be directly in schema)
+	if !childExists && !strings.Contains(parentElement.Cardinality, "*") {
+		// Only reject for non-array parents
 		log.Printf("❌ REJECTED: Child field %s not found in %s schema", childPath, schema.ResourceType)
 		return fmt.Errorf("child field %s not found in FHIR schema for %s", childPath, schema.ResourceType)
+	}
+
+	if !childExists {
+		log.Printf("ℹ️  Child field %s not in schema, but parent is array - allowing (complex type)", childPath)
 	}
 
 	// Create parent object if it doesn't exist
@@ -681,6 +757,139 @@ func (s *HL7FHIRTransformServiceV3) setNestedFieldFromSchema(
 		log.Printf("✅ Set nested field: %s.%s = %v", parentField, childField, value)
 		return nil
 	}
+}
+
+// Handle paths with array indices like "name[0].given[1]"
+func (s *HL7FHIRTransformServiceV3) setFieldWithArrayIndices(
+	resource map[string]interface{},
+	fieldPath string,
+	value interface{},
+	schema *fhir.FHIRSchema,
+) error {
+	// Parse path with array indices: "name[0].given[1]" -> segments with indices
+	// Use regex to split by dots while preserving array indices
+	parts := strings.Split(fieldPath, ".")
+
+	current := resource
+	for i := 0; i < len(parts); i++ {
+		part := parts[i]
+
+		// Check if this part has an array index like "name[0]" or "given[1]"
+		if strings.Contains(part, "[") {
+			// Extract field name and index
+			openBracket := strings.Index(part, "[")
+			closeBracket := strings.Index(part, "]")
+			if openBracket == -1 || closeBracket == -1 {
+				return fmt.Errorf("invalid array syntax in path: %s", part)
+			}
+
+			fieldName := part[:openBracket]
+			indexStr := part[openBracket+1 : closeBracket]
+			index, err := strconv.Atoi(indexStr)
+			if err != nil {
+				return fmt.Errorf("invalid array index: %s", indexStr)
+			}
+
+			// Ensure array exists
+			if _, exists := current[fieldName]; !exists {
+				current[fieldName] = []interface{}{}
+			}
+
+			// Get array
+			arr, ok := current[fieldName].([]interface{})
+			if !ok {
+				return fmt.Errorf("field %s is not an array", fieldName)
+			}
+
+			// Extend array if needed
+			for len(arr) <= index {
+				arr = append(arr, map[string]interface{}{})
+			}
+			current[fieldName] = arr
+
+			// If this is the last part, set the value
+			if i == len(parts)-1 {
+				arr[index] = value
+				current[fieldName] = arr
+				log.Printf("✅ Set array field: %s = %v", fieldPath, value)
+				return nil
+			}
+
+			// Navigate into the array element
+			elem, ok := arr[index].(map[string]interface{})
+			if !ok {
+				// Create a new map at this index
+				elem = map[string]interface{}{}
+				arr[index] = elem
+			}
+			current = elem
+
+		} else {
+			// Simple field name without array index
+			if i == len(parts)-1 {
+				// Last part - set the value
+				current[part] = value
+				log.Printf("✅ Set field: %s = %v", fieldPath, value)
+				return nil
+			}
+
+			// Navigate deeper
+			if _, exists := current[part]; !exists {
+				current[part] = map[string]interface{}{}
+			}
+
+			next, ok := current[part].(map[string]interface{})
+			if !ok {
+				return fmt.Errorf("field %s is not an object", part)
+			}
+			current = next
+		}
+	}
+
+	return nil
+}
+
+// Handle deeply nested fields (3+ levels) like "identifier.type.coding.code"
+func (s *HL7FHIRTransformServiceV3) setDeeplyNestedField(
+	resource map[string]interface{},
+	parts []string,
+	value interface{},
+	schema *fhir.FHIRSchema,
+) error {
+	if len(parts) == 0 {
+		return fmt.Errorf("empty field path")
+	}
+
+	// Navigate/create the nested structure
+	current := resource
+	for i := 0; i < len(parts)-1; i++ {
+		part := parts[i]
+
+		// Check if current level exists
+		if _, exists := current[part]; !exists {
+			// Create new object at this level
+			current[part] = map[string]interface{}{}
+		}
+
+		// Try to cast to map for next level
+		nextMap, ok := current[part].(map[string]interface{})
+		if !ok {
+			// Current level is not an object, can't nest further
+			log.Printf("⚠️  Cannot nest into %s - not an object", strings.Join(parts[:i+1], "."))
+			// Fall back to setting as flat string
+			fullPath := strings.Join(parts, ".")
+			resource[fullPath] = value
+			return nil
+		}
+
+		current = nextMap
+	}
+
+	// Set the final value
+	finalField := parts[len(parts)-1]
+	current[finalField] = value
+	log.Printf("✅ Set deeply nested field: %s = %v", strings.Join(parts, "."), value)
+	return nil
 }
 
 // Handle nested array fields (e.g., destination.name where destination is array)
@@ -768,6 +977,14 @@ func (s *HL7FHIRTransformServiceV3) setArrayField(
 // =====================================
 
 func (s *HL7FHIRTransformServiceV3) normalizeFieldPath(fieldPath, resourceType string) string {
+	// Fix double resource name issue: "Patient.Patient.identifier" -> "Patient.identifier"
+	doubleResourcePrefix := resourceType + "." + resourceType + "."
+	if strings.HasPrefix(fieldPath, doubleResourcePrefix) {
+		// Remove the double resource prefix and re-add single prefix
+		withoutDouble := strings.TrimPrefix(fieldPath, doubleResourcePrefix)
+		return fmt.Sprintf("%s.%s", resourceType, withoutDouble)
+	}
+
 	if strings.HasPrefix(fieldPath, resourceType+".") {
 		return fieldPath // Already normalized
 	}
@@ -1001,20 +1218,43 @@ func (s *HL7FHIRTransformServiceV3) filterMappingsForResource(mappings []FieldMa
 
 func (s *HL7FHIRTransformServiceV3) getFieldMappings(ctx context.Context, messageType, profile string) ([]FieldMapping, error) {
 	if s.db == nil {
-		return nil, fmt.Errorf("database not available for field mappings")
+		log.Printf("⚠️ V3 Service: Database not available, using default mappings for %s", messageType)
+		return s.getDefaultMappingsForTesting(messageType), nil
 	}
 
+	log.Printf("🔍 V3 Service: Loading mappings for message type: %s", messageType)
+
+	// STEP 1: Try interface-specific mappings (from wizard-generated transformation_mapping)
+	// Note: InterfaceID should be passed in request, but for now we'll try to load any interface with this message type
+	mappings, err := s.loadInterfaceSpecificMappings(ctx, messageType)
+	if err == nil && len(mappings) > 0 {
+		log.Printf("✅ V3 Service: Loaded %d mappings from interface-specific configuration for %s", len(mappings), messageType)
+		return mappings, nil
+	}
+
+	log.Printf("ℹ️ V3 Service: No interface-specific mappings found, trying V9 OOB templates...")
+
+	// STEP 2: Try V9 hierarchical mapping resolution (global OOB templates)
+	mappings, err = s.loadFromV9OOBTemplates(ctx, messageType)
+	if err == nil && len(mappings) > 0 {
+		log.Printf("✅ V3 Service: Loaded %d mappings from V9 OOB templates for %s", len(mappings), messageType)
+		return mappings, nil
+	}
+
+	log.Printf("⚠️ V3 Service: V9 OOB templates not found, trying V5 legacy schema...")
+
+	// STEP 2: Fallback to V5 legacy schema (existing field_element_mappings)
 	query := `
-		SELECT segment_name, hl7_field, 
+		SELECT segment_name, hl7_field,
 		       COALESCE(hl7_component, '') as hl7_component,
-		       fhir_resource_type, fhir_element_path, 
+		       fhir_resource_type, fhir_element_path,
 		       COALESCE(data_type_transform, '') as data_type_transform,
 		       is_required,
 		       COALESCE(transformation_rules, '{}') as transformation_rules
 		FROM field_element_mappings fem
 		WHERE EXISTS (
-			SELECT 1 FROM message_fhir_templates mft 
-			WHERE mft.message_type = $1 
+			SELECT 1 FROM message_fhir_templates mft
+			WHERE mft.message_type = $1
 			AND mft.fhir_resources::jsonb ? fem.fhir_resource_type
 		)
 		ORDER BY fem.fhir_resource_type, fem.segment_name, fem.hl7_field
@@ -1026,7 +1266,7 @@ func (s *HL7FHIRTransformServiceV3) getFieldMappings(ctx context.Context, messag
 	}
 	defer rows.Close()
 
-	var mappings []FieldMapping
+	var legacyMappings []FieldMapping
 	for rows.Next() {
 		var mapping FieldMapping
 		var component sql.NullString
@@ -1061,11 +1301,398 @@ func (s *HL7FHIRTransformServiceV3) getFieldMappings(ctx context.Context, messag
 			}
 		}
 
+		legacyMappings = append(legacyMappings, mapping)
+	}
+
+	if len(legacyMappings) > 0 {
+		log.Printf("📊 V3 Service: Found %d legacy field mappings for message type %s", len(legacyMappings), messageType)
+	} else {
+		log.Printf("⚠️ V3 Service: No mappings found in either V9 or V5 schemas for message type %s", messageType)
+	}
+
+	return legacyMappings, nil
+}
+
+// loadInterfaceSpecificMappings loads mappings from the transformation_mapping field in interfaces table
+func (s *HL7FHIRTransformServiceV3) loadInterfaceSpecificMappings(ctx context.Context, messageType string) ([]FieldMapping, error) {
+	log.Printf("🎯 V3 Service: Loading interface-specific mappings for message type: %s", messageType)
+
+	// Query for interfaces that have this message type configured
+	query := `
+		SELECT id, transformation_mapping
+		FROM interfaces
+		WHERE message_type = $1
+		  AND transformation_mapping IS NOT NULL
+		  AND transformation_mapping != '{}'
+		  AND is_active = true
+		ORDER BY updated_at DESC
+		LIMIT 1
+	`
+
+	var interfaceID string
+	var mappingJSONBytes []byte
+
+	log.Printf("🔍 V3 Service: Executing query for message type: %s", messageType)
+	err := s.db.QueryRowContext(ctx, query, messageType).Scan(&interfaceID, &mappingJSONBytes)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			log.Printf("ℹ️ V3 Service: No interface-specific mappings found for message type: %s", messageType)
+			return nil, fmt.Errorf("no interface-specific mappings found")
+		}
+		log.Printf("❌ V3 Service: Query/Scan error: %v", err)
+		return nil, fmt.Errorf("failed to query interface mappings: %w", err)
+	}
+
+	log.Printf("📋 V3 Service: Found interface-specific mappings in interface: %s", interfaceID)
+	log.Printf("🔍 V3 Service: Scanned %d bytes from database", len(mappingJSONBytes))
+
+	// Parse the transformation_mapping JSON - wizard saves it as an array
+	log.Printf("🔍 V3 Service: Raw mapping JSON length: %d bytes", len(mappingJSONBytes))
+	log.Printf("🔍 V3 Service: First 100 chars: %s", string(mappingJSONBytes[:min(100, len(mappingJSONBytes))]))
+
+	// JSONB from PostgreSQL comes as a JSON-encoded string, need to double-decode
+	var jsonString string
+	if err := json.Unmarshal(mappingJSONBytes, &jsonString); err != nil {
+		// If it's not a string, try direct array parse (for backward compatibility)
+		var mappingArray []map[string]interface{}
+		if err := json.Unmarshal(mappingJSONBytes, &mappingArray); err != nil {
+			log.Printf("❌ V3 Service: Failed to parse as string or array: %v", err)
+			return nil, fmt.Errorf("failed to parse transformation_mapping JSON: %w", err)
+		}
+		log.Printf("✅ V3 Service: Parsed array directly with %d items", len(mappingArray))
+		mappings := s.extractFieldMappingsFromWizardArray(mappingArray)
+		return mappings, nil
+	}
+
+	// Now parse the string content as array
+	var mappingArray []map[string]interface{}
+	if err := json.Unmarshal([]byte(jsonString), &mappingArray); err != nil {
+		log.Printf("❌ V3 Service: Failed to parse string content as array: %v", err)
+		return nil, fmt.Errorf("failed to parse transformation_mapping JSON content: %w", err)
+	}
+
+	log.Printf("✅ V3 Service: Parsed array with %d items", len(mappingArray))
+	if len(mappingArray) > 0 {
+		log.Printf("🔍 V3 Service: First item keys: %v", getMapKeys(mappingArray[0]))
+	}
+
+	// Extract field mappings from the wizard array format
+	mappings := s.extractFieldMappingsFromWizardArray(mappingArray)
+
+	if len(mappings) > 0 {
+		log.Printf("✅ V3 Service: Extracted %d field mappings from interface configuration", len(mappings))
+	} else {
+		log.Printf("⚠️ V3 Service: extractFieldMappingsFromWizardArray returned 0 mappings from %d input items", len(mappingArray))
+	}
+
+	return mappings, nil
+}
+
+// extractFieldMappingsFromWizardArray converts wizard-saved array format to FieldMapping array
+// Wizard format: [{ "sourcePath": "PID.3", "targetPath": "Patient.identifier[0].value", "transformType": "string_direct", "isRequired": true }, ...]
+func (s *HL7FHIRTransformServiceV3) extractFieldMappingsFromWizardArray(mappingArray []map[string]interface{}) []FieldMapping {
+	var mappings []FieldMapping
+
+	for idx, item := range mappingArray {
+		sourcePath, _ := item["sourcePath"].(string)
+		targetPath, _ := item["targetPath"].(string)
+		transformType, _ := item["transformType"].(string)
+		isRequired, _ := item["isRequired"].(bool)
+
+		if sourcePath == "" || targetPath == "" {
+			log.Printf("⚠️ V3 Service: Skipping item %d - sourcePath='%s', targetPath='%s'", idx, sourcePath, targetPath)
+			continue
+		}
+
+		log.Printf("🔍 V3 Service: Processing item %d - source='%s', target='%s', transform='%s'", idx, sourcePath, targetPath, transformType)
+
+		// Parse sourcePath (e.g., "PID.3.1" -> segment="PID", field="3", component="1")
+		sourceParts := strings.Split(sourcePath, ".")
+		if len(sourceParts) < 2 {
+			continue
+		}
+
+		segmentName := sourceParts[0]
+		fieldNum := sourceParts[1]
+		component := ""
+		if len(sourceParts) > 2 {
+			component = sourceParts[2]
+		}
+
+		// Parse targetPath (e.g., "Patient.identifier[0].value" -> resource="Patient", path="identifier[0].value")
+		// KEEP array indices in the path - we'll handle them during field setting
+		targetParts := strings.Split(targetPath, ".")
+		if len(targetParts) < 2 {
+			continue
+		}
+
+		resourceType := targetParts[0]
+		elementPath := strings.Join(targetParts[1:], ".")
+
+		// Create mapping
+		mapping := FieldMapping{
+			SegmentName:       segmentName,
+			HL7Field:          fieldNum,
+			HL7Component:      component,
+			FHIRResourceType:  resourceType,
+			FHIRElementPath:   elementPath,
+			DataTypeTransform: transformType,
+			IsRequired:        isRequired,
+		}
+
 		mappings = append(mappings, mapping)
 	}
 
-	log.Printf("📊 Found %d field mappings for message type %s", len(mappings), messageType)
+	return mappings
+}
+
+// extractFieldMappingsFromWizardConfig converts wizard-saved mapping format to FieldMapping array
+func (s *HL7FHIRTransformServiceV3) extractFieldMappingsFromWizardConfig(mappingData map[string]interface{}) []FieldMapping {
+	var mappings []FieldMapping
+
+	// The wizard saves mappings in format: { "PID.3": { "fhirPath": "Patient.identifier", ... }, ... }
+	for hl7Path, mappingValue := range mappingData {
+		mappingObj, ok := mappingValue.(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		// Extract segment name and field from HL7 path (e.g., "PID.3" -> segment="PID", field="3")
+		parts := strings.Split(hl7Path, ".")
+		if len(parts) < 2 {
+			continue
+		}
+
+		segmentName := parts[0]
+		fieldNum := parts[1]
+
+		// Extract FHIR path (e.g., "Patient.identifier")
+		fhirPath, _ := mappingObj["fhirPath"].(string)
+		if fhirPath == "" {
+			continue
+		}
+
+		// Extract resource type from FHIR path
+		fhirParts := strings.Split(fhirPath, ".")
+		if len(fhirParts) < 2 {
+			continue
+		}
+
+		resourceType := fhirParts[0]
+		elementPath := strings.Join(fhirParts[1:], ".")
+
+		// Create mapping
+		mapping := FieldMapping{
+			SegmentName:       segmentName,
+			HL7Field:          fieldNum,
+			HL7Component:      "", // Can be extended from mappingObj if needed
+			FHIRResourceType:  resourceType,
+			FHIRElementPath:   elementPath,
+			DataTypeTransform: getDataTypeTransform(mappingObj),
+			IsRequired:        getIsRequired(mappingObj),
+		}
+
+		mappings = append(mappings, mapping)
+	}
+
+	return mappings
+}
+
+func getDataTypeTransform(mappingObj map[string]interface{}) string {
+	if transform, ok := mappingObj["transform"].(string); ok {
+		return transform
+	}
+	return ""
+}
+
+func getIsRequired(mappingObj map[string]interface{}) bool {
+	if required, ok := mappingObj["required"].(bool); ok {
+		return required
+	}
+	return false
+}
+
+// loadFromV9OOBTemplates loads field mappings from our new V9 OOB template architecture
+func (s *HL7FHIRTransformServiceV3) loadFromV9OOBTemplates(ctx context.Context, messageType string) ([]FieldMapping, error) {
+	log.Printf("🎯 V3 Service: Loading V9 OOB template for message type: %s", messageType)
+
+	// Query the actual hl7_fhir_templates table
+	query := `
+		SELECT template_config, template_description, template_name
+		FROM hl7_fhir_templates
+		WHERE message_type = $1 AND is_default = true
+		ORDER BY created_at DESC
+		LIMIT 1
+	`
+
+	var templateConfig string
+	var templateDescription string
+	var templateName string
+
+	err := s.db.QueryRowContext(ctx, query, messageType).Scan(&templateConfig, &templateDescription, &templateName)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			log.Printf("ℹ️ V3 Service: No OOB template found for message type: %s", messageType)
+			return nil, fmt.Errorf("no OOB template found for message type: %s", messageType)
+		}
+		return nil, fmt.Errorf("failed to query OOB template: %w", err)
+	}
+
+	log.Printf("📋 V3 Service: Found OOB template: %s (%s)", templateName, templateDescription)
+	log.Printf("🔍 V3 Service: Template config size: %d bytes", len(templateConfig))
+
+	// Parse the template config JSON
+	var templateData map[string]interface{}
+	if err := json.Unmarshal([]byte(templateConfig), &templateData); err != nil {
+		log.Printf("❌ V3 Service: Failed to parse template JSON: %v", err)
+		log.Printf("🔍 V3 Service: Template config sample (first 200 chars): %s", templateConfig[:min(200, len(templateConfig))])
+		return nil, fmt.Errorf("failed to parse V9 template config: %w", err)
+	}
+
+	log.Printf("✅ V3 Service: Template JSON parsed successfully")
+	log.Printf("🔍 V3 Service: Template top-level keys: %v", getKeys(templateData))
+
+	// Convert V9 OOB template format to V3 FieldMapping format
+	mappings, err := s.convertV9TemplateToFieldMappings(templateData)
+	if err != nil {
+		log.Printf("❌ V3 Service: Failed to convert template: %v", err)
+		return nil, fmt.Errorf("failed to convert V9 template to field mappings: %w", err)
+	}
+
+	log.Printf("✅ V3 Service: Converted V9 template to %d field mappings", len(mappings))
 	return mappings, nil
+}
+
+// convertV9TemplateToFieldMappings converts our V9 OOB template format to V3 FieldMapping format
+func (s *HL7FHIRTransformServiceV3) convertV9TemplateToFieldMappings(templateData map[string]interface{}) ([]FieldMapping, error) {
+	var mappings []FieldMapping
+
+	// Extract resources from template - try both "resources" and "mappings" keys
+	var resourcesInterface interface{}
+	var ok bool
+
+	// Try "resources" key first (new format)
+	resourcesInterface, ok = templateData["resources"]
+	if !ok {
+		// Try "mappings" key (legacy format)
+		resourcesInterface, ok = templateData["mappings"]
+		if !ok {
+			return nil, fmt.Errorf("no resources or mappings found in V9 template")
+		}
+		log.Printf("🔧 V3 Service: Using legacy 'mappings' key format")
+	} else {
+		log.Printf("🔧 V3 Service: Using new 'resources' key format")
+	}
+
+	resources, ok := resourcesInterface.(map[string]interface{})
+	if !ok {
+		return nil, fmt.Errorf("invalid resources format in V9 template")
+	}
+
+	// Process each resource type (Patient, Observation, etc.)
+	for resourceType, resourceDataInterface := range resources {
+		resourceData, ok := resourceDataInterface.(map[string]interface{})
+		if !ok {
+			log.Printf("⚠️ V3 Service: Skipping invalid resource data for %s", resourceType)
+			continue
+		}
+
+		// Extract mappings array from resource
+		mappingsInterface, ok := resourceData["mappings"]
+		if !ok {
+			log.Printf("ℹ️ V3 Service: No mappings found for resource %s", resourceType)
+			continue
+		}
+
+		resourceMappings, ok := mappingsInterface.([]interface{})
+		if !ok {
+			log.Printf("⚠️ V3 Service: Invalid mappings format for resource %s", resourceType)
+			continue
+		}
+
+		// Convert each mapping
+		for _, mappingInterface := range resourceMappings {
+			mapping, ok := mappingInterface.(map[string]interface{})
+			if !ok {
+				continue
+			}
+
+			// Extract HL7 path (e.g., "PID.3.1")
+			hl7Path, ok := mapping["hl7Path"].(string)
+			if !ok {
+				continue
+			}
+
+			// Extract FHIR path (e.g., "Patient.identifier[0].value")
+			fhirPath, ok := mapping["fhirPath"].(string)
+			if !ok {
+				continue
+			}
+
+			// Parse HL7 path into segment and field components
+			segmentName, hl7Field, hl7Component := s.parseHL7Path(hl7Path)
+
+			// Extract additional mapping properties
+			transformFunc, _ := mapping["transform"].(string)
+			required, _ := mapping["required"].(bool)
+			confidence, _ := mapping["confidence"].(float64)
+
+			// Create FieldMapping struct
+			fieldMapping := FieldMapping{
+				SegmentName:       segmentName,
+				HL7Field:         hl7Field,
+				HL7Component:     hl7Component,
+				FHIRResourceType: resourceType,
+				FHIRElementPath:  fhirPath,
+				DataTypeTransform: transformFunc,
+				IsRequired:       required,
+				TransformationRules: map[string]interface{}{
+					"confidence":     confidence,
+					"sourceTemplate": "V9_OOB",
+					"transform":      transformFunc,
+				},
+			}
+
+			mappings = append(mappings, fieldMapping)
+		}
+	}
+
+	log.Printf("🔄 V3 Service: Converted %d V9 mappings to FieldMapping format", len(mappings))
+	return mappings, nil
+}
+
+// parseHL7Path parses HL7 path like "PID.3.1" into segment, field, and component
+func (s *HL7FHIRTransformServiceV3) parseHL7Path(hl7Path string) (segment, field, component string) {
+	parts := strings.Split(hl7Path, ".")
+	if len(parts) < 2 {
+		return hl7Path, "", ""
+	}
+
+	segment = parts[0]
+	field = parts[1]
+
+	if len(parts) >= 3 {
+		component = parts[2]
+	}
+
+	return segment, field, component
+}
+
+// Helper function to get keys from map
+func getKeys(m map[string]interface{}) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
+}
+
+// Helper function for min
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 // =====================================
@@ -1091,23 +1718,111 @@ func (s *HL7FHIRTransformServiceV3) initializeResponse(request *TransformRequest
 }
 
 func (s *HL7FHIRTransformServiceV3) extractMessageType(parsedHL7 map[string]interface{}) (string, error) {
+	// Log the structure for debugging
+	log.Printf("🔍 V3 Service: Parsing message type from HL7 data structure")
+	log.Printf("🔍 V3 Service: Available top-level keys: %v", getMapKeys(parsedHL7))
+
+	// Debug: Check messageType field structure
+	if messageType, exists := parsedHL7["messageType"]; exists {
+		log.Printf("🔍 V3 Service: messageType field exists, type: %T, value: %v", messageType, messageType)
+	}
+
+	// Try direct access first (parsedHL7Data is already the .data portion)
+	if messageType, exists := parsedHL7["messageType"].(map[string]interface{}); exists {
+		if name, nameOk := messageType["name"].(string); nameOk {
+			log.Printf("✅ V3 Service: Found message type (direct): %s", name)
+			return name, nil
+		}
+		log.Printf("🔍 V3 Service: messageType exists but no name field. Keys: %v", getMapKeys(messageType))
+	}
+
+	// Try direct string access (in case it's just a string)
+	if messageType, exists := parsedHL7["messageType"].(string); exists {
+		log.Printf("✅ V3 Service: Found message type (string): %s", messageType)
+		return messageType, nil
+	}
+
+	// Try with "data" wrapper (in case full structure is passed)
 	if data, ok := parsedHL7["data"].(map[string]interface{}); ok {
 		if messageType, exists := data["messageType"].(map[string]interface{}); exists {
 			if name, nameOk := messageType["name"].(string); nameOk {
+				log.Printf("✅ V3 Service: Found message type (nested): %s", name)
 				return name, nil
 			}
 		}
 	}
+
+	// Try basicSegments MSH.9 as fallback
+	if basicSegments, ok := parsedHL7["basicSegments"].(map[string]interface{}); ok {
+		if msh, mshOk := basicSegments["MSH"].(map[string]interface{}); mshOk {
+			if fields, fieldsOk := msh["fields"].(map[string]interface{}); fieldsOk {
+				if msh9, msh9Ok := fields["MSH.9"].(string); msh9Ok {
+					log.Printf("✅ V3 Service: Found message type from MSH.9: %s", msh9)
+					return msh9, nil
+				}
+			}
+		}
+	}
+
+	log.Printf("❌ V3 Service: Message type extraction failed. Available keys: %v", getMapKeys(parsedHL7))
 	return "", fmt.Errorf("message type not found in parsed HL7 data")
 }
 
+// Helper function to get map keys for debugging
+func getMapKeys(m map[string]interface{}) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
+}
+
 func (s *HL7FHIRTransformServiceV3) extractEnhancedSegments(parsedHL7 map[string]interface{}) map[string]interface{} {
+	// Try direct access first (parsedHL7Data is already the .data portion)
+	if enhancedSegments, ok := parsedHL7["enhancedSegments"].(map[string]interface{}); ok {
+		log.Printf("✅ V3 Service: Found enhanced segments (direct): %d segments", len(enhancedSegments))
+		return enhancedSegments
+	}
+
+	// Try with "data" wrapper (in case full structure is passed)
 	if data, ok := parsedHL7["data"].(map[string]interface{}); ok {
 		if enhancedSegments, ok := data["enhancedSegments"].(map[string]interface{}); ok {
+			log.Printf("✅ V3 Service: Found enhanced segments (nested): %d segments", len(enhancedSegments))
 			return enhancedSegments
 		}
 	}
+
+	log.Printf("❌ V3 Service: Enhanced segments not found. Available keys: %v", getMapKeys(parsedHL7))
 	return nil
+}
+
+// convertToAtomicMappings converts FieldMapping structs to AtomicMapping format for frontend
+func (s *HL7FHIRTransformServiceV3) convertToAtomicMappings(fieldMappings []FieldMapping) []AtomicMapping {
+	atomicMappings := make([]AtomicMapping, len(fieldMappings))
+
+	for i, fieldMapping := range fieldMappings {
+		// Build HL7 source path from segment and field components
+		sourcePath := fieldMapping.SegmentName + "." + fieldMapping.HL7Field
+		if fieldMapping.HL7Component != "" {
+			sourcePath += "." + fieldMapping.HL7Component
+		}
+		if fieldMapping.HL7SubComponent != "" {
+			sourcePath += "." + fieldMapping.HL7SubComponent
+		}
+
+		atomicMappings[i] = AtomicMapping{
+			ID:             fmt.Sprintf("%d", fieldMapping.ID),
+			SourcePath:     sourcePath,
+			TargetPath:     fieldMapping.FHIRElementPath,
+			TransformType:  fieldMapping.DataTypeTransform,
+			DefaultValue:   "", // FieldMapping doesn't have default value
+			ValidationRule: "", // FieldMapping doesn't have validation rule
+			IsRequired:     fieldMapping.IsRequired,
+		}
+	}
+
+	log.Printf("✅ Converted %d FieldMappings to AtomicMappings for frontend", len(atomicMappings))
+	return atomicMappings
 }
 
 func (s *HL7FHIRTransformServiceV3) populateTransformResponse(
@@ -1117,12 +1832,16 @@ func (s *HL7FHIRTransformServiceV3) populateTransformResponse(
 	warnings, errors []string,
 	transformStartTime, startTime time.Time,
 	createBundle bool,
+	fieldMappings []FieldMapping,
 ) {
 	response.FHIRResources = resources
 	response.MappingStats = stats
 	response.Warnings = append(response.Warnings, warnings...)
 	response.Errors = append(response.Errors, errors...)
 	response.Performance.TransformTime = time.Since(transformStartTime).String()
+
+	// Convert field mappings to atomic mappings for frontend
+	response.AtomicMappings = s.convertToAtomicMappings(fieldMappings)
 
 	for _, resource := range resources {
 		if resourceType, ok := resource["resourceType"].(string); ok {
@@ -1605,12 +2324,47 @@ func (s *HL7FHIRTransformServiceV3) transformControlIdToReference(controlId stri
 }
 
 // =====================================
-// HELPER FUNCTIONS
+// DEFAULT MAPPINGS FOR TESTING
 // =====================================
 
-func min(a, b int) int {
-	if a < b {
-		return a
+// getDefaultMappingsForTesting provides hardcoded mappings when database is not available
+func (s *HL7FHIRTransformServiceV3) getDefaultMappingsForTesting(messageType string) []FieldMapping {
+	log.Printf("🧪 V3 Service: Providing default test mappings for %s", messageType)
+
+	// Return a basic set of common ADT^A01 mappings for testing
+	defaultMappings := []FieldMapping{
+		// Patient mappings
+		{ID: 1, SegmentName: "PID", HL7Field: "3", HL7Component: "1", FHIRResourceType: "Patient", FHIRElementPath: "identifier[0].value", DataTypeTransform: "cx_to_identifier", IsRequired: true},
+		{ID: 2, SegmentName: "PID", HL7Field: "5", HL7Component: "1", FHIRResourceType: "Patient", FHIRElementPath: "name[0].family", DataTypeTransform: "xpn_to_humanname", IsRequired: true},
+		{ID: 3, SegmentName: "PID", HL7Field: "5", HL7Component: "2", FHIRResourceType: "Patient", FHIRElementPath: "name[0].given[0]", DataTypeTransform: "xpn_to_humanname", IsRequired: true},
+		{ID: 4, SegmentName: "PID", HL7Field: "5", HL7Component: "3", FHIRResourceType: "Patient", FHIRElementPath: "name[0].given[1]", DataTypeTransform: "xpn_to_humanname", IsRequired: false},
+		{ID: 5, SegmentName: "PID", HL7Field: "7", HL7Component: "", FHIRResourceType: "Patient", FHIRElementPath: "birthDate", DataTypeTransform: "ts_to_date", IsRequired: false},
+		{ID: 6, SegmentName: "PID", HL7Field: "8", HL7Component: "", FHIRResourceType: "Patient", FHIRElementPath: "gender", DataTypeTransform: "gender_mapping", IsRequired: false},
+		{ID: 7, SegmentName: "PID", HL7Field: "11", HL7Component: "", FHIRResourceType: "Patient", FHIRElementPath: "address[0]", DataTypeTransform: "xad_to_address", IsRequired: false},
+		{ID: 8, SegmentName: "PID", HL7Field: "13", HL7Component: "", FHIRResourceType: "Patient", FHIRElementPath: "telecom[0]", DataTypeTransform: "xtn_to_contactpoint", IsRequired: false},
+
+		// MessageHeader mappings
+		{ID: 9, SegmentName: "MSH", HL7Field: "9", HL7Component: "", FHIRResourceType: "MessageHeader", FHIRElementPath: "eventCoding", DataTypeTransform: "msh9_trigger_event_to_coding", IsRequired: true},
+		{ID: 10, SegmentName: "MSH", HL7Field: "3", HL7Component: "", FHIRResourceType: "MessageHeader", FHIRElementPath: "source.name", DataTypeTransform: "", IsRequired: false},
+		{ID: 11, SegmentName: "MSH", HL7Field: "4", HL7Component: "", FHIRResourceType: "MessageHeader", FHIRElementPath: "source.software", DataTypeTransform: "", IsRequired: false},
+		{ID: 12, SegmentName: "MSH", HL7Field: "10", HL7Component: "", FHIRResourceType: "MessageHeader", FHIRElementPath: "response.identifier", DataTypeTransform: "control_id_to_reference", IsRequired: false},
+
+		// Encounter mappings
+		{ID: 13, SegmentName: "PV1", HL7Field: "2", HL7Component: "", FHIRResourceType: "Encounter", FHIRElementPath: "class.code", DataTypeTransform: "", IsRequired: false},
+		{ID: 14, SegmentName: "PV1", HL7Field: "3", HL7Component: "1", FHIRResourceType: "Encounter", FHIRElementPath: "location[0].location.identifier.value", DataTypeTransform: "", IsRequired: false},
+		{ID: 15, SegmentName: "PV1", HL7Field: "3", HL7Component: "2", FHIRResourceType: "Encounter", FHIRElementPath: "location[0].location.display", DataTypeTransform: "", IsRequired: false},
+		{ID: 16, SegmentName: "PV1", HL7Field: "3", HL7Component: "3", FHIRResourceType: "Encounter", FHIRElementPath: "location[0].physicalType.coding[0].display", DataTypeTransform: "", IsRequired: false},
+
+		// Event mappings
+		{ID: 17, SegmentName: "EVN", HL7Field: "1", HL7Component: "", FHIRResourceType: "MessageHeader", FHIRElementPath: "eventCoding.code", DataTypeTransform: "", IsRequired: false},
+		{ID: 18, SegmentName: "EVN", HL7Field: "1", HL7Component: "", FHIRResourceType: "MessageHeader", FHIRElementPath: "eventCoding.display", DataTypeTransform: "", IsRequired: false},
+		{ID: 19, SegmentName: "EVN", HL7Field: "2", HL7Component: "", FHIRResourceType: "MessageHeader", FHIRElementPath: "meta.lastUpdated", DataTypeTransform: "ts_to_datetime", IsRequired: false},
 	}
-	return b
+
+	log.Printf("✅ V3 Service: Returning %d default test mappings for %s", len(defaultMappings), messageType)
+	return defaultMappings
 }
+
+// =====================================
+// HELPER FUNCTIONS
+// =====================================

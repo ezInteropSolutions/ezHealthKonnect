@@ -208,6 +208,16 @@ router.get('/lineage/:messageId', requireAuth, async (req, res) => {
 router.post('/check-duplicate', requireAuth, wizardController.checkDuplicateName);
 
 // ====================================
+// OPTIMIZED WIZARD ROUTES
+// ====================================
+
+// Get mapping templates for optimized wizard
+router.get('/mapping-templates', requireAuth, wizardController.getMappingTemplates);
+
+// Validate final configuration before interface creation
+router.post('/validate-final-config', requireAuth, wizardController.validateFinalConfig);
+
+// ====================================
 // NEW HL7-FHIR MAPPING ROUTES
 // ====================================
 

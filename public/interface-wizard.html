@@ -547,6 +547,207 @@
             color: var(--navy-primary);
             font-weight: 500;
         }
+
+        /* Step 4 FHIR Transformation Styles */
+        .step4-fhir-container {
+            padding: 0;
+        }
+
+        .fhir-transformation-interface {
+            min-height: 400px;
+        }
+
+        .fhir-transformation-results {
+            min-height: 300px;
+            border: 2px solid #e2e8f0;
+            border-radius: 12px;
+            background: white;
+        }
+
+        .mapping-config-header {
+            background: linear-gradient(135deg, #f8f9ff 0%, #fff 100%);
+            border: 2px solid #f8bbd9;
+            border-radius: 12px;
+            padding: 16px 20px;
+            margin-bottom: 16px;
+        }
+
+        .config-info {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .config-details h4 {
+            margin: 0 0 6px 0;
+            font-size: 16px;
+            font-weight: 600;
+            color: #1e3a8a;
+        }
+
+        .config-meta {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 12px;
+            color: #6b7280;
+        }
+
+        .message-type, .profile-type {
+            background: #e0e7ff;
+            color: #1e3a8a;
+            padding: 2px 8px;
+            border-radius: 6px;
+            font-weight: 500;
+        }
+
+        .config-status {
+            padding: 2px 8px;
+            border-radius: 6px;
+            font-weight: 500;
+            font-size: 11px;
+            text-transform: uppercase;
+        }
+
+        .config-status.unsaved {
+            background: #fef2f2;
+            color: #dc2626;
+        }
+
+        .config-status.saved {
+            background: #f0fdf4;
+            color: #16a34a;
+        }
+
+        .config-status.modified {
+            background: #fef3c7;
+            color: #d97706;
+        }
+
+        .separator {
+            color: #d1d5db;
+        }
+
+        .config-actions {
+            display: flex;
+            gap: 12px;
+        }
+
+        .config-btn {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 6px;
+            font-size: 13px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .config-btn.primary {
+            background: #1e3a8a;
+            color: white;
+        }
+
+        .config-btn.primary:hover {
+            background: #1e40af;
+            transform: translateY(-1px);
+        }
+
+        .config-btn.secondary {
+            background: white;
+            color: #1e3a8a;
+            border: 2px solid #e2e8f0;
+        }
+
+        .config-btn.secondary:hover {
+            background: #f8f9ff;
+            border-color: #f8bbd9;
+        }
+
+        .fhir-resource-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(248, 187, 217, 0.15);
+        }
+
+        /* Mapping Strategy */
+        .mapping-strategy {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: linear-gradient(135deg, #f8f9ff 0%, #fff 100%);
+            border: 2px solid #f8bbd9;
+            border-radius: 12px;
+            padding: 16px 20px;
+            margin-bottom: 24px;
+        }
+
+        .strategy-tabs {
+            display: flex;
+            gap: 2px;
+            background: #e5e7eb;
+            border-radius: 8px;
+            padding: 2px;
+        }
+
+        .strategy-tab {
+            padding: 8px 16px;
+            border: none;
+            background: none;
+            border-radius: 6px;
+            font-size: 13px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            color: #6b7280;
+        }
+
+        .strategy-tab.active {
+            background: #1e3a8a;
+            color: white;
+        }
+
+        .strategy-actions {
+            display: flex;
+            gap: 12px;
+        }
+
+        .strategy-btn {
+            padding: 10px 16px;
+            border: none;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .strategy-btn.primary {
+            background: #1e3a8a;
+            color: white;
+        }
+
+        .strategy-btn.primary:hover {
+            background: #1e40af;
+            transform: translateY(-1px);
+        }
+
+        .strategy-btn.secondary {
+            background: white;
+            color: #1e3a8a;
+            border: 2px solid #f8bbd9;
+        }
+
+        .fhir-resources-container {
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
     </style>
 </head>
 <body>
@@ -604,8 +805,8 @@
                             <a href="#" class="step-link" onclick="showStep(4)">
                                 <div class="step-number" id="stepCircle4">4</div>
                                 <div class="step-content">
-                                    <div class="step-title">Mapping</div>
-                                    <div class="step-description">Configure data mapping</div>
+                                    <div class="step-title">FHIR Transform</div>
+                                    <div class="step-description">HL7 to FHIR conversion</div>
                                 </div>
                             </a>
                         </li>
@@ -791,12 +992,91 @@
                     <div class="wizard-step" id="step4">
                         <div class="step-header">
                             <div class="step-progress">STEP 4 OF 5</div>
-                            <h3 class="step-title">Configure Data Mapping</h3>
-                            <p class="step-description">Map source fields to target format</p>
+                            <h3 class="step-title">HL7 to FHIR Transformation</h3>
+                            <p class="step-description">Transform parsed HL7 data to FHIR resources</p>
                         </div>
-                        <div class="demo-content">
-                            <p>🔗 Field Mapping Configuration</p>
-                            <p>Source → Target field mappings will be configured here</p>
+
+                        <div id="step4-content" class="step4-fhir-container">
+                            <!-- FHIR Transformation Interface -->
+                            <div class="fhir-transformation-interface">
+                                <!-- Configuration Header -->
+                                <div class="mapping-config-header">
+                                    <div class="config-info">
+                                        <div class="config-details">
+                                            <h4>🔄 HL7 → FHIR Transformation</h4>
+                                            <div class="config-meta">
+                                                <span class="message-type" id="fhir-message-type">Loading...</span>
+                                                <span class="separator">•</span>
+                                                <span class="profile-type">FHIR R4</span>
+                                                <span class="separator">•</span>
+                                                <span class="config-status unsaved" id="fhir-config-status">Ready</span>
+                                            </div>
+                                        </div>
+                                        <div class="config-actions">
+                                            <button class="config-btn primary" id="btn-transform-to-fhir" onclick="startFHIRTransformation()">
+                                                ▶️ Transform to FHIR
+                                            </button>
+                                            <button class="config-btn secondary" id="btn-view-fhir-json" onclick="viewFHIRJSON()" style="display: none;">
+                                                📄 View JSON
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- Transformation Results Container -->
+                                <div id="fhir-transformation-results" class="fhir-transformation-results">
+                                    <div class="transformation-placeholder">
+                                        <div style="text-align: center; padding: 60px 20px;">
+                                            <div style="font-size: 64px; margin-bottom: 24px; color: #1e3a8a;">🔄</div>
+                                            <div style="font-size: 20px; font-weight: 600; margin-bottom: 12px; color: #1e3a8a;">Ready for FHIR Transformation</div>
+                                            <div style="font-size: 16px; color: #6b7280; margin-bottom: 32px; max-width: 400px; margin-left: auto; margin-right: auto; line-height: 1.5;">
+                                                Click "Transform to FHIR" to convert your parsed HL7 data into FHIR R4 resources
+                                            </div>
+                                            <div style="display: flex; justify-content: center; gap: 16px; flex-wrap: wrap;">
+                                                <div style="background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px; padding: 12px; text-align: center; min-width: 120px;">
+                                                    <div style="font-size: 18px; font-weight: 600; color: #16a34a;">👤</div>
+                                                    <div style="font-size: 12px; color: #15803d; margin-top: 4px;">Patient</div>
+                                                </div>
+                                                <div style="background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 8px; padding: 12px; text-align: center; min-width: 120px;">
+                                                    <div style="font-size: 18px; font-weight: 600; color: #2563eb;">🏥</div>
+                                                    <div style="font-size: 12px; color: #1d4ed8; margin-top: 4px;">Encounter</div>
+                                                </div>
+                                                <div style="background: #fdf2f8; border: 1px solid #fbcfe8; border-radius: 8px; padding: 12px; text-align: center; min-width: 120px;">
+                                                    <div style="font-size: 18px; font-weight: 600; color: #db2777;">🔬</div>
+                                                    <div style="font-size: 12px; color: #be185d; margin-top: 4px;">Observation</div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- Enhanced Mapping Interface (Hidden by default) -->
+                                <div id="enhanced-mapping-interface" style="display: none; margin-top: 24px;">
+                                    <div class="mapping-strategy">
+                                        <div class="strategy-info">
+                                            <h4 style="margin: 0 0 8px 0; font-size: 16px; font-weight: 600; color: #1e3a8a;">Mapping Strategy</h4>
+                                            <div class="strategy-tabs">
+                                                <button class="strategy-tab active" data-strategy="automatic">Automatic</button>
+                                                <button class="strategy-tab" data-strategy="manual">Manual Review</button>
+                                                <button class="strategy-tab" data-strategy="custom">Custom Rules</button>
+                                            </div>
+                                        </div>
+                                        <div class="strategy-actions">
+                                            <button class="strategy-btn secondary" onclick="editFieldMappings()">
+                                                🔧 Edit Mappings
+                                            </button>
+                                            <button class="strategy-btn primary" onclick="validateTransformation()">
+                                                ✅ Validate
+                                            </button>
+                                        </div>
+                                    </div>
+
+                                    <!-- FHIR Resources Container -->
+                                    <div id="fhir-resources-container" class="fhir-resources-container">
+                                        <!-- Dynamic FHIR resource cards will be inserted here -->
+                                    </div>
+                                </div>
+                            </div>
                         </div>
                     </div>
 
@@ -839,9 +1119,9 @@
         const totalSteps = 5;
         const stepTitles = [
             'Interface Configuration',
-            'Upload HL7 Message', 
+            'Upload HL7 Message',
             'Review Parsed Content',
-            'Configure Data Mapping',
+            'HL7 to FHIR Transformation',
             'Deploy Interface'
         ];
 
@@ -955,6 +1235,9 @@
         // Initialize
         updateNavigation();
     </script>
+
+    <!-- Step 4 FHIR Transformation Module -->
+    <script src="js/step4-fhir-transform.js"></script>
 
 </body>
 </html>

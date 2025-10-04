@@ -1,7 +1,7 @@
 // interface-config-manager.js
 // Enhanced interface configuration management for comprehensive editing
 
-class InterfaceConfigManager {
+class BasicInterfaceConfigManager {
     constructor() {
         this.availableInterfaces = [];
         this.currentInterface = null;
@@ -694,13 +694,13 @@ function testInterfaceConfiguration() {
 // Initialize the configuration manager when DOM is ready
 function initializeConfigManager() {
     console.log('🔧 Initializing InterfaceConfigManager...');
-    window.interfaceConfigManager = new InterfaceConfigManager();
-    window.interfaceConfigManager.init();
+    window.basicInterfaceConfigManager = new BasicInterfaceConfigManager();
+    window.basicInterfaceConfigManager.init();
     console.log('✅ InterfaceConfigManager initialized');
 }
 
 // Make class available globally (after class definition)
-window.InterfaceConfigManager = InterfaceConfigManager;
+window.BasicInterfaceConfigManager = BasicInterfaceConfigManager;
 console.log('✅ InterfaceConfigManager class exposed globally');
 
 if (document.readyState === 'loading') {

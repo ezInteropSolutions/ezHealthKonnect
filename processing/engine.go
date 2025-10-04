@@ -1,22 +1,26 @@
 // processing/engine.go
-// Simple Processing Engine for Configuration Controller
+// Simple Processing Engine for Configuration Controller (MVC + OOB)
 
 package processing
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"sync"
 	"time"
+
+	"ezhealthkonnect/services"
 )
 
 // ProcessingEngine provides basic interface engine functionality
 type ProcessingEngine struct {
-	db               *sql.DB
-	activeInterfaces map[string]*InterfaceStatus
-	mutex           sync.RWMutex
-	stats           *EngineStats
-	running         bool
+	db                   *sql.DB
+	activeInterfaces     map[string]*InterfaceStatus
+	mutex               sync.RWMutex
+	stats               *EngineStats
+	running             bool
+	transformationService *services.TransformationService // OOB: Auto-integrated transformation
 }
 
 // InterfaceStatus tracks the status of an interface
@@ -40,8 +44,9 @@ type EngineStats struct {
 }
 
 // NewProcessingEngine creates a new processing engine
+// OOB: Auto-initializes transformation service if MongoDB is available
 func NewProcessingEngine(db *sql.DB) *ProcessingEngine {
-	return &ProcessingEngine{
+	engine := &ProcessingEngine{
 		db:               db,
 		activeInterfaces: make(map[string]*InterfaceStatus),
 		stats: &EngineStats{
@@ -51,6 +56,11 @@ func NewProcessingEngine(db *sql.DB) *ProcessingEngine {
 		},
 		running: false,
 	}
+
+	// OOB: Auto-initialize transformation service (will be nil if MongoDB unavailable)
+	engine.transformationService = services.InitializeTransformationService(db)
+
+	return engine
 }
 
 // Start starts the processing engine
@@ -197,4 +207,38 @@ func (pe *ProcessingEngine) GetActiveInterfaces() map[string]*InterfaceStatus {
 		result[k] = v
 	}
 	return result
+}
+
+// ==================== TRANSFORMATION METHODS (MVC + OOB) ====================
+// These methods delegate to the auto-initialized TransformationService
+
+// TransformStoredMessage retrieves parsedJSON from MongoDB and transforms it to FHIR
+// MVC + OOB: Delegates to TransformationService which handles:
+//   1. Retrieve parsedJSON from MongoDB
+//   2. Load interface-specific mapping from interfaces table
+//   3. Execute transformation pipeline
+//   4. Store FHIR output in hybrid storage
+func (pe *ProcessingEngine) TransformStoredMessage(
+	ctx context.Context,
+	interfaceID string,
+	messageID string,
+) (*services.TransformationResult, error) {
+	if pe.transformationService == nil {
+		return nil, fmt.Errorf("transformation service not available (MongoDB required)")
+	}
+
+	return pe.transformationService.TransformStoredMessage(ctx, interfaceID, messageID)
+}
+
+// TransformInterfaceMessages transforms all untransformed messages for an interface
+func (pe *ProcessingEngine) TransformInterfaceMessages(
+	ctx context.Context,
+	interfaceID string,
+	limit int,
+) ([]*services.TransformationResult, error) {
+	if pe.transformationService == nil {
+		return nil, fmt.Errorf("transformation service not available (MongoDB required)")
+	}
+
+	return pe.transformationService.TransformInterfaceMessages(ctx, interfaceID, limit)
 }

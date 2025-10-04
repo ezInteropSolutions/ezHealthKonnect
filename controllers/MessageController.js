@@ -290,58 +290,86 @@ class MessageController {
                 });
             }
 
-            // Generate message ID
+            // Generate message ID for tracking
             const messageId = `UI-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
-            // Store message in interface-specific table using InterfaceTableManager
-            let processingId;
-            try {
-                console.log(`📧 Storing message in interface-specific table for interface ${interfaceId}`);
+            console.log(`🚀 Sending message via ${interfaceData.source_type} connectivity for interface ${interfaceId}`);
 
-                const messageData = {
-                    messageId,
-                    correlationId: messageId, // Use messageId as correlation ID for UI-generated messages
-                    interfaceId: interfaceId, // Required for NOT NULL constraint
-                    interfaceName: interfaceData.name,
-                    status: 'processing',
-                    sourceType: 'ui_test',
-                    sourceEndpoint: 'ui_manual_send',
-                    sourceIP: req.ip || req.connection.remoteAddress || '127.0.0.1',
-                    messageType: messageType || 'Unknown',
-                    messageSize: messageContent?.length || 0,
-                    messageEncoding: 'UTF-8',
-                    rawMessage: messageContent, // Store the actual message content
-                    receivedAt: new Date()
-                };
-
-                processingId = await this.tableManager.insertMessage(interfaceId, messageData);
-                console.log(`✅ Message stored in interface table with ID: ${processingId}`);
-            } catch (dbError) {
-                console.error('Interface table insertion error:', dbError.message);
-                return res.status(500).json({
-                    success: false,
-                    error: 'Failed to store message in interface table',
-                    details: dbError.message
-                });
-            }
-
-            // Note: processingId is the UUID returned from interface table insertion
-            const messageRecordId = processingId;
-
-            // Send to interface based on source type and config
+            // Send message using actual source connectivity (NO DIRECT DB INSERTION)
             let deliveryResult;
             try {
-                if (interfaceData.source_type === 'fhir' || interfaceData.source_type === 'http') {
-                    // Send HTTP request
+                if (interfaceData.source_type === 'tcp' || interfaceData.source_type === 'mllp') {
+                    // Send via TCP/MLLP connectivity
+                    const host = sourceConfig.host || 'localhost';
+                    const port = sourceConfig.port || 6661;
+
+                    const net = require('net');
+                    const client = new net.Socket();
+
+                    const sendPromise = new Promise((resolve, reject) => {
+                        let responseData = '';
+
+                        client.connect(port, host, () => {
+                            console.log(`📡 Connected to ${host}:${port}`);
+
+                            // For MLLP, wrap message in MLLP envelope
+                            let messageToSend = messageContent;
+                            if (interfaceData.source_type === 'mllp') {
+                                messageToSend = `\x0B${messageContent}\x1C\x0D`;
+                            }
+
+                            client.write(messageToSend);
+                        });
+
+                        client.on('data', (data) => {
+                            responseData += data.toString();
+                        });
+
+                        client.on('close', () => {
+                            resolve({
+                                success: true,
+                                status: 200,
+                                response: responseData || 'Message sent via TCP/MLLP connectivity',
+                                method: 'tcp_connectivity'
+                            });
+                        });
+
+                        client.on('error', (err) => {
+                            reject({
+                                success: false,
+                                status: 500,
+                                response: err.message,
+                                method: 'tcp_connectivity'
+                            });
+                        });
+
+                        // Timeout after 10 seconds
+                        setTimeout(() => {
+                            client.destroy();
+                            reject({
+                                success: false,
+                                status: 408,
+                                response: 'Connection timeout',
+                                method: 'tcp_connectivity'
+                            });
+                        }, 10000);
+                    });
+
+                    deliveryResult = await sendPromise;
+
+                } else if (interfaceData.source_type === 'fhir' || interfaceData.source_type === 'http') {
+                    // Send via HTTP connectivity
+                    const host = sourceConfig.host || 'localhost';
                     const port = sourceConfig.port || 8090;
                     const path = sourceConfig.path || '/fhir';
 
                     const fetch = require('node-fetch');
-                    const response = await fetch(`http://localhost:${port}${path}`, {
+                    const response = await fetch(`http://${host}:${port}${path}`, {
                         method: 'POST',
                         headers: {
                             'Content-Type': contentType,
-                            'X-Message-ID': messageId
+                            'X-Message-ID': messageId,
+                            'X-Interface-ID': interfaceId
                         },
                         body: messageContent
                     });
@@ -349,73 +377,57 @@ class MessageController {
                     deliveryResult = {
                         success: response.ok,
                         status: response.status,
-                        response: await response.text()
+                        response: await response.text(),
+                        method: 'http_connectivity'
                     };
+
                 } else {
-                    // For other types, just mark as sent for now
-                    deliveryResult = {
-                        success: true,
-                        status: 200,
-                        response: 'Message queued for processing'
-                    };
+                    // Unsupported source type
+                    return res.status(400).json({
+                        success: false,
+                        error: `Unsupported source type: ${interfaceData.source_type}`,
+                        supportedTypes: ['tcp', 'mllp', 'http', 'fhir']
+                    });
                 }
 
-                // Update processing status in interface table
-                const finalStatus = deliveryResult.success ? 'sent' : 'failed';
-                const tableName = this.tableManager.getInterfaceTableName(interfaceId);
+                console.log(`📨 Message delivery result:`, deliveryResult);
 
-                await this.database.sequelize.query(`
-                    UPDATE ${tableName}
-                    SET status = :status,
-                        processing_completed_at = CURRENT_TIMESTAMP,
-                        delivery_status = :deliveryStatus,
-                        delivery_attempts = 1,
-                        processing_time_ms = EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - received_at)) * 1000
-                    WHERE id = :messageRecordId
-                `, {
-                    replacements: {
-                        status: finalStatus,
-                        deliveryStatus: deliveryResult.success ? 'delivered' : 'failed',
-                        messageRecordId
+                res.json({
+                    success: deliveryResult.success,
+                    messageId: messageId,
+                    interface: {
+                        id: interfaceId,
+                        name: interfaceData.name,
+                        type: interfaceData.source_type,
+                        endpoint: `${sourceConfig.host || 'localhost'}:${sourceConfig.port}`
                     },
-                    type: this.database.sequelize.QueryTypes.UPDATE
+                    delivery: {
+                        status: deliveryResult.status,
+                        method: deliveryResult.method,
+                        response: deliveryResult.response
+                    },
+                    message: deliveryResult.success
+                        ? `Message sent successfully via ${interfaceData.source_type} connectivity`
+                        : `Message delivery failed: ${deliveryResult.response}`
                 });
 
-            } catch (deliveryError) {
-                // Update with error status in interface table
-                const tableName = this.tableManager.getInterfaceTableName(interfaceId);
+            } catch (connectivityError) {
+                console.error(`❌ Connectivity Error (${interfaceData.source_type}):`, connectivityError);
 
-                await this.database.sequelize.query(`
-                    UPDATE ${tableName}
-                    SET status = 'failed',
-                        processing_completed_at = CURRENT_TIMESTAMP,
-                        error_count = error_count + 1,
-                        last_error_message = :errorMessage,
-                        last_error_at = CURRENT_TIMESTAMP
-                    WHERE id = :messageRecordId
-                `, {
-                    replacements: {
-                        errorMessage: deliveryError.message,
-                        messageRecordId
-                    },
-                    type: this.database.sequelize.QueryTypes.UPDATE
-                });
-
-                deliveryResult = {
+                res.status(500).json({
                     success: false,
-                    error: deliveryError.message
-                };
+                    messageId: messageId,
+                    interface: {
+                        id: interfaceId,
+                        name: interfaceData.name,
+                        type: interfaceData.source_type,
+                        endpoint: `${sourceConfig.host || 'localhost'}:${sourceConfig.port}`
+                    },
+                    error: 'Failed to send message via source connectivity',
+                    details: connectivityError.response || connectivityError.message || connectivityError,
+                    message: `Unable to connect to ${interfaceData.source_type} endpoint. Ensure the interface listener is running.`
+                });
             }
-
-            res.json({
-                success: true,
-                data: {
-                    messageId,
-                    messageRecordId,
-                    deliveryResult,
-                    message: 'Message sent successfully'
-                }
-            });
 
         } catch (error) {
             console.error('❌ Send Message Error:', error);

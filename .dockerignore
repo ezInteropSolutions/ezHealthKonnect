@@ -1,14 +1,86 @@
-node_modules
+# Version control
 .git
-.env
-*.log
+.gitignore
+
+# Node.js
+node_modules
+npm-debug.log
+yarn-error.log
+.npm
+
+# Development files
+*.md
+README*
+CHANGELOG*
+LICENSE*
+.vscode/
+.idea/
+
+# Test files
+test/
+tests/
+*.test.js
+*.spec.js
+
+# Logs
 logs/
-uploads/
-.automation/
+*.log
+
+# Environment and config
+.env
+.env.*
+!.env.example
+
+# Build artifacts
 dist/
+build/
+coverage/
+.automation/
 .github/
-README.md
-CHANGELOG.md
-docs/
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Docker
+Dockerfile*
+docker-compose*
 .dockerignore
 docker-entrypoint.sh
+
+# Documentation
+docs/
+
+# Temporary files
+*.tmp
+*.temp
+*.swp
+*.swo
+*~
+
+# Database files (development)
+*.sqlite
+*.sqlite3
+*.db
+
+# Screenshots and images
+*.png
+*.jpg
+*.jpeg
+*.gif
+
+# Go build artifacts
+go-api
+main
+
+# Unused scripts
+setup_sample_transformations.js
+setup_transformation_pipeline.js
+test_*.js
+send_hl7_test.js
+uploads/

@@ -959,6 +959,7 @@ class MessageManager {
 
         try {
             let response;
+            let isSuccess = false;
 
             if (flowType === 'hl7-to-fhir') {
                 // HL7 → FHIR message flow
@@ -986,6 +987,7 @@ class MessageManager {
                 if (response.ok) {
                     const data = await response.json();
                     this.showSuccess(`HL7→FHIR flow initiated! Correlation ID: ${data.data.correlationId}`);
+                    isSuccess = true;
                 } else {
                     const error = await response.json();
                     this.showError(error.error || 'Failed to initiate HL7→FHIR flow');
@@ -1004,16 +1006,36 @@ class MessageManager {
                     })
                 });
 
-                if (response.ok) {
-                    const data = await response.json();
-                    this.showSuccess('Message sent successfully!');
+                const responseData = await response.json();
+                console.log('🔍 Send message response:', responseData);
+
+                if (response.ok && responseData.success) {
+                    // Show detailed connectivity success message
+                    const endpoint = responseData.interface?.endpoint || 'endpoint';
+                    const method = responseData.delivery?.method || 'connectivity';
+                    const interfaceName = responseData.interface?.name || 'Unknown';
+                    const interfaceType = responseData.interface?.type || 'Unknown';
+                    const messageId = responseData.messageId || 'Unknown';
+
+                    this.showSuccess(`📡 Message sent via ${method.toUpperCase()}!<br>
+                                     <small>Interface: ${interfaceName} (${interfaceType})<br>
+                                     Endpoint: ${endpoint}<br>
+                                     Message ID: ${messageId}</small>`);
+                    isSuccess = true;
                 } else {
-                    const error = await response.json();
-                    this.showError(error.error || 'Failed to send message');
+                    // Show detailed connectivity error message
+                    let errorMsg = responseData.error || 'Failed to send message';
+                    if (responseData.details) {
+                        errorMsg += `<br><small>Details: ${responseData.details}</small>`;
+                    }
+                    if (responseData.message) {
+                        errorMsg += `<br><small>${responseData.message}</small>`;
+                    }
+                    this.showError(errorMsg);
                 }
             }
 
-            if (response.ok) {
+            if (isSuccess) {
                 closeSendMessageModal();
                 form.reset();
                 this.loadMessages(); // Refresh messages

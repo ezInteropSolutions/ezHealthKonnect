@@ -1072,18 +1072,25 @@ func extractMessageInfoSimple(rawMessage string) (version, messageType, triggerE
 	messageType = "ADT"
 	triggerEvent = "A01"
 
-	lines := strings.Split(rawMessage, "\n")
+	// Handle both \r\n (CRLF), \r (CR), and \n (LF) as segment separators
+	// Replace all \r\n with \n first, then \r with \n
+	normalizedMessage := strings.ReplaceAll(rawMessage, "\r\n", "\n")
+	normalizedMessage = strings.ReplaceAll(normalizedMessage, "\r", "\n")
+
+	lines := strings.Split(normalizedMessage, "\n")
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
 		if strings.HasPrefix(line, "MSH|") {
 			fields := strings.Split(line, "|")
 
+			// MSH-12 (field index 11) contains the version
 			if len(fields) >= 12 {
 				if v := strings.TrimSpace(fields[11]); v != "" {
 					version = v
 				}
 			}
 
+			// MSH-9 (field index 8) contains message type^trigger event
 			if len(fields) >= 9 {
 				msgField := strings.TrimSpace(fields[8])
 				if msgField != "" {

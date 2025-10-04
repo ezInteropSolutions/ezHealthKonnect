@@ -241,13 +241,31 @@ class RoutingService {
             throw new Error('No target configuration found in interface');
         }
 
+        // Parse endpoint URL if provided (legacy support)
+        let host = targetConfig.host || 'localhost';
+        let port = targetConfig.port || 8080;
+        let path = targetConfig.path || '/';
+        let type = this.determineDestinationType(targetConfig);
+
+        if (targetConfig.endpoint) {
+            try {
+                const url = new URL(targetConfig.endpoint);
+                type = url.protocol.replace(':', ''); // http or https
+                host = url.hostname;
+                port = url.port || (type === 'https' ? 443 : 80);
+                path = url.pathname;
+            } catch (e) {
+                console.warn(`⚠️ Failed to parse endpoint URL: ${targetConfig.endpoint}, using defaults`);
+            }
+        }
+
         // Primary destination
         const primaryDestination = {
             id: targetConfig.targetInterfaceId || 'primary',
-            type: this.determineDestinationType(targetConfig),
-            host: targetConfig.host || 'localhost',
-            port: targetConfig.port || 8080,
-            path: targetConfig.path || '/',
+            type: type,
+            host: host,
+            port: parseInt(port),
+            path: path,
             method: targetConfig.method || 'POST',
             contentType: targetConfig.contentType || 'application/json',
             headers: targetConfig.headers || {},

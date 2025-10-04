@@ -27,6 +27,7 @@ import (
 
 type TransformRequest struct {
 	ParsedHL7Data  map[string]interface{} `json:"parsedHL7Data" binding:"required"`
+	MessageType    string                 `json:"messageType,omitempty"` // OOB: Injected from pipeline config
 	TargetProfile  string                 `json:"targetProfile,omitempty"`
 	FHIRVersion    string                 `json:"fhirVersion,omitempty"`
 	CreateBundle   bool                   `json:"createBundle,omitempty"`
@@ -40,6 +41,7 @@ type TransformResponse struct {
 	RequestID        string                   `json:"requestId"`
 	MessageType      string                   `json:"messageType"`
 	FHIRResources    []map[string]interface{} `json:"fhirResources"`
+	AtomicMappings   []AtomicMapping          `json:"atomicMappings"`
 	Bundle           map[string]interface{}   `json:"bundle,omitempty"`
 	ResourceCounts   map[string]int           `json:"resourceCounts"`
 	MappingStats     MappingStatistics        `json:"mappingStats"`

@@ -55,6 +55,9 @@ const (
 	StepTypeFHIRBuild        TransformationStepType = "fhir_build"
 	StepTypeCodeLookup       TransformationStepType = "code_lookup"
 	StepTypeTemplateApply    TransformationStepType = "template_apply"
+
+	// PostgreSQL-based types
+	StepTypePostgresAtomicMapping TransformationStepType = "postgres_atomic_mapping"
 )
 
 // StepCondition defines when a step should execute

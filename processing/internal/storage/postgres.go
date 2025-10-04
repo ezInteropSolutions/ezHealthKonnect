@@ -13,7 +13,7 @@ import (
 	"github.com/lib/pq"
 	_ "github.com/lib/pq"
 
-	"github.com/ezhealthkonnect/processing/pkg"
+	"ezhealthkonnect/processing/pkg"
 )
 
 // PostgreSQLProvider implements StorageProvider for PostgreSQL

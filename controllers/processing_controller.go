@@ -4,8 +4,8 @@
 package controllers
 
 import (
-	"database/sql"
 	"net/http"
+	"strconv"
 
 	"ezhealthkonnect/processing"
 
@@ -17,9 +17,8 @@ type ProcessingController struct {
 	engine *processing.ProcessingEngine
 }
 
-// NewProcessingController creates a new processing controller
-func NewProcessingController(db *sql.DB) *ProcessingController {
-	engine := processing.NewProcessingEngine(db)
+// NewProcessingController creates a new processing controller with existing engine
+func NewProcessingController(engine *processing.ProcessingEngine) *ProcessingController {
 	return &ProcessingController{
 		engine: engine,
 	}
@@ -43,6 +42,10 @@ func (pc *ProcessingController) RegisterRoutes(router *gin.RouterGroup) {
 		// Message queue management
 		processing.POST("/queue/enqueue", pc.EnqueueMessage)
 		processing.GET("/queue/stats", pc.GetQueueStats)
+
+		// Message transformation (MVC + OOB: retrieve parsedJSON → map → transform → store FHIR)
+		processing.POST("/transform/message/:interfaceId/:messageId", pc.TransformStoredMessage)
+		processing.POST("/transform/interface/:interfaceId", pc.TransformInterfaceMessages)
 	}
 }
 
@@ -232,5 +235,80 @@ func (pc *ProcessingController) GetQueueStats(c *gin.Context) {
 			"total":     0,
 			"last_updated": "placeholder",
 		},
+	})
+}
+
+// TransformStoredMessage transforms a single stored message
+// MVC + OOB: Retrieves parsedJSON from MongoDB → uses interface mapping → generates FHIR → stores output
+// POST /api/processing/messages/:interfaceId/:messageId/transform
+func (pc *ProcessingController) TransformStoredMessage(c *gin.Context) {
+	interfaceID := c.Param("interfaceId")
+	messageID := c.Param("messageId")
+
+	if interfaceID == "" || messageID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"error":   "interface_id and message_id are required",
+		})
+		return
+	}
+
+	// Delegate to processing engine
+	result, err := pc.engine.TransformStoredMessage(c.Request.Context(), interfaceID, messageID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"error":   err.Error(),
+			"message": "Transformation failed",
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success":          result.Success,
+		"fhir_bundle":      result.TransformedMessage,
+		"resource_type":    result.FHIRResourceType,
+		"resource_id":      result.FHIRResourceID,
+		"processing_time":  result.ProcessingTimeMs,
+		"metadata":         result.TransformationMetadata,
+		"validation_errors": result.ValidationErrors,
+	})
+}
+
+// TransformInterfaceMessages transforms all untransformed messages for an interface
+// POST /api/processing/interfaces/:interfaceId/transform?limit=100
+func (pc *ProcessingController) TransformInterfaceMessages(c *gin.Context) {
+	interfaceID := c.Param("interfaceId")
+	if interfaceID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"error":   "interface_id is required",
+		})
+		return
+	}
+
+	// Get limit from query params
+	limit := 100
+	if limitParam := c.Query("limit"); limitParam != "" {
+		if parsedLimit, err := strconv.Atoi(limitParam); err == nil && parsedLimit > 0 {
+			limit = parsedLimit
+		}
+	}
+
+	// Delegate to processing engine
+	results, err := pc.engine.TransformInterfaceMessages(c.Request.Context(), interfaceID, limit)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"error":   err.Error(),
+			"message": "Batch transformation failed",
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success":         true,
+		"total_transformed": len(results),
+		"results":         results,
 	})
 }

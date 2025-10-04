@@ -10,6 +10,8 @@ import (
 	"sort"
 	"time"
 
+	"ezhealthkonnect/services"
+
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -17,12 +19,13 @@ import (
 
 // TransformationEngine handles the execution of transformation pipelines
 type TransformationEngine struct {
-	mongoClient       *mongo.Client
-	database          *mongo.Database
-	pipelineCollection *mongo.Collection
-	templateCollection *mongo.Collection
-	valueMapsCollection *mongo.Collection
-	stepProcessors    map[TransformationStepType]StepProcessor
+	mongoClient           *mongo.Client
+	database              *mongo.Database
+	pipelineCollection    *mongo.Collection
+	templateCollection    *mongo.Collection
+	valueMapsCollection   *mongo.Collection
+	stepProcessors        map[TransformationStepType]StepProcessor
+	postgresTransformService *services.PostgresTransformationService
 }
 
 // StepProcessor interface for individual transformation step handlers
@@ -32,16 +35,17 @@ type StepProcessor interface {
 }
 
 // NewTransformationEngine creates a new transformation engine
-func NewTransformationEngine(mongoClient *mongo.Client, databaseName string) *TransformationEngine {
+func NewTransformationEngine(mongoClient *mongo.Client, databaseName string, postgresService *services.PostgresTransformationService) *TransformationEngine {
 	database := mongoClient.Database(databaseName)
 
 	engine := &TransformationEngine{
-		mongoClient:         mongoClient,
-		database:           database,
-		pipelineCollection:  database.Collection("transformation_pipelines"),
-		templateCollection:  database.Collection("transformation_templates"),
-		valueMapsCollection: database.Collection("value_maps"),
-		stepProcessors:     make(map[TransformationStepType]StepProcessor),
+		mongoClient:              mongoClient,
+		database:                database,
+		pipelineCollection:       database.Collection("transformation_pipelines"),
+		templateCollection:       database.Collection("transformation_templates"),
+		valueMapsCollection:      database.Collection("value_maps"),
+		stepProcessors:          make(map[TransformationStepType]StepProcessor),
+		postgresTransformService: postgresService,
 	}
 
 	// Register built-in step processors
@@ -63,7 +67,86 @@ func (engine *TransformationEngine) registerStepProcessors() {
 	engine.stepProcessors[StepTypeFHIRBuild] = &FHIRBuildProcessor{}
 	engine.stepProcessors[StepTypeCodeLookup] = &CodeLookupProcessor{engine: engine}
 
+	// Register PostgreSQL-based processors
+	if engine.postgresTransformService != nil {
+		engine.stepProcessors[StepTypePostgresAtomicMapping] = &PostgresAtomicMappingProcessor{
+			postgresService: engine.postgresTransformService,
+		}
+		log.Printf("✅ PostgreSQL atomic mapping processor registered")
+	}
+
 	log.Printf("✅ Transformation engine registered %d step processors", len(engine.stepProcessors))
+}
+
+// PostgresAtomicMappingProcessor handles PostgreSQL atomic mapping transformations
+type PostgresAtomicMappingProcessor struct {
+	postgresService *services.PostgresTransformationService
+}
+
+// Process executes PostgreSQL atomic mapping transformation
+func (pamp *PostgresAtomicMappingProcessor) Process(ctx context.Context, step *TransformationStep, transformationContext *TransformationContext) error {
+	log.Printf("🔄 Starting PostgreSQL atomic mappings transformation step: %s", step.Name)
+
+	if pamp.postgresService == nil {
+		return fmt.Errorf("PostgreSQL transformation service not available")
+	}
+
+	// Extract interface ID from transformation context
+	interfaceID := transformationContext.InterfaceID
+
+	// Extract message type - try multiple sources
+	messageType := "ADT^A01" // Default fallback
+	if mt, exists := transformationContext.Variables["message_type"]; exists {
+		if mtStr, ok := mt.(string); ok {
+			messageType = mtStr
+		}
+	}
+
+	// Get source data from transformation context
+	sourceData := transformationContext.Variables
+
+	// Execute PostgreSQL atomic mappings transformation
+	result, err := pamp.postgresService.ExecuteTransformation(interfaceID, messageType, sourceData)
+	if err != nil {
+		return fmt.Errorf("PostgreSQL atomic mappings failed: %w", err)
+	}
+
+	// Store results in transformation context
+	if result.Success {
+		// Update target message with FHIR Patient resource
+		transformationContext.TargetMessage = result.TransformedMessage
+		transformationContext.Variables["transformation_metadata"] = result.TransformationMetadata
+		transformationContext.Variables["fhir_resource_type"] = result.FHIRResourceType
+		transformationContext.Variables["fhir_resource_id"] = result.FHIRResourceID
+
+		// Add PostgreSQL-specific metadata to variables
+		transformationContext.Variables["postgres_atomic_mappings"] = map[string]interface{}{
+			"applied_mappings":   result.TransformationMetadata["mappings_applied"],
+			"skipped_mappings":   result.TransformationMetadata["mappings_skipped"],
+			"processing_time_ms": result.ProcessingTimeMs,
+			"processing_method":  "postgres_atomic_mappings",
+			"total_mappings":     result.TransformationMetadata["total_mappings"],
+		}
+
+		log.Printf("✅ PostgreSQL atomic mappings completed: %d mappings applied", len(result.TransformationMetadata["mappings_applied"].([]string)))
+	} else {
+		return fmt.Errorf("PostgreSQL transformation failed with validation errors: %v", result.ValidationErrors)
+	}
+
+	return nil
+}
+
+// Validate validates the transformation step configuration
+func (pamp *PostgresAtomicMappingProcessor) Validate(step *TransformationStep) error {
+	if step.StepType != StepTypePostgresAtomicMapping {
+		return fmt.Errorf("invalid step type for PostgreSQL atomic mapping processor: %s", step.StepType)
+	}
+
+	if pamp.postgresService == nil {
+		return fmt.Errorf("PostgreSQL transformation service not initialized")
+	}
+
+	return nil
 }
 
 // GetTransformationPipeline retrieves a transformation pipeline for an interface

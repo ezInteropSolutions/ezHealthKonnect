@@ -108,8 +108,9 @@ services:
       - "3000:3000"    # Node.js frontend
       - "8080:8080"    # Go backend API
       # Interface ports (configured in database)
-      - "6661:6661"    # Interface 1: HL7 TCP Receiver
-      - "8081:8081"    # Interface 2: FHIR HTTP Receiver
+      - "6661:6661"    # Interface 1: HL7 TCP Receiver (primary)
+      - "2575:2575"    # Interface 2: Alternative HL7 TCP port
+      - "8081:8081"    # Interface 3: FHIR HTTP Receiver
       # Reserved ports for additional interfaces
       - "8090:8090"    # Interface 3
       - "8091:8091"    # Interface 4

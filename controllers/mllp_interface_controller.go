@@ -20,10 +20,24 @@ type MLLPInterfaceController struct {
 	db          *sql.DB
 }
 
-// NewMLLPInterfaceController creates a new MLLP interface controller
+// NewMLLPInterfaceController creates a new MLLP interface controller with OOB configuration
 func NewMLLPInterfaceController(db *sql.DB) *MLLPInterfaceController {
+	mllpService := services.NewMLLPConnectivityService(db)
+
+	// OOB: Auto-configure hybrid storage if MongoDB is available
+	hybridStorage := services.InitializeHybridStorage(db)
+	if hybridStorage != nil {
+		mllpService.SetHybridStorage(hybridStorage)
+	}
+
+	// OOB: Auto-configure JSON parser service if MongoDB is available
+	parserService := services.InitializeMessageParserService(db)
+	if parserService != nil {
+		mllpService.SetParserService(parserService)
+	}
+
 	return &MLLPInterfaceController{
-		mllpService: services.NewMLLPConnectivityService(db),
+		mllpService: mllpService,
 		db:          db,
 	}
 }
@@ -51,6 +65,7 @@ func (controller *MLLPInterfaceController) RegisterRoutes(router *gin.RouterGrou
 // StartListener starts a new MLLP listener
 func (controller *MLLPInterfaceController) StartListener(c *gin.Context) {
 	var request struct {
+		InterfaceID       string `json:"interfaceId" binding:"required"` // Interface UUID from database
 		Host              string `json:"host"`
 		Port              int    `json:"port" binding:"required"`
 		MaxConnections    int    `json:"maxConnections"`
@@ -70,8 +85,21 @@ func (controller *MLLPInterfaceController) StartListener(c *gin.Context) {
 		return
 	}
 
+	// Verify interface exists in database
+	var interfaceName string
+	err := controller.db.QueryRow("SELECT name FROM interfaces WHERE id = $1", request.InterfaceID).Scan(&interfaceName)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"error":   "Interface not found",
+			"message": "The specified interface ID does not exist in the database",
+		})
+		return
+	}
+
 	// Create MLLP configuration
 	config := &services.MLLPConfig{
+		InterfaceID:    request.InterfaceID, // Associate listener with interface
 		Host:           request.Host,
 		Port:           request.Port,
 		MaxConnections: request.MaxConnections,

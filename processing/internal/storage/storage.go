@@ -7,7 +7,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/ezhealthkonnect/processing/pkg"
+	"ezhealthkonnect/processing/pkg"
 )
 
 // StorageProvider defines the unified storage interface
