@@ -187,7 +187,7 @@ class InterfaceLifecycleController {
             const { interfaceId } = req.params;
             const userId = req.user?.id || req.session?.user?.id;
 
-            // Get interface configuration and runtime stats using existing database config
+            // Get interface configuration from database
             const database = require('../config/database');
             const sequelize = database.sequelize;
 
@@ -220,19 +220,50 @@ class InterfaceLifecycleController {
 
             const interfaceData = result[0];
 
-            // Get processing engine status for this interface
-            const engineStats = this.processingEngine.getProcessingStats();
-            const interfaceDetail = engineStats.interfaceDetails.find(
-                detail => detail.interfaceId === interfaceId
-            );
+            // Get REAL runtime status from Go backend
+            let goBackendStatus = null;
+            let processingActive = false;
+            let processedCount = 0;
+
+            try {
+                // Get fetch implementation
+                let fetch;
+                try {
+                    fetch = require('node-fetch');
+                } catch {
+                    fetch = global.fetch;
+                }
+
+                if (fetch) {
+                    const goBackendUrl = process.env.GO_BACKEND_URL || 'http://localhost:8080';
+                    const response = await fetch(`${goBackendUrl}/api/processing/interfaces/${interfaceId}/status`, {
+                        method: 'GET',
+                        timeout: 5000
+                    });
+
+                    if (response.ok) {
+                        const goData = await response.json();
+                        goBackendStatus = goData.status;
+                        processingActive = goBackendStatus?.status === 'active';
+                        processedCount = goBackendStatus?.messages_processed || 0;
+                        console.log(`✅ Got runtime status from Go backend:`, { interfaceId, status: goBackendStatus?.status, processedCount });
+                    }
+                }
+            } catch (goError) {
+                console.warn(`⚠️ Failed to get Go backend status for ${interfaceId}:`, goError.message);
+                // Continue with database status only
+            }
 
             res.json({
                 success: true,
                 interface: {
                     ...interfaceData,
                     engineRunning: this.isEngineRunning,
-                    processingActive: !!interfaceDetail,
-                    processingStats: interfaceDetail || null
+                    processingActive: processingActive,
+                    processingStats: {
+                        processedCount: processedCount,
+                        status: goBackendStatus?.status || 'unknown'
+                    }
                 }
             });
 

@@ -14,9 +14,8 @@ import (
 
 // TransformationPipelineService handles transformation pipeline operations
 type TransformationPipelineService struct {
-	db               *sql.DB
-	executorRegistry *ExecutorRegistry
-	executors        map[string]TransformationExecutor // Legacy - kept for compatibility
+	db        *sql.DB
+	executors map[string]TransformationExecutor
 }
 
 // TransformationExecutor interface for step execution
@@ -28,10 +27,15 @@ type TransformationExecutor interface {
 // NewTransformationPipelineService creates a new transformation pipeline service
 func NewTransformationPipelineService(db *sql.DB) *TransformationPipelineService {
 	service := &TransformationPipelineService{
-		db:               db,
-		executorRegistry: NewExecutorRegistry(db), // Use ExecutorRegistry with all built-in executors
-		executors:        make(map[string]TransformationExecutor),
+		db:        db,
+		executors: make(map[string]TransformationExecutor),
 	}
+
+	// Register executors
+	service.RegisterExecutor(NewValidationExecutor())
+	service.RegisterExecutor(NewHL7ToFHIRMappingExecutor(db))
+	service.RegisterExecutor(NewFHIRValidationExecutor())
+	service.RegisterExecutor(NewCustomScriptExecutor())
 
 	return service
 }
@@ -242,17 +246,17 @@ func (tps *TransformationPipelineService) executePipeline(
 
 		fmt.Printf("🔄 Executing step: %s (%s)\n", step.StepName, step.StepType)
 
-		// Get executor from registry (with automatic fallback to generic)
-		executor := tps.executorRegistry.GetExecutor(step.StepType)
-		if executor == nil {
-			return nil, fmt.Errorf("no executor available for step type: %s", step.StepType)
+		// Get executor for step type
+		executor, exists := tps.executors[step.StepType]
+		if !exists {
+			return nil, fmt.Errorf("no executor registered for step type: %s", step.StepType)
 		}
 
 		// Execute step with timeout
 		stepCtx, cancel := context.WithTimeout(ctx, time.Duration(step.TimeoutMs)*time.Millisecond)
 		defer cancel()
 
-		outputData, stepErr := executor.Execute(stepCtx, &step, currentData)
+		outputData, stepErr := executor.Execute(stepCtx, step, currentData)
 		stepDuration := time.Now().Sub(stepStartTime)
 
 		// Create step log

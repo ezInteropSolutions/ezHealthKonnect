@@ -1,0 +1,246 @@
+package controllers
+
+import (
+	"net/http"
+
+	"github.com/gin-gonic/gin"
+
+	"ezhealthkonnect/models"
+	"ezhealthkonnect/services"
+)
+
+// PipelineManagementController handles pipeline CRUD operations
+// MVC: This is a CONTROLLER - thin orchestration, delegates to services
+type PipelineManagementController struct {
+	pipelineService *services.PipelineManagementService
+}
+
+// NewPipelineManagementController creates a new pipeline management controller
+func NewPipelineManagementController(pipelineService *services.PipelineManagementService) *PipelineManagementController {
+	return &PipelineManagementController{
+		pipelineService: pipelineService,
+	}
+}
+
+// SavePipeline saves a visual pipeline (create or update)
+// POST /api/pipelines
+func (pmc *PipelineManagementController) SavePipeline(c *gin.Context) {
+	var visualPipeline models.VisualPipeline
+
+	if err := c.ShouldBindJSON(&visualPipeline); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"error":   "Invalid pipeline format: " + err.Error(),
+		})
+		return
+	}
+
+	// Delegate to service
+	savedPipeline, err := pmc.pipelineService.SaveVisualPipeline(
+		c.Request.Context(),
+		&visualPipeline,
+	)
+
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"error":   err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success":     true,
+		"pipeline_id": savedPipeline.ID,
+		"message":     "Pipeline saved successfully",
+	})
+}
+
+// LoadPipeline loads a pipeline in visual format
+// GET /api/pipelines/:id
+func (pmc *PipelineManagementController) LoadPipeline(c *gin.Context) {
+	pipelineID := c.Param("id")
+
+	if pipelineID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"error":   "pipeline_id is required",
+		})
+		return
+	}
+
+	// Delegate to service
+	visualPipeline, err := pmc.pipelineService.LoadVisualPipeline(
+		c.Request.Context(),
+		pipelineID,
+	)
+
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"error":   err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success":  true,
+		"pipeline": visualPipeline,
+	})
+}
+
+// LoadPipelineByInterface loads pipeline for specific interface and message type
+// GET /api/pipelines/interface/:interfaceId/:messageType
+func (pmc *PipelineManagementController) LoadPipelineByInterface(c *gin.Context) {
+	interfaceID := c.Param("interfaceId")
+	messageType := c.Param("messageType")
+
+	if interfaceID == "" || messageType == "" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"error":   "interface_id and message_type are required",
+		})
+		return
+	}
+
+	// Delegate to service
+	visualPipeline, err := pmc.pipelineService.LoadPipelineByInterface(
+		c.Request.Context(),
+		interfaceID,
+		messageType,
+	)
+
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{
+			"success": false,
+			"error":   err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success":  true,
+		"pipeline": visualPipeline,
+	})
+}
+
+// ListPipelines lists all pipelines for an interface
+// GET /api/pipelines/interface/:interfaceId
+func (pmc *PipelineManagementController) ListPipelines(c *gin.Context) {
+	interfaceID := c.Param("interfaceId")
+
+	if interfaceID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"error":   "interface_id is required",
+		})
+		return
+	}
+
+	// Delegate to service
+	pipelines, err := pmc.pipelineService.ListPipelinesByInterface(
+		c.Request.Context(),
+		interfaceID,
+	)
+
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"error":   err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success":   true,
+		"pipelines": pipelines,
+	})
+}
+
+// DeletePipeline deletes a pipeline
+// DELETE /api/pipelines/:id
+func (pmc *PipelineManagementController) DeletePipeline(c *gin.Context) {
+	pipelineID := c.Param("id")
+
+	if pipelineID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"error":   "pipeline_id is required",
+		})
+		return
+	}
+
+	// Delegate to service
+	err := pmc.pipelineService.DeletePipeline(
+		c.Request.Context(),
+		pipelineID,
+	)
+
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"error":   err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "Pipeline deleted successfully",
+	})
+}
+
+// ClonePipeline creates a copy of a pipeline
+// POST /api/pipelines/:id/clone
+func (pmc *PipelineManagementController) ClonePipeline(c *gin.Context) {
+	pipelineID := c.Param("id")
+
+	var request struct {
+		NewName string `json:"new_name"`
+	}
+
+	if err := c.ShouldBindJSON(&request); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"error":   "Invalid request format: " + err.Error(),
+		})
+		return
+	}
+
+	// Delegate to service
+	newPipeline, err := pmc.pipelineService.ClonePipeline(
+		c.Request.Context(),
+		pipelineID,
+		request.NewName,
+	)
+
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"error":   err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success":        true,
+		"new_pipeline_id": newPipeline.ID,
+		"message":        "Pipeline cloned successfully",
+	})
+}
+
+// RegisterRoutes registers all pipeline management routes
+func (pmc *PipelineManagementController) RegisterRoutes(router *gin.RouterGroup) {
+	pipelines := router.Group("/pipelines")
+	{
+		// CRUD operations
+		pipelines.POST("", pmc.SavePipeline)
+		pipelines.GET("/:id", pmc.LoadPipeline)
+		pipelines.DELETE("/:id", pmc.DeletePipeline)
+		pipelines.POST("/:id/clone", pmc.ClonePipeline)
+
+		// Interface-specific
+		pipelines.GET("/interface/:interfaceId", pmc.ListPipelines)
+		pipelines.GET("/interface/:interfaceId/:messageType", pmc.LoadPipelineByInterface)
+	}
+}

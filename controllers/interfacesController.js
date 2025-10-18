@@ -233,10 +233,10 @@ class InterfacesController {
                     targetType,
                     targetConnectivity: finalTargetConnectivity,  // ✅ Use final value
                     messageType: messageType || 'auto-detect',
-                    sourceConfig: JSON.stringify(sourceConfig || {}),
-                    targetConfig: JSON.stringify(targetConfig || {}),
-                    processingRules: JSON.stringify(processingRules || {}),
-                    transformationMapping: JSON.stringify(transformationMapping || {})
+                    sourceConfig: this.safeJsonStringify(sourceConfig),
+                    targetConfig: this.safeJsonStringify(targetConfig),
+                    processingRules: this.safeJsonStringify(processingRules),
+                    transformationMapping: this.safeJsonStringify(transformationMapping)
                 },
                 type: this.database.sequelize.QueryTypes.SELECT
             });
@@ -740,10 +740,10 @@ class InterfacesController {
                     targetType,
                     targetConnectivity: finalTargetConnectivity,
                     messageType,
-                    sourceConfig: JSON.stringify(sourceConfig || {}),
-                    targetConfig: JSON.stringify(targetConfig || {}),
-                    processingRules: JSON.stringify(processingRules || {}),
-                    transformationMapping: JSON.stringify(transformationMapping || {}),
+                    sourceConfig: this.safeJsonStringify(sourceConfig),
+                    targetConfig: this.safeJsonStringify(targetConfig),
+                    processingRules: this.safeJsonStringify(processingRules),
+                    transformationMapping: this.safeJsonStringify(transformationMapping),
                     userId
                 },
                 type: this.database.sequelize.QueryTypes.UPDATE
@@ -800,13 +800,35 @@ class InterfacesController {
      */
     parseJsonField(jsonString) {
         if (!jsonString) return {};
-        
+
         try {
             return typeof jsonString === 'string' ? JSON.parse(jsonString) : jsonString;
         } catch (error) {
             console.warn('❌ Failed to parse JSON field:', jsonString);
             return {};
         }
+    }
+
+    /**
+     * Safely stringify JSON fields for database
+     * Handles both objects and already-stringified JSON to prevent double-encoding
+     */
+    safeJsonStringify(value) {
+        if (!value) return '{}';
+
+        if (typeof value === 'string') {
+            // Already a string - validate it's valid JSON and return as-is
+            try {
+                JSON.parse(value); // Validate it's valid JSON
+                return value; // Return the string as-is
+            } catch (error) {
+                console.warn('⚠️ Invalid JSON string provided, returning empty object');
+                return '{}';
+            }
+        }
+
+        // It's an object, stringify it
+        return JSON.stringify(value);
     }
 
     /**

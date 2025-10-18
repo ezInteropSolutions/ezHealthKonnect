@@ -1,0 +1,561 @@
+package services
+
+import (
+	"context"
+	"database/sql"
+	"encoding/json"
+	"fmt"
+	"log"
+	"sync"
+	"time"
+
+	"ezhealthkonnect/models"
+)
+
+// HybridExecutionEngine handles execution of pipelines with parallel and inline groups
+// MVC: This is a SERVICE - contains ALL business logic for hybrid execution
+type HybridExecutionEngine struct {
+	db               *sql.DB
+	executorRegistry *ExecutorRegistry
+	mutex            sync.RWMutex
+}
+
+// NewHybridExecutionEngine creates a new hybrid execution engine (OOB pattern)
+func NewHybridExecutionEngine(db *sql.DB) *HybridExecutionEngine {
+	engine := &HybridExecutionEngine{
+		db:    db,
+		mutex: sync.RWMutex{},
+	}
+
+	// OOB: Auto-initialize executor registry
+	engine.executorRegistry = NewExecutorRegistry(db)
+
+	log.Println("✅ Hybrid Execution Engine initialized")
+
+	return engine
+}
+
+// ExecutePipeline executes a complete pipeline with hybrid execution support
+func (hee *HybridExecutionEngine) ExecutePipeline(
+	ctx context.Context,
+	pipelineID string,
+	messageID string,
+	inputData map[string]interface{},
+) (*models.HybridExecutionResult, error) {
+
+	startTime := time.Now()
+	log.Printf("🔄 Starting hybrid pipeline execution: pipeline=%s, message=%s", pipelineID, messageID)
+
+	// Load pipeline with execution groups
+	_, groups, deps, err := hee.loadPipelineWithGroups(ctx, pipelineID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load pipeline: %w", err)
+	}
+
+	// Build execution order (dependency resolution)
+	executionOrder, err := hee.resolveExecutionOrder(groups, deps)
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve execution order: %w", err)
+	}
+
+	// Execute layers in order
+	var executionLog []models.GroupExecutionLog
+	currentData := inputData
+
+	for _, group := range executionOrder {
+		groupResult, err := hee.executeGroup(ctx, group, currentData)
+
+		executionLog = append(executionLog, *groupResult)
+
+		if err != nil {
+			return &models.HybridExecutionResult{
+				Success:      false,
+				OutputData:   currentData,
+				ExecutionLog: executionLog,
+				TotalTimeMs:  time.Since(startTime).Milliseconds(),
+				Error:        err.Error(),
+			}, err
+		}
+
+		// Update current data for next group (keep using current data from execution)
+		// currentData remains the same for next iteration
+	}
+
+	totalTime := time.Since(startTime).Milliseconds()
+
+	log.Printf("✅ Pipeline execution complete: %dms, %d groups executed", totalTime, len(executionLog))
+
+	return &models.HybridExecutionResult{
+		Success:      true,
+		OutputData:   currentData,
+		ExecutionLog: executionLog,
+		TotalTimeMs:  totalTime,
+	}, nil
+}
+
+// executeGroup executes a single execution group (parallel or inline)
+func (hee *HybridExecutionEngine) executeGroup(
+	ctx context.Context,
+	group *models.ExecutionOrderGroup,
+	inputData map[string]interface{},
+) (*models.GroupExecutionLog, error) {
+
+	startTime := time.Now()
+
+	log.Printf("📦 Executing group: %s (%s mode, %d steps)", group.GroupID, group.GroupType, len(group.Steps))
+
+	var stepLogs []models.StepExecutionLog
+	var outputData map[string]interface{}
+	var err error
+
+	if group.GroupType == "parallel" {
+		// Execute all steps in parallel
+		outputData, stepLogs, err = hee.executeParallel(ctx, group.Steps, inputData)
+	} else {
+		// Execute steps in sequence (inline/waterfall)
+		outputData, stepLogs, err = hee.executeInline(ctx, group.Steps, inputData)
+	}
+
+	duration := time.Since(startTime).Milliseconds()
+
+	groupLog := &models.GroupExecutionLog{
+		GroupID:       group.GroupID,
+		GroupType:     group.GroupType,
+		StartedAt:     startTime,
+		CompletedAt:   time.Now(),
+		DurationMs:    duration,
+		Success:       err == nil,
+		StepsExecuted: stepLogs,
+	}
+
+	if err != nil {
+		groupLog.Error = err.Error()
+		log.Printf("❌ Group execution failed: %s (%s)", group.GroupID, err.Error())
+	} else {
+		log.Printf("✅ Group execution complete: %s (%dms)", group.GroupID, duration)
+	}
+
+	return groupLog, err
+}
+
+// executeParallel executes steps in parallel using goroutines
+func (hee *HybridExecutionEngine) executeParallel(
+	ctx context.Context,
+	steps []models.TransformationStep,
+	inputData map[string]interface{},
+) (map[string]interface{}, []models.StepExecutionLog, error) {
+
+	var wg sync.WaitGroup
+	resultChan := make(chan *models.StepExecutionLog, len(steps))
+	errorChan := make(chan error, len(steps))
+
+	// Execute all steps concurrently
+	for _, step := range steps {
+		wg.Add(1)
+		go func(s models.TransformationStep) {
+			defer wg.Done()
+
+			stepLog, err := hee.executeStep(ctx, &s, inputData)
+			if err != nil && s.Required {
+				errorChan <- fmt.Errorf("required step '%s' failed: %w", s.StepName, err)
+				return
+			}
+
+			resultChan <- stepLog
+		}(step)
+	}
+
+	// Wait for all goroutines
+	wg.Wait()
+	close(resultChan)
+	close(errorChan)
+
+	// Check for errors
+	if len(errorChan) > 0 {
+		return inputData, nil, <-errorChan
+	}
+
+	// Collect results
+	var stepLogs []models.StepExecutionLog
+	var outputs []map[string]interface{}
+
+	for stepLog := range resultChan {
+		stepLogs = append(stepLogs, *stepLog)
+		if stepLog.Success && stepLog.OutputSnapshot != nil {
+			outputs = append(outputs, stepLog.OutputSnapshot)
+		}
+	}
+
+	// Merge all outputs (deep merge strategy)
+	mergedOutput := hee.deepMergeOutputs(inputData, outputs)
+
+	return mergedOutput, stepLogs, nil
+}
+
+// executeInline executes steps sequentially (waterfall)
+func (hee *HybridExecutionEngine) executeInline(
+	ctx context.Context,
+	steps []models.TransformationStep,
+	inputData map[string]interface{},
+) (map[string]interface{}, []models.StepExecutionLog, error) {
+
+	var stepLogs []models.StepExecutionLog
+	currentData := inputData
+
+	for _, step := range steps {
+		stepLog, err := hee.executeStep(ctx, &step, currentData)
+		stepLogs = append(stepLogs, *stepLog)
+
+		if err != nil {
+			if step.Required {
+				return currentData, stepLogs, fmt.Errorf("required step '%s' failed: %w", step.StepName, err)
+			}
+			// Optional step failed - continue
+			log.Printf("⚠️  Optional step '%s' failed: %v", step.StepName, err)
+			continue
+		}
+
+		// Output of step N becomes input of step N+1
+		if stepLog.OutputSnapshot != nil {
+			currentData = stepLog.OutputSnapshot
+		}
+	}
+
+	return currentData, stepLogs, nil
+}
+
+// executeStep executes a single transformation step
+func (hee *HybridExecutionEngine) executeStep(
+	ctx context.Context,
+	step *models.TransformationStep,
+	inputData map[string]interface{},
+) (*models.StepExecutionLog, error) {
+
+	startTime := time.Now()
+
+	log.Printf("  🔹 Executing step: %s (%s)", step.StepName, step.StepType)
+
+	// Get executor for step type
+	executor := hee.executorRegistry.GetExecutor(step.StepType)
+
+	// Execute with timeout
+	ctxWithTimeout, cancel := context.WithTimeout(ctx, time.Duration(step.TimeoutMs)*time.Millisecond)
+	defer cancel()
+
+	outputData, err := executor.Execute(ctxWithTimeout, step, inputData)
+
+	duration := time.Since(startTime).Milliseconds()
+
+	stepLog := &models.StepExecutionLog{
+		StepID:         step.ID,
+		StepName:       step.StepName,
+		StepType:       step.StepType,
+		StartedAt:      startTime,
+		CompletedAt:    time.Now(),
+		DurationMs:     duration,
+		Success:        err == nil,
+		InputSnapshot:  inputData,
+		OutputSnapshot: outputData,
+	}
+
+	if err != nil {
+		stepLog.Error = err.Error()
+		log.Printf("    ❌ Step failed: %s (%dms) - %v", step.StepName, duration, err)
+	} else {
+		log.Printf("    ✅ Step complete: %s (%dms)", step.StepName, duration)
+	}
+
+	return stepLog, err
+}
+
+// loadPipelineWithGroups loads pipeline with execution groups and dependencies
+func (hee *HybridExecutionEngine) loadPipelineWithGroups(
+	ctx context.Context,
+	pipelineID string,
+) (*models.TransformationPipeline, []models.ExecutionGroup, []models.StepDependency, error) {
+
+	// Load pipeline
+	var pipeline models.TransformationPipeline
+	err := hee.db.QueryRowContext(ctx, `
+		SELECT id, interface_id, message_type, pipeline_name, enabled, version
+		FROM transformation_pipelines
+		WHERE id = $1
+	`, pipelineID).Scan(
+		&pipeline.ID,
+		&pipeline.InterfaceID,
+		&pipeline.MessageType,
+		&pipeline.PipelineName,
+		&pipeline.Enabled,
+		&pipeline.Version,
+	)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("pipeline not found: %w", err)
+	}
+
+	// Load execution groups
+	rows, err := hee.db.QueryContext(ctx, `
+		SELECT id, pipeline_id, group_id, group_type, layer, sequence, merge_strategy
+		FROM execution_groups
+		WHERE pipeline_id = $1
+		ORDER BY sequence
+	`, pipelineID)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("failed to load execution groups: %w", err)
+	}
+	defer rows.Close()
+
+	var groups []models.ExecutionGroup
+	for rows.Next() {
+		var group models.ExecutionGroup
+		err := rows.Scan(
+			&group.ID,
+			&group.PipelineID,
+			&group.GroupID,
+			&group.GroupType,
+			&group.Layer,
+			&group.Sequence,
+			&group.MergeStrategy,
+		)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+
+		// Load steps for this group
+		stepRows, err := hee.db.QueryContext(ctx, `
+			SELECT id, step_name, step_type, sequence, layer, required, timeout_ms, config, script_content, on_error_strategy
+			FROM transformation_steps
+			WHERE execution_group_id = $1
+			ORDER BY sequence
+		`, group.ID)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+
+		var steps []models.TransformationStep
+		for stepRows.Next() {
+			var step models.TransformationStep
+			var configJSON []byte
+
+			err := stepRows.Scan(
+				&step.ID,
+				&step.StepName,
+				&step.StepType,
+				&step.Sequence,
+				&step.Layer,
+				&step.Required,
+				&step.TimeoutMs,
+				&configJSON,
+				&step.ScriptContent,
+				&step.OnErrorStrategy,
+			)
+			if err != nil {
+				stepRows.Close()
+				return nil, nil, nil, err
+			}
+
+			// Parse config JSON
+			if len(configJSON) > 0 {
+				json.Unmarshal(configJSON, &step.Config)
+			}
+
+			steps = append(steps, step)
+		}
+		stepRows.Close()
+
+		group.Steps = steps
+		groups = append(groups, group)
+	}
+
+	// Load dependencies
+	depRows, err := hee.db.QueryContext(ctx, `
+		SELECT sd.id, sd.group_id, sd.depends_on_group_id, sd.dependency_type
+		FROM step_dependencies sd
+		JOIN execution_groups eg ON eg.id = sd.group_id
+		WHERE eg.pipeline_id = $1
+	`, pipelineID)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("failed to load dependencies: %w", err)
+	}
+	defer depRows.Close()
+
+	var deps []models.StepDependency
+	for depRows.Next() {
+		var dep models.StepDependency
+		err := depRows.Scan(
+			&dep.ID,
+			&dep.GroupID,
+			&dep.DependsOnGroupID,
+			&dep.DependencyType,
+		)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		deps = append(deps, dep)
+	}
+
+	return &pipeline, groups, deps, nil
+}
+
+// resolveExecutionOrder resolves dependencies and returns execution order
+func (hee *HybridExecutionEngine) resolveExecutionOrder(
+	groups []models.ExecutionGroup,
+	deps []models.StepDependency,
+) ([]*models.ExecutionOrderGroup, error) {
+
+	// Build dependency map
+	depMap := make(map[string][]string) // groupID -> depends on groupIDs
+	groupMap := make(map[string]*models.ExecutionGroup)
+
+	for i := range groups {
+		groupMap[groups[i].ID] = &groups[i]
+		depMap[groups[i].ID] = []string{}
+	}
+
+	for _, dep := range deps {
+		depMap[dep.GroupID] = append(depMap[dep.GroupID], dep.DependsOnGroupID)
+	}
+
+	// Topological sort (Kahn's algorithm)
+	resolved := make([]*models.ExecutionOrderGroup, 0)
+	resolvedSet := make(map[string]bool)
+
+	// Find groups with no dependencies
+	ready := make([]*models.ExecutionGroup, 0)
+	for id, dependencies := range depMap {
+		if len(dependencies) == 0 {
+			ready = append(ready, groupMap[id])
+		}
+	}
+
+	for len(ready) > 0 {
+		// Get next ready group
+		current := ready[0]
+		ready = ready[1:]
+
+		// Add to resolved order
+		orderGroup := &models.ExecutionOrderGroup{
+			GroupID:   current.GroupID,
+			GroupType: current.GroupType,
+			Layer:     current.Layer,
+			Sequence:  current.Sequence,
+			Steps:     current.Steps,
+			DependsOn: depMap[current.ID],
+		}
+		resolved = append(resolved, orderGroup)
+		resolvedSet[current.ID] = true
+
+		// Find newly ready groups
+		for id, dependencies := range depMap {
+			if resolvedSet[id] {
+				continue
+			}
+
+			allDepsResolved := true
+			for _, depID := range dependencies {
+				if !resolvedSet[depID] {
+					allDepsResolved = false
+					break
+				}
+			}
+
+			if allDepsResolved {
+				ready = append(ready, groupMap[id])
+			}
+		}
+	}
+
+	// Check for circular dependencies
+	if len(resolved) != len(groups) {
+		return nil, fmt.Errorf("circular dependency detected or unreachable groups")
+	}
+
+	return resolved, nil
+}
+
+// deepMergeOutputs merges multiple outputs using deep merge strategy
+func (hee *HybridExecutionEngine) deepMergeOutputs(
+	base map[string]interface{},
+	outputs []map[string]interface{},
+) map[string]interface{} {
+
+	result := make(map[string]interface{})
+
+	// Start with base
+	for k, v := range base {
+		result[k] = v
+	}
+
+	// Merge each output
+	for _, output := range outputs {
+		for k, v := range output {
+			if existing, exists := result[k]; exists {
+				// If both are maps, merge recursively
+				if existingMap, ok := existing.(map[string]interface{}); ok {
+					if newMap, ok := v.(map[string]interface{}); ok {
+						result[k] = hee.deepMergeOutputs(existingMap, []map[string]interface{}{newMap})
+						continue
+					}
+				}
+			}
+			// Otherwise, override
+			result[k] = v
+		}
+	}
+
+	return result
+}
+
+// GetPipelineExecutionStats returns statistics for a pipeline
+func (hee *HybridExecutionEngine) GetPipelineExecutionStats(
+	ctx context.Context,
+	pipelineID string,
+) (map[string]interface{}, error) {
+
+	stats := make(map[string]interface{})
+
+	// Get total executions
+	var totalExecutions int
+	err := hee.db.QueryRowContext(ctx, `
+		SELECT COUNT(*) FROM transformation_executions
+		WHERE pipeline_id = $1
+	`, pipelineID).Scan(&totalExecutions)
+	if err != nil {
+		return nil, err
+	}
+
+	stats["total_executions"] = totalExecutions
+
+	// Get success rate
+	var successCount int
+	err = hee.db.QueryRowContext(ctx, `
+		SELECT COUNT(*) FROM transformation_executions
+		WHERE pipeline_id = $1 AND status = 'completed'
+	`, pipelineID).Scan(&successCount)
+	if err != nil {
+		return nil, err
+	}
+
+	if totalExecutions > 0 {
+		stats["success_rate"] = float64(successCount) / float64(totalExecutions) * 100
+	} else {
+		stats["success_rate"] = 0.0
+	}
+
+	// Get average execution time
+	var avgTimeMs sql.NullInt64
+	err = hee.db.QueryRowContext(ctx, `
+		SELECT AVG(total_time_ms) FROM transformation_executions
+		WHERE pipeline_id = $1 AND status = 'completed'
+	`, pipelineID).Scan(&avgTimeMs)
+	if err != nil {
+		return nil, err
+	}
+
+	if avgTimeMs.Valid {
+		stats["avg_execution_time_ms"] = avgTimeMs.Int64
+	} else {
+		stats["avg_execution_time_ms"] = 0
+	}
+
+	return stats, nil
+}

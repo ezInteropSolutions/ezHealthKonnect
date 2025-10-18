@@ -284,10 +284,241 @@ type TransformationMetrics struct {
 ### **📋 Next Implementation Steps**
 1. **Load Templates**: Insert real mappings into database
 2. **Update Transform Service**: Use hierarchical resolution
-3. **Build Visual Coder**: React-based drag-drop interface
+3. **Build Visual Coder**: React-based drag-drop interface (Phase 2)
 4. **Extend Message Types**: ORM, MDM, SIU, DFT, RDE
 5. **Plugin System**: Format adapter registration
 6. **Performance Testing**: Million message validation
+
+---
+
+## 🔄 **Pipeline Builder Architecture (Phase 1 - October 2025)**
+
+### **Purpose**: Enable users to build, deploy, and test transformation pipelines
+
+**Design Principles**:
+1. **Progressive Deployment**: Wizard → Pipeline → Deploy → Test → Enhance
+2. **Dual-Mode Support**: Express Mode (quick setup) + Step-by-Step Mode (full control)
+3. **Optional Layers**: Pre-processing and post-processing are optional for performance
+4. **Wizard Integration**: Core transformation reuses existing wizard mappings
+5. **AI-Assisted**: Claude chat integration for natural language pipeline building
+
+### **Pipeline Structure**
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  PIPELINE = Configurable Transformation Flow               │
+│                                                             │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐     │
+│  │ Pre-Process  │  │ Core Transform│ │ Post-Process │     │
+│  │ (Optional)   │→ │ (Required)    │→│ (Optional)   │     │
+│  └──────────────┘  └──────────────┘  └──────────────┘     │
+│                                                             │
+│  Pre: Validation, Enrichment, Custom Logic                 │
+│  Core: Wizard Mapping (HL7→FHIR or any format)            │
+│  Post: FHIR Validation, Delivery, Anonymization            │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### **Express Mode (Quick Deployment)**
+
+For users who want immediate deployment with sensible defaults:
+
+```
+Step 1: Source & Target
+- From: HL7 v2.x
+- To: FHIR R4
+- Message Type: ADT^A01
+
+Step 2: Use Wizard Mapping
+- ☑ Use existing wizard mapping (recommended)
+- Interface: Test Interface1
+- Mapping: ADT^A01 → FHIR Patient
+
+Step 3: Quality Options
+- ☑ Validate HL7 input (schema-based)
+- ☑ Validate FHIR output (schema-based)
+- ☐ Enable enrichment (optional)
+- ☐ Enable PHI anonymization (optional)
+
+[Deploy Pipeline] → Ready to test immediately
+```
+
+### **Step-by-Step Mode (Full Control)**
+
+For advanced users who need custom logic:
+
+- **Drag-drop interface** with three collapsible layers
+- **Template library** with pre-built steps
+- **Custom steps** via JSON or AI chat
+- **Visual connections** showing data flow
+- **Real-time validation** of pipeline structure
+
+### **Pipeline Database Schema**
+
+```sql
+-- Pipeline definitions
+transformation_pipelines (
+    id UUID PRIMARY KEY,
+    interface_id UUID REFERENCES interfaces(id),
+    message_type VARCHAR(50),
+    pipeline_name VARCHAR(255),
+    mode VARCHAR(20),  -- 'express' | 'step-by-step'
+    is_active BOOLEAN DEFAULT true,
+    created_at TIMESTAMP,
+    updated_at TIMESTAMP
+);
+
+-- Pipeline steps (ordered execution)
+transformation_steps (
+    id UUID PRIMARY KEY,
+    pipeline_id UUID REFERENCES transformation_pipelines(id),
+    step_name VARCHAR(255),
+    step_type VARCHAR(50),  -- 'validation', 'enrichment', 'mapping', 'custom'
+    layer VARCHAR(20),      -- 'pre', 'core', 'post'
+    sequence INT,           -- Execution order
+    is_optional BOOLEAN DEFAULT false,
+    config JSONB,           -- Step-specific configuration
+
+    -- Wizard integration
+    wizard_mapping_id UUID REFERENCES interface_message_mappings(id),
+
+    created_at TIMESTAMP
+);
+
+-- Pipeline execution logs
+pipeline_executions (
+    id UUID PRIMARY KEY,
+    pipeline_id UUID REFERENCES transformation_pipelines(id),
+    message_id VARCHAR(255),
+    status VARCHAR(50),     -- 'success', 'failed', 'partial'
+    started_at TIMESTAMP,
+    completed_at TIMESTAMP,
+    duration_ms INT,
+    steps_executed JSONB,   -- Array of step execution details
+    error_details JSONB
+);
+```
+
+### **AI Integration (Claude Chat)**
+
+**Claude assists with:**
+
+1. **Natural Language Step Creation**
+   - User: "Validate patient ID is 10 digits"
+   - Claude: Generates validation step config
+
+2. **Schema-Aware Suggestions**
+   - Reads HL7/FHIR schemas
+   - Suggests required fields for message type
+   - Warns about missing mappings
+
+3. **Pipeline Optimization**
+   - Identifies redundant steps
+   - Suggests performance improvements
+   - Recommends error handling
+
+4. **Troubleshooting**
+   - Analyzes execution logs
+   - Suggests fixes for failures
+   - Explains validation errors
+
+### **Schema-Driven Validation Engine**
+
+**Universal validation for any format with a schema:**
+
+```go
+type ValidationEngine struct {
+    schemaLoader SchemaLoader
+}
+
+func (ve *ValidationEngine) Validate(message, format, version string) ValidationResult {
+    schema := ve.schemaLoader.Load(format, version)
+
+    return ValidationResult{
+        StructureValid: ve.validateStructure(message, schema),
+        RequiredFields: ve.validateRequired(message, schema),
+        DataTypes:      ve.validateDataTypes(message, schema),
+        Formats:        ve.validateFormats(message, schema),
+        Bindings:       ve.validateBindings(message, schema),  // Code tables
+        Cardinality:    ve.validateCardinality(message, schema)
+    }
+}
+```
+
+**For HL7:**
+- Structure: Segment order, field positions
+- Required: MSH, PID, PV1 for ADT^A01
+- Data Types: TS (timestamp), CX (extended composite), etc.
+- Formats: YYYYMMDD for dates, regex for IDs
+- Bindings: HL70001 (gender), HL70002 (marital status)
+- Cardinality: 0..1, 1..*, etc.
+
+**For FHIR:**
+- Structure: Resource type, element hierarchy
+- Required: Patient.identifier, Patient.name
+- Data Types: dateTime, CodeableConcept, Reference
+- Formats: FHIR date formats, URI patterns
+- Bindings: ValueSets (administrative-gender, etc.)
+- Cardinality: Must support elements
+
+### **Wizard Mapping Integration**
+
+**Core transformation step = Wizard mapping:**
+
+```javascript
+{
+  "step_type": "mapping",
+  "step_name": "HL7 to FHIR Patient",
+  "layer": "core",
+  "sequence": 100,
+
+  // Uses existing wizard mapping!
+  "wizard_mapping_id": "abc123...",
+  "interface_id": "interface_uuid",
+  "message_type": "ADT^A01",
+
+  // OR create inline mapping
+  "inline_mapping": {
+    "PID.3": "Patient.identifier[0].value",
+    "PID.5.1": "Patient.name[0].family"
+    // ... manual mappings
+  },
+
+  // OR AI-generated
+  "ai_generated": true,
+  "ai_confidence": 0.95
+}
+```
+
+### **Future: Visual Block System (Phase 2)**
+
+Eventually expand to full block-based programming:
+
+- **Logic Blocks**: if/switch/loop
+- **Transform Blocks**: value_map, string_ops, calculations
+- **Flow Control**: parallel/merge/filter/aggregate
+- **Error Handling**: try/catch, default_value
+
+**Implementation timeline**: After Pipeline Builder Phase 1 is deployed and tested
+
+### **Technology Stack**
+
+**Frontend**:
+- Vanilla JavaScript (current Phase 1C)
+- HTML5 Drag & Drop API
+- Future: React + TypeScript for visual blocks (Phase 2)
+
+**Backend**:
+- Node.js: Pipeline routes, API layer
+- Go: Transformation execution engine
+- PostgreSQL: Pipeline storage, execution logs
+- MongoDB: Message storage (hybrid approach)
+
+**AI Integration**:
+- Claude 3.5 Sonnet API
+- Real-time chat interface
+- Schema context injection
+- Step generation from natural language
 
 ---
 

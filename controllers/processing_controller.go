@@ -4,6 +4,7 @@
 package controllers
 
 import (
+	"log"
 	"net/http"
 	"strconv"
 
@@ -115,7 +116,12 @@ func (pc *ProcessingController) GetEngineStats(c *gin.Context) {
 // ActivateInterface activates a specific interface for processing
 func (pc *ProcessingController) ActivateInterface(c *gin.Context) {
 	interfaceID := c.Param("id")
+
+	// DEBUG: Log at controller level
+	log.Printf("🎯 [CONTROLLER] ActivateInterface called for: %s", interfaceID)
+
 	if interfaceID == "" {
+		log.Printf("❌ [CONTROLLER] No interface ID provided")
 		c.JSON(http.StatusBadRequest, gin.H{
 			"success": false,
 			"error":   "Interface ID is required",
@@ -123,7 +129,10 @@ func (pc *ProcessingController) ActivateInterface(c *gin.Context) {
 		return
 	}
 
+	log.Printf("📞 [CONTROLLER] Calling engine.ActivateInterface(%s)", interfaceID)
+
 	if err := pc.engine.ActivateInterface(interfaceID); err != nil {
+		log.Printf("❌ [CONTROLLER] Engine returned error: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"success": false,
 			"error":   err.Error(),
@@ -133,11 +142,15 @@ func (pc *ProcessingController) ActivateInterface(c *gin.Context) {
 		return
 	}
 
+	log.Printf("✅ [CONTROLLER] Engine activation successful, getting status...")
+	status := pc.engine.GetInterfaceStatus(interfaceID)
+	log.Printf("✅ [CONTROLLER] Status retrieved: %+v", status)
+
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "Interface activated successfully",
 		"interface_id": interfaceID,
-		"status": pc.engine.GetInterfaceStatus(interfaceID),
+		"status": status,
 	})
 }
 

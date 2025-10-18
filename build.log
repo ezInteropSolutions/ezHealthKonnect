@@ -1,0 +1,104 @@
+#1 [internal] load local bake definitions
+#1 reading from stdin 516B done
+#1 DONE 0.0s
+
+#2 [internal] load build definition from Dockerfile
+#2 transferring dockerfile: 560B 0.0s done
+#2 DONE 0.0s
+
+#3 [internal] load metadata for docker.io/library/node:18-alpine
+#3 ...
+
+#4 [auth] library/node:pull token for registry-1.docker.io
+#4 DONE 0.0s
+
+#3 [internal] load metadata for docker.io/library/node:18-alpine
+#3 DONE 3.0s
+
+#5 [internal] load .dockerignore
+#5 transferring context: 970B 0.0s done
+#5 DONE 0.0s
+
+#6 [internal] load build context
+#6 DONE 0.0s
+
+#7 [1/7] FROM docker.io/library/node:18-alpine@sha256:8d6421d663b4c28fd3ebc498332f249011d118945588d0a35cb9bc4b8ca09d9e
+#7 resolve docker.io/library/node:18-alpine@sha256:8d6421d663b4c28fd3ebc498332f249011d118945588d0a35cb9bc4b8ca09d9e 0.0s done
+#7 DONE 0.0s
+
+#6 [internal] load build context
+#6 transferring context: 363.69kB 0.4s done
+#6 DONE 0.4s
+
+#8 [2/7] RUN apk add --no-cache go git bash curl postgresql-client
+#8 CACHED
+
+#9 [3/7] WORKDIR /app
+#9 CACHED
+
+#10 [4/7] COPY package*.json go.mod go.sum ./
+#10 DONE 0.1s
+
+#11 [5/7] RUN npm install && go mod download
+#11 1.878 npm warn EBADENGINE Unsupported engine {
+#11 1.878 npm warn EBADENGINE   package: 'joi@18.0.1',
+#11 1.878 npm warn EBADENGINE   required: { node: '>= 20' },
+#11 1.878 npm warn EBADENGINE   current: { node: 'v18.20.8', npm: '10.8.2' }
+#11 1.878 npm warn EBADENGINE }
+#11 1.879 npm warn EBADENGINE Unsupported engine {
+#11 1.879 npm warn EBADENGINE   package: 'undici@7.11.0',
+#11 1.879 npm warn EBADENGINE   required: { node: '>=20.18.1' },
+#11 1.879 npm warn EBADENGINE   current: { node: 'v18.20.8', npm: '10.8.2' }
+#11 1.879 npm warn EBADENGINE }
+#11 47.55 
+#11 47.55 added 380 packages, and audited 381 packages in 47s
+#11 47.55 
+#11 47.55 57 packages are looking for funding
+#11 47.55   run `npm fund` for details
+#11 47.55 
+#11 47.55 found 0 vulnerabilities
+#11 47.55 npm notice
+#11 47.55 npm notice New major version of npm available! 10.8.2 -> 11.6.2
+#11 47.55 npm notice Changelog: https://github.com/npm/cli/releases/tag/v11.6.2
+#11 47.55 npm notice To update run: npm install -g npm@11.6.2
+#11 47.55 npm notice
+#11 DONE 57.0s
+
+#12 [6/7] COPY . .
+#12 DONE 14.4s
+
+#13 [7/7] RUN go mod tidy && go build -o go-api main.go
+#13 0.673 go: downloading gopkg.in/check.v1 v1.0.0-20201130134442-10cb98267c6c
+#13 0.713 go: downloading github.com/google/go-cmp v0.7.0
+#13 0.758 go: downloading github.com/go-playground/assert/v2 v2.2.0
+#13 1.342 go: downloading github.com/kr/pretty v0.3.0
+#13 1.560 go: downloading github.com/rogpeppe/go-internal v1.8.0
+#13 1.802 go: finding module for package github.com/redis/go-redis/v9
+#13 1.802 go: finding module for package github.com/rabbitmq/amqp091-go
+#13 2.183 go: downloading github.com/rabbitmq/amqp091-go v1.10.0
+#13 2.204 go: downloading github.com/redis/go-redis/v9 v9.14.0
+#13 2.653 go: downloading github.com/redis/go-redis v6.15.9+incompatible
+#13 2.702 go: found github.com/rabbitmq/amqp091-go in github.com/rabbitmq/amqp091-go v1.10.0
+#13 2.702 go: found github.com/redis/go-redis/v9 in github.com/redis/go-redis/v9 v9.14.0
+#13 2.816 go: downloading go.uber.org/goleak v1.3.0
+#13 2.816 go: downloading github.com/cespare/xxhash/v2 v2.3.0
+#13 2.816 go: downloading github.com/dgryski/go-rendezvous v0.0.0-20200823014737-9f7001d12a5f
+#13 2.817 go: downloading github.com/bsm/ginkgo/v2 v2.12.0
+#13 2.817 go: downloading github.com/bsm/gomega v1.27.10
+#13 37.77 # command-line-arguments
+#13 37.77 ./main.go:911:47: cannot use ctx (variable of type context.Context) as services.MLLPConfig value in argument to mllpService.StartListener
+#13 37.77 ./main.go:911:52: cannot use mllpConfig (variable of type *services.MLLPConfig) as string value in argument to mllpService.StartListener
+#13 ERROR: process "/bin/sh -c go mod tidy && go build -o go-api main.go" did not complete successfully: exit code: 1
+------
+ > [7/7] RUN go mod tidy && go build -o go-api main.go:
+2.702 go: found github.com/rabbitmq/amqp091-go in github.com/rabbitmq/amqp091-go v1.10.0
+2.702 go: found github.com/redis/go-redis/v9 in github.com/redis/go-redis/v9 v9.14.0
+2.816 go: downloading go.uber.org/goleak v1.3.0
+2.816 go: downloading github.com/cespare/xxhash/v2 v2.3.0
+2.816 go: downloading github.com/dgryski/go-rendezvous v0.0.0-20200823014737-9f7001d12a5f
+2.817 go: downloading github.com/bsm/ginkgo/v2 v2.12.0
+2.817 go: downloading github.com/bsm/gomega v1.27.10
+37.77 # command-line-arguments
+37.77 ./main.go:911:47: cannot use ctx (variable of type context.Context) as services.MLLPConfig value in argument to mllpService.StartListener
+37.77 ./main.go:911:52: cannot use mllpConfig (variable of type *services.MLLPConfig) as string value in argument to mllpService.StartListener
+------

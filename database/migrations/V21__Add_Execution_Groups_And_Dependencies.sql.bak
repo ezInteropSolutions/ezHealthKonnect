@@ -1,0 +1,488 @@
+-- V21: Execution Groups & Dependencies for Hybrid Pipeline Execution
+-- Adds support for parallel and inline (waterfall) execution within same pipeline
+-- Fully backward compatible with V20 transformation pipelines
+
+-- ============================================================================
+-- 1. EXECUTION GROUPS TABLE
+-- ============================================================================
+-- Groups steps for parallel or inline execution
+CREATE TABLE IF NOT EXISTS execution_groups (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    pipeline_id UUID NOT NULL REFERENCES transformation_pipelines(id) ON DELETE CASCADE,
+    group_id VARCHAR(100) NOT NULL, -- User-friendly group identifier (e.g., "parallel_1", "inline_1")
+    group_type VARCHAR(20) NOT NULL, -- 'parallel' or 'inline'
+    layer VARCHAR(20) NOT NULL, -- 'pre', 'core', 'post'
+    sequence INTEGER NOT NULL, -- Execution order of groups (10, 20, 30...)
+    merge_strategy VARCHAR(20) DEFAULT 'deep_merge', -- For parallel: how to merge results
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT chk_group_type CHECK (group_type IN ('parallel', 'inline')),
+    CONSTRAINT chk_group_layer CHECK (layer IN ('pre', 'core', 'post')),
+    CONSTRAINT chk_merge_strategy CHECK (merge_strategy IN ('deep_merge', 'shallow_merge', 'override', 'array_append')),
+    CONSTRAINT uq_pipeline_group_id UNIQUE (pipeline_id, group_id)
+);
+
+CREATE INDEX idx_execution_groups_pipeline ON execution_groups(pipeline_id);
+CREATE INDEX idx_execution_groups_layer ON execution_groups(pipeline_id, layer);
+CREATE INDEX idx_execution_groups_sequence ON execution_groups(pipeline_id, sequence);
+CREATE INDEX idx_execution_groups_type ON execution_groups(group_type);
+
+COMMENT ON TABLE execution_groups IS 'Execution groups for organizing steps into parallel or inline execution blocks';
+COMMENT ON COLUMN execution_groups.group_type IS 'parallel: steps run concurrently, inline: steps run sequentially';
+COMMENT ON COLUMN execution_groups.merge_strategy IS 'How to merge results from parallel steps: deep_merge (recursive), shallow_merge (top-level), override (last wins)';
+
+-- ============================================================================
+-- 2. STEP DEPENDENCIES TABLE
+-- ============================================================================
+-- Tracks dependencies between execution groups
+CREATE TABLE IF NOT EXISTS step_dependencies (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    group_id UUID NOT NULL REFERENCES execution_groups(id) ON DELETE CASCADE,
+    depends_on_group_id UUID NOT NULL REFERENCES execution_groups(id) ON DELETE CASCADE,
+    dependency_type VARCHAR(20) DEFAULT 'completion', -- 'completion', 'success', 'data_flow'
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT chk_no_self_dependency CHECK (group_id != depends_on_group_id),
+    CONSTRAINT chk_dependency_type CHECK (dependency_type IN ('completion', 'success', 'data_flow')),
+    CONSTRAINT uq_group_dependency UNIQUE (group_id, depends_on_group_id)
+);
+
+CREATE INDEX idx_step_dependencies_group ON step_dependencies(group_id);
+CREATE INDEX idx_step_dependencies_depends_on ON step_dependencies(depends_on_group_id);
+
+COMMENT ON TABLE step_dependencies IS 'Dependencies between execution groups (e.g., enrichment depends on validation)';
+COMMENT ON COLUMN step_dependencies.dependency_type IS 'completion: wait for finish, success: wait for success, data_flow: data from previous group required';
+
+-- ============================================================================
+-- 3. ALTER TRANSFORMATION_STEPS - Add Execution Group Reference
+-- ============================================================================
+-- Link steps to execution groups
+ALTER TABLE transformation_steps
+ADD COLUMN IF NOT EXISTS execution_group_id UUID REFERENCES execution_groups(id) ON DELETE SET NULL,
+ADD COLUMN IF NOT EXISTS visual_metadata JSONB DEFAULT '{}'; -- For UI positioning (x, y, width, height)
+
+CREATE INDEX IF NOT EXISTS idx_transformation_steps_execution_group ON transformation_steps(execution_group_id);
+
+COMMENT ON COLUMN transformation_steps.execution_group_id IS 'Links step to an execution group (NULL means legacy/ungrouped step)';
+COMMENT ON COLUMN transformation_steps.visual_metadata IS 'UI positioning and visual properties: {x: 100, y: 200, width: 280, height: 120}';
+
+-- ============================================================================
+-- 4. PIPELINE VISUAL CONFIGURATION TABLE
+-- ============================================================================
+-- Store visual pipeline configuration for drag-drop UI
+CREATE TABLE IF NOT EXISTS pipeline_visual_configs (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    pipeline_id UUID NOT NULL REFERENCES transformation_pipelines(id) ON DELETE CASCADE,
+    canvas_config JSONB DEFAULT '{}', -- Canvas zoom, pan, layout settings
+    layer_modes JSONB DEFAULT '{"pre": "parallel", "core": "waterfall", "post": "parallel"}', -- Execution mode per layer
+    connections JSONB DEFAULT '[]', -- Visual connection data
+    version INTEGER DEFAULT 1,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT uq_pipeline_visual_config UNIQUE (pipeline_id)
+);
+
+CREATE INDEX idx_pipeline_visual_configs_pipeline ON pipeline_visual_configs(pipeline_id);
+
+COMMENT ON TABLE pipeline_visual_configs IS 'Visual configuration for drag-drop pipeline builder UI';
+COMMENT ON COLUMN pipeline_visual_configs.layer_modes IS 'Execution mode per layer: parallel (concurrent), waterfall (sequential), hybrid (mixed)';
+COMMENT ON COLUMN pipeline_visual_configs.connections IS 'Array of connection objects: [{from: "step_1", to: "step_2", type: "parallel"}]';
+
+-- ============================================================================
+-- 5. EXECUTION FLOW METADATA TABLE
+-- ============================================================================
+-- Cache resolved execution order for performance
+CREATE TABLE IF NOT EXISTS execution_flow_metadata (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    pipeline_id UUID NOT NULL REFERENCES transformation_pipelines(id) ON DELETE CASCADE,
+    resolved_order JSONB NOT NULL, -- Pre-computed execution order: [{groupId, steps[], dependencies[]}]
+    last_computed_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    is_valid BOOLEAN DEFAULT true, -- False if pipeline changed and needs recomputation
+
+    CONSTRAINT uq_pipeline_execution_flow UNIQUE (pipeline_id)
+);
+
+CREATE INDEX idx_execution_flow_pipeline ON execution_flow_metadata(pipeline_id);
+CREATE INDEX idx_execution_flow_valid ON execution_flow_metadata(is_valid) WHERE is_valid = true;
+
+COMMENT ON TABLE execution_flow_metadata IS 'Cached execution order for pipeline (invalidated on pipeline changes)';
+COMMENT ON COLUMN execution_flow_metadata.resolved_order IS 'Pre-computed dependency-resolved execution order for performance';
+
+-- ============================================================================
+-- 6. TRIGGERS - Auto-Update and Validation
+-- ============================================================================
+
+-- Update updated_at timestamp on execution_groups
+CREATE OR REPLACE FUNCTION update_execution_group_timestamp()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.updated_at = CURRENT_TIMESTAMP;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER tr_update_execution_group_timestamp
+BEFORE UPDATE ON execution_groups
+FOR EACH ROW
+EXECUTE FUNCTION update_execution_group_timestamp();
+
+-- Update updated_at timestamp on pipeline_visual_configs
+CREATE OR REPLACE FUNCTION update_pipeline_visual_config_timestamp()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.updated_at = CURRENT_TIMESTAMP;
+    NEW.version = NEW.version + 1;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER tr_update_pipeline_visual_config_timestamp
+BEFORE UPDATE ON pipeline_visual_configs
+FOR EACH ROW
+EXECUTE FUNCTION update_pipeline_visual_config_timestamp();
+
+-- Invalidate execution flow cache when pipeline changes
+CREATE OR REPLACE FUNCTION invalidate_execution_flow_cache()
+RETURNS TRIGGER AS $$
+BEGIN
+    UPDATE execution_flow_metadata
+    SET is_valid = false
+    WHERE pipeline_id = COALESCE(NEW.pipeline_id, OLD.pipeline_id);
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER tr_invalidate_flow_on_group_change
+AFTER INSERT OR UPDATE OR DELETE ON execution_groups
+FOR EACH ROW
+EXECUTE FUNCTION invalidate_execution_flow_cache();
+
+CREATE TRIGGER tr_invalidate_flow_on_dependency_change
+AFTER INSERT OR UPDATE OR DELETE ON step_dependencies
+FOR EACH ROW
+EXECUTE FUNCTION invalidate_execution_flow_cache();
+
+CREATE TRIGGER tr_invalidate_flow_on_step_change
+AFTER INSERT OR UPDATE OR DELETE ON transformation_steps
+FOR EACH ROW
+EXECUTE FUNCTION invalidate_execution_flow_cache();
+
+-- Prevent circular dependencies
+CREATE OR REPLACE FUNCTION check_circular_dependency()
+RETURNS TRIGGER AS $$
+DECLARE
+    visited UUID[];
+    current_group UUID;
+BEGIN
+    -- Build dependency chain
+    visited := ARRAY[NEW.group_id];
+    current_group := NEW.depends_on_group_id;
+
+    -- Follow dependency chain
+    WHILE current_group IS NOT NULL LOOP
+        -- Check if we've seen this group before (circular dependency)
+        IF current_group = ANY(visited) THEN
+            RAISE EXCEPTION 'Circular dependency detected: group % depends on itself through chain %',
+                NEW.group_id, visited || current_group;
+        END IF;
+
+        visited := visited || current_group;
+
+        -- Get next dependency
+        SELECT depends_on_group_id INTO current_group
+        FROM step_dependencies
+        WHERE group_id = current_group
+        LIMIT 1;
+    END LOOP;
+
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER tr_check_circular_dependency
+BEFORE INSERT OR UPDATE ON step_dependencies
+FOR EACH ROW
+EXECUTE FUNCTION check_circular_dependency();
+
+-- ============================================================================
+-- 7. BACKWARD COMPATIBILITY - Auto-Migrate V20 Data
+-- ============================================================================
+-- OOB: Automatically migrate existing transformation_steps to execution groups
+
+DO $$
+DECLARE
+    pipeline_rec RECORD;
+    group_rec RECORD;
+    step_rec RECORD;
+    new_group_id UUID;
+BEGIN
+    -- Only migrate if there are existing pipelines without execution groups
+    IF EXISTS (
+        SELECT 1 FROM transformation_pipelines
+        WHERE id NOT IN (SELECT DISTINCT pipeline_id FROM execution_groups)
+        LIMIT 1
+    ) THEN
+        RAISE NOTICE '🔄 Starting auto-migration of V20 pipelines to V21 execution groups...';
+
+        -- For each pipeline
+        FOR pipeline_rec IN
+            SELECT id, pipeline_name
+            FROM transformation_pipelines
+            WHERE id NOT IN (SELECT DISTINCT pipeline_id FROM execution_groups)
+        LOOP
+            RAISE NOTICE '  📦 Migrating pipeline: % (%)', pipeline_rec.pipeline_name, pipeline_rec.id;
+
+            -- Group steps by layer and execution_mode
+            FOR group_rec IN
+                SELECT
+                    layer,
+                    execution_mode,
+                    MIN(sequence) as min_seq
+                FROM transformation_steps
+                WHERE pipeline_id = pipeline_rec.id
+                GROUP BY layer, execution_mode
+                ORDER BY MIN(sequence)
+            LOOP
+                -- Create execution group
+                INSERT INTO execution_groups (
+                    pipeline_id,
+                    group_id,
+                    group_type,
+                    layer,
+                    sequence,
+                    merge_strategy
+                )
+                VALUES (
+                    pipeline_rec.id,
+                    format('%s_%s_migrated', group_rec.layer, group_rec.execution_mode),
+                    CASE
+                        WHEN group_rec.execution_mode = 'parallel' THEN 'parallel'
+                        ELSE 'inline'
+                    END,
+                    group_rec.layer,
+                    group_rec.min_seq,
+                    'deep_merge'
+                )
+                RETURNING id INTO new_group_id;
+
+                -- Link steps to group
+                UPDATE transformation_steps
+                SET execution_group_id = new_group_id
+                WHERE pipeline_id = pipeline_rec.id
+                  AND layer = group_rec.layer
+                  AND execution_mode = group_rec.execution_mode;
+
+                RAISE NOTICE '    ✅ Created group: % (% steps)',
+                    format('%s_%s_migrated', group_rec.layer, group_rec.execution_mode),
+                    (SELECT COUNT(*) FROM transformation_steps WHERE execution_group_id = new_group_id);
+            END LOOP;
+
+            -- Create visual config with defaults
+            INSERT INTO pipeline_visual_configs (pipeline_id, layer_modes)
+            VALUES (
+                pipeline_rec.id,
+                jsonb_build_object(
+                    'pre', 'parallel',
+                    'core', 'waterfall',
+                    'post', 'parallel'
+                )
+            );
+        END LOOP;
+
+        RAISE NOTICE '✅ V20 to V21 migration complete!';
+    ELSE
+        RAISE NOTICE 'ℹ️  No V20 pipelines to migrate (all pipelines already have execution groups)';
+    END IF;
+END $$;
+
+-- ============================================================================
+-- 8. SAMPLE DATA - Example Hybrid Pipeline
+-- ============================================================================
+-- Create a sample hybrid pipeline to demonstrate parallel + inline execution
+
+DO $$
+DECLARE
+    sample_pipeline_id UUID;
+    sample_interface_id UUID;
+    group1_id UUID;
+    group2_id UUID;
+    group3_id UUID;
+    group4_id UUID;
+BEGIN
+    -- Only create sample if we have interfaces
+    SELECT id INTO sample_interface_id FROM interfaces LIMIT 1;
+
+    IF sample_interface_id IS NOT NULL THEN
+        -- Create sample pipeline
+        INSERT INTO transformation_pipelines (
+            interface_id,
+            message_type,
+            pipeline_name,
+            enabled
+        ) VALUES (
+            sample_interface_id,
+            'ADT^A01',
+            'Sample Hybrid Pipeline (Parallel + Inline)',
+            false -- Disabled by default
+        ) RETURNING id INTO sample_pipeline_id;
+
+        -- Pre-processing: Parallel validation group
+        INSERT INTO execution_groups (pipeline_id, group_id, group_type, layer, sequence, merge_strategy)
+        VALUES (sample_pipeline_id, 'parallel_validation', 'parallel', 'pre', 10, 'deep_merge')
+        RETURNING id INTO group1_id;
+
+        INSERT INTO transformation_steps (pipeline_id, execution_group_id, step_name, step_type, sequence, layer, required)
+        VALUES
+            (sample_pipeline_id, group1_id, 'Validate PID.3 (Patient ID)', 'pre.validation', 10, 'pre', true),
+            (sample_pipeline_id, group1_id, 'Validate PID.5 (Patient Name)', 'pre.validation', 20, 'pre', true),
+            (sample_pipeline_id, group1_id, 'Check Duplicate Patient', 'pre.validation', 30, 'pre', false);
+
+        -- Pre-processing: Inline enrichment (depends on validation)
+        INSERT INTO execution_groups (pipeline_id, group_id, group_type, layer, sequence, merge_strategy)
+        VALUES (sample_pipeline_id, 'inline_enrichment', 'inline', 'pre', 40, 'deep_merge')
+        RETURNING id INTO group2_id;
+
+        INSERT INTO transformation_steps (pipeline_id, execution_group_id, step_name, step_type, sequence, layer, required)
+        VALUES
+            (sample_pipeline_id, group2_id, 'Enrich from Epic API', 'pre.enrichment', 40, 'pre', false);
+
+        -- Add dependency: enrichment depends on validation
+        INSERT INTO step_dependencies (group_id, depends_on_group_id, dependency_type)
+        VALUES (group2_id, group1_id, 'success');
+
+        -- Core: HL7→FHIR mapping (inline)
+        INSERT INTO execution_groups (pipeline_id, group_id, group_type, layer, sequence, merge_strategy)
+        VALUES (sample_pipeline_id, 'core_mapping', 'inline', 'core', 100, 'deep_merge')
+        RETURNING id INTO group3_id;
+
+        INSERT INTO transformation_steps (pipeline_id, execution_group_id, step_name, step_type, sequence, layer, required)
+        VALUES
+            (sample_pipeline_id, group3_id, 'HL7 to FHIR Mapping', 'core.mapping', 100, 'core', true);
+
+        -- Add dependency: mapping depends on enrichment
+        INSERT INTO step_dependencies (group_id, depends_on_group_id, dependency_type)
+        VALUES (group3_id, group2_id, 'completion');
+
+        -- Post-processing: Parallel validation and delivery
+        INSERT INTO execution_groups (pipeline_id, group_id, group_type, layer, sequence, merge_strategy)
+        VALUES (sample_pipeline_id, 'parallel_post', 'parallel', 'post', 200, 'deep_merge')
+        RETURNING id INTO group4_id;
+
+        INSERT INTO transformation_steps (pipeline_id, execution_group_id, step_name, step_type, sequence, layer, required)
+        VALUES
+            (sample_pipeline_id, group4_id, 'Validate FHIR Bundle', 'post.validation', 200, 'post', true),
+            (sample_pipeline_id, group4_id, 'Anonymize Test Patients', 'post.custom', 210, 'post', false);
+
+        -- Add dependency: post processing depends on core mapping
+        INSERT INTO step_dependencies (group_id, depends_on_group_id, dependency_type)
+        VALUES (group4_id, group3_id, 'success');
+
+        -- Create visual config
+        INSERT INTO pipeline_visual_configs (pipeline_id, layer_modes, connections)
+        VALUES (
+            sample_pipeline_id,
+            '{"pre": "hybrid", "core": "waterfall", "post": "parallel"}'::jsonb,
+            '[
+                {"from": "parallel_validation", "to": "inline_enrichment", "type": "dependency"},
+                {"from": "inline_enrichment", "to": "core_mapping", "type": "dependency"},
+                {"from": "core_mapping", "to": "parallel_post", "type": "dependency"}
+            ]'::jsonb
+        );
+
+        RAISE NOTICE '✅ Sample hybrid pipeline created: %', sample_pipeline_id;
+    END IF;
+END $$;
+
+-- ============================================================================
+-- 9. HELPER VIEWS
+-- ============================================================================
+
+-- View: Pipeline execution order (resolved dependencies)
+CREATE OR REPLACE VIEW v_pipeline_execution_order AS
+SELECT
+    eg.pipeline_id,
+    eg.id as group_id,
+    eg.group_id as group_name,
+    eg.group_type,
+    eg.layer,
+    eg.sequence,
+    COALESCE(
+        json_agg(
+            json_build_object(
+                'step_id', ts.id,
+                'step_name', ts.step_name,
+                'step_type', ts.step_type,
+                'required', ts.required
+            ) ORDER BY ts.sequence
+        ) FILTER (WHERE ts.id IS NOT NULL),
+        '[]'::json
+    ) as steps,
+    COALESCE(
+        array_agg(DISTINCT dep_eg.group_id) FILTER (WHERE dep_eg.id IS NOT NULL),
+        '{}'::varchar[]
+    ) as depends_on
+FROM execution_groups eg
+LEFT JOIN transformation_steps ts ON ts.execution_group_id = eg.id
+LEFT JOIN step_dependencies sd ON sd.group_id = eg.id
+LEFT JOIN execution_groups dep_eg ON dep_eg.id = sd.depends_on_group_id
+GROUP BY eg.id, eg.pipeline_id, eg.group_id, eg.group_type, eg.layer, eg.sequence
+ORDER BY eg.pipeline_id, eg.sequence;
+
+COMMENT ON VIEW v_pipeline_execution_order IS 'Resolved execution order for all pipelines with dependencies';
+
+-- ============================================================================
+-- 10. PERFORMANCE OPTIMIZATION
+-- ============================================================================
+
+-- Partial index for active pipelines with execution groups
+CREATE INDEX idx_execution_groups_active_pipelines ON execution_groups(pipeline_id)
+WHERE pipeline_id IN (SELECT id FROM transformation_pipelines WHERE enabled = true);
+
+-- Index for dependency resolution queries
+CREATE INDEX idx_dependencies_resolution ON step_dependencies(depends_on_group_id, group_id);
+
+-- GIN index for JSONB searches
+CREATE INDEX idx_pipeline_visual_config_layer_modes ON pipeline_visual_configs USING GIN(layer_modes);
+
+-- ============================================================================
+-- MIGRATION SUMMARY
+-- ============================================================================
+
+DO $$
+BEGIN
+    RAISE NOTICE '
+    ============================================================================
+    ✅ V21 Migration Complete: Execution Groups & Dependencies
+    ============================================================================
+
+    New Tables Created:
+    - execution_groups              (Parallel/Inline execution blocks)
+    - step_dependencies            (Dependencies between groups)
+    - pipeline_visual_configs      (Visual pipeline configuration)
+    - execution_flow_metadata      (Cached execution order)
+
+    Enhanced Tables:
+    - transformation_steps         (+ execution_group_id, visual_metadata)
+
+    Features Added:
+    ✅ Hybrid execution (parallel + inline in same pipeline)
+    ✅ Dependency management between execution groups
+    ✅ Visual pipeline configuration storage
+    ✅ Execution flow caching for performance
+    ✅ Circular dependency prevention
+    ✅ Automatic V20 data migration
+
+    Backward Compatibility:
+    ✅ All V20 pipelines automatically migrated
+    ✅ Existing execution_mode preserved
+    ✅ No breaking changes to existing APIs
+
+    Next Steps:
+    1. Update Go models (models/execution_group_models.go)
+    2. Create execution engine service
+    3. Build frontend drag-drop UI
+    ============================================================================
+    ';
+END $$;

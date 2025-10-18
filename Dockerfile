@@ -10,16 +10,16 @@ WORKDIR /app
 
 # Copy and install dependencies
 COPY package*.json go.mod go.sum ./
-RUN npm install --only=production && go mod download
+RUN npm install && go mod download
 
 # Copy everything else
 COPY . .
 
-# Build Go app with different name to avoid conflict
+# Build Go app
 RUN go mod tidy && go build -o go-api main.go
 
 # Expose ports
 EXPOSE 3000 8080
 
-# Simple startup command - NO EXTERNAL SCRIPTS
-CMD ["sh", "-c", "echo 'Starting...' && ./go-api & sleep 5 && node server.js"]
+# Start both Go backend and Node.js frontend
+CMD ["sh", "-c", "./go-api & sleep 5 && node server.js"]

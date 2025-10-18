@@ -133,6 +133,9 @@ services:
       # ✅ CRITICAL: These were missing in your broken config
       - ./hl7:/app/hl7                    # Go HL7 parsing code
       - ./schemas:/app/schemas:ro         # HL7 and FHIR schema files
+      # Mount app.js for hot-reload (DISABLED - causes require() cache issues)
+      # - ./app.js:/app/app.js
+      # - ./server.js:/app/server.js
     
     # Wait for PostgreSQL, MongoDB, and migrations to complete
     depends_on:

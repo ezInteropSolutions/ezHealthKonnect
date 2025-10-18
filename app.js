@@ -261,6 +261,19 @@ console.log('🔄 Mounting /api/wizard...');
 app.use('/api/wizard', wizardRoutes);
 console.log('🔄 Mounting /api/messages...');
 app.use('/api/messages', messageRoutes);
+
+// Pipeline Builder routes - with debug logging
+console.log('🔄 Mounting /api/pipelines...');
+try {
+    const pipelineRoutes = require('./routes/pipelineRoutes');
+    console.log('✅ pipelineRoutes loaded successfully');
+    app.use('/api', pipelineRoutes);
+    console.log('✅ Pipeline routes mounted successfully');
+} catch (error) {
+    console.error('❌ Failed to load pipeline routes:', error.message);
+    console.error('Stack:', error.stack);
+}
+
 console.log('✅ Essential routes mounted successfully');
 
 console.log('About to require interfaceLifecycle routes...');

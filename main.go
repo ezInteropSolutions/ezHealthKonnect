@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"database/sql"
 	"ezhealthkonnect/config"
 	"ezhealthkonnect/controllers"
@@ -9,9 +8,7 @@ import (
 	"ezhealthkonnect/hl7"
 	"ezhealthkonnect/processing"
 	"ezhealthkonnect/services"
-	"encoding/json"
 	"fmt"
-	"io"
 	"log"
 	"net/http"
 	"os"
@@ -61,13 +58,11 @@ func main() {
 			log.Printf("❌ ERROR: Database ping failed: %v", err)
 			db = nil
 		} else {
-			// Initialize Interface Message Service with database connection
-			interfaceMessageService = services.NewInterfaceMessageService(db)
-			log.Printf("✅ InterfaceMessageService initialized")
-
-			// Initialize Output Message Service with database connection (MongoDB optional)
-			outputMessageService = services.NewOutputMessageService(db, nil, "")
-			log.Printf("✅ OutputMessageService initialized")
+			// OLD MLLP System services - no longer needed with ProcessingEngine architecture
+			// interfaceMessageService = services.NewInterfaceMessageService(db)
+			// log.Printf("✅ InterfaceMessageService initialized")
+			// outputMessageService = services.NewOutputMessageService(db, nil, "")
+			// log.Printf("✅ OutputMessageService initialized")
 
 			// Initialize PostgreSQL Transformation Service (standalone)
 			postgresTransformationService = services.NewPostgresTransformationService(db)
@@ -100,20 +95,21 @@ func main() {
 
 
 
-	// Initialize Interface Engine - Start listeners for active interfaces
-	if db != nil {
-		log.Printf("🚀 Starting Interface Engine...")
-		interfaceEngine := services.NewMLLPConnectivityService(db)
-
-		// Start interface listeners in background
-		go func() {
-			if err := startInterfaceListeners(db, interfaceEngine); err != nil {
-				log.Printf("❌ Failed to start interface listeners: %v", err)
-			}
-		}()
-
-		log.Printf("✅ Interface Engine initialized")
-	}
+	// OLD MLLP System - Replaced by ProcessingEngine architecture
+	// Interface listeners are now managed by ProcessingEngine via /api/processing/interfaces/:id/activate
+	// if db != nil {
+	// 	log.Printf("🚀 Starting Interface Engine...")
+	// 	interfaceEngine := services.NewMLLPConnectivityService(db)
+	//
+	// 	// Start interface listeners in background
+	// 	go func() {
+	// 		if err := startInterfaceListeners(db, interfaceEngine); err != nil {
+	// 			log.Printf("❌ Failed to start interface listeners: %v", err)
+	// 		}
+	// 	}()
+	//
+	// 	log.Printf("✅ Interface Engine initialized")
+	// }
 
 	// Initialize schema systems if schemas are available - ENHANCED
 	if cfg.UseFilesystemSchema() {
@@ -843,6 +839,17 @@ func handleMappingRules(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// ============================================================================
+// DEAD CODE - OLD MLLP SYSTEM (Lines 847-1262)
+// ============================================================================
+// The following functions are part of the OLD MLLP system architecture.
+// They have been replaced by the ProcessingEngine architecture which is
+// activated via /api/processing/interfaces/:id/activate API endpoint.
+//
+// DO NOT DELETE - Kept for reference during transition period.
+// ============================================================================
+
+/*
 // startInterfaceListeners reads interface configurations and starts appropriate listeners
 func startInterfaceListeners(db *sql.DB, mllpService *services.MLLPConnectivityService) error {
 	log.Printf("🔍 Querying active interfaces from database...")
@@ -1259,3 +1266,8 @@ func startHttpListener(port int, interfaceID, interfaceName, targetConfig, trans
 		log.Printf("❌ HTTP server error for %s: %v", interfaceName, err)
 	}
 }
+*/
+
+// ============================================================================
+// END OF DEAD CODE - OLD MLLP SYSTEM
+// ============================================================================

@@ -6,6 +6,7 @@ package processing
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"sync"
 	"time"
@@ -17,10 +18,14 @@ import (
 type ProcessingEngine struct {
 	db                   *sql.DB
 	activeInterfaces     map[string]*InterfaceStatus
+	activeConnectors     map[string]InputConnector       // Track active TCP/HTTP connectors
+	messageChan          map[string]chan Message        // Message channels per interface
 	mutex               sync.RWMutex
 	stats               *EngineStats
 	running             bool
-	transformationService *services.TransformationService // OOB: Auto-integrated transformation
+	parserService        *services.MessageParserService // JSON conversion service
+	mongoService         *services.MongoDBMessageService // MongoDB storage
+	// transformationService *services.TransformationService // TODO: Add when service is ready
 }
 
 // InterfaceStatus tracks the status of an interface
@@ -44,11 +49,13 @@ type EngineStats struct {
 }
 
 // NewProcessingEngine creates a new processing engine
-// OOB: Auto-initializes transformation service if MongoDB is available
+// OOB: Auto-initializes MongoDB and parser service if available
 func NewProcessingEngine(db *sql.DB) *ProcessingEngine {
 	engine := &ProcessingEngine{
 		db:               db,
 		activeInterfaces: make(map[string]*InterfaceStatus),
+		activeConnectors: make(map[string]InputConnector),
+		messageChan:      make(map[string]chan Message),
 		stats: &EngineStats{
 			StartTime:             time.Now(),
 			LastActivity:          time.Now(),
@@ -57,8 +64,29 @@ func NewProcessingEngine(db *sql.DB) *ProcessingEngine {
 		running: false,
 	}
 
+	// OOB: Auto-initialize parser service (includes MongoDB detection)
+	ctx := context.Background()
+	parserService := services.InitializeMessageParserService(db)
+	if parserService != nil {
+		engine.parserService = parserService
+
+		// Also get MongoDB service for raw storage
+		mongoConnService, err := services.NewMongoDBConnectionService()
+		if err == nil {
+			err = mongoConnService.Connect(ctx)
+			if err == nil {
+				engine.mongoService = services.NewMongoDBMessageService(
+					mongoConnService.GetClient(),
+					mongoConnService.GetDatabase(),
+				)
+				fmt.Printf("✅ Parser Service initialized with MongoDB\n")
+			}
+		}
+	}
+
 	// OOB: Auto-initialize transformation service (will be nil if MongoDB unavailable)
-	engine.transformationService = services.InitializeTransformationService(db)
+	// TODO: Re-enable when TransformationService is implemented
+	// engine.transformationService = services.InitializeTransformationService(db)
 
 	return engine
 }
@@ -104,12 +132,50 @@ func (pe *ProcessingEngine) ActivateInterface(interfaceID string) error {
 	pe.mutex.Lock()
 	defer pe.mutex.Unlock()
 
+	// Check if already active
+	if _, exists := pe.activeInterfaces[interfaceID]; exists {
+		return fmt.Errorf("interface already active")
+	}
+
 	// Get interface details from database
-	var name string
-	err := pe.db.QueryRow("SELECT name FROM interfaces WHERE id = $1", interfaceID).Scan(&name)
+	var name, sourceConfigJSON string
+	err := pe.db.QueryRow(`
+		SELECT name, source_config
+		FROM interfaces
+		WHERE id = $1
+	`, interfaceID).Scan(&name, &sourceConfigJSON)
 	if err != nil {
 		return fmt.Errorf("interface not found: %v", err)
 	}
+
+	// Parse source config
+	var sourceConfig map[string]interface{}
+	if err := json.Unmarshal([]byte(sourceConfigJSON), &sourceConfig); err != nil {
+		return fmt.Errorf("failed to parse source config: %v", err)
+	}
+
+	// Add interface_id to config for connector
+	sourceConfig["interface_id"] = interfaceID
+
+	// Create connector based on source type
+	connector, err := NewTCPInputConnector(sourceConfig)
+	if err != nil {
+		return fmt.Errorf("failed to create connector: %v", err)
+	}
+
+	// Create message channel for this interface
+	messageChan := make(chan Message, 100) // Buffered channel
+
+	// Start connector
+	ctx := context.Background()
+	go func() {
+		if err := connector.Start(ctx, messageChan); err != nil {
+			fmt.Printf("❌ Connector error for interface %s: %v\n", interfaceID, err)
+		}
+	}()
+
+	// Start message processor
+	go pe.processMessages(interfaceID, messageChan)
 
 	// Update interface status in database
 	_, err = pe.db.Exec("UPDATE interfaces SET status = 'active' WHERE id = $1", interfaceID)
@@ -127,7 +193,11 @@ func (pe *ProcessingEngine) ActivateInterface(interfaceID string) error {
 		Errors:           0,
 	}
 
+	pe.activeConnectors[interfaceID] = connector
+	pe.messageChan[interfaceID] = messageChan
+
 	pe.stats.LastActivity = time.Now()
+	fmt.Printf("✅ Interface activated: %s (%s)\n", name, interfaceID)
 	return nil
 }
 
@@ -223,11 +293,8 @@ func (pe *ProcessingEngine) TransformStoredMessage(
 	interfaceID string,
 	messageID string,
 ) (*services.TransformationResult, error) {
-	if pe.transformationService == nil {
-		return nil, fmt.Errorf("transformation service not available (MongoDB required)")
-	}
-
-	return pe.transformationService.TransformStoredMessage(ctx, interfaceID, messageID)
+	// TODO: Implement when TransformationService is ready
+	return nil, fmt.Errorf("transformation service not yet implemented")
 }
 
 // TransformInterfaceMessages transforms all untransformed messages for an interface
@@ -236,9 +303,6 @@ func (pe *ProcessingEngine) TransformInterfaceMessages(
 	interfaceID string,
 	limit int,
 ) ([]*services.TransformationResult, error) {
-	if pe.transformationService == nil {
-		return nil, fmt.Errorf("transformation service not available (MongoDB required)")
-	}
-
-	return pe.transformationService.TransformInterfaceMessages(ctx, interfaceID, limit)
+	// TODO: Implement when TransformationService is ready
+	return nil, fmt.Errorf("transformation service not yet implemented")
 }

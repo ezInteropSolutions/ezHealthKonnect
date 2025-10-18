@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pipeline Builder - ezHealthKonnect</title>
+    <link rel="stylesheet" href="/css/pipeline-builder.css?v=2.0">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body>
+    <!-- Header -->
+    <header class="pipeline-header">
+        <div class="header-left">
+            <button id="backBtn" class="btn-icon" title="Back to Interfaces">
+                <i class="fas fa-arrow-left"></i>
+            </button>
+            <h1 id="pipelineTitle">Pipeline Builder</h1>
+            <span id="interfaceInfo" class="interface-badge"></span>
+        </div>
+        <div class="header-center">
+            <div class="pipeline-status">
+                <span id="autoSaveStatus" class="status-indicator"></span>
+            </div>
+        </div>
+        <div class="header-right">
+            <button id="testPipelineBtn" class="btn btn-secondary">
+                <i class="fas fa-flask"></i> Test
+            </button>
+            <button id="savePipelineBtn" class="btn btn-primary">
+                <i class="fas fa-save"></i> Save Pipeline
+            </button>
+        </div>
+    </header>
+
+    <!-- Main Container -->
+    <div class="pipeline-container">
+
+        <!-- Left Panel: Toolbox -->
+        <aside class="toolbox-panel">
+            <div class="panel-header">
+                <h2><i class="fas fa-toolbox"></i> Components</h2>
+                <input type="text" id="toolboxSearch" class="search-input" placeholder="Search steps...">
+            </div>
+
+            <div class="toolbox-content">
+                <!-- Template Library -->
+                <div class="toolbox-section">
+                    <h3 class="section-title">
+                        <i class="fas fa-star"></i> Templates
+                        <button class="section-toggle" data-target="templates-list">
+                            <i class="fas fa-chevron-down"></i>
+                        </button>
+                    </h3>
+                    <div id="templates-list" class="section-content">
+                        <!-- Populated dynamically -->
+                    </div>
+                </div>
+
+                <!-- Pre-Processing Steps -->
+                <div class="toolbox-section">
+                    <h3 class="section-title">
+                        <i class="fas fa-filter"></i> Pre-Processing
+                        <button class="section-toggle" data-target="pre-steps-list">
+                            <i class="fas fa-chevron-down"></i>
+                        </button>
+                    </h3>
+                    <div id="pre-steps-list" class="section-content">
+                        <!-- Populated dynamically -->
+                    </div>
+                </div>
+
+                <!-- Core Mapping -->
+                <div class="toolbox-section">
+                    <h3 class="section-title">
+                        <i class="fas fa-exchange-alt"></i> Transformation
+                        <button class="section-toggle" data-target="core-steps-list">
+                            <i class="fas fa-chevron-down"></i>
+                        </button>
+                    </h3>
+                    <div id="core-steps-list" class="section-content">
+                        <!-- Populated dynamically -->
+                    </div>
+                </div>
+
+                <!-- Post-Processing -->
+                <div class="toolbox-section">
+                    <h3 class="section-title">
+                        <i class="fas fa-check-circle"></i> Post-Processing
+                        <button class="section-toggle" data-target="post-steps-list">
+                            <i class="fas fa-chevron-down"></i>
+                        </button>
+                    </h3>
+                    <div id="post-steps-list" class="section-content">
+                        <!-- Populated dynamically -->
+                    </div>
+                </div>
+
+                <!-- Custom Scripts -->
+                <div class="toolbox-section">
+                    <h3 class="section-title">
+                        <i class="fas fa-code"></i> Custom Scripts
+                        <button class="section-toggle" data-target="custom-steps-list">
+                            <i class="fas fa-chevron-down"></i>
+                        </button>
+                    </h3>
+                    <div id="custom-steps-list" class="section-content">
+                        <!-- Populated dynamically -->
+                    </div>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Center: Canvas Area -->
+        <main class="canvas-area">
+            <div class="canvas-toolbar">
+                <div class="toolbar-left">
+                    <button id="zoomInBtn" class="btn-icon" title="Zoom In">
+                        <i class="fas fa-search-plus"></i>
+                    </button>
+                    <button id="zoomOutBtn" class="btn-icon" title="Zoom Out">
+                        <i class="fas fa-search-minus"></i>
+                    </button>
+                    <button id="zoomResetBtn" class="btn-icon" title="Reset Zoom">
+                        <i class="fas fa-compress"></i>
+                    </button>
+                    <span id="zoomLevel" class="zoom-level">100%</span>
+                </div>
+                <div class="toolbar-center">
+                    <div class="execution-mode-toggle">
+                        <button id="parallelModeBtn" class="mode-btn active" data-mode="parallel">
+                            <i class="fas fa-stream"></i> Parallel
+                        </button>
+                        <button id="inlineModeBtn" class="mode-btn" data-mode="inline">
+                            <i class="fas fa-arrow-right"></i> Sequential
+                        </button>
+                    </div>
+                </div>
+                <div class="toolbar-right">
+                    <button id="autoLayoutBtn" class="btn-icon" title="Auto Layout">
+                        <i class="fas fa-magic"></i>
+                    </button>
+                    <button id="clearCanvasBtn" class="btn-icon" title="Clear Canvas">
+                        <i class="fas fa-trash"></i>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Canvas with Layers -->
+            <div class="canvas-wrapper" id="canvasWrapper">
+                <svg id="connectionsSvg" class="connections-layer"></svg>
+
+                <div class="canvas-layers" id="canvasLayers">
+                    <!-- Pre-Processing Layer -->
+                    <div class="layer-container" data-layer="pre">
+                        <div class="layer-header">
+                            <span class="layer-icon"><i class="fas fa-filter"></i></span>
+                            <span class="layer-title">Pre-Processing</span>
+                            <span class="layer-badge" id="preLayerBadge">0 steps</span>
+                        </div>
+                        <div class="layer-drop-zone" data-layer="pre" id="preLayer">
+                            <div class="drop-zone-placeholder">
+                                <i class="fas fa-filter"></i>
+                                <p>Drag validation and enrichment steps here</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Core Transformation Layer -->
+                    <div class="layer-container" data-layer="core">
+                        <div class="layer-header">
+                            <span class="layer-icon"><i class="fas fa-exchange-alt"></i></span>
+                            <span class="layer-title">Core Transformation</span>
+                            <span class="layer-badge" id="coreLayerBadge">0 steps</span>
+                        </div>
+                        <div class="layer-drop-zone" data-layer="core" id="coreLayer">
+                            <div class="drop-zone-placeholder">
+                                <i class="fas fa-exchange-alt"></i>
+                                <p>Drag mapping steps here</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Post-Processing Layer -->
+                    <div class="layer-container" data-layer="post">
+                        <div class="layer-header">
+                            <span class="layer-icon"><i class="fas fa-check-circle"></i></span>
+                            <span class="layer-title">Post-Processing</span>
+                            <span class="layer-badge" id="postLayerBadge">0 steps</span>
+                        </div>
+                        <div class="layer-drop-zone" data-layer="post" id="postLayer">
+                            <div class="drop-zone-placeholder">
+                                <i class="fas fa-check-circle"></i>
+                                <p>Drag validation and delivery steps here</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+
+        <!-- Right Panel: Properties -->
+        <aside class="properties-panel">
+            <div class="panel-header">
+                <h2><i class="fas fa-cog"></i> Properties</h2>
+            </div>
+
+            <div id="propertiesContent" class="properties-content">
+                <div class="no-selection-message">
+                    <i class="fas fa-mouse-pointer"></i>
+                    <p>Select a step to configure its properties</p>
+                </div>
+            </div>
+        </aside>
+    </div>
+
+    <!-- Modal: Test Pipeline -->
+    <div id="testModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3><i class="fas fa-flask"></i> Test Pipeline</h3>
+                <button class="modal-close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label>Sample Message (HL7)</label>
+                    <textarea id="testMessageInput" rows="10" placeholder="Paste HL7 message here..."></textarea>
+                </div>
+                <div class="test-results" id="testResults" style="display: none;">
+                    <h4>Execution Results</h4>
+                    <div id="testResultsContent"></div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button id="runTestBtn" class="btn btn-primary">
+                    <i class="fas fa-play"></i> Run Test
+                </button>
+                <button class="btn btn-secondary modal-close">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- JavaScript Dependencies -->
+    <script src="/js/pipeline/models/PipelineModels.js?v=2.0"></script>
+    <script src="/js/pipeline/services/PipelineAPIService.js?v=2.0"></script>
+    <script src="/js/pipeline/managers/DragDropManager.js?v=2.0"></script>
+    <script src="/js/pipeline/managers/CanvasRenderer.js?v=2.0"></script>
+    <script src="/js/pipeline/managers/StepNodeManager.js?v=2.0"></script>
+    <script src="/js/pipeline/managers/ToolboxManager.js?v=2.0"></script>
+    <script src="/js/pipeline/managers/PropertiesPanel.js?v=2.0"></script>
+    <script src="/js/pipeline/managers/LayerContainer.js?v=2.0"></script>
+    <script src="/js/pipeline/PipelineBuilder.js?v=2.0"></script>
+    <script src="/js/pipeline/init.js?v=2.0"></script>
+</body>
+</html>

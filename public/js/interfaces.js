@@ -906,32 +906,29 @@ function createCompactTableRow(interface) {
     `;
 }
 
-// Get mini icon-only action buttons
+// Get mini icon-only action buttons - CONSOLIDATED
 function getMiniActionButtons(interface) {
     const buttons = [];
 
-    // Edit button always available (enhanced with more debug info)
-    buttons.push(`<button class="action-btn edit" data-tooltip="Edit Configuration" onclick="console.log('🖱️ Edit button clicked for interface:', '${interface.id}', '${interface.name}'); console.log('🖱️ Button element:', this); showEditModal('${interface.id}')">⚙️</button>`);
+    // Configuration buttons group
+    buttons.push(`<button class="action-btn edit" title="Edit Configuration" onclick="event.stopPropagation(); showEditModal('${interface.id}')">⚙️</button>`);
+    buttons.push(`<button class="action-btn pipeline" title="Configure Pipeline" onclick="event.stopPropagation(); configurePipeline('${interface.id}', '${interface.messageType || 'ADT^A01'}')">🔀</button>`);
 
-    // Runtime Processing Controls
-    buttons.push(`<button class="action-btn runtime-activate" data-tooltip="Start Processing" onclick="activateInterfaceProcessing('${interface.id}')" id="activate-${interface.id}">▶️</button>`);
-    buttons.push(`<button class="action-btn runtime-deactivate" data-tooltip="Stop Processing" onclick="deactivateInterfaceProcessing('${interface.id}')" id="deactivate-${interface.id}" style="display:none">⏹️</button>`);
+    // Runtime Control buttons - Start/Pause/Stop
+    buttons.push(`<button class="action-btn runtime-start" title="Start - Begin Processing" onclick="event.stopPropagation(); activateInterfaceProcessing('${interface.id}')" id="start-${interface.id}">▶️</button>`);
+    buttons.push(`<button class="action-btn runtime-pause" title="Pause - Stop inbound, finish queue" onclick="event.stopPropagation(); pauseInterfaceProcessing('${interface.id}')" id="pause-${interface.id}" style="display:none">⏸️</button>`);
+    buttons.push(`<button class="action-btn runtime-stop" title="Stop - Immediate shutdown" onclick="event.stopPropagation(); deactivateInterfaceProcessing('${interface.id}')" id="stop-${interface.id}" style="display:none">⏹️</button>`);
 
-    // Traditional Interface Controls (if needed)
-    switch (interface.status) {
-        case 'stopped':
-            buttons.push(`<button class="action-btn delete" data-tooltip="Delete Interface" onclick="deleteInterface('${interface.id}')">🗑️</button>`);
-            break;
-
-        case 'error':
-            buttons.push(`<button class="action-btn restart" data-tooltip="Reset Interface" onclick="resetInterface('${interface.id}')">🔄</button>`);
-            break;
+    // Status-specific actions
+    if (interface.status === 'stopped') {
+        buttons.push(`<button class="action-btn delete" title="Delete Interface" onclick="event.stopPropagation(); deleteInterface('${interface.id}')">🗑️</button>`);
+    } else if (interface.status === 'error') {
+        buttons.push(`<button class="action-btn restart" title="Reset Error State" onclick="event.stopPropagation(); resetInterface('${interface.id}')">🔄</button>`);
     }
 
-    // Messages and monitoring
-    buttons.push(`<button class="action-btn messages" data-tooltip="View Messages" onclick="viewInterfaceMessages('${interface.id}')">💬</button>`);
-    buttons.push(`<button class="action-btn monitor" data-tooltip="View Processing History" onclick="showProcessingHistory('${interface.id}')">📈</button>`);
-    buttons.push(`<button class="action-btn details" data-tooltip="Interface Details" onclick="showInterfaceDetails('${interface.id}')">ℹ️</button>`);
+    // View/Monitor buttons
+    buttons.push(`<button class="action-btn messages" title="View Messages" onclick="event.stopPropagation(); viewInterfaceMessages('${interface.id}')">💬</button>`);
+    buttons.push(`<button class="action-btn details" title="View Details" onclick="event.stopPropagation(); showInterfaceDetails('${interface.id}')">ℹ️</button>`);
 
     return buttons.join('');
 }
@@ -2245,8 +2242,14 @@ function updateRuntimeStatusDisplay(element, isProcessing, stats, errorState = n
         }
     } else if (isProcessing) {
         indicator.className = 'status-indicator active';
-        text.textContent = stats ?
-            `Processing (${stats.processedCount || 0} msgs)` : 'Processing';
+
+        // Show "Listening" if no messages processed yet (waiting for input)
+        // Show "Running" if actively processing messages
+        if (stats && stats.processedCount > 0) {
+            text.textContent = `Running (${stats.processedCount} msgs)`;
+        } else {
+            text.textContent = 'Listening';
+        }
     } else {
         indicator.className = 'status-indicator stopped';
         text.textContent = 'Stopped';
@@ -2254,19 +2257,29 @@ function updateRuntimeStatusDisplay(element, isProcessing, stats, errorState = n
 }
 
 /**
- * Update action button visibility
+ * Update action button visibility - UPDATED for Start/Pause/Stop
  */
-function updateActionButtonsVisibility(interfaceId, isProcessing) {
-    const activateBtn = document.getElementById(`activate-${interfaceId}`);
-    const deactivateBtn = document.getElementById(`deactivate-${interfaceId}`);
+function updateActionButtonsVisibility(interfaceId, isProcessing, isPaused = false) {
+    const startBtn = document.getElementById(`start-${interfaceId}`);
+    const pauseBtn = document.getElementById(`pause-${interfaceId}`);
+    const stopBtn = document.getElementById(`stop-${interfaceId}`);
 
-    if (activateBtn && deactivateBtn) {
-        if (isProcessing) {
-            activateBtn.style.display = 'none';
-            deactivateBtn.style.display = 'inline-block';
+    if (startBtn && pauseBtn && stopBtn) {
+        if (isPaused) {
+            // Paused state: show Start and Stop
+            startBtn.style.display = 'inline-block';
+            pauseBtn.style.display = 'none';
+            stopBtn.style.display = 'inline-block';
+        } else if (isProcessing) {
+            // Running state: show Pause and Stop
+            startBtn.style.display = 'none';
+            pauseBtn.style.display = 'inline-block';
+            stopBtn.style.display = 'inline-block';
         } else {
-            activateBtn.style.display = 'inline-block';
-            deactivateBtn.style.display = 'none';
+            // Stopped state: show only Start
+            startBtn.style.display = 'inline-block';
+            pauseBtn.style.display = 'none';
+            stopBtn.style.display = 'none';
         }
     }
 }
@@ -2316,17 +2329,65 @@ async function activateInterfaceProcessing(interfaceId) {
 }
 
 /**
- * Deactivate interface processing
+ * Pause interface processing - stops inbound but waits for queue to clear
  */
-async function deactivateInterfaceProcessing(interfaceId) {
-    const deactivateBtn = document.getElementById(`deactivate-${interfaceId}`);
-    if (deactivateBtn) {
-        deactivateBtn.disabled = true;
-        deactivateBtn.textContent = '⏳';
+async function pauseInterfaceProcessing(interfaceId) {
+    const pauseBtn = document.getElementById(`pause-${interfaceId}`);
+    if (pauseBtn) {
+        pauseBtn.disabled = true;
+        pauseBtn.textContent = '⏳';
     }
 
     try {
-        console.log(`⏸️ Deactivating interface processing: ${interfaceId}`);
+        console.log(`⏸️ Pausing interface processing: ${interfaceId}`);
+
+        const response = await fetch(`/api/runtime/interfaces/${interfaceId}/pause`, {
+            method: 'POST',
+            credentials: 'include',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                graceful: true,
+                waitForQueue: true
+            })
+        });
+
+        const data = await response.json();
+
+        if (response.ok) {
+            console.log('✅ Interface paused:', data.message);
+            showSuccess(`Interface paused - finishing queue`);
+
+            // Immediately update status
+            await updateInterfaceRuntimeStatus(interfaceId);
+        } else {
+            console.error('❌ Pause failed:', data.message);
+            showError(data.message || 'Failed to pause interface');
+        }
+    } catch (error) {
+        console.error('❌ Pause error:', error);
+        showError('Failed to pause interface: ' + error.message);
+    } finally {
+        if (pauseBtn) {
+            pauseBtn.disabled = false;
+            pauseBtn.textContent = '⏸️';
+        }
+    }
+}
+
+/**
+ * Deactivate interface processing - immediate stop
+ */
+async function deactivateInterfaceProcessing(interfaceId) {
+    const stopBtn = document.getElementById(`stop-${interfaceId}`);
+    if (stopBtn) {
+        stopBtn.disabled = true;
+        stopBtn.textContent = '⏳';
+    }
+
+    try {
+        console.log(`⏹️ Stopping interface processing: ${interfaceId}`);
 
         const response = await fetch(`/api/runtime/interfaces/${interfaceId}/deactivate`, {
             method: 'POST',
@@ -2335,29 +2396,30 @@ async function deactivateInterfaceProcessing(interfaceId) {
                 'Content-Type': 'application/json'
             },
             body: JSON.stringify({
-                reason: 'manual_stop'
+                reason: 'manual_stop',
+                immediate: true
             })
         });
 
         const data = await response.json();
 
         if (response.ok) {
-            console.log('✅ Interface deactivated:', data.message);
-            showSuccess(`Interface processing stopped`);
+            console.log('✅ Interface stopped:', data.message);
+            showSuccess(`Interface stopped immediately`);
 
             // Immediately update status
             await updateInterfaceRuntimeStatus(interfaceId);
         } else {
-            console.error('❌ Deactivation failed:', data.message);
-            showError(data.message || 'Failed to deactivate interface');
+            console.error('❌ Stop failed:', data.message);
+            showError(data.message || 'Failed to stop interface');
         }
     } catch (error) {
-        console.error('❌ Deactivation error:', error);
-        showError('Failed to deactivate interface: ' + error.message);
+        console.error('❌ Stop error:', error);
+        showError('Failed to stop interface: ' + error.message);
     } finally {
-        if (deactivateBtn) {
-            deactivateBtn.disabled = false;
-            deactivateBtn.textContent = '⏸️';
+        if (stopBtn) {
+            stopBtn.disabled = false;
+            stopBtn.textContent = '⏹️';
         }
     }
 }
@@ -2472,6 +2534,17 @@ async function resetInterface(interfaceId) {
         console.error('❌ Reset interface error:', error);
         showError('Failed to reset interface: ' + error.message);
     }
+}
+
+/**
+ * Navigate to Pipeline Builder
+ * NEW: Integration with drag-and-drop pipeline builder
+ */
+function configurePipeline(interfaceId, messageType) {
+    console.log('🔀 Opening Pipeline Builder for:', interfaceId, messageType);
+
+    // Navigate to pipeline builder with interface context
+    window.location.href = `/pipeline-builder.html?interfaceId=${interfaceId}&messageType=${encodeURIComponent(messageType)}`;
 }
 
 // Cleanup on page unload

@@ -1,31 +1,9 @@
 {
   "permissions": {
     "allow": [
-      "Bash(docker exec:*)",
-      "Bash(node:*)",
-      "Bash(docker-compose build:*)",
-      "Bash(tasklist)",
-      "Bash(findstr:*)",
-      "Bash(netstat:*)",
-      "Bash(tasklist:*)",
-      "Bash(docker restart:*)",
-      "Bash(timeout:*)",
-      "Bash(powershell:*)",
-      "Bash(docker logs:*)",
-      "Bash(docker build:*)",
-      "Bash(docker stop:*)",
-      "Bash(docker-compose:*)",
-      "Bash(curl:*)",
-      "Bash(gunzip:*)",
-      "Bash(DB_HOST=postgres node check_templates.js)",
-      "Bash(DB_USER=ezhealth_user DB_PASSWORD=secure_password_change_me node check_templates.js)",
-      "Bash(psql:*)",
-      "Bash(docker cp:*)",
-      "Bash(python3:*)",
-      "Bash(for file in *.md)",
-      "Bash(do echo \"=== $file ===\")",
-      "Bash(head:*)",
-      "Bash(done)"
+      "Bash(docker exec ezhealthkonnect-postgres psql -U ezhealth_user -d ezhealthkonnect -c \"SELECT interface_id, output_table_name, schema_version, updated_at FROM output_table_metadata ORDER BY updated_at DESC;\")",
+      "Bash(docker exec ezhealthkonnect-postgres psql -U ezhealth_user -d ezhealthkonnect -c \"SELECT COUNT(*) as total_output_messages, COUNT(CASE WHEN mongo_synced THEN 1 END) as mongo_synced FROM output_intf_629ac1e8_0c50_447a_b93f_ebfc15830a7d;\")",
+      "Bash(docker exec ezhealthkonnect-postgres psql -U ezhealth_user -d ezhealthkonnect -c \"SELECT COUNT(*) as total_output_messages, COUNT(CASE WHEN status = ''transformed'' THEN 1 END) as successful_transformations FROM output_intf_629ac1e8_0c50_447a_b93f_ebfc15830a7d;\")"
     ],
     "deny": [],
     "ask": []

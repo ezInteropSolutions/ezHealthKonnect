@@ -1,0 +1,452 @@
+package services
+
+import (
+	"context"
+	"database/sql"
+	"encoding/json"
+	"fmt"
+	"log"
+
+	"ezhealthkonnect/models"
+
+	"github.com/google/uuid"
+)
+
+// PipelineManagementService handles pipeline CRUD operations
+// MVC: This is a SERVICE - contains ALL business logic for pipeline management
+type PipelineManagementService struct {
+	db *sql.DB
+}
+
+// NewPipelineManagementService creates a new pipeline management service
+func NewPipelineManagementService(db *sql.DB) *PipelineManagementService {
+	return &PipelineManagementService{
+		db: db,
+	}
+}
+
+// SaveVisualPipeline saves a pipeline from visual format to database
+func (pms *PipelineManagementService) SaveVisualPipeline(
+	ctx context.Context,
+	visual *models.VisualPipeline,
+) (*models.TransformationPipeline, error) {
+
+	tx, err := pms.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to start transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	// Convert visual format to database models
+	pipeline, groups, deps, err := models.ConvertVisualToDatabase(visual)
+	if err != nil {
+		return nil, fmt.Errorf("failed to convert visual pipeline: %w", err)
+	}
+
+	// Check if pipeline exists (update) or new (insert)
+	var existingID string
+	err = tx.QueryRowContext(ctx, `
+		SELECT id FROM transformation_pipelines
+		WHERE interface_id = $1 AND message_type = $2
+	`, pipeline.InterfaceID, pipeline.MessageType).Scan(&existingID)
+
+	if err == sql.ErrNoRows {
+		// Create new pipeline
+		pipeline.ID = uuid.New().String()
+
+		_, err = tx.ExecContext(ctx, `
+			INSERT INTO transformation_pipelines (
+				id, interface_id, message_type, pipeline_name, enabled, version
+			) VALUES ($1, $2, $3, $4, $5, $6)
+		`, pipeline.ID, pipeline.InterfaceID, pipeline.MessageType, pipeline.PipelineName, pipeline.Enabled, 1)
+
+		if err != nil {
+			return nil, fmt.Errorf("failed to insert pipeline: %w", err)
+		}
+
+		log.Printf("✅ Created new pipeline: %s", pipeline.ID)
+	} else if err != nil {
+		return nil, fmt.Errorf("failed to check existing pipeline: %w", err)
+	} else {
+		// Update existing pipeline
+		pipeline.ID = existingID
+
+		_, err = tx.ExecContext(ctx, `
+			UPDATE transformation_pipelines
+			SET pipeline_name = $1, updated_at = CURRENT_TIMESTAMP
+			WHERE id = $2
+		`, pipeline.PipelineName, pipeline.ID)
+
+		if err != nil {
+			return nil, fmt.Errorf("failed to update pipeline: %w", err)
+		}
+
+		// Delete existing execution groups and dependencies
+		_, err = tx.ExecContext(ctx, `DELETE FROM execution_groups WHERE pipeline_id = $1`, pipeline.ID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to delete old execution groups: %w", err)
+		}
+
+		log.Printf("✅ Updated existing pipeline: %s", pipeline.ID)
+	}
+
+	// Insert execution groups
+	for i := range groups {
+		groups[i].ID = uuid.New().String()
+		groups[i].PipelineID = pipeline.ID
+
+		_, err = tx.ExecContext(ctx, `
+			INSERT INTO execution_groups (
+				id, pipeline_id, group_id, group_type, layer, sequence, merge_strategy
+			) VALUES ($1, $2, $3, $4, $5, $6, $7)
+		`, groups[i].ID, groups[i].PipelineID, groups[i].GroupID, groups[i].GroupType,
+			groups[i].Layer, groups[i].Sequence, groups[i].MergeStrategy)
+
+		if err != nil {
+			return nil, fmt.Errorf("failed to insert execution group: %w", err)
+		}
+
+		// Insert steps for this group
+		for j := range groups[i].Steps {
+			step := &groups[i].Steps[j]
+			step.ID = uuid.New().String()
+			step.PipelineID = pipeline.ID
+			step.ExecutionGroupID = &groups[i].ID
+
+			configJSON, _ := json.Marshal(step.Config)
+
+			_, err = tx.ExecContext(ctx, `
+				INSERT INTO transformation_steps (
+					id, pipeline_id, execution_group_id, step_name, step_type, sequence,
+					layer, required, timeout_ms, enabled, config, script_content, on_error_strategy
+				) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+			`, step.ID, step.PipelineID, step.ExecutionGroupID, step.StepName, step.StepType,
+				step.Sequence, step.Layer, step.Required, step.TimeoutMs, step.Enabled,
+				configJSON, step.ScriptContent, step.OnErrorStrategy)
+
+			if err != nil {
+				return nil, fmt.Errorf("failed to insert step: %w", err)
+			}
+		}
+	}
+
+	// Create map of group_id to database ID
+	groupIDMap := make(map[string]string)
+	for _, group := range groups {
+		groupIDMap[group.GroupID] = group.ID
+	}
+
+	// Insert dependencies
+	for i := range deps {
+		deps[i].ID = uuid.New().String()
+
+		// Map group_id to database ID
+		groupID, ok1 := groupIDMap[deps[i].GroupID]
+		dependsOnID, ok2 := groupIDMap[deps[i].DependsOnGroupID]
+
+		if !ok1 || !ok2 {
+			continue // Skip invalid dependencies
+		}
+
+		deps[i].GroupID = groupID
+		deps[i].DependsOnGroupID = dependsOnID
+
+		_, err = tx.ExecContext(ctx, `
+			INSERT INTO step_dependencies (
+				id, group_id, depends_on_group_id, dependency_type
+			) VALUES ($1, $2, $3, $4)
+		`, deps[i].ID, deps[i].GroupID, deps[i].DependsOnGroupID, deps[i].DependencyType)
+
+		if err != nil {
+			return nil, fmt.Errorf("failed to insert dependency: %w", err)
+		}
+	}
+
+	// Create visual config
+	layerModes := make(map[string]interface{})
+	for layerName, layer := range visual.Layers {
+		layerModes[layerName] = layer.Mode
+	}
+
+	layerModesJSON, _ := json.Marshal(layerModes)
+
+	_, err = tx.ExecContext(ctx, `
+		INSERT INTO pipeline_visual_configs (
+			id, pipeline_id, layer_modes
+		) VALUES ($1, $2, $3)
+		ON CONFLICT (pipeline_id) DO UPDATE
+		SET layer_modes = EXCLUDED.layer_modes,
+		    updated_at = CURRENT_TIMESTAMP
+	`, uuid.New().String(), pipeline.ID, layerModesJSON)
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to save visual config: %w", err)
+	}
+
+	// Commit transaction
+	if err = tx.Commit(); err != nil {
+		return nil, fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
+	log.Printf("✅ Pipeline saved successfully: %s (%d groups, %d steps)",
+		pipeline.ID, len(groups), len(pipeline.Steps))
+
+	return pipeline, nil
+}
+
+// LoadVisualPipeline loads a pipeline in visual format
+func (pms *PipelineManagementService) LoadVisualPipeline(
+	ctx context.Context,
+	pipelineID string,
+) (*models.VisualPipeline, error) {
+
+	// Load pipeline
+	var pipeline models.TransformationPipeline
+	err := pms.db.QueryRowContext(ctx, `
+		SELECT id, interface_id, message_type, pipeline_name, enabled, version
+		FROM transformation_pipelines
+		WHERE id = $1
+	`, pipelineID).Scan(
+		&pipeline.ID,
+		&pipeline.InterfaceID,
+		&pipeline.MessageType,
+		&pipeline.PipelineName,
+		&pipeline.Enabled,
+		&pipeline.Version,
+	)
+
+	if err != nil {
+		return nil, fmt.Errorf("pipeline not found: %w", err)
+	}
+
+	// Load execution groups with steps
+	groups, deps, err := pms.loadExecutionGroupsAndDependencies(ctx, pipelineID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Convert to visual format
+	visualPipeline := models.ConvertDatabaseToVisual(&pipeline, groups, deps)
+
+	return visualPipeline, nil
+}
+
+// LoadPipelineByInterface loads pipeline for specific interface and message type
+func (pms *PipelineManagementService) LoadPipelineByInterface(
+	ctx context.Context,
+	interfaceID string,
+	messageType string,
+) (*models.VisualPipeline, error) {
+
+	var pipelineID string
+	err := pms.db.QueryRowContext(ctx, `
+		SELECT id FROM transformation_pipelines
+		WHERE interface_id = $1 AND message_type = $2
+	`, interfaceID, messageType).Scan(&pipelineID)
+
+	if err != nil {
+		return nil, fmt.Errorf("pipeline not found for interface %s and message type %s", interfaceID, messageType)
+	}
+
+	return pms.LoadVisualPipeline(ctx, pipelineID)
+}
+
+// ListPipelinesByInterface lists all pipelines for an interface
+func (pms *PipelineManagementService) ListPipelinesByInterface(
+	ctx context.Context,
+	interfaceID string,
+) ([]models.TransformationPipeline, error) {
+
+	rows, err := pms.db.QueryContext(ctx, `
+		SELECT id, interface_id, message_type, pipeline_name, enabled, version, created_at, updated_at
+		FROM transformation_pipelines
+		WHERE interface_id = $1
+		ORDER BY message_type
+	`, interfaceID)
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to list pipelines: %w", err)
+	}
+	defer rows.Close()
+
+	var pipelines []models.TransformationPipeline
+
+	for rows.Next() {
+		var p models.TransformationPipeline
+		err := rows.Scan(
+			&p.ID,
+			&p.InterfaceID,
+			&p.MessageType,
+			&p.PipelineName,
+			&p.Enabled,
+			&p.Version,
+			&p.CreatedAt,
+			&p.UpdatedAt,
+		)
+		if err != nil {
+			return nil, err
+		}
+		pipelines = append(pipelines, p)
+	}
+
+	return pipelines, nil
+}
+
+// DeletePipeline deletes a pipeline and all related data
+func (pms *PipelineManagementService) DeletePipeline(
+	ctx context.Context,
+	pipelineID string,
+) error {
+
+	result, err := pms.db.ExecContext(ctx, `
+		DELETE FROM transformation_pipelines WHERE id = $1
+	`, pipelineID)
+
+	if err != nil {
+		return fmt.Errorf("failed to delete pipeline: %w", err)
+	}
+
+	rowsAffected, _ := result.RowsAffected()
+	if rowsAffected == 0 {
+		return fmt.Errorf("pipeline not found: %s", pipelineID)
+	}
+
+	log.Printf("✅ Pipeline deleted: %s", pipelineID)
+
+	return nil
+}
+
+// ClonePipeline creates a copy of a pipeline
+func (pms *PipelineManagementService) ClonePipeline(
+	ctx context.Context,
+	pipelineID string,
+	newName string,
+) (*models.TransformationPipeline, error) {
+
+	// Load existing pipeline
+	visual, err := pms.LoadVisualPipeline(ctx, pipelineID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load pipeline for cloning: %w", err)
+	}
+
+	// Update name
+	visual.Name = newName
+	visual.ID = "" // Clear ID to create new pipeline
+
+	// Save as new pipeline
+	return pms.SaveVisualPipeline(ctx, visual)
+}
+
+// loadExecutionGroupsAndDependencies is a helper to load groups and dependencies
+func (pms *PipelineManagementService) loadExecutionGroupsAndDependencies(
+	ctx context.Context,
+	pipelineID string,
+) ([]models.ExecutionGroup, []models.StepDependency, error) {
+
+	// Load execution groups
+	rows, err := pms.db.QueryContext(ctx, `
+		SELECT id, pipeline_id, group_id, group_type, layer, sequence, merge_strategy
+		FROM execution_groups
+		WHERE pipeline_id = $1
+		ORDER BY sequence
+	`, pipelineID)
+
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to load execution groups: %w", err)
+	}
+	defer rows.Close()
+
+	var groups []models.ExecutionGroup
+
+	for rows.Next() {
+		var group models.ExecutionGroup
+		err := rows.Scan(
+			&group.ID,
+			&group.PipelineID,
+			&group.GroupID,
+			&group.GroupType,
+			&group.Layer,
+			&group.Sequence,
+			&group.MergeStrategy,
+		)
+		if err != nil {
+			return nil, nil, err
+		}
+
+		// Load steps for this group
+		stepRows, err := pms.db.QueryContext(ctx, `
+			SELECT id, step_name, step_type, sequence, layer, required, timeout_ms, config, script_content, on_error_strategy
+			FROM transformation_steps
+			WHERE execution_group_id = $1
+			ORDER BY sequence
+		`, group.ID)
+
+		if err != nil {
+			return nil, nil, err
+		}
+
+		var steps []models.TransformationStep
+		for stepRows.Next() {
+			var step models.TransformationStep
+			var configJSON []byte
+
+			err := stepRows.Scan(
+				&step.ID,
+				&step.StepName,
+				&step.StepType,
+				&step.Sequence,
+				&step.Layer,
+				&step.Required,
+				&step.TimeoutMs,
+				&configJSON,
+				&step.ScriptContent,
+				&step.OnErrorStrategy,
+			)
+			if err != nil {
+				stepRows.Close()
+				return nil, nil, err
+			}
+
+			if len(configJSON) > 0 {
+				json.Unmarshal(configJSON, &step.Config)
+			}
+
+			steps = append(steps, step)
+		}
+		stepRows.Close()
+
+		group.Steps = steps
+		groups = append(groups, group)
+	}
+
+	// Load dependencies
+	depRows, err := pms.db.QueryContext(ctx, `
+		SELECT sd.id, sd.group_id, sd.depends_on_group_id, sd.dependency_type
+		FROM step_dependencies sd
+		JOIN execution_groups eg ON eg.id = sd.group_id
+		WHERE eg.pipeline_id = $1
+	`, pipelineID)
+
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to load dependencies: %w", err)
+	}
+	defer depRows.Close()
+
+	var deps []models.StepDependency
+
+	for depRows.Next() {
+		var dep models.StepDependency
+		err := depRows.Scan(
+			&dep.ID,
+			&dep.GroupID,
+			&dep.DependsOnGroupID,
+			&dep.DependencyType,
+		)
+		if err != nil {
+			return nil, nil, err
+		}
+		deps = append(deps, dep)
+	}
+
+	return groups, deps, nil
+}

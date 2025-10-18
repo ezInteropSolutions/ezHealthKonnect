@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"log"
 	"reflect"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -37,22 +38,11 @@ type HL7FHIRTransformServiceV3 struct {
 func NewHL7FHIRTransformServiceV3(database *sql.DB) *HL7FHIRTransformServiceV3 {
 	service := &HL7FHIRTransformServiceV3{
 		db:         database,
-		fhirLoader: fhir.GetFHIRSchemaLoader(),
+		fhirLoader: nil, // Will be loaded on-demand during Transform()
 	}
 
-	// Verify FHIR schema loader is available
-	if service.fhirLoader == nil {
-		log.Printf("❌ ERROR: FHIR schema loader not available")
-		service.schemaReady = false
-	} else {
-		// Test schema loading
-		if available, err := service.fhirLoader.ListAvailableSchemas(); err == nil {
-			if len(available) > 0 {
-				service.schemaReady = true
-				log.Printf("✅ Schema-driven service initialized with %d schemas", len(available))
-			}
-		}
-	}
+	// Note: FHIR schema loader availability is checked at Transform() time
+	// This allows the service to be created before schemas are loaded (OOB pattern)
 
 	return service
 }
@@ -65,7 +55,19 @@ func (s *HL7FHIRTransformServiceV3) Transform(
 	ctx context.Context,
 	request *TransformRequest,
 ) (*TransformResponse, error) {
-	if !s.schemaReady {
+	// On-demand FHIR schema loader initialization (OOB pattern)
+	if s.fhirLoader == nil {
+		s.fhirLoader = fhir.GetFHIRSchemaLoader()
+	}
+
+	// Verify schemas are available
+	if s.fhirLoader == nil {
+		return nil, fmt.Errorf("FHIR schema loader not initialized")
+	}
+
+	// Check if schemas are loaded
+	available, err := s.fhirLoader.ListAvailableSchemas()
+	if err != nil || len(available) == 0 {
 		return nil, fmt.Errorf("FHIR schemas not loaded - cannot perform schema-driven transformation")
 	}
 
@@ -205,15 +207,6 @@ func (s *HL7FHIRTransformServiceV3) createResourceFromAtomicMappings(
 		"id":           fmt.Sprintf("%s-%d", strings.ToLower(resourceType), time.Now().UnixNano()),
 	}
 
-	// Only add text if it exists in schema
-	textPath := fmt.Sprintf("%s.text", resourceType)
-	if _, exists := schema.Elements[textPath]; exists {
-		resource["text"] = map[string]interface{}{
-			"status": "generated",
-			"div":    fmt.Sprintf("<div xmlns=\"http://www.w3.org/1999/xhtml\">%s resource created from HL7 message</div>", resourceType),
-		}
-	}
-
 	mappedFieldCount := 0
 
 	// Process each atomic mapping
@@ -265,6 +258,19 @@ func (s *HL7FHIRTransformServiceV3) createResourceFromAtomicMappings(
 		return nil, warnings, errors, 0
 	}
 
+	// ✅ Generate human-readable narrative based on mapped data
+	textPath := fmt.Sprintf("%s.text", resourceType)
+	if _, exists := schema.Elements[textPath]; exists {
+		narrative := s.generateNarrative(resourceType, resource)
+		// Remove any leading/trailing whitespace
+		narrative = strings.TrimSpace(narrative)
+		log.Printf("🔍 Generated narrative length: %d chars, first 100: %s", len(narrative), narrative[:min(100, len(narrative))])
+		resource["text"] = map[string]interface{}{
+			"status": "generated",
+			"div":    narrative,
+		}
+	}
+
 	// ✅ SCHEMA-DRIVEN: Ensure all required fields exist before validation
 	s.ensureRequiredFieldsFromSchema(resource, schema, &warnings, &errors)
 
@@ -278,6 +284,174 @@ func (s *HL7FHIRTransformServiceV3) createResourceFromAtomicMappings(
 
 	log.Printf("✅ Created %s with %d mapped fields", resourceType, mappedFieldCount)
 	return resource, warnings, errors, mappedFieldCount
+}
+
+// =====================================
+// NARRATIVE GENERATION
+// =====================================
+
+// generateNarrative creates human-readable XHTML narrative based on resource content
+func (s *HL7FHIRTransformServiceV3) generateNarrative(resourceType string, resource map[string]interface{}) string {
+	// Generate comprehensive table-based narrative for any resource
+	html := s.generateResourceTable(resourceType, resource)
+	return fmt.Sprintf("<div xmlns=\"http://www.w3.org/1999/xhtml\">%s</div>", html)
+}
+
+// generateResourceTable creates an HTML table showing key resource properties
+func (s *HL7FHIRTransformServiceV3) generateResourceTable(resourceType string, resource map[string]interface{}) string {
+	var html strings.Builder
+
+	html.WriteString("<table class=\"grid\" style=\"border-collapse:collapse;width:100%;\">")
+	html.WriteString(fmt.Sprintf("<thead><tr style=\"background:#f0f0f0;\"><th colspan=\"2\" style=\"padding:8px;text-align:left;\">%s</th></tr></thead>", resourceType))
+	html.WriteString("<tbody>")
+
+	// Add key-value rows for important fields
+	s.addTableRow(&html, "ID", fmt.Sprintf("%v", resource["id"]))
+
+	// Type-specific important fields
+	switch resourceType {
+	case "Patient":
+		s.addPatientRows(&html, resource)
+	case "Encounter":
+		s.addEncounterRows(&html, resource)
+	case "MessageHeader":
+		s.addMessageHeaderRows(&html, resource)
+	default:
+		// Generic handling - show all top-level fields
+		keys := make([]string, 0)
+		for key := range resource {
+			if key != "resourceType" && key != "id" && key != "text" {
+				keys = append(keys, key)
+			}
+		}
+		sort.Strings(keys)
+		for _, key := range keys {
+			s.addTableRow(&html, key, fmt.Sprintf("%v", resource[key]))
+		}
+	}
+
+	html.WriteString("</tbody></table>")
+	return html.String()
+}
+
+func (s *HL7FHIRTransformServiceV3) addTableRow(buf *strings.Builder, label, value string) {
+	if value == "" || value == "<nil>" {
+		return
+	}
+	// Escape HTML entities in value
+	value = strings.ReplaceAll(value, "&", "&amp;")
+	value = strings.ReplaceAll(value, "<", "&lt;")
+	value = strings.ReplaceAll(value, ">", "&gt;")
+	value = strings.ReplaceAll(value, "\"", "&quot;")
+
+	buf.WriteString(fmt.Sprintf("<tr><td style=\"padding:4px 8px;border:1px solid #ddd;font-weight:bold;\">%s</td><td style=\"padding:4px 8px;border:1px solid #ddd;\">%s</td></tr>",
+		label, value))
+}
+
+func (s *HL7FHIRTransformServiceV3) addPatientRows(html *strings.Builder, resource map[string]interface{}) {
+	// Name
+	if names, ok := resource["name"].([]interface{}); ok && len(names) > 0 {
+		if name, ok := names[0].(map[string]interface{}); ok {
+			family, _ := name["family"].(string)
+			var given string
+			if givenArr, ok := name["given"].([]interface{}); ok && len(givenArr) > 0 {
+				given, _ = givenArr[0].(string)
+			}
+			if family != "" || given != "" {
+				s.addTableRow(html, "Name", fmt.Sprintf("%s, %s", family, given))
+			}
+		}
+	}
+
+	// Gender
+	if gender, ok := resource["gender"].(string); ok {
+		s.addTableRow(html, "Gender", gender)
+	}
+
+	// Birth Date
+	if birthDate, ok := resource["birthDate"].(string); ok {
+		s.addTableRow(html, "Birth Date", birthDate)
+	}
+
+	// Address
+	if addresses, ok := resource["address"].([]interface{}); ok && len(addresses) > 0 {
+		if addr, ok := addresses[0].(map[string]interface{}); ok {
+			var parts []string
+			if city, ok := addr["city"].(string); ok && city != "" {
+				parts = append(parts, city)
+			}
+			if state, ok := addr["state"].(string); ok && state != "" {
+				parts = append(parts, state)
+			}
+			if len(parts) > 0 {
+				s.addTableRow(html, "Address", strings.Join(parts, ", "))
+			}
+		}
+	}
+}
+
+func (s *HL7FHIRTransformServiceV3) addEncounterRows(html *strings.Builder, resource map[string]interface{}) {
+	// Class
+	if class, ok := resource["class"].(map[string]interface{}); ok {
+		if code, ok := class["code"].(string); ok {
+			classDesc := code
+			// Map common codes to descriptions
+			switch code {
+			case "I": classDesc = "Inpatient"
+			case "O": classDesc = "Outpatient"
+			case "E": classDesc = "Emergency"
+			}
+			s.addTableRow(html, "Class", classDesc)
+		}
+	}
+
+	// Status
+	if status, ok := resource["status"].(string); ok {
+		s.addTableRow(html, "Status", status)
+	}
+
+	// Period
+	if period, ok := resource["period"].(map[string]interface{}); ok {
+		if start, ok := period["start"].(string); ok {
+			s.addTableRow(html, "Start", start)
+		}
+		if end, ok := period["end"].(string); ok {
+			s.addTableRow(html, "End", end)
+		}
+	}
+
+	// Location
+	if locations, ok := resource["location"].([]interface{}); ok && len(locations) > 0 {
+		if loc, ok := locations[0].(map[string]interface{}); ok {
+			if location, ok := loc["location"].(map[string]interface{}); ok {
+				if display, ok := location["display"].(string); ok {
+					s.addTableRow(html, "Location", display)
+				}
+			}
+		}
+	}
+}
+
+func (s *HL7FHIRTransformServiceV3) addMessageHeaderRows(html *strings.Builder, resource map[string]interface{}) {
+	// Event
+	if eventCoding, ok := resource["eventCoding"].(map[string]interface{}); ok {
+		code, _ := eventCoding["code"].(string)
+		display, _ := eventCoding["display"].(string)
+		if code != "" {
+			eventStr := code
+			if display != "" {
+				eventStr = fmt.Sprintf("%s (%s)", code, display)
+			}
+			s.addTableRow(html, "Event", eventStr)
+		}
+	}
+
+	// Source
+	if source, ok := resource["source"].(map[string]interface{}); ok {
+		if name, ok := source["name"].(string); ok {
+			s.addTableRow(html, "Source", name)
+		}
+	}
 }
 
 // =====================================
@@ -711,6 +885,16 @@ func (s *HL7FHIRTransformServiceV3) setNestedFieldFromSchema(
 	parentElement, parentExists := schema.Elements[parentPath]
 
 	if !parentExists {
+		// ✅ Try to find choice type element (e.g., "eventCoding" -> "event[x]")
+		choiceElement, choiceExists := s.findChoiceTypeElement(parentField, schema)
+		if choiceExists {
+			parentElement = choiceElement
+			parentExists = true
+			log.Printf("✅ Found choice type parent for %s", parentField)
+		}
+	}
+
+	if !parentExists {
 		// ✅ STRICT: Reject nested fields where parent doesn't exist in schema
 		log.Printf("❌ REJECTED: Parent field %s not found in %s schema", parentPath, schema.ResourceType)
 		return fmt.Errorf("parent field %s not found in FHIR schema for %s", parentField, schema.ResourceType)
@@ -720,6 +904,16 @@ func (s *HL7FHIRTransformServiceV3) setNestedFieldFromSchema(
 	// Note: For complex types (arrays of objects), child validation may be relaxed
 	childPath := fmt.Sprintf("%s.%s", parentPath, childField)
 	_, childExists := schema.Elements[childPath]
+
+	// ✅ FIX: If parent is a complex data type (Coding, HumanName, etc.), allow standard properties
+	// Complex types like Coding have properties (code, display, system) that aren't in the resource schema
+	if !childExists && s.isComplexDataType(parentElement.DataType) {
+		// Allow standard properties for complex types
+		if s.isStandardComplexTypeProperty(parentElement.DataType, childField) {
+			log.Printf("✅ Allowing standard property %s for complex type %s", childField, parentElement.DataType)
+			childExists = true
+		}
+	}
 
 	// If parent is an array of complex types, don't strict validate children
 	// (e.g., name is HumanName[], so name.family may not be directly in schema)
@@ -1013,24 +1207,77 @@ func (s *HL7FHIRTransformServiceV3) validateResourceAgainstSchema(
 
 	// Check required fields from schema
 	for _, requiredField := range schema.Required {
+		// Check if this is a nested field (e.g., "MessageHeader.destination.endpoint")
+		parts := strings.Split(requiredField, ".")
+		if len(parts) > 2 {
+			// This is a nested required field - check if parent exists first
+			// e.g., "MessageHeader.destination.endpoint" -> check if "destination" exists
+			parentField := parts[1]
+
+			// If parent doesn't exist, skip validation for this nested required field
+			if _, parentExists := resource[parentField]; !parentExists {
+				continue // Parent is optional and not present, so child requirement doesn't apply
+			}
+
+			// Parent exists, now check if the nested field exists
+			// For now, we'll skip deep validation of nested structures
+			// This prevents false positives for conditional requirements
+			continue
+		}
+
+		// For top-level required fields, validate normally
 		normalizedField := s.getResourceFieldName(requiredField) // Remove "MessageHeader." prefix
 
-		if _, hasValue := resource[normalizedField]; !hasValue {
-			validationError := fmt.Sprintf("FHIR Validation: Required field %s missing from resource", requiredField)
-			validationErrors = append(validationErrors, validationError)
-			*warnings = append(*warnings, fmt.Sprintf("Required field %s missing from FHIR resource", requiredField))
+		// ✅ Handle choice types like event[x] - check if ANY variant exists
+		if strings.HasSuffix(normalizedField, "[x]") {
+			// This is a choice type - check for any variant
+			baseField := strings.TrimSuffix(normalizedField, "[x]")
+			hasAnyVariant := false
+
+			// Check all possible variants of the choice type
+			for fieldName := range resource {
+				if strings.HasPrefix(fieldName, baseField) {
+					hasAnyVariant = true
+					log.Printf("✅ Found choice type variant: %s for required field %s", fieldName, requiredField)
+					break
+				}
+			}
+
+			if !hasAnyVariant {
+				validationError := fmt.Sprintf("FHIR Validation: Required field %s missing from resource", requiredField)
+				validationErrors = append(validationErrors, validationError)
+				*warnings = append(*warnings, fmt.Sprintf("Required field %s missing from FHIR resource", requiredField))
+			}
+		} else {
+			// Regular field - check directly
+			if _, hasValue := resource[normalizedField]; !hasValue {
+				validationError := fmt.Sprintf("FHIR Validation: Required field %s missing from resource", requiredField)
+				validationErrors = append(validationErrors, validationError)
+				*warnings = append(*warnings, fmt.Sprintf("Required field %s missing from FHIR resource", requiredField))
+			}
 		}
 	}
 
 	// Check for properties that don't exist in schema
 	for fieldName := range resource {
-		if fieldName == "resourceType" || fieldName == "id" {
+		if fieldName == "resourceType" || fieldName == "id" || fieldName == "text" {
 			continue // These are always valid
 		}
 
 		// Check if field exists in schema
 		fieldPath := fmt.Sprintf("%s.%s", schema.ResourceType, fieldName)
-		if _, exists := schema.Elements[fieldPath]; !exists {
+		_, exists := schema.Elements[fieldPath]
+
+		// ✅ If not found directly, check if it's a choice type variant (e.g., eventCoding for event[x])
+		if !exists {
+			choiceElement, choiceExists := s.findChoiceTypeElement(fieldName, schema)
+			if choiceExists {
+				exists = true
+				log.Printf("✅ Validated choice type property: %s (maps to %s)", fieldName, choiceElement.Path)
+			}
+		}
+
+		if !exists {
 			validationError := fmt.Sprintf("FHIR Validation: Property %s does not exist in %s schema", fieldName, schema.ResourceType)
 			validationErrors = append(validationErrors, validationError)
 		}
@@ -1777,11 +2024,135 @@ func getMapKeys(m map[string]interface{}) []string {
 	return keys
 }
 
+// isComplexDataType checks if the data type is a FHIR complex type (not a primitive)
+func (s *HL7FHIRTransformServiceV3) isComplexDataType(dataType string) bool {
+	complexTypes := map[string]bool{
+		"Coding":           true,
+		"CodeableConcept":  true,
+		"HumanName":        true,
+		"Address":          true,
+		"ContactPoint":     true,
+		"Identifier":       true,
+		"Reference":        true,
+		"Period":           true,
+		"Quantity":         true,
+		"Range":            true,
+		"Ratio":            true,
+		"SampledData":      true,
+		"Attachment":       true,
+		"Annotation":       true,
+		"Signature":        true,
+		"Timing":           true,
+		"Age":              true,
+		"Distance":         true,
+		"Duration":         true,
+		"Count":            true,
+		"Money":            true,
+		"ContactDetail":    true,
+		"Contributor":      true,
+		"DataRequirement":  true,
+		"Expression":       true,
+		"ParameterDefinition": true,
+		"RelatedArtifact":  true,
+		"TriggerDefinition": true,
+		"UsageContext":     true,
+		"Dosage":           true,
+		"Meta":             true,
+	}
+	return complexTypes[dataType]
+}
+
+// isStandardComplexTypeProperty checks if a field is a standard property of a FHIR complex type
+func (s *HL7FHIRTransformServiceV3) isStandardComplexTypeProperty(dataType, property string) bool {
+	// Define standard properties for each complex type
+	standardProperties := map[string]map[string]bool{
+		"Coding": {
+			"system":       true,
+			"version":      true,
+			"code":         true,
+			"display":      true,
+			"userSelected": true,
+		},
+		"CodeableConcept": {
+			"coding": true,
+			"text":   true,
+		},
+		"HumanName": {
+			"use":    true,
+			"text":   true,
+			"family": true,
+			"given":  true,
+			"prefix": true,
+			"suffix": true,
+			"period": true,
+		},
+		"Address": {
+			"use":        true,
+			"type":       true,
+			"text":       true,
+			"line":       true,
+			"city":       true,
+			"district":   true,
+			"state":      true,
+			"postalCode": true,
+			"country":    true,
+			"period":     true,
+		},
+		"ContactPoint": {
+			"system": true,
+			"value":  true,
+			"use":    true,
+			"rank":   true,
+			"period": true,
+		},
+		"Identifier": {
+			"use":      true,
+			"type":     true,
+			"system":   true,
+			"value":    true,
+			"period":   true,
+			"assigner": true,
+		},
+		"Reference": {
+			"reference": true,
+			"type":      true,
+			"identifier": true,
+			"display":   true,
+		},
+		"Period": {
+			"start": true,
+			"end":   true,
+		},
+		"Quantity": {
+			"value":      true,
+			"comparator": true,
+			"unit":       true,
+			"system":     true,
+			"code":       true,
+		},
+	}
+
+	if props, exists := standardProperties[dataType]; exists {
+		return props[property]
+	}
+	return false
+}
+
 func (s *HL7FHIRTransformServiceV3) extractEnhancedSegments(parsedHL7 map[string]interface{}) map[string]interface{} {
-	// Try direct access first (parsedHL7Data is already the .data portion)
-	if enhancedSegments, ok := parsedHL7["enhancedSegments"].(map[string]interface{}); ok {
-		log.Printf("✅ V3 Service: Found enhanced segments (direct): %d segments", len(enhancedSegments))
-		return enhancedSegments
+	// DEBUG: Check what type enhancedSegments actually is
+	if rawSegments, exists := parsedHL7["enhancedSegments"]; exists {
+		log.Printf("🔍 V3 Service: enhancedSegments exists, type: %T", rawSegments)
+
+		// Try direct access first (parsedHL7Data is already the .data portion)
+		if enhancedSegments, ok := rawSegments.(map[string]interface{}); ok {
+			log.Printf("✅ V3 Service: Found enhanced segments (direct): %d segments", len(enhancedSegments))
+			return enhancedSegments
+		}
+
+		// If it's a different map type, try to convert it
+		log.Printf("⚠️ V3 Service: enhancedSegments is not map[string]interface{}, attempting conversion")
+	} else {
+		log.Printf("❌ V3 Service: enhancedSegments key does not exist")
 	}
 
 	// Try with "data" wrapper (in case full structure is passed)

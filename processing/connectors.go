@@ -6,6 +6,7 @@ package processing
 import (
 	"context"
 	"fmt"
+	"time"
 )
 
 // InputConnector interface for receiving messages
@@ -40,12 +41,14 @@ type OutputConnector interface {
 
 // Message represents an incoming message
 type Message struct {
-	ID        string                 `json:"id"`
-	Content   string                 `json:"content"`
-	Type      string                 `json:"type"`
-	Source    string                 `json:"source"`
-	Timestamp string                 `json:"timestamp"`
-	Metadata  map[string]interface{} `json:"metadata"`
+	ID          string                 `json:"id"`
+	Content     string                 `json:"content"`
+	Type        string                 `json:"type"`
+	Source      string                 `json:"source"`
+	Timestamp   string                 `json:"timestamp"`
+	ReceivedAt  time.Time              `json:"received_at"`
+	Size        int                    `json:"size"`
+	Metadata    map[string]interface{} `json:"metadata"`
 }
 
 // ProcessedMessage represents a processed message ready for output
