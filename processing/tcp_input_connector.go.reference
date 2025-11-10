@@ -171,13 +171,15 @@ func (t *TCPInputConnector) handleConnection(conn net.Conn, messageChan chan<- M
 			}
 
 			// Create message
+			now := time.Now()
 			message := Message{
-				ID:        fmt.Sprintf("tcp_%d", time.Now().UnixNano()),
-				Content:   string(messageData),
-				Type:      "hl7",
-				Source:    "tcp",
-				Timestamp: time.Now().Format(time.RFC3339),
-				Metadata:  make(map[string]interface{}),
+				ID:         fmt.Sprintf("tcp_%d", now.UnixNano()),
+				Content:    string(messageData),
+				Type:       "hl7",
+				Source:     "tcp",
+				Timestamp:  now.Format(time.RFC3339),
+				ReceivedAt: now, // Set ReceivedAt time.Time for database storage
+				Metadata:   make(map[string]interface{}),
 			}
 
 			// Store additional metadata

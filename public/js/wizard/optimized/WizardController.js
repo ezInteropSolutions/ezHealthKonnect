@@ -71,11 +71,11 @@ class WizardController extends EventTarget {
         this.model.addEventListener('dataChange', (event) => {
             const { step, data, validation } = event.detail;
 
-            // IMPORTANT: Don't re-render Step 1 on every data change
-            // This prevents the input field from losing focus and triggering blur events
-            // Step 1 is just basic form fields - no need to re-render on every keystroke
-            if (step === 1) {
-                console.log('ℹ️ Step 1 data changed, updating validation only (not re-rendering)');
+            // IMPORTANT: Don't re-render Step 1 or Step 4 on every data change
+            // Step 1: Prevents input fields from losing focus on every keystroke
+            // Step 4: Preserves UI state (shown/hidden sections) when checkboxes/radios change
+            if (step === 1 || step === 4) {
+                console.log(`ℹ️ Step ${step} data changed, updating validation only (not re-rendering)`);
                 this.view.showValidation(validation);
                 return;
             }

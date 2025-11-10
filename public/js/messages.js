@@ -22,6 +22,9 @@ class MessageManager {
             // Check for URL parameters (interface filter)
             this.handleURLParameters();
 
+            // Set default date filter (last 1 day)
+            this.setDefaultDateFilter();
+
             console.log('🚨🚨🚨 About to call loadUserInfo()');
             await this.loadUserInfo();
             console.log('✅ loadUserInfo completed successfully');
@@ -104,7 +107,9 @@ class MessageManager {
         if (pageHeader && !document.getElementById('interfaceSelector')) {
             const selectorHTML = `
                 <div id="interfaceSelector" class="me-3">
-                    <label class="form-label text-muted">Current Interface:</label>
+                    <label class="form-label text-muted">
+                        <i class="fas fa-filter me-1"></i>Current Interface:
+                    </label>
                     <select class="form-select form-select-sm" id="currentInterfaceSelect" onchange="messageManager.switchInterface(this.value)">
                         <option value="">Loading interfaces...</option>
                     </select>
@@ -112,6 +117,37 @@ class MessageManager {
             `;
             pageHeader.insertAdjacentHTML('afterbegin', selectorHTML);
         }
+    }
+
+    setDefaultDateFilter() {
+        // Set date filter to last 1 day by default
+        const now = new Date();
+        const yesterday = new Date(now.getTime() - (24 * 60 * 60 * 1000)); // 1 day ago
+
+        // Format dates for datetime-local input (YYYY-MM-DDTHH:MM)
+        const formatDateTimeLocal = (date) => {
+            const year = date.getFullYear();
+            const month = String(date.getMonth() + 1).padStart(2, '0');
+            const day = String(date.getDate()).padStart(2, '0');
+            const hours = String(date.getHours()).padStart(2, '0');
+            const minutes = String(date.getMinutes()).padStart(2, '0');
+            return `${year}-${month}-${day}T${hours}:${minutes}`;
+        };
+
+        const dateFromInput = document.getElementById('filterDateFrom');
+        const dateToInput = document.getElementById('filterDateTo');
+
+        if (dateFromInput) {
+            dateFromInput.value = formatDateTimeLocal(yesterday);
+            this.filters.dateFrom = formatDateTimeLocal(yesterday);
+        }
+
+        if (dateToInput) {
+            dateToInput.value = formatDateTimeLocal(now);
+            this.filters.dateTo = formatDateTimeLocal(now);
+        }
+
+        console.log('✅ Default date filter set: Last 1 day');
     }
 
     async loadUserInfo() {
@@ -253,7 +289,9 @@ class MessageManager {
 
             const params = new URLSearchParams({
                 page: this.currentPage,
-                limit: this.pageSize
+                limit: this.pageSize,
+                sortBy: 'received_at',  // Sort by received_at by default
+                sortOrder: 'desc'       // Descending order (newest first)
             });
 
             // Add filters (excluding interfaceId since it's in the URL)
@@ -317,7 +355,7 @@ class MessageManager {
                     <small class="text-muted">${message.source_type}</small>
                 </td>
                 <td>
-                    ${message.processing_time_ms ? `${message.processing_time_ms}ms` : '-'}
+                    ${this.renderProcessingTime(message)}
                     ${message.error_count > 0 ? `<br><small class="text-danger">${message.error_count} errors</small>` : ''}
                 </td>
                 <td>
@@ -341,17 +379,129 @@ class MessageManager {
 
     renderStatusBadge(status) {
         const statusConfig = {
+            // Reception statuses
             'received': { class: 'bg-info', text: 'Received' },
+            'queued': { class: 'bg-secondary', text: 'Queued' },
+
+            // Processing statuses
             'processing': { class: 'bg-warning text-dark', text: 'Processing' },
+            'parsed': { class: 'bg-primary', text: 'Parsed' },
+            'parsing_failed': { class: 'bg-danger', text: 'Parsing Failed' },
             'transformed': { class: 'bg-primary', text: 'Transformed' },
+            'transformation_failed': { class: 'bg-danger', text: 'Transform Failed' },
+
+            // Delivery statuses
             'sent': { class: 'bg-success', text: 'Sent' },
+            'delivered': { class: 'bg-success', text: 'Delivered' },
+            'delivery_failed': { class: 'bg-danger', text: 'Delivery Failed' },
+
+            // Error statuses
             'failed': { class: 'bg-danger', text: 'Failed' },
             'error': { class: 'bg-danger', text: 'Error' },
-            'reprocessing': { class: 'bg-warning text-dark', text: 'Reprocessing' }
+
+            // Retry statuses
+            'reprocessing': { class: 'bg-warning text-dark', text: 'Reprocessing' },
+            'retry': { class: 'bg-warning text-dark', text: 'Retry' }
         };
 
         const config = statusConfig[status] || { class: 'bg-secondary', text: status };
         return `<span class="badge ${config.class} status-badge">${config.text}</span>`;
+    }
+
+    renderProcessingTime(message) {
+        // 1. If processing_time_ms is explicitly set, use it
+        if (message.processing_time_ms != null && message.processing_time_ms > 0) {
+            return `${message.processing_time_ms}ms`;
+        }
+
+        // 2. If processing is completed, calculate from timestamps
+        if (message.processing_completed_at && message.received_at) {
+            try {
+                const receivedAt = new Date(message.received_at);
+                const completedAt = new Date(message.processing_completed_at);
+                const diffMs = completedAt - receivedAt;
+
+                if (diffMs >= 0) {
+                    return `${Math.round(diffMs)}ms`;
+                }
+            } catch (e) {
+                console.error('Error calculating processing time:', e);
+            }
+        }
+
+        // 3. If still processing or queued, show status indicator
+        const inProgressStatuses = ['processing', 'queued', 'reprocessing'];
+        if (inProgressStatuses.includes(message.status)) {
+            return '<span class="text-muted"><i class="fas fa-spinner fa-pulse"></i> Processing...</span>';
+        }
+
+        // 4. If just received, show pending
+        if (message.status === 'received') {
+            return '<span class="text-muted">Pending</span>';
+        }
+
+        // 5. If parsed but no processing time, it was instant
+        if (message.status === 'parsed' || message.status === 'transformed') {
+            return '<span class="text-success">< 1ms</span>';
+        }
+
+        // 6. Default: no time available
+        return '<span class="text-muted">-</span>';
+    }
+
+    calculateProcessingTimeForDetail(message) {
+        // 1. If processing_time_ms is explicitly set, use it
+        if (message.processing_time_ms != null && message.processing_time_ms > 0) {
+            return `${message.processing_time_ms}ms`;
+        }
+
+        // 2. If parsing_time_ms is set, use that
+        if (message.parsing_time_ms != null && message.parsing_time_ms > 0) {
+            return `${message.parsing_time_ms}ms (parsing)`;
+        }
+
+        // 3. If processing is completed, calculate from timestamps
+        if (message.processing_completed_at && message.received_at) {
+            try {
+                const receivedAt = new Date(message.received_at);
+                const completedAt = new Date(message.processing_completed_at);
+                const diffMs = completedAt - receivedAt;
+
+                if (diffMs >= 0) {
+                    return `${Math.round(diffMs)}ms (calculated)`;
+                }
+            } catch (e) {
+                console.error('Error calculating processing time:', e);
+            }
+        }
+
+        // 4. If parsed_at exists, calculate from received to parsed
+        if (message.parsed_at && message.received_at) {
+            try {
+                const receivedAt = new Date(message.received_at);
+                const parsedAt = new Date(message.parsed_at);
+                const diffMs = parsedAt - receivedAt;
+
+                if (diffMs >= 0) {
+                    return `${Math.round(diffMs)}ms (parsing)`;
+                }
+            } catch (e) {
+                console.error('Error calculating parsing time:', e);
+            }
+        }
+
+        // 5. If message was delivered, show approximate time
+        if (message.status === 'delivered' || message.delivery_status === 'delivered') {
+            return '< 1000ms (estimated)';
+        }
+
+        // 6. If parsed/transformed, show instant
+        if (message.status === 'parsed' || message.status === 'transformed') {
+            return '< 1ms';
+        }
+
+        // 7. Default
+        return 'N/A';
     }
 
     renderPagination(pagination) {
@@ -508,6 +658,13 @@ class MessageManager {
                 document.getElementById('reprocessBtn').style.display =
                     ['failed', 'error'].includes(message.status) ? 'inline-block' : 'none';
                 document.getElementById('deleteBtn').style.display = 'inline-block';
+
+                // Show/hide errors tab based on error_count (V23 - Error Handling Enhancement)
+                const errorsTabBtn = document.getElementById('errorsTabBtn');
+                if (errorsTabBtn) {
+                    errorsTabBtn.style.display =
+                        (message.error_count && message.error_count > 0) ? 'inline-block' : 'none';
+                }
             } else {
                 this.showError('Failed to load message details');
             }
@@ -520,23 +677,31 @@ class MessageManager {
     async loadDataLineage(messageId) {
         try {
             const message = this.messageData.message;
+            const container = document.getElementById('messageLineageView');
 
-            // Get lineage data
+            container.innerHTML = '<div class="text-center"><i class="fas fa-spinner fa-spin"></i> Loading data lineage...</div>';
+
+            // Get lineage data from backend
             const lineageResponse = await fetch(`/api/messages/${messageId}/lineage`);
-            let lineageData = null;
 
-            if (lineageResponse.ok) {
-                lineageData = await lineageResponse.json();
-            } else {
-                // Create lineage data from available information
-                lineageData = await this.constructLineageData(message);
+            if (!lineageResponse.ok) {
+                throw new Error('Failed to fetch lineage data');
             }
 
-            this.renderDataLineage(lineageData);
+            const lineageData = await lineageResponse.json();
+
+            if (!lineageData.success) {
+                throw new Error(lineageData.error || 'Failed to load lineage');
+            }
+
+            this.renderDataLineage(lineageData.data);
         } catch (error) {
             console.error('Failed to load data lineage:', error);
             document.getElementById('messageLineageView').innerHTML =
-                '<div class="alert alert-warning">Unable to load data lineage information.</div>';
+                `<div class="alert alert-warning">
+                    <h6>⚠️ Unable to load data lineage</h6>
+                    <p>${error.message}</p>
+                </div>`;
         }
     }
 
@@ -570,232 +735,428 @@ class MessageManager {
         }
     }
 
-    renderDataLineage(lineageData) {
+    renderDataLineage(lineage) {
         const container = document.getElementById('messageLineageView');
-        const { sourceMessage, relatedMessages, interfaces, correlationId } = lineageData;
 
-        // Find source interface
-        const sourceInterface = interfaces.find(i => i.id === sourceMessage.interface_id);
-
-        // Find target interfaces based on routing configuration
-        let targetInterfaces = [];
-        if (sourceInterface?.processing_rules) {
-            const rules = JSON.parse(sourceInterface.processing_rules);
-            if (rules.targetFhirInterface) {
-                const targetInterface = interfaces.find(i => i.id === rules.targetFhirInterface);
-                if (targetInterface) targetInterfaces.push(targetInterface);
-            }
+        // Check if we have the new lineage structure with input/transformation/output/target
+        if (!lineage.input) {
+            container.innerHTML = '<div class="alert alert-info">No lineage data available</div>';
+            return;
         }
 
-        // Check if messages reached target interfaces
-        const reachedTargets = relatedMessages.filter(msg =>
-            targetInterfaces.some(target => target.id === msg.interface_id)
-        );
+        // Store lineage data for copy functionality
+        this.currentLineageData = lineage;
+
+        const { input, transformation, output, target, flowStatus } = lineage;
 
         container.innerHTML = `
-            <div class="lineage-container">
-                <h5>🔍 Message Flow Analysis</h5>
-                <p><strong>Correlation ID:</strong> <code>${correlationId}</code></p>
-
-                <div class="lineage-flow">
-                    <div class="lineage-interface source">
-                        <h6>📥 Source Interface</h6>
-                        <div><strong>${sourceInterface?.name || 'Unknown'}</strong></div>
-                        <div class="text-muted">${sourceInterface?.source_type || 'Unknown'} → ${sourceInterface?.target_type || 'Unknown'}</div>
-                        <div class="mt-2">
-                            <span class="badge bg-success">Message Received</span><br>
-                            <small>${this.formatDateTime(sourceMessage.received_at)}</small>
+            <div class="lineage-container" style="max-width: 1400px; margin: 0 auto;">
+                <!-- Header -->
+                <div style="background: linear-gradient(to right, white 0%, #fdf2f8 100%); padding: 1.5rem; border-radius: 8px; margin-bottom: 1.5rem; border-left: 4px solid #ec4899; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
+                    <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem;">
+                        <div>
+                            <h5 style="color: #1e3a8a; margin: 0; font-weight: 600; font-size: 1.25rem;">
+                                Message Journey
+                            </h5>
+                            <p style="color: #64748b; margin: 0.25rem 0 0 0; font-size: 0.9rem;">
+                                <code style="background: #fce7f3; padding: 0.25rem 0.5rem; border-radius: 4px; color: #ec4899; font-size: 0.85rem;">${lineage.correlationId}</code>
+                            </p>
+                        </div>
+                        <div style="display: flex; gap: 0.75rem;">
+                            <div style="display: flex; align-items: center; gap: 0.5rem; padding: 0.5rem 1rem; background: ${flowStatus.inputReceived ? '#fce7f3' : '#fef2f2'}; border-radius: 6px; border: 1px solid ${flowStatus.inputReceived ? '#fbcfe8' : '#fecaca'};">
+                                <div style="width: 8px; height: 8px; border-radius: 50%; background: ${flowStatus.inputReceived ? '#ec4899' : '#ef4444'};"></div>
+                                <span style="font-size: 0.85rem; color: #64748b; font-weight: 500;">Received</span>
+                            </div>
+                            <div style="display: flex; align-items: center; gap: 0.5rem; padding: 0.5rem 1rem; background: ${flowStatus.transformed ? '#fce7f3' : '#fef2f2'}; border-radius: 6px; border: 1px solid ${flowStatus.transformed ? '#fbcfe8' : '#fecaca'};">
+                                <div style="width: 8px; height: 8px; border-radius: 50%; background: ${flowStatus.transformed ? '#ec4899' : '#ef4444'};"></div>
+                                <span style="font-size: 0.85rem; color: #64748b; font-weight: 500;">Transformed</span>
+                            </div>
+                            <div style="display: flex; align-items: center; gap: 0.5rem; padding: 0.5rem 1rem; background: ${flowStatus.delivered ? '#fce7f3' : '#fef2f2'}; border-radius: 6px; border: 1px solid ${flowStatus.delivered ? '#fbcfe8' : '#fecaca'};">
+                                <div style="width: 8px; height: 8px; border-radius: 50%; background: ${flowStatus.delivered ? '#ec4899' : '#ef4444'};"></div>
+                                <span style="font-size: 0.85rem; color: #64748b; font-weight: 500;">Delivered</span>
+                            </div>
                         </div>
                     </div>
+                </div>
 
-                    <div class="lineage-arrow ${sourceMessage.status === 'sent' ? 'success' : 'error'}">
-                        ${sourceMessage.status === 'sent' ? '✅ →' : '❌ →'}
+                <!-- Step 1: Input Message -->
+                <div style="background: white; border-radius: 8px; padding: 1.5rem; margin-bottom: 1.5rem; box-shadow: 0 1px 3px rgba(0,0,0,0.05); border-left: 4px solid #1e3a8a;">
+                    <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1.5rem;">
+                        <div style="width: 40px; height: 40px; background: #eff6ff; border-radius: 8px; display: flex; align-items: center; justify-content: center;">
+                            <svg style="width: 20px; height: 20px; color: #1e3a8a;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/>
+                            </svg>
+                        </div>
+                        <div style="flex: 1;">
+                            <h6 style="color: #1e3a8a; margin: 0; font-weight: 600;">1. Message Received</h6>
+                            <p style="color: #64748b; margin: 0; font-size: 0.85rem;">${this.formatDateTime(input.receivedAt)}</p>
+                        </div>
+                        <div style="background: #fce7f3; color: #ec4899; padding: 0.5rem 1rem; border-radius: 6px; font-size: 0.85rem; font-weight: 500;">
+                            ${input.messageType}
+                        </div>
                     </div>
+                    <div class="row g-3">
+                        <div class="col-md-4">
+                            <div style="background: #f8fafc; padding: 1rem; border-radius: 6px; height: 100%;">
+                                <table class="table table-sm table-borderless mb-0" style="font-size: 0.9rem;">
+                                    <tr><th style="width: 45%; color: #64748b; font-weight: 500;">Interface:</th><td style="color: #1e293b;"><strong>${input.interfaceName}</strong></td></tr>
+                                    <tr><th style="color: #64748b; font-weight: 500;">Message ID:</th><td style="color: #1e293b; font-family: monospace; font-size: 0.8rem;">${input.messageId}</td></tr>
+                                    <tr><th style="color: #64748b; font-weight: 500;">Source:</th><td style="color: #1e293b;">${input.sourceType}</td></tr>
+                                    <tr><th style="color: #64748b; font-weight: 500;">Size:</th><td style="color: #1e293b;">${this.formatBytes(input.messageSize)}</td></tr>
+                                    <tr><th style="color: #64748b; font-weight: 500;">Status:</th><td>${this.renderStatusBadge(input.status)}</td></tr>
+                                </table>
+                            </div>
+                        </div>
+                        <div class="col-md-8">
+                            <div style="background: #f8fafc; padding: 1rem; border-radius: 6px; height: 100%; position: relative;">
+                                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem;">
+                                    <div style="color: #64748b; font-size: 0.85rem; font-weight: 500;">Raw HL7 Message</div>
+                                    ${input.rawContent ? `<button onclick="messageManager.copyRawMessage()"
+                                            style="background: #ec4899; color: white; border: none; padding: 0.35rem 0.65rem; border-radius: 4px; cursor: pointer; font-size: 0.8rem; display: flex; align-items: center; gap: 0.35rem;"
+                                            title="Copy raw message">
+                                        <svg style="width: 13px; height: 13px;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/>
+                                        </svg>
+                                        Copy
+                                    </button>` : ''}
+                                </div>
+                                ${input.rawContent ? this.formatMessageContent(input.rawContent) : '<div style="padding: 2rem; text-align: center; color: #cbd5e1;"><svg style="width: 48px; height: 48px; margin-bottom: 0.5rem;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg><p style="margin: 0;">No content available</p></div>'}
+                            </div>
+                        </div>
+                    </div>
+                </div>
 
-                    ${targetInterfaces.length > 0 ? targetInterfaces.map(target => {
-                        const reachedTarget = reachedTargets.find(msg => msg.interface_id === target.id);
-                        return `
-                            <div class="lineage-interface ${reachedTarget ? 'target' : 'missing'}">
-                                <h6>📤 Target Interface</h6>
-                                <div><strong>${target.name}</strong></div>
-                                <div class="text-muted">${target.source_type} → ${target.target_type}</div>
-                                <div class="mt-2">
-                                    ${reachedTarget ?
-                                        `<span class="badge bg-success">Message Received</span><br>
-                                         <small>${this.formatDateTime(reachedTarget.received_at)}</small>` :
-                                        `<span class="badge bg-danger">Message Missing</span><br>
-                                         <small>No message found</small>`
-                                    }
+                <!-- Step 2: Transformation -->
+                ${transformation ? `
+                <div style="background: white; border-radius: 8px; padding: 1.5rem; margin-bottom: 1.5rem; box-shadow: 0 1px 3px rgba(0,0,0,0.05); border-left: 4px solid #fce7f3;">
+                    <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1.5rem;">
+                        <div style="width: 40px; height: 40px; background: #fce7f3; border-radius: 8px; display: flex; align-items: center; justify-content: center;">
+                            <svg style="width: 20px; height: 20px; color: #ec4899;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+                            </svg>
+                        </div>
+                        <div style="flex: 1;">
+                            <h6 style="color: #1e3a8a; margin: 0; font-weight: 600;">2. HL7 → FHIR Transformation</h6>
+                            <p style="color: #64748b; margin: 0; font-size: 0.85rem;">${transformation.parsedAt ? this.formatDateTime(transformation.parsedAt) : 'N/A'}</p>
+                        </div>
+                        <div style="background: #eff6ff; color: #1e3a8a; padding: 0.5rem 1rem; border-radius: 6px; font-size: 0.85rem; font-weight: 500;">
+                            ${transformation.parsingTimeMs || 0}ms
+                        </div>
+                    </div>
+                    <div class="row g-3">
+                        <div class="col-md-4">
+                            <div style="background: #f8fafc; padding: 1rem; border-radius: 6px;">
+                                <table class="table table-sm table-borderless mb-0" style="font-size: 0.9rem;">
+                                    <tr><th style="width: 45%; color: #64748b; font-weight: 500;">Status:</th><td><span class="badge bg-success">Success</span></td></tr>
+                                    <tr><th style="color: #64748b; font-weight: 500;">Parse Time:</th><td style="color: #1e293b;"><strong>${transformation.parsingTimeMs || 0}ms</strong></td></tr>
+                                    <tr><th style="color: #64748b; font-weight: 500;">Format:</th><td style="color: #1e293b;">HL7 v2 → FHIR R4</td></tr>
+                                </table>
+                            </div>
+                        </div>
+                        <div class="col-md-8">
+                            <div style="background: #f8fafc; padding: 1rem; border-radius: 6px;">
+                                <div style="color: #64748b; font-size: 0.85rem; font-weight: 500; margin-bottom: 0.75rem;">Transformation Output</div>
+                                <div style="padding: 1rem; background: white; border-radius: 4px; border: 1px solid #e2e8f0;">
+                                    <div style="display: flex; align-items: center; gap: 0.5rem; color: #64748b; font-size: 0.9rem;">
+                                        <svg style="width: 16px; height: 16px;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                                        </svg>
+                                        <span>Parsed HL7 structure and converted to FHIR Bundle</span>
+                                    </div>
                                 </div>
                             </div>
-                        `;
-                    }).join('') : `
-                        <div class="lineage-interface missing">
-                            <h6>⚠️ Direct Routing</h6>
-                            <div><strong>External Endpoint</strong></div>
-                            <div class="text-muted">Direct HTTP/TCP connection</div>
-                            <div class="mt-2">
-                                <span class="badge bg-warning">Bypassed Interface</span><br>
-                                <small>No tracking available</small>
+                        </div>
+                    </div>
+                </div>
+                ` : '<div style="background: white; border-radius: 8px; padding: 2rem; text-align: center; color: #cbd5e1; box-shadow: 0 1px 3px rgba(0,0,0,0.05);"><svg style="width: 48px; height: 48px; margin-bottom: 0.5rem;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"/></svg><p style="margin: 0;">No transformation data</p></div>'}
+
+                <!-- Step 3: Output & Delivery -->
+                ${output ? `
+                <div style="background: white; border-radius: 8px; padding: 1.5rem; margin-bottom: 1.5rem; box-shadow: 0 1px 3px rgba(0,0,0,0.05); border-left: 4px solid #1e3a8a;">
+                    <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1.5rem;">
+                        <div style="width: 40px; height: 40px; background: #eff6ff; border-radius: 8px; display: flex; align-items: center; justify-content: center;">
+                            <svg style="width: 20px; height: 20px; color: #1e3a8a;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"/>
+                            </svg>
+                        </div>
+                        <div style="flex: 1;">
+                            <h6 style="color: #1e3a8a; margin: 0; font-weight: 600;">3. Sent to Destination</h6>
+                            <p style="color: #64748b; margin: 0; font-size: 0.85rem;">${output.deliveryCompletedAt ? this.formatDateTime(output.deliveryCompletedAt) : 'In progress'}</p>
+                        </div>
+                        <div style="display: flex; gap: 0.5rem;">
+                            <div style="background: ${output.deliveryStatus === 'delivered' ? '#f0fdf4' : '#fef2f2'}; color: ${output.deliveryStatus === 'delivered' ? '#166534' : '#991b1b'}; padding: 0.5rem 1rem; border-radius: 6px; font-size: 0.85rem; font-weight: 500;">
+                                ${output.deliveryStatus}
+                            </div>
+                            <div style="background: #eff6ff; color: #1e3a8a; padding: 0.5rem 1rem; border-radius: 6px; font-size: 0.85rem; font-weight: 500;">
+                                ${output.deliveryTimeMs || 0}ms
                             </div>
                         </div>
-                    `}
+                    </div>
+                    <div class="row g-3">
+                        <div class="col-md-4">
+                            <div style="background: #f8fafc; padding: 1rem; border-radius: 6px;">
+                                <table class="table table-sm table-borderless mb-0" style="font-size: 0.9rem;">
+                                    <tr><th style="width: 50%; color: #64748b; font-weight: 500;">HTTP Status:</th><td style="color: #1e293b;"><span class="badge" style="background: #dcfce7; color: #166534;">${output.deliveryStatusCode || 'N/A'}</span></td></tr>
+                                    <tr><th style="color: #64748b; font-weight: 500;">Transform Time:</th><td style="color: #1e293b;">${output.transformationTimeMs || 0}ms</td></tr>
+                                    <tr><th style="color: #64748b; font-weight: 500;">Delivery Time:</th><td style="color: #1e293b;">${output.deliveryTimeMs || 0}ms</td></tr>
+                                    <tr><th style="color: #64748b; font-weight: 500;">Retry Count:</th><td style="color: #1e293b;">${output.retryCount || 0}</td></tr>
+                                </table>
+                            </div>
+                        </div>
+                        <div class="col-md-8">
+                            <div style="background: #f8fafc; padding: 1rem; border-radius: 6px; height: 100%;">
+                                <div style="color: #64748b; font-size: 0.85rem; font-weight: 500; margin-bottom: 0.75rem;">FHIR Bundle Sent</div>
+                                ${output.transformedMessage ? (
+                                    // Check if it's MongoDB metadata or actual FHIR content
+                                    (typeof output.transformedMessage === 'object' && output.transformedMessage.mongo_reference) ?
+                                    `<div style="padding: 1.5rem; background: white; border-radius: 6px; border: 1px solid #e2e8f0;">
+                                        <div style="display: flex; align-items: start; gap: 1rem;">
+                                            <div style="width: 40px; height: 40px; background: white; border-radius: 8px; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
+                                                <svg style="width: 20px; height: 20px; color: #ec4899;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 19a2 2 0 01-2-2V7a2 2 0 012-2h4l2 2h4a2 2 0 012 2v1M5 19h14a2 2 0 002-2v-5a2 2 0 00-2-2H9a2 2 0 00-2 2v5a2 2 0 01-2 2z"/>
+                                                </svg>
+                                            </div>
+                                            <div style="flex: 1;">
+                                                <div style="color: #1e3a8a; font-weight: 600; margin-bottom: 0.5rem;">✓ FHIR Bundle Stored</div>
+                                                <div style="color: #64748b; font-size: 0.9rem; margin-bottom: 0.75rem;">Full FHIR R4 Bundle successfully stored in MongoDB for scalability</div>
+                                                <div style="background: white; padding: 0.75rem; border-radius: 4px; font-family: monospace; font-size: 0.8rem; color: #ec4899; word-break: break-all;">
+                                                    ${output.transformedMessage.mongo_reference}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>` :
+                                    this.renderFHIRBundle(output.transformedMessage)
+                                ) : '<div style="padding: 2rem; text-align: center; color: #cbd5e1;"><svg style="width: 48px; height: 48px; margin-bottom: 0.5rem;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z"/></svg><p style="margin: 0;">No FHIR content available</p></div>'}
+                            </div>
+                        </div>
+                    </div>
                 </div>
+                ` : '<div style="background: white; border-radius: 8px; padding: 2rem; text-align: center; color: #cbd5e1; box-shadow: 0 1px 3px rgba(0,0,0,0.05);"><svg style="width: 48px; height: 48px; margin-bottom: 0.5rem;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4"/></svg><p style="margin: 0;">No output data</p></div>'}
 
-                <h6 class="mt-4">📋 Message Timeline</h6>
-                <table class="lineage-table">
-                    <thead>
-                        <tr>
-                            <th>Timestamp</th>
-                            <th>Interface</th>
-                            <th>Event</th>
-                            <th>Status</th>
-                            <th>Details</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <tr>
-                            <td>${this.formatDateTime(sourceMessage.received_at)}</td>
-                            <td>${sourceInterface?.name || 'Unknown'}</td>
-                            <td>Message Received</td>
-                            <td><span class="badge bg-info">received</span></td>
-                            <td>Type: ${sourceMessage.message_type}, Size: ${this.formatBytes(sourceMessage.message_size)}</td>
-                        </tr>
-                        ${sourceMessage.processing_completed_at ? `
-                        <tr>
-                            <td>${this.formatDateTime(sourceMessage.processing_completed_at)}</td>
-                            <td>${sourceInterface?.name || 'Unknown'}</td>
-                            <td>Processing Completed</td>
-                            <td><span class="badge bg-${sourceMessage.status === 'sent' ? 'success' : 'danger'}">${sourceMessage.status}</span></td>
-                            <td>Processing time: ${sourceMessage.processing_time_ms || 0}ms</td>
-                        </tr>
+                <!-- Step 4: Target Response -->
+                ${target ? `
+                <div style="background: white; border-radius: 8px; padding: 1.5rem; margin-bottom: 1.5rem; box-shadow: 0 1px 3px rgba(0,0,0,0.05); border-left: 4px solid #fce7f3;">
+                    <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1.5rem;">
+                        <div style="width: 40px; height: 40px; background: #fce7f3; border-radius: 8px; display: flex; align-items: center; justify-content: center;">
+                            <svg style="width: 20px; height: 20px; color: #ec4899;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                            </svg>
+                        </div>
+                        <div style="flex: 1;">
+                            <h6 style="color: #1e3a8a; margin: 0; font-weight: 600;">4. Response from ${target.interfaceName}</h6>
+                            <p style="color: #64748b; margin: 0; font-size: 0.85rem;">${this.formatDateTime(target.receivedAt)}</p>
+                        </div>
+                        <div style="background: #f0fdf4; color: #166534; padding: 0.5rem 1rem; border-radius: 6px; font-size: 0.85rem; font-weight: 500;">
+                            Acknowledged
+                        </div>
+                    </div>
+                    <div style="background: #f8fafc; padding: 1rem; border-radius: 6px;">
+                        <table class="table table-sm table-borderless mb-0" style="font-size: 0.9rem;">
+                            <tr><th style="width: 30%; color: #64748b; font-weight: 500;">Target:</th><td style="color: #1e293b;"><strong>${target.interfaceName}</strong></td></tr>
+                            <tr><th style="color: #64748b; font-weight: 500;">Message ID:</th><td style="color: #1e293b; font-family: monospace; font-size: 0.8rem;">${target.messageId}</td></tr>
+                            <tr><th style="color: #64748b; font-weight: 500;">Status:</th><td>${this.renderStatusBadge(target.status)}</td></tr>
+                            <tr><th style="color: #64748b; font-weight: 500;">Size:</th><td style="color: #1e293b;">${this.formatBytes(target.messageSize)}</td></tr>
+                        </table>
+                    </div>
+                </div>
+                ` : '<div style="background: white; border-radius: 8px; padding: 2rem; text-align: center; color: #cbd5e1; box-shadow: 0 1px 3px rgba(0,0,0,0.05);"><svg style="width: 48px; height: 48px; margin-bottom: 0.5rem;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg><p style="margin: 0;">Awaiting target acknowledgment</p></div>'}
+
+                <!-- Complete Timeline -->
+                <div style="background: white; border-radius: 8px; padding: 1.5rem; margin-top: 2rem; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
+                    <h6 style="color: #1e3a8a; margin-bottom: 1.5rem; font-weight: 600;">
+                        <svg style="width: 20px; height: 20px; display: inline-block; margin-right: 0.5rem;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                        </svg>
+                        Complete Timeline
+                    </h6>
+                    <div style="position: relative; padding-left: 2rem;">
+                        <!-- Timeline line -->
+                        <div style="position: absolute; left: 19px; top: 0; bottom: 0; width: 2px; background: #e2e8f0;"></div>
+
+                        <!-- Timeline item: Received -->
+                        <div style="position: relative; padding-bottom: 2rem;">
+                            <div style="position: absolute; left: -2rem; width: 40px; height: 40px; background: #eff6ff; border: 3px solid #1e3a8a; border-radius: 50%; display: flex; align-items: center; justify-content: center;">
+                                <div style="width: 12px; height: 12px; background: #1e3a8a; border-radius: 50%;"></div>
+                            </div>
+                            <div style="background: #f8fafc; padding: 1rem; border-radius: 6px; margin-left: 1.5rem;">
+                                <div style="display: flex; justify-content: between; align-items: center; margin-bottom: 0.5rem;">
+                                    <strong style="color: #1e293b;">Message Received</strong>
+                                    <span style="color: #64748b; font-size: 0.85rem; margin-left: auto;">${this.formatDateTime(input.receivedAt)}</span>
+                                </div>
+                                <div style="color: #64748b; font-size: 0.9rem;">Received at ${input.interfaceName} interface</div>
+                            </div>
+                        </div>
+
+                        ${transformation ? `
+                        <!-- Timeline item: Transformed -->
+                        <div style="position: relative; padding-bottom: 2rem;">
+                            <div style="position: absolute; left: -2rem; width: 40px; height: 40px; background: #fce7f3; border: 3px solid #ec4899; border-radius: 50%; display: flex; align-items: center; justify-content: center;">
+                                <div style="width: 12px; height: 12px; background: #ec4899; border-radius: 50%;"></div>
+                            </div>
+                            <div style="background: #f8fafc; padding: 1rem; border-radius: 6px; margin-left: 1.5rem;">
+                                <div style="display: flex; justify-content: between; align-items: center; margin-bottom: 0.5rem;">
+                                    <strong style="color: #1e293b;">HL7 → FHIR Transformation</strong>
+                                    <span style="color: #64748b; font-size: 0.85rem; margin-left: auto;">${transformation.parsedAt ? this.formatDateTime(transformation.parsedAt) : 'N/A'}</span>
+                                </div>
+                                <div style="color: #64748b; font-size: 0.9rem;">Completed in ${transformation.parsingTimeMs || 0}ms</div>
+                            </div>
+                        </div>
                         ` : ''}
-                        ${reachedTargets.map(target => `
-                        <tr>
-                            <td>${this.formatDateTime(target.received_at)}</td>
-                            <td>${interfaces.find(i => i.id === target.interface_id)?.name || 'Unknown'}</td>
-                            <td>Message Delivered</td>
-                            <td><span class="badge bg-success">received</span></td>
-                            <td>Correlation maintained</td>
-                        </tr>
-                        `).join('')}
-                    </tbody>
-                </table>
 
-                ${targetInterfaces.length === 0 || reachedTargets.length === 0 ? `
-                <div class="alert alert-warning mt-3">
-                    <h6>⚠️ Lineage Gap Detected</h6>
-                    <p>This message was processed but may not have reached its intended target interface:</p>
-                    <ul>
-                        <li>Source interface shows status: <strong>${sourceMessage.status}</strong></li>
-                        <li>Delivery status: <strong>${sourceMessage.delivery_status || 'unknown'}</strong></li>
-                        ${sourceMessage.last_error_message ? `<li>Last error: <code>${sourceMessage.last_error_message}</code></li>` : ''}
-                        <li>Recommendation: Check interface routing configuration</li>
-                    </ul>
+                        ${output ? `
+                        <!-- Timeline item: Delivered -->
+                        <div style="position: relative; padding-bottom: 2rem;">
+                            <div style="position: absolute; left: -2rem; width: 40px; height: 40px; background: #eff6ff; border: 3px solid #1e3a8a; border-radius: 50%; display: flex; align-items: center; justify-content: center;">
+                                <div style="width: 12px; height: 12px; background: #1e3a8a; border-radius: 50%;"></div>
+                            </div>
+                            <div style="background: #f8fafc; padding: 1rem; border-radius: 6px; margin-left: 1.5rem;">
+                                <div style="display: flex; justify-content: between; align-items: center; margin-bottom: 0.5rem;">
+                                    <strong style="color: #1e293b;">Sent to Destination</strong>
+                                    <span style="color: #64748b; font-size: 0.85rem; margin-left: auto;">${output.deliveryCompletedAt ? this.formatDateTime(output.deliveryCompletedAt) : 'In progress'}</span>
+                                </div>
+                                <div style="color: #64748b; font-size: 0.9rem;">HTTP ${output.deliveryStatusCode || 'N/A'} - Delivered in ${output.deliveryTimeMs || 0}ms</div>
+                            </div>
+                        </div>
+                        ` : ''}
+
+                        ${target ? `
+                        <!-- Timeline item: Acknowledged -->
+                        <div style="position: relative;">
+                            <div style="position: absolute; left: -2rem; width: 40px; height: 40px; background: #fce7f3; border: 3px solid #ec4899; border-radius: 50%; display: flex; align-items: center; justify-content: center;">
+                                <svg style="width: 16px; height: 16px; color: #ec4899;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"/>
+                                </svg>
+                            </div>
+                            <div style="background: #f8fafc; padding: 1rem; border-radius: 6px; margin-left: 1.5rem;">
+                                <div style="display: flex; justify-content: between; align-items: center; margin-bottom: 0.5rem;">
+                                    <strong style="color: #1e293b;">Target Acknowledged</strong>
+                                    <span style="color: #64748b; font-size: 0.85rem; margin-left: auto;">${this.formatDateTime(target.receivedAt)}</span>
+                                </div>
+                                <div style="color: #64748b; font-size: 0.9rem;">Received at ${target.interfaceName}</div>
+                            </div>
+                        </div>
+                        ` : ''}
+                    </div>
                 </div>
-                ` : ''}
             </div>
         `;
     }
 
-    async loadMessageContent(messageId) {
-        try {
-            const container = document.getElementById('messageContentView');
-            const message = this.messageData.message;
-            const content = this.messageData.content;
-
-            container.innerHTML = `
-                <div class="content-container">
-                    <div class="row">
-                        <div class="col-md-6">
-                            <h6>📄 Raw Message Content</h6>
-                            <div class="card">
-                                <div class="card-body">
-                                    <pre class="bg-light p-3" style="max-height: 400px; overflow-y: auto;"><code>${this.escapeHtml(content?.raw_message || 'No content available')}</code></pre>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="col-md-6">
-                            <h6>🔍 Message Properties</h6>
-                            <table class="table table-sm">
-                                <tr><th>Encoding:</th><td>${message.message_encoding || 'Unknown'}</td></tr>
-                                <tr><th>Size:</th><td>${this.formatBytes(message.message_size)}</td></tr>
-                                <tr><th>Type:</th><td>${message.message_type || 'Unknown'}</td></tr>
-                                <tr><th>Source IP:</th><td>${message.source_ip || 'N/A'}</td></tr>
-                                <tr><th>Source Endpoint:</th><td>${message.source_endpoint || 'N/A'}</td></tr>
-                            </table>
-
-                            ${content?.parsed_content ? `
-                            <h6 class="mt-3">📋 Parsed Fields</h6>
-                            <div class="card">
-                                <div class="card-body">
-                                    <pre class="bg-light p-3" style="max-height: 300px; overflow-y: auto;"><code>${this.escapeHtml(JSON.stringify(content.parsed_content, null, 2))}</code></pre>
-                                </div>
-                            </div>
-                            ` : ''}
-                        </div>
-                    </div>
-                </div>
-            `;
-        } catch (error) {
-            console.error('Failed to load message content:', error);
-            document.getElementById('messageContentView').innerHTML =
-                '<div class="alert alert-warning">Unable to load message content.</div>';
-        }
-    }
 
     async loadTransformations(messageId) {
         try {
             const container = document.getElementById('messageTransformationsView');
-            const transformations = this.messageData.transformations || [];
 
-            if (transformations.length === 0) {
+            container.innerHTML = '<div class="text-center"><i class="fas fa-spinner fa-spin"></i> Loading transformation pipeline...</div>';
+
+            // Get lineage data from backend which includes transformation steps
+            const lineageResponse = await fetch(`/api/messages/${messageId}/lineage`);
+
+            if (!lineageResponse.ok) {
+                throw new Error('Failed to fetch lineage data');
+            }
+
+            const lineageData = await lineageResponse.json();
+
+            if (!lineageData.success) {
+                throw new Error(lineageData.error || 'Failed to load lineage');
+            }
+
+            const transformationSteps = lineageData.data?.output?.transformation_steps || [];
+
+            if (transformationSteps.length === 0) {
                 container.innerHTML = `
-                    <div class="alert alert-info">
-                        <h6>ℹ️ No Transformations Found</h6>
-                        <p>This message was not transformed or transformation data is not available.</p>
+                    <div style="max-width: 1400px; margin: 0 auto;">
+                        <div style="background: linear-gradient(135deg, #eff6ff 0%, #fdf2f8 100%); padding: 2rem; border-radius: 8px; text-align: center; border: 2px dashed #e2e8f0;">
+                            <svg style="width: 48px; height: 48px; color: #94a3b8; margin-bottom: 1rem;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                            </svg>
+                            <h6 style="color: #1e3a8a; margin-bottom: 0.5rem;">No Transformations Found</h6>
+                            <p style="color: #64748b; margin: 0;">This message was not transformed or transformation data is not available.</p>
+                        </div>
                     </div>
                 `;
                 return;
             }
 
-            const transformationsHtml = transformations.map((transform, index) => `
-                <div class="card mb-3">
-                    <div class="card-header">
-                        <h6>🔄 Transformation ${index + 1}: ${transform.type || 'Unknown'}</h6>
+            // Render transformation steps
+            const transformationsHtml = transformationSteps.map((step, index) => {
+                const stepTypeColors = {
+                    'pre.validation': { bg: '#dbeafe', color: '#1e40af', icon: 'M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z' },
+                    'core.mapping': { bg: '#fce7f3', color: '#ec4899', icon: 'M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15' },
+                    'post.validation': { bg: '#dcfce7', color: '#16a34a', icon: 'M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z' }
+                };
+                const typeStyle = stepTypeColors[step.steptype] || stepTypeColors['core.mapping'];
+                const success = step.success;
+                const duration = step.durationms?.low || 0;
+
+                return `
+                <div style="background: white; border-radius: 8px; padding: 1.5rem; box-shadow: 0 1px 3px rgba(0,0,0,0.05); margin-bottom: 1.5rem; border-left: 4px solid ${typeStyle.color};">
+                    <div style="display: flex; align-items: start; gap: 1rem; margin-bottom: 1.5rem;">
+                        <div style="width: 40px; height: 40px; background: ${typeStyle.bg}; border-radius: 8px; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
+                            <svg style="width: 20px; height: 20px; color: ${typeStyle.color};" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="${typeStyle.icon}"/>
+                            </svg>
+                        </div>
+                        <div style="flex: 1;">
+                            <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem;">
+                                <div>
+                                    <h6 style="color: #1e3a8a; margin: 0; font-weight: 600; font-size: 1rem;">${step.stepname || `Step ${index + 1}`}</h6>
+                                    <div style="display: flex; gap: 0.5rem; margin-top: 0.5rem; flex-wrap: wrap;">
+                                        <span style="background: ${typeStyle.bg}; color: ${typeStyle.color}; padding: 0.25rem 0.65rem; border-radius: 4px; font-size: 0.8rem; font-weight: 500;">${step.steptype}</span>
+                                        ${success ?
+                                            '<span style="background: #dcfce7; color: #16a34a; padding: 0.25rem 0.65rem; border-radius: 4px; font-size: 0.8rem;">✓ Success</span>' :
+                                            '<span style="background: #fee2e2; color: #dc2626; padding: 0.25rem 0.65rem; border-radius: 4px; font-size: 0.8rem;">✗ Failed</span>'
+                                        }
+                                        <span style="background: #f1f5f9; color: #64748b; padding: 0.25rem 0.65rem; border-radius: 4px; font-size: 0.8rem;">⏱ ${duration}ms</span>
+                                    </div>
+                                </div>
+                            </div>
+                            ${step.error ? `
+                            <div style="margin-top: 1rem; padding: 0.75rem; background: #fee2e2; border-left: 3px solid #dc2626; border-radius: 4px;">
+                                <div style="color: #dc2626; font-weight: 600; font-size: 0.85rem; margin-bottom: 0.25rem;">Error:</div>
+                                <div style="color: #991b1b; font-size: 0.85rem;">${this.escapeHtml(step.error)}</div>
+                            </div>
+                            ` : ''}
+                        </div>
                     </div>
-                    <div class="card-body">
-                        <div class="row">
-                            <div class="col-md-6">
-                                <h6>Input</h6>
-                                <pre class="bg-light p-3" style="max-height: 300px; overflow-y: auto;"><code>${this.escapeHtml(transform.input || 'No input data')}</code></pre>
-                            </div>
-                            <div class="col-md-6">
-                                <h6>Output</h6>
-                                <pre class="bg-light p-3" style="max-height: 300px; overflow-y: auto;"><code>${this.escapeHtml(transform.output || 'No output data')}</code></pre>
+
+                    <div style="display: grid; grid-template-columns: 1px 1fr; gap: 1rem;">
+                        <div style="background: ${typeStyle.color}; width: 2px; margin-left: 19px;"></div>
+                        <div>
+                            <div style="background: #f8fafc; padding: 1rem; border-radius: 6px; border: 1px solid #e2e8f0;">
+                                <div style="color: #64748b; font-size: 0.85rem; margin-bottom: 0.5rem; font-weight: 500;">Step Details</div>
+                                <table style="width: 100%; font-size: 0.85rem;">
+                                    <tr>
+                                        <td style="color: #64748b; padding: 0.4rem 0;">Started:</td>
+                                        <td style="color: #1e293b; padding: 0.4rem 0;">${new Date(step.startedat).toLocaleString()}</td>
+                                    </tr>
+                                    <tr>
+                                        <td style="color: #64748b; padding: 0.4rem 0;">Completed:</td>
+                                        <td style="color: #1e293b; padding: 0.4rem 0;">${new Date(step.completedat).toLocaleString()}</td>
+                                    </tr>
+                                    <tr>
+                                        <td style="color: #64748b; padding: 0.4rem 0;">Duration:</td>
+                                        <td style="color: #1e293b; padding: 0.4rem 0;"><strong>${duration}ms</strong></td>
+                                    </tr>
+                                    <tr>
+                                        <td style="color: #64748b; padding: 0.4rem 0;">Step ID:</td>
+                                        <td style="color: #1e293b; padding: 0.4rem 0; font-family: monospace; font-size: 0.75rem;">${step.stepid}</td>
+                                    </tr>
+                                </table>
                             </div>
                         </div>
-                        ${transform.mapping_rules ? `
-                        <div class="mt-3">
-                            <h6>Mapping Rules</h6>
-                            <table class="table table-sm">
-                                ${Object.entries(transform.mapping_rules).map(([source, target]) => `
-                                <tr>
-                                    <td><code>${source}</code></td>
-                                    <td>→</td>
-                                    <td><code>${target}</code></td>
-                                </tr>
-                                `).join('')}
-                            </table>
-                        </div>
-                        ` : ''}
                     </div>
                 </div>
-            `).join('');
+                `;
+            }).join('');
 
             container.innerHTML = `
-                <div class="transformations-container">
-                    <h5>🔄 Message Transformations</h5>
+                <div style="max-width: 1400px; margin: 0 auto;">
+                    <div style="background: linear-gradient(to right, white 0%, #fdf2f8 100%); padding: 1.5rem; border-radius: 8px; margin-bottom: 1.5rem; border-left: 4px solid #ec4899; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
+                        <h5 style="color: #1e3a8a; margin: 0; font-weight: 600;">Message Transformations</h5>
+                        <p style="color: #64748b; margin: 0.25rem 0 0 0; font-size: 0.9rem;">View transformation steps and mapping rules</p>
+                    </div>
                     ${transformationsHtml}
                 </div>
             `;
@@ -806,10 +1167,289 @@ class MessageManager {
         }
     }
 
+    async loadErrors(messageId) {
+        try {
+            const container = document.getElementById('messageErrorsView');
+            const message = this.messageData.message;
+
+            container.innerHTML = '<div class="text-center"><i class="fas fa-spinner fa-spin"></i> Loading errors...</div>';
+
+            // Fetch errors from API
+            const response = await fetch(`/api/messages/${messageId}/errors?interfaceId=${message.interface_id}`);
+
+            if (!response.ok) {
+                throw new Error('Failed to fetch errors');
+            }
+
+            const result = await response.json();
+
+            if (!result.success) {
+                throw new Error(result.error || 'Failed to load errors');
+            }
+
+            const { errors, summary } = result.data;
+
+            // If no errors, show a success message
+            if (!errors || errors.length === 0) {
+                container.innerHTML = `
+                    <div style="max-width: 1400px; margin: 0 auto;">
+                        <div style="background: linear-gradient(135deg, #dcfce7 0%, #f0fdf4 100%); padding: 3rem; border-radius: 8px; text-align: center; border: 2px dashed #86efac;">
+                            <svg style="width: 64px; height: 64px; color: #16a34a; margin-bottom: 1rem;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                            </svg>
+                            <h5 style="color: #166534; margin-bottom: 0.5rem; font-weight: 600;">No Errors or Warnings</h5>
+                            <p style="color: #16a34a; margin: 0;">This message processed successfully without any errors.</p>
+                        </div>
+                    </div>
+                `;
+                // Hide the errors tab if no errors
+                document.getElementById('errorsTabBtn').style.display = 'none';
+                return;
+            }
+
+            // Render errors
+            container.innerHTML = this.renderErrorStack(errors, summary);
+
+        } catch (error) {
+            console.error('Failed to load errors:', error);
+            document.getElementById('messageErrorsView').innerHTML =
+                '<div class="alert alert-warning">Unable to load error data.</div>';
+        }
+    }
+
+    renderErrorStack(errors, summary) {
+        const severityConfig = {
+            'critical': {
+                bg: '#fee2e2',
+                color: '#dc2626',
+                icon: '🔴',
+                label: 'CRITICAL'
+            },
+            'error': {
+                bg: '#fed7aa',
+                color: '#ea580c',
+                icon: '❌',
+                label: 'ERROR'
+            },
+            'warning': {
+                bg: '#fef3c7',
+                color: '#d97706',
+                icon: '⚠️',
+                label: 'WARNING'
+            }
+        };
+
+        const errorsByType = errors.reduce((acc, err) => {
+            const severity = err.severity || 'error';
+            if (!acc[severity]) acc[severity] = [];
+            acc[severity].push(err);
+            return acc;
+        }, {});
+
+        const errorHtml = Object.entries(errorsByType)
+            .sort(([a], [b]) => {
+                const order = { 'critical': 0, 'error': 1, 'warning': 2 };
+                return order[a] - order[b];
+            })
+            .map(([severity, severityErrors]) => {
+                const config = severityConfig[severity];
+                return severityErrors.map((err, index) => {
+                    const timestamp = new Date(err.error_timestamp).toLocaleString();
+                    const hasStackTrace = err.stack_trace && err.stack_trace.length > 0;
+
+                    return `
+                        <div style="background: white; border-radius: 8px; padding: 1.5rem; box-shadow: 0 1px 3px rgba(0,0,0,0.05); margin-bottom: 1.5rem; border-left: 4px solid ${config.color};">
+                            <div style="display: flex; align-items: start; gap: 1rem; margin-bottom: 1rem;">
+                                <div style="width: 48px; height: 48px; background: ${config.bg}; border-radius: 8px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; font-size: 24px;">
+                                    ${config.icon}
+                                </div>
+                                <div style="flex: 1;">
+                                    <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 0.75rem;">
+                                        <div>
+                                            <span style="background: ${config.bg}; color: ${config.color}; padding: 0.25rem 0.65rem; border-radius: 4px; font-size: 0.75rem; font-weight: 600; margin-right: 0.5rem;">${config.label}</span>
+                                            <span style="color: #64748b; font-size: 0.85rem;">${timestamp}</span>
+                                        </div>
+                                        <span style="background: #f1f5f9; color: #64748b; padding: 0.25rem 0.65rem; border-radius: 4px; font-size: 0.75rem;">${err.stage || 'unknown'}</span>
+                                    </div>
+                                    <h6 style="color: #1e3a8a; margin: 0 0 0.5rem 0; font-weight: 600; font-size: 1rem;">${this.escapeHtml(err.message)}</h6>
+                                    <div style="color: #64748b; font-size: 0.9rem; margin-bottom: 0.75rem;">
+                                        <strong>Type:</strong> ${err.error_type || 'Unknown'}
+                                        ${err.recovery_action ? `<span style="margin-left: 1rem;"><strong>Recovery:</strong> ${err.recovery_action}</span>` : ''}
+                                    </div>
+                                    ${err.details ? `
+                                        <div style="background: #f8fafc; padding: 0.75rem; border-radius: 4px; border-left: 3px solid ${config.color}; margin-bottom: 0.75rem;">
+                                            <div style="color: ${config.color}; font-weight: 600; font-size: 0.85rem; margin-bottom: 0.25rem;">Details:</div>
+                                            <div style="color: #1e293b; font-size: 0.85rem; white-space: pre-wrap;">${this.escapeHtml(err.details)}</div>
+                                        </div>
+                                    ` : ''}
+                                    ${hasStackTrace ? `
+                                        <details style="margin-top: 0.75rem;">
+                                            <summary style="cursor: pointer; color: #64748b; font-size: 0.85rem; padding: 0.5rem; background: #f8fafc; border-radius: 4px;">
+                                                <i class="fas fa-code"></i> View Stack Trace
+                                            </summary>
+                                            <div style="margin-top: 0.75rem; background: #1e293b; color: #f8fafc; padding: 1rem; border-radius: 4px; overflow-x: auto; font-family: 'Courier New', monospace; font-size: 0.75rem; max-height: 300px; overflow-y: auto;">
+                                                <pre style="margin: 0; white-space: pre-wrap; word-wrap: break-word;">${this.escapeHtml(err.stack_trace)}</pre>
+                                            </div>
+                                        </details>
+                                    ` : ''}
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+            }).join('');
+
+        return `
+            <div style="max-width: 1400px; margin: 0 auto;">
+                <div style="background: linear-gradient(to right, white 0%, #fef2f2 100%); padding: 1.5rem; border-radius: 8px; margin-bottom: 1.5rem; border-left: 4px solid #dc2626; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
+                    <h5 style="color: #1e3a8a; margin: 0 0 0.5rem 0; font-weight: 600;">Errors & Warnings (${errors.length})</h5>
+                    <div style="display: flex; gap: 1.5rem; flex-wrap: wrap; margin-top: 1rem;">
+                        ${errorsByType.critical ? `<div><span style="font-weight: 600; color: #dc2626;">Critical:</span> ${errorsByType.critical.length}</div>` : ''}
+                        ${errorsByType.error ? `<div><span style="font-weight: 600; color: #ea580c;">Errors:</span> ${errorsByType.error.length}</div>` : ''}
+                        ${errorsByType.warning ? `<div><span style="font-weight: 600; color: #d97706;">Warnings:</span> ${errorsByType.warning.length}</div>` : ''}
+                    </div>
+                </div>
+                ${errorHtml}
+            </div>
+        `;
+    }
+
     escapeHtml(text) {
         const div = document.createElement('div');
         div.textContent = text;
         return div.innerHTML;
+    }
+
+    getDeliveryStatusClass(status) {
+        const statusClasses = {
+            'pending': 'bg-secondary',
+            'delivered': 'bg-success',
+            'failed': 'bg-danger',
+            'retrying': 'bg-warning text-dark'
+        };
+        return statusClasses[status] || 'bg-secondary';
+    }
+
+    formatMessageContent(content, contentType) {
+        if (!content) return '<em class="text-muted">No content available</em>';
+
+        try {
+            // Try to parse as JSON and format it
+            const parsed = JSON.parse(content);
+            const formatted = JSON.stringify(parsed, null, 2);
+            return `<pre class="bg-light p-3" style="max-height: 600px; overflow-y: auto; white-space: pre-wrap; word-wrap: break-word;"><code>${this.escapeHtml(formatted)}</code></pre>`;
+        } catch (e) {
+            // Not JSON, check if it's XML
+            if (content.trim().startsWith('<')) {
+                // Try to pretty-print XML
+                try {
+                    const formatted = this.formatXml(content);
+                    return `<pre class="bg-light p-3" style="max-height: 600px; overflow-y: auto; white-space: pre-wrap; word-wrap: break-word;"><code>${this.escapeHtml(formatted)}</code></pre>`;
+                } catch (xmlError) {
+                    // XML formatting failed, show as-is
+                }
+            }
+
+            // Show as plain text
+            return `<pre class="bg-light p-3" style="max-height: 600px; overflow-y: auto; white-space: pre-wrap; word-wrap: break-word;"><code>${this.escapeHtml(content)}</code></pre>`;
+        }
+    }
+
+    renderFHIRBundle(fhirData) {
+        if (!fhirData) return '<div style="padding: 2rem; text-align: center; color: #cbd5e1;">No FHIR data</div>';
+
+        // Extract deliveryPayload if it exists, otherwise use the whole object
+        const bundleToShow = fhirData.deliveryPayload || fhirData.fhirBundle || fhirData;
+        const bundleStr = JSON.stringify(bundleToShow, null, 2);
+        const bundleId = 'fhir-bundle-' + Date.now();
+
+        return `
+            <div>
+                <div style="display: flex; justify-content: flex-end; margin-bottom: 0.5rem;">
+                    <button onclick="messageManager.copyToClipboard('${bundleId}')"
+                            style="background: #ec4899; color: white; border: none; padding: 0.35rem 0.65rem; border-radius: 4px; cursor: pointer; font-size: 0.8rem; display: flex; align-items: center; gap: 0.35rem;"
+                            title="Copy to clipboard">
+                        <svg style="width: 13px; height: 13px;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/>
+                        </svg>
+                        Copy
+                    </button>
+                </div>
+                <pre id="${bundleId}" style="background: #f8fafc; padding: 1rem; border-radius: 6px; border: 1px solid #e2e8f0; max-height: 500px; overflow: auto; margin: 0;"><code style="color: #1e293b; font-size: 0.85rem;">${this.escapeHtml(bundleStr)}</code></pre>
+            </div>
+        `;
+    }
+
+    copyToClipboard(elementId) {
+        const element = document.getElementById(elementId);
+        if (!element) return;
+
+        const text = element.textContent;
+        navigator.clipboard.writeText(text).then(() => {
+            // Show success message
+            const btn = event.target.closest('button');
+            const originalHTML = btn.innerHTML;
+            btn.innerHTML = `
+                <svg style="width: 16px; height: 16px;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
+                </svg>
+                Copied!
+            `;
+            setTimeout(() => {
+                btn.innerHTML = originalHTML;
+            }, 2000);
+        });
+    }
+
+    copyRawMessage() {
+        // Get the raw message from the lineage data
+        const lineageData = this.currentLineageData;
+        if (!lineageData || !lineageData.input || !lineageData.input.rawContent) return;
+
+        const text = lineageData.input.rawContent;
+        navigator.clipboard.writeText(text).then(() => {
+            // Find the copy button and update it
+            const btn = event.target.closest('button');
+            const originalHTML = btn.innerHTML;
+            btn.innerHTML = `<svg style="width: 13px; height: 13px;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
+                        </svg> Copied!`;
+            setTimeout(() => {
+                btn.innerHTML = originalHTML;
+            }, 2000);
+        }).catch(err => {
+            console.error('Failed to copy:', err);
+        });
+    }
+
+
+    formatXml(xml) {
+        // Simple XML formatter
+        const PADDING = '  ';
+        const reg = /(>)(<)(\/*)/g;
+        let formatted = '';
+        let pad = 0;
+
+        xml = xml.replace(reg, '$1\r\n$2$3');
+        xml.split('\r\n').forEach(node => {
+            let indent = 0;
+            if (node.match(/.+<\/\w[^>]*>$/)) {
+                indent = 0;
+            } else if (node.match(/^<\/\w/)) {
+                if (pad !== 0) {
+                    pad -= 1;
+                }
+            } else if (node.match(/^<\w([^>]*[^\/])?>.*$/)) {
+                indent = 1;
+            } else {
+                indent = 0;
+            }
+
+            formatted += PADDING.repeat(pad) + node + '\r\n';
+            pad += indent;
+        });
+
+        return formatted.trim();
     }
 
     renderMessageDetail(data) {
@@ -817,47 +1457,78 @@ class MessageManager {
         const container = document.getElementById('messageDetailContent');
 
         container.innerHTML = `
-            <div class="row">
-                <div class="col-md-6">
-                    <h6>Message Information</h6>
-                    <table class="table table-sm">
-                        <tr><th>Message ID:</th><td>${message.message_id}</td></tr>
-                        <tr><th>Interface:</th><td>${message.interface_name}</td></tr>
-                        <tr><th>Status:</th><td>${this.renderStatusBadge(message.status)}</td></tr>
-                        <tr><th>Type:</th><td>${message.message_type || 'Unknown'}</td></tr>
-                        <tr><th>Size:</th><td>${this.formatBytes(message.message_size)}</td></tr>
-                        <tr><th>Source:</th><td>${message.source_type} (${message.source_endpoint || 'N/A'})</td></tr>
-                        <tr><th>Received:</th><td>${this.formatDateTime(message.received_at)}</td></tr>
-                        ${message.processing_completed_at ? `
-                            <tr><th>Completed:</th><td>${this.formatDateTime(message.processing_completed_at)}</td></tr>
-                        ` : ''}
-                        ${message.processing_time_ms ? `
-                            <tr><th>Processing Time:</th><td>${message.processing_time_ms}ms</td></tr>
-                        ` : ''}
-                        ${message.error_count > 0 ? `
-                            <tr><th>Errors:</th><td class="text-danger">${message.error_count}</td></tr>
-                        ` : ''}
-                        ${message.last_error_message ? `
-                            <tr><th>Last Error:</th><td class="text-danger">${message.last_error_message}</td></tr>
-                        ` : ''}
-                    </table>
+            <div style="max-width: 1400px; margin: 0 auto;">
+                <!-- Message Overview Card -->
+                <div style="background: linear-gradient(to right, white 0%, #fdf2f8 100%); padding: 1.5rem; border-radius: 8px; margin-bottom: 1.5rem; border-left: 4px solid #ec4899; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
+                    <div style="display: flex; justify-content: space-between; align-items: start; flex-wrap: wrap; gap: 1rem;">
+                        <div>
+                            <h5 style="color: #1e3a8a; margin: 0 0 0.5rem 0; font-weight: 600;">Message Details</h5>
+                            <div style="display: flex; gap: 1rem; flex-wrap: wrap;">
+                                <span style="font-size: 0.9rem; color: #64748b;">
+                                    <strong>ID:</strong> <code style="background: #fce7f3; padding: 0.25rem 0.5rem; border-radius: 4px; color: #ec4899; font-size: 0.85rem;">${message.message_id}</code>
+                                </span>
+                                <span style="font-size: 0.9rem; color: #64748b;">
+                                    <strong>Type:</strong> <span style="background: #fce7f3; color: #ec4899; padding: 0.25rem 0.75rem; border-radius: 6px; font-size: 0.85rem; font-weight: 500;">${message.message_type || 'Unknown'}</span>
+                                </span>
+                            </div>
+                        </div>
+                        <div style="display: flex; gap: 0.75rem; align-items: center;">
+                            ${this.renderStatusBadge(message.status)}
+                            <span style="background: ${message.delivery_status === 'delivered' ? '#fce7f3' : '#fef2f2'}; color: ${message.delivery_status === 'delivered' ? '#ec4899' : '#991b1b'}; padding: 0.5rem 1rem; border-radius: 6px; font-size: 0.85rem; font-weight: 500; border: 1px solid ${message.delivery_status === 'delivered' ? '#fbcfe8' : '#fecaca'};">
+                                ${message.delivery_status || 'N/A'}
+                            </span>
+                        </div>
+                    </div>
                 </div>
-                <div class="col-md-6">
-                    <h6>Processing Information</h6>
-                    <table class="table table-sm">
-                        <tr><th>Transformation:</th><td>${message.transformation_applied ? 'Applied' : 'None'}</td></tr>
-                        <tr><th>Retry Count:</th><td>${message.retry_count}</td></tr>
-                        <tr><th>Delivery Status:</th><td>${message.delivery_status || 'N/A'}</td></tr>
-                        <tr><th>Delivery Attempts:</th><td>${message.delivery_attempts || 0}</td></tr>
-                        ${message.source_ip ? `
-                            <tr><th>Source IP:</th><td>${message.source_ip}</td></tr>
-                        ` : ''}
-                        ${message.correlation_id ? `
-                            <tr><th>Correlation ID:</th><td>${message.correlation_id}</td></tr>
-                        ` : ''}
-                    </table>
+
+                <!-- Info Grid -->
+                <div class="row g-3">
+                    <div class="col-md-6">
+                        <div style="background: white; border-radius: 8px; padding: 1.5rem; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
+                            <h6 style="color: #1e3a8a; margin-bottom: 1rem; font-weight: 600;">
+                                <svg style="width: 18px; height: 18px; display: inline-block; margin-right: 0.5rem;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                                </svg>
+                                Message Information
+                            </h6>
+                            <table class="table table-sm table-borderless mb-0" style="font-size: 0.9rem;">
+                                <tr><th style="width: 40%; color: #64748b; font-weight: 500;">Interface:</th><td style="color: #1e293b;"><strong>${message.interface_name}</strong></td></tr>
+                                <tr><th style="color: #64748b; font-weight: 500;">Size:</th><td style="color: #1e293b;">${this.formatBytes(message.message_size)}</td></tr>
+                                <tr><th style="color: #64748b; font-weight: 500;">Source:</th><td style="color: #1e293b;">${message.source_type} (${message.source_endpoint || 'N/A'})</td></tr>
+                                <tr><th style="color: #64748b; font-weight: 500;">Received:</th><td style="color: #1e293b;">${this.formatDateTime(message.received_at)}</td></tr>
+                                ${message.processing_completed_at ? `
+                                    <tr><th style="color: #64748b; font-weight: 500;">Completed:</th><td style="color: #1e293b;">${this.formatDateTime(message.processing_completed_at)}</td></tr>
+                                ` : ''}
+                                <tr><th style="color: #64748b; font-weight: 500;">Processing Time:</th><td style="color: #1e293b;"><strong>${this.calculateProcessingTimeForDetail(message)}</strong></td></tr>
+                                ${message.correlation_id ? `
+                                    <tr><th style="color: #64748b; font-weight: 500;">Correlation ID:</th><td style="color: #64748b; font-family: monospace; font-size: 0.8rem;">${message.correlation_id}</td></tr>
+                                ` : ''}
+                            </table>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div style="background: white; border-radius: 8px; padding: 1.5rem; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
+                            <h6 style="color: #1e3a8a; margin-bottom: 1rem; font-weight: 600;">
+                                <svg style="width: 18px; height: 18px; display: inline-block; margin-right: 0.5rem;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
+                                </svg>
+                                Processing Details
+                            </h6>
+                            <table class="table table-sm table-borderless mb-0" style="font-size: 0.9rem;">
+                                <tr><th style="width: 45%; color: #64748b; font-weight: 500;">Delivery Attempts:</th><td style="color: #1e293b;">${message.delivery_attempts || 0}</td></tr>
+                                ${message.source_ip ? `
+                                    <tr><th style="color: #64748b; font-weight: 500;">Source IP:</th><td style="color: #1e293b;">${message.source_ip}</td></tr>
+                                ` : ''}
+                                ${message.error_count > 0 ? `
+                                    <tr><th style="color: #64748b; font-weight: 500;">Errors:</th><td><span style="color: #ef4444; font-weight: 600;">${message.error_count}</span></td></tr>
+                                ` : ''}
+                                ${message.last_error_message ? `
+                                    <tr><th style="color: #64748b; font-weight: 500;">Last Error:</th><td style="color: #ef4444; font-size: 0.85rem;">${message.last_error_message}</td></tr>
+                                ` : ''}
+                            </table>
+                        </div>
+                    </div>
                 </div>
-            </div>
 
             ${transformations.length > 0 ? `
                 <div class="mt-4">
@@ -876,31 +1547,49 @@ class MessageManager {
                 </div>
             ` : ''}
 
-            <div class="mt-4">
-                <h6>Message Content</h6>
-                <div class="row">
-                    ${content.length > 0 ? content.map(c => `
-                        <div class="col-md-${content.length > 1 ? '6' : '12'} mb-3">
-                            <h6 class="text-capitalize">${c.content_type.replace('_', ' ')} Content</h6>
-                            <div class="message-content">
-                                ${this.formatContent(c.content_data, c.content_type)}
-                            </div>
-                            <small class="text-muted">Size: ${this.formatBytes(c.content_size)} | Encoding: ${c.content_encoding}</small>
+            <!-- Raw Message Content Section -->
+            <div style="background: white; padding: 1.5rem; border-radius: 8px; border: 1px solid #e2e8f0; margin-top: 1.5rem;">
+                <div style="display: flex; align-items: center; gap: 0.75rem; margin-bottom: 1rem;">
+                    <div style="width: 32px; height: 32px; background: linear-gradient(135deg, #fce7f3 0%, #fdf2f8 100%); border-radius: 6px; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
+                        <svg style="width: 18px; height: 18px; color: #ec4899;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+                        </svg>
+                    </div>
+                    <div style="flex: 1;">
+                        <h6 style="color: #1e3a8a; margin: 0; font-weight: 600;">Raw Message Content</h6>
+                        <div style="display: flex; gap: 1rem; margin-top: 0.25rem;">
+                            <span style="font-size: 0.85rem; color: #64748b;">
+                                Size: <strong style="color: #ec4899;">${this.formatBytes(message.message_size)}</strong>
+                            </span>
+                            <span style="font-size: 0.85rem; color: #64748b;">
+                                Encoding: <strong style="color: #ec4899;">${message.message_encoding || 'UTF-8'}</strong>
+                            </span>
                         </div>
-                    `).join('') : message.raw_message ? `
-                        <div class="col-12 mb-3">
-                            <h6>Raw Message Content</h6>
-                            <div class="message-content">
-                                <pre style="background-color: #f8f9fa; padding: 10px; border-radius: 4px; font-family: monospace; white-space: pre-wrap; word-wrap: break-word;">${message.raw_message.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</pre>
-                            </div>
-                            <small class="text-muted">Size: ${this.formatBytes(message.message_size)} | Encoding: ${message.message_encoding}</small>
-                        </div>
-                    ` : `
-                        <div class="col-12">
-                            <em class="text-muted">No message content available</em>
-                        </div>
-                    `}
+                    </div>
                 </div>
+                ${content.length > 0 ? content.map(c => `
+                    <div style="margin-bottom: 1.5rem;">
+                        <div style="background: #fdf2f8; padding: 0.5rem 0.75rem; border-radius: 4px; margin-bottom: 0.75rem; border-left: 3px solid #ec4899;">
+                            <span style="font-size: 0.85rem; color: #1e3a8a; font-weight: 600; text-transform: capitalize;">
+                                ${c.content_type.replace('_', ' ')} Content
+                            </span>
+                        </div>
+                        <div class="message-content" style="background: #f8fafc; padding: 1rem; border-radius: 6px; border: 1px solid #e2e8f0;">
+                            ${this.formatContent(c.content_data, c.content_type)}
+                        </div>
+                        <div style="margin-top: 0.5rem; font-size: 0.8rem; color: #94a3b8;">
+                            Size: ${this.formatBytes(c.content_size)} | Encoding: ${c.content_encoding}
+                        </div>
+                    </div>
+                `).join('') : message.raw_message ? `
+                    <div class="message-content" style="background: #f8fafc; padding: 1rem; border-radius: 6px; border: 1px solid #e2e8f0;">
+                        ${this.formatMessageContent(message.raw_message, message.message_encoding)}
+                    </div>
+                ` : `
+                    <div style="padding: 2rem; text-align: center; color: #94a3b8; font-style: italic; background: #f8fafc; border-radius: 6px; border: 1px dashed #e2e8f0;">
+                        No message content available
+                    </div>
+                `}
             </div>
         `;
     }
@@ -1191,8 +1880,39 @@ class MessageManager {
     }
 
     refreshMessages() {
-        this.loadMessages();
-        this.loadStats();
+        // Add visual feedback for refresh
+        const refreshBtn = document.querySelector('button[onclick="refreshMessages()"]');
+        const refreshIcon = refreshBtn?.querySelector('i');
+
+        if (refreshIcon) {
+            // Add spinning animation
+            refreshIcon.classList.add('fa-spin');
+            refreshBtn.disabled = true;
+        }
+
+        // Show toast notification
+        this.showSuccess('Refreshing messages...');
+
+        // Perform refresh
+        Promise.all([
+            this.loadMessages(),
+            this.loadStats()
+        ]).then(() => {
+            // Remove spinning animation
+            if (refreshIcon) {
+                refreshIcon.classList.remove('fa-spin');
+                refreshBtn.disabled = false;
+            }
+            this.showSuccess('Messages refreshed successfully!');
+        }).catch(error => {
+            // Remove spinning animation on error
+            if (refreshIcon) {
+                refreshIcon.classList.remove('fa-spin');
+                refreshBtn.disabled = false;
+            }
+            this.showError('Failed to refresh messages');
+            console.error('Refresh error:', error);
+        });
     }
 
     updateMessageCount(count) {
@@ -1328,6 +2048,8 @@ function switchTab(tabName) {
         messageManager.loadMessageContent(messageManager.selectedMessageId);
     } else if (tabName === 'transformations' && messageManager.selectedMessageId) {
         messageManager.loadTransformations(messageManager.selectedMessageId);
+    } else if (tabName === 'errors' && messageManager.selectedMessageId) {
+        messageManager.loadErrors(messageManager.selectedMessageId);
     }
 }
 

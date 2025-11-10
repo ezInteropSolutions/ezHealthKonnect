@@ -1999,6 +1999,27 @@ func (s *HL7FHIRTransformServiceV3) extractMessageType(parsedHL7 map[string]inte
 		}
 	}
 
+	// Try as struct with Name field (when read from MongoDB as Go struct)
+	if messageTypeVal, exists := parsedHL7["messageType"]; exists {
+		// Use reflection to extract Name field from struct
+		if msgTypeStruct, ok := messageTypeVal.(map[string]interface{}); ok {
+			if name, nameOk := msgTypeStruct["Name"].(string); nameOk {
+				log.Printf("✅ V3 Service: Found message type from struct Name field: %s", name)
+				return name, nil
+			}
+		}
+		// Try reflection for actual struct types
+		val := reflect.ValueOf(messageTypeVal)
+		if val.Kind() == reflect.Struct {
+			nameField := val.FieldByName("Name")
+			if nameField.IsValid() && nameField.Kind() == reflect.String {
+				name := nameField.String()
+				log.Printf("✅ V3 Service: Found message type via reflection: %s", name)
+				return name, nil
+			}
+		}
+	}
+
 	// Try basicSegments MSH.9 as fallback
 	if basicSegments, ok := parsedHL7["basicSegments"].(map[string]interface{}); ok {
 		if msh, mshOk := basicSegments["MSH"].(map[string]interface{}); mshOk {
@@ -2149,8 +2170,21 @@ func (s *HL7FHIRTransformServiceV3) extractEnhancedSegments(parsedHL7 map[string
 			return enhancedSegments
 		}
 
-		// If it's a different map type, try to convert it
-		log.Printf("⚠️ V3 Service: enhancedSegments is not map[string]interface{}, attempting conversion")
+		// If it's a different map type (like map[string]hl7.EnhancedSegment), convert via JSON
+		log.Printf("⚠️ V3 Service: enhancedSegments is not map[string]interface{}, attempting JSON conversion")
+		jsonBytes, err := json.Marshal(rawSegments)
+		if err != nil {
+			log.Printf("❌ V3 Service: Failed to marshal enhancedSegments: %v", err)
+		} else {
+			var converted map[string]interface{}
+			err = json.Unmarshal(jsonBytes, &converted)
+			if err != nil {
+				log.Printf("❌ V3 Service: Failed to unmarshal enhancedSegments: %v", err)
+			} else {
+				log.Printf("✅ V3 Service: Successfully converted enhancedSegments via JSON: %d segments", len(converted))
+				return converted
+			}
+		}
 	} else {
 		log.Printf("❌ V3 Service: enhancedSegments key does not exist")
 	}
@@ -2220,9 +2254,14 @@ func (s *HL7FHIRTransformServiceV3) populateTransformResponse(
 		}
 	}
 
+	log.Printf("🔍 [DEBUG V3] createBundle=%v, resources count=%d", createBundle, len(resources))
 	if createBundle && len(resources) > 0 {
 		bundle := s.createBundle(resources, response.RequestID, response.MessageType)
 		response.Bundle = bundle
+		bundleJSON, _ := json.Marshal(bundle)
+		log.Printf("🔍 [DEBUG V3] Bundle created! Size: %d bytes, resourceType: %v", len(bundleJSON), bundle["resourceType"])
+	} else {
+		log.Printf("⚠️  [DEBUG V3] Bundle NOT created - createBundle=%v, resources=%d", createBundle, len(resources))
 	}
 
 	response.Success = len(response.Errors) == 0

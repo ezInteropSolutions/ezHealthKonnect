@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Edit Modal Test - FHIR Configuration</title>
+    <link rel="stylesheet" href="css/styles.css">
+    <link rel="stylesheet" href="css/interfaces.css">
+    <link rel="stylesheet" href="css/wizard.css">
+    <style>
+        body {
+            padding: 20px;
+            font-family: Arial, sans-serif;
+        }
+        .test-section {
+            margin: 20px 0;
+            padding: 15px;
+            border: 2px solid #007bff;
+            border-radius: 8px;
+            background: #f8f9fa;
+        }
+        .test-button {
+            padding: 10px 20px;
+            background: #007bff;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            margin: 5px;
+        }
+        .test-button:hover {
+            background: #0056b3;
+        }
+        .status {
+            margin: 10px 0;
+            padding: 10px;
+            border-radius: 5px;
+        }
+        .status.success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        .status.error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        .status.info {
+            background: #d1ecf1;
+            color: #0c5460;
+            border: 1px solid #bee5eb;
+        }
+        pre {
+            background: #fff;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            overflow-x: auto;
+            max-height: 400px;
+        }
+    </style>
+</head>
+<body>
+    <h1>🧪 Edit Modal Configuration Test</h1>
+    <p>This page tests the shared component architecture for the edit modal</p>
+
+    <div class="test-section">
+        <h2>Step 1: Verify Shared Components Loaded</h2>
+        <button class="test-button" onclick="testSharedComponents()">Test Shared Components</button>
+        <div id="test1-result"></div>
+    </div>
+
+    <div class="test-section">
+        <h2>Step 2: Verify populateEditForm Function</h2>
+        <button class="test-button" onclick="testPopulateFunction()">Test populateEditForm</button>
+        <div id="test2-result"></div>
+    </div>
+
+    <div class="test-section">
+        <h2>Step 3: Test FHIR Receiver Configuration</h2>
+        <button class="test-button" onclick="testFhirReceiverConfig()">Test FHIR Config Rendering</button>
+        <div id="test3-result"></div>
+    </div>
+
+    <div class="test-section">
+        <h2>Step 4: Test HTTP Authentication</h2>
+        <button class="test-button" onclick="testHttpAuth()">Test HTTP Auth Rendering</button>
+        <div id="test4-result"></div>
+    </div>
+
+    <div class="test-section">
+        <h2>Step 5: Simulate Edit Modal Load</h2>
+        <button class="test-button" onclick="simulateEditModal()">Load Edit Modal with FHIR Receiver 2 Data</button>
+        <div id="test5-result"></div>
+    </div>
+
+    <!-- Modal Container Placeholder -->
+    <div id="edit-modal-container"></div>
+
+    <!-- Test Data Container -->
+    <div id="editSourceTypeContainer"></div>
+    <div id="editSourceConnectivityContainer"></div>
+    <div id="editSourceConfigPanel"></div>
+
+    <!-- Load Dependencies -->
+    <script src="js/components/InterfaceConfigComponents.js"></script>
+    <script src="js/components/modal-components.js"></script>
+
+    <script>
+        function showResult(elementId, status, message, details = null) {
+            const element = document.getElementById(elementId);
+            let html = `<div class="status ${status}">`;
+            html += `<strong>${status === 'success' ? '✅' : status === 'error' ? '❌' : 'ℹ️'} ${message}</strong>`;
+            if (details) {
+                html += `<pre>${JSON.stringify(details, null, 2)}</pre>`;
+            }
+            html += `</div>`;
+            element.innerHTML = html;
+        }
+
+        function testSharedComponents() {
+            try {
+                if (typeof InterfaceConfigComponents === 'undefined') {
+                    showResult('test1-result', 'error', 'InterfaceConfigComponents is not defined!');
+                    return;
+                }
+
+                const methods = [
+                    'getSourceTypeSelector',
+                    'getSourceConnectivitySelector',
+                    'getSourceConfigPanel',
+                    'getTcpMllpConfig',
+                    'getHttpConfig',
+                    'getHttpAuthConfig',
+                    'getHttpAuthDetailsPanel',
+                    'getFhirReceiverConfig'
+                ];
+
+                const missing = methods.filter(m => typeof InterfaceConfigComponents[m] !== 'function');
+
+                if (missing.length > 0) {
+                    showResult('test1-result', 'error', 'Missing methods', { missing });
+                } else {
+                    showResult('test1-result', 'success', 'All shared component methods are available!', { methods });
+                }
+            } catch (error) {
+                showResult('test1-result', 'error', 'Error testing shared components', { error: error.message });
+            }
+        }
+
+        function testPopulateFunction() {
+            try {
+                if (typeof window.populateEditForm === 'undefined') {
+                    showResult('test2-result', 'error', 'window.populateEditForm is not defined!');
+                    return;
+                }
+
+                showResult('test2-result', 'success', 'window.populateEditForm function is available!', {
+                    functionType: typeof window.populateEditForm,
+                    functionSource: window.populateEditForm.toString().substring(0, 200) + '...'
+                });
+            } catch (error) {
+                showResult('test2-result', 'error', 'Error testing populateEditForm', { error: error.message });
+            }
+        }
+
+        function testFhirReceiverConfig() {
+            try {
+                const config = {
+                    basePath: '/fhir/r4',
+                    fhirVersion: 'R4',
+                    operations: ['CREATE', 'READ', 'UPDATE']
+                };
+
+                const html = InterfaceConfigComponents.getFhirReceiverConfig(config, 'test_');
+
+                if (html && html.includes('basePath') && html.includes('fhirVersion')) {
+                    showResult('test3-result', 'success', 'FHIR Receiver Config renders correctly!', {
+                        htmlLength: html.length,
+                        containsBasePath: html.includes('basePath'),
+                        containsFhirVersion: html.includes('fhirVersion'),
+                        containsOperations: html.includes('operations')
+                    });
+                } else {
+                    showResult('test3-result', 'error', 'FHIR Config missing expected fields');
+                }
+            } catch (error) {
+                showResult('test3-result', 'error', 'Error rendering FHIR config', { error: error.message });
+            }
+        }
+
+        function testHttpAuth() {
+            try {
+                const config = {
+                    authType: 'oauth2',
+                    oauthIssuer: 'https://auth.example.com',
+                    oauthAudience: 'https://api.example.com'
+                };
+
+                const html = InterfaceConfigComponents.getHttpAuthConfig(config, 'test_');
+
+                if (html && html.includes('HTTP Authentication') && html.includes('oauth2')) {
+                    showResult('test4-result', 'success', 'HTTP Authentication renders correctly!', {
+                        htmlLength: html.length,
+                        containsAuthSection: html.includes('HTTP Authentication'),
+                        containsOAuth2: html.includes('oauth2'),
+                        containsAuthTypes: html.includes('Bearer Token')
+                    });
+                } else {
+                    showResult('test4-result', 'error', 'HTTP Auth missing expected fields');
+                }
+            } catch (error) {
+                showResult('test4-result', 'error', 'Error rendering HTTP auth', { error: error.message });
+            }
+        }
+
+        function simulateEditModal() {
+            try {
+                // Simulate FHIR Receiver 2 data structure
+                const fhirReceiver2Data = {
+                    id: 2,
+                    name: 'FHIR Receiver 2',
+                    description: 'Test FHIR receiver interface',
+                    sourceType: 'fhir',
+                    sourceConnectivity: {
+                        type: 'http',
+                        config: {
+                            host: 'localhost',
+                            port: 2575
+                        }
+                    },
+                    sourceConfig: {
+                        basePath: '/fhir/r4',
+                        fhirVersion: 'R4',
+                        operations: ['CREATE', 'READ', 'UPDATE', 'SEARCH'],
+                        authType: 'oauth2',
+                        oauthIssuer: 'https://auth.hospital.com',
+                        oauthAudience: 'https://fhir.hospital.com',
+                        acceptedResources: ['Patient', 'Observation', 'Encounter'],
+                        validateStructure: true
+                    },
+                    targetType: 'fhir',
+                    targetEndpoint: 'http://localhost:8080/fhir',
+                    status: 'active'
+                };
+
+                console.log('📝 Simulating edit modal with data:', fhirReceiver2Data);
+
+                // Call populateEditForm
+                if (typeof window.populateEditForm !== 'function') {
+                    showResult('test5-result', 'error', 'populateEditForm function not available');
+                    return;
+                }
+
+                window.populateEditForm(fhirReceiver2Data);
+
+                // Check if containers were populated
+                const sourceTypeContainer = document.getElementById('editSourceTypeContainer');
+                const sourceConnectivityContainer = document.getElementById('editSourceConnectivityContainer');
+                const sourceConfigPanel = document.getElementById('editSourceConfigPanel');
+
+                const results = {
+                    sourceTypeRendered: sourceTypeContainer && sourceTypeContainer.innerHTML.length > 0,
+                    sourceConnectivityRendered: sourceConnectivityContainer && sourceConnectivityContainer.innerHTML.length > 0,
+                    sourceConfigRendered: sourceConfigPanel && sourceConfigPanel.innerHTML.length > 0,
+                    configPanelContainsFhir: sourceConfigPanel && sourceConfigPanel.innerHTML.includes('FHIR'),
+                    configPanelContainsAuth: sourceConfigPanel && sourceConfigPanel.innerHTML.includes('Authentication'),
+                    sourceTypeSelectorHTML: sourceTypeContainer ? sourceTypeContainer.innerHTML.substring(0, 200) : 'Not rendered'
+                };
+
+                const allRendered = results.sourceTypeRendered &&
+                                   results.sourceConnectivityRendered &&
+                                   results.sourceConfigRendered;
+
+                if (allRendered) {
+                    showResult('test5-result', 'success', 'Edit modal populated successfully! Check the containers below.', results);
+                } else {
+                    showResult('test5-result', 'error', 'Some containers not rendered', results);
+                }
+            } catch (error) {
+                showResult('test5-result', 'error', 'Error simulating edit modal', {
+                    error: error.message,
+                    stack: error.stack
+                });
+            }
+        }
+
+        // Auto-run tests on page load
+        window.addEventListener('DOMContentLoaded', function() {
+            console.log('🧪 Test page loaded');
+            setTimeout(() => {
+                testSharedComponents();
+            }, 500);
+        });
+    </script>
+</body>
+</html>

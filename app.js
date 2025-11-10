@@ -262,6 +262,18 @@ app.use('/api/wizard', wizardRoutes);
 console.log('🔄 Mounting /api/messages...');
 app.use('/api/messages', messageRoutes);
 
+// Deployment management routes
+console.log('🔄 Mounting /api/deployment...');
+const deploymentRoutes = require('./routes/deploymentRoutes');
+app.use('/api/deployment', deploymentRoutes);
+console.log('✅ Deployment routes mounted at /api/deployment');
+
+// FHIR Receiver routes - Node.js handles incoming FHIR resources
+console.log('🔄 Mounting /fhir (FHIR Receiver)...');
+const fhirReceiverRoutes = require('./routes/fhirReceiverRoutes');
+app.use('/fhir', fhirReceiverRoutes);
+console.log('✅ FHIR Receiver routes mounted at /fhir');
+
 // Pipeline Builder routes - with debug logging
 console.log('🔄 Mounting /api/pipelines...');
 try {

@@ -25,6 +25,18 @@ func NewProcessingController(engine *processing.ProcessingEngine) *ProcessingCon
 	}
 }
 
+// checkEngine verifies the engine is initialized and returns an error response if not
+func (pc *ProcessingController) checkEngine(c *gin.Context) bool {
+	if pc.engine == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{
+			"success": false,
+			"error":   "Processing engine is not initialized. Please check database connection.",
+		})
+		return false
+	}
+	return true
+}
+
 // RegisterRoutes registers processing engine routes
 func (pc *ProcessingController) RegisterRoutes(router *gin.RouterGroup) {
 	processing := router.Group("/processing")
@@ -52,6 +64,9 @@ func (pc *ProcessingController) RegisterRoutes(router *gin.RouterGroup) {
 
 // StartEngine starts the interface engine
 func (pc *ProcessingController) StartEngine(c *gin.Context) {
+	if !pc.checkEngine(c) {
+		return
+	}
 	if err := pc.engine.Start(); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"success": false,
@@ -70,6 +85,9 @@ func (pc *ProcessingController) StartEngine(c *gin.Context) {
 
 // StopEngine stops the interface engine
 func (pc *ProcessingController) StopEngine(c *gin.Context) {
+	if !pc.checkEngine(c) {
+		return
+	}
 	if err := pc.engine.Stop(); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"success": false,
@@ -87,6 +105,9 @@ func (pc *ProcessingController) StopEngine(c *gin.Context) {
 
 // GetEngineStatus returns the current engine status
 func (pc *ProcessingController) GetEngineStatus(c *gin.Context) {
+	if !pc.checkEngine(c) {
+		return
+	}
 	stats := pc.engine.GetStats()
 
 	c.JSON(http.StatusOK, gin.H{
@@ -105,6 +126,9 @@ func (pc *ProcessingController) GetEngineStatus(c *gin.Context) {
 
 // GetEngineStats returns detailed engine statistics
 func (pc *ProcessingController) GetEngineStats(c *gin.Context) {
+	if !pc.checkEngine(c) {
+		return
+	}
 	stats := pc.engine.GetStats()
 
 	c.JSON(http.StatusOK, gin.H{
@@ -115,6 +139,9 @@ func (pc *ProcessingController) GetEngineStats(c *gin.Context) {
 
 // ActivateInterface activates a specific interface for processing
 func (pc *ProcessingController) ActivateInterface(c *gin.Context) {
+	if !pc.checkEngine(c) {
+		return
+	}
 	interfaceID := c.Param("id")
 
 	// DEBUG: Log at controller level
@@ -156,6 +183,9 @@ func (pc *ProcessingController) ActivateInterface(c *gin.Context) {
 
 // DeactivateInterface deactivates a specific interface
 func (pc *ProcessingController) DeactivateInterface(c *gin.Context) {
+	if !pc.checkEngine(c) {
+		return
+	}
 	interfaceID := c.Param("id")
 	if interfaceID == "" {
 		c.JSON(http.StatusBadRequest, gin.H{
@@ -184,6 +214,9 @@ func (pc *ProcessingController) DeactivateInterface(c *gin.Context) {
 
 // GetInterfaceStatus returns status for a specific interface
 func (pc *ProcessingController) GetInterfaceStatus(c *gin.Context) {
+	if !pc.checkEngine(c) {
+		return
+	}
 	interfaceID := c.Param("id")
 	if interfaceID == "" {
 		c.JSON(http.StatusBadRequest, gin.H{
@@ -255,6 +288,9 @@ func (pc *ProcessingController) GetQueueStats(c *gin.Context) {
 // MVC + OOB: Retrieves parsedJSON from MongoDB → uses interface mapping → generates FHIR → stores output
 // POST /api/processing/messages/:interfaceId/:messageId/transform
 func (pc *ProcessingController) TransformStoredMessage(c *gin.Context) {
+	if !pc.checkEngine(c) {
+		return
+	}
 	interfaceID := c.Param("interfaceId")
 	messageID := c.Param("messageId")
 
@@ -291,6 +327,9 @@ func (pc *ProcessingController) TransformStoredMessage(c *gin.Context) {
 // TransformInterfaceMessages transforms all untransformed messages for an interface
 // POST /api/processing/interfaces/:interfaceId/transform?limit=100
 func (pc *ProcessingController) TransformInterfaceMessages(c *gin.Context) {
+	if !pc.checkEngine(c) {
+		return
+	}
 	interfaceID := c.Param("interfaceId")
 	if interfaceID == "" {
 		c.JSON(http.StatusBadRequest, gin.H{

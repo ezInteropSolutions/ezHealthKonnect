@@ -117,6 +117,17 @@ class InterfaceLifecycleController {
             const result = await response.json();
             console.log(`✅ Interface activated via Go backend: ${interfaceId}`, result);
 
+            // Update database interface_status to 'active'
+            const database = require('../config/database');
+            const sequelize = database.sequelize;
+            await sequelize.query(
+                'UPDATE interfaces SET interface_status = :status WHERE id = :interface_id',
+                {
+                    replacements: { status: 'active', interface_id: interfaceId },
+                    type: sequelize.QueryTypes.UPDATE
+                }
+            );
+
             // Log activation event
             await this.logAuditEvent(userId, 'INTERFACE_ACTIVATED', {
                 interfaceId: interfaceId,
@@ -150,9 +161,46 @@ class InterfaceLifecycleController {
             const { reason } = req.body;
             const userId = req.user?.id || req.session?.user?.id;
 
-            console.log(`⏸️ Deactivating interface: ${interfaceId}`);
+            console.log(`⏹️ Deactivating interface: ${interfaceId}`);
 
-            await this.processingEngine.deactivateInterface(interfaceId, reason || 'manual');
+            // Call Go backend to deactivate the interface
+            let fetch;
+            try {
+                fetch = require('node-fetch');
+            } catch {
+                fetch = global.fetch;
+            }
+
+            if (!fetch) {
+                throw new Error('No fetch implementation available');
+            }
+
+            const goBackendUrl = process.env.GO_BACKEND_URL || 'http://localhost:8080';
+            const response = await fetch(`${goBackendUrl}/api/processing/interfaces/${interfaceId}/deactivate`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                timeout: 30000
+            });
+
+            if (!response.ok) {
+                const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
+                throw new Error(`Go backend deactivation failed: ${response.status} - ${errorData.error || response.statusText}`);
+            }
+
+            console.log(`✅ Interface stopped via Go backend: ${interfaceId}`);
+
+            // Update database interface_status to 'configured' (stopped state)
+            const database = require('../config/database');
+            const sequelize = database.sequelize;
+            await sequelize.query(
+                'UPDATE interfaces SET interface_status = :status WHERE id = :interface_id',
+                {
+                    replacements: { status: 'configured', interface_id: interfaceId },
+                    type: sequelize.QueryTypes.UPDATE
+                }
+            );
 
             // Log deactivation event
             await this.logAuditEvent(userId, 'INTERFACE_DEACTIVATED', {
@@ -165,7 +213,7 @@ class InterfaceLifecycleController {
                 success: true,
                 message: `Interface ${interfaceId} deactivated successfully`,
                 interfaceId: interfaceId,
-                status: 'paused'
+                status: 'configured'
             });
 
         } catch (error) {
@@ -173,6 +221,82 @@ class InterfaceLifecycleController {
             res.status(500).json({
                 success: false,
                 message: 'Failed to deactivate interface',
+                error: error.message,
+                interfaceId: req.params.interfaceId
+            });
+        }
+    }
+
+    /**
+     * Pause a specific interface (graceful stop - waits for queue to clear)
+     */
+    async pauseInterface(req, res) {
+        try {
+            const { interfaceId } = req.params;
+            const { graceful, waitForQueue } = req.body;
+            const userId = req.user?.id || req.session?.user?.id;
+
+            console.log(`⏸️ Pausing interface: ${interfaceId} (graceful: ${graceful}, waitForQueue: ${waitForQueue})`);
+
+            // Call Go backend to deactivate the interface
+            let fetch;
+            try {
+                fetch = require('node-fetch');
+            } catch {
+                fetch = global.fetch;
+            }
+
+            if (!fetch) {
+                throw new Error('No fetch implementation available');
+            }
+
+            const goBackendUrl = process.env.GO_BACKEND_URL || 'http://localhost:8080';
+            const response = await fetch(`${goBackendUrl}/api/processing/interfaces/${interfaceId}/deactivate`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                timeout: 30000
+            });
+
+            if (!response.ok) {
+                const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
+                throw new Error(`Go backend deactivation failed: ${response.status} - ${errorData.error || response.statusText}`);
+            }
+
+            console.log(`✅ Interface paused via Go backend: ${interfaceId}`);
+
+            // Update database interface_status to 'paused'
+            const database = require('../config/database');
+            const sequelize = database.sequelize;
+            await sequelize.query(
+                'UPDATE interfaces SET interface_status = :status WHERE id = :interface_id',
+                {
+                    replacements: { status: 'paused', interface_id: interfaceId },
+                    type: sequelize.QueryTypes.UPDATE
+                }
+            );
+
+            // Log pause event
+            await this.logAuditEvent(userId, 'INTERFACE_PAUSED', {
+                interfaceId: interfaceId,
+                graceful: graceful,
+                waitForQueue: waitForQueue,
+                timestamp: new Date()
+            });
+
+            res.json({
+                success: true,
+                message: `Interface ${interfaceId} paused successfully`,
+                interfaceId: interfaceId,
+                status: 'paused'
+            });
+
+        } catch (error) {
+            console.error(`❌ Failed to pause interface ${req.params.interfaceId}:`, error);
+            res.status(500).json({
+                success: false,
+                message: 'Failed to pause interface',
                 error: error.message,
                 interfaceId: req.params.interfaceId
             });

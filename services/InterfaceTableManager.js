@@ -12,9 +12,10 @@ class InterfaceTableManager {
      * CORE: Get table name for interface (dedicated table naming)
      */
     getInterfaceTableName(interfaceId) {
-        // Convert UUID to safe table identifier
-        const shortId = interfaceId.replace(/-/g, '_').substring(0, 16);
-        return `messages_intf_${shortId}`;
+        // Convert UUID to safe table identifier (use FULL UUID, not truncated)
+        // PostgreSQL allows up to 63 chars for identifiers, UUID is 36 chars + prefix = 50 chars total
+        const fullId = interfaceId.replace(/-/g, '_');
+        return `messages_intf_${fullId}`;
     }
 
     /**
@@ -308,7 +309,7 @@ class InterfaceTableManager {
         const finalSortOrder = ['ASC', 'DESC'].includes(sortOrder.toUpperCase()) ? sortOrder.toUpperCase() : 'DESC';
 
         // Standard schema - all interface tables use the same format
-        let selectColumns = 'id, message_id, correlation_id, status, priority, message_type, message_size, received_at, source_type, source_endpoint, processing_completed_at, processing_time_ms, error_count, last_error_message, delivery_status, delivery_attempts';
+        let selectColumns = 'id, message_id, correlation_id, status, priority, message_type, message_size, received_at, source_type, source_endpoint, processing_completed_at, processing_time_ms, parsed_at, parsing_time_ms, error_count, last_error_message, delivery_status, delivery_attempts';
 
         // PERFORMANCE QUERY: Only this interface's table
         const messagesQuery = `

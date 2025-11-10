@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"ezhealthkonnect/models"
 	"ezhealthkonnect/services"
 )
 
@@ -18,14 +19,17 @@ import (
 type ProcessingEngine struct {
 	db                   *sql.DB
 	activeInterfaces     map[string]*InterfaceStatus
-	activeConnectors     map[string]InputConnector       // Track active TCP/HTTP connectors
-	messageChan          map[string]chan Message        // Message channels per interface
+	activeConnectors     map[string]InputConnector               // Track active connectors (ALL 32 types)
+	messageChan          map[string]chan *models.InboundMessage  // Message channels per interface (UNIFIED MODEL)
 	mutex               sync.RWMutex
 	stats               *EngineStats
 	running             bool
 	parserService        *services.MessageParserService // JSON conversion service
 	mongoService         *services.MongoDBMessageService // MongoDB storage
-	// transformationService *services.TransformationService // TODO: Add when service is ready
+	outputDeliveryService *services.OutputDeliveryService // Output delivery service (V21)
+	errorService         *services.ErrorCaptureService // Error capture service (V23)
+	errorHandler         *ErrorHandler                  // Error handler with panic recovery (V23)
+	transformationService *services.TransformationPipelineService // Pipeline-based transformation (MVC + OOB)
 }
 
 // InterfaceStatus tracks the status of an interface
@@ -55,7 +59,7 @@ func NewProcessingEngine(db *sql.DB) *ProcessingEngine {
 		db:               db,
 		activeInterfaces: make(map[string]*InterfaceStatus),
 		activeConnectors: make(map[string]InputConnector),
-		messageChan:      make(map[string]chan Message),
+		messageChan:      make(map[string]chan *models.InboundMessage), // UNIFIED MODEL
 		stats: &EngineStats{
 			StartTime:             time.Now(),
 			LastActivity:          time.Now(),
@@ -84,9 +88,23 @@ func NewProcessingEngine(db *sql.DB) *ProcessingEngine {
 		}
 	}
 
-	// OOB: Auto-initialize transformation service (will be nil if MongoDB unavailable)
-	// TODO: Re-enable when TransformationService is implemented
-	// engine.transformationService = services.InitializeTransformationService(db)
+	// OOB: Auto-initialize transformation pipeline service (MVC pattern)
+	engine.transformationService = services.NewTransformationPipelineService(db)
+	if engine.transformationService != nil {
+		fmt.Printf("✅ Transformation Pipeline Service initialized (MVC + OOB)\n")
+	}
+
+	// OOB: Initialize Output Delivery Service (V21)
+	engine.outputDeliveryService = services.NewOutputDeliveryService(db)
+	fmt.Printf("✅ Output Delivery Service initialized\n")
+
+	// OOB: Initialize Error Capture Service (V23)
+	engine.errorService = services.NewErrorCaptureService(db)
+	fmt.Printf("✅ Error Capture Service initialized\n")
+
+	// OOB: Initialize Error Handler with Panic Recovery (V23)
+	engine.errorHandler = NewErrorHandler(engine.errorService)
+	fmt.Printf("✅ Error Handler initialized - panic recovery enabled\n")
 
 	return engine
 }
@@ -157,14 +175,37 @@ func (pe *ProcessingEngine) ActivateInterface(interfaceID string) error {
 	// Add interface_id to config for connector
 	sourceConfig["interface_id"] = interfaceID
 
-	// Create connector based on source type
-	connector, err := NewTCPInputConnector(sourceConfig)
-	if err != nil {
-		return fmt.Errorf("failed to create connector: %v", err)
+	// Detect source type and connectivity to determine connector type
+	sourceType, _ := sourceConfig["type"].(string)
+	connectivity, _ := sourceConfig["connectivity"].(string)
+
+	// OOB: Map legacy connector type to OOB type name
+	var legacyType string
+	if sourceType == "fhir" && (connectivity == "http" || connectivity == "https") {
+		legacyType = "http"
+	} else if connectivity == "http" || connectivity == "https" {
+		legacyType = "http"
+	} else {
+		legacyType = "tcp"
 	}
 
-	// Create message channel for this interface
-	messageChan := make(chan Message, 100) // Buffered channel
+	// OOB: Convert legacy type to OOB type name (supports ALL 32 connectors)
+	oobTypeName := MapLegacyConnectorType(legacyType, "inbound")
+
+	fmt.Printf("🔍 Creating %s connector for interface %s\n", oobTypeName, interfaceID)
+
+	// OOB: Create connector using unified factory (ALL 32 connectors)
+	connector, err := CreateInputConnector(oobTypeName, sourceConfig)
+	if err != nil {
+		return fmt.Errorf("failed to create connector '%s': %v", oobTypeName, err)
+	}
+
+	// Create message channel for this interface (HIGH-VOLUME BUFFER for enterprise scale)
+	bufferSize := 10000 // OOB: Configurable per interface for millions/billions of messages
+	if customBuffer, ok := sourceConfig["buffer_size"].(float64); ok {
+		bufferSize = int(customBuffer)
+	}
+	messageChan := make(chan *models.InboundMessage, bufferSize) // UNIFIED MODEL + ENTERPRISE BUFFER
 
 	// Start connector
 	ctx := context.Background()

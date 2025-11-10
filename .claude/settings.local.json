@@ -1,9 +1,29 @@
 {
   "permissions": {
     "allow": [
-      "Bash(docker exec ezhealthkonnect-postgres psql -U ezhealth_user -d ezhealthkonnect -c \"SELECT interface_id, output_table_name, schema_version, updated_at FROM output_table_metadata ORDER BY updated_at DESC;\")",
-      "Bash(docker exec ezhealthkonnect-postgres psql -U ezhealth_user -d ezhealthkonnect -c \"SELECT COUNT(*) as total_output_messages, COUNT(CASE WHEN mongo_synced THEN 1 END) as mongo_synced FROM output_intf_629ac1e8_0c50_447a_b93f_ebfc15830a7d;\")",
-      "Bash(docker exec ezhealthkonnect-postgres psql -U ezhealth_user -d ezhealthkonnect -c \"SELECT COUNT(*) as total_output_messages, COUNT(CASE WHEN status = ''transformed'' THEN 1 END) as successful_transformations FROM output_intf_629ac1e8_0c50_447a_b93f_ebfc15830a7d;\")"
+      "Bash(docker-compose restart:*)",
+      "Bash(docker logs:*)",
+      "Bash(docker exec:*)",
+      "Bash(curl:*)",
+      "Bash(docker-compose stop:*)",
+      "Bash(docker-compose build:*)",
+      "Bash(docker-compose up:*)",
+      "Bash(docker-compose logs:*)",
+      "Bash(docker-compose exec app grep:*)",
+      "Bash(docker-compose exec:*)",
+      "Bash(docker ps:*)",
+      "Bash(docker-compose ps:*)",
+      "Bash(docker-compose run:*)",
+      "Bash(/c/Projects/ezHealthKonnect/services/transformation_pipeline_service.go)",
+      "Bash(timeout 300 docker-compose build:*)",
+      "Bash(powershell -Command:*)",
+      "Bash(powershell:*)",
+      "Bash(/dev/null)",
+      "Bash(timeout 10 powershell:*)",
+      "Bash(cat:*)",
+      "Bash(docker-compose down:*)",
+      "Bash(node fix_mongo_schema.js:*)",
+      "Bash(ss:*)"
     ],
     "deny": [],
     "ask": []

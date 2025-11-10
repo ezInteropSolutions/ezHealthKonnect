@@ -392,18 +392,3 @@ func (engine *TransformationEngine) SaveTransformationPipeline(ctx context.Conte
 	log.Printf("✅ Saved transformation pipeline: %s", pipeline.Name)
 	return nil
 }
-
-// Helper function for string contains check
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(substr) == 0 ||
-		(len(substr) > 0 && containsSubstring(s, substr)))
-}
-
-func containsSubstring(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
-}

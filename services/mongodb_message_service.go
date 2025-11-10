@@ -375,3 +375,8 @@ func (mms *MongoDBMessageService) getRawMessageCollection(interfaceID string) *m
 	collectionName := fmt.Sprintf("raw_messages_%s", interfaceID)
 	return mms.client.Database(mms.database).Collection(collectionName)
 }
+
+// GetCollection returns a MongoDB collection by name (public helper for external packages)
+func (mms *MongoDBMessageService) GetCollection(collectionName string) *mongo.Collection {
+	return mms.client.Database(mms.database).Collection(collectionName)
+}

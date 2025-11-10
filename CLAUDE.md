@@ -549,3 +549,132 @@ Deliver to Destination
 ### Archived Documentation
 - 📦 **[docs/archive/](docs/archive/)** - 20 legacy/redundant documentation files (consolidated into SYSTEM_DOCUMENTATION.md)
 
+## Multi-Connectivity Architecture (October 2025)
+
+### Overview
+Universal connector framework supporting 32 OOB connectors for healthcare integration patterns. System acts as a **middleware/integration engine** - receiving messages from any source and delivering to any destination.
+
+### Phase 1: Foundation (✅ Complete - October 26, 2025)
+**Database Schema** - 4 migrations created:
+- **V26**: Multi-connectivity foundation (4 tables: connectivity_types, interface_connectivity, cron_jobs, connectivity_execution_log)
+- **V27**: Database connectors (PostgreSQL, MySQL, SQL Server, MongoDB, Oracle - inbound/outbound)
+- **V28**: Message queues + cloud storage (RabbitMQ, Kafka, Redis, AWS S3, Azure Blob, GCS, SFTP, FTP)
+- **V29**: TCP/MLLP outbound (middleware scenario support - user-requested feature)
+
+**Models & Services**:
+- [models/connectivity_models.go](models/connectivity_models.go) - Complete type definitions
+- [services/connectivity_service.go](services/connectivity_service.go) - CRUD operations with NULL JSONB handling
+- [controllers/connectivity_controller.go](controllers/connectivity_controller.go) - 16 REST API endpoints
+
+**Final Count**: 32 connectors (16 inbound + 16 outbound) with perfect symmetry
+
+### Phase 2A: Connector Framework (✅ Complete - October 26, 2025)
+**Universal Interface** - [services/connectors/connector_interface.go](services/connectors/connector_interface.go):
+```go
+type Connector interface {
+    Initialize(config []byte) error
+    GetMetadata() ConnectorMetadata
+    Validate() error
+    TestConnection(ctx context.Context) error
+    Close() error
+    GetStatus() ConnectorStatus
+}
+
+type InboundConnector interface {
+    Connector
+    Start(ctx context.Context, messageChan chan<- *models.InboundMessage) error
+    Stop() error
+    SupportsCron() bool
+}
+
+type OutboundConnector interface {
+    Connector
+    Send(ctx context.Context, message *models.OutboundMessage) (*DeliveryResult, error)
+    SendBatch(ctx context.Context, messages []*models.OutboundMessage) ([]*DeliveryResult, error)
+    SupportsBatch() bool
+}
+```
+
+**Base Implementation** - [services/connectors/base_connector.go](services/connectors/base_connector.go):
+- BaseConnector with thread-safe state management (RWMutex)
+- BaseInboundConnector with graceful shutdown (stop channel)
+- BaseOutboundConnector with batch support
+
+**Factory Pattern** - [services/connectors/connector_factory.go](services/connectors/connector_factory.go):
+- Global singleton factory with automatic registration
+- All 32 connectors registered at initialization
+- Support for custom connector plugins
+
+**Connector Stubs** - [services/connectors/connector_stubs.go](services/connectors/connector_stubs.go):
+- Minimal implementations for all 32 connectors
+- Ready for actual implementation logic
+
+### Phase 2B: Connector Implementation (🔄 In Progress - October 26, 2025)
+
+**Implemented Connectors**:
+1. ✅ **TCP/MLLP Inbound** - [tcp_mllp_inbound.go](services/connectors/tcp_mllp_inbound.go)
+   - Full MLLP protocol parser (0x0B start, 0x1C/0x0D end)
+   - TLS 1.2/1.3 support with certificate configuration
+   - Connection pooling with configurable max connections
+   - Automatic ACK/NACK generation
+   - Keep-alive with configurable period
+   - Read/write timeout handling
+   - Graceful shutdown with active connection tracking
+   - Message type extraction from MSH segment
+   - Message control ID correlation
+
+**Priority Queue** (Next 3-4 weeks):
+2. ⏳ TCP/MLLP Outbound (middleware scenario - send HL7 to downstream)
+3. ⏳ HTTP Outbound (FHIR delivery to REST endpoints)
+4. ⏳ File Writer (local archiving and debugging)
+5. ⏳ PostgreSQL Inbound/Outbound (EHR database integration)
+6. ⏳ MongoDB Inbound/Outbound (FHIR persistence)
+7. ⏳ AWS S3 Inbound/Outbound (cloud file handling)
+8. ⏳ Kafka Producer (event streaming)
+9. ⏳ RabbitMQ Publisher (message queue delivery)
+
+### Connector Catalog
+
+**Network Connectors (4)**:
+- tcp_mllp_inbound ✅ / tcp_mllp_outbound ⏳
+- http_rest_inbound / http_outbound ⏳
+
+**File System Connectors (2)**:
+- file_listener / file_writer ⏳
+
+**Database Connectors (10)**:
+- postgresql_inbound / postgresql_outbound ⏳
+- mysql_inbound / mysql_outbound
+- sqlserver_inbound / sqlserver_outbound
+- mongodb_inbound / mongodb_outbound ⏳
+- oracle_inbound / oracle_outbound
+
+**Message Queue Connectors (6)**:
+- rabbitmq_inbound / rabbitmq_outbound ⏳
+- kafka_inbound / kafka_outbound ⏳
+- redis_inbound / redis_outbound
+
+**Cloud Storage Connectors (6)**:
+- aws_s3_inbound / aws_s3_outbound ⏳
+- azure_blob_inbound / azure_blob_outbound
+- gcs_inbound / gcs_outbound
+
+**File Transfer Connectors (4)**:
+- sftp_inbound / sftp_outbound
+- ftp_inbound / ftp_outbound
+
+### Documentation
+- 📘 **[CONNECTIVITY_CATALOG.md](CONNECTIVITY_CATALOG.md)** - Complete catalog with all 32 connectors
+- 📗 **[CONNECTOR_IMPLEMENTATION_GUIDE.md](CONNECTOR_IMPLEMENTATION_GUIDE.md)** - Step-by-step implementation guide
+- 🏗️ **[CONNECTIVITY_ARCHITECTURE.md](CONNECTIVITY_ARCHITECTURE.md)** - Architecture design and patterns
+- 🔐 **[CONNECTIVITY_CLOUD_AND_SECURITY.md](CONNECTIVITY_CLOUD_AND_SECURITY.md)** - Cloud integration and security
+- 📋 **[CONNECTIVITY_PATTERNS.md](CONNECTIVITY_PATTERNS.md)** - Integration pattern explanations
+
+### Key Architectural Decisions
+1. **OOB Pattern** - Metadata-driven configuration stored in database
+2. **Factory Pattern** - Dynamic connector instantiation by type name
+3. **Interface Segregation** - Separate interfaces for inbound/outbound connectors
+4. **Thread Safety** - All connectors use mutex-protected state management
+5. **Graceful Shutdown** - Context cancellation + stop channels for clean termination
+6. **Middleware Support** - TCP/MLLP outbound enables bidirectional scenarios (user feedback)
+

@@ -154,24 +154,28 @@ class FhirInterfaceHandler extends BaseInterfaceHandler {
 
     /**
      * Validate FHIR-specific configuration
+     * Updated for shared components field IDs
      */
     validateConfiguration() {
         const errors = [];
-        const fhirServerUrl = this.getFieldValue('editFhirServerUrl');
 
-        if (!fhirServerUrl.trim()) {
-            errors.push('FHIR Server URL is required');
+        // Shared components use 'edittargetEndpoint' for FHIR Base URL
+        const targetEndpoint = this.getFieldValue('edittargetEndpoint');
+
+        if (!targetEndpoint || !targetEndpoint.trim()) {
+            errors.push('FHIR Base URL is required');
         } else {
             try {
-                new URL(fhirServerUrl);
+                new URL(targetEndpoint);
             } catch (e) {
-                errors.push('FHIR Server URL must be a valid URL');
+                errors.push('FHIR Base URL must be a valid URL (e.g., http://localhost:8080/fhir)');
             }
         }
 
-        const resourceEndpoint = this.getFieldValue('editResourceEndpoint');
-        if (!resourceEndpoint.trim()) {
-            errors.push('Resource Endpoint is required');
+        // Optional: Validate delivery mode if present
+        const deliveryMode = this.getFieldValue('editfhirDeliveryMode');
+        if (deliveryMode && !['immediate', 'batch', 'queued'].includes(deliveryMode)) {
+            errors.push('Invalid delivery mode selected');
         }
 
         return {

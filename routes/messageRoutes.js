@@ -56,6 +56,12 @@ router.get('/stats', sessionAuth, (req, res) => {
 // Get detailed message by ID
 router.get('/:messageId', sessionAuth, (req, res) => MessageController.getMessageDetail(req, res));
 
+// Get data lineage for a message (input → transformation → output → delivery)
+router.get('/:messageId/lineage', sessionAuth, (req, res) => MessageController.getDataLineage(req, res));
+
+// Get errors and warnings for a message (V23 - Error Handling Enhancement)
+router.get('/:messageId/errors', sessionAuth, (req, res) => MessageController.getMessageErrors(req, res));
+
 // Send test message to interface
 router.post('/send/:interfaceId', sessionAuth, (req, res) => MessageController.sendMessage(req, res));
 

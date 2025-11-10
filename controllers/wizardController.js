@@ -70,12 +70,13 @@ class WizardController {
         const mappings = {
             'hl7v2': { format: 'hl7', connectivity: 'tcp' },
             'hl7': { format: 'hl7', connectivity: 'tcp' },
+            'fhir': { format: 'fhir', connectivity: 'http' },  // FHIR receiver
             'file': { format: 'flatfile', connectivity: 'file' },
             'http': { format: 'hl7', connectivity: 'http' },
             'database': { format: 'database', connectivity: 'database' },
             'manual': { format: 'hl7', connectivity: 'tcp' }
         };
-        
+
         const mapping = mappings[uiSourceType] || { format: 'hl7', connectivity: 'tcp' };
         console.log(`Source mapping: ${uiSourceType} → format: ${mapping.format}, connectivity: ${mapping.connectivity}`);
         return mapping;

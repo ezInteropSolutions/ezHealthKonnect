@@ -10,31 +10,33 @@
     class WizardNavigation {
         constructor() {
             this.currentStep = 1;
-            this.totalSteps = 5;
+            this.totalSteps = 6; // Updated from 5 to 6
             this.isMaximized = false;
             this.validationInProgress = false;
             this.isModalOpen = false;
             this.modalListenersSetup = false;
-            
+
             // Track step initialization
             this.stepsInitialized = new Set();
-            
+
             this.stepTitles = [
                 'Interface Configuration',
-                'Upload Sample HL7 Message', 
+                'Upload Sample HL7 Message',
                 'Review Parsed Data',
                 'Configure Data Mapping',
-                'Deploy Interface'
+                'FHIR Output Configuration', // New Step 5
+                'Deploy Interface' // Moved from Step 5 to Step 6
             ];
-            
+
             this.stepDescriptions = [
                 'Set up the basic configuration for your HL7 interface',
                 'Upload a sample HL7 message to analyze structure',
-                'Verify the HL7 message structure and segments', 
+                'Verify the HL7 message structure and segments',
                 'Configure how HL7 fields map to target format',
-                'Review and deploy your new HL7 interface'
+                'Configure where and how to deliver FHIR resources', // New Step 5
+                'Review and deploy your new HL7 interface' // Step 6
             ];
-            
+
             this.init();
         }
         
@@ -154,28 +156,81 @@
         console.log('Validation already in progress, please wait...');
         return;
     }
-    
+
     console.log(`Next step requested from ${this.currentStep}`);
-    
+
     try {
         this.validationInProgress = true;
-        
+
         // Validate current step using step handlers (preferred) or fallback
         const validationResult = await this.validateCurrentStep();
         console.log('Validation result:', validationResult);
-        
+
         if (!validationResult) {
             console.log('🚫 BLOCKED: Current step validation failed - step transition cancelled');
             this.validationInProgress = false;
             return; // BLOCK progression - this is the key fix
         }
-        
+
         // Only proceed if validation passes
         if (this.currentStep < this.totalSteps) {
-            this.setCurrentStep(this.currentStep + 1);
-            console.log(`✅ Successfully moved to step ${this.currentStep}`);
+            let nextStep = this.currentStep + 1;
+
+            // CONDITIONAL STEP LOGIC: Skip HL7-specific steps for FHIR sources
+            if (this.currentStep === 1) {
+                const sourceType = document.getElementById('wizardSourceType')?.value;
+                console.log('Source type detected:', sourceType);
+
+                // If source is FHIR, skip steps 2 & 3 (HL7 upload and parsing)
+                if (sourceType && sourceType.toLowerCase() === 'fhir') {
+                    console.log('🎯 FHIR source detected - skipping steps 2 & 3 (HL7 upload/parsing)');
+                    nextStep = 4; // Jump directly to mapping configuration
+                }
+            }
+
+            // CONDITIONAL STEP LOGIC: Show/hide Step 5 (FHIR Output) based on FHIR transformation
+            if (this.currentStep === 4) {
+                // Check if FHIR transformation is enabled
+                const fhirEnabled = this.isFhirTransformationEnabled();
+                console.log('FHIR transformation enabled:', fhirEnabled);
+
+                if (fhirEnabled) {
+                    // Show Step 5 (FHIR Output) - both sidebar indicator AND step content
+                    const step5Indicator = document.getElementById('stepIndicator5');
+                    if (step5Indicator) {
+                        step5Indicator.style.display = 'block';
+                    }
+
+                    const step5Content = document.getElementById('step5');
+                    if (step5Content) {
+                        step5Content.style.display = 'block';
+                        console.log('✅ Step 5 (FHIR Output) shown - sidebar and content');
+                    }
+
+                    // Next step is Step 5
+                    nextStep = 5;
+                } else {
+                    // Hide Step 5 (FHIR Output) and skip to Step 6 (Deploy)
+                    const step5Indicator = document.getElementById('stepIndicator5');
+                    if (step5Indicator) {
+                        step5Indicator.style.display = 'none';
+                    }
+
+                    const step5Content = document.getElementById('step5');
+                    if (step5Content) {
+                        step5Content.style.display = 'none';
+                        console.log('⏭️ Step 5 (FHIR Output) hidden - skipping to Deploy');
+                    }
+
+                    // Skip Step 5, go directly to Step 6 (Deploy)
+                    nextStep = 6;
+                }
+            }
+
+            this.setCurrentStep(nextStep);
+            console.log(`✅ Successfully moved to step ${nextStep}`);
         }
-        
+
     } catch (error) {
         console.error('Next step error:', error);
         this.showNotification('An error occurred during validation. Please try again.', 'error');
@@ -218,20 +273,66 @@ async validateCurrentStep() {
         case 4:
             return true; // Mapping step basic validation
         case 5:
-            return true; // Final step
+            return true; // FHIR Output step (conditional)
+        case 6:
+            return true; // Deploy step
         default:
             return true;
     }
 }
 
 
-        
+
+        /**
+         * Check if FHIR transformation is enabled in Step 4
+         */
+        isFhirTransformationEnabled() {
+            // Check if FHIR transformation checkbox/toggle is checked
+            const fhirEnabled = document.getElementById('enableFhirTransform')?.checked ||
+                               document.getElementById('fhirTransformEnabled')?.checked ||
+                               false;
+
+            // Alternative: Check if target type is FHIR
+            const targetType = document.getElementById('wizardTargetType')?.value;
+            const targetIsFhir = targetType && targetType.toLowerCase().includes('fhir');
+
+            return fhirEnabled || targetIsFhir;
+        }
+
         previousStep() {
             console.log(`Previous step requested from ${this.currentStep}`);
-            
+
             if (this.currentStep > 1) {
-                this.setCurrentStep(this.currentStep - 1);
-                console.log(`Moved to step ${this.currentStep}`);
+                let prevStep = this.currentStep - 1;
+
+                // CONDITIONAL STEP LOGIC: Skip HL7-specific steps for FHIR sources
+                if (this.currentStep === 4) {
+                    const sourceType = document.getElementById('wizardSourceType')?.value;
+                    console.log('Source type detected on back navigation:', sourceType);
+
+                    // If source is FHIR, skip steps 2 & 3 (HL7 upload and parsing)
+                    if (sourceType && sourceType.toLowerCase() === 'fhir') {
+                        console.log('🎯 FHIR source detected - skipping back to step 1 (bypassing steps 2 & 3)');
+                        prevStep = 1; // Jump back to interface configuration
+                    }
+                }
+
+                // CONDITIONAL STEP LOGIC: Handle backward navigation from Step 6 (Deploy)
+                if (this.currentStep === 6) {
+                    const fhirEnabled = this.isFhirTransformationEnabled();
+                    console.log('Going back from Deploy, FHIR enabled:', fhirEnabled);
+
+                    if (fhirEnabled) {
+                        // Go back to Step 5 (FHIR Output)
+                        prevStep = 5;
+                    } else {
+                        // Skip Step 5, go back to Step 4 (Mapping)
+                        prevStep = 4;
+                    }
+                }
+
+                this.setCurrentStep(prevStep);
+                console.log(`Moved to step ${prevStep}`);
             }
         }
         

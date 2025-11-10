@@ -300,7 +300,11 @@ class MessageController {
             try {
                 if (interfaceData.source_type === 'tcp' || interfaceData.source_type === 'mllp') {
                     // Send via TCP/MLLP connectivity
-                    const host = sourceConfig.host || 'localhost';
+                    // Force IPv4 for localhost to match Go listener (0.0.0.0)
+                    let host = sourceConfig.host || 'localhost';
+                    if (host === 'localhost') {
+                        host = '127.0.0.1';  // Force IPv4 instead of IPv6
+                    }
                     const port = sourceConfig.port || 6661;
 
                     const net = require('net');
@@ -312,17 +316,20 @@ class MessageController {
                         client.connect(port, host, () => {
                             console.log(`📡 Connected to ${host}:${port}`);
 
-                            // For MLLP, wrap message in MLLP envelope
-                            let messageToSend = messageContent;
-                            if (interfaceData.source_type === 'mllp') {
-                                messageToSend = `\x0B${messageContent}\x1C\x0D`;
-                            }
+                            // TCP interfaces expect MLLP framing (HL7 protocol standard)
+                            // MLLP format: <VT>message<FS><CR> where VT=0x0B, FS=0x1C, CR=0x0D
+                            const messageToSend = `\x0B${messageContent}\x1C\x0D`;
 
+                            console.log(`📤 Sending MLLP-wrapped message (${messageContent.length} bytes + framing)`);
                             client.write(messageToSend);
                         });
 
                         client.on('data', (data) => {
                             responseData += data.toString();
+                            console.log(`📥 Received ACK response (${data.length} bytes)`);
+
+                            // Close connection after receiving ACK (don't wait for server to close)
+                            client.end();
                         });
 
                         client.on('close', () => {
@@ -343,23 +350,27 @@ class MessageController {
                             });
                         });
 
-                        // Timeout after 10 seconds
+                        // Timeout after 30 seconds (allow time for HL7→FHIR transformation)
                         setTimeout(() => {
                             client.destroy();
                             reject({
                                 success: false,
                                 status: 408,
-                                response: 'Connection timeout',
+                                response: 'Connection timeout - no ACK received within 30 seconds',
                                 method: 'tcp_connectivity'
                             });
-                        }, 10000);
+                        }, 30000);
                     });
 
                     deliveryResult = await sendPromise;
 
                 } else if (interfaceData.source_type === 'fhir' || interfaceData.source_type === 'http') {
                     // Send via HTTP connectivity
-                    const host = sourceConfig.host || 'localhost';
+                    // Force IPv4 for localhost to match Go listener (0.0.0.0)
+                    let host = sourceConfig.host || 'localhost';
+                    if (host === 'localhost') {
+                        host = '127.0.0.1';  // Force IPv4 instead of IPv6
+                    }
                     const port = sourceConfig.port || 8090;
                     const path = sourceConfig.path || '/fhir';
 
@@ -722,6 +733,14 @@ class MessageController {
                     tableStrategy: 'dedicated',
                     tableName: result.tableName
                 };
+
+                // IMPORTANT: Add interface_name to each message (dedicated tables don't have this column)
+                if (result.messages && Array.isArray(result.messages)) {
+                    result.messages = result.messages.map(msg => ({
+                        ...msg,
+                        interface_name: interfaceInfo.name
+                    }));
+                }
             }
 
             res.json({
@@ -878,49 +897,46 @@ class MessageController {
                 });
             }
 
-            // Time range calculation
-            let timeFilter = '';
-            switch (timeRange) {
-                case '1h':
-                    timeFilter = "AND mpe.received_at >= NOW() - INTERVAL '1 hour'";
-                    break;
-                case '24h':
-                    timeFilter = "AND mpe.received_at >= NOW() - INTERVAL '24 hours'";
-                    break;
-                case '7d':
-                    timeFilter = "AND mpe.received_at >= NOW() - INTERVAL '7 days'";
-                    break;
-                case '30d':
-                    timeFilter = "AND mpe.received_at >= NOW() - INTERVAL '30 days'";
-                    break;
-                default:
-                    timeFilter = "AND mpe.received_at >= NOW() - INTERVAL '24 hours'";
+            // Get stats from interface-specific table
+            const stats = await this.tableManager.getInterfaceTableStats(interfaceId);
+
+            // If no stats (table doesn't exist), return zeros
+            if (!stats) {
+                return res.json({
+                    success: true,
+                    data: {
+                        interface: interfaceCheck[0],
+                        timeRange,
+                        stats: {
+                            total_messages: 0,
+                            successful_messages: 0,
+                            failed_messages: 0,
+                            processing_messages: 0,
+                            avg_processing_time: 0,
+                            last_message_at: null,
+                            unique_message_types: 0
+                        }
+                    }
+                });
             }
 
-            const statsQuery = `
-                SELECT
-                    COUNT(*) as total_messages,
-                    COUNT(CASE WHEN mpe.status IN ('sent', 'delivered') THEN 1 END) as successful_messages,
-                    COUNT(CASE WHEN mpe.status IN ('failed', 'error') THEN 1 END) as failed_messages,
-                    COUNT(CASE WHEN mpe.status IN ('received', 'processing', 'transforming') THEN 1 END) as processing_messages,
-                    AVG(mpe.processing_time_ms) as avg_processing_time,
-                    MAX(mpe.received_at) as last_message_at,
-                    COUNT(DISTINCT mpe.message_type) as unique_message_types
-                FROM message_processing_enhanced mpe
-                WHERE mpe.interface_id = :interfaceId ${timeFilter}
-            `;
-
-            const statsResult = await this.database.sequelize.query(statsQuery, {
-                replacements: { interfaceId },
-                type: this.database.sequelize.QueryTypes.SELECT
-            });
+            // Format stats for frontend
+            const formattedStats = {
+                total_messages: parseInt(stats.total_messages) || 0,
+                successful_messages: parseInt(stats.successful_messages) || 0,
+                failed_messages: parseInt(stats.failed_messages) || 0,
+                processing_messages: parseInt(stats.processing_messages) || 0,
+                avg_processing_time: parseFloat(stats.avg_processing_time) || 0,
+                last_message_at: stats.last_message_at,
+                unique_message_types: parseInt(stats.unique_message_types) || 0
+            };
 
             res.json({
                 success: true,
                 data: {
                     interface: interfaceCheck[0],
                     timeRange,
-                    stats: statsResult[0]
+                    stats: formattedStats
                 }
             });
 
@@ -1358,6 +1374,401 @@ class MessageController {
                 details: error.message
             });
         }
+    }
+
+    /**
+     * Get data lineage for a message (input → transformation → output)
+     */
+    async getDataLineage(req, res) {
+        try {
+            await this.ensureDatabase();
+
+            const { messageId } = req.params;
+            const userId = req.session.user.id;
+
+            console.log(`🔍 Getting data lineage for message: ${messageId}`);
+
+            // Step 1: Find the input message across all interface tables
+            let inputMessage;
+            try {
+                // Find which interface table contains this message
+                const allInterfaces = await this.database.sequelize.query(`
+                    SELECT id, name FROM interfaces WHERE user_id = :userId
+                `, {
+                    replacements: { userId },
+                    type: this.database.sequelize.QueryTypes.SELECT
+                });
+
+                for (const intf of allInterfaces) {
+                    const tableName = `messages_intf_${intf.id.replace(/-/g, '_')}`;
+                    try {
+                        const result = await this.database.sequelize.query(`
+                            SELECT
+                                m.*,
+                                '${intf.id}' as interface_id,
+                                '${intf.name}' as interface_name
+                            FROM ${tableName} m
+                            WHERE m.id = :messageId
+                            LIMIT 1
+                        `, {
+                            replacements: { messageId },
+                            type: this.database.sequelize.QueryTypes.SELECT
+                        });
+
+                        if (result.length > 0) {
+                            inputMessage = result[0];
+                            inputMessage.input_table_name = tableName;
+                            break;
+                        }
+                    } catch (err) {
+                        // Table doesn't exist or no access, continue
+                        continue;
+                    }
+                }
+            } catch (err) {
+                console.error('Error finding input message:', err);
+            }
+
+            if (!inputMessage) {
+                return res.status(404).json({
+                    success: false,
+                    error: 'Message not found'
+                });
+            }
+
+            // Step 2: Get the output message from output table (if exists)
+            const outputTableName = `output_intf_${inputMessage.interface_id.replace(/-/g, '_')}`;
+            let outputMessage = null;
+
+            try {
+                const outputResult = await this.database.sequelize.query(`
+                    SELECT *
+                    FROM ${outputTableName}
+                    WHERE input_message_id = :inputMessageId
+                       OR correlation_id = :correlationId
+                    ORDER BY created_at DESC
+                    LIMIT 1
+                `, {
+                    replacements: {
+                        inputMessageId: inputMessage.message_id,
+                        correlationId: inputMessage.correlation_id || inputMessage.message_id
+                    },
+                    type: this.database.sequelize.QueryTypes.SELECT
+                });
+
+                if (outputResult.length > 0) {
+                    outputMessage = outputResult[0];
+                    outputMessage.output_table_name = outputTableName;
+                }
+            } catch (err) {
+                console.log(`⚠️ No output table found for interface ${inputMessage.interface_id}`);
+            }
+
+            // Step 3: Get target interface (where output was delivered)
+            let targetInterface = null;
+            let deliveredMessage = null;
+
+            if (outputMessage && outputMessage.delivery_status === 'delivered') {
+                // Get target interface from source interface's target_config
+                const sourceInterfaceData = await this.database.sequelize.query(`
+                    SELECT target_config FROM interfaces WHERE id = :interfaceId
+                `, {
+                    replacements: { interfaceId: inputMessage.interface_id },
+                    type: this.database.sequelize.QueryTypes.SELECT
+                });
+
+                let targetInterfaceId = null;
+                if (sourceInterfaceData.length > 0 && sourceInterfaceData[0].target_config) {
+                    const targetConfig = sourceInterfaceData[0].target_config;
+                    // Extract target interface ID from target config (if it's an interface-based target)
+                    targetInterfaceId = targetConfig.interfaceId || targetConfig.interface_id;
+                }
+
+                if (targetInterfaceId) {
+                    try {
+                        const targetTableName = `messages_intf_${targetInterfaceId.replace(/-/g, '_')}`;
+                        const deliveredResult = await this.database.sequelize.query(`
+                            SELECT m.*, i.name as interface_name, i.source_type, i.target_type
+                            FROM ${targetTableName} m
+                            JOIN interfaces i ON i.id = :targetInterfaceId
+                            WHERE m.correlation_id = :correlationId
+                               OR m.message_id LIKE '%' || :inputMessageId || '%'
+                            ORDER BY m.received_at DESC
+                            LIMIT 1
+                        `, {
+                            replacements: {
+                                targetInterfaceId,
+                                correlationId: outputMessage.correlation_id,
+                                inputMessageId: inputMessage.message_id
+                            },
+                            type: this.database.sequelize.QueryTypes.SELECT
+                        });
+
+                        if (deliveredResult.length > 0) {
+                            deliveredMessage = deliveredResult[0];
+                            targetInterface = {
+                                id: targetInterfaceId,
+                                name: deliveredResult[0].interface_name,
+                                source_type: deliveredResult[0].source_type,
+                                target_type: deliveredResult[0].target_type
+                            };
+                        }
+                    } catch (err) {
+                        console.log(`⚠️ Could not find delivered message in target interface`);
+                    }
+                }
+            }
+
+            // Step 4: Fetch content from tables (raw message, transformed output)
+            let rawContent = inputMessage.raw_message || null;
+            let transformedContent = null;
+
+            // Try to get transformed output from output table
+            if (outputMessage) {
+                try {
+                    const outputContentQuery = `
+                        SELECT transformed_message
+                        FROM ${outputTableName}
+                        WHERE id = :outputId
+                    `;
+                    const outputContent = await this.database.sequelize.query(outputContentQuery, {
+                        replacements: { outputId: outputMessage.id },
+                        type: this.database.sequelize.QueryTypes.SELECT
+                    });
+
+                    if (outputContent.length > 0 && outputContent[0].transformed_message) {
+                        transformedContent = outputContent[0].transformed_message;
+
+                        // Check if it's a MongoDB reference and fetch actual content
+                        if (typeof transformedContent === 'object' && transformedContent.mongo_reference) {
+                            console.log('Detected MongoDB reference, fetching actual FHIR bundle...');
+                            try {
+                                const { MongoClient } = require('mongodb');
+                                const mongoUri = process.env.MONGODB_URI || 'mongodb://ezhealth_user:secure_password_change_me@mongodb:27017/ezhealthkonnect?authSource=admin';
+                                const client = new MongoClient(mongoUri);
+                                await client.connect();
+
+                                const db = client.db('ezhealthkonnect');
+                                // Collection name uses hyphens, not underscores
+                                const collectionName = `transformed_messages_intf_${inputMessage.interface_id}`;
+                                const collection = db.collection(collectionName);
+
+                                // Query by correlation_id (which stores message_id when correlation_id is null)
+                                const mongoDoc = await collection.findOne({
+                                    correlation_id: inputMessage.message_id
+                                });
+
+                                await client.close();
+
+                                if (mongoDoc && mongoDoc.fhir_bundle) {
+                                    transformedContent = mongoDoc.fhir_bundle;
+                                    console.log('Successfully fetched FHIR bundle from MongoDB');
+
+                                    // Also store transformation metadata for the transformation steps
+                                    if (mongoDoc.transformation_metadata) {
+                                        outputMessage.transformation_steps = mongoDoc.transformation_metadata.steps;
+                                    }
+                                }
+                            } catch (mongoErr) {
+                                console.error('Error fetching from MongoDB:', mongoErr.message);
+                            }
+                        }
+                    }
+                } catch (err) {
+                    console.log('Could not fetch transformed message:', err.message);
+                }
+            }
+
+            // Step 5: Build lineage response
+            const lineage = {
+                correlationId: inputMessage.correlation_id || inputMessage.message_id,
+
+                // Input stage
+                input: {
+                    messageId: inputMessage.message_id,
+                    interfaceId: inputMessage.interface_id,
+                    interfaceName: inputMessage.interface_name,
+                    tableName: inputMessage.input_table_name,
+                    status: inputMessage.status,
+                    receivedAt: inputMessage.received_at,
+                    messageType: inputMessage.message_type,
+                    messageSize: inputMessage.message_size,
+                    sourceType: inputMessage.source_type,
+                    sourceEndpoint: inputMessage.source_endpoint,
+                    rawContent: rawContent
+                },
+
+                // Transformation stage
+                transformation: inputMessage.parsed_at ? {
+                    parsedAt: inputMessage.parsed_at,
+                    parsingStatus: inputMessage.parsing_status,
+                    parsingTimeMs: inputMessage.parsing_time_ms,
+                    transformedAt: inputMessage.processing_completed_at,
+                    processingTimeMs: inputMessage.processing_time_ms
+                } : null,
+
+                // Output stage
+                output: outputMessage ? {
+                    outputMessageId: outputMessage.id,
+                    tableName: outputMessage.output_table_name,
+                    transformationStatus: outputMessage.transformation_status,
+                    transformedAt: outputMessage.transformed_at,
+                    transformationTimeMs: outputMessage.transformation_time_ms,
+                    deliveryStatus: outputMessage.delivery_status,
+                    deliveryStartedAt: outputMessage.delivery_started_at,
+                    deliveryCompletedAt: outputMessage.delivery_completed_at,
+                    deliveryTimeMs: outputMessage.delivery_time_ms,
+                    deliveryStatusCode: outputMessage.delivery_status_code,
+                    retryCount: outputMessage.retry_count,
+                    transformedMessage: transformedContent,
+                    transformation_steps: outputMessage.transformation_steps || []
+                } : null,
+
+                // Target interface (where message was delivered)
+                target: deliveredMessage ? {
+                    messageId: deliveredMessage.message_id,
+                    interfaceId: targetInterface.id,
+                    interfaceName: targetInterface.name,
+                    sourceType: targetInterface.source_type,
+                    targetType: targetInterface.target_type,
+                    status: deliveredMessage.status,
+                    receivedAt: deliveredMessage.received_at,
+                    messageType: deliveredMessage.message_type,
+                    messageSize: deliveredMessage.message_size
+                } : null,
+
+                // Flow summary
+                flowStatus: {
+                    inputReceived: !!inputMessage,
+                    transformed: !!outputMessage,
+                    delivered: outputMessage?.delivery_status === 'delivered',
+                    targetReceived: !!deliveredMessage,
+                    complete: !!(inputMessage && outputMessage && deliveredMessage)
+                }
+            };
+
+            res.json({
+                success: true,
+                data: lineage
+            });
+
+        } catch (error) {
+            console.error('❌ Get Data Lineage Error:', error);
+            res.status(500).json({
+                success: false,
+                error: 'Failed to retrieve data lineage',
+                debug: error.message
+            });
+        }
+    }
+
+    /**
+     * Get errors and warnings for a specific message
+     * Uses PostgreSQL get_message_errors() function from V23 migration
+     */
+    async getMessageErrors(req, res) {
+        try {
+            await this.ensureDatabase();
+
+            const { messageId } = req.params;
+            const { interfaceId } = req.query;
+
+            if (!interfaceId) {
+                return res.status(400).json({
+                    success: false,
+                    error: 'interfaceId query parameter is required'
+                });
+            }
+
+            // Get table name
+            const tableName = `messages_intf_${interfaceId.replace(/-/g, '_')}`;
+
+            // Call PostgreSQL get_message_errors() function
+            const errors = await this.database.sequelize.query(`
+                SELECT
+                    error_timestamp,
+                    stage,
+                    severity,
+                    error_type,
+                    message,
+                    details,
+                    stack_trace,
+                    recovery_action
+                FROM get_message_errors(:tableName, :messageId)
+                ORDER BY error_timestamp DESC
+            `, {
+                replacements: { tableName, messageId },
+                type: this.database.sequelize.QueryTypes.SELECT
+            });
+
+            // Also get error summary
+            const summary = await this.database.sequelize.query(`
+                SELECT
+                    error_count,
+                    last_error_message,
+                    last_error_timestamp,
+                    last_error_stage,
+                    error_severity
+                FROM ${tableName}
+                WHERE message_id = :messageId
+            `, {
+                replacements: { messageId },
+                type: this.database.sequelize.QueryTypes.SELECT
+            });
+
+            res.json({
+                success: true,
+                data: {
+                    errors: errors,
+                    summary: summary[0] || {
+                        error_count: 0,
+                        last_error_message: null,
+                        last_error_timestamp: null,
+                        last_error_stage: null,
+                        error_severity: null
+                    }
+                }
+            });
+
+        } catch (error) {
+            console.error('❌ Get Message Errors Error:', error);
+            res.status(500).json({
+                success: false,
+                error: 'Failed to retrieve message errors',
+                debug: error.message
+            });
+        }
+    }
+
+    async getTableNameForMessage(messageId, userId) {
+        // Helper to find which table a message belongs to
+        if (!userId) return null;
+
+        const interfaces = await this.database.sequelize.query(`
+            SELECT id FROM interfaces WHERE user_id = :userId
+        `, {
+            replacements: { userId },
+            type: this.database.sequelize.QueryTypes.SELECT
+        });
+
+        for (const intf of interfaces) {
+            const tableName = `messages_intf_${intf.id.replace(/-/g, '_')}`;
+            try {
+                const result = await this.database.sequelize.query(`
+                    SELECT 1 FROM ${tableName} WHERE id = :messageId LIMIT 1
+                `, {
+                    replacements: { messageId },
+                    type: this.database.sequelize.QueryTypes.SELECT
+                });
+
+                if (result.length > 0) {
+                    return tableName;
+                }
+            } catch (err) {
+                continue;
+            }
+        }
+        return null;
     }
 }
 

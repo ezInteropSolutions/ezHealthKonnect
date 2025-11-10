@@ -257,16 +257,16 @@ class DatabaseManager {
                 allowNull: false
             },
             source_connectivity: {
-                type: DataTypes.STRING(50),
-                allowNull: false
+                type: DataTypes.JSONB,
+                defaultValue: {}
             },
             target_type: {
                 type: DataTypes.STRING(50),
                 allowNull: false
             },
             target_connectivity: {
-                type: DataTypes.STRING(50),
-                allowNull: false
+                type: DataTypes.JSONB,
+                defaultValue: {}
             },
             source_config: {
                 type: DataTypes.JSONB,

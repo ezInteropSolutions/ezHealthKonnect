@@ -99,6 +99,15 @@ class InterfaceService {
             const interfaceId = uuidv4();
             const now = new Date();
 
+            // ⚠️ CRITICAL FIX: V30 migration changed source_connectivity and target_connectivity to JSONB
+            // They now expect structure: { type: "tcp", config: {...} }
+            console.log('🔍 RAW interfaceData:', {
+                sourceConnectivity: interfaceData.sourceConnectivity,
+                targetConnectivity: interfaceData.targetConnectivity,
+                sourceConfig: typeof interfaceData.sourceConfig,
+                targetConfig: typeof interfaceData.targetConfig
+            });
+
             const createData = {
                 id: interfaceId,
                 name: interfaceData.name,
@@ -106,11 +115,19 @@ class InterfaceService {
                 message_type: interfaceData.messageType || 'ADT^A01',
                 source_type: interfaceData.sourceType,
                 target_type: interfaceData.targetType,
-                source_connectivity: interfaceData.sourceConnectivity,
-                target_connectivity: interfaceData.targetConnectivity,
-                source_config: JSON.stringify(interfaceData.sourceConfig || {}),
-                target_config: JSON.stringify(interfaceData.targetConfig || {}),
-                transformation_mapping: JSON.stringify(interfaceData.mappings || {}),
+                // V30 migration: connectivity fields are now JSONB with structure {type, config}
+                source_connectivity: {
+                    type: interfaceData.sourceConnectivity || 'tcp',
+                    config: interfaceData.sourceConfig || {}
+                },
+                target_connectivity: {
+                    type: interfaceData.targetConnectivity || 'http',
+                    config: interfaceData.targetConfig || {}
+                },
+                // Keep old columns for backward compatibility during transition
+                source_config: interfaceData.sourceConfig || {},
+                target_config: interfaceData.targetConfig || {},
+                transformation_mapping: interfaceData.mappings || {},
                 status: interfaceData.status || 'draft',
                 user_id: userId,
                 created_by: userId,
@@ -120,13 +137,14 @@ class InterfaceService {
                 updated_at: now
             };
 
-            console.log('Prepared create data:', {
+            console.log('✅ Prepared create data with JSONB objects:', {
                 id: createData.id,
                 name: createData.name,
                 source_type: createData.source_type,
                 target_type: createData.target_type,
                 status: createData.status,
-                user_id: createData.user_id
+                user_id: createData.user_id,
+                target_config: createData.target_config
             });
 
             // Step 3: Execute database create

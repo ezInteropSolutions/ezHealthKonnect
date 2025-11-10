@@ -130,3 +130,25 @@ func (te *TransformationExecution) UnmarshalExecutionLog(data []byte) error {
 	}
 	return json.Unmarshal(data, &te.ExecutionLog)
 }
+
+// TransformationExecutionResult represents the result of a pipeline execution (MVC + OOB)
+type TransformationExecutionResult struct {
+	PipelineID    string                 `json:"pipeline_id"`
+	CorrelationID string                 `json:"correlation_id"`
+	Status        string                 `json:"status"` // in_progress, completed, failed, partial
+	StartedAt     time.Time              `json:"started_at"`
+	CompletedAt   time.Time              `json:"completed_at"`
+	ExecutionTime time.Duration          `json:"execution_time"`
+	Output        map[string]interface{} `json:"output"`         // Transformed content (FHIR bundle, JSON, etc.)
+	DeliveryPayload *DeliveryPayload     `json:"delivery_payload,omitempty"` // Prepared for transmission
+	Errors        []TransformationError  `json:"errors"`
+}
+
+// TransformationError represents an error during transformation execution
+type TransformationError struct {
+	Step      string    `json:"step"`
+	Message   string    `json:"message"`
+	Timestamp time.Time `json:"timestamp"`
+	Code      string    `json:"code,omitempty"`
+	Details   string    `json:"details,omitempty"`
+}

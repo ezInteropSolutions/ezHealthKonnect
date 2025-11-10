@@ -167,7 +167,11 @@ class InterfacesController {
                 sourceConfig,
                 targetConfig,
                 processingRules,
-                transformationMapping
+                transformationMapping,
+                // ✅ NEW: Deployment configuration
+                deploymentMode,      // 'auto', 'manual', 'delayed'
+                autoStart,           // boolean
+                deploymentDelay      // seconds (for delayed mode)
             } = req.body;
 
             console.log(`🔍 Creating interface: ${name}`);
@@ -181,6 +185,17 @@ class InterfacesController {
 
             console.log(`   Final Source Connectivity: ${finalSourceConnectivity}`);
             console.log(`   Final Target Connectivity: ${finalTargetConnectivity}`);
+
+            // ✅ NEW: Apply deployment configuration defaults (changed to auto-deploy by default)
+            const finalDeploymentMode = deploymentMode || 'auto';
+            const finalAutoStart = autoStart !== false; // true by default
+            const finalDeploymentDelay = deploymentDelay || 0;
+
+            console.log(`   Deployment Mode: ${finalDeploymentMode}`);
+            console.log(`   Auto-Start: ${finalAutoStart}`);
+            if (finalDeploymentMode === 'delayed') {
+                console.log(`   Deployment Delay: ${finalDeploymentDelay}s`);
+            }
 
             // Validation
             if (!name || !sourceType || !targetType) {
@@ -206,38 +221,48 @@ class InterfacesController {
                 });
             }
 
-            // ✅ UPDATED: Insert with connectivity fields
+            // ✅ UPDATED: Insert with connectivity and deployment fields
+            // OOB: Use centralized JSONB preparation
+            const replacements = this.prepareJsonbReplacements({
+                userId,
+                name,
+                description: description || '',
+                sourceType,
+                sourceConnectivity: finalSourceConnectivity,
+                targetType,
+                targetConnectivity: finalTargetConnectivity,
+                messageType: messageType || 'auto-detect',
+                sourceConfig,
+                targetConfig,
+                processingRules,
+                transformationMapping,
+                deploymentMode: finalDeploymentMode,
+                autoStart: finalAutoStart,
+                deploymentDelay: finalDeploymentDelay
+            });
+
             const newInterfaces = await this.database.sequelize.query(`
                 INSERT INTO interfaces (
-                    user_id, name, description, 
-                    source_type, source_connectivity, 
-                    target_type, target_connectivity, 
-                    message_type, source_config, target_config, 
-                    processing_rules, transformation_mapping, 
+                    user_id, name, description,
+                    source_type, source_connectivity,
+                    target_type, target_connectivity,
+                    message_type, source_config, target_config,
+                    processing_rules, transformation_mapping,
+                    deployment_mode, auto_start, deployment_delay_seconds,
+                    deployment_status,
                     status, created_by, updated_by, created_at, updated_at, is_active
                 ) VALUES (
-                    :userId, :name, :description, 
-                    :sourceType, :sourceConnectivity, 
-                    :targetType, :targetConnectivity, 
-                    :messageType, :sourceConfig, :targetConfig, 
-                    :processingRules, :transformationMapping, 
+                    :userId, :name, :description,
+                    :sourceType, :sourceConnectivity,
+                    :targetType, :targetConnectivity,
+                    :messageType, :sourceConfig::jsonb, :targetConfig::jsonb,
+                    :processingRules::jsonb, :transformationMapping::jsonb,
+                    :deploymentMode, :autoStart, :deploymentDelay,
+                    'not_deployed',
                     'inactive', :userId, :userId, NOW(), NOW(), true
                 ) RETURNING *
             `, {
-                replacements: {
-                    userId,
-                    name,
-                    description: description || '',
-                    sourceType,
-                    sourceConnectivity: finalSourceConnectivity,  // ✅ Use final value
-                    targetType,
-                    targetConnectivity: finalTargetConnectivity,  // ✅ Use final value
-                    messageType: messageType || 'auto-detect',
-                    sourceConfig: this.safeJsonStringify(sourceConfig),
-                    targetConfig: this.safeJsonStringify(targetConfig),
-                    processingRules: this.safeJsonStringify(processingRules),
-                    transformationMapping: this.safeJsonStringify(transformationMapping)
-                },
+                replacements,
                 type: this.database.sequelize.QueryTypes.SELECT
             });
             
@@ -245,6 +270,137 @@ class InterfacesController {
             console.log(`✅ Interface Created - User: ${userEmail}, Interface: ${name} (${newInterfaceItem.id})`);
             console.log(`   Source: ${newInterfaceItem.source_type} via ${newInterfaceItem.source_connectivity}`);
             console.log(`   Target: ${newInterfaceItem.target_type} via ${newInterfaceItem.target_connectivity}`);
+
+            // 🏗️ AUTO-CREATE: PostgreSQL table + MongoDB collection for new interface
+            try {
+                const InterfaceTableManager = require('../services/InterfaceTableManager');
+                const tableManager = new InterfaceTableManager();
+
+                // Create PostgreSQL table for this interface
+                const tableName = await tableManager.ensureInterfaceTable(
+                    newInterfaceItem.id,
+                    newInterfaceItem.name
+                );
+                console.log(`✅ Created PostgreSQL table: ${tableName}`);
+
+                // Create MongoDB collection proactively
+                try {
+                    const { MongoClient } = require('mongodb');
+                    const mongoUri = process.env.MONGODB_URI;
+                    const mongoDbName = process.env.MONGODB_DATABASE || 'ezhealthkonnect';
+
+                    if (mongoUri) {
+                        const mongoClient = new MongoClient(mongoUri);
+                        await mongoClient.connect();
+                        const db = mongoClient.db(mongoDbName);
+                        const collectionName = `raw_messages_${newInterfaceItem.id}`;
+
+                        // Check if collection exists
+                        const collections = await db.listCollections({ name: collectionName }).toArray();
+                        if (collections.length === 0) {
+                            // Create collection with schema validation
+                            await db.createCollection(collectionName, {
+                                validator: {
+                                    $jsonSchema: {
+                                        bsonType: "object",
+                                        required: ["message_id", "raw_content", "received_at"],
+                                        properties: {
+                                            message_id: { bsonType: "string" },
+                                            raw_content: { bsonType: "string" },
+                                            parsed_content: { bsonType: "object" },
+                                            received_at: { bsonType: "date" },
+                                            parsed_at: { bsonType: "date" },
+                                            parsing_time_ms: { bsonType: "int" },
+                                            parsed_format: { bsonType: "string" }
+                                        }
+                                    }
+                                }
+                            });
+
+                            // Create indexes
+                            const collection = db.collection(collectionName);
+                            await collection.createIndex({ message_id: 1 }, { unique: true });
+                            await collection.createIndex({ received_at: -1 });
+                            await collection.createIndex({ parsed_at: -1 });
+                            await collection.createIndex({ parsed_format: 1 });
+
+                            console.log(`✅ Created MongoDB raw collection: ${collectionName}`);
+                        } else {
+                            console.log(`ℹ️  MongoDB raw collection already exists: ${collectionName}`);
+                        }
+
+                        // Create transformed messages collection
+                        const transformedCollectionName = `transformed_messages_intf_${newInterfaceItem.id}`;
+                        const transformedCollections = await db.listCollections({ name: transformedCollectionName }).toArray();
+
+                        if (transformedCollections.length === 0) {
+                            await db.createCollection(transformedCollectionName, {
+                                validator: {
+                                    $jsonSchema: {
+                                        bsonType: "object",
+                                        required: ["message_id", "interface_id", "created_at"],
+                                        properties: {
+                                            message_id: { bsonType: "string" },
+                                            correlation_id: { bsonType: "string" },
+                                            interface_id: { bsonType: "string" },
+                                            message_type: { bsonType: "string" },
+                                            fhir_bundle: { bsonType: "object" },
+                                            fhir_resources: {
+                                                bsonType: "array",
+                                                items: { bsonType: "object" }
+                                            },
+                                            transformation_pipeline_id: { bsonType: "string" },
+                                            transformation_steps: {
+                                                bsonType: "array",
+                                                items: { bsonType: "object" }
+                                            },
+                                            transformation_status: {
+                                                bsonType: "string",
+                                                enum: ["pending", "in_progress", "completed", "failed", "partial"]
+                                            },
+                                            created_at: { bsonType: "date" },
+                                            completed_at: { bsonType: "date" },
+                                            transformation_time_ms: { bsonType: "int" },
+                                            error_count: { bsonType: "int" },
+                                            errors: {
+                                                bsonType: "array",
+                                                items: { bsonType: "object" }
+                                            },
+                                            validation_results: { bsonType: "object" }
+                                        }
+                                    }
+                                }
+                            });
+
+                            // Create indexes for transformed collection
+                            const transformedCollection = db.collection(transformedCollectionName);
+                            await transformedCollection.createIndex({ message_id: 1 }, { unique: true });
+                            await transformedCollection.createIndex({ interface_id: 1 });
+                            await transformedCollection.createIndex({ correlation_id: 1 });
+                            await transformedCollection.createIndex({ created_at: -1 });
+                            await transformedCollection.createIndex({ completed_at: -1 });
+                            await transformedCollection.createIndex({ transformation_status: 1 });
+                            await transformedCollection.createIndex({ message_type: 1 });
+                            await transformedCollection.createIndex({ 'fhir_resources.resourceType': 1 });
+
+                            console.log(`✅ Created MongoDB transformed collection: ${transformedCollectionName}`);
+                        } else {
+                            console.log(`ℹ️  MongoDB transformed collection already exists: ${transformedCollectionName}`);
+                        }
+
+                        await mongoClient.close();
+                    } else {
+                        console.log(`⚠️  MongoDB URI not configured - collection will be created on first message`);
+                    }
+                } catch (mongoError) {
+                    console.warn(`⚠️  MongoDB collection creation skipped (non-critical):`, mongoError.message);
+                    console.log(`ℹ️  MongoDB collection will be created automatically on first message`);
+                }
+            } catch (tableError) {
+                console.error(`❌ Failed to create storage for interface ${newInterfaceItem.id}:`, tableError);
+                // Don't fail interface creation if table creation fails - table can be created on first message
+                console.warn(`⚠️  Storage will be created automatically when first message is received`);
+            }
 
             // ✅ UPDATED: Transform for frontend with connectivity fields
             const responseInterface = {
@@ -595,20 +751,26 @@ class InterfacesController {
      * Delete an interface (soft delete)
      */
     async deleteInterface(req, res) {
-        console.log('\n=== DELETE INTERFACE ===');
-        
+        console.log('\n=== DELETE INTERFACE (ENHANCED WITH TABLE CLEANUP) ===');
+
         try {
             await this.ensureDatabase();
-            
+
             const userId = req.session.user.id;
             const userEmail = req.session.user.email;
             const interfaceId = req.params.interfaceId;
 
+            // Query parameters for data retention
+            // ?retainData=false to permanently delete table/collection
+            // ?retainData=true (default) to keep table/collection for data recovery
+            const retainData = req.query.retainData !== 'false'; // default true
+
             console.log(`🔍 Deleting interface ${interfaceId} for user: ${userEmail}`);
+            console.log(`   Retain data: ${retainData ? 'YES (soft delete + keep table)' : 'NO (hard delete + drop table)'}`);
 
             // Get current interface
             const interfaceData = await this.database.sequelize.query(`
-                SELECT id, name, status FROM interfaces 
+                SELECT id, name, status FROM interfaces
                 WHERE id = :interfaceId AND user_id = :userId AND is_active = true
             `, {
                 replacements: { interfaceId, userId },
@@ -623,7 +785,7 @@ class InterfacesController {
             }
 
             const interfaceItem = interfaceData[0];
-            
+
             // Check if interface is running
             if (interfaceItem.status === 'active') {
                 return res.status(400).json({
@@ -632,21 +794,60 @@ class InterfacesController {
                 });
             }
 
-            // Soft delete
+            // ALWAYS soft delete the interface record (for audit trail)
             await this.database.sequelize.query(`
-                UPDATE interfaces 
-                SET is_active = false, updated_by = :userId, updated_at = NOW()
+                UPDATE interfaces
+                SET is_active = false,
+                    status = 'deleted',
+                    updated_by = :userId,
+                    updated_at = NOW(),
+                    deleted_at = NOW()
                 WHERE id = :interfaceId
             `, {
                 replacements: { userId, interfaceId },
                 type: this.database.sequelize.QueryTypes.UPDATE
             });
 
-            console.log(`✅ Interface Deleted - User: ${userEmail}, Interface: ${interfaceItem.name}`);
+            console.log(`✅ Interface soft-deleted in database - User: ${userEmail}, Interface: ${interfaceItem.name}`);
+
+            // Optional: Drop PostgreSQL table and MongoDB collection
+            if (!retainData) {
+                try {
+                    const InterfaceTableManager = require('../services/InterfaceTableManager');
+                    const tableManager = new InterfaceTableManager();
+
+                    const tableName = tableManager.getInterfaceTableName(interfaceId);
+
+                    // Drop PostgreSQL table
+                    await this.database.sequelize.query(`DROP TABLE IF EXISTS ${tableName} CASCADE`);
+                    console.log(`🗑️  Dropped PostgreSQL table: ${tableName}`);
+
+                    // Remove from metadata
+                    await this.database.sequelize.query(`
+                        DELETE FROM interface_table_metadata WHERE interface_id = :interfaceId
+                    `, {
+                        replacements: { interfaceId },
+                        type: this.database.sequelize.QueryTypes.DELETE
+                    });
+
+                    // MongoDB collection deletion would happen via Go backend
+                    console.log(`ℹ️  MongoDB collection cleanup will happen automatically via TTL or manual cleanup`);
+
+                } catch (tableError) {
+                    console.error(`⚠️  Failed to drop table (non-critical):`, tableError.message);
+                    // Continue - table deletion is optional
+                }
+            } else {
+                console.log(`ℹ️  Data retained - PostgreSQL table and MongoDB collection preserved for recovery`);
+            }
 
             return res.json({
                 success: true,
-                message: `Interface "${interfaceItem.name}" deleted successfully`
+                message: `Interface "${interfaceItem.name}" deleted successfully`,
+                dataRetained: retainData,
+                info: retainData
+                    ? 'Interface data retained in database tables. You can restore this interface if needed.'
+                    : 'Interface data permanently deleted from storage tables.'
             });
 
         } catch (error) {
@@ -689,9 +890,10 @@ class InterfacesController {
             console.log(`🔍 Updating interface ${interfaceId} for user: ${userEmail}`);
             console.log(`   New name: ${name}`);
             console.log(`   Source Type: ${sourceType} | Target Type: ${targetType}`);
-            console.log(`   Source Config:`, sourceConfig);
-            console.log(`   Target Config:`, targetConfig);
-            console.log(`   Processing Rules:`, processingRules);
+            console.log(`   Source Config (type: ${typeof sourceConfig}):`, sourceConfig);
+            console.log(`   Target Config (type: ${typeof targetConfig}):`, targetConfig);
+            console.log(`   Processing Rules (type: ${typeof processingRules}):`, processingRules);
+            console.log(`   Transformation Mapping (type: ${typeof transformationMapping}):`, transformationMapping);
 
             // Verify interface exists and belongs to user
             const existingInterface = await this.database.sequelize.query(`
@@ -713,39 +915,64 @@ class InterfacesController {
             const finalSourceConnectivity = sourceConnectivity || this.getDefaultConnectivity('source', sourceType);
             const finalTargetConnectivity = targetConnectivity || this.getDefaultConnectivity('target', targetType);
 
-            // Update interface
+            // OOB: Build V30 JSONB structures for connectivity columns
+            // V30 migration changed source_connectivity and target_connectivity to JSONB: {type, config}
+            const sourceConnectivityJsonb = {
+                type: finalSourceConnectivity,
+                config: sourceConfig || {}
+            };
+
+            const targetConnectivityJsonb = {
+                type: finalTargetConnectivity,
+                config: targetConfig || {}
+            };
+
+            console.log('🔧 V30 JSONB structures:', {
+                sourceConnectivityJsonb,
+                targetConnectivityJsonb
+            });
+
+            // OOB: Use centralized JSONB preparation (now includes connectivity JSONB objects)
+            const replacements = this.prepareJsonbReplacements({
+                interfaceId,
+                name,
+                description,
+                sourceType,
+                sourceConnectivity: sourceConnectivityJsonb,  // V30 JSONB: {type, config}
+                targetType,
+                targetConnectivity: targetConnectivityJsonb,  // V30 JSONB: {type, config}
+                messageType,
+                sourceConfig,
+                targetConfig,
+                processingRules,
+                transformationMapping,
+                userId
+            });
+
+            console.log('📊 OOB Update - JSONB fields prepared:', {
+                sourceConnectivity: replacements.sourceConnectivity?.substring(0, 150),
+                targetConnectivity: replacements.targetConnectivity?.substring(0, 150)
+            });
+
+            // Update interface with consistent JSONB casting for ALL JSONB columns
             await this.database.sequelize.query(`
                 UPDATE interfaces SET
                     name = :name,
                     description = :description,
                     source_type = :sourceType,
-                    source_connectivity = :sourceConnectivity,
+                    source_connectivity = :sourceConnectivity::jsonb,
                     target_type = :targetType,
-                    target_connectivity = :targetConnectivity,
+                    target_connectivity = :targetConnectivity::jsonb,
                     message_type = :messageType,
-                    source_config = :sourceConfig,
-                    target_config = :targetConfig,
-                    processing_rules = :processingRules,
-                    transformation_mapping = :transformationMapping,
+                    source_config = :sourceConfig::jsonb,
+                    target_config = :targetConfig::jsonb,
+                    processing_rules = :processingRules::jsonb,
+                    transformation_mapping = :transformationMapping::jsonb,
                     updated_by = :userId,
                     updated_at = CURRENT_TIMESTAMP
                 WHERE id = :interfaceId
             `, {
-                replacements: {
-                    interfaceId,
-                    name,
-                    description,
-                    sourceType,
-                    sourceConnectivity: finalSourceConnectivity,
-                    targetType,
-                    targetConnectivity: finalTargetConnectivity,
-                    messageType,
-                    sourceConfig: this.safeJsonStringify(sourceConfig),
-                    targetConfig: this.safeJsonStringify(targetConfig),
-                    processingRules: this.safeJsonStringify(processingRules),
-                    transformationMapping: this.safeJsonStringify(transformationMapping),
-                    userId
-                },
+                replacements,
                 type: this.database.sequelize.QueryTypes.UPDATE
             });
 
@@ -813,6 +1040,12 @@ class InterfacesController {
      * Safely stringify JSON fields for database
      * Handles both objects and already-stringified JSON to prevent double-encoding
      */
+    /**
+     * OOB: Centralized JSONB value preparation for PostgreSQL
+     * Handles JSON stringification AND type casting for PostgreSQL JSONB columns
+     * @param {any} value - Value to prepare (object, string, null, undefined)
+     * @returns {string} JSON string suitable for PostgreSQL JSONB column
+     */
     safeJsonStringify(value) {
         if (!value) return '{}';
 
@@ -829,6 +1062,53 @@ class InterfacesController {
 
         // It's an object, stringify it
         return JSON.stringify(value);
+    }
+
+    /**
+     * OOB: Build SQL column assignments with proper JSONB casting
+     * Centralized approach to handle PostgreSQL JSONB requirements consistently
+     * @param {object} replacements - Object with column names and values
+     * @returns {object} Updated replacements with JSONB-ready values
+     */
+    prepareJsonbReplacements(replacements) {
+        // V30 Update: These columns are JSONB in PostgreSQL and need proper handling
+        // source_connectivity and target_connectivity are V30 JSONB: {type, config}
+        const jsonbColumns = [
+            'sourceConfig', 'targetConfig', 'processingRules', 'transformationMapping',
+            'sourceConnectivity', 'targetConnectivity'  // V30 JSONB columns
+        ];
+
+        const prepared = { ...replacements };
+
+        console.log('🔧 OOB prepareJsonbReplacements - Input types:');
+        jsonbColumns.forEach(column => {
+            // Always ensure JSONB columns have a value (even if undefined/null)
+            if (prepared.hasOwnProperty(column)) {
+                console.log(`   ${column}: ${typeof prepared[column]} = ${JSON.stringify(prepared[column] || null).substring(0, 100)}`);
+                const originalType = typeof prepared[column];
+                prepared[column] = this.safeJsonStringify(prepared[column]);
+                console.log(`   ✅ ${column}: ${originalType} → string (length: ${prepared[column].length})`);
+            }
+        });
+
+        return prepared;
+    }
+
+    /**
+     * OOB: Get SQL column assignment with JSONB cast
+     * Use in SQL queries to ensure proper type casting
+     * @param {string} column - Column name
+     * @param {string} param - Parameter name
+     * @returns {string} SQL fragment with proper casting
+     */
+    getJsonbColumnAssignment(column, param) {
+        const jsonbColumns = ['source_config', 'target_config', 'processing_rules', 'transformation_mapping'];
+
+        if (jsonbColumns.includes(column)) {
+            return `${column} = :${param}::jsonb`;
+        }
+
+        return `${column} = :${param}`;
     }
 
     /**

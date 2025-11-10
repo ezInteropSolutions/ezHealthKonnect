@@ -365,7 +365,49 @@ class WizardView extends EventTarget {
                             </div>
                         </div>
                         <div id="sourceConfigPanel" class="config-panel">
-                            ${this.getSourceConfigPanel(data.sourceConnectivity, data.sourceConfig)}
+                            ${this.getSourceConfigPanel(data.sourceConnectivity, data.sourceConfig, data.sourceType)}
+                        </div>
+                    </div>
+
+                    <!-- Transformation Flow Section -->
+                    <div class="config-section">
+                        <h4 class="section-title">🔄 Transformation Flow</h4>
+                        <div class="form-group">
+                            <label for="transformationFlow" class="form-label required">Select Processing Flow</label>
+                            <select id="transformationFlow" class="form-control" required>
+                                <option value="">Choose transformation flow...</option>
+                                <optgroup label="🔀 Transformation Flows (Auto-processing)">
+                                    <option value="hl7_to_fhir" ${data.transformationFlow === 'hl7_to_fhir' ? 'selected' : ''}>
+                                        HL7 v2.x → FHIR R4 (Automatic Transformation)
+                                    </option>
+                                    <option value="ccd_to_fhir" ${data.transformationFlow === 'ccd_to_fhir' ? 'selected' : ''}>
+                                        CCD/C-CDA → FHIR R4 (Automatic Transformation)
+                                    </option>
+                                    <option value="hl7_to_fhir_stu3" ${data.transformationFlow === 'hl7_to_fhir_stu3' ? 'selected' : ''}>
+                                        HL7 v2.x → FHIR STU3 (Automatic Transformation)
+                                    </option>
+                                </optgroup>
+                                <optgroup label="📦 Passthrough Flows (No transformation)">
+                                    <option value="passthrough" ${data.transformationFlow === 'passthrough' ? 'selected' : ''}>
+                                        Passthrough (Store only, no transformation)
+                                    </option>
+                                    <option value="fhir_receiver" ${data.transformationFlow === 'fhir_receiver' ? 'selected' : ''}>
+                                        FHIR Receiver (Direct storage, user-driven)
+                                    </option>
+                                    <option value="file_processor" ${data.transformationFlow === 'file_processor' ? 'selected' : ''}>
+                                        File Processor (Batch processing, user-driven)
+                                    </option>
+                                </optgroup>
+                            </select>
+                            <div class="form-hint">
+                                ℹ️ Transformation flows automatically process messages. Passthrough flows store for manual processing.
+                            </div>
+                        </div>
+
+                        <!-- Flow Description (Dynamic based on selection) -->
+                        <div id="flowDescription" class="alert alert-info" style="display: none; margin-top: 12px; padding: 12px; background: #e3f2fd; border: 1px solid #90caf9; border-radius: 6px;">
+                            <strong id="flowDescTitle"></strong>
+                            <p id="flowDescText" style="margin: 8px 0 0 0; font-size: 13px;"></p>
                         </div>
                     </div>
 
@@ -436,79 +478,249 @@ class WizardView extends EventTarget {
 
     /**
      * Get source configuration panel based on connectivity type
+     * REFACTORED: Now delegates to shared InterfaceConfigComponents
      */
-    getSourceConfigPanel(connectivity, config = {}) {
-        switch (connectivity) {
-            case 'tcp':
-                return `
-                    <div class="config-group">
-                        <h4>TCP/MLLP Configuration</h4>
-                        <div class="form-row">
-                            <div class="form-group">
-                                <label for="sourceHost" class="form-label required">Host</label>
-                                <input type="text" id="sourceHost" class="form-control"
-                                       value="${config.host || 'localhost'}"
-                                       placeholder="localhost">
-                                <div class="form-hint">💡 OOB: localhost for development</div>
-                            </div>
-                            <div class="form-group">
-                                <label for="sourcePort" class="form-label required">Port</label>
-                                <input type="number" id="sourcePort" class="form-control"
-                                       value="${config.port || 2575}"
-                                       min="1" max="65535"
-                                       placeholder="2575">
-                                <div class="form-hint">💡 OOB: 2575 is standard HL7 port</div>
-                            </div>
+    getSourceConfigPanel(connectivity, config = {}, sourceType = '') {
+        // Delegate to shared component library
+        return InterfaceConfigComponents.getSourceConfigPanel(
+            connectivity,
+            sourceType,
+            config,
+            { idPrefix: '' }  // Wizard uses no prefix for backward compatibility
+        );
+    }
+
+    /**
+     * Get FHIR Receiver specific configuration panel
+     * REFACTORED: Delegates to shared InterfaceConfigComponents
+     */
+    getFhirReceiverConfig(config = {}) {
+        return InterfaceConfigComponents.getFhirReceiverConfig(config, '');
+    }
+
+    /**
+     * LEGACY METHOD - Kept for backward compatibility but now delegates to shared component
+     */
+    _legacyGetFhirReceiverConfig(config = {}) {
+        return `
+            <div class="config-group fhir-receiver-config">
+                <h4>🏥 FHIR Receiver Configuration</h4>
+
+                <!-- Base URL Path -->
+                <div class="form-group">
+                    <label for="fhirBasePath" class="form-label required">Base URL Path</label>
+                    <input type="text" id="fhirBasePath" class="form-control"
+                           value="${config.basePath || '/fhir'}"
+                           placeholder="/fhir">
+                    <div class="form-hint">💡 Example endpoint: <code>/fhir/receiver/{interfaceId}</code> or <code>/fhir/{resourceType}</code></div>
+                </div>
+
+                <!-- FHIR Version -->
+                <div class="form-group">
+                    <label for="fhirVersion" class="form-label required">FHIR Version</label>
+                    <select id="fhirVersion" class="form-control">
+                        <option value="R4" ${!config.fhirVersion || config.fhirVersion === 'R4' ? 'selected' : ''}>FHIR R4 (Recommended)</option>
+                        <option value="STU3" ${config.fhirVersion === 'STU3' ? 'selected' : ''}>FHIR STU3</option>
+                        <option value="DSTU2" ${config.fhirVersion === 'DSTU2' ? 'selected' : ''}>FHIR DSTU2 (Legacy)</option>
+                    </select>
+                    <div class="form-hint">Select the FHIR version your sender systems will use</div>
+                </div>
+
+                <!-- Supported Operations -->
+                <div class="form-group">
+                    <label class="form-label">
+                        Supported REST Operations
+                        <a href="#" class="help-link" onclick="event.preventDefault(); alert('Choose which FHIR REST API operations to enable:\\n\\n• CREATE (POST) - Most common, create new resources\\n• READ (GET) - Retrieve resources by ID\\n• UPDATE (PUT) - Replace entire resource\\n• PATCH - Partial updates\\n• DELETE - Remove resources (use with caution)\\n• SEARCH - Query with parameters\\n• BATCH/TRANSACTION - Multiple operations in one request\\n\\nRecommendation: Start with CREATE only, add others as needed.');" title="Click for help">ⓘ</a>
+                    </label>
+                    <div class="checkbox-group">
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="opCreate" ${!config.operations || config.operations.includes('CREATE') ? 'checked' : ''}>
+                            <span>CREATE (POST)</span>
+                        </label>
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="opRead" ${config.operations?.includes('READ') ? 'checked' : ''}>
+                            <span>READ (GET)</span>
+                        </label>
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="opUpdate" ${config.operations?.includes('UPDATE') ? 'checked' : ''}>
+                            <span>UPDATE (PUT)</span>
+                        </label>
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="opPatch" ${config.operations?.includes('PATCH') ? 'checked' : ''}>
+                            <span>PATCH</span>
+                        </label>
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="opDelete" ${config.operations?.includes('DELETE') ? 'checked' : ''}>
+                            <span>DELETE</span>
+                        </label>
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="opSearch" ${config.operations?.includes('SEARCH') ? 'checked' : ''}>
+                            <span>SEARCH</span>
+                        </label>
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="opBatch" ${config.operations?.includes('BATCH') ? 'checked' : ''}>
+                            <span>BATCH/TRANSACTION</span>
+                        </label>
+                    </div>
+                </div>
+
+                <!-- Resource Filtering -->
+                <div class="form-group">
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="enableResourceFilter" ${config.enableResourceFilter ? 'checked' : ''}>
+                        <span>Restrict Accepted Resource Types</span>
+                    </label>
+                    <div id="resourceFilterPanel" style="display: ${config.enableResourceFilter ? 'block' : 'none'}; margin-top: 12px;">
+                        <div class="checkbox-group" style="max-height: 200px; overflow-y: auto; border: 1px solid #ddd; padding: 12px; border-radius: 4px;">
+                            ${this.getFhirResourceCheckboxes(config.acceptedResources || [])}
                         </div>
+                        <label class="checkbox-label" style="margin-top: 8px;">
+                            <input type="checkbox" id="rejectUnknownResources" ${config.rejectUnknownResources ? 'checked' : ''}>
+                            <span>Reject resources not in the list above</span>
+                        </label>
+                    </div>
+                </div>
+
+                <!-- Validation Settings -->
+                <div class="form-group">
+                    <label class="form-label">Validation Settings</label>
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="validateStructure" ${config.validateStructure !== false ? 'checked' : ''}>
+                        <span>Validate Resource Structure (required fields, data types)</span>
+                    </label>
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="validateProfiles" ${config.validateProfiles ? 'checked' : ''}>
+                        <span>Validate Against Profiles (US Core, IPS, etc.)</span>
+                    </label>
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="validateTerminology" ${config.validateTerminology ? 'checked' : ''}>
+                        <span>Validate Terminology (CodeSystems, ValueSets)</span>
+                    </label>
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="rejectInvalid" ${config.rejectInvalid ? 'checked' : ''}>
+                        <span>Reject Invalid Resources (vs Accept with Warnings)</span>
+                    </label>
+                </div>
+
+                <!-- Rate Limiting -->
+                <div class="form-group">
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="enableRateLimit" ${config.enableRateLimit ? 'checked' : ''}>
+                        <span>Enable Rate Limiting</span>
+                    </label>
+                    <div id="rateLimitPanel" style="display: ${config.enableRateLimit ? 'block' : 'none'}; margin-top: 12px;">
                         <div class="form-row">
                             <div class="form-group">
-                                <label for="sourceTimeout" class="form-label">Timeout (ms)</label>
-                                <input type="number" id="sourceTimeout" class="form-control"
-                                       value="${config.timeout || 30000}"
-                                       min="1000" max="300000">
+                                <label for="rateLimit" class="form-label">Requests per Minute</label>
+                                <input type="number" id="rateLimit" class="form-control"
+                                       value="${config.rateLimit || 60}"
+                                       min="1" max="10000">
                             </div>
                             <div class="form-group">
-                                <label for="sourceEncoding" class="form-label">Encoding</label>
-                                <select id="sourceEncoding" class="form-control">
-                                    <option value="utf8" ${config.encoding === 'utf8' ? 'selected' : ''}>UTF-8</option>
-                                    <option value="ascii" ${config.encoding === 'ascii' ? 'selected' : ''}>ASCII</option>
-                                    <option value="latin1" ${config.encoding === 'latin1' ? 'selected' : ''}>Latin-1</option>
-                                </select>
+                                <label for="burstLimit" class="form-label">Burst Allowance</label>
+                                <input type="number" id="burstLimit" class="form-control"
+                                       value="${config.burstLimit || 10}"
+                                       min="1" max="1000">
                             </div>
                         </div>
                     </div>
-                `;
-            case 'http':
-                return `
-                    <div class="config-group">
-                        <h4>HTTP/REST Configuration</h4>
+                </div>
+
+                <!-- Content Format -->
+                <div class="form-group">
+                    <label class="form-label">Accepted Content Types</label>
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="acceptFhirJson" ${config.acceptFhirJson !== false ? 'checked' : ''}>
+                        <span>application/fhir+json (FHIR Standard)</span>
+                    </label>
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="acceptJson" ${config.acceptJson !== false ? 'checked' : ''}>
+                        <span>application/json (Fallback)</span>
+                    </label>
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="acceptFhirXml" ${config.acceptFhirXml ? 'checked' : ''}>
+                        <span>application/fhir+xml (XML Support)</span>
+                    </label>
+                </div>
+
+                <!-- Post-Reception Actions (Integration Engine Features) -->
+                <div class="form-group" style="border-top: 2px solid #e0e0e0; padding-top: 20px; margin-top: 20px;">
+                    <h4 style="margin-bottom: 16px;">🔄 Post-Reception Actions</h4>
+                    <div class="form-hint" style="margin-bottom: 12px;">Configure what happens after receiving FHIR resources</div>
+
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="actionStoreOnly" ${!config.postActions || config.postActions.includes('store') ? 'checked' : ''}>
+                        <span>Store in Database (Always enabled)</span>
+                    </label>
+
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="actionTransform" ${config.postActions?.includes('transform') ? 'checked' : ''}>
+                        <span>Apply Transformation Pipeline (custom mappings, enrichment)</span>
+                    </label>
+
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="actionForward" ${config.postActions?.includes('forward') ? 'checked' : ''}>
+                        <span>Forward to Destination (route to another FHIR server)</span>
+                    </label>
+
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="actionWorkflow" ${config.postActions?.includes('workflow') ? 'checked' : ''}>
+                        <span>Trigger Workflow (conditional routing, notifications)</span>
+                    </label>
+
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="actionAudit" ${config.postActions?.includes('audit') ? 'checked' : ''}>
+                        <span>Generate FHIR AuditEvent (compliance tracking)</span>
+                    </label>
+
+                    <!-- Forwarding Configuration (shown when forward is checked) -->
+                    <div id="forwardingConfig" style="display: ${config.postActions?.includes('forward') ? 'block' : 'none'}; margin-top: 12px; padding: 12px; background: #f5f5f5; border-radius: 4px;">
                         <div class="form-group">
-                            <label for="sourceEndpoint" class="form-label required">Endpoint URL</label>
-                            <input type="url" id="sourceEndpoint" class="form-control"
-                                   value="${config.endpoint || 'http://localhost:3000/api/hl7/receive'}"
-                                   placeholder="http://localhost:3000/api/hl7/receive">
+                            <label for="forwardDestination" class="form-label">Forward Destination URL</label>
+                            <input type="url" id="forwardDestination" class="form-control"
+                                   value="${config.forwardDestination || ''}"
+                                   placeholder="https://fhir-server.example.com/fhir">
                         </div>
-                        <div class="form-row">
-                            <div class="form-group">
-                                <label for="sourceMethod" class="form-label">HTTP Method</label>
-                                <select id="sourceMethod" class="form-control">
-                                    <option value="POST" ${config.method === 'POST' ? 'selected' : ''}>POST</option>
-                                    <option value="PUT" ${config.method === 'PUT' ? 'selected' : ''}>PUT</option>
-                                </select>
-                            </div>
-                            <div class="form-group">
-                                <label for="sourceContentType" class="form-label">Content Type</label>
-                                <select id="sourceContentType" class="form-control">
-                                    <option value="text/plain" ${config.contentType === 'text/plain' ? 'selected' : ''}>text/plain</option>
-                                    <option value="application/hl7-v2" ${config.contentType === 'application/hl7-v2' ? 'selected' : ''}>application/hl7-v2</option>
-                                </select>
-                            </div>
-                        </div>
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="forwardAsync" ${config.forwardAsync !== false ? 'checked' : ''}>
+                            <span>Async Forwarding (don't wait for response)</span>
+                        </label>
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="forwardOnlyValid" ${config.forwardOnlyValid ? 'checked' : ''}>
+                            <span>Forward Only Valid Resources</span>
+                        </label>
                     </div>
-                `;
-            default:
-                return '<div class="config-placeholder">Select connectivity type to configure</div>';
-        }
+                </div>
+
+                <!-- HTTP Authentication (Universal for all HTTP connections) -->
+                ${this.getHttpAuthConfig(config)}
+
+            </div>
+        `;
+    }
+
+    /**
+     * Get FHIR resource type checkboxes
+     * REFACTORED: Delegates to shared InterfaceConfigComponents
+     */
+    getFhirResourceCheckboxes(selectedResources = []) {
+        return InterfaceConfigComponents.getFhirResourceCheckboxes(selectedResources, '');
+    }
+
+    /**
+     * Get HTTP Authentication Configuration Panel
+     * REFACTORED: Delegates to shared InterfaceConfigComponents
+     */
+    getHttpAuthConfig(config = {}) {
+        return InterfaceConfigComponents.getHttpAuthConfig(config, '');
+    }
+
+    /**
+     * Get HTTP Authentication Details Panel
+     * REFACTORED: Delegates to shared InterfaceConfigComponents
+     */
+    getHttpAuthDetailsPanel(authType, config = {}) {
+        return InterfaceConfigComponents.getHttpAuthDetailsPanel(authType, config, '');
     }
 
     /**
@@ -550,7 +762,7 @@ class WizardView extends EventTarget {
 
                     <!-- Dynamic configuration based on connectivity -->
                     <div id="targetConfigPanel" class="config-panel">
-                        ${this.getTargetConfigPanel(data.targetConnectivity, data.targetConfig)}
+                        ${this.getTargetConfigPanel(data.targetConnectivity, {...(data.targetConfig || {}), transformationFlow: data.transformationFlow})}
                     </div>
 
                     <!-- FHIR Server Testing -->
@@ -567,11 +779,46 @@ class WizardView extends EventTarget {
     }
 
     /**
+     * Check if delivery mode options should be shown based on selected transformation flow
+     * Only show for automatic transformation flows, not for passthrough/receiver flows
+     */
+    shouldShowDeliveryMode(transformationFlow) {
+        // Delivery mode is relevant for transformation flows that output FHIR
+        const transformationFlowsWithDelivery = [
+            'hl7_to_fhir',         // HL7 v2.x → FHIR R4
+            'ccd_to_fhir',         // CCD/C-CDA → FHIR R4
+            'hl7_to_fhir_stu3',    // HL7 v2.x → FHIR STU3
+            // Easy to add: 'x12_to_fhir', 'csv_to_fhir', etc.
+        ];
+
+        return transformationFlowsWithDelivery.includes(transformationFlow);
+    }
+
+    /**
      * Get target configuration panel
      */
     getTargetConfigPanel(connectivity, config = {}) {
+        // Delegate to shared components for all target connectivity types
+        const targetType = document.querySelector('#targetType')?.value || 'fhir';
+        return InterfaceConfigComponents.getTargetConfigPanel(connectivity, targetType, config, { idPrefix: '' });
+
+        /* OLD IMPLEMENTATION - Replaced with shared components
         switch (connectivity) {
             case 'http':
+                // Get transformation flow from dropdown (if available) or wizard data
+                const transformationFlowDropdown = document.querySelector('#transformationFlow');
+                const wizardData = this.controller?.model?.data || {};
+                const transformationFlow = transformationFlowDropdown?.value || wizardData.transformationFlow || config.transformationFlow;
+                const showDeliveryMode = this.shouldShowDeliveryMode(transformationFlow);
+
+                console.log('🔍 Target config panel - DEBUG:', {
+                    dropdownValue: transformationFlowDropdown?.value,
+                    wizardDataFlow: wizardData.transformationFlow,
+                    configFlow: config.transformationFlow,
+                    finalFlow: transformationFlow,
+                    showDeliveryMode: showDeliveryMode
+                });
+
                 return `
                     <div class="config-group">
                         <h4>FHIR Server Configuration</h4>
@@ -600,6 +847,101 @@ class WizardView extends EventTarget {
                             </div>
                         </div>
 
+                        <!-- Delivery Mode (Only for transformation flows) -->
+                        ${showDeliveryMode ? `
+                        <div class="form-group" id="deliveryModeGroup">
+                            <label class="form-label">
+                                Delivery Mode
+                                <span class="badge badge-info" style="font-size: 10px; margin-left: 8px;">Transformation Flow</span>
+                            </label>
+                            <div class="form-row" style="gap: 10px;">
+                                <div class="form-check" style="flex: 1;">
+                                    <input type="radio" id="deliveryModeBundle" name="deliveryMode" value="bundle"
+                                           class="form-check-input" ${!config.deliveryMode || config.deliveryMode === 'bundle' ? 'checked' : ''}>
+                                    <label for="deliveryModeBundle" class="form-check-label">
+                                        <strong>Bundle</strong>
+                                        <div class="form-hint">Single transaction (Recommended)</div>
+                                    </label>
+                                </div>
+                                <div class="form-check" style="flex: 1;">
+                                    <input type="radio" id="deliveryModeIndividual" name="deliveryMode" value="individual"
+                                           class="form-check-input" ${config.deliveryMode === 'individual' ? 'checked' : ''}>
+                                    <label for="deliveryModeIndividual" class="form-check-label">
+                                        <strong>Individual</strong>
+                                        <div class="form-hint">Separate API calls per resource</div>
+                                    </label>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Resource Selection (Only visible when Individual mode selected) -->
+                        <div id="individualResourceSelection" class="form-group" style="display: ${config.deliveryMode === 'individual' ? 'block' : 'none'};">
+                            <label class="form-label">Select Resources to Send</label>
+                            <div class="form-hint" style="margin-bottom: 10px;">Choose which FHIR resources to send individually. Unselected resources will be skipped.</div>
+                            <div class="resource-checkboxes" style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px;">
+                                <label class="form-check-label" style="display: flex; align-items: center; gap: 6px;">
+                                    <input type="checkbox" name="individualResources" value="Patient" ${config.individualResources?.includes('Patient') !== false ? 'checked' : ''}>
+                                    Patient
+                                </label>
+                                <label class="form-check-label" style="display: flex; align-items: center; gap: 6px;">
+                                    <input type="checkbox" name="individualResources" value="Encounter" ${config.individualResources?.includes('Encounter') !== false ? 'checked' : ''}>
+                                    Encounter
+                                </label>
+                                <label class="form-check-label" style="display: flex; align-items: center; gap: 6px;">
+                                    <input type="checkbox" name="individualResources" value="Observation" ${config.individualResources?.includes('Observation') !== false ? 'checked' : ''}>
+                                    Observation
+                                </label>
+                                <label class="form-check-label" style="display: flex; align-items: center; gap: 6px;">
+                                    <input type="checkbox" name="individualResources" value="Condition" ${config.individualResources?.includes('Condition') !== false ? 'checked' : ''}>
+                                    Condition
+                                </label>
+                                <label class="form-check-label" style="display: flex; align-items: center; gap: 6px;">
+                                    <input type="checkbox" name="individualResources" value="Procedure" ${config.individualResources?.includes('Procedure') !== false ? 'checked' : ''}>
+                                    Procedure
+                                </label>
+                                <label class="form-check-label" style="display: flex; align-items: center; gap: 6px;">
+                                    <input type="checkbox" name="individualResources" value="MedicationRequest" ${config.individualResources?.includes('MedicationRequest') !== false ? 'checked' : ''}>
+                                    MedicationRequest
+                                </label>
+                                <label class="form-check-label" style="display: flex; align-items: center; gap: 6px;">
+                                    <input type="checkbox" name="individualResources" value="AllergyIntolerance" ${config.individualResources?.includes('AllergyIntolerance') !== false ? 'checked' : ''}>
+                                    AllergyIntolerance
+                                </label>
+                                <label class="form-check-label" style="display: flex; align-items: center; gap: 6px;">
+                                    <input type="checkbox" name="individualResources" value="DiagnosticReport" ${config.individualResources?.includes('DiagnosticReport') !== false ? 'checked' : ''}>
+                                    DiagnosticReport
+                                </label>
+                                <label class="form-check-label" style="display: flex; align-items: center; gap: 6px;">
+                                    <input type="checkbox" name="individualResources" value="MessageHeader" ${config.individualResources?.includes('MessageHeader') !== false ? 'checked' : ''}>
+                                    MessageHeader
+                                </label>
+                            </div>
+                            <div class="form-group" style="margin-top: 12px;">
+                                <label class="form-check-label" style="display: flex; align-items: center; gap: 6px;">
+                                    <input type="checkbox" id="stopOnIndividualError" ${config.stopOnIndividualError ? 'checked' : ''}>
+                                    Stop processing if any resource fails
+                                </label>
+                            </div>
+                        </div>
+
+                        <!-- Default FHIR Operation -->
+                        <div class="form-group">
+                            <label for="defaultOperation" class="form-label">
+                                Default FHIR Operation
+                                <span class="badge badge-secondary" style="font-size: 10px; margin-left: 8px;">Applied to all resources</span>
+                            </label>
+                            <select id="defaultOperation" class="form-control">
+                                <option value="POST" ${!config.defaultOperation || config.defaultOperation === 'POST' ? 'selected' : ''}>POST - Create new resource</option>
+                                <option value="PUT" ${config.defaultOperation === 'PUT' ? 'selected' : ''}>PUT - Update existing resource</option>
+                                <option value="PATCH" ${config.defaultOperation === 'PATCH' ? 'selected' : ''}>PATCH - Partial update</option>
+                            </select>
+                            <div class="form-hint" style="margin-top: 6px;">
+                                POST creates new resources. PUT/PATCH require resource IDs from HL7 message.
+                                <br><strong>Advanced routing logic</strong> (conditional operations, multiple destinations) can be configured in the Transformation Pipeline later.
+                            </div>
+                        </div>
+                        ` : '<!-- Delivery mode hidden: Direct receiver or non-transformation flow -->'}
+
                         <!-- Authentication -->
                         <div class="form-group">
                             <label class="form-label">Authentication</label>
@@ -611,19 +953,49 @@ class WizardView extends EventTarget {
                         </div>
 
                         <div id="authConfig" class="auth-config" ${!config.authEnabled ? 'style="display: none;"' : ''}>
-                            <div class="form-row">
-                                <div class="form-group">
-                                    <label for="authType" class="form-label">Auth Type</label>
-                                    <select id="authType" class="form-control">
-                                        <option value="basic">Basic Auth</option>
-                                        <option value="bearer">Bearer Token</option>
-                                        <option value="oauth2">OAuth 2.0</option>
-                                    </select>
+                            <div class="form-group">
+                                <label for="authType" class="form-label">Authentication Type</label>
+                                <select id="authType" class="form-control">
+                                    <option value="none" ${config.authType === 'none' || !config.authType ? 'selected' : ''}>None</option>
+                                    <option value="basic" ${config.authType === 'basic' ? 'selected' : ''}>Basic Authentication</option>
+                                    <option value="bearer" ${config.authType === 'bearer' ? 'selected' : ''}>Bearer Token</option>
+                                    <option value="oauth2" ${config.authType === 'oauth2' ? 'selected' : ''}>OAuth 2.0 (Coming Soon)</option>
+                                </select>
+                            </div>
+
+                            <!-- Basic Auth Fields (shown when authType = basic) -->
+                            <div id="basicAuthFields" style="display: ${config.authType === 'basic' ? 'block' : 'none'};">
+                                <div class="form-row">
+                                    <div class="form-group">
+                                        <label for="authUsername" class="form-label">Username</label>
+                                        <input type="text" id="authUsername" class="form-control"
+                                               value="${config.authUsername || ''}"
+                                               placeholder="Enter username">
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="authPassword" class="form-label">Password</label>
+                                        <input type="password" id="authPassword" class="form-control"
+                                               value="${config.authPassword || ''}"
+                                               placeholder="Enter password">
+                                    </div>
                                 </div>
+                            </div>
+
+                            <!-- Bearer Token Fields (shown when authType = bearer) -->
+                            <div id="bearerTokenFields" style="display: ${config.authType === 'bearer' ? 'block' : 'none'};">
                                 <div class="form-group">
-                                    <label for="authToken" class="form-label">Token/Credentials</label>
+                                    <label for="authToken" class="form-label">Bearer Token</label>
                                     <input type="password" id="authToken" class="form-control"
-                                           placeholder="Enter token or credentials">
+                                           value="${config.authToken || ''}"
+                                           placeholder="Enter bearer token">
+                                    <div class="form-hint">Token will be sent as: Authorization: Bearer {token}</div>
+                                </div>
+                            </div>
+
+                            <!-- OAuth 2.0 Fields (shown when authType = oauth2) -->
+                            <div id="oauth2Fields" style="display: ${config.authType === 'oauth2' ? 'block' : 'none'};">
+                                <div class="form-hint" style="color: #6c757d; padding: 12px; background: #f8f9fa; border-radius: 6px;">
+                                    ⚠️ OAuth 2.0 is coming soon. For now, please use Bearer Token with a pre-obtained OAuth token.
                                 </div>
                             </div>
                         </div>
@@ -632,6 +1004,269 @@ class WizardView extends EventTarget {
             default:
                 return '<div class="config-placeholder">Select connectivity type to configure</div>';
         }
+        */
+    }
+    /**
+     * Update target configuration panel when connectivity or transformation flow changes
+     */
+    updateTargetConfigPanel(container) {
+        const targetConnectivitySelect = container.querySelector('#targetConnectivity');
+        const targetConfigPanelDiv = container.querySelector('#targetConfigPanel');
+
+        if (!targetConnectivitySelect || !targetConfigPanelDiv) {
+            console.warn('⚠️ Target config elements not found');
+            return;
+        }
+
+        // Get current values
+        const connectivity = targetConnectivitySelect.value;
+        const wizardData = this.controller?.model?.data || {};
+
+        console.log('🔄 Updating target config panel - connectivity:', connectivity, 'transformationFlow:', wizardData.transformationFlow);
+
+        // Re-render panel with transformation flow passed through
+        targetConfigPanelDiv.innerHTML = this.getTargetConfigPanel(connectivity, {
+            ...(wizardData.targetConfig || {}),
+            transformationFlow: wizardData.transformationFlow
+        });
+
+        // Re-attach event listeners for new content
+        this.setupTargetConfigListeners(container);
+
+        console.log('✅ Target config panel updated');
+    }
+
+    /**
+     * Update source configuration panel when connectivity changes
+     */
+    updateSourceConfigPanel(container) {
+        const sourceConnectivitySelect = container.querySelector('#sourceConnectivity');
+        const sourceTypeSelect = container.querySelector('#sourceType');
+        const sourceConfigPanelDiv = container.querySelector('#sourceConfigPanel');
+
+        if (!sourceConnectivitySelect || !sourceConfigPanelDiv) {
+            console.warn('⚠️ Source config elements not found');
+            return;
+        }
+
+        // Get current values
+        const connectivity = sourceConnectivitySelect.value;
+        const sourceType = sourceTypeSelect?.value || '';
+        const wizardData = this.controller?.model?.data || {};
+
+        console.log('🔄 Updating source config panel - connectivity:', connectivity, 'sourceType:', sourceType);
+
+        // Re-render panel with current config
+        sourceConfigPanelDiv.innerHTML = this.getSourceConfigPanel(connectivity, wizardData.sourceConfig || {}, sourceType);
+
+        // Re-attach event listeners for dynamic elements (like auth type dropdown)
+        if (typeof InterfaceConfigComponents !== 'undefined') {
+            console.log('🔧 Re-attaching shared component event listeners...');
+            InterfaceConfigComponents.attachEventListeners(sourceConfigPanelDiv, '');
+            console.log('✅ Event listeners re-attached');
+        }
+
+        console.log('✅ Source config panel updated');
+    }
+
+    /**
+     * Setup event listeners for target configuration panel
+     * Called after panel is rendered or re-rendered
+     */
+    setupTargetConfigListeners(container) {
+        console.log('🔧 Setting up target config listeners...');
+
+        // Target endpoint input
+        const targetEndpointInput = container.querySelector('#targetEndpoint');
+        if (targetEndpointInput) {
+            targetEndpointInput.addEventListener('input', (e) => {
+                this.dispatchEvent(new CustomEvent('fieldChange', {
+                    detail: { field: 'targetEndpoint', value: e.target.value }
+                }));
+            });
+            console.log('✅ Target endpoint input listener attached');
+        }
+
+        // Delivery mode radio buttons (for FHIR target)
+        const deliveryModeBundle = container.querySelector('#deliveryModeBundle');
+        const deliveryModeIndividual = container.querySelector('#deliveryModeIndividual');
+        const resourceSelectionDiv = container.querySelector('#individualResourceSelection');
+
+        if (deliveryModeBundle) {
+            deliveryModeBundle.addEventListener('change', (e) => {
+                if (e.target.checked) {
+                    console.log('📦 Delivery mode: Bundle (single transaction)');
+                    // Hide resource selection when Bundle is selected
+                    if (resourceSelectionDiv) {
+                        resourceSelectionDiv.style.display = 'none';
+                    }
+                    this.dispatchEvent(new CustomEvent('fieldChange', {
+                        detail: { field: 'deliveryMode', value: 'bundle' }
+                    }));
+                }
+            });
+        }
+
+        if (deliveryModeIndividual) {
+            deliveryModeIndividual.addEventListener('change', (e) => {
+                if (e.target.checked) {
+                    console.log('📄 Delivery mode: Individual (separate API calls)');
+                    // Show resource selection when Individual is selected
+                    if (resourceSelectionDiv) {
+                        resourceSelectionDiv.style.display = 'block';
+                        console.log('✅ Resource selection panel shown');
+                    }
+                    this.dispatchEvent(new CustomEvent('fieldChange', {
+                        detail: { field: 'deliveryMode', value: 'individual' }
+                    }));
+                }
+            });
+        }
+
+        if (deliveryModeBundle || deliveryModeIndividual) {
+            console.log('✅ Delivery mode radio listeners attached');
+        }
+
+        // Resource checkboxes (for Individual mode)
+        const resourceCheckboxes = container.querySelectorAll('input[name="individualResources"]');
+        resourceCheckboxes.forEach(checkbox => {
+            checkbox.addEventListener('change', () => {
+                const selectedResources = Array.from(resourceCheckboxes)
+                    .filter(cb => cb.checked)
+                    .map(cb => cb.value);
+                console.log('📋 Selected resources:', selectedResources);
+                this.dispatchEvent(new CustomEvent('fieldChange', {
+                    detail: { field: 'individualResources', value: selectedResources }
+                }));
+            });
+        });
+
+        if (resourceCheckboxes.length > 0) {
+            console.log(`✅ Resource checkbox listeners attached (${resourceCheckboxes.length} resources)`);
+        }
+
+        // Authentication toggle (for FHIR target)
+        const targetAuthCheckbox = container.querySelector('#targetAuthEnabled');
+        const authConfigDiv = container.querySelector('#authConfig');
+        if (targetAuthCheckbox && authConfigDiv) {
+            targetAuthCheckbox.addEventListener('change', (e) => {
+                if (e.target.checked) {
+                    authConfigDiv.style.display = 'block';
+                    console.log('✅ Authentication enabled - showing auth config');
+                } else {
+                    authConfigDiv.style.display = 'none';
+                    console.log('❌ Authentication disabled - hiding auth config');
+                }
+
+                this.dispatchEvent(new CustomEvent('fieldChange', {
+                    detail: { field: 'targetAuthEnabled', value: e.target.checked }
+                }));
+            });
+            console.log('✅ Authentication toggle listener attached');
+        }
+
+        // Authentication type selector
+        const authTypeSelect = container.querySelector('#authType');
+        const basicAuthFields = container.querySelector('#basicAuthFields');
+        const bearerTokenFields = container.querySelector('#bearerTokenFields');
+        const oauth2Fields = container.querySelector('#oauth2Fields');
+
+        if (authTypeSelect) {
+            authTypeSelect.addEventListener('change', (e) => {
+                const authType = e.target.value;
+                console.log('🔐 Auth type changed:', authType);
+
+                // Hide all auth field groups
+                if (basicAuthFields) basicAuthFields.style.display = 'none';
+                if (bearerTokenFields) bearerTokenFields.style.display = 'none';
+                if (oauth2Fields) oauth2Fields.style.display = 'none';
+
+                // Show the selected auth field group
+                if (authType === 'basic' && basicAuthFields) {
+                    basicAuthFields.style.display = 'block';
+                } else if (authType === 'bearer' && bearerTokenFields) {
+                    bearerTokenFields.style.display = 'block';
+                } else if (authType === 'oauth2' && oauth2Fields) {
+                    oauth2Fields.style.display = 'block';
+                }
+
+                this.dispatchEvent(new CustomEvent('fieldChange', {
+                    detail: { field: 'authType', value: authType }
+                }));
+            });
+            console.log('✅ Auth type selector listener attached');
+        }
+
+        // Default FHIR Operation selector
+        const defaultOperationSelect = container.querySelector('#defaultOperation');
+        if (defaultOperationSelect) {
+            defaultOperationSelect.addEventListener('change', (e) => {
+                const operation = e.target.value;
+                console.log('🔧 Default operation changed:', operation);
+                this.dispatchEvent(new CustomEvent('fieldChange', {
+                    detail: { field: 'defaultOperation', value: operation }
+                }));
+            });
+            console.log('✅ Default operation selector listener attached');
+        }
+
+        // Auth field inputs
+        const authUsernameInput = container.querySelector('#authUsername');
+        const authPasswordInput = container.querySelector('#authPassword');
+        const bearerTokenInput = container.querySelector('#bearerToken');
+        const oauth2ClientIdInput = container.querySelector('#oauth2ClientId');
+        const oauth2ClientSecretInput = container.querySelector('#oauth2ClientSecret');
+        const oauth2TokenUrlInput = container.querySelector('#oauth2TokenUrl');
+
+        if (authUsernameInput) {
+            authUsernameInput.addEventListener('input', (e) => {
+                this.dispatchEvent(new CustomEvent('fieldChange', {
+                    detail: { field: 'authUsername', value: e.target.value }
+                }));
+            });
+        }
+
+        if (authPasswordInput) {
+            authPasswordInput.addEventListener('input', (e) => {
+                this.dispatchEvent(new CustomEvent('fieldChange', {
+                    detail: { field: 'authPassword', value: e.target.value }
+                }));
+            });
+        }
+
+        if (bearerTokenInput) {
+            bearerTokenInput.addEventListener('input', (e) => {
+                this.dispatchEvent(new CustomEvent('fieldChange', {
+                    detail: { field: 'bearerToken', value: e.target.value }
+                }));
+            });
+        }
+
+        if (oauth2ClientIdInput) {
+            oauth2ClientIdInput.addEventListener('input', (e) => {
+                this.dispatchEvent(new CustomEvent('fieldChange', {
+                    detail: { field: 'oauth2ClientId', value: e.target.value }
+                }));
+            });
+        }
+
+        if (oauth2ClientSecretInput) {
+            oauth2ClientSecretInput.addEventListener('input', (e) => {
+                this.dispatchEvent(new CustomEvent('fieldChange', {
+                    detail: { field: 'oauth2ClientSecret', value: e.target.value }
+                }));
+            });
+        }
+
+        if (oauth2TokenUrlInput) {
+            oauth2TokenUrlInput.addEventListener('input', (e) => {
+                this.dispatchEvent(new CustomEvent('fieldChange', {
+                    detail: { field: 'oauth2TokenUrl', value: e.target.value }
+                }));
+            });
+        }
+
+        console.log('✅ Target config listeners setup complete');
     }
 
     /**
@@ -3713,6 +4348,20 @@ PV1|1|I|ICU^101^1|||DOC123^Smith^Jane|||EMERGENCY|||
             });
         });
 
+        // Source Type selector - re-render panel when changed (for FHIR detection)
+        const sourceTypeSelect = container.querySelector('#sourceType');
+        if (sourceTypeSelect) {
+            sourceTypeSelect.addEventListener('change', (e) => {
+                console.log('🔄 Source type changed:', e.target.value);
+                this.updateSourceConfigPanel(container);
+
+                this.dispatchEvent(new CustomEvent('fieldChange', {
+                    detail: { field: 'sourceType', value: e.target.value }
+                }));
+            });
+            console.log('✅ Source type selector listener attached');
+        }
+
         // Source configuration inputs
         const sourceHostInput = container.querySelector('#sourceHost');
         if (sourceHostInput) {
@@ -3732,15 +4381,116 @@ PV1|1|I|ICU^101^1|||DOC123^Smith^Jane|||EMERGENCY|||
             });
         }
 
-        // Target configuration inputs
-        const targetEndpointInput = container.querySelector('#targetEndpoint');
-        if (targetEndpointInput) {
-            targetEndpointInput.addEventListener('input', (e) => {
+        // Source Connectivity selector - re-render panel when changed
+        const sourceConnectivitySelect = container.querySelector('#sourceConnectivity');
+        if (sourceConnectivitySelect) {
+            sourceConnectivitySelect.addEventListener('change', (e) => {
+                console.log('🔄 Source connectivity changed:', e.target.value);
+                this.updateSourceConfigPanel(container);
+
                 this.dispatchEvent(new CustomEvent('fieldChange', {
-                    detail: { field: 'targetEndpoint', value: e.target.value }
+                    detail: { field: 'sourceConnectivity', value: e.target.value }
                 }));
             });
+            console.log('✅ Source connectivity selector listener attached');
         }
+
+        // HTTP Authentication Type selector - update auth details panel dynamically
+        const httpAuthTypeSelect = container.querySelector('#httpAuthType');
+        if (httpAuthTypeSelect) {
+            httpAuthTypeSelect.addEventListener('change', (e) => {
+                const authType = e.target.value;
+                console.log('🔐 HTTP auth type changed:', authType);
+
+                const authDetailsPanel = container.querySelector('#httpAuthDetails');
+                if (authDetailsPanel) {
+                    authDetailsPanel.innerHTML = this.getHttpAuthDetailsPanel(authType, {});
+                }
+
+                this.dispatchEvent(new CustomEvent('fieldChange', {
+                    detail: { field: 'httpAuthType', value: authType }
+                }));
+            });
+            console.log('✅ HTTP auth type selector listener attached');
+        }
+
+        // Transformation Flow selector
+        const transformationFlowSelect = container.querySelector('#transformationFlow');
+        const flowDescriptionDiv = container.querySelector('#flowDescription');
+        const flowDescTitle = container.querySelector('#flowDescTitle');
+        const flowDescText = container.querySelector('#flowDescText');
+
+        if (transformationFlowSelect) {
+            transformationFlowSelect.addEventListener('change', (e) => {
+                const flow = e.target.value;
+                console.log('🔄 Transformation flow selected:', flow);
+
+                // Show/hide flow description
+                if (flow && flowDescriptionDiv) {
+                    const flowDescriptions = {
+                        'hl7_to_fhir': {
+                            title: '🔀 HL7 v2.x → FHIR R4 Transformation',
+                            text: 'Automatically converts incoming HL7 v2.x messages to FHIR R4 resources and delivers them to your FHIR server. Supports ADT, ORU, ORM, and other message types.'
+                        },
+                        'ccd_to_fhir': {
+                            title: '🔀 CCD/C-CDA → FHIR R4 Transformation',
+                            text: 'Automatically converts C-CDA (Consolidated Clinical Document Architecture) documents to FHIR R4 resources. Ideal for EHR interoperability.'
+                        },
+                        'hl7_to_fhir_stu3': {
+                            title: '🔀 HL7 v2.x → FHIR STU3 Transformation',
+                            text: 'Automatically converts HL7 v2.x messages to FHIR STU3 resources for systems that haven\'t upgraded to R4.'
+                        },
+                        'passthrough': {
+                            title: '📦 Passthrough (No Transformation)',
+                            text: 'Stores messages without transformation. Useful for archiving, auditing, or manual processing later.'
+                        },
+                        'fhir_receiver': {
+                            title: '📦 FHIR Receiver (Direct Storage)',
+                            text: 'Receives FHIR resources via HTTP and stores them without modification. No automatic forwarding - user-driven processing.'
+                        },
+                        'file_processor': {
+                            title: '📦 File Processor (Batch Processing)',
+                            text: 'Processes files in batches. Stores content for manual review and processing. Ideal for bulk data loads.'
+                        }
+                    };
+
+                    const desc = flowDescriptions[flow];
+                    if (desc) {
+                        flowDescTitle.textContent = desc.title;
+                        flowDescText.textContent = desc.text;
+                        flowDescriptionDiv.style.display = 'block';
+                    } else {
+                        flowDescriptionDiv.style.display = 'none';
+                    }
+                }
+
+                // Re-render target config panel to show/hide delivery mode
+                this.updateTargetConfigPanel(container);
+
+                this.dispatchEvent(new CustomEvent('fieldChange', {
+                    detail: { field: 'transformationFlow', value: flow }
+                }));
+            });
+            console.log('✅ Transformation flow selector listener attached');
+        }
+
+        // Target Connectivity selector - re-render panel when changed
+        const targetConnectivitySelect = container.querySelector('#targetConnectivity');
+        if (targetConnectivitySelect) {
+            targetConnectivitySelect.addEventListener('change', (e) => {
+                console.log('🔄 Target connectivity changed:', e.target.value);
+                this.updateTargetConfigPanel(container);
+
+                this.dispatchEvent(new CustomEvent('fieldChange', {
+                    detail: { field: 'targetConnectivity', value: e.target.value }
+                }));
+            });
+            console.log('✅ Target connectivity selector listener attached');
+        }
+
+        // Setup all target config listeners (delivery mode, auth, etc.)
+        // This is now handled by the centralized setupTargetConfigListeners method
+        this.setupTargetConfigListeners(container);
     }
 
     /**
@@ -3938,6 +4688,10 @@ PV1|1|I|ICU^101^1|||DOC123^Smith^Jane|||EMERGENCY|||
 
         // Segment toggle functionality
         this.setupSegmentToggles(container);
+
+        // Setup target configuration listeners (delivery mode, authentication, resources)
+        this.setupTargetConfigListeners(container);
+        console.log('✅ Step 4 target config listeners attached');
     }
 
     /**
@@ -4371,15 +5125,167 @@ PV1|1|I|ICU^101^1|||DOC123^Smith^Jane|||EMERGENCY|||
             console.log('💾 Captured description:', data.description);
         }
 
+        // Step 1: Source Configuration (CRITICAL for FHIR skip logic!)
+        const sourceType = this.container.querySelector('#sourceType')?.value;
+        const sourceConnectivity = this.container.querySelector('#sourceConnectivity')?.value;
+        const sourcePort = this.container.querySelector('#sourcePort')?.value;
+        const sourceHost = this.container.querySelector('#sourceHost')?.value;
+        const transformationFlow = this.container.querySelector('#transformationFlow')?.value;
+
+        if (sourceType !== undefined) {
+            data.sourceType = sourceType;
+            console.log('💾 Captured sourceType:', data.sourceType);
+        }
+        if (sourceConnectivity !== undefined) {
+            data.sourceConnectivity = sourceConnectivity;
+            console.log('💾 Captured sourceConnectivity:', data.sourceConnectivity);
+        }
+        if (transformationFlow !== undefined) {
+            data.transformationFlow = transformationFlow;
+            console.log('💾 Captured transformationFlow:', data.transformationFlow);
+        }
+        if (sourcePort !== undefined || sourceHost !== undefined) {
+            data.sourceConfig = data.sourceConfig || {};
+            if (sourcePort) data.sourceConfig.port = parseInt(sourcePort);
+            if (sourceHost) data.sourceConfig.host = sourceHost;
+        }
+
+        // FHIR Receiver Configuration (comprehensive fields)
+        if (sourceType === 'fhir' && sourceConnectivity === 'http') {
+            data.sourceConfig = data.sourceConfig || {};
+
+            // FHIR Receiver Base Configuration
+            const fhirBasePath = this.container.querySelector('#fhirBasePath')?.value;
+            const fhirVersion = this.container.querySelector('#fhirVersion')?.value;
+            const fhirContentType = this.container.querySelector('#fhirContentType')?.value;
+
+            if (fhirBasePath) data.sourceConfig.basePath = fhirBasePath;
+            if (fhirVersion) data.sourceConfig.fhirVersion = fhirVersion;
+            if (fhirContentType) data.sourceConfig.contentType = fhirContentType;
+
+            // FHIR REST Operations
+            const operations = [];
+            ['CREATE', 'READ', 'UPDATE', 'PATCH', 'DELETE', 'SEARCH', 'BATCH'].forEach(op => {
+                const checkbox = this.container.querySelector(`#fhirOperation${op}`);
+                if (checkbox?.checked) operations.push(op);
+            });
+            if (operations.length > 0) data.sourceConfig.operations = operations;
+
+            // HTTP Authentication
+            const httpAuthType = this.container.querySelector('#httpAuthType')?.value;
+            if (httpAuthType) {
+                data.sourceConfig.authType = httpAuthType;
+
+                // Auth type specific fields
+                if (httpAuthType === 'api_key') {
+                    data.sourceConfig.apiKeyHeader = this.container.querySelector('#authApiKeyHeader')?.value;
+                    data.sourceConfig.apiKeyValue = this.container.querySelector('#authApiKeyValue')?.value;
+                    data.sourceConfig.apiKeyLocation = this.container.querySelector('#authApiKeyLocation')?.value;
+                } else if (httpAuthType === 'basic') {
+                    data.sourceConfig.basicUsername = this.container.querySelector('#authBasicUsername')?.value;
+                    data.sourceConfig.basicPassword = this.container.querySelector('#authBasicPassword')?.value;
+                    data.sourceConfig.basicRealm = this.container.querySelector('#authBasicRealm')?.value;
+                } else if (httpAuthType === 'bearer') {
+                    data.sourceConfig.bearerToken = this.container.querySelector('#authBearerToken')?.value;
+                    data.sourceConfig.bearerTokenValidation = this.container.querySelector('#authBearerTokenValidation')?.checked;
+                } else if (httpAuthType === 'oauth2') {
+                    data.sourceConfig.oauthIssuer = this.container.querySelector('#authOAuthIssuer')?.value;
+                    data.sourceConfig.oauthAudience = this.container.querySelector('#authOAuthAudience')?.value;
+                    data.sourceConfig.oauthScopes = this.container.querySelector('#authOAuthScopes')?.value;
+                    data.sourceConfig.oauthClientId = this.container.querySelector('#authOAuthClientId')?.value;
+                    data.sourceConfig.oauthClientSecret = this.container.querySelector('#authOAuthClientSecret')?.value;
+                    data.sourceConfig.smartOnFhir = this.container.querySelector('#authSmartOnFhir')?.checked;
+                } else if (httpAuthType === 'mtls') {
+                    data.sourceConfig.mtlsServerCert = this.container.querySelector('#authMtlsServerCert')?.value;
+                    data.sourceConfig.mtlsServerKey = this.container.querySelector('#authMtlsServerKey')?.value;
+                    data.sourceConfig.mtlsClientCA = this.container.querySelector('#authMtlsClientCA')?.value;
+                    data.sourceConfig.mtlsVerifyClient = this.container.querySelector('#authMtlsVerifyClient')?.checked;
+                }
+            }
+
+            // Resource Filtering
+            const acceptedResources = [];
+            const resourceCheckboxes = this.container.querySelectorAll('input[name="fhirResource"]:checked');
+            resourceCheckboxes.forEach(cb => acceptedResources.push(cb.value));
+            if (acceptedResources.length > 0) data.sourceConfig.acceptedResources = acceptedResources;
+
+            // Validation Settings
+            const validateStructure = this.container.querySelector('#fhirValidateStructure')?.checked;
+            const validateProfiles = this.container.querySelector('#fhirValidateProfiles')?.checked;
+            const validateTerminology = this.container.querySelector('#fhirValidateTerminology')?.checked;
+            if (validateStructure !== undefined) data.sourceConfig.validateStructure = validateStructure;
+            if (validateProfiles !== undefined) data.sourceConfig.validateProfiles = validateProfiles;
+            if (validateTerminology !== undefined) data.sourceConfig.validateTerminology = validateTerminology;
+
+            // Rate Limiting
+            const rateLimitEnabled = this.container.querySelector('#fhirRateLimitEnabled')?.checked;
+            const rateLimitRequests = this.container.querySelector('#fhirRateLimitRequests')?.value;
+            const rateLimitWindow = this.container.querySelector('#fhirRateLimitWindow')?.value;
+            if (rateLimitEnabled !== undefined) data.sourceConfig.rateLimitEnabled = rateLimitEnabled;
+            if (rateLimitRequests) data.sourceConfig.rateLimitRequests = parseInt(rateLimitRequests);
+            if (rateLimitWindow) data.sourceConfig.rateLimitWindow = parseInt(rateLimitWindow);
+
+            // Post-Reception Actions
+            const postReceptionActions = [];
+            ['store', 'transform', 'forward', 'workflow', 'audit'].forEach(action => {
+                const checkbox = this.container.querySelector(`#fhirAction${action.charAt(0).toUpperCase() + action.slice(1)}`);
+                if (checkbox?.checked) postReceptionActions.push(action);
+            });
+            if (postReceptionActions.length > 0) data.sourceConfig.postReceptionActions = postReceptionActions;
+
+            console.log('💾 Captured FHIR receiver configuration:', data.sourceConfig);
+        }
+
         // Step 4: Target Configuration
         const targetType = this.container.querySelector('#targetType')?.value;
         const targetConnectivity = this.container.querySelector('#targetConnectivity')?.value;
         const targetEndpoint = this.container.querySelector('#targetEndpoint')?.value;
         if (targetType !== undefined) data.targetType = targetType;
         if (targetConnectivity !== undefined) data.targetConnectivity = targetConnectivity;
+
+        // Capture all target config fields
         if (targetEndpoint !== undefined) {
             data.targetConfig = data.targetConfig || {};
             data.targetConfig.endpoint = targetEndpoint;
+
+            // Delivery mode
+            const deliveryModeBundle = this.container.querySelector('#deliveryModeBundle');
+            const deliveryModeIndividual = this.container.querySelector('#deliveryModeIndividual');
+            if (deliveryModeBundle || deliveryModeIndividual) {
+                data.targetConfig.deliveryMode = deliveryModeIndividual?.checked ? 'individual' : 'bundle';
+            }
+
+            // Individual resources (only if individual mode selected)
+            if (deliveryModeIndividual?.checked) {
+                const resourceCheckboxes = this.container.querySelectorAll('input[name="individualResources"]:checked');
+                data.targetConfig.individualResources = Array.from(resourceCheckboxes).map(cb => cb.value);
+            }
+
+            // Default FHIR Operation
+            const defaultOperation = this.container.querySelector('#defaultOperation')?.value;
+            if (defaultOperation) {
+                data.targetConfig.defaultOperation = defaultOperation;
+            }
+
+            // Authentication
+            const authEnabled = this.container.querySelector('#targetAuthEnabled')?.checked;
+            data.targetConfig.authEnabled = authEnabled;
+
+            if (authEnabled) {
+                const authType = this.container.querySelector('#authType')?.value;
+                data.targetConfig.authType = authType;
+
+                if (authType === 'basic') {
+                    data.targetConfig.authUsername = this.container.querySelector('#authUsername')?.value;
+                    data.targetConfig.authPassword = this.container.querySelector('#authPassword')?.value;
+                } else if (authType === 'bearer') {
+                    data.targetConfig.authToken = this.container.querySelector('#authToken')?.value;
+                } else if (authType === 'oauth2') {
+                    data.targetConfig.authClientId = this.container.querySelector('#authClientId')?.value;
+                    data.targetConfig.authClientSecret = this.container.querySelector('#authClientSecret')?.value;
+                    data.targetConfig.authTokenUrl = this.container.querySelector('#authTokenUrl')?.value;
+                }
+            }
         }
 
         console.log('📝 Synced form values:', data);

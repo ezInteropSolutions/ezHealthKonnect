@@ -1,0 +1,379 @@
+// processing/http_input_connector.go
+// HTTP input connector for FHIR receiver (OOB + MVC pattern)
+
+package processing
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"log"
+	"net/http"
+	"sync"
+	"time"
+)
+
+// HTTPInputConnector implements InputConnector for HTTP/FHIR endpoints
+type HTTPInputConnector struct {
+	host         string
+	port         int
+	basePath     string
+	interfaceID  string
+	fhirVersion  string
+	server       *http.Server
+	messageChan  chan<- Message
+	messageCount int64
+	errorCount   int64
+	lastActivity time.Time
+	running      bool
+	mutex        sync.RWMutex
+}
+
+// NewHTTPInputConnector creates a new HTTP input connector for FHIR receiver
+func NewHTTPInputConnector(config map[string]interface{}) (InputConnector, error) {
+	// OOB Pattern: Sensible defaults with minimal configuration
+	host, ok := config["host"].(string)
+	if !ok || host == "" || host == "localhost" || host == "127.0.0.1" {
+		// Always use 0.0.0.0 for Docker compatibility
+		host = "0.0.0.0"
+	}
+
+	port, ok := config["port"].(float64)
+	if !ok {
+		port = 8090 // Default FHIR receiver port (different from main app)
+	}
+
+	basePath, ok := config["base_path"].(string)
+	if !ok || basePath == "" {
+		basePath = "/fhir/r4" // Default FHIR R4 base path
+	}
+
+	fhirVersion, ok := config["fhir_version"].(string)
+	if !ok || fhirVersion == "" {
+		fhirVersion = "R4" // Default to FHIR R4
+	}
+
+	interfaceID, _ := config["interface_id"].(string)
+
+	connector := &HTTPInputConnector{
+		host:         host,
+		port:         int(port),
+		basePath:     basePath,
+		interfaceID:  interfaceID,
+		fhirVersion:  fhirVersion,
+		lastActivity: time.Now(),
+		running:      false,
+	}
+
+	log.Printf("✅ HTTP FHIR receiver connector initialized: %s:%d%s (FHIR %s, Interface: %s)\n",
+		host, int(port), basePath, fhirVersion, interfaceID)
+	return connector, nil
+}
+
+// Start begins listening for HTTP FHIR requests
+func (h *HTTPInputConnector) Start(ctx context.Context, messageChan chan<- Message) error {
+	h.mutex.Lock()
+	if h.running {
+		h.mutex.Unlock()
+		return fmt.Errorf("HTTP listener already running on %s:%d", h.host, h.port)
+	}
+	h.messageChan = messageChan
+	h.mutex.Unlock()
+
+	// Create HTTP server with mux for FHIR endpoints
+	mux := http.NewServeMux()
+
+	// FHIR endpoint pattern: POST /fhir/r4/{resourceType}
+	// MVP: Accept all resource types with single handler
+	mux.HandleFunc(h.basePath+"/", h.handleFHIRRequest)
+
+	// Metadata endpoint (capability statement)
+	mux.HandleFunc(h.basePath+"/metadata", h.handleMetadata)
+
+	// Health check endpoint
+	mux.HandleFunc("/health", h.handleHealth)
+
+	addr := fmt.Sprintf("%s:%d", h.host, h.port)
+	h.server = &http.Server{
+		Addr:         addr,
+		Handler:      mux,
+		ReadTimeout:  30 * time.Second,
+		WriteTimeout: 30 * time.Second,
+		IdleTimeout:  60 * time.Second,
+	}
+
+	h.mutex.Lock()
+	h.running = true
+	h.mutex.Unlock()
+
+	log.Printf("🔌 HTTP FHIR receiver started on %s%s (FHIR %s)\n", addr, h.basePath, h.fhirVersion)
+
+	// Start server in goroutine
+	go func() {
+		if err := h.server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			h.mutex.Lock()
+			h.errorCount++
+			h.running = false
+			h.mutex.Unlock()
+			log.Printf("❌ HTTP server error on %s: %v\n", addr, err)
+		}
+	}()
+
+	// Monitor context for shutdown
+	go func() {
+		<-ctx.Done()
+		log.Printf("🛑 HTTP listener context cancelled on %s\n", addr)
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := h.server.Shutdown(shutdownCtx); err != nil {
+			log.Printf("❌ Error shutting down HTTP server: %v\n", err)
+		}
+	}()
+
+	return nil
+}
+
+// handleFHIRRequest handles incoming FHIR resource requests
+func (h *HTTPInputConnector) handleFHIRRequest(w http.ResponseWriter, r *http.Request) {
+	// Log incoming request
+	remoteAddr := r.RemoteAddr
+	log.Printf("📥 FHIR %s request from %s: %s %s\n", h.fhirVersion, remoteAddr, r.Method, r.URL.Path)
+
+	// MVP: Only support POST (Create operation)
+	if r.Method != http.MethodPost {
+		h.sendOperationOutcome(w, http.StatusMethodNotAllowed,
+			"error", "not-supported",
+			fmt.Sprintf("Method %s not supported in MVP - only POST (Create) is available", r.Method))
+		return
+	}
+
+	// Validate Content-Type
+	contentType := r.Header.Get("Content-Type")
+	if contentType != "application/fhir+json" && contentType != "application/json" {
+		h.sendOperationOutcome(w, http.StatusUnsupportedMediaType,
+			"error", "invalid",
+			fmt.Sprintf("Unsupported Content-Type: %s - use application/fhir+json", contentType))
+		return
+	}
+
+	// Read request body
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		h.mutex.Lock()
+		h.errorCount++
+		h.mutex.Unlock()
+		h.sendOperationOutcome(w, http.StatusBadRequest,
+			"error", "invalid",
+			fmt.Sprintf("Failed to read request body: %v", err))
+		return
+	}
+	defer r.Body.Close()
+
+	// Parse FHIR resource to extract resourceType
+	var fhirResource map[string]interface{}
+	if err := json.Unmarshal(body, &fhirResource); err != nil {
+		h.mutex.Lock()
+		h.errorCount++
+		h.mutex.Unlock()
+		h.sendOperationOutcome(w, http.StatusBadRequest,
+			"error", "structure",
+			fmt.Sprintf("Invalid JSON: %v", err))
+		return
+	}
+
+	// Extract resourceType
+	resourceType, ok := fhirResource["resourceType"].(string)
+	if !ok || resourceType == "" {
+		h.sendOperationOutcome(w, http.StatusBadRequest,
+			"error", "required",
+			"Missing required field: resourceType")
+		return
+	}
+
+	// Extract resource ID if present
+	resourceID, _ := fhirResource["id"].(string)
+
+	// Create message for processing pipeline
+	now := time.Now()
+	message := Message{
+		ID:         fmt.Sprintf("fhir_http_%d", now.UnixNano()),
+		Content:    string(body),
+		Type:       "fhir",
+		Source:     "http",
+		Timestamp:  now.Format(time.RFC3339),
+		ReceivedAt: now, // Set ReceivedAt time.Time for database storage
+		Metadata:   make(map[string]interface{}),
+	}
+
+	// Store additional metadata
+	message.Metadata["source_address"] = remoteAddr
+	message.Metadata["message_size"] = len(body)
+	message.Metadata["interface_id"] = h.interfaceID
+	message.Metadata["fhir_version"] = h.fhirVersion
+	message.Metadata["resource_type"] = resourceType
+	message.Metadata["resource_id"] = resourceID
+	message.Metadata["http_method"] = r.Method
+	message.Metadata["http_path"] = r.URL.Path
+	message.Metadata["content_type"] = contentType
+
+	// Send to processing channel
+	select {
+	case h.messageChan <- message:
+		h.mutex.Lock()
+		h.messageCount++
+		h.lastActivity = time.Now()
+		h.mutex.Unlock()
+
+		log.Printf("✅ FHIR resource received: %s/%s (%d bytes, ID: %s)\n",
+			resourceType, resourceID, len(body), message.ID)
+
+		// Return 201 Created with OperationOutcome
+		location := fmt.Sprintf("%s/%s", h.basePath, resourceType)
+		if resourceID != "" {
+			location = fmt.Sprintf("%s/%s", location, resourceID)
+		}
+		w.Header().Set("Location", location)
+
+		h.sendOperationOutcome(w, http.StatusCreated,
+			"information", "informational",
+			fmt.Sprintf("Resource %s created successfully", resourceType))
+
+	default:
+		h.mutex.Lock()
+		h.errorCount++
+		h.mutex.Unlock()
+		log.Printf("⚠️ Message channel full, rejecting FHIR request from %s\n", remoteAddr)
+		h.sendOperationOutcome(w, http.StatusServiceUnavailable,
+			"error", "transient",
+			"Processing queue full - please retry later")
+	}
+}
+
+// handleMetadata returns FHIR CapabilityStatement (simplified MVP version)
+func (h *HTTPInputConnector) handleMetadata(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		h.sendOperationOutcome(w, http.StatusMethodNotAllowed,
+			"error", "not-supported",
+			"Only GET method supported for metadata endpoint")
+		return
+	}
+
+	capability := map[string]interface{}{
+		"resourceType": "CapabilityStatement",
+		"status":       "active",
+		"date":         time.Now().Format(time.RFC3339),
+		"kind":         "instance",
+		"fhirVersion":  h.fhirVersion,
+		"format":       []string{"application/fhir+json"},
+		"rest": []map[string]interface{}{
+			{
+				"mode": "server",
+				"resource": []map[string]interface{}{
+					{
+						"type": "*", // All resource types supported in MVP
+						"interaction": []map[string]interface{}{
+							{"code": "create"}, // MVP: Only POST/Create
+						},
+					},
+				},
+			},
+		},
+	}
+
+	w.Header().Set("Content-Type", "application/fhir+json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(capability)
+}
+
+// handleHealth returns health check status
+func (h *HTTPInputConnector) handleHealth(w http.ResponseWriter, r *http.Request) {
+	status := h.GetStatus()
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":        status.Status,
+		"message_count": status.MessageCount,
+		"error_count":   status.ErrorCount,
+		"last_activity": status.LastActivity,
+	})
+}
+
+// sendOperationOutcome sends a FHIR OperationOutcome response
+func (h *HTTPInputConnector) sendOperationOutcome(w http.ResponseWriter, statusCode int, severity, code, diagnostics string) {
+	outcome := map[string]interface{}{
+		"resourceType": "OperationOutcome",
+		"issue": []map[string]interface{}{
+			{
+				"severity":    severity,
+				"code":        code,
+				"diagnostics": diagnostics,
+			},
+		},
+	}
+
+	w.Header().Set("Content-Type", "application/fhir+json")
+	w.WriteHeader(statusCode)
+	json.NewEncoder(w).Encode(outcome)
+}
+
+// TestConnection tests if the HTTP port is available
+func (h *HTTPInputConnector) TestConnection() error {
+	addr := fmt.Sprintf("%s:%d", h.host, h.port)
+	log.Printf("🔍 Testing HTTP listener availability on %s\n", addr)
+
+	// For HTTP, we just verify the configuration is valid
+	// Actual port binding happens in Start()
+	if h.port <= 0 || h.port > 65535 {
+		return fmt.Errorf("invalid port number: %d", h.port)
+	}
+
+	log.Printf("✅ HTTP configuration valid for port %d\n", h.port)
+	return nil
+}
+
+// Close shuts down the HTTP server
+func (h *HTTPInputConnector) Close() error {
+	h.mutex.Lock()
+	defer h.mutex.Unlock()
+
+	if !h.running {
+		return nil
+	}
+
+	h.running = false
+
+	if h.server != nil {
+		log.Printf("🔌 HTTP input connector shutting down: %s:%d\n", h.host, h.port)
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		if err := h.server.Shutdown(ctx); err != nil {
+			log.Printf("❌ Error shutting down HTTP server: %v\n", err)
+			return err
+		}
+		h.server = nil
+	}
+
+	log.Printf("🔌 HTTP listener closed on %s:%d\n", h.host, h.port)
+	return nil
+}
+
+// GetStatus returns connector status
+func (h *HTTPInputConnector) GetStatus() ConnectorStatus {
+	h.mutex.RLock()
+	defer h.mutex.RUnlock()
+
+	status := "stopped"
+	if h.running {
+		status = "listening"
+	}
+
+	return ConnectorStatus{
+		Type:         "HTTP",
+		Status:       status,
+		LastActivity: h.lastActivity.Format(time.RFC3339),
+		MessageCount: h.messageCount,
+		ErrorCount:   h.errorCount,
+	}
+}

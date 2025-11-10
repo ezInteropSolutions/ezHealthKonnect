@@ -69,15 +69,15 @@ func main() {
 			log.Printf("✅ PostgreSQL Transformation Service initialized")
 
 			// Initialize Processing Engine with OOB pattern (auto-detects MongoDB)
-		processingEngine = processing.NewProcessingEngine(db)
-		if err := processingEngine.Start(); err != nil {
-			log.Printf("❌ Failed to start Processing Engine: %v", err)
-		} else {
-			log.Printf("✅ Processing Engine initialized and started")
+			processingEngine = processing.NewProcessingEngine(db)
+			if err := processingEngine.Start(); err != nil {
+				log.Printf("❌ Failed to start Processing Engine: %v", err)
+			} else {
+				log.Printf("✅ Processing Engine initialized and started")
+			}
 		}
+		// Silent success - no logging when database connects properly
 	}
-	// Silent success - no logging when database connects properly
-}
 
 // Note: MongoDB is now auto-detected via ProcessingEngineFactory (OOB pattern)
 // If MONGODB_HOST or MONGODB_URI is configured, hybrid storage is enabled automatically
@@ -593,6 +593,41 @@ func main() {
 		// MLLP INTERFACE CONTROLLER - HL7 CONNECTIVITY
 		mllpCtrl := controllers.NewMLLPInterfaceController(db)
 		mllpCtrl.RegisterRoutes(api)
+
+		// CONNECTIVITY CONTROLLER - MULTI-CONNECTIVITY SUPPORT (OOB CONNECTORS)
+		if db != nil {
+			connectivityCtrl := controllers.NewConnectivityController(db)
+			connectivityGroup := api.Group("/connectivity")
+			{
+				// Connectivity Types (OOB Connector Definitions)
+				connectivityGroup.GET("/types", connectivityCtrl.ListConnectivityTypes)
+				connectivityGroup.GET("/types/:identifier", connectivityCtrl.GetConnectivityType)
+				connectivityGroup.GET("/types/category/:category", connectivityCtrl.GetConnectivityTypesByCategory)
+
+				// Interface Connectivity Configuration
+				connectivityGroup.POST("/interfaces/:interface_id", connectivityCtrl.CreateInterfaceConnectivity)
+				connectivityGroup.GET("/interfaces/:interface_id", connectivityCtrl.GetInterfaceConnectivity)
+				connectivityGroup.PUT("/interfaces/:interface_id", connectivityCtrl.UpdateInterfaceConnectivity)
+				connectivityGroup.DELETE("/interfaces/:interface_id", connectivityCtrl.DeleteInterfaceConnectivity)
+
+				// Connection Testing
+				connectivityGroup.POST("/interfaces/:interface_id/test-source", connectivityCtrl.TestSourceConnection)
+				connectivityGroup.POST("/interfaces/:interface_id/test-target", connectivityCtrl.TestTargetConnection)
+
+				// Cron Job Management
+				connectivityGroup.POST("/interfaces/:interface_id/cron/enable", connectivityCtrl.EnableCronJob)
+				connectivityGroup.POST("/interfaces/:interface_id/cron/disable", connectivityCtrl.DisableCronJob)
+				connectivityGroup.GET("/interfaces/:interface_id/cron/status", connectivityCtrl.GetCronJobStatus)
+
+				// Execution Logs and Statistics
+				connectivityGroup.GET("/interfaces/:interface_id/executions", connectivityCtrl.GetExecutionLogs)
+				connectivityGroup.GET("/interfaces/:interface_id/executions/stats", connectivityCtrl.GetExecutionStats)
+
+				// Cron Expression Preview Helper
+				connectivityGroup.POST("/cron/preview", connectivityCtrl.PreviewCronSchedule)
+			}
+			log.Printf("✅ Connectivity Controller initialized (Multi-Connectivity Support)")
+		}
 
 		// OUTPUT MESSAGE CONTROLLER - TRANSFORMATION OUTPUT MANAGEMENT
 		outputMsgCtrl := controllers.NewOutputMessageController(db)

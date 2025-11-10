@@ -160,8 +160,20 @@ class BasicInterfaceConfigManager {
         setFieldValue('editFormat', interfaceData.messageType || interfaceData.format, 'HL7');
         setFieldValue('editStatus', interfaceData.status, 'inactive');
 
-        // Source configuration
-        setFieldValue('editSourceType', interfaceData.sourceType, 'tcp');
+        // Source configuration - MAP sourceType to modal dropdown values
+        // Database has: file, tcp, http, database, mllp
+        // Interface uses: hl7v2, hl7, fhir, file, database, http
+        const sourceTypeMapping = {
+            'hl7v2': 'tcp',      // HL7 v2.x uses TCP/MLLP
+            'hl7': 'tcp',        // Generic HL7 uses TCP
+            'fhir': 'http',      // FHIR uses HTTP
+            'file': 'file',      // Direct mapping
+            'database': 'database', // Direct mapping
+            'http': 'http'       // Direct mapping
+        };
+        const mappedSourceType = sourceTypeMapping[interfaceData.sourceType] || interfaceData.sourceType || 'tcp';
+
+        setFieldValue('editSourceType', mappedSourceType, 'tcp');
         setFieldValue('editSourceConnectivity', interfaceData.sourceConnectivity, 'inbound');
 
         // Target configuration
@@ -322,45 +334,54 @@ class BasicInterfaceConfigManager {
      * Collect form data for saving
      */
     collectFormData() {
+        console.log('📋 Starting form data collection...');
+
+        // Debug: Check which fields exist
+        console.log('🔍 Field availability:', {
+            editInterfaceId: !!document.getElementById('editInterfaceId'),
+            editInterfaceName: !!document.getElementById('editInterfaceName'),
+            editInterfaceDescription: !!document.getElementById('editInterfaceDescription'),
+            editStatus: !!document.getElementById('editStatus'),
+            editsourceType: !!document.getElementById('editsourceType'),
+            editsourceConnectivity: !!document.getElementById('editsourceConnectivity'),
+            edittargetConnectivity: !!document.getElementById('edittargetConnectivity')
+        });
+
         const formData = {
-            id: document.getElementById('editInterfaceId').value,
-            name: document.getElementById('editInterfaceName').value,
-            description: document.getElementById('editInterfaceDescription').value,
-            format: document.getElementById('editFormat').value,
-            messageType: document.getElementById('editFormat').value, // Map format to messageType for backend compatibility
-            status: document.getElementById('editStatus').value,
-            sourceType: document.getElementById('editSourceType').value,
-            sourceConnectivity: document.getElementById('editSourceConnectivity').value,
-            targetType: document.getElementById('editTargetType').value,
-            targetConnectivity: document.getElementById('editTargetConnectivity').value
+            id: document.getElementById('editInterfaceId')?.value || '',
+            name: document.getElementById('editInterfaceName')?.value || '',
+            description: document.getElementById('editInterfaceDescription')?.value || '',
+            status: document.getElementById('editStatus')?.value || 'inactive',
+            // Use shared component field IDs (with 'edit' prefix, lowercase after prefix)
+            sourceType: document.getElementById('editsourceType')?.value || 'hl7v2',
+            sourceConnectivity: document.getElementById('editsourceConnectivity')?.value || 'tcp',
+            targetConnectivity: document.getElementById('edittargetConnectivity')?.value || 'http'
         };
 
-        // Collect source configuration
-        formData.sourceConfig = {
-            host: document.getElementById('editSourceHost')?.value || 'localhost',
-            port: parseInt(document.getElementById('editSourcePort')?.value) || 6661
+        console.log('📝 Basic fields collected:', formData);
+
+        // Backward compatibility: set format and messageType from sourceType
+        formData.format = formData.sourceType;
+        formData.messageType = formData.sourceType;
+
+        // Set targetType based on targetConnectivity (backend expects this field)
+        // Map: sink -> sink, http -> fhir, tcp -> hl7v2, file -> file, database -> database
+        const targetTypeMap = {
+            'sink': 'sink',
+            'http': 'fhir',
+            'tcp': 'hl7v2',
+            'file': 'file',
+            'database': 'database'
         };
+        formData.targetType = targetTypeMap[formData.targetConnectivity] || 'fhir';
 
-        // Collect target configuration using object-oriented approach
-        const targetType = formData.targetType;
+        // Collect source configuration from shared components (with 'edit' prefix)
+        formData.sourceConfig = this.collectSourceConfig('edit');
 
-        // Use specialized handler for target type
-        const targetHandler = window.InterfaceHandlerFactory?.createHandler(targetType, formData);
+        // Collect target configuration from shared components (with 'edit' prefix)
+        formData.targetConfig = this.collectTargetConfig('edit', formData.targetConnectivity);
 
-        if (targetHandler) {
-            console.log(`🔧 Using ${targetHandler.constructor.name} for target configuration`);
-            formData.targetConfig = targetHandler.collectTargetConfig();
-        } else {
-            console.warn('⚠️ Interface handlers not loaded, using fallback logic');
-            // Fallback for when handlers aren't loaded yet
-            formData.targetConfig = {
-                host: document.getElementById('editTargetHost')?.value || '',
-                port: parseInt(document.getElementById('editTargetPort')?.value) || 8080,
-                path: document.getElementById('editTargetPath')?.value || '/fhir'
-            };
-        }
-
-        // Collect processing rules
+        // Collect processing rules (if fields exist)
         formData.processingRules = {
             routingMode: document.getElementById('editRoutingMode')?.value || 'direct',
             targetFhirInterface: document.getElementById('editTargetFhirInterface')?.value || '',
@@ -368,13 +389,141 @@ class BasicInterfaceConfigManager {
             retryPolicy: document.getElementById('editRetryPolicy')?.value || '3'
         };
 
-        // Performance settings
+        // Performance settings (if fields exist)
         const tableStrategy = document.getElementById('editTableStrategy')?.value;
         formData.useDedicatedTable = tableStrategy === 'dedicated';
         formData.tableManagementStrategy = tableStrategy || 'shared';
         formData.expectedVolume = document.getElementById('editExpectedVolume')?.value || 'low';
 
+        console.log('📦 Collected form data:', formData);
         return formData;
+    }
+
+    /**
+     * Collect source configuration from shared components
+     * @param {string} idPrefix - ID prefix for form fields
+     */
+    collectSourceConfig(idPrefix = '') {
+        const sourceConnectivity = document.getElementById(`${idPrefix}sourceConnectivity`)?.value;
+        const config = {};
+
+        // Common fields
+        const port = document.getElementById(`${idPrefix}sourcePort`)?.value;
+        const host = document.getElementById(`${idPrefix}sourceHost`)?.value;
+
+        if (port) config.port = parseInt(port);
+        if (host) config.host = host;
+
+        // TCP/MLLP specific
+        if (sourceConnectivity === 'tcp') {
+            const protocol = document.getElementById(`${idPrefix}tcpProtocol`)?.value;
+            const encoding = document.getElementById(`${idPrefix}tcpEncoding`)?.value;
+            if (protocol) config.protocol = protocol;
+            if (encoding) config.encoding = encoding;
+        }
+
+        // FHIR specific
+        if (sourceConnectivity === 'http') {
+            const basePath = document.getElementById(`${idPrefix}fhirBasePath`)?.value;
+            const fhirVersion = document.getElementById(`${idPrefix}FhirVersion`)?.value;
+            const authType = document.getElementById(`${idPrefix}HttpAuthType`)?.value;
+
+            if (basePath) config.basePath = basePath;
+            if (fhirVersion) config.fhirVersion = fhirVersion;
+            if (authType) config.authType = authType;
+
+            // Collect auth details based on type
+            if (authType === 'basic') {
+                config.authUsername = document.getElementById(`${idPrefix}HttpAuthUsername`)?.value;
+                config.authPassword = document.getElementById(`${idPrefix}HttpAuthPassword`)?.value;
+            } else if (authType === 'api_key') {
+                config.authApiKey = document.getElementById(`${idPrefix}HttpAuthApiKey`)?.value;
+                config.authHeaderName = document.getElementById(`${idPrefix}HttpAuthHeaderName`)?.value;
+            } else if (authType === 'bearer') {
+                config.authBearerToken = document.getElementById(`${idPrefix}HttpAuthBearerToken`)?.value;
+            }
+        }
+
+        return config;
+    }
+
+    /**
+     * Collect target configuration from shared components
+     * @param {string} idPrefix - ID prefix for form fields
+     * @param {string} connectivity - Target connectivity type
+     */
+    collectTargetConfig(idPrefix = '', connectivity = 'http') {
+        const config = {};
+
+        if (connectivity === 'sink') {
+            // Sink target (store only, no routing)
+            const enableLogging = document.getElementById(`${idPrefix}sinkEnableLogging`)?.checked;
+            const enableValidation = document.getElementById(`${idPrefix}sinkEnableValidation`)?.checked;
+            const retentionDays = document.getElementById(`${idPrefix}sinkRetentionDays`)?.value;
+            const generateAck = document.getElementById(`${idPrefix}sinkGenerateAck`)?.checked;
+
+            config.enableLogging = enableLogging !== false;
+            config.enableValidation = enableValidation === true;
+            config.retentionDays = retentionDays ? parseInt(retentionDays) : 30;
+            config.generateAck = generateAck !== false;
+            config.mode = 'sink'; // Explicit marker for backend
+        } else if (connectivity === 'http') {
+            // HTTP/FHIR target
+            const endpoint = document.getElementById(`${idPrefix}targetEndpoint`)?.value;
+            const deliveryMode = document.getElementById(`${idPrefix}fhirDeliveryMode`)?.value;
+            const version = document.getElementById(`${idPrefix}targetVersion`)?.value;
+            const format = document.getElementById(`${idPrefix}targetFormat`)?.value;
+            // Auth fields use 'target' prefix (e.g., edittargetHttpAuthType)
+            const authType = document.getElementById(`${idPrefix}targetHttpAuthType`)?.value;
+
+            if (endpoint) config.endpoint = endpoint;
+            if (deliveryMode) config.deliveryMode = deliveryMode;
+            if (version) config.version = version;
+            if (format) config.format = format;
+            if (authType) config.authType = authType;
+
+            // Collect auth details based on type
+            if (authType === 'basic') {
+                config.username = document.getElementById(`${idPrefix}targetAuthUsername`)?.value;
+                config.password = document.getElementById(`${idPrefix}targetAuthPassword`)?.value;
+            } else if (authType === 'api_key') {
+                config.apiKey = document.getElementById(`${idPrefix}targetAuthApiKeyValue`)?.value;
+                config.apiKeyHeader = document.getElementById(`${idPrefix}targetAuthApiKeyHeader`)?.value;
+            } else if (authType === 'bearer') {
+                config.bearerToken = document.getElementById(`${idPrefix}targetAuthBearerToken`)?.value;
+            }
+        } else if (connectivity === 'file') {
+            // File output target
+            const filePath = document.getElementById(`${idPrefix}targetFilePath`)?.value;
+            const filePattern = document.getElementById(`${idPrefix}targetFilePattern`)?.value;
+            const fileFormat = document.getElementById(`${idPrefix}targetFileFormat`)?.value;
+
+            if (filePath) config.filePath = filePath;
+            if (filePattern) config.filePattern = filePattern;
+            if (fileFormat) config.fileFormat = fileFormat;
+        } else if (connectivity === 'tcp') {
+            // TCP/MLLP target
+            const host = document.getElementById(`${idPrefix}targetTcpHost`)?.value;
+            const port = document.getElementById(`${idPrefix}targetTcpPort`)?.value;
+            const protocol = document.getElementById(`${idPrefix}targetTcpProtocol`)?.value;
+
+            if (host) config.host = host;
+            if (port) config.port = parseInt(port);
+            if (protocol) config.protocol = protocol;
+        } else if (connectivity === 'database') {
+            // Database target
+            const dbType = document.getElementById(`${idPrefix}targetDbType`)?.value;
+            const dbHost = document.getElementById(`${idPrefix}targetDbHost`)?.value;
+            const dbPort = document.getElementById(`${idPrefix}targetDbPort`)?.value;
+            const dbName = document.getElementById(`${idPrefix}targetDbName`)?.value;
+
+            if (dbType) config.dbType = dbType;
+            if (dbHost) config.host = dbHost;
+            if (dbPort) config.port = parseInt(dbPort);
+            if (dbName) config.database = dbName;
+        }
+
+        return config;
     }
 
     /**
@@ -696,7 +845,11 @@ function initializeConfigManager() {
     console.log('🔧 Initializing InterfaceConfigManager...');
     window.basicInterfaceConfigManager = new BasicInterfaceConfigManager();
     window.basicInterfaceConfigManager.init();
-    console.log('✅ InterfaceConfigManager initialized');
+
+    // CRITICAL FIX: Also expose as interfaceConfigManager for interfaces.js compatibility
+    window.interfaceConfigManager = window.basicInterfaceConfigManager;
+
+    console.log('✅ InterfaceConfigManager initialized and exposed as window.interfaceConfigManager');
 }
 
 // Make class available globally (after class definition)

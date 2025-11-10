@@ -109,17 +109,18 @@ services:
       - "8080:8080"    # Go backend API
       # Interface ports (configured in database)
       - "6661:6661"    # Interface 1: HL7 TCP Receiver (primary)
-      - "2575:2575"    # Interface 2: Alternative HL7 TCP port
-      - "8081:8081"    # Interface 3: FHIR HTTP Receiver
+      - "6662:6662"    # Interface 2: HL7 TCP Receiver (secondary)
+      - "2575:2575"    # Interface 3: Alternative HL7 TCP port
+      - "8081:8081"    # Interface 4: FHIR HTTP Receiver
       # Reserved ports for additional interfaces
-      - "8090:8090"    # Interface 3
-      - "8091:8091"    # Interface 4
-      - "8092:8092"    # Interface 5
-      - "8093:8093"    # Interface 6
-      - "8094:8094"    # Interface 7
-      - "8095:8095"    # Interface 8
-      - "8096:8096"    # Interface 9
-      - "8097:8097"    # Interface 10
+      - "8090:8090"    # Interface 5
+      - "8091:8091"    # Interface 6
+      - "8092:8092"    # Interface 7
+      - "8093:8093"    # Interface 8
+      - "8094:8094"    # Interface 9
+      - "8095:8095"    # Interface 10
+      - "8096:8096"    # Interface 11
+      - "8097:8097"    # Interface 12
     
     # ✅ FIXED: Complete volume mounting (was missing critical mounts)
     volumes:

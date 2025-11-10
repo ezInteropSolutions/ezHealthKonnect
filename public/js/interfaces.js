@@ -1175,7 +1175,10 @@ function showEditModal(interfaceId) {
     }
 
     // Use the enhanced configuration manager to populate the form
-    if (window.interfaceConfigManager) {
+    if (window.populateEditForm) {
+        console.log('✅ Using shared components populateEditForm');
+        window.populateEditForm(interface);
+    } else if (window.interfaceConfigManager) {
         console.log('✅ Using enhanced configuration manager');
         window.interfaceConfigManager.populateEditForm(interface);
     } else {
@@ -2205,16 +2208,38 @@ async function updateInterfaceRuntimeStatus(interfaceId) {
             const data = await response.json();
             const isProcessing = data.interface?.processingActive || false;
             const stats = data.interface?.processingStats;
+            const status = data.interface?.interface_status || data.interface?.status || 'unknown';
+            const isPaused = status === 'paused';
+            const isStopped = status === 'configured' || status === 'draft' || status === 'testing' || status === 'retired';
+            const isActive = status === 'active';
 
-            updateRuntimeStatusDisplay(statusElement, isProcessing, stats);
-            updateActionButtonsVisibility(interfaceId, isProcessing);
+            if (isPaused) {
+                // Paused: Show Start + Stop
+                updateRuntimeStatusDisplay(statusElement, false, stats, 'paused');
+                updateActionButtonsVisibility(interfaceId, false, true);
+            } else if (isActive && isProcessing) {
+                // Active and processing: Show Pause + Stop
+                updateRuntimeStatusDisplay(statusElement, true, stats, null);
+                updateActionButtonsVisibility(interfaceId, true, false);
+            } else if (isStopped) {
+                // Stopped: Show Start only
+                updateRuntimeStatusDisplay(statusElement, false, stats, null);
+                updateActionButtonsVisibility(interfaceId, false, false);
+            } else {
+                // Default: Show Start only
+                updateRuntimeStatusDisplay(statusElement, false, stats, null);
+                updateActionButtonsVisibility(interfaceId, false, false);
+            }
         } else if (response.status === 404) {
             updateRuntimeStatusDisplay(statusElement, false, null, 'not_configured');
+            updateActionButtonsVisibility(interfaceId, false, false);
         } else {
             updateRuntimeStatusDisplay(statusElement, false, null, 'error');
+            updateActionButtonsVisibility(interfaceId, false, false);
         }
     } catch (error) {
         updateRuntimeStatusDisplay(statusElement, false, null, 'offline');
+        updateActionButtonsVisibility(interfaceId, false, false);
     }
 }
 
@@ -2238,6 +2263,10 @@ function updateRuntimeStatusDisplay(element, isProcessing, stats, errorState = n
             case 'not_configured':
                 indicator.className = 'status-indicator stopped';
                 text.textContent = 'Not Active';
+                break;
+            case 'paused':
+                indicator.className = 'status-indicator paused';
+                text.textContent = 'Paused';
                 break;
         }
     } else if (isProcessing) {
@@ -2288,7 +2317,7 @@ function updateActionButtonsVisibility(interfaceId, isProcessing, isPaused = fal
  * Activate interface processing
  */
 async function activateInterfaceProcessing(interfaceId) {
-    const activateBtn = document.getElementById(`activate-${interfaceId}`);
+    const activateBtn = document.getElementById(`start-${interfaceId}`);
     if (activateBtn) {
         activateBtn.disabled = true;
         activateBtn.textContent = '⏳';
@@ -2323,7 +2352,7 @@ async function activateInterfaceProcessing(interfaceId) {
     } finally {
         if (activateBtn) {
             activateBtn.disabled = false;
-            activateBtn.textContent = '🚀';
+            activateBtn.textContent = '▶️';
         }
     }
 }

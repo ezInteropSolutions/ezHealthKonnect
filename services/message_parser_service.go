@@ -6,6 +6,7 @@ package services
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"log"
 	"time"
@@ -21,6 +22,8 @@ type MessageParserService struct {
 	postgresService        *InterfaceMessageService
 	transformationPipeline *TransformationPipelineService // OOB: Auto-configured transformation
 	outputMessageService   *OutputMessageService          // OOB: Hybrid output storage
+	outputDeliveryService  *OutputDeliveryService         // V21: Push-based delivery
+	db                     *sql.DB                        // Database for querying interface config
 }
 
 // NewMessageParserService creates new parser service (OOB)
@@ -155,16 +158,21 @@ func InitializeMessageParserService(db *sql.DB) *MessageParserService {
 	// OOB: Initialize hybrid output message service
 	outputMessageService := NewOutputMessageService(db, mongoClient, mongoDatabase)
 
+	// V21: Initialize output delivery service (push-based delivery)
+	outputDeliveryService := NewOutputDeliveryService(db)
+
 	parserService := &MessageParserService{
 		formatDetector:         NewFormatDetector(),
 		parserFactory:          NewParserFactory(),
 		mongoService:           mongoService,
 		postgresService:        postgresService,
-		transformationPipeline: transformationPipeline,   // OOB: Auto-configured
-		outputMessageService:   outputMessageService,     // OOB: Hybrid storage
+		transformationPipeline: transformationPipeline,     // OOB: Auto-configured
+		outputMessageService:   outputMessageService,       // OOB: Hybrid storage
+		outputDeliveryService:  outputDeliveryService,      // V21: Push-based delivery
+		db:                     db,                         // V21: For querying interface config
 	}
 
-	fmt.Printf("✅ Message parser service initialized with MongoDB + PostgreSQL + Transformation Pipeline + Output Storage\n")
+	fmt.Printf("✅ Message parser service initialized with MongoDB + PostgreSQL + Transformation Pipeline + Output Storage + Delivery\n")
 	return parserService
 }
 
@@ -199,86 +207,66 @@ func (mps *MessageParserService) executeTransformationPipeline(
 		return
 	}
 
-	log.Printf("🔍 Message Parser: Calling ExecuteTransformation with messageType='%s'", messageType)
+	// DISABLED: Legacy transformation path
+	// MVC Pipeline in engine_message_processor.go now handles ALL transformation
+	// This duplicate transformation was causing the executor to receive incomplete responses
+	log.Printf("📝 Skipping legacy transformation - MVC pipeline handles transformation for message %s", messageID)
+}
 
-	// Read parsed JSON from MongoDB (to get properly serialized map[string]interface{})
-	// This avoids Go struct types that can't be accessed as maps
-	parsedJSON, err := mps.mongoService.GetParsedContent(ctx, interfaceID, messageID)
+// getInterfaceTargetConfig retrieves target configuration and output message ID for delivery
+// V21: Helper function for output delivery trigger
+func (mps *MessageParserService) getInterfaceTargetConfig(interfaceID, inputMessageID string) (*models.DestinationConfig, string, error) {
+	ctx := context.Background()
+
+	// Query interface target configuration
+	query := `
+		SELECT target_config
+		FROM interfaces
+		WHERE id = $1
+	`
+
+	var targetConfigJSON string
+	err := mps.db.QueryRowContext(ctx, query, interfaceID).Scan(&targetConfigJSON)
 	if err != nil {
-		log.Printf("❌ Failed to read parsed JSON from MongoDB for message %s: %v", messageID, err)
-		return
-	}
-	if parsedJSON == nil {
-		log.Printf("❌ No parsed JSON found in MongoDB for message %s", messageID)
-		return
+		return nil, "", fmt.Errorf("failed to query interface target_config: %w", err)
 	}
 
-	log.Printf("✅ Retrieved parsed JSON from MongoDB for message %s", messageID)
-
-	// Execute transformation pipeline
-	transformResult, err := mps.transformationPipeline.ExecuteTransformation(
-		ctx,
-		messageID,
-		interfaceID,
-		messageType,
-		parsedJSON,
-	)
-
+	// Parse target_config JSON
+	var targetConfig models.DestinationConfig
+	err = json.Unmarshal([]byte(targetConfigJSON), &targetConfig)
 	if err != nil {
-		log.Printf("❌ Transformation failed for message %s: %v", messageID, err)
-		return
+		return nil, "", fmt.Errorf("failed to parse target_config JSON: %w", err)
 	}
 
-	if !transformResult.Success {
-		log.Printf("❌ Transformation completed with errors for message %s: %v", messageID, transformResult.Error)
-		return
+	// Get output message ID from output table
+	// First, get output table name from metadata
+	metadataQuery := `
+		SELECT output_table_name
+		FROM output_table_metadata
+		WHERE interface_id = $1
+	`
+
+	var outputTableName string
+	err = mps.db.QueryRowContext(ctx, metadataQuery, interfaceID).Scan(&outputTableName)
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to get output table name: %w", err)
 	}
 
-	log.Printf("✅ Transformation completed for message %s (success: %t, time: %dms, steps: %d)",
-		messageID, transformResult.Success, transformResult.TotalTimeMs, len(transformResult.TransformationLog))
+	// Query output message ID from output table
+	// Find the most recent output message for this input message
+	outputMessageQuery := fmt.Sprintf(`
+		SELECT id
+		FROM %s
+		WHERE input_message_id = $1
+		ORDER BY created_at DESC
+		LIMIT 1
+	`, outputTableName)
 
-	// STEP 7: Store transformed output in hybrid storage
-	if mps.outputMessageService != nil && transformResult.OutputData != nil {
-		// Convert transformation log to map for storage
-		transformationMetadata := map[string]interface{}{
-			"steps":       transformResult.TransformationLog,
-			"total_steps": len(transformResult.TransformationLog),
-		}
-
-		// Prepare transformation result for storage
-		outputResult := &TransformationResult{
-			Success:                transformResult.Success,
-			TransformedMessage:     transformResult.OutputData,
-			TransformationMetadata: transformationMetadata,
-			ValidationErrors:       make(map[string]interface{}),
-			ProcessingTimeMs:       transformResult.TotalTimeMs,
-			ErrorMessage:          transformResult.Error,
-		}
-
-		// Extract FHIR resource type and ID if available
-		if resourceType, ok := transformResult.OutputData["resourceType"].(string); ok {
-			outputResult.FHIRResourceType = resourceType
-		}
-		if id, ok := transformResult.OutputData["id"].(string); ok {
-			outputResult.FHIRResourceID = id
-		}
-
-		// Use message ID as correlation ID
-		correlationID := messageID
-
-		// Store in hybrid storage (MongoDB + PostgreSQL)
-		err := mps.outputMessageService.StoreTransformationResult(
-			ctx,
-			interfaceID,
-			messageID,
-			correlationID,
-			outputResult,
-		)
-
-		if err != nil {
-			log.Printf("❌ Failed to store transformation output for message %s: %v", messageID, err)
-		} else {
-			log.Printf("✅ Stored transformation output for message %s in hybrid storage", messageID)
-		}
+	var outputMessageID string
+	err = mps.db.QueryRowContext(ctx, outputMessageQuery, inputMessageID).Scan(&outputMessageID)
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to get output message ID: %w", err)
 	}
+
+	return &targetConfig, outputMessageID, nil
 }

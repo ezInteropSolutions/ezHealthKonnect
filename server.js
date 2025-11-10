@@ -33,7 +33,7 @@ async function startServer() {
         }
         
         // Start Express server
-        app.listen(PORT, () => {
+        const server = app.listen(PORT, async () => {
             console.log(`\n🏥 ezHealthKonnect Enterprise Server`);
             console.log(`📍 Server: http://localhost:${PORT}`);
             console.log(`🔐 Login: http://localhost:${PORT}/login.html`);
@@ -42,13 +42,30 @@ async function startServer() {
             console.log(`🗄️  Storage: PostgreSQL Only (Production Mode)`);
             console.log(`🛡️  Compliance: HIPAA/GDPR audit logging via PostgreSQL`);
             console.log(`📊 Audit Logs: PostgreSQL audit_logs table + logs/audit.log backup`);
-            
+
             console.log(`\n🔑 Default Admin Credentials:`);
             console.log(`   Email: admin@ezhealthkonnect.com`);
             console.log(`   Password: admin123`);
-            
+
             console.log('\n✅ Server ready - PostgreSQL-only production mode active!');
             console.log('🚀 All user data now stored securely in PostgreSQL database');
+
+            // Initialize interface deployment service (auto-start interfaces)
+            try {
+                const database = require('./config/database');
+                const InterfaceDeploymentService = require('./services/InterfaceDeploymentService');
+                const deploymentService = new InterfaceDeploymentService(database);
+
+                // Store globally for API access
+                global.deploymentService = deploymentService;
+
+                // Initialize and auto-start interfaces (async, non-blocking)
+                deploymentService.initializeOnStartup().catch(error => {
+                    console.error('⚠️  Interface auto-start failed:', error.message);
+                });
+            } catch (error) {
+                console.error('⚠️  Deployment service initialization failed:', error.message);
+            }
         });
         
     } catch (error) {
@@ -60,11 +77,17 @@ async function startServer() {
 // Graceful shutdown handling
 process.on('SIGTERM', async () => {
     console.log('\n🔄 SIGTERM received, shutting down gracefully...');
+    if (global.deploymentService) {
+        global.deploymentService.cleanup();
+    }
     process.exit(0);
 });
 
 process.on('SIGINT', async () => {
     console.log('\n🔄 SIGINT received, shutting down gracefully...');
+    if (global.deploymentService) {
+        global.deploymentService.cleanup();
+    }
     process.exit(0);
 });
 

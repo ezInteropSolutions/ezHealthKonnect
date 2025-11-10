@@ -1,0 +1,337 @@
+package connectors
+
+import (
+	"bytes"
+	"encoding/json"
+	"ezhealthkonnect/models"
+	"fmt"
+	"io"
+	"net/http"
+	"strings"
+	"time"
+)
+
+// FHIROutputConnector implements OutputConnector for FHIR R4 destinations
+// Sends FHIR bundles to FHIR servers via HTTP POST
+type FHIROutputConnector struct {
+	*BaseConnector
+	httpClient *http.Client
+	endpoint   string
+}
+
+// NewFHIROutputConnector creates a new FHIR output connector
+func NewFHIROutputConnector() *FHIROutputConnector {
+	base := NewBaseConnector(
+		"fhir",
+		"FHIR R4 HTTP Connector",
+		"1.0.0",
+		"Delivers FHIR bundles to FHIR R4 servers via HTTP POST",
+	)
+
+	// Add capabilities
+	base.AddCapability("http_post")
+	base.AddCapability("fhir_r4")
+	base.AddCapability("retry")
+	base.AddCapability("authentication")
+	base.AddCapability("tls")
+
+	connector := &FHIROutputConnector{
+		BaseConnector: base,
+	}
+
+	return connector
+}
+
+// Connect establishes connection to FHIR server (validates configuration and creates HTTP client)
+func (f *FHIROutputConnector) Connect(config models.DestinationConfig) error {
+	fmt.Printf("🔌 Connecting to FHIR server...\n")
+
+	// Validate configuration
+	if err := f.ValidateConfig(config); err != nil {
+		return fmt.Errorf("invalid FHIR configuration: %w", err)
+	}
+
+	// Store configuration
+	f.Config = config
+
+	// Build endpoint URL
+	f.endpoint = config.BuildEndpointURL()
+	if f.endpoint == "" {
+		// If BuildEndpointURL returns empty, construct manually
+		protocol := config.Protocol
+		if protocol == "" {
+			protocol = "http"
+		}
+		host := config.Host
+		if host == "localhost" {
+			host = "127.0.0.1" // Force IPv4
+		}
+		port := config.Port
+		path := config.Path
+
+		f.endpoint = fmt.Sprintf("%s://%s:%d%s", protocol, host, port, path)
+	}
+
+	// Force IPv4 for localhost
+	if strings.Contains(f.endpoint, "localhost") {
+		f.endpoint = strings.ReplaceAll(f.endpoint, "localhost", "127.0.0.1")
+	}
+
+	// Create HTTP client with timeout
+	timeout := time.Duration(config.GetTimeout()) * time.Millisecond
+	f.httpClient = &http.Client{
+		Timeout: timeout,
+	}
+
+	fmt.Printf("✅ FHIR connector initialized\n")
+	fmt.Printf("   Endpoint: %s\n", f.endpoint)
+	fmt.Printf("   Timeout: %dms\n", config.GetTimeout())
+	fmt.Printf("   Auth: %s\n", getAuthTypeDisplay(config.AuthType))
+
+	return nil
+}
+
+// Send delivers a FHIR bundle to the FHIR server
+func (f *FHIROutputConnector) Send(message models.OutputMessage) (*models.DeliveryResult, error) {
+	startTime := time.Now()
+
+	fmt.Printf("📤 Sending FHIR bundle to %s\n", f.endpoint)
+	fmt.Printf("   Message ID: %s\n", message.ID)
+	fmt.Printf("   Message Type: %s\n", message.MessageType)
+
+	// Prepare delivery result
+	result := &models.DeliveryResult{
+		Success:      false,
+		Status:       "failed",
+		ShouldRetry:  false,
+	}
+
+	// Marshal message content to JSON
+	jsonData, err := json.Marshal(message.Content)
+	if err != nil {
+		result.ErrorMessage = fmt.Sprintf("failed to marshal FHIR bundle: %v", err)
+		result.DeliveryTimeMs = time.Since(startTime).Milliseconds()
+		return result, fmt.Errorf("failed to marshal message content: %w", err)
+	}
+
+	// Create HTTP request
+	req, err := http.NewRequest("POST", f.endpoint, bytes.NewBuffer(jsonData))
+	if err != nil {
+		result.ErrorMessage = fmt.Sprintf("failed to create HTTP request: %v", err)
+		result.DeliveryTimeMs = time.Since(startTime).Milliseconds()
+		return result, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	// Set headers
+	contentType := f.Config.GetContentType()
+	acceptHeader := f.Config.GetAcceptHeader()
+
+	req.Header.Set("Content-Type", contentType)
+	req.Header.Set("Accept", acceptHeader)
+
+	// Add custom headers
+	if f.Config.HTTPHeaders != nil {
+		for key, value := range f.Config.HTTPHeaders {
+			req.Header.Set(key, value)
+		}
+	}
+
+	// Add authentication
+	if err := f.addAuthentication(req); err != nil {
+		result.ErrorMessage = fmt.Sprintf("failed to add authentication: %v", err)
+		result.DeliveryTimeMs = time.Since(startTime).Milliseconds()
+		return result, fmt.Errorf("authentication error: %w", err)
+	}
+
+	// Send request
+	fmt.Printf("📡 POST %s (Content-Type: %s, Size: %d bytes)\n", f.endpoint, contentType, len(jsonData))
+	resp, err := f.httpClient.Do(req)
+	if err != nil {
+		result.ErrorMessage = fmt.Sprintf("HTTP request failed: %v", err)
+		result.DeliveryTimeMs = time.Since(startTime).Milliseconds()
+		result.ShouldRetry = f.isRetryableError(err.Error())
+
+		fmt.Printf("❌ HTTP request failed: %v\n", err)
+		return result, fmt.Errorf("HTTP request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	// Read response body
+	responseBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		result.ErrorMessage = fmt.Sprintf("failed to read response body: %v", err)
+		result.DeliveryTimeMs = time.Since(startTime).Milliseconds()
+		result.StatusCode = resp.StatusCode
+		return result, fmt.Errorf("failed to read response: %w", err)
+	}
+
+	result.StatusCode = resp.StatusCode
+	result.Response = string(responseBody)
+	result.DeliveryTimeMs = time.Since(startTime).Milliseconds()
+
+	// Check HTTP status code
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		// Success
+		result.Success = true
+		result.Status = "delivered"
+		result.ShouldRetry = false
+
+		fmt.Printf("✅ FHIR bundle delivered successfully\n")
+		fmt.Printf("   Status: %d %s\n", resp.StatusCode, http.StatusText(resp.StatusCode))
+		fmt.Printf("   Time: %dms\n", result.DeliveryTimeMs)
+
+		return result, nil
+	}
+
+	// Check if retryable
+	retryPolicy := f.Config.GetRetryPolicy()
+	result.ShouldRetry = retryPolicy.IsRetryableStatusCode(resp.StatusCode)
+	result.Status = "failed"
+
+	// Parse FHIR OperationOutcome if present
+	if strings.Contains(string(responseBody), "OperationOutcome") {
+		operationOutcome := f.parseFHIROperationOutcome(responseBody)
+		if operationOutcome != "" {
+			result.ErrorMessage = fmt.Sprintf("FHIR OperationOutcome: %s", operationOutcome)
+		} else {
+			result.ErrorMessage = fmt.Sprintf("HTTP %d: %s", resp.StatusCode, http.StatusText(resp.StatusCode))
+		}
+	} else {
+		result.ErrorMessage = fmt.Sprintf("HTTP %d: %s - %s", resp.StatusCode, http.StatusText(resp.StatusCode), string(responseBody))
+	}
+
+	fmt.Printf("❌ FHIR delivery failed\n")
+	fmt.Printf("   Status: %d %s\n", resp.StatusCode, http.StatusText(resp.StatusCode))
+	fmt.Printf("   Error: %s\n", result.ErrorMessage)
+	fmt.Printf("   Should Retry: %v\n", result.ShouldRetry)
+
+	return result, fmt.Errorf("delivery failed with status %d", resp.StatusCode)
+}
+
+// Close closes the HTTP client connection
+func (f *FHIROutputConnector) Close() error {
+	// HTTP client doesn't need explicit closing
+	fmt.Printf("🔌 FHIR connector closed\n")
+	return nil
+}
+
+// Test performs a health check on the FHIR server
+func (f *FHIROutputConnector) Test() error {
+	fmt.Printf("🔍 Testing FHIR server connection...\n")
+
+	// Try a simple GET request to the base URL
+	baseURL := f.endpoint
+	if strings.Contains(baseURL, "/Patient") {
+		baseURL = strings.Replace(baseURL, "/Patient", "/metadata", 1)
+	}
+
+	req, err := http.NewRequest("GET", baseURL, nil)
+	if err != nil {
+		return fmt.Errorf("failed to create test request: %w", err)
+	}
+
+	req.Header.Set("Accept", f.Config.GetAcceptHeader())
+
+	// Add authentication
+	if err := f.addAuthentication(req); err != nil {
+		return fmt.Errorf("authentication error: %w", err)
+	}
+
+	resp, err := f.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("connection test failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 200 && resp.StatusCode < 500 {
+		fmt.Printf("✅ FHIR server connection test successful (status: %d)\n", resp.StatusCode)
+		return nil
+	}
+
+	return fmt.Errorf("connection test failed with status %d", resp.StatusCode)
+}
+
+// addAuthentication adds authentication headers to the request
+func (f *FHIROutputConnector) addAuthentication(req *http.Request) error {
+	authType := f.Config.AuthType
+	if authType == "" || authType == "none" {
+		return nil
+	}
+
+	switch authType {
+	case "basic":
+		if f.Config.Username != "" && f.Config.Password != "" {
+			req.SetBasicAuth(f.Config.Username, f.Config.Password)
+			fmt.Printf("🔐 Added Basic authentication\n")
+		}
+
+	case "bearer":
+		if f.Config.BearerToken != "" {
+			req.Header.Set("Authorization", "Bearer "+f.Config.BearerToken)
+			fmt.Printf("🔐 Added Bearer token authentication\n")
+		}
+
+	case "api_key":
+		if f.Config.APIKey != "" {
+			headerName := f.Config.APIKeyHeader
+			if headerName == "" {
+				headerName = "X-API-Key"
+			}
+			req.Header.Set(headerName, f.Config.APIKey)
+			fmt.Printf("🔐 Added API key authentication\n")
+		}
+
+	default:
+		return fmt.Errorf("unsupported authentication type: %s", authType)
+	}
+
+	return nil
+}
+
+// parseFHIROperationOutcome extracts error messages from FHIR OperationOutcome
+func (f *FHIROutputConnector) parseFHIROperationOutcome(responseBody []byte) string {
+	var outcome map[string]interface{}
+	if err := json.Unmarshal(responseBody, &outcome); err != nil {
+		return ""
+	}
+
+	// Extract issue array
+	issues, ok := outcome["issue"].([]interface{})
+	if !ok || len(issues) == 0 {
+		return ""
+	}
+
+	// Extract first issue diagnostics
+	firstIssue, ok := issues[0].(map[string]interface{})
+	if !ok {
+		return ""
+	}
+
+	diagnostics, ok := firstIssue["diagnostics"].(string)
+	if ok && diagnostics != "" {
+		return diagnostics
+	}
+
+	// Try to get severity and code
+	severity, _ := firstIssue["severity"].(string)
+	code, _ := firstIssue["code"].(string)
+	if severity != "" && code != "" {
+		return fmt.Sprintf("%s: %s", severity, code)
+	}
+
+	return ""
+}
+
+// isRetryableError checks if an error message indicates a retryable failure
+func (f *FHIROutputConnector) isRetryableError(errorMsg string) bool {
+	retryPolicy := f.Config.GetRetryPolicy()
+	return retryPolicy.IsRetryableError(errorMsg)
+}
+
+// Helper function for auth type display
+func getAuthTypeDisplay(authType string) string {
+	if authType == "" || authType == "none" {
+		return "None"
+	}
+	return authType
+}

@@ -173,6 +173,7 @@ class WizardModel extends EventTarget {
                     sourceType: this.data.sourceType,
                     sourceConnectivity: this.data.sourceConnectivity,
                     sourceConfig: this.data.sourceConfig,
+                    transformationFlow: this.data.transformationFlow,
                     // Target configuration
                     targetType: this.data.targetType,
                     targetConnectivity: this.data.targetConnectivity,
@@ -429,6 +430,18 @@ class WizardModel extends EventTarget {
             return true;
         }
 
+        // FHIR Skip Exception: Allow jumping from step 1 to step 4 for FHIR sources
+        if (this.currentStep === 1 && step === 4) {
+            const sourceType = this.data.sourceType;
+            if (sourceType && sourceType.toLowerCase() === 'fhir') {
+                console.log('✅ FHIR skip allowed: step 1 → step 4');
+                // Still validate step 1 before allowing skip
+                const isValid = this.validateCurrentStep();
+                console.log('🔍 Step 1 validation for FHIR skip:', isValid);
+                return isValid;
+            }
+        }
+
         if (step > this.currentStep + 1) {
             console.log('❌ Cannot skip steps');
             return false;
@@ -466,13 +479,41 @@ class WizardModel extends EventTarget {
 
     nextStep() {
         console.log('📋 Model nextStep called, current:', this.currentStep);
-        const result = this.goToStep(this.currentStep + 1);
+
+        let nextStepNum = this.currentStep + 1;
+
+        // FHIR Step Skip Logic: Skip HL7-specific steps (2 & 3) for FHIR sources
+        if (this.currentStep === 1) {
+            const sourceType = this.data.sourceType;
+            console.log('🔍 Source type detected:', sourceType);
+
+            // If source is FHIR, skip steps 2 & 3 (HL7 upload and parsing)
+            if (sourceType && sourceType.toLowerCase() === 'fhir') {
+                console.log('🎯 FHIR source detected - skipping steps 2 & 3 (HL7 upload/parsing)');
+                nextStepNum = 4; // Jump directly to mapping configuration
+            }
+        }
+
+        const result = this.goToStep(nextStepNum);
         console.log('📋 Model nextStep result:', result);
         return result;
     }
 
     previousStep() {
-        return this.goToStep(Math.max(1, this.currentStep - 1));
+        let prevStepNum = Math.max(1, this.currentStep - 1);
+
+        // FHIR Step Skip Logic: Skip HL7-specific steps (2 & 3) when going back
+        if (this.currentStep === 4) {
+            const sourceType = this.data.sourceType;
+
+            // If source is FHIR, skip back to step 1 (bypassing steps 2 & 3)
+            if (sourceType && sourceType.toLowerCase() === 'fhir') {
+                console.log('🎯 FHIR source detected - skipping back to step 1 (bypassing steps 2 & 3)');
+                prevStepNum = 1; // Jump back to interface configuration
+            }
+        }
+
+        return this.goToStep(prevStepNum);
     }
 
     /**
@@ -493,7 +534,12 @@ class WizardModel extends EventTarget {
             mappingsCount: this.data.fhirTransformResult?.atomicMappings?.length
         });
 
-        return {
+        // Deep log targetConfig to identify JSON issues
+        console.log('🔍 targetConfig DETAILED:', JSON.stringify(this.data.targetConfig, null, 2));
+        console.log('🔍 targetConfig TYPE:', typeof this.data.targetConfig);
+        console.log('🔍 targetConfig KEYS:', this.data.targetConfig ? Object.keys(this.data.targetConfig) : 'null/undefined');
+
+        const payload = {
             // Basic interface info
             name: this.data.name,
             description: this.data.description,
@@ -524,6 +570,17 @@ class WizardModel extends EventTarget {
             templateUsed: this.data.mappingTemplate,
             status: this.data.status || 'active'
         };
+
+        // Test JSON stringification of the entire payload
+        try {
+            const testJSON = JSON.stringify(payload);
+            console.log('✅ Payload JSON stringification successful, length:', testJSON.length);
+        } catch (err) {
+            console.error('❌ PAYLOAD JSON STRINGIFICATION FAILED:', err.message);
+            console.error('❌ Problematic payload structure:', payload);
+        }
+
+        return payload;
     }
 
     /**
