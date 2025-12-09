@@ -1,0 +1,404 @@
+package services
+
+import (
+	"context"
+	"ezhealthkonnect/models"
+	"fmt"
+	"strings"
+	"time"
+)
+
+// CalculateAgeExecutor calculates age from date of birth
+type CalculateAgeExecutor struct{}
+
+func (e *CalculateAgeExecutor) Execute(
+	ctx context.Context,
+	step *models.TransformationStep,
+	inputData map[string]interface{},
+) (map[string]interface{}, error) {
+	dobField := getStringValue(step.Config, "dob_field")
+	ageField := getStringValue(step.Config, "age_field")
+	dateFormat := getStringValue(step.Config, "date_format")
+	if dateFormat == "" {
+		dateFormat = "YYYYMMDD"
+	}
+
+	outputData := make(map[string]interface{})
+	for k, v := range inputData {
+		outputData[k] = v
+	}
+
+	dobValue := getNestedValue(outputData, dobField)
+	if dobValue == nil {
+		return outputData, nil
+	}
+
+	dobStr := fmt.Sprintf("%v", dobValue)
+
+	// Parse DOB
+	dob, err := e.parseDate(dobStr, dateFormat)
+	if err != nil {
+		return outputData, fmt.Errorf("failed to parse DOB '%s': %v", dobStr, err)
+	}
+
+	// Calculate age
+	now := time.Now()
+	age := now.Year() - dob.Year()
+
+	// Adjust if birthday hasn't occurred this year
+	if now.YearDay() < dob.YearDay() {
+		age--
+	}
+
+	setNestedValue(outputData, ageField, age)
+
+	return outputData, nil
+}
+
+func (e *CalculateAgeExecutor) parseDate(value, format string) (time.Time, error) {
+	formatMap := map[string]string{
+		"YYYYMMDD":           "20060102",
+		"YYYY-MM-DD":         "2006-01-02",
+		"MM/DD/YYYY":         "01/02/2006",
+		"DD/MM/YYYY":         "02/01/2006",
+		"YYYYMMDDHHMMSS":     "20060102150405",
+		"YYYY-MM-DD HH:MM:SS": "2006-01-02 15:04:05",
+		"ISO8601":            time.RFC3339,
+		"RFC3339":            time.RFC3339,
+	}
+
+	goFormat, exists := formatMap[format]
+	if !exists {
+		goFormat = format
+	}
+
+	return time.Parse(goFormat, value)
+}
+
+func (e *CalculateAgeExecutor) GetStepType() string {
+	return "calculate-age"
+}
+
+func (e *CalculateAgeExecutor) Validate(step *models.TransformationStep) error {
+	dobField := getStringValue(step.Config, "dob_field")
+	ageField := getStringValue(step.Config, "age_field")
+
+	if dobField == "" || ageField == "" {
+		return fmt.Errorf("dob_field and age_field are required")
+	}
+
+	return nil
+}
+
+// GenerateIDExecutor generates unique identifiers
+type GenerateIDExecutor struct{}
+
+func (e *GenerateIDExecutor) Execute(
+	ctx context.Context,
+	step *models.TransformationStep,
+	inputData map[string]interface{},
+) (map[string]interface{}, error) {
+	targetField := getStringValue(step.Config, "target_field")
+	idType := getStringValue(step.Config, "id_type") // "uuid", "sequential", "composite"
+	prefix := getStringValue(step.Config, "prefix")
+	suffix := getStringValue(step.Config, "suffix")
+
+	outputData := make(map[string]interface{})
+	for k, v := range inputData {
+		outputData[k] = v
+	}
+
+	var generatedID string
+	var err error
+
+	switch idType {
+	case "uuid":
+		generatedID = e.generateUUID()
+
+	case "sequential":
+		// For sequential, we would need a counter service
+		// For now, use timestamp-based sequential ID
+		generatedID = e.generateSequential()
+
+	case "composite":
+		// Composite ID from multiple fields
+		sourceFields, ok := step.Config["source_fields"].([]interface{})
+		if !ok {
+			return outputData, fmt.Errorf("source_fields required for composite ID")
+		}
+		generatedID, err = e.generateComposite(outputData, sourceFields)
+		if err != nil {
+			return outputData, err
+		}
+
+	default:
+		return outputData, fmt.Errorf("unsupported id_type: %s", idType)
+	}
+
+	// Add prefix and suffix
+	if prefix != "" {
+		generatedID = prefix + generatedID
+	}
+	if suffix != "" {
+		generatedID = generatedID + suffix
+	}
+
+	setNestedValue(outputData, targetField, generatedID)
+
+	return outputData, nil
+}
+
+func (e *GenerateIDExecutor) generateUUID() string {
+	// Simple UUID v4 implementation
+	// In production, use github.com/google/uuid
+	timestamp := time.Now().UnixNano()
+	return fmt.Sprintf("%x-%x-%x-%x-%x",
+		timestamp&0xFFFFFFFF,
+		(timestamp>>32)&0xFFFF,
+		0x4000|((timestamp>>48)&0x0FFF),
+		0x8000|((timestamp>>60)&0x3FFF),
+		timestamp>>64)
+}
+
+func (e *GenerateIDExecutor) generateSequential() string {
+	// Timestamp-based sequential ID
+	return fmt.Sprintf("%d", time.Now().UnixNano())
+}
+
+func (e *GenerateIDExecutor) generateComposite(data map[string]interface{}, fields []interface{}) (string, error) {
+	var parts []string
+
+	for _, field := range fields {
+		fieldStr := field.(string)
+		value := getNestedValue(data, fieldStr)
+		if value == nil {
+			return "", fmt.Errorf("field %s is required for composite ID", fieldStr)
+		}
+		parts = append(parts, fmt.Sprintf("%v", value))
+	}
+
+	return strings.Join(parts, "_"), nil
+}
+
+func (e *GenerateIDExecutor) GetStepType() string {
+	return "generate-id"
+}
+
+func (e *GenerateIDExecutor) Validate(step *models.TransformationStep) error {
+	targetField := getStringValue(step.Config, "target_field")
+	idType := getStringValue(step.Config, "id_type")
+
+	if targetField == "" {
+		return fmt.Errorf("target_field is required")
+	}
+
+	if idType != "uuid" && idType != "sequential" && idType != "composite" {
+		return fmt.Errorf("id_type must be 'uuid', 'sequential', or 'composite'")
+	}
+
+	if idType == "composite" {
+		sourceFields, ok := step.Config["source_fields"].([]interface{})
+		if !ok || len(sourceFields) == 0 {
+			return fmt.Errorf("source_fields required for composite ID")
+		}
+	}
+
+	return nil
+}
+
+// AddMetadataExecutor adds metadata fields
+type AddMetadataExecutor struct{}
+
+func (e *AddMetadataExecutor) Execute(
+	ctx context.Context,
+	step *models.TransformationStep,
+	inputData map[string]interface{},
+) (map[string]interface{}, error) {
+	metadata, ok := step.Config["metadata"].([]interface{})
+	if !ok {
+		return inputData, fmt.Errorf("invalid metadata configuration")
+	}
+
+	outputData := make(map[string]interface{})
+	for k, v := range inputData {
+		outputData[k] = v
+	}
+
+	for _, meta := range metadata {
+		metaMap := meta.(map[string]interface{})
+		field := getStringValue(metaMap, "field")
+		valueType := getStringValue(metaMap, "type") // "static", "timestamp", "system"
+		value := metaMap["value"]
+
+		var fieldValue interface{}
+
+		switch valueType {
+		case "static":
+			fieldValue = value
+
+		case "timestamp":
+			format := getStringValue(metaMap, "format")
+			if format == "" {
+				format = time.RFC3339
+			} else {
+				// Map common formats
+				formatMap := map[string]string{
+					"ISO8601":            time.RFC3339,
+					"YYYYMMDD":           "20060102",
+					"YYYY-MM-DD":         "2006-01-02",
+					"YYYYMMDDHHMMSS":     "20060102150405",
+					"YYYY-MM-DD HH:MM:SS": "2006-01-02 15:04:05",
+				}
+				if mappedFormat, exists := formatMap[format]; exists {
+					format = mappedFormat
+				}
+			}
+			fieldValue = time.Now().Format(format)
+
+		case "system":
+			systemField := getStringValue(metaMap, "system_field")
+			fieldValue = e.getSystemValue(systemField)
+
+		default:
+			return outputData, fmt.Errorf("unsupported metadata type: %s", valueType)
+		}
+
+		setNestedValue(outputData, field, fieldValue)
+	}
+
+	return outputData, nil
+}
+
+func (e *AddMetadataExecutor) getSystemValue(field string) interface{} {
+	switch field {
+	case "hostname":
+		return "ezhealthkonnect-server" // Would use os.Hostname() in production
+	case "environment":
+		return "production" // Would read from env var
+	case "version":
+		return "1.0.0" // Would read from build info
+	case "timestamp":
+		return time.Now().Unix()
+	case "iso_timestamp":
+		return time.Now().Format(time.RFC3339)
+	default:
+		return nil
+	}
+}
+
+func (e *AddMetadataExecutor) GetStepType() string {
+	return "add-metadata"
+}
+
+func (e *AddMetadataExecutor) Validate(step *models.TransformationStep) error {
+	metadata, ok := step.Config["metadata"].([]interface{})
+	if !ok || len(metadata) == 0 {
+		return fmt.Errorf("metadata configuration is required")
+	}
+
+	for _, meta := range metadata {
+		metaMap := meta.(map[string]interface{})
+		field := getStringValue(metaMap, "field")
+		if field == "" {
+			return fmt.Errorf("field is required for metadata entry")
+		}
+	}
+
+	return nil
+}
+
+// EnrichFromExternalAPIExecutor enriches data from external API
+type EnrichFromExternalAPIExecutor struct{}
+
+func (e *EnrichFromExternalAPIExecutor) Execute(
+	ctx context.Context,
+	step *models.TransformationStep,
+	inputData map[string]interface{},
+) (map[string]interface{}, error) {
+	apiURL := getStringValue(step.Config, "api_url")
+	method := getStringValue(step.Config, "method")
+	if method == "" {
+		method = "GET"
+	}
+	lookupField := getStringValue(step.Config, "lookup_field")
+	targetFields, ok := step.Config["target_fields"].(map[string]interface{})
+	if !ok {
+		return inputData, fmt.Errorf("invalid target_fields configuration")
+	}
+
+	outputData := make(map[string]interface{})
+	for k, v := range inputData {
+		outputData[k] = v
+	}
+
+	// Get lookup value
+	lookupValue := getNestedValue(outputData, lookupField)
+	if lookupValue == nil {
+		// If no lookup value, check if we should fail or continue
+		continueOnError := step.Config["continue_on_error"]
+		if continueOnError == true {
+			return outputData, nil
+		}
+		return outputData, fmt.Errorf("lookup field %s not found", lookupField)
+	}
+
+	// Replace {value} placeholder in URL
+	finalURL := strings.ReplaceAll(apiURL, "{value}", fmt.Sprintf("%v", lookupValue))
+
+	// Mock API response for now (in production, use http.Client)
+	// This is a placeholder for actual HTTP call
+	apiResponse := e.mockAPICall(finalURL, method)
+
+	// Map API response to target fields
+	for targetField, sourcePath := range targetFields {
+		sourcePathStr := sourcePath.(string)
+		value := getNestedValue(apiResponse, sourcePathStr)
+		if value != nil {
+			setNestedValue(outputData, targetField, value)
+		}
+	}
+
+	return outputData, nil
+}
+
+func (e *EnrichFromExternalAPIExecutor) mockAPICall(url, method string) map[string]interface{} {
+	// Mock response - in production, this would make actual HTTP call
+	// Example: Patient demographic enrichment from EHR system
+	return map[string]interface{}{
+		"patient": map[string]interface{}{
+			"insurance": map[string]interface{}{
+				"provider": "Blue Cross",
+				"policy":   "BC12345",
+			},
+			"primary_care_provider": "Dr. Smith",
+			"allergies": []interface{}{
+				"Penicillin",
+				"Peanuts",
+			},
+		},
+	}
+}
+
+func (e *EnrichFromExternalAPIExecutor) GetStepType() string {
+	return "enrich-from-api"
+}
+
+func (e *EnrichFromExternalAPIExecutor) Validate(step *models.TransformationStep) error {
+	apiURL := getStringValue(step.Config, "api_url")
+	lookupField := getStringValue(step.Config, "lookup_field")
+
+	if apiURL == "" {
+		return fmt.Errorf("api_url is required")
+	}
+
+	if lookupField == "" {
+		return fmt.Errorf("lookup_field is required")
+	}
+
+	targetFields, ok := step.Config["target_fields"].(map[string]interface{})
+	if !ok || len(targetFields) == 0 {
+		return fmt.Errorf("target_fields is required")
+	}
+
+	return nil
+}

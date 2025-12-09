@@ -531,7 +531,11 @@ class WizardModel extends EventTarget {
             description: this.data.description,
             sourceType: this.data.sourceType,
             targetType: this.data.targetType,
-            mappingsCount: this.data.fhirTransformResult?.atomicMappings?.length
+            mappingsCount: this.data.fhirTransformResult?.atomicMappings?.length,
+            debug_logging: this.data.debug_logging,
+            debugLogging: this.data.debugLogging,
+            auto_start: this.data.auto_start,
+            deployment_mode: this.data.deployment_mode
         });
 
         // Deep log targetConfig to identify JSON issues
@@ -566,9 +570,19 @@ class WizardModel extends EventTarget {
             // Include parsed HL7 data for enhanced segments
             parsedHL7Data: this.data.parsedHL7Data,
 
+            // Logging configuration (V33)
+            debug_logging: this.data.debugLogging || this.data.debug_logging || false,
+            log_retention_days: this.data.logRetentionDays || this.data.log_retention_days || 30,
+            retain_error_logs_forever: this.data.retainErrorLogs !== false && this.data.retain_error_logs_forever !== false,
+
+            // Deployment configuration (V33)
+            auto_start: this.data.auto_start || false,
+            deployment_mode: this.data.deployment_mode || 'manual',
+            deployment_delay_seconds: this.data.deployment_delay_seconds || 0,
+
             // Additional metadata
             templateUsed: this.data.mappingTemplate,
-            status: this.data.status || 'active'
+            status: this.data.status || 'configured'  // New interfaces start as 'configured'
         };
 
         // Test JSON stringification of the entire payload

@@ -29,7 +29,23 @@ class WizardView extends EventTarget {
         this.lastCheckedName = null;
         this.isDuplicateName = false;
 
+        // OOB: Form binding engine for schema-based form handling
+        this.formBindingEngine = null;
+
         this.initializeView();
+    }
+
+    /**
+     * Initialize form binding engine after container is ready
+     * OOB Pattern: Uses FormFieldSchema as single source of truth
+     */
+    initializeFormBinding() {
+        if (typeof FormFieldSchema !== 'undefined' && typeof FormBindingEngine !== 'undefined') {
+            this.formBindingEngine = new FormBindingEngine(this.container, FormFieldSchema);
+            console.log('✅ FormBindingEngine initialized with schema');
+        } else {
+            console.warn('⚠️ FormFieldSchema or FormBindingEngine not loaded, using legacy sync');
+        }
     }
 
     /**
@@ -44,6 +60,7 @@ class WizardView extends EventTarget {
 
         this.render();
         this.attachEventListeners();
+        this.initializeFormBinding(); // OOB: Initialize schema-based form binding
     }
 
     /**
@@ -361,6 +378,7 @@ class WizardView extends EventTarget {
                                     <option value="tcp" ${data.sourceConnectivity === 'tcp' ? 'selected' : ''}>TCP/MLLP (Standard)</option>
                                     <option value="http" ${data.sourceConnectivity === 'http' ? 'selected' : ''}>HTTP/REST</option>
                                     <option value="file" ${data.sourceConnectivity === 'file' ? 'selected' : ''}>File Input</option>
+                                    <option value="database" ${data.sourceConnectivity === 'database' ? 'selected' : ''}>Database</option>
                                 </select>
                             </div>
                         </div>
@@ -408,6 +426,130 @@ class WizardView extends EventTarget {
                         <div id="flowDescription" class="alert alert-info" style="display: none; margin-top: 12px; padding: 12px; background: #e3f2fd; border: 1px solid #90caf9; border-radius: 6px;">
                             <strong id="flowDescTitle"></strong>
                             <p id="flowDescText" style="margin: 8px 0 0 0; font-size: 13px;"></p>
+                        </div>
+                    </div>
+
+                    <!-- Deployment Settings Section -->
+                    <div class="config-section">
+                        <h4 class="section-title">🚀 Deployment Settings</h4>
+                        <div class="form-group">
+                            <label for="deploymentMode" class="form-label">Startup Mode</label>
+                            <select id="deploymentMode" class="form-control">
+                                <option value="manual" ${(data.deploymentMode || data.deployment_mode || 'manual') === 'manual' ? 'selected' : ''}>Manual - Start manually from UI</option>
+                                <option value="auto" ${(data.deploymentMode || data.deployment_mode) === 'auto' ? 'selected' : ''}>Auto - Start automatically on service startup</option>
+                                <option value="delayed" ${(data.deploymentMode || data.deployment_mode) === 'delayed' ? 'selected' : ''}>Delayed - Auto-start with delay</option>
+                            </select>
+                            <div class="form-hint">
+                                💡 Manual: You control when interface starts<br>
+                                ⚡ Auto: Interface starts automatically when service boots up<br>
+                                ⏱️ Delayed: Auto-start after a delay (useful for dependencies)
+                            </div>
+                        </div>
+
+                        <div id="delaySettingsPanel" style="display: ${(data.deploymentMode || data.deployment_mode) === 'delayed' ? 'block' : 'none'}; margin-top: 12px;">
+                            <div class="form-group">
+                                <label for="deploymentDelay" class="form-label">Delay (seconds)</label>
+                                <input type="number"
+                                       id="deploymentDelay"
+                                       class="form-control"
+                                       min="0"
+                                       max="300"
+                                       value="${data.deploymentDelay || data.deployment_delay_seconds || 0}"
+                                       placeholder="0">
+                                <div class="form-hint">Delay in seconds before auto-starting (0-300 seconds)</div>
+                            </div>
+                        </div>
+
+                        <div class="form-group" style="margin-top: 12px;">
+                            <label class="form-label" style="display: flex; align-items: center; cursor: pointer;">
+                                <input type="checkbox"
+                                       id="autoStart"
+                                       style="margin-right: 8px; width: 18px; height: 18px; cursor: pointer;"
+                                       ${data.autoStart || data.auto_start ? 'checked' : ''}>
+                                <span>Auto-start interface after creation (start immediately after wizard completes)</span>
+                            </label>
+                            <div class="form-hint">
+                                ✅ Recommended for development/testing<br>
+                                ⚠️ Disable for production (verify configuration first)
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Logging & Troubleshooting Section -->
+                    <div class="config-section" style="margin-top: 1.5rem;">
+                        <h4 class="section-title">📋 Logging & Troubleshooting</h4>
+
+                        <!-- Debug Logging Toggle -->
+                        <div class="form-group">
+                            <div style="background: linear-gradient(to right, #fef2f2, #fff7ed); border-left: 3px solid #f59e0b; padding: 14px; border-radius: 6px;">
+                                <label class="form-label" style="display: flex; align-items: center; cursor: pointer; margin: 0;">
+                                    <input type="checkbox"
+                                           id="debugLogging"
+                                           style="margin-right: 10px; width: 20px; height: 20px; cursor: pointer; accent-color: #f59e0b;"
+                                           ${data.debugLogging || data.debug_logging ? 'checked' : ''}>
+                                    <div style="flex: 1;">
+                                        <span style="font-weight: 600; color: #1e3a8a; font-size: 0.95rem;">Enable Debug Logging</span>
+                                        <div style="font-size: 0.85rem; color: #6b7280; margin-top: 4px; line-height: 1.4;">
+                                            📝 Captures detailed logs for all message processing operations
+                                        </div>
+                                        <div style="font-size: 0.85rem; color: #dc2626; margin-top: 4px; font-weight: 500;">
+                                            ⚠️ Warning: Increases storage usage
+                                        </div>
+                                    </div>
+                                </label>
+                            </div>
+                        </div>
+
+                        <!-- Log Retention Period -->
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 16px;">
+                            <div class="form-group" style="margin: 0;">
+                                <label for="logRetentionDays" class="form-label" style="font-weight: 600; color: #1e3a8a; margin-bottom: 8px;">
+                                    🗑️ Log Retention Period
+                                </label>
+                                <div style="display: flex; align-items: center; gap: 8px;">
+                                    <input type="number"
+                                           id="logRetentionDays"
+                                           class="form-control"
+                                           min="1"
+                                           max="365"
+                                           value="${data.logRetentionDays || data.log_retention_days || 30}"
+                                           placeholder="30"
+                                           style="max-width: 100px; text-align: center; font-weight: 600;">
+                                    <span style="color: #6b7280; font-size: 0.9rem;">days</span>
+                                </div>
+                                <div class="form-hint" style="margin-top: 6px;">
+                                    Debug/info logs auto-deleted after this period
+                                </div>
+                            </div>
+
+                            <!-- Retain Errors Toggle -->
+                            <div class="form-group" style="margin: 0;">
+                                <label class="form-label" style="font-weight: 600; color: #1e3a8a; margin-bottom: 8px;">
+                                    ♾️ Error Log Retention
+                                </label>
+                                <div style="background: #f0f9ff; border: 1px solid #bfdbfe; padding: 10px 12px; border-radius: 6px;">
+                                    <label style="display: flex; align-items: center; cursor: pointer; margin: 0;">
+                                        <input type="checkbox"
+                                               id="retainErrorLogs"
+                                               style="margin-right: 8px; width: 18px; height: 18px; cursor: pointer; accent-color: #0369a1;"
+                                               ${data.retainErrorLogs !== false && data.retain_error_logs_forever !== false ? 'checked' : ''}>
+                                        <span style="font-size: 0.9rem; color: #1e3a8a; font-weight: 500;">Keep errors forever</span>
+                                    </label>
+                                </div>
+                                <div class="form-hint" style="margin-top: 6px;">
+                                    ✅ Recommended for compliance
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Info Panel -->
+                        <div style="background: #f9fafb; border: 1px solid #e5e7eb; padding: 12px; border-radius: 6px; margin-top: 16px;">
+                            <div style="font-size: 0.875rem; color: #374151; line-height: 1.6;">
+                                <strong style="color: #1e3a8a;">Retention Policy Summary:</strong><br>
+                                • <strong>Debug/Info logs:</strong> Deleted after <span id="retentionSummary" style="color: #0369a1; font-weight: 600;">${data.logRetentionDays || data.log_retention_days || 30} days</span><br>
+                                • <strong>Error/Warning logs:</strong> <span id="errorRetentionSummary" style="color: #059669; font-weight: 600;">${data.retainErrorLogs !== false && data.retain_error_logs_forever !== false ? 'Kept forever' : 'Same as debug logs'}</span><br>
+                                • <strong>Audit logs:</strong> <span style="color: #059669; font-weight: 600;">Always retained (HIPAA compliance)</span>
+                            </div>
                         </div>
                     </div>
 
@@ -727,55 +869,105 @@ class WizardView extends EventTarget {
      * Step 3: Target Configuration
      */
     getStep3Template(data) {
+        // Check if this is a sink-only flow
+        const isSinkOnly = this.isSinkOnlyFlow(data.transformationFlow);
+
+        // Auto-set defaults for sink-only flows
+        if (isSinkOnly) {
+            data.targetConnectivity = 'sink';
+            data.targetType = data.targetType || 'fhir';
+        }
+
         return `
             <div class="wizard-step-content" data-step="4">
                 <div class="wizard-step-header">
                     <h3>Target Configuration</h3>
-                    <p>Configure where FHIR resources will be sent</p>
+                    <p>${isSinkOnly ? 'Messages will be stored in database only (no external routing)' : 'Configure where FHIR resources will be sent'}</p>
                 </div>
 
                 <div class="wizard-form">
-                    <div class="form-row">
-                        <div class="form-group">
-                            <label for="targetType" class="form-label required">Target Format</label>
-                            <select id="targetType" class="form-control" required>
-                                <option value="fhir" ${data.targetType === 'fhir' ? 'selected' : ''}>FHIR R4 (Recommended)</option>
-                                <option value="fhir-stu3" ${data.targetType === 'fhir-stu3' ? 'selected' : ''}>FHIR STU3</option>
-                                <option value="hl7v2" ${data.targetType === 'hl7v2' ? 'selected' : ''}>HL7 v2.x</option>
-                                <option value="database" ${data.targetType === 'database' ? 'selected' : ''}>Database</option>
-                                <option value="file" ${data.targetType === 'file' ? 'selected' : ''}>File Output</option>
-                            </select>
-                            <div class="form-hint">💡 OOB: FHIR R4 is the current standard</div>
+                    ${isSinkOnly ? `
+                        <!-- Sink-Only Flow: Show informational message only -->
+                        <div class="alert alert-info" style="background: linear-gradient(135deg, #e3f2fd 0%, #ffffff 100%); padding: 24px; border: 2px solid #90caf9; border-radius: 12px; margin-bottom: 20px;">
+                            <div style="display: flex; align-items: start; gap: 16px;">
+                                <div style="font-size: 48px; line-height: 1;">📦</div>
+                                <div style="flex: 1;">
+                                    <h4 style="margin: 0 0 12px 0; color: #1976d2; font-size: 18px; font-weight: 600;">Sink Mode - Storage Only</h4>
+                                    <p style="margin: 0 0 16px 0; color: #424242; font-size: 14px; line-height: 1.6;">
+                                        Messages are received and stored in your database (<strong>PostgreSQL + MongoDB</strong>) but <strong>NOT routed</strong> to any external system.
+                                    </p>
+                                    <div style="background: white; padding: 16px; border-radius: 8px; border-left: 4px solid #4caf50;">
+                                        <strong style="color: #2e7d32; display: block; margin-bottom: 8px;">✅ Perfect for:</strong>
+                                        <ul style="margin: 0; padding-left: 20px; color: #424242; font-size: 13px; line-height: 1.8;">
+                                            <li>FHIR receiving and storage</li>
+                                            <li>Archival and audit purposes</li>
+                                            <li>Manual processing workflows</li>
+                                            <li>Development and testing</li>
+                                        </ul>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
 
-                        <div class="form-group">
-                            <label for="targetConnectivity" class="form-label required">Connectivity</label>
-                            <select id="targetConnectivity" class="form-control" required>
-                                <option value="http" ${data.targetConnectivity === 'http' ? 'selected' : ''}>HTTP/REST (Standard)</option>
-                                <option value="tcp" ${data.targetConnectivity === 'tcp' ? 'selected' : ''}>TCP/MLLP</option>
-                                <option value="file" ${data.targetConnectivity === 'file' ? 'selected' : ''}>File Output</option>
-                                <option value="database" ${data.targetConnectivity === 'database' ? 'selected' : ''}>Database</option>
-                            </select>
-                            <div class="form-hint">💡 OOB: HTTP/REST is FHIR standard</div>
+                        <!-- Hidden inputs to set connectivity as sink -->
+                        <input type="hidden" id="targetConnectivity" value="sink">
+                        <input type="hidden" id="targetType" value="${data.targetType || 'fhir'}">
+                    ` : `
+                        <!-- Regular Flow: Show target configuration options -->
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="targetType" class="form-label required">Target Format</label>
+                                <select id="targetType" class="form-control" required>
+                                    <option value="fhir" ${data.targetType === 'fhir' ? 'selected' : ''}>FHIR R4 (Recommended)</option>
+                                    <option value="fhir-stu3" ${data.targetType === 'fhir-stu3' ? 'selected' : ''}>FHIR STU3</option>
+                                    <option value="hl7v2" ${data.targetType === 'hl7v2' ? 'selected' : ''}>HL7 v2.x</option>
+                                    <option value="database" ${data.targetType === 'database' ? 'selected' : ''}>Database</option>
+                                    <option value="file" ${data.targetType === 'file' ? 'selected' : ''}>File Output</option>
+                                </select>
+                                <div class="form-hint">💡 OOB: FHIR R4 is the current standard</div>
+                            </div>
+
+                            <div class="form-group">
+                                <label for="targetConnectivity" class="form-label required">Connectivity</label>
+                                <select id="targetConnectivity" class="form-control" required>
+                                    <option value="http" ${data.targetConnectivity === 'http' ? 'selected' : ''}>HTTP/REST (Standard)</option>
+                                    <option value="tcp" ${data.targetConnectivity === 'tcp' ? 'selected' : ''}>TCP/MLLP</option>
+                                    <option value="file" ${data.targetConnectivity === 'file' ? 'selected' : ''}>File Output</option>
+                                    <option value="database" ${data.targetConnectivity === 'database' ? 'selected' : ''}>Database</option>
+                                </select>
+                                <div class="form-hint">💡 HTTP/REST is FHIR standard delivery</div>
+                            </div>
                         </div>
-                    </div>
 
-                    <!-- Dynamic configuration based on connectivity -->
-                    <div id="targetConfigPanel" class="config-panel">
-                        ${this.getTargetConfigPanel(data.targetConnectivity, {...(data.targetConfig || {}), transformationFlow: data.transformationFlow})}
-                    </div>
+                        <!-- Dynamic configuration based on connectivity -->
+                        <div id="targetConfigPanel" class="config-panel">
+                            ${this.getTargetConfigPanel(data.targetConnectivity, {...(data.targetConfig || {}), transformationFlow: data.transformationFlow})}
+                        </div>
 
-                    <!-- FHIR Server Testing -->
-                    <div class="connection-test">
-                        <button type="button" class="btn btn-outline-primary" id="testTargetConnection">
-                            <span class="btn-icon">🎯</span>
-                            Test FHIR Server
-                        </button>
-                        <div class="connection-status" id="targetConnectionStatus"></div>
-                    </div>
+                        <!-- FHIR Server Testing -->
+                        <div class="connection-test">
+                            <button type="button" class="btn btn-outline-primary" id="testTargetConnection">
+                                <span class="btn-icon">🎯</span>
+                                Test FHIR Server
+                            </button>
+                            <div class="connection-status" id="targetConnectionStatus"></div>
+                        </div>
+                    `}
                 </div>
             </div>
         `;
+    }
+
+    /**
+     * Check if this is a sink-only flow (no external routing)
+     */
+    isSinkOnlyFlow(transformationFlow) {
+        const sinkOnlyFlows = [
+            'passthrough',      // Passthrough - store only, no transformation
+            'fhir_receiver',    // FHIR Receiver - direct storage
+            'file_processor'    // File processor - batch processing
+        ];
+        return sinkOnlyFlows.includes(transformationFlow);
     }
 
     /**
@@ -4491,6 +4683,84 @@ PV1|1|I|ICU^101^1|||DOC123^Smith^Jane|||EMERGENCY|||
         // Setup all target config listeners (delivery mode, auth, etc.)
         // This is now handled by the centralized setupTargetConfigListeners method
         this.setupTargetConfigListeners(container);
+
+        // Deployment Mode selector - show/hide delay panel
+        const deploymentModeSelect = container.querySelector('#deploymentMode');
+        const delaySettingsPanel = container.querySelector('#delaySettingsPanel');
+        if (deploymentModeSelect && delaySettingsPanel) {
+            deploymentModeSelect.addEventListener('change', (e) => {
+                const mode = e.target.value;
+                console.log('🚀 Deployment mode changed:', mode);
+
+                // Show delay settings only for 'delayed' mode
+                delaySettingsPanel.style.display = mode === 'delayed' ? 'block' : 'none';
+
+                this.dispatchEvent(new CustomEvent('fieldChange', {
+                    detail: { field: 'deploymentMode', value: mode }
+                }));
+            });
+            console.log('✅ Deployment mode selector listener attached');
+        }
+
+        // Deployment delay input
+        const deploymentDelayInput = container.querySelector('#deploymentDelay');
+        if (deploymentDelayInput) {
+            deploymentDelayInput.addEventListener('input', (e) => {
+                this.dispatchEvent(new CustomEvent('fieldChange', {
+                    detail: { field: 'deploymentDelay', value: parseInt(e.target.value) || 0 }
+                }));
+            });
+        }
+
+        // Auto-start checkbox
+        const autoStartCheckbox = container.querySelector('#autoStart');
+        if (autoStartCheckbox) {
+            autoStartCheckbox.addEventListener('change', (e) => {
+                this.dispatchEvent(new CustomEvent('fieldChange', {
+                    detail: { field: 'autoStart', value: e.target.checked }
+                }));
+            });
+        }
+
+        // Logging configuration listeners
+        const debugLoggingCheckbox = container.querySelector('#debugLogging');
+        if (debugLoggingCheckbox) {
+            debugLoggingCheckbox.addEventListener('change', (e) => {
+                this.dispatchEvent(new CustomEvent('fieldChange', {
+                    detail: { field: 'debugLogging', value: e.target.checked }
+                }));
+            });
+        }
+
+        const logRetentionInput = container.querySelector('#logRetentionDays');
+        const retentionSummary = container.querySelector('#retentionSummary');
+        if (logRetentionInput) {
+            logRetentionInput.addEventListener('input', (e) => {
+                const days = parseInt(e.target.value) || 30;
+                // Update summary text dynamically
+                if (retentionSummary) {
+                    retentionSummary.textContent = `${days} days`;
+                }
+                this.dispatchEvent(new CustomEvent('fieldChange', {
+                    detail: { field: 'logRetentionDays', value: days }
+                }));
+            });
+        }
+
+        const retainErrorLogsCheckbox = container.querySelector('#retainErrorLogs');
+        const errorRetentionSummary = container.querySelector('#errorRetentionSummary');
+        if (retainErrorLogsCheckbox) {
+            retainErrorLogsCheckbox.addEventListener('change', (e) => {
+                // Update summary text dynamically
+                if (errorRetentionSummary) {
+                    errorRetentionSummary.textContent = e.target.checked ? 'Kept forever' : 'Same as debug logs';
+                    errorRetentionSummary.style.color = e.target.checked ? '#059669' : '#6b7280';
+                }
+                this.dispatchEvent(new CustomEvent('fieldChange', {
+                    detail: { field: 'retainErrorLogs', value: e.target.checked }
+                }));
+            });
+        }
     }
 
     /**
@@ -4691,7 +4961,13 @@ PV1|1|I|ICU^101^1|||DOC123^Smith^Jane|||EMERGENCY|||
 
         // Setup target configuration listeners (delivery mode, authentication, resources)
         this.setupTargetConfigListeners(container);
-        console.log('✅ Step 4 target config listeners attached');
+
+        // REUSABILITY: Use shared component event listeners for target config
+        // This handles HTTP auth type dropdown changes (Basic, Bearer, API Key)
+        // Note: 'target' prefix matches getHttpTargetConfig() which calls getHttpAuthConfig(config, idPrefix + 'target')
+        InterfaceConfigComponents.attachEventListeners(container, 'target');
+
+        console.log('✅ Step 4 target config listeners attached (wizard + shared)');
     }
 
     /**
@@ -5107,199 +5383,129 @@ PV1|1|I|ICU^101^1|||DOC123^Smith^Jane|||EMERGENCY|||
 
     /**
      * Sync form data to model
+     * Uses InterfaceConfigComponents for unified data collection (same as Edit modal)
      */
     syncFormDataToModel() {
-        console.log('🔄 Syncing form data to model...');
+        console.log('🔄 Syncing form data to model (using InterfaceConfigComponents)...');
 
-        const data = {};
+        // Use the unified InterfaceConfigComponents for data collection
+        // This ensures Wizard and Edit modal use the same logic
+        // Wizard uses empty prefix '', Edit modal uses 'edit'
+        const configData = InterfaceConfigComponents.collectFormData(this.container, '');
 
-        // Step 1: Interface Basic Info (CRITICAL - must be preserved!)
-        const interfaceName = this.container.querySelector('#interfaceName')?.value;
-        const interfaceDescription = this.container.querySelector('#interfaceDescription')?.value;
-        if (interfaceName !== undefined) {
-            data.name = interfaceName || '';
-            console.log('💾 Captured name:', data.name);
-        }
-        if (interfaceDescription !== undefined) {
-            data.description = interfaceDescription || '';
-            console.log('💾 Captured description:', data.description);
-        }
+        // Merge basic info fields with config data from shared component
+        // configData already includes logging settings via InterfaceConfigComponents.collectFormData()
+        const data = {
+            name: this.container.querySelector('#interfaceName')?.value || '',
+            description: this.container.querySelector('#interfaceDescription')?.value || '',
+            transformationFlow: this.container.querySelector('#transformationFlow')?.value,
+            ...configData  // Includes sourceType, sourceConfig, targetConfig, deployment settings, AND logging settings
+        };
 
-        // Step 1: Source Configuration (CRITICAL for FHIR skip logic!)
-        const sourceType = this.container.querySelector('#sourceType')?.value;
-        const sourceConnectivity = this.container.querySelector('#sourceConnectivity')?.value;
-        const sourcePort = this.container.querySelector('#sourcePort')?.value;
-        const sourceHost = this.container.querySelector('#sourceHost')?.value;
-        const transformationFlow = this.container.querySelector('#transformationFlow')?.value;
-
-        if (sourceType !== undefined) {
-            data.sourceType = sourceType;
-            console.log('💾 Captured sourceType:', data.sourceType);
-        }
-        if (sourceConnectivity !== undefined) {
-            data.sourceConnectivity = sourceConnectivity;
-            console.log('💾 Captured sourceConnectivity:', data.sourceConnectivity);
-        }
-        if (transformationFlow !== undefined) {
-            data.transformationFlow = transformationFlow;
-            console.log('💾 Captured transformationFlow:', data.transformationFlow);
-        }
-        if (sourcePort !== undefined || sourceHost !== undefined) {
-            data.sourceConfig = data.sourceConfig || {};
-            if (sourcePort) data.sourceConfig.port = parseInt(sourcePort);
-            if (sourceHost) data.sourceConfig.host = sourceHost;
-        }
-
-        // FHIR Receiver Configuration (comprehensive fields)
-        if (sourceType === 'fhir' && sourceConnectivity === 'http') {
-            data.sourceConfig = data.sourceConfig || {};
-
-            // FHIR Receiver Base Configuration
-            const fhirBasePath = this.container.querySelector('#fhirBasePath')?.value;
-            const fhirVersion = this.container.querySelector('#fhirVersion')?.value;
-            const fhirContentType = this.container.querySelector('#fhirContentType')?.value;
-
-            if (fhirBasePath) data.sourceConfig.basePath = fhirBasePath;
-            if (fhirVersion) data.sourceConfig.fhirVersion = fhirVersion;
-            if (fhirContentType) data.sourceConfig.contentType = fhirContentType;
-
-            // FHIR REST Operations
-            const operations = [];
-            ['CREATE', 'READ', 'UPDATE', 'PATCH', 'DELETE', 'SEARCH', 'BATCH'].forEach(op => {
-                const checkbox = this.container.querySelector(`#fhirOperation${op}`);
-                if (checkbox?.checked) operations.push(op);
-            });
-            if (operations.length > 0) data.sourceConfig.operations = operations;
-
-            // HTTP Authentication
-            const httpAuthType = this.container.querySelector('#httpAuthType')?.value;
-            if (httpAuthType) {
-                data.sourceConfig.authType = httpAuthType;
-
-                // Auth type specific fields
-                if (httpAuthType === 'api_key') {
-                    data.sourceConfig.apiKeyHeader = this.container.querySelector('#authApiKeyHeader')?.value;
-                    data.sourceConfig.apiKeyValue = this.container.querySelector('#authApiKeyValue')?.value;
-                    data.sourceConfig.apiKeyLocation = this.container.querySelector('#authApiKeyLocation')?.value;
-                } else if (httpAuthType === 'basic') {
-                    data.sourceConfig.basicUsername = this.container.querySelector('#authBasicUsername')?.value;
-                    data.sourceConfig.basicPassword = this.container.querySelector('#authBasicPassword')?.value;
-                    data.sourceConfig.basicRealm = this.container.querySelector('#authBasicRealm')?.value;
-                } else if (httpAuthType === 'bearer') {
-                    data.sourceConfig.bearerToken = this.container.querySelector('#authBearerToken')?.value;
-                    data.sourceConfig.bearerTokenValidation = this.container.querySelector('#authBearerTokenValidation')?.checked;
-                } else if (httpAuthType === 'oauth2') {
-                    data.sourceConfig.oauthIssuer = this.container.querySelector('#authOAuthIssuer')?.value;
-                    data.sourceConfig.oauthAudience = this.container.querySelector('#authOAuthAudience')?.value;
-                    data.sourceConfig.oauthScopes = this.container.querySelector('#authOAuthScopes')?.value;
-                    data.sourceConfig.oauthClientId = this.container.querySelector('#authOAuthClientId')?.value;
-                    data.sourceConfig.oauthClientSecret = this.container.querySelector('#authOAuthClientSecret')?.value;
-                    data.sourceConfig.smartOnFhir = this.container.querySelector('#authSmartOnFhir')?.checked;
-                } else if (httpAuthType === 'mtls') {
-                    data.sourceConfig.mtlsServerCert = this.container.querySelector('#authMtlsServerCert')?.value;
-                    data.sourceConfig.mtlsServerKey = this.container.querySelector('#authMtlsServerKey')?.value;
-                    data.sourceConfig.mtlsClientCA = this.container.querySelector('#authMtlsClientCA')?.value;
-                    data.sourceConfig.mtlsVerifyClient = this.container.querySelector('#authMtlsVerifyClient')?.checked;
-                }
-            }
-
-            // Resource Filtering
-            const acceptedResources = [];
-            const resourceCheckboxes = this.container.querySelectorAll('input[name="fhirResource"]:checked');
-            resourceCheckboxes.forEach(cb => acceptedResources.push(cb.value));
-            if (acceptedResources.length > 0) data.sourceConfig.acceptedResources = acceptedResources;
-
-            // Validation Settings
-            const validateStructure = this.container.querySelector('#fhirValidateStructure')?.checked;
-            const validateProfiles = this.container.querySelector('#fhirValidateProfiles')?.checked;
-            const validateTerminology = this.container.querySelector('#fhirValidateTerminology')?.checked;
-            if (validateStructure !== undefined) data.sourceConfig.validateStructure = validateStructure;
-            if (validateProfiles !== undefined) data.sourceConfig.validateProfiles = validateProfiles;
-            if (validateTerminology !== undefined) data.sourceConfig.validateTerminology = validateTerminology;
-
-            // Rate Limiting
-            const rateLimitEnabled = this.container.querySelector('#fhirRateLimitEnabled')?.checked;
-            const rateLimitRequests = this.container.querySelector('#fhirRateLimitRequests')?.value;
-            const rateLimitWindow = this.container.querySelector('#fhirRateLimitWindow')?.value;
-            if (rateLimitEnabled !== undefined) data.sourceConfig.rateLimitEnabled = rateLimitEnabled;
-            if (rateLimitRequests) data.sourceConfig.rateLimitRequests = parseInt(rateLimitRequests);
-            if (rateLimitWindow) data.sourceConfig.rateLimitWindow = parseInt(rateLimitWindow);
-
-            // Post-Reception Actions
-            const postReceptionActions = [];
-            ['store', 'transform', 'forward', 'workflow', 'audit'].forEach(action => {
-                const checkbox = this.container.querySelector(`#fhirAction${action.charAt(0).toUpperCase() + action.slice(1)}`);
-                if (checkbox?.checked) postReceptionActions.push(action);
-            });
-            if (postReceptionActions.length > 0) data.sourceConfig.postReceptionActions = postReceptionActions;
-
-            console.log('💾 Captured FHIR receiver configuration:', data.sourceConfig);
-        }
-
-        // Step 4: Target Configuration
+        // Get target type if available
         const targetType = this.container.querySelector('#targetType')?.value;
-        const targetConnectivity = this.container.querySelector('#targetConnectivity')?.value;
-        const targetEndpoint = this.container.querySelector('#targetEndpoint')?.value;
-        if (targetType !== undefined) data.targetType = targetType;
-        if (targetConnectivity !== undefined) data.targetConnectivity = targetConnectivity;
+        if (targetType) data.targetType = targetType;
 
-        // Capture all target config fields
-        if (targetEndpoint !== undefined) {
-            data.targetConfig = data.targetConfig || {};
-            data.targetConfig.endpoint = targetEndpoint;
-
-            // Delivery mode
-            const deliveryModeBundle = this.container.querySelector('#deliveryModeBundle');
-            const deliveryModeIndividual = this.container.querySelector('#deliveryModeIndividual');
-            if (deliveryModeBundle || deliveryModeIndividual) {
-                data.targetConfig.deliveryMode = deliveryModeIndividual?.checked ? 'individual' : 'bundle';
-            }
-
-            // Individual resources (only if individual mode selected)
-            if (deliveryModeIndividual?.checked) {
-                const resourceCheckboxes = this.container.querySelectorAll('input[name="individualResources"]:checked');
-                data.targetConfig.individualResources = Array.from(resourceCheckboxes).map(cb => cb.value);
-            }
-
-            // Default FHIR Operation
-            const defaultOperation = this.container.querySelector('#defaultOperation')?.value;
-            if (defaultOperation) {
-                data.targetConfig.defaultOperation = defaultOperation;
-            }
-
-            // Authentication
-            const authEnabled = this.container.querySelector('#targetAuthEnabled')?.checked;
-            data.targetConfig.authEnabled = authEnabled;
-
-            if (authEnabled) {
-                const authType = this.container.querySelector('#authType')?.value;
-                data.targetConfig.authType = authType;
-
-                if (authType === 'basic') {
-                    data.targetConfig.authUsername = this.container.querySelector('#authUsername')?.value;
-                    data.targetConfig.authPassword = this.container.querySelector('#authPassword')?.value;
-                } else if (authType === 'bearer') {
-                    data.targetConfig.authToken = this.container.querySelector('#authToken')?.value;
-                } else if (authType === 'oauth2') {
-                    data.targetConfig.authClientId = this.container.querySelector('#authClientId')?.value;
-                    data.targetConfig.authClientSecret = this.container.querySelector('#authClientSecret')?.value;
-                    data.targetConfig.authTokenUrl = this.container.querySelector('#authTokenUrl')?.value;
-                }
-            }
-        }
-
-        console.log('📝 Synced form values:', data);
+        console.log('📝 Synced form values via InterfaceConfigComponents:', data);
 
         // Update model data (dispatch event for async handling)
         if (Object.keys(data).length > 0) {
             this.dispatchEvent(new CustomEvent('dataSync', {
                 detail: data,
-                bubbles: true,  // Ensure event bubbles up
-                composed: true   // Allow crossing shadow DOM boundaries
+                bubbles: true,
+                composed: true
             }));
         }
 
-        // Return the data so it can be used synchronously
+        return data;
+    }
+
+    /**
+     * Legacy form extraction - fallback when FormBindingEngine not available
+     * This maintains backward compatibility during migration
+     */
+    extractFormDataLegacy(sourceConnectivity, targetConnectivity) {
+        const data = {};
+
+        // Basic Info
+        const interfaceName = this.container.querySelector('#interfaceName')?.value;
+        const interfaceDescription = this.container.querySelector('#interfaceDescription')?.value;
+        if (interfaceName !== undefined) data.name = interfaceName || '';
+        if (interfaceDescription !== undefined) data.description = interfaceDescription || '';
+
+        // Source Configuration
+        const sourceType = this.container.querySelector('#sourceType')?.value;
+        const sourcePort = this.container.querySelector('#sourcePort')?.value;
+        const sourceHost = this.container.querySelector('#sourceHost')?.value;
+        const transformationFlow = this.container.querySelector('#transformationFlow')?.value;
+
+        if (sourceType !== undefined) data.sourceType = sourceType;
+        if (sourceConnectivity !== undefined) data.sourceConnectivity = sourceConnectivity;
+        if (transformationFlow !== undefined) data.transformationFlow = transformationFlow;
+
+        if (sourcePort || sourceHost) {
+            data.sourceConfig = data.sourceConfig || {};
+            if (sourcePort) data.sourceConfig.port = parseInt(sourcePort);
+            if (sourceHost) data.sourceConfig.host = sourceHost;
+        }
+
+        // Database Connectivity
+        if (sourceConnectivity === 'database') {
+            data.sourceConfig = data.sourceConfig || {};
+            const fields = ['sourceDbType:db_type', 'sourceHost:host', 'sourcePort:port', 'sourceDatabase:database',
+                           'sourceUsername:username', 'sourcePassword:password', 'sourceSslMode:ssl_mode',
+                           'sourceTableName:table_name', 'sourceQuery:query', 'sourceIncrementalColumn:incremental_column',
+                           'sourceIncrementalType:incremental_type', 'sourcePollingInterval:polling_interval',
+                           'sourceMaxRecords:max_records', 'sourceAfterProcessing:after_processing'];
+
+            fields.forEach(mapping => {
+                const [id, key] = mapping.split(':');
+                const value = this.container.querySelector(`#${id}`)?.value;
+                if (value) {
+                    data.sourceConfig[key] = ['port', 'polling_interval', 'max_records'].includes(key)
+                        ? parseInt(value) : value;
+                }
+            });
+        }
+
+        // Target Configuration
+        const targetType = this.container.querySelector('#targetType')?.value;
+        const targetEndpoint = this.container.querySelector('#targetEndpoint')?.value;
+        if (targetType !== undefined) data.targetType = targetType;
+        if (targetConnectivity !== undefined) data.targetConnectivity = targetConnectivity;
+
+        if (targetEndpoint !== undefined) {
+            data.targetConfig = data.targetConfig || {};
+            data.targetConfig.endpoint = targetEndpoint;
+
+            // Delivery mode
+            const deliveryModeIndividual = this.container.querySelector('#deliveryModeIndividual');
+            if (deliveryModeIndividual !== null) {
+                data.targetConfig.deliveryMode = deliveryModeIndividual?.checked ? 'individual' : 'bundle';
+            }
+
+            // Authentication
+            const authType = this.container.querySelector('#authType')?.value;
+            if (authType && authType !== 'none') {
+                data.targetConfig.authType = authType;
+                if (authType === 'basic') {
+                    data.targetConfig.username = this.container.querySelector('#authUsername')?.value;
+                    data.targetConfig.password = this.container.querySelector('#authPassword')?.value;
+                } else if (authType === 'bearer') {
+                    data.targetConfig.bearerToken = this.container.querySelector('#authToken')?.value;
+                } else if (authType === 'api_key') {
+                    data.targetConfig.apiKey = this.container.querySelector('#authApiKey')?.value;
+                    data.targetConfig.apiKeyHeader = this.container.querySelector('#authApiKeyHeader')?.value || 'X-API-Key';
+                }
+            }
+
+            // Version and format
+            const targetVersion = this.container.querySelector('#targetVersion')?.value;
+            const targetFormat = this.container.querySelector('#targetFormat')?.value;
+            if (targetVersion) data.targetConfig.version = targetVersion;
+            if (targetFormat) data.targetConfig.format = targetFormat;
+        }
+
         return data;
     }
 
@@ -5712,6 +5918,212 @@ PV1|1|I|ICU^101^1|||DOC123^Smith^Jane|||EMERGENCY|||
             info: 'ℹ️'
         };
         return icons[type] || icons.info;
+    }
+
+    /**
+     * Show wizard completion modal with action buttons
+     */
+    showCompletionModal(data) {
+        const { interfaceId, name, status, messageType, autoStart } = data;
+
+        // Create completion modal overlay
+        const completionModal = document.createElement('div');
+        completionModal.className = 'wizard-completion-modal';
+        completionModal.innerHTML = `
+            <div class="completion-modal-overlay" style="
+                position: fixed;
+                top: 0;
+                left: 0;
+                right: 0;
+                bottom: 0;
+                background: rgba(0, 0, 0, 0.7);
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                z-index: 10002;
+                animation: fadeIn 0.3s ease;
+            ">
+                <div class="completion-modal-content" style="
+                    background: white;
+                    border-radius: 12px;
+                    padding: 32px;
+                    max-width: 600px;
+                    width: 90%;
+                    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+                    animation: slideUp 0.3s ease;
+                ">
+                    <!-- Success Icon -->
+                    <div style="text-align: center; margin-bottom: 24px;">
+                        <div style="
+                            width: 80px;
+                            height: 80px;
+                            margin: 0 auto;
+                            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+                            border-radius: 50%;
+                            display: flex;
+                            align-items: center;
+                            justify-content: center;
+                            font-size: 48px;
+                            color: white;
+                            box-shadow: 0 8px 24px rgba(16, 185, 129, 0.3);
+                        ">✓</div>
+                    </div>
+
+                    <!-- Title -->
+                    <h2 style="
+                        text-align: center;
+                        color: #1e3a8a;
+                        font-size: 24px;
+                        font-weight: 600;
+                        margin: 0 0 12px 0;
+                    ">Interface Created Successfully!</h2>
+
+                    <!-- Interface Name -->
+                    <p style="
+                        text-align: center;
+                        color: #6b7280;
+                        font-size: 16px;
+                        margin: 0 0 24px 0;
+                    ">"<strong>${name}</strong>" is ready</p>
+
+                    <!-- Status Info -->
+                    <div style="
+                        background: ${status === 'active' ? '#d1fae5' : '#fef3c7'};
+                        border: 2px solid ${status === 'active' ? '#10b981' : '#f59e0b'};
+                        border-radius: 8px;
+                        padding: 16px;
+                        margin-bottom: 24px;
+                    ">
+                        <div style="display: flex; align-items: center; gap: 12px;">
+                            <div style="font-size: 24px;">${status === 'active' ? '🟢' : '📝'}</div>
+                            <div>
+                                <div style="font-weight: 600; color: #1e3a8a; margin-bottom: 4px;">
+                                    ${status === 'active' ? 'Active & Running' : 'Draft - Customize Pipeline'}
+                                </div>
+                                <div style="font-size: 14px; color: #6b7280;">
+                                    ${status === 'active'
+                                        ? 'Interface is processing messages'
+                                        : 'Configure pipeline steps before activation'}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Action Buttons -->
+                    <div style="
+                        display: grid;
+                        grid-template-columns: 1fr 1fr;
+                        gap: 12px;
+                        margin-bottom: 16px;
+                    ">
+                        <button onclick="window.wizardCompletionActions.configurePipeline('${interfaceId}', '${messageType}')" style="
+                            background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%);
+                            color: white;
+                            border: none;
+                            border-radius: 8px;
+                            padding: 16px;
+                            font-size: 15px;
+                            font-weight: 600;
+                            cursor: pointer;
+                            transition: all 0.2s;
+                            box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3);
+                        " onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 6px 16px rgba(99, 102, 241, 0.4)'"
+                           onmouseout="this.style.transform=''; this.style.boxShadow='0 4px 12px rgba(99, 102, 241, 0.3)'">
+                            🔀 Configure Pipeline
+                        </button>
+
+                        <button onclick="window.wizardCompletionActions.viewMessages('${interfaceId}')" style="
+                            background: white;
+                            color: #6366f1;
+                            border: 2px solid #6366f1;
+                            border-radius: 8px;
+                            padding: 16px;
+                            font-size: 15px;
+                            font-weight: 600;
+                            cursor: pointer;
+                            transition: all 0.2s;
+                        " onmouseover="this.style.background='#f5f3ff'"
+                           onmouseout="this.style.background='white'">
+                            💬 View Messages
+                        </button>
+                    </div>
+
+                    <!-- Close Button -->
+                    <button onclick="window.wizardCompletionActions.close()" style="
+                        background: #e5e7eb;
+                        color: #374151;
+                        border: none;
+                        border-radius: 8px;
+                        padding: 14px;
+                        font-size: 14px;
+                        font-weight: 600;
+                        cursor: pointer;
+                        width: 100%;
+                        transition: all 0.2s;
+                    " onmouseover="this.style.background='#d1d5db'"
+                       onmouseout="this.style.background='#e5e7eb'">
+                        Close & Return to Interfaces
+                    </button>
+                </div>
+            </div>
+        `;
+
+        // Add animations
+        const style = document.createElement('style');
+        style.textContent = `
+            @keyframes fadeIn {
+                from { opacity: 0; }
+                to { opacity: 1; }
+            }
+            @keyframes slideUp {
+                from {
+                    opacity: 0;
+                    transform: translateY(30px);
+                }
+                to {
+                    opacity: 1;
+                    transform: translateY(0);
+                }
+            }
+        `;
+        document.head.appendChild(style);
+
+        // Add to DOM
+        document.body.appendChild(completionModal);
+
+        // Setup action handlers
+        window.wizardCompletionActions = {
+            configurePipeline: (interfaceId, messageType) => {
+                completionModal.remove();
+                if (window.wizardController) {
+                    window.wizardController.closeWizard();
+                }
+                // Navigate to pipeline configuration
+                if (typeof window.configurePipeline === 'function') {
+                    window.configurePipeline(interfaceId, messageType);
+                } else {
+                    window.location.href = `pipeline-builder.html?interfaceId=${interfaceId}&messageType=${messageType}`;
+                }
+            },
+            viewMessages: (interfaceId) => {
+                completionModal.remove();
+                if (window.wizardController) {
+                    window.wizardController.closeWizard();
+                }
+                // Navigate to messages page
+                if (typeof window.viewInterfaceMessages === 'function') {
+                    window.viewInterfaceMessages(interfaceId);
+                } else {
+                    window.location.href = `messages.html?interfaceId=${interfaceId}`;
+                }
+            },
+            close: () => {
+                completionModal.remove();
+                if (window.wizardController) {
+                    window.wizardController.closeWizard();
+                }
+            }
+        };
     }
 
     // ====================================

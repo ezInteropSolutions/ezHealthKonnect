@@ -3,8 +3,12 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
     <title>Pipeline Builder - ezHealthKonnect</title>
-    <link rel="stylesheet" href="/css/pipeline-builder.css?v=2.0">
+    <link rel="stylesheet" href="/css/pipeline-builder.css?v=8.3">
+    <link rel="stylesheet" href="/css/components/field-path-autocomplete.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 </head>
 <body>
@@ -198,8 +202,8 @@
             </div>
         </main>
 
-        <!-- Right Panel: Properties -->
-        <aside class="properties-panel">
+        <!-- Right Panel: Properties (HIDDEN - Using modal instead) -->
+        <aside class="properties-panel" style="display: none;">
             <div class="panel-header">
                 <h2><i class="fas fa-cog"></i> Properties</h2>
             </div>
@@ -211,6 +215,46 @@
                 </div>
             </div>
         </aside>
+    </div>
+
+    <!-- Modal: Step Properties -->
+    <div id="stepPropertiesModal" class="modal" style="display: none;">
+        <div class="modal-content" style="max-width: 900px; max-height: 90vh; overflow: hidden; display: flex; flex-direction: column;">
+            <div class="modal-header" style="background: linear-gradient(135deg, #1e3a8a 0%, #2563eb 100%); color: white; border-radius: 8px 8px 0 0;">
+                <h3><i class="fas fa-cog"></i> <span id="stepModalTitle">Step Configuration</span></h3>
+                <button class="modal-close" style="color: white;">&times;</button>
+            </div>
+
+            <!-- Tab Navigation -->
+            <div class="modal-tabs" style="display: flex; background: #f3f4f6; border-bottom: 2px solid #e5e7eb; padding: 0;">
+                <button class="modal-tab active" data-tab="form" style="flex: 1; padding: 12px 20px; border: none; background: white; border-bottom: 3px solid #2563eb; cursor: pointer; font-weight: 500; color: #1e3a8a; transition: all 0.3s;">
+                    <i class="fas fa-sliders-h"></i> Configuration
+                </button>
+                <button class="modal-tab" data-tab="json" style="flex: 1; padding: 12px 20px; border: none; background: transparent; border-bottom: 3px solid transparent; cursor: pointer; font-weight: 500; color: #6b7280; transition: all 0.3s;">
+                    <i class="fas fa-file-upload"></i> Import JSON
+                </button>
+                <button class="modal-tab" data-tab="docs" style="flex: 1; padding: 12px 20px; border: none; background: transparent; border-bottom: 3px solid transparent; cursor: pointer; font-weight: 500; color: #6b7280; transition: all 0.3s;">
+                    <i class="fas fa-book"></i> Documentation
+                </button>
+            </div>
+
+            <div class="modal-body" style="flex: 1; overflow-y: auto; padding: 1.5rem;">
+                <!-- Form Tab Content -->
+                <div id="formTabContent" class="tab-content active">
+                    <!-- Dynamic form UI loaded here -->
+                </div>
+
+                <!-- JSON Tab Content -->
+                <div id="jsonTabContent" class="tab-content" style="display: none;">
+                    <!-- Dynamic JSON editor loaded here -->
+                </div>
+
+                <!-- Documentation Tab Content -->
+                <div id="docsTabContent" class="tab-content" style="display: none;">
+                    <!-- Dynamic documentation loaded here -->
+                </div>
+            </div>
+        </div>
     </div>
 
     <!-- Modal: Test Pipeline -->
@@ -239,16 +283,22 @@
         </div>
     </div>
 
+    <!-- Authentication Service (OOB) -->
+    <script src="/js/services/AuthService.js"></script>
+
     <!-- JavaScript Dependencies -->
-    <script src="/js/pipeline/models/PipelineModels.js?v=2.0"></script>
-    <script src="/js/pipeline/services/PipelineAPIService.js?v=2.0"></script>
-    <script src="/js/pipeline/managers/DragDropManager.js?v=2.0"></script>
-    <script src="/js/pipeline/managers/CanvasRenderer.js?v=2.0"></script>
-    <script src="/js/pipeline/managers/StepNodeManager.js?v=2.0"></script>
-    <script src="/js/pipeline/managers/ToolboxManager.js?v=2.0"></script>
-    <script src="/js/pipeline/managers/PropertiesPanel.js?v=2.0"></script>
-    <script src="/js/pipeline/managers/LayerContainer.js?v=2.0"></script>
-    <script src="/js/pipeline/PipelineBuilder.js?v=2.0"></script>
-    <script src="/js/pipeline/init.js?v=2.0"></script>
+    <script src="/js/pipeline/models/PipelineModels.js?v=4.0"></script>
+    <script src="/js/pipeline/services/PipelineAPIService.js?v=4.2"></script>
+    <script src="/js/pipeline/managers/DragDropManager.js?v=4.0"></script>
+    <script src="/js/pipeline/managers/CanvasRenderer.js?v=4.0"></script>
+    <script src="/js/pipeline/managers/StepNodeManager.js?v=6.0"></script>
+    <script src="/js/pipeline/managers/ToolboxManager.js?v=8.5"></script>
+    <script src="/js/pipeline/managers/PropertiesPanel.js?v=18.0"></script>
+    <!-- Modular OOP Components -->
+    <script src="/js/pipeline/components/FieldPathInputWithAutocomplete.js?v=2.4"></script>
+    <script src="/js/pipeline/components/ValidationRuleBuilder.js?v=12.0"></script>
+    <script src="/js/pipeline/managers/LayerContainer.js?v=4.0"></script>
+    <script src="/js/pipeline/PipelineBuilder.js?v=9.1"></script>
+    <script src="/js/pipeline/init.js?v=7.5"></script>
 </body>
 </html>

@@ -92,7 +92,9 @@ func (f *DefaultConnectorFactory) registerBuiltInConnectors() {
 	f.RegisterOutbound("tcp_mllp_outbound", NewTCPMLLPOutboundConnector)
 	f.RegisterInbound("http_rest_inbound", NewHTTPFHIRInboundConnector) // HTTP FHIR receiver
 	f.RegisterInbound("http", NewHTTPFHIRInboundConnector)               // Alias for http connectivity
-	f.RegisterOutbound("http_outbound", NewHTTPOutboundConnector)
+	f.RegisterOutbound("http_outbound", NewHTTPOutboundConnector)        // HTTP delivery (full implementation)
+	f.RegisterOutbound("http", NewHTTPOutboundConnector)                 // Alias for http connectivity
+	f.RegisterOutbound("http_rest", NewHTTPOutboundConnector)            // Alias for destination type compatibility
 
 	// File System Connectors
 	f.RegisterInbound("file_listener", NewFileListenerConnector)
@@ -117,6 +119,34 @@ func (f *DefaultConnectorFactory) registerBuiltInConnectors() {
 	// Database Connectors - Oracle
 	f.RegisterInbound("oracle_inbound", NewOracleInboundConnector)
 	f.RegisterOutbound("oracle_outbound", NewOracleOutboundConnector)
+
+	// Cloud Data Warehouse Connectors - Snowflake
+	f.RegisterInbound("snowflake_inbound", NewSnowflakeInboundConnector)
+	f.RegisterOutbound("snowflake_outbound", NewSnowflakeOutboundConnector)
+
+	// Cloud Data Warehouse Connectors - Databricks
+	f.RegisterInbound("databricks_inbound", NewDatabricksInboundConnector)
+	f.RegisterOutbound("databricks_outbound", NewDatabricksOutboundConnector)
+
+	// Cloud Data Warehouse Connectors - BigQuery
+	f.RegisterInbound("bigquery_inbound", NewBigQueryInboundConnector)
+	f.RegisterOutbound("bigquery_outbound", NewBigQueryOutboundConnector)
+
+	// Cloud Data Warehouse Connectors - Redshift
+	f.RegisterInbound("redshift_inbound", NewRedshiftInboundConnector)
+	f.RegisterOutbound("redshift_outbound", NewRedshiftOutboundConnector)
+
+	// Cloud Data Warehouse Connectors - Azure Synapse
+	f.RegisterInbound("synapse_inbound", NewSynapseInboundConnector)
+	f.RegisterOutbound("synapse_outbound", NewSynapseOutboundConnector)
+
+	// Specialized Analytics Connectors - ClickHouse
+	f.RegisterInbound("clickhouse_inbound", NewClickHouseInboundConnector)
+	f.RegisterOutbound("clickhouse_outbound", NewClickHouseOutboundConnector)
+
+	// Specialized Analytics Connectors - TimescaleDB (PostgreSQL-based)
+	f.RegisterInbound("timescaledb_inbound", NewTimescaleDBInboundConnector)
+	f.RegisterOutbound("timescaledb_outbound", NewTimescaleDBOutboundConnector)
 
 	// Message Queue Connectors - RabbitMQ
 	f.RegisterInbound("rabbitmq_inbound", NewRabbitMQInboundConnector)

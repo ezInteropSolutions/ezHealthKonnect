@@ -15,13 +15,15 @@ type PostgresTransformationService struct {
 
 // AtomicMapping represents a single field mapping from HL7 to FHIR
 type AtomicMapping struct {
-	ID             string `json:"id"`
-	SourcePath     string `json:"sourcePath"`
-	TargetPath     string `json:"targetPath"`
-	TransformType  string `json:"transformType"`
-	DefaultValue   string `json:"defaultValue,omitempty"`
-	ValidationRule string `json:"validationRule,omitempty"`
-	IsRequired     bool   `json:"isRequired"`
+	ID               string `json:"id"`
+	SourcePath       string `json:"sourcePath"`
+	TargetPath       string `json:"targetPath"`
+	ResourceType     string `json:"resourceType"`       // FHIR Resource Type (e.g., "Patient", "Encounter")
+	FHIRResourceType string `json:"fhirResourceType"`   // Alias for compatibility
+	TransformType    string `json:"transformType"`
+	DefaultValue     string `json:"defaultValue,omitempty"`
+	ValidationRule   string `json:"validationRule,omitempty"`
+	IsRequired       bool   `json:"isRequired"`
 }
 
 // TransformationConfig represents the complete transformation configuration
@@ -119,6 +121,7 @@ func (pts *PostgresTransformationService) ExecuteTransformation(interfaceID, mes
 		"mappings_skipped":  []string{},
 		"processing_method": "postgres_atomic_mappings",
 		"config_version":    "1.0",
+		"steps":             []map[string]interface{}{}, // Transformation steps for UI
 	}
 
 	appliedMappings := []string{}

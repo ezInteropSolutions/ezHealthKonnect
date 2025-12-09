@@ -670,13 +670,10 @@
                     <i class="fas fa-info-circle" style="margin-right: 0.5rem;"></i>Details
                 </button>
                 <button class="tab-btn" onclick="switchTab('lineage')">
-                    <i class="fas fa-project-diagram" style="margin-right: 0.5rem;"></i>Data Lineage
+                    <i class="fas fa-project-diagram" style="margin-right: 0.5rem;"></i>Data Lineage & Transformations
                 </button>
-                <button class="tab-btn" onclick="switchTab('transformations')">
-                    <i class="fas fa-code-branch" style="margin-right: 0.5rem;"></i>Transformations
-                </button>
-                <button class="tab-btn" id="errorsTabBtn" onclick="switchTab('errors')" style="display: none;">
-                    <i class="fas fa-exclamation-triangle" style="margin-right: 0.5rem;"></i>Errors & Warnings
+                <button class="tab-btn" id="logsTabBtn" onclick="switchTab('logs')">
+                    <i class="fas fa-file-alt" style="margin-right: 0.5rem;"></i>Logs
                 </button>
             </div>
 
@@ -688,24 +685,23 @@
                     </div>
                 </div>
 
-                <!-- Data Lineage Tab -->
+                <!-- Data Lineage & Transformations Tab (Consolidated) -->
                 <div id="lineageTab" class="tab-content">
                     <div id="messageLineageView">
                         <div class="loading">Loading data lineage...</div>
                     </div>
                 </div>
 
-                <!-- Transformations Tab -->
-                <div id="transformationsTab" class="tab-content">
-                    <div id="messageTransformationsView">
-                        <div class="loading">Loading transformations...</div>
+                <!-- Logs Tab (with Error/Debug toggle) -->
+                <div id="logsTab" class="tab-content">
+                    <div style="background: linear-gradient(135deg, #1e3a8a 0%, #2563eb 100%); color: white; padding: 1rem 1.5rem; border-radius: 8px 8px 0 0; margin-bottom: 1rem;">
+                        <div style="display: flex; align-items: center; gap: 0.75rem;">
+                            <i class="fas fa-file-alt" style="font-size: 1.25rem;"></i>
+                            <h6 style="margin: 0; font-weight: 600;">Processing Logs</h6>
+                        </div>
                     </div>
-                </div>
-
-                <!-- Errors & Warnings Tab -->
-                <div id="errorsTab" class="tab-content">
-                    <div id="messageErrorsView">
-                        <div class="loading">Loading errors...</div>
+                    <div id="messageLogsView">
+                        <div class="loading">Loading logs...</div>
                     </div>
                 </div>
             </div>
@@ -830,6 +826,8 @@
     </script>
     <!-- Bootstrap JS -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <!-- Authentication Service (OOB) -->
+    <script src="/js/services/AuthService.js"></script>
     <script src="js/messages.js"></script>
 </body>
 </html>

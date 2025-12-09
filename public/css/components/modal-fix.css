@@ -46,11 +46,43 @@
     overflow: hidden !important;
     box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2) !important;
     transform: scale(0.9);
-    transition: transform 0.3s ease;
+    transition: transform 0.3s ease, width 0.3s ease, max-width 0.3s ease, max-height 0.3s ease;
 }
 
 #editModal.show .modal-content {
     transform: scale(1);
+}
+
+/* MAXIMIZED STATE - Full screen override */
+#editModal .modal-content.maximized,
+#editModal.show .modal-content.maximized,
+#editModalContent.maximized {
+    position: fixed !important;
+    top: 0 !important;
+    left: 0 !important;
+    right: 0 !important;
+    bottom: 0 !important;
+    width: 100vw !important;
+    height: 100vh !important;
+    max-width: 100vw !important;
+    max-height: 100vh !important;
+    margin: 0 !important;
+    border-radius: 0 !important;
+    transform: none !important;
+    z-index: 2001 !important;
+}
+
+#editModal .modal-content.maximized .modal-body {
+    max-height: calc(100vh - 160px) !important;
+    height: calc(100vh - 160px) !important;
+    overflow-y: auto !important;
+}
+
+/* Ensure overlay doesn't constrain maximized modal */
+#editModal.show:has(.modal-content.maximized) {
+    padding: 0 !important;
+    align-items: stretch !important;
+    justify-content: stretch !important;
 }
 
 /* Ensure other modals don't conflict */

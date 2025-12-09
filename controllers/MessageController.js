@@ -5,12 +5,28 @@ class MessageController {
     constructor() {
         this.database = require('../config/database');
         this.tableManager = require('../services/InterfaceTableManager');
+        this.mongoService = null;  // Lazy-loaded MongoDB service
     }
 
     async ensureDatabase() {
         if (!this.database) {
             this.database = require('../config/database');
         }
+    }
+
+    async ensureMongoService() {
+        if (!this.mongoService) {
+            try {
+                const MongoDBConnectionService = require('../services/MongoDBConnectionService');
+                this.mongoService = new MongoDBConnectionService();
+                await this.mongoService.connect();
+                console.log('✅ MongoDB service initialized for MessageController');
+            } catch (error) {
+                console.log('⚠️ MongoDB not available, using PostgreSQL-only mode');
+                this.mongoService = null;
+            }
+        }
+        return this.mongoService;
     }
 
     /**
@@ -173,6 +189,8 @@ class MessageController {
             const { messageId } = req.params;
             const userId = req.session.user.id;
 
+            console.log(`🔍 getMessageDetail: Looking for message ${messageId} for user ${userId}`);
+
             // Find which interface table contains this message
             let messageResult = null;
             let interfaceName = null;
@@ -188,14 +206,18 @@ class MessageController {
                 type: this.database.sequelize.QueryTypes.SELECT
             });
 
+            console.log(`🔍 Found ${interfaces.length} interfaces for user`);
+
             // Search each interface table for the message
             for (const iface of interfaces) {
                 const tableName = this.tableManager.getInterfaceTableName(iface.id);
+                console.log(`🔍 Searching table ${tableName} for message`);
 
                 try {
+                    // Search by both message_id and id to handle both cases
                     const query = `
                         SELECT * FROM ${tableName}
-                        WHERE id = :messageId
+                        WHERE message_id = :messageId OR id::text = :messageId
                     `;
 
                     const result = await this.database.sequelize.query(query, {
@@ -460,61 +482,128 @@ class MessageController {
             const { messageId } = req.params;
             const userId = req.session.user.id;
 
-            // Verify message exists and user has access
-            const messageQuery = `
-                SELECT mpe.*, i.name as interface_name
-                FROM message_processing_enhanced mpe
-                JOIN interfaces i ON mpe.interface_id = i.id
-                WHERE mpe.id = :messageId AND i.user_id = :userId
-                AND mpe.status IN ('failed', 'error')
+            console.log(`🔍 Reprocess request: messageId=${messageId}, userId=${userId}`);
+
+            // First, find which interface table the message is in by querying interface_table_metadata
+            const metadataQuery = `
+                SELECT itm.table_name, itm.interface_id, i.name as interface_name
+                FROM interface_table_metadata itm
+                JOIN interfaces i ON itm.interface_id = i.id
+                WHERE i.user_id = $1
             `;
 
-            const messageResult = await this.database.sequelize.query(messageQuery, {
-                replacements: { messageId, userId },
+            const metadataResult = await this.database.sequelize.query(metadataQuery, {
+                bind: [userId],
                 type: this.database.sequelize.QueryTypes.SELECT
             });
 
-            if (messageResult.length === 0) {
+            console.log(`🔍 Found ${metadataResult.length} interface tables for user ${userId}:`, metadataResult.map(m => m.table_name));
+
+            // Search for the message across all interface tables
+            let message = null;
+            let tableName = null;
+            let interfaceId = null;
+            let interfaceName = null;
+
+            for (const metadata of metadataResult) {
+                try {
+                    console.log(`🔍 Checking table ${metadata.table_name} for message ${messageId}`);
+
+                    // Use $1 placeholder instead of :messageId for better UUID handling
+                    const checkQuery = `SELECT * FROM ${metadata.table_name} WHERE id = $1`;
+                    const result = await this.database.sequelize.query(checkQuery, {
+                        bind: [messageId],
+                        type: this.database.sequelize.QueryTypes.SELECT,
+                        logging: (sql, timing) => {
+                            console.log(`📝 Executing SQL: ${sql}`);
+                            console.log(`📝 With params: ${messageId}`);
+                        }
+                    });
+
+                    console.log(`📊 Query returned ${result.length} rows from ${metadata.table_name}`);
+
+                    if (result.length > 0) {
+                        console.log(`✅ Found message in table ${metadata.table_name}`);
+                        message = result[0];
+                        tableName = metadata.table_name;
+                        interfaceId = metadata.interface_id;
+                        interfaceName = metadata.interface_name;
+                        break;
+                    } else {
+                        console.log(`❌ Message not found in table ${metadata.table_name}`);
+                    }
+                } catch (err) {
+                    console.error(`⚠️ Error checking table ${metadata.table_name}:`, err.message);
+                    console.error(`⚠️ Full error:`, err);
+                    // Table might not exist, continue to next
+                    continue;
+                }
+            }
+
+            if (!message) {
+                console.error(`❌ Message ${messageId} not found in any interface table`);
                 return res.status(404).json({
                     success: false,
-                    error: 'Message not found or not eligible for reprocessing'
+                    error: 'Message not found or access denied'
                 });
             }
 
-            // Update message status to reprocessing
-            await this.database.sequelize.query(`
-                UPDATE message_processing_enhanced
+            // Update message status to reprocessing and reset delivery status
+            const updateQuery = `
+                UPDATE ${tableName}
                 SET status = 'reprocessing',
-                    retry_count = retry_count + 1,
-                    processing_started_at = CURRENT_TIMESTAMP,
-                    last_error_message = NULL
-                WHERE id = :messageId
-            `, {
-                replacements: { messageId },
+                    delivery_status = 'queued',
+                    delivery_attempts = COALESCE(delivery_attempts, 0) + 1,
+                    last_error_message = NULL,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = $1
+            `;
+
+            await this.database.sequelize.query(updateQuery, {
+                bind: [messageId],
                 type: this.database.sequelize.QueryTypes.UPDATE
             });
 
-            // TODO: Trigger actual reprocessing logic here
-            // For now, just mark as received to be picked up by processing engine
+            // Trigger actual reprocessing via Go backend
+            // Send the raw message back to the processing engine
+            try {
+                const axios = require('axios');
+                const goBackendUrl = process.env.GO_BACKEND_URL || 'http://localhost:8080';
 
-            setTimeout(async () => {
-                try {
-                    await this.database.sequelize.query(`
-                        UPDATE message_processing_enhanced
-                        SET status = 'received'
-                        WHERE id = :messageId
-                    `, {
-                        replacements: { messageId },
-                        type: this.database.sequelize.QueryTypes.UPDATE
-                    });
-                } catch (err) {
-                    console.error('Error updating reprocess status:', err);
-                }
-            }, 1000);
+                await axios.post(`${goBackendUrl}/api/processing/reprocess`, {
+                    messageId: messageId,
+                    interfaceId: interfaceId,
+                    rawMessage: message.raw_message,
+                    messageType: message.message_type
+                });
+            } catch (goError) {
+                console.warn('⚠️ Could not trigger Go backend reprocessing, will rely on status change:', goError.message);
+
+                // Fallback: Reset status to 'received' so it gets picked up by processing engine
+                setTimeout(async () => {
+                    try {
+                        await this.database.sequelize.query(`
+                            UPDATE ${tableName}
+                            SET status = 'received'
+                            WHERE id = :messageId
+                        `, {
+                            replacements: { messageId },
+                            type: this.database.sequelize.QueryTypes.UPDATE
+                        });
+                    } catch (err) {
+                        console.error('Error updating reprocess status:', err);
+                    }
+                }, 1000);
+            }
 
             res.json({
                 success: true,
-                message: 'Message queued for reprocessing'
+                message: 'Message queued for reprocessing',
+                data: {
+                    messageId: messageId,
+                    interfaceId: interfaceId,
+                    interfaceName: interfaceName
+                }
             });
 
         } catch (error) {
@@ -1220,7 +1309,8 @@ class MessageController {
             console.log(`🏥 Receiving FHIR ${resourceType} message...`);
 
             // Find FHIR Receiver interface
-            const fhirInterface = await database.sequelize.query(`
+            await this.ensureDatabase();
+            const fhirInterface = await this.database.sequelize.query(`
                 SELECT id, name, target_config, processing_rules
                 FROM interfaces
                 WHERE message_type = 'FHIR'
@@ -1228,7 +1318,7 @@ class MessageController {
                 AND target_type = 'database'
                 AND status = 'active'
                 LIMIT 1
-            `, { type: database.sequelize.QueryTypes.SELECT });
+            `, { type: this.database.sequelize.QueryTypes.SELECT });
 
             if (!fhirInterface || fhirInterface.length === 0) {
                 return res.status(404).json({
@@ -1279,7 +1369,7 @@ class MessageController {
 
             const startTime = Date.now();
 
-            const insertResult = await database.sequelize.query(`
+            const insertResult = await this.database.sequelize.query(`
                 INSERT INTO ${tableName} (
                     interface_id, message_id, correlation_id, status, source,
                     message_type, content_type, raw_message, processed_message,
@@ -1393,7 +1483,7 @@ class MessageController {
             try {
                 // Find which interface table contains this message
                 const allInterfaces = await this.database.sequelize.query(`
-                    SELECT id, name FROM interfaces WHERE user_id = :userId
+                    SELECT id, name, source_type, target_type FROM interfaces WHERE user_id = :userId
                 `, {
                     replacements: { userId },
                     type: this.database.sequelize.QueryTypes.SELECT
@@ -1406,9 +1496,11 @@ class MessageController {
                             SELECT
                                 m.*,
                                 '${intf.id}' as interface_id,
-                                '${intf.name}' as interface_name
+                                '${intf.name}' as interface_name,
+                                '${intf.source_type}' as interface_source_type,
+                                '${intf.target_type}' as interface_target_type
                             FROM ${tableName} m
-                            WHERE m.id = :messageId
+                            WHERE m.message_id = :messageId
                             LIMIT 1
                         `, {
                             replacements: { messageId },
@@ -1436,32 +1528,57 @@ class MessageController {
                 });
             }
 
-            // Step 2: Get the output message from output table (if exists)
-            const outputTableName = `output_intf_${inputMessage.interface_id.replace(/-/g, '_')}`;
-            let outputMessage = null;
+            // Step 2: Get the transformed message from MongoDB (hybrid storage architecture)
+            let transformedMessage = null;
+            const mongoService = await this.ensureMongoService();
 
-            try {
-                const outputResult = await this.database.sequelize.query(`
-                    SELECT *
-                    FROM ${outputTableName}
-                    WHERE input_message_id = :inputMessageId
-                       OR correlation_id = :correlationId
-                    ORDER BY created_at DESC
-                    LIMIT 1
-                `, {
-                    replacements: {
-                        inputMessageId: inputMessage.message_id,
-                        correlationId: inputMessage.correlation_id || inputMessage.message_id
-                    },
-                    type: this.database.sequelize.QueryTypes.SELECT
-                });
+            if (mongoService) {
+                try {
+                    const collectionName = `transformed_messages_intf_${inputMessage.interface_id.replace(/-/g, '_')}`;
+                    const collection = mongoService.db.collection(collectionName);
 
-                if (outputResult.length > 0) {
-                    outputMessage = outputResult[0];
-                    outputMessage.output_table_name = outputTableName;
+                    transformedMessage = await collection.findOne({
+                        message_id: inputMessage.message_id
+                    });
+
+                    if (transformedMessage) {
+                        console.log(`✅ Found transformed message in MongoDB collection: ${collectionName}`);
+                        console.log(`   Transformation status: ${transformedMessage.transformation_status}`);
+                        console.log(`   Pipeline steps: ${transformedMessage.transformation_metadata?.steps?.length || 0}`);
+                    }
+                } catch (err) {
+                    console.error(`⚠️ Error querying MongoDB for transformed message:`, err.message);
                 }
-            } catch (err) {
-                console.log(`⚠️ No output table found for interface ${inputMessage.interface_id}`);
+            }
+
+            // Fallback: Try PostgreSQL output table (legacy architecture)
+            let outputMessage = null;
+            if (!transformedMessage) {
+                try {
+                    const outputTableName = `output_intf_${inputMessage.interface_id.replace(/-/g, '_')}`;
+                    const outputResult = await this.database.sequelize.query(`
+                        SELECT *
+                        FROM ${outputTableName}
+                        WHERE input_message_id = :inputMessageId
+                           OR correlation_id = :correlationId
+                        ORDER BY created_at DESC
+                        LIMIT 1
+                    `, {
+                        replacements: {
+                            inputMessageId: inputMessage.message_id,
+                            correlationId: inputMessage.correlation_id || inputMessage.message_id
+                        },
+                        type: this.database.sequelize.QueryTypes.SELECT
+                    });
+
+                    if (outputResult.length > 0) {
+                        outputMessage = outputResult[0];
+                        outputMessage.output_table_name = outputTableName;
+                        console.log(`✅ Found output message in PostgreSQL table: ${outputTableName}`);
+                    }
+                } catch (err) {
+                    console.log(`⚠️ No PostgreSQL output table found for interface ${inputMessage.interface_id}`);
+                }
             }
 
             // Step 3: Get target interface (where output was delivered)
@@ -1519,13 +1636,21 @@ class MessageController {
                 }
             }
 
-            // Step 4: Fetch content from tables (raw message, transformed output)
+            // Step 4: Fetch content from tables/collections (raw message, transformed output)
             let rawContent = inputMessage.raw_message || null;
             let transformedContent = null;
+            let transformationSteps = null;
 
-            // Try to get transformed output from output table
-            if (outputMessage) {
+            // Try to get transformed content from MongoDB first (current architecture)
+            if (transformedMessage) {
+                transformedContent = transformedMessage.delivery_payload || transformedMessage.transformed_content;
+                transformationSteps = transformedMessage.transformation_metadata?.steps || null;
+                console.log(`📊 Retrieved transformation with ${transformationSteps?.length || 0} steps from MongoDB`);
+            }
+            // Fallback: Try to get transformed output from PostgreSQL output table (legacy)
+            else if (outputMessage) {
                 try {
+                    const outputTableName = `output_intf_${inputMessage.interface_id.replace(/-/g, '_')}`;
                     const outputContentQuery = `
                         SELECT transformed_message
                         FROM ${outputTableName}
@@ -1550,7 +1675,7 @@ class MessageController {
 
                                 const db = client.db('ezhealthkonnect');
                                 // Collection name uses hyphens, not underscores
-                                const collectionName = `transformed_messages_intf_${inputMessage.interface_id}`;
+                                const collectionName = `transformed_messages_intf_${inputMessage.interface_id.replace(/-/g, '_')}`;
                                 const collection = db.collection(collectionName);
 
                                 // Query by correlation_id (which stores message_id when correlation_id is null)
@@ -1588,6 +1713,8 @@ class MessageController {
                     messageId: inputMessage.message_id,
                     interfaceId: inputMessage.interface_id,
                     interfaceName: inputMessage.interface_name,
+                    interfaceSourceType: inputMessage.interface_source_type,
+                    interfaceTargetType: inputMessage.interface_target_type,
                     tableName: inputMessage.input_table_name,
                     status: inputMessage.status,
                     receivedAt: inputMessage.received_at,
@@ -1598,8 +1725,8 @@ class MessageController {
                     rawContent: rawContent
                 },
 
-                // Transformation stage
-                transformation: inputMessage.parsed_at ? {
+                // Transformation stage (skip for sink interfaces - they receive already-transformed data)
+                transformation: (inputMessage.parsed_at && inputMessage.interface_target_type !== 'sink') ? {
                     parsedAt: inputMessage.parsed_at,
                     parsingStatus: inputMessage.parsing_status,
                     parsingTimeMs: inputMessage.parsing_time_ms,
@@ -1607,9 +1734,34 @@ class MessageController {
                     processingTimeMs: inputMessage.processing_time_ms
                 } : null,
 
-                // Output stage
-                output: outputMessage ? {
+                // Output stage (MongoDB or PostgreSQL)
+                output: transformedMessage ? {
+                    // MongoDB-based transformation data
+                    outputMessageId: transformedMessage._id,
+                    storageType: 'mongodb',
+                    collectionName: `transformed_messages_intf_${inputMessage.interface_id.replace(/-/g, '_')}`,
+                    transformationStatus: transformedMessage.transformation_status,
+                    transformedAt: transformedMessage.completed_at,
+                    transformationTimeMs: transformedMessage.transformation_time_ms,
+                    pipelineId: transformedMessage.transformation_pipeline_id,
+                    pipelineSteps: transformationSteps,
+                    deliveryStatus: transformedMessage.delivery_status,
+                    deliveryStartedAt: transformedMessage.delivery_started_at,
+                    deliveryCompletedAt: transformedMessage.delivered_at,
+                    deliveryTimeMs: transformedMessage.delivery_duration_ms,
+                    deliveryStatusCode: transformedMessage.delivery_http_status,
+                    deliveryEndpoint: transformedMessage.destination_endpoint,
+                    deliveryResponse: transformedMessage.delivery_response_body,
+                    deliveryAcknowledgment: transformedMessage.delivery_acknowledgment,
+                    retryCount: transformedMessage.delivery_retry_count || 0,
+                    errorCount: transformedMessage.error_count || 0,
+                    errors: transformedMessage.errors || [],
+                    transformedContent: transformedContent,
+                    transformedMessage: transformedMessage.transformed_content || transformedMessage.fhir_bundle
+                } : (outputMessage ? {
+                    // Legacy PostgreSQL output table data
                     outputMessageId: outputMessage.id,
+                    storageType: 'postgresql',
                     tableName: outputMessage.output_table_name,
                     transformationStatus: outputMessage.transformation_status,
                     transformedAt: outputMessage.transformed_at,
@@ -1619,10 +1771,12 @@ class MessageController {
                     deliveryCompletedAt: outputMessage.delivery_completed_at,
                     deliveryTimeMs: outputMessage.delivery_time_ms,
                     deliveryStatusCode: outputMessage.delivery_status_code,
+                    deliveryEndpoint: outputMessage.delivery_endpoint_url || outputMessage.endpoint_url,
+                    deliveryResponse: outputMessage.delivery_response_body || outputMessage.response_body,
                     retryCount: outputMessage.retry_count,
                     transformedMessage: transformedContent,
                     transformation_steps: outputMessage.transformation_steps || []
-                } : null,
+                } : null),
 
                 // Target interface (where message was delivered)
                 target: deliveredMessage ? {
@@ -1640,12 +1794,24 @@ class MessageController {
                 // Flow summary
                 flowStatus: {
                     inputReceived: !!inputMessage,
-                    transformed: !!outputMessage,
-                    delivered: outputMessage?.delivery_status === 'delivered',
+                    transformed: !!outputMessage || !!transformedMessage,
+                    delivered: outputMessage?.delivery_status === 'delivered' || transformedMessage?.delivery_status === 'delivered',
                     targetReceived: !!deliveredMessage,
-                    complete: !!(inputMessage && outputMessage && deliveredMessage)
+                    complete: !!(inputMessage && (outputMessage || transformedMessage) && deliveredMessage)
                 }
             };
+
+            // Debug: Log what we're actually returning
+            console.log('✅ Lineage query completed:', {
+                hasInputMessage: !!inputMessage,
+                hasTransformedMessage: !!transformedMessage,
+                hasOutputMessage: !!outputMessage,
+                transformationSteps: transformationSteps?.length || 0,
+                hasRawContent: !!rawContent,
+                hasTransformedContent: !!transformedContent,
+                deliveryStatus: transformedMessage?.delivery_status || outputMessage?.delivery_status || 'unknown',
+                flowStatus: lineage.flowStatus
+            });
 
             res.json({
                 success: true,
@@ -1735,6 +1901,92 @@ class MessageController {
             res.status(500).json({
                 success: false,
                 error: 'Failed to retrieve message errors',
+                debug: error.message
+            });
+        }
+    }
+
+    /**
+     * Get processing logs for a message from MongoDB (V33 - Interface-Level Logging)
+     */
+    async getMessageLogs(req, res) {
+        try {
+            await this.ensureDatabase();
+
+            const { messageId } = req.params;
+            const { interfaceId, level } = req.query;
+
+            if (!interfaceId) {
+                return res.status(400).json({
+                    success: false,
+                    error: 'interfaceId query parameter is required'
+                });
+            }
+
+            // Use shared MongoDB service
+            const mongoService = await this.ensureMongoService();
+
+            if (!mongoService) {
+                return res.status(503).json({
+                    success: false,
+                    error: 'MongoDB service not available. Logs require MongoDB.'
+                });
+            }
+
+            try {
+                const collectionName = `processing_logs_intf_${interfaceId.replace(/-/g, '_')}`;
+                const collection = mongoService.db.collection(collectionName);
+
+                // Build filter
+                const filter = { message_id: messageId };
+                if (level && level !== 'all') {
+                    if (level === 'error') {
+                        // Show only errors and warnings
+                        filter.log_level = { $in: ['error', 'warning'] };
+                    } else {
+                        filter.log_level = level;
+                    }
+                }
+
+                // Query logs
+                const logs = await collection.find(filter)
+                    .sort({ timestamp: 1 })
+                    .toArray();
+
+                // Calculate summary
+                const summary = {
+                    total: logs.length,
+                    errors: logs.filter(l => l.log_level === 'error').length,
+                    warnings: logs.filter(l => l.log_level === 'warning').length,
+                    info: logs.filter(l => l.log_level === 'info').length,
+                    debug: logs.filter(l => l.log_level === 'debug').length
+                };
+
+                res.json({
+                    success: true,
+                    data: {
+                        logs: logs.map(log => ({
+                            timestamp: log.timestamp,
+                            level: log.log_level,
+                            category: log.category,
+                            message: log.message,
+                            details: log.details,
+                            context: log.context
+                        })),
+                        summary
+                    }
+                });
+
+            } catch (error) {
+                console.error('Error querying logs collection:', error);
+                throw error;
+            }
+
+        } catch (error) {
+            console.error('Failed to retrieve message logs:', error);
+            res.status(500).json({
+                success: false,
+                error: 'Failed to retrieve message logs',
                 debug: error.message
             });
         }

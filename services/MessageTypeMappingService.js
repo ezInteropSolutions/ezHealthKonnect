@@ -61,6 +61,96 @@ class MessageTypeMappingService {
     }
 
     /**
+     * Store interface message mapping (called by wizard controller)
+     * @param {string} interfaceId - Interface UUID
+     * @param {string} messageType - HL7 message type (e.g., "ADT^A01")
+     * @param {Array} mappings - Array of atomic mappings
+     * @param {Object} metadata - Additional metadata (templateUsed, createdBy, etc.)
+     * @returns {Promise<Object>} - Save result
+     */
+    async storeInterfaceMessageMapping(interfaceId, messageType, mappings, metadata = {}) {
+        console.log('\n🔍 === STORING INTERFACE MESSAGE MAPPING ===');
+        console.log('Interface ID:', interfaceId);
+        console.log('Message Type:', messageType);
+        console.log('Mappings count:', mappings?.length || 0);
+        console.log('Mappings sample:', mappings?.slice(0, 2));
+        console.log('Metadata:', JSON.stringify(metadata, null, 2));
+
+        if (!mappings || mappings.length === 0) {
+            console.warn('⚠️ WARNING: No mappings provided to store!');
+        }
+
+        const client = await this.pool.connect();
+
+        try {
+            await client.query('BEGIN');
+            this.logger.info(`Storing mappings for interface: ${interfaceId}, message type: ${messageType}`);
+
+            // Build mapping configuration
+            const customConfig = {
+                messageType: messageType,
+                version: '2.0',
+                createdAt: new Date().toISOString(),
+                atomicMappings: mappings || [],
+                metadata: metadata
+            };
+
+            const customizedFields = mappings ? mappings.map(m => m.hl7Field || m.sourceField).filter(Boolean) : [];
+
+            // Insert/Update interface message mapping
+            const mappingQuery = `
+                INSERT INTO interface_message_mappings (
+                    interface_id,
+                    message_type,
+                    uses_standard_template,
+                    standard_template_id,
+                    custom_mapping_config,
+                    customized_fields,
+                    customization_reason,
+                    created_by
+                ) VALUES ($1, $2, $3, NULL, $4, $5, $6, (SELECT user_id FROM interfaces WHERE id = $1))
+                ON CONFLICT (interface_id, message_type)
+                DO UPDATE SET
+                    uses_standard_template = EXCLUDED.uses_standard_template,
+                    custom_mapping_config = EXCLUDED.custom_mapping_config,
+                    customized_fields = EXCLUDED.customized_fields,
+                    customization_reason = EXCLUDED.customization_reason,
+                    updated_at = CURRENT_TIMESTAMP
+                RETURNING id
+            `;
+
+            const usesTemplate = metadata.templateUsed === true;
+            const reason = metadata.customTemplate ? 'Wizard-generated custom mapping' : 'Wizard-configured mapping';
+
+            const result = await client.query(mappingQuery, [
+                interfaceId,
+                messageType,
+                usesTemplate,
+                JSON.stringify(customConfig),
+                customizedFields,
+                reason
+            ]);
+
+            await client.query('COMMIT');
+
+            this.logger.info(`✅ Mappings stored successfully: ${mappings?.length || 0} mappings`);
+
+            return {
+                success: true,
+                mappingId: result.rows[0].id,
+                mappingCount: mappings?.length || 0
+            };
+
+        } catch (error) {
+            await client.query('ROLLBACK');
+            this.logger.error('Failed to store interface message mapping:', error);
+            throw error;
+        } finally {
+            client.release();
+        }
+    }
+
+    /**
      * Save wizard configuration using message-type-centric approach
      * @param {string} interfaceId - Interface UUID
      * @param {Object} wizardData - Complete wizard configuration data

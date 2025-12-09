@@ -6,6 +6,22 @@ class InterfaceTableManager {
         this.database = require('../config/database');
         this.tableCache = new Map(); // Cache of existing interface tables
         this.schemaTemplate = this.getMessageTableSchema();
+        this.CURRENT_SCHEMA_VERSION = '1.1'; // Increment when schema changes
+        this.REQUIRED_COLUMNS = [
+            'id', 'message_id', 'correlation_id', 'interface_id', 'status', 'priority',
+            'received_at', 'source_type', 'source_endpoint', 'source_ip',
+            'message_type', 'message_size', 'message_encoding', 'raw_message',
+            'processing_started_at', 'processing_completed_at', 'transformation_applied',
+            'transformation_type', 'processing_time_ms',
+            // V19 JSON Parsing columns
+            'parsed_at', 'parsing_status', 'parsing_time_ms', 'parsing_error',
+            // Error handling
+            'error_count', 'last_error_message', 'last_error_at', 'retry_count', 'max_retries',
+            // Delivery
+            'target_endpoint', 'delivery_status', 'delivery_attempts', 'last_delivery_attempt_at',
+            // Audit
+            'created_at', 'updated_at'
+        ];
     }
 
     /**
@@ -36,6 +52,10 @@ class InterfaceTableManager {
             if (!tableExists) {
                 console.log(`🏗️ Creating dedicated table for interface: ${interfaceName} -> ${tableName}`);
                 await this.createInterfaceTable(tableName, interfaceId);
+            } else {
+                // AUTO-MIGRATION: Validate existing table schema
+                console.log(`🔍 Validating schema for existing table: ${tableName}`);
+                await this.ensureTableSchemaValid(tableName);
             }
 
             // Cache the table name
@@ -71,6 +91,87 @@ class InterfaceTableManager {
         });
 
         return result[0].exists;
+    }
+
+    /**
+     * SCHEMA VALIDATION: Check if table has all required columns
+     */
+    async validateTableSchema(tableName) {
+        const query = `
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_schema = 'public'
+              AND table_name = :tableName
+            ORDER BY ordinal_position
+        `;
+
+        const columns = await this.database.sequelize.query(query, {
+            replacements: { tableName },
+            type: this.database.sequelize.QueryTypes.SELECT
+        });
+
+        const existingColumns = columns.map(c => c.column_name);
+        const missingColumns = this.REQUIRED_COLUMNS.filter(col => !existingColumns.includes(col));
+
+        return {
+            isValid: missingColumns.length === 0,
+            existingColumns,
+            missingColumns
+        };
+    }
+
+    /**
+     * SCHEMA MIGRATION: Automatically add missing columns to existing table
+     */
+    async migrateTableSchema(tableName, missingColumns) {
+        console.log(`🔧 Migrating table ${tableName}: Adding ${missingColumns.length} missing columns`);
+
+        const columnDefinitions = {
+            // V19 JSON Parsing columns
+            'parsed_at': 'TIMESTAMP WITH TIME ZONE',
+            'parsing_status': 'VARCHAR(50)',
+            'parsing_time_ms': 'INTEGER',
+            'parsing_error': 'TEXT',
+            // Processing columns
+            'processing_started_at': 'TIMESTAMP WITH TIME ZONE',
+            'transformation_applied': 'BOOLEAN DEFAULT false',
+            'transformation_type': 'VARCHAR(100)',
+            // Error handling
+            'last_error_at': 'TIMESTAMP WITH TIME ZONE',
+            'retry_count': 'INTEGER DEFAULT 0',
+            'max_retries': 'INTEGER DEFAULT 3',
+            // Delivery
+            'target_endpoint': 'VARCHAR(500)',
+            'last_delivery_attempt_at': 'TIMESTAMP WITH TIME ZONE'
+        };
+
+        const alterStatements = [];
+        for (const column of missingColumns) {
+            if (columnDefinitions[column]) {
+                alterStatements.push(`ADD COLUMN IF NOT EXISTS ${column} ${columnDefinitions[column]}`);
+            }
+        }
+
+        if (alterStatements.length > 0) {
+            const alterSQL = `ALTER TABLE ${tableName} ${alterStatements.join(',\n')}`;
+            await this.database.sequelize.query(alterSQL);
+            console.log(`✅ Successfully migrated ${tableName}: Added ${alterStatements.length} columns`);
+        }
+    }
+
+    /**
+     * SCHEMA ENFORCEMENT: Ensure table schema is up-to-date (called on table access)
+     */
+    async ensureTableSchemaValid(tableName) {
+        const validation = await this.validateTableSchema(tableName);
+
+        if (!validation.isValid) {
+            console.log(`⚠️ Table ${tableName} has outdated schema (${validation.missingColumns.length} missing columns)`);
+            await this.migrateTableSchema(tableName, validation.missingColumns);
+            return true; // Schema was migrated
+        }
+
+        return false; // Schema was already valid
     }
 
     /**
@@ -132,6 +233,12 @@ class InterfaceTableManager {
                 transformation_applied BOOLEAN DEFAULT false,
                 transformation_type VARCHAR(100),
                 processing_time_ms INTEGER,
+
+                -- JSON Parsing (V19 migration columns)
+                parsed_at TIMESTAMP WITH TIME ZONE,
+                parsing_status VARCHAR(50),
+                parsing_time_ms INTEGER,
+                parsing_error TEXT,
 
                 -- Error handling
                 error_count INTEGER DEFAULT 0,
@@ -267,6 +374,9 @@ class InterfaceTableManager {
                 }
             };
         }
+
+        // AUTO-MIGRATION: Ensure table schema is up-to-date before querying
+        await this.ensureTableSchemaValid(tableName);
 
         const {
             limit = 50,

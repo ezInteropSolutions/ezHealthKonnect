@@ -20,6 +20,7 @@ class PipelineAPIService {
                 'Content-Type': 'application/json',
                 ...options.headers
             },
+            credentials: 'include', // Important: Include cookies for session
             ...options
         };
 
@@ -30,6 +31,13 @@ class PipelineAPIService {
         try {
             const response = await fetch(url, config);
             const contentType = response.headers.get('content-type');
+
+            // Check for authentication errors
+            if (response.status === 401 || response.status === 403) {
+                console.warn('🚫 Session expired or unauthorized access');
+                this.handleAuthenticationError();
+                throw new Error('Session expired. Redirecting to login...');
+            }
 
             let responseData;
             if (contentType && contentType.includes('application/json')) {
@@ -46,6 +54,49 @@ class PipelineAPIService {
         } catch (error) {
             console.error(`API Error [${method} ${endpoint}]:`, error);
             throw error;
+        }
+    }
+
+    /**
+     * Handle authentication errors
+     */
+    handleAuthenticationError() {
+        // Store current URL to redirect back after login
+        const currentPath = window.location.pathname + window.location.search;
+        sessionStorage.setItem('redirectAfterLogin', currentPath);
+
+        // Redirect to login page
+        setTimeout(() => {
+            window.location.href = '/login.html';
+        }, 500);
+    }
+
+    /**
+     * Check if user session is valid
+     */
+    async checkSession() {
+        try {
+            const response = await fetch('/api/auth/session', {
+                method: 'GET',
+                credentials: 'include',
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            });
+
+            if (response.status === 401 || response.status === 403) {
+                return false;
+            }
+
+            if (!response.ok) {
+                return false;
+            }
+
+            const data = await response.json();
+            return data.authenticated === true;
+        } catch (error) {
+            console.error('Session check failed:', error);
+            return false;
         }
     }
 
@@ -97,8 +148,10 @@ class PipelineAPIService {
      * Test pipeline with sample message
      */
     async testPipeline(visualPipeline, sampleMessage) {
+        const pipelineData = visualPipeline.toJSON();
         return await this.request('POST', '/pipelines/test', {
-            pipeline: visualPipeline.toJSON(),
+            pipeline_id: pipelineData.id,
+            pipeline: pipelineData,
             sample_message: sampleMessage
         });
     }
@@ -144,6 +197,29 @@ class PipelineAPIService {
     async createTemplate(template) {
         return await this.request('POST', '/templates', template);
     }
+    /**
+     * Create template from step
+     */
+    async createTemplateFromStep(stepId, templateName, description, isPublic = true) {
+        return await this.request('POST', '/templates/from-step', {
+            step_id: stepId,
+            template_name: templateName,
+            description: description,
+            is_public: isPublic
+        });
+    }
+
+    /**
+     * Apply template to pipeline
+     */
+    async applyTemplate(templateId, pipelineId, sequence, stepName = null) {
+        return await this.request('POST', `/templates/${templateId}/apply`, {
+            pipeline_id: pipelineId,
+            sequence: sequence,
+            step_name: stepName
+        });
+    }
+
 
     /**
      * Update template

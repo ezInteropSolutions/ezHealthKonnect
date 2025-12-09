@@ -1,0 +1,351 @@
+package services
+
+import (
+	"context"
+	"ezhealthkonnect/models"
+	"fmt"
+	"regexp"
+	"strings"
+)
+
+// RemoveDuplicatesExecutor removes duplicate values from arrays or duplicate records
+type RemoveDuplicatesExecutor struct{}
+
+func (e *RemoveDuplicatesExecutor) Execute(
+	ctx context.Context,
+	step *models.TransformationStep,
+	inputData map[string]interface{},
+) (map[string]interface{}, error) {
+	targetType := getStringValue(step.Config, "target_type") // "array" or "records"
+	field := getStringValue(step.Config, "field")
+
+	outputData := make(map[string]interface{})
+	for k, v := range inputData {
+		outputData[k] = v
+	}
+
+	switch targetType {
+	case "array":
+		return e.removeDuplicatesFromArray(field, outputData)
+
+	case "records":
+		return e.removeDuplicateRecords(step, outputData)
+
+	default:
+		return outputData, fmt.Errorf("unsupported target_type: %s", targetType)
+	}
+}
+
+func (e *RemoveDuplicatesExecutor) removeDuplicatesFromArray(field string, data map[string]interface{}) (map[string]interface{}, error) {
+	value := getNestedValue(data, field)
+	if value == nil {
+		return data, nil
+	}
+
+	array, ok := value.([]interface{})
+	if !ok {
+		return data, fmt.Errorf("field %s is not an array", field)
+	}
+
+	// Use map to track seen values
+	seen := make(map[string]bool)
+	unique := make([]interface{}, 0)
+
+	for _, item := range array {
+		itemStr := fmt.Sprintf("%v", item)
+		if !seen[itemStr] {
+			seen[itemStr] = true
+			unique = append(unique, item)
+		}
+	}
+
+	setNestedValue(data, field, unique)
+	setNestedValue(data, fmt.Sprintf("_duplicates_removed_%s", strings.ReplaceAll(field, ".", "_")), len(array)-len(unique))
+
+	return data, nil
+}
+
+func (e *RemoveDuplicatesExecutor) removeDuplicateRecords(step *models.TransformationStep, data map[string]interface{}) (map[string]interface{}, error) {
+	recordsField := getStringValue(step.Config, "records_field")
+	uniqueKeys, ok := step.Config["unique_keys"].([]interface{})
+	if !ok {
+		return data, fmt.Errorf("unique_keys required for records deduplication")
+	}
+
+	value := getNestedValue(data, recordsField)
+	if value == nil {
+		return data, nil
+	}
+
+	records, ok := value.([]interface{})
+	if !ok {
+		return data, fmt.Errorf("field %s is not an array of records", recordsField)
+	}
+
+	// Use map to track seen combinations of unique keys
+	seen := make(map[string]bool)
+	unique := make([]interface{}, 0)
+
+	for _, record := range records {
+		recordMap, ok := record.(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		// Build composite key from unique_keys
+		keyParts := make([]string, 0)
+		for _, uniqueKey := range uniqueKeys {
+			uniqueKeyStr := uniqueKey.(string)
+			keyValue := getNestedValue(recordMap, uniqueKeyStr)
+			keyParts = append(keyParts, fmt.Sprintf("%v", keyValue))
+		}
+		compositeKey := strings.Join(keyParts, "|")
+
+		if !seen[compositeKey] {
+			seen[compositeKey] = true
+			unique = append(unique, record)
+		}
+	}
+
+	setNestedValue(data, recordsField, unique)
+	setNestedValue(data, "_duplicate_records_removed", len(records)-len(unique))
+
+	return data, nil
+}
+
+func (e *RemoveDuplicatesExecutor) GetStepType() string {
+	return "remove-duplicates"
+}
+
+func (e *RemoveDuplicatesExecutor) Validate(step *models.TransformationStep) error {
+	targetType := getStringValue(step.Config, "target_type")
+	if targetType != "array" && targetType != "records" {
+		return fmt.Errorf("target_type must be 'array' or 'records'")
+	}
+
+	if targetType == "array" {
+		field := getStringValue(step.Config, "field")
+		if field == "" {
+			return fmt.Errorf("field is required for array deduplication")
+		}
+	}
+
+	if targetType == "records" {
+		recordsField := getStringValue(step.Config, "records_field")
+		if recordsField == "" {
+			return fmt.Errorf("records_field is required for records deduplication")
+		}
+
+		uniqueKeys, ok := step.Config["unique_keys"].([]interface{})
+		if !ok || len(uniqueKeys) == 0 {
+			return fmt.Errorf("unique_keys is required for records deduplication")
+		}
+	}
+
+	return nil
+}
+
+// DataCleanupExecutor cleans up data (trim, normalize, standardize)
+type DataCleanupExecutor struct{}
+
+func (e *DataCleanupExecutor) Execute(
+	ctx context.Context,
+	step *models.TransformationStep,
+	inputData map[string]interface{},
+) (map[string]interface{}, error) {
+	cleanupRules, ok := step.Config["cleanup_rules"].([]interface{})
+	if !ok {
+		return inputData, fmt.Errorf("invalid cleanup_rules configuration")
+	}
+
+	outputData := make(map[string]interface{})
+	for k, v := range inputData {
+		outputData[k] = v
+	}
+
+	for _, rule := range cleanupRules {
+		ruleMap := rule.(map[string]interface{})
+		field := getStringValue(ruleMap, "field")
+		cleanupType := getStringValue(ruleMap, "type")
+
+		value := getNestedValue(outputData, field)
+		if value == nil {
+			continue
+		}
+
+		cleanedValue, err := e.applyCleanup(value, cleanupType, ruleMap)
+		if err != nil {
+			return outputData, fmt.Errorf("cleanup failed for field %s: %v", field, err)
+		}
+
+		setNestedValue(outputData, field, cleanedValue)
+	}
+
+	return outputData, nil
+}
+
+func (e *DataCleanupExecutor) applyCleanup(value interface{}, cleanupType string, config map[string]interface{}) (interface{}, error) {
+	valueStr := fmt.Sprintf("%v", value)
+
+	switch cleanupType {
+	case "trim":
+		return strings.TrimSpace(valueStr), nil
+
+	case "remove_extra_spaces":
+		// Replace multiple spaces with single space
+		re := regexp.MustCompile(`\s+`)
+		return re.ReplaceAllString(valueStr, " "), nil
+
+	case "remove_special_chars":
+		allowedChars := getStringValue(config, "allowed_chars")
+		if allowedChars == "" {
+			allowedChars = "a-zA-Z0-9 "
+		}
+		pattern := fmt.Sprintf("[^%s]", allowedChars)
+		re := regexp.MustCompile(pattern)
+		return re.ReplaceAllString(valueStr, ""), nil
+
+	case "normalize_phone":
+		// Remove all non-numeric characters
+		re := regexp.MustCompile(`[^0-9]`)
+		cleaned := re.ReplaceAllString(valueStr, "")
+
+		// Format based on length
+		if len(cleaned) == 10 {
+			// US phone: (XXX) XXX-XXXX
+			return fmt.Sprintf("(%s) %s-%s", cleaned[0:3], cleaned[3:6], cleaned[6:10]), nil
+		} else if len(cleaned) == 11 && cleaned[0] == '1' {
+			// US phone with country code: +1 (XXX) XXX-XXXX
+			return fmt.Sprintf("+1 (%s) %s-%s", cleaned[1:4], cleaned[4:7], cleaned[7:11]), nil
+		}
+		return cleaned, nil
+
+	case "normalize_ssn":
+		// Remove all non-numeric characters
+		re := regexp.MustCompile(`[^0-9]`)
+		cleaned := re.ReplaceAllString(valueStr, "")
+
+		if len(cleaned) == 9 {
+			// Format as XXX-XX-XXXX
+			return fmt.Sprintf("%s-%s-%s", cleaned[0:3], cleaned[3:5], cleaned[5:9]), nil
+		}
+		return cleaned, nil
+
+	case "normalize_date":
+		// Convert various date formats to standard format
+		sourceFormat := getStringValue(config, "source_format")
+		targetFormat := getStringValue(config, "target_format")
+		if targetFormat == "" {
+			targetFormat = "YYYY-MM-DD"
+		}
+
+		// Use date conversion helper
+		executor := &DateTimeConversionExecutor{}
+		parsedTime, err := executor.parseDateTime(valueStr, sourceFormat)
+		if err != nil {
+			return valueStr, err
+		}
+		return executor.formatDateTime(parsedTime, targetFormat), nil
+
+	case "standardize_case":
+		caseType := getStringValue(config, "case") // "upper", "lower", "title", "sentence"
+		switch caseType {
+		case "upper":
+			return strings.ToUpper(valueStr), nil
+		case "lower":
+			return strings.ToLower(valueStr), nil
+		case "title":
+			return strings.Title(strings.ToLower(valueStr)), nil
+		case "sentence":
+			if len(valueStr) > 0 {
+				return strings.ToUpper(valueStr[0:1]) + strings.ToLower(valueStr[1:]), nil
+			}
+			return valueStr, nil
+		default:
+			return valueStr, nil
+		}
+
+	case "remove_null_chars":
+		// Remove null bytes and control characters
+		re := regexp.MustCompile(`[\x00-\x1F\x7F]`)
+		return re.ReplaceAllString(valueStr, ""), nil
+
+	case "normalize_whitespace":
+		// Normalize all whitespace to spaces
+		re := regexp.MustCompile(`[\t\r\n\v\f]`)
+		normalized := re.ReplaceAllString(valueStr, " ")
+		// Then remove extra spaces
+		re2 := regexp.MustCompile(`\s+`)
+		return strings.TrimSpace(re2.ReplaceAllString(normalized, " ")), nil
+
+	case "fix_encoding":
+		// Fix common encoding issues (placeholder - would need actual encoding detection)
+		// For now, just ensure valid UTF-8
+		return valueStr, nil
+
+	case "standardize_gender":
+		// Standardize gender codes
+		valueLower := strings.ToLower(strings.TrimSpace(valueStr))
+		genderMap := map[string]string{
+			"m":      "M",
+			"male":   "M",
+			"f":      "F",
+			"female": "F",
+			"o":      "O",
+			"other":  "O",
+			"u":      "U",
+			"unknown": "U",
+		}
+		if standardized, exists := genderMap[valueLower]; exists {
+			return standardized, nil
+		}
+		return "U", nil
+
+	case "remove_leading_zeros":
+		return strings.TrimLeft(valueStr, "0"), nil
+
+	case "pad_zeros":
+		length := int(getFloatValue(config, "length"))
+		if length > 0 {
+			for len(valueStr) < length {
+				valueStr = "0" + valueStr
+			}
+		}
+		return valueStr, nil
+
+	case "regex_replace":
+		pattern := getStringValue(config, "pattern")
+		replacement := getStringValue(config, "replacement")
+		re, err := regexp.Compile(pattern)
+		if err != nil {
+			return valueStr, fmt.Errorf("invalid regex pattern: %v", err)
+		}
+		return re.ReplaceAllString(valueStr, replacement), nil
+
+	default:
+		return valueStr, fmt.Errorf("unsupported cleanup type: %s", cleanupType)
+	}
+}
+
+func (e *DataCleanupExecutor) GetStepType() string {
+	return "data-cleanup"
+}
+
+func (e *DataCleanupExecutor) Validate(step *models.TransformationStep) error {
+	cleanupRules, ok := step.Config["cleanup_rules"].([]interface{})
+	if !ok || len(cleanupRules) == 0 {
+		return fmt.Errorf("cleanup_rules configuration is required")
+	}
+
+	for _, rule := range cleanupRules {
+		ruleMap := rule.(map[string]interface{})
+		field := getStringValue(ruleMap, "field")
+		cleanupType := getStringValue(ruleMap, "type")
+
+		if field == "" || cleanupType == "" {
+			return fmt.Errorf("field and type are required for each cleanup rule")
+		}
+	}
+
+	return nil
+}

@@ -1,0 +1,146 @@
+/**
+ * FieldPathInputWithAutocomplete Styles
+ */
+
+.field-path-autocomplete-wrapper {
+    position: relative;
+    width: 100%;
+}
+
+.field-path-input {
+    width: 100%;
+    font-family: 'Courier New', monospace;
+    font-size: 13px;
+    padding: 8px 12px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+}
+
+.field-path-input:focus {
+    outline: none;
+    border-color: #4a90e2;
+    box-shadow: 0 0 0 2px rgba(74, 144, 226, 0.1);
+}
+
+.autocomplete-dropdown {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    margin-top: 4px;
+    background: white;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    z-index: 1000;
+    max-height: 300px;
+    overflow-y: auto;
+}
+
+.autocomplete-item {
+    padding: 10px 12px;
+    border-bottom: 1px solid #f0f0f0;
+    cursor: pointer;
+    transition: background 0.15s;
+}
+
+.autocomplete-item:last-child {
+    border-bottom: none;
+}
+
+.autocomplete-item:hover,
+.autocomplete-item.selected {
+    background: #f5f8fb;
+}
+
+.autocomplete-item.selected {
+    background: #e8f4ff;
+}
+
+.field-name {
+    font-weight: 600;
+    font-size: 13px;
+    color: #333;
+    margin-bottom: 2px;
+}
+
+.field-description {
+    font-size: 12px;
+    color: #666;
+    margin-bottom: 4px;
+}
+
+.field-path {
+    font-family: 'Courier New', monospace;
+    font-size: 11px;
+    color: #4a90e2;
+    background: #f0f7ff;
+    padding: 2px 6px;
+    border-radius: 3px;
+    display: inline-block;
+}
+
+/* Scrollbar */
+.autocomplete-dropdown::-webkit-scrollbar {
+    width: 8px;
+}
+
+.autocomplete-dropdown::-webkit-scrollbar-track {
+    background: #f1f1f1;
+    border-radius: 4px;
+}
+
+.autocomplete-dropdown::-webkit-scrollbar-thumb {
+    background: #ccc;
+    border-radius: 4px;
+}
+
+.autocomplete-dropdown::-webkit-scrollbar-thumb:hover {
+    background: #999;
+}
+
+/* Search mode toggle (global, at top of validation builder) */
+.search-mode-toggle {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 16px;
+    padding: 10px;
+    background: #f8f9fa;
+    border-radius: 4px;
+}
+
+.search-mode-toggle label {
+    margin: 0;
+    font-weight: 600;
+    color: #666;
+}
+
+.toggle-buttons {
+    display: flex;
+    gap: 8px;
+}
+
+.toggle-btn {
+    padding: 6px 16px;
+    border: 1px solid #ddd;
+    background: white;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 13px;
+    transition: all 0.15s;
+}
+
+.toggle-btn:hover {
+    background: #f0f0f0;
+}
+
+.toggle-btn.active {
+    background: #4a90e2;
+    color: white;
+    border-color: #4a90e2;
+}
+
+.toggle-btn i {
+    margin-right: 6px;
+}

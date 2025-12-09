@@ -5,6 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Interfaces - ezHealthKonnect</title>
     
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <!-- EXISTING CSS Dependencies (DO NOT CHANGE) -->
     <link rel="stylesheet" href="css/dashboard.css">
     <link rel="stylesheet" href="css/interfaces.css">
@@ -168,9 +170,12 @@
     <div id="create-modal-container"></div>
     <div id="edit-modal-container"></div>
     <div id="details-modal-container"></div>
-    
+
     <!-- Include wizard modal component -->
     <div id="wizard-modal-container"></div>
+
+    <!-- Delete Interface Modal -->
+    <div id="delete-modal-container"></div>
 
     <!-- Loading Overlay - UNCHANGED -->
     <div class="loading-overlay" id="loadingOverlay">
@@ -184,27 +189,34 @@
     <!-- EXISTING JavaScript Dependencies (DO NOT CHANGE ORDER) -->
     <script src="js/core/env-config.js"></script>
 
+    <!-- Authentication Service (OOB) -->
+    <script src="/js/services/AuthService.js"></script>
+
     <script src="js/components/interface-handlers.js"></script>
-    <script src="js/interfaces.js"></script>
-    <script src="js/interface-config-manager.js?v=4"></script>
+    <script src="js/interfaces.js?v=7"></script>
+    <script src="js/interface-config-manager.js?v=5"></script>
     <script src="js/wizard/module-loader.js"></script>
     <!-- ADD THESE TWO LINES HERE - BEFORE other components -->
     <script src="js/core/wizard-navigation.js"></script>  <!-- ADD THIS -->
-    
 
-    
+
+
     <!-- NEW: Component loaders -->
-    <script src="js/components/InterfaceConfigComponents.js?v=2"></script>
+    <script src="js/components/InterfaceConfigComponents.js?v=6"></script>
     <script src="js/components/header-component.js"></script>
     <script src="js/components/table-component.js"></script>
-    <script src="js/components/modal-components.js"></script>
-    <script src="js/components/wizard-component.js"></script>
+    <script src="js/components/modal-components.js?v=4"></script>
+    <script src="js/components/wizard-component.js?v=2"></script>
     
     <!-- PRESERVED: Core wizard functions (MUST STAY GLOBAL) -->
     <script src="js/core/wizard-functions.js"></script>
 
+    <!-- OOB: Form Schema and Binding Engine (Single Source of Truth) -->
+    <script src="js/FormFieldSchema.js"></script>
+    <script src="js/FormBindingEngine.js"></script>
+
     <!-- OPTIMIZED WIZARD: New MVC system -->
-    <script src="js/wizard/optimized/WizardModel.js"></script>
+    <script src="js/wizard/optimized/WizardModel.js?v=2.1"></script>
     <script src="js/wizard/optimized/WizardView.js"></script>
     <script src="js/wizard/optimized/WizardController.js"></script>
     <script src="js/wizard/optimized/WizardFHIRTransform.js"></script>

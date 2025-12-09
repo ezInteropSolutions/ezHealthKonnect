@@ -106,7 +106,8 @@
     height: 100vh;
     display: flex;
     flex-direction: column;
-    overflow: hidden;
+    overflow-y: auto; /* Allow vertical scrolling */
+    overflow-x: hidden; /* Prevent horizontal scroll */
     flex: 1;
     min-width: 0;
     position: relative;
@@ -1272,4 +1273,466 @@
     .sidebar.collapsed .nav-item::before {
         display: none;
     }
+}
+/* ===================================== */
+/* ACTION DROPDOWN MENU STYLES */
+/* ===================================== */
+
+.action-dropdown {
+    position: relative;
+    display: inline-block;
+}
+
+.dropdown-menu {
+    position: absolute;
+    right: 0;
+    top: 100%;
+    background: white;
+    border: 1px solid #e2e8f0;
+    border-radius: 6px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    min-width: 220px;
+    z-index: 1000;
+    margin-top: 4px;
+    padding: 0.5rem 0;
+}
+
+.dropdown-item {
+    display: block;
+    padding: 0.75rem 1rem;
+    color: #1e293b;
+    text-decoration: none;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    font-size: 0.875rem;
+    white-space: nowrap;
+}
+
+.dropdown-item i {
+    width: 20px;
+    margin-right: 0.75rem;
+    text-align: center;
+    color: #64748b;
+}
+
+.dropdown-item:hover {
+    background: #f8fafc;
+    color: #1e3a8a;
+}
+
+.dropdown-item:hover i {
+    color: #1e3a8a;
+}
+
+.dropdown-item.text-danger {
+    color: #dc2626;
+}
+
+.dropdown-item.text-danger:hover {
+    background: #fef2f2;
+    color: #991b1b;
+}
+
+.dropdown-item.text-danger i {
+    color: #dc2626;
+}
+
+.dropdown-item.text-muted {
+    color: #94a3b8;
+    cursor: not-allowed;
+}
+
+.dropdown-divider {
+    height: 1px;
+    background: #e2e8f0;
+    margin: 0.5rem 0;
+}
+
+.action-btn.runtime-control {
+    background: linear-gradient(135deg, #1e3a8a 0%, #2563eb 100%);
+    color: white;
+    border: none;
+    padding: 0.5rem 0.75rem;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    font-size: 1rem;
+}
+
+.action-btn.runtime-control:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 8px rgba(30, 58, 138, 0.3);
+}
+
+.action-btn.dropdown-toggle {
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    padding: 0.5rem 0.75rem;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    color: #64748b;
+}
+
+.action-btn.dropdown-toggle:hover {
+    background: #e2e8f0;
+    color: #1e3a8a;
+}
+
+.action-btn.dropdown-toggle i {
+    font-size: 1rem;
+}
+
+/* MODERN ACTION BUTTONS (3-Button Layout) */
+.action-btn-modern {
+    border: none;
+    padding: 0.6rem 0.85rem;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    font-size: 1.1rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 40px;
+    height: 40px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.action-btn-modern:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+}
+
+.action-btn-modern:active {
+    transform: translateY(0);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+}
+
+.action-btn-modern.runtime-control {
+    position: relative;
+    overflow: hidden;
+}
+
+.action-btn-modern.runtime-control::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: -100%;
+    width: 100%;
+    height: 100%;
+    background: rgba(255, 255, 255, 0.2);
+    transition: left 0.3s ease;
+}
+
+.action-btn-modern.runtime-control:hover::before {
+    left: 100%;
+}
+
+/* Dropdown menu improvements */
+.dropdown-menu {
+    animation: slideDown 0.2s ease;
+}
+
+@keyframes slideDown {
+    from {
+        opacity: 0;
+        transform: translateY(-10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.dropdown-item {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.75rem 1rem;
+    color: #1e293b;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    text-decoration: none;
+    border-radius: 4px;
+    margin: 0.25rem 0.5rem;
+}
+
+.dropdown-item:hover {
+    background: #f8fafc;
+    color: #1e3a8a;
+}
+
+.dropdown-item i {
+    font-size: 1rem;
+    transition: transform 0.2s ease;
+}
+
+.dropdown-item:hover i {
+    transform: scale(1.1);
+}
+
+.dropdown-item.text-danger:hover {
+    background: #fef2f2;
+    color: #dc2626;
+}
+
+.dropdown-item.text-danger:hover i {
+    color: #dc2626 !important;
+}
+
+/* CLEAN AESTHETIC ACTION BUTTONS */
+.action-btn-icon {
+    border: none;
+    padding: 0;
+    width: 34px;
+    height: 34px;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    font-size: 0.875rem;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+    position: relative;
+    overflow: hidden;
+}
+
+.action-btn-icon:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.15);
+}
+
+.action-btn-icon:active {
+    transform: translateY(0);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+}
+
+.action-btn-icon i {
+    position: relative;
+    z-index: 1;
+}
+
+/* Clean dropdown menu */
+.dropdown-menu-clean {
+    display: none;
+    position: absolute;
+    right: 0;
+    top: calc(100% + 4px);
+    background: white;
+    border-radius: 8px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15), 0 0 0 1px rgba(0, 0, 0, 0.05);
+    min-width: 160px;
+    z-index: 1000;
+    padding: 4px;
+    animation: slideDown 0.15s ease;
+}
+
+.dropdown-item-clean {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 12px;
+    color: #1e293b;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    border-radius: 4px;
+    font-size: 0.875rem;
+    font-weight: 500;
+}
+
+.dropdown-item-clean:hover {
+    background: #f1f5f9;
+}
+
+.dropdown-item-clean i {
+    width: 16px;
+    text-align: center;
+    font-size: 0.875rem;
+    color: #64748b;
+}
+
+.dropdown-item-clean span {
+    flex: 1;
+}
+
+.dropdown-item-clean.danger {
+    color: #dc2626;
+}
+
+.dropdown-item-clean.danger i {
+    color: #dc2626;
+}
+
+.dropdown-item-clean.danger:hover {
+    background: #fef2f2;
+}
+
+.dropdown-item-clean.disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+.dropdown-item-clean.disabled:hover {
+    background: transparent;
+}
+
+.dropdown-divider-clean {
+    height: 1px;
+    background: #e2e8f0;
+    margin: 4px 0;
+}
+
+@keyframes slideDown {
+    from {
+        opacity: 0;
+        transform: translateY(-4px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* Remove old styles */
+.action-btn-modern,
+.action-btn.runtime-control,
+.action-btn.dropdown-toggle {
+    display: none;
+}
+
+/* MINIMALIST OUTLINE BUTTONS (Pencil/Line Style) */
+.action-btn-outline {
+    background: transparent;
+    border: 1.5px solid currentColor;
+    padding: 0;
+    width: 32px;
+    height: 32px;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.95rem;
+    position: relative;
+}
+
+.action-btn-outline:hover {
+    background: currentColor;
+    transform: translateY(-1px);
+}
+
+.action-btn-outline:hover i {
+    color: white !important;
+}
+
+.action-btn-outline:active {
+    transform: translateY(0);
+}
+
+.action-btn-outline i {
+    color: inherit;
+    transition: color 0.2s ease;
+}
+
+/* Minimal dropdown menu */
+.dropdown-menu-minimal {
+    display: none;
+    position: absolute;
+    right: 0;
+    top: calc(100% + 6px);
+    background: white;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+    min-width: 140px;
+    z-index: 1000;
+    padding: 6px;
+    animation: fadeIn 0.15s ease;
+}
+
+.dropdown-item-minimal {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 10px;
+    color: #374151;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    border-radius: 5px;
+    font-size: 0.875rem;
+}
+
+.dropdown-item-minimal:hover {
+    background: #f3f4f6;
+    color: #111827;
+}
+
+.dropdown-item-minimal i {
+    width: 16px;
+    text-align: center;
+    font-size: 0.875rem;
+    color: #6b7280;
+}
+
+.dropdown-item-minimal:hover i {
+    color: #374151;
+}
+
+.dropdown-item-minimal span {
+    flex: 1;
+    font-weight: 500;
+}
+
+.dropdown-item-minimal.danger {
+    color: #dc2626;
+}
+
+.dropdown-item-minimal.danger i {
+    color: #dc2626;
+}
+
+.dropdown-item-minimal.danger:hover {
+    background: #fef2f2;
+    color: #991b1b;
+}
+
+.dropdown-item-minimal.danger:hover i {
+    color: #991b1b;
+}
+
+.dropdown-item-minimal.disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+.dropdown-item-minimal.disabled:hover {
+    background: transparent;
+}
+
+.dropdown-divider-minimal {
+    height: 1px;
+    background: #e5e7eb;
+    margin: 6px 0;
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(-4px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* Hide old styles */
+.action-btn-icon,
+.action-btn-modern,
+.dropdown-menu-clean {
+    display: none !important;
 }

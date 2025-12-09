@@ -37,6 +37,17 @@ app.use((req, res, next) => {
     }
     next();
 });
+// Disable caching for JavaScript and HTML files in development
+app.use((req, res, next) => {
+    if (req.url.endsWith('.js') || req.url.endsWith('.html') || req.url.endsWith('.css')) {
+        res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+        res.setHeader('Pragma', 'no-cache');
+        res.setHeader('Expires', '0');
+        res.setHeader('Surrogate-Control', 'no-store');
+    }
+    next();
+});
+
 app.use(express.static('public'));
 app.use('/uploads', express.static('uploads'));
 
@@ -261,6 +272,12 @@ console.log('🔄 Mounting /api/wizard...');
 app.use('/api/wizard', wizardRoutes);
 console.log('🔄 Mounting /api/messages...');
 app.use('/api/messages', messageRoutes);
+
+// Schema routes (HL7/FHIR schema loading for XPath IntelliSense)
+console.log('🔄 Mounting /api/schemas...');
+const schemaRoutes = require('./routes/schemaRoutes');
+app.use('/api/schemas', schemaRoutes);
+console.log('✅ Schema routes mounted at /api/schemas');
 
 // Deployment management routes
 console.log('🔄 Mounting /api/deployment...');

@@ -107,20 +107,11 @@ services:
     ports:
       - "3000:3000"    # Node.js frontend
       - "8080:8080"    # Go backend API
-      # Interface ports (configured in database)
-      - "6661:6661"    # Interface 1: HL7 TCP Receiver (primary)
-      - "6662:6662"    # Interface 2: HL7 TCP Receiver (secondary)
-      - "2575:2575"    # Interface 3: Alternative HL7 TCP port
-      - "8081:8081"    # Interface 4: FHIR HTTP Receiver
-      # Reserved ports for additional interfaces
-      - "8090:8090"    # Interface 5
-      - "8091:8091"    # Interface 6
-      - "8092:8092"    # Interface 7
-      - "8093:8093"    # Interface 8
-      - "8094:8094"    # Interface 9
-      - "8095:8095"    # Interface 10
-      - "8096:8096"    # Interface 11
-      - "8097:8097"    # Interface 12
+      # Interface ports - TCP MLLP range (HL7 receivers)
+      - "2575:2575"    # Alternative HL7 TCP port
+      - "6661-6670:6661-6670"    # TCP MLLP port range for HL7 interfaces
+      # Interface ports - HTTP range (FHIR/REST receivers)
+      - "8081-8099:8081-8099"    # HTTP port range for FHIR/REST interfaces
     
     # ✅ FIXED: Complete volume mounting (was missing critical mounts)
     volumes:
@@ -131,6 +122,7 @@ services:
       - ./middleware:/app/middleware
       - ./config:/app/config
       - ./scripts:/app/scripts
+      - ./processing:/app/processing      # Go processing engine code
       # ✅ CRITICAL: These were missing in your broken config
       - ./hl7:/app/hl7                    # Go HL7 parsing code
       - ./schemas:/app/schemas:ro         # HL7 and FHIR schema files

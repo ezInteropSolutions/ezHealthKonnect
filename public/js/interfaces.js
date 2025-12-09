@@ -22,7 +22,14 @@ window.addEventListener('load', function() {
 
 // Initialize the interfaces page
 async function initializeInterfacesPage() {
-    await loadUserInfo();
+    // Use OOB AuthService for authentication
+    const isAuthenticated = await window.AuthService.initialize();
+
+    if (!isAuthenticated) {
+        console.warn('🚫 Authentication failed, initialization aborted');
+        return;
+    }
+
     updateTime();
     setInterval(updateTime, 60000);
 
@@ -194,29 +201,30 @@ function debugModalContainers() {
 }
 
 // Load user info
-async function loadUserInfo() {
-    try {
-        const response = await fetch('/api/user-info');
-        if (response.ok) {
-            const user = await response.json();
-            currentUser = user;
-            
-            const firstName = user.name ? user.name.split(' ')[0] : 'User';
-            document.getElementById('userName').textContent = firstName;
-            document.getElementById('userRole').textContent = (user.role || 'USER').toUpperCase();
-            document.getElementById('userAvatar').textContent = firstName.charAt(0).toUpperCase();
-            
-            if (user.role === 'admin') {
-                document.getElementById('adminSection').style.display = 'block';
-            }
-        } else if (response.status === 401) {
-            window.location.href = 'login.html';
-        }
-    } catch (error) {
-        console.error('Error loading user info:', error);
-        window.location.href = 'login.html';
-    }
-}
+// DEPRECATED: Replaced by AuthService.initialize()
+// async function loadUserInfo() {
+//     try {
+//         const response = await fetch('/api/user-info');
+//         if (response.ok) {
+//             const user = await response.json();
+//             currentUser = user;
+//
+//             const firstName = user.name ? user.name.split(' ')[0] : 'User';
+//             document.getElementById('userName').textContent = firstName;
+//             document.getElementById('userRole').textContent = (user.role || 'USER').toUpperCase();
+//             document.getElementById('userAvatar').textContent = firstName.charAt(0).toUpperCase();
+//
+//             if (user.role === 'admin') {
+//                 document.getElementById('adminSection').style.display = 'block';
+//             }
+//         } else if (response.status === 401) {
+//             window.location.href = 'login.html';
+//         }
+//     } catch (error) {
+//         console.error('Error loading user info:', error);
+//         window.location.href = 'login.html';
+//     }
+// }
 
 // Update time
 function updateTime() {
@@ -227,15 +235,8 @@ function updateTime() {
 
 // Logout function
 async function logout() {
-    if (confirm('Are you sure you want to logout?')) {
-        try {
-            await fetch('/api/logout', { method: 'POST' });
-        } catch (error) {
-            console.error('Logout error:', error);
-        } finally {
-            window.location.href = 'login.html';
-        }
-    }
+    // Use OOB AuthService for logout
+    await window.AuthService.logout();
 }
 
 // FIXED: Clean event listeners setup
@@ -831,25 +832,54 @@ function renderInterfacesTable() {
     updatePaginationControls();
 }
 
+// Get initial status display from database status (optimistic UI)
+function getInitialStatusDisplay(interface) {
+    // Use interface_status if available, fallback to status
+    const status = interface.interface_status || interface.status || 'unknown';
+    const isActive = status === 'active';
+    const isPaused = status === 'paused';
+    const isStopped = ['configured', 'draft', 'testing', 'retired', 'inactive', 'stopped'].includes(status);
+
+    let indicatorClass, statusText;
+    if (isActive) {
+        indicatorClass = 'running';
+        statusText = 'Running';
+    } else if (isPaused) {
+        indicatorClass = 'paused';
+        statusText = 'Paused';
+    } else if (isStopped) {
+        indicatorClass = 'stopped';
+        statusText = 'Stopped';
+    } else {
+        indicatorClass = 'stopped';
+        statusText = status.charAt(0).toUpperCase() + status.slice(1);
+    }
+
+    return { indicatorClass, statusText, isActive, isPaused, isStopped };
+}
+
 // Create ultra compact table row
 function createCompactTableRow(interface) {
-    const lastUpdated = interface.lastUpdated 
+    const lastUpdated = interface.lastUpdated
         ? formatCompactTime(new Date(interface.lastUpdated))
         : { time: 'Never', date: '' };
-    
-    const lastActivity = interface.lastActivity 
+
+    const lastActivity = interface.lastActivity
         ? formatCompactTime(new Date(interface.lastActivity))
         : { time: 'Never', date: '' };
-    
-    const successRate = interface.statistics.totalProcessed > 0 
+
+    const successRate = interface.statistics.totalProcessed > 0
         ? ((interface.statistics.successful / interface.statistics.totalProcessed) * 100).toFixed(1)
         : '0';
-    
+
     const hasErrors = interface.statistics.failed > 0;
     const errorClass = hasErrors ? 'has-errors' : '';
-    
+
+    // Get initial status from DB (optimistic UI - no "Checking...")
+    const initialStatus = getInitialStatusDisplay(interface);
+
     return `
-        <tr onclick="showInterfaceDetails('${interface.id}')">
+        <tr data-interface-id="${interface.id}" onclick="showInterfaceDetails('${interface.id}')">
             <td>
                 <div class="interface-name-cell">
                     <div class="interface-name">${interface.name}</div>
@@ -862,8 +892,8 @@ function createCompactTableRow(interface) {
             <td>
                 <div class="runtime-status-cell">
                     <span class="runtime-status" id="runtime-${interface.id}">
-                        <span class="status-indicator checking">●</span>
-                        <span class="status-text">Checking...</span>
+                        <span class="status-indicator ${initialStatus.indicatorClass}">●</span>
+                        <span class="status-text">${initialStatus.statusText}</span>
                     </span>
                 </div>
             </td>
@@ -908,30 +938,345 @@ function createCompactTableRow(interface) {
 
 // Get mini icon-only action buttons - CONSOLIDATED
 function getMiniActionButtons(interface) {
-    const buttons = [];
+    const initialStatus = getInitialStatusDisplay(interface);
+    const showStart = !initialStatus.isActive;
+    const showPause = initialStatus.isActive && !initialStatus.isPaused;
+    const showStop = initialStatus.isActive || initialStatus.isPaused;
+    const canDelete = !initialStatus.isActive && !initialStatus.isPaused;
 
-    // Configuration buttons group
-    buttons.push(`<button class="action-btn edit" title="Edit Configuration" onclick="event.stopPropagation(); showEditModal('${interface.id}')">⚙️</button>`);
-    buttons.push(`<button class="action-btn pipeline" title="Configure Pipeline" onclick="event.stopPropagation(); configurePipeline('${interface.id}', '${interface.messageType || 'ADT^A01'}')">🔀</button>`);
+    // Determine runtime control icon and action (Start/Pause only, Stop is separate)
+    let runtimeIcon = '<i class="far fa-play-circle"></i>';
+    let runtimeAction = `activateInterfaceProcessing('${interface.id}')`;
+    let runtimeTitle = 'Start Processing';
+    let runtimeColor = '#10b981'; // Green
 
-    // Runtime Control buttons - Start/Pause/Stop
-    buttons.push(`<button class="action-btn runtime-start" title="Start - Begin Processing" onclick="event.stopPropagation(); activateInterfaceProcessing('${interface.id}')" id="start-${interface.id}">▶️</button>`);
-    buttons.push(`<button class="action-btn runtime-pause" title="Pause - Stop inbound, finish queue" onclick="event.stopPropagation(); pauseInterfaceProcessing('${interface.id}')" id="pause-${interface.id}" style="display:none">⏸️</button>`);
-    buttons.push(`<button class="action-btn runtime-stop" title="Stop - Immediate shutdown" onclick="event.stopPropagation(); deactivateInterfaceProcessing('${interface.id}')" id="stop-${interface.id}" style="display:none">⏹️</button>`);
+    if (showPause) {
+        // Running: Show pause button
+        runtimeIcon = '<i class="far fa-pause-circle"></i>';
+        runtimeAction = `pauseInterfaceProcessing('${interface.id}')`;
+        runtimeTitle = 'Pause Processing';
+        runtimeColor = '#f59e0b'; // Amber
+    }
+    // Note: Stop button is now always separate, not part of the morphing button
 
-    // Status-specific actions
-    if (interface.status === 'stopped') {
-        buttons.push(`<button class="action-btn delete" title="Delete Interface" onclick="event.stopPropagation(); deleteInterface('${interface.id}')">🗑️</button>`);
-    } else if (interface.status === 'error') {
-        buttons.push(`<button class="action-btn restart" title="Reset Error State" onclick="event.stopPropagation(); resetInterface('${interface.id}')">🔄</button>`);
+    return `
+        <div style="display: flex; gap: 0.5rem; align-items: center; justify-content: flex-end;">
+            <!-- Button 1: Runtime Control - Start/Pause (Outline) -->
+            <button class="action-btn-outline" title="${runtimeTitle}"
+                    onclick="event.stopPropagation(); ${runtimeAction}"
+                    style="color: ${runtimeColor}; border-color: ${runtimeColor};"
+                    id="runtime-btn-${interface.id}">
+                ${runtimeIcon}
+            </button>
+
+            <!-- Button 2: Stop (Always Visible) -->
+            <button class="action-btn-outline" title="Stop Processing"
+                    onclick="event.stopPropagation(); deactivateInterfaceProcessing('${interface.id}')"
+                    style="color: #ef4444; border-color: #ef4444; ${!showStop ? 'opacity: 0.3; cursor: not-allowed;' : ''}"
+                    id="stop-btn-${interface.id}"
+                    ${!showStop ? 'disabled' : ''}>
+                <i class="far fa-stop-circle"></i>
+            </button>
+
+            <!-- Button 3: View Messages (Outline) -->
+            <button class="action-btn-outline" title="View Messages"
+                    onclick="event.stopPropagation(); viewInterfaceMessages('${interface.id}')"
+                    style="color: #3b82f6; border-color: #3b82f6;">
+                <i class="far fa-envelope"></i>
+            </button>
+
+            <!-- Button 4: More Actions (Outline) -->
+            <div class="action-dropdown" style="position: relative; display: inline-block;">
+                <button class="action-btn-outline" title="More Actions"
+                        onclick="event.stopPropagation(); toggleActionsMenu('${interface.id}')"
+                        style="color: #64748b; border-color: #64748b;"
+                        id="actions-menu-btn-${interface.id}">
+                    <i class="fas fa-ellipsis-h"></i>
+                </button>
+                <div class="dropdown-menu-minimal" id="actions-menu-${interface.id}">
+                    <div class="dropdown-item-minimal" onclick="event.stopPropagation(); showEditModal('${interface.id}'); closeActionsMenu('${interface.id}')">
+                        <i class="far fa-edit"></i>
+                        <span>Edit</span>
+                    </div>
+                    <div class="dropdown-item-minimal" onclick="event.stopPropagation(); configurePipeline('${interface.id}', '${interface.messageType || 'ADT^A01'}'); closeActionsMenu('${interface.id}')">
+                        <i class="fas fa-network-wired"></i>
+                        <span>Pipeline</span>
+                    </div>
+                    <div class="dropdown-item-minimal" onclick="event.stopPropagation(); showInterfaceDetails('${interface.id}'); closeActionsMenu('${interface.id}')">
+                        <i class="far fa-file-alt"></i>
+                        <span>Details</span>
+                    </div>
+                    ${interface.status === 'error' ? `
+                    <div class="dropdown-item-minimal" onclick="event.stopPropagation(); resetInterface('${interface.id}'); closeActionsMenu('${interface.id}')">
+                        <i class="fas fa-sync"></i>
+                        <span>Reset</span>
+                    </div>
+                    ` : ''}
+                    <div class="dropdown-divider-minimal"></div>
+                    ${canDelete ? `
+                    <div class="dropdown-item-minimal danger" onclick="event.stopPropagation(); confirmDeleteInterface('${interface.id}', '${interface.name?.replace(/'/g, "\\'")}'); closeActionsMenu('${interface.id}')">
+                        <i class="far fa-trash-alt"></i>
+                        <span>Delete</span>
+                    </div>
+                    ` : `
+                    <div class="dropdown-item-minimal disabled" title="Stop interface first">
+                        <i class="far fa-trash-alt"></i>
+                        <span>Delete</span>
+                    </div>
+                    `}
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+// Toggle actions dropdown menu
+function toggleActionsMenu(interfaceId) {
+    console.log('📋 toggleActionsMenu called for:', interfaceId);
+    const menu = document.getElementById(`actions-menu-${interfaceId}`);
+
+    if (!menu) {
+        console.error('❌ Menu not found:', `actions-menu-${interfaceId}`);
+        return;
     }
 
-    // View/Monitor buttons
-    buttons.push(`<button class="action-btn messages" title="View Messages" onclick="event.stopPropagation(); viewInterfaceMessages('${interface.id}')">💬</button>`);
-    buttons.push(`<button class="action-btn details" title="View Details" onclick="event.stopPropagation(); showInterfaceDetails('${interface.id}')">ℹ️</button>`);
+    const allMenus = document.querySelectorAll('.dropdown-menu, .dropdown-menu-clean, .dropdown-menu-minimal');
 
-    return buttons.join('');
+    // Close all other menus
+    allMenus.forEach(m => {
+        if (m.id !== `actions-menu-${interfaceId}`) {
+            m.style.display = 'none';
+        }
+    });
+
+    // Toggle current menu
+    const newDisplay = menu.style.display === 'none' || menu.style.display === '' ? 'block' : 'none';
+    menu.style.display = newDisplay;
+    console.log('✅ Menu toggled to:', newDisplay);
 }
+
+// Close specific actions menu
+function closeActionsMenu(interfaceId) {
+    const menu = document.getElementById(`actions-menu-${interfaceId}`);
+    if (menu) {
+        menu.style.display = 'none';
+    }
+}
+
+// Confirm delete interface with warning
+function confirmDeleteInterface(interfaceId, interfaceName) {
+    console.log('🗑️ confirmDeleteInterface called:', { interfaceId, interfaceName });
+
+    const modal = document.createElement('div');
+    modal.className = 'modal show';
+    modal.style.cssText = `
+        display: flex !important;
+        position: fixed !important;
+        top: 0 !important;
+        left: 0 !important;
+        width: 100% !important;
+        height: 100% !important;
+        background: rgba(0, 0, 0, 0.7) !important;
+        z-index: 10000 !important;
+        align-items: center !important;
+        justify-content: center !important;
+    `;
+    modal.innerHTML = `
+        <div class="modal-content" style="max-width: 550px; width: 90%; border-radius: 8px; border: 1px solid var(--pink-200, #f8bbd9);">
+            <div class="modal-header">
+                <h3><i class="fas fa-exclamation-triangle"></i> Delete Interface</h3>
+                <button class="modal-close" onclick="this.closest('.modal').remove()">&times;</button>
+            </div>
+            <div class="modal-body" style="padding: 16px;">
+                <!-- Warning Alert -->
+                <div style="background: #fef2f2; border-left: 4px solid #dc2626; padding: 12px; border-radius: 4px; margin-bottom: 16px;">
+                    <p style="margin: 0; color: #991b1b; font-weight: 600; font-size: 0.9rem;">
+                        <i class="fas fa-exclamation-triangle"></i> Warning: Interface deletion cannot be undone!
+                    </p>
+                </div>
+
+                <!-- Interface Name Display -->
+                <p style="margin-bottom: 12px; color: #374151; font-size: 0.95rem;">You are about to delete the following interface:</p>
+                <div style="background: var(--pink-100, #fce7f3); padding: 12px; border-radius: 6px; margin-bottom: 20px; border: 1px solid var(--pink-200, #f8bbd9);">
+                    <strong style="color: var(--navy-primary, #1e3a8a); font-size: 1rem;">${interfaceName}</strong>
+                </div>
+
+                <!-- Data Retention Options -->
+                <div style="background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 6px; padding: 14px; margin-bottom: 16px;">
+                    <h4 style="margin: 0 0 12px 0; color: var(--navy-primary, #1e3a8a); font-size: 0.95rem; font-weight: 600;">
+                        <i class="fas fa-database"></i> Data Retention Policy
+                    </h4>
+
+                    <!-- Option 1: Soft Delete (Recommended) -->
+                    <label style="display: flex; align-items: flex-start; cursor: pointer; margin-bottom: 12px; padding: 10px; background: white; border-radius: 4px; border: 2px solid #e5e7eb; transition: all 0.2s;">
+                        <input type="radio" name="deleteMode" value="soft" checked
+                               style="margin-top: 3px; margin-right: 10px; accent-color: var(--navy-primary, #1e3a8a);">
+                        <div style="flex: 1;">
+                            <strong style="color: #0369a1; font-size: 0.9rem;">Keep All Messages & Logs (Recommended)</strong>
+                            <div style="font-size: 0.85rem; color: #6b7280; margin-top: 4px; line-height: 1.4;">
+                                Remove interface configuration and pipeline settings only. All messages and processing logs will be retained indefinitely for compliance and audit purposes.
+                            </div>
+                        </div>
+                    </label>
+
+                    <!-- Option 2: Partial Delete -->
+                    <label style="display: flex; align-items: flex-start; cursor: pointer; margin-bottom: 12px; padding: 10px; background: white; border-radius: 4px; border: 2px solid #e5e7eb; transition: all 0.2s;">
+                        <input type="radio" name="deleteMode" value="partial"
+                               style="margin-top: 3px; margin-right: 10px; accent-color: #f59e0b;">
+                        <div style="flex: 1;">
+                            <strong style="color: #f59e0b; font-size: 0.9rem;">Keep Error Messages Only</strong>
+                            <div style="font-size: 0.85rem; color: #6b7280; margin-top: 4px; line-height: 1.4;">
+                                Delete interface configuration, pipeline, and successful message logs. Retain only error messages and failed transaction logs for troubleshooting.
+                            </div>
+                        </div>
+                    </label>
+
+                    <!-- Option 3: Hard Delete -->
+                    <label style="display: flex; align-items: flex-start; cursor: pointer; padding: 10px; background: white; border-radius: 4px; border: 2px solid #e5e7eb; transition: all 0.2s;">
+                        <input type="radio" name="deleteMode" value="hard"
+                               style="margin-top: 3px; margin-right: 10px; accent-color: #dc2626;">
+                        <div style="flex: 1;">
+                            <strong style="color: #dc2626; font-size: 0.9rem;">Delete Everything Permanently</strong>
+                            <div style="font-size: 0.85rem; color: #6b7280; margin-top: 4px; line-height: 1.4;">
+                                Permanently delete interface configuration, pipeline settings, all messages (successful and errors), and all processing logs. This action cannot be undone.
+                            </div>
+                        </div>
+                    </label>
+                </div>
+
+                <!-- Summary of What Will Be Removed -->
+                <div style="background: #f0f9ff; border-left: 3px solid var(--navy-primary, #1e3a8a); padding: 12px; border-radius: 4px;">
+                    <p style="color: #374151; font-size: 0.9rem; font-weight: 600; margin: 0 0 8px 0;">
+                        The following will be removed:
+                    </p>
+                    <ul style="color: #6b7280; font-size: 0.875rem; margin: 0; padding-left: 20px; line-height: 1.6;">
+                        <li>Interface configuration</li>
+                        <li>Pipeline settings and transformation mappings</li>
+                        <li id="delete-messages-item">All messages <span style="color: #0369a1; font-weight: 600;">(RETAINED)</span></li>
+                        <li id="delete-logs-item">All processing logs <span style="color: #0369a1; font-weight: 600;">(RETAINED)</span></li>
+                    </ul>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="this.closest('.modal').remove()">
+                    <i class="fas fa-times"></i> Cancel
+                </button>
+                <button class="btn btn-danger" onclick="executeDeleteInterface('${interfaceId}', this.closest('.modal').querySelector('input[name=deleteMode]:checked').value); this.closest('.modal').remove()">
+                    <i class="fas fa-trash-alt"></i> Yes, Delete Interface
+                </button>
+            </div>
+        </div>
+    `;
+
+    document.body.appendChild(modal);
+    console.log('✅ Delete confirmation modal displayed');
+
+    // Add hover effects to radio labels
+    const radioLabels = modal.querySelectorAll('label');
+    radioLabels.forEach(label => {
+        label.addEventListener('mouseenter', () => {
+            label.style.borderColor = 'var(--navy-primary, #1e3a8a)';
+            label.style.boxShadow = '0 2px 8px rgba(30, 58, 138, 0.1)';
+        });
+        label.addEventListener('mouseleave', () => {
+            const radio = label.querySelector('input[type="radio"]');
+            if (!radio.checked) {
+                label.style.borderColor = '#e5e7eb';
+                label.style.boxShadow = 'none';
+            }
+        });
+    });
+
+    // Add event listener to update UI based on selected mode
+    const radioButtons = modal.querySelectorAll('input[name="deleteMode"]');
+    radioButtons.forEach(radio => {
+        radio.addEventListener('change', (e) => {
+            console.log('📻 Delete mode changed:', e.target.value);
+            const messagesItem = modal.querySelector('#delete-messages-item');
+            const logsItem = modal.querySelector('#delete-logs-item');
+
+            // Update summary text
+            if (e.target.value === 'hard') {
+                messagesItem.innerHTML = 'All messages <span style="color: #dc2626; font-weight: 600;">(PERMANENT DELETE)</span>';
+                logsItem.innerHTML = 'All processing logs <span style="color: #dc2626; font-weight: 600;">(PERMANENT DELETE)</span>';
+            } else if (e.target.value === 'partial') {
+                messagesItem.innerHTML = 'All messages <span style="color: #f59e0b; font-weight: 600;">(successful deleted, errors retained)</span>';
+                logsItem.innerHTML = 'All processing logs <span style="color: #f59e0b; font-weight: 600;">(success deleted, errors retained)</span>';
+            } else {
+                messagesItem.innerHTML = 'All messages <span style="color: #0369a1; font-weight: 600;">(RETAINED)</span>';
+                logsItem.innerHTML = 'All processing logs <span style="color: #0369a1; font-weight: 600;">(RETAINED)</span>';
+            }
+
+            // Highlight selected option
+            radioLabels.forEach(label => {
+                const input = label.querySelector('input[type="radio"]');
+                if (input.checked) {
+                    label.style.borderColor = 'var(--navy-primary, #1e3a8a)';
+                    label.style.backgroundColor = '#f0f9ff';
+                    label.style.boxShadow = '0 2px 8px rgba(30, 58, 138, 0.15)';
+                } else {
+                    label.style.borderColor = '#e5e7eb';
+                    label.style.backgroundColor = 'white';
+                    label.style.boxShadow = 'none';
+                }
+            });
+        });
+    });
+
+    // Set initial selected state
+    const checkedRadio = modal.querySelector('input[name="deleteMode"]:checked');
+    if (checkedRadio) {
+        const checkedLabel = checkedRadio.closest('label');
+        checkedLabel.style.borderColor = 'var(--navy-primary, #1e3a8a)';
+        checkedLabel.style.backgroundColor = '#f0f9ff';
+        checkedLabel.style.boxShadow = '0 2px 8px rgba(30, 58, 138, 0.15)';
+    }
+}
+
+// Execute delete interface with data retention option
+async function executeDeleteInterface(interfaceId, deleteMode = 'soft') {
+    try {
+        console.log(`🗑️ Deleting interface ${interfaceId} with mode: ${deleteMode}`);
+
+        const response = await fetch(`/api/interfaces/${interfaceId}?mode=${deleteMode}`, {
+            method: 'DELETE',
+            credentials: 'include',
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        });
+
+        const data = await response.json();
+
+        if (response.ok) {
+            const message = deleteMode === 'hard'
+                ? '✅ Interface and all associated data deleted permanently'
+                : '✅ Interface deleted successfully (messages and logs retained for compliance)';
+
+            showSuccess(message);
+            console.log('✅ Delete successful:', data);
+
+            // Reload interface list after short delay
+            setTimeout(() => loadInterfaces(), 500);
+        } else {
+            const errorMsg = data.message || data.error || 'Unknown error occurred';
+            showError(`Failed to delete interface: ${errorMsg}`);
+            console.error('❌ Delete failed:', data);
+        }
+    } catch (error) {
+        console.error('❌ Delete error:', error);
+        showError(`Error deleting interface: ${error.message}`);
+    }
+}
+
+// Close dropdown menus when clicking outside
+document.addEventListener('click', (event) => {
+    if (!event.target.closest('.action-dropdown')) {
+        document.querySelectorAll('.dropdown-menu, .dropdown-menu-clean, .dropdown-menu-minimal').forEach(menu => {
+            menu.style.display = 'none';
+        });
+    }
+});
 
 // Format time in ultra compact format
 function formatCompactTime(date) {
@@ -1096,29 +1441,175 @@ async function pauseInterface(interfaceId) {
     }
 }
 
-async function deleteInterface(interfaceId) {
-    const interfaceName = interfaces.find(i => i.id === interfaceId)?.name || 'this interface';
-    
-    if (!confirm(`Delete "${interfaceName}"?`)) {
+// Show delete modal with data retention options
+function showDeleteModal(interfaceId, interfaceName) {
+    const container = document.getElementById('delete-modal-container');
+    if (!container) {
+        console.error('Delete modal container not found');
         return;
     }
-    
+
+    container.innerHTML = `
+        <div class="modal-overlay show" id="deleteModal" onclick="if(event.target === this) closeDeleteModal()">
+            <div class="modal-content" style="max-width: 600px;">
+                <div class="modal-header">
+                    <h3>🗑️ Delete Interface</h3>
+                    <button class="modal-close" onclick="closeDeleteModal()">×</button>
+                </div>
+                <div class="modal-body">
+                    <div class="alert alert-warning" style="background: #fff3cd; border: 1px solid #ffc107; border-radius: 6px; padding: 12px; margin-bottom: 20px;">
+                        <strong>⚠️ Warning:</strong> You are about to delete interface "<strong>${interfaceName}</strong>"
+                    </div>
+
+                    <div class="form-group" style="margin-bottom: 20px;">
+                        <label style="display: block; font-weight: 600; margin-bottom: 8px; color: #1e3a8a;">
+                            Delete Type
+                        </label>
+                        <div style="display: flex; flex-direction: column; gap: 10px;">
+                            <label class="radio-label" style="display: flex; align-items: center; padding: 12px; border: 2px solid #e5e7eb; border-radius: 6px; cursor: pointer; transition: all 0.2s;">
+                                <input type="radio" name="deleteType" value="soft" checked style="margin-right: 10px; width: 18px; height: 18px; cursor: pointer;">
+                                <div>
+                                    <div style="font-weight: 600; color: #1e3a8a;">Soft Delete (Recommended)</div>
+                                    <div style="font-size: 12px; color: #6b7280; margin-top: 2px;">Interface can be restored later</div>
+                                </div>
+                            </label>
+                            <label class="radio-label" style="display: flex; align-items: center; padding: 12px; border: 2px solid #e5e7eb; border-radius: 6px; cursor: pointer; transition: all 0.2s;">
+                                <input type="radio" name="deleteType" value="hard" style="margin-right: 10px; width: 18px; height: 18px; cursor: pointer;">
+                                <div>
+                                    <div style="font-weight: 600; color: #dc2626;">Permanent Delete</div>
+                                    <div style="font-size: 12px; color: #6b7280; margin-top: 2px;">Cannot be undone - interface is permanently removed</div>
+                                </div>
+                            </label>
+                        </div>
+                    </div>
+
+                    <div class="form-group" id="dataRetentionGroup" style="margin-bottom: 20px;">
+                        <label style="display: block; font-weight: 600; margin-bottom: 8px; color: #1e3a8a;">
+                            Message Data Retention
+                        </label>
+                        <div style="display: flex; flex-direction: column; gap: 10px;">
+                            <label class="radio-label" style="display: flex; align-items: center; padding: 12px; border: 2px solid #e5e7eb; border-radius: 6px; cursor: pointer;">
+                                <input type="radio" name="dataRetention" value="keep_all" checked style="margin-right: 10px; width: 18px; height: 18px; cursor: pointer;">
+                                <div>
+                                    <div style="font-weight: 600;">Keep All Messages</div>
+                                    <div style="font-size: 12px; color: #6b7280; margin-top: 2px;">Retain all processed messages for audit/recovery</div>
+                                </div>
+                            </label>
+                            <label class="radio-label" style="display: flex; align-items: center; padding: 12px; border: 2px solid #e5e7eb; border-radius: 6px; cursor: pointer;">
+                                <input type="radio" name="dataRetention" value="keep_errors" style="margin-right: 10px; width: 18px; height: 18px; cursor: pointer;">
+                                <div>
+                                    <div style="font-weight: 600;">Keep Errors Only</div>
+                                    <div style="font-size: 12px; color: #6b7280; margin-top: 2px;">Delete successful messages, keep failed for analysis</div>
+                                </div>
+                            </label>
+                            <label class="radio-label" style="display: flex; align-items: center; padding: 12px; border: 2px solid #e5e7eb; border-radius: 6px; cursor: pointer;">
+                                <input type="radio" name="dataRetention" value="delete_all" style="margin-right: 10px; width: 18px; height: 18px; cursor: pointer;">
+                                <div>
+                                    <div style="font-weight: 600; color: #dc2626;">Delete All Messages</div>
+                                    <div style="font-size: 12px; color: #6b7280; margin-top: 2px;">Permanently remove all message data</div>
+                                </div>
+                            </label>
+                        </div>
+                    </div>
+
+                    <div class="alert alert-info" style="background: #e0e7ff; border: 1px solid #6366f1; border-radius: 6px; padding: 12px; font-size: 13px;">
+                        <strong>ℹ️ Note:</strong> Soft delete marks the interface as deleted but keeps all configuration and data. You can restore it later from the system settings.
+                    </div>
+                </div>
+                <div class="modal-footer" style="display: flex; gap: 12px; justify-content: flex-end; padding: 16px; border-top: 1px solid #e5e7eb;">
+                    <button class="btn btn-secondary" onclick="closeDeleteModal()">Cancel</button>
+                    <button class="btn btn-danger" onclick="confirmDelete('${interfaceId}')">Delete Interface</button>
+                </div>
+            </div>
+        </div>
+    `;
+
+    // Add event listener for delete type change
+    const deleteTypeInputs = container.querySelectorAll('input[name="deleteType"]');
+    const dataRetentionGroup = container.querySelector('#dataRetentionGroup');
+
+    deleteTypeInputs.forEach(input => {
+        input.addEventListener('change', (e) => {
+            if (e.target.value === 'hard') {
+                dataRetentionGroup.style.display = 'none';
+            } else {
+                dataRetentionGroup.style.display = 'block';
+            }
+        });
+    });
+
+    // Add hover effects to radio labels
+    const radioLabels = container.querySelectorAll('.radio-label');
+    radioLabels.forEach(label => {
+        label.addEventListener('mouseenter', () => {
+            label.style.borderColor = '#6366f1';
+            label.style.background = '#f8f9ff';
+        });
+        label.addEventListener('mouseleave', () => {
+            const input = label.querySelector('input');
+            if (!input.checked) {
+                label.style.borderColor = '#e5e7eb';
+                label.style.background = 'white';
+            }
+        });
+        label.addEventListener('click', () => {
+            radioLabels.forEach(l => {
+                l.style.borderColor = '#e5e7eb';
+                l.style.background = 'white';
+            });
+            label.style.borderColor = '#6366f1';
+            label.style.background = '#f8f9ff';
+        });
+    });
+}
+
+function closeDeleteModal() {
+    const container = document.getElementById('delete-modal-container');
+    if (container) {
+        container.innerHTML = '';
+    }
+}
+
+async function confirmDelete(interfaceId) {
+    const container = document.getElementById('delete-modal-container');
+    const deleteType = container.querySelector('input[name="deleteType"]:checked')?.value || 'soft';
+    const dataRetention = container.querySelector('input[name="dataRetention"]:checked')?.value || 'keep_all';
+
+    console.log('Deleting interface:', { interfaceId, deleteType, dataRetention });
+
     try {
-        const response = await fetch(`/api/interfaces/${interfaceId}`, { method: 'DELETE' });
-        
+        const response = await fetch(`/api/interfaces/${interfaceId}`, {
+            method: 'DELETE',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                deleteType: deleteType,
+                dataRetention: dataRetention
+            })
+        });
+
         if (response.ok) {
             const data = await response.json();
-            showSuccess(data.message);
+            closeDeleteModal();
+            showSuccess(data.message || 'Interface deleted successfully');
             await loadInterfaces();
         } else if (response.status === 401) {
             window.location.href = 'login.html';
         } else {
-            throw new Error('Failed to delete interface');
+            const error = await response.json();
+            throw new Error(error.error || 'Failed to delete interface');
         }
     } catch (error) {
         console.error('Error deleting interface:', error);
-        showError('Failed to delete interface');
+        showError(error.message || 'Failed to delete interface');
     }
+}
+
+// Legacy function for backward compatibility
+async function deleteInterface(interfaceId) {
+    const interfaceName = interfaces.find(i => i.id === interfaceId)?.name || 'Interface';
+    showDeleteModal(interfaceId, interfaceName);
 }
 
 // Modal Functions
@@ -1603,6 +2094,39 @@ function collectTargetConfiguration() {
         }
     }
 
+    // ✅ FIX: Collect authentication configuration
+    const authType = document.getElementById('edittargetHttpAuthType')?.value;
+    if (authType && authType !== 'none') {
+        targetConfig.authType = authType;
+
+        if (authType === 'basic') {
+            targetConfig.username = document.getElementById('edittargetHttpAuthUsername')?.value;
+            targetConfig.password = document.getElementById('edittargetHttpAuthPassword')?.value;
+        } else if (authType === 'bearer') {
+            targetConfig.bearerToken = document.getElementById('edittargetHttpAuthBearerToken')?.value;
+        } else if (authType === 'api_key') {
+            targetConfig.apiKey = document.getElementById('edittargetHttpAuthApiKey')?.value;
+            targetConfig.apiKeyHeader = document.getElementById('edittargetHttpAuthApiKeyHeader')?.value || 'X-API-Key';
+        }
+    }
+
+    // Collect FHIR version and format if present
+    const targetVersion = document.getElementById('edittargetVersion')?.value;
+    if (targetVersion) {
+        targetConfig.version = targetVersion;
+    }
+
+    const targetFormat = document.getElementById('edittargetFormat')?.value;
+    if (targetFormat) {
+        targetConfig.format = targetFormat;
+    }
+
+    // Collect endpoint from target config panel
+    const targetEndpoint = document.getElementById('edittargetEndpoint')?.value;
+    if (targetEndpoint) {
+        targetConfig.endpoint = targetEndpoint;
+    }
+
     console.log('✅ Target configuration collected:', targetConfig);
     return targetConfig;
 }
@@ -2000,11 +2524,19 @@ function setupRuntimeMonitoring() {
     // Check engine status immediately
     checkProcessingEngineStatus();
 
-    // Start periodic monitoring
+    // Background hydration: Update runtime statuses after UI renders
+    // Use requestIdleCallback for better performance, fallback to setTimeout
+    const scheduleBackgroundUpdate = window.requestIdleCallback || ((cb) => setTimeout(cb, 100));
+    scheduleBackgroundUpdate(() => {
+        console.log('🔄 Background hydration: updating runtime statuses...');
+        updateInterfaceRuntimeStatuses();
+    });
+
+    // Start periodic monitoring (less frequent since we have optimistic UI)
     runtimeMonitoringInterval = setInterval(() => {
         checkProcessingEngineStatus();
         updateInterfaceRuntimeStatuses();
-    }, 10000); // Every 10 seconds
+    }, 30000); // Every 30 seconds (reduced from 10s since UI is already accurate)
 
     console.log('✅ Runtime monitoring active');
 }
@@ -2183,11 +2715,75 @@ async function stopProcessingEngine() {
 }
 
 /**
- * Update interface runtime statuses
+ * Update interface runtime statuses using batch endpoint for performance
  */
 async function updateInterfaceRuntimeStatuses() {
-    for (const interface of interfaces) {
-        await updateInterfaceRuntimeStatus(interface.id);
+    try {
+        // Single API call to get all statuses
+        const response = await fetch('/api/runtime/interfaces/statuses', {
+            method: 'GET',
+            credentials: 'include'
+        });
+
+        if (response.ok) {
+            const data = await response.json();
+            if (data.success && data.statuses) {
+                // Update each interface with its status from batch response
+                for (const iface of interfaces) {
+                    const status = data.statuses[iface.id];
+                    if (status) {
+                        updateInterfaceStatusDisplay(iface.id, status);
+                    } else {
+                        // Interface not in response, mark as unknown
+                        const statusElement = document.getElementById(`runtime-${iface.id}`);
+                        if (statusElement) {
+                            updateRuntimeStatusDisplay(statusElement, false, null, 'unknown');
+                            updateActionButtonsVisibility(iface.id, false, false);
+                        }
+                    }
+                }
+            }
+        } else {
+            // Fallback to individual calls if batch fails
+            console.warn('Batch status endpoint failed, falling back to individual calls');
+            await Promise.all(interfaces.map(iface => updateInterfaceRuntimeStatus(iface.id)));
+        }
+    } catch (error) {
+        console.error('Error fetching batch statuses:', error);
+        // Fallback to individual calls
+        await Promise.all(interfaces.map(iface => updateInterfaceRuntimeStatus(iface.id)));
+    }
+}
+
+/**
+ * Update interface status display from batch response
+ */
+function updateInterfaceStatusDisplay(interfaceId, statusData) {
+    const statusElement = document.getElementById(`runtime-${interfaceId}`);
+    if (!statusElement) return;
+
+    const status = statusData.status || 'unknown';
+    const stats = {
+        processedCount: statusData.messages_processed || 0,
+        status: status
+    };
+
+    const isPaused = status === 'paused';
+    const isStopped = status === 'configured' || status === 'draft' || status === 'testing' || status === 'retired' || status === 'inactive' || status === 'stopped';
+    const isActive = status === 'active';
+
+    if (isPaused) {
+        updateRuntimeStatusDisplay(statusElement, false, stats, 'paused');
+        updateActionButtonsVisibility(interfaceId, false, true);
+    } else if (isActive) {
+        updateRuntimeStatusDisplay(statusElement, true, stats, null);
+        updateActionButtonsVisibility(interfaceId, true, false);
+    } else if (isStopped) {
+        updateRuntimeStatusDisplay(statusElement, false, stats, null);
+        updateActionButtonsVisibility(interfaceId, false, false);
+    } else {
+        updateRuntimeStatusDisplay(statusElement, false, stats, null);
+        updateActionButtonsVisibility(interfaceId, false, false);
     }
 }
 
@@ -2206,19 +2802,22 @@ async function updateInterfaceRuntimeStatus(interfaceId) {
 
         if (response.ok) {
             const data = await response.json();
-            const isProcessing = data.interface?.processingActive || false;
-            const stats = data.interface?.processingStats;
-            const status = data.interface?.interface_status || data.interface?.status || 'unknown';
+            const isProcessing = data.interface?.processingActive || data.status?.processingActive || false;
+            const stats = data.interface?.processingStats || data.status?.processingStats;
+            // Handle both response formats:
+            // 1. data.interface.status (old format)
+            // 2. data.status.status (current Go backend format)
+            const status = data.interface?.interface_status || data.interface?.status || data.status?.status || 'unknown';
             const isPaused = status === 'paused';
-            const isStopped = status === 'configured' || status === 'draft' || status === 'testing' || status === 'retired';
+            const isStopped = status === 'configured' || status === 'draft' || status === 'testing' || status === 'retired' || status === 'inactive' || status === 'stopped';
             const isActive = status === 'active';
 
             if (isPaused) {
                 // Paused: Show Start + Stop
                 updateRuntimeStatusDisplay(statusElement, false, stats, 'paused');
                 updateActionButtonsVisibility(interfaceId, false, true);
-            } else if (isActive && isProcessing) {
-                // Active and processing: Show Pause + Stop
+            } else if (isActive) {
+                // Active: Show Pause + Stop (status is active, regardless of processingActive flag)
                 updateRuntimeStatusDisplay(statusElement, true, stats, null);
                 updateActionButtonsVisibility(interfaceId, true, false);
             } else if (isStopped) {
@@ -2226,7 +2825,7 @@ async function updateInterfaceRuntimeStatus(interfaceId) {
                 updateRuntimeStatusDisplay(statusElement, false, stats, null);
                 updateActionButtonsVisibility(interfaceId, false, false);
             } else {
-                // Default: Show Start only
+                // Default (unknown, error, etc.): Show Start only
                 updateRuntimeStatusDisplay(statusElement, false, stats, null);
                 updateActionButtonsVisibility(interfaceId, false, false);
             }
@@ -2286,26 +2885,100 @@ function updateRuntimeStatusDisplay(element, isProcessing, stats, errorState = n
 }
 
 /**
- * Update action button visibility - UPDATED for Start/Pause/Stop
+ * Update delete button state in dropdown menu
+ */
+function updateDeleteButtonState(interfaceId, canDelete) {
+    const menu = document.getElementById(`actions-menu-${interfaceId}`);
+    if (!menu) return;
+
+    // Find all delete button items in the dropdown
+    const deleteItems = menu.querySelectorAll('.dropdown-item-minimal');
+    deleteItems.forEach(item => {
+        const itemText = item.querySelector('span')?.textContent;
+        if (itemText === 'Delete') {
+            if (canDelete) {
+                // Enable delete
+                item.classList.remove('disabled');
+                item.classList.add('danger');
+                item.removeAttribute('title');
+                item.onclick = function(e) {
+                    e.stopPropagation();
+                    const iface = interfaces.find(i => i.id === interfaceId);
+                    confirmDeleteInterface(interfaceId, iface?.name?.replace(/'/g, "\\'") || '');
+                    closeActionsMenu(interfaceId);
+                };
+            } else {
+                // Disable delete
+                item.classList.add('disabled');
+                item.classList.remove('danger');
+                item.setAttribute('title', 'Stop interface first');
+                item.onclick = null;
+            }
+        }
+    });
+}
+
+/**
+ * Update action button visibility - UPDATED for single morphing button (outline design)
  */
 function updateActionButtonsVisibility(interfaceId, isProcessing, isPaused = false) {
+    // Update morphing button (Start/Pause only)
+    const runtimeBtn = document.getElementById(`runtime-btn-${interfaceId}`);
+
+    if (runtimeBtn) {
+        let icon, action, title, color;
+
+        if (isProcessing || isPaused) {
+            // Running/Paused state: Show Pause button (amber)
+            icon = '<i class="far fa-pause-circle"></i>';
+            action = `pauseInterfaceProcessing('${interfaceId}')`;
+            title = 'Pause Processing';
+            color = '#f59e0b'; // Amber
+        } else {
+            // Stopped state: Show Start button (green)
+            icon = '<i class="far fa-play-circle"></i>';
+            action = `activateInterfaceProcessing('${interfaceId}')`;
+            title = 'Start Processing';
+            color = '#10b981'; // Green
+        }
+
+        runtimeBtn.innerHTML = icon;
+        runtimeBtn.setAttribute('onclick', `event.stopPropagation(); ${action}`);
+        runtimeBtn.setAttribute('title', title);
+        runtimeBtn.style.color = color;
+        runtimeBtn.style.borderColor = color;
+    }
+
+    // Update dedicated Stop button (always visible, enabled/disabled)
+    const dedicatedStopBtn = document.getElementById(`stop-btn-${interfaceId}`);
+    if (dedicatedStopBtn) {
+        const shouldEnable = isProcessing || isPaused;
+        if (shouldEnable) {
+            dedicatedStopBtn.disabled = false;
+            dedicatedStopBtn.style.opacity = '1';
+            dedicatedStopBtn.style.cursor = 'pointer';
+        } else {
+            dedicatedStopBtn.disabled = true;
+            dedicatedStopBtn.style.opacity = '0.3';
+            dedicatedStopBtn.style.cursor = 'not-allowed';
+        }
+    }
+
+    // Legacy fallback for old three-button design (if it exists)
     const startBtn = document.getElementById(`start-${interfaceId}`);
     const pauseBtn = document.getElementById(`pause-${interfaceId}`);
     const stopBtn = document.getElementById(`stop-${interfaceId}`);
 
     if (startBtn && pauseBtn && stopBtn) {
         if (isPaused) {
-            // Paused state: show Start and Stop
             startBtn.style.display = 'inline-block';
             pauseBtn.style.display = 'none';
             stopBtn.style.display = 'inline-block';
         } else if (isProcessing) {
-            // Running state: show Pause and Stop
             startBtn.style.display = 'none';
             pauseBtn.style.display = 'inline-block';
             stopBtn.style.display = 'inline-block';
         } else {
-            // Stopped state: show only Start
             startBtn.style.display = 'inline-block';
             pauseBtn.style.display = 'none';
             stopBtn.style.display = 'none';
@@ -2340,8 +3013,18 @@ async function activateInterfaceProcessing(interfaceId) {
             console.log('✅ Interface activated:', data.message);
             showSuccess(`Interface activated successfully`);
 
-            // Immediately update status
+            // Update the interface status in memory
+            const iface = interfaces.find(i => i.id === interfaceId);
+            if (iface) {
+                iface.status = 'active';
+                iface.interface_status = 'active';
+            }
+
+            // Update runtime status which will update the buttons
             await updateInterfaceRuntimeStatus(interfaceId);
+
+            // Update delete button state in dropdown (disable it when active)
+            updateDeleteButtonState(interfaceId, false);
         } else {
             console.error('❌ Activation failed:', data.message);
             showError(data.message || 'Failed to activate interface');
@@ -2436,8 +3119,18 @@ async function deactivateInterfaceProcessing(interfaceId) {
             console.log('✅ Interface stopped:', data.message);
             showSuccess(`Interface stopped immediately`);
 
-            // Immediately update status
+            // Update the interface status in memory
+            const iface = interfaces.find(i => i.id === interfaceId);
+            if (iface) {
+                iface.status = 'stopped';
+                iface.interface_status = 'stopped';
+            }
+
+            // Update runtime status which will update the buttons
             await updateInterfaceRuntimeStatus(interfaceId);
+
+            // Update delete button state in dropdown (enable it when stopped)
+            updateDeleteButtonState(interfaceId, true);
         } else {
             console.error('❌ Stop failed:', data.message);
             showError(data.message || 'Failed to stop interface');
@@ -2569,11 +3262,12 @@ async function resetInterface(interfaceId) {
  * Navigate to Pipeline Builder
  * NEW: Integration with drag-and-drop pipeline builder
  */
-function configurePipeline(interfaceId, messageType) {
-    console.log('🔀 Opening Pipeline Builder for:', interfaceId, messageType);
+function configurePipeline(interfaceId) {
+    console.log('🔀 Opening Pipeline Builder for:', interfaceId);
 
-    // Navigate to pipeline builder with interface context
-    window.location.href = `/pipeline-builder.html?interfaceId=${interfaceId}&messageType=${encodeURIComponent(messageType)}`;
+    // Navigate to pipeline builder with interface context only
+    // Message type will be loaded from the interface configuration
+    window.location.href = `/pipeline-builder.html?interfaceId=${interfaceId}`;
 }
 
 // Cleanup on page unload

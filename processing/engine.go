@@ -8,11 +8,13 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"log"
 	"sync"
 	"time"
 
 	"ezhealthkonnect/models"
 	"ezhealthkonnect/services"
+	. "ezhealthkonnect/services/connectors" // Import connectors package for factory
 )
 
 // ProcessingEngine provides basic interface engine functionality
@@ -24,6 +26,7 @@ type ProcessingEngine struct {
 	mutex               sync.RWMutex
 	stats               *EngineStats
 	running             bool
+	connectorFactory     ConnectorFactory                        // Factory for creating connectors (OOB pattern)
 	parserService        *services.MessageParserService // JSON conversion service
 	mongoService         *services.MongoDBMessageService // MongoDB storage
 	outputDeliveryService *services.OutputDeliveryService // Output delivery service (V21)
@@ -65,8 +68,11 @@ func NewProcessingEngine(db *sql.DB) *ProcessingEngine {
 			LastActivity:          time.Now(),
 			AverageProcessingTime: "0ms",
 		},
-		running: false,
+		running:          false,
+		connectorFactory: NewConnectorFactory(), // OOB: Initialize connector factory
 	}
+
+	fmt.Printf("✅ Connector Factory initialized (32 connectors registered)\n")
 
 	// OOB: Auto-initialize parser service (includes MongoDB detection)
 	ctx := context.Background()
@@ -156,12 +162,12 @@ func (pe *ProcessingEngine) ActivateInterface(interfaceID string) error {
 	}
 
 	// Get interface details from database
-	var name, sourceConfigJSON string
+	var name, sourceConfigJSON, sourceConnectivityJSON string
 	err := pe.db.QueryRow(`
-		SELECT name, source_config
+		SELECT name, source_config, COALESCE(source_connectivity::text, '{}')
 		FROM interfaces
 		WHERE id = $1
-	`, interfaceID).Scan(&name, &sourceConfigJSON)
+	`, interfaceID).Scan(&name, &sourceConfigJSON, &sourceConnectivityJSON)
 	if err != nil {
 		return fmt.Errorf("interface not found: %v", err)
 	}
@@ -172,20 +178,48 @@ func (pe *ProcessingEngine) ActivateInterface(interfaceID string) error {
 		return fmt.Errorf("failed to parse source config: %v", err)
 	}
 
+	// Parse source connectivity (V30 format: {type, config})
+	var sourceConnectivity map[string]interface{}
+	if err := json.Unmarshal([]byte(sourceConnectivityJSON), &sourceConnectivity); err == nil {
+		// Merge connectivity config into source config
+		if connType, ok := sourceConnectivity["type"].(string); ok {
+			sourceConfig["connectivity"] = connType
+			sourceConfig["type"] = connType // For backward compatibility
+		}
+		if connConfig, ok := sourceConnectivity["config"].(map[string]interface{}); ok {
+			// Merge config fields - source_connectivity config takes precedence over source_config
+			for k, v := range connConfig {
+				sourceConfig[k] = v // ALWAYS overwrite - source_connectivity is the authoritative source
+			}
+		}
+	}
+
 	// Add interface_id to config for connector
 	sourceConfig["interface_id"] = interfaceID
+
+	// DEBUG: Log source config
+	fmt.Printf("🔍 Source config for %s: %+v\n", interfaceID, sourceConfig)
 
 	// Detect source type and connectivity to determine connector type
 	sourceType, _ := sourceConfig["type"].(string)
 	connectivity, _ := sourceConfig["connectivity"].(string)
 
-	// OOB: Map legacy connector type to OOB type name
+	// DEBUG: Log detected values
+	fmt.Printf("🔍 Detected sourceType='%s', connectivity='%s'\n", sourceType, connectivity)
+
+	// OOB: Determine connector type from connectivity (supports ALL 32 connector types)
 	var legacyType string
-	if sourceType == "fhir" && (connectivity == "http" || connectivity == "https") {
+	if connectivity != "" {
+		// Use connectivity directly (file, tcp, http, database, kafka, etc.)
+		legacyType = connectivity
+	} else if sourceType == "fhir" {
+		// Backward compatibility: fhir without connectivity -> http
 		legacyType = "http"
-	} else if connectivity == "http" || connectivity == "https" {
-		legacyType = "http"
+	} else if sourceType == "hl7v2" || sourceType == "hl7" {
+		// Backward compatibility: hl7 without connectivity -> tcp
+		legacyType = "tcp"
 	} else {
+		// Default fallback
 		legacyType = "tcp"
 	}
 
@@ -286,6 +320,64 @@ func (pe *ProcessingEngine) GetInterfaceStatus(interfaceID string) *InterfaceSta
 		Status:      status,
 		LastActivity: time.Now(),
 	}
+}
+
+// GetAllInterfaceStatuses returns statuses for all interfaces in a single query
+func (pe *ProcessingEngine) GetAllInterfaceStatuses() map[string]*InterfaceStatus {
+	pe.mutex.RLock()
+	defer pe.mutex.RUnlock()
+
+	statuses := make(map[string]*InterfaceStatus)
+
+	// Query all interfaces from database
+	rows, err := pe.db.Query(`
+		SELECT id, name, status, interface_status,
+		       COALESCE(total_processed, 0) as total_processed,
+		       COALESCE(failed_processed, 0) as failed_processed,
+		       updated_at
+		FROM interfaces
+		WHERE deleted_at IS NULL
+		ORDER BY name
+	`)
+	if err != nil {
+		log.Printf("Error querying interfaces: %v", err)
+		return statuses
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var id, name, status, interfaceStatus string
+		var totalProcessed, failedProcessed int64
+		var updatedAt time.Time
+
+		err := rows.Scan(&id, &name, &status, &interfaceStatus, &totalProcessed, &failedProcessed, &updatedAt)
+		if err != nil {
+			log.Printf("Error scanning interface row: %v", err)
+			continue
+		}
+
+		// Check if interface is in active list (runtime status)
+		if activeStatus, exists := pe.activeInterfaces[id]; exists {
+			statuses[id] = activeStatus
+		} else {
+			// Use database status, prefer interface_status over status
+			displayStatus := interfaceStatus
+			if displayStatus == "" {
+				displayStatus = status
+			}
+
+			statuses[id] = &InterfaceStatus{
+				InterfaceID:       id,
+				Name:              name,
+				Status:            displayStatus,
+				MessagesProcessed: totalProcessed,
+				Errors:            failedProcessed,
+				LastActivity:      updatedAt,
+			}
+		}
+	}
+
+	return statuses
 }
 
 // GetStats returns current engine statistics

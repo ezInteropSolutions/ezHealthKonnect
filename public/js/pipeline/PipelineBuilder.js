@@ -67,6 +67,9 @@ class PipelineBuilder {
         this.propertiesPanel = new PropertiesPanel(this);
         this.layerContainer = new LayerContainer(this);
         this.toolboxManager = new ToolboxManager(this);
+
+        // Make PropertiesPanel globally accessible for row click handlers
+        window.propertiesPanel = this.propertiesPanel;
     }
 
     /**
@@ -79,7 +82,25 @@ class PipelineBuilder {
                 this.pipeline = await window.pipelineAPI.loadPipeline(this.pipelineId);
                 this.interfaceId = this.pipeline.interfaceId;
                 this.messageType = this.pipeline.messageType;
-            } else if (this.interfaceId && this.messageType) {
+            } else if (this.interfaceId) {
+                // Load interface to get message type if not provided
+                if (!this.messageType || this.messageType === 'hl7v2') {
+                    console.log('📡 Loading interface to get message type...');
+                    const interfaceResponse = await fetch(`/api/interfaces/${this.interfaceId}`);
+                    if (interfaceResponse.ok) {
+                        const interfaceData = await interfaceResponse.json();
+                        // Use message_type from interface, default to ADT^A01 if not set or invalid
+                        const dbMessageType = interfaceData.message_type || interfaceData.messageType;
+                        this.messageType = (dbMessageType && dbMessageType !== 'hl7v2')
+                            ? dbMessageType
+                            : 'ADT^A01';
+                        console.log(`✅ Message type resolved: ${this.messageType}`);
+                    } else {
+                        console.warn('⚠️ Failed to load interface, defaulting to ADT^A01');
+                        this.messageType = 'ADT^A01';
+                    }
+                }
+
                 // Try to load existing pipeline for interface/message type
                 this.pipeline = await window.pipelineAPI.loadPipelineByInterface(
                     this.interfaceId,
@@ -235,6 +256,12 @@ class PipelineBuilder {
     openTestModal() {
         const modal = document.getElementById('testModal');
         if (modal) {
+            // Reset test results when opening modal
+            const resultsDiv = document.getElementById('testResults');
+            const resultsContent = document.getElementById('testResultsContent');
+            if (resultsDiv) resultsDiv.style.display = 'none';
+            if (resultsContent) resultsContent.innerHTML = '';
+
             modal.classList.add('active');
         }
     }
@@ -328,6 +355,11 @@ class PipelineBuilder {
         }
 
         let html = `
+            <div style="margin-bottom: 15px; text-align: right;">
+                <button onclick="window.pipelineBuilder.runTest()" class="btn-secondary" style="padding: 8px 16px;">
+                    <i class="fas fa-redo"></i> Run Test Again
+                </button>
+            </div>
             <div class="test-result ${result.success ? 'success' : 'error'}">
                 <h4>
                     <i class="fas fa-${result.success ? 'check-circle' : 'times-circle'}"></i>

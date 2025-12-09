@@ -341,7 +341,7 @@ class MessageManager {
         }
 
         tbody.innerHTML = messages.map(message => `
-            <tr class="message-row" onclick="showMessageDetail('${message.id}')">
+            <tr class="message-row" onclick="showMessageDetail('${message.message_id}')">
                 <td>
                     <div class="fw-bold">${message.message_id}</div>
                     ${message.correlation_id ? `<small class="text-muted">Corr: ${message.correlation_id}</small>` : ''}
@@ -360,11 +360,11 @@ class MessageManager {
                 </td>
                 <td>
                     <div class="btn-group btn-group-sm">
-                        <button class="btn btn-outline-primary btn-sm" onclick="event.stopPropagation(); showMessageDetail('${message.id}')">
+                        <button class="btn btn-outline-primary btn-sm" onclick="event.stopPropagation(); showMessageDetail('${message.message_id}')">
                             <i class="fas fa-eye"></i>
                         </button>
                         ${message.status === 'failed' || message.status === 'error' ? `
-                            <button class="btn btn-outline-warning btn-sm" onclick="event.stopPropagation(); reprocessMessage('${message.id}')">
+                            <button class="btn btn-outline-warning btn-sm" onclick="event.stopPropagation(); reprocessMessage('${message.message_id}')">
                                 <i class="fas fa-redo"></i>
                             </button>
                         ` : ''}
@@ -959,7 +959,9 @@ class MessageManager {
                         </table>
                     </div>
                 </div>
-                ` : '<div style="background: white; border-radius: 8px; padding: 2rem; text-align: center; color: #cbd5e1; box-shadow: 0 1px 3px rgba(0,0,0,0.05);"><svg style="width: 48px; height: 48px; margin-bottom: 0.5rem;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg><p style="margin: 0;">Awaiting target acknowledgment</p></div>'}
+                ` : (input.interfaceTargetType === 'sink' ?
+                    '<div style="background: white; border-radius: 8px; padding: 2rem; text-align: center; color: #10b981; box-shadow: 0 1px 3px rgba(0,0,0,0.05);"><svg style="width: 48px; height: 48px; margin-bottom: 0.5rem;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg><p style="margin: 0; font-weight: 500;">Final Destination (Sink)</p><p style="margin-top: 0.5rem; font-size: 0.85rem; color: #64748b;">This interface is the final recipient</p></div>'
+                    : '<div style="background: white; border-radius: 8px; padding: 2rem; text-align: center; color: #cbd5e1; box-shadow: 0 1px 3px rgba(0,0,0,0.05);"><svg style="width: 48px; height: 48px; margin-bottom: 0.5rem;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg><p style="margin: 0;">Awaiting target acknowledgment</p></div>')}
 
                 <!-- Complete Timeline -->
                 <div style="background: white; border-radius: 8px; padding: 1.5rem; margin-top: 2rem; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
@@ -1312,6 +1314,114 @@ class MessageManager {
                 ${errorHtml}
             </div>
         `;
+    }
+
+    /**
+     * Load logs for a message from MongoDB (V33 - Interface-Level Logging)
+     */
+    async loadLogs(messageId) {
+        try {
+            const container = document.getElementById('messageLogsView');
+            container.innerHTML = '<div class="text-center"><i class="fas fa-spinner fa-spin"></i> Loading logs...</div>';
+
+            // Get logs from new MongoDB endpoint
+            const logsResponse = await fetch(`/api/messages/${messageId}/logs?interfaceId=${this.currentInterfaceId}&level=all`);
+
+            if (!logsResponse.ok) {
+                throw new Error('Failed to fetch logs');
+            }
+
+            const logsData = await logsResponse.json();
+
+            if (!logsData.success) {
+                throw new Error(logsData.error || 'Failed to load logs');
+            }
+
+            const logs = logsData.data.logs || [];
+            const summary = logsData.data.summary || { total: 0, errors: 0, warnings: 0, info: 0, debug: 0 };
+
+            if (logs.length === 0) {
+                container.innerHTML = `
+                    <div style="background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%); padding: 2.5rem; border-radius: 8px; text-align: center; border: 2px dashed #93c5fd;">
+                        <h6 style="color: #1e40af; margin-bottom: 0.75rem; font-size: 1.1rem;">No Debug Logs Available</h6>
+                        <p style="color: #64748b;">This message was processed before debug logging was enabled.</p>
+                    </div>
+                `;
+                return;
+            }
+
+            const logsHTML = logs.map(log => {
+                const levelColors = {
+                    'error': { bg: '#fef2f2', border: '#f87171', text: '#991b1b', icon: 'exclamation-circle' },
+                    'warning': { bg: '#fef3c7', border: '#fbbf24', text: '#92400e', icon: 'exclamation-triangle' },
+                    'info': { bg: '#eff6ff', border: '#60a5fa', text: '#1e40af', icon: 'info-circle' },
+                    'debug': { bg: '#f5f3ff', border: '#a78bfa', text: '#5b21b6', icon: 'bug' }
+                };
+                const style = levelColors[log.level] || levelColors.info;
+
+                let detailsHTML = '';
+                if (log.details && Object.keys(log.details).length > 0) {
+                    const detailItems = Object.entries(log.details)
+                        .map(([key, value]) => `<strong>${key}:</strong> ${JSON.stringify(value)}`)
+                        .join(', ');
+                    detailsHTML = `<div style="margin-top: 0.5rem; font-size: 0.85rem; font-family: monospace; padding: 0.5rem; background: rgba(0,0,0,0.03); border-radius: 4px;">${detailItems}</div>`;
+                }
+
+                // Add stack trace display
+                let stackTraceHTML = '';
+                if (log.stack_trace) {
+                    stackTraceHTML = `
+                        <details style="margin-top: 0.75rem; background: rgba(0,0,0,0.05); padding: 0.5rem; border-radius: 4px;">
+                            <summary style="cursor: pointer; font-weight: 600; color: ${style.text}; user-select: none;">
+                                <i class="fas fa-layer-group"></i> Stack Trace
+                            </summary>
+                            <pre style="margin: 0.5rem 0 0 0; font-size: 0.75rem; font-family: 'Courier New', monospace; overflow-x: auto; white-space: pre-wrap; word-wrap: break-word;">${log.stack_trace}</pre>
+                        </details>
+                    `;
+                }
+
+                // Add error code if present
+                const errorCodeBadge = log.error_code ? `<span style="background: ${style.border}; color: white; padding: 0.125rem 0.5rem; border-radius: 3px; font-size: 0.7rem; margin-left: 0.5rem;">${log.error_code}</span>` : '';
+
+                return `
+                    <div style="background: ${style.bg}; border-left: 3px solid ${style.border}; padding: 0.75rem 1rem; margin-bottom: 0.5rem; border-radius: 4px;">
+                        <div style="display: flex; justify-content: space-between;">
+                            <div style="flex: 1;">
+                                <div style="display: flex; align-items: center;">
+                                    <i class="fas fa-${style.icon}" style="color: ${style.text};"></i> 
+                                    <strong style="margin-left: 0.5rem;">${log.level.toUpperCase()}</strong> 
+                                    <span style="color: #64748b; margin: 0 0.5rem;">•</span>
+                                    <span style="color: #64748b;">${log.category}</span>
+                                    ${errorCodeBadge}
+                                </div>
+                                <div style="margin-top: 0.5rem; color: #1e293b;">${log.message}</div>
+                                ${detailsHTML}
+                                ${stackTraceHTML}
+                            </div>
+                            <div style="color: #94a3b8; font-size: 0.75rem; white-space: nowrap; margin-left: 1rem;">${new Date(log.timestamp).toLocaleTimeString()}</div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+
+            container.innerHTML = `
+                <div>
+                    <div style="margin-bottom: 1rem;">
+                        <strong>Total:</strong> ${summary.total} |
+                        <strong style="color: #dc2626;">Errors:</strong> ${summary.errors} |
+                        <strong style="color: #d97706;">Warnings:</strong> ${summary.warnings} |
+                        <strong style="color: #2563eb;">Info:</strong> ${summary.info} |
+                        <strong style="color: #7c3aed;">Debug:</strong> ${summary.debug}
+                    </div>
+                    ${logsHTML}
+                </div>
+            `;
+
+        } catch (error) {
+            console.error('Failed to load logs:', error);
+            document.getElementById('messageLogsView').innerHTML = '<div class="alert alert-warning">Unable to load log data.</div>';
+        }
+
     }
 
     escapeHtml(text) {
@@ -2050,6 +2160,8 @@ function switchTab(tabName) {
         messageManager.loadTransformations(messageManager.selectedMessageId);
     } else if (tabName === 'errors' && messageManager.selectedMessageId) {
         messageManager.loadErrors(messageManager.selectedMessageId);
+    } else if (tabName === 'logs' && messageManager.selectedMessageId) {
+        messageManager.loadLogs(messageManager.selectedMessageId);
     }
 }
 

@@ -51,6 +51,7 @@ func (pc *ProcessingController) RegisterRoutes(router *gin.RouterGroup) {
 		processing.POST("/interfaces/:id/activate", pc.ActivateInterface)
 		processing.POST("/interfaces/:id/deactivate", pc.DeactivateInterface)
 		processing.GET("/interfaces/:id/status", pc.GetInterfaceStatus)
+		processing.GET("/interfaces/statuses", pc.GetAllInterfaceStatuses)
 
 		// Message queue management
 		processing.POST("/queue/enqueue", pc.EnqueueMessage)
@@ -232,6 +233,21 @@ func (pc *ProcessingController) GetInterfaceStatus(c *gin.Context) {
 		"success": true,
 		"interface_id": interfaceID,
 		"status": status,
+	})
+}
+
+// GetAllInterfaceStatuses returns statuses for all interfaces in a single call
+func (pc *ProcessingController) GetAllInterfaceStatuses(c *gin.Context) {
+	if !pc.checkEngine(c) {
+		return
+	}
+
+	statuses := pc.engine.GetAllInterfaceStatuses()
+
+	c.JSON(http.StatusOK, gin.H{
+		"success":  true,
+		"statuses": statuses,
+		"count":    len(statuses),
 	})
 }
 

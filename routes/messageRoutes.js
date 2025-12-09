@@ -62,6 +62,9 @@ router.get('/:messageId/lineage', sessionAuth, (req, res) => MessageController.g
 // Get errors and warnings for a message (V23 - Error Handling Enhancement)
 router.get('/:messageId/errors', sessionAuth, (req, res) => MessageController.getMessageErrors(req, res));
 
+// Get processing logs for a message (V33 - Interface-Level Logging)
+router.get('/:messageId/logs', sessionAuth, (req, res) => MessageController.getMessageLogs(req, res));
+
 // Send test message to interface
 router.post('/send/:interfaceId', sessionAuth, (req, res) => MessageController.sendMessage(req, res));
 

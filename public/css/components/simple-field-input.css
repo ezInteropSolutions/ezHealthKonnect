@@ -1,0 +1,32 @@
+/**
+ * SimpleFieldInput - Minimal styles
+ */
+
+.simple-field-input-wrapper {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.simple-field-input {
+    flex: 1;
+    font-family: 'Courier New', monospace;
+    font-size: 13px;
+}
+
+.help-btn {
+    padding: 4px 8px;
+    color: #666;
+    font-size: 16px;
+}
+
+.help-btn:hover {
+    color: #4a90e2;
+}
+
+.field-help-text {
+    display: block;
+    font-size: 11px;
+    margin-top: 2px;
+    color: #999;
+}

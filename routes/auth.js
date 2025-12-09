@@ -147,4 +147,24 @@ router.get('/profile', requireAuth, (req, res) => {
     res.json(req.session.user);
 });
 
+// GET /api/auth/session - Check if session is valid
+router.get('/session', (req, res) => {
+    if (req.session && req.session.user) {
+        res.json({
+            authenticated: true,
+            user: {
+                id: req.session.user.id,
+                email: req.session.user.email,
+                name: req.session.user.name,
+                role: req.session.user.role
+            }
+        });
+    } else {
+        res.status(401).json({
+            authenticated: false,
+            message: 'No active session'
+        });
+    }
+});
+
 module.exports = router;

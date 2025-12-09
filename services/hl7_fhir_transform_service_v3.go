@@ -2216,13 +2216,15 @@ func (s *HL7FHIRTransformServiceV3) convertToAtomicMappings(fieldMappings []Fiel
 		}
 
 		atomicMappings[i] = AtomicMapping{
-			ID:             fmt.Sprintf("%d", fieldMapping.ID),
-			SourcePath:     sourcePath,
-			TargetPath:     fieldMapping.FHIRElementPath,
-			TransformType:  fieldMapping.DataTypeTransform,
-			DefaultValue:   "", // FieldMapping doesn't have default value
-			ValidationRule: "", // FieldMapping doesn't have validation rule
-			IsRequired:     fieldMapping.IsRequired,
+			ID:               fmt.Sprintf("%d", fieldMapping.ID),
+			SourcePath:       sourcePath,
+			TargetPath:       fieldMapping.FHIRElementPath,
+			ResourceType:     fieldMapping.FHIRResourceType,  // Include resource type for UI filtering
+			FHIRResourceType: fieldMapping.FHIRResourceType,  // Alias for compatibility
+			TransformType:    fieldMapping.DataTypeTransform,
+			DefaultValue:     "",                             // FieldMapping doesn't have default value
+			ValidationRule:   "",                             // FieldMapping doesn't have validation rule
+			IsRequired:       fieldMapping.IsRequired,
 		}
 	}
 

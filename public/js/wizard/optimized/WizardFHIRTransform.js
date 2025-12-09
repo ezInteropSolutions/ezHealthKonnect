@@ -147,12 +147,40 @@ class WizardFHIRTransform {
 
                             // Update the mapping container content
                             const mappingContainer = document.getElementById('fhir-mapping-container');
+                            console.log('🔍 Looking for mapping container:', {
+                                found: !!mappingContainer,
+                                currentHTML: mappingContainer?.innerHTML?.substring(0, 100)
+                            });
+
                             if (mappingContainer) {
                                 console.log('🔄 Updating mapping container with new mappings');
-                                mappingContainer.innerHTML = window.wizardController.view.getFHIRMappingContent(currentData);
-                                console.log('✅ Mapping container updated');
+                                console.log('📊 Generating mapping content for:', {
+                                    mappingCount: currentData.fhirTransformResult?.atomicMappings?.length,
+                                    hasTransformResult: !!currentData.fhirTransformResult
+                                });
+
+                                const newContent = window.wizardController.view.getFHIRMappingContent(currentData);
+                                console.log('📄 Generated content length:', newContent.length, 'chars');
+                                console.log('📄 Content preview:', newContent.substring(0, 200));
+
+                                mappingContainer.innerHTML = newContent;
+                                console.log('✅ Mapping container innerHTML updated successfully');
+                                console.log('✅ New container preview:', mappingContainer.innerHTML.substring(0, 200));
+
+                                // Force browser repaint to ensure visual update
+                                void mappingContainer.offsetHeight;
+                                mappingContainer.style.opacity = '0.99';
+                                setTimeout(() => {
+                                    mappingContainer.style.opacity = '1';
+                                    console.log('🎨 Forced visual repaint completed');
+                                }, 10);
                             } else {
                                 console.warn('⚠️ Mapping container not found, doing full re-render');
+                                console.log('🔄 Available elements:', {
+                                    wizardContent: !!document.getElementById('wizard-content'),
+                                    stepContent: !!document.querySelector('.wizard-step-content'),
+                                    allIds: Array.from(document.querySelectorAll('[id]')).map(el => el.id)
+                                });
                                 window.wizardController.view.renderStep(currentStep, currentData);
                             }
 

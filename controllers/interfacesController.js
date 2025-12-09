@@ -56,9 +56,9 @@ class InterfacesController {
             
             console.log(`🔍 Fetching interfaces for user: ${userEmail} (ID: ${userId})`);
 
-            // ✅ UPDATED: Include connectivity fields in SELECT
+            // ✅ UPDATED: Include connectivity fields, deployment settings, and logging settings in SELECT
             const interfaces = await this.database.sequelize.query(`
-                SELECT 
+                SELECT
                     i.id,
                     i.user_id,
                     i.name,
@@ -73,6 +73,12 @@ class InterfacesController {
                     i.processing_rules,
                     i.transformation_mapping,
                     i.status,
+                    i.deployment_mode,
+                    i.auto_start,
+                    i.deployment_delay_seconds,
+                    i.debug_logging,
+                    i.log_retention_days,
+                    i.retain_error_logs_forever,
                     i.total_processed,
                     i.successful_processed,
                     i.failed_processed,
@@ -92,25 +98,36 @@ class InterfacesController {
 
             console.log(`✅ Found ${interfaces.length} interfaces for user: ${userEmail}`);
             
-            // ✅ UPDATED: Transform data with connectivity fields
+            // ✅ UPDATED: Transform data with connectivity fields, deployment settings, and logging settings
             const transformedInterfaces = interfaces.map(item => ({
                 id: item.id,
                 userId: item.user_id,
                 name: item.name,
                 description: item.description,
-                
+
                 // ✅ UPDATED: Include source and target connectivity
                 sourceType: item.source_type,
                 sourceConnectivity: item.source_connectivity,
                 targetType: item.target_type,
                 targetConnectivity: item.target_connectivity,
-                
+
                 sourceConfig: this.parseJsonField(item.source_config),
                 targetConfig: this.parseJsonField(item.target_config),
                 messageType: item.message_type,
                 processingRules: this.parseJsonField(item.processing_rules),
                 transformationMapping: this.parseJsonField(item.transformation_mapping),
                 status: item.status,
+
+                // Deployment settings (V32)
+                deployment_mode: item.deployment_mode || 'manual',
+                auto_start: item.auto_start || false,
+                deployment_delay_seconds: item.deployment_delay_seconds || 0,
+
+                // Logging settings (V33)
+                debug_logging: item.debug_logging || false,
+                log_retention_days: item.log_retention_days || 30,
+                retain_error_logs_forever: item.retain_error_logs_forever !== false,
+
                 statistics: {
                     totalProcessed: item.total_processed || 0,
                     successful: item.successful_processed || 0,
@@ -330,7 +347,7 @@ class InterfacesController {
                         }
 
                         // Create transformed messages collection
-                        const transformedCollectionName = `transformed_messages_intf_${newInterfaceItem.id}`;
+                        const transformedCollectionName = `transformed_messages_intf_${newInterfaceItem.id.replace(/-/g, '_')}`;
                         const transformedCollections = await db.listCollections({ name: transformedCollectionName }).toArray();
 
                         if (transformedCollections.length === 0) {
@@ -760,13 +777,23 @@ class InterfacesController {
             const userEmail = req.session.user.email;
             const interfaceId = req.params.interfaceId;
 
-            // Query parameters for data retention
-            // ?retainData=false to permanently delete table/collection
-            // ?retainData=true (default) to keep table/collection for data recovery
-            const retainData = req.query.retainData !== 'false'; // default true
+            // New: Support request body parameters from delete modal
+            const deleteType = req.body?.deleteType || req.query.deleteType || 'soft'; // soft or hard
+            const dataRetention = req.body?.dataRetention || req.query.dataRetention || 'keep_all'; // keep_all, keep_errors, delete_all
+
+            // Legacy support: ?retainData=false maps to hard delete + delete_all
+            const legacyRetainData = req.query.retainData;
+            if (legacyRetainData !== undefined) {
+                console.log('⚠️  Using legacy retainData parameter');
+                if (legacyRetainData === 'false') {
+                    deleteType = 'hard';
+                    dataRetention = 'delete_all';
+                }
+            }
 
             console.log(`🔍 Deleting interface ${interfaceId} for user: ${userEmail}`);
-            console.log(`   Retain data: ${retainData ? 'YES (soft delete + keep table)' : 'NO (hard delete + drop table)'}`);
+            console.log(`   Delete type: ${deleteType}`);
+            console.log(`   Data retention: ${dataRetention}`);
 
             // Get current interface
             const interfaceData = await this.database.sequelize.query(`
@@ -794,31 +821,61 @@ class InterfacesController {
                 });
             }
 
-            // ALWAYS soft delete the interface record (for audit trail)
-            await this.database.sequelize.query(`
-                UPDATE interfaces
-                SET is_active = false,
-                    status = 'deleted',
-                    updated_by = :userId,
-                    updated_at = NOW(),
-                    deleted_at = NOW()
-                WHERE id = :interfaceId
-            `, {
-                replacements: { userId, interfaceId },
-                type: this.database.sequelize.QueryTypes.UPDATE
-            });
+            // CRITICAL: Deactivate interface in Go backend FIRST to release ports/resources
+            // Even if status is not 'active', there might be zombie listeners
+            try {
+                console.log(`🛑 Deactivating interface ${interfaceId} in Go backend before delete...`);
+                const goBackendUrl = `http://localhost:${process.env.API_PORT || 8080}/api/processing/interfaces/${interfaceId}/deactivate`;
+                const deactivateResponse = await fetch(goBackendUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' }
+                });
 
-            console.log(`✅ Interface soft-deleted in database - User: ${userEmail}, Interface: ${interfaceItem.name}`);
+                if (deactivateResponse.ok) {
+                    console.log(`✅ Interface ${interfaceId} deactivated in Go backend`);
+                } else {
+                    console.log(`⚠️  Deactivation returned status ${deactivateResponse.status}, proceeding with delete anyway`);
+                }
+            } catch (deactivateError) {
+                console.log(`⚠️  Could not deactivate interface in Go backend: ${deactivateError.message}`);
+                console.log(`   Proceeding with delete anyway (interface may already be stopped)`);
+            }
 
-            // Optional: Drop PostgreSQL table and MongoDB collection
-            if (!retainData) {
-                try {
-                    const InterfaceTableManager = require('../services/InterfaceTableManager');
-                    const tableManager = new InterfaceTableManager();
+            // Step 1: Mark interface as deleted (soft or hard delete)
+            if (deleteType === 'soft') {
+                // Soft delete: Mark as deleted but keep record
+                await this.database.sequelize.query(`
+                    UPDATE interfaces
+                    SET is_active = false,
+                        status = 'deleted',
+                        updated_by = :userId,
+                        updated_at = NOW(),
+                        deleted_at = NOW()
+                    WHERE id = :interfaceId
+                `, {
+                    replacements: { userId, interfaceId },
+                    type: this.database.sequelize.QueryTypes.UPDATE
+                });
+                console.log(`✅ Interface soft-deleted (can be restored) - User: ${userEmail}, Interface: ${interfaceItem.name}`);
+            } else {
+                // Hard delete: Permanently remove interface record
+                await this.database.sequelize.query(`
+                    DELETE FROM interfaces WHERE id = :interfaceId
+                `, {
+                    replacements: { interfaceId },
+                    type: this.database.sequelize.QueryTypes.DELETE
+                });
+                console.log(`🗑️  Interface permanently deleted - User: ${userEmail}, Interface: ${interfaceItem.name}`);
+            }
 
-                    const tableName = tableManager.getInterfaceTableName(interfaceId);
+            // Step 2: Handle message data based on retention policy
+            try {
+                const InterfaceTableManager = require('../services/InterfaceTableManager');
+                const tableManager = new InterfaceTableManager();
+                const tableName = tableManager.getInterfaceTableName(interfaceId);
 
-                    // Drop PostgreSQL table
+                if (dataRetention === 'delete_all') {
+                    // Delete all messages - drop table completely
                     await this.database.sequelize.query(`DROP TABLE IF EXISTS ${tableName} CASCADE`);
                     console.log(`🗑️  Dropped PostgreSQL table: ${tableName}`);
 
@@ -829,25 +886,44 @@ class InterfacesController {
                         replacements: { interfaceId },
                         type: this.database.sequelize.QueryTypes.DELETE
                     });
+                    console.log(`🗑️  All message data permanently deleted`);
 
-                    // MongoDB collection deletion would happen via Go backend
-                    console.log(`ℹ️  MongoDB collection cleanup will happen automatically via TTL or manual cleanup`);
+                } else if (dataRetention === 'keep_errors') {
+                    // Delete successful messages, keep errors for analysis
+                    await this.database.sequelize.query(`
+                        DELETE FROM ${tableName}
+                        WHERE status NOT IN ('error', 'failed', 'validation_error')
+                    `);
+                    console.log(`🗑️  Deleted successful messages, retained error records`);
 
-                } catch (tableError) {
-                    console.error(`⚠️  Failed to drop table (non-critical):`, tableError.message);
-                    // Continue - table deletion is optional
+                } else {
+                    // keep_all - do nothing, preserve all data
+                    console.log(`ℹ️  All message data preserved for audit/recovery`);
                 }
+
+            } catch (tableError) {
+                console.error(`⚠️  Failed to handle message data (non-critical):`, tableError.message);
+                // Continue - message data cleanup is optional
+            }
+
+            // Build response message
+            let dataInfo = '';
+            if (dataRetention === 'delete_all') {
+                dataInfo = 'All message data permanently deleted.';
+            } else if (dataRetention === 'keep_errors') {
+                dataInfo = 'Successful messages deleted, error records retained for analysis.';
             } else {
-                console.log(`ℹ️  Data retained - PostgreSQL table and MongoDB collection preserved for recovery`);
+                dataInfo = 'All message data retained for audit/recovery.';
             }
 
             return res.json({
                 success: true,
                 message: `Interface "${interfaceItem.name}" deleted successfully`,
-                dataRetained: retainData,
-                info: retainData
-                    ? 'Interface data retained in database tables. You can restore this interface if needed.'
-                    : 'Interface data permanently deleted from storage tables.'
+                deleteType: deleteType,
+                dataRetention: dataRetention,
+                info: deleteType === 'soft'
+                    ? `Interface soft-deleted (can be restored). ${dataInfo}`
+                    : `Interface permanently deleted. ${dataInfo}`
             });
 
         } catch (error) {
@@ -884,7 +960,16 @@ class InterfacesController {
                 sourceConfig,
                 targetConfig,
                 processingRules,
-                transformationMapping
+                transformationMapping,
+                // Deployment settings (V32)
+                deployment_mode,
+                auto_start,
+                deployment_delay_seconds,
+                status,
+                // Logging settings (V33)
+                debug_logging,
+                log_retention_days,
+                retain_error_logs_forever
             } = req.body;
 
             console.log(`🔍 Updating interface ${interfaceId} for user: ${userEmail}`);
@@ -894,6 +979,9 @@ class InterfacesController {
             console.log(`   Target Config (type: ${typeof targetConfig}):`, targetConfig);
             console.log(`   Processing Rules (type: ${typeof processingRules}):`, processingRules);
             console.log(`   Transformation Mapping (type: ${typeof transformationMapping}):`, transformationMapping);
+            console.log(`   Deployment: mode=${deployment_mode}, auto_start=${auto_start}, delay=${deployment_delay_seconds}s`);
+            console.log(`   Status: ${status}`);
+            console.log(`   Logging: debug=${debug_logging}, retention=${log_retention_days} days, retain_errors=${retain_error_logs_forever}`);
 
             // Verify interface exists and belongs to user
             const existingInterface = await this.database.sequelize.query(`
@@ -949,16 +1037,30 @@ class InterfacesController {
                 userId
             });
 
+            // Add deployment settings to replacements (V32)
+            replacements.deployment_mode = deployment_mode || 'manual';
+            replacements.auto_start = auto_start === true || auto_start === 'true';
+            replacements.deployment_delay_seconds = parseInt(deployment_delay_seconds) || 0;
+            replacements.status = status || 'inactive';
+
+            // Add logging settings to replacements (V33)
+            replacements.debug_logging = debug_logging === true || debug_logging === 'true';
+            replacements.log_retention_days = parseInt(log_retention_days) || 30;
+            replacements.retain_error_logs_forever = retain_error_logs_forever !== false && retain_error_logs_forever !== 'false';
+
             console.log('📊 OOB Update - JSONB fields prepared:', {
                 sourceConnectivity: replacements.sourceConnectivity?.substring(0, 150),
                 targetConnectivity: replacements.targetConnectivity?.substring(0, 150)
             });
 
             // Update interface with consistent JSONB casting for ALL JSONB columns
+            // V32: Added deployment settings columns
+            // V33: Added logging settings columns
             await this.database.sequelize.query(`
                 UPDATE interfaces SET
                     name = :name,
                     description = :description,
+                    status = :status,
                     source_type = :sourceType,
                     source_connectivity = :sourceConnectivity::jsonb,
                     target_type = :targetType,
@@ -968,6 +1070,12 @@ class InterfacesController {
                     target_config = :targetConfig::jsonb,
                     processing_rules = :processingRules::jsonb,
                     transformation_mapping = :transformationMapping::jsonb,
+                    deployment_mode = :deployment_mode,
+                    auto_start = :auto_start,
+                    deployment_delay_seconds = :deployment_delay_seconds,
+                    debug_logging = :debug_logging,
+                    log_retention_days = :log_retention_days,
+                    retain_error_logs_forever = :retain_error_logs_forever,
                     updated_by = :userId,
                     updated_at = CURRENT_TIMESTAMP
                 WHERE id = :interfaceId

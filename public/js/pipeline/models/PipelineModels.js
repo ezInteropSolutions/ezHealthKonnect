@@ -191,6 +191,12 @@ class VisualStep {
     }
 
     toJSON() {
+        console.log('[VisualStep.toJSON] Serializing step:', {
+            id: this.id,
+            stepName: this.stepName,
+            stepType: this.stepType,
+            instanceOf: this instanceof VisualStep
+        });
         return {
             id: this.id,
             step_name: this.stepName,

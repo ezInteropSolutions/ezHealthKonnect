@@ -39,7 +39,7 @@ class InterfaceConfigComponents {
                     <option value="xml" ${selectedValue === 'xml' ? 'selected' : ''}>XML</option>
                     <option value="csv" ${selectedValue === 'csv' ? 'selected' : ''}>CSV</option>
                 </select>
-                ${config.showHint !== false ? '<div class="form-hint">💡 OOB: HL7 v2.x is most common in healthcare</div>' : ''}
+                ${config.showHint !== false ? '<div class="form-hint">OOB: HL7 v2.x is most common in healthcare</div>' : ''}
             </div>
         `;
     }
@@ -69,7 +69,7 @@ class InterfaceConfigComponents {
                     <option value="rabbitmq" ${selectedValue === 'rabbitmq' ? 'selected' : ''}>RabbitMQ</option>
                     <option value="kafka" ${selectedValue === 'kafka' ? 'selected' : ''}>Apache Kafka</option>
                 </select>
-                ${config.showHint !== false ? '<div class="form-hint">💡 OOB: TCP/MLLP for HL7, HTTP for FHIR</div>' : ''}
+                ${config.showHint !== false ? '<div class="form-hint">OOB: TCP/MLLP for HL7, HTTP for FHIR</div>' : ''}
             </div>
         `;
     }
@@ -139,7 +139,7 @@ class InterfaceConfigComponents {
                                    value="${config.host || 'localhost'}"
                                    placeholder="localhost"
                                    name="${direction}Host">
-                            <div class="form-hint">💡 OOB: localhost for development</div>
+                            <div class="form-hint">OOB: localhost for development</div>
                         </div>
                         <div class="form-group">
                             <label for="${prefix}Port" class="form-label required">Port</label>
@@ -148,7 +148,7 @@ class InterfaceConfigComponents {
                                    min="1" max="65535"
                                    placeholder="2575"
                                    name="${direction}Port">
-                            <div class="form-hint">💡 OOB: 2575 is standard HL7 port</div>
+                            <div class="form-hint">OOB: 2575 is standard HL7 port</div>
                         </div>
                     </div>
                 ` : `
@@ -246,10 +246,10 @@ class InterfaceConfigComponents {
      * @param {string} idPrefix - ID prefix for form fields
      */
     static getHttpAuthConfig(config = {}, idPrefix = '') {
-        console.log('🔐 getHttpAuthConfig called with:', { config, idPrefix });
+        console.log('getHttpAuthConfig called with:', { config, idPrefix });
         return `
             <div class="config-group http-auth-config">
-                <h4>🔐 HTTP Authentication</h4>
+                <h4>HTTP Authentication</h4>
                 <div class="form-hint" style="background: #e7f3ff; padding: 8px; margin-bottom: 10px; border-left: 3px solid #0066cc;">
                     <strong>Secure your endpoint:</strong> Choose authentication based on your security requirements and client capabilities.
                 </div>
@@ -290,7 +290,7 @@ class InterfaceConfigComponents {
                 return `
                     <div class="auth-info">
                         <div class="alert alert-warning">
-                            ⚠️ <strong>No Authentication</strong> - Endpoint is publicly accessible. Only use in development environments.
+                            <strong>No Authentication</strong> - Endpoint is publicly accessible. Only use in development environments.
                         </div>
                     </div>
                 `;
@@ -299,20 +299,20 @@ class InterfaceConfigComponents {
                 return `
                     <div class="auth-fields">
                         <div class="form-group">
-                            <label for="${idPrefix}AuthApiKeyHeader" class="form-label">Header Name</label>
-                            <input type="text" id="${idPrefix}AuthApiKeyHeader" class="form-control"
+                            <label for="${idPrefix}HttpAuthApiKeyHeader" class="form-label">Header Name</label>
+                            <input type="text" id="${idPrefix}HttpAuthApiKeyHeader" class="form-control"
                                    value="${config.apiKeyHeader || 'X-API-Key'}"
                                    placeholder="X-API-Key"
                                    name="apiKeyHeader">
                             <div class="form-hint">Header name for API key (e.g., X-API-Key, Authorization)</div>
                         </div>
                         <div class="form-group">
-                            <label for="${idPrefix}AuthApiKeyValue" class="form-label">Expected API Key</label>
-                            <input type="password" id="${idPrefix}AuthApiKeyValue" class="form-control"
-                                   value="${config.apiKeyValue || ''}"
+                            <label for="${idPrefix}HttpAuthApiKey" class="form-label">API Key</label>
+                            <input type="password" id="${idPrefix}HttpAuthApiKey" class="form-control"
+                                   value="${config.apiKey || ''}"
                                    placeholder="Enter API key"
-                                   name="apiKeyValue">
-                            <div class="form-hint">The API key value to validate against</div>
+                                   name="apiKey">
+                            <div class="form-hint">The API key value to send with requests</div>
                         </div>
                         <div class="form-group">
                             <label class="checkbox-label">
@@ -328,27 +328,27 @@ class InterfaceConfigComponents {
                 return `
                     <div class="auth-fields">
                         <div class="alert alert-info">
-                            ℹ️ Basic Authentication encodes credentials in Base64. <strong>Always use HTTPS</strong> to protect credentials in transit.
+                            Basic Authentication encodes credentials in Base64. <strong>Always use HTTPS</strong> to protect credentials in transit.
                         </div>
                         <div class="form-row">
                             <div class="form-group">
-                                <label for="${idPrefix}AuthUsername" class="form-label">Username</label>
-                                <input type="text" id="${idPrefix}AuthUsername" class="form-control"
+                                <label for="${idPrefix}HttpAuthUsername" class="form-label">Username</label>
+                                <input type="text" id="${idPrefix}HttpAuthUsername" class="form-control"
                                        value="${config.username || ''}"
                                        placeholder="username"
                                        name="username">
                             </div>
                             <div class="form-group">
-                                <label for="${idPrefix}AuthPassword" class="form-label">Password</label>
-                                <input type="password" id="${idPrefix}AuthPassword" class="form-control"
+                                <label for="${idPrefix}HttpAuthPassword" class="form-label">Password</label>
+                                <input type="password" id="${idPrefix}HttpAuthPassword" class="form-control"
                                        value="${config.password || ''}"
                                        placeholder="password"
                                        name="password">
                             </div>
                         </div>
                         <div class="form-group">
-                            <label for="${idPrefix}AuthRealm" class="form-label">Realm (Optional)</label>
-                            <input type="text" id="${idPrefix}AuthRealm" class="form-control"
+                            <label for="${idPrefix}HttpAuthRealm" class="form-label">Realm (Optional)</label>
+                            <input type="text" id="${idPrefix}HttpAuthRealm" class="form-control"
                                    value="${config.realm || ''}"
                                    placeholder="Restricted Area"
                                    name="realm">
@@ -361,8 +361,8 @@ class InterfaceConfigComponents {
                 return `
                     <div class="auth-fields">
                         <div class="form-group">
-                            <label for="${idPrefix}AuthBearerToken" class="form-label">Bearer Token</label>
-                            <textarea id="${idPrefix}AuthBearerToken" class="form-control" rows="3"
+                            <label for="${idPrefix}HttpAuthBearerToken" class="form-label">Bearer Token</label>
+                            <textarea id="${idPrefix}HttpAuthBearerToken" class="form-control" rows="3"
                                       placeholder="Enter bearer token (e.g., JWT)"
                                       name="bearerToken">${config.bearerToken || ''}</textarea>
                             <div class="form-hint">Token sent in Authorization: Bearer {token} header</div>
@@ -390,7 +390,7 @@ class InterfaceConfigComponents {
                 return `
                     <div class="auth-fields">
                         <div class="alert alert-info">
-                            ℹ️ OAuth 2.0 configuration. For FHIR endpoints, this supports SMART on FHIR workflows.
+                            OAuth 2.0 configuration. For FHIR endpoints, this supports SMART on FHIR workflows.
                         </div>
                         <div class="form-group">
                             <label for="${idPrefix}AuthOAuthIssuer" class="form-label">Token Issuer URL</label>
@@ -430,7 +430,7 @@ class InterfaceConfigComponents {
                 return `
                     <div class="auth-fields">
                         <div class="alert alert-info">
-                            ℹ️ Mutual TLS (mTLS) requires both server and client certificates. Highest security level.
+                            Mutual TLS (mTLS) requires both server and client certificates. Highest security level.
                         </div>
                         <div class="form-group">
                             <label for="${idPrefix}AuthMtlsServerCert" class="form-label">Server Certificate Path</label>
@@ -483,9 +483,9 @@ class InterfaceConfigComponents {
 
         return `
             <div class="config-group http-receiver-config">
-                <h4>🌐 HTTP/REST Receiver Configuration</h4>
+                <h4>HTTP/REST Receiver Configuration</h4>
                 <div class="form-hint" style="background: #fff3cd; padding: 10px; border-left: 4px solid #ffc107; margin-bottom: 15px;">
-                    <strong>ℹ️ Universal HTTP Receiver</strong><br>
+                    <strong>Universal HTTP Receiver</strong><br>
                     Accept any HTTP payload: HL7 messages, JSON, XML, custom formats, webhooks, etc.
                 </div>
 
@@ -506,8 +506,8 @@ class InterfaceConfigComponents {
                                    required
                                    name="port">
                             <div class="form-hint">
-                                ⚠️ <strong>Reserved</strong>: ${reservedPortsStr}<br>
-                                ✅ <strong>Recommended</strong>: 8082-8089, 9000-9999
+                                <strong>Reserved</strong>: ${reservedPortsStr}<br>
+                                <strong>Recommended</strong>: 8082-8089, 9000-9999
                             </div>
                         </div>
                         <div class="form-group" style="flex: 1;">
@@ -520,7 +520,7 @@ class InterfaceConfigComponents {
                         </div>
                     </div>
                     <div class="alert alert-info" style="margin-top: 12px; padding: 10px; background: #d1ecf1; border: 1px solid #bee5eb; border-radius: 4px; font-size: 13px;">
-                        <strong>📡 External systems will send requests to:</strong><br>
+                        <strong>External systems will send requests to:</strong><br>
                         <code style="background: #fff; padding: 2px 6px; border-radius: 3px;">http://your-server:<span id="${idPrefix}HttpPortPreview">${config.port || '8082'}</span><span id="${idPrefix}HttpContextPreview">${config.contextPath || '/api/receive'}</span></code>
                     </div>
                 </div>
@@ -536,7 +536,7 @@ class InterfaceConfigComponents {
                            placeholder="/api/receive"
                            required
                            name="contextPath">
-                    <div class="form-hint">💡 URL path for incoming requests (e.g., /api/receive, /hl7/inbound, /webhook)</div>
+                    <div class="form-hint">URL path for incoming requests (e.g., /api/receive, /hl7/inbound, /webhook)</div>
                 </div>
 
                 <!-- HTTP Methods -->
@@ -640,7 +640,7 @@ class InterfaceConfigComponents {
     static getFhirReceiverConfig(config = {}, idPrefix = '') {
         return `
             <div class="config-group fhir-receiver-config">
-                <h4>🏥 FHIR Receiver Configuration</h4>
+                <h4>FHIR Receiver Configuration</h4>
 
                 <!-- Listener Configuration -->
                 <div class="config-group" style="background: #f8f9fa; padding: 15px; border-radius: 6px; margin-bottom: 20px;">
@@ -660,7 +660,7 @@ class InterfaceConfigComponents {
                                    name="port"
                                    data-id-prefix="${idPrefix}">
                             <div id="${idPrefix}portValidation" class="form-hint">
-                                ✅ <strong>Recommended</strong>: 8082-8089, 9000-9999
+                                <strong>Recommended</strong>: 8082-8089, 9000-9999
                             </div>
                         </div>
                         <div class="form-group" style="flex: 1;">
@@ -673,7 +673,7 @@ class InterfaceConfigComponents {
                         </div>
                     </div>
                     <div class="alert alert-info" style="margin-top: 12px; padding: 10px; background: #d1ecf1; border: 1px solid #bee5eb; border-radius: 4px; font-size: 13px;">
-                        <strong>📡 External systems will send FHIR resources to:</strong><br>
+                        <strong>External systems will send FHIR resources to:</strong><br>
                         <code style="background: #fff; padding: 2px 6px; border-radius: 3px;">http://your-server:<span id="${idPrefix}PortPreview">${config.port || '8082'}</span><span id="${idPrefix}BasePathPreview">${config.basePath || '/fhir'}</span>/Patient</code>
                     </div>
                 </div>
@@ -686,7 +686,7 @@ class InterfaceConfigComponents {
                            placeholder="/fhir"
                            name="basePath"
                            data-id-prefix="${idPrefix}">
-                    <div class="form-hint">💡 URL path prefix for FHIR endpoints (e.g., /fhir/r4, /api/fhir)</div>
+                    <div class="form-hint">URL path prefix for FHIR endpoints (e.g., /fhir/r4, /api/fhir)</div>
                 </div>
 
                 <!-- FHIR Version -->
@@ -857,43 +857,95 @@ class InterfaceConfigComponents {
 
         return `
             <div class="config-group">
-                <h4>File ${isSource ? 'Listener' : 'Writer'} Configuration</h4>
+                <h4>📂 File ${isSource ? 'Listener' : 'Writer'} Configuration</h4>
                 <div class="form-group">
-                    <label for="${prefix}FilePath" class="form-label required">${isSource ? 'Watch Directory' : 'Output Directory'}</label>
-                    <input type="text" id="${prefix}FilePath" class="form-control"
-                           value="${config.filePath || '/data/hl7/incoming'}"
+                    <label for="${prefix}DirectoryPath" class="form-label required">${isSource ? 'Watch Directory' : 'Output Directory'}</label>
+                    <input type="text" id="${prefix}DirectoryPath" class="form-control"
+                           value="${config.directoryPath || config.directory_path || '/data/hl7/incoming'}"
                            placeholder="/data/hl7/incoming"
-                           name="${direction}FilePath">
-                    <div class="form-hint">${isSource ? 'Directory to monitor for new files' : 'Directory where files will be written'}</div>
+                           name="${direction}DirectoryPath">
+                    <div class="form-hint">${isSource ? '📁 Directory to monitor for new files' : '📁 Directory where files will be written'}</div>
                 </div>
                 ${isSource ? `
                     <div class="form-group">
                         <label for="${prefix}FilePattern" class="form-label">File Pattern</label>
                         <input type="text" id="${prefix}FilePattern" class="form-control"
-                               value="${config.filePattern || '*.hl7'}"
+                               value="${config.filePattern || config.file_pattern || '*.hl7'}"
                                placeholder="*.hl7"
                                name="${direction}FilePattern">
-                        <div class="form-hint">Glob pattern to match files (e.g., *.hl7, ADT_*.txt)</div>
+                        <div class="form-hint">🔍 Glob pattern (e.g., *.hl7, ADT_*.txt, message_*.xml)</div>
                     </div>
                     <div class="form-group">
-                        <label class="checkbox-label">
-                            <input type="checkbox" id="${prefix}DeleteAfterProcess" name="${direction}DeleteAfterProcess"
-                                   ${config.deleteAfterProcess ? 'checked' : ''}>
-                            <span>Delete files after successful processing</span>
-                        </label>
+                        <label for="${prefix}PollingInterval" class="form-label">Polling Interval (seconds)</label>
+                        <input type="number" id="${prefix}PollingInterval" class="form-control"
+                               value="${config.pollingInterval || config.polling_interval || 10}"
+                               min="1" max="3600"
+                               name="${direction}PollingInterval">
+                        <div class="form-hint">How often to scan directory (default: 10 seconds)</div>
+                    </div>
+                    <div class="form-group">
+                        <label for="${prefix}AfterProcessing" class="form-label">After Processing</label>
+                        <select id="${prefix}AfterProcessing" class="form-control" name="${direction}AfterProcessing"
+                                onchange="InterfaceConfigComponents.toggleArchivePath('${prefix}')">
+                            <option value="nothing" ${(config.afterProcessing || config.after_processing) === 'nothing' ? 'selected' : ''}>Leave File (Nothing)</option>
+                            <option value="delete" ${(config.afterProcessing || config.after_processing) === 'delete' ? 'selected' : ''}>Delete File</option>
+                            <option value="move" ${(config.afterProcessing || config.after_processing) === 'move' ? 'selected' : ''}>Move to Archive</option>
+                            <option value="archive" ${(config.afterProcessing || config.after_processing) === 'archive' ? 'selected' : ''}>Archive File</option>
+                        </select>
+                        <div class="form-hint">What to do with file after processing</div>
+                    </div>
+                    <div class="form-group" id="${prefix}ArchivePathGroup" style="display: ${(config.afterProcessing || config.after_processing) === 'move' || (config.afterProcessing || config.after_processing) === 'archive' ? 'block' : 'none'}">
+                        <label for="${prefix}ArchivePath" class="form-label">Archive Directory</label>
+                        <input type="text" id="${prefix}ArchivePath" class="form-control"
+                               value="${config.archivePath || config.archive_path || '/data/hl7/archive'}"
+                               placeholder="/data/hl7/archive"
+                               name="${direction}ArchivePath">
+                        <div class="form-hint">📦 Directory for archived files (required if using move/archive)</div>
                     </div>
                 ` : `
                     <div class="form-group">
-                        <label for="${prefix}FileNaming" class="form-label">File Naming Pattern</label>
-                        <input type="text" id="${prefix}FileNaming" class="form-control"
-                               value="${config.fileNaming || '{timestamp}_{messageId}.hl7'}"
-                               placeholder="{timestamp}_{messageId}.hl7"
-                               name="${direction}FileNaming">
-                        <div class="form-hint">Variables: {timestamp}, {messageId}, {interfaceId}</div>
+                        <label for="${prefix}FilenamePattern" class="form-label">File Naming Pattern</label>
+                        <input type="text" id="${prefix}FilenamePattern" class="form-control"
+                               value="${config.filenamePattern || config.filename_pattern || 'message_{timestamp}.hl7'}"
+                               placeholder="message_{timestamp}.hl7"
+                               name="${direction}FilenamePattern">
+                        <div class="form-hint">📝 Variables: {timestamp}, {date}, {time}, {message_id}, {interface_id}</div>
+                    </div>
+                    <div class="form-group">
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="${prefix}AppendTimestamp" name="${direction}AppendTimestamp"
+                                   ${config.appendTimestamp || config.append_timestamp ? 'checked' : ''}>
+                            <span>Append timestamp if file exists</span>
+                        </label>
+                        <div class="form-hint">⏰ Prevents overwriting existing files</div>
                     </div>
                 `}
+                <div class="form-group">
+                    <label for="${prefix}Encoding" class="form-label">File Encoding</label>
+                    <select id="${prefix}Encoding" class="form-control" name="${direction}Encoding">
+                        <option value="UTF-8" ${(config.encoding || 'UTF-8') === 'UTF-8' ? 'selected' : ''}>UTF-8</option>
+                        <option value="ASCII" ${config.encoding === 'ASCII' ? 'selected' : ''}>ASCII</option>
+                        <option value="ISO-8859-1" ${config.encoding === 'ISO-8859-1' ? 'selected' : ''}>ISO-8859-1</option>
+                    </select>
+                    <div class="form-hint">📄 Character encoding for files</div>
+                </div>
             </div>
         `;
+    }
+
+    /**
+     * Toggle Archive Path visibility based on After Processing selection
+     * @param {string} prefix - Field ID prefix
+     */
+    static toggleArchivePath(prefix) {
+        const afterProcessingSelect = document.getElementById(`${prefix}AfterProcessing`);
+        const archivePathGroup = document.getElementById(`${prefix}ArchivePathGroup`);
+
+        if (afterProcessingSelect && archivePathGroup) {
+            const value = afterProcessingSelect.value;
+            // Show archive path only for 'move' or 'archive' actions
+            archivePathGroup.style.display = (value === 'move' || value === 'archive') ? 'block' : 'none';
+        }
     }
 
     /**
@@ -904,14 +956,607 @@ class InterfaceConfigComponents {
      */
     static getDatabaseConfig(direction = 'source', config = {}, idPrefix = '') {
         const prefix = idPrefix + direction;
+        const isSource = direction === 'source';
+        const label = direction.charAt(0).toUpperCase() + direction.slice(1);
+
+        // Database type detection from config or default to PostgreSQL
+        const dbType = config.db_type || config.dbType || 'postgresql';
+
         return `
-            <div class="config-group">
-                <h4>Database Configuration</h4>
-                <div class="alert alert-info">
-                    ℹ️ Database connectivity configuration coming soon. For now, use file or HTTP connectivity.
+            <div class="config-group database-config">
+                <h4 style="margin-bottom: 20px; color: #343a40;">
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align: text-bottom; margin-right: 8px;">
+                        <ellipse cx="12" cy="5" rx="9" ry="3"></ellipse>
+                        <path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"></path>
+                        <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"></path>
+                    </svg>
+                    Database Configuration
+                </h4>
+
+                <!-- Database Type Selection -->
+                <div class="form-group">
+                    <label for="${prefix}DbType" class="form-label required">Database Type</label>
+                    <select id="${prefix}DbType" class="form-control db-type-selector" name="${direction}DbType"
+                            onchange="InterfaceConfigComponents.onDatabaseTypeChange('${prefix}')">
+                        <optgroup label="Traditional RDBMS">
+                            <option value="postgresql" ${dbType === 'postgresql' ? 'selected' : ''}>PostgreSQL</option>
+                            <option value="mysql" ${dbType === 'mysql' ? 'selected' : ''}>MySQL / MariaDB</option>
+                            <option value="sqlserver" ${dbType === 'sqlserver' ? 'selected' : ''}>SQL Server</option>
+                            <option value="oracle" ${dbType === 'oracle' ? 'selected' : ''}>Oracle Database</option>
+                        </optgroup>
+                        <optgroup label="NoSQL">
+                            <option value="mongodb" ${dbType === 'mongodb' ? 'selected' : ''}>MongoDB</option>
+                        </optgroup>
+                        <optgroup label="Cloud Data Warehouses">
+                            <option value="snowflake" ${dbType === 'snowflake' ? 'selected' : ''}>Snowflake</option>
+                            <option value="databricks" ${dbType === 'databricks' ? 'selected' : ''}>Databricks SQL</option>
+                            <option value="bigquery" ${dbType === 'bigquery' ? 'selected' : ''}>Google BigQuery</option>
+                            <option value="redshift" ${dbType === 'redshift' ? 'selected' : ''}>AWS Redshift</option>
+                            <option value="synapse" ${dbType === 'synapse' ? 'selected' : ''}>Azure Synapse</option>
+                        </optgroup>
+                        <optgroup label="Specialized Analytics">
+                            <option value="clickhouse" ${dbType === 'clickhouse' ? 'selected' : ''}>ClickHouse</option>
+                            <option value="timescaledb" ${dbType === 'timescaledb' ? 'selected' : ''}>TimescaleDB</option>
+                        </optgroup>
+                    </select>
+                    <div class="form-hint">Select the database platform to connect to</div>
+                </div>
+
+                <!-- Connection Configuration -->
+                <div id="${prefix}DbConnectionFields">
+                    ${this.getDatabaseConnectionFields(direction, dbType, config, prefix)}
+                </div>
+
+                <!-- Query Configuration (Source only) -->
+                ${isSource ? `
+                    <div class="form-group" style="margin-top: 20px;">
+                        <h5 style="margin-bottom: 15px; color: #495057; border-bottom: 1px solid #e9ecef; padding-bottom: 8px;">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align: text-bottom; margin-right: 6px;">
+                                <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                                <line x1="3" y1="9" x2="21" y2="9"></line>
+                                <line x1="9" y1="21" x2="9" y2="9"></line>
+                            </svg>
+                            Query Configuration
+                        </h5>
+                        <div style="display: flex; gap: 20px; margin-bottom: 15px;">
+                            <label style="display: flex; align-items: center; cursor: pointer; padding: 10px 15px; border: 2px solid ${!config.query ? '#007bff' : '#dee2e6'}; border-radius: 6px; background: ${!config.query ? '#f0f7ff' : '#fff'}; flex: 1;">
+                                <input type="radio" id="${prefix}QueryModeTable" name="${prefix}QueryMode" value="table"
+                                       style="width: 18px; height: 18px; margin-right: 10px; accent-color: #007bff;" ${!config.query ? 'checked' : ''}
+                                       onchange="InterfaceConfigComponents.toggleQueryMode('${prefix}', 'table')">
+                                <span>
+                                    <strong style="display: block; font-size: 14px;">Table-based</strong>
+                                    <small style="color: #6c757d;">Simple table query with auto-polling</small>
+                                </span>
+                            </label>
+                            <label style="display: flex; align-items: center; cursor: pointer; padding: 10px 15px; border: 2px solid ${config.query ? '#007bff' : '#dee2e6'}; border-radius: 6px; background: ${config.query ? '#f0f7ff' : '#fff'}; flex: 1;">
+                                <input type="radio" id="${prefix}QueryModeCustom" name="${prefix}QueryMode" value="custom"
+                                       style="width: 18px; height: 18px; margin-right: 10px; accent-color: #007bff;" ${config.query ? 'checked' : ''}
+                                       onchange="InterfaceConfigComponents.toggleQueryMode('${prefix}', 'custom')">
+                                <span>
+                                    <strong style="display: block; font-size: 14px;">Custom SQL</strong>
+                                    <small style="color: #6c757d;">Full control over query</small>
+                                </span>
+                            </label>
+                        </div>
+                    </div>
+
+                    <!-- Table Mode -->
+                    <div id="${prefix}TableModeFields" style="display: ${!config.query ? 'block' : 'none'}">
+                        <div class="form-group">
+                            <label for="${prefix}TableName" class="form-label required">Table Name</label>
+                            <input type="text" id="${prefix}TableName" class="form-control"
+                                   value="${config.table_name || config.tableName || ''}"
+                                   placeholder="patients"
+                                   name="${direction}TableName">
+                            <div class="form-hint">Name of the database table to query (e.g., patients, orders, lab_results)</div>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="${prefix}IncrementalColumn" class="form-label">Incremental Column
+                                    <span style="cursor: help; color: #007bff;" title="Prevents re-reading same records">?</span>
+                                </label>
+                                <input type="text" id="${prefix}IncrementalColumn" class="form-control"
+                                       value="${config.incremental_column || config.incrementalColumn || ''}"
+                                       placeholder="updated_at"
+                                       name="${direction}IncrementalColumn">
+                                <div class="form-hint">Column to track progress (updated_at, created_at, id). Only polls NEW/UPDATED records since last run. Leave empty to read all records every time.</div>
+                            </div>
+                            <div class="form-group">
+                                <label for="${prefix}IncrementalType" class="form-label">Column Data Type</label>
+                                <select id="${prefix}IncrementalType" class="form-control" name="${direction}IncrementalType">
+                                    <option value="timestamp" ${!config.incremental_type || config.incremental_type === 'timestamp' ? 'selected' : ''}>Timestamp</option>
+                                    <option value="integer" ${config.incremental_type === 'integer' ? 'selected' : ''}>Integer</option>
+                                    <option value="bigint" ${config.incremental_type === 'bigint' ? 'selected' : ''}>BigInt</option>
+                                </select>
+                                <div class="form-hint">Data type of incremental column (Timestamp for dates, Integer/BigInt for IDs)</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Custom Query Mode -->
+                    <div id="${prefix}CustomQueryModeFields" style="display: ${config.query ? 'block' : 'none'}">
+                        <div class="form-group">
+                            <label for="${prefix}Query" class="form-label required">SQL Query</label>
+                            <textarea id="${prefix}Query" class="form-control" rows="4"
+                                      name="${direction}Query"
+                                      placeholder="SELECT * FROM patients WHERE status='pending' ORDER BY created_at">${config.query || ''}</textarea>
+                            <div class="form-hint">Full SELECT query with your own WHERE conditions, JOINs, etc. System will add LIMIT automatically. Use this for complex queries or when you need full control.</div>
+                        </div>
+                    </div>
+
+                    <!-- Polling Config -->
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="${prefix}PollingInterval" class="form-label">Polling Interval (seconds)</label>
+                            <input type="number" id="${prefix}PollingInterval" class="form-control"
+                                   value="${config.polling_interval || config.pollingInterval || 60}"
+                                   min="5" max="3600"
+                                   name="${direction}PollingInterval">
+                            <div class="form-hint">How often to check for new records (5-3600 seconds). Lower = faster updates, higher = less database load.</div>
+                        </div>
+                        <div class="form-group">
+                            <label for="${prefix}MaxRecords" class="form-label">Max Records Per Poll</label>
+                            <input type="number" id="${prefix}MaxRecords" class="form-control"
+                                   value="${config.max_records || config.maxRecords || 100}"
+                                   min="1" max="10000"
+                                   name="${direction}MaxRecords">
+                            <div class="form-hint">Maximum records to fetch each poll (1-10000). Prevents overwhelming the system with large batches.</div>
+                        </div>
+                    </div>
+
+                    <!-- After Processing -->
+                    <div class="form-group">
+                        <label for="${prefix}AfterProcessing" class="form-label">After Processing Action</label>
+                        <select id="${prefix}AfterProcessing" class="form-control" name="${direction}AfterProcessing"
+                                onchange="InterfaceConfigComponents.toggleAfterProcessingFields('${prefix}')">
+                            <option value="nothing" ${!config.after_processing || config.after_processing === 'nothing' ? 'selected' : ''}>Nothing (Keep Records)</option>
+                            <option value="update_flag" ${config.after_processing === 'update_flag' ? 'selected' : ''}>Update Flag (Mark as Processed)</option>
+                            <option value="delete" ${config.after_processing === 'delete' ? 'selected' : ''}>Delete (Remove After Processing)</option>
+                            <option value="archive" ${config.after_processing === 'archive' ? 'selected' : ''}>Archive (Move to Archive Table)</option>
+                        </select>
+                        <div class="form-hint">What to do with records after successful processing. Use "Nothing" to keep original data, "Update Flag" to mark as processed, "Delete" to remove, or "Archive" to move to backup table.</div>
+                    </div>
+
+                    <!-- Update Flag Fields -->
+                    <div id="${prefix}UpdateFlagFields" style="display: ${config.after_processing === 'update_flag' ? 'block' : 'none'}">
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="${prefix}ProcessedFlagCol" class="form-label required">Flag Column Name</label>
+                                <input type="text" id="${prefix}ProcessedFlagCol" class="form-control"
+                                       value="${config.processed_flag_col || config.processedFlagCol || ''}"
+                                       placeholder="processed"
+                                       name="${direction}ProcessedFlagCol">
+                                <div class="form-hint">Column to update (e.g., "processed", "is_synced", "exported")</div>
+                            </div>
+                            <div class="form-group">
+                                <label for="${prefix}ProcessedFlagVal" class="form-label required">Flag Value to Set</label>
+                                <input type="text" id="${prefix}ProcessedFlagVal" class="form-control"
+                                       value="${config.processed_flag_val || config.processedFlagVal || 'true'}"
+                                       placeholder="true"
+                                       name="${direction}ProcessedFlagVal">
+                                <div class="form-hint">Value to set in flag column (e.g., "true", "1", "Y", current timestamp)</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Archive Fields -->
+                    <div id="${prefix}ArchiveFields" style="display: ${config.after_processing === 'archive' ? 'block' : 'none'}">
+                        <div class="form-group">
+                            <label for="${prefix}ArchiveTable" class="form-label required">Archive Table Name</label>
+                            <input type="text" id="${prefix}ArchiveTable" class="form-control"
+                                   value="${config.archive_table || config.archiveTable || ''}"
+                                   placeholder="patients_archive"
+                                   name="${direction}ArchiveTable">
+                            <div class="form-hint">Target table for archiving processed records. Must have identical schema as source table. Records are copied here then deleted from source.</div>
+                        </div>
+                    </div>
+                ` : `
+                    <div class="form-group" style="margin-top: 20px;">
+                        <h5 style="margin-bottom: 15px; color: #495057; border-bottom: 1px solid #e9ecef; padding-bottom: 8px;">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align: text-bottom; margin-right: 6px;">
+                                <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+                                <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+                            </svg>
+                            Write Configuration
+                        </h5>
+                        <label for="${prefix}TableName" class="form-label required">Table Name</label>
+                        <input type="text" id="${prefix}TableName" class="form-control"
+                               value="${config.table_name || config.tableName || ''}"
+                               placeholder="fhir_messages"
+                               name="${direction}TableName">
+                        <div class="form-hint">Target table where transformed messages will be written</div>
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="${prefix}WriteMode" class="form-label">Write Mode</label>
+                            <select id="${prefix}WriteMode" class="form-control" name="${direction}WriteMode">
+                                <option value="insert" ${!config.write_mode || config.write_mode === 'insert' ? 'selected' : ''}>Insert Only</option>
+                                <option value="upsert" ${config.write_mode === 'upsert' ? 'selected' : ''}>Upsert (Insert or Update)</option>
+                                <option value="update" ${config.write_mode === 'update' ? 'selected' : ''}>Update Only</option>
+                            </select>
+                            <div class="form-hint">Insert = Always create new row. Upsert = Create new or update existing. Update = Only modify existing rows.</div>
+                        </div>
+                        <div class="form-group">
+                            <label for="${prefix}UniqueKey" class="form-label">Unique Key Column
+                                <span style="cursor: help; color: #007bff;" title="Required for Upsert/Update modes">?</span>
+                            </label>
+                            <input type="text" id="${prefix}UniqueKey" class="form-control"
+                                   value="${config.unique_key || config.uniqueKey || ''}"
+                                   placeholder="message_id"
+                                   name="${direction}UniqueKey">
+                            <div class="form-hint">Column used to detect duplicates (e.g., message_id, patient_id). Required for Upsert/Update modes. Uses PostgreSQL ON CONFLICT.</div>
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="${prefix}BatchSize" class="form-label">Batch Size</label>
+                        <input type="number" id="${prefix}BatchSize" class="form-control"
+                               value="${config.batch_size || config.batchSize || 100}"
+                               min="1" max="10000"
+                               name="${direction}BatchSize">
+                        <div class="form-hint">Number of records to insert per transaction (1-10000). Higher = faster throughput, lower = less memory usage.</div>
+                    </div>
+                `}
+            </div>
+        `;
+    }
+
+    /**
+     * Get database-specific connection fields based on database type
+     * @param {string} direction - 'source' or 'target'
+     * @param {string} dbType - Database type
+     * @param {object} config - Configuration values
+     * @param {string} prefix - ID prefix for form fields
+     */
+    static getDatabaseConnectionFields(direction, dbType, config, prefix) {
+        // Cloud data warehouses use different authentication
+        const isCloudWarehouse = ['snowflake', 'databricks', 'bigquery', 'redshift', 'synapse'].includes(dbType);
+
+        if (dbType === 'snowflake') {
+            return this.getSnowflakeConnectionFields(direction, config, prefix);
+        } else if (dbType === 'databricks') {
+            return this.getDatabricksConnectionFields(direction, config, prefix);
+        } else if (dbType === 'bigquery') {
+            return this.getBigQueryConnectionFields(direction, config, prefix);
+        } else if (dbType === 'mongodb') {
+            return this.getMongoDBConnectionFields(direction, config, prefix);
+        } else {
+            // Traditional RDBMS (PostgreSQL, MySQL, SQL Server, Oracle, etc.)
+            return this.getTraditionalRDBMSConnectionFields(direction, dbType, config, prefix);
+        }
+    }
+
+    /**
+     * Traditional RDBMS connection fields (PostgreSQL, MySQL, SQL Server, Oracle, TimescaleDB, ClickHouse)
+     */
+    static getTraditionalRDBMSConnectionFields(direction, dbType, config, prefix) {
+        const defaultPorts = {
+            'postgresql': 5432,
+            'mysql': 3306,
+            'sqlserver': 1433,
+            'oracle': 1521,
+            'timescaledb': 5432,
+            'clickhouse': 8123
+        };
+
+        return `
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="${prefix}Host" class="form-label required">Host</label>
+                    <input type="text" id="${prefix}Host" class="form-control"
+                           value="${config.host || 'localhost'}"
+                           placeholder="localhost"
+                           name="${direction}Host">
+                    <div class="form-hint">Database server hostname or IP address (e.g., localhost, db.example.com, 192.168.1.100)</div>
+                </div>
+                <div class="form-group">
+                    <label for="${prefix}Port" class="form-label">Port</label>
+                    <input type="number" id="${prefix}Port" class="form-control"
+                           value="${config.port || defaultPorts[dbType] || 5432}"
+                           min="1" max="65535"
+                           name="${direction}Port">
+                    <div class="form-hint">Database server port. Default: ${defaultPorts[dbType] || 5432}</div>
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label for="${prefix}Database" class="form-label required">Database Name</label>
+                <input type="text" id="${prefix}Database" class="form-control"
+                       value="${config.database || ''}"
+                       placeholder="ezhealthkonnect"
+                       name="${direction}Database">
+                <div class="form-hint">Name of the database/schema to connect to</div>
+            </div>
+
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="${prefix}Username" class="form-label required">Username</label>
+                    <input type="text" id="${prefix}Username" class="form-control"
+                           value="${config.username || ''}"
+                           placeholder="dbuser"
+                           name="${direction}Username"
+                           autocomplete="off">
+                    <div class="form-hint">Database user with appropriate permissions (SELECT for source, INSERT/UPDATE for target)</div>
+                </div>
+                <div class="form-group">
+                    <label for="${prefix}Password" class="form-label required">Password</label>
+                    <input type="password" id="${prefix}Password" class="form-control"
+                           value="${config.password || ''}"
+                           placeholder="••••••••"
+                           name="${direction}Password"
+                           autocomplete="new-password">
+                    <div class="form-hint">Database password (stored encrypted)</div>
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label for="${prefix}SslMode" class="form-label">SSL Mode
+                    <span style="cursor: help; color: #007bff;" title="SSL/TLS is fully functional - uses native PostgreSQL driver">?</span>
+                </label>
+                <select id="${prefix}SslMode" class="form-control" name="${direction}SslMode">
+                    <option value="disable" ${!config.ssl_mode || config.ssl_mode === 'disable' ? 'selected' : ''}>Disable (No Encryption)</option>
+                    <option value="require" ${config.ssl_mode === 'require' ? 'selected' : ''}>Require (Encrypted Connection)</option>
+                    <option value="verify-ca" ${config.ssl_mode === 'verify-ca' ? 'selected' : ''}>Verify CA (Verify Certificate Authority)</option>
+                    <option value="verify-full" ${config.ssl_mode === 'verify-full' ? 'selected' : ''}>Verify Full (Verify Hostname + CA)</option>
+                </select>
+                <div class="form-hint">SSL/TLS encryption for database connection. Use "Require" or higher for production. Maps directly to PostgreSQL sslmode parameter.</div>
+            </div>
+        `;
+    }
+
+    /**
+     * Snowflake connection fields
+     */
+    static getSnowflakeConnectionFields(direction, config, prefix) {
+        return `
+            <div class="form-group">
+                <label for="${prefix}Account" class="form-label required">Account Identifier</label>
+                <input type="text" id="${prefix}Account" class="form-control"
+                       value="${config.account || ''}"
+                       placeholder="xy12345.us-east-1"
+                       name="${direction}Account">
+                <div class="form-hint">Format: account_name.region or account_locator</div>
+            </div>
+
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="${prefix}Username" class="form-label required">Username</label>
+                    <input type="text" id="${prefix}Username" class="form-control"
+                           value="${config.username || ''}"
+                           name="${direction}Username">
+                </div>
+                <div class="form-group">
+                    <label for="${prefix}Password" class="form-label required">Password</label>
+                    <input type="password" id="${prefix}Password" class="form-control"
+                           value="${config.password || ''}"
+                           name="${direction}Password">
+                </div>
+            </div>
+
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="${prefix}Warehouse" class="form-label required">Warehouse</label>
+                    <input type="text" id="${prefix}Warehouse" class="form-control"
+                           value="${config.warehouse || ''}"
+                           placeholder="COMPUTE_WH"
+                           name="${direction}Warehouse">
+                </div>
+                <div class="form-group">
+                    <label for="${prefix}Database" class="form-label required">Database</label>
+                    <input type="text" id="${prefix}Database" class="form-control"
+                           value="${config.database || ''}"
+                           placeholder="HEALTHCARE_DB"
+                           name="${direction}Database">
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label for="${prefix}Schema" class="form-label">Schema</label>
+                <input type="text" id="${prefix}Schema" class="form-control"
+                       value="${config.schema || 'PUBLIC'}"
+                       placeholder="PUBLIC"
+                       name="${direction}Schema">
+            </div>
+        `;
+    }
+
+    /**
+     * Databricks connection fields
+     */
+    static getDatabricksConnectionFields(direction, config, prefix) {
+        return `
+            <div class="form-group">
+                <label for="${prefix}Host" class="form-label required">Databricks Host</label>
+                <input type="text" id="${prefix}Host" class="form-control"
+                       value="${config.host || ''}"
+                       placeholder="adb-1234567890123456.7.azuredatabricks.net"
+                       name="${direction}Host">
+                <div class="form-hint">Your Databricks workspace URL (without https://)</div>
+            </div>
+
+            <div class="form-group">
+                <label for="${prefix}HttpPath" class="form-label required">HTTP Path</label>
+                <input type="text" id="${prefix}HttpPath" class="form-control"
+                       value="${config.http_path || config.httpPath || ''}"
+                       placeholder="/sql/1.0/warehouses/abc123"
+                       name="${direction}HttpPath">
+                <div class="form-hint">SQL warehouse HTTP path from connection details</div>
+            </div>
+
+            <div class="form-group">
+                <label for="${prefix}Token" class="form-label required">Personal Access Token</label>
+                <input type="password" id="${prefix}Token" class="form-control"
+                       value="${config.token || ''}"
+                       placeholder="dapi..."
+                       name="${direction}Token">
+                <div class="form-hint">Generate from User Settings > Access Tokens</div>
+            </div>
+        `;
+    }
+
+    /**
+     * BigQuery connection fields
+     */
+    static getBigQueryConnectionFields(direction, config, prefix) {
+        return `
+            <div class="form-group">
+                <label for="${prefix}ProjectId" class="form-label required">Google Cloud Project ID</label>
+                <input type="text" id="${prefix}ProjectId" class="form-control"
+                       value="${config.project_id || config.projectId || ''}"
+                       placeholder="my-healthcare-project"
+                       name="${direction}ProjectId">
+            </div>
+
+            <div class="form-group">
+                <label for="${prefix}Dataset" class="form-label required">Dataset</label>
+                <input type="text" id="${prefix}Dataset" class="form-control"
+                       value="${config.dataset || ''}"
+                       placeholder="healthcare_data"
+                       name="${direction}Dataset">
+            </div>
+
+            <div class="form-group">
+                <label for="${prefix}CredentialsJson" class="form-label required">Service Account JSON Key</label>
+                <textarea id="${prefix}CredentialsJson" class="form-control" rows="4"
+                          name="${direction}CredentialsJson"
+                          placeholder='{"type": "service_account", "project_id": "...", ...}'>${config.credentials_json || config.credentialsJson || ''}</textarea>
+                <div class="form-hint">Paste the entire JSON key file content</div>
+            </div>
+        `;
+    }
+
+    /**
+     * MongoDB connection fields
+     */
+    static getMongoDBConnectionFields(direction, config, prefix) {
+        return `
+            <div class="form-group">
+                <label for="${prefix}ConnectionString" class="form-label required">MongoDB Connection String</label>
+                <input type="text" id="${prefix}ConnectionString" class="form-control"
+                       value="${config.connection_string || config.connectionString || ''}"
+                       placeholder="mongodb://localhost:27017/ezhealthkonnect"
+                       name="${direction}ConnectionString">
+                <div class="form-hint">Full MongoDB connection URI (mongodb:// or mongodb+srv://)</div>
+            </div>
+
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="${prefix}Database" class="form-label required">Database</label>
+                    <input type="text" id="${prefix}Database" class="form-control"
+                           value="${config.database || ''}"
+                           placeholder="ezhealthkonnect"
+                           name="${direction}Database">
+                </div>
+                <div class="form-group">
+                    <label for="${prefix}Collection" class="form-label required">Collection</label>
+                    <input type="text" id="${prefix}Collection" class="form-control"
+                           value="${config.collection || ''}"
+                           placeholder="messages"
+                           name="${direction}Collection">
                 </div>
             </div>
         `;
+    }
+
+    /**
+     * Handle database type change event
+     * @param {string} prefix - ID prefix
+     */
+    static onDatabaseTypeChange(prefix) {
+        const dbTypeSelect = document.getElementById(`${prefix}DbType`);
+        const connectionFieldsContainer = document.getElementById(`${prefix}DbConnectionFields`);
+
+        if (!dbTypeSelect || !connectionFieldsContainer) {
+            console.error('Database type selector or connection fields container not found');
+            return;
+        }
+
+        const dbType = dbTypeSelect.value;
+        const direction = prefix.replace('source', '').replace('target', '') ? 'target' : 'source';
+
+        // Re-render connection fields based on new database type
+        connectionFieldsContainer.innerHTML = this.getDatabaseConnectionFields(
+            direction,
+            dbType,
+            {}, // Empty config for new selection
+            prefix
+        );
+    }
+
+    /**
+     * Toggle between table-based and custom query modes
+     * @param {string} prefix - ID prefix
+     * @param {string} mode - 'table' or 'custom'
+     */
+    static toggleQueryMode(prefix, mode) {
+        const tableModeFields = document.getElementById(`${prefix}TableModeFields`);
+        const customQueryModeFields = document.getElementById(`${prefix}CustomQueryModeFields`);
+        const tableRadio = document.getElementById(`${prefix}QueryModeTable`);
+        const customRadio = document.getElementById(`${prefix}QueryModeCustom`);
+
+        if (!tableModeFields || !customQueryModeFields) {
+            console.error('Query mode field containers not found');
+            return;
+        }
+
+        // Toggle field visibility
+        if (mode === 'table') {
+            tableModeFields.style.display = 'block';
+            customQueryModeFields.style.display = 'none';
+        } else if (mode === 'custom') {
+            tableModeFields.style.display = 'none';
+            customQueryModeFields.style.display = 'block';
+        }
+
+        // Update radio button card styling
+        if (tableRadio && customRadio) {
+            const tableLabel = tableRadio.closest('label');
+            const customLabel = customRadio.closest('label');
+
+            if (tableLabel && customLabel) {
+                if (mode === 'table') {
+                    tableLabel.style.borderColor = '#007bff';
+                    tableLabel.style.background = '#f0f7ff';
+                    customLabel.style.borderColor = '#dee2e6';
+                    customLabel.style.background = '#fff';
+                } else {
+                    tableLabel.style.borderColor = '#dee2e6';
+                    tableLabel.style.background = '#fff';
+                    customLabel.style.borderColor = '#007bff';
+                    customLabel.style.background = '#f0f7ff';
+                }
+            }
+        }
+    }
+
+    /**
+     * Toggle after-processing conditional fields based on selection
+     * @param {string} prefix - ID prefix
+     */
+    static toggleAfterProcessingFields(prefix) {
+        const afterProcessingSelect = document.getElementById(`${prefix}AfterProcessing`);
+        const updateFlagFields = document.getElementById(`${prefix}UpdateFlagFields`);
+        const archiveFields = document.getElementById(`${prefix}ArchiveFields`);
+
+        if (!afterProcessingSelect || !updateFlagFields || !archiveFields) {
+            console.error('After-processing field containers not found');
+            return;
+        }
+
+        const selectedMode = afterProcessingSelect.value;
+
+        // Hide all conditional fields first
+        updateFlagFields.style.display = 'none';
+        archiveFields.style.display = 'none';
+
+        // Show relevant fields based on selection
+        if (selectedMode === 'update_flag') {
+            updateFlagFields.style.display = 'block';
+        } else if (selectedMode === 'archive') {
+            archiveFields.style.display = 'block';
+        }
+        // 'delete' and 'nothing' modes don't need additional fields
     }
 
     /**
@@ -926,7 +1571,7 @@ class InterfaceConfigComponents {
             <div class="config-group">
                 <h4>SFTP Configuration</h4>
                 <div class="alert alert-info">
-                    ℹ️ SFTP connectivity configuration coming soon.
+                    SFTP connectivity configuration coming soon.
                 </div>
             </div>
         `;
@@ -944,7 +1589,7 @@ class InterfaceConfigComponents {
             <div class="config-group">
                 <h4>RabbitMQ Configuration</h4>
                 <div class="alert alert-info">
-                    ℹ️ RabbitMQ connectivity configuration coming soon.
+                    RabbitMQ connectivity configuration coming soon.
                 </div>
             </div>
         `;
@@ -962,7 +1607,7 @@ class InterfaceConfigComponents {
             <div class="config-group">
                 <h4>Apache Kafka Configuration</h4>
                 <div class="alert alert-info">
-                    ℹ️ Kafka connectivity configuration coming soon.
+                    Kafka connectivity configuration coming soon.
                 </div>
             </div>
         `;
@@ -1064,31 +1709,31 @@ class InterfaceConfigComponents {
         const reservedPorts = [3000, 8080, 8081, 8090, 8091, 8092, 8093, 8094, 8095, 8096, 8097, 5432, 27017];
 
         if (!port || isNaN(portNum)) {
-            validationElement.innerHTML = '✅ <strong>Recommended</strong>: 8082-8089, 9000-9999';
+            validationElement.innerHTML = '<strong>Recommended</strong>: 8082-8089, 9000-9999';
             validationElement.style.color = '';
             return;
         }
 
         if (reservedPorts.includes(portNum)) {
-            validationElement.innerHTML = `⚠️ <strong>Port ${portNum} is reserved</strong> for system services. Please choose another port.`;
+            validationElement.innerHTML = `<strong>Port ${portNum} is reserved</strong> for system services. Please choose another port.`;
             validationElement.style.color = '#856404';
             validationElement.style.background = '#fff3cd';
             validationElement.style.padding = '8px';
             validationElement.style.borderRadius = '4px';
         } else if (portNum >= 8082 && portNum <= 8089) {
-            validationElement.innerHTML = `✅ <strong>Port ${portNum} is recommended</strong> for FHIR receivers`;
+            validationElement.innerHTML = `<strong>Port ${portNum} is recommended</strong> for FHIR receivers`;
             validationElement.style.color = '#155724';
             validationElement.style.background = '#d4edda';
             validationElement.style.padding = '8px';
             validationElement.style.borderRadius = '4px';
         } else if (portNum >= 9000 && portNum <= 9999) {
-            validationElement.innerHTML = `✅ <strong>Port ${portNum} is available</strong> - good choice`;
+            validationElement.innerHTML = `<strong>Port ${portNum} is available</strong> - good choice`;
             validationElement.style.color = '#155724';
             validationElement.style.background = '#d4edda';
             validationElement.style.padding = '8px';
             validationElement.style.borderRadius = '4px';
         } else {
-            validationElement.innerHTML = `ℹ️ Port ${portNum} - will be validated on save`;
+            validationElement.innerHTML = `Port ${portNum} - will be validated on save`;
             validationElement.style.color = '#004085';
             validationElement.style.background = '#cce5ff';
             validationElement.style.padding = '8px';
@@ -1106,7 +1751,7 @@ class InterfaceConfigComponents {
         if (authTypeSelect) {
             authTypeSelect.addEventListener('change', (e) => {
                 const authType = e.target.value;
-                console.log(`🔐 HTTP auth type changed to: ${authType} (prefix: ${idPrefix})`);
+                console.log(`HTTP auth type changed to: ${authType} (prefix: ${idPrefix})`);
 
                 const authDetailsPanel = containerElement.querySelector(`#${idPrefix}HttpAuthDetails`);
                 if (authDetailsPanel) {
@@ -1116,7 +1761,7 @@ class InterfaceConfigComponents {
                     this.attachEventListeners(containerElement, idPrefix);
                 }
             });
-            console.log(`✅ HTTP auth type listener attached (prefix: ${idPrefix})`);
+            console.log(`HTTP auth type listener attached (prefix: ${idPrefix})`);
         }
     }
 
@@ -1139,13 +1784,13 @@ class InterfaceConfigComponents {
                         name="targetConnectivity"
                         required>
                     <option value="">Select connectivity...</option>
-                    <option value="sink" ${selectedValue === 'sink' ? 'selected' : ''}>🗄️ Sink (Store Only - No Routing)</option>
+                    <option value="sink" ${selectedValue === 'sink' ? 'selected' : ''}>Sink (Store Only - No Routing)</option>
                     <option value="http" ${selectedValue === 'http' ? 'selected' : ''}>HTTP/REST (Standard)</option>
                     <option value="tcp" ${selectedValue === 'tcp' ? 'selected' : ''}>TCP/MLLP</option>
                     <option value="file" ${selectedValue === 'file' ? 'selected' : ''}>File Output</option>
                     <option value="database" ${selectedValue === 'database' ? 'selected' : ''}>Database</option>
                 </select>
-                ${config.showHint !== false ? '<div class="form-hint">💡 Sink stores messages without routing to external systems</div>' : ''}
+                ${config.showHint !== false ? '<div class="form-hint">Sink stores messages without routing to external systems</div>' : ''}
             </div>
         `;
     }
@@ -1172,7 +1817,7 @@ class InterfaceConfigComponents {
             case 'database':
                 return this.getDatabaseTargetConfig(config, idPrefix);
             default:
-                return '<div class="config-placeholder">📋 Select target connectivity type to configure</div>';
+                return '<div class="config-placeholder">Select target connectivity type to configure</div>';
         }
     }
 
@@ -1182,9 +1827,9 @@ class InterfaceConfigComponents {
     static getSinkTargetConfig(config = {}, idPrefix = '') {
         return `
             <div class="config-group">
-                <h4>🗄️ Sink Configuration</h4>
+                <h4>Sink Configuration</h4>
                 <div class="alert alert-info" style="background: #e7f3ff; padding: 15px; border-left: 4px solid #2196F3; margin-bottom: 20px;">
-                    <strong>ℹ️ Sink Mode - Store Only</strong><br>
+                    <strong>Sink Mode - Store Only</strong><br>
                     Messages are received and stored in the database but NOT routed to any external system.
                     <br><br>
                     <strong>Use Cases:</strong>
@@ -1202,7 +1847,7 @@ class InterfaceConfigComponents {
                                ${config.enableLogging !== false ? 'checked' : ''}>
                         Enable detailed logging for stored messages
                     </label>
-                    <div class="form-hint">💡 Logs all message details including headers and metadata</div>
+                    <div class="form-hint">Logs all message details including headers and metadata</div>
                 </div>
 
                 <div class="form-group">
@@ -1211,7 +1856,7 @@ class InterfaceConfigComponents {
                                ${config.enableValidation === true ? 'checked' : ''}>
                         Validate message format before storing
                     </label>
-                    <div class="form-hint">⚠️ Validates HL7/FHIR structure (may impact performance)</div>
+                    <div class="form-hint">Validates HL7/FHIR structure (may impact performance)</div>
                 </div>
 
                 <div class="form-group">
@@ -1223,7 +1868,7 @@ class InterfaceConfigComponents {
                         <option value="365" ${config.retentionDays === '365' || config.retentionDays === 365 ? 'selected' : ''}>1 year</option>
                         <option value="-1" ${config.retentionDays === '-1' || config.retentionDays === -1 ? 'selected' : ''}>Indefinite (Manual cleanup only)</option>
                     </select>
-                    <div class="form-hint">💡 Old messages are automatically purged after this period</div>
+                    <div class="form-hint">Old messages are automatically purged after this period</div>
                 </div>
 
                 <div class="form-group">
@@ -1232,11 +1877,11 @@ class InterfaceConfigComponents {
                                ${config.generateAck !== false ? 'checked' : ''}>
                         Generate ACK/NACK responses (for HL7)
                     </label>
-                    <div class="form-hint">✅ Sends acknowledgment back to source system</div>
+                    <div class="form-hint">Sends acknowledgment back to source system</div>
                 </div>
 
                 <div class="alert alert-success" style="background: #d4edda; padding: 12px; border-left: 4px solid #28a745; margin-top: 20px;">
-                    <strong>✅ Sink is Ready</strong><br>
+                    <strong>Sink is Ready</strong><br>
                     No destination configuration required. Messages will be stored in your interface-specific table.
                 </div>
             </div>
@@ -1249,14 +1894,14 @@ class InterfaceConfigComponents {
     static getHttpTargetConfig(config = {}, idPrefix = '') {
         return `
             <div class="config-group">
-                <h4>🌐 FHIR Server Configuration</h4>
+                <h4>FHIR Server Configuration</h4>
                 <div class="form-group">
                     <label for="${idPrefix}targetEndpoint" class="form-label required">FHIR Base URL</label>
                     <input type="url" id="${idPrefix}targetEndpoint" class="form-control"
                            value="${config.endpoint || 'http://localhost:8080/fhir'}"
                            placeholder="http://localhost:8080/fhir"
                            required>
-                    <div class="form-hint">💡 OOB: Local HAPI FHIR server</div>
+                    <div class="form-hint">OOB: Local HAPI FHIR server</div>
                 </div>
                 <div class="form-row">
                     <div class="form-group">
@@ -1352,7 +1997,7 @@ class InterfaceConfigComponents {
                            value="${config.filePath || '/app/output'}"
                            placeholder="/app/output"
                            required>
-                    <div class="form-hint">💡 Directory where files will be written</div>
+                    <div class="form-hint">Directory where files will be written</div>
                 </div>
                 <div class="form-row">
                     <div class="form-group">
@@ -1385,7 +2030,7 @@ class InterfaceConfigComponents {
                                ${config.overwriteExisting === true ? 'checked' : ''}>
                         Overwrite existing files
                     </label>
-                    <div class="form-hint">⚠️ If unchecked, will append timestamp to avoid conflicts</div>
+                    <div class="form-hint">If unchecked, will append timestamp to avoid conflicts</div>
                 </div>
             </div>
         `;
@@ -1395,83 +2040,370 @@ class InterfaceConfigComponents {
      * Get Database target configuration
      */
     static getDatabaseTargetConfig(config = {}, idPrefix = '') {
+        // Use the comprehensive database configuration with direction='target'
+        return this.getDatabaseConfig('target', config, idPrefix);
+    }
+
+    // ============================================================
+    // DEPLOYMENT SETTINGS - Auto/Manual/Delayed start configuration
+    // ============================================================
+
+    /**
+     * Get deployment settings panel
+     * @param {object} config - Current deployment configuration
+     * @param {string} idPrefix - ID prefix for form elements
+     * @returns {string} - HTML for deployment settings
+     */
+    static getDeploymentSettingsPanel(config = {}, idPrefix = '') {
+        const deploymentMode = config.deployment_mode || config.deploymentMode || 'manual';
+        const autoStart = config.auto_start !== undefined ? config.auto_start : (config.autoStart || false);
+        const delaySeconds = config.deployment_delay_seconds || config.deploymentDelaySeconds || 0;
+
         return `
-            <div class="config-group">
-                <h4>🗄️ Database Output Configuration</h4>
+            <div class="deployment-settings">
+                <h4>Deployment Settings</h4>
                 <div class="form-group">
-                    <label for="${idPrefix}targetDbType" class="form-label required">Database Type</label>
-                    <select id="${idPrefix}targetDbType" class="form-control" required>
-                        <option value="">Select database type...</option>
-                        <option value="postgresql" ${config.dbType === 'postgresql' ? 'selected' : ''}>PostgreSQL</option>
-                        <option value="mysql" ${config.dbType === 'mysql' ? 'selected' : ''}>MySQL</option>
-                        <option value="sqlserver" ${config.dbType === 'sqlserver' ? 'selected' : ''}>SQL Server</option>
-                        <option value="mongodb" ${config.dbType === 'mongodb' ? 'selected' : ''}>MongoDB</option>
-                        <option value="oracle" ${config.dbType === 'oracle' ? 'selected' : ''}>Oracle</option>
+                    <label for="${idPrefix}deploymentMode" class="form-label">Startup Mode</label>
+                    <select id="${idPrefix}deploymentMode" class="form-control">
+                        <option value="manual" ${deploymentMode === 'manual' ? 'selected' : ''}>Manual - Start manually from UI</option>
+                        <option value="auto" ${deploymentMode === 'auto' ? 'selected' : ''}>Auto - Start when engine starts</option>
+                        <option value="delayed" ${deploymentMode === 'delayed' ? 'selected' : ''}>Delayed - Start after delay</option>
                     </select>
-                    <div class="form-hint">💡 Select your target database system</div>
+                    <div class="form-hint">Auto mode starts interface when the processing engine starts</div>
                 </div>
-                <div class="form-row">
-                    <div class="form-group">
-                        <label for="${idPrefix}targetDbHost" class="form-label required">Host</label>
-                        <input type="text" id="${idPrefix}targetDbHost" class="form-control"
-                               value="${config.dbHost || 'localhost'}"
-                               placeholder="localhost"
-                               required>
-                    </div>
-                    <div class="form-group">
-                        <label for="${idPrefix}targetDbPort" class="form-label required">Port</label>
-                        <input type="number" id="${idPrefix}targetDbPort" class="form-control"
-                               value="${config.dbPort || '5432'}"
-                               placeholder="5432"
-                               required>
-                    </div>
-                </div>
-                <div class="form-row">
-                    <div class="form-group">
-                        <label for="${idPrefix}targetDbName" class="form-label required">Database Name</label>
-                        <input type="text" id="${idPrefix}targetDbName" class="form-control"
-                               value="${config.dbName || ''}"
-                               placeholder="database_name"
-                               required>
-                    </div>
-                    <div class="form-group">
-                        <label for="${idPrefix}targetDbTable" class="form-label required">Table Name</label>
-                        <input type="text" id="${idPrefix}targetDbTable" class="form-control"
-                               value="${config.dbTable || ''}"
-                               placeholder="table_name"
-                               required>
-                    </div>
-                </div>
-                <div class="form-row">
-                    <div class="form-group">
-                        <label for="${idPrefix}targetDbUsername" class="form-label required">Username</label>
-                        <input type="text" id="${idPrefix}targetDbUsername" class="form-control"
-                               value="${config.dbUsername || ''}"
-                               placeholder="db_user"
-                               required>
-                    </div>
-                    <div class="form-group">
-                        <label for="${idPrefix}targetDbPassword" class="form-label required">Password</label>
-                        <input type="password" id="${idPrefix}targetDbPassword" class="form-control"
-                               value="${config.dbPassword || ''}"
-                               placeholder="••••••••"
-                               required>
-                    </div>
+                <div class="form-group delay-settings" id="${idPrefix}delaySettings" style="${deploymentMode === 'delayed' ? '' : 'display: none;'}">
+                    <label for="${idPrefix}deploymentDelay" class="form-label">Startup Delay (seconds)</label>
+                    <input type="number" id="${idPrefix}deploymentDelay" class="form-control"
+                           value="${delaySeconds}" min="0" max="3600" step="1">
+                    <div class="form-hint">Delay before auto-starting (0-3600 seconds)</div>
                 </div>
                 <div class="form-group">
                     <label class="form-check-label">
-                        <input type="checkbox" id="${idPrefix}targetDbSSL" class="form-check-input"
-                               ${config.dbSSL === true ? 'checked' : ''}>
-                        Use SSL/TLS connection
+                        <input type="checkbox" id="${idPrefix}autoStart" class="form-check-input"
+                               ${autoStart ? 'checked' : ''}>
+                        Restart interface when configuration changes
                     </label>
-                    <div class="form-hint">🔒 Recommended for production databases</div>
+                    <div class="form-hint">Automatically restart this interface when saving configuration or pipeline changes</div>
                 </div>
             </div>
         `;
+    }
+
+    /**
+     * Initialize deployment settings event handlers
+     * Call this after rendering the deployment panel
+     */
+    static initDeploymentSettingsEvents(container = document, idPrefix = '') {
+        const modeSelect = container.querySelector(`#${idPrefix}deploymentMode`);
+        const delaySettings = container.querySelector(`#${idPrefix}delaySettings`);
+
+        if (modeSelect && delaySettings) {
+            modeSelect.addEventListener('change', (e) => {
+                delaySettings.style.display = e.target.value === 'delayed' ? '' : 'none';
+            });
+        }
+    }
+
+    /**
+     * Collect deployment settings from form
+     * @param {HTMLElement} container - Container element
+     * @param {string} idPrefix - ID prefix
+     * @returns {object} - Deployment configuration
+     */
+    static collectDeploymentSettings(container = document, idPrefix = '') {
+        const deploymentMode = container.querySelector(`#${idPrefix}deploymentMode`)?.value || 'manual';
+        const autoStart = container.querySelector(`#${idPrefix}autoStart`)?.checked || false;
+        const delaySeconds = parseInt(container.querySelector(`#${idPrefix}deploymentDelay`)?.value) || 0;
+
+        return {
+            deployment_mode: deploymentMode,
+            auto_start: autoStart,
+            deployment_delay_seconds: delaySeconds
+        };
+    }
+
+    // ============================================================
+    // UNIFIED COLLECT METHODS - Single source of truth for data extraction
+    // ============================================================
+
+    /**
+     * Collect source configuration from form
+     * @param {HTMLElement} container - Container element (or document)
+     * @param {string} idPrefix - ID prefix ('' for wizard, 'edit' for edit modal)
+     * @returns {object} - Collected source configuration
+     */
+    static collectSourceConfig(container = document, idPrefix = '') {
+        const prefix = idPrefix + 'source';
+        const config = {};
+
+        // Get connectivity type to determine which fields to collect
+        const connectivityEl = container.querySelector(`#${idPrefix}sourceConnectivity`);
+        const connectivity = connectivityEl?.value || 'tcp';
+
+        console.log(`InterfaceConfigComponents.collectSourceConfig: prefix="${prefix}", connectivity="${connectivity}"`);
+
+        // Common fields for network-based sources
+        const hostEl = container.querySelector(`#${prefix}Host`);
+        const portEl = container.querySelector(`#${prefix}Port`);
+
+        // If fields don't exist in DOM (e.g., Step 2 after HL7 parsing), return existing config from wizard model
+        if (!hostEl && !portEl && window.wizardController?.model?.data?.sourceConfig) {
+            console.log(`⚠️ Source config fields not in DOM, preserving existing config from model`);
+            return window.wizardController.model.data.sourceConfig;
+        }
+
+        const host = hostEl?.value;
+        const port = portEl?.value;
+
+        if (host) config.host = host;
+        if (port) config.port = parseInt(port);
+
+        // Connectivity-specific fields
+        switch (connectivity) {
+            case 'tcp':
+            case 'mllp':
+                const useTls = container.querySelector(`#${prefix}UseTls`)?.checked;
+                const ackMode = container.querySelector(`#${prefix}AckMode`)?.value;
+                if (useTls !== undefined) config.useTls = useTls;
+                if (ackMode) config.ackMode = ackMode;
+                break;
+
+            case 'http':
+                const basePath = container.querySelector(`#${prefix}BasePath`)?.value;
+                const fhirVersion = container.querySelector(`#${prefix}FhirVersion`)?.value;
+                if (basePath) config.basePath = basePath;
+                if (fhirVersion) config.fhirVersion = fhirVersion;
+                break;
+
+            case 'database':
+                const database = container.querySelector(`#${prefix}Database`)?.value;
+                const username = container.querySelector(`#${prefix}Username`)?.value;
+                const password = container.querySelector(`#${prefix}Password`)?.value;
+                const sslMode = container.querySelector(`#${prefix}SslMode`)?.value;
+                const tableName = container.querySelector(`#${prefix}TableName`)?.value;
+                const pollingInterval = container.querySelector(`#${prefix}PollingInterval`)?.value;
+                const query = container.querySelector(`#${prefix}Query`)?.value; // Not CustomQuery
+                const dbType = container.querySelector(`#${prefix}DbType`)?.value;
+                const maxRecords = container.querySelector(`#${prefix}MaxRecords`)?.value;
+                const afterProcessing = container.querySelector(`#${prefix}AfterProcessing`)?.value;
+                const incrementalColumn = container.querySelector(`#${prefix}IncrementalColumn`)?.value;
+                const incrementalType = container.querySelector(`#${prefix}IncrementalType`)?.value;
+
+                // Update flag fields
+                const processedFlagCol = container.querySelector(`#${prefix}ProcessedFlagCol`)?.value;
+                const processedFlagVal = container.querySelector(`#${prefix}ProcessedFlagVal`)?.value;
+
+                // Archive fields
+                const archiveTable = container.querySelector(`#${prefix}ArchiveTable`)?.value;
+
+                if (database) config.database = database;
+                if (username) config.username = username;
+                if (password) config.password = password;
+                if (sslMode) config.ssl_mode = sslMode;
+                if (tableName) config.table_name = tableName;
+                if (pollingInterval) config.polling_interval = parseInt(pollingInterval);
+                if (query) config.query = query;
+                if (dbType) config.db_type = dbType;
+                if (maxRecords) config.max_records = parseInt(maxRecords);
+                if (afterProcessing) config.after_processing = afterProcessing;
+                if (incrementalColumn) config.incremental_column = incrementalColumn;
+                if (incrementalType) config.incremental_type = incrementalType;
+
+                // Update flag config
+                if (processedFlagCol) config.processed_flag_col = processedFlagCol;
+                if (processedFlagVal) config.processed_flag_val = processedFlagVal;
+
+                // Archive config
+                if (archiveTable) config.archive_table = archiveTable;
+                break;
+
+            case 'file':
+                const directoryPath = container.querySelector(`#${prefix}DirectoryPath`)?.value;
+                const filePattern = container.querySelector(`#${prefix}FilePattern`)?.value;
+                const filePollingInterval = container.querySelector(`#${prefix}PollingInterval`)?.value;
+                const fileAfterProcessing = container.querySelector(`#${prefix}AfterProcessing`)?.value;
+                const archivePath = container.querySelector(`#${prefix}ArchivePath`)?.value;
+
+                if (directoryPath) config.directory_path = directoryPath;
+                if (filePattern) config.file_pattern = filePattern;
+                if (filePollingInterval) config.polling_interval = parseInt(filePollingInterval);
+                if (fileAfterProcessing) config.after_processing = fileAfterProcessing;
+                if (archivePath) config.archive_path = archivePath;
+                break;
+        }
+
+        console.log(`Source config collected:`, config);
+        return config;
+    }
+
+    /**
+     * Collect target configuration from form
+     * @param {HTMLElement} container - Container element (or document)
+     * @param {string} idPrefix - ID prefix ('' for wizard, 'edit' for edit modal)
+     * @returns {object} - Collected target configuration
+     */
+    static collectTargetConfig(container = document, idPrefix = '') {
+        const prefix = idPrefix + 'target';
+        const config = {};
+
+        // Get connectivity type
+        const connectivityEl = container.querySelector(`#${idPrefix}targetConnectivity`);
+        const connectivity = connectivityEl?.value || 'http';
+
+        console.log(`InterfaceConfigComponents.collectTargetConfig: prefix="${prefix}", connectivity="${connectivity}"`);
+
+        switch (connectivity) {
+            case 'sink':
+                const enableLogging = container.querySelector(`#${prefix}EnableLogging`)?.checked;
+                const enableValidation = container.querySelector(`#${prefix}EnableValidation`)?.checked;
+                const retentionDays = container.querySelector(`#${prefix}RetentionDays`)?.value;
+                const generateAck = container.querySelector(`#${prefix}GenerateAck`)?.checked;
+
+                config.enableLogging = enableLogging !== false;
+                config.enableValidation = enableValidation === true;
+                config.retentionDays = retentionDays ? parseInt(retentionDays) : 30;
+                config.generateAck = generateAck !== false;
+                config.mode = 'sink';
+                break;
+
+            case 'http':
+                const endpoint = container.querySelector(`#${prefix}Endpoint`)?.value;
+                const version = container.querySelector(`#${prefix}Version`)?.value;
+                const format = container.querySelector(`#${prefix}Format`)?.value;
+                const deliveryMode = container.querySelector(`#${prefix}DeliveryMode`)?.value ||
+                                    (container.querySelector(`#${prefix}DeliveryModeIndividual`)?.checked ? 'individual' : 'bundle');
+                const authType = container.querySelector(`#${prefix}HttpAuthType`)?.value;
+
+                if (endpoint) config.endpoint = endpoint;
+                if (version) config.version = version;
+                if (format) config.format = format;
+                if (deliveryMode) config.deliveryMode = deliveryMode;
+                if (authType && authType !== 'none') {
+                    config.authType = authType;
+                    if (authType === 'basic') {
+                        config.username = container.querySelector(`#${prefix}HttpAuthUsername`)?.value;
+                        config.password = container.querySelector(`#${prefix}HttpAuthPassword`)?.value;
+                    } else if (authType === 'bearer') {
+                        config.bearerToken = container.querySelector(`#${prefix}HttpAuthBearerToken`)?.value;
+                    } else if (authType === 'api_key') {
+                        config.apiKey = container.querySelector(`#${prefix}HttpAuthApiKey`)?.value;
+                        config.apiKeyHeader = container.querySelector(`#${prefix}HttpAuthApiKeyHeader`)?.value || 'X-API-Key';
+                    }
+                }
+                break;
+
+            case 'database':
+                const dbHost = container.querySelector(`#${prefix}Host`)?.value;
+                const dbPort = container.querySelector(`#${prefix}Port`)?.value;
+                const database = container.querySelector(`#${prefix}Database`)?.value;
+                const username = container.querySelector(`#${prefix}Username`)?.value;
+                const password = container.querySelector(`#${prefix}Password`)?.value;
+                const sslMode = container.querySelector(`#${prefix}SslMode`)?.value;
+                const tableName = container.querySelector(`#${prefix}TableName`)?.value;
+
+                if (dbHost) config.host = dbHost;
+                if (dbPort) config.port = parseInt(dbPort);
+                if (database) config.database = database;
+                if (username) config.username = username;
+                if (password) config.password = password;
+                if (sslMode) config.ssl_mode = sslMode;
+                if (tableName) config.table_name = tableName;
+                break;
+
+            case 'file':
+                const outputDirectory = container.querySelector(`#${prefix}OutputDirectory`)?.value;
+                const fileNamePattern = container.querySelector(`#${prefix}FileNamePattern`)?.value;
+                const fileFormat = container.querySelector(`#${prefix}FileFormat`)?.value;
+
+                if (outputDirectory) config.output_directory = outputDirectory;
+                if (fileNamePattern) config.file_name_pattern = fileNamePattern;
+                if (fileFormat) config.file_format = fileFormat;
+                break;
+        }
+
+        console.log(`Target config collected:`, config);
+        return config;
+    }
+
+    /**
+     * Get source connectivity type from form
+     * @param {HTMLElement} container - Container element
+     * @param {string} idPrefix - ID prefix
+     * @returns {string} - Connectivity type
+     */
+    static getSourceConnectivity(container = document, idPrefix = '') {
+        return container.querySelector(`#${idPrefix}sourceConnectivity`)?.value || 'tcp';
+    }
+
+    /**
+     * Get target connectivity type from form
+     * @param {HTMLElement} container - Container element
+     * @param {string} idPrefix - ID prefix
+     * @returns {string} - Connectivity type
+     */
+    static getTargetConnectivity(container = document, idPrefix = '') {
+        return container.querySelector(`#${idPrefix}targetConnectivity`)?.value || 'http';
+    }
+
+    /**
+     * Get source type from form
+     * @param {HTMLElement} container - Container element
+     * @param {string} idPrefix - ID prefix
+     * @returns {string} - Source type
+     */
+    static getSourceType(container = document, idPrefix = '') {
+        return container.querySelector(`#${idPrefix}sourceType`)?.value || 'hl7v2';
+    }
+
+    /**
+     * Collect logging settings from form (V33)
+     * @param {HTMLElement} container - Container element
+     * @param {string} idPrefix - ID prefix ('' for wizard, 'edit' for edit modal)
+     * @returns {object} - Logging settings
+     */
+    static collectLoggingSettings(container = document, idPrefix = '') {
+        const debugLoggingId = idPrefix ? `${idPrefix}DebugLogging` : 'debugLogging';
+        const logRetentionId = idPrefix ? `${idPrefix}LogRetention` : 'logRetentionDays';
+        const retainErrorsId = idPrefix ? `${idPrefix}RetainErrors` : 'retainErrorLogs';
+
+        const debugLogging = container.querySelector(`#${debugLoggingId}`)?.checked || false;
+        const logRetentionDays = parseInt(container.querySelector(`#${logRetentionId}`)?.value) || 30;
+        const retainErrorLogs = container.querySelector(`#${retainErrorsId}`)?.checked !== false;
+
+        return {
+            debug_logging: debugLogging,
+            log_retention_days: logRetentionDays,
+            retain_error_logs_forever: retainErrorLogs
+        };
+    }
+
+    /**
+     * Collect all interface form data
+     * @param {HTMLElement} container - Container element
+     * @param {string} idPrefix - ID prefix
+     * @returns {object} - Complete form data
+     */
+    static collectFormData(container = document, idPrefix = '') {
+        const sourceConnectivity = this.getSourceConnectivity(container, idPrefix);
+        const targetConnectivity = this.getTargetConnectivity(container, idPrefix);
+        const sourceType = this.getSourceType(container, idPrefix);
+
+        const formData = {
+            sourceType,
+            sourceConnectivity,
+            targetConnectivity,
+            sourceConfig: this.collectSourceConfig(container, idPrefix),
+            targetConfig: this.collectTargetConfig(container, idPrefix),
+            ...this.collectDeploymentSettings(container, idPrefix),
+            ...this.collectLoggingSettings(container, idPrefix)
+        };
+
+        console.log('📦 InterfaceConfigComponents.collectFormData:', formData);
+        return formData;
     }
 }
 
 // Make it globally available
 window.InterfaceConfigComponents = InterfaceConfigComponents;
 
-console.log('✅ InterfaceConfigComponents loaded successfully');
+console.log('InterfaceConfigComponents loaded successfully');

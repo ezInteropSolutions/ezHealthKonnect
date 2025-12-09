@@ -49,106 +49,28 @@ func NewHTTPRESTInboundConnector() InboundConnector {
 	return NewBaseInboundConnector(metadata)
 }
 
-// NewHTTPOutboundConnector creates an HTTP outbound connector
-func NewHTTPOutboundConnector() OutboundConnector {
-	metadata := ConnectorMetadata{
-		TypeName:           "http_outbound",
-		DisplayName:        "HTTP/HTTPS Endpoint",
-		Version:            "1.0.0",
-		Category:           "outbound",
-		Mode:               "push",
-		ImplementationLang: "go",
-		Capabilities: map[string]bool{
-			"supports_batch": false,
-			"supports_tls":   true,
-			"supports_auth":  true,
-			"supports_retry": true,
-		},
-	}
-	return NewBaseOutboundConnector(metadata, false)
-}
+// NewHTTPOutboundConnector - MOVED to http_outbound.go (full implementation)
+// See services/connectors/http_outbound.go for the complete HTTP outbound connector
 
 // -----------------------------------------------------------------------------
 // File System Connectors (2)
 // -----------------------------------------------------------------------------
 
-// NewFileListenerConnector creates a file system listener connector
-func NewFileListenerConnector() InboundConnector {
-	metadata := ConnectorMetadata{
-		TypeName:           "file_listener",
-		DisplayName:        "File System Listener",
-		Version:            "1.0.0",
-		Category:           "inbound",
-		Mode:               "pull",
-		ImplementationLang: "go",
-		Capabilities: map[string]bool{
-			"supports_cron":             true,
-			"supports_after_processing": true,
-			"supports_patterns":         true,
-		},
-	}
-	return NewBaseInboundConnector(metadata)
-}
+// NewFileListenerConnector - MOVED to file_listener.go (full implementation)
+// See services/connectors/file_listener.go for the complete file listener connector
 
-// NewFileWriterConnector creates a file system writer connector
-func NewFileWriterConnector() OutboundConnector {
-	metadata := ConnectorMetadata{
-		TypeName:           "file_writer",
-		DisplayName:        "File System Writer",
-		Version:            "1.0.0",
-		Category:           "outbound",
-		Mode:               "push",
-		ImplementationLang: "go",
-		Capabilities: map[string]bool{
-			"supports_batch":   true,
-			"supports_append":  true,
-			"supports_pattern": true,
-		},
-	}
-	return NewBaseOutboundConnector(metadata, true)
-}
+// NewFileWriterConnector - MOVED to file_writer.go (full implementation)
+// See services/connectors/file_writer.go for the complete file writer connector
 
 // -----------------------------------------------------------------------------
 // Database Connectors - PostgreSQL (2)
 // -----------------------------------------------------------------------------
 
-// NewPostgreSQLInboundConnector creates a PostgreSQL inbound connector
-func NewPostgreSQLInboundConnector() InboundConnector {
-	metadata := ConnectorMetadata{
-		TypeName:           "postgresql_inbound",
-		DisplayName:        "PostgreSQL Database Reader",
-		Version:            "1.0.0",
-		Category:           "inbound",
-		Mode:               "pull",
-		ImplementationLang: "go",
-		Capabilities: map[string]bool{
-			"supports_cron":             true,
-			"supports_ssl":              true,
-			"supports_incremental":      true,
-			"supports_after_processing": true,
-		},
-	}
-	return NewBaseInboundConnector(metadata)
-}
+// NewPostgreSQLInboundConnector - IMPLEMENTED in postgresql_inbound.go
+// See services/connectors/postgresql_inbound.go for the complete PostgreSQL inbound connector
 
-// NewPostgreSQLOutboundConnector creates a PostgreSQL outbound connector
-func NewPostgreSQLOutboundConnector() OutboundConnector {
-	metadata := ConnectorMetadata{
-		TypeName:           "postgresql_outbound",
-		DisplayName:        "PostgreSQL Database Writer",
-		Version:            "1.0.0",
-		Category:           "outbound",
-		Mode:               "push",
-		ImplementationLang: "go",
-		Capabilities: map[string]bool{
-			"supports_batch":  true,
-			"supports_ssl":    true,
-			"supports_upsert": true,
-			"supports_pool":   true,
-		},
-	}
-	return NewBaseOutboundConnector(metadata, true)
-}
+// NewPostgreSQLOutboundConnector - IMPLEMENTED in postgresql_outbound.go
+// See services/connectors/postgresql_outbound.go for the complete PostgreSQL outbound connector
 
 // -----------------------------------------------------------------------------
 // Database Connectors - MySQL (2)
@@ -316,6 +238,327 @@ func NewOracleOutboundConnector() OutboundConnector {
 			"supports_ssl":    true,
 			"supports_merge":  true,
 			"supports_pool":   true,
+		},
+	}
+	return NewBaseOutboundConnector(metadata, true)
+}
+
+// -----------------------------------------------------------------------------
+// Cloud Data Warehouse Connectors - Snowflake (2)
+// -----------------------------------------------------------------------------
+
+// NewSnowflakeInboundConnector creates a Snowflake inbound connector
+func NewSnowflakeInboundConnector() InboundConnector {
+	metadata := ConnectorMetadata{
+		TypeName:           "snowflake_inbound",
+		DisplayName:        "Snowflake Data Warehouse Reader",
+		Version:            "1.0.0",
+		Category:           "inbound",
+		Mode:               "pull",
+		ImplementationLang: "go",
+		Capabilities: map[string]bool{
+			"supports_cron":             true,
+			"supports_oauth":            true,
+			"supports_key_pair_auth":    true,
+			"supports_incremental":      true,
+			"supports_after_processing": true,
+			"supports_warehouse_mgmt":   true,
+		},
+	}
+	return NewBaseInboundConnector(metadata)
+}
+
+// NewSnowflakeOutboundConnector creates a Snowflake outbound connector
+func NewSnowflakeOutboundConnector() OutboundConnector {
+	metadata := ConnectorMetadata{
+		TypeName:           "snowflake_outbound",
+		DisplayName:        "Snowflake Data Warehouse Writer",
+		Version:            "1.0.0",
+		Category:           "outbound",
+		Mode:               "push",
+		ImplementationLang: "go",
+		Capabilities: map[string]bool{
+			"supports_batch":           true,
+			"supports_oauth":           true,
+			"supports_key_pair_auth":   true,
+			"supports_merge":           true,
+			"supports_pool":            true,
+			"supports_warehouse_mgmt":  true,
+			"supports_stage_copy":      true,
+		},
+	}
+	return NewBaseOutboundConnector(metadata, true)
+}
+
+// -----------------------------------------------------------------------------
+// Cloud Data Warehouse Connectors - Databricks (2)
+// -----------------------------------------------------------------------------
+
+// NewDatabricksInboundConnector creates a Databricks inbound connector
+func NewDatabricksInboundConnector() InboundConnector {
+	metadata := ConnectorMetadata{
+		TypeName:           "databricks_inbound",
+		DisplayName:        "Databricks SQL Warehouse Reader",
+		Version:            "1.0.0",
+		Category:           "inbound",
+		Mode:               "pull",
+		ImplementationLang: "go",
+		Capabilities: map[string]bool{
+			"supports_cron":             true,
+			"supports_pat_auth":         true,
+			"supports_oauth":            true,
+			"supports_incremental":      true,
+			"supports_after_processing": true,
+			"supports_delta_lake":       true,
+		},
+	}
+	return NewBaseInboundConnector(metadata)
+}
+
+// NewDatabricksOutboundConnector creates a Databricks outbound connector
+func NewDatabricksOutboundConnector() OutboundConnector {
+	metadata := ConnectorMetadata{
+		TypeName:           "databricks_outbound",
+		DisplayName:        "Databricks SQL Warehouse Writer",
+		Version:            "1.0.0",
+		Category:           "outbound",
+		Mode:               "push",
+		ImplementationLang: "go",
+		Capabilities: map[string]bool{
+			"supports_batch":       true,
+			"supports_pat_auth":    true,
+			"supports_oauth":       true,
+			"supports_merge":       true,
+			"supports_pool":        true,
+			"supports_delta_lake":  true,
+			"supports_unity_cat":   true,
+		},
+	}
+	return NewBaseOutboundConnector(metadata, true)
+}
+
+// -----------------------------------------------------------------------------
+// Cloud Data Warehouse Connectors - BigQuery (2)
+// -----------------------------------------------------------------------------
+
+// NewBigQueryInboundConnector creates a BigQuery inbound connector
+func NewBigQueryInboundConnector() InboundConnector {
+	metadata := ConnectorMetadata{
+		TypeName:           "bigquery_inbound",
+		DisplayName:        "Google BigQuery Reader",
+		Version:            "1.0.0",
+		Category:           "inbound",
+		Mode:               "pull",
+		ImplementationLang: "go",
+		Capabilities: map[string]bool{
+			"supports_cron":             true,
+			"supports_service_account":  true,
+			"supports_oauth":            true,
+			"supports_incremental":      true,
+			"supports_after_processing": true,
+			"supports_standard_sql":     true,
+		},
+	}
+	return NewBaseInboundConnector(metadata)
+}
+
+// NewBigQueryOutboundConnector creates a BigQuery outbound connector
+func NewBigQueryOutboundConnector() OutboundConnector {
+	metadata := ConnectorMetadata{
+		TypeName:           "bigquery_outbound",
+		DisplayName:        "Google BigQuery Writer",
+		Version:            "1.0.0",
+		Category:           "outbound",
+		Mode:               "push",
+		ImplementationLang: "go",
+		Capabilities: map[string]bool{
+			"supports_batch":          true,
+			"supports_service_account": true,
+			"supports_oauth":          true,
+			"supports_merge":          true,
+			"supports_streaming":      true,
+			"supports_standard_sql":   true,
+		},
+	}
+	return NewBaseOutboundConnector(metadata, true)
+}
+
+// -----------------------------------------------------------------------------
+// Cloud Data Warehouse Connectors - Redshift (2)
+// -----------------------------------------------------------------------------
+
+// NewRedshiftInboundConnector creates a Redshift inbound connector
+func NewRedshiftInboundConnector() InboundConnector {
+	metadata := ConnectorMetadata{
+		TypeName:           "redshift_inbound",
+		DisplayName:        "AWS Redshift Data Warehouse Reader",
+		Version:            "1.0.0",
+		Category:           "inbound",
+		Mode:               "pull",
+		ImplementationLang: "go",
+		Capabilities: map[string]bool{
+			"supports_cron":             true,
+			"supports_ssl":              true,
+			"supports_iam_auth":         true,
+			"supports_incremental":      true,
+			"supports_after_processing": true,
+		},
+	}
+	return NewBaseInboundConnector(metadata)
+}
+
+// NewRedshiftOutboundConnector creates a Redshift outbound connector
+func NewRedshiftOutboundConnector() OutboundConnector {
+	metadata := ConnectorMetadata{
+		TypeName:           "redshift_outbound",
+		DisplayName:        "AWS Redshift Data Warehouse Writer",
+		Version:            "1.0.0",
+		Category:           "outbound",
+		Mode:               "push",
+		ImplementationLang: "go",
+		Capabilities: map[string]bool{
+			"supports_batch":    true,
+			"supports_ssl":      true,
+			"supports_iam_auth": true,
+			"supports_merge":    true,
+			"supports_pool":     true,
+			"supports_s3_copy":  true,
+		},
+	}
+	return NewBaseOutboundConnector(metadata, true)
+}
+
+// -----------------------------------------------------------------------------
+// Cloud Data Warehouse Connectors - Azure Synapse (2)
+// -----------------------------------------------------------------------------
+
+// NewSynapseInboundConnector creates an Azure Synapse inbound connector
+func NewSynapseInboundConnector() InboundConnector {
+	metadata := ConnectorMetadata{
+		TypeName:           "synapse_inbound",
+		DisplayName:        "Azure Synapse Analytics Reader",
+		Version:            "1.0.0",
+		Category:           "inbound",
+		Mode:               "pull",
+		ImplementationLang: "go",
+		Capabilities: map[string]bool{
+			"supports_cron":             true,
+			"supports_encryption":       true,
+			"supports_azure_ad_auth":    true,
+			"supports_incremental":      true,
+			"supports_after_processing": true,
+		},
+	}
+	return NewBaseInboundConnector(metadata)
+}
+
+// NewSynapseOutboundConnector creates an Azure Synapse outbound connector
+func NewSynapseOutboundConnector() OutboundConnector {
+	metadata := ConnectorMetadata{
+		TypeName:           "synapse_outbound",
+		DisplayName:        "Azure Synapse Analytics Writer",
+		Version:            "1.0.0",
+		Category:           "outbound",
+		Mode:               "push",
+		ImplementationLang: "go",
+		Capabilities: map[string]bool{
+			"supports_batch":         true,
+			"supports_encryption":    true,
+			"supports_azure_ad_auth": true,
+			"supports_merge":         true,
+			"supports_pool":          true,
+			"supports_polybase":      true,
+		},
+	}
+	return NewBaseOutboundConnector(metadata, true)
+}
+
+// -----------------------------------------------------------------------------
+// Specialized Analytics Connectors - ClickHouse (2)
+// -----------------------------------------------------------------------------
+
+// NewClickHouseInboundConnector creates a ClickHouse inbound connector
+func NewClickHouseInboundConnector() InboundConnector {
+	metadata := ConnectorMetadata{
+		TypeName:           "clickhouse_inbound",
+		DisplayName:        "ClickHouse OLAP Reader",
+		Version:            "1.0.0",
+		Category:           "inbound",
+		Mode:               "pull",
+		ImplementationLang: "go",
+		Capabilities: map[string]bool{
+			"supports_cron":             true,
+			"supports_https":            true,
+			"supports_incremental":      true,
+			"supports_after_processing": true,
+			"supports_columnar":         true,
+		},
+	}
+	return NewBaseInboundConnector(metadata)
+}
+
+// NewClickHouseOutboundConnector creates a ClickHouse outbound connector
+func NewClickHouseOutboundConnector() OutboundConnector {
+	metadata := ConnectorMetadata{
+		TypeName:           "clickhouse_outbound",
+		DisplayName:        "ClickHouse OLAP Writer",
+		Version:            "1.0.0",
+		Category:           "outbound",
+		Mode:               "push",
+		ImplementationLang: "go",
+		Capabilities: map[string]bool{
+			"supports_batch":         true,
+			"supports_https":         true,
+			"supports_merge":         true,
+			"supports_pool":          true,
+			"supports_columnar":      true,
+			"supports_merge_tree":    true,
+		},
+	}
+	return NewBaseOutboundConnector(metadata, true)
+}
+
+// -----------------------------------------------------------------------------
+// Specialized Analytics Connectors - TimescaleDB (2)
+// -----------------------------------------------------------------------------
+
+// NewTimescaleDBInboundConnector creates a TimescaleDB inbound connector
+func NewTimescaleDBInboundConnector() InboundConnector {
+	metadata := ConnectorMetadata{
+		TypeName:           "timescaledb_inbound",
+		DisplayName:        "TimescaleDB Time-Series Reader",
+		Version:            "1.0.0",
+		Category:           "inbound",
+		Mode:               "pull",
+		ImplementationLang: "go",
+		Capabilities: map[string]bool{
+			"supports_cron":             true,
+			"supports_ssl":              true,
+			"supports_incremental":      true,
+			"supports_after_processing": true,
+			"supports_hypertables":      true,
+			"supports_time_bucketing":   true,
+		},
+	}
+	return NewBaseInboundConnector(metadata)
+}
+
+// NewTimescaleDBOutboundConnector creates a TimescaleDB outbound connector
+func NewTimescaleDBOutboundConnector() OutboundConnector {
+	metadata := ConnectorMetadata{
+		TypeName:           "timescaledb_outbound",
+		DisplayName:        "TimescaleDB Time-Series Writer",
+		Version:            "1.0.0",
+		Category:           "outbound",
+		Mode:               "push",
+		ImplementationLang: "go",
+		Capabilities: map[string]bool{
+			"supports_batch":       true,
+			"supports_ssl":         true,
+			"supports_upsert":      true,
+			"supports_pool":        true,
+			"supports_hypertables": true,
+			"supports_compression": true,
 		},
 	}
 	return NewBaseOutboundConnector(metadata, true)

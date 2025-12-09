@@ -61,6 +61,7 @@ func (tps *TransformationPipelineService) ExecutePipeline(
 		Status:        "in_progress",
 		StartedAt:     startTime,
 		Errors:        []models.TransformationError{},
+		ExecutionLog:  []models.StepExecutionLog{}, // Initialize step execution log
 	}
 
 	// Execute steps in sequence
@@ -71,11 +72,26 @@ func (tps *TransformationPipelineService) ExecutePipeline(
 			continue
 		}
 
+		stepStartTime := time.Now()
 		log.Printf("▶️  Executing step %d/%d: %s (type: %s)", i+1, len(pipeline.Steps), step.StepName, step.StepType)
 
 		// Execute step using executor registry (OOB pattern)
 		output, err := tps.executorRegistry.ExecuteStep(ctx, step, currentData)
+		stepDuration := time.Since(stepStartTime)
+
+		// Create step execution log
+		stepLog := models.StepExecutionLog{
+			StepID:      step.ID,
+			StepName:    step.StepName,
+			StepType:    step.StepType,
+			StartedAt:   stepStartTime,
+			CompletedAt: time.Now(),
+			DurationMs:  stepDuration.Milliseconds(),
+			Success:     err == nil,
+		}
+
 		if err != nil {
+			stepLog.Error = err.Error()
 			log.Printf("❌ Step failed: %s - %v", step.StepName, err)
 
 			// Record error
@@ -87,6 +103,7 @@ func (tps *TransformationPipelineService) ExecutePipeline(
 
 			// Handle error based on strategy
 			if step.OnErrorStrategy == "fail" || step.Required {
+				result.ExecutionLog = append(result.ExecutionLog, stepLog)
 				result.Status = "failed"
 				result.CompletedAt = time.Now()
 				result.ExecutionTime = time.Since(startTime)
@@ -95,9 +112,12 @@ func (tps *TransformationPipelineService) ExecutePipeline(
 				log.Printf("⚠️  Continuing despite error (strategy: %s)", step.OnErrorStrategy)
 			}
 		} else {
-			log.Printf("✅ Step completed: %s", step.StepName)
+			log.Printf("✅ Step completed: %s (took %dms)", step.StepName, stepDuration.Milliseconds())
 			currentData = output // Pass output to next step
 		}
+
+		// Add step log to execution log
+		result.ExecutionLog = append(result.ExecutionLog, stepLog)
 	}
 
 	// Pipeline completed successfully

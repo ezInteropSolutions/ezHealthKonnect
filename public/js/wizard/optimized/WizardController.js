@@ -287,6 +287,18 @@ class WizardController extends EventTarget {
             case 5:
                 // Validate final configuration
                 await this.validateFinalConfiguration();
+
+                // Populate deployment settings panel
+                const deploymentContainer = document.getElementById('wizardDeploymentSettingsContainer');
+                if (deploymentContainer && window.InterfaceConfigComponents) {
+                    deploymentContainer.innerHTML = InterfaceConfigComponents.getDeploymentSettingsPanel(
+                        this.model.data || {},
+                        '' // Wizard uses empty prefix
+                    );
+                    // Initialize event handlers for deployment settings
+                    InterfaceConfigComponents.initDeploymentSettingsEvents(document, '');
+                    console.log('✅ Deployment settings panel populated for Step 5');
+                }
                 break;
         }
     }
@@ -499,7 +511,21 @@ class WizardController extends EventTarget {
             await this.loadStep(this.model.currentStep);
         } else {
             console.log('❌ Model validation failed, showing warning');
-            this.view.showNotification('Please resolve validation errors before proceeding', 'warning');
+
+            // Show specific validation errors instead of generic message
+            const errors = this.model.validation.errors;
+            if (errors && Object.keys(errors).length > 0) {
+                const errorMessages = Object.entries(errors)
+                    .map(([field, message]) => `• ${message}`)
+                    .join('\n');
+                console.log('❌ Validation errors:', errorMessages);
+                this.view.showNotification(
+                    `Please fix the following issues:\n\n${errorMessages}`,
+                    'warning'
+                );
+            } else {
+                this.view.showNotification('Please resolve validation errors before proceeding', 'warning');
+            }
         }
     }
 
@@ -897,18 +923,18 @@ PV1|1|I|ICU^101^1|||DOC123^Smith^Jane|||EMERGENCY|||`
 
                 console.log('✅ Interface created successfully:', interfaceData);
 
-                // Show success notification
-                this.view.showNotification('Interface created and activated successfully!', 'success');
+                // Get the interface status to show appropriate message
+                const status = interfaceData.status || 'draft';
+                const messageType = interfaceData.message_type || payload.messageType || 'ADT^A01';
 
-                // Close wizard after delay
-                setTimeout(() => {
-                    this.closeWizard();
-
-                    // Refresh interfaces list if available
-                    if (typeof window.loadInterfaces === 'function') {
-                        window.loadInterfaces();
-                    }
-                }, 2000);
+                // Show completion modal with action buttons instead of simple notification
+                this.view.showCompletionModal({
+                    interfaceId: interfaceId,
+                    name: payload.name,
+                    status: status,
+                    messageType: messageType,
+                    autoStart: payload.auto_start || false
+                });
 
                 // Emit completion event
                 if (interfaceId) {
@@ -921,6 +947,11 @@ PV1|1|I|ICU^101^1|||DOC123^Smith^Jane|||EMERGENCY|||`
                     }));
                 } else {
                     console.warn('⚠️ Backend returned success but no interface ID. Response:', response);
+                }
+
+                // Refresh interfaces list in background
+                if (typeof window.loadInterfaces === 'function') {
+                    window.loadInterfaces();
                 }
 
             } else {

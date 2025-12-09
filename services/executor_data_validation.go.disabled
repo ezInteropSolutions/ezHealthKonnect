@@ -1,0 +1,412 @@
+package services
+
+import (
+	"context"
+	"ezhealthkonnect/models"
+	"fmt"
+	"regexp"
+	"strconv"
+	"time"
+)
+
+// ============================================
+// DATA VALIDATION EXECUTORS
+// ============================================
+
+// ValidateDataTypesExecutor validates field data types
+type ValidateDataTypesExecutor struct{}
+
+func NewValidateDataTypesExecutor() *ValidateDataTypesExecutor {
+	return &ValidateDataTypesExecutor{}
+}
+
+func (e *ValidateDataTypesExecutor) Execute(
+	ctx context.Context,
+	step *models.TransformationStep,
+	inputData map[string]interface{},
+) (map[string]interface{}, error) {
+	rules, ok := step.Config["rules"].([]interface{})
+	if !ok {
+		return inputData, fmt.Errorf("invalid rules configuration")
+	}
+
+	onError := "fail"
+	if errStrategy, ok := step.Config["on_error"].(string); ok {
+		onError = errStrategy
+	}
+
+	validationErrors := []string{}
+
+	for _, rule := range rules {
+		ruleMap, ok := rule.(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		field := getStringValue(ruleMap, "field")
+		expectedType := getStringValue(ruleMap, "type")
+		pattern := getStringValue(ruleMap, "pattern")
+
+		// Get field value from parsed data
+		value := getNestedValue(inputData, field)
+		if value == nil {
+			continue
+		}
+
+		// Validate type
+		valid := false
+		switch expectedType {
+		case "string":
+			_, valid = value.(string)
+			if valid && pattern != "" {
+				matched, _ := regexp.MatchString(pattern, value.(string))
+				valid = matched
+			}
+		case "number":
+			_, valid = value.(float64)
+			if !valid {
+				_, valid = value.(int)
+			}
+		case "date":
+			format := getStringValue(ruleMap, "format")
+			valid = e.isValidDate(value, format)
+		case "boolean":
+			_, valid = value.(bool)
+		}
+
+		if !valid {
+			errMsg := fmt.Sprintf("Field %s failed type validation (expected: %s)", field, expectedType)
+			validationErrors = append(validationErrors, errMsg)
+		}
+	}
+
+	// Handle validation errors
+	if len(validationErrors) > 0 {
+		inputData["_validation_errors"] = validationErrors
+		if onError == "fail" {
+			return inputData, fmt.Errorf("data type validation failed: %v", validationErrors)
+		}
+	}
+
+	return inputData, nil
+}
+
+func (e *ValidateDataTypesExecutor) isValidDate(value interface{}, format string) bool {
+	strValue, ok := value.(string)
+	if !ok {
+		return false
+	}
+
+	// Map common formats to Go time layout
+	layouts := map[string]string{
+		"YYYYMMDD":   "20060102",
+		"YYYY-MM-DD": "2006-01-02",
+		"MM/DD/YYYY": "01/02/2006",
+		"YYYYMMDDHHMM": "200601021504",
+	}
+
+	layout, exists := layouts[format]
+	if !exists {
+		layout = "20060102" // default
+	}
+
+	_, err := time.Parse(layout, strValue)
+	return err == nil
+}
+
+func (e *ValidateDataTypesExecutor) GetStepType() string {
+	return "pre.validation"
+}
+
+func (e *ValidateDataTypesExecutor) Validate(step *models.TransformationStep) error {
+	if step.Config["rules"] == nil {
+		return fmt.Errorf("rules configuration is required")
+	}
+	return nil
+}
+
+// ValidateFormatExecutor validates field formats (phone, SSN, email)
+type ValidateFormatExecutor struct{}
+
+func NewValidateFormatExecutor() *ValidateFormatExecutor {
+	return &ValidateFormatExecutor{}
+}
+
+func (e *ValidateFormatExecutor) Execute(
+	ctx context.Context,
+	step *models.TransformationStep,
+	inputData map[string]interface{},
+) (map[string]interface{}, error) {
+	validations, ok := step.Config["validations"].([]interface{})
+	if !ok {
+		return inputData, fmt.Errorf("invalid validations configuration")
+	}
+
+	formats := make(map[string]string)
+	if configFormats, ok := step.Config["formats"].(map[string]interface{}); ok {
+		for k, v := range configFormats {
+			formats[k] = v.(string)
+		}
+	}
+
+	validationErrors := []string{}
+
+	for _, validation := range validations {
+		valMap, ok := validation.(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		field := getStringValue(valMap, "field")
+		formatType := getStringValue(valMap, "format")
+
+		value := getNestedValue(inputData, field)
+		if value == nil {
+			continue
+		}
+
+		strValue, ok := value.(string)
+		if !ok {
+			continue
+		}
+
+		// Get regex pattern for format
+		pattern, exists := formats[formatType]
+		if !exists {
+			continue
+		}
+
+		// Validate format
+		matched, err := regexp.MatchString(pattern, strValue)
+		if err != nil || !matched {
+			errMsg := fmt.Sprintf("Field %s failed format validation (format: %s)", field, formatType)
+			validationErrors = append(validationErrors, errMsg)
+		}
+	}
+
+	if len(validationErrors) > 0 {
+		inputData["_validation_errors"] = validationErrors
+		return inputData, fmt.Errorf("format validation failed: %v", validationErrors)
+	}
+
+	return inputData, nil
+}
+
+func (e *ValidateFormatExecutor) GetStepType() string {
+	return "pre.validation"
+}
+
+func (e *ValidateFormatExecutor) Validate(step *models.TransformationStep) error {
+	if step.Config["validations"] == nil {
+		return fmt.Errorf("validations configuration is required")
+	}
+	return nil
+}
+
+// ValidateRangeExecutor validates numeric ranges
+type ValidateRangeExecutor struct{}
+
+func NewValidateRangeExecutor() *ValidateRangeExecutor {
+	return &ValidateRangeExecutor{}
+}
+
+func (e *ValidateRangeExecutor) Execute(
+	ctx context.Context,
+	step *models.TransformationStep,
+	inputData map[string]interface{},
+) (map[string]interface{}, error) {
+	rules, ok := step.Config["rules"].([]interface{})
+	if !ok {
+		return inputData, fmt.Errorf("invalid rules configuration")
+	}
+
+	validationErrors := []string{}
+
+	for _, rule := range rules {
+		ruleMap, ok := rule.(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		field := getStringValue(ruleMap, "field")
+		min := getFloatValue(ruleMap, "min")
+		max := getFloatValue(ruleMap, "max")
+		description := getStringValue(ruleMap, "description")
+
+		value := getNestedValue(inputData, field)
+		if value == nil {
+			continue
+		}
+
+		// Convert to float64
+		var numValue float64
+		switch v := value.(type) {
+		case float64:
+			numValue = v
+		case int:
+			numValue = float64(v)
+		case string:
+			parsed, err := strconv.ParseFloat(v, 64)
+			if err != nil {
+				validationErrors = append(validationErrors, fmt.Sprintf("Field %s is not a valid number", field))
+				continue
+			}
+			numValue = parsed
+		default:
+			continue
+		}
+
+		// Validate range
+		if numValue < min || numValue > max {
+			errMsg := fmt.Sprintf("Field %s (%s) out of range: %.2f (expected: %.2f - %.2f)",
+				field, description, numValue, min, max)
+			validationErrors = append(validationErrors, errMsg)
+		}
+	}
+
+	if len(validationErrors) > 0 {
+		inputData["_validation_errors"] = validationErrors
+		return inputData, fmt.Errorf("range validation failed: %v", validationErrors)
+	}
+
+	return inputData, nil
+}
+
+func (e *ValidateRangeExecutor) GetStepType() string {
+	return "pre.validation"
+}
+
+func (e *ValidateRangeExecutor) Validate(step *models.TransformationStep) error {
+	if step.Config["rules"] == nil {
+		return fmt.Errorf("rules configuration is required")
+	}
+	return nil
+}
+
+// CrossFieldValidationExecutor validates relationships between fields
+type CrossFieldValidationExecutor struct{}
+
+func NewCrossFieldValidationExecutor() *CrossFieldValidationExecutor {
+	return &CrossFieldValidationExecutor{}
+}
+
+func (e *CrossFieldValidationExecutor) Execute(
+	ctx context.Context,
+	step *models.TransformationStep,
+	inputData map[string]interface{},
+) (map[string]interface{}, error) {
+	rules, ok := step.Config["rules"].([]interface{})
+	if !ok {
+		return inputData, fmt.Errorf("invalid rules configuration")
+	}
+
+	validationErrors := []string{}
+
+	for _, rule := range rules {
+		ruleMap, ok := rule.(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		name := getStringValue(ruleMap, "name")
+		field1 := getStringValue(ruleMap, "field1")
+		field2 := getStringValue(ruleMap, "field2")
+		operator := getStringValue(ruleMap, "operator")
+		message := getStringValue(ruleMap, "message")
+
+		value1 := getNestedValue(inputData, field1)
+		value2 := getNestedValue(inputData, field2)
+
+		if value1 == nil || value2 == nil {
+			continue
+		}
+
+		// Compare values based on operator
+		valid := e.compareValues(value1, value2, operator)
+
+		if !valid {
+			errMsg := message
+			if errMsg == "" {
+				errMsg = fmt.Sprintf("Cross-field validation failed: %s", name)
+			}
+			validationErrors = append(validationErrors, errMsg)
+		}
+	}
+
+	if len(validationErrors) > 0 {
+		inputData["_validation_errors"] = validationErrors
+		return inputData, fmt.Errorf("cross-field validation failed: %v", validationErrors)
+	}
+
+	return inputData, nil
+}
+
+func (e *CrossFieldValidationExecutor) compareValues(val1, val2 interface{}, operator string) bool {
+	// Convert to comparable types
+	switch operator {
+	case "greater_than", "after":
+		// Try date comparison first
+		if t1, ok1 := e.parseDate(val1); ok1 {
+			if t2, ok2 := e.parseDate(val2); ok2 {
+				return t1.After(t2)
+			}
+		}
+		// Fallback to numeric comparison
+		num1 := toFloat64(val1)
+		num2 := toFloat64(val2)
+		return num1 > num2
+
+	case "less_than", "before":
+		if t1, ok1 := e.parseDate(val1); ok1 {
+			if t2, ok2 := e.parseDate(val2); ok2 {
+				return t1.Before(t2)
+			}
+		}
+		num1 := toFloat64(val1)
+		num2 := toFloat64(val2)
+		return num1 < num2
+
+	case "equals":
+		return fmt.Sprintf("%v", val1) == fmt.Sprintf("%v", val2)
+
+	case "not_equals":
+		return fmt.Sprintf("%v", val1) != fmt.Sprintf("%v", val2)
+	}
+
+	return false
+}
+
+func (e *CrossFieldValidationExecutor) parseDate(value interface{}) (time.Time, bool) {
+	strValue, ok := value.(string)
+	if !ok {
+		return time.Time{}, false
+	}
+
+	// Try common formats
+	layouts := []string{
+		"20060102",
+		"2006-01-02",
+		"01/02/2006",
+		"2006-01-02T15:04:05Z",
+		time.RFC3339,
+	}
+
+	for _, layout := range layouts {
+		if t, err := time.Parse(layout, strValue); err == nil {
+			return t, true
+		}
+	}
+
+	return time.Time{}, false
+}
+
+func (e *CrossFieldValidationExecutor) GetStepType() string {
+	return "pre.validation"
+}
+
+func (e *CrossFieldValidationExecutor) Validate(step *models.TransformationStep) error {
+	if step.Config["rules"] == nil {
+		return fmt.Errorf("rules configuration is required")
+	}
+	return nil
+}

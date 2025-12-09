@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -123,7 +124,7 @@ func (oms *OutputMessageService) storeOutputInMongoDB(
 	correlationID string,
 	result *TransformationResult,
 ) (string, error) {
-	collectionName := fmt.Sprintf("transformed_messages_intf_%s", interfaceID)
+	collectionName := fmt.Sprintf("transformed_messages_intf_%s", strings.ReplaceAll(interfaceID, "-", "_"))
 	collection := oms.mongoClient.Database(oms.mongoDatabase).Collection(collectionName)
 
 	// Generate reference key for cross-database correlation

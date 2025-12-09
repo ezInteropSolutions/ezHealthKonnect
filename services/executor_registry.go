@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"strconv"
+	"strings"
 
 	"ezhealthkonnect/models"
 )
@@ -144,6 +146,11 @@ func (ve *ValidationExecutor) Execute(
 	inputData map[string]interface{},
 ) (map[string]interface{}, error) {
 
+	log.Printf("[DEBUG] Input data keys: %v", getMapKeys(inputData))
+	for k := range inputData {
+		log.Printf("[DEBUG]   - %s (type: %T)", k, inputData[k])
+	}
+
 	// Extract validation rules from config
 	rules, ok := step.Config["rules"].([]interface{})
 	if !ok {
@@ -159,13 +166,19 @@ func (ve *ValidationExecutor) Execute(
 		}
 
 		field, _ := rule["field"].(string)
-		required, _ := rule["required"].(bool)
+		ruleType, _ := rule["type"].(string)
+		errorMessage, _ := rule["errorMessage"].(string)
 
-		if required {
+		if ruleType == "required" {
 			// Check if field exists in input data
 			value := getNestedValue(inputData, field)
+			log.Printf("[DEBUG] Field: %s, Value: %v (type: %T)", field, value, value)
 			if value == nil || value == "" {
-				errors = append(errors, fmt.Sprintf("Required field missing: %s", field))
+				if errorMessage != "" {
+					errors = append(errors, errorMessage)
+				} else {
+					errors = append(errors, fmt.Sprintf("Required field missing: %s", field))
+				}
 			}
 		}
 	}
@@ -637,43 +650,74 @@ func (ge *GenericExecutor) Validate(step *models.TransformationStep) error {
 // getNestedValue retrieves a value from nested map using dot notation
 // Example: getNestedValue(data, "patient.name.family") => data["patient"]["name"]["family"]
 func getNestedValue(data map[string]interface{}, path string) interface{} {
-	keys := splitPath(path)
-	current := interface{}(data)
+	log.Printf("[getNestedValue] Path: %s", path)
+	keys := strings.Split(path, ".")
+	var current interface{} = data
 
 	for _, key := range keys {
-		if currentMap, ok := current.(map[string]interface{}); ok {
-			current = currentMap[key]
+		log.Printf("[getNestedValue]   Processing key: %s, current type: %T", key, current)
+
+		// Handle array access like "fields[1]"
+		if strings.Contains(key, "[") {
+			parts := strings.Split(key, "[")
+			mapKey := parts[0]
+			indexStr := strings.TrimSuffix(parts[1], "]")
+			index, err := strconv.Atoi(indexStr)
+			if err != nil {
+				log.Printf("[getNestedValue]   Failed to parse index: %v", err)
+				return nil
+			}
+
+			// Get map value
+			currentMap, ok := current.(map[string]interface{})
+			if !ok {
+				log.Printf("[getNestedValue]   Current is not a map")
+				return nil
+			}
+
+			arrayValue, exists := currentMap[mapKey]
+			if !exists {
+				log.Printf("[getNestedValue]   Key %s not found in map", mapKey)
+				return nil
+			}
+
+			// Convert to array
+			array, ok := arrayValue.([]interface{})
+			if !ok {
+				log.Printf("[getNestedValue]   %s is not an array, type: %T", mapKey, arrayValue)
+				return nil
+			}
+
+			// Check bounds
+			if index < 0 || index >= len(array) {
+				log.Printf("[getNestedValue]   Index %d out of bounds (len=%d)", index, len(array))
+				return nil
+			}
+
+			current = array[index]
 		} else {
-			return nil
+			// Normal map access
+			currentMap, ok := current.(map[string]interface{})
+			if !ok {
+				log.Printf("[getNestedValue]   Current is not a map for key: %s", key)
+				return nil
+			}
+
+			value, exists := currentMap[key]
+			if !exists {
+				log.Printf("[getNestedValue]   Key %s not found", key)
+				return nil
+			}
+
+			current = value
 		}
 	}
 
+	log.Printf("[getNestedValue] Final value: %v (type: %T)", current, current)
 	return current
 }
 
-// splitPath splits a dot-notation path into keys
-func splitPath(path string) []string {
-	// Simple implementation - can be enhanced for array indices
-	result := []string{}
-	current := ""
 
-	for _, char := range path {
-		if char == '.' {
-			if current != "" {
-				result = append(result, current)
-				current = ""
-			}
-		} else {
-			current += string(char)
-		}
-	}
-
-	if current != "" {
-		result = append(result, current)
-	}
-
-	return result
-}
 
 // ===============================================================
 // PASSTHROUGH EXECUTOR (OOB - Most Common Use Case)

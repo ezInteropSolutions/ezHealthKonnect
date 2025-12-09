@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Description Display Test</title>
+    <link rel="stylesheet" href="/css/components/xpath-autocomplete.css">
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            max-width: 900px;
+            margin: 30px auto;
+            padding: 20px;
+            background: #f5f7fa;
+        }
+        .test-box {
+            background: white;
+            padding: 25px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+            margin-bottom: 20px;
+        }
+        h2 {
+            color: #2c3e50;
+            margin-top: 0;
+        }
+        .status {
+            padding: 12px;
+            border-radius: 6px;
+            margin-top: 15px;
+            font-weight: 500;
+        }
+        .status.success {
+            background: #d4edda;
+            color: #155724;
+            border-left: 4px solid #28a745;
+        }
+        .status.info {
+            background: #d1ecf1;
+            color: #0c5460;
+            border-left: 4px solid #17a2b8;
+        }
+        code {
+            background: #f4f4f4;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: 'Courier New', monospace;
+            font-size: 13px;
+        }
+        .example-dropdown {
+            margin-top: 15px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            overflow: hidden;
+        }
+        .instruction {
+            background: #fff3cd;
+            padding: 12px;
+            border-radius: 6px;
+            border-left: 4px solid #ffc107;
+            margin-bottom: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="test-box">
+        <h2>🔍 XPath Autocomplete - Description Display Test</h2>
+
+        <div class="instruction">
+            <strong>📝 What to check:</strong>
+            <ol style="margin: 10px 0 0 20px; padding: 0;">
+                <li>Type "patient" or "date" in the search box below</li>
+                <li>Verify you see <strong>blue badges</strong> with field keys (PID.3, PID.7)</li>
+                <li>Verify you see <strong>bold descriptions</strong> (Patient ID, Date of Birth)</li>
+                <li>Verify you see <strong>gray technical paths</strong> below each field</li>
+                <li>Verify paths end with <code>.value</code></li>
+            </ol>
+        </div>
+
+        <h3>Live XPath Autocomplete:</h3>
+        <div id="xpath-container" style="margin-bottom: 20px;"></div>
+
+        <div class="status info" id="status-message">
+            <strong>Status:</strong> Initializing...
+        </div>
+
+        <div class="status success" id="selected-info" style="display: none;">
+            <strong>Selected Path:</strong><br>
+            <code id="selected-path-display"></code><br><br>
+            <strong>Description:</strong><br>
+            <span id="selected-description-display"></span>
+        </div>
+    </div>
+
+    <div class="test-box">
+        <h2>📋 Expected Display Format</h2>
+        <p>Each autocomplete result should look like this:</p>
+
+        <div class="example-dropdown">
+            <div class="xpath-dropdown-item" style="padding: 10px 12px; border-bottom: 1px solid #f0f0f0;">
+                <div class="xpath-item-header" style="display: flex; align-items: baseline; gap: 8px; margin-bottom: 4px;">
+                    <span class="xpath-item-key" style="font-family: 'Courier New', monospace; font-size: 13px; color: #4a90e2; font-weight: 700; background: #e8f4ff; padding: 2px 6px; border-radius: 3px; white-space: nowrap;">PID.7</span>
+                    <span class="xpath-item-name" style="font-size: 14px; color: #2c3e50; font-weight: 500; flex: 1;">Date of Birth</span>
+                </div>
+                <div class="xpath-item-details" style="display: flex; gap: 12px; flex-wrap: wrap; font-size: 12px; padding-left: 4px;">
+                    <span class="xpath-item-path-small" style="font-family: 'Courier New', monospace; color: #888; font-size: 11px; flex: 1; min-width: 200px;">enhancedSegments.PID.fields[2].value</span>
+                    <span class="xpath-item-type" style="color: #4a90e2; font-weight: 600; background: #e8f4ff; padding: 2px 6px; border-radius: 3px;">TS</span>
+                </div>
+            </div>
+
+            <div class="xpath-dropdown-item" style="padding: 10px 12px;">
+                <div class="xpath-item-header" style="display: flex; align-items: baseline; gap: 8px; margin-bottom: 4px;">
+                    <span class="xpath-item-key" style="font-family: 'Courier New', monospace; font-size: 13px; color: #4a90e2; font-weight: 700; background: #e8f4ff; padding: 2px 6px; border-radius: 3px; white-space: nowrap;">PID.5</span>
+                    <span class="xpath-item-name" style="font-size: 14px; color: #2c3e50; font-weight: 500; flex: 1;">Patient Name</span>
+                </div>
+                <div class="xpath-item-details" style="display: flex; gap: 12px; flex-wrap: wrap; font-size: 12px; padding-left: 4px;">
+                    <span class="xpath-item-path-small" style="font-family: 'Courier New', monospace; color: #888; font-size: 11px; flex: 1; min-width: 200px;">enhancedSegments.PID.fields[1].value</span>
+                    <span class="xpath-item-type" style="color: #4a90e2; font-weight: 600; background: #e8f4ff; padding: 2px 6px; border-radius: 3px;">XPN</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="/js/pipeline/components/XPathAutocomplete.js"></script>
+    <script>
+        const container = document.getElementById('xpath-container');
+        const statusMessage = document.getElementById('status-message');
+        const selectedInfo = document.getElementById('selected-info');
+        const selectedPathDisplay = document.getElementById('selected-path-display');
+        const selectedDescDisplay = document.getElementById('selected-description-display');
+
+        const autocomplete = new XPathAutocomplete(container, {
+            format: 'hl7v2',
+            version: 'v2.5',
+            messageType: 'ADT_A01',
+            placeholder: 'Search for "patient", "date", "birth", or "PID.7"...',
+            onChange: (path) => {
+                console.log('✅ Selected path:', path);
+
+                // Update status
+                statusMessage.style.display = 'none';
+                selectedInfo.style.display = 'block';
+                selectedPathDisplay.textContent = path;
+
+                // Find the description from the autocomplete data
+                const selectedField = autocomplete.flattenedPaths.find(p => p.path === path);
+                if (selectedField) {
+                    selectedDescDisplay.textContent = `${selectedField.name} - ${selectedField.description}`;
+                }
+            }
+        });
+
+        // Update status after initialization
+        setTimeout(() => {
+            if (autocomplete.flattenedPaths && autocomplete.flattenedPaths.length > 0) {
+                statusMessage.innerHTML = `<strong>✅ Ready!</strong> ${autocomplete.flattenedPaths.length} field paths loaded. Try searching above.`;
+                statusMessage.className = 'status success';
+            } else {
+                statusMessage.innerHTML = '<strong>⚠️ Warning:</strong> No field paths loaded. Check console for errors.';
+                statusMessage.className = 'status info';
+            }
+        }, 2000);
+
+        console.log('🧪 XPath Autocomplete Test Page Loaded');
+        console.log('📊 Try searching for: "patient", "date", "birth", "PID.7"');
+    </script>
+</body>
+</html>

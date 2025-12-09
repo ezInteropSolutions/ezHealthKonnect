@@ -11,10 +11,18 @@
     /**
      * Initialize application
      */
-    function init() {
+    async function init() {
         console.log('Initializing Pipeline Builder...');
 
         try {
+            // Check authentication using OOB AuthService
+            const isAuthenticated = await window.AuthService.initialize();
+
+            if (!isAuthenticated) {
+                console.warn('🚫 Authentication failed, initialization aborted');
+                return;
+            }
+
             // Create pipeline builder instance
             pipelineBuilder = new PipelineBuilder();
 

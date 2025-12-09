@@ -4,19 +4,18 @@
 package processing
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log"
-	"net/http"
 	"strings"
 	"time"
 
 	"ezhealthkonnect/models"
 	"ezhealthkonnect/services"
+	"ezhealthkonnect/services/connectors"
 	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/mongo"
 )
 
 // processMessages processes incoming messages from ANY connector channel (ALL 32 connectors)
@@ -189,6 +188,16 @@ func (pe *ProcessingEngine) storeAndParse(interfaceID string, msg *models.Inboun
 		sourceType = st
 	}
 
+	// Create processing logger if debug logging enabled
+	logger := pe.createLogger(interfaceID, msg.MessageID, msg.CorrelationID, messageType)
+	if logger != nil {
+		logger.Info(services.LogCategoryConnection, "Message received", map[string]interface{}{
+			"source_type": sourceType,
+			"message_size": len(msg.Content),
+			"source_endpoint": msg.SourceType,
+		})
+	}
+
 	// STEP 1: Store raw message in MongoDB (if available)
 	if pe.mongoService != nil {
 		rawDoc := &services.RawMessageDocument{
@@ -232,12 +241,95 @@ func (pe *ProcessingEngine) storeAndParse(interfaceID string, msg *models.Inboun
 	}
 
 	// STEP 2: Parse to JSON (if parser service available)
-	// Note: For FHIR messages, content is already JSON - parser will detect and handle accordingly
-	if pe.parserService != nil {
+	// Note: For FHIR messages, content is already JSON - skip parsing
+	if sourceType == "http_fhir" {
+		log.Printf("⏭️  Skipping JSON conversion for FHIR message: %s", msg.MessageID)
+
+		if logger != nil {
+			logger.Info(services.LogCategoryParsing, "FHIR message received (sink interface)", map[string]interface{}{
+				"message_type": messageType,
+				"skip_parsing": true,
+			})
+		}
+
+		// Store the FHIR bundle as-is in MongoDB parsed_content
+		if pe.mongoService != nil {
+			collectionName := fmt.Sprintf("raw_messages_intf_%s", strings.ReplaceAll(interfaceID, "-", "_"))
+			collection := pe.mongoService.GetCollection(collectionName)
+
+			// Parse the FHIR bundle to store in parsed_content
+			var fhirBundle map[string]interface{}
+			if err := json.Unmarshal([]byte(msg.Content), &fhirBundle); err == nil {
+				updateResult, err := collection.UpdateOne(
+					ctx,
+					bson.M{"message_id": msg.MessageID},
+					bson.M{
+						"$set": bson.M{
+							"parsed_content": fhirBundle,
+							"parsed_at":      time.Now(),
+							"parsed_format":  "fhir",
+							"parsing_status": "completed",
+						},
+					},
+				)
+				if err != nil {
+					log.Printf("⚠️  Failed to store FHIR bundle in MongoDB: %v", err)
+					if logger != nil {
+						logger.Error(services.LogCategoryParsing, "Failed to store FHIR bundle in MongoDB", map[string]interface{}{
+							"error": err.Error(),
+						})
+					}
+				} else {
+					log.Printf("✅ FHIR bundle stored in MongoDB: %s (matched: %d)", msg.MessageID, updateResult.MatchedCount)
+					if logger != nil {
+						logger.Info(services.LogCategoryParsing, "FHIR bundle saved to MongoDB", map[string]interface{}{
+							"collection":    collectionName,
+							"message_id":    msg.MessageID,
+							"matched_count": updateResult.MatchedCount,
+						})
+					}
+				}
+			}
+		}
+
+		// Update PostgreSQL parsing status
+		tableName := fmt.Sprintf("messages_intf_%s", strings.ReplaceAll(interfaceID, "-", "_"))
+		query := fmt.Sprintf(`UPDATE %s SET parsing_status = 'completed', parsed_at = $1 WHERE message_id = $2`, tableName)
+		result, err := pe.db.Exec(query, time.Now(), msg.MessageID)
+		if err != nil {
+			log.Printf("⚠️  Failed to update parsing status in PostgreSQL: %v", err)
+			if logger != nil {
+				logger.Error(services.LogCategoryParsing, "Failed to update parsing status in PostgreSQL", map[string]interface{}{
+					"error": err.Error(),
+				})
+			}
+		} else {
+			rowsAffected, _ := result.RowsAffected()
+			log.Printf("✅ Parsing status updated in PostgreSQL: %s (rows: %d)", msg.MessageID, rowsAffected)
+			if logger != nil {
+				logger.Info(services.LogCategoryParsing, "Parsing status saved to PostgreSQL", map[string]interface{}{
+					"table":         tableName,
+					"message_id":    msg.MessageID,
+					"status":        "completed",
+					"rows_affected": rowsAffected,
+				})
+			}
+		}
+
+	} else if pe.parserService != nil {
 		log.Printf("🔄 Starting JSON conversion for message: %s (type: %s)", msg.MessageID, messageType)
+
+		if logger != nil {
+			logger.LogParsingStart(messageType)
+		}
+
 		result, err := pe.parserService.ParseToJSON(ctx, msg.MessageID, interfaceID, msg.Content)
 		if err != nil {
 			log.Printf("❌ JSON conversion failed for %s: %v", msg.MessageID, err)
+
+			if logger != nil {
+				logger.LogParsingError(messageType, err.Error(), 0)
+			}
 
 			// Capture JSON parsing error (V23 - Error Handling Enhancement)
 			if pe.errorService != nil {
@@ -256,14 +348,37 @@ func (pe *ProcessingEngine) storeAndParse(interfaceID string, msg *models.Inboun
 			log.Printf("✅ JSON conversion completed for %s in %dms",
 				msg.MessageID, result.ParsingTime.Milliseconds())
 
+			if logger != nil {
+				logger.LogParsingComplete(messageType, result.ParsingTime.Milliseconds(), len(result.ParsedJSON))
+			}
+
 			// STEP 3: Trigger transformation pipeline (MVC + OOB pattern)
 			if pe.transformationService != nil {
-				go pe.executeTransformationPipeline(ctx, interfaceID, msg.MessageID, messageType, result)
+				go pe.executeTransformationPipelineWithLogger(ctx, interfaceID, msg.MessageID, messageType, result, logger)
 			} else {
 				log.Printf("⚠️  Transformation service not available - skipping transformation")
 			}
 		}
 	}
+}
+
+// executeTransformationPipelineWithLogger executes transformation with logging support
+func (pe *ProcessingEngine) executeTransformationPipelineWithLogger(
+	ctx context.Context,
+	interfaceID string,
+	messageID string,
+	messageType string,
+	parseResult *models.ParserResult,
+	logger *services.ProcessingLogger,
+) {
+	if logger != nil {
+		logger.Info(services.LogCategoryTransformation, "Starting transformation pipeline", map[string]interface{}{
+			"message_type": messageType,
+		})
+	}
+
+	// Call existing implementation
+	pe.executeTransformationPipeline(ctx, interfaceID, messageID, messageType, parseResult)
 }
 
 // executeTransformationPipeline executes the transformation pipeline (MVC + OOB)
@@ -300,10 +415,10 @@ func (pe *ProcessingEngine) executeTransformationPipeline(
 		}
 	}()
 
-	// Step 1: Get or create pipeline for this interface + message type
-	log.Printf("🔍 [MVC PIPELINE] Calling GetOrCreateDefaultPipeline...")
-	pipeline, err := pe.transformationService.GetOrCreateDefaultPipeline(ctx, interfaceID, messageType)
-	log.Printf("🔍 [MVC PIPELINE] GetOrCreateDefaultPipeline returned: pipeline=%v, err=%v", pipeline != nil, err)
+	// Step 1: Get existing pipeline for this interface + message type (do NOT auto-create)
+	// Pipelines should only be created via wizard or manual pipeline builder
+	log.Printf("🔍 [MVC PIPELINE] Getting transformation pipeline...")
+	pipeline, err := pe.transformationService.GetPipeline(ctx, interfaceID, messageType)
 	if err != nil {
 		log.Printf("❌ [MVC PIPELINE] Failed to get transformation pipeline for interface %s, message type %s: %v",
 			interfaceID, messageType, err)
@@ -324,7 +439,7 @@ func (pe *ProcessingEngine) executeTransformationPipeline(
 	}
 
 	if pipeline == nil {
-		log.Printf("ℹ️  [MVC PIPELINE] No transformation pipeline configured for interface %s, message type %s - skipping",
+		log.Printf("⏭️  [MVC PIPELINE] No transformation pipeline configured for interface %s, message type %s - skipping transformation",
 			interfaceID, messageType)
 		return
 	}
@@ -398,6 +513,14 @@ func (pe *ProcessingEngine) storeTransformedMessage(
 		"transformation_time_ms":     int32(result.ExecutionTime.Milliseconds()), // Convert to int32 for MongoDB schema
 		"error_count":                len(result.Errors),
 		"errors":                     result.Errors,
+	}
+
+	// Add transformation steps metadata for UI display
+	if result.ExecutionLog != nil && len(result.ExecutionLog) > 0 {
+		transformedDoc["transformation_metadata"] = map[string]interface{}{
+			"steps": result.ExecutionLog,
+		}
+		log.Printf("📊 [STORAGE] Storing %d transformation steps in MongoDB", len(result.ExecutionLog))
 	}
 
 	// UNIVERSAL STORAGE DESIGN - Works for all message types
@@ -519,50 +642,100 @@ func (pe *ProcessingEngine) updateMongoSyncStatus(interfaceID string, messageID 
 
 // deliverMessage sends the transformed message to the destination endpoint
 func (pe *ProcessingEngine) deliverMessage(ctx context.Context, interfaceID string, messageID string, payload *models.DeliveryPayload) {
-	log.Printf("🚀 [DELIVERY] Starting delivery for message %s to %s", messageID, payload.DestinationEndpoint)
+	log.Printf("🚀 [DELIVERY] Starting delivery for message %s to %s (type: %s)",
+		messageID, payload.DestinationEndpoint, payload.DestinationType)
 
-	// Create HTTP request
-	req, err := http.NewRequestWithContext(ctx, "POST", payload.DestinationEndpoint, bytes.NewReader(payload.Transmission.Content))
+	// OOB PATTERN: Use connector factory to create outbound connector
+	connector, err := pe.connectorFactory.CreateOutbound(payload.DestinationType)
 	if err != nil {
-		log.Printf("❌ [DELIVERY] Failed to create HTTP request: %v", err)
-		pe.updateDeliveryStatus(interfaceID, messageID, "failed", err.Error())
+		log.Printf("❌ [DELIVERY] Failed to create outbound connector '%s': %v", payload.DestinationType, err)
+		pe.updateDeliveryStatus(interfaceID, messageID, "failed", fmt.Sprintf("Connector creation failed: %v", err))
 		return
 	}
 
-	// Add headers from delivery payload
-	for key, value := range payload.Transmission.Headers {
-		req.Header.Set(key, value)
-		log.Printf("🔑 [DELIVERY] Header: %s = %s", key, maskSensitiveHeader(key, value))
-	}
-
-	// Execute HTTP request
-	client := &http.Client{
-		Timeout: 30 * time.Second,
-	}
-
-	startTime := time.Now()
-	resp, err := client.Do(req)
-	deliveryTime := time.Since(startTime)
-
+	// Get target connectivity config from database
+	var targetConnectivityJSON string
+	err = pe.db.QueryRow(`
+		SELECT COALESCE(target_connectivity::text, '{}')
+		FROM interfaces
+		WHERE id = $1
+	`, interfaceID).Scan(&targetConnectivityJSON)
 	if err != nil {
-		log.Printf("❌ [DELIVERY] HTTP request failed after %dms: %v", deliveryTime.Milliseconds(), err)
-		pe.updateDeliveryStatus(interfaceID, messageID, "failed", err.Error())
+		log.Printf("❌ [DELIVERY] Failed to load target_connectivity for interface %s: %v", interfaceID, err)
+		pe.updateDeliveryStatus(interfaceID, messageID, "failed", fmt.Sprintf("Config load failed: %v", err))
 		return
 	}
-	defer resp.Body.Close()
 
-	// Read response body
-	respBody, _ := io.ReadAll(resp.Body)
+	// Parse target connectivity
+	var targetConnectivity map[string]interface{}
+	if err := json.Unmarshal([]byte(targetConnectivityJSON), &targetConnectivity); err != nil {
+		log.Printf("❌ [DELIVERY] Failed to parse target_connectivity: %v", err)
+		pe.updateDeliveryStatus(interfaceID, messageID, "failed", fmt.Sprintf("Config parse failed: %v", err))
+		return
+	}
 
-	// Check response status
-	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-		log.Printf("✅ [DELIVERY] Message delivered successfully in %dms (status: %d)", deliveryTime.Milliseconds(), resp.StatusCode)
-		log.Printf("📥 [DELIVERY] Response: %s", string(respBody))
-		pe.updateDeliveryStatus(interfaceID, messageID, "delivered", fmt.Sprintf("HTTP %d", resp.StatusCode))
+	// Merge config with delivery payload
+	config := make(map[string]interface{})
+	if connConfig, ok := targetConnectivity["config"].(map[string]interface{}); ok {
+		for k, v := range connConfig {
+			config[k] = v
+		}
+	}
+
+	// Add endpoint from delivery payload ONLY if not already in config
+	// This prevents overriding the correct endpoint from target_connectivity
+	if _, hasEndpoint := config["endpoint"]; !hasEndpoint {
+		config["endpoint"] = payload.DestinationEndpoint
+	}
+	config["interface_id"] = interfaceID
+
+	// Convert config to JSON for connector initialization
+	configJSON, err := json.Marshal(config)
+	if err != nil {
+		log.Printf("❌ [DELIVERY] Failed to marshal config: %v", err)
+		pe.updateDeliveryStatus(interfaceID, messageID, "failed", fmt.Sprintf("Config marshal failed: %v", err))
+		return
+	}
+
+	log.Printf("🔍 [DELIVERY] Initializing %s connector with config: %s", payload.DestinationType, string(configJSON))
+
+	// Initialize connector with config
+	if err := connector.Initialize(configJSON); err != nil {
+		log.Printf("❌ [DELIVERY] Failed to initialize connector: %v", err)
+		pe.updateDeliveryStatus(interfaceID, messageID, "failed", fmt.Sprintf("Connector init failed: %v", err))
+		return
+	}
+
+	// Create outbound message
+	outboundMsg := &models.OutboundMessage{
+		MessageID:         messageID,
+		InterfaceID:       interfaceID,
+		Content:           string(payload.Transmission.Content),
+		ContentType:       payload.Transmission.ContentType,
+		DestinationType:   payload.DestinationType,
+		DestinationConfig: config,
+		Headers:           payload.Transmission.Headers,
+		CreatedAt:         time.Now(),
+		MaxRetries:        3,
+		Timeout:           30,
+	}
+
+	// Send via connector (uses connector-specific delivery logic)
+	result, err := connector.Send(ctx, outboundMsg)
+	if err != nil {
+		log.Printf("❌ [DELIVERY] Connector send failed: %v", err)
+		pe.updateDeliveryStatusWithResponse(interfaceID, messageID, "failed", err.Error(), result)
+		return
+	}
+
+	// Update delivery status based on result
+	if result.Success {
+		log.Printf("✅ [DELIVERY] Message delivered successfully in %dms (ack: %s)",
+			result.DurationMs, result.Acknowledgment)
+		pe.updateDeliveryStatusWithResponse(interfaceID, messageID, "delivered", result.Acknowledgment, result)
 	} else {
-		log.Printf("⚠️  [DELIVERY] Delivery failed with HTTP %d after %dms", resp.StatusCode, deliveryTime.Milliseconds())
-		log.Printf("📥 [DELIVERY] Error response: %s", string(respBody))
-		pe.updateDeliveryStatus(interfaceID, messageID, "failed", fmt.Sprintf("HTTP %d: %s", resp.StatusCode, string(respBody)))
+		log.Printf("⚠️ [DELIVERY] Delivery failed: %s", result.ErrorMessage)
+		pe.updateDeliveryStatusWithResponse(interfaceID, messageID, "failed", result.ErrorMessage, result)
 	}
 }
 
@@ -603,4 +776,127 @@ func (pe *ProcessingEngine) updateDeliveryStatus(interfaceID string, messageID s
 	if err != nil {
 		log.Printf("⚠️  [DELIVERY] Failed to update delivery status: %v", err)
 	}
+}
+
+// updateDeliveryStatusWithResponse updates delivery status with full response details
+func (pe *ProcessingEngine) updateDeliveryStatusWithResponse(interfaceID string, messageID string, status string, details string, result *connectors.DeliveryResult) {
+	log.Printf("🔧 [DEBUG] updateDeliveryStatusWithResponse called: msgID=%s, status=%s", messageID, status)
+
+	// Update MongoDB if available
+	if pe.mongoService != nil {
+		collectionName := fmt.Sprintf("transformed_messages_intf_%s", strings.ReplaceAll(interfaceID, "-", "_"))
+		collection := pe.mongoService.GetCollection(collectionName)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		// Build update document with response details
+		updateDoc := bson.M{
+			"delivery_status":  status,
+			"delivery_details": details,
+			"delivered_at":     time.Now(),
+		}
+
+		if result != nil {
+			updateDoc["delivery_duration_ms"] = result.DurationMs
+			updateDoc["delivery_retry_count"] = result.RetryCount
+			updateDoc["delivery_acknowledgment"] = result.Acknowledgment
+
+			// Store response metadata if available
+			if result.Metadata != nil {
+				if statusCode, ok := result.Metadata["status_code"].(int); ok {
+					updateDoc["delivery_http_status"] = statusCode
+				}
+				if respBody, ok := result.Metadata["response_body"].(string); ok {
+					updateDoc["delivery_response_body"] = respBody
+				}
+			}
+		}
+
+		filter := bson.M{"message_id": messageID}
+		update := bson.M{"$set": updateDoc}
+
+		_, err := collection.UpdateOne(ctx, filter, update)
+		if err != nil {
+			log.Printf("⚠️  [DELIVERY] Failed to update MongoDB delivery status: %v", err)
+		}
+	}
+
+	// Update PostgreSQL message table
+	if pe.db != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		inputTableName := fmt.Sprintf("messages_intf_%s", strings.ReplaceAll(interfaceID, "-", "_"))
+
+		updateQuery := fmt.Sprintf(`
+			UPDATE %s
+			SET delivery_status = $1,
+			    delivery_attempts = delivery_attempts + 1,
+			    updated_at = NOW()
+			WHERE message_id = $2
+		`, inputTableName)
+
+		_, err := pe.db.ExecContext(ctx, updateQuery, status, messageID)
+		if err != nil {
+			log.Printf("⚠️  [DELIVERY] Failed to update PostgreSQL delivery status: %v", err)
+		} else {
+			log.Printf("✅ [DELIVERY] PostgreSQL updated: message_id=%s, delivery_status=%s", messageID, status)
+		}
+	}
+}
+
+// createLogger creates a processing logger for a message if debug logging is enabled
+func (pe *ProcessingEngine) createLogger(interfaceID, messageID, correlationID, messageType string) *services.ProcessingLogger {
+	log.Printf("🔍 [CREATE LOGGER] Called for interface: %s, message: %s", interfaceID, messageID)
+
+	// Check if debug logging is enabled for this interface
+	if pe.db == nil {
+		log.Printf("⚠️  [CREATE LOGGER] Database is nil")
+		return nil
+	}
+
+	var debugLogging bool
+	var interfaceName string
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	query := `SELECT name, debug_logging FROM interfaces WHERE id = $1`
+	err := pe.db.QueryRowContext(ctx, query, interfaceID).Scan(&interfaceName, &debugLogging)
+	if err != nil {
+		log.Printf("⚠️  [CREATE LOGGER] Query failed: %v", err)
+		return nil
+	}
+
+	log.Printf("🔍 [CREATE LOGGER] Interface: %s, debug_logging: %v", interfaceName, debugLogging)
+
+	// Only create logger if debug logging enabled
+	if !debugLogging {
+		log.Printf("⚠️  [CREATE LOGGER] Debug logging is disabled for %s", interfaceName)
+		return nil
+	}
+
+	// Get MongoDB client for logging
+	var mongoClient *mongo.Client
+	if pe.mongoService != nil {
+		mongoClient = pe.mongoService.GetClient()
+		if mongoClient != nil {
+			log.Printf("✅ [DEBUG LOGGER] MongoDB client available for logging (interface: %s)", interfaceName)
+		} else {
+			log.Printf("⚠️  [DEBUG LOGGER] mongoService exists but GetClient() returned nil (interface: %s)", interfaceName)
+		}
+	} else {
+		log.Printf("⚠️  [DEBUG LOGGER] mongoService is nil - logs will only print to console (interface: %s)", interfaceName)
+	}
+
+	return services.NewProcessingLogger(
+		interfaceID,
+		interfaceName,
+		messageID,
+		correlationID,
+		messageType,
+		debugLogging,
+		mongoClient,
+	)
 }

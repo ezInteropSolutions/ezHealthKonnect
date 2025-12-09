@@ -108,6 +108,21 @@ class InterfaceService {
                 targetConfig: typeof interfaceData.targetConfig
             });
 
+            // Clean target config based on connectivity type
+            // Sink targets should not have HTTP-specific fields
+            let cleanedTargetConfig = interfaceData.targetConfig || {};
+            const targetConnType = interfaceData.targetConnectivity || 'http';
+
+            if (targetConnType === 'sink') {
+                // For sink, only keep sink-specific fields
+                cleanedTargetConfig = {
+                    enableLogging: cleanedTargetConfig.enableLogging !== false,
+                    enableValidation: cleanedTargetConfig.enableValidation || false,
+                    retentionDays: cleanedTargetConfig.retentionDays || 30,
+                    generateAck: cleanedTargetConfig.generateAck !== false
+                };
+            }
+
             const createData = {
                 id: interfaceId,
                 name: interfaceData.name,
@@ -115,20 +130,23 @@ class InterfaceService {
                 message_type: interfaceData.messageType || 'ADT^A01',
                 source_type: interfaceData.sourceType,
                 target_type: interfaceData.targetType,
-                // V30 migration: connectivity fields are now JSONB with structure {type, config}
+                // V30+ migration: ONLY use connectivity fields (no legacy duplication)
                 source_connectivity: {
                     type: interfaceData.sourceConnectivity || 'tcp',
                     config: interfaceData.sourceConfig || {}
                 },
                 target_connectivity: {
-                    type: interfaceData.targetConnectivity || 'http',
-                    config: interfaceData.targetConfig || {}
+                    type: targetConnType,
+                    config: cleanedTargetConfig
                 },
-                // Keep old columns for backward compatibility during transition
-                source_config: interfaceData.sourceConfig || {},
-                target_config: interfaceData.targetConfig || {},
-                transformation_mapping: interfaceData.mappings || {},
+                // REMOVED: Legacy columns source_config/target_config - use *_connectivity only
+                // FIXED: Handle both wizard formats - transformationMapping (object with atomicMappings) or mappings (array)
+                transformation_mapping: interfaceData.transformationMapping || interfaceData.mappings || {},
                 status: interfaceData.status || 'draft',
+                // V32: Deployment configuration fields
+                deployment_mode: interfaceData.deployment_mode || 'manual',
+                auto_start: interfaceData.auto_start !== undefined ? interfaceData.auto_start : false,
+                deployment_delay_seconds: interfaceData.deployment_delay_seconds || 0,
                 user_id: userId,
                 created_by: userId,
                 updated_by: userId,
@@ -142,9 +160,9 @@ class InterfaceService {
                 name: createData.name,
                 source_type: createData.source_type,
                 target_type: createData.target_type,
-                status: createData.status,
-                user_id: createData.user_id,
-                target_config: createData.target_config
+                source_connectivity: createData.source_connectivity,
+                target_connectivity: createData.target_connectivity,
+                status: createData.status
             });
 
             // Step 3: Execute database create
@@ -364,13 +382,19 @@ class InterfaceService {
             const inputTableName = `messages_intf_${interfaceId.replace(/-/g, '_')}`;
             const outputTableName = `output_intf_${interfaceId.replace(/-/g, '_')}`;
 
-            // Create input table (for received messages)
+            // Create PostgreSQL tables
             await this.createInputTable(inputTableName, interfaceId);
-
-            // Create output table (for transformed/delivered messages)
             await this.createOutputTable(outputTableName, interfaceId);
+            console.log(`✅ PostgreSQL tables created: ${inputTableName}, ${outputTableName}`);
 
-            console.log(`✅ Tables created: ${inputTableName}, ${outputTableName}`);
+            // Create MongoDB collections (if MongoDB is available)
+            try {
+                await this.createMongoDBCollections(interfaceId, interfaceName);
+            } catch (mongoError) {
+                console.warn(`⚠️ MongoDB collections not created (MongoDB may not be available):`, mongoError.message);
+                // Don't fail interface creation if MongoDB is not available
+            }
+
             return { inputTableName, outputTableName };
 
         } catch (error) {
@@ -456,10 +480,10 @@ class InterfaceService {
         const createIndex = `CREATE INDEX IF NOT EXISTS idx_${tableName}_message_id ON ${tableName}(message_id);`;
 
         const registerMetadata = `
-            INSERT INTO output_table_metadata (interface_id, table_name, created_at)
+            INSERT INTO output_table_metadata (interface_id, output_table_name, created_at)
             VALUES ($1, $2, CURRENT_TIMESTAMP)
             ON CONFLICT (interface_id) DO UPDATE SET
-                table_name = $2, updated_at = CURRENT_TIMESTAMP;
+                output_table_name = $2, updated_at = CURRENT_TIMESTAMP;
         `;
 
         await this.database.sequelize.query(createTableSQL);
@@ -469,6 +493,52 @@ class InterfaceService {
         });
 
         console.log(`✅ Output table created: ${tableName}`);
+    }
+
+    /**
+     * Create MongoDB collections for interface
+     * Creates: raw_messages_intf_<id> and transformed_messages_intf_<id>
+     */
+    async createMongoDBCollections(interfaceId, interfaceName) {
+        console.log(`📦 Creating MongoDB collections for interface: ${interfaceName}`);
+
+        try {
+            // Import MongoDB connection service (Go backend service)
+            const { MongoClient } = require('mongodb');
+
+            // Get MongoDB URI from environment
+            const mongoURI = process.env.MONGODB_URI;
+            if (!mongoURI) {
+                throw new Error('MONGODB_URI environment variable not set');
+            }
+
+            const client = new MongoClient(mongoURI);
+            await client.connect();
+
+            const db = client.db(process.env.MONGODB_DATABASE || 'ezhealthkonnect');
+
+            // Collection names (matching Go backend naming convention)
+            const rawCollectionName = `raw_messages_intf_${interfaceId}`;
+            const transformedCollectionName = `transformed_messages_intf_${interfaceId}`;
+
+            // Create raw messages collection
+            await db.createCollection(rawCollectionName);
+            await db.collection(rawCollectionName).createIndex({ message_id: 1 }, { unique: true });
+            await db.collection(rawCollectionName).createIndex({ received_at: -1 });
+            console.log(`✅ MongoDB collection created: ${rawCollectionName}`);
+
+            // Create transformed messages collection
+            await db.createCollection(transformedCollectionName);
+            await db.collection(transformedCollectionName).createIndex({ message_id: 1 });
+            await db.collection(transformedCollectionName).createIndex({ transformed_at: -1 });
+            console.log(`✅ MongoDB collection created: ${transformedCollectionName}`);
+
+            await client.close();
+
+        } catch (error) {
+            console.error(`❌ Failed to create MongoDB collections:`, error);
+            throw error;
+        }
     }
 }
 

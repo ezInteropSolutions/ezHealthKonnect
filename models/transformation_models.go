@@ -141,6 +141,7 @@ type TransformationExecutionResult struct {
 	ExecutionTime time.Duration          `json:"execution_time"`
 	Output        map[string]interface{} `json:"output"`         // Transformed content (FHIR bundle, JSON, etc.)
 	DeliveryPayload *DeliveryPayload     `json:"delivery_payload,omitempty"` // Prepared for transmission
+	ExecutionLog  []StepExecutionLog     `json:"execution_log"`  // Step-by-step execution tracking
 	Errors        []TransformationError  `json:"errors"`
 }
 

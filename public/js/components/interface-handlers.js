@@ -113,7 +113,13 @@ class FhirInterfaceHandler extends BaseInterfaceHandler {
      * Populate FHIR-specific form fields from saved configuration
      */
     populateTargetFields(targetConfig) {
-        console.log('🔍 FHIR Handler: Populating fields from config:', targetConfig);
+        console.log('🔍 FHIR Handler: Populating fields from config:', JSON.stringify(targetConfig, null, 2));
+        console.log('🔍 FHIR Handler: Auth fields available:', {
+            authType: targetConfig.authType,
+            username: targetConfig.username,
+            password: targetConfig.password ? '***masked***' : 'NOT SET',
+            hasAuthType: !!targetConfig.authType
+        });
 
         // Reconstruct FHIR Server URL if not stored directly
         let fhirServerUrl = targetConfig.fhirServerUrl;
@@ -148,6 +154,46 @@ class FhirInterfaceHandler extends BaseInterfaceHandler {
         }
 
         this.setFieldValue('editResourceEndpoint', resourceEndpoint);
+
+        // Populate FHIR endpoint (InterfaceConfigComponents uses 'edittargetEndpoint' for FHIR)
+        if (targetConfig.endpoint) {
+            this.setFieldValue('edittargetEndpoint', targetConfig.endpoint);
+        }
+
+        // Populate authentication fields (if present)
+        if (targetConfig.authType) {
+            this.setFieldValue('edittargetHttpAuthType', targetConfig.authType);
+            console.log('🔑 FHIR Handler: Auth type set to', targetConfig.authType);
+
+            // Populate auth-specific fields based on type
+            if (targetConfig.authType === 'basic') {
+                this.setFieldValue('edittargetHttpAuthUsername', targetConfig.username);
+                this.setFieldValue('edittargetHttpAuthPassword', targetConfig.password);
+                console.log('🔑 FHIR Handler: Basic auth credentials populated');
+            } else if (targetConfig.authType === 'bearer') {
+                this.setFieldValue('edittargetHttpAuthBearerToken', targetConfig.bearerToken);
+                console.log('🔑 FHIR Handler: Bearer token populated');
+            } else if (targetConfig.authType === 'api_key') {
+                this.setFieldValue('edittargetHttpAuthApiKey', targetConfig.apiKey);
+                this.setFieldValue('edittargetHttpAuthApiKeyHeader', targetConfig.apiKeyHeader);
+                console.log('🔑 FHIR Handler: API key populated');
+            } else if (targetConfig.authType === 'oauth2') {
+                this.setFieldValue('edittargetHttpAuthClientId', targetConfig.clientId);
+                this.setFieldValue('edittargetHttpAuthClientSecret', targetConfig.clientSecret);
+                this.setFieldValue('edittargetHttpAuthTokenUrl', targetConfig.tokenUrl);
+                console.log('🔑 FHIR Handler: OAuth2 credentials populated');
+            }
+        }
+
+        // Populate delivery mode if present
+        if (targetConfig.deliveryMode) {
+            this.setFieldValue('edittargetDeliveryMode', targetConfig.deliveryMode);
+        }
+
+        // Populate FHIR version if present
+        if (targetConfig.version) {
+            this.setFieldValue('edittargetVersion', targetConfig.version);
+        }
 
         console.log('✅ FHIR Handler: Fields populated successfully');
     }

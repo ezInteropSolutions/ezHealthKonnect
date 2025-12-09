@@ -31,11 +31,15 @@ class InterfaceDeploymentService {
                 await this.database.connect();
             }
 
-            // Wait a few seconds for Go backend to be ready
-            console.log('⏳ Waiting for Go backend to be ready...');
-            await this.waitForGoBackend(30); // 30 second timeout
+            // Give Go backend extra time to start (avoid race condition)
+            console.log('⏳ Allowing Go backend startup time (5s delay)...');
+            await new Promise(resolve => setTimeout(resolve, 5000));
 
-            // Get all interfaces that should auto-start
+            // Wait for Go backend to be ready (increased timeout to handle slower startups)
+            console.log('⏳ Waiting for Go backend to be ready...');
+            await this.waitForGoBackend(60); // Increased from 30s to 60s timeout
+
+            // Get all interfaces that should auto-start based on deployment_mode
             const interfaces = await this.database.sequelize.query(`
                 SELECT
                     id,
@@ -48,7 +52,7 @@ class InterfaceDeploymentService {
                     status
                 FROM interfaces
                 WHERE is_active = true
-                  AND auto_start = true
+                  AND deployment_mode IN ('auto', 'delayed')
                   AND deleted_at IS NULL
                 ORDER BY deployment_delay_seconds ASC, created_at ASC
             `, {
@@ -77,8 +81,15 @@ class InterfaceDeploymentService {
 
         } catch (error) {
             console.error('\n❌ Deployment Service Initialization Failed:', error.message);
-            console.error('❌ Interfaces will need to be started manually\n');
+            console.error('❌ Retrying deployment in background...\n');
+
             // Don't throw - allow app to continue running
+            // Schedule a retry in background after 30 seconds
+            setTimeout(async () => {
+                console.log('\n🔄 Retrying deployment service initialization...');
+                this.isInitialized = false; // Reset flag to allow retry
+                await this.initializeOnStartup();
+            }, 30000); // Retry after 30 seconds
         }
     }
 
@@ -121,35 +132,58 @@ class InterfaceDeploymentService {
     }
 
     /**
-     * Deploy (activate) an interface
+     * Deploy (activate) an interface with retry logic
      */
     async deployInterface(intf) {
         const { id, name, source_type, target_type } = intf;
+        const maxRetries = 3;
+        const retryDelay = 2000; // 2 seconds
 
         try {
             // Update deployment status to "deploying"
             await this.updateDeploymentStatus(id, 'deploying');
 
-            // Call Go backend to activate interface
-            console.log(`   🔗 Activating interface in Go backend...`);
-            const response = await axios.post(
-                `${this.goBackendUrl}/api/processing/interfaces/${id}/activate`,
-                {},
-                { timeout: 10000 }
-            );
+            // Try activation with retries (for race condition on startup)
+            let lastError;
+            for (let attempt = 1; attempt <= maxRetries; attempt++) {
+                try {
+                    console.log(`   🔗 Activating interface in Go backend (attempt ${attempt}/${maxRetries})...`);
+                    const response = await axios.post(
+                        `${this.goBackendUrl}/api/processing/interfaces/${id}/activate`,
+                        {},
+                        { timeout: 10000 }
+                    );
 
-            if (response.data.success) {
-                console.log(`   ✅ Interface activated successfully`);
-                console.log(`   ✅ Source: ${source_type || 'N/A'}`);
-                console.log(`   ✅ Target: ${target_type || 'N/A'}`);
+                    if (response.data.success) {
+                        console.log(`   ✅ Interface activated successfully`);
+                        console.log(`   ✅ Source: ${source_type || 'N/A'}`);
+                        console.log(`   ✅ Target: ${target_type || 'N/A'}`);
 
-                // Update deployment status to "deployed"
-                await this.updateDeploymentStatus(id, 'deployed', true);
+                        // Update deployment status to "deployed"
+                        await this.updateDeploymentStatus(id, 'deployed', true);
 
-                console.log(`   ✅ Deployment complete\n`);
-            } else {
-                throw new Error(response.data.message || 'Activation failed');
+                        console.log(`   ✅ Deployment complete\n`);
+                        return; // Success!
+                    } else {
+                        throw new Error(response.data.message || 'Activation failed');
+                    }
+                } catch (error) {
+                    lastError = error;
+
+                    // If 503 (engine not ready) and not last attempt, retry
+                    if (error.response?.status === 503 && attempt < maxRetries) {
+                        console.log(`   ⚠️  Processing engine not ready, retrying in ${retryDelay/1000}s...`);
+                        await new Promise(resolve => setTimeout(resolve, retryDelay));
+                        continue;
+                    }
+
+                    // Otherwise, throw to outer catch
+                    throw error;
+                }
             }
+
+            // If we get here, all retries failed
+            throw lastError;
 
         } catch (error) {
             console.error(`   ❌ Deployment failed for ${name}:`, error.message);
@@ -185,7 +219,7 @@ class InterfaceDeploymentService {
     }
 
     /**
-     * Wait for Go backend to be ready
+     * Wait for Go backend to be ready (including processing engine)
      */
     async waitForGoBackend(timeoutSeconds = 30) {
         const startTime = Date.now();
@@ -195,21 +229,23 @@ class InterfaceDeploymentService {
         while (Date.now() - startTime < timeoutMs) {
             attempts++;
             try {
-                const response = await axios.get(`${this.goBackendUrl}/health`, {
+                // Check if processing engine is initialized and ready
+                const response = await axios.get(`${this.goBackendUrl}/api/processing/engine/status`, {
                     timeout: 2000
                 });
 
-                if (response.status === 200) {
-                    console.log(`✅ Go backend is ready (attempt ${attempts})\n`);
+                if (response.status === 200 && response.data.success) {
+                    console.log(`✅ Go backend & Processing Engine ready (attempt ${attempts})\n`);
                     return true;
                 }
             } catch (error) {
                 // Backend not ready yet, wait and retry
+                console.log(`   ⏳ Waiting for processing engine... (attempt ${attempts})`);
                 await new Promise(resolve => setTimeout(resolve, 2000));
             }
         }
 
-        throw new Error(`Go backend not ready after ${timeoutSeconds}s (${attempts} attempts)`);
+        throw new Error(`Processing engine not ready after ${timeoutSeconds}s (${attempts} attempts)`);
     }
 
     /**

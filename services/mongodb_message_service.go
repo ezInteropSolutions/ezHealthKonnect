@@ -380,3 +380,8 @@ func (mms *MongoDBMessageService) getRawMessageCollection(interfaceID string) *m
 func (mms *MongoDBMessageService) GetCollection(collectionName string) *mongo.Collection {
 	return mms.client.Database(mms.database).Collection(collectionName)
 }
+
+// GetClient returns the MongoDB client for external use (e.g., debug logging)
+func (mms *MongoDBMessageService) GetClient() *mongo.Client {
+	return mms.client
+}

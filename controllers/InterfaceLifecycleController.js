@@ -109,15 +109,23 @@ class InterfaceLifecycleController {
                 timeout: 30000
             });
 
+            let result;
             if (!response.ok) {
                 const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
-                throw new Error(`Go backend activation failed: ${response.status} - ${errorData.error || response.statusText}`);
+
+                // Special case: If already active, treat as success
+                if (response.status === 500 && errorData.error?.includes('already active')) {
+                    console.log(`⚠️ Interface already active in Go backend, updating database: ${interfaceId}`);
+                    result = { message: 'Interface already active', alreadyActive: true };
+                } else {
+                    throw new Error(`Go backend activation failed: ${response.status} - ${errorData.error || response.statusText}`);
+                }
+            } else {
+                result = await response.json();
+                console.log(`✅ Interface activated via Go backend: ${interfaceId}`, result);
             }
 
-            const result = await response.json();
-            console.log(`✅ Interface activated via Go backend: ${interfaceId}`, result);
-
-            // Update database interface_status to 'active'
+            // Update database interface_status to 'active' (even if already active)
             const database = require('../config/database');
             const sequelize = database.sequelize;
             await sequelize.query(

@@ -1,0 +1,613 @@
+package services
+
+import (
+	"context"
+	"ezhealthkonnect/models"
+	"fmt"
+	"regexp"
+	"strings"
+	"time"
+)
+
+// FieldMappingExecutor maps source fields to target fields
+type FieldMappingExecutor struct{}
+
+func (e *FieldMappingExecutor) Execute(
+	ctx context.Context,
+	step *models.TransformationStep,
+	inputData map[string]interface{},
+) (map[string]interface{}, error) {
+	mappings, ok := step.Config["mappings"].([]interface{})
+	if !ok {
+		return inputData, fmt.Errorf("invalid mappings configuration")
+	}
+
+	outputData := make(map[string]interface{})
+	// Copy input data to output
+	for k, v := range inputData {
+		outputData[k] = v
+	}
+
+	for _, mapping := range mappings {
+		mappingMap := mapping.(map[string]interface{})
+		sourceField := getStringValue(mappingMap, "source")
+		targetField := getStringValue(mappingMap, "target")
+		defaultValue := mappingMap["default"]
+
+		sourceValue := getNestedValue(inputData, sourceField)
+
+		if sourceValue == nil && defaultValue != nil {
+			sourceValue = defaultValue
+		}
+
+		if sourceValue != nil {
+			setNestedValue(outputData, targetField, sourceValue)
+		}
+	}
+
+	return outputData, nil
+}
+
+func (e *FieldMappingExecutor) GetStepType() string {
+	return "field-mapping"
+}
+
+func (e *FieldMappingExecutor) Validate(step *models.TransformationStep) error {
+	mappings, ok := step.Config["mappings"].([]interface{})
+	if !ok || len(mappings) == 0 {
+		return fmt.Errorf("mappings configuration is required")
+	}
+	return nil
+}
+
+// SplitCombineFieldsExecutor splits or combines field values
+type SplitCombineFieldsExecutor struct{}
+
+func (e *SplitCombineFieldsExecutor) Execute(
+	ctx context.Context,
+	step *models.TransformationStep,
+	inputData map[string]interface{},
+) (map[string]interface{}, error) {
+	operation := getStringValue(step.Config, "operation") // "split" or "combine"
+
+	outputData := make(map[string]interface{})
+	for k, v := range inputData {
+		outputData[k] = v
+	}
+
+	switch operation {
+	case "split":
+		return e.executeSplit(step, outputData)
+	case "combine":
+		return e.executeCombine(step, outputData)
+	default:
+		return inputData, fmt.Errorf("invalid operation: %s", operation)
+	}
+}
+
+func (e *SplitCombineFieldsExecutor) executeSplit(
+	step *models.TransformationStep,
+	outputData map[string]interface{},
+) (map[string]interface{}, error) {
+	sourceField := getStringValue(step.Config, "source_field")
+	delimiter := getStringValue(step.Config, "delimiter")
+	targetFields, ok := step.Config["target_fields"].([]interface{})
+	if !ok {
+		return outputData, fmt.Errorf("target_fields is required for split operation")
+	}
+
+	sourceValue := getNestedValue(outputData, sourceField)
+	if sourceValue == nil {
+		return outputData, nil
+	}
+
+	sourceStr, ok := sourceValue.(string)
+	if !ok {
+		return outputData, fmt.Errorf("source field must be a string")
+	}
+
+	parts := strings.Split(sourceStr, delimiter)
+
+	for i, targetField := range targetFields {
+		targetFieldStr := targetField.(string)
+		if i < len(parts) {
+			setNestedValue(outputData, targetFieldStr, parts[i])
+		}
+	}
+
+	return outputData, nil
+}
+
+func (e *SplitCombineFieldsExecutor) executeCombine(
+	step *models.TransformationStep,
+	outputData map[string]interface{},
+) (map[string]interface{}, error) {
+	sourceFields, ok := step.Config["source_fields"].([]interface{})
+	if !ok {
+		return outputData, fmt.Errorf("source_fields is required for combine operation")
+	}
+
+	targetField := getStringValue(step.Config, "target_field")
+	delimiter := getStringValue(step.Config, "delimiter")
+	if delimiter == "" {
+		delimiter = " "
+	}
+
+	var parts []string
+	for _, sourceField := range sourceFields {
+		sourceFieldStr := sourceField.(string)
+		value := getNestedValue(outputData, sourceFieldStr)
+		if value != nil {
+			parts = append(parts, fmt.Sprintf("%v", value))
+		}
+	}
+
+	combined := strings.Join(parts, delimiter)
+	setNestedValue(outputData, targetField, combined)
+
+	return outputData, nil
+}
+
+func (e *SplitCombineFieldsExecutor) GetStepType() string {
+	return "split-combine-fields"
+}
+
+func (e *SplitCombineFieldsExecutor) Validate(step *models.TransformationStep) error {
+	operation := getStringValue(step.Config, "operation")
+	if operation != "split" && operation != "combine" {
+		return fmt.Errorf("operation must be 'split' or 'combine'")
+	}
+	return nil
+}
+
+// DateTimeConversionExecutor converts date/time formats
+type DateTimeConversionExecutor struct{}
+
+func (e *DateTimeConversionExecutor) Execute(
+	ctx context.Context,
+	step *models.TransformationStep,
+	inputData map[string]interface{},
+) (map[string]interface{}, error) {
+	conversions, ok := step.Config["conversions"].([]interface{})
+	if !ok {
+		return inputData, fmt.Errorf("invalid conversions configuration")
+	}
+
+	outputData := make(map[string]interface{})
+	for k, v := range inputData {
+		outputData[k] = v
+	}
+
+	for _, conversion := range conversions {
+		convMap := conversion.(map[string]interface{})
+		field := getStringValue(convMap, "field")
+		sourceFormat := getStringValue(convMap, "source_format")
+		targetFormat := getStringValue(convMap, "target_format")
+
+		value := getNestedValue(outputData, field)
+		if value == nil {
+			continue
+		}
+
+		valueStr := fmt.Sprintf("%v", value)
+
+		// Parse source format
+		parsedTime, err := e.parseDateTime(valueStr, sourceFormat)
+		if err != nil {
+			return outputData, fmt.Errorf("failed to parse date %s with format %s: %v", valueStr, sourceFormat, err)
+		}
+
+		// Format to target format
+		formattedValue := e.formatDateTime(parsedTime, targetFormat)
+		setNestedValue(outputData, field, formattedValue)
+	}
+
+	return outputData, nil
+}
+
+func (e *DateTimeConversionExecutor) parseDateTime(value, format string) (time.Time, error) {
+	// Map common formats to Go time layout
+	formatMap := map[string]string{
+		"YYYYMMDD":           "20060102",
+		"YYYY-MM-DD":         "2006-01-02",
+		"MM/DD/YYYY":         "01/02/2006",
+		"DD/MM/YYYY":         "02/01/2006",
+		"YYYYMMDDHHMMSS":     "20060102150405",
+		"YYYY-MM-DD HH:MM:SS": "2006-01-02 15:04:05",
+		"ISO8601":            time.RFC3339,
+		"RFC3339":            time.RFC3339,
+	}
+
+	goFormat, exists := formatMap[format]
+	if !exists {
+		goFormat = format // Assume it's already a Go time layout
+	}
+
+	return time.Parse(goFormat, value)
+}
+
+func (e *DateTimeConversionExecutor) formatDateTime(t time.Time, format string) string {
+	formatMap := map[string]string{
+		"YYYYMMDD":           "20060102",
+		"YYYY-MM-DD":         "2006-01-02",
+		"MM/DD/YYYY":         "01/02/2006",
+		"DD/MM/YYYY":         "02/01/2006",
+		"YYYYMMDDHHMMSS":     "20060102150405",
+		"YYYY-MM-DD HH:MM:SS": "2006-01-02 15:04:05",
+		"ISO8601":            time.RFC3339,
+		"RFC3339":            time.RFC3339,
+	}
+
+	goFormat, exists := formatMap[format]
+	if !exists {
+		goFormat = format
+	}
+
+	return t.Format(goFormat)
+}
+
+func (e *DateTimeConversionExecutor) GetStepType() string {
+	return "datetime-conversion"
+}
+
+func (e *DateTimeConversionExecutor) Validate(step *models.TransformationStep) error {
+	conversions, ok := step.Config["conversions"].([]interface{})
+	if !ok || len(conversions) == 0 {
+		return fmt.Errorf("conversions configuration is required")
+	}
+	return nil
+}
+
+// UnitConversionExecutor converts units (lb→kg, F→C, in→cm)
+type UnitConversionExecutor struct{}
+
+func (e *UnitConversionExecutor) Execute(
+	ctx context.Context,
+	step *models.TransformationStep,
+	inputData map[string]interface{},
+) (map[string]interface{}, error) {
+	conversions, ok := step.Config["conversions"].([]interface{})
+	if !ok {
+		return inputData, fmt.Errorf("invalid conversions configuration")
+	}
+
+	outputData := make(map[string]interface{})
+	for k, v := range inputData {
+		outputData[k] = v
+	}
+
+	for _, conversion := range conversions {
+		convMap := conversion.(map[string]interface{})
+		field := getStringValue(convMap, "field")
+		fromUnit := getStringValue(convMap, "from")
+		toUnit := getStringValue(convMap, "to")
+		precision := int(getFloatValue(convMap, "precision"))
+		if precision == 0 {
+			precision = 2
+		}
+
+		value := getNestedValue(outputData, field)
+		if value == nil {
+			continue
+		}
+
+		numValue := toFloat64(value)
+		if numValue == 0 {
+			continue
+		}
+
+		convertedValue, err := e.convertUnit(numValue, fromUnit, toUnit)
+		if err != nil {
+			return outputData, fmt.Errorf("conversion failed for field %s: %v", field, err)
+		}
+
+		// Round to precision
+		multiplier := float64(1)
+		for i := 0; i < precision; i++ {
+			multiplier *= 10
+		}
+		convertedValue = float64(int(convertedValue*multiplier+0.5)) / multiplier
+
+		setNestedValue(outputData, field, convertedValue)
+	}
+
+	return outputData, nil
+}
+
+func (e *UnitConversionExecutor) convertUnit(value float64, from, to string) (float64, error) {
+	conversionKey := strings.ToLower(from) + "_to_" + strings.ToLower(to)
+
+	conversions := map[string]func(float64) float64{
+		// Weight
+		"lb_to_kg":  func(v float64) float64 { return v * 0.453592 },
+		"kg_to_lb":  func(v float64) float64 { return v / 0.453592 },
+		"oz_to_g":   func(v float64) float64 { return v * 28.3495 },
+		"g_to_oz":   func(v float64) float64 { return v / 28.3495 },
+
+		// Temperature
+		"f_to_c":    func(v float64) float64 { return (v - 32) * 5 / 9 },
+		"c_to_f":    func(v float64) float64 { return v*9/5 + 32 },
+		"c_to_k":    func(v float64) float64 { return v + 273.15 },
+		"k_to_c":    func(v float64) float64 { return v - 273.15 },
+
+		// Length
+		"in_to_cm":  func(v float64) float64 { return v * 2.54 },
+		"cm_to_in":  func(v float64) float64 { return v / 2.54 },
+		"ft_to_m":   func(v float64) float64 { return v * 0.3048 },
+		"m_to_ft":   func(v float64) float64 { return v / 0.3048 },
+		"mi_to_km":  func(v float64) float64 { return v * 1.60934 },
+		"km_to_mi":  func(v float64) float64 { return v / 1.60934 },
+
+		// Volume
+		"gal_to_l":  func(v float64) float64 { return v * 3.78541 },
+		"l_to_gal":  func(v float64) float64 { return v / 3.78541 },
+		"oz_to_ml":  func(v float64) float64 { return v * 29.5735 },
+		"ml_to_oz":  func(v float64) float64 { return v / 29.5735 },
+	}
+
+	convFunc, exists := conversions[conversionKey]
+	if !exists {
+		return 0, fmt.Errorf("unsupported conversion: %s to %s", from, to)
+	}
+
+	return convFunc(value), nil
+}
+
+func (e *UnitConversionExecutor) GetStepType() string {
+	return "unit-conversion"
+}
+
+func (e *UnitConversionExecutor) Validate(step *models.TransformationStep) error {
+	conversions, ok := step.Config["conversions"].([]interface{})
+	if !ok || len(conversions) == 0 {
+		return fmt.Errorf("conversions configuration is required")
+	}
+	return nil
+}
+
+// StringManipulationExecutor manipulates string values
+type StringManipulationExecutor struct{}
+
+func (e *StringManipulationExecutor) Execute(
+	ctx context.Context,
+	step *models.TransformationStep,
+	inputData map[string]interface{},
+) (map[string]interface{}, error) {
+	operations, ok := step.Config["operations"].([]interface{})
+	if !ok {
+		return inputData, fmt.Errorf("invalid operations configuration")
+	}
+
+	outputData := make(map[string]interface{})
+	for k, v := range inputData {
+		outputData[k] = v
+	}
+
+	for _, operation := range operations {
+		opMap := operation.(map[string]interface{})
+		field := getStringValue(opMap, "field")
+		opType := getStringValue(opMap, "operation")
+
+		value := getNestedValue(outputData, field)
+		if value == nil {
+			continue
+		}
+
+		valueStr := fmt.Sprintf("%v", value)
+
+		result, err := e.applyOperation(valueStr, opType, opMap)
+		if err != nil {
+			return outputData, fmt.Errorf("operation failed for field %s: %v", field, err)
+		}
+
+		setNestedValue(outputData, field, result)
+	}
+
+	return outputData, nil
+}
+
+func (e *StringManipulationExecutor) applyOperation(value, operation string, config map[string]interface{}) (string, error) {
+	switch operation {
+	case "uppercase":
+		return strings.ToUpper(value), nil
+
+	case "lowercase":
+		return strings.ToLower(value), nil
+
+	case "trim":
+		return strings.TrimSpace(value), nil
+
+	case "substring":
+		start := int(getFloatValue(config, "start"))
+		length := int(getFloatValue(config, "length"))
+		if start < 0 || start >= len(value) {
+			return value, nil
+		}
+		end := start + length
+		if end > len(value) {
+			end = len(value)
+		}
+		return value[start:end], nil
+
+	case "replace":
+		find := getStringValue(config, "find")
+		replace := getStringValue(config, "replace")
+		return strings.ReplaceAll(value, find, replace), nil
+
+	case "regex_replace":
+		pattern := getStringValue(config, "pattern")
+		replace := getStringValue(config, "replace")
+		re, err := regexp.Compile(pattern)
+		if err != nil {
+			return value, fmt.Errorf("invalid regex pattern: %v", err)
+		}
+		return re.ReplaceAllString(value, replace), nil
+
+	case "pad_left":
+		length := int(getFloatValue(config, "length"))
+		padChar := getStringValue(config, "pad_char")
+		if padChar == "" {
+			padChar = " "
+		}
+		for len(value) < length {
+			value = padChar + value
+		}
+		return value, nil
+
+	case "pad_right":
+		length := int(getFloatValue(config, "length"))
+		padChar := getStringValue(config, "pad_char")
+		if padChar == "" {
+			padChar = " "
+		}
+		for len(value) < length {
+			value = value + padChar
+		}
+		return value, nil
+
+	default:
+		return value, fmt.Errorf("unsupported operation: %s", operation)
+	}
+}
+
+func (e *StringManipulationExecutor) GetStepType() string {
+	return "string-manipulation"
+}
+
+func (e *StringManipulationExecutor) Validate(step *models.TransformationStep) error {
+	operations, ok := step.Config["operations"].([]interface{})
+	if !ok || len(operations) == 0 {
+		return fmt.Errorf("operations configuration is required")
+	}
+	return nil
+}
+
+// ValueLookupExecutor maps values using lookup tables
+type ValueLookupExecutor struct{}
+
+func (e *ValueLookupExecutor) Execute(
+	ctx context.Context,
+	step *models.TransformationStep,
+	inputData map[string]interface{},
+) (map[string]interface{}, error) {
+	field := getStringValue(step.Config, "field")
+	lookupTable, ok := step.Config["lookup_table"].(map[string]interface{})
+	if !ok {
+		return inputData, fmt.Errorf("invalid lookup_table configuration")
+	}
+	defaultValue := step.Config["default_value"]
+
+	outputData := make(map[string]interface{})
+	for k, v := range inputData {
+		outputData[k] = v
+	}
+
+	value := getNestedValue(outputData, field)
+	if value == nil {
+		return outputData, nil
+	}
+
+	valueStr := fmt.Sprintf("%v", value)
+
+	// Look up the value
+	mappedValue, exists := lookupTable[valueStr]
+	if !exists {
+		if defaultValue != nil {
+			mappedValue = defaultValue
+		} else {
+			return outputData, fmt.Errorf("no mapping found for value '%s' and no default provided", valueStr)
+		}
+	}
+
+	setNestedValue(outputData, field, mappedValue)
+
+	return outputData, nil
+}
+
+func (e *ValueLookupExecutor) GetStepType() string {
+	return "value-lookup"
+}
+
+func (e *ValueLookupExecutor) Validate(step *models.TransformationStep) error {
+	field := getStringValue(step.Config, "field")
+	if field == "" {
+		return fmt.Errorf("field is required")
+	}
+
+	lookupTable, ok := step.Config["lookup_table"].(map[string]interface{})
+	if !ok || len(lookupTable) == 0 {
+		return fmt.Errorf("lookup_table is required and must not be empty")
+	}
+
+	return nil
+}
+
+// CodeSystemMappingExecutor maps between code systems (ICD-9→ICD-10)
+type CodeSystemMappingExecutor struct{}
+
+func (e *CodeSystemMappingExecutor) Execute(
+	ctx context.Context,
+	step *models.TransformationStep,
+	inputData map[string]interface{},
+) (map[string]interface{}, error) {
+	field := getStringValue(step.Config, "field")
+	sourceSystem := getStringValue(step.Config, "source_system")
+	targetSystem := getStringValue(step.Config, "target_system")
+	mappingTable, ok := step.Config["mapping_table"].(map[string]interface{})
+	if !ok {
+		return inputData, fmt.Errorf("invalid mapping_table configuration")
+	}
+
+	outputData := make(map[string]interface{})
+	for k, v := range inputData {
+		outputData[k] = v
+	}
+
+	value := getNestedValue(outputData, field)
+	if value == nil {
+		return outputData, nil
+	}
+
+	codeStr := fmt.Sprintf("%v", value)
+
+	// Look up the code mapping
+	mappedCode, exists := mappingTable[codeStr]
+	if !exists {
+		// Check if we should fail on unmapped codes
+		failOnUnmapped := step.Config["fail_on_unmapped"]
+		if failOnUnmapped == true {
+			return outputData, fmt.Errorf("no mapping found for code '%s' from %s to %s", codeStr, sourceSystem, targetSystem)
+		}
+		// Keep original code if no mapping found
+		return outputData, nil
+	}
+
+	setNestedValue(outputData, field, mappedCode)
+
+	return outputData, nil
+}
+
+func (e *CodeSystemMappingExecutor) GetStepType() string {
+	return "code-system-mapping"
+}
+
+func (e *CodeSystemMappingExecutor) Validate(step *models.TransformationStep) error {
+	field := getStringValue(step.Config, "field")
+	if field == "" {
+		return fmt.Errorf("field is required")
+	}
+
+	sourceSystem := getStringValue(step.Config, "source_system")
+	targetSystem := getStringValue(step.Config, "target_system")
+	if sourceSystem == "" || targetSystem == "" {
+		return fmt.Errorf("source_system and target_system are required")
+	}
+
+	mappingTable, ok := step.Config["mapping_table"].(map[string]interface{})
+	if !ok || len(mappingTable) == 0 {
+		return fmt.Errorf("mapping_table is required and must not be empty")
+	}
+
+	return nil
+}
+

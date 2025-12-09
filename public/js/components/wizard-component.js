@@ -421,10 +421,13 @@
                                         <div class="stat-label">Validations Passed</div>
                                     </div>
                                 </div>
-                                
+
+                                <!-- Deployment Settings -->
+                                <div id="wizardDeploymentSettingsContainer"></div>
+
                                 <div class="alert alert-success">
                                     <h5>✅ Ready for Deployment</h5>
-                                    <p>Your HL7 interface configuration is complete and ready for deployment. 
+                                    <p>Your HL7 interface configuration is complete and ready for deployment.
                                     Click "Create Interface" to make it live and start processing messages.</p>
                                 </div>
                             </div>

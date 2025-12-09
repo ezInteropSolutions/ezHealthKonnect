@@ -112,11 +112,19 @@ class StepNodeManager {
      * Deselect current node
      */
     deselectNode() {
-        if (this.selectedNode) {
-            this.selectedNode.classList.remove('selected');
-            this.selectedNode = null;
+        // Prevent infinite loop with PropertiesPanel.hideProperties()
+        if (this.isDeselecting) return;
+        this.isDeselecting = true;
+
+        try {
+            if (this.selectedNode) {
+                this.selectedNode.classList.remove('selected');
+                this.selectedNode = null;
+            }
+            this.builder.propertiesPanel.hideProperties();
+        } finally {
+            this.isDeselecting = false;
         }
-        this.builder.propertiesPanel.hideProperties();
     }
 
     /**

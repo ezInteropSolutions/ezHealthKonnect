@@ -40,8 +40,15 @@ type HTTPFHIRInboundConnector struct {
 
 // NewHTTPFHIRInboundConnector creates a new HTTP FHIR inbound connector
 func NewHTTPFHIRInboundConnector() InboundConnector {
+	metadata := ConnectorMetadata{
+		TypeName:    "http_fhir_inbound",
+		DisplayName: "HTTP FHIR Receiver",
+		Version:     "1.0.0",
+		Category:    "inbound",
+		Mode:        "push",
+	}
 	return &HTTPFHIRInboundConnector{
-		BaseInboundConnector: NewBaseInboundConnector("http_fhir_inbound", "HTTP FHIR Receiver"),
+		BaseInboundConnector: NewBaseInboundConnector(metadata),
 		basePath:             "/fhir/r4",
 		fhirVersion:          "R4",
 		enableCORS:           true,
@@ -55,14 +62,19 @@ func (h *HTTPFHIRInboundConnector) Initialize(config []byte) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
+	log.Printf("🔍 HTTP FHIR Initialize called with config: %s", string(config))
+
 	var cfg map[string]interface{}
 	if err := json.Unmarshal(config, &cfg); err != nil {
 		return fmt.Errorf("failed to parse config: %w", err)
 	}
 
+	log.Printf("🔍 Parsed config keys: %v", getConfigKeys(cfg))
+
 	// Port (required)
 	if port, ok := cfg["port"].(float64); ok {
 		h.port = int(port)
+		log.Printf("🔍 Port set to: %d", h.port)
 	} else {
 		return fmt.Errorf("port is required")
 	}
@@ -70,31 +82,62 @@ func (h *HTTPFHIRInboundConnector) Initialize(config []byte) error {
 	// Base path
 	if basePath, ok := cfg["basePath"].(string); ok && basePath != "" {
 		h.basePath = basePath
+		log.Printf("🔍 BasePath set to: %s", h.basePath)
 	}
 
 	// FHIR version
 	if version, ok := cfg["fhirVersion"].(string); ok && version != "" {
 		h.fhirVersion = version
+		log.Printf("🔍 FhirVersion set to: %s", h.fhirVersion)
 	}
 
 	// Authentication
+	log.Printf("🔍 Checking authType in config...")
 	if authType, ok := cfg["authType"].(string); ok {
+		log.Printf("🔍 Found authType: '%s'", authType)
 		h.authType = authType
 		switch authType {
 		case "basic":
-			h.authUsername, _ = cfg["username"].(string)
-			h.authPassword, _ = cfg["password"].(string)
+			log.Printf("🔍 Processing basic auth...")
+			if username, ok := cfg["username"].(string); ok {
+				h.authUsername = username
+				log.Printf("🔍 Username set to: '%s'", h.authUsername)
+			} else {
+				log.Printf("⚠️ username field not found or not a string in config")
+			}
+			if password, ok := cfg["password"].(string); ok {
+				h.authPassword = password
+				log.Printf("🔍 Password set to: '%s'", h.authPassword)
+			} else {
+				log.Printf("⚠️ password field not found or not a string in config")
+			}
 		case "bearer":
 			h.bearerToken, _ = cfg["bearerToken"].(string)
 		case "api_key":
 			h.apiKey, _ = cfg["apiKey"].(string)
 		}
+	} else {
+		log.Printf("⚠️ authType not found in config or not a string")
 	}
 
 	log.Printf("✅ HTTP FHIR Inbound initialized: port=%d, path=%s, version=%s, auth=%s",
 		h.port, h.basePath, h.fhirVersion, h.authType)
 
+	if h.authType == "basic" {
+		log.Printf("🔐 Basic Auth configured: username='%s', password='%s'",
+			h.authUsername, h.authPassword)
+	}
+
 	return nil
+}
+
+// Helper function to get config keys for debugging
+func getConfigKeys(cfg map[string]interface{}) []string {
+	keys := make([]string, 0, len(cfg))
+	for k := range cfg {
+		keys = append(keys, k)
+	}
+	return keys
 }
 
 // Start begins listening for HTTP FHIR requests
@@ -199,18 +242,19 @@ func (h *HTTPFHIRInboundConnector) handleFHIRRequest(w http.ResponseWriter, r *h
 
 	// Create inbound message
 	msg := &models.InboundMessage{
-		MessageID:   fmt.Sprintf("http_%s_%d", r.RemoteAddr, time.Now().UnixNano()),
-		Content:     body,
-		ContentType: "application/fhir+json",
-		Protocol:    "http",
-		SourceIP:    strings.Split(r.RemoteAddr, ":")[0],
+		MessageID:      fmt.Sprintf("http_%s_%d", r.RemoteAddr, time.Now().UnixNano()),
+		Content:        string(body),
+		ContentType:    "application/fhir+json",
+		SourceType:     "http_fhir",
+		SourceEndpoint: r.RequestURI,
+		SourceIP:       strings.Split(r.RemoteAddr, ":")[0],
 		Headers: map[string]string{
 			"Content-Type": r.Header.Get("Content-Type"),
 			"User-Agent":   r.Header.Get("User-Agent"),
 		},
 		ReceivedAt:  time.Now(),
-		Format:      "fhir",
 		MessageType: resourceType,
+		MessageSize: len(body),
 	}
 
 	// Send to processing engine
@@ -377,22 +421,20 @@ func (h *HTTPFHIRInboundConnector) GetStatus() ConnectorStatus {
 	defer h.mu.RUnlock()
 
 	status := ConnectorStatus{
-		Name:      h.metadata.Name,
-		Type:      h.metadata.Type,
-		State:     "unknown",
-		Timestamp: time.Now(),
-	}
-
-	if h.server != nil {
-		status.State = "running"
-		status.Details = map[string]interface{}{
-			"port":     h.port,
+		Connected:    h.server != nil,
+		LastActivity: time.Now(),
+		Metadata: map[string]string{
+			"port":     fmt.Sprintf("%d", h.port),
 			"basePath": h.basePath,
 			"version":  h.fhirVersion,
 			"auth":     h.authType,
-		}
+		},
+	}
+
+	if h.server != nil {
+		status.State = StateRunning
 	} else {
-		status.State = "stopped"
+		status.State = StateStopped
 	}
 
 	return status

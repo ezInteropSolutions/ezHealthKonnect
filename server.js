@@ -66,6 +66,18 @@ async function startServer() {
             } catch (error) {
                 console.error('⚠️  Deployment service initialization failed:', error.message);
             }
+
+            // Initialize log retention cleanup service (V33 - Interface-Level Logging)
+            try {
+                const LogRetentionCleanup = require('./services/LogRetentionCleanup');
+                LogRetentionCleanup.start();
+                console.log('🧹 Log retention cleanup service started');
+
+                // Store globally for manual cleanup API access
+                global.logRetentionCleanup = LogRetentionCleanup;
+            } catch (error) {
+                console.error('⚠️  Log retention cleanup service failed:', error.message);
+            }
         });
         
     } catch (error) {
@@ -79,6 +91,9 @@ process.on('SIGTERM', async () => {
     console.log('\n🔄 SIGTERM received, shutting down gracefully...');
     if (global.deploymentService) {
         global.deploymentService.cleanup();
+    if (global.logRetentionCleanup) {
+        global.logRetentionCleanup.stop();
+    }
     }
     process.exit(0);
 });
@@ -87,6 +102,9 @@ process.on('SIGINT', async () => {
     console.log('\n🔄 SIGINT received, shutting down gracefully...');
     if (global.deploymentService) {
         global.deploymentService.cleanup();
+    if (global.logRetentionCleanup) {
+        global.logRetentionCleanup.stop();
+    }
     }
     process.exit(0);
 });

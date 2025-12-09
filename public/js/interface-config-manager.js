@@ -5,6 +5,19 @@ class BasicInterfaceConfigManager {
     constructor() {
         this.availableInterfaces = [];
         this.currentInterface = null;
+        this.formBindingEngine = null;
+    }
+
+    /**
+     * Initialize form binding engine for edit modal
+     * OOB Pattern: Uses FormFieldSchema as single source of truth
+     */
+    initializeFormBinding() {
+        const editModal = document.getElementById('editInterfaceModal');
+        if (editModal && typeof FormFieldSchema !== 'undefined' && typeof FormBindingEngine !== 'undefined') {
+            this.formBindingEngine = new FormBindingEngine(editModal, FormFieldSchema, 'edit');
+            console.log('✅ Edit modal FormBindingEngine initialized with schema (prefix: edit)');
+        }
     }
 
     /**
@@ -13,6 +26,7 @@ class BasicInterfaceConfigManager {
     async init() {
         await this.loadAvailableInterfaces();
         this.setupDynamicFieldHandlers();
+        this.initializeFormBinding(); // OOB: Initialize schema-based form binding
     }
 
     /**
@@ -201,17 +215,49 @@ class BasicInterfaceConfigManager {
      */
     populateConfigurationFields(interfaceData) {
         console.log('🔧 Populating configuration fields...');
+        console.log('🔍 [DEBUG] Full interfaceData received:', interfaceData);
 
         try {
-            // Source configuration
-            const sourceConfig = typeof interfaceData.source_config === 'string'
-                ? JSON.parse(interfaceData.source_config)
-                : interfaceData.source_config || interfaceData.sourceConfig || {};
+            // Source configuration - V30+ uses source_connectivity.config
+            let sourceConfig = {};
+            if (interfaceData.source_connectivity?.config) {
+                // New V30+ format: {type, config}
+                sourceConfig = interfaceData.source_connectivity.config;
+            } else if (interfaceData.source_config) {
+                // Legacy format fallback
+                sourceConfig = typeof interfaceData.source_config === 'string'
+                    ? JSON.parse(interfaceData.source_config)
+                    : interfaceData.source_config;
+            } else if (interfaceData.sourceConfig) {
+                sourceConfig = interfaceData.sourceConfig;
+            }
 
             console.log('📋 Source config:', sourceConfig);
 
+            // Common fields for TCP/MLLP/HTTP source types
             this.setFieldIfExists('editSourceHost', sourceConfig.host);
             this.setFieldIfExists('editSourcePort', sourceConfig.port);
+
+            // Database-specific fields - InterfaceConfigComponents uses {prefix}source{Field} pattern
+            // So for edit modal with idPrefix='edit', fields are: editsourceHost, editsourceDatabase, etc.
+            // Note: Component uses capital letters: Host, Port, Database, Username, Password, SslMode
+            // Config uses snake_case: ssl_mode, table_name, polling_interval
+            this.setFieldIfExists('editsourceHost', sourceConfig.host);
+            this.setFieldIfExists('editsourcePort', sourceConfig.port);
+            this.setFieldIfExists('editsourceDatabase', sourceConfig.database);
+            this.setFieldIfExists('editsourceUsername', sourceConfig.username);
+            this.setFieldIfExists('editsourcePassword', sourceConfig.password);
+            this.setFieldIfExists('editsourceSslMode', sourceConfig.ssl_mode || sourceConfig.sslMode);
+            this.setFieldIfExists('editsourceTableName', sourceConfig.table_name || sourceConfig.tableName);
+            this.setFieldIfExists('editsourcePollingInterval', sourceConfig.polling_interval || sourceConfig.pollingInterval);
+            this.setFieldIfExists('editsourceCustomQuery', sourceConfig.query);
+
+            // TCP/MLLP specific fields
+            this.setFieldIfExists('editSourceTLS', sourceConfig.useTLS);
+            this.setFieldIfExists('editSourceAckMode', sourceConfig.ackMode);
+
+            // HTTP specific fields
+            this.setFieldIfExists('editSourcePath', sourceConfig.path);
 
             // DEBUG: Verify the values were actually set
             setTimeout(() => {
@@ -227,14 +273,30 @@ class BasicInterfaceConfigManager {
                 });
             }, 500);
 
-            // Target configuration - handle multiple possible field names
-            let targetConfig = interfaceData.target_config || interfaceData.targetConfig;
-            if (typeof targetConfig === 'string') {
-                targetConfig = JSON.parse(targetConfig);
+            // Target configuration - V30+ uses target_connectivity.config
+            let targetConfig = {};
+            if (interfaceData.target_connectivity?.config) {
+                // New V30+ format: {type, config}
+                targetConfig = interfaceData.target_connectivity.config;
+                console.log('📦 Using V30+ target_connectivity.config format');
+            } else if (interfaceData.target_config) {
+                // Legacy format fallback
+                targetConfig = typeof interfaceData.target_config === 'string'
+                    ? JSON.parse(interfaceData.target_config)
+                    : interfaceData.target_config;
+                console.log('📦 Using legacy target_config format');
+            } else if (interfaceData.targetConfig) {
+                targetConfig = interfaceData.targetConfig;
+                console.log('📦 Using targetConfig (camelCase) format');
             }
-            targetConfig = targetConfig || {};
 
-            console.log('🎯 Target config:', targetConfig);
+            console.log('🎯 Target config extracted:', JSON.stringify(targetConfig, null, 2));
+            console.log('🔑 Auth fields in targetConfig:', {
+                authType: targetConfig.authType,
+                username: targetConfig.username,
+                password: targetConfig.password ? '***' : undefined,
+                bearerToken: targetConfig.bearerToken ? '***' : undefined
+            });
 
             // Use object-oriented approach for populating target fields
             const targetType = interfaceData.targetType;
@@ -332,33 +394,37 @@ class BasicInterfaceConfigManager {
 
     /**
      * Collect form data for saving
+     * Uses InterfaceConfigComponents for unified data collection (same as Wizard)
      */
     collectFormData() {
-        console.log('📋 Starting form data collection...');
+        console.log('📋 Starting form data collection (using InterfaceConfigComponents)...');
 
-        // Debug: Check which fields exist
-        console.log('🔍 Field availability:', {
-            editInterfaceId: !!document.getElementById('editInterfaceId'),
-            editInterfaceName: !!document.getElementById('editInterfaceName'),
-            editInterfaceDescription: !!document.getElementById('editInterfaceDescription'),
-            editStatus: !!document.getElementById('editStatus'),
-            editsourceType: !!document.getElementById('editsourceType'),
-            editsourceConnectivity: !!document.getElementById('editsourceConnectivity'),
-            edittargetConnectivity: !!document.getElementById('edittargetConnectivity')
-        });
+        // Use the unified InterfaceConfigComponents for data collection
+        // This ensures Wizard and Edit modal use the same logic
+        const configData = InterfaceConfigComponents.collectFormData(document, 'edit');
 
         const formData = {
             id: document.getElementById('editInterfaceId')?.value || '',
             name: document.getElementById('editInterfaceName')?.value || '',
             description: document.getElementById('editInterfaceDescription')?.value || '',
             status: document.getElementById('editStatus')?.value || 'inactive',
-            // Use shared component field IDs (with 'edit' prefix, lowercase after prefix)
-            sourceType: document.getElementById('editsourceType')?.value || 'hl7v2',
-            sourceConnectivity: document.getElementById('editsourceConnectivity')?.value || 'tcp',
-            targetConnectivity: document.getElementById('edittargetConnectivity')?.value || 'http'
+            // Use unified component data
+            sourceType: configData.sourceType,
+            sourceConnectivity: configData.sourceConnectivity,
+            targetConnectivity: configData.targetConnectivity,
+            sourceConfig: configData.sourceConfig,
+            targetConfig: configData.targetConfig,
+            // Deployment settings
+            deployment_mode: configData.deployment_mode,
+            auto_start: configData.auto_start,
+            deployment_delay_seconds: configData.deployment_delay_seconds,
+            // Logging settings
+            debug_logging: document.getElementById('editDebugLogging')?.checked || false,
+            log_retention_days: parseInt(document.getElementById('editLogRetention')?.value) || 30,
+            retain_error_logs_forever: document.getElementById('editRetainErrors')?.checked !== false,
         };
 
-        console.log('📝 Basic fields collected:', formData);
+        console.log('📝 Form data collected via InterfaceConfigComponents:', formData);
 
         // Backward compatibility: set format and messageType from sourceType
         formData.format = formData.sourceType;
@@ -374,12 +440,6 @@ class BasicInterfaceConfigManager {
             'database': 'database'
         };
         formData.targetType = targetTypeMap[formData.targetConnectivity] || 'fhir';
-
-        // Collect source configuration from shared components (with 'edit' prefix)
-        formData.sourceConfig = this.collectSourceConfig('edit');
-
-        // Collect target configuration from shared components (with 'edit' prefix)
-        formData.targetConfig = this.collectTargetConfig('edit', formData.targetConnectivity);
 
         // Collect processing rules (if fields exist)
         formData.processingRules = {
@@ -404,8 +464,14 @@ class BasicInterfaceConfigManager {
      * @param {string} idPrefix - ID prefix for form fields
      */
     collectSourceConfig(idPrefix = '') {
-        const sourceConnectivity = document.getElementById(`${idPrefix}sourceConnectivity`)?.value;
+        // Handle both casing patterns: editSourceConnectivity (our code) and editsourceConnectivity (components)
+        const sourceConnectivity = document.getElementById(`${idPrefix}SourceConnectivity`)?.value ||
+                                   document.getElementById(`${idPrefix}sourceConnectivity`)?.value ||
+                                   document.getElementById(`${idPrefix}SourceType`)?.value ||  // fallback to source type
+                                   'tcp';
         const config = {};
+
+        console.log(`🔧 collectSourceConfig: idPrefix="${idPrefix}", sourceConnectivity="${sourceConnectivity}"`);
 
         // Common fields
         const port = document.getElementById(`${idPrefix}sourcePort`)?.value;
@@ -442,6 +508,54 @@ class BasicInterfaceConfigManager {
             } else if (authType === 'bearer') {
                 config.authBearerToken = document.getElementById(`${idPrefix}HttpAuthBearerToken`)?.value;
             }
+        }
+
+        // File Listener specific
+        if (sourceConnectivity === 'file') {
+            const directoryPath = document.getElementById(`${idPrefix}sourceDirectoryPath`)?.value;
+            const filePattern = document.getElementById(`${idPrefix}sourceFilePattern`)?.value;
+            const pollingInterval = document.getElementById(`${idPrefix}sourcePollingInterval`)?.value;
+            const afterProcessing = document.getElementById(`${idPrefix}sourceAfterProcessing`)?.value;
+            const archivePath = document.getElementById(`${idPrefix}sourceArchivePath`)?.value;
+            const encoding = document.getElementById(`${idPrefix}sourceEncoding`)?.value;
+
+            // Use snake_case for consistency with Go backend
+            if (directoryPath) config.directory_path = directoryPath;
+            if (filePattern) config.file_pattern = filePattern;
+            if (pollingInterval) config.polling_interval = parseInt(pollingInterval);
+            if (afterProcessing) config.after_processing = afterProcessing;
+            if (archivePath) config.archive_path = archivePath;
+            if (encoding) config.encoding = encoding;
+
+            console.log('📂 File source config collected:', config);
+        }
+
+        // Database specific - uses InterfaceConfigComponents field IDs
+        if (sourceConnectivity === 'database') {
+            // InterfaceConfigComponents uses prefix pattern: {idPrefix}source{Field}
+            // e.g., editsourceHost, editsourcePort, editsourceDatabase
+            // Note: Component uses capital letters: Host, Port, Database, Username, Password, SslMode
+            const dbHost = document.getElementById(`${idPrefix}sourceHost`)?.value;
+            const dbPort = document.getElementById(`${idPrefix}sourcePort`)?.value;
+            const dbName = document.getElementById(`${idPrefix}sourceDatabase`)?.value;
+            const username = document.getElementById(`${idPrefix}sourceUsername`)?.value;
+            const password = document.getElementById(`${idPrefix}sourcePassword`)?.value;
+            const sslMode = document.getElementById(`${idPrefix}sourceSslMode`)?.value; // SslMode not SSLMode
+            const tableName = document.getElementById(`${idPrefix}sourceTableName`)?.value;
+            const pollingInterval = document.getElementById(`${idPrefix}sourcePollingInterval`)?.value;
+            const customQuery = document.getElementById(`${idPrefix}sourceCustomQuery`)?.value;
+
+            if (dbHost) config.host = dbHost;
+            if (dbPort) config.port = parseInt(dbPort);
+            if (dbName) config.database = dbName;
+            if (username) config.username = username;
+            if (password) config.password = password;
+            if (sslMode) config.ssl_mode = sslMode; // snake_case to match InterfaceConfigComponents
+            if (tableName) config.table_name = tableName; // snake_case for consistency
+            if (pollingInterval) config.polling_interval = parseInt(pollingInterval); // snake_case
+            if (customQuery) config.query = customQuery;
+
+            console.log('🗄️ Database source config collected:', config);
         }
 
         return config;
@@ -493,14 +607,19 @@ class BasicInterfaceConfigManager {
                 config.bearerToken = document.getElementById(`${idPrefix}targetAuthBearerToken`)?.value;
             }
         } else if (connectivity === 'file') {
-            // File output target
-            const filePath = document.getElementById(`${idPrefix}targetFilePath`)?.value;
-            const filePattern = document.getElementById(`${idPrefix}targetFilePattern`)?.value;
-            const fileFormat = document.getElementById(`${idPrefix}targetFileFormat`)?.value;
+            // File Writer target
+            const directoryPath = document.getElementById(`${idPrefix}targetDirectoryPath`)?.value;
+            const filenamePattern = document.getElementById(`${idPrefix}targetFilenamePattern`)?.value;
+            const appendTimestamp = document.getElementById(`${idPrefix}targetAppendTimestamp`)?.checked;
+            const encoding = document.getElementById(`${idPrefix}targetEncoding`)?.value;
 
-            if (filePath) config.filePath = filePath;
-            if (filePattern) config.filePattern = filePattern;
-            if (fileFormat) config.fileFormat = fileFormat;
+            // Use snake_case for consistency with Go backend
+            if (directoryPath) config.directory_path = directoryPath;
+            if (filenamePattern) config.filename_pattern = filenamePattern;
+            if (appendTimestamp !== undefined) config.append_timestamp = appendTimestamp;
+            if (encoding) config.encoding = encoding;
+
+            console.log('📂 File target config collected:', config);
         } else if (connectivity === 'tcp') {
             // TCP/MLLP target
             const host = document.getElementById(`${idPrefix}targetTcpHost`)?.value;
@@ -638,6 +757,8 @@ function updateSourceFields() {
                 </div>
             `;
             break;
+        // Note: 'database' case is handled by InterfaceConfigComponents.getSourceConfigPanel()
+        // via modal-components.js updateEditSourceConfigPanel() - no duplicate code here
         default:
             fieldsHTML = '<p class="form-help">Configure source-specific settings above</p>';
     }
