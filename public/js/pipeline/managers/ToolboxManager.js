@@ -29,6 +29,12 @@ class ToolboxManager {
 
         // Also load user templates from database
         try {
+            // Check if API is available
+            if (!this.builder.api || typeof this.builder.api.listTemplates !== 'function') {
+                console.log('[Toolbox] User templates API not available - using built-in templates only');
+                return;
+            }
+
             const response = await this.builder.api.listTemplates();
             const dbTemplates = response.templates || response.data || [];
 
@@ -91,6 +97,23 @@ class ToolboxManager {
                     fields: ['demographics', 'insurance']
                 }
             }),
+            new StepTemplate({
+                id: 'add-metadata',
+                name: 'Add Metadata',
+                type: 'pre.enrichment.metadata',
+                description: 'Add processing metadata (timestamps, IDs, custom fields)',
+                layer: 'pre',
+                icon: 'fas fa-tags',
+                isSystem: true,
+                defaultConfig: {
+                    addTimestamp: true,
+                    addCorrelationId: true,
+                    addInterfaceId: false,
+                    addMessageId: false,
+                    customMetadata: {}
+                }
+            }),
+
             new StepTemplate({
                 id: 'hl7-fhir-mapping',
                 name: 'HL7→FHIR Transform',

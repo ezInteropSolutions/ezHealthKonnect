@@ -1827,6 +1827,50 @@ class PropertiesPanel {
                         help: 'Add validation rules for HL7 fields. Click "+ Add Rule" to add more fields.'
                     }
                 ]
+                        },
+            'pre.enrichment.metadata': {
+                fields: [
+                    {
+                        key: 'addTimestamp',
+                        label: 'Add Timestamp',
+                        type: 'checkbox',
+                        default: true,
+                        checkboxLabel: 'Add receivedAt and processedAt timestamps',
+                        help: 'Automatically adds timestamp metadata to messages'
+                    },
+                    {
+                        key: 'addCorrelationId',
+                        label: 'Add Correlation ID',
+                        type: 'checkbox',
+                        default: true,
+                        checkboxLabel: 'Generate unique correlation ID (UUID)',
+                        help: 'Adds a unique correlation ID for message tracking'
+                    },
+                    {
+                        key: 'addInterfaceId',
+                        label: 'Add Interface ID',
+                        type: 'checkbox',
+                        default: false,
+                        checkboxLabel: 'Include interface ID in metadata',
+                        help: 'Adds the current interface ID to message metadata'
+                    },
+                    {
+                        key: 'addMessageId',
+                        label: 'Add/Extract Message ID',
+                        type: 'checkbox',
+                        default: false,
+                        checkboxLabel: 'Extract or generate message ID',
+                        help: 'Extracts message ID from HL7 MSH.10 or generates a new one'
+                    },
+                    {
+                        key: 'customMetadata',
+                        label: 'Custom Metadata (JSON)',
+                        type: 'textarea',
+                        rows: 4,
+                        placeholder: '{"processingNode": "server-01", "environment": "production"}',
+                        help: 'Additional custom key-value pairs to add as metadata (JSON format)'
+                    }
+                ]
             },
             'pre.enrichment': {
                 fields: [

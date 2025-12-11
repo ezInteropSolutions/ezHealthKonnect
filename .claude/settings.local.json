@@ -61,7 +61,8 @@
       "Bash(ls:*)",
       "Bash(node:*)",
       "Bash(docker-compose start:*)",
-      "Bash(bash c:/tmp/apply_all_validation_fixes.sh)"
+      "Bash(bash c:/tmp/apply_all_validation_fixes.sh)",
+      "Bash(git add:*)"
     ],
     "deny": [],
     "ask": []

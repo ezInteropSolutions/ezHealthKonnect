@@ -466,7 +466,7 @@ function searchTree(node, query) {
  */
 exports.uploadSample = async (req, res) => {
     try {
-        const { messageType, hlVersion, parsedContent, description } = req.body;
+        const { messageType, hlVersion, parsedContent, description, interfaceId } = req.body;
 
         if (!messageType || !hlVersion || !parsedContent) {
             return res.status(400).json({
@@ -480,7 +480,8 @@ exports.uploadSample = async (req, res) => {
             hlVersion,
             format: 'hl7v2',
             parsedContent,
-            description
+            description,
+            interfaceId: interfaceId ? parseInt(interfaceId) : null
         });
 
         res.json({
@@ -517,22 +518,28 @@ exports.listSamples = async (req, res) => {
  */
 exports.getUniversalHL7Fields = async (req, res) => {
     try {
-        console.log('📂 Loading universal HL7 field paths from all samples...');
+        const { messageType, interfaceId } = req.query;
 
-        const universalTree = await SampleMessageService.buildUniversalFieldTree('hl7v2');
+        console.log(`📂 Loading HL7 field paths (messageType: ${messageType || 'all'}, interfaceId: ${interfaceId || 'none'})...`);
 
-        if (!universalTree || universalTree.children.length === 0) {
+        const fieldTree = await SampleMessageService.buildFieldTreeWithFallback(
+            'hl7v2',
+            messageType,
+            interfaceId ? parseInt(interfaceId) : null
+        );
+
+        if (!fieldTree || fieldTree.children.length === 0) {
             return res.status(404).json({
                 success: false,
-                error: 'No HL7 samples available. Please add samples via /api/schemas/samples endpoint.'
+                error: 'No HL7 samples available. Please upload a sample via /api/schemas/samples endpoint.'
             });
         }
 
-        console.log(`✅ Universal tree built: ${universalTree.children.length} segments`);
+        console.log(`✅ Field tree built: ${fieldTree.children.length} segments`);
 
-        res.json({ success: true, xpathTree: universalTree });
+        res.json({ success: true, xpathTree: fieldTree });
     } catch (error) {
-        console.error('❌ Error building universal field tree:', error.message);
+        console.error('❌ Error building field tree:', error.message);
         res.status(500).json({ success: false, error: error.message });
     }
 };

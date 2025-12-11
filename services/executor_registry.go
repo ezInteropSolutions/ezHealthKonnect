@@ -11,6 +11,8 @@ import (
 	"strings"
 
 	"ezhealthkonnect/models"
+	"ezhealthkonnect/services/executors/enrichment"
+	"ezhealthkonnect/services/executors/validation"
 )
 
 // StepExecutor interface - all executors must implement this
@@ -57,6 +59,9 @@ func (er *ExecutorRegistry) autoRegisterExecutors() {
 
 	// Pre-processing executors
 	er.Register(NewValidationExecutor(er.db))
+	er.Register(enrichment.NewMetadataEnrichmentExecutor())
+	er.Register(validation.NewFieldValidationExecutor()) // Metadata Enrichment
+	er.Register(enrichment.NewMetadataEnrichmentExecutor())
 	er.Register(NewEnrichmentExecutor(er.db))
 
 	// Core executors

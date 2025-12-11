@@ -82,19 +82,28 @@ class SampleMessageService {
             hlVersion,
             format = 'hl7v2',
             parsedContent,
-            description
+            description,
+            interfaceId = null,
+            sampleScope = interfaceId ? 'interface' : 'global',
+            source = 'user-upload',
+            priority = interfaceId ? 10 : 50  // Interface samples higher priority
         } = sampleData;
 
         const pool = getPool();
         try {
             const query = `
                 INSERT INTO sample_parsed_messages
-                    (message_type, hl7_version, format, parsed_content, description)
-                VALUES ($1, $2, $3, $4, $5)
+                    (message_type, hl7_version, format, parsed_content, description,
+                     interface_id, sample_scope, source, priority)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
                 ON CONFLICT (message_type, hl7_version, format, is_active)
                 DO UPDATE SET
                     parsed_content = EXCLUDED.parsed_content,
                     description = EXCLUDED.description,
+                    interface_id = EXCLUDED.interface_id,
+                    sample_scope = EXCLUDED.sample_scope,
+                    source = EXCLUDED.source,
+                    priority = EXCLUDED.priority,
                     updated_at = CURRENT_TIMESTAMP
                 RETURNING id
             `;
@@ -104,10 +113,15 @@ class SampleMessageService {
                 hlVersion,
                 format,
                 parsedContent,
-                description
+                description,
+                interfaceId,
+                sampleScope,
+                source,
+                priority
             ]);
 
-            console.log(`✅ Sample message saved: ${messageType} v${hlVersion} (ID: ${result.rows[0].id})`);
+            const scope = interfaceId ? `interface ${interfaceId}` : 'global';
+            console.log(`✅ Sample message saved: ${messageType} v${hlVersion} (${scope}, ID: ${result.rows[0].id})`);
             return result.rows[0].id;
         } catch (error) {
             console.error('Error upserting sample message:', error);
@@ -245,6 +259,67 @@ class SampleMessageService {
         }
 
         return tree;
+    }
+
+    /**
+     * Build field tree with intelligent fallback
+     * Priority: Interface-specific → System library → Aggregated
+     * @param {string} format - 'hl7v2', 'fhir', etc.
+     * @param {string} messageType - Optional: 'ADT^A01', 'Patient', etc.
+     * @param {number} interfaceId - Optional: specific interface
+     * @returns {Object} XPath tree structure
+     */
+    static async buildFieldTreeWithFallback(format = 'hl7v2', messageType = null, interfaceId = null) {
+        const pool = getPool();
+        try {
+            // Priority 1: Interface-specific sample (user uploaded)
+            if (interfaceId && messageType) {
+                const interfaceSample = await pool.query(`
+                    SELECT parsed_content, source
+                    FROM sample_parsed_messages
+                    WHERE interface_id = $1
+                      AND message_type = $2
+                      AND format = $3
+                      AND is_active = TRUE
+                    ORDER BY priority ASC, updated_at DESC
+                    LIMIT 1
+                `, [interfaceId, messageType, format]);
+
+                if (interfaceSample.rows.length > 0) {
+                    console.log(`✅ Using interface-specific sample (${interfaceSample.rows[0].source})`);
+                    return this.buildXPathTree(interfaceSample.rows[0].parsed_content.enhancedSegments);
+                }
+            }
+
+            // Priority 2: System library for this message type
+            if (messageType) {
+                const librarySample = await pool.query(`
+                    SELECT parsed_content
+                    FROM sample_parsed_messages
+                    WHERE message_type = $1
+                      AND format = $2
+                      AND sample_scope = 'global'
+                      AND is_active = TRUE
+                    ORDER BY priority ASC, updated_at DESC
+                    LIMIT 1
+                `, [messageType, format]);
+
+                if (librarySample.rows.length > 0) {
+                    console.log(`✅ Using system library sample for ${messageType}`);
+                    return this.buildXPathTree(librarySample.rows[0].parsed_content.enhancedSegments);
+                }
+            }
+
+            // Priority 3: Aggregate all samples of this format (universal fallback)
+            console.log(`⚠️  No specific sample found, using aggregated fields from all samples`);
+            return await this.buildUniversalFieldTree(format);
+
+        } catch (error) {
+            console.error('Error in buildFieldTreeWithFallback:', error);
+            throw error;
+        } finally {
+            await pool.end();
+        }
     }
 
     /**

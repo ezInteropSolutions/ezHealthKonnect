@@ -44,6 +44,16 @@ class FieldPathInputWithAutocomplete {
         try {
             console.log('[FieldPathInput] Loading fields from sample_parsed_messages...');
             const response = await fetch('/api/schemas/hl7/fields');
+
+            // Check if endpoint exists
+            if (!response.ok) {
+                if (response.status === 404) {
+                    console.log('[FieldPathInput] Autocomplete API not available - manual field entry enabled');
+                    return;
+                }
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+
             const data = await response.json();
 
             if (data.success && data.xpathTree) {
@@ -54,7 +64,10 @@ class FieldPathInputWithAutocomplete {
                 console.log(`[FieldPathInput] Loaded ${fields.length} fields from database`);
             }
         } catch (error) {
-            console.error('[FieldPathInput] Error loading fields:', error);
+            // Only log if it's not a 404 (which we already handled)
+            if (error.message && !error.message.includes('404')) {
+                console.warn('[FieldPathInput] Could not load autocomplete fields:', error.message);
+            }
         } finally {
             FieldPathInputWithAutocomplete.isLoading = false;
         }
