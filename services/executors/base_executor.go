@@ -5,6 +5,8 @@ import (
 	"ezhealthkonnect/models"
 	"fmt"
 	"log"
+	"strconv"
+	"strings"
 	"time"
 )
 
@@ -96,14 +98,68 @@ func GetNestedValue(data map[string]interface{}, path string) interface{} {
 		return nil
 	}
 
-	// Simple implementation - try direct key first
+	// Try direct key first (for simple paths)
 	if val, ok := data[path]; ok {
 		return val
 	}
 
-	// TODO: Implement full path traversal with dot notation and array indices
-	// For now, return nil if not found at top level
-	return nil
+	// Parse path with dot notation and array indices
+	// Example: "enhancedSegments.PID.fields[4].subfields[1].value"
+	current := interface{}(data)
+	parts := strings.Split(path, ".")
+
+	for _, part := range parts {
+		// Check if part has array index like "fields[4]"
+		if strings.Contains(part, "[") {
+			// Extract key and index: "fields[4]" -> "fields", 4
+			openBracket := strings.Index(part, "[")
+			closeBracket := strings.Index(part, "]")
+
+			if openBracket == -1 || closeBracket == -1 {
+				return nil // Invalid syntax
+			}
+
+			key := part[:openBracket]
+			indexStr := part[openBracket+1 : closeBracket]
+			index, err := strconv.Atoi(indexStr)
+			if err != nil {
+				return nil // Invalid index
+			}
+
+			// Navigate to the key first
+			if currentMap, ok := current.(map[string]interface{}); ok {
+				arrayVal, exists := currentMap[key]
+				if !exists {
+					return nil
+				}
+
+				// Access array element
+				if arraySlice, ok := arrayVal.([]interface{}); ok {
+					if index < 0 || index >= len(arraySlice) {
+						return nil // Index out of bounds
+					}
+					current = arraySlice[index]
+				} else {
+					return nil // Not an array
+				}
+			} else {
+				return nil
+			}
+		} else {
+			// Simple key navigation
+			if currentMap, ok := current.(map[string]interface{}); ok {
+				val, exists := currentMap[part]
+				if !exists {
+					return nil
+				}
+				current = val
+			} else {
+				return nil
+			}
+		}
+	}
+
+	return current
 }
 
 // SetNestedValue sets a value in a nested map using dot notation
