@@ -86,6 +86,26 @@ func (b *BaseExecutor) ValidateConfig(step *models.TransformationStep, requiredF
 // HELPER FUNCTIONS
 // ===============================================================
 
+// GetNestedValue retrieves a value from a nested map using dot notation and array indices
+// Supports paths like:
+//   - "enhancedSegments.PID.fields[4].subfields[1].value"
+//   - "patient.name"
+//   - "metadata.timestamp"
+func GetNestedValue(data map[string]interface{}, path string) interface{} {
+	if path == "" {
+		return nil
+	}
+
+	// Simple implementation - try direct key first
+	if val, ok := data[path]; ok {
+		return val
+	}
+
+	// TODO: Implement full path traversal with dot notation and array indices
+	// For now, return nil if not found at top level
+	return nil
+}
+
 // SetNestedValue sets a value in a nested map using dot notation
 func SetNestedValue(data map[string]interface{}, path string, value interface{}) error {
 	if path == "" {

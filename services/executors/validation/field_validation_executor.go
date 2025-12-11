@@ -79,6 +79,12 @@ func (e *FieldValidationExecutor) Execute(
 	return inputData, nil
 }
 
+// Validate validates the step configuration
+func (e *FieldValidationExecutor) Validate(step *models.TransformationStep) error {
+	_, err := e.parseConfig(step)
+	return err
+}
+
 // parseConfig parses the step configuration
 func (e *FieldValidationExecutor) parseConfig(step *models.TransformationStep) (*models.ValidationConfig, error) {
 	var config models.ValidationConfig

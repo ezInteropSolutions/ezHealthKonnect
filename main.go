@@ -42,7 +42,7 @@ func main() {
 		cfg.LogConfiguration()
 	}
 
-	// Database connection for FHIR transformations
+	// Database connection for FHIR transformations with retry logic
 	var db *sql.DB
 	var err error
 
@@ -51,13 +51,33 @@ func main() {
 	if dbConnectionString == "" {
 		log.Printf("⚠️ WARNING: No database configuration found; DB-backed transformations will be disabled")
 	} else {
-		db, err = sql.Open("postgres", dbConnectionString)
-		if err != nil {
-			log.Printf("❌ ERROR: Failed to connect to database for FHIR transformations: %v", err)
-		} else if err = db.Ping(); err != nil {
-			log.Printf("❌ ERROR: Database ping failed: %v", err)
-			db = nil
-		} else {
+		// Retry logic for database connection (PostgreSQL may be starting up)
+		maxRetries := 10
+		retryDelay := 2 * time.Second
+
+		for i := 0; i < maxRetries; i++ {
+			db, err = sql.Open("postgres", dbConnectionString)
+			if err != nil {
+				log.Printf("❌ ERROR: Failed to connect to database for FHIR transformations (attempt %d/%d): %v", i+1, maxRetries, err)
+				time.Sleep(retryDelay)
+				continue
+			}
+
+			err = db.Ping()
+			if err != nil {
+				log.Printf("⚠️ Database ping failed (attempt %d/%d): %v - retrying...", i+1, maxRetries, err)
+				db.Close()
+				db = nil
+				time.Sleep(retryDelay)
+				continue
+			}
+
+			// Success!
+			log.Printf("✅ Database connection established (attempt %d/%d)", i+1, maxRetries)
+			break
+		}
+
+		if db != nil {
 			// OLD MLLP System services - no longer needed with ProcessingEngine architecture
 			// interfaceMessageService = services.NewInterfaceMessageService(db)
 			// log.Printf("✅ InterfaceMessageService initialized")
@@ -75,8 +95,9 @@ func main() {
 			} else {
 				log.Printf("✅ Processing Engine initialized and started")
 			}
+		} else {
+			log.Printf("❌ FATAL: Database connection failed after %d retries - transformation pipeline will not be available", maxRetries)
 		}
-		// Silent success - no logging when database connects properly
 	}
 
 // Note: MongoDB is now auto-detected via ProcessingEngineFactory (OOB pattern)
