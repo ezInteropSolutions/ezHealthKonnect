@@ -374,3 +374,42 @@ func getMapKeys(m map[string]interface{}) []string {
 	}
 	return keys
 }
+
+// SetNestedValue sets a value in a nested map using dot notation
+// Creates intermediate maps as needed
+// Example: SetNestedValue(data, "enriched.api.patient", value) creates enriched -> api -> patient
+func SetNestedValue(data map[string]interface{}, path string, value interface{}) {
+	if path == "" {
+		return
+	}
+
+	parts := strings.Split(path, ".")
+	current := data
+
+	// Navigate to the parent of the target field, creating maps as needed
+	for i := 0; i < len(parts)-1; i++ {
+		part := parts[i]
+
+		// Check if this part exists
+		if existing, ok := current[part]; ok {
+			// If it exists and is a map, continue navigating
+			if existingMap, ok := existing.(map[string]interface{}); ok {
+				current = existingMap
+			} else {
+				// Overwrite non-map values with a new map
+				newMap := make(map[string]interface{})
+				current[part] = newMap
+				current = newMap
+			}
+		} else {
+			// Create new map for this part
+			newMap := make(map[string]interface{})
+			current[part] = newMap
+			current = newMap
+		}
+	}
+
+	// Set the final value
+	finalKey := parts[len(parts)-1]
+	current[finalKey] = value
+}
