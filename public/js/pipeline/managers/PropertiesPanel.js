@@ -1820,6 +1820,31 @@ class PropertiesPanel {
             'pre.validation': {
                 fields: [
                     {
+                        key: 'validation_mode',
+                        label: 'Validation Mode',
+                        type: 'select',
+                        required: true,
+                        default: 'accept_and_flag',
+                        options: [
+                            {
+                                value: 'strict_reject',
+                                label: '❌ Strict Reject - Send NACK on failure, stop processing',
+                                description: 'Critical interfaces: Pipeline fails immediately, NACK sent to sender. Use for patient safety, lab results, medications.'
+                            },
+                            {
+                                value: 'accept_and_flag',
+                                label: '⚠️ Accept & Flag - Send ACK with warnings, continue processing (DEFAULT)',
+                                description: 'Data quality monitoring: Message accepted with warnings, ACK sent. Use for non-critical interfaces, gradual validation rollout.'
+                            },
+                            {
+                                value: 'no_validation',
+                                label: '⏭️ No Validation - Skip all checks',
+                                description: 'Emergency bypass: All validation skipped, ACK sent immediately. Use for debugging or when validation is not needed.'
+                            }
+                        ],
+                        help: 'Controls ACK/NACK response and pipeline behavior when validation fails. Strict Reject = NACK + stop, Accept & Flag = ACK + continue with warnings, No Validation = skip all checks.'
+                    },
+                    {
                         key: 'rules',
                         label: 'Validation Rules',
                         type: 'validation-builder',
