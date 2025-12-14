@@ -75,17 +75,24 @@ class FieldPathInputWithAutocomplete {
 
     /**
      * Flatten tree structure into searchable array
+     * CRITICAL: Use field KEY (e.g., "PID.3", "MSH.9") not complex path
+     * Backend expects simple HL7 field keys and handles path resolution automatically
      */
     flattenTree(node, result = []) {
         // Include field-value nodes (e.g., PID.3, PID.5, PID.7)
         // AND string nodes (subfields like PID.5.1, PID.5.2)
         if ((node.type === 'field-value' || node.type === 'string') && node.path) {
+            // CRITICAL FIX: Use field KEY from node.name instead of complex path
+            // SampleMessageService.buildXPathTree() sets node.name to field.key (PID.3, MSH.9, etc.)
+            // The complex path like "enhancedSegments.PID.fields[0].value" should NOT be used
+            const fieldKey = node.name || '';
+
             result.push({
-                path: node.path,
-                name: node.name || '',
+                path: fieldKey, // Use simple HL7 key (PID.3, MSH.9) not complex path
+                name: fieldKey,
                 description: node.description || '',
                 dataType: node.dataType || '',
-                displayText: `${node.name} - ${node.description || 'No description'}`,
+                displayText: `${fieldKey} - ${node.description || 'No description'}`,
                 example: node.example || ''
             });
         }
@@ -119,7 +126,7 @@ class FieldPathInputWithAutocomplete {
 
     getPlaceholder() {
         return this.options.searchMode === 'path'
-            ? 'Enter field path (e.g., enhancedSegments.PID.fields[2].value)'
+            ? 'Enter field key (e.g., PID.3, MSH.9, PID.5.1)'
             : 'Search by description (e.g., Date of Birth, Patient Name)';
     }
 

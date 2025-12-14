@@ -236,14 +236,14 @@ class ValidationRuleBuilder {
                     <input type="number"
                            class="rule-min-length"
                            placeholder="Min"
-                           value="${rule.minLength || ''}"
-                           data-rule-prop="minLength"
+                           value="${rule.min || ''}"
+                           data-rule-prop="min"
                            style="width: 50%;">
                     <input type="number"
                            class="rule-max-length"
                            placeholder="Max"
-                           value="${rule.maxLength || ''}"
-                           data-rule-prop="maxLength"
+                           value="${rule.max || ''}"
+                           data-rule-prop="max"
                            style="width: 50%;">
                 </div>
                 <small style="color: #6b7280;">Leave blank for no limit</small>
@@ -263,8 +263,8 @@ class ValidationRuleBuilder {
                 <input type="text"
                        class="rule-pattern"
                        placeholder="e.g., ^[A-Z]{2}\\d{6}$"
-                       value="${rule.pattern || ''}"
-                       data-rule-prop="pattern">
+                       value="${rule.regex || ''}"
+                       data-rule-prop="regex">
                 <small style="color: #6b7280;">Enter custom regex pattern</small>
             </div>
         `;
@@ -339,14 +339,18 @@ class ValidationRuleBuilder {
                 initialValue: rule.field || '',
                 searchMode: 'path',
                 onChange: (path, fieldData) => {
+                    console.log('[ValidationRuleBuilder] onChange received:', { path, fieldData });
                     hiddenInput.value = path;
                     this.rules[index].field = path;
                     // Store field description for better error messages
                     if (fieldData && fieldData.description) {
+                        console.log('[ValidationRuleBuilder] Storing description:', fieldData.description);
                         this.rules[index]._fieldDescription = fieldData.description;
+                    } else {
+                        console.warn('[ValidationRuleBuilder] No fieldData.description received!');
                     }
                     this.updateHiddenField();
-                    
+
                     // Auto-populate error message when field is selected
                     const ruleRow = container.closest('.validation-rule-row');
                     const validationType = ruleRow.querySelector('.rule-type')?.value || 'required';
@@ -557,7 +561,7 @@ class ValidationRuleBuilder {
                 console.log('[ValidationRuleBuilder]   Input:', prop, '=', value || '(empty)');
 
                 // Type conversion
-                if (prop === 'minLength' || prop === 'maxLength') {
+                if (prop === 'min' || prop === 'max') {
                     value = value ? parseInt(value) : null;
                 }
 
@@ -632,11 +636,11 @@ class ValidationRuleBuilder {
                 errors.push(`Rule ${index + 1}: Format preset is required`);
             }
 
-            if (rule.type === 'pattern' && !rule.pattern) {
+            if (rule.type === 'pattern' && !rule.regex) {
                 errors.push(`Rule ${index + 1}: Regex pattern is required`);
             }
 
-            if (rule.type === 'length' && !rule.minLength && !rule.maxLength) {
+            if (rule.type === 'length' && !rule.min && !rule.max) {
                 errors.push(`Rule ${index + 1}: At least one length constraint is required`);
             }
         });
@@ -695,7 +699,29 @@ class ValidationRuleBuilder {
     getFieldDisplayName(fieldPath) {
         if (!fieldPath) return 'Field';
 
-        // Try to extract from path like "enhancedSegments.PID.fields[2].value"
+        // NEW: Try to extract from simple HL7 field key (PID.3, MSH.9, PID.5.1)
+        const hl7KeyMatch = fieldPath.match(/^([A-Z]{3})\.(\d+)(?:\.(\d+))?$/);
+        if (hl7KeyMatch) {
+            const segment = hl7KeyMatch[1];
+            const field = hl7KeyMatch[2];
+            const subfield = hl7KeyMatch[3];
+
+            const segmentNames = {
+                'PID': 'Patient',
+                'MSH': 'Message',
+                'PV1': 'Visit',
+                'OBR': 'Observation',
+                'OBX': 'Result',
+                'NK1': 'Next of Kin',
+                'AL1': 'Allergy',
+                'DG1': 'Diagnosis',
+            };
+
+            const baseName = segmentNames[segment] || segment;
+            return subfield ? `${baseName} Field ${field}.${subfield}` : `${baseName} Field ${field}`;
+        }
+
+        // LEGACY: Try to extract from path like "enhancedSegments.PID.fields[2].value"
         const match = fieldPath.match(/enhancedSegments\.(\w+)\./);
         if (match) {
             const segment = match[1];

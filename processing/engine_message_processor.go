@@ -177,6 +177,11 @@ func (pe *ProcessingEngine) storeAndParseWithRecovery(interfaceID string, msg *m
 func (pe *ProcessingEngine) storeAndParse(interfaceID string, msg *models.InboundMessage) {
 	ctx := context.Background()
 
+	// Inject ProcessingEngine into context for validation feedback
+	ctx = context.WithValue(ctx, "processing_engine", pe)
+	ctx = context.WithValue(ctx, "message_id", msg.MessageID)
+	ctx = context.WithValue(ctx, "interface_id", interfaceID)
+
 	// Get dynamic metadata from message
 	messageType := msg.MessageType // Default: hl7, fhir, etc.
 	if mt, ok := msg.Headers["message_type"]; ok && mt != "" {

@@ -24,6 +24,14 @@ const (
 	MLLPEndByte2  byte = 0x0D // Carriage Return (CR)
 )
 
+// ConnectionInfo stores connection details for validation feedback
+type ConnectionInfo struct {
+	Conn          net.Conn
+	OriginalMsg   string
+	ConnID        string
+	ReceivedAt    time.Time
+}
+
 // TCPMLLPInboundConnector implements HL7 MLLP protocol listener
 type TCPMLLPInboundConnector struct {
 	*BaseInboundConnector
@@ -44,6 +52,10 @@ type TCPMLLPInboundConnector struct {
 	authPassword     string
 	generateACK      bool
 	validateChecksum bool
+
+	// Validation feedback support
+	messageConns      map[string]*ConnectionInfo // messageID -> connection info (for validation feedback)
+	messageConnsMutex sync.RWMutex
 }
 
 // NewTCPMLLPInboundConnector creates a new TCP/MLLP inbound connector
@@ -68,6 +80,7 @@ func NewTCPMLLPInboundConnector() InboundConnector {
 	return &TCPMLLPInboundConnector{
 		BaseInboundConnector: base,
 		activeConns:          make(map[string]net.Conn),
+		messageConns:         make(map[string]*ConnectionInfo),
 	}
 }
 
@@ -380,10 +393,17 @@ func (c *TCPMLLPInboundConnector) handleConnection(conn net.Conn, connID string,
 			c.IncrementMessagesReceived()
 			log.Printf("✅ TCP/MLLP Inbound: Message queued for processing: %s", inboundMsg.MessageID)
 
-			// Send ACK
+			// Store connection info for validation feedback (instead of immediate ACK)
 			if c.generateACK {
-				ack := c.generateACKMessage(hl7Message, "AA", "Message accepted")
-				c.sendACK(conn, ack)
+				c.messageConnsMutex.Lock()
+				c.messageConns[inboundMsg.MessageID] = &ConnectionInfo{
+					Conn:        conn,
+					OriginalMsg: hl7Message,
+					ConnID:      connID,
+					ReceivedAt:  time.Now(),
+				}
+				c.messageConnsMutex.Unlock()
+				log.Printf("📋 TCP/MLLP Inbound: Connection stored for validation feedback: %s", inboundMsg.MessageID)
 			}
 
 		case <-time.After(5 * time.Second):
@@ -548,4 +568,46 @@ func (c *TCPMLLPInboundConnector) Stop() error {
 func (c *TCPMLLPInboundConnector) Close() error {
 	c.Stop()
 	return c.BaseInboundConnector.Close()
+}
+
+// SendValidationResponse implements ValidationAwareConnector interface
+func (c *TCPMLLPInboundConnector) SendValidationResponse(ctx context.Context, feedback *models.ValidationFeedback) error {
+	c.messageConnsMutex.RLock()
+	connInfo, exists := c.messageConns[feedback.MessageID]
+	c.messageConnsMutex.RUnlock()
+
+	if !exists {
+		return fmt.Errorf("connection not found for message %s", feedback.MessageID)
+	}
+
+	defer func() {
+		c.messageConnsMutex.Lock()
+		delete(c.messageConns, feedback.MessageID)
+		c.messageConnsMutex.Unlock()
+	}()
+
+	var ackCode string
+	var ackMessage string
+
+	if feedback.IsRejected() {
+		ackCode = "AE"
+		ackMessage = feedback.GetErrorMessage()
+		log.Printf("❌ TCP/MLLP: Sending NACK for %s: %s", feedback.MessageID, ackMessage)
+	} else if feedback.HasWarnings() {
+		ackCode = "AA"
+		ackMessage = "Message accepted with warnings"
+		log.Printf("⚠️  TCP/MLLP: Sending ACK with warnings for %s", feedback.MessageID)
+	} else {
+		ackCode = "AA"
+		ackMessage = "Message accepted"
+		log.Printf("✅ TCP/MLLP: Sending ACK for %s", feedback.MessageID)
+	}
+
+	ack := c.generateACKMessage(connInfo.OriginalMsg, ackCode, ackMessage)
+	return c.sendACK(connInfo.Conn, ack)
+}
+
+// SupportsValidationFeedback implements ValidationAwareConnector interface
+func (c *TCPMLLPInboundConnector) SupportsValidationFeedback() bool {
+	return true
 }

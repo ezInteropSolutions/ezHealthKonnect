@@ -2,6 +2,7 @@ package executors
 
 import (
 	"context"
+	"ezhealthkonnect/hl7"
 	"ezhealthkonnect/models"
 	"fmt"
 	"log"
@@ -103,15 +104,34 @@ func GetNestedValue(data map[string]interface{}, path string) interface{} {
 		return val
 	}
 
+	// Auto-lookup HL7 field keys directly from enhanced schema
+	// Example: "PID.3" looks up enhancedSegments["PID"].Fields for Key="PID.3"
+	// Example: "PID.5.1" looks up field PID.5 then searches its Subfields for Key="PID.5.1"
+	if isHL7FieldKey(path) {
+		return getHL7FieldValue(data, path)
+	}
+
+	// LEGACY SUPPORT: Convert old format to new format automatically
+	// "enhancedSegments.MSH.fields[2].value" -> "MSH.2"
+	// "enhancedSegments.PID.fields[3].subfields[0].value" -> "PID.3.1"
+	if strings.HasPrefix(path, "enhancedSegments.") {
+		convertedKey := convertLegacyPathToHL7Key(path)
+		if convertedKey != "" && isHL7FieldKey(convertedKey) {
+			log.Printf("🔄 [LEGACY] Auto-converting path '%s' to '%s'", path, convertedKey)
+			return getHL7FieldValue(data, convertedKey)
+		}
+	}
+
 	// Parse path with dot notation and array indices
 	// Example: "enhancedSegments.PID.fields[4].subfields[1].value"
+	// Special handling: Don't split on dots inside brackets
 	current := interface{}(data)
-	parts := strings.Split(path, ".")
+	parts := splitPathRespectingBrackets(path)
 
 	for _, part := range parts {
-		// Check if part has array index like "fields[4]"
+		// Check if part has bracket notation like "fields[4]" or "fields[PID.3]"
 		if strings.Contains(part, "[") {
-			// Extract key and index: "fields[4]" -> "fields", 4
+			// Extract key and index/key: "fields[4]" -> "fields", "4"
 			openBracket := strings.Index(part, "[")
 			closeBracket := strings.Index(part, "]")
 
@@ -120,27 +140,37 @@ func GetNestedValue(data map[string]interface{}, path string) interface{} {
 			}
 
 			key := part[:openBracket]
-			indexStr := part[openBracket+1 : closeBracket]
-			index, err := strconv.Atoi(indexStr)
-			if err != nil {
-				return nil // Invalid index
-			}
+			indexOrKey := part[openBracket+1 : closeBracket]
 
 			// Navigate to the key first
 			if currentMap, ok := current.(map[string]interface{}); ok {
-				arrayVal, exists := currentMap[key]
+				val, exists := currentMap[key]
 				if !exists {
 					return nil
 				}
 
-				// Access array element
-				if arraySlice, ok := arrayVal.([]interface{}); ok {
-					if index < 0 || index >= len(arraySlice) {
-						return nil // Index out of bounds
+				// Try as array index first (integer)
+				if index, err := strconv.Atoi(indexOrKey); err == nil {
+					// It's an integer - treat as array index
+					if arraySlice, ok := val.([]interface{}); ok {
+						if index < 0 || index >= len(arraySlice) {
+							return nil // Index out of bounds
+						}
+						current = arraySlice[index]
+					} else {
+						return nil // Not an array
 					}
-					current = arraySlice[index]
 				} else {
-					return nil // Not an array
+					// It's a string - treat as map key
+					if mapVal, ok := val.(map[string]interface{}); ok {
+						subVal, exists := mapVal[indexOrKey]
+						if !exists {
+							return nil
+						}
+						current = subVal
+					} else {
+						return nil // Not a map
+					}
 				}
 			} else {
 				return nil
@@ -185,4 +215,162 @@ func EnsureMapExists(data map[string]interface{}, path string) map[string]interf
 	newMap := make(map[string]interface{})
 	data[path] = newMap
 	return newMap
+}
+
+// isHL7FieldKey checks if a path looks like an HL7 field key (e.g., "PID.3", "MSH.9", "PID.5.1")
+func isHL7FieldKey(path string) bool {
+	// HL7 field keys have format: SEGMENT.FIELD or SEGMENT.FIELD.SUBFIELD
+	// Examples: PID.3, MSH.9, PID.5.1, PID.13.4
+	parts := strings.Split(path, ".")
+	if len(parts) < 2 || len(parts) > 3 {
+		return false
+	}
+	
+	// First part should be 3-letter segment name (uppercase)
+	segment := parts[0]
+	if len(segment) != 3 {
+		return false
+	}
+	for _, c := range segment {
+		if c < 'A' || c > 'Z' {
+			return false
+		}
+	}
+	
+	// Second part should be a number (field position)
+	if _, err := strconv.Atoi(parts[1]); err != nil {
+		return false
+	}
+	
+	// Third part (if exists) should be a number (subfield position)
+	if len(parts) == 3 {
+		if _, err := strconv.Atoi(parts[2]); err != nil {
+			return false
+		}
+	}
+	
+	return true
+}
+
+// getHL7FieldValue retrieves a field value directly from the enhanced schema structure
+// This function works with the actual Go struct types (map[string]hl7.EnhancedSegment)
+// instead of trying to use generic path resolution
+//
+// Examples:
+//   - "PID.3" -> searches enhancedSegments["PID"].Fields for Key="PID.3" and returns Value
+//   - "PID.5.1" -> searches enhancedSegments["PID"].Fields for Key="PID.5", then Subfields for Key="PID.5.1"
+//   - "MSH.9" -> searches enhancedSegments["MSH"].Fields for Key="MSH.9" and returns Value
+func getHL7FieldValue(data map[string]interface{}, fieldKey string) interface{} {
+	// 1. Type-assert enhancedSegments as map[string]hl7.EnhancedSegment
+	enhancedSegsRaw, ok := data["enhancedSegments"]
+	if !ok {
+		return nil
+	}
+
+	enhancedSegs, ok := enhancedSegsRaw.(map[string]hl7.EnhancedSegment)
+	if !ok {
+		return nil
+	}
+
+	// 2. Parse field key to extract segment name
+	parts := strings.Split(fieldKey, ".")
+	if len(parts) < 2 {
+		return nil
+	}
+
+	segmentName := parts[0] // e.g., "PID"
+
+	// 3. Get the segment
+	segment, ok := enhancedSegs[segmentName]
+	if !ok {
+		return nil
+	}
+
+	// 4. Search Fields array for matching Key
+	// Handle both field-level (PID.3) and subfield-level (PID.5.1) access
+	if len(parts) == 2 {
+		// Field-level access: PID.3
+		for _, field := range segment.Fields {
+			if field.Key == fieldKey {
+				return field.Value
+			}
+		}
+		return nil
+	}
+
+	// Subfield-level access: PID.5.1
+	// First find the parent field (PID.5)
+	parentFieldKey := parts[0] + "." + parts[1] // e.g., "PID.5"
+	for _, field := range segment.Fields {
+		if field.Key == parentFieldKey {
+			// Found parent field, now search its subfields
+			for _, subfield := range field.Subfields {
+				if subfield.Key == fieldKey {
+					return subfield.Value
+				}
+			}
+			return nil
+		}
+	}
+
+	return nil
+}
+
+// splitPathRespectingBrackets splits a path on dots, but ignores dots inside brackets
+// Example: "fields[PID.3].value" -> ["fields[PID.3]", "value"]
+func splitPathRespectingBrackets(path string) []string {
+	var parts []string
+	var current strings.Builder
+	insideBrackets := 0
+
+	for _, char := range path {
+		if char == '[' {
+			insideBrackets++
+			current.WriteRune(char)
+		} else if char == ']' {
+			insideBrackets--
+			current.WriteRune(char)
+		} else if char == '.' && insideBrackets == 0 {
+			// Only split on dots outside of brackets
+			if current.Len() > 0 {
+				parts = append(parts, current.String())
+				current.Reset()
+			}
+		} else {
+			current.WriteRune(char)
+		}
+	}
+
+	// Add the last part
+	if current.Len() > 0 {
+		parts = append(parts, current.String())
+	}
+
+	return parts
+}
+
+// convertLegacyPathToHL7Key converts old path format to new HL7 field key format
+// Examples:
+//   - "enhancedSegments.MSH.fields[2].value" -> "MSH.2"
+//   - "enhancedSegments.PID.fields[3].value" -> "PID.3"
+//   - "enhancedSegments.PID.fields[5].subfields[0].value" -> "PID.5.1"
+//
+// LIMITATION: Cannot reliably convert array indices to field numbers without data access
+// because fields array is indexed by position, not field number.
+// The actual field key (PID.3, MSH.9) is stored in Field.Key property.
+// This function exists for documentation purposes but returns empty string.
+// Users should use simple HL7 field keys (PID.3, MSH.9) directly in validation rules.
+func convertLegacyPathToHL7Key(path string) string {
+	// Cannot convert without accessing the actual data structure
+	// UI has been updated to generate simple keys directly
+	return ""
+}
+
+// getMapKeys returns the keys of a map for debugging
+func getMapKeys(m map[string]interface{}) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
 }

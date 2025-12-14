@@ -55,18 +55,25 @@ func NewFormatValidator() *FormatValidator {
 			description:   "Validates field format against regex patterns",
 		},
 		presets: map[string]string{
-			"email":    `^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$`,
-			"phone":    `^\d{10}$|^\d{3}-\d{3}-\d{4}$`,
-			"ssn":      `^\d{3}-\d{2}-\d{4}$`,
-			"date":     `^\d{8}$`, // YYYYMMDD
-			"datetime": `^\d{14}$`, // YYYYMMDDHHMMSS
-			"mrn":      `^[A-Z0-9]{6,12}$`,
-			"zip":      `^\d{5}(-\d{4})?$`,
+			"email":        `^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$`,
+			"phone":        `^\d{10}$|^\d{3}-\d{3}-\d{4}$`,
+			"ssn":          `^\d{3}-\d{2}-\d{4}$`,
+			"date":         `^\d{8}$`,  // YYYYMMDD
+			"hl7_date":     `^\d{8}$`,  // HL7 date format (YYYYMMDD)
+			"datetime":     `^\d{14}$`, // YYYYMMDDHHMMSS
+			"hl7_datetime": `^\d{14}$`, // HL7 datetime format (YYYYMMDDHHMMSS)
+			"mrn":          `^[A-Z0-9]{6,12}$`,
+			"zip":          `^\d{5}(-\d{4})?$`,
 		},
 	}
 }
 
 func (v *FormatValidator) Validate(value interface{}, options map[string]interface{}) (bool, string) {
+	// Handle nil values - should pass (use required validator for presence checks)
+	if value == nil {
+		return true, ""
+	}
+
 	strValue := fmt.Sprintf("%v", value)
 	strValue = strings.TrimSpace(strValue)
 
@@ -97,6 +104,8 @@ func (v *FormatValidator) Validate(value interface{}, options map[string]interfa
 		return false, "No validation pattern specified"
 	}
 
+	fmt.Printf("🔍 [FormatValidator] Validating value: '%s' (type: %T) against %s (pattern: '%s')\n", strValue, value, formatName, pattern)
+
 	// Compile and test regex
 	re, err := regexp.Compile(pattern)
 	if err != nil {
@@ -104,9 +113,11 @@ func (v *FormatValidator) Validate(value interface{}, options map[string]interfa
 	}
 
 	if !re.MatchString(strValue) {
+		fmt.Printf("❌ [FormatValidator] NO MATCH: '%s' does not match '%s'\n", strValue, pattern)
 		return false, fmt.Sprintf("Value '%s' does not match required %s format", strValue, formatName)
 	}
 
+	fmt.Printf("✅ [FormatValidator] MATCHED: '%s' matches %s\n", strValue, formatName)
 	return true, ""
 }
 
@@ -174,6 +185,11 @@ func NewPatternValidator() *PatternValidator {
 }
 
 func (v *PatternValidator) Validate(value interface{}, options map[string]interface{}) (bool, string) {
+	// Handle nil values - should pass (use required validator for presence checks)
+	if value == nil {
+		return true, ""
+	}
+
 	strValue := fmt.Sprintf("%v", value)
 	strValue = strings.TrimSpace(strValue)
 
@@ -187,14 +203,18 @@ func (v *PatternValidator) Validate(value interface{}, options map[string]interf
 		return false, "No regex pattern specified"
 	}
 
+	fmt.Printf("🔍 [PatternValidator] Validating value: '%s' (type: %T) against regex: '%s'\n", strValue, value, regex)
+
 	re, err := regexp.Compile(regex)
 	if err != nil {
 		return false, fmt.Sprintf("Invalid regex pattern: %v", err)
 	}
 
 	if !re.MatchString(strValue) {
+		fmt.Printf("❌ [PatternValidator] NO MATCH: '%s' does not match '%s'\n", strValue, regex)
 		return false, fmt.Sprintf("Value '%s' does not match pattern: %s", strValue, regex)
 	}
 
+	fmt.Printf("✅ [PatternValidator] MATCHED: '%s' matches '%s'\n", strValue, regex)
 	return true, ""
 }

@@ -64,16 +64,56 @@ func (e *FieldValidationExecutor) Execute(
 		return inputData, err
 	}
 
+	// Check validation mode - skip validation if mode is no_validation
+	if config.ValidationMode == models.ValidationModeNoValidation {
+		log.Printf("⏭️  Skipping validation (mode: no_validation)")
+		e.PostExecute(ctx, step, nil, time.Since(start))
+		return inputData, nil
+	}
+
 	// Run validations
 	result := e.validateRules(config, inputData)
 
-	// Handle validation errors
+	// Handle validation errors based on mode
 	if !result.Valid {
 		errMsg := e.formatFieldValidationErrors(result.Errors, config.AddFieldNames)
-		err := fmt.Errorf("validation failed: %s", errMsg)
-		e.PostExecute(ctx, step, err, time.Since(start))
-		return inputData, err
+		mode := config.ValidationMode
+		if mode == "" {
+			mode = models.ValidationModeAcceptAndFlag // Default
+		}
+
+		if mode == models.ValidationModeStrictReject {
+			// STRICT MODE: Fail the pipeline, send NACK
+			log.Printf("❌ [Strict Validation] Validation failed - pipeline will stop")
+			err := fmt.Errorf("validation failed: %s", errMsg)
+			inputData["_validation_status"] = "rejected"
+			inputData["_validation_errors"] = result.Errors
+
+			// Publish validation feedback (rejected)
+			e.publishValidationFeedback(ctx, mode, "rejected", result.Errors, time.Since(start))
+
+			e.PostExecute(ctx, step, err, time.Since(start))
+			return inputData, err
+		}
+
+		if mode == models.ValidationModeAcceptAndFlag {
+			// ACCEPT & FLAG MODE: Continue processing with warnings, send ACK
+			log.Printf("⚠️  [Accept & Flag] Validation warnings: %s", errMsg)
+			inputData["_validation_status"] = "warning"
+			inputData["_validation_warnings"] = result.Errors
+			inputData["_requires_review"] = true
+
+			// Publish validation feedback (warnings)
+			e.publishValidationFeedback(ctx, mode, "warning", result.Errors, time.Since(start))
+
+			e.PostExecute(ctx, step, nil, time.Since(start))
+			return inputData, nil
+		}
 	}
+
+	// Validation passed
+	inputData["_validation_status"] = "passed"
+	e.publishValidationFeedback(ctx, config.ValidationMode, "passed", nil, time.Since(start))
 
 	e.PostExecute(ctx, step, nil, time.Since(start))
 	return inputData, nil
@@ -277,4 +317,42 @@ func (e *FieldValidationExecutor) formatFieldValidationErrors(errors []models.Fi
 // GetStepType returns the step type identifier
 func (e *FieldValidationExecutor) GetStepType() string {
 	return "pre.validation"
+}
+
+// publishValidationFeedback publishes validation results to the ProcessingEngine
+func (e *FieldValidationExecutor) publishValidationFeedback(
+	ctx context.Context,
+	mode models.ValidationACKMode,
+	status string,
+	errors []models.FieldValidationError,
+	processingTime time.Duration,
+) {
+	pe, ok := ctx.Value("processing_engine").(interface {
+		PublishValidationFeedback(*models.ValidationFeedback)
+	})
+	if !ok || pe == nil {
+		log.Printf("⚠️  ProcessingEngine not found in context - cannot send validation feedback")
+		return
+	}
+
+	messageID, _ := ctx.Value("message_id").(string)
+	interfaceID, _ := ctx.Value("interface_id").(string)
+
+	if messageID == "" || interfaceID == "" {
+		log.Printf("⚠️  Missing messageID or interfaceID in context")
+		return
+	}
+
+	feedback := models.NewValidationFeedback(
+		messageID,
+		interfaceID,
+		mode,
+		status,
+		errors,
+		processingTime.Milliseconds(),
+		"tcp_mllp_inbound",
+	)
+
+	log.Printf("📤 Publishing validation feedback: %s (status: %s)", messageID, status)
+	pe.PublishValidationFeedback(feedback)
 }

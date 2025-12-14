@@ -33,6 +33,10 @@ type ProcessingEngine struct {
 	errorService         *services.ErrorCaptureService // Error capture service (V23)
 	errorHandler         *ErrorHandler                  // Error handler with panic recovery (V23)
 	transformationService *services.TransformationPipelineService // Pipeline-based transformation (MVC + OOB)
+
+	// Validation feedback system (universal for all connectors)
+	validationConnectors  map[string]ValidationAwareConnector // interfaceID -> connector
+	validationMutex       sync.RWMutex
 }
 
 // InterfaceStatus tracks the status of an interface
@@ -68,8 +72,9 @@ func NewProcessingEngine(db *sql.DB) *ProcessingEngine {
 			LastActivity:          time.Now(),
 			AverageProcessingTime: "0ms",
 		},
-		running:          false,
-		connectorFactory: NewConnectorFactory(), // OOB: Initialize connector factory
+		running:             false,
+		connectorFactory:    NewConnectorFactory(), // OOB: Initialize connector factory
+		validationConnectors: make(map[string]ValidationAwareConnector),
 	}
 
 	fmt.Printf("✅ Connector Factory initialized (32 connectors registered)\n")
@@ -248,6 +253,11 @@ func (pe *ProcessingEngine) ActivateInterface(interfaceID string) error {
 			fmt.Printf("❌ Connector error for interface %s: %v\n", interfaceID, err)
 		}
 	}()
+
+	// Register connector for validation feedback (if supported)
+	if validationConnector, ok := connector.(ValidationAwareConnector); ok {
+		pe.RegisterValidationConnector(interfaceID, validationConnector)
+	}
 
 	// Start message processor
 	go pe.processMessages(interfaceID, messageChan)
@@ -438,4 +448,39 @@ func (pe *ProcessingEngine) TransformInterfaceMessages(
 ) ([]*services.TransformationResult, error) {
 	// TODO: Implement when TransformationService is ready
 	return nil, fmt.Errorf("transformation service not yet implemented")
+}
+// ==================== VALIDATION FEEDBACK METHODS ====================
+
+// RegisterValidationConnector registers a connector for validation feedback
+func (pe *ProcessingEngine) RegisterValidationConnector(interfaceID string, connector ValidationAwareConnector) {
+	if connector == nil || !connector.SupportsValidationFeedback() {
+		return
+	}
+
+	pe.validationMutex.Lock()
+	defer pe.validationMutex.Unlock()
+
+	pe.validationConnectors[interfaceID] = connector
+	log.Printf("📋 Registered validation connector for interface %s", interfaceID)
+}
+
+// PublishValidationFeedback sends validation results to the appropriate connector
+func (pe *ProcessingEngine) PublishValidationFeedback(feedback *models.ValidationFeedback) {
+	pe.validationMutex.RLock()
+	connector, exists := pe.validationConnectors[feedback.InterfaceID]
+	pe.validationMutex.RUnlock()
+
+	if !exists {
+		log.Printf("⚠️  No validation connector found for interface %s", feedback.InterfaceID)
+		return
+	}
+
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		if err := connector.SendValidationResponse(ctx, feedback); err != nil {
+			log.Printf("❌ Failed to send validation response for %s: %v", feedback.MessageID, err)
+		}
+	}()
 }

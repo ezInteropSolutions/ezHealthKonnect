@@ -63,7 +63,11 @@
       "Bash(docker-compose start:*)",
       "Bash(bash c:/tmp/apply_all_validation_fixes.sh)",
       "Bash(git add:*)",
-      "Bash(git commit:*)"
+      "Bash(git commit:*)",
+      "Bash(file:*)",
+      "Bash(timeout 180 docker-compose build:*)",
+      "Bash(timeout 200 docker-compose build:*)",
+      "Bash(cut:*)"
     ],
     "deny": [],
     "ask": []

@@ -64,6 +64,21 @@ type OutboundConnector interface {
 	SupportsBatch() bool
 }
 
+// ValidationAwareConnector interface for connectors that can send validation feedback
+// This allows connectors to respond appropriately to validation results:
+// - TCP/MLLP: Send ACK (AA) or NACK (AE)
+// - HTTP REST: Send HTTP 200/202/400 status codes
+// - File: Write .error files
+// - Database: Update validation_status column
+// - Kafka/RabbitMQ: Publish to DLQ/error topic
+type ValidationAwareConnector interface {
+	// SendValidationResponse sends appropriate response based on validation result
+	SendValidationResponse(ctx context.Context, feedback *models.ValidationFeedback) error
+
+	// SupportsValidationFeedback indicates if connector can send validation responses
+	SupportsValidationFeedback() bool
+}
+
 // ConnectorMetadata contains static information about a connector
 type ConnectorMetadata struct {
 	TypeName           string            `json:"type_name"`

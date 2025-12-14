@@ -86,26 +86,25 @@ func (c *TransformationTestController) TestPipeline(ctx *gin.Context) {
 }
 
 func (c *TransformationTestController) parseTestMessage(message string) map[string]interface{} {
-	// Use real HL7 parser with schema
+	// TODO: Auto-detect message format (HL7, FHIR, CDA, EDI, CSV, etc.)
+	// For now, assume HL7 v2.x format
+
 	log.Printf("🔍 [Test] Parsing HL7 message with real parser...")
 	enhancedResult := hl7.ParseWithRealSchema(message)
 
-	// Convert enhancedSegments to JSON-serializable format
-	segmentsJSON, err := json.Marshal(enhancedResult.EnhancedSegments)
-	if err != nil {
-		log.Printf("⚠️ [Test] Failed to marshal segments: %v", err)
-	}
-
-	var enhancedSegmentsMap map[string]interface{}
-	if err := json.Unmarshal(segmentsJSON, &enhancedSegmentsMap); err != nil {
-		log.Printf("⚠️ [Test] Failed to unmarshal segments: %v", err)
-		enhancedSegmentsMap = make(map[string]interface{})
-	}
-
-	// Convert to map for processing
+	// CRITICAL: PRESERVE typed structures - DO NOT marshal/unmarshal to JSON
+	// Converting to JSON loses Go type information (map[string]hl7.EnhancedSegment becomes map[string]interface{})
+	// This breaks field lookups in validators and other executors
+	//
+	// This applies to ALL message formats:
+	// - HL7 v2.x: Keep enhancedSegments as map[string]hl7.EnhancedSegment
+	// - FHIR: Keep resource structures as typed FHIR models
+	// - CDA: Keep document structures as typed CDA models
+	// - EDI: Keep segment structures as typed EDI models
+	// - CSV: Keep parsed structures with appropriate types
 	result := map[string]interface{}{
 		"raw":              message,
-		"enhancedSegments": enhancedSegmentsMap,
+		"enhancedSegments": enhancedResult.EnhancedSegments, // Keep typed structure
 		"messageType":      enhancedResult.MessageType,
 		"version":          enhancedResult.Version,
 		"dictionaryUsed":   enhancedResult.DictionaryUsed,
