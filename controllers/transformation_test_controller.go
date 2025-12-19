@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 )
@@ -86,11 +87,21 @@ func (c *TransformationTestController) TestPipeline(ctx *gin.Context) {
 		}
 	}
 
+	// Clean parsed message - remove internal metadata fields that were added by steps
+	cleanedMessage := make(map[string]interface{})
+	for k, v := range parsedJSON {
+		// Skip internal/temporary fields added by executors
+		if strings.HasPrefix(k, "_") {
+			continue
+		}
+		cleanedMessage[k] = v
+	}
+
 	response := gin.H{
 		"success":           execErr == nil,
 		"error":             formatError(execErr),
 		"execution_results": results,
-		"parsed_message":    parsedJSON,
+		"parsed_message":    cleanedMessage, // Cleaned message without internal metadata
 		"steps_count":       len(steps),
 	}
 
@@ -228,13 +239,64 @@ func (c *TransformationTestController) executeSteps(steps []*models.Transformati
 		// Don't include the entire message with enhancedSegments in each step output
 		stepOutput := map[string]interface{}{}
 
-		// Copy only non-message fields (metadata only)
-		for k, v := range output {
-			// Skip full message structure fields
-			if k == "enhancedSegments" || k == "raw" || k == "segmentOrder" {
-				continue
+		// Extract step-specific output based on step type
+		switch step.StepType {
+		case "pre.validation", "pre.validation.field":
+			// Validation steps: Extract validation results only
+			if validationStatus, ok := output["_validation_status"].(string); ok {
+				stepOutput["validation_status"] = validationStatus
 			}
-			stepOutput[k] = v
+			if validationErrors, ok := output["_validation_errors"].([]models.FieldValidationError); ok {
+				stepOutput["validation_errors"] = validationErrors
+				stepOutput["error_count"] = len(validationErrors)
+			}
+			if validationWarnings, ok := output["_validation_warnings"].([]models.FieldValidationError); ok {
+				stepOutput["validation_warnings"] = validationWarnings
+				stepOutput["warning_count"] = len(validationWarnings)
+			}
+			// Extract field-level results if available
+			if fieldResults, ok := output["_field_validation_results"].([]map[string]interface{}); ok {
+				stepOutput["field_results"] = fieldResults
+			}
+
+		case "pre.enrichment.api":
+			// API enrichment: Extract API call metadata only
+			if endpoint, ok := step.Config["endpoint"].(string); ok {
+				stepOutput["api_endpoint"] = endpoint
+			}
+			if method, ok := step.Config["method"].(string); ok {
+				stepOutput["http_method"] = method
+			}
+			if targetPath, ok := step.Config["targetPath"].(string); ok {
+				stepOutput["enriched_path"] = targetPath
+			}
+			stepOutput["message"] = "API enrichment completed"
+
+		case "pre.enrichment.metadata":
+			// Metadata enrichment: Show what metadata was added
+			addedFields := []string{}
+			for k := range output {
+				// Find fields that were added (not in original message structure)
+				if !strings.HasPrefix(k, "_") && k != "enhancedSegments" && k != "raw" &&
+				   k != "messageType" && k != "version" && k != "dictionaryUsed" &&
+				   k != "schemaLoaded" && k != "segmentOrder" {
+					addedFields = append(addedFields, k)
+				}
+			}
+			stepOutput["metadata_added"] = addedFields
+			stepOutput["message"] = fmt.Sprintf("Added %d metadata fields", len(addedFields))
+
+		default:
+			// For other steps, copy non-message fields
+			for k, v := range output {
+				// Skip full message structure fields and internal metadata
+				if k == "enhancedSegments" || k == "raw" || k == "segmentOrder" ||
+				   k == "messageType" || k == "version" || k == "dictionaryUsed" ||
+				   k == "schemaLoaded" || strings.HasPrefix(k, "_") {
+					continue
+				}
+				stepOutput[k] = v
+			}
 		}
 
 		results = append(results, map[string]interface{}{

@@ -67,6 +67,37 @@ func (e *FieldValidationExecutor) Execute(
 	// Run validations
 	result := e.validateRules(config, inputData)
 
+	// Build field-level validation output
+	fieldResults := make([]map[string]interface{}, 0)
+	for _, rule := range config.Rules {
+		fieldResult := map[string]interface{}{
+			"field":          rule.Field,
+			"validation_type": rule.Type,
+			"error_message":   rule.ErrorMessage,
+		}
+
+		// Check if this field had errors
+		fieldError := ""
+		for _, err := range result.Errors {
+			if err.Field == rule.Field {
+				fieldError = err.Message
+				break
+			}
+		}
+
+		if fieldError != "" {
+			fieldResult["valid"] = false
+			fieldResult["error"] = fieldError
+		} else {
+			fieldResult["valid"] = true
+		}
+
+		fieldResults = append(fieldResults, fieldResult)
+	}
+
+	// Store field-level results for step output tracking
+	inputData["_field_validation_results"] = fieldResults
+
 	// Handle validation errors based on standard step controls
 	if !result.Valid {
 		errMsg := e.formatFieldValidationErrors(result.Errors, config.AddFieldNames)
@@ -79,8 +110,9 @@ func (e *FieldValidationExecutor) Execute(
 			log.Printf("❌ [Strict Mode] Validation failed - pipeline will stop (Required=%v, OnErrorStrategy=%s)",
 				step.Required, step.OnErrorStrategy)
 			err := fmt.Errorf("validation failed: %s", errMsg)
+
+			// Add metadata ONLY for ACK/NACK decision (internal use)
 			inputData["_validation_status"] = "rejected"
-			inputData["_validation_errors"] = result.Errors
 			inputData["_ack_response"] = "NACK"
 
 			// Publish validation feedback (rejected)
@@ -92,9 +124,9 @@ func (e *FieldValidationExecutor) Execute(
 			// ACCEPT & FLAG MODE: Continue processing with warnings, send ACK
 			log.Printf("⚠️  [Accept & Flag] Validation warnings: %s (Required=%v, OnErrorStrategy=%s)",
 				errMsg, step.Required, step.OnErrorStrategy)
+
+			// Add metadata ONLY for ACK/NACK decision (internal use)
 			inputData["_validation_status"] = "warning"
-			inputData["_validation_warnings"] = result.Errors
-			inputData["_requires_review"] = true
 			inputData["_ack_response"] = "ACK"
 
 			// Publish validation feedback (warnings)
@@ -106,6 +138,7 @@ func (e *FieldValidationExecutor) Execute(
 	}
 
 	// Validation passed
+	// Add metadata ONLY for ACK/NACK decision (internal use)
 	inputData["_validation_status"] = "passed"
 	inputData["_ack_response"] = "ACK"
 	e.publishValidationFeedback(ctx, "passed", nil, time.Since(start))
