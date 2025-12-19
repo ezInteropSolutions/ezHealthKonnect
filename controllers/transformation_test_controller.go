@@ -224,13 +224,27 @@ func (c *TransformationTestController) executeSteps(steps []*models.Transformati
 			}
 		}
 
+		// Extract only step-specific metadata for the result
+		// Don't include the entire message with enhancedSegments in each step output
+		stepOutput := map[string]interface{}{}
+
+		// Copy only non-message fields (metadata only)
+		for k, v := range output {
+			// Skip full message structure fields
+			if k == "enhancedSegments" || k == "raw" || k == "segmentOrder" {
+				continue
+			}
+			stepOutput[k] = v
+		}
+
 		results = append(results, map[string]interface{}{
 			"step_name":  step.StepName,
 			"step_type":  step.StepType,
 			"success":    true,
-			"output":     output,
+			"output":     stepOutput, // Only step-specific metadata
 		})
 
+		// Update currentData for next step (full message with modifications)
 		currentData = output
 	}
 

@@ -212,7 +212,7 @@ func (c *PipelineTestController) executePipeline(pipeline map[string]interface{}
 
 				log.Printf("    🔹 Step %d: %s (%s)", stepIdx+1, stepName, stepType)
 
-				// Execute step
+				// Execute step - it receives currentData but returns only step-specific output
 				stepResult := c.executeStep(step, currentData)
 				response.ExecutionResults = append(response.ExecutionResults, stepResult)
 
@@ -224,22 +224,18 @@ func (c *PipelineTestController) executePipeline(pipeline map[string]interface{}
 					// For now, continue execution even on error (soft fail)
 					// In production, check step config for fail_on_error flag
 				} else {
-					// Update current data with step output
-					if stepResult.Output != nil {
-						for k, v := range stepResult.Output {
-							currentData[k] = v
-						}
+					// Steps may modify currentData directly (e.g., add parsed_hl7, fhir_bundle)
+					// But stepResult.Output should ONLY contain step-specific metadata, not the entire message
 
-						// Extract validation warnings if present
-						if validationStatus, ok := stepResult.Output["_validation_status"].(string); ok && validationStatus == "warning" {
-							if warnings, ok := stepResult.Output["_validation_warnings"].([]interface{}); ok {
-								for _, warning := range warnings {
-									if warningMap, ok := warning.(map[string]interface{}); ok {
-										field := warningMap["field"]
-										errorMsg := warningMap["error"]
-										response.Warnings = append(response.Warnings,
-											fmt.Sprintf("[%s] %s: %s", stepName, field, errorMsg))
-									}
+					// Extract validation warnings if present
+					if validationStatus, ok := stepResult.Output["_validation_status"].(string); ok && validationStatus == "warning" {
+						if warnings, ok := stepResult.Output["_validation_warnings"].([]interface{}); ok {
+							for _, warning := range warnings {
+								if warningMap, ok := warning.(map[string]interface{}); ok {
+									field := warningMap["field"]
+									errorMsg := warningMap["error"]
+									response.Warnings = append(response.Warnings,
+										fmt.Sprintf("[%s] %s: %s", stepName, field, errorMsg))
 								}
 							}
 						}
@@ -351,40 +347,44 @@ func (c *PipelineTestController) executeHL7Validation(inputData map[string]inter
 
 	// Execute REAL validation using ExecutorRegistry
 	ctx := context.Background()
-	output, err := c.pipelineService.GetExecutorRegistry().ExecuteStep(ctx, *step, parsedData)
+	_, err := c.pipelineService.GetExecutorRegistry().ExecuteStep(ctx, *step, parsedData)
 
+	// Return ONLY validation-specific metadata - NOT the entire parsed message
 	if err != nil {
 		// Validation failed with Required=true or OnErrorStrategy=fail
 		result.Success = false
 		result.Error = err.Error()
-		result.Output["_validation_status"] = "rejected"
-		if errors, ok := output["_validation_errors"]; ok {
-			result.Output["_validation_errors"] = errors
-		}
+		result.Output["validation_status"] = "rejected"
+		result.Output["message"] = fmt.Sprintf("Validation failed: %s", err.Error())
 	} else {
-		// Check validation status in output
-		validationStatus, _ := output["_validation_status"].(string)
+		// Check if validation added warnings to parsedData
+		validationStatus, _ := parsedData["_validation_status"].(string)
 
 		if validationStatus == "warning" {
 			// Validation found issues but continuing
-			result.Success = true // Step succeeded (didn't fail pipeline)
-			result.Output["_validation_status"] = "warning"
-			if warnings, ok := output["_validation_warnings"]; ok {
-				result.Output["_validation_warnings"] = warnings
-				result.Output["message"] = "Validation passed with warnings - see _validation_warnings"
+			result.Success = true
+			result.Output["validation_status"] = "warning"
+			if warnings, ok := parsedData["_validation_warnings"]; ok {
+				result.Output["validation_warnings"] = warnings
+				result.Output["message"] = "Validation passed with warnings"
 			}
 		} else {
 			// Validation passed completely
 			result.Success = true
-			result.Output["_validation_status"] = "passed"
-			result.Output["message"] = "Validation passed - all rules satisfied"
+			result.Output["validation_status"] = "passed"
+			result.Output["message"] = "All validation rules satisfied"
 		}
 	}
 
-	// Always include basic info
+	// Include ONLY basic metadata - NOT the entire parsed message
 	result.Output["message_type"] = parsed.MessageType
 	result.Output["version"] = parsed.Version
 	result.Output["segments_count"] = len(parsed.EnhancedSegments)
+
+	// Validation rules applied
+	if rulesConfig, ok := config["rules"].([]interface{}); ok {
+		result.Output["rules_applied"] = len(rulesConfig)
+	}
 
 	result.ExecutionMs = time.Since(startTime).Milliseconds()
 	return result
