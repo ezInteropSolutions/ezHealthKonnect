@@ -86,6 +86,60 @@ func (b *BaseExecutor) ValidateConfig(step *models.TransformationStep, requiredF
 }
 
 // ===============================================================
+// STEP OUTPUT MANAGEMENT
+// ===============================================================
+
+// SetStepOutput stores step-specific output data in the execution context
+func (b *BaseExecutor) SetStepOutput(
+	execContext *models.PipelineExecutionContext,
+	step *models.TransformationStep,
+	outputData map[string]interface{},
+) {
+	namespace := models.GenerateStepNamespace(step.StepName, step.ID, step.StepAlias)
+
+	alias := ""
+	if step.StepAlias != nil {
+		alias = *step.StepAlias
+	} else {
+		alias = models.GenerateDefaultAlias(step.StepName)
+	}
+
+	execContext.StepOutputs[namespace] = models.StepOutput{
+		StepID:     step.ID,
+		StepName:   step.StepName,
+		StepAlias:  alias,
+		StepType:   step.StepType,
+		Namespace:  namespace,
+		Sequence:   step.Sequence,
+		OutputData: outputData,
+		Success:    true, // Will be updated by pipeline service if error occurs
+	}
+}
+
+// GetStepOutput retrieves step output by namespace
+func (b *BaseExecutor) GetStepOutput(
+	execContext *models.PipelineExecutionContext,
+	namespace string,
+) (map[string]interface{}, bool) {
+	if output, exists := execContext.StepOutputs[namespace]; exists {
+		return output.OutputData, true
+	}
+	return nil, false
+}
+
+// GetStepOutputByAlias retrieves step output by user-friendly alias
+func (b *BaseExecutor) GetStepOutputByAlias(
+	execContext *models.PipelineExecutionContext,
+	alias string,
+) (map[string]interface{}, error) {
+	output, err := execContext.GetStepOutputByAlias(alias)
+	if err != nil {
+		return nil, err
+	}
+	return output.OutputData, nil
+}
+
+// ===============================================================
 // HELPER FUNCTIONS
 // ===============================================================
 
@@ -190,18 +244,6 @@ func GetNestedValue(data map[string]interface{}, path string) interface{} {
 	}
 
 	return current
-}
-
-// SetNestedValue sets a value in a nested map using dot notation
-func SetNestedValue(data map[string]interface{}, path string, value interface{}) error {
-	if path == "" {
-		return fmt.Errorf("empty path")
-	}
-
-	// Simple implementation - just set at top level for now
-	// Can be enhanced to handle nested paths like "patient.age"
-	data[path] = value
-	return nil
 }
 
 // EnsureMapExists ensures a nested map path exists

@@ -8,11 +8,18 @@ ADD COLUMN IF NOT EXISTS interface_id UUID,
 ADD COLUMN IF NOT EXISTS source VARCHAR(50) DEFAULT 'system-library',
 ADD COLUMN IF NOT EXISTS priority INTEGER DEFAULT 50;
 
--- Add foreign key constraint
-ALTER TABLE sample_parsed_messages
-ADD CONSTRAINT fk_sample_interface
-FOREIGN KEY (interface_id) REFERENCES interfaces(id)
-ON DELETE CASCADE;
+-- Add foreign key constraint (if not exists)
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'fk_sample_interface'
+    ) THEN
+        ALTER TABLE sample_parsed_messages
+        ADD CONSTRAINT fk_sample_interface
+        FOREIGN KEY (interface_id) REFERENCES interfaces(id)
+        ON DELETE CASCADE;
+    END IF;
+END$$;
 
 -- Add indexes for efficient lookups
 CREATE INDEX IF NOT EXISTS idx_samples_scope

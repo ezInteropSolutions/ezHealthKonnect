@@ -330,10 +330,11 @@ class PipelineBuilder {
      * Render test results with proper FHIR resource display
      */
     renderTestResults(result) {
-        // Extract data from correct structure (Go backend returns execution_results, final_output, errors)
+        // Extract data from correct structure (Go backend returns execution_results, final_output, errors, warnings)
         const stepsExecuted = result.execution_results?.length || 0;
         const finalOutput = result.final_output || {};
         const validationErrors = result.errors || [];
+        const validationWarnings = result.warnings || [];
 
         // Find the mapping step to get resources and validation errors
         let fhirBundle = null;
@@ -370,6 +371,11 @@ class PipelineBuilder {
                 ${result.error ? `<p class="error-message"><strong>Error:</strong> ${this.escapeHtml(result.error)}</p>` : ''}
             </div>
         `;
+
+        // Show validation warnings prominently if any
+        if (validationWarnings.length > 0) {
+            html += this.renderValidationWarnings(validationWarnings);
+        }
 
         // Show validation errors prominently if any
         const allErrors = [...validationErrors, ...mappingValidationErrors];
@@ -503,25 +509,61 @@ class PipelineBuilder {
     }
 
     /**
-     * Render validation errors
+     * Render validation warnings (pipeline continues, message accepted)
+     */
+    renderValidationWarnings(warnings) {
+        if (!warnings || warnings.length === 0) return '';
+
+        let html = `
+            <div class="validation-warnings-section" style="background: #fffbeb; border: 1px solid #fbbf24; border-radius: 0.5rem; padding: 1rem; margin: 1rem 0;">
+                <h5 style="color: #b45309; margin: 0 0 0.75rem 0; display: flex; align-items: center; gap: 0.5rem;">
+                    <i class="fas fa-exclamation-triangle"></i> Validation Warnings (${warnings.length})
+                    <span style="font-size: 0.75rem; font-weight: normal; color: #92400e; background: #fef3c7; padding: 0.25rem 0.5rem; border-radius: 0.25rem;">Pipeline Continued (ACK Sent)</span>
+                </h5>
+                <ul style="margin: 0; padding-left: 1.5rem; color: #78350f;">
+        `;
+
+        warnings.forEach(warning => {
+            html += `<li style="margin-bottom: 0.5rem;">${this.escapeHtml(warning)}</li>`;
+        });
+
+        html += `
+                </ul>
+                <p style="margin: 0.75rem 0 0 0; font-size: 0.875rem; color: #92400e;">
+                    <i class="fas fa-info-circle"></i> These warnings indicate data quality issues but did not stop processing.
+                    The message was accepted (ACK) and the pipeline continued successfully.
+                </p>
+            </div>
+        `;
+
+        return html;
+    }
+
+    /**
+     * Render validation errors (pipeline stopped, message rejected)
      */
     renderValidationErrors(errors) {
         if (!errors || errors.length === 0) return '';
 
         let html = `
-            <div class="validation-errors-section">
-                <h5>
-                    <i class="fas fa-exclamation-triangle"></i> Validation Warnings (${errors.length})
+            <div class="validation-errors-section" style="background: #fef2f2; border: 1px solid #ef4444; border-radius: 0.5rem; padding: 1rem; margin: 1rem 0;">
+                <h5 style="color: #991b1b; margin: 0 0 0.75rem 0; display: flex; align-items: center; gap: 0.5rem;">
+                    <i class="fas fa-times-circle"></i> Validation Errors (${errors.length})
+                    <span style="font-size: 0.75rem; font-weight: normal; color: #7f1d1d; background: #fee2e2; padding: 0.25rem 0.5rem; border-radius: 0.25rem;">Pipeline Stopped (NACK Sent)</span>
                 </h5>
-                <ul>
+                <ul style="margin: 0; padding-left: 1.5rem; color: #7f1d1d;">
         `;
 
         errors.forEach(error => {
-            html += `<li>${this.escapeHtml(error)}</li>`;
+            html += `<li style="margin-bottom: 0.5rem;">${this.escapeHtml(error)}</li>`;
         });
 
         html += `
                 </ul>
+                <p style="margin: 0.75rem 0 0 0; font-size: 0.875rem; color: #991b1b;">
+                    <i class="fas fa-exclamation-circle"></i> These critical validation errors stopped pipeline execution.
+                    The message was rejected (NACK) and will not be processed further.
+                </p>
             </div>
         `;
 

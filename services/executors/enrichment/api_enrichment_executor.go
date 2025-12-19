@@ -1,16 +1,13 @@
 package enrichment
 
 import (
-	"bytes"
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"ezhealthkonnect/models"
 	"ezhealthkonnect/services/executors"
+	httpservice "ezhealthkonnect/services/http"
 	"fmt"
-	"io"
 	"log"
-	"net/http"
 	"strings"
 	"time"
 )
@@ -20,10 +17,11 @@ import (
 // ===============================================================
 // Queries external REST APIs to enrich message data
 // Implements Strategy Pattern - concrete strategy for API enrichment
+// Uses shared HTTPClientService for OOP code reuse
 
 type APIEnrichmentExecutor struct {
 	*executors.BaseExecutor
-	httpClient *http.Client
+	httpService *httpservice.HTTPClientService
 }
 
 // NewAPIEnrichmentExecutor creates a new API enrichment executor
@@ -31,7 +29,7 @@ func NewAPIEnrichmentExecutor() *APIEnrichmentExecutor {
 	metadata := models.ExecutorMetadata{
 		Name:        "API Enrichment",
 		Description: "Enriches messages by querying external REST APIs (EMPI, EHR, LIMS, etc.)",
-		Version:     "1.0.0",
+		Version:     "2.0.0", // Upgraded to use shared HTTPClientService
 		Author:      "ezHealthKonnect",
 		Category:    "enrichment",
 	}
@@ -40,13 +38,13 @@ func NewAPIEnrichmentExecutor() *APIEnrichmentExecutor {
 
 	return &APIEnrichmentExecutor{
 		BaseExecutor: base,
-		httpClient: &http.Client{
-			Timeout: 30 * time.Second, // Global timeout, overridden per request
-		},
+		httpService:  httpservice.NewHTTPClientService(30 * time.Second),
 	}
 }
 
-// Execute performs API enrichment
+// Execute performs API enrichment using shared HTTPClientService
+// This method maintains backward compatibility but doesn't track step outputs
+// For full step output tracking, use ExecuteWithContext from pipeline service
 func (e *APIEnrichmentExecutor) Execute(
 	ctx context.Context,
 	step *models.TransformationStep,
@@ -68,15 +66,38 @@ func (e *APIEnrichmentExecutor) Execute(
 
 	log.Printf("🌐 [API Enrichment] Calling API: %s %s", config.Method, config.Endpoint)
 
-	// Build request
-	req, err := e.buildRequest(ctx, config, inputData)
-	if err != nil {
-		e.PostExecute(ctx, step, err, time.Since(start))
-		return inputData, err
+	// Build URL with field mappings
+	url := e.buildURL(config.Endpoint, config.FieldMappings, inputData)
+
+	// Build request body with field mappings
+	var requestBody interface{}
+	if config.RequestBody != nil {
+		requestBody = e.replaceFieldMappings(config.RequestBody, config.FieldMappings, inputData)
 	}
 
-	// Execute API call with retries
-	responseData, err := e.executeWithRetry(ctx, req, config)
+	// Build query params with field mappings
+	queryParams := e.buildQueryParams(config.QueryParams, config.FieldMappings, inputData)
+
+	// Create request configuration
+	requestConfig := &httpservice.RequestConfig{
+		Method:      config.Method,
+		URL:         url,
+		Headers:     config.Headers,
+		QueryParams: queryParams,
+		Body:        requestBody,
+		Timeout:     time.Duration(config.TimeoutMs) * time.Millisecond,
+		RetryCount:  config.RetryCount,
+		RetryDelay:  time.Duration(config.RetryDelayMs) * time.Millisecond,
+	}
+
+	// Create authentication configuration
+	authConfig := e.buildAuthConfig(config)
+
+	// Execute API call using shared service
+	apiStart := time.Now()
+	resp, err := e.httpService.Execute(ctx, requestConfig, authConfig)
+	apiDuration := time.Since(apiStart).Milliseconds()
+
 	if err != nil {
 		if config.FailOnError {
 			e.PostExecute(ctx, step, err, time.Since(start))
@@ -86,26 +107,42 @@ func (e *APIEnrichmentExecutor) Execute(
 		// Use default value if configured
 		if config.DefaultValue != nil {
 			log.Printf("⚠️  API call failed, using default value: %v", config.DefaultValue)
-			responseData = config.DefaultValue
+			executors.SetNestedValue(inputData, e.getTargetPath(config), config.DefaultValue)
 		} else {
 			log.Printf("⚠️  API call failed, continuing without enrichment: %v", err)
-			e.PostExecute(ctx, step, nil, time.Since(start))
-			return inputData, nil
 		}
+
+		e.PostExecute(ctx, step, nil, time.Since(start))
+		return inputData, nil
 	}
 
 	// Store response in target path
-	targetPath := config.TargetPath
-	if targetPath == "" {
-		targetPath = "enriched.api"
+	targetPath := e.getTargetPath(config)
+	executors.SetNestedValue(inputData, targetPath, resp.JSON)
+
+	// Count enriched fields if response is a map
+	enrichedFields := 0
+	if jsonMap, ok := resp.JSON.(map[string]interface{}); ok {
+		enrichedFields = e.countFields(jsonMap)
 	}
 
-	executors.SetNestedValue(inputData, targetPath, responseData)
-
-	log.Printf("✅ [API Enrichment] Response stored at: %s", targetPath)
+	log.Printf("✅ [API Enrichment] Response stored at: %s (%d fields, %dms)",
+		targetPath, enrichedFields, apiDuration)
 	e.PostExecute(ctx, step, nil, time.Since(start))
 
 	return inputData, nil
+}
+
+// countFields recursively counts the number of fields in a map
+func (e *APIEnrichmentExecutor) countFields(data map[string]interface{}) int {
+	count := 0
+	for _, value := range data {
+		count++
+		if nested, ok := value.(map[string]interface{}); ok {
+			count += e.countFields(nested)
+		}
+	}
+	return count
 }
 
 // Validate checks if the step configuration is valid
@@ -150,90 +187,79 @@ func (e *APIEnrichmentExecutor) parseConfig(step *models.TransformationStep) (*m
 	return &config, nil
 }
 
-// buildRequest constructs the HTTP request from configuration
-func (e *APIEnrichmentExecutor) buildRequest(
-	ctx context.Context,
-	config *models.APIEnrichmentConfig,
+// buildURL replaces field mappings in URL template
+func (e *APIEnrichmentExecutor) buildURL(
+	urlTemplate string,
+	fieldMappings map[string]string,
 	inputData map[string]interface{},
-) (*http.Request, error) {
-
-	// Replace field mappings in URL
-	url := config.Endpoint
-	for key, fieldPath := range config.FieldMappings {
+) string {
+	url := urlTemplate
+	for key, fieldPath := range fieldMappings {
 		value := executors.GetNestedValue(inputData, fieldPath)
 		if value != nil {
 			url = strings.ReplaceAll(url, "{"+key+"}", fmt.Sprintf("%v", value))
 		}
 	}
-
-	// Create request body if configured
-	var bodyReader io.Reader
-	if config.Method == "POST" || config.Method == "PUT" || config.Method == "PATCH" {
-		if config.RequestBody != nil {
-			// Replace field mappings in request body
-			body := e.replaceFieldMappings(config.RequestBody, config.FieldMappings, inputData)
-			bodyBytes, err := json.Marshal(body)
-			if err != nil {
-				return nil, fmt.Errorf("failed to marshal request body: %w", err)
-			}
-			bodyReader = bytes.NewReader(bodyBytes)
-		}
-	}
-
-	// Create HTTP request
-	req, err := http.NewRequestWithContext(ctx, config.Method, url, bodyReader)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
-	}
-
-	// Add headers
-	for key, value := range config.Headers {
-		req.Header.Set(key, value)
-	}
-
-	// Add query parameters
-	if len(config.QueryParams) > 0 {
-		q := req.URL.Query()
-		for key, value := range config.QueryParams {
-			// Replace field mappings in query params
-			if fieldPath, exists := config.FieldMappings[key]; exists {
-				fieldValue := executors.GetNestedValue(inputData, fieldPath)
-				if fieldValue != nil {
-					value = fmt.Sprintf("%v", fieldValue)
-				}
-			}
-			q.Add(key, value)
-		}
-		req.URL.RawQuery = q.Encode()
-	}
-
-	// Add authentication
-	e.addAuthentication(req, config)
-
-	return req, nil
+	return url
 }
 
-// addAuthentication adds authentication headers to the request
-func (e *APIEnrichmentExecutor) addAuthentication(req *http.Request, config *models.APIEnrichmentConfig) {
+// buildQueryParams creates query parameters with field mapping replacements
+func (e *APIEnrichmentExecutor) buildQueryParams(
+	queryParams map[string]string,
+	fieldMappings map[string]string,
+	inputData map[string]interface{},
+) map[string]string {
+	if len(queryParams) == 0 {
+		return nil
+	}
+
+	result := make(map[string]string)
+	for key, value := range queryParams {
+		// Check if this query param should be replaced with a field value
+		if fieldPath, exists := fieldMappings[key]; exists {
+			fieldValue := executors.GetNestedValue(inputData, fieldPath)
+			if fieldValue != nil {
+				result[key] = fmt.Sprintf("%v", fieldValue)
+				continue
+			}
+		}
+		result[key] = value
+	}
+	return result
+}
+
+// buildAuthConfig creates authentication configuration from API enrichment config
+func (e *APIEnrichmentExecutor) buildAuthConfig(config *models.APIEnrichmentConfig) *httpservice.AuthConfig {
+	if config.AuthType == "" || config.AuthType == "none" {
+		return nil
+	}
+
+	authConfig := &httpservice.AuthConfig{}
+
 	switch config.AuthType {
 	case "basic":
-		if config.Username != "" && config.Password != "" {
-			auth := config.Username + ":" + config.Password
-			encoded := base64.StdEncoding.EncodeToString([]byte(auth))
-			req.Header.Set("Authorization", "Basic "+encoded)
-			log.Printf("   🔐 Added Basic auth for user: %s", config.Username)
-		}
+		authConfig.Type = httpservice.AuthTypeBasic
+		authConfig.Username = config.Username
+		authConfig.Password = config.Password
+
 	case "bearer":
-		if config.BearerToken != "" {
-			req.Header.Set("Authorization", "Bearer "+config.BearerToken)
-			log.Printf("   🔐 Added Bearer token authentication")
-		}
+		authConfig.Type = httpservice.AuthTypeBearer
+		authConfig.BearerToken = config.BearerToken
+
 	case "apikey":
-		if config.APIKey != "" {
-			req.Header.Set("X-API-Key", config.APIKey)
-			log.Printf("   🔐 Added API key authentication")
-		}
+		authConfig.Type = httpservice.AuthTypeAPIKey
+		authConfig.APIKey = config.APIKey
 	}
+
+	return authConfig
+}
+
+// getTargetPath returns the target path for storing API response
+func (e *APIEnrichmentExecutor) getTargetPath(config *models.APIEnrichmentConfig) string {
+	if config.TargetPath != "" {
+		return config.TargetPath
+	}
+	return "enriched.api"
 }
 
 // replaceFieldMappings replaces field mappings in a map
@@ -261,65 +287,6 @@ func (e *APIEnrichmentExecutor) replaceFieldMappings(
 	return result
 }
 
-// executeWithRetry executes the HTTP request with retry logic
-func (e *APIEnrichmentExecutor) executeWithRetry(
-	ctx context.Context,
-	req *http.Request,
-	config *models.APIEnrichmentConfig,
-) (interface{}, error) {
-
-	// Set timeout for this specific request
-	timeout := time.Duration(config.TimeoutMs) * time.Millisecond
-	client := &http.Client{Timeout: timeout}
-
-	var lastErr error
-	retries := config.RetryCount
-	if retries < 0 {
-		retries = 0
-	}
-
-	for attempt := 0; attempt <= retries; attempt++ {
-		if attempt > 0 {
-			log.Printf("   🔄 Retry attempt %d/%d", attempt, retries)
-			time.Sleep(time.Duration(config.RetryDelayMs) * time.Millisecond)
-		}
-
-		// Execute request
-		resp, err := client.Do(req)
-		if err != nil {
-			lastErr = fmt.Errorf("HTTP request failed: %w", err)
-			continue
-		}
-
-		defer resp.Body.Close()
-
-		// Read response body
-		bodyBytes, err := io.ReadAll(resp.Body)
-		if err != nil {
-			lastErr = fmt.Errorf("failed to read response body: %w", err)
-			continue
-		}
-
-		// Check status code
-		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-			lastErr = fmt.Errorf("API returned status %d: %s", resp.StatusCode, string(bodyBytes))
-			continue
-		}
-
-		// Parse JSON response
-		var responseData interface{}
-		if err := json.Unmarshal(bodyBytes, &responseData); err != nil {
-			// If not JSON, return as string
-			log.Printf("   ⚠️  Response is not JSON, storing as string")
-			return string(bodyBytes), nil
-		}
-
-		log.Printf("   ✅ API call successful (status: %d)", resp.StatusCode)
-		return responseData, nil
-	}
-
-	return nil, lastErr
-}
 
 // GetConfigSchema returns the JSON schema for configuration
 func (e *APIEnrichmentExecutor) GetConfigSchema() map[string]interface{} {

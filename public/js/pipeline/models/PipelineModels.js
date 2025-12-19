@@ -179,7 +179,8 @@ class VisualStep {
         this.onErrorStrategy = data.onErrorStrategy || 'fail';
         this.executionMode = data.executionMode || 'sequential';
         this.description = data.description || '';
-        this.icon = data.icon || 'fas fa-cog';
+        // Auto-assign icon based on step type if not provided
+        this.icon = data.icon || this.getIconForType(this.stepType);
     }
 
     generateUUID() {
@@ -238,6 +239,56 @@ class VisualStep {
         });
     }
 
+    /**
+     * Get icon for step type (automatic mapping)
+     * @param {string} stepType - Step type (e.g., 'pre.validation', 'pre.enrichment.api')
+     * @returns {string} Font Awesome icon class
+     */
+    getIconForType(stepType) {
+        const iconMap = {
+            'pre.validation': 'fas fa-check-circle',
+            'pre.validation.field': 'fas fa-check-square',
+            'pre.enrichment': 'fas fa-plus-circle',
+            'pre.enrichment.api': 'fas fa-cloud',
+            'pre.enrichment.database': 'fas fa-database',
+            'pre.enrichment.cache': 'fas fa-bolt',
+            'pre.enrichment.metadata': 'fas fa-tags',
+            'pre.extraction': 'fas fa-filter',
+            'core.transformation': 'fas fa-arrows-alt-h',
+            'core.mapping': 'fas fa-project-diagram',
+            'core.mapping.hl7-fhir': 'fas fa-exchange-alt',
+            'post.validation': 'fas fa-shield-alt',
+            'post.fhir.validation': 'fas fa-shield-alt',
+            'post.anonymization': 'fas fa-user-secret',
+            'post.audit': 'fas fa-clipboard-list',
+            'post.delivery': 'fas fa-paper-plane',
+            'post.error_handling': 'fas fa-exclamation-triangle',
+            'post.quality': 'fas fa-check-double',
+            'pre.logic': 'fas fa-sitemap',
+            'core.logic': 'fas fa-sitemap',
+            'post.logic': 'fas fa-sitemap',
+            'custom': 'fas fa-cog',
+            'default': 'fas fa-cog'
+        };
+
+        // Try exact match first
+        if (iconMap[stepType]) {
+            return iconMap[stepType];
+        }
+
+        // Try category match (e.g., 'pre.enrichment.xyz' → 'pre.enrichment')
+        const parts = stepType.split('.');
+        if (parts.length >= 2) {
+            const category = parts.slice(0, 2).join('.');
+            if (iconMap[category]) {
+                return iconMap[category];
+            }
+        }
+
+        // Default fallback
+        return iconMap['default'];
+    }
+
     clone() {
         return new VisualStep({
             stepName: this.stepName,
@@ -270,6 +321,9 @@ class StepTemplate {
         this.defaultConfig = data.defaultConfig || {};
         this.scriptTemplate = data.scriptTemplate || null;
         this.isSystem = data.isSystem !== undefined ? data.isSystem : false;
+        // Template-level defaults for required and onErrorStrategy (override VisualStep defaults)
+        this.required = data.required;  // undefined means use VisualStep default
+        this.onErrorStrategy = data.onErrorStrategy;  // undefined means use VisualStep default
     }
 
     createStep() {
@@ -281,7 +335,10 @@ class StepTemplate {
             config: JSON.parse(JSON.stringify(this.defaultConfig)),
             scriptContent: this.scriptTemplate,
             description: this.description,
-            icon: this.icon
+            icon: this.icon,
+            // Pass template-level defaults if specified
+            required: this.required,
+            onErrorStrategy: this.onErrorStrategy
         });
     }
 

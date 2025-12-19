@@ -18,7 +18,7 @@ CREATE TABLE IF NOT EXISTS sample_parsed_messages (
 );
 
 -- Index for fast lookups
-CREATE INDEX idx_sample_parsed_messages_lookup
+CREATE INDEX IF NOT EXISTS idx_sample_parsed_messages_lookup
 ON sample_parsed_messages(message_type, hl7_version, format)
 WHERE is_active = TRUE;
 

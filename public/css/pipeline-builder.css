@@ -2042,3 +2042,127 @@ details[open] summary {
 .toolbox-section.templates-section .section-title i {
     color: #a855f7;
 }
+
+/* ============================================
+   Conditional Field Visibility (Dynamic Auth Forms)
+   ============================================ */
+.conditional-field.hidden {
+    display: none !important;
+}
+
+/* ============================================
+   Authentication Containers (Styled Like OAuth2)
+   ============================================ */
+.auth-container {
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    padding: 20px;
+    background: #f8f9fa;
+    margin-bottom: 15px;
+}
+
+.auth-container-header {
+    margin-bottom: 20px;
+    padding-bottom: 15px;
+    border-bottom: 2px solid #e2e8f0;
+}
+
+.auth-container-header h4 {
+    margin: 0;
+    font-size: 16px;
+    font-weight: 600;
+    color: #0f172a;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.auth-container-header h4 i {
+    color: #3b82f6;
+    font-size: 18px;
+}
+
+.auth-container-body {
+    background: white;
+    padding: 20px;
+    border-radius: 4px;
+}
+
+.auth-container-body .form-group {
+    margin-bottom: 15px;
+}
+
+.auth-container-body .form-group:last-child {
+    margin-bottom: 0;
+}
+
+.auth-container-body label {
+    font-weight: 600;
+    font-size: 14px;
+    margin-bottom: 5px;
+    display: block;
+    color: #0f172a;
+}
+
+.auth-container-body .form-control {
+    width: 100%;
+    padding: 8px 12px;
+    border: 1px solid #cbd5e1;
+    border-radius: 4px;
+    font-size: 14px;
+    transition: border-color 0.2s;
+}
+
+.auth-container-body .form-control:focus {
+    outline: none;
+    border-color: #3b82f6;
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+}
+
+.auth-container-body .form-text {
+    margin-top: 5px;
+    font-style: italic;
+    color: #6b7280;
+    font-size: 13px;
+}
+
+.auth-container-body .checkbox-label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-weight: 500;
+    cursor: pointer;
+}
+
+.auth-container-body .checkbox-label input[type="checkbox"] {
+    width: 18px;
+    height: 18px;
+    cursor: pointer;
+}
+
+/* API Key specific styles */
+.apikey-container .common-headers-hint {
+    margin-top: 15px;
+    padding: 12px;
+    background: #f1f5f9;
+    border-radius: 4px;
+    font-size: 13px;
+    color: #475569;
+}
+
+.apikey-container .common-headers-hint strong {
+    color: #0f172a;
+}
+
+/* Icon color variations */
+.basic-auth-container .auth-container-header h4 i {
+    color: #8b5cf6; /* Purple for basic auth */
+}
+
+.bearer-token-container .auth-container-header h4 i {
+    color: #10b981; /* Green for bearer token */
+}
+
+.apikey-container .auth-container-header h4 i {
+    color: #f59e0b; /* Amber for API key */
+}

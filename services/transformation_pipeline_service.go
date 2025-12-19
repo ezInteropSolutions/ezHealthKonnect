@@ -41,6 +41,11 @@ func (tps *TransformationPipelineService) RegisterExecutor(executor Transformati
 	tps.executors[executor.GetSupportedType()] = executor
 }
 
+// GetExecutorRegistry returns the executor registry for testing
+func (tps *TransformationPipelineService) GetExecutorRegistry() *ExecutorRegistry {
+	return tps.executorRegistry
+}
+
 // GetPipeline retrieves a transformation pipeline for an interface/message type
 func (tps *TransformationPipelineService) GetPipeline(ctx context.Context, interfaceID string, messageType string) (*models.TransformationPipeline, error) {
 	query := `
@@ -80,7 +85,7 @@ func (tps *TransformationPipelineService) GetPipeline(ctx context.Context, inter
 // GetPipelineSteps retrieves all steps for a pipeline, ordered by layer and sequence
 func (tps *TransformationPipelineService) GetPipelineSteps(ctx context.Context, pipelineID string) ([]models.TransformationStep, error) {
 	query := `
-		SELECT id, pipeline_id, step_name, step_type, sequence, layer, required, timeout_ms,
+		SELECT id, pipeline_id, step_name, step_alias, step_type, sequence, layer, required, timeout_ms,
 		       enabled, config, script_type, script_content, on_error_strategy, execution_mode,
 		       created_at, updated_at
 		FROM transformation_steps
@@ -110,6 +115,7 @@ func (tps *TransformationPipelineService) GetPipelineSteps(ctx context.Context, 
 			&step.ID,
 			&step.PipelineID,
 			&step.StepName,
+			&step.StepAlias,
 			&step.StepType,
 			&step.Sequence,
 			&step.Layer,
@@ -220,12 +226,23 @@ func (tps *TransformationPipelineService) ExecuteTransformation(
 	return result, err
 }
 
-// executePipeline executes all steps in a pipeline
+// executePipeline executes all steps in a pipeline using PipelineExecutionContext
 func (tps *TransformationPipelineService) executePipeline(
 	ctx context.Context,
 	pipeline *models.TransformationPipeline,
 	input map[string]interface{},
 ) (*models.TransformationResult, error) {
+
+	// Create execution context with step output tracking
+	execContext := &models.PipelineExecutionContext{
+		Message:     input,
+		StepOutputs: make(map[string]models.StepOutput),
+		Metadata: map[string]interface{}{
+			"pipeline_id":   pipeline.ID,
+			"pipeline_name": pipeline.PipelineName,
+			"started_at":    time.Now(),
+		},
+	}
 
 	result := &models.TransformationResult{
 		Success:           true,
@@ -233,8 +250,6 @@ func (tps *TransformationPipelineService) executePipeline(
 		TransformationLog: []models.StepExecutionLog{},
 		TotalTimeMs:       0,
 	}
-
-	currentData := input
 
 	// Execute steps in order (already ordered by layer + sequence)
 	for _, step := range pipeline.Steps {
@@ -248,22 +263,102 @@ func (tps *TransformationPipelineService) executePipeline(
 			return nil, fmt.Errorf("no executor available for step type: %s", step.StepType)
 		}
 
-		// Execute step with timeout
+		// Execute step with timeout (legacy executors still use old signature)
 		stepCtx, cancel := context.WithTimeout(ctx, time.Duration(step.TimeoutMs)*time.Millisecond)
 		defer cancel()
 
-		outputData, stepErr := executor.Execute(stepCtx, &step, currentData)
+		// Call legacy Execute method (still returns map, modifies execContext.Message)
+		apiCallStart := time.Now()
+		outputData, stepErr := executor.Execute(stepCtx, &step, execContext.Message)
 		stepDuration := time.Now().Sub(stepStartTime)
+		apiCallDuration := time.Now().Sub(apiCallStart).Milliseconds()
 
-		// Create step log
+		// Generate namespace for this step
+		namespace := models.GenerateStepNamespace(step.StepName, step.ID, step.StepAlias)
+		alias := ""
+		if step.StepAlias != nil {
+			alias = *step.StepAlias
+		} else {
+			alias = models.GenerateDefaultAlias(step.StepName)
+		}
+
+		// Get step output from namespace (if executor set it)
+		stepOutput, outputExists := execContext.StepOutputs[namespace]
+
+		// Update step output with duration and success status
+		if outputExists {
+			stepOutput.DurationMs = stepDuration.Milliseconds()
+			if stepErr != nil {
+				stepOutput.Success = false
+				stepOutput.Error = stepErr.Error()
+			}
+			execContext.StepOutputs[namespace] = stepOutput
+		} else {
+			// Executor didn't set output - create automatic output with basic metadata
+			stepOutputData := map[string]interface{}{
+				"step_type":         step.StepType,
+				"execution_time_ms": apiCallDuration,
+			}
+
+			// For API enrichment steps, capture additional metadata automatically
+			if step.StepType == "pre.enrichment.api" {
+				if config, ok := step.Config["endpoint"].(string); ok {
+					stepOutputData["api_endpoint"] = config
+				}
+				if method, ok := step.Config["method"].(string); ok {
+					stepOutputData["http_method"] = method
+				}
+				if targetPath, ok := step.Config["targetPath"].(string); ok {
+					stepOutputData["enriched_path"] = targetPath
+				}
+			}
+
+			if stepErr != nil {
+				// Step failed - create error output
+				execContext.StepOutputs[namespace] = models.StepOutput{
+					StepID:     step.ID,
+					StepName:   step.StepName,
+					StepAlias:  alias,
+					StepType:   step.StepType,
+					Namespace:  namespace,
+					Sequence:   step.Sequence,
+					OutputData: stepOutputData,
+					Success:    false,
+					Error:      stepErr.Error(),
+					DurationMs: stepDuration.Milliseconds(),
+				}
+			} else {
+				// Step succeeded - create success output
+				execContext.StepOutputs[namespace] = models.StepOutput{
+					StepID:     step.ID,
+					StepName:   step.StepName,
+					StepAlias:  alias,
+					StepType:   step.StepType,
+					Namespace:  namespace,
+					Sequence:   step.Sequence,
+					OutputData: stepOutputData,
+					Success:    true,
+					DurationMs: stepDuration.Milliseconds(),
+				}
+			}
+		}
+
+		// Create step log with step output reference
 		stepLog := models.StepExecutionLog{
 			StepID:      step.ID,
 			StepName:    step.StepName,
+			StepAlias:   alias,
 			StepType:    step.StepType,
+			Namespace:   namespace,
 			StartedAt:   stepStartTime,
 			CompletedAt: time.Now(),
 			DurationMs:  stepDuration.Milliseconds(),
 			Success:     stepErr == nil,
+		}
+
+		// Attach step output to log
+		if output, exists := execContext.StepOutputs[namespace]; exists {
+			stepLog.StepOutput = &output
 		}
 
 		if stepErr != nil {
@@ -278,16 +373,18 @@ func (tps *TransformationPipelineService) executePipeline(
 				return result, fmt.Errorf("pipeline failed at step %s: %w", step.StepName, stepErr)
 			} else if step.OnErrorStrategy == "skip" {
 				fmt.Printf("⚠️  Skipping failed optional step: %s\n", step.StepName)
-				// Continue with previous data
+				// Continue with previous message data
 			} else if step.OnErrorStrategy == "default" {
 				// Use default value from config (if provided)
-				// For now, continue with previous data
+				// For now, continue with previous message data
 				fmt.Printf("⚠️  Using default value for failed step: %s\n", step.StepName)
 			}
 		} else {
-			// Step succeeded, update current data
-			currentData = outputData
-			result.OutputData = outputData
+			// Step succeeded, update message data (executors still modify the map directly)
+			if outputData != nil {
+				execContext.Message = outputData
+			}
+			result.OutputData = execContext.Message
 			fmt.Printf("✅ Step completed: %s (took %dms)\n", step.StepName, stepDuration.Milliseconds())
 		}
 
@@ -295,7 +392,11 @@ func (tps *TransformationPipelineService) executePipeline(
 		result.TotalTimeMs += stepDuration.Milliseconds()
 	}
 
-	fmt.Printf("✅ Pipeline completed successfully (total: %dms)\n", result.TotalTimeMs)
+	// Final output is the transformed message
+	result.OutputData = execContext.Message
+
+	fmt.Printf("✅ Pipeline completed successfully (total: %dms, %d step outputs tracked)\n",
+		result.TotalTimeMs, len(execContext.StepOutputs))
 
 	return result, nil
 }

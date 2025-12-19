@@ -494,10 +494,7 @@ class PropertiesPanel {
                     <textarea id="stepDescription" rows="3">${step.description || ''}</textarea>
                 </div>
 
-                <div class="form-group">
-                    <label>Icon (Font Awesome class)</label>
-                    <input type="text" id="stepIcon" value="${step.icon}" placeholder="fas fa-cog">
-                </div>
+                <!-- Icon is automatically assigned based on step type -->
             </div>
         `;
     }
@@ -829,16 +826,7 @@ class PropertiesPanel {
             configTextarea.addEventListener('blur', () => this.validateJSON(configTextarea));
         }
 
-        // Icon preview
-        const iconInput = form.querySelector('#stepIcon');
-        if (iconInput) {
-            iconInput.addEventListener('input', (e) => {
-                const preview = form.querySelector('h3 i');
-                if (preview) {
-                    preview.className = e.target.value;
-                }
-            });
-        }
+        // Icon is now automatically assigned based on step type - no manual input needed
 
         // === HL7→FHIR Mapping Tab Switching ===
         const configTabs = form.querySelectorAll('.config-tab');
@@ -961,6 +949,58 @@ class PropertiesPanel {
             container._validationBuilderInstance = builder;
         });
 
+        // === Metadata Builder Initialization (Key-Value Pair Builder) ===
+        const metadataContainers = form.querySelectorAll('.metadata-builder-container');
+        metadataContainers.forEach(container => {
+            const initialMetadataJSON = container.dataset.initialMetadata;
+            const initialMetadata = initialMetadataJSON ? JSON.parse(initialMetadataJSON) : {};
+
+            // Instantiate MetadataBuilder component
+            const builder = new MetadataBuilder(container, initialMetadata);
+
+            // Store reference for later access
+            container._metadataBuilderInstance = builder;
+        });
+
+        // === Header Builder Initialization (HTTP Headers for API Enrichment) ===
+        const headerContainers = form.querySelectorAll('.header-builder-container');
+        headerContainers.forEach(container => {
+            const initialHeadersJSON = container.dataset.initialHeaders;
+            const initialHeaders = initialHeadersJSON ? JSON.parse(initialHeadersJSON) : {};
+
+            // Instantiate HeaderBuilder component
+            const builder = new HeaderBuilder(container, initialHeaders);
+
+            // Store reference for later access
+            container._headerBuilderInstance = builder;
+        });
+
+        // === Query Param Builder Initialization (Query Parameters for API Enrichment) ===
+        const queryParamContainers = form.querySelectorAll('.query-param-builder-container');
+        queryParamContainers.forEach(container => {
+            const initialParamsJSON = container.dataset.initialParams;
+            const initialParams = initialParamsJSON ? JSON.parse(initialParamsJSON) : {};
+
+            // Instantiate QueryParamBuilder component
+            const builder = new QueryParamBuilder(container, initialParams);
+
+            // Store reference for later access
+            container._queryParamBuilderInstance = builder;
+        });
+
+        // === OAuth 2.0 Config Builder Initialization (OAuth 2.0 for API Enrichment) ===
+        const oauth2Containers = form.querySelectorAll('.oauth2-config-builder-container');
+        oauth2Containers.forEach(container => {
+            const initialConfigJSON = container.dataset.initialConfig;
+            const initialConfig = initialConfigJSON ? JSON.parse(initialConfigJSON) : {};
+
+            // Instantiate OAuth2ConfigBuilder component
+            const builder = new OAuth2ConfigBuilder(container, initialConfig);
+
+            // Store reference for later access
+            container._oauth2ConfigBuilderInstance = builder;
+        });
+
         // === Field Path Selector Initialization (Universal - All Steps) ===
         // Auto-enhance all inputs with data-field-type="xpath"
         if (window.FieldPathSelector) {
@@ -972,6 +1012,50 @@ class PropertiesPanel {
                 messageType: messageType
             });
         }
+
+        // === Conditional Field Visibility (Dynamic Auth Form Fields) ===
+        this.setupConditionalFieldVisibility(form);
+
+        return form;
+    }
+
+    /**
+     * Setup conditional field visibility based on control field values
+     * Used for dynamic auth form fields and other conditional configurations
+     */
+    setupConditionalFieldVisibility(form) {
+        // Find all fields that control visibility of other fields
+        const controlFields = form.querySelectorAll('select[name^="config_"], input[name^="config_"]');
+
+        controlFields.forEach(controlField => {
+            const fieldName = controlField.name.replace('config_', '');
+
+            // Find all conditional fields that depend on this control field
+            const conditionalFields = form.querySelectorAll(
+                `.conditional-field[data-visible-when-field="${fieldName}"]`
+            );
+
+            if (conditionalFields.length === 0) return;
+
+            // Add change event listener to control field
+            controlField.addEventListener('change', (e) => {
+                const currentValue = e.target.value;
+
+                // Update visibility of all dependent fields
+                conditionalFields.forEach(conditionalField => {
+                    const requiredValue = conditionalField.dataset.visibleWhenValue;
+
+                    if (currentValue === requiredValue) {
+                        conditionalField.classList.remove('hidden');
+                    } else {
+                        conditionalField.classList.add('hidden');
+                    }
+                });
+            });
+
+            // Trigger initial visibility check
+            controlField.dispatchEvent(new Event('change'));
+        });
     }
 
     /**
@@ -1407,10 +1491,8 @@ class PropertiesPanel {
             step.description = descField.value || '';
         }
 
-        const iconField = form.querySelector('#stepIcon');
-        if (iconField && iconField.value) {
-            step.icon = iconField.value;
-        }
+        // Icon is automatically assigned based on step type - no manual override needed
+        // The VisualStep constructor will handle icon assignment via getIconForType()
 
         // Execution properties - only update if form fields exist
         const seqField = form.querySelector('#stepSequence');
@@ -1457,6 +1539,120 @@ class PropertiesPanel {
                 console.error('[PropertiesPanel] Failed to parse validation rules:', error);
             }
         }
+
+        // Collect metadata from MetadataBuilder component
+        const metadataBuilderContainers = form.querySelectorAll('.metadata-builder-container');
+        metadataBuilderContainers.forEach(container => {
+            const builder = container._metadataBuilderInstance;
+            if (builder) {
+                step.config = step.config || {};
+                const fieldKey = container.dataset.fieldKey;
+                const metadata = builder.getMetadata();
+                step.config[fieldKey] = metadata;
+                console.log('[PropertiesPanel] ✅ Saved metadata to step.config.' + fieldKey + ':', metadata);
+            }
+        });
+
+        // Collect headers from HeaderBuilder component
+        const headerBuilderContainers = form.querySelectorAll('.header-builder-container');
+        headerBuilderContainers.forEach(container => {
+            const builder = container._headerBuilderInstance;
+            if (builder) {
+                step.config = step.config || {};
+                const fieldKey = container.dataset.fieldKey;
+                const headers = builder.getHeaders();
+                step.config[fieldKey] = headers;
+                console.log('[PropertiesPanel] ✅ Saved headers to step.config.' + fieldKey + ':', headers);
+            }
+        });
+
+        // Collect query params from QueryParamBuilder component
+        const queryParamBuilderContainers = form.querySelectorAll('.query-param-builder-container');
+        queryParamBuilderContainers.forEach(container => {
+            const builder = container._queryParamBuilderInstance;
+            if (builder) {
+                step.config = step.config || {};
+                const fieldKey = container.dataset.fieldKey;
+                const queryParams = builder.getParams();
+                step.config[fieldKey] = queryParams;
+                console.log('[PropertiesPanel] ✅ Saved query params to step.config.' + fieldKey + ':', queryParams);
+            }
+        });
+
+        // Collect Basic Auth data from auth container
+        const basicAuthContainer = form.querySelector('.basic-auth-container');
+        if (basicAuthContainer && !basicAuthContainer.closest('.conditional-field.hidden')) {
+            const username = basicAuthContainer.querySelector('[name="basicAuth_username"]')?.value || '';
+            const password = basicAuthContainer.querySelector('[name="basicAuth_password"]')?.value || '';
+            step.config.basicAuth = { username, password };
+            // Also store in legacy fields for backward compatibility
+            step.config.basicAuthUsername = username;
+            step.config.basicAuthPassword = password;
+            console.log('[PropertiesPanel] ✅ Saved Basic Auth config');
+        }
+
+        // Collect Bearer Token data from auth container
+        const bearerTokenContainer = form.querySelector('.bearer-token-container');
+        if (bearerTokenContainer && !bearerTokenContainer.closest('.conditional-field.hidden')) {
+            const token = bearerTokenContainer.querySelector('[name="bearerToken_token"]')?.value || '';
+            step.config.bearerToken = token;
+            console.log('[PropertiesPanel] ✅ Saved Bearer Token config');
+        }
+
+        // Collect API Key data from auth container
+        const apiKeyContainer = form.querySelector('.apikey-container');
+        if (apiKeyContainer && !apiKeyContainer.closest('.conditional-field.hidden')) {
+            const apiKey = apiKeyContainer.querySelector('[name="apiKeyAuth_apiKey"]')?.value || '';
+            const headerName = apiKeyContainer.querySelector('[name="apiKeyAuth_headerName"]')?.value || 'X-API-Key';
+            step.config.apiKeyAuth = { apiKey, headerName };
+            // Also store in legacy fields for backward compatibility
+            step.config.apiKey = apiKey;
+            step.config.apiKeyHeader = headerName;
+            console.log('[PropertiesPanel] ✅ Saved API Key config');
+        }
+
+        // Collect OAuth 2.0 config from OAuth2ConfigBuilder component
+        const oauth2ConfigBuilderContainers = form.querySelectorAll('.oauth2-config-builder-container');
+        oauth2ConfigBuilderContainers.forEach(container => {
+            const builder = container._oauth2ConfigBuilderInstance;
+            if (builder) {
+                step.config = step.config || {};
+                const fieldKey = container.dataset.fieldKey;
+                const oauth2Config = builder.getConfig();
+                step.config[fieldKey] = oauth2Config;
+                console.log('[PropertiesPanel] ✅ Saved OAuth 2.0 config to step.config.' + fieldKey + ':', oauth2Config);
+            }
+        });
+
+        // Collect dynamic configuration fields (enrichment checkboxes, text inputs, etc.)
+        step.config = step.config || {};
+
+        // Collect all config_* fields
+        const configInputs = form.querySelectorAll('[name^="config_"]');
+        configInputs.forEach(input => {
+            const fieldName = input.name.replace('config_', '');
+
+            if (input.type === 'checkbox') {
+                step.config[fieldName] = input.checked;
+            } else if (input.type === 'number') {
+                step.config[fieldName] = parseInt(input.value) || 0;
+            } else if (input.tagName === 'TEXTAREA') {
+                // Try to parse JSON from textareas, otherwise use raw value
+                try {
+                    if (input.value.trim().startsWith('{') || input.value.trim().startsWith('[')) {
+                        step.config[fieldName] = JSON.parse(input.value);
+                    } else {
+                        step.config[fieldName] = input.value;
+                    }
+                } catch (e) {
+                    step.config[fieldName] = input.value;
+                }
+            } else {
+                step.config[fieldName] = input.value;
+            }
+        });
+
+        console.log('[PropertiesPanel] Collected config fields:', step.config);
 
         // Configuration textarea (legacy)
         const configText = form.querySelector('#stepConfig')?.value;
@@ -1585,12 +1781,28 @@ class PropertiesPanel {
                 ? JSON.stringify(rawValue, null, 2)
                 : rawValue;
 
-            html += `<div class="form-group">`;
+            // Handle conditional visibility
+            let visibilityClass = '';
+            let visibilityDataAttr = '';
+            if (field.visibleWhen) {
+                visibilityClass = 'conditional-field';
+                visibilityDataAttr = `data-visible-when-field="${field.visibleWhen.field}" data-visible-when-value="${field.visibleWhen.value}"`;
+
+                // Check if field should be initially visible
+                const controlFieldValue = step.config?.[field.visibleWhen.field] ||
+                                         stepConfig.fields.find(f => f.key === field.visibleWhen.field)?.default || '';
+                if (controlFieldValue !== field.visibleWhen.value) {
+                    visibilityClass += ' hidden';
+                }
+            }
+
+            html += `<div class="form-group ${visibilityClass}" ${visibilityDataAttr}>`;
             html += `<label>${field.label}${field.required ? ' *' : ''}</label>`;
 
             switch (field.type) {
                 case 'text':
-                    html += `<input type="text" name="config_${field.key}" value="${value}" ${field.required ? 'required' : ''} placeholder="${field.placeholder || ''}">`;
+                case 'password':
+                    html += `<input type="${field.type}" name="config_${field.key}" value="${value}" ${field.required ? 'required' : ''} placeholder="${field.placeholder || ''}">`;
                     break;
 
                 case 'number':
@@ -1642,6 +1854,181 @@ class PropertiesPanel {
 
                     // Create container for ValidationRuleBuilder component
                     html += `<div class="validation-builder-container" data-field-key="${field.key}" data-initial-rules='${JSON.stringify(rules)}'></div>`;
+                    break;
+
+                case 'metadata-builder':
+                    // Key-value pair builder for custom metadata
+                    let metadata = {};
+                    try {
+                        if (typeof value === 'string') {
+                            metadata = JSON.parse(value);
+                        } else if (typeof value === 'object' && value !== null) {
+                            metadata = value;
+                        }
+                    } catch (e) {
+                        console.warn('Failed to parse metadata:', e);
+                        metadata = {};
+                    }
+
+                    // Create container for MetadataBuilder component
+                    html += `<div class="metadata-builder-container" data-field-key="${field.key}" data-initial-metadata='${JSON.stringify(metadata)}'></div>`;
+                    break;
+
+                case 'header-builder':
+                    // HTTP Header builder for API enrichment
+                    let headers = {};
+                    try {
+                        if (typeof value === 'string') {
+                            headers = JSON.parse(value);
+                        } else if (typeof value === 'object' && value !== null) {
+                            headers = value;
+                        }
+                    } catch (e) {
+                        console.warn('Failed to parse headers:', e);
+                        headers = {};
+                    }
+
+                    // Create container for HeaderBuilder component
+                    html += `<div class="header-builder-container" data-field-key="${field.key}" data-initial-headers='${JSON.stringify(headers)}'></div>`;
+                    break;
+
+                case 'query-param-builder':
+                    // Query parameter builder for API enrichment
+                    let queryParams = {};
+                    try {
+                        if (typeof value === 'string') {
+                            queryParams = JSON.parse(value);
+                        } else if (typeof value === 'object' && value !== null) {
+                            queryParams = value;
+                        }
+                    } catch (e) {
+                        console.warn('Failed to parse query params:', e);
+                        queryParams = {};
+                    }
+
+                    // Create container for QueryParamBuilder component
+                    html += `<div class="query-param-builder-container" data-field-key="${field.key}" data-initial-params='${JSON.stringify(queryParams)}'></div>`;
+                    break;
+
+                case 'basic-auth-container':
+                    // Basic authentication container
+                    let basicAuthData = {};
+                    try {
+                        if (typeof value === 'string') {
+                            basicAuthData = JSON.parse(value);
+                        } else if (typeof value === 'object' && value !== null) {
+                            basicAuthData = value;
+                        }
+                    } catch (e) {
+                        basicAuthData = {};
+                    }
+
+                    // Create styled container for basic auth
+                    html += `<div class="auth-container basic-auth-container">
+                        <div class="auth-container-header">
+                            <h4><i class="fas fa-user-lock"></i> Basic Authentication</h4>
+                        </div>
+                        <div class="auth-container-body">
+                            <div class="form-group">
+                                <label>Username <span class="text-danger">*</span></label>
+                                <input type="text" class="form-control" name="basicAuth_username"
+                                       value="${basicAuthData.username || ''}"
+                                       placeholder="username" required>
+                                <small class="form-text text-muted">Username for basic authentication</small>
+                            </div>
+                            <div class="form-group">
+                                <label>Password <span class="text-danger">*</span></label>
+                                <input type="password" class="form-control" name="basicAuth_password"
+                                       value="${basicAuthData.password || ''}"
+                                       placeholder="password" required>
+                                <small class="form-text text-muted">Password for basic authentication</small>
+                            </div>
+                        </div>
+                    </div>`;
+                    break;
+
+                case 'bearer-token-container':
+                    // Bearer token container
+                    let bearerTokenData = typeof value === 'string' ? value : (value?.token || '');
+
+                    // Create styled container for bearer token
+                    html += `<div class="auth-container bearer-token-container">
+                        <div class="auth-container-header">
+                            <h4><i class="fas fa-key"></i> Bearer Token Authentication</h4>
+                        </div>
+                        <div class="auth-container-body">
+                            <div class="form-group">
+                                <label>Bearer Token <span class="text-danger">*</span></label>
+                                <textarea class="form-control" name="bearerToken_token" rows="4"
+                                          placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..." required>${bearerTokenData}</textarea>
+                                <small class="form-text text-muted">JWT or access token for Bearer authentication. Typically starts with "eyJ"</small>
+                            </div>
+                            <div class="form-group">
+                                <label class="checkbox-label">
+                                    <input type="checkbox" name="bearerToken_testConnection">
+                                    Test token validity on save
+                                </label>
+                            </div>
+                        </div>
+                    </div>`;
+                    break;
+
+                case 'apikey-container':
+                    // API key container
+                    let apiKeyData = {};
+                    try {
+                        if (typeof value === 'string') {
+                            apiKeyData = JSON.parse(value);
+                        } else if (typeof value === 'object' && value !== null) {
+                            apiKeyData = value;
+                        }
+                    } catch (e) {
+                        apiKeyData = {};
+                    }
+
+                    // Create styled container for API key
+                    html += `<div class="auth-container apikey-container">
+                        <div class="auth-container-header">
+                            <h4><i class="fas fa-fingerprint"></i> API Key Authentication</h4>
+                        </div>
+                        <div class="auth-container-body">
+                            <div class="form-group">
+                                <label>API Key <span class="text-danger">*</span></label>
+                                <input type="text" class="form-control" name="apiKeyAuth_apiKey"
+                                       value="${apiKeyData.apiKey || ''}"
+                                       placeholder="your-api-key-here" required>
+                                <small class="form-text text-muted">API key provided by the service</small>
+                            </div>
+                            <div class="form-group">
+                                <label>Header Name</label>
+                                <input type="text" class="form-control" name="apiKeyAuth_headerName"
+                                       value="${apiKeyData.headerName || 'X-API-Key'}"
+                                       placeholder="X-API-Key">
+                                <small class="form-text text-muted">HTTP header name for the API key (default: X-API-Key)</small>
+                            </div>
+                            <div class="common-headers-hint">
+                                <strong>Common header names:</strong> X-API-Key, X-API-Token, Authorization, api-key
+                            </div>
+                        </div>
+                    </div>`;
+                    break;
+
+                case 'oauth2-builder':
+                    // OAuth 2.0 configuration builder
+                    let oauth2Config = {};
+                    try {
+                        if (typeof value === 'string') {
+                            oauth2Config = JSON.parse(value);
+                        } else if (typeof value === 'object' && value !== null) {
+                            oauth2Config = value;
+                        }
+                    } catch (e) {
+                        console.warn('Failed to parse OAuth 2.0 config:', e);
+                        oauth2Config = {};
+                    }
+
+                    // Create container for OAuth2ConfigBuilder component
+                    html += `<div class="oauth2-config-builder-container" data-field-key="${field.key}" data-initial-config='${JSON.stringify(oauth2Config)}'></div>`;
                     break;
             }
 
@@ -1820,39 +2207,14 @@ class PropertiesPanel {
             'pre.validation': {
                 fields: [
                     {
-                        key: 'validation_mode',
-                        label: 'Validation Mode',
-                        type: 'select',
-                        required: true,
-                        default: 'accept_and_flag',
-                        options: [
-                            {
-                                value: 'strict_reject',
-                                label: '❌ Strict Reject - Send NACK on failure, stop processing',
-                                description: 'Critical interfaces: Pipeline fails immediately, NACK sent to sender. Use for patient safety, lab results, medications.'
-                            },
-                            {
-                                value: 'accept_and_flag',
-                                label: '⚠️ Accept & Flag - Send ACK with warnings, continue processing (DEFAULT)',
-                                description: 'Data quality monitoring: Message accepted with warnings, ACK sent. Use for non-critical interfaces, gradual validation rollout.'
-                            },
-                            {
-                                value: 'no_validation',
-                                label: '⏭️ No Validation - Skip all checks',
-                                description: 'Emergency bypass: All validation skipped, ACK sent immediately. Use for debugging or when validation is not needed.'
-                            }
-                        ],
-                        help: 'Controls ACK/NACK response and pipeline behavior when validation fails. Strict Reject = NACK + stop, Accept & Flag = ACK + continue with warnings, No Validation = skip all checks.'
-                    },
-                    {
                         key: 'rules',
                         label: 'Validation Rules',
                         type: 'validation-builder',
                         required: true,
-                        help: 'Add validation rules for HL7 fields. Click "+ Add Rule" to add more fields.'
+                        help: 'Add validation rules for HL7 fields. Use step-level controls (Required + Error Strategy) to control ACK/NACK behavior.'
                     }
                 ]
-                        },
+            },
             'pre.enrichment.metadata': {
                 fields: [
                     {
@@ -1889,11 +2251,346 @@ class PropertiesPanel {
                     },
                     {
                         key: 'customMetadata',
-                        label: 'Custom Metadata (JSON)',
+                        label: 'Custom Metadata',
+                        type: 'metadata-builder',
+                        required: false,
+                        help: 'Add custom key-value pairs (e.g., environment, processingNode, facility). Non-technical users can use the form below, technical users can import JSON.'
+                    }
+                ]
+            },
+            'pre.enrichment.api': {
+                fields: [
+                    {
+                        key: 'endpoint',
+                        label: 'API Endpoint',
+                        type: 'text',
+                        required: true,
+                        placeholder: 'https://empi.hospital.org/api/patients/{patientId}',
+                        help: 'API endpoint URL. Use {placeholder} for field values from HL7 message'
+                    },
+                    {
+                        key: 'method',
+                        label: 'HTTP Method',
+                        type: 'select',
+                        required: true,
+                        default: 'GET',
+                        options: [
+                            { value: 'GET', label: 'GET' },
+                            { value: 'POST', label: 'POST' },
+                            { value: 'PUT', label: 'PUT' },
+                            { value: 'PATCH', label: 'PATCH' }
+                        ],
+                        help: 'HTTP method for the API request'
+                    },
+                    {
+                        key: 'authType',
+                        label: 'Authentication Type',
+                        type: 'select',
+                        default: 'none',
+                        options: [
+                            { value: 'none', label: 'None' },
+                            { value: 'basic', label: 'Basic Auth' },
+                            { value: 'bearer', label: 'Bearer Token' },
+                            { value: 'apikey', label: 'API Key' },
+                            { value: 'oauth2', label: 'OAuth 2.0' }
+                        ],
+                        help: 'Authentication method for the API'
+                    },
+                    {
+                        key: 'basicAuth',
+                        label: 'Basic Authentication',
+                        type: 'basic-auth-container',
+                        required: false,
+                        help: 'Username and password authentication',
+                        visibleWhen: { field: 'authType', value: 'basic' }
+                    },
+                    {
+                        key: 'bearerToken',
+                        label: 'Bearer Token Authentication',
+                        type: 'bearer-token-container',
+                        required: false,
+                        help: 'Token-based authentication',
+                        visibleWhen: { field: 'authType', value: 'bearer' }
+                    },
+                    {
+                        key: 'apiKeyAuth',
+                        label: 'API Key Authentication',
+                        type: 'apikey-container',
+                        required: false,
+                        help: 'API key authentication',
+                        visibleWhen: { field: 'authType', value: 'apikey' }
+                    },
+                    {
+                        key: 'oauth2Config',
+                        label: 'OAuth 2.0 Configuration',
+                        type: 'oauth2-builder',
+                        required: false,
+                        help: 'Configure OAuth 2.0 authentication (Client Credentials, Password Grant, etc.)',
+                        visibleWhen: { field: 'authType', value: 'oauth2' }
+                    },
+                    {
+                        key: 'headers',
+                        label: 'HTTP Headers',
+                        type: 'header-builder',
+                        required: false,
+                        help: 'Add custom HTTP headers for the API request'
+                    },
+                    {
+                        key: 'queryParams',
+                        label: 'Query Parameters',
+                        type: 'query-param-builder',
+                        required: false,
+                        help: 'Add query parameters to the API URL'
+                    },
+                    {
+                        key: 'fieldMappings',
+                        label: 'Field Mappings (JSON)',
                         type: 'textarea',
                         rows: 4,
-                        placeholder: '{"processingNode": "server-01", "environment": "production"}',
-                        help: 'Additional custom key-value pairs to add as metadata (JSON format)'
+                        placeholder: '{"patientId": "PID.3", "messageType": "MSH.9"}',
+                        help: 'Map placeholder names to HL7 field paths. Example: {"patientId": "PID.3"}'
+                    },
+                    {
+                        key: 'targetPath',
+                        label: 'Target Path',
+                        type: 'text',
+                        default: 'enriched.api',
+                        placeholder: 'enriched.api',
+                        help: 'Where to store API response in message data (dot notation)'
+                    },
+                    {
+                        key: 'timeoutMs',
+                        label: 'Timeout (ms)',
+                        type: 'number',
+                        default: 5000,
+                        min: 100,
+                        max: 30000,
+                        help: 'API request timeout in milliseconds'
+                    },
+                    {
+                        key: 'retryCount',
+                        label: 'Retry Count',
+                        type: 'number',
+                        default: 0,
+                        min: 0,
+                        max: 5,
+                        help: 'Number of retry attempts on failure (before applying Error Strategy)'
+                    }
+                    // Note: Error handling is controlled by step-level "On Error Strategy" setting:
+                    // - "Fail" = Stop pipeline on API error
+                    // - "Skip" = Continue without enrichment data
+                    // - "Use Default Value" = Continue with defaultValue (if configured)
+                ]
+            },
+            'pre.enrichment.database': {
+                fields: [
+                    {
+                        key: 'databaseType',
+                        label: 'Database Type',
+                        type: 'select',
+                        required: true,
+                        options: [
+                            { value: 'postgresql', label: 'PostgreSQL' },
+                            { value: 'mysql', label: 'MySQL' },
+                            { value: 'sqlserver', label: 'SQL Server' },
+                            { value: 'oracle', label: 'Oracle' }
+                        ],
+                        help: 'Type of database to query'
+                    },
+                    {
+                        key: 'connectionString',
+                        label: 'Connection String',
+                        type: 'text',
+                        required: true,
+                        placeholder: 'postgresql://user:pass@localhost:5432/dbname',
+                        help: 'Database connection string'
+                    },
+                    {
+                        key: 'query',
+                        label: 'SQL Query',
+                        type: 'textarea',
+                        required: true,
+                        rows: 4,
+                        placeholder: 'SELECT * FROM patients WHERE patient_id = $1',
+                        help: 'SQL query with parameter placeholders ($1, $2, etc.)'
+                    },
+                    {
+                        key: 'queryParams',
+                        label: 'Query Parameters (JSON)',
+                        type: 'textarea',
+                        rows: 3,
+                        placeholder: '{"patientId": "PID.3"}',
+                        help: 'Map parameter names to HL7 field paths. Example: {"patientId": "PID.3"}'
+                    },
+                    {
+                        key: 'resultMapping',
+                        label: 'Result Mapping (JSON)',
+                        type: 'textarea',
+                        rows: 3,
+                        placeholder: '{"patient_name": "fullName", "dob": "dateOfBirth"}',
+                        help: 'Map database column names to output field names (optional)'
+                    },
+                    {
+                        key: 'targetPath',
+                        label: 'Target Path',
+                        type: 'text',
+                        default: 'enriched.database',
+                        placeholder: 'enriched.database',
+                        help: 'Where to store query results in message data'
+                    },
+                    {
+                        key: 'timeoutMs',
+                        label: 'Timeout (ms)',
+                        type: 'number',
+                        default: 3000,
+                        min: 100,
+                        max: 30000,
+                        help: 'Query timeout in milliseconds'
+                    },
+                    {
+                        key: 'failOnError',
+                        label: 'Fail on Error',
+                        type: 'checkbox',
+                        default: false,
+                        checkboxLabel: 'Stop pipeline if query fails',
+                        help: 'If unchecked, pipeline continues even if query fails'
+                    }
+                ]
+            },
+            'pre.enrichment.cache': {
+                fields: [
+                    {
+                        key: 'cacheType',
+                        label: 'Cache Type',
+                        type: 'select',
+                        required: true,
+                        options: [
+                            { value: 'redis', label: 'Redis' },
+                            { value: 'memcached', label: 'Memcached' }
+                        ],
+                        help: 'Type of cache system to use'
+                    },
+                    {
+                        key: 'connectionString',
+                        label: 'Connection String',
+                        type: 'text',
+                        required: true,
+                        placeholder: 'redis://localhost:6379',
+                        help: 'Cache server connection string'
+                    },
+                    {
+                        key: 'keyTemplate',
+                        label: 'Cache Key Template',
+                        type: 'text',
+                        required: true,
+                        placeholder: 'patient:{patientId}',
+                        help: 'Key template with placeholders. Example: patient:{patientId}'
+                    },
+                    {
+                        key: 'keyMappings',
+                        label: 'Key Mappings (JSON)',
+                        type: 'textarea',
+                        rows: 3,
+                        placeholder: '{"patientId": "PID.3"}',
+                        help: 'Map placeholder names to HL7 field paths. Example: {"patientId": "PID.3"}'
+                    },
+                    {
+                        key: 'targetPath',
+                        label: 'Target Path',
+                        type: 'text',
+                        default: 'enriched.cache',
+                        placeholder: 'enriched.cache',
+                        help: 'Where to store cached data in message'
+                    },
+                    {
+                        key: 'timeoutMs',
+                        label: 'Timeout (ms)',
+                        type: 'number',
+                        default: 1000,
+                        min: 100,
+                        max: 10000,
+                        help: 'Cache lookup timeout in milliseconds'
+                    },
+                    {
+                        key: 'writeBack',
+                        label: 'Write Back to Cache',
+                        type: 'checkbox',
+                        default: false,
+                        checkboxLabel: 'Write enriched data back to cache',
+                        help: 'If checked, enriched data will be written back to cache'
+                    },
+                    {
+                        key: 'ttlSeconds',
+                        label: 'TTL (seconds)',
+                        type: 'number',
+                        default: 3600,
+                        min: 60,
+                        max: 86400,
+                        help: 'Time-to-live for cache entries (if write-back enabled)'
+                    },
+                    {
+                        key: 'failOnError',
+                        label: 'Fail on Error',
+                        type: 'checkbox',
+                        default: false,
+                        checkboxLabel: 'Stop pipeline if cache lookup fails',
+                        help: 'If unchecked, pipeline continues even if cache lookup fails'
+                    }
+                ]
+            },
+            'pre.enrichment.script': {
+                fields: [
+                    {
+                        key: 'script',
+                        label: 'JavaScript Code',
+                        type: 'textarea',
+                        required: true,
+                        rows: 12,
+                        placeholder: `// Extract patient date of birth
+var dob = getNestedValue(input, "enhancedSegments.PID.fields.7.value");
+
+// Calculate age
+var age = calculateAge(dob);
+
+// Return enrichment data
+return {
+    age: age,
+    ageGroup: age < 18 ? "pediatric" : "adult"
+};`,
+                        help: 'JavaScript code to execute. Use "input" variable for message data. Available functions: getNestedValue(), calculateAge(), parseHL7Date(), console.log()'
+                    },
+                    {
+                        key: 'context',
+                        label: 'Context Variables (JSON)',
+                        type: 'textarea',
+                        rows: 3,
+                        placeholder: '{"hospitalId": "HOSPITAL_001", "environment": "production"}',
+                        help: 'Additional variables to make available in script context (JSON format)'
+                    },
+                    {
+                        key: 'targetPath',
+                        label: 'Target Path',
+                        type: 'text',
+                        default: 'enriched.script',
+                        placeholder: 'enriched.script',
+                        help: 'Where to store script result in message data'
+                    },
+                    {
+                        key: 'timeoutMs',
+                        label: 'Timeout (ms)',
+                        type: 'number',
+                        default: 5000,
+                        min: 100,
+                        max: 30000,
+                        help: 'Script execution timeout in milliseconds'
+                    },
+                    {
+                        key: 'failOnError',
+                        label: 'Fail on Error',
+                        type: 'checkbox',
+                        default: false,
+                        checkboxLabel: 'Stop pipeline if script fails',
+                        help: 'If unchecked, pipeline continues even if script execution fails'
                     }
                 ]
             },
@@ -2030,12 +2727,13 @@ class PropertiesPanel {
     getStepDocumentation(stepType) {
         const docs = {
             'pre.validation': {
-                description: 'Validates incoming HL7 messages against defined rules before processing. Ensures data quality and prevents invalid messages from entering the transformation pipeline.',
+                description: 'Validates incoming HL7 messages against defined rules. Use step-level controls (Required + Error Strategy) to control whether validation failures stop the pipeline (NACK) or continue with warnings (ACK).',
                 useCases: [
-                    'Validate required fields are present (e.g., Patient ID, Message Type)',
-                    'Check data types and formats (e.g., dates, numeric values)',
-                    'Enforce business rules (e.g., age ranges, valid codes)',
-                    'Prevent processing of incomplete or malformed messages'
+                    'Critical validation (Required=true): Patient safety fields → NACK on failure, stop pipeline',
+                    'Data quality monitoring (Required=false + Error Strategy=continue): Accept with warnings → ACK, continue pipeline',
+                    'Skip validation (Enabled=false): Emergency bypass → Skip all checks',
+                    'Validate field formats (dates, numeric values, coded values)',
+                    'Enforce business rules (age ranges, allowed codes, required fields)'
                 ],
                 example: {
                     rules: [
@@ -2151,6 +2849,55 @@ class PropertiesPanel {
                     { path: 'enhancedSegments.PV1.fields[10].value', description: 'Admission Date/Time', segment: 'PV1', field: 'PV1.44' }
                 ]
             },
+            'pre.enrichment.api': {
+                description: 'Enriches HL7 messages by querying external REST APIs (EMPI, EHR, LIMS, insurance systems). Supports all authentication methods including OAuth 2.0 with automatic token management. 100% Postman feature parity.',
+                useCases: [
+                    'Epic FHIR EMPI lookup - Get complete patient demographics using MRN',
+                    'Cerner EMPI - Retrieve patient master index data with OAuth 2.0',
+                    'LIMS integration - Fetch pending lab orders for patient',
+                    'Insurance verification - Check coverage and eligibility in real-time',
+                    'Provider directory - Lookup NPI, specialty, DEA number from external API'
+                ],
+                example: {
+                    endpoint: 'https://epic-fhir.hospital.org/api/FHIR/R4/Patient/{patientId}',
+                    method: 'GET',
+                    authType: 'oauth2',
+                    oauth2Config: {
+                        grantType: 'client_credentials',
+                        tokenURL: 'https://epic-fhir.hospital.org/oauth2/token',
+                        clientID: 'integration-engine',
+                        clientSecret: '***',
+                        scope: 'patient/*.read'
+                    },
+                    headers: {
+                        'Accept': 'application/fhir+json',
+                        'Epic-Client-ID': 'integration-engine'
+                    },
+                    queryParams: {
+                        '_format': 'json',
+                        '_pretty': 'true'
+                    },
+                    fieldMappings: {
+                        patientId: 'enhancedSegments.PID.fields[2].value'
+                    },
+                    targetPath: 'enriched.empi',
+                    timeoutMs: 5000,
+                    retryCount: 2
+                },
+                parameters: [
+                    { name: 'endpoint', type: 'string', required: true, description: 'API endpoint URL. Use {placeholder} for dynamic values from HL7 fields. Example: https://api.empi.org/patients/{patientId}' },
+                    { name: 'method', type: 'enum (GET|POST|PUT|PATCH)', required: true, description: 'HTTP method for the API request' },
+                    { name: 'authType', type: 'enum (none|basic|bearer|apikey|oauth2)', required: false, description: 'Authentication method: none (no auth), basic (username/password), bearer (token), apikey (API key in header), oauth2 (OAuth 2.0 with automatic token management)' },
+                    { name: 'oauth2Config', type: 'object', required: false, description: 'OAuth 2.0 configuration - ONLY when authType=oauth2. Includes: grantType (client_credentials|password|refresh_token), tokenURL, clientID, clientSecret, scope. Automatic token caching and refresh.' },
+                    { name: 'headers', type: 'object', required: false, description: 'HTTP headers as key-value pairs. Use HeaderBuilder UI for visual configuration. Example: {"Accept": "application/json", "Epic-Client-ID": "integration-engine"}' },
+                    { name: 'queryParams', type: 'object', required: false, description: 'Query parameters as key-value pairs. Use QueryParamBuilder UI for visual configuration with live URL preview. Example: {"_format": "json", "_count": "10"}' },
+                    { name: 'fieldMappings', type: 'object (JSON)', required: false, description: 'Maps placeholder names in URL to HL7 field paths. Example: {"patientId": "enhancedSegments.PID.fields[2].value"} replaces {patientId} in URL with PID-3 value' },
+                    { name: 'targetPath', type: 'string', required: false, description: 'Where to store API response in message data using dot notation. Default: "enriched.api". Example: "enriched.empi" stores response at message.enriched.empi' },
+                    { name: 'timeoutMs', type: 'number (100-30000)', required: false, description: 'API request timeout in milliseconds. Default: 5000 (5 seconds). Prevents hanging on slow APIs' },
+                    { name: 'retryCount', type: 'number (0-5)', required: false, description: 'Number of retry attempts on failure before applying step-level Error Strategy. Default: 0. Uses exponential backoff for network resilience' },
+                    { name: 'Error Handling', type: 'Step-level setting', required: false, description: 'Use "On Error Strategy" in Execution Settings to control pipeline behavior on API failure: "Fail" stops pipeline, "Skip" continues without data, "Use Default Value" continues with defaultValue (if configured in backend executor)' }
+                ]
+            },
             'pre.enrichment': {
                 description: 'Enriches HL7 messages with additional data from external systems (EMPI, EHR, etc.). Enhances message content before FHIR transformation.',
                 useCases: [
@@ -2173,6 +2920,38 @@ class PropertiesPanel {
                     { name: 'sources', type: 'Array<string>', required: true, description: 'List of data sources to query (EMPI, EHR, LIMS, etc.)' },
                     { name: 'timeout_ms', type: 'number', required: false, description: 'Maximum time to wait for enrichment (default: 3000)' },
                     { name: 'failOnError', type: 'boolean', required: false, description: 'Whether to fail pipeline if enrichment fails (default: false)' }
+                ]
+            },
+            'pre.enrichment.metadata': {
+                description: 'Adds processing metadata, timestamps, correlation IDs, and custom organizational fields to messages. Enriches messages with tracking, auditing, and contextual information.',
+                useCases: [
+                    'Add timestamps for message received and processed times (ISO 8601 format)',
+                    'Generate unique correlation IDs for message tracking across systems',
+                    'Add custom organizational metadata (environment, processing node, version)',
+                    'Include interface ID and message ID for troubleshooting',
+                    'Tag messages with source system, facility, or department information',
+                    'Add processing context (server hostname, region, data center)'
+                ],
+                example: {
+                    addTimestamp: true,
+                    addCorrelationId: true,
+                    addInterfaceId: false,
+                    addMessageId: false,
+                    customMetadata: {
+                        "processingNode": "server-01",
+                        "environment": "production",
+                        "facility": "MAIN_CAMPUS",
+                        "department": "RADIOLOGY",
+                        "version": "2.1.0",
+                        "region": "us-east-1"
+                    }
+                },
+                parameters: [
+                    { name: 'addTimestamp', type: 'boolean', required: false, description: 'Add receivedAt and processedAt timestamps in ISO 8601 format (e.g., 2025-10-26T14:30:00Z)' },
+                    { name: 'addCorrelationId', type: 'boolean', required: false, description: 'Generate and add a unique UUID correlation ID for end-to-end message tracking' },
+                    { name: 'addInterfaceId', type: 'boolean', required: false, description: 'Include the interface ID from which the message was received' },
+                    { name: 'addMessageId', type: 'boolean', required: false, description: 'Extract or generate a unique message ID (from MSH.10 if available in HL7 messages)' },
+                    { name: 'customMetadata', type: 'JSON Object', required: false, description: 'Custom key-value pairs to add as metadata. Must be valid JSON format. Example: {"environment": "prod", "version": "1.0", "facility": "MAIN"}. All values are stored as strings.' }
                 ]
             },
             'core.mapping': {

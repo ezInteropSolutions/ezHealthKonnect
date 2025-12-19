@@ -74,8 +74,11 @@ class ToolboxManager {
                 type: 'pre.validation',
                 description: 'Validate fields (required, format, length, pattern)',
                 layer: 'pre',
-                icon: 'fas fa-check-circle',
+                icon: this.getIconForType('pre.validation'),
                 isSystem: true,
+                // Validation defaults: Use standard step controls
+                required: false,  // Uncheck to accept messages with warnings (ACK)
+                onErrorStrategy: 'continue',  // Continue = ACK with warnings, Fail = NACK
                 defaultConfig: {
                     rules: [
                         { field: 'enhancedSegments.MSH.fields[1].value', type: 'required', errorMessage: 'Message type is required' },
@@ -90,7 +93,7 @@ class ToolboxManager {
                 type: 'pre.enrichment',
                 description: 'Enrich from external system',
                 layer: 'pre',
-                icon: 'fas fa-plus-circle',
+                icon: this.getIconForType('pre.enrichment'),
                 isSystem: true,
                 defaultConfig: {
                     source: 'epic',
@@ -103,7 +106,7 @@ class ToolboxManager {
                 type: 'pre.enrichment.metadata',
                 description: 'Add processing metadata (timestamps, IDs, custom fields)',
                 layer: 'pre',
-                icon: 'fas fa-tags',
+                icon: this.getIconForType('pre.enrichment.metadata'),
                 isSystem: true,
                 defaultConfig: {
                     addTimestamp: true,
@@ -113,6 +116,79 @@ class ToolboxManager {
                     customMetadata: {}
                 }
             }),
+            new StepTemplate({
+                id: 'enrich-api',
+                name: 'API Enrichment',
+                type: 'pre.enrichment.api',
+                description: 'Enrich message data from external REST API (EMPI, EHR, LIMS)',
+                layer: 'pre',
+                icon: this.getIconForType('pre.enrichment.api'),
+                isSystem: true,
+                defaultConfig: {
+                    endpoint: 'https://api.example.com/patients/{patientId}',
+                    method: 'GET',
+                    authType: 'none',
+                    fieldMappings: { patientId: 'PID.3' },
+                    targetPath: 'enriched.api',
+                    timeoutMs: 5000,
+                    retryCount: 0,
+                    failOnError: false
+                }
+            }),
+            new StepTemplate({
+                id: 'enrich-database',
+                name: 'Database Enrichment',
+                type: 'pre.enrichment.database',
+                description: 'Query database for additional patient or order data',
+                layer: 'pre',
+                icon: this.getIconForType('pre.enrichment.database'),
+                isSystem: true,
+                defaultConfig: {
+                    databaseType: 'postgresql',
+                    connectionString: 'postgresql://user:pass@localhost:5432/dbname',
+                    query: 'SELECT * FROM patients WHERE patient_id = $1',
+                    queryParams: { patientId: 'PID.3' },
+                    targetPath: 'enriched.database',
+                    timeoutMs: 3000,
+                    failOnError: false
+                }
+            }),
+            new StepTemplate({
+                id: 'enrich-cache',
+                name: 'Cache Enrichment',
+                type: 'pre.enrichment.cache',
+                description: 'Lookup enrichment data from Redis or Memcached',
+                layer: 'pre',
+                icon: this.getIconForType('pre.enrichment.cache'),
+                isSystem: true,
+                defaultConfig: {
+                    cacheType: 'redis',
+                    connectionString: 'redis://localhost:6379',
+                    keyTemplate: 'patient:{patientId}',
+                    keyMappings: { patientId: 'PID.3' },
+                    targetPath: 'enriched.cache',
+                    timeoutMs: 1000,
+                    writeBack: false,
+                    ttlSeconds: 3600,
+                    failOnError: false
+                }
+            }),
+            new StepTemplate({
+                id: 'enrich-script',
+                name: 'Script Enrichment',
+                type: 'pre.enrichment.script',
+                description: 'Calculate custom fields using JavaScript (age, BMI, etc.)',
+                layer: 'pre',
+                icon: this.getIconForType('pre.enrichment.script'),
+                isSystem: true,
+                defaultConfig: {
+                    script: `// Extract patient date of birth\nvar dob = getNestedValue(input, "enhancedSegments.PID.fields.7.value");\n\n// Calculate age\nvar age = calculateAge(dob);\n\n// Return enrichment data\nreturn {\n    age: age,\n    ageGroup: age < 18 ? "pediatric" : "adult"\n};`,
+                    context: {},
+                    targetPath: 'enriched.script',
+                    timeoutMs: 5000,
+                    failOnError: false
+                }
+            }),
 
             new StepTemplate({
                 id: 'hl7-fhir-mapping',
@@ -120,7 +196,7 @@ class ToolboxManager {
                 type: 'core.mapping',
                 description: 'Transform HL7 v2.x to FHIR R4',
                 layer: 'core',
-                icon: 'fas fa-exchange-alt',
+                icon: this.getIconForType('core.mapping.hl7-fhir'),
                 isSystem: true,
                 defaultConfig: {
                     fhir_version: 'R4',
@@ -133,7 +209,7 @@ class ToolboxManager {
                 type: 'post.validation',
                 description: 'Validate FHIR bundle against R4 specification',
                 layer: 'post',
-                icon: 'fas fa-shield-alt',
+                icon: this.getIconForType('post.fhir.validation'),
                 isSystem: true,
                 defaultConfig: {
                     fhir_version: 'R4',
@@ -209,7 +285,7 @@ class ToolboxManager {
                 type: 'post.delivery',
                 description: 'Send FHIR bundle to destination',
                 layer: 'post',
-                icon: 'fas fa-paper-plane',
+                icon: this.getIconForType('post.delivery'),
                 isSystem: true,
                 defaultConfig: {
                     endpoint: 'http://fhir-server:8080/fhir',
@@ -226,7 +302,7 @@ class ToolboxManager {
                 type: 'pre.validation',
                 description: 'Validate field data types (string, number, date)',
                 layer: 'pre',
-                icon: 'fas fa-list-check',
+                icon: this.getIconForType('pre.validation'),
                 isSystem: true,
                 defaultConfig: {
                     rules: [
@@ -243,7 +319,7 @@ class ToolboxManager {
                 type: 'pre.validation',
                 description: 'Validate specific formats (Phone, SSN, Email, etc.)',
                 layer: 'pre',
-                icon: 'fas fa-spell-check',
+                icon: this.getIconForType('pre.validation'),
                 isSystem: true,
                 defaultConfig: {
                     validations: [
@@ -265,7 +341,7 @@ class ToolboxManager {
                 type: 'pre.validation',
                 description: 'Validate numeric ranges (min/max values)',
                 layer: 'pre',
-                icon: 'fas fa-sliders-h',
+                icon: this.getIconForType('pre.validation'),
                 isSystem: true,
                 defaultConfig: {
                     rules: [
@@ -281,7 +357,7 @@ class ToolboxManager {
                 type: 'pre.validation',
                 description: 'Validate relationships between fields',
                 layer: 'pre',
-                icon: 'fas fa-code-branch',
+                icon: this.getIconForType('pre.validation.cross-field'),
                 isSystem: true,
                 defaultConfig: {
                     rules: [
@@ -305,7 +381,7 @@ class ToolboxManager {
                 type: 'core.transformation',
                 description: 'Map source fields to target fields',
                 layer: 'core',
-                icon: 'fas fa-arrows-alt-h',
+                icon: this.getIconForType('core.transformation'),
                 isSystem: true,
                 defaultConfig: {
                     mappings: [
@@ -322,7 +398,7 @@ class ToolboxManager {
                 type: 'pre.transformation',
                 description: 'Split or combine field values',
                 layer: 'pre',
-                icon: 'fas fa-scissors',
+                icon: this.getIconForType('pre.transformation'),
                 isSystem: true,
                 defaultConfig: {
                     operations: [
@@ -348,7 +424,7 @@ class ToolboxManager {
                 type: 'pre.transformation',
                 description: 'Convert date/time formats',
                 layer: 'pre',
-                icon: 'fas fa-calendar-alt',
+                icon: this.getIconForType('pre.transformation'),
                 isSystem: true,
                 defaultConfig: {
                     conversions: [
@@ -368,7 +444,7 @@ class ToolboxManager {
                 type: 'pre.transformation',
                 description: 'Convert units (lb→kg, F→C, in→cm)',
                 layer: 'pre',
-                icon: 'fas fa-balance-scale',
+                icon: this.getIconForType('pre.transformation'),
                 isSystem: true,
                 defaultConfig: {
                     conversions: [
@@ -384,7 +460,7 @@ class ToolboxManager {
                 type: 'pre.transformation',
                 description: 'Uppercase, lowercase, trim, substring operations',
                 layer: 'pre',
-                icon: 'fas fa-font',
+                icon: this.getIconForType('pre.transformation'),
                 isSystem: true,
                 defaultConfig: {
                     operations: [
@@ -401,7 +477,7 @@ class ToolboxManager {
                 type: 'pre.transformation',
                 description: 'Map values using lookup tables (M→Male, F→Female)',
                 layer: 'pre',
-                icon: 'fas fa-table',
+                icon: this.getIconForType('pre.transformation'),
                 isSystem: true,
                 defaultConfig: {
                     lookups: [
@@ -425,7 +501,7 @@ class ToolboxManager {
                 type: 'core.transformation',
                 description: 'Map between code systems (ICD-9→ICD-10, LOINC)',
                 layer: 'core',
-                icon: 'fas fa-code',
+                icon: this.getIconForType('pre.enrichment.script'),
                 isSystem: true,
                 defaultConfig: {
                     mappings: [
@@ -449,7 +525,7 @@ class ToolboxManager {
                 type: 'pre.enrichment',
                 description: 'Calculate age in years from date of birth',
                 layer: 'pre',
-                icon: 'fas fa-birthday-cake',
+                icon: this.getIconForType('pre.enrichment'),
                 isSystem: true,
                 defaultConfig: {
                     dob_field: 'PID.7',
@@ -464,7 +540,7 @@ class ToolboxManager {
                 type: 'pre.enrichment',
                 description: 'Generate unique identifiers',
                 layer: 'pre',
-                icon: 'fas fa-fingerprint',
+                icon: this.getIconForType('pre.enrichment'),
                 isSystem: true,
                 defaultConfig: {
                     fields: [
@@ -480,7 +556,7 @@ class ToolboxManager {
                 type: 'pre.enrichment',
                 description: 'Call external REST API for data enrichment',
                 layer: 'pre',
-                icon: 'fas fa-plug',
+                icon: this.getIconForType('pre.enrichment'),
                 isSystem: true,
                 defaultConfig: {
                     url: 'https://api.example.com/patient/{{patientId}}',
@@ -502,7 +578,7 @@ class ToolboxManager {
                 type: 'pre.enrichment',
                 description: 'Lookup data from database',
                 layer: 'pre',
-                icon: 'fas fa-database',
+                icon: this.getIconForType('pre.enrichment.database'),
                 isSystem: true,
                 defaultConfig: {
                     query: 'SELECT * FROM providers WHERE npi = $1',
@@ -521,7 +597,7 @@ class ToolboxManager {
                 type: 'pre.logic',
                 description: 'Conditional execution based on rules',
                 layer: 'pre',
-                icon: 'fas fa-question-circle',
+                icon: this.getIconForType('pre.logic'),
                 isSystem: true,
                 defaultConfig: {
                     condition: {
@@ -545,7 +621,7 @@ class ToolboxManager {
                 type: 'pre.logic',
                 description: 'Multiple condition branching',
                 layer: 'pre',
-                icon: 'fas fa-sitemap',
+                icon: this.getIconForType('pre.logic'),
                 isSystem: true,
                 defaultConfig: {
                     switch_field: 'parsed.PV1.2.value',
@@ -564,7 +640,7 @@ class ToolboxManager {
                 type: 'core.logic',
                 description: 'Iterate over array elements',
                 layer: 'core',
-                icon: 'fas fa-repeat',
+                icon: this.getIconForType('core.logic'),
                 isSystem: true,
                 defaultConfig: {
                     array_field: 'parsed.OBX',
@@ -584,7 +660,7 @@ class ToolboxManager {
                 type: 'pre.extraction',
                 description: 'Extract specific HL7 segments',
                 layer: 'pre',
-                icon: 'fas fa-filter',
+                icon: this.getIconForType('pre.extraction'),
                 isSystem: true,
                 defaultConfig: {
                     segments: ['PID', 'PV1', 'OBX'],
@@ -598,7 +674,7 @@ class ToolboxManager {
                 type: 'core.transformation',
                 description: 'Build FHIR resource from data',
                 layer: 'core',
-                icon: 'fas fa-cube',
+                icon: this.getIconForType('core.transformation'),
                 isSystem: true,
                 defaultConfig: {
                     resource_type: 'Patient',
@@ -616,7 +692,7 @@ class ToolboxManager {
                 type: 'pre.error_handling',
                 description: 'Error handling with fallback',
                 layer: 'pre',
-                icon: 'fas fa-shield-alt',
+                icon: this.getIconForType('post.fhir.validation'),
                 isSystem: true,
                 defaultConfig: {
                     try_steps: ['step_id_1', 'step_id_2'],
@@ -634,7 +710,7 @@ class ToolboxManager {
                 type: 'post.error_handling',
                 description: 'Retry failed operations with backoff',
                 layer: 'post',
-                icon: 'fas fa-redo',
+                icon: this.getIconForType('post.error_handling'),
                 isSystem: true,
                 defaultConfig: {
                     max_retries: 3,
@@ -653,7 +729,7 @@ class ToolboxManager {
                 type: 'post.quality',
                 description: 'Remove duplicate entries',
                 layer: 'post',
-                icon: 'fas fa-clone',
+                icon: this.getIconForType('post.quality'),
                 isSystem: true,
                 defaultConfig: {
                     array_field: 'bundle.entry',
@@ -667,7 +743,7 @@ class ToolboxManager {
                 type: 'post.quality',
                 description: 'Mask or anonymize PHI data',
                 layer: 'post',
-                icon: 'fas fa-user-secret',
+                icon: this.getIconForType('post.quality'),
                 isSystem: true,
                 defaultConfig: {
                     fields_to_mask: [
@@ -836,7 +912,7 @@ class ToolboxManager {
 
     return input;
 }`,
-            icon: 'fas fa-code',
+            icon: this.getIconForType('pre.enrichment.script'),
             description: 'Custom JavaScript transformation'
         });
 
@@ -911,6 +987,112 @@ class ToolboxManager {
                 }
             });
         });
+    }
+
+    /**
+     * Get icon for step type (automatic mapping)
+     * @param {string} stepType - Step type (e.g., 'pre.validation', 'pre.enrichment.api')
+     * @returns {string} Font Awesome icon class
+     */
+    getIconForType(stepType) {
+        // Comprehensive icon mapping based on step type
+        const iconMap = {
+            // ============================================
+            // VALIDATION STEPS (Pre-Processing)
+            // ============================================
+            'pre.validation': 'fas fa-check-circle',
+            'pre.validation.field': 'fas fa-check-square',
+            'pre.validation.schema': 'fas fa-clipboard-check',
+            'pre.validation.cross-field': 'fas fa-code-branch',
+
+            // ============================================
+            // ENRICHMENT STEPS (Pre-Processing)
+            // ============================================
+            'pre.enrichment': 'fas fa-plus-circle',
+            'pre.enrichment.api': 'fas fa-cloud',
+            'pre.enrichment.database': 'fas fa-database',
+            'pre.enrichment.cache': 'fas fa-bolt',
+            'pre.enrichment.script': 'fas fa-code',
+            'pre.enrichment.metadata': 'fas fa-tags',
+            'pre.extraction': 'fas fa-filter',
+
+            // ============================================
+            // TRANSFORMATION STEPS (Core Processing)
+            // ============================================
+            'core.transformation': 'fas fa-arrows-alt-h',
+            'core.mapping': 'fas fa-project-diagram',
+            'core.mapping.hl7-fhir': 'fas fa-exchange-alt',
+            'core.mapping.custom': 'fas fa-wrench',
+
+            // ============================================
+            // POST-PROCESSING STEPS
+            // ============================================
+            'post.validation': 'fas fa-shield-alt',
+            'post.fhir.validation': 'fas fa-shield-alt',
+            'post.anonymization': 'fas fa-user-secret',
+            'post.audit': 'fas fa-clipboard-list',
+            'post.delivery': 'fas fa-paper-plane',
+            'post.error_handling': 'fas fa-exclamation-triangle',
+            'post.quality': 'fas fa-check-double',
+
+            // ============================================
+            // CONDITIONAL LOGIC
+            // ============================================
+            'pre.logic': 'fas fa-sitemap',
+            'core.logic': 'fas fa-sitemap',
+            'post.logic': 'fas fa-sitemap',
+
+            // ============================================
+            // ERROR HANDLING
+            // ============================================
+            'pre.error': 'fas fa-exclamation-triangle',
+            'core.error': 'fas fa-exclamation-triangle',
+            'post.error': 'fas fa-exclamation-triangle',
+
+            // ============================================
+            // CUSTOM/SCRIPT STEPS
+            // ============================================
+            'custom': 'fas fa-cog',
+            'custom.script': 'fas fa-file-code',
+            'custom.javascript': 'fas fa-js',
+
+            // ============================================
+            // SPECIALIZED ENRICHMENT
+            // ============================================
+            'pre.enrichment.empi': 'fas fa-id-card',
+            'pre.enrichment.terminology': 'fas fa-book-medical',
+            'pre.enrichment.provider': 'fas fa-user-md',
+            'pre.enrichment.location': 'fas fa-map-marker-alt',
+
+            // ============================================
+            // DEFAULT
+            // ============================================
+            'default': 'fas fa-cog'
+        };
+
+        // Try exact match first
+        if (iconMap[stepType]) {
+            return iconMap[stepType];
+        }
+
+        // Try partial match (e.g., 'pre.validation.custom' → 'pre.validation')
+        for (const [type, icon] of Object.entries(iconMap)) {
+            if (stepType.startsWith(type + '.')) {
+                return icon;
+            }
+        }
+
+        // Try category match (e.g., 'pre.enrichment.xyz' → 'pre.enrichment')
+        const parts = stepType.split('.');
+        if (parts.length >= 2) {
+            const category = parts.slice(0, 2).join('.');
+            if (iconMap[category]) {
+                return iconMap[category];
+            }
+        }
+
+        // Default fallback
+        return iconMap['default'];
     }
 
     /**

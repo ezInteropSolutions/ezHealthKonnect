@@ -64,47 +64,41 @@ func (e *FieldValidationExecutor) Execute(
 		return inputData, err
 	}
 
-	// Check validation mode - skip validation if mode is no_validation
-	if config.ValidationMode == models.ValidationModeNoValidation {
-		log.Printf("⏭️  Skipping validation (mode: no_validation)")
-		e.PostExecute(ctx, step, nil, time.Since(start))
-		return inputData, nil
-	}
-
 	// Run validations
 	result := e.validateRules(config, inputData)
 
-	// Handle validation errors based on mode
+	// Handle validation errors based on standard step controls
 	if !result.Valid {
 		errMsg := e.formatFieldValidationErrors(result.Errors, config.AddFieldNames)
-		mode := config.ValidationMode
-		if mode == "" {
-			mode = models.ValidationModeAcceptAndFlag // Default
-		}
 
-		if mode == models.ValidationModeStrictReject {
+		// Determine behavior based on step-level controls
+		// Required=true or OnErrorStrategy="fail" → Return error (NACK sent, pipeline stops)
+		// Required=false and OnErrorStrategy="continue" → Return nil (ACK sent, pipeline continues)
+		if step.Required || step.OnErrorStrategy == "fail" {
 			// STRICT MODE: Fail the pipeline, send NACK
-			log.Printf("❌ [Strict Validation] Validation failed - pipeline will stop")
+			log.Printf("❌ [Strict Mode] Validation failed - pipeline will stop (Required=%v, OnErrorStrategy=%s)",
+				step.Required, step.OnErrorStrategy)
 			err := fmt.Errorf("validation failed: %s", errMsg)
 			inputData["_validation_status"] = "rejected"
 			inputData["_validation_errors"] = result.Errors
+			inputData["_ack_response"] = "NACK"
 
 			// Publish validation feedback (rejected)
-			e.publishValidationFeedback(ctx, mode, "rejected", result.Errors, time.Since(start))
+			e.publishValidationFeedback(ctx, "rejected", result.Errors, time.Since(start))
 
 			e.PostExecute(ctx, step, err, time.Since(start))
 			return inputData, err
-		}
-
-		if mode == models.ValidationModeAcceptAndFlag {
+		} else {
 			// ACCEPT & FLAG MODE: Continue processing with warnings, send ACK
-			log.Printf("⚠️  [Accept & Flag] Validation warnings: %s", errMsg)
+			log.Printf("⚠️  [Accept & Flag] Validation warnings: %s (Required=%v, OnErrorStrategy=%s)",
+				errMsg, step.Required, step.OnErrorStrategy)
 			inputData["_validation_status"] = "warning"
 			inputData["_validation_warnings"] = result.Errors
 			inputData["_requires_review"] = true
+			inputData["_ack_response"] = "ACK"
 
 			// Publish validation feedback (warnings)
-			e.publishValidationFeedback(ctx, mode, "warning", result.Errors, time.Since(start))
+			e.publishValidationFeedback(ctx, "warning", result.Errors, time.Since(start))
 
 			e.PostExecute(ctx, step, nil, time.Since(start))
 			return inputData, nil
@@ -113,7 +107,8 @@ func (e *FieldValidationExecutor) Execute(
 
 	// Validation passed
 	inputData["_validation_status"] = "passed"
-	e.publishValidationFeedback(ctx, config.ValidationMode, "passed", nil, time.Since(start))
+	inputData["_ack_response"] = "ACK"
+	e.publishValidationFeedback(ctx, "passed", nil, time.Since(start))
 
 	e.PostExecute(ctx, step, nil, time.Since(start))
 	return inputData, nil
@@ -322,7 +317,6 @@ func (e *FieldValidationExecutor) GetStepType() string {
 // publishValidationFeedback publishes validation results to the ProcessingEngine
 func (e *FieldValidationExecutor) publishValidationFeedback(
 	ctx context.Context,
-	mode models.ValidationACKMode,
 	status string,
 	errors []models.FieldValidationError,
 	processingTime time.Duration,
@@ -341,6 +335,14 @@ func (e *FieldValidationExecutor) publishValidationFeedback(
 	if messageID == "" || interfaceID == "" {
 		log.Printf("⚠️  Missing messageID or interfaceID in context")
 		return
+	}
+
+	// Mode is no longer a separate parameter - determined by status
+	var mode models.ValidationACKMode
+	if status == "rejected" {
+		mode = models.ValidationModeStrictReject
+	} else {
+		mode = models.ValidationModeAcceptAndFlag
 	}
 
 	feedback := models.NewValidationFeedback(

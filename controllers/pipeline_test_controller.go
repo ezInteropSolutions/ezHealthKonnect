@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"ezhealthkonnect/hl7"
+	"ezhealthkonnect/models"
 	"ezhealthkonnect/services"
 
 	"github.com/gin-gonic/gin"
@@ -17,16 +18,19 @@ import (
 
 // PipelineTestController handles pipeline testing operations
 type PipelineTestController struct {
-	db              *sql.DB
-	transformService *services.HL7FHIRTransformServiceV3
+	db                *sql.DB
+	transformService  *services.HL7FHIRTransformServiceV3
+	pipelineService   *services.TransformationPipelineService
 }
 
 // NewPipelineTestController creates a new pipeline test controller
 func NewPipelineTestController(db *sql.DB) *PipelineTestController {
 	transformService := services.NewHL7FHIRTransformServiceV3(db)
+	pipelineService := services.NewTransformationPipelineService(db)
 	return &PipelineTestController{
-		db:              db,
+		db:               db,
 		transformService: transformService,
+		pipelineService:  pipelineService,
 	}
 }
 
@@ -225,6 +229,20 @@ func (c *PipelineTestController) executePipeline(pipeline map[string]interface{}
 						for k, v := range stepResult.Output {
 							currentData[k] = v
 						}
+
+						// Extract validation warnings if present
+						if validationStatus, ok := stepResult.Output["_validation_status"].(string); ok && validationStatus == "warning" {
+							if warnings, ok := stepResult.Output["_validation_warnings"].([]interface{}); ok {
+								for _, warning := range warnings {
+									if warningMap, ok := warning.(map[string]interface{}); ok {
+										field := warningMap["field"]
+										errorMsg := warningMap["error"]
+										response.Warnings = append(response.Warnings,
+											fmt.Sprintf("[%s] %s: %s", stepName, field, errorMsg))
+									}
+								}
+							}
+						}
 					}
 				}
 			}
@@ -287,7 +305,7 @@ func (c *PipelineTestController) executeStep(step map[string]interface{}, inputD
 	return result
 }
 
-// executeHL7Validation validates HL7 message structure
+// executeHL7Validation validates HL7 message structure using REAL validation executor
 func (c *PipelineTestController) executeHL7Validation(inputData map[string]interface{}, config map[string]interface{}) StepExecutionResult {
 	startTime := time.Now()
 	result := StepExecutionResult{
@@ -305,7 +323,7 @@ func (c *PipelineTestController) executeHL7Validation(inputData map[string]inter
 		return result
 	}
 
-	// Parse HL7 with real schema parser
+	// Parse HL7 with real schema parser first
 	parsed := hl7.ParseWithRealSchema(rawMessage)
 	if parsed == nil || !parsed.SchemaLoaded {
 		result.Success = false
@@ -314,16 +332,59 @@ func (c *PipelineTestController) executeHL7Validation(inputData map[string]inter
 		return result
 	}
 
+	// Store parsed message for validation executor
+	inputData["parsed_hl7"] = parsed
+
+	// Convert parsed HL7 to proper format for validation
+	parsedJSON, _ := json.Marshal(parsed)
+	var parsedData map[string]interface{}
+	json.Unmarshal(parsedJSON, &parsedData)
+
+	// Create transformation step with validation config
+	step := &models.TransformationStep{
+		StepName:        "Field Validation",
+		StepType:        "pre.validation",
+		Required:        false, // Will be set from actual step config
+		OnErrorStrategy: "continue", // Will be set from actual step config
+		Config:          config,
+	}
+
+	// Execute REAL validation using ExecutorRegistry
+	ctx := context.Background()
+	output, err := c.pipelineService.GetExecutorRegistry().ExecuteStep(ctx, *step, parsedData)
+
+	if err != nil {
+		// Validation failed with Required=true or OnErrorStrategy=fail
+		result.Success = false
+		result.Error = err.Error()
+		result.Output["_validation_status"] = "rejected"
+		if errors, ok := output["_validation_errors"]; ok {
+			result.Output["_validation_errors"] = errors
+		}
+	} else {
+		// Check validation status in output
+		validationStatus, _ := output["_validation_status"].(string)
+
+		if validationStatus == "warning" {
+			// Validation found issues but continuing
+			result.Success = true // Step succeeded (didn't fail pipeline)
+			result.Output["_validation_status"] = "warning"
+			if warnings, ok := output["_validation_warnings"]; ok {
+				result.Output["_validation_warnings"] = warnings
+				result.Output["message"] = "Validation passed with warnings - see _validation_warnings"
+			}
+		} else {
+			// Validation passed completely
+			result.Success = true
+			result.Output["_validation_status"] = "passed"
+			result.Output["message"] = "Validation passed - all rules satisfied"
+		}
+	}
+
+	// Always include basic info
 	result.Output["message_type"] = parsed.MessageType
 	result.Output["version"] = parsed.Version
 	result.Output["segments_count"] = len(parsed.EnhancedSegments)
-	result.Output["schema_loaded"] = parsed.SchemaLoaded
-	result.Output["dictionary_used"] = parsed.DictionaryUsed
-	result.Output["validation_errors"] = parsed.ValidationErrors
-	result.Output["message"] = fmt.Sprintf("HL7 validation passed - %d segments parsed", len(parsed.EnhancedSegments))
-
-	// Store parsed message for next steps
-	inputData["parsed_hl7"] = parsed
 
 	result.ExecutionMs = time.Since(startTime).Milliseconds()
 	return result

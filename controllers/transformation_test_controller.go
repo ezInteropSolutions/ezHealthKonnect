@@ -70,19 +70,36 @@ func (c *TransformationTestController) TestPipeline(ctx *gin.Context) {
 	log.Printf("🔄 [Test] Executing %d steps...", len(steps))
 	results, execErr := c.executeSteps(steps, parsedJSON)
 
+	// Extract warnings from results
+	warnings := []string{}
+	if allWarnings, ok := parsedJSON["_all_warnings"].([]string); ok {
+		warnings = allWarnings
+		log.Printf("⚠️ [Test] Found %d warnings during execution", len(warnings))
+	}
+
 	if execErr != nil {
 		log.Printf("❌ [Test] Execution failed: %v", execErr)
 	} else {
 		log.Printf("✅ [Test] Execution completed, %d results", len(results))
+		if len(warnings) > 0 {
+			log.Printf("⚠️ [Test] Execution succeeded with %d warnings", len(warnings))
+		}
 	}
 
-	ctx.JSON(http.StatusOK, gin.H{
+	response := gin.H{
 		"success":           execErr == nil,
 		"error":             formatError(execErr),
 		"execution_results": results,
 		"parsed_message":    parsedJSON,
 		"steps_count":       len(steps),
-	})
+	}
+
+	// Add warnings if any
+	if len(warnings) > 0 {
+		response["warnings"] = warnings
+	}
+
+	ctx.JSON(http.StatusOK, response)
 }
 
 func (c *TransformationTestController) parseTestMessage(message string) map[string]interface{} {
@@ -160,6 +177,7 @@ func (c *TransformationTestController) loadPipelineSteps(pipelineID string) ([]*
 func (c *TransformationTestController) executeSteps(steps []*models.TransformationStep, data map[string]interface{}) ([]map[string]interface{}, error) {
 	results := []map[string]interface{}{}
 	currentData := data
+	warnings := []string{}
 
 	for i, step := range steps {
 		log.Printf("   Step %d: %s (type: %s)", i+1, step.StepName, step.StepType)
@@ -168,10 +186,11 @@ func (c *TransformationTestController) executeSteps(steps []*models.Transformati
 		if executor == nil {
 			log.Printf("   ⚠️ No executor found for type: %s", step.StepType)
 			results = append(results, map[string]interface{}{
-				"step":    step.StepName,
-				"type":    step.StepType,
-				"status":  "skipped",
-				"message": fmt.Sprintf("No executor for type: %s", step.StepType),
+				"step_name":  step.StepName,
+				"step_type":  step.StepType,
+				"success":    false,
+				"error":      fmt.Sprintf("No executor for type: %s", step.StepType),
+				"output":     map[string]interface{}{},
 			})
 			continue
 		}
@@ -183,22 +202,42 @@ func (c *TransformationTestController) executeSteps(steps []*models.Transformati
 		if err != nil {
 			log.Printf("   ❌ Step failed: %v", err)
 			results = append(results, map[string]interface{}{
-				"step":   step.StepName,
-				"type":   step.StepType,
-				"status": "failed",
-				"error":  err.Error(),
+				"step_name":  step.StepName,
+				"step_type":  step.StepType,
+				"success":    false,
+				"error":      err.Error(),
+				"output":     output,
 			})
 			return results, err
 		}
 
 		log.Printf("   ✅ Step completed successfully")
+
+		// Check for validation warnings in output
+		if validationStatus, ok := output["_validation_status"].(string); ok && validationStatus == "warning" {
+			if validationWarnings, ok := output["_validation_warnings"].([]models.FieldValidationError); ok {
+				for _, warning := range validationWarnings {
+					warningMsg := fmt.Sprintf("[%s] %s: %s", step.StepName, warning.Field, warning.Message)
+					warnings = append(warnings, warningMsg)
+					log.Printf("   ⚠️ Validation warning: %s", warningMsg)
+				}
+			}
+		}
+
 		results = append(results, map[string]interface{}{
-			"step":   step.StepName,
-			"type":   step.StepType,
-			"status": "success",
+			"step_name":  step.StepName,
+			"step_type":  step.StepType,
+			"success":    true,
+			"output":     output,
 		})
 
 		currentData = output
+	}
+
+	// Add warnings to the last result context if any were found
+	if len(warnings) > 0 {
+		// Store warnings in a way the caller can access them
+		currentData["_all_warnings"] = warnings
 	}
 
 	return results, nil

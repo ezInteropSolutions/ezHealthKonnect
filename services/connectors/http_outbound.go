@@ -1,18 +1,16 @@
 // services/connectors/http_outbound.go
 // HTTP Outbound Connector - Delivers messages via HTTP/HTTPS POST
+// Uses shared HTTPClientService for OOP code reuse
 
 package connectors
 
 import (
-	"bytes"
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"ezhealthkonnect/models"
+	httpservice "ezhealthkonnect/services/http"
 	"fmt"
-	"io"
 	"log"
-	"net/http"
 	"strings"
 	"sync"
 	"time"
@@ -21,19 +19,14 @@ import (
 // HTTPOutboundConnector implements HTTP/HTTPS message delivery
 type HTTPOutboundConnector struct {
 	*BaseOutboundConnector
-	endpoint       string
-	method         string // POST, PUT, PATCH
-	authType       string
-	authUsername   string
-	authPassword   string
-	bearerToken    string
-	apiKey         string
-	apiKeyHeader   string
-	timeout        time.Duration
-	retryAttempts  int
-	retryDelay     time.Duration
-	client         *http.Client
-	mu             sync.RWMutex
+	endpoint      string
+	method        string // POST, PUT, PATCH
+	authConfig    *httpservice.AuthConfig
+	timeout       time.Duration
+	retryAttempts int
+	retryDelay    time.Duration
+	httpService   *httpservice.HTTPClientService
+	mu            sync.RWMutex
 }
 
 // NewHTTPOutboundConnector creates a new HTTP outbound connector
@@ -41,7 +34,7 @@ func NewHTTPOutboundConnector() OutboundConnector {
 	metadata := ConnectorMetadata{
 		TypeName:           "http_outbound",
 		DisplayName:        "HTTP/HTTPS Endpoint",
-		Version:            "1.0.0",
+		Version:            "2.0.0", // Upgraded to use shared HTTPClientService
 		Category:           "outbound",
 		Mode:               "push",
 		ImplementationLang: "go",
@@ -58,7 +51,7 @@ func NewHTTPOutboundConnector() OutboundConnector {
 		timeout:               30 * time.Second,
 		retryAttempts:         3,
 		retryDelay:            1 * time.Second,
-		apiKeyHeader:          "X-API-Key", // Default
+		httpService:           httpservice.NewHTTPClientService(30 * time.Second),
 	}
 }
 
@@ -105,41 +98,49 @@ func (h *HTTPOutboundConnector) Initialize(config []byte) error {
 	}
 
 	// Authentication
-	if authType, ok := cfg["authType"].(string); ok {
-		h.authType = authType
-		log.Printf("🔍 Auth type set to: %s", h.authType)
+	if authType, ok := cfg["authType"].(string); ok && authType != "" && authType != "none" {
+		log.Printf("🔍 Auth type set to: %s", authType)
+
+		h.authConfig = &httpservice.AuthConfig{}
 
 		switch authType {
 		case "basic":
-			h.authUsername, _ = cfg["username"].(string)
-			h.authPassword, _ = cfg["password"].(string)
-			log.Printf("🔐 Basic Auth configured: username='%s'", h.authUsername)
+			h.authConfig.Type = httpservice.AuthTypeBasic
+			h.authConfig.Username, _ = cfg["username"].(string)
+			h.authConfig.Password, _ = cfg["password"].(string)
+			log.Printf("🔐 Basic Auth configured: username='%s'", h.authConfig.Username)
 
 		case "bearer":
-			h.bearerToken, _ = cfg["bearerToken"].(string)
+			h.authConfig.Type = httpservice.AuthTypeBearer
+			h.authConfig.BearerToken, _ = cfg["bearerToken"].(string)
 			log.Printf("🔐 Bearer Token configured")
 
 		case "api_key":
-			h.apiKey, _ = cfg["apiKey"].(string)
+			h.authConfig.Type = httpservice.AuthTypeAPIKey
+			h.authConfig.APIKey, _ = cfg["apiKey"].(string)
 			if header, ok := cfg["apiKeyHeader"].(string); ok && header != "" {
-				h.apiKeyHeader = header
+				h.authConfig.APIKeyHeader = header
+			} else {
+				h.authConfig.APIKeyHeader = "X-API-Key"
 			}
-			log.Printf("🔐 API Key configured (header: %s)", h.apiKeyHeader)
+			log.Printf("🔐 API Key configured (header: %s)", h.authConfig.APIKeyHeader)
 		}
 	}
 
-	// Create HTTP client with timeout
-	h.client = &http.Client{
-		Timeout: h.timeout,
-	}
+	// Update HTTP service timeout
+	h.httpService.SetTimeout(h.timeout)
 
+	authTypeStr := "none"
+	if h.authConfig != nil {
+		authTypeStr = string(h.authConfig.Type)
+	}
 	log.Printf("✅ HTTP Outbound initialized: endpoint=%s, method=%s, auth=%s, timeout=%v",
-		h.endpoint, h.method, h.authType, h.timeout)
+		h.endpoint, h.method, authTypeStr, h.timeout)
 
 	return nil
 }
 
-// Send delivers a message to the HTTP endpoint
+// Send delivers a message to the HTTP endpoint using shared HTTPClientService
 func (h *HTTPOutboundConnector) Send(ctx context.Context, message *models.OutboundMessage) (*DeliveryResult, error) {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
@@ -148,87 +149,64 @@ func (h *HTTPOutboundConnector) Send(ctx context.Context, message *models.Outbou
 	result := &DeliveryResult{
 		MessageID:  message.MessageID,
 		Timestamp:  startTime,
-		RetryCount: 0,
+		RetryCount: h.retryAttempts,
 		Success:    false,
 		Metadata:   make(map[string]interface{}),
 	}
 
 	log.Printf("🚀 [HTTP OUT] Sending message %s to %s", message.MessageID, h.endpoint)
 
-	// Create HTTP request
-	req, err := http.NewRequestWithContext(ctx, h.method, h.endpoint, bytes.NewReader([]byte(message.Content)))
-	if err != nil {
-		result.ErrorMessage = fmt.Sprintf("Failed to create request: %v", err)
-		result.DurationMs = time.Since(startTime).Milliseconds()
-		return result, err
-	}
-
-	// Add headers from message
+	// Prepare headers
+	headers := make(map[string]string)
 	for key, value := range message.Headers {
-		req.Header.Set(key, value)
+		headers[key] = value
 	}
 
 	// Set Content-Type if provided
 	if message.ContentType != "" {
-		req.Header.Set("Content-Type", message.ContentType)
+		headers["Content-Type"] = message.ContentType
 	}
 
-	// Add authentication
-	h.addAuthentication(req)
-
-	// Execute with retries
-	var resp *http.Response
-	var lastErr error
-
-	for attempt := 0; attempt <= h.retryAttempts; attempt++ {
-		if attempt > 0 {
-			log.Printf("🔄 [HTTP OUT] Retry attempt %d/%d for message %s", attempt, h.retryAttempts, message.MessageID)
-			time.Sleep(h.retryDelay)
-			result.RetryCount = attempt
-		}
-
-		resp, lastErr = h.client.Do(req)
-		if lastErr == nil {
-			break
-		}
-
-		log.Printf("⚠️ [HTTP OUT] Attempt %d failed: %v", attempt+1, lastErr)
+	// Create request configuration
+	requestConfig := &httpservice.RequestConfig{
+		Method:     h.method,
+		URL:        h.endpoint,
+		Headers:    headers,
+		Body:       message.Content, // Will be JSON marshaled if needed
+		Timeout:    h.timeout,
+		RetryCount: h.retryAttempts,
+		RetryDelay: h.retryDelay,
 	}
+
+	// Execute request using shared HTTP service
+	resp, err := h.httpService.Execute(ctx, requestConfig, h.authConfig)
 
 	result.DurationMs = time.Since(startTime).Milliseconds()
 
-	if lastErr != nil {
-		result.ErrorMessage = fmt.Sprintf("HTTP request failed after %d retries: %v", result.RetryCount, lastErr)
-		log.Printf("❌ [HTTP OUT] Message %s delivery failed: %s", message.MessageID, result.ErrorMessage)
-		return result, lastErr
-	}
-	defer resp.Body.Close()
-
-	// Read response body
-	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
-		log.Printf("⚠️ [HTTP OUT] Failed to read response body: %v", err)
-		respBody = []byte{}
+		result.ErrorMessage = fmt.Sprintf("HTTP request failed: %v", err)
+		log.Printf("❌ [HTTP OUT] Message %s delivery failed: %s", message.MessageID, result.ErrorMessage)
+		return result, err
 	}
 
 	// Store response details in metadata
 	result.Metadata["status_code"] = resp.StatusCode
-	result.Metadata["response_body"] = string(respBody)
-	result.Metadata["response_headers"] = resp.Header
+	result.Metadata["response_body"] = string(resp.Body)
+	result.Metadata["response_headers"] = resp.Headers
 
-	// Check response status
+	// Check response status (already validated by HTTPClientService, but double-check)
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 		result.Success = true
 		result.Acknowledgment = fmt.Sprintf("HTTP %d", resp.StatusCode)
 		log.Printf("✅ [HTTP OUT] Message %s delivered successfully (status: %d, duration: %dms)",
 			message.MessageID, resp.StatusCode, result.DurationMs)
-		log.Printf("📥 [HTTP OUT] Response: %s", truncateString(string(respBody), 200))
+		log.Printf("📥 [HTTP OUT] Response: %s", truncateString(string(resp.Body), 200))
 	} else {
 		result.Success = false
-		result.ErrorMessage = fmt.Sprintf("HTTP %d: %s", resp.StatusCode, string(respBody))
+		result.ErrorMessage = fmt.Sprintf("HTTP %d: %s", resp.StatusCode, string(resp.Body))
 		log.Printf("❌ [HTTP OUT] Message %s delivery failed with HTTP %d (duration: %dms)",
 			message.MessageID, resp.StatusCode, result.DurationMs)
-		log.Printf("📥 [HTTP OUT] Error response: %s", truncateString(string(respBody), 200))
+		log.Printf("📥 [HTTP OUT] Error response: %s", truncateString(string(resp.Body), 200))
 	}
 
 	return result, nil
@@ -265,19 +243,16 @@ func (h *HTTPOutboundConnector) Validate() error {
 
 // TestConnection checks if the endpoint is reachable
 func (h *HTTPOutboundConnector) TestConnection(ctx context.Context) error {
-	req, err := http.NewRequestWithContext(ctx, "HEAD", h.endpoint, nil)
-	if err != nil {
-		return fmt.Errorf("failed to create test request: %w", err)
+	requestConfig := &httpservice.RequestConfig{
+		Method:  "HEAD",
+		URL:     h.endpoint,
+		Timeout: 5 * time.Second,
 	}
 
-	h.addAuthentication(req)
-
-	client := &http.Client{Timeout: 5 * time.Second}
-	resp, err := client.Do(req)
+	resp, err := h.httpService.Execute(ctx, requestConfig, h.authConfig)
 	if err != nil {
 		return fmt.Errorf("endpoint not reachable: %w", err)
 	}
-	defer resp.Body.Close()
 
 	if resp.StatusCode >= 500 {
 		return fmt.Errorf("endpoint returned server error: %d", resp.StatusCode)
@@ -291,43 +266,24 @@ func (h *HTTPOutboundConnector) GetStatus() ConnectorStatus {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 
+	authTypeStr := "none"
+	if h.authConfig != nil {
+		authTypeStr = string(h.authConfig.Type)
+	}
+
 	status := ConnectorStatus{
-		Connected:    h.client != nil,
+		Connected:    h.httpService != nil,
 		LastActivity: time.Now(),
 		State:        StateReady,
 		Metadata: map[string]string{
 			"endpoint": h.endpoint,
 			"method":   h.method,
-			"auth":     h.authType,
+			"auth":     authTypeStr,
 			"timeout":  h.timeout.String(),
 		},
 	}
 
 	return status
-}
-
-// addAuthentication adds authentication headers to the request
-func (h *HTTPOutboundConnector) addAuthentication(req *http.Request) {
-	switch h.authType {
-	case "basic":
-		if h.authUsername != "" && h.authPassword != "" {
-			auth := base64.StdEncoding.EncodeToString([]byte(h.authUsername + ":" + h.authPassword))
-			req.Header.Set("Authorization", "Basic "+auth)
-			log.Printf("🔐 [HTTP OUT] Added Basic Auth for user: %s", h.authUsername)
-		}
-
-	case "bearer":
-		if h.bearerToken != "" {
-			req.Header.Set("Authorization", "Bearer "+h.bearerToken)
-			log.Printf("🔐 [HTTP OUT] Added Bearer Token")
-		}
-
-	case "api_key":
-		if h.apiKey != "" {
-			req.Header.Set(h.apiKeyHeader, h.apiKey)
-			log.Printf("🔐 [HTTP OUT] Added API Key header: %s", h.apiKeyHeader)
-		}
-	}
 }
 
 // truncateString truncates a string to maxLen characters

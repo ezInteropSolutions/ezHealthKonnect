@@ -57,12 +57,17 @@ func (er *ExecutorRegistry) autoRegisterExecutors() {
 	// Essential OOB executor
 	er.Register(NewPassthroughExecutor())
 
-	// Pre-processing executors
+	// Pre-processing executors - Validation
 	er.Register(NewValidationExecutor(er.db))
-	er.Register(enrichment.NewMetadataEnrichmentExecutor())
-	er.Register(validation.NewFieldValidationExecutor()) // Metadata Enrichment
-	er.Register(enrichment.NewMetadataEnrichmentExecutor())
-	er.Register(NewEnrichmentExecutor(er.db))
+	er.Register(validation.NewFieldValidationExecutor())
+
+	// Pre-processing executors - Enrichment (Strategy Pattern)
+	er.Register(enrichment.NewMetadataEnrichmentExecutor())  // Metadata enrichment
+	er.Register(enrichment.NewAPIEnrichmentExecutor())       // API enrichment
+	er.Register(enrichment.NewDatabaseEnrichmentExecutor(er.db)) // Database enrichment
+	er.Register(enrichment.NewCacheEnrichmentExecutor())     // Cache enrichment (Redis/Memcached)
+	er.Register(enrichment.NewScriptEnrichmentExecutor())    // Script-based enrichment
+	er.Register(NewEnrichmentExecutor(er.db))                // Legacy enrichment (backward compatibility)
 
 	// Core executors
 	hl7FhirExecutor := NewHL7FHIRMappingExecutor(er.db)
@@ -77,7 +82,7 @@ func (er *ExecutorRegistry) autoRegisterExecutors() {
 	er.Register(NewJavaScriptExecutor())
 	er.Register(NewGenericExecutor())
 
-	log.Println("  ✓ Registered: Passthrough, Validation, Enrichment, HL7→FHIR Mapping, FHIR Validation, JavaScript, Generic")
+	log.Println("  ✓ Registered: Passthrough, Validation (Field), Enrichment (Metadata, API, Database, Cache, Script), HL7→FHIR Mapping, FHIR Validation, JavaScript, Generic")
 }
 
 // Register adds an executor to the registry
