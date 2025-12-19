@@ -62,6 +62,7 @@ type ValidationConfig struct {
 	ValidationMode   ValidationACKMode `json:"validation_mode,omitempty"`  // How to handle validation failures
 	StopOnFirstError bool              `json:"stopOnFirstError,omitempty"` // Stop validation on first failure
 	AddFieldNames    bool              `json:"addFieldNames,omitempty"`    // Auto-add field names to error messages
+	DetailedOutput   bool              `json:"detailedOutput,omitempty"`   // Include field-by-field validation results in output
 }
 
 // FieldValidationResult represents the result of a validation

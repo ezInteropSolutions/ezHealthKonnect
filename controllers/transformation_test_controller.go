@@ -87,11 +87,15 @@ func (c *TransformationTestController) TestPipeline(ctx *gin.Context) {
 		}
 	}
 
-	// Clean parsed message - remove internal metadata fields that were added by steps
+	// Clean parsed message - remove internal metadata and step-added fields
 	cleanedMessage := make(map[string]interface{})
 	for k, v := range parsedJSON {
 		// Skip internal/temporary fields added by executors
 		if strings.HasPrefix(k, "_") {
+			continue
+		}
+		// Skip metadata field - it's shown in the enrichment step output
+		if k == "metadata" {
 			continue
 		}
 		cleanedMessage[k] = v
@@ -254,13 +258,27 @@ func (c *TransformationTestController) executeSteps(steps []*models.Transformati
 				stepOutput["validation_warnings"] = validationWarnings
 				stepOutput["warning_count"] = len(validationWarnings)
 			}
-			// Extract field-level results if available
-			if fieldResults, ok := output["_field_validation_results"].([]map[string]interface{}); ok {
-				stepOutput["field_results"] = fieldResults
+
+			// Check if detailed output is enabled in step config
+			showDetailedOutput := false
+			if config, ok := step.Config["detailedOutput"].(bool); ok {
+				showDetailedOutput = config
+			}
+
+			// Extract field-level results only if detailed output is enabled
+			if showDetailedOutput {
+				if fieldResults, ok := output["_field_validation_results"].([]map[string]interface{}); ok {
+					stepOutput["field_results"] = fieldResults
+				}
+			} else {
+				// Summary only - just show total fields validated
+				if fieldResults, ok := output["_field_validation_results"].([]map[string]interface{}); ok {
+					stepOutput["fields_validated"] = len(fieldResults)
+				}
 			}
 
 		case "pre.enrichment.api":
-			// API enrichment: Extract API call metadata only
+			// API enrichment: Extract API call metadata AND response data
 			if endpoint, ok := step.Config["endpoint"].(string); ok {
 				stepOutput["api_endpoint"] = endpoint
 			}
@@ -269,22 +287,31 @@ func (c *TransformationTestController) executeSteps(steps []*models.Transformati
 			}
 			if targetPath, ok := step.Config["targetPath"].(string); ok {
 				stepOutput["enriched_path"] = targetPath
+
+				// Extract the actual API response data
+				apiResponse := getNestedValue(output, targetPath)
+				if apiResponse != nil {
+					stepOutput["api_response"] = apiResponse
+				}
 			}
 			stepOutput["message"] = "API enrichment completed"
 
 		case "pre.enrichment.metadata":
-			// Metadata enrichment: Show what metadata was added
-			addedFields := []string{}
-			for k := range output {
-				// Find fields that were added (not in original message structure)
-				if !strings.HasPrefix(k, "_") && k != "enhancedSegments" && k != "raw" &&
-				   k != "messageType" && k != "version" && k != "dictionaryUsed" &&
-				   k != "schemaLoaded" && k != "segmentOrder" {
-					addedFields = append(addedFields, k)
+			// Metadata enrichment: Show the actual metadata that was added
+			if metadata, ok := output["metadata"].(map[string]interface{}); ok {
+				stepOutput["metadata"] = metadata
+				stepOutput["fields_added"] = len(metadata)
+
+				// List field names for quick reference
+				fieldNames := make([]string, 0, len(metadata))
+				for k := range metadata {
+					fieldNames = append(fieldNames, k)
 				}
+				stepOutput["field_names"] = fieldNames
+				stepOutput["message"] = fmt.Sprintf("Added %d metadata fields", len(metadata))
+			} else {
+				stepOutput["message"] = "No metadata added"
 			}
-			stepOutput["metadata_added"] = addedFields
-			stepOutput["message"] = fmt.Sprintf("Added %d metadata fields", len(addedFields))
 
 		default:
 			// For other steps, copy non-message fields
@@ -332,6 +359,27 @@ func getConfigKeys(config map[string]interface{}) []string {
 		keys = append(keys, k)
 	}
 	return keys
+}
+
+// getNestedValue retrieves a value from nested maps using dot notation
+// e.g., "enriched.empi" or "metadata.correlationId"
+func getNestedValue(data map[string]interface{}, path string) interface{} {
+	if path == "" {
+		return nil
+	}
+
+	parts := strings.Split(path, ".")
+	var current interface{} = data
+
+	for _, part := range parts {
+		if currentMap, ok := current.(map[string]interface{}); ok {
+			current = currentMap[part]
+		} else {
+			return nil
+		}
+	}
+
+	return current
 }
 
 func (c *TransformationTestController) GetPipeline(ctx *gin.Context) {
