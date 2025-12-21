@@ -101,11 +101,52 @@ func (c *TransformationTestController) TestPipeline(ctx *gin.Context) {
 		cleanedMessage[k] = v
 	}
 
+	// Build execution metadata (order, timing, success/fail) and step outputs (data produced)
+	executionMetadata := make([]map[string]interface{}, 0, len(results))
+	stepOutputsMap := make(map[string]interface{})
+
+	for _, result := range results {
+		stepName, _ := result["step_name"].(string)
+		stepType, _ := result["step_type"].(string)
+		success, _ := result["success"].(bool)
+		output, _ := result["output"].(map[string]interface{})
+
+		// Execution metadata: timing, order, status (NO output data)
+		metadata := map[string]interface{}{
+			"step_name": stepName,
+			"step_type": stepType,
+			"success":   success,
+		}
+
+		// Add sequence if available
+		if seq, ok := result["sequence"].(int); ok {
+			metadata["sequence"] = seq
+		}
+
+		// Add duration if available
+		if duration, ok := result["duration_ms"].(int64); ok {
+			metadata["duration_ms"] = duration
+		}
+
+		// Add error if present
+		if err, ok := result["error"].(string); ok && err != "" {
+			metadata["error"] = err
+		}
+
+		executionMetadata = append(executionMetadata, metadata)
+
+		// Step outputs: data produced by the step
+		if stepName != "" && output != nil {
+			stepOutputsMap[stepName] = output
+		}
+	}
+
 	response := gin.H{
 		"success":           execErr == nil,
 		"error":             formatError(execErr),
-		"execution_results": results,
-		"parsed_message":    cleanedMessage, // Cleaned message without internal metadata
+		"execution_results": executionMetadata,  // Execution metadata only (timing, order, status)
+		"step_outputs":      stepOutputsMap,     // Data produced by steps (validation results, API responses, etc.)
+		"parsed_message":    cleanedMessage,     // Final transformed message
 		"steps_count":       len(steps),
 	}
 
@@ -278,22 +319,25 @@ func (c *TransformationTestController) executeSteps(steps []*models.Transformati
 			}
 
 		case "pre.enrichment.api":
-			// API enrichment: Extract API call metadata AND response data
-			if endpoint, ok := step.Config["endpoint"].(string); ok {
-				stepOutput["api_endpoint"] = endpoint
-			}
-			if method, ok := step.Config["method"].(string); ok {
-				stepOutput["http_method"] = method
-			}
-			if targetPath, ok := step.Config["targetPath"].(string); ok {
-				stepOutput["enriched_path"] = targetPath
+			// API enrichment: Extract comprehensive request/response details
 
-				// Extract the actual API response data
-				apiResponse := getNestedValue(output, targetPath)
-				if apiResponse != nil {
-					stepOutput["api_response"] = apiResponse
-				}
+			// Extract request details (method, URL, headers, body)
+			if apiRequest, ok := output["_api_request"].(map[string]interface{}); ok {
+				stepOutput["request"] = apiRequest
 			}
+
+			// Extract response details (status, headers, body, timing)
+			if apiResponse, ok := output["_api_response"].(map[string]interface{}); ok {
+				stepOutput["response"] = apiResponse
+			}
+
+			// Extract enriched path
+			if enrichedPath, ok := output["_api_enriched_path"].(string); ok {
+				stepOutput["enriched_path"] = enrichedPath
+			} else if targetPath, ok := step.Config["targetPath"].(string); ok {
+				stepOutput["enriched_path"] = targetPath
+			}
+
 			stepOutput["message"] = "API enrichment completed"
 
 		case "pre.enrichment.metadata":
@@ -301,13 +345,6 @@ func (c *TransformationTestController) executeSteps(steps []*models.Transformati
 			if metadata, ok := output["metadata"].(map[string]interface{}); ok {
 				stepOutput["metadata"] = metadata
 				stepOutput["fields_added"] = len(metadata)
-
-				// List field names for quick reference
-				fieldNames := make([]string, 0, len(metadata))
-				for k := range metadata {
-					fieldNames = append(fieldNames, k)
-				}
-				stepOutput["field_names"] = fieldNames
 				stepOutput["message"] = fmt.Sprintf("Added %d metadata fields", len(metadata))
 			} else {
 				stepOutput["message"] = "No metadata added"
@@ -388,4 +425,104 @@ func (c *TransformationTestController) GetPipeline(ctx *gin.Context) {
 
 func (c *TransformationTestController) TransformMessage(ctx *gin.Context) {
 	ctx.JSON(503, gin.H{"error": "Transform endpoint not yet implemented"})
+}
+
+// ================================================================
+// TEST API ENDPOINT
+// ================================================================
+
+// TestAPIEndpoint tests an API enrichment step configuration
+// POST /api/transformation/test-api-endpoint
+func (c *TransformationTestController) TestAPIEndpoint(ctx *gin.Context) {
+	var req struct {
+		StepConfig map[string]interface{} `json:"stepConfig"` // API enrichment step configuration
+		TestData   map[string]interface{} `json:"testData"`   // Sample message data for field mappings
+	}
+
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		log.Printf("❌ Invalid test API endpoint request: %v", err)
+		ctx.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"error":   "Invalid request: " + err.Error(),
+		})
+		return
+	}
+
+	log.Printf("🧪 Testing API endpoint configuration")
+
+	// Create temporary step for testing
+	stepID := "test-step-temp"
+	step := &models.TransformationStep{
+		ID:       stepID,
+		StepName: "API Endpoint Test",
+		StepType: "pre.enrichment.api",
+		Config:   req.StepConfig,
+		Enabled:  true,
+	}
+
+	// Get API enrichment executor
+	executor := c.executorRegistry.GetExecutor("pre.enrichment.api")
+	if executor == nil {
+		log.Printf("❌ Failed to get API enrichment executor")
+		ctx.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"error":   "API enrichment executor not available",
+		})
+		return
+	}
+
+	// Execute API call with test data
+	testContext := context.Background()
+	result, execErr := executor.Execute(testContext, step, req.TestData)
+
+	// Extract request/response details
+	var requestDetails map[string]interface{}
+	var responseDetails map[string]interface{}
+
+	if apiRequest, ok := result["_api_request"].(map[string]interface{}); ok {
+		requestDetails = apiRequest
+	}
+
+	if apiResponse, ok := result["_api_response"].(map[string]interface{}); ok {
+		responseDetails = apiResponse
+	}
+
+	// Check if API call failed
+	if execErr != nil {
+		log.Printf("❌ API endpoint test failed: %v", execErr)
+		ctx.JSON(http.StatusOK, gin.H{
+			"success":  false,
+			"error":    execErr.Error(),
+			"request":  requestDetails,
+			"response": responseDetails,
+			"message":  "API call failed - check endpoint configuration and authentication",
+		})
+		return
+	}
+
+	// Check if response has error (API call failed but not executor error)
+	if responseDetails != nil {
+		if respErr, hasErr := responseDetails["error"]; hasErr {
+			log.Printf("⚠️  API returned error: %v", respErr)
+			ctx.JSON(http.StatusOK, gin.H{
+				"success":  false,
+				"error":    fmt.Sprintf("%v", respErr),
+				"request":  requestDetails,
+				"response": responseDetails,
+				"message":  "API call failed - see error details",
+			})
+			return
+		}
+	}
+
+	log.Printf("✅ API endpoint test successful")
+
+	// Return success with full request/response details
+	ctx.JSON(http.StatusOK, gin.H{
+		"success":  true,
+		"request":  requestDetails,
+		"response": responseDetails,
+		"message":  "API call successful - inspect response to configure field mapping",
+		"help":     "Click on fields below to add them to your response mapping configuration",
+	})
 }

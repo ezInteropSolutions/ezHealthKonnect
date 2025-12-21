@@ -131,11 +131,20 @@ type APIEnrichmentConfig struct {
 	Method string `json:"method,omitempty"` // Default: GET
 
 	// Authentication configuration
-	AuthType    string `json:"authType,omitempty"` // none, basic, bearer, apikey
+	AuthType    string `json:"authType,omitempty"` // none, basic, bearer, apikey, oauth2
 	Username    string `json:"username,omitempty"`
 	Password    string `json:"password,omitempty"`
 	APIKey      string `json:"apiKey,omitempty"`
 	BearerToken string `json:"bearerToken,omitempty"`
+
+	// OAuth 2.0 configuration (full OAuth flow with automatic token management)
+	OAuth2TokenURL     string `json:"oauth2TokenUrl,omitempty"`     // OAuth 2.0 token endpoint URL
+	OAuth2ClientID     string `json:"oauth2ClientId,omitempty"`     // OAuth 2.0 client ID
+	OAuth2ClientSecret string `json:"oauth2ClientSecret,omitempty"` // OAuth 2.0 client secret
+	OAuth2GrantType    string `json:"oauth2GrantType,omitempty"`    // Grant type: client_credentials, password, refresh_token
+	OAuth2Scope        string `json:"oauth2Scope,omitempty"`        // OAuth 2.0 scope (space-separated)
+	OAuth2Username     string `json:"oauth2Username,omitempty"`     // Username for password grant
+	OAuth2Password     string `json:"oauth2Password,omitempty"`     // Password for password grant
 
 	// Request configuration
 	Headers     map[string]string      `json:"headers,omitempty"`

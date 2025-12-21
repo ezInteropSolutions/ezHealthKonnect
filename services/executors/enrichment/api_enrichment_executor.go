@@ -6,6 +6,7 @@ import (
 	"ezhealthkonnect/models"
 	"ezhealthkonnect/services/executors"
 	httpservice "ezhealthkonnect/services/http"
+	"ezhealthkonnect/services/response"
 	"fmt"
 	"log"
 	"strings"
@@ -98,8 +99,21 @@ func (e *APIEnrichmentExecutor) Execute(
 	resp, err := e.httpService.Execute(ctx, requestConfig, authConfig)
 	apiDuration := time.Since(apiStart).Milliseconds()
 
+	// Store comprehensive request/response details for step output tracking
+	requestDetails := e.buildRequestDetails(requestConfig, authConfig, apiStart)
+	var responseDetails map[string]interface{}
+
 	if err != nil {
+		// Store error response details
+		responseDetails = map[string]interface{}{
+			"error":       err.Error(),
+			"duration_ms": apiDuration,
+		}
+
 		if config.FailOnError {
+			// Store failed API call details in output data for visibility
+			inputData["_api_request"] = requestDetails
+			inputData["_api_response"] = responseDetails
 			e.PostExecute(ctx, step, err, time.Since(start))
 			return inputData, err
 		}
@@ -112,37 +126,55 @@ func (e *APIEnrichmentExecutor) Execute(
 			log.Printf("⚠️  API call failed, continuing without enrichment: %v", err)
 		}
 
+		// Still store request/response details for debugging
+		inputData["_api_request"] = requestDetails
+		inputData["_api_response"] = responseDetails
 		e.PostExecute(ctx, step, nil, time.Since(start))
 		return inputData, nil
 	}
 
-	// Store response in target path
+	// Check if response mapping is configured
+	var enrichedFields int
 	targetPath := e.getTargetPath(config)
-	executors.SetNestedValue(inputData, targetPath, resp.JSON)
 
-	// Count enriched fields if response is a map
-	enrichedFields := 0
-	if jsonMap, ok := resp.JSON.(map[string]interface{}); ok {
-		enrichedFields = e.countFields(jsonMap)
+	if responseMappingRaw, hasMappingConfig := step.Config["responseMapping"]; hasMappingConfig {
+		// Apply response mapping to extract specific fields
+		log.Printf("📋 [API Enrichment] Applying response mapping configuration")
+		mappedData, mappingErr := e.applyResponseMapping(resp.JSON, responseMappingRaw)
+
+		if mappingErr != nil {
+			log.Printf("⚠️  Response mapping failed: %v, storing full response instead", mappingErr)
+			// Fallback: Store full response at target path
+			executors.SetNestedValue(inputData, targetPath, resp.JSON)
+			enrichedFields = e.countFields(resp.JSON)
+		} else {
+			// Store mapped fields directly in message (not nested under targetPath)
+			for field, value := range mappedData {
+				executors.SetNestedValue(inputData, field, value)
+			}
+			enrichedFields = len(mappedData)
+			log.Printf("✅ [API Enrichment] Extracted %d fields using response mapping", enrichedFields)
+		}
+	} else {
+		// No response mapping - store full response at target path (existing behavior)
+		executors.SetNestedValue(inputData, targetPath, resp.JSON)
+		enrichedFields = e.countFields(resp.JSON)
+		log.Printf("✅ [API Enrichment] Stored full response at: %s", targetPath)
 	}
+
+	// Build response details with full information
+	responseDetails = e.buildResponseDetails(resp, apiDuration, enrichedFields)
+
+	// Store request/response details for step output tracking
+	inputData["_api_request"] = requestDetails
+	inputData["_api_response"] = responseDetails
+	inputData["_api_enriched_path"] = targetPath
 
 	log.Printf("✅ [API Enrichment] Response stored at: %s (%d fields, %dms)",
 		targetPath, enrichedFields, apiDuration)
 	e.PostExecute(ctx, step, nil, time.Since(start))
 
 	return inputData, nil
-}
-
-// countFields recursively counts the number of fields in a map
-func (e *APIEnrichmentExecutor) countFields(data map[string]interface{}) int {
-	count := 0
-	for _, value := range data {
-		count++
-		if nested, ok := value.(map[string]interface{}); ok {
-			count += e.countFields(nested)
-		}
-	}
-	return count
 }
 
 // Validate checks if the step configuration is valid
@@ -249,6 +281,19 @@ func (e *APIEnrichmentExecutor) buildAuthConfig(config *models.APIEnrichmentConf
 	case "apikey":
 		authConfig.Type = httpservice.AuthTypeAPIKey
 		authConfig.APIKey = config.APIKey
+
+	case "oauth2":
+		// OAuth 2.0 - full OAuth configuration with automatic token management
+		authConfig.Type = httpservice.AuthTypeOAuth2
+		authConfig.OAuth2Config = &httpservice.OAuth2Config{
+			TokenURL:     config.OAuth2TokenURL,
+			ClientID:     config.OAuth2ClientID,
+			ClientSecret: config.OAuth2ClientSecret,
+			GrantType:    httpservice.OAuth2GrantType(config.OAuth2GrantType),
+			Scope:        config.OAuth2Scope,
+			Username:     config.OAuth2Username, // For password grant
+			Password:     config.OAuth2Password, // For password grant
+		}
 	}
 
 	return authConfig
@@ -357,5 +402,320 @@ func (e *APIEnrichmentExecutor) GetConfigExample() map[string]interface{} {
 		"defaultValue": map[string]interface{}{
 			"status": "not_found",
 		},
+	}
+}
+
+// buildRequestDetails creates comprehensive request details for step output
+func (e *APIEnrichmentExecutor) buildRequestDetails(
+	requestConfig *httpservice.RequestConfig,
+	authConfig *httpservice.AuthConfig,
+	sentAt time.Time,
+) map[string]interface{} {
+	// Mask sensitive headers
+	maskedHeaders := e.maskSensitiveHeaders(requestConfig.Headers, authConfig)
+
+	requestDetails := map[string]interface{}{
+		"method":   requestConfig.Method,
+		"url":      requestConfig.URL,
+		"headers":  maskedHeaders,
+		"sent_at":  sentAt.Format(time.RFC3339Nano),
+	}
+
+	// Add query params if present
+	if len(requestConfig.QueryParams) > 0 {
+		requestDetails["query_params"] = requestConfig.QueryParams
+	}
+
+	// Add request body if present
+	if requestConfig.Body != nil {
+		requestDetails["body"] = requestConfig.Body
+	}
+
+	// Add timeout info
+	if requestConfig.Timeout > 0 {
+		requestDetails["timeout_ms"] = int(requestConfig.Timeout.Milliseconds())
+	}
+
+	return requestDetails
+}
+
+// buildResponseDetails creates comprehensive response details for step output
+func (e *APIEnrichmentExecutor) buildResponseDetails(
+	resp *httpservice.Response,
+	durationMs int64,
+	enrichedFields int,
+) map[string]interface{} {
+	responseDetails := map[string]interface{}{
+		"status_code":     resp.StatusCode,
+		"status_text":     e.getStatusText(resp.StatusCode),
+		"duration_ms":     durationMs,
+		"enriched_fields": enrichedFields,
+		"received_at":     time.Now().Format(time.RFC3339Nano),
+	}
+
+	// Add response headers (convert http.Header to map)
+	if len(resp.Headers) > 0 {
+		headers := make(map[string]string)
+		for key, values := range resp.Headers {
+			if len(values) > 0 {
+				headers[key] = values[0] // Use first value
+			}
+		}
+		responseDetails["headers"] = headers
+	}
+
+	// Add content type
+	contentType := resp.Headers.Get("Content-Type")
+	if contentType != "" {
+		responseDetails["content_type"] = contentType
+	}
+
+	// Add body - both raw and parsed
+	if len(resp.Body) > 0 {
+		responseDetails["body_raw"] = string(resp.Body)
+		responseDetails["body_size"] = len(resp.Body)
+	}
+
+	// Add parsed JSON if available
+	if resp.JSON != nil {
+		responseDetails["body_parsed"] = resp.JSON
+
+		// Add field structure analysis for UI field picker
+		responseDetails["field_structure"] = e.analyzeFieldStructure(resp.JSON, "")
+	}
+
+	return responseDetails
+}
+
+// maskSensitiveHeaders masks sensitive header values for security
+func (e *APIEnrichmentExecutor) maskSensitiveHeaders(
+	headers map[string]string,
+	authConfig *httpservice.AuthConfig,
+) map[string]string {
+	masked := make(map[string]string)
+	sensitiveKeys := map[string]bool{
+		"authorization": true,
+		"api-key":       true,
+		"x-api-key":     true,
+		"apikey":        true,
+		"token":         true,
+		"bearer":        true,
+		"password":      true,
+		"secret":        true,
+	}
+
+	for key, value := range headers {
+		lowerKey := strings.ToLower(key)
+		if sensitiveKeys[lowerKey] {
+			masked[key] = "***MASKED***"
+		} else {
+			masked[key] = value
+		}
+	}
+
+	// Add auth type if present (without credentials)
+	if authConfig != nil {
+		masked["X-Auth-Type"] = string(authConfig.Type)
+	}
+
+	return masked
+}
+
+// getStatusText returns human-readable HTTP status text
+func (e *APIEnrichmentExecutor) getStatusText(statusCode int) string {
+	statusTexts := map[int]string{
+		200: "OK",
+		201: "Created",
+		204: "No Content",
+		400: "Bad Request",
+		401: "Unauthorized",
+		403: "Forbidden",
+		404: "Not Found",
+		500: "Internal Server Error",
+		502: "Bad Gateway",
+		503: "Service Unavailable",
+		504: "Gateway Timeout",
+	}
+
+	if text, ok := statusTexts[statusCode]; ok {
+		return text
+	}
+
+	if statusCode >= 200 && statusCode < 300 {
+		return "Success"
+	} else if statusCode >= 400 && statusCode < 500 {
+		return "Client Error"
+	} else if statusCode >= 500 {
+		return "Server Error"
+	}
+
+	return "Unknown"
+}
+
+// ================================================================
+// RESPONSE MAPPING SUPPORT
+// ================================================================
+
+// applyResponseMapping applies response mapping configuration to extract specific fields
+func (e *APIEnrichmentExecutor) applyResponseMapping(apiResponse interface{}, mappingConfigRaw interface{}) (map[string]interface{}, error) {
+	// Import response extractor service
+	extractorService := response.NewResponseExtractorService()
+
+	// Parse step config to extract mapping rules
+	configJSON, err := json.Marshal(mappingConfigRaw)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal response mapping config: %w", err)
+	}
+
+	var responseMappingConfig models.ResponseMappingConfig
+	if err := json.Unmarshal(configJSON, &responseMappingConfig); err != nil {
+		return nil, fmt.Errorf("failed to parse response mapping config: %w", err)
+	}
+
+	// Load mapping rules based on mode
+	var mappingRules []models.ResponseMappingRule
+
+	switch responseMappingConfig.Mode {
+	case models.MappingModeTemplate:
+		// Load template (requires DB access - will be handled by pipeline service)
+		// For now, return error indicating DB dependency
+		return nil, fmt.Errorf("template mode requires database access - use pipeline service LoadMappingRulesForStep")
+
+	case models.MappingModeCustom:
+		// Use custom extractors directly
+		mappingRules = responseMappingConfig.Extractors
+
+	case models.MappingModeExtend:
+		// Load template + add custom extractors (requires DB)
+		return nil, fmt.Errorf("extend mode requires database access - use pipeline service LoadMappingRulesForStep")
+
+	case models.MappingModeOverride:
+		// Load template with overrides (requires DB)
+		return nil, fmt.Errorf("override mode requires database access - use pipeline service LoadMappingRulesForStep")
+
+	default:
+		return nil, fmt.Errorf("unknown mapping mode: %s", responseMappingConfig.Mode)
+	}
+
+	if len(mappingRules) == 0 {
+		return nil, fmt.Errorf("no mapping rules configured")
+	}
+
+	// Apply mapping rules to extract fields
+	log.Printf("📋 Applying %d response mapping rules", len(mappingRules))
+	return extractorService.ApplyMappingRules(apiResponse, mappingRules)
+}
+
+// countFields recursively counts fields in any data structure
+func (e *APIEnrichmentExecutor) countFields(data interface{}) int {
+	switch v := data.(type) {
+	case map[string]interface{}:
+		count := 0
+		for _, value := range v {
+			count++
+			if nested, ok := value.(map[string]interface{}); ok {
+				count += e.countFields(nested)
+			}
+		}
+		return count
+	case []interface{}:
+		count := 0
+		for _, item := range v {
+			count += e.countFields(item)
+		}
+		return count
+	default:
+		return 1
+	}
+}
+
+// ================================================================
+// FIELD STRUCTURE ANALYSIS (For UI Field Picker)
+// ================================================================
+
+// analyzeFieldStructure creates a flattened list of all available JSONPath expressions
+// This enables the UI to show a visual field picker for response mapping configuration
+func (e *APIEnrichmentExecutor) analyzeFieldStructure(data interface{}, prefix string) []map[string]interface{} {
+	fields := []map[string]interface{}{}
+
+	switch v := data.(type) {
+	case map[string]interface{}:
+		for key, value := range v {
+			path := prefix + "." + key
+			if prefix == "" {
+				path = "$" + path
+			}
+
+			fieldType := e.getJSONType(value)
+			fields = append(fields, map[string]interface{}{
+				"path":   path,
+				"key":    key,
+				"type":   fieldType,
+				"sample": e.getSampleValue(value),
+			})
+
+			// Recursively analyze nested objects (but not arrays to keep list manageable)
+			if nested, ok := value.(map[string]interface{}); ok {
+				if nestedFields := e.analyzeFieldStructure(nested, path); len(nestedFields) > 0 {
+					fields = append(fields, nestedFields...)
+				}
+			}
+		}
+
+	case []interface{}:
+		if len(v) > 0 {
+			// Analyze first array element as example
+			path := prefix + "[0]"
+			fields = append(fields, map[string]interface{}{
+				"path":   prefix, // Use array path without [0] for filtering
+				"key":    "[array]",
+				"type":   "array",
+				"sample": fmt.Sprintf("Array with %d items", len(v)),
+			})
+
+			// Analyze first element structure
+			if nestedFields := e.analyzeFieldStructure(v[0], path); len(nestedFields) > 0 {
+				fields = append(fields, nestedFields...)
+			}
+		}
+	}
+
+	return fields
+}
+
+// getJSONType returns the JSON type of a value
+func (e *APIEnrichmentExecutor) getJSONType(value interface{}) string {
+	switch value.(type) {
+	case string:
+		return "string"
+	case float64, int, int64, int32:
+		return "number"
+	case bool:
+		return "boolean"
+	case map[string]interface{}:
+		return "object"
+	case []interface{}:
+		return "array"
+	case nil:
+		return "null"
+	default:
+		return "unknown"
+	}
+}
+
+// getSampleValue returns a preview of the value for UI display
+func (e *APIEnrichmentExecutor) getSampleValue(value interface{}) interface{} {
+	switch v := value.(type) {
+	case map[string]interface{}:
+		return "{...}"
+	case []interface{}:
+		return fmt.Sprintf("[%d items]", len(v))
+	case string:
+		if len(v) > 50 {
+			return v[:50] + "..."
+		}
+		return v
+	default:
+		return value
 	}
 }

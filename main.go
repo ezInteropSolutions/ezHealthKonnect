@@ -341,6 +341,7 @@ func main() {
 			// ADDED: Transformation Pipeline Test Routes
 			transformTestCtrl := controllers.NewTransformationTestController(db)
 			fhirGroup.POST("/pipeline/test", transformTestCtrl.TestPipeline)
+			fhirGroup.POST("/pipeline/test-api-endpoint", transformTestCtrl.TestAPIEndpoint) // Test API endpoint before configuring mapping
 			fhirGroup.GET("/pipeline/:interfaceId/:messageType", transformTestCtrl.GetPipeline)
 			// ADDED: Schema listing endpoint
 			fhirGroup.GET("/transform/schemas", func(c *gin.Context) {
@@ -654,6 +655,11 @@ func main() {
 		outputMsgCtrl := controllers.NewOutputMessageController(db)
 		outputMsgCtrl.RegisterRoutes(api)
 		log.Printf("✅ Output Message Controller initialized")
+
+		// RESPONSE MAPPING CONTROLLER - API RESPONSE MAPPING TEMPLATES
+		responseMappingCtrl := controllers.NewResponseMappingController(db)
+		responseMappingCtrl.RegisterRoutes(api)
+		log.Printf("✅ Response Mapping Controller initialized")
 
 		// UNIVERSAL TRANSFORMATION CONTROLLER - NEW TRANSFORMATION ENGINE
 		// TODO: Re-enable Transformation controller after fixing imports

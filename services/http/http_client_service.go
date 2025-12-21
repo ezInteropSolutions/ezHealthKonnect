@@ -30,16 +30,18 @@ const (
 	AuthTypeBasic  AuthType = "basic"
 	AuthTypeBearer AuthType = "bearer"
 	AuthTypeAPIKey AuthType = "apikey"
+	AuthTypeOAuth2 AuthType = "oauth2" // Full OAuth 2.0 with automatic token management
 )
 
 // AuthConfig contains authentication configuration
 type AuthConfig struct {
-	Type        AuthType
-	Username    string // For Basic auth
-	Password    string // For Basic auth
-	BearerToken string // For Bearer auth
-	APIKey      string // For API Key auth
+	Type         AuthType
+	Username     string // For Basic auth
+	Password     string // For Basic auth
+	BearerToken  string // For Bearer auth
+	APIKey       string // For API Key auth
 	APIKeyHeader string // Custom header name for API Key (default: X-API-Key)
+	OAuth2Config *OAuth2Config // For OAuth 2.0 with automatic token management
 }
 
 // RequestConfig contains HTTP request configuration
@@ -64,8 +66,9 @@ type Response struct {
 
 // HTTPClientService provides shared HTTP client functionality
 type HTTPClientService struct {
-	client *http.Client
-	mu     sync.RWMutex
+	client       *http.Client
+	oauth2Service *OAuth2Service // For OAuth 2.0 token management
+	mu           sync.RWMutex
 }
 
 // NewHTTPClientService creates a new HTTP client service
@@ -74,11 +77,16 @@ func NewHTTPClientService(timeout time.Duration) *HTTPClientService {
 		timeout = 30 * time.Second
 	}
 
-	return &HTTPClientService{
+	service := &HTTPClientService{
 		client: &http.Client{
 			Timeout: timeout,
 		},
 	}
+
+	// Initialize OAuth2 service
+	service.oauth2Service = NewOAuth2Service(service)
+
+	return service
 }
 
 // BuildRequest constructs an HTTP request from configuration
@@ -152,14 +160,16 @@ func (h *HTTPClientService) BuildRequest(
 
 	// Add authentication
 	if auth != nil {
-		h.AddAuthentication(req, auth)
+		if err := h.AddAuthentication(req, auth); err != nil {
+			return nil, fmt.Errorf("failed to add authentication: %w", err)
+		}
 	}
 
 	return req, nil
 }
 
 // AddAuthentication adds authentication headers to the request
-func (h *HTTPClientService) AddAuthentication(req *http.Request, auth *AuthConfig) {
+func (h *HTTPClientService) AddAuthentication(req *http.Request, auth *AuthConfig) error {
 	switch auth.Type {
 	case AuthTypeBasic:
 		if auth.Username != "" && auth.Password != "" {
@@ -184,7 +194,19 @@ func (h *HTTPClientService) AddAuthentication(req *http.Request, auth *AuthConfi
 			req.Header.Set(headerName, auth.APIKey)
 			log.Printf("   🔐 Added API key authentication (header: %s)", headerName)
 		}
+
+	case AuthTypeOAuth2:
+		if auth.OAuth2Config != nil {
+			// Get token from OAuth2Service (handles caching and automatic refresh)
+			token, err := h.oauth2Service.GetToken(req.Context(), auth.OAuth2Config)
+			if err != nil {
+				return fmt.Errorf("failed to get OAuth2 token: %w", err)
+			}
+			req.Header.Set("Authorization", "Bearer "+token.AccessToken)
+			log.Printf("   🔐 Added OAuth2 token authentication (expires: %s)", token.ExpiresAt.Format("2006-01-02 15:04:05"))
+		}
 	}
+	return nil
 }
 
 // ExecuteWithRetry executes the HTTP request with retry logic

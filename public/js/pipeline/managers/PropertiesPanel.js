@@ -1001,6 +1001,106 @@ class PropertiesPanel {
             container._oauth2ConfigBuilderInstance = builder;
         });
 
+        // === API Endpoint Tester Initialization (Test API Before Configuring Mapping) ===
+        // NO-CODE INTEGRATION ENGINE: Let users see API response before configuration
+        const apiTesterContainers = form.querySelectorAll('.api-endpoint-tester-container');
+        console.log('🔍 Found API tester containers:', apiTesterContainers.length);
+        apiTesterContainers.forEach(container => {
+            console.log('🔍 Container element:', container);
+            console.log('🔍 Container ID:', container.id);
+
+            if (typeof APIEndpointTester === 'undefined') {
+                console.warn('APIEndpointTester component not loaded');
+                return;
+            }
+
+            // Instantiate API Endpoint Tester component - pass element directly
+            const tester = new APIEndpointTester(container);
+
+            // Set callback for when user clicks a field to add to mapping
+            tester.setOnAddMappingRule((ruleData) => {
+                console.log('🎯 User added field to response mapping:', ruleData);
+
+                // Get or create response mapping config
+                if (!step.config.responseMapping) {
+                    step.config.responseMapping = {
+                        mode: 'custom',
+                        extractors: []
+                    };
+                }
+
+                // Add the new extractor rule
+                step.config.responseMapping.extractors.push({
+                    sourcePath: ruleData.sourcePath,
+                    targetField: ruleData.targetField,
+                    transformType: ruleData.transformType || 'none',
+                    required: false,
+                    description: `Extracted from ${ruleData.sourcePath}`
+                });
+
+                // Show success feedback
+                console.log('✅ Added field to response mapping:', ruleData.targetField);
+
+                // TODO: Re-render response mapping section to show new rule in UI
+                // For now, user can see it when they save and reopen the step
+            });
+
+            // Get current step configuration for testing
+            const getCurrentStepConfig = () => {
+                const config = {};
+
+                // Get endpoint
+                const endpointInput = form.querySelector('[name="config_endpoint"]');
+                if (endpointInput) config.endpoint = endpointInput.value;
+
+                // Get method
+                const methodSelect = form.querySelector('[name="config_method"]');
+                if (methodSelect) config.method = methodSelect.value;
+
+                // Get auth type
+                const authTypeSelect = form.querySelector('[name="config_authType"]');
+                if (authTypeSelect) config.authType = authTypeSelect.value;
+
+                // Get bearer token if present
+                const bearerTokenInput = form.querySelector('[name="config_bearerToken"]');
+                if (bearerTokenInput) config.bearerToken = bearerTokenInput.value;
+
+                // Get API key if present
+                const apiKeyInput = form.querySelector('[name="config_apiKey"]');
+                if (apiKeyInput) config.apiKey = apiKeyInput.value;
+
+                // Get headers from builder
+                const headerContainer = form.querySelector('.header-builder-container');
+                if (headerContainer && headerContainer._headerBuilderInstance) {
+                    config.headers = headerContainer._headerBuilderInstance.getHeaders();
+                }
+
+                // Get query params from builder
+                const queryParamContainer = form.querySelector('.query-param-builder-container');
+                if (queryParamContainer && queryParamContainer._queryParamBuilderInstance) {
+                    config.queryParams = queryParamContainer._queryParamBuilderInstance.getQueryParams();
+                }
+
+                // Get field mappings (for URL placeholder resolution)
+                const fieldMappingsInput = form.querySelector('[name="config_fieldMappings"]');
+                if (fieldMappingsInput && fieldMappingsInput.value) {
+                    try {
+                        config.fieldMappings = JSON.parse(fieldMappingsInput.value);
+                    } catch (e) {
+                        console.warn('Failed to parse fieldMappings:', e);
+                    }
+                }
+
+                return config;
+            };
+
+            // Render the tester
+            tester.render(getCurrentStepConfig());
+
+            // Store reference for later access
+            container._apiEndpointTesterInstance = tester;
+        });
+
         // === Field Path Selector Initialization (Universal - All Steps) ===
         // Auto-enhance all inputs with data-field-type="xpath"
         if (window.FieldPathSelector) {
@@ -1617,10 +1717,25 @@ class PropertiesPanel {
             const builder = container._oauth2ConfigBuilderInstance;
             if (builder) {
                 step.config = step.config || {};
-                const fieldKey = container.dataset.fieldKey;
                 const oauth2Config = builder.getConfig();
-                step.config[fieldKey] = oauth2Config;
-                console.log('[PropertiesPanel] ✅ Saved OAuth 2.0 config to step.config.' + fieldKey + ':', oauth2Config);
+
+                // Map OAuth2ConfigBuilder fields to backend model fields
+                // Backend expects: oauth2TokenUrl, oauth2ClientId, oauth2ClientSecret,
+                //                  oauth2GrantType, oauth2Scope, oauth2Username, oauth2Password
+                if (oauth2Config.tokenURL) step.config.oauth2TokenUrl = oauth2Config.tokenURL;
+                if (oauth2Config.clientID) step.config.oauth2ClientId = oauth2Config.clientID;
+                if (oauth2Config.clientSecret) step.config.oauth2ClientSecret = oauth2Config.clientSecret;
+                if (oauth2Config.grantType) step.config.oauth2GrantType = oauth2Config.grantType;
+                if (oauth2Config.scope) step.config.oauth2Scope = oauth2Config.scope;
+                if (oauth2Config.username) step.config.oauth2Username = oauth2Config.username;
+                if (oauth2Config.password) step.config.oauth2Password = oauth2Config.password;
+
+                console.log('[PropertiesPanel] ✅ Saved OAuth 2.0 config to step.config (flattened):', {
+                    oauth2TokenUrl: step.config.oauth2TokenUrl,
+                    oauth2ClientId: step.config.oauth2ClientId,
+                    oauth2GrantType: step.config.oauth2GrantType,
+                    oauth2Scope: step.config.oauth2Scope
+                });
             }
         });
 
@@ -1910,6 +2025,12 @@ class PropertiesPanel {
                     html += `<div class="query-param-builder-container" data-field-key="${field.key}" data-initial-params='${JSON.stringify(queryParams)}'></div>`;
                     break;
 
+                case 'api-endpoint-tester':
+                    // API Endpoint Tester - NO-CODE: Test API and visually pick response fields
+                    // This enables first-time users to see actual API response before configuration
+                    html += `<div class="api-endpoint-tester-container" id="api-endpoint-tester-container"></div>`;
+                    break;
+
                 case 'basic-auth-container':
                     // Basic authentication container
                     let basicAuthData = {};
@@ -2025,6 +2146,19 @@ class PropertiesPanel {
                     } catch (e) {
                         console.warn('Failed to parse OAuth 2.0 config:', e);
                         oauth2Config = {};
+                    }
+
+                    // Also check for flattened OAuth2 fields in step.config
+                    // Backend stores as: oauth2TokenUrl, oauth2ClientId, etc.
+                    // OAuth2ConfigBuilder expects: tokenURL, clientID, etc.
+                    if (step.config) {
+                        if (step.config.oauth2TokenUrl) oauth2Config.tokenURL = step.config.oauth2TokenUrl;
+                        if (step.config.oauth2ClientId) oauth2Config.clientID = step.config.oauth2ClientId;
+                        if (step.config.oauth2ClientSecret) oauth2Config.clientSecret = step.config.oauth2ClientSecret;
+                        if (step.config.oauth2GrantType) oauth2Config.grantType = step.config.oauth2GrantType;
+                        if (step.config.oauth2Scope) oauth2Config.scope = step.config.oauth2Scope;
+                        if (step.config.oauth2Username) oauth2Config.username = step.config.oauth2Username;
+                        if (step.config.oauth2Password) oauth2Config.password = step.config.oauth2Password;
                     }
 
                     // Create container for OAuth2ConfigBuilder component
@@ -2212,6 +2346,14 @@ class PropertiesPanel {
                         type: 'validation-builder',
                         required: true,
                         help: 'Add validation rules for HL7 fields. Use step-level controls (Required + Error Strategy) to control ACK/NACK behavior.'
+                    },
+                    {
+                        key: 'detailedOutput',
+                        label: 'Output Detail Level',
+                        type: 'checkbox',
+                        default: false,
+                        checkboxLabel: 'Show detailed field-by-field validation results',
+                        help: 'When enabled, step output includes detailed validation results for each field. When disabled, shows only summary (fields validated count and status).'
                     }
                 ]
             },
@@ -2375,6 +2517,13 @@ class PropertiesPanel {
                         min: 0,
                         max: 5,
                         help: 'Number of retry attempts on failure (before applying Error Strategy)'
+                    },
+                    {
+                        key: 'apiEndpointTester',
+                        label: '🧪 Test API Endpoint',
+                        type: 'api-endpoint-tester',
+                        required: false,
+                        help: 'Test your API configuration and see the actual response before configuring field mappings. NO-CODE: Click fields to automatically add them to response mapping.'
                     }
                     // Note: Error handling is controlled by step-level "On Error Strategy" setting:
                     // - "Fail" = Stop pipeline on API error

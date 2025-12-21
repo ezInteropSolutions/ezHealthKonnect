@@ -412,10 +412,10 @@ db.getCollection('raw_messages_intf_<id>').findOne(
 
 ### Documentation
 - **Master Reference**: [SYSTEM_DOCUMENTATION.md](SYSTEM_DOCUMENTATION.md) - Complete consolidated system documentation
-- **Architecture Details**: [JSON_CONVERSION_ARCHITECTURE.md](JSON_CONVERSION_ARCHITECTURE.md)
-- **Transformation Pipeline**: [TRANSFORMATION_PIPELINE_DESIGN.md](TRANSFORMATION_PIPELINE_DESIGN.md)
-- **Hybrid Storage**: [HYBRID_STORAGE_ARCHITECTURE.md](HYBRID_STORAGE_ARCHITECTURE.md)
-- **Scalability Design**: [SCALABILITY_AND_GUI_DESIGN.md](SCALABILITY_AND_GUI_DESIGN.md)
+- **Architecture Details**: [architecture/JSON_CONVERSION_ARCHITECTURE.md](architecture/JSON_CONVERSION_ARCHITECTURE.md)
+- **Transformation Pipeline**: [architecture/TRANSFORMATION_PIPELINE_DESIGN.md](architecture/TRANSFORMATION_PIPELINE_DESIGN.md)
+- **Hybrid Storage**: [architecture/HYBRID_STORAGE_ARCHITECTURE.md](architecture/HYBRID_STORAGE_ARCHITECTURE.md)
+- **Scalability Design**: [architecture/SCALABILITY_AND_GUI_DESIGN.md](architecture/SCALABILITY_AND_GUI_DESIGN.md)
 
 
 ## Transformation Pipeline Architecture (Design Phase - October 2025)
@@ -539,15 +539,15 @@ Deliver to Destination
 - 🤖 **[CLAUDE.md](CLAUDE.md)** - AI assistant project guide (this file)
 
 ### Architecture Deep Dives
-- 🔄 **[JSON_CONVERSION_ARCHITECTURE.md](JSON_CONVERSION_ARCHITECTURE.md)** - JSON conversion pipeline details
-- 🔀 **[TRANSFORMATION_PIPELINE_DESIGN.md](TRANSFORMATION_PIPELINE_DESIGN.md)** - Transformation pipeline architecture
-- 💾 **[HYBRID_STORAGE_ARCHITECTURE.md](HYBRID_STORAGE_ARCHITECTURE.md)** - PostgreSQL + MongoDB storage design
-- 📈 **[SCALABILITY_AND_GUI_DESIGN.md](SCALABILITY_AND_GUI_DESIGN.md)** - Scale + UI architecture
-- 🏗️ **[ARCHITECTURE_REFERENCE.md](ARCHITECTURE_REFERENCE.md)** - Design patterns and principles
-- ⚙️ **[INTERFACE_CONFIGURATION_ENGINE.md](INTERFACE_CONFIGURATION_ENGINE.md)** - Configuration engine design
+- 🔄 **[architecture/JSON_CONVERSION_ARCHITECTURE.md](architecture/JSON_CONVERSION_ARCHITECTURE.md)** - JSON conversion pipeline details
+- 🔀 **[architecture/TRANSFORMATION_PIPELINE_DESIGN.md](architecture/TRANSFORMATION_PIPELINE_DESIGN.md)** - Transformation pipeline architecture
+- 💾 **[architecture/HYBRID_STORAGE_ARCHITECTURE.md](architecture/HYBRID_STORAGE_ARCHITECTURE.md)** - PostgreSQL + MongoDB storage design
+- 📈 **[architecture/SCALABILITY_AND_GUI_DESIGN.md](architecture/SCALABILITY_AND_GUI_DESIGN.md)** - Scale + UI architecture
+- 🏗️ **[architecture/ARCHITECTURE_REFERENCE.md](architecture/ARCHITECTURE_REFERENCE.md)** - Design patterns and principles
+- ⚙️ **[architecture/INTERFACE_CONFIGURATION_ENGINE.md](architecture/INTERFACE_CONFIGURATION_ENGINE.md)** - Configuration engine design
 
 ### Archived Documentation
-- 📦 **[docs/archive/](docs/archive/)** - 20 legacy/redundant documentation files (consolidated into SYSTEM_DOCUMENTATION.md)
+- 📦 **[docs/archive/](docs/archive/)** - 120 historical implementation logs, debug guides, and status reports (consolidated into SYSTEM_DOCUMENTATION.md)
 
 ## Multi-Connectivity Architecture (October 2025)
 
@@ -664,11 +664,11 @@ type OutboundConnector interface {
 - ftp_inbound / ftp_outbound
 
 ### Documentation
-- 📘 **[CONNECTIVITY_CATALOG.md](CONNECTIVITY_CATALOG.md)** - Complete catalog with all 32 connectors
-- 📗 **[CONNECTOR_IMPLEMENTATION_GUIDE.md](CONNECTOR_IMPLEMENTATION_GUIDE.md)** - Step-by-step implementation guide
-- 🏗️ **[CONNECTIVITY_ARCHITECTURE.md](CONNECTIVITY_ARCHITECTURE.md)** - Architecture design and patterns
-- 🔐 **[CONNECTIVITY_CLOUD_AND_SECURITY.md](CONNECTIVITY_CLOUD_AND_SECURITY.md)** - Cloud integration and security
-- 📋 **[CONNECTIVITY_PATTERNS.md](CONNECTIVITY_PATTERNS.md)** - Integration pattern explanations
+- 📘 **[connectivity/CONNECTIVITY_CATALOG.md](connectivity/CONNECTIVITY_CATALOG.md)** - Complete catalog with all 32 connectors
+- 📗 **[connectivity/CONNECTOR_IMPLEMENTATION_GUIDE.md](connectivity/CONNECTOR_IMPLEMENTATION_GUIDE.md)** - Step-by-step implementation guide
+- 🏗️ **[connectivity/CONNECTIVITY_ARCHITECTURE.md](connectivity/CONNECTIVITY_ARCHITECTURE.md)** - Architecture design and patterns
+- 🔐 **[connectivity/CONNECTIVITY_CLOUD_AND_SECURITY.md](connectivity/CONNECTIVITY_CLOUD_AND_SECURITY.md)** - Cloud integration and security
+- 📋 **[connectivity/CONNECTIVITY_PATTERNS.md](connectivity/CONNECTIVITY_PATTERNS.md)** - Integration pattern explanations
 
 ### Key Architectural Decisions
 1. **OOB Pattern** - Metadata-driven configuration stored in database

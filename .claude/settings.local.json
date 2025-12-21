@@ -76,7 +76,16 @@
       "Bash(timeout 20 docker-compose up:*)",
       "Bash(timeout 30 docker-compose up:*)",
       "Bash(timeout 40 docker-compose up:*)",
-      "Bash(timeout 50 docker-compose up:*)"
+      "Bash(timeout 50 docker-compose up:*)",
+      "Bash(git restore:*)",
+      "Bash(...\",  ← Duplicate!\n  }\n}\n\nExample After:\n{\n  \"step_name\": \"API Enrichment\",\n  \"output\": {\n    \"api_endpoint\": \"https://empi.org/api/patients/12345\",\n    \"http_method\": \"GET\",\n    \"enriched_path\": \"enriched.empi\",\n    \"execution_time_ms\": 234\n  }\n}\n\nFiles Modified:\n- controllers/transformation_test_controller.go (filter step outputs)\n- controllers/pipeline_test_controller.go (remove output merging)\n\nStatus: Ready for Testing\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nCo-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>\nEOF\n)\")",
+      "Bash(tee:*)",
+      "Bash(chmod:*)",
+      "Bash(bash test-pipeline-api.sh:*)",
+      "Bash(xargs:*)",
+      "Bash(bash:*)",
+      "Bash(docker run:*)",
+      "Bash(docker rm:*)"
     ],
     "deny": [],
     "ask": []
