@@ -85,7 +85,14 @@
       "Bash(xargs:*)",
       "Bash(bash:*)",
       "Bash(docker run:*)",
-      "Bash(docker rm:*)"
+      "Bash(docker rm:*)",
+      "Bash(docker-compose exec app cat:*)",
+      "Bash(go get:*)",
+      "Bash(docker-compose port:*)",
+      "Bash(netstat:*)",
+      "Bash(findstr:*)",
+      "Bash(docker-compose rm:*)",
+      "Bash(docker-compose exec mysql mysql:*)"
     ],
     "deny": [],
     "ask": []

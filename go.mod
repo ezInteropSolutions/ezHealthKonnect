@@ -8,9 +8,13 @@ require (
 	github.com/dop251/goja v0.0.0-20250630131328-58d95d85e994
 	github.com/gin-contrib/cors v1.7.6
 	github.com/gin-gonic/gin v1.10.1
+	github.com/go-sql-driver/mysql v1.8.1
 	github.com/google/uuid v1.6.0
 	github.com/joho/godotenv v1.5.1
 	github.com/lib/pq v1.10.9
+	github.com/microsoft/go-mssqldb v1.7.2
+	github.com/redis/go-redis/v9 v9.7.0
+	github.com/sijms/go-ora/v2 v2.8.22
 	github.com/stretchr/testify v1.10.0
 	github.com/wk8/go-ordered-map/v2 v2.1.8
 	go.mongodb.org/mongo-driver v1.17.1

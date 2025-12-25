@@ -7,9 +7,11 @@
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
     <title>Pipeline Builder - ezHealthKonnect</title>
-    <link rel="stylesheet" href="/css/pipeline-builder.css?v=8.3">
+    <link rel="stylesheet" href="/css/pipeline-builder.css?v=8.5">
     <link rel="stylesheet" href="/css/components/field-path-autocomplete.css">
     <link rel="stylesheet" href="/css/api-endpoint-tester.css">
+    <link rel="stylesheet" href="/css/result-mapping-builder.css?v=1.0">
+    <link rel="stylesheet" href="/css/database-query-tester.css?v=1.0">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 </head>
 <body>
@@ -223,7 +225,12 @@
         <div class="modal-content" style="max-width: 900px; max-height: 90vh; overflow: hidden; display: flex; flex-direction: column;">
             <div class="modal-header" style="background: linear-gradient(135deg, #1e3a8a 0%, #2563eb 100%); color: white; border-radius: 8px 8px 0 0;">
                 <h3><i class="fas fa-cog"></i> <span id="stepModalTitle">Step Configuration</span></h3>
-                <button class="modal-close" style="color: white;">&times;</button>
+                <div class="modal-header-actions">
+                    <button class="modal-fullscreen-btn" title="Toggle Fullscreen" style="background: transparent; border: none; color: white; font-size: 18px; cursor: pointer; padding: 8px 12px; margin-right: 8px; transition: all 0.2s;">
+                        <i class="fas fa-expand"></i>
+                    </button>
+                    <button class="modal-close" style="color: white;">&times;</button>
+                </div>
             </div>
 
             <!-- Tab Navigation -->
@@ -294,13 +301,18 @@
     <script src="/js/pipeline/managers/CanvasRenderer.js?v=4.0"></script>
     <script src="/js/pipeline/managers/StepNodeManager.js?v=6.0"></script>
     <script src="/js/pipeline/managers/ToolboxManager.js?v=8.5"></script>
-    <script src="/js/pipeline/managers/PropertiesPanel.js?v=19.3"></script>
+    <script src="/js/pipeline/managers/PropertiesPanel.js?v=21.0"></script>
     <!-- Modular OOP Components -->
+    <script src="/js/pipeline/components/FieldPathSearchComponent.js?v=2.1"></script>
     <script src="/js/pipeline/components/FieldPathInputWithAutocomplete.js?v=2.4"></script>
     <script src="/js/pipeline/components/ValidationRuleBuilder.js?v=12.0"></script>
     <script src="/js/pipeline/components/MetadataBuilder.js?v=1.0"></script>
     <script src="/js/pipeline/components/HeaderBuilder.js?v=1.0"></script>
-    <script src="/js/pipeline/components/QueryParamBuilder.js?v=1.0"></script>
+    <script src="/js/pipeline/components/QueryParamBuilder.js?v=1.3"></script>
+    <script src="/js/pipeline/components/ResultMappingBuilder.js?v=2.0"></script>
+    <script src="/js/pipeline/components/DatabaseQueryTester.js?v=1.6"></script>
+    <script src="/js/pipeline/components/MongoDBFilterBuilder.js?v=1.0"></script>
+    <script src="/js/pipeline/components/MongoDBProjectionBuilder.js?v=1.0"></script>
     <script src="/js/pipeline/components/OAuth2ConfigBuilder.js?v=1.0"></script>
     <script src="/js/pipeline/components/APIEndpointTester.js?v=1.1"></script>
     <script src="/js/pipeline/managers/LayerContainer.js?v=4.0"></script>

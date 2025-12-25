@@ -44,6 +44,89 @@ services:
     networks:
       - ezhealthkonnect
 
+  # Redis Cache Service for Database Enrichment Testing
+  redis:
+    image: redis:7-alpine
+    container_name: ezhealthkonnect-redis
+    restart: unless-stopped
+    command: redis-server --requirepass secure_password_change_me
+    ports:
+      - "6379:6379"
+    volumes:
+      # Persistent data for Redis
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - ezhealthkonnect
+
+  # MySQL Database for Enrichment Testing
+  mysql:
+    image: mysql:8.0
+    container_name: ezhealthkonnect-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: secure_password_change_me
+      MYSQL_DATABASE: ezhealthkonnect
+      MYSQL_USER: ezhealth_user
+      MYSQL_PASSWORD: secure_password_change_me
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "ezhealth_user", "-psecure_password_change_me"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - ezhealthkonnect
+
+  # SQL Server Database for Enrichment Testing
+  sqlserver:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: ezhealthkonnect-sqlserver
+    restart: unless-stopped
+    environment:
+      ACCEPT_EULA: Y
+      MSSQL_SA_PASSWORD: SecurePassword123!
+      MSSQL_PID: Developer
+    ports:
+      - "1433:1433"
+    volumes:
+      - sqlserver_data:/var/opt/mssql
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P SecurePassword123! -Q 'SELECT 1' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - ezhealthkonnect
+
+  # Oracle Database for Enrichment Testing
+  oracle:
+    image: gvenzl/oracle-free:latest
+    container_name: ezhealthkonnect-oracle
+    restart: unless-stopped
+    environment:
+      ORACLE_PASSWORD: SecurePassword123
+      APP_USER: ezhealth_user
+      APP_USER_PASSWORD: secure_password_change_me
+    ports:
+      - "1521:1521"
+    volumes:
+      - oracle_data:/opt/oracle/oradata
+    healthcheck:
+      test: ["CMD-SHELL", "echo 'SELECT 1 FROM DUAL;' | sqlplus -s ezhealth_user/secure_password_change_me@//localhost:1521/FREEPDB1 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    networks:
+      - ezhealthkonnect
+
   # Flyway handles SCHEMA migrations only (version controlled)
   flyway:
     image: flyway/flyway:latest
@@ -151,6 +234,22 @@ volumes:
 
   # MongoDB persistent data for Configuration Engine
   mongodb_data:
+    driver: local
+
+  # Redis persistent data for enrichment testing
+  redis_data:
+    driver: local
+
+  # MySQL persistent data for enrichment testing
+  mysql_data:
+    driver: local
+
+  # SQL Server persistent data for enrichment testing
+  sqlserver_data:
+    driver: local
+
+  # Oracle persistent data for enrichment testing
+  oracle_data:
     driver: local
 
 # Network for services to communicate

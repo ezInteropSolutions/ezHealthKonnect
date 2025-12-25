@@ -70,7 +70,7 @@ class ToolboxManager {
         return [
             new StepTemplate({
                 id: 'validate-fields',
-                name: 'Field Validation',
+                name: 'field_validation',
                 type: 'pre.validation',
                 description: 'Validate fields (required, format, length, pattern)',
                 layer: 'pre',
@@ -102,7 +102,7 @@ class ToolboxManager {
             }),
             new StepTemplate({
                 id: 'add-metadata',
-                name: 'Add Metadata',
+                name: 'add_metadata',
                 type: 'pre.enrichment.metadata',
                 description: 'Add processing metadata (timestamps, IDs, custom fields)',
                 layer: 'pre',
@@ -118,7 +118,7 @@ class ToolboxManager {
             }),
             new StepTemplate({
                 id: 'enrich-api',
-                name: 'API Enrichment',
+                name: 'api_enrichment',
                 type: 'pre.enrichment.api',
                 description: 'Enrich message data from external REST API (EMPI, EHR, LIMS)',
                 layer: 'pre',
@@ -137,15 +137,15 @@ class ToolboxManager {
             }),
             new StepTemplate({
                 id: 'enrich-database',
-                name: 'Database Enrichment',
+                name: 'database_enrichment',
                 type: 'pre.enrichment.database',
                 description: 'Query database for additional patient or order data',
-                layer: 'pre',
+                layer: ['pre', 'core'],  // Allow in both pre-processing and core layers
                 icon: this.getIconForType('pre.enrichment.database'),
                 isSystem: true,
                 defaultConfig: {
                     databaseType: 'postgresql',
-                    connectionString: 'postgresql://user:pass@localhost:5432/dbname',
+                    connectionString: '', // Empty - will be built from individual fields
                     query: 'SELECT * FROM patients WHERE patient_id = $1',
                     queryParams: { patientId: 'PID.3' },
                     targetPath: 'enriched.database',

@@ -80,9 +80,9 @@ class QueryParamBuilder {
             this.addParamRow(key, value, '', true);
         });
 
-        // Add empty row if no params
+        // Add empty row if no params (disabled by default)
         if (this.rows.length === 0) {
-            this.addParamRow('', '', '', true);
+            this.addParamRow('', '', '', false);
         }
 
         // Event listeners
@@ -128,9 +128,7 @@ class QueryParamBuilder {
                        placeholder="Parameter name">
             </div>
             <div class="query-param-col-value">
-                <input type="text" class="form-control form-control-sm param-value"
-                       value="${this.escapeHtml(value)}"
-                       placeholder="Parameter value">
+                <div class="param-value-search-wrapper"></div>
             </div>
             <div class="query-param-col-description">
                 <input type="text" class="form-control form-control-sm param-description"
@@ -149,12 +147,41 @@ class QueryParamBuilder {
 
         // Event listeners
         const keyInput = row.querySelector('.param-key');
-        const valueInput = row.querySelector('.param-value');
+        const valueWrapper = row.querySelector('.param-value-search-wrapper');
         const descriptionInput = row.querySelector('.param-description');
         const enabledCheckbox = row.querySelector('.param-enabled');
         const deleteBtn = row.querySelector('.delete-param-btn');
 
+        // Create value input with FieldPathSearchComponent
+        const valueInput = document.createElement('input');
+        valueInput.type = 'text';
+        valueInput.className = 'form-control form-control-sm param-value';
+        valueInput.value = this.escapeHtml(value);
+        valueInput.placeholder = 'e.g., PID.3 or search...';
+        valueWrapper.appendChild(valueInput);
+
+        // Initialize FieldPathSearchComponent if available
+        let fieldPathSearch = null;
+        if (typeof FieldPathSearchComponent !== 'undefined') {
+            fieldPathSearch = new FieldPathSearchComponent(valueInput, {
+                onSelect: (fieldPath) => {
+                    valueInput.value = fieldPath;
+                    this.onChange();
+                    this.updateUrlPreview();
+                },
+                placeholder: 'Search HL7 fields or enter custom value...',
+                allowCustom: true,
+                showCategories: true
+            });
+            row._fieldPathSearch = fieldPathSearch;
+        }
+
         keyInput.addEventListener('input', () => {
+            // Auto-enable checkbox when user types a key
+            if (keyInput.value.trim() && !enabledCheckbox.checked) {
+                enabledCheckbox.checked = true;
+                row.dataset.enabled = 'true';
+            }
             this.onChange();
             this.updateUrlPreview();
         });
@@ -173,12 +200,17 @@ class QueryParamBuilder {
         });
 
         deleteBtn.addEventListener('click', () => {
+            // Cleanup FieldPathSearchComponent if exists
+            if (row._fieldPathSearch) {
+                row._fieldPathSearch.destroy();
+            }
+
             row.remove();
             this.rows = this.rows.filter(r => r !== row);
 
-            // Add empty row if all deleted
+            // Add empty row if all deleted (disabled by default)
             if (this.rows.length === 0) {
-                this.addParamRow('', '', '', true);
+                this.addParamRow('', '', '', false);
             }
 
             this.onChange();
@@ -189,16 +221,20 @@ class QueryParamBuilder {
     }
 
     getParams() {
+        console.log('[QueryParamBuilder] 🔍 getParams() called, rows count:', this.rows.length);
         const params = {};
-        this.rows.forEach(row => {
+        this.rows.forEach((row, index) => {
             const enabled = row.querySelector('.param-enabled').checked;
             const key = row.querySelector('.param-key').value.trim();
             const value = row.querySelector('.param-value').value.trim();
+
+            console.log(`[QueryParamBuilder] Row #${index}: enabled=${enabled}, key="${key}", value="${value}"`);
 
             if (enabled && key) {
                 params[key] = value;
             }
         });
+        console.log('[QueryParamBuilder] ✅ Returning params:', params);
         return params;
     }
 

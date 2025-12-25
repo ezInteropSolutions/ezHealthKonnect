@@ -1,6 +1,7 @@
 package models
 
 import (
+	"encoding/json"
 	"time"
 )
 
@@ -143,6 +144,7 @@ type APIEnrichmentConfig struct {
 	OAuth2ClientSecret string `json:"oauth2ClientSecret,omitempty"` // OAuth 2.0 client secret
 	OAuth2GrantType    string `json:"oauth2GrantType,omitempty"`    // Grant type: client_credentials, password, refresh_token
 	OAuth2Scope        string `json:"oauth2Scope,omitempty"`        // OAuth 2.0 scope (space-separated)
+	OAuth2Audience     string `json:"oauth2Audience,omitempty"`     // OAuth 2.0 audience (required by Auth0 and some providers)
 	OAuth2Username     string `json:"oauth2Username,omitempty"`     // Username for password grant
 	OAuth2Password     string `json:"oauth2Password,omitempty"`     // Password for password grant
 
@@ -181,16 +183,48 @@ type DatabaseEnrichmentConfigV2 struct {
 	ConnectionString string `json:"connectionString,omitempty"`
 	ConnectionName   string `json:"connectionName,omitempty"` // Reference to stored connection
 
-	// Database type
-	DatabaseType string `json:"databaseType"` // postgresql, mysql, sqlserver, oracle
+	// Individual connection fields (alternative to connectionString)
+	DBHost     string `json:"dbHost,omitempty"`
+	DBPort     int    `json:"dbPort,omitempty"`
+	DBName     string `json:"dbName,omitempty"`
+	DBUser     string `json:"dbUser,omitempty"`
+	DBPassword string `json:"dbPassword,omitempty"`
 
-	// Query configuration
+	// Database type (SQL and NoSQL)
+	DatabaseType string `json:"databaseType"` // postgresql, mysql, sqlserver, oracle, mongodb, redis, dynamodb, snowflake, databricks, cassandra
+
+	// Query configuration (SQL databases)
 	Query       string            `json:"query"`       // SQL query with parameter placeholders
 	QueryParams map[string]string `json:"queryParams,omitempty"` // Map parameter name to field path
 
 	// Example:
 	// Query: "SELECT * FROM patients WHERE patient_id = $1"
 	// QueryParams: {"patientId": "PID.3"}
+
+	// NoSQL-specific configuration
+	Collection          string                   `json:"collection,omitempty"`          // MongoDB collection name
+	Filter              map[string]interface{}   `json:"filter,omitempty"`              // MongoDB filter query
+	Projection          map[string]interface{}   `json:"projection,omitempty"`          // MongoDB projection
+	MongoDBQueryMode    string                   `json:"mongodbQueryMode,omitempty"`    // visual or advanced
+	AggregationPipeline []map[string]interface{} `json:"-"`                             // MongoDB aggregation pipeline (advanced mode) - custom unmarshaling
+	AggregationPipelineRaw json.RawMessage       `json:"aggregationPipeline,omitempty"` // Raw JSON for custom unmarshaling
+	RedisKey            string                   `json:"redisKey,omitempty"`            // Redis key pattern (supports {field} placeholders)
+	RedisCommand        string                   `json:"redisCommand,omitempty"`        // GET, HGETALL, SMEMBERS, etc.
+	DynamoDBTable   string                 `json:"dynamodbTable,omitempty"`   // DynamoDB table name
+	KeyCondition    string                 `json:"keyCondition,omitempty"`    // DynamoDB key condition expression
+	FilterExpression string                `json:"filterExpression,omitempty"` // DynamoDB filter expression
+	CassandraKeyspace string               `json:"cassandraKeyspace,omitempty"` // Cassandra keyspace
+
+	// Cloud database specific
+	AWSRegion        string `json:"awsRegion,omitempty"`        // For DynamoDB
+	AWSAccessKey     string `json:"awsAccessKey,omitempty"`     // For DynamoDB
+	AWSSecretKey     string `json:"awsSecretKey,omitempty"`     // For DynamoDB
+	SnowflakeAccount string `json:"snowflakeAccount,omitempty"` // For Snowflake
+	SnowflakeWarehouse string `json:"snowflakeWarehouse,omitempty"` // For Snowflake
+	SnowflakeSchema  string `json:"snowflakeSchema,omitempty"`  // For Snowflake
+	DatabricksHTTPPath string `json:"databricksHttpPath,omitempty"` // For Databricks
+	DatabricksCatalog  string `json:"databricksCatalog,omitempty"`  // For Databricks
+	DatabricksToken    string `json:"databricksToken,omitempty"`    // For Databricks access token
 
 	// Response mapping
 	TargetPath    string            `json:"targetPath,omitempty"`    // Default: "enriched.database"
@@ -206,6 +240,46 @@ type DatabaseEnrichmentConfigV2 struct {
 	// Error handling
 	FailOnError  bool        `json:"failOnError,omitempty"` // Default: false
 	DefaultValue interface{} `json:"defaultValue,omitempty"`
+}
+
+// UnmarshalJSON custom unmarshaler to handle aggregationPipeline as both string and array
+func (d *DatabaseEnrichmentConfigV2) UnmarshalJSON(data []byte) error {
+	// Create a type alias to avoid infinite recursion
+	type Alias DatabaseEnrichmentConfigV2
+
+	// Unmarshal into alias
+	aux := &struct {
+		*Alias
+	}{
+		Alias: (*Alias)(d),
+	}
+
+	if err := json.Unmarshal(data, aux); err != nil {
+		return err
+	}
+
+	// Handle aggregationPipeline - convert string to array if needed
+	if len(d.AggregationPipelineRaw) > 0 {
+		// Try to unmarshal as array first
+		var pipeline []map[string]interface{}
+		if err := json.Unmarshal(d.AggregationPipelineRaw, &pipeline); err == nil {
+			d.AggregationPipeline = pipeline
+		} else {
+			// Try as string (legacy format)
+			var pipelineStr string
+			if err := json.Unmarshal(d.AggregationPipelineRaw, &pipelineStr); err == nil {
+				// If it's an empty string, leave AggregationPipeline as empty array
+				if pipelineStr != "" {
+					// Try to parse the string as JSON
+					if err := json.Unmarshal([]byte(pipelineStr), &pipeline); err == nil {
+						d.AggregationPipeline = pipeline
+					}
+				}
+			}
+		}
+	}
+
+	return nil
 }
 
 // ===============================================================

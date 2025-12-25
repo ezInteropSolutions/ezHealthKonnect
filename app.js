@@ -65,7 +65,8 @@ app.use((req, res, next) => {
             req.originalUrl.startsWith('/api/hl7') ||
             req.originalUrl.startsWith('/api/system') ||
             req.originalUrl.startsWith('/api/processing') ||
-            req.originalUrl.startsWith('/api/mllp')) {
+            req.originalUrl.startsWith('/api/mllp') ||
+            req.originalUrl.startsWith('/api/database')) {
             console.log(`Should be proxied to Go backend: ${GO_BACKEND_URL}${req.originalUrl}`);
         } else {
             console.log(`Should be handled by Node.js locally`);
@@ -211,6 +212,10 @@ app.use('/api/hl7', forwardToGo);
 app.use('/api/system', forwardToGo);
 app.use('/api/processing', forwardToGo);  // NEW: Processing engine routes
 app.use('/api/mllp', forwardToGo);        // NEW: MLLP connectivity routes
+
+// Database query testing routes - use explicit route matching
+app.post('/api/database/test-query', forwardToGo);  // NEW: Database query testing
+console.log('✅ Database test-query route registered');
 
 console.log('Simple proxy configured successfully');
 

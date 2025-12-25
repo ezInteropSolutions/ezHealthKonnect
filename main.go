@@ -343,6 +343,12 @@ func main() {
 			fhirGroup.POST("/pipeline/test", transformTestCtrl.TestPipeline)
 			fhirGroup.POST("/pipeline/test-api-endpoint", transformTestCtrl.TestAPIEndpoint) // Test API endpoint before configuring mapping
 			fhirGroup.GET("/pipeline/:interfaceId/:messageType", transformTestCtrl.GetPipeline)
+
+			// ADDED: Database Query Test Routes (NO-CODE: Test queries before saving pipeline)
+			dbTestCtrl := controllers.NewDatabaseTestController(db)
+			api.POST("/database/test-query", dbTestCtrl.TestQuery)
+			api.POST("/database/mongodb-schema", dbTestCtrl.GetMongoDBCollectionSchema)
+
 			// ADDED: Schema listing endpoint
 			fhirGroup.GET("/transform/schemas", func(c *gin.Context) {
 				fhirLoader := fhir.GetFHIRSchemaLoader()

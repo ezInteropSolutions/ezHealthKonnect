@@ -1,133 +1,197 @@
-# ✅ OAuth 2.0 Working Test Example
+# ✅ OAuth 2.0 Audience Field Missing - Quick Fix
 
-## Simplest Test: Use the UI
+## The Problem
 
-**This is the recommended way to test OAuth2 - it's much easier!**
+Your test payload shows the audience field is **missing**:
 
-### Steps:
-
-1. **Open Pipeline Builder**:
-   ```
-   http://localhost:3000/pipeline-builder.html
-   ```
-
-2. **Create a new pipeline** and add "API Enrichment" step
-
-3. **Configure OAuth 2.0**:
-   - Click on the step
-   - Auth Type: Select **"OAuth 2.0"**
-   - You'll see the OAuth2ConfigBuilder component appear
-
-4. **Fill in test credentials** (these will fail auth but demonstrate the flow):
-   ```
-   Grant Type: Client Credentials
-   Token URL: https://github.com/login/oauth/access_token
-   Client ID: test-client-id
-   Client Secret: test-secret
-   Scope: (leave empty or "read:user")
-   ```
-
-5. **Click "Test Connection"** button
-   - This tests just the OAuth2 token acquisition
-   - You'll see the token request being made
-   - Check browser console for detailed logs
-
-6. **Configure endpoint and test full flow**:
-   ```
-   Endpoint: https://api.github.com/zen
-   Method: GET
-   ```
-
-7. **Click "🧪 Test API Endpoint"**
-   - This tests the full OAuth2 integration
-   - Token is automatically obtained and cached
-   - Request is made with Bearer token
-
-## What You'll See
-
-### In Browser Console:
-```javascript
-[PropertiesPanel] ✅ Saved OAuth 2.0 config to step.config (flattened): {
-  oauth2TokenUrl: "https://github.com/login/oauth/access_token",
-  oauth2ClientId: "test-client-id",
-  oauth2GrantType: "client_credentials"
+```json
+{
+  "oauth2TokenUrl": "https://dev-4y4un4zsmylun23v.us.auth0.com/oauth/token",
+  "oauth2ClientId": "pNwhb5rF32Nk0cbhQGTOs4Fz8yqEkyua",
+  "oauth2ClientSecret": "r9uyn_4T2MZUOqaYBLnwGwy0C-ZXIno6H_4Y7zhOi6sO9VZgFbeFi7k7FR-pN9ct",
+  "oauth2GrantType": "client_credentials"
+  // ❌ oauth2Audience is missing!
 }
 ```
 
-### In Docker Logs:
-```bash
-docker-compose logs -f app | grep -i oauth
-
-# You'll see:
-# 🔐 Requesting new OAuth2 token from https://github.com/login/oauth/access_token
-# (May fail due to invalid credentials, but proves the flow works)
-```
-
-## Alternative: Use Real OAuth Provider
-
-### Option 1: Auth0 (Free Tier)
-
-1. Sign up at https://auth0.com (free)
-2. Create a Machine-to-Machine application
-3. Get your credentials from the dashboard
-4. Use in the UI:
-   ```
-   Token URL: https://YOUR-TENANT.auth0.com/oauth/token
-   Client ID: <from Auth0 dashboard>
-   Client Secret: <from Auth0 dashboard>
-   Grant Type: client_credentials
-   Scope: (check Auth0 API scopes)
-   ```
-
-### Option 2: Google Cloud
-
-1. Go to https://console.cloud.google.com
-2. Create a project
-3. Enable an API (like Google Drive API)
-4. Create OAuth 2.0 credentials (Service Account)
-5. Download JSON key file
-6. Use in the UI
-
-## Testing Token Caching
-
-1. Configure OAuth2 in UI (see above)
-2. Click "🧪 Test API Endpoint" (1st call)
-3. Check logs: `docker-compose logs -f app | grep OAuth`
-   - Should see: "Requesting new OAuth2 token"
-4. Click "🧪 Test API Endpoint" again (2nd call)
-   - Should see: "Using cached OAuth2 token" ✅
-   - 2nd call will be faster!
-
-## The OAuth2 Flow is Working!
-
-Even if authentication fails (invalid credentials), you'll see that:
-1. ✅ OAuth2ConfigBuilder captures all fields correctly
-2. ✅ PropertiesPanel flattens config correctly
-3. ✅ Backend receives OAuth2 configuration
-4. ✅ OAuth2Service attempts to fetch token
-5. ✅ Token caching is active
-6. ✅ Bearer header is added to requests
-
-The integration is **complete and working** - you just need valid OAuth credentials to test successfully!
-
-## Quick Win: Test with httpbin.org Bearer
-
-If you just want to see the system work without OAuth setup:
-
-```
-Auth Type: Bearer Token
-Bearer Token: test-token-12345
-Endpoint: https://httpbin.org/bearer
-Method: GET
-```
-
-Click "🧪 Test API Endpoint" - this will work immediately and show you the full flow!
+Auth0 requires the audience parameter, so it's returning 400 Bad Request.
 
 ---
 
-**Sources**:
-- [OAuth 2.0 Playground](https://www.oauth.com/playground/)
-- [OAuth 2.0 Debugger](https://oauthdebugger.com/)
-- [WireMock OAuth2 Mock](https://docs.wiremock.io/oauth2-mock/)
-- [navikt/mock-oauth2-server](https://github.com/navikt/mock-oauth2-server)
-- [Auth0 Free Tier](https://auth0.com)
+## Quick Fix: 2 Steps
+
+### Step 1: Hard Refresh Browser (Clear Cache)
+**Press**: `Ctrl + Shift + R` (Windows) or `Cmd + Shift + R` (Mac)
+
+This ensures the updated JavaScript with audience field support is loaded.
+
+### Step 2: Fill in Audience Field
+
+After hard refresh, you should see a new **"Audience"** field in the OAuth2 form.
+
+**Fill it in**:
+```
+Audience: https://dev-4y4un4zsmylun23v.us.auth0.com/api/v2/
+```
+
+**IMPORTANT**: Make sure you actually **type the value** - don't just see the placeholder!
+
+---
+
+## How to Verify It's Fixed
+
+### In Browser Console (F12)
+
+After filling the audience field and clicking "Test API Endpoint", you should see:
+
+```javascript
+[PropertiesPanel] 🔍 Reading OAuth2 config for API test: {
+  grantType: "client_credentials",
+  tokenURL: "https://dev-4y4un4zsmylun23v.us.auth0.com/oauth/token",
+  clientID: "pNwhb5rF32Nk0cbhQGTOs4Fz8yqEkyua",
+  clientSecret: "r9uyn_4T2MZUOqaYBLnwGwy0C-ZXIno6H_4Y7zhOi6sO9VZgFbeFi7k7FR-pN9ct",
+  scope: "read:users",
+  audience: "https://dev-4y4un4zsmylun23v.us.auth0.com/api/v2/"  // ✅ Should be here!
+}
+```
+
+### Test the Audience Field Manually
+
+In browser console, run:
+
+```javascript
+// Get the OAuth2ConfigBuilder instance
+const container = document.querySelector('.oauth2-config-builder');
+const builder = container._oauth2ConfigBuilderInstance;
+
+// Get the config
+console.log(builder.getConfig());
+
+// Should show:
+// {
+//   grantType: "client_credentials",
+//   tokenURL: "...",
+//   clientID: "...",
+//   clientSecret: "...",
+//   audience: "https://dev-4y4un4zsmylun23v.us.auth0.com/api/v2/"  // ✅
+// }
+```
+
+---
+
+## If Audience Field Still Missing from UI
+
+If you don't see an "Audience" field after hard refresh, let's verify the files were updated:
+
+### Check OAuth2ConfigBuilder.js
+
+Open browser DevTools → Sources → find `OAuth2ConfigBuilder.js`
+
+Search for: `addFormField('audience'`
+
+**You should see** (around line 127):
+```javascript
+// Optional fields (all grant types)
+this.addFormField('scope', 'Scope', 'text', 'read write', false);
+this.addFormField('audience', 'Audience', 'text', 'https://api.example.com/', false);
+```
+
+If you **don't see** the audience line, then the file wasn't updated in the Docker container.
+
+**Solution**: Rebuild Docker container:
+```bash
+docker-compose down
+docker-compose up -d --build
+```
+
+Then hard refresh browser again.
+
+---
+
+## Alternative: Manual Test with curl
+
+If you want to verify OAuth2 works end-to-end while debugging the UI, you can test manually:
+
+### Get Token with curl
+```bash
+curl -X POST https://dev-4y4un4zsmylun23v.us.auth0.com/oauth/token \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d "grant_type=client_credentials" \
+  -d "client_id=pNwhb5rF32Nk0cbhQGTOs4Fz8yqEkyua" \
+  -d "client_secret=r9uyn_4T2MZUOqaYBLnwGwy0C-ZXIno6H_4Y7zhOi6sO9VZgFbeFi7k7FR-pN9ct" \
+  -d "audience=https://dev-4y4un4zsmylun23v.us.auth0.com/api/v2/"
+```
+
+**Expected Response**:
+```json
+{
+  "access_token": "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6...",
+  "token_type": "Bearer",
+  "expires_in": 86400
+}
+```
+
+### Use Token in UI
+
+1. Copy the `access_token` from curl response
+2. In UI, select **Auth Type: Bearer Token**
+3. Paste token in **Bearer Token** field
+4. Set Endpoint: `https://dev-4y4un4zsmylun23v.us.auth0.com/api/v2/users`
+5. Click **"🧪 Test API Endpoint"**
+
+This should work immediately and prove the full flow works!
+
+---
+
+## What Should Happen (Success)
+
+### Browser Console
+```javascript
+[PropertiesPanel] 🔍 Reading OAuth2 config for API test: {
+  audience: "https://dev-4y4un4zsmylun23v.us.auth0.com/api/v2/"  // ✅
+  // ...
+}
+```
+
+### Docker Logs
+```bash
+docker-compose logs -f app | grep -i oauth
+
+# Expected output:
+🔑 [OAuth2] Requesting new access token from https://dev-4y4un4zsmylun23v.us.auth0.com/oauth/token
+🔑 [OAuth2] OAuth2 request body: {
+  "grant_type": "client_credentials",
+  "client_id": "pNwhb5rF32Nk0cbhQGTOs4Fz8yqEkyua",
+  "scope": "read:users",
+  "audience": "https://dev-4y4un4zsmylun23v.us.auth0.com/api/v2/"  // ✅
+}
+✅ [OAuth2] Access token obtained successfully
+🔐 Added OAuth2 token authentication
+```
+
+### API Response
+```json
+{
+  "success": true,
+  "response": {
+    "users": [...]
+  },
+  "status_code": 200
+}
+```
+
+---
+
+## Summary
+
+**Root Cause**: Audience field not being sent in test payload
+
+**Most Likely Reason**: Browser cache not cleared after frontend update
+
+**Solution**:
+1. ✅ Hard refresh browser (`Ctrl+Shift+R`)
+2. ✅ Verify audience field appears in OAuth2 form
+3. ✅ Fill in audience: `https://dev-4y4un4zsmylun23v.us.auth0.com/api/v2/`
+4. ✅ Click test - should work!
+
+If still not working after hard refresh, rebuild Docker container and try again.

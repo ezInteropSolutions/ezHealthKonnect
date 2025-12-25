@@ -55,6 +55,9 @@ class PropertiesPanel {
         // Setup tab switching
         this.setupTabSwitching(modal);
 
+        // Setup fullscreen toggle
+        this.setupFullscreenToggle(modal);
+
         // Show modal
         modal.style.display = 'flex';
 
@@ -129,6 +132,54 @@ class PropertiesPanel {
                 }
             });
         });
+    }
+
+    /**
+     * Setup fullscreen toggle functionality
+     */
+    setupFullscreenToggle(modal) {
+        const fullscreenBtn = modal.querySelector('.modal-fullscreen-btn');
+        if (!fullscreenBtn) return;
+
+        const icon = fullscreenBtn.querySelector('i');
+        let isFullscreen = false;
+
+        fullscreenBtn.addEventListener('click', () => {
+            isFullscreen = !isFullscreen;
+
+            if (isFullscreen) {
+                // Enter fullscreen
+                modal.classList.add('fullscreen');
+                icon.className = 'fas fa-compress';
+                fullscreenBtn.title = 'Exit Fullscreen';
+                console.log('✅ Entered fullscreen mode');
+            } else {
+                // Exit fullscreen
+                modal.classList.remove('fullscreen');
+                icon.className = 'fas fa-expand';
+                fullscreenBtn.title = 'Toggle Fullscreen';
+                console.log('✅ Exited fullscreen mode');
+            }
+        });
+
+        // Also support F11 key for fullscreen toggle
+        const f11Handler = (e) => {
+            if (e.key === 'F11' && modal.style.display === 'flex') {
+                e.preventDefault();
+                fullscreenBtn.click();
+            }
+        };
+        document.addEventListener('keydown', f11Handler);
+
+        // Remove handler when modal closes
+        const originalCloseModal = this.closeModal.bind(this);
+        this.closeModal = () => {
+            document.removeEventListener('keydown', f11Handler);
+            modal.classList.remove('fullscreen');
+            isFullscreen = false;
+            icon.className = 'fas fa-expand';
+            originalCloseModal();
+        };
     }
 
     /**
@@ -406,6 +457,180 @@ class PropertiesPanel {
                             `).join('')}
                         </tbody>
                     </table>
+                </div>
+                ` : ''}
+
+                ${docs.databaseConfigs ? `
+                <div class="doc-section" style="margin-bottom: 1.5rem;">
+                    <h4 style="color: #2563eb; margin-bottom: 0.5rem;">
+                        <i class="fas fa-database"></i> Database-Specific Configuration
+                    </h4>
+                    <p style="color: #6b7280; font-size: 0.875rem; margin-bottom: 1rem;">Click a database to see connection string format, query syntax, and special features.</p>
+                    ${Object.keys(docs.databaseConfigs).map(dbType => {
+                        const db = docs.databaseConfigs[dbType];
+                        return `
+                        <details style="margin-bottom: 0.75rem; border: 1px solid #e5e7eb; border-radius: 6px; background: #f9fafb;">
+                            <summary style="padding: 0.75rem; cursor: pointer; font-weight: 600; color: #1e3a8a; display: flex; align-items: center; gap: 0.5rem;">
+                                <i class="fas fa-chevron-right" style="font-size: 0.75rem; transition: transform 0.2s;"></i>
+                                ${db.name}
+                            </summary>
+                            <div style="padding: 1rem; background: white; border-top: 1px solid #e5e7eb;">
+                                <div style="margin-bottom: 1rem;">
+                                    <strong style="color: #4b5563;">Connection String Format:</strong>
+                                    <pre style="background: #f3f4f6; padding: 0.5rem; border-radius: 4px; margin-top: 0.5rem; font-size: 0.8rem; overflow-x: auto;"><code>${db.connectionFormat}</code></pre>
+                                    <pre style="background: #e0e7ff; padding: 0.5rem; border-radius: 4px; margin-top: 0.5rem; font-size: 0.8rem; overflow-x: auto; color: #1e3a8a;"><code>${db.example}</code></pre>
+                                </div>
+                                ${db.queryFormat ? `
+                                <div style="margin-bottom: 1rem;">
+                                    <strong style="color: #4b5563;">Query Parameter Format:</strong>
+                                    <p style="color: #6b7280; font-size: 0.875rem; margin-top: 0.5rem;">${db.queryFormat}</p>
+                                    <pre style="background: #f3f4f6; padding: 0.5rem; border-radius: 4px; margin-top: 0.5rem; font-size: 0.8rem; overflow-x: auto;"><code>${db.queryExample}</code></pre>
+                                </div>
+                                ` : ''}
+                                ${db.features && db.features.length > 0 ? `
+                                <div>
+                                    <strong style="color: #4b5563;">Special Features:</strong>
+                                    <ul style="margin-top: 0.5rem; padding-left: 1.5rem; color: #6b7280; font-size: 0.875rem;">
+                                        ${db.features.map(f => `<li>${f}</li>`).join('')}
+                                    </ul>
+                                </div>
+                                ` : ''}
+                            </div>
+                        </details>
+                        `;
+                    }).join('')}
+                </div>
+                ` : ''}
+
+                ${docs.noCodeFeatures ? `
+                <div class="doc-section" style="margin-bottom: 1.5rem;">
+                    <h4 style="color: #2563eb; margin-bottom: 0.5rem;">
+                        <i class="fas fa-magic"></i> NO-CODE Features
+                    </h4>
+                    ${docs.noCodeFeatures.map(feature => `
+                        <div style="margin-bottom: 1rem; padding: 1rem; background: linear-gradient(135deg, #667eea15 0%, #764ba215 100%); border-left: 4px solid #667eea; border-radius: 4px;">
+                            <div style="font-weight: 600; color: #1e3a8a; margin-bottom: 0.5rem;">
+                                ${feature.feature}
+                            </div>
+                            <p style="color: #4b5563; margin-bottom: 0.5rem; font-size: 0.875rem;">${feature.description}</p>
+                            <p style="color: #6b7280; font-size: 0.875rem; margin-bottom: 0.5rem;"><strong>How:</strong> ${feature.howTo}</p>
+                            <p style="color: #059669; font-size: 0.875rem;"><strong>Benefit:</strong> ${feature.benefit}</p>
+                        </div>
+                    `).join('')}
+                </div>
+                ` : ''}
+
+                ${docs.workflow ? `
+                <div class="doc-section" style="margin-bottom: 1.5rem;">
+                    <h4 style="color: #2563eb; margin-bottom: 0.5rem;">
+                        <i class="fas fa-list-ol"></i> Configuration Workflow
+                    </h4>
+                    <ol style="padding-left: 1.5rem; color: #4b5563; line-height: 2;">
+                        ${docs.workflow.map(w => `
+                            <li>
+                                <strong style="color: #1e3a8a;">${w.action}</strong>
+                                <div style="color: #6b7280; font-size: 0.875rem; margin-top: 0.25rem;">${w.description}</div>
+                            </li>
+                        `).join('')}
+                    </ol>
+                </div>
+                ` : ''}
+
+                ${docs.bestPractices ? `
+                <div class="doc-section" style="margin-bottom: 1.5rem;">
+                    <h4 style="color: #2563eb; margin-bottom: 0.5rem;">
+                        <i class="fas fa-star"></i> Best Practices
+                    </h4>
+                    ${docs.bestPractices.map(bp => `
+                        <div style="margin-bottom: 1rem; padding: 1rem; background: #ecfdf5; border-left: 4px solid #10b981; border-radius: 4px;">
+                            <div style="font-weight: 600; color: #065f46; margin-bottom: 0.5rem;">
+                                ${bp.practice}
+                            </div>
+                            <p style="color: #4b5563; margin-bottom: 0.5rem; font-size: 0.875rem;"><strong>Why:</strong> ${bp.reason}</p>
+                            <p style="color: #6b7280; font-size: 0.875rem;"><strong>Example:</strong> ${bp.example}</p>
+                        </div>
+                    `).join('')}
+                </div>
+                ` : ''}
+
+                ${docs.troubleshooting ? `
+                <div class="doc-section" style="margin-bottom: 1.5rem;">
+                    <h4 style="color: #2563eb; margin-bottom: 0.5rem;">
+                        <i class="fas fa-wrench"></i> Troubleshooting
+                    </h4>
+                    ${docs.troubleshooting.map(t => `
+                        <details style="margin-bottom: 0.75rem; border: 1px solid #fee2e2; border-radius: 6px; background: #fef2f2;">
+                            <summary style="padding: 0.75rem; cursor: pointer; font-weight: 600; color: #991b1b;">
+                                ${t.issue}
+                            </summary>
+                            <div style="padding: 1rem; background: white; border-top: 1px solid #fee2e2;">
+                                <p style="color: #6b7280; font-size: 0.875rem; margin-bottom: 0.5rem;"><strong>Cause:</strong> ${t.cause}</p>
+                                <p style="color: #059669; font-size: 0.875rem;"><strong>Fix:</strong> ${t.fix}</p>
+                            </div>
+                        </details>
+                    `).join('')}
+                </div>
+                ` : ''}
+
+                ${docs.securityNotes ? `
+                <div class="doc-section" style="margin-bottom: 1.5rem;">
+                    <h4 style="color: #2563eb; margin-bottom: 0.5rem;">
+                        <i class="fas fa-shield-alt"></i> Security Notes
+                    </h4>
+                    ${docs.securityNotes.map(sn => `
+                        <div style="margin-bottom: 1rem; padding: 1rem; background: #fff7ed; border-left: 4px solid #f97316; border-radius: 4px;">
+                            <div style="font-weight: 600; color: #9a3412; margin-bottom: 0.5rem;">
+                                ${sn.note}
+                            </div>
+                            <p style="color: #4b5563; margin-bottom: 0.5rem; font-size: 0.875rem;">${sn.detail}</p>
+                            <p style="color: #059669; font-size: 0.875rem;"><strong>Recommendation:</strong> ${sn.recommendation}</p>
+                        </div>
+                    `).join('')}
+                </div>
+                ` : ''}
+
+                ${docs.accessMethods ? `
+                <div class="doc-section" style="margin-bottom: 1.5rem;">
+                    <h4 style="color: #2563eb; margin-bottom: 0.5rem;">
+                        <i class="fas fa-code-branch"></i> Access Methods
+                    </h4>
+                    ${docs.accessMethods.map(am => `
+                        <div style="margin-bottom: 1rem; padding: 1rem; background: #f0f9ff; border-left: 4px solid #0284c7; border-radius: 4px;">
+                            <div style="font-weight: 600; color: #075985; margin-bottom: 0.5rem;">
+                                ${am.method}
+                            </div>
+                            <p style="color: #4b5563; margin-bottom: 0.5rem; font-size: 0.875rem;">${am.description}</p>
+                            <p style="color: #6b7280; font-size: 0.875rem; margin-bottom: 0.5rem;"><strong>Format:</strong> <code style="background: white; padding: 0.2rem 0.5rem; border-radius: 3px;">${am.format}</code></p>
+                            <details style="margin-top: 0.5rem;">
+                                <summary style="cursor: pointer; color: #0284c7; font-size: 0.875rem; font-weight: 600;">View Examples</summary>
+                                <ul style="margin-top: 0.5rem; padding-left: 1.5rem; font-size: 0.875rem;">
+                                    ${am.examples.map(ex => `<li><code style="background: white; padding: 0.2rem 0.5rem; border-radius: 3px;">${ex}</code></li>`).join('')}
+                                </ul>
+                            </details>
+                        </div>
+                    `).join('')}
+                </div>
+                ` : ''}
+
+                ${docs.stepOutputStructure ? `
+                <div class="doc-section" style="margin-bottom: 1.5rem;">
+                    <h4 style="color: #2563eb; margin-bottom: 0.5rem;">
+                        <i class="fas fa-sitemap"></i> Step Output Structure Examples
+                    </h4>
+                    <p style="color: #6b7280; font-size: 0.875rem; margin-bottom: 1rem;">Click to expand and see the data structure for each step type.</p>
+                    ${Object.keys(docs.stepOutputStructure).map(stepType => {
+                        const structure = docs.stepOutputStructure[stepType];
+                        return `
+                        <details style="margin-bottom: 0.75rem; border: 1px solid #e5e7eb; border-radius: 6px; background: #f9fafb;">
+                            <summary style="padding: 0.75rem; cursor: pointer; font-weight: 600; color: #1e3a8a;">
+                                ${stepType.replace(/_/g, ' ').toUpperCase()}
+                            </summary>
+                            <div style="padding: 1rem; background: white; border-top: 1px solid #e5e7eb;">
+                                <pre style="background: #f3f4f6; padding: 1rem; border-radius: 6px; overflow-x: auto; font-size: 0.8rem; line-height: 1.6;"><code>${JSON.stringify(structure, null, 2)}</code></pre>
+                            </div>
+                        </details>
+                        `;
+                    }).join('')}
                 </div>
                 ` : ''}
 
@@ -975,17 +1200,187 @@ class PropertiesPanel {
             container._headerBuilderInstance = builder;
         });
 
-        // === Query Param Builder Initialization (Query Parameters for API Enrichment) ===
+        // === Query Param Builder Initialization (Query Parameters for API Enrichment & Database Enrichment) ===
         const queryParamContainers = form.querySelectorAll('.query-param-builder-container');
-        queryParamContainers.forEach(container => {
+        console.log('[PropertiesPanel] 🔍 Found', queryParamContainers.length, 'query-param-builder-container(s) during initialization');
+        queryParamContainers.forEach((container, index) => {
             const initialParamsJSON = container.dataset.initialParams;
             const initialParams = initialParamsJSON ? JSON.parse(initialParamsJSON) : {};
+            const fieldKey = container.dataset.fieldKey;
+
+            console.log(`[PropertiesPanel] 📦 Initializing QueryParamBuilder #${index} with fieldKey="${fieldKey}", initialParams:`, initialParams);
 
             // Instantiate QueryParamBuilder component
             const builder = new QueryParamBuilder(container, initialParams);
 
-            // Store reference for later access
+            // Store reference for later access (both on container AND on this object)
             container._queryParamBuilderInstance = builder;
+
+            // CRITICAL FIX: Also store globally on PropertiesPanel instance
+            // This ensures we can retrieve it even if the modal content is replaced
+            this._activeQueryParamBuilder = builder;
+            this._activeQueryParamFieldKey = fieldKey;
+
+            // Listen for parameter changes to update the Database Query Tester in real-time
+            container.addEventListener('paramsChanged', (e) => {
+                console.log('[PropertiesPanel] 📡 Query params changed:', e.detail.params);
+                // Find and update the database query tester
+                const testerContainers = form.querySelectorAll('.database-query-tester-container');
+                testerContainers.forEach(testerContainer => {
+                    const tester = testerContainer._databaseTesterInstance;
+                    if (tester) {
+                        const currentConfig = tester.config || {};
+                        currentConfig.queryParams = e.detail.params;
+                        tester.updateConfig(currentConfig);
+                        console.log('[PropertiesPanel] ✅ Updated tester with new params');
+                    }
+                });
+            });
+
+            console.log(`[PropertiesPanel] ✅ Stored _queryParamBuilderInstance for fieldKey="${fieldKey}"`);
+        });
+
+        // === Result Mapping Builder Initialization (Database Enrichment) ===
+        // NO-CODE: Visual builder for mapping database columns to output fields
+        const resultMappingContainers = form.querySelectorAll('.result-mapping-builder-container');
+        resultMappingContainers.forEach(container => {
+            const initialMappingsJSON = container.dataset.initialMappings;
+            const initialMappings = initialMappingsJSON ? JSON.parse(initialMappingsJSON) : {};
+
+            // Instantiate ResultMappingBuilder component
+            const builder = new ResultMappingBuilder(container, initialMappings);
+
+            // Store reference for later access
+            container._resultMappingBuilderInstance = builder;
+        });
+
+        // === MongoDB Filter Builder Initialization ===
+        // NO-CODE: Visual builder for MongoDB filter queries
+        const mongoFilterContainers = form.querySelectorAll('.mongodb-filter-builder-container');
+        mongoFilterContainers.forEach(container => {
+            const initialFilterJSON = container.dataset.initialFilter;
+            const initialFilter = initialFilterJSON ? JSON.parse(initialFilterJSON) : {};
+
+            // Instantiate MongoDBFilterBuilder component
+            const builder = new MongoDBFilterBuilder(container, initialFilter);
+
+            // Store reference for later access
+            container._mongodbFilterBuilderInstance = builder;
+        });
+
+        // === MongoDB Projection Builder Initialization ===
+        // NO-CODE: Visual field selector for MongoDB projection
+        const mongoProjectionContainers = form.querySelectorAll('.mongodb-projection-builder-container');
+        mongoProjectionContainers.forEach(container => {
+            const initialProjectionJSON = container.dataset.initialProjection;
+            const initialProjection = initialProjectionJSON ? JSON.parse(initialProjectionJSON) : {};
+
+            // Get connection config from form fields
+            const connectionConfig = {
+                dbHost: form.querySelector('[name="config_dbHost"]')?.value || 'mongodb',
+                dbPort: parseInt(form.querySelector('[name="config_dbPort"]')?.value) || 27017,
+                dbName: form.querySelector('[name="config_dbName"]')?.value || 'ezhealthkonnect',
+                dbUser: form.querySelector('[name="config_dbUser"]')?.value || '',
+                dbPassword: form.querySelector('[name="config_dbPassword"]')?.value || '',
+                collection: form.querySelector('[name="config_collection"]')?.value || ''
+            };
+
+            // Instantiate MongoDBProjectionBuilder component with connection config
+            const builder = new MongoDBProjectionBuilder(container, initialProjection, connectionConfig);
+
+            // Store reference for later access
+            container._mongodbProjectionBuilderInstance = builder;
+
+            // Watch for collection name changes and reload schema
+            const collectionInput = form.querySelector('[name="config_collection"]');
+            if (collectionInput) {
+                collectionInput.addEventListener('change', () => {
+                    connectionConfig.collection = collectionInput.value;
+                    builder.connectionConfig = connectionConfig;
+                    builder.loadCollectionSchema();
+                });
+            }
+        });
+
+        // === Database Query Tester Initialization (Database Enrichment) ===
+        // NO-CODE: Test SQL queries before saving pipeline
+        const dbQueryTesterContainers = form.querySelectorAll('.database-query-tester-container');
+        dbQueryTesterContainers.forEach(container => {
+            // Create tester with empty config (will be updated when user changes fields)
+            const tester = new DatabaseQueryTester(container, {});
+
+            // Store reference for later access
+            container._databaseQueryTesterInstance = tester;
+
+            // Set callback for adding mappings from query results
+            tester.setOnAddMapping((dbColumn) => {
+                console.log('🎯 User clicked Add to Mapping for column:', dbColumn);
+
+                // Find the ResultMappingBuilder instance
+                const resultMappingContainer = form.querySelector('.result-mapping-builder-container');
+                if (resultMappingContainer && resultMappingContainer._resultMappingBuilderInstance) {
+                    resultMappingContainer._resultMappingBuilderInstance.addMappingFromQueryResult(dbColumn);
+                    console.log('✅ Added column to Result Mapping Builder:', dbColumn);
+                } else {
+                    console.warn('⚠️ ResultMappingBuilder not found');
+                }
+            });
+
+            // Update tester config when user changes query/params/connection
+            const updateTesterConfig = () => {
+                const config = {
+                    databaseType: form.querySelector('[name="config_databaseType"]')?.value,
+                    connectionString: form.querySelector('[name="config_connectionString"]')?.value,
+                    // Individual connection fields
+                    dbHost: form.querySelector('[name="config_dbHost"]')?.value,
+                    dbPort: parseInt(form.querySelector('[name="config_dbPort"]')?.value) || 0,
+                    dbName: form.querySelector('[name="config_dbName"]')?.value,
+                    dbUser: form.querySelector('[name="config_dbUser"]')?.value,
+                    dbPassword: form.querySelector('[name="config_dbPassword"]')?.value,
+                    query: form.querySelector('[name="config_query"]')?.value,
+                    queryParams: {}
+                };
+
+                // Get query params from QueryParamBuilder
+                const queryParamContainer = form.querySelector('.query-param-builder-container');
+                if (queryParamContainer && queryParamContainer._queryParamBuilderInstance) {
+                    config.queryParams = queryParamContainer._queryParamBuilderInstance.getParams();
+                } else if (this._activeQueryParamBuilder) {
+                    // FALLBACK: Use globally stored instance if container not found
+                    config.queryParams = this._activeQueryParamBuilder.getParams();
+                    console.log('[PropertiesPanel] 🔧 Using global QueryParamBuilder for tester update:', config.queryParams);
+                }
+
+                tester.updateConfig(config);
+            };
+
+            // Attach change listeners to update tester config
+            const queryInput = form.querySelector('[name="config_query"]');
+            if (queryInput) {
+                queryInput.addEventListener('blur', updateTesterConfig);
+            }
+
+            const connectionStringInput = form.querySelector('[name="config_connectionString"]');
+            if (connectionStringInput) {
+                connectionStringInput.addEventListener('blur', updateTesterConfig);
+            }
+
+            const databaseTypeSelect = form.querySelector('[name="config_databaseType"]');
+            if (databaseTypeSelect) {
+                databaseTypeSelect.addEventListener('change', updateTesterConfig);
+            }
+
+            // Attach listeners for individual connection fields
+            const dbFieldNames = ['config_dbHost', 'config_dbPort', 'config_dbName', 'config_dbUser', 'config_dbPassword'];
+            dbFieldNames.forEach(fieldName => {
+                const field = form.querySelector(`[name="${fieldName}"]`);
+                if (field) {
+                    field.addEventListener('blur', updateTesterConfig);
+                }
+            });
+
+            // Initial config update
+            setTimeout(updateTesterConfig, 100);
         });
 
         // === OAuth 2.0 Config Builder Initialization (OAuth 2.0 for API Enrichment) ===
@@ -1069,6 +1464,23 @@ class PropertiesPanel {
                 const apiKeyInput = form.querySelector('[name="config_apiKey"]');
                 if (apiKeyInput) config.apiKey = apiKeyInput.value;
 
+                // Get OAuth2 config from OAuth2ConfigBuilder component
+                const oauth2Container = form.querySelector('.oauth2-config-builder');
+                if (oauth2Container && oauth2Container._oauth2ConfigBuilderInstance) {
+                    const oauth2Config = oauth2Container._oauth2ConfigBuilderInstance.getConfig();
+                    console.log('[PropertiesPanel] 🔍 Reading OAuth2 config for API test:', oauth2Config);
+
+                    // Map OAuth2ConfigBuilder fields to backend model fields
+                    if (oauth2Config.tokenURL) config.oauth2TokenUrl = oauth2Config.tokenURL;
+                    if (oauth2Config.clientID) config.oauth2ClientId = oauth2Config.clientID;
+                    if (oauth2Config.clientSecret) config.oauth2ClientSecret = oauth2Config.clientSecret;
+                    if (oauth2Config.grantType) config.oauth2GrantType = oauth2Config.grantType;
+                    if (oauth2Config.scope) config.oauth2Scope = oauth2Config.scope;
+                    if (oauth2Config.audience) config.oauth2Audience = oauth2Config.audience;
+                    if (oauth2Config.username) config.oauth2Username = oauth2Config.username;
+                    if (oauth2Config.password) config.oauth2Password = oauth2Config.password;
+                }
+
                 // Get headers from builder
                 const headerContainer = form.querySelector('.header-builder-container');
                 if (headerContainer && headerContainer._headerBuilderInstance) {
@@ -1130,32 +1542,72 @@ class PropertiesPanel {
         controlFields.forEach(controlField => {
             const fieldName = controlField.name.replace('config_', '');
 
-            // Find all conditional fields that depend on this control field
+            // Find all conditional fields that depend on this control field (old pattern)
             const conditionalFields = form.querySelectorAll(
                 `.conditional-field[data-visible-when-field="${fieldName}"]`
             );
 
-            if (conditionalFields.length === 0) return;
+            // Find all conditional fields that depend on this control field (new showIf pattern)
+            const showIfFields = form.querySelectorAll(
+                `.conditional-field[data-show-if-field="${fieldName}"]`
+            );
+
+            if (conditionalFields.length === 0 && showIfFields.length === 0) return;
 
             // Add change event listener to control field
             controlField.addEventListener('change', (e) => {
                 const currentValue = e.target.value;
 
-                // Update visibility of all dependent fields
+                // Update visibility of all dependent fields (old pattern)
                 conditionalFields.forEach(conditionalField => {
-                    const requiredValue = conditionalField.dataset.visibleWhenValue;
+                    this.updateFieldVisibility(conditionalField, form);
+                });
 
-                    if (currentValue === requiredValue) {
-                        conditionalField.classList.remove('hidden');
-                    } else {
-                        conditionalField.classList.add('hidden');
-                    }
+                // Update visibility of all dependent fields (new showIf pattern with arrays)
+                showIfFields.forEach(conditionalField => {
+                    this.updateFieldVisibility(conditionalField, form);
                 });
             });
 
             // Trigger initial visibility check
             controlField.dispatchEvent(new Event('change'));
         });
+    }
+
+    /**
+     * Update field visibility based on ALL conditions (AND logic)
+     * Checks both visibleWhen and showIf conditions if present
+     */
+    updateFieldVisibility(conditionalField, form) {
+        let shouldShow = true;
+
+        // Check visibleWhen condition
+        const visibleWhenField = conditionalField.dataset.visibleWhenField;
+        const visibleWhenValue = conditionalField.dataset.visibleWhenValue;
+        if (visibleWhenField && visibleWhenValue) {
+            const controlField = form.querySelector(`[name="config_${visibleWhenField}"]`);
+            if (controlField && controlField.value !== visibleWhenValue) {
+                shouldShow = false;
+            }
+        }
+
+        // Check showIf condition (AND with visibleWhen)
+        const showIfField = conditionalField.dataset.showIfField;
+        const showIfValues = conditionalField.dataset.showIfValues;
+        if (showIfField && showIfValues) {
+            const controlField = form.querySelector(`[name="config_${showIfField}"]`);
+            const allowedValues = JSON.parse(showIfValues || '[]');
+            if (controlField && !allowedValues.includes(controlField.value)) {
+                shouldShow = false;
+            }
+        }
+
+        // Apply visibility
+        if (shouldShow) {
+            conditionalField.classList.remove('hidden');
+        } else {
+            conditionalField.classList.add('hidden');
+        }
     }
 
     /**
@@ -1667,15 +2119,117 @@ class PropertiesPanel {
         });
 
         // Collect query params from QueryParamBuilder component
-        const queryParamBuilderContainers = form.querySelectorAll('.query-param-builder-container');
-        queryParamBuilderContainers.forEach(container => {
-            const builder = container._queryParamBuilderInstance;
+        // FIX: Search in the entire modal content, not just the form, because the container might be re-rendered
+        const modal = document.getElementById('stepPropertiesModal');
+        const searchRoot = modal || form;
+        console.log('[PropertiesPanel] 🔍 Searching for query-param-builder-container in:', searchRoot.id || searchRoot.className);
+        const queryParamBuilderContainers = searchRoot.querySelectorAll('.query-param-builder-container');
+        console.log('[PropertiesPanel] 🔍 Found', queryParamBuilderContainers.length, 'query-param-builder-container(s) during collection');
+
+        // CRITICAL FIX: If no containers found in DOM, use the globally stored builder instance
+        if (queryParamBuilderContainers.length === 0 && this._activeQueryParamBuilder) {
+            console.log('[PropertiesPanel] 🔧 FALLBACK: Using globally stored QueryParamBuilder instance');
+            step.config = step.config || {};
+            const queryParams = this._activeQueryParamBuilder.getParams();
+            const fieldKey = this._activeQueryParamFieldKey || 'queryParamsBuilder';
+
+            console.log(`[PropertiesPanel] 🔑 getParams() returned from global builder:`, queryParams);
+
+            step.config[fieldKey] = queryParams;
+
+            // For database enrichment, also store as 'queryParams' for backend compatibility
+            if (fieldKey === 'queryParamsBuilder') {
+                step.config.queryParams = queryParams;
+            }
+
+            console.log('[PropertiesPanel] ✅ Saved query params from global builder to step.config.' + fieldKey + ':', queryParams);
+        } else {
+            // Normal path: found containers in DOM
+            queryParamBuilderContainers.forEach((container, index) => {
+                const fieldKey = container.dataset.fieldKey;
+                const builder = container._queryParamBuilderInstance;
+                console.log(`[PropertiesPanel] 📦 Container #${index} fieldKey="${fieldKey}", has builder:`, !!builder);
+
+                if (builder) {
+                    step.config = step.config || {};
+                    const queryParams = builder.getParams();
+                    console.log(`[PropertiesPanel] 🔑 getParams() returned:`, queryParams);
+
+                    // Store with both the builder key and the backend key for compatibility
+                    step.config[fieldKey] = queryParams;  // e.g., queryParamsBuilder
+
+                    // For database enrichment, also store as 'queryParams' for backend compatibility
+                    if (fieldKey === 'queryParamsBuilder') {
+                        step.config.queryParams = queryParams;
+                    }
+
+                    console.log('[PropertiesPanel] ✅ Saved query params to step.config.' + fieldKey + ':', queryParams);
+                } else {
+                    console.warn(`[PropertiesPanel] ⚠️ Container #${index} fieldKey="${fieldKey}" has NO _queryParamBuilderInstance!`);
+                }
+            });
+        }
+
+        // Collect result mappings from ResultMappingBuilder component (Database Enrichment)
+        const resultMappingBuilderContainers = form.querySelectorAll('.result-mapping-builder-container');
+        resultMappingBuilderContainers.forEach(container => {
+            const builder = container._resultMappingBuilderInstance;
             if (builder) {
                 step.config = step.config || {};
                 const fieldKey = container.dataset.fieldKey;
-                const queryParams = builder.getParams();
-                step.config[fieldKey] = queryParams;
-                console.log('[PropertiesPanel] ✅ Saved query params to step.config.' + fieldKey + ':', queryParams);
+                const resultMappings = builder.getMappings();
+
+                // Store with both the builder key and the backend key for compatibility
+                step.config[fieldKey] = resultMappings;  // e.g., resultMappingBuilder
+
+                // For database enrichment, also store as 'resultMapping' for backend compatibility
+                if (fieldKey === 'resultMappingBuilder') {
+                    step.config.resultMapping = resultMappings;
+                }
+
+                console.log('[PropertiesPanel] ✅ Saved result mappings to step.config.' + fieldKey + ':', resultMappings);
+            }
+        });
+
+        // Collect filter from MongoDBFilterBuilder component
+        const mongoFilterBuilderContainers = form.querySelectorAll('.mongodb-filter-builder-container');
+        mongoFilterBuilderContainers.forEach(container => {
+            const builder = container._mongodbFilterBuilderInstance;
+            if (builder) {
+                step.config = step.config || {};
+                const fieldKey = container.dataset.fieldKey;
+                const filter = builder.getFilter();
+
+                // Store with both the builder key and the backend key
+                step.config[fieldKey] = filter;  // e.g., mongodbFilterBuilder
+
+                // Also store as 'filter' for backend compatibility
+                if (fieldKey === 'mongodbFilterBuilder') {
+                    step.config.filter = filter;
+                }
+
+                console.log('[PropertiesPanel] ✅ Saved MongoDB filter to step.config.' + fieldKey + ':', filter);
+            }
+        });
+
+        // Collect projection from MongoDBProjectionBuilder component
+        const mongoProjectionBuilderContainers = form.querySelectorAll('.mongodb-projection-builder-container');
+        mongoProjectionBuilderContainers.forEach(container => {
+            const builder = container._mongodbProjectionBuilderInstance;
+            if (builder) {
+                step.config = step.config || {};
+                const fieldKey = container.dataset.fieldKey;
+                const projection = builder.getProjection();
+
+                // Store with both the builder key and the backend key
+                step.config[fieldKey] = projection;  // e.g., mongodbProjectionBuilder
+
+                // Also store as 'projection' for backend compatibility
+                if (fieldKey === 'mongodbProjectionBuilder') {
+                    step.config.projection = projection;
+                }
+
+                console.log('[PropertiesPanel] ✅ Saved MongoDB projection to step.config.' + fieldKey + ':', projection);
             }
         });
 
@@ -1713,20 +2267,24 @@ class PropertiesPanel {
 
         // Collect OAuth 2.0 config from OAuth2ConfigBuilder component
         const oauth2ConfigBuilderContainers = form.querySelectorAll('.oauth2-config-builder-container');
+        console.log('[PropertiesPanel] 🔍 Found OAuth2 containers:', oauth2ConfigBuilderContainers.length);
         oauth2ConfigBuilderContainers.forEach(container => {
             const builder = container._oauth2ConfigBuilderInstance;
+            console.log('[PropertiesPanel] 🔍 OAuth2ConfigBuilder instance:', builder);
             if (builder) {
                 step.config = step.config || {};
                 const oauth2Config = builder.getConfig();
+                console.log('[PropertiesPanel] 🔍 OAuth2 config from builder:', oauth2Config);
 
                 // Map OAuth2ConfigBuilder fields to backend model fields
                 // Backend expects: oauth2TokenUrl, oauth2ClientId, oauth2ClientSecret,
-                //                  oauth2GrantType, oauth2Scope, oauth2Username, oauth2Password
+                //                  oauth2GrantType, oauth2Scope, oauth2Audience, oauth2Username, oauth2Password
                 if (oauth2Config.tokenURL) step.config.oauth2TokenUrl = oauth2Config.tokenURL;
                 if (oauth2Config.clientID) step.config.oauth2ClientId = oauth2Config.clientID;
                 if (oauth2Config.clientSecret) step.config.oauth2ClientSecret = oauth2Config.clientSecret;
                 if (oauth2Config.grantType) step.config.oauth2GrantType = oauth2Config.grantType;
                 if (oauth2Config.scope) step.config.oauth2Scope = oauth2Config.scope;
+                if (oauth2Config.audience) step.config.oauth2Audience = oauth2Config.audience;
                 if (oauth2Config.username) step.config.oauth2Username = oauth2Config.username;
                 if (oauth2Config.password) step.config.oauth2Password = oauth2Config.password;
 
@@ -1736,6 +2294,8 @@ class PropertiesPanel {
                     oauth2GrantType: step.config.oauth2GrantType,
                     oauth2Scope: step.config.oauth2Scope
                 });
+            } else {
+                console.warn('[PropertiesPanel] ⚠️ OAuth2ConfigBuilder instance not found on container');
             }
         });
 
@@ -1747,20 +2307,34 @@ class PropertiesPanel {
         configInputs.forEach(input => {
             const fieldName = input.name.replace('config_', '');
 
+            // Skip fields that are hidden (conditionally invisible)
+            const fieldContainer = input.closest('.form-group');
+            if (fieldContainer && fieldContainer.classList.contains('hidden')) {
+                console.log(`[PropertiesPanel] Skipping hidden field: ${fieldName}`);
+                return; // Skip this field
+            }
+
             if (input.type === 'checkbox') {
                 step.config[fieldName] = input.checked;
             } else if (input.type === 'number') {
                 step.config[fieldName] = parseInt(input.value) || 0;
             } else if (input.tagName === 'TEXTAREA') {
                 // Try to parse JSON from textareas, otherwise use raw value
-                try {
-                    if (input.value.trim().startsWith('{') || input.value.trim().startsWith('[')) {
-                        step.config[fieldName] = JSON.parse(input.value);
-                    } else {
-                        step.config[fieldName] = input.value;
+                const trimmedValue = input.value.trim();
+
+                // Handle empty textareas - send null instead of empty string to avoid backend unmarshaling errors
+                if (trimmedValue === '') {
+                    step.config[fieldName] = null;
+                } else {
+                    try {
+                        if (trimmedValue.startsWith('{') || trimmedValue.startsWith('[')) {
+                            step.config[fieldName] = JSON.parse(trimmedValue);
+                        } else {
+                            step.config[fieldName] = trimmedValue;
+                        }
+                    } catch (e) {
+                        step.config[fieldName] = trimmedValue;
                     }
-                } catch (e) {
-                    step.config[fieldName] = input.value;
                 }
             } else {
                 step.config[fieldName] = input.value;
@@ -1768,6 +2342,15 @@ class PropertiesPanel {
         });
 
         console.log('[PropertiesPanel] Collected config fields:', step.config);
+
+        // CRITICAL FIX: For database enrichment steps, if individual connection fields are provided,
+        // force connectionString to be empty so executor builds it from individual fields
+        if (step.config.databaseType &&
+            (step.config.dbHost || step.config.dbName || step.config.dbUser)) {
+            console.log('[PropertiesPanel] 🔧 Database enrichment with individual fields detected');
+            console.log('[PropertiesPanel] 🔧 Setting connectionString to empty to force field-based connection');
+            step.config.connectionString = '';
+        }
 
         // Configuration textarea (legacy)
         const configText = form.querySelector('#stepConfig')?.value;
@@ -1896,19 +2479,41 @@ class PropertiesPanel {
                 ? JSON.stringify(rawValue, null, 2)
                 : rawValue;
 
-            // Handle conditional visibility
+            // Handle conditional visibility (can have both visibleWhen AND showIf)
             let visibilityClass = '';
             let visibilityDataAttr = '';
+            let shouldHide = false;
+
+            // Check visibleWhen condition (single value match)
             if (field.visibleWhen) {
                 visibilityClass = 'conditional-field';
                 visibilityDataAttr = `data-visible-when-field="${field.visibleWhen.field}" data-visible-when-value="${field.visibleWhen.value}"`;
 
-                // Check if field should be initially visible
                 const controlFieldValue = step.config?.[field.visibleWhen.field] ||
                                          stepConfig.fields.find(f => f.key === field.visibleWhen.field)?.default || '';
                 if (controlFieldValue !== field.visibleWhen.value) {
-                    visibilityClass += ' hidden';
+                    shouldHide = true;
                 }
+            }
+
+            // Check showIf condition (multiple value match - AND with visibleWhen if both present)
+            if (field.showIf) {
+                visibilityClass = 'conditional-field';
+                const showIfAttr = `data-show-if-field="${field.showIf.field}" data-show-if-values='${JSON.stringify(field.showIf.values)}'`;
+
+                // Combine with existing visibility data if present
+                visibilityDataAttr = visibilityDataAttr ? `${visibilityDataAttr} ${showIfAttr}` : showIfAttr;
+
+                const controlFieldValue = step.config?.[field.showIf.field] ||
+                                         stepConfig.fields.find(f => f.key === field.showIf.field)?.default || '';
+                if (!field.showIf.values.includes(controlFieldValue)) {
+                    shouldHide = true;
+                }
+            }
+
+            // Apply hidden class if any condition fails
+            if (shouldHide) {
+                visibilityClass += ' hidden';
             }
 
             html += `<div class="form-group ${visibilityClass}" ${visibilityDataAttr}>`;
@@ -2008,10 +2613,10 @@ class PropertiesPanel {
                     break;
 
                 case 'query-param-builder':
-                    // Query parameter builder for API enrichment
+                    // Query parameter builder for API enrichment and database enrichment
                     let queryParams = {};
                     try {
-                        if (typeof value === 'string') {
+                        if (typeof value === 'string' && value.trim() !== '') {
                             queryParams = JSON.parse(value);
                         } else if (typeof value === 'object' && value !== null) {
                             queryParams = value;
@@ -2021,14 +2626,74 @@ class PropertiesPanel {
                         queryParams = {};
                     }
 
+                    console.log(`[PropertiesPanel] 🏗️ Rendering query-param-builder for field "${field.key}", value from step.config:`, value, 'parsed queryParams:', queryParams);
+
                     // Create container for QueryParamBuilder component
                     html += `<div class="query-param-builder-container" data-field-key="${field.key}" data-initial-params='${JSON.stringify(queryParams)}'></div>`;
+                    break;
+
+                case 'result-mapping-builder':
+                    // Result mapping builder for database enrichment - NO-CODE visual mapper
+                    let resultMappings = {};
+                    try {
+                        if (typeof value === 'string') {
+                            resultMappings = JSON.parse(value);
+                        } else if (typeof value === 'object' && value !== null) {
+                            resultMappings = value;
+                        }
+                    } catch (e) {
+                        console.warn('Failed to parse result mappings:', e);
+                        resultMappings = {};
+                    }
+
+                    // Create container for ResultMappingBuilder component
+                    html += `<div class="result-mapping-builder-container" data-field-key="${field.key}" data-initial-mappings='${JSON.stringify(resultMappings)}'></div>`;
                     break;
 
                 case 'api-endpoint-tester':
                     // API Endpoint Tester - NO-CODE: Test API and visually pick response fields
                     // This enables first-time users to see actual API response before configuration
                     html += `<div class="api-endpoint-tester-container" id="api-endpoint-tester-container"></div>`;
+                    break;
+
+                case 'database-query-tester':
+                    // Database Query Tester - NO-CODE: Test SQL queries before saving pipeline
+                    // Shows actual database results and allows click-to-add mapping
+                    html += `<div class="database-query-tester-container" data-field-key="${field.key}"></div>`;
+                    break;
+
+                case 'mongodb-filter-builder':
+                    // MongoDB Filter Builder - NO-CODE visual query builder
+                    let filterValue = {};
+                    try {
+                        if (typeof value === 'string') {
+                            filterValue = JSON.parse(value);
+                        } else if (typeof value === 'object' && value !== null) {
+                            filterValue = value;
+                        }
+                    } catch (e) {
+                        console.warn('Failed to parse MongoDB filter:', e);
+                        filterValue = {};
+                    }
+
+                    html += `<div class="mongodb-filter-builder-container" data-field-key="${field.key}" data-initial-filter='${JSON.stringify(filterValue)}'></div>`;
+                    break;
+
+                case 'mongodb-projection-builder':
+                    // MongoDB Projection Builder - NO-CODE field selector
+                    let projectionValue = {};
+                    try {
+                        if (typeof value === 'string') {
+                            projectionValue = JSON.parse(value);
+                        } else if (typeof value === 'object' && value !== null) {
+                            projectionValue = value;
+                        }
+                    } catch (e) {
+                        console.warn('Failed to parse MongoDB projection:', e);
+                        projectionValue = {};
+                    }
+
+                    html += `<div class="mongodb-projection-builder-container" data-field-key="${field.key}" data-initial-projection='${JSON.stringify(projectionValue)}'></div>`;
                     break;
 
                 case 'basic-auth-container':
@@ -2157,6 +2822,7 @@ class PropertiesPanel {
                         if (step.config.oauth2ClientSecret) oauth2Config.clientSecret = step.config.oauth2ClientSecret;
                         if (step.config.oauth2GrantType) oauth2Config.grantType = step.config.oauth2GrantType;
                         if (step.config.oauth2Scope) oauth2Config.scope = step.config.oauth2Scope;
+                        if (step.config.oauth2Audience) oauth2Config.audience = step.config.oauth2Audience;
                         if (step.config.oauth2Username) oauth2Config.username = step.config.oauth2Username;
                         if (step.config.oauth2Password) oauth2Config.password = step.config.oauth2Password;
                     }
@@ -2542,42 +3208,164 @@ class PropertiesPanel {
                             { value: 'postgresql', label: 'PostgreSQL' },
                             { value: 'mysql', label: 'MySQL' },
                             { value: 'sqlserver', label: 'SQL Server' },
-                            { value: 'oracle', label: 'Oracle' }
+                            { value: 'oracle', label: 'Oracle' },
+                            { value: 'mongodb', label: 'MongoDB' },
+                            { value: 'redis', label: 'Redis' }
                         ],
-                        help: 'Type of database to query'
+                        help: 'Type of database to query (SQL and NoSQL)'
                     },
                     {
-                        key: 'connectionString',
-                        label: 'Connection String',
+                        key: 'dbHost',
+                        label: 'Host',
                         type: 'text',
                         required: true,
-                        placeholder: 'postgresql://user:pass@localhost:5432/dbname',
-                        help: 'Database connection string'
+                        default: 'postgres',
+                        placeholder: 'localhost or postgres',
+                        help: 'Database server hostname or IP address'
+                    },
+                    {
+                        key: 'dbPort',
+                        label: 'Port',
+                        type: 'number',
+                        required: true,
+                        default: 5432,
+                        placeholder: 'PostgreSQL: 5432, MySQL: 3306, MongoDB: 27017, Redis: 6379, SQL Server: 1433, Oracle: 1521',
+                        help: 'Database server port - changes based on database type'
+                    },
+                    {
+                        key: 'dbName',
+                        label: 'Database',
+                        type: 'text',
+                        required: true,
+                        default: 'ezhealthkonnect',
+                        placeholder: 'database_name',
+                        help: 'Database name to connect to'
+                    },
+                    {
+                        key: 'dbUser',
+                        label: 'Username',
+                        type: 'text',
+                        required: true,
+                        default: 'ezhealth_user',
+                        placeholder: 'username',
+                        help: 'Database username'
+                    },
+                    {
+                        key: 'dbPassword',
+                        label: 'Password',
+                        type: 'password',
+                        required: true,
+                        placeholder: 'password',
+                        help: 'Database password (stored securely)'
+                    },
+                    {
+                        key: 'collection',
+                        label: 'Collection Name',
+                        type: 'text',
+                        required: false,
+                        placeholder: 'patients',
+                        help: 'MongoDB collection name (only for MongoDB)',
+                        showIf: { field: 'databaseType', values: ['mongodb'] }
+                    },
+                    {
+                        key: 'mongodbQueryMode',
+                        label: 'Query Mode',
+                        type: 'select',
+                        required: false,
+                        default: 'visual',
+                        options: [
+                            { value: 'visual', label: '👁️ User-Friendly (Visual Builder - Recommended for beginners)' },
+                            { value: 'advanced', label: '⚡ Advanced (Aggregation Pipeline - For MongoDB experts)' }
+                        ],
+                        help: 'Choose how to build your MongoDB query. Visual mode = no coding required. Advanced mode = full MongoDB aggregation power.',
+                        showIf: { field: 'databaseType', values: ['mongodb'] }
+                    },
+                    {
+                        key: 'mongodbFilterBuilder',
+                        label: 'Filter Conditions',
+                        type: 'mongodb-filter-builder',
+                        required: false,
+                        help: 'Visual builder for MongoDB query filter. NO-CODE: Click to add conditions instead of writing JSON.',
+                        showIf: { field: 'databaseType', values: ['mongodb'] },
+                        visibleWhen: { field: 'mongodbQueryMode', value: 'visual' }
+                    },
+                    {
+                        key: 'mongodbProjectionBuilder',
+                        label: 'Select Fields',
+                        type: 'mongodb-projection-builder',
+                        required: false,
+                        help: 'Visual field selector for MongoDB projection. NO-CODE: Check fields to include/exclude.',
+                        showIf: { field: 'databaseType', values: ['mongodb'] },
+                        visibleWhen: { field: 'mongodbQueryMode', value: 'visual' }
+                    },
+                    {
+                        key: 'aggregationPipeline',
+                        label: 'Aggregation Pipeline (JSON)',
+                        type: 'textarea',
+                        required: false,
+                        rows: 15,
+                        placeholder: '[\n  { "$match": { "mrn": "{PID.3}" } },\n  { "$project": { "fullName": { "$concat": ["$firstName", " ", "$lastName"] } } }\n]',
+                        help: 'MongoDB aggregation pipeline as JSON array. Supports full MongoDB syntax including $concat, $group, $lookup, etc. Use {PID.3} for HL7 field placeholders.',
+                        showIf: { field: 'databaseType', values: ['mongodb'] },
+                        visibleWhen: { field: 'mongodbQueryMode', value: 'advanced' }
+                    },
+                    {
+                        key: 'redisKey',
+                        label: 'Redis Key Pattern',
+                        type: 'text',
+                        required: false,
+                        placeholder: 'patient:{PID.3}',
+                        help: 'Redis key pattern with field placeholders. Example: patient:{PID.3}',
+                        showIf: { field: 'databaseType', values: ['redis'] }
+                    },
+                    {
+                        key: 'redisCommand',
+                        label: 'Redis Command',
+                        type: 'select',
+                        required: false,
+                        options: [
+                            { value: 'GET', label: 'GET - Get string value' },
+                            { value: 'HGETALL', label: 'HGETALL - Get all hash fields' },
+                            { value: 'SMEMBERS', label: 'SMEMBERS - Get all set members' },
+                            { value: 'LRANGE', label: 'LRANGE - Get list range' }
+                        ],
+                        default: 'GET',
+                        help: 'Redis command to execute (only for Redis)',
+                        showIf: { field: 'databaseType', values: ['redis'] }
                     },
                     {
                         key: 'query',
                         label: 'SQL Query',
                         type: 'textarea',
-                        required: true,
+                        required: false,
                         rows: 4,
                         placeholder: 'SELECT * FROM patients WHERE patient_id = $1',
-                        help: 'SQL query with parameter placeholders ($1, $2, etc.)'
+                        help: 'SQL query with parameter placeholders ($1, $2, etc.)',
+                        showIf: { field: 'databaseType', values: ['postgresql', 'mysql', 'sqlserver', 'oracle'] }
                     },
                     {
-                        key: 'queryParams',
-                        label: 'Query Parameters (JSON)',
-                        type: 'textarea',
-                        rows: 3,
-                        placeholder: '{"patientId": "PID.3"}',
-                        help: 'Map parameter names to HL7 field paths. Example: {"patientId": "PID.3"}'
+                        key: 'queryParamsBuilder',
+                        label: 'Query Parameters',
+                        type: 'query-param-builder',
+                        required: false,
+                        help: 'Map SQL parameter placeholders to HL7 field paths. NO-CODE: Visual builder eliminates JSON editing.',
+                        showIf: { field: 'databaseType', values: ['postgresql', 'mysql', 'sqlserver', 'oracle'] }
                     },
                     {
-                        key: 'resultMapping',
-                        label: 'Result Mapping (JSON)',
-                        type: 'textarea',
-                        rows: 3,
-                        placeholder: '{"patient_name": "fullName", "dob": "dateOfBirth"}',
-                        help: 'Map database column names to output field names (optional)'
+                        key: 'databaseQueryTester',
+                        label: '🧪 Test Database Query',
+                        type: 'database-query-tester',
+                        required: false,
+                        help: 'Test your SQL query with sample parameters before saving. NO-CODE: Click [+ Add to Mapping] on result fields to automatically add them to Result Mapping.',
+                        showIf: { field: 'databaseType', values: ['postgresql', 'mysql', 'sqlserver', 'oracle'] }
+                    },
+                    {
+                        key: 'resultMappingBuilder',
+                        label: 'Result Mapping',
+                        type: 'result-mapping-builder',
+                        required: false,
+                        help: 'Map database columns to output field names. NO-CODE: Use visual builder or click [+ Add to Mapping] from Query Tester results.',
+                        showIf: { field: 'databaseType', values: ['postgresql', 'mysql', 'sqlserver', 'oracle'] }
                     },
                     {
                         key: 'targetPath',
@@ -3047,6 +3835,289 @@ return {
                     { name: 'Error Handling', type: 'Step-level setting', required: false, description: 'Use "On Error Strategy" in Execution Settings to control pipeline behavior on API failure: "Fail" stops pipeline, "Skip" continues without data, "Use Default Value" continues with defaultValue (if configured in backend executor)' }
                 ]
             },
+            'pre.enrichment.database': {
+                description: 'Enriches HL7 messages by querying databases (PostgreSQL, MySQL, SQL Server, MongoDB, Redis, Oracle). NO-CODE: Visual builders for query parameters and result mapping. Test queries before saving with real database results. Works even when query returns 0 rows - column autocomplete always available!',
+                useCases: [
+                    'EMPI lookup - Query patient master index database using MRN or SSN',
+                    'Provider credentials - Fetch NPI, DEA, specialty from provider database',
+                    'Patient demographics - Retrieve complete patient profile from EHR database',
+                    'Lab reference ranges - Get normal ranges from LIMS database based on test code',
+                    'Insurance verification - Check coverage in billing database using policy number',
+                    'Facility master data - Lookup facility addresses, phone numbers, identifiers'
+                ],
+                databaseConfigs: {
+                    mysql: {
+                        name: '🐬 MySQL',
+                        connectionFormat: 'username:password@tcp(host:port)/database',
+                        example: 'app_user:mypassword@tcp(mysql.example.com:3306)/healthcare_db',
+                        queryFormat: 'Use ? for parameter placeholders',
+                        queryExample: 'SELECT * FROM patients WHERE mrn = ? AND dob = ?',
+                        features: [
+                            'Default port: 3306',
+                            'Multi-statement queries supported',
+                            'JSON functions (JSON_EXTRACT, JSON_VALUE)',
+                            'Date formatting (DATE_FORMAT)',
+                            'Use PID.3.1 (not PID.3) to match simple varchar columns'
+                        ]
+                    },
+                    postgresql: {
+                        name: '🐘 PostgreSQL',
+                        connectionFormat: 'host=hostname port=port user=username password=password dbname=database sslmode=disable',
+                        example: 'host=postgres.example.com port=5432 user=app_user password=mypassword dbname=healthcare_db sslmode=disable',
+                        queryFormat: 'Use $1, $2, $3... for parameter placeholders',
+                        queryExample: 'SELECT * FROM patients WHERE mrn = $1 AND dob = $2',
+                        features: [
+                            'Default port: 5432',
+                            'Advanced JSON/JSONB support',
+                            'Array operations',
+                            'Window functions',
+                            'SSL modes: disable, require, verify-ca, verify-full'
+                        ]
+                    },
+                    sqlserver: {
+                        name: '🏢 SQL Server',
+                        connectionFormat: 'sqlserver://username:password@host:port?database=dbname',
+                        example: 'sqlserver://app_user:mypassword@sqlserver.example.com:1433?database=HealthcareDB',
+                        queryFormat: 'Use @p1, @p2, @p3... for parameter placeholders',
+                        queryExample: 'SELECT * FROM patients WHERE mrn = @p1 AND DateOfBirth = @p2',
+                        features: [
+                            'Default port: 1433',
+                            'Windows Authentication supported',
+                            'TOP clause for limiting rows',
+                            'JSON support (JSON_VALUE, FOR JSON PATH)',
+                            'Common Table Expressions (CTEs)'
+                        ]
+                    },
+                    mongodb: {
+                        name: '🍃 MongoDB',
+                        connectionFormat: 'mongodb://username:password@host:port/database?authSource=admin',
+                        example: 'mongodb://app_user:mypassword@mongodb.example.com:27017/healthcare_db?authSource=admin',
+                        queryFormat: 'Visual query builders for filter and projection (NO raw JSON required!)',
+                        queryExample: '{ "mrn": "{{ PID.3.1 }}", "status": "active" }',
+                        features: [
+                            'Default port: 27017',
+                            'NoSQL document database',
+                            'Filter Builder for match conditions',
+                            'Projection Builder for field selection',
+                            'Advanced Mode for raw query editing',
+                            'Nested document queries',
+                            'Array operations ($in, $elemMatch)'
+                        ]
+                    },
+                    redis: {
+                        name: '⚡ Redis',
+                        connectionFormat: 'redis://[:password@]host:port/database',
+                        example: 'redis://:mypassword@redis.example.com:6379/0',
+                        queryFormat: 'Redis commands (GET, HGETALL, SMEMBERS, etc.)',
+                        queryExample: 'GET patient:{{ PID.3.1 }}',
+                        features: [
+                            'Default port: 6379',
+                            'Key-value operations',
+                            'Hash field retrieval (HGETALL)',
+                            'Set operations (SMEMBERS)',
+                            'Caching and temporary storage',
+                            'Fast lookups for frequently accessed data'
+                        ]
+                    },
+                    oracle: {
+                        name: '🔴 Oracle',
+                        connectionFormat: 'oracle://username:password@host:port/servicename',
+                        example: 'oracle://app_user:mypassword@oracle.example.com:1521/ORCL',
+                        queryFormat: 'Use :1, :2, :3... for parameter placeholders',
+                        queryExample: 'SELECT * FROM patients WHERE mrn = :1 AND date_of_birth = :2',
+                        features: [
+                            'Default port: 1521',
+                            'TNS Names format supported',
+                            'ROWNUM for limiting rows',
+                            'Hierarchical queries (CONNECT BY)',
+                            'Advanced date functions (TO_CHAR)',
+                            'Enterprise-grade features'
+                        ]
+                    }
+                },
+                example: {
+                    databaseType: 'PostgreSQL',
+                    connectionString: 'postgresql://user:pass@hostname:5432/database',
+                    query: 'SELECT id, email, role, created_at FROM users WHERE email = $1',
+                    queryParams: { '1': 'enhancedSegments.PID.fields[13].value' },
+                    resultMapping: {
+                        'id': 'userId',
+                        'email': 'userEmail',
+                        'role': 'userRole',
+                        'created_at': 'userCreatedAt'
+                    },
+                    targetPath: 'enriched.user',
+                    timeoutMs: 3000,
+                    failOnError: false
+                },
+                parameters: [
+                    {
+                        name: 'databaseType',
+                        type: 'enum (PostgreSQL|MySQL|SQL Server|MongoDB|Oracle)',
+                        required: true,
+                        description: 'Database type. Determines SQL driver and connection protocol.'
+                    },
+                    {
+                        name: 'connectionString',
+                        type: 'string',
+                        required: true,
+                        description: 'Database connection string. Format varies by database type. Examples: PostgreSQL: "postgresql://user:pass@host:5432/db", MySQL: "mysql://user:pass@host:3306/db", SQL Server: "sqlserver://user:pass@host:1433?database=db"'
+                    },
+                    {
+                        name: 'query',
+                        type: 'string (SQL)',
+                        required: true,
+                        description: 'SQL query to execute. Use $1, $2, $3... for parameter placeholders (PostgreSQL syntax). Use ? for MySQL/SQL Server. Test your query with the Query Tester before saving!'
+                    },
+                    {
+                        name: 'queryParams (Visual Builder)',
+                        type: 'object (Auto-built)',
+                        required: false,
+                        description: 'NO-CODE: Visual table maps SQL parameters to HL7 field paths. NO JSON EDITING REQUIRED! Example: $1 → enhancedSegments.PID.fields[13].value maps first parameter to PID-13 (Phone Number). Click [+ Add Parameter] to add rows.'
+                    },
+                    {
+                        name: 'resultMapping (Visual Builder)',
+                        type: 'object (Auto-built)',
+                        required: false,
+                        description: 'NO-CODE: Visual table maps database columns to output field names. NO JSON EDITING REQUIRED! Test your query first, then click [+ Add to Mapping] on result fields to auto-populate this builder. Auto converts snake_case to camelCase (created_at → createdAt).'
+                    },
+                    {
+                        name: 'targetPath',
+                        type: 'string',
+                        required: false,
+                        description: 'Where to store database results in message data using dot notation. Default: "enriched.database". Example: "enriched.empi" stores results at message.enriched.empi. Use different paths for multiple database enrichment steps.'
+                    },
+                    {
+                        name: 'timeoutMs',
+                        type: 'number (100-30000)',
+                        required: false,
+                        description: 'Database query timeout in milliseconds. Default: 3000 (3 seconds). Prevents hanging on slow queries or network issues.'
+                    },
+                    {
+                        name: 'failOnError',
+                        type: 'boolean',
+                        required: false,
+                        description: 'Whether to stop pipeline if database query fails. Default: false (continue without enrichment data). Set to true for critical enrichment that MUST succeed.'
+                    }
+                ],
+                noCodeFeatures: [
+                    {
+                        feature: 'Query Parameter Builder',
+                        description: 'Visual table for mapping SQL parameters ($1, $2, etc.) to HL7 field paths. NO JSON EDITING!',
+                        howTo: 'Click [+ Add Parameter] → Select HL7 field from dropdown or type field path → Parameter automatically numbered',
+                        benefit: 'Eliminates JSON syntax errors, provides field autocomplete, shows parameter order visually'
+                    },
+                    {
+                        feature: 'Result Mapping Builder',
+                        description: 'Visual table for mapping database columns to output field names. AUTO camelCase conversion!',
+                        howTo: 'Click [+ Add Mapping] → Enter DB column name → Enter output field name (or use suggestion) → Auto-converts snake_case to camelCase',
+                        benefit: 'No JSON editing, auto naming conventions, visual feedback on mappings'
+                    },
+                    {
+                        feature: 'Database Query Tester',
+                        description: 'Test SQL queries BEFORE saving pipeline! See real database results with click-to-add mapping.',
+                        howTo: '1) Configure connection & query 2) Enter test parameter values 3) Click [▶ Run Query] 4) See actual results 5) Click [+ Add to Mapping] on any field',
+                        benefit: 'Instant feedback, verify queries work, one-click configuration from real data, no trial-and-error'
+                    },
+                    {
+                        feature: 'Click-to-Add Mapping',
+                        description: 'Click [+ Add to Mapping] on query results to auto-populate Result Mapping Builder',
+                        howTo: 'Run query → Click [+ Add to Mapping] next to any field → Automatically adds row to Result Mapping Builder with smart field name',
+                        benefit: '80% time savings, zero typos, smart camelCase conversion (created_at → createdAt)'
+                    }
+                ],
+                workflow: [
+                    { step: 1, action: 'Select database type', description: 'Choose PostgreSQL, MySQL, SQL Server, MongoDB, or Oracle' },
+                    { step: 2, action: 'Enter connection string', description: 'Database connection URL with credentials (secure storage recommended)' },
+                    { step: 3, action: 'Write SQL query', description: 'Use $1, $2... for parameters. Example: SELECT * FROM patients WHERE mrn = $1' },
+                    { step: 4, action: 'Map query parameters (Visual Builder)', description: 'Click [+ Add Parameter] → Select HL7 field path for each $1, $2, etc.' },
+                    { step: 5, action: 'Test your query! 🧪', description: 'Scroll to Query Tester → Enter test values → Click [▶ Run Query] → See real results!' },
+                    { step: 6, action: 'Click-to-add result mappings', description: 'Click [+ Add to Mapping] on fields you want to include → Auto-populates Result Mapping Builder' },
+                    { step: 7, action: 'Configure target path', description: 'Set where to store results (e.g., enriched.empi, enriched.provider)' },
+                    { step: 8, action: 'Save step', description: 'Configuration saved with visual builders + tested query' }
+                ],
+                bestPractices: [
+                    {
+                        practice: 'Always test queries first',
+                        reason: 'Query Tester shows real results and prevents SQL errors in production',
+                        example: 'Run test query with sample MRN before deploying pipeline'
+                    },
+                    {
+                        practice: 'Use named connection strings (future)',
+                        reason: 'Centralized connection management, credential rotation, environment-specific configs',
+                        example: 'Instead of hardcoding connection string, reference named connection "EMPI_PROD"'
+                    },
+                    {
+                        practice: 'Limit result rows in query',
+                        reason: 'Prevents performance issues from large result sets',
+                        example: 'Add LIMIT 1 to queries that should return single row (patient lookup, provider lookup)'
+                    },
+                    {
+                        practice: 'Use specific column names',
+                        reason: 'SELECT * causes issues when schema changes. Specify exact columns needed.',
+                        example: 'Use SELECT id, name, mrn instead of SELECT *'
+                    },
+                    {
+                        practice: 'Set appropriate timeout',
+                        reason: 'Balance between allowing slow queries and preventing pipeline hangs',
+                        example: 'Simple lookups: 1000ms, complex joins: 5000ms, reporting queries: 10000ms'
+                    },
+                    {
+                        practice: 'Use failOnError wisely',
+                        reason: 'Critical enrichment should fail pipeline; optional enrichment should continue',
+                        example: 'EMPI lookup (critical): failOnError=true, Provider specialty (nice-to-have): failOnError=false'
+                    }
+                ],
+                troubleshooting: [
+                    {
+                        issue: 'Connection failed: dial tcp: lookup failed',
+                        cause: 'Hostname not resolvable or database server not reachable',
+                        fix: 'Check connection string hostname. For Docker: use service name (e.g., postgres) not localhost'
+                    },
+                    {
+                        issue: 'Query execution failed: syntax error',
+                        cause: 'Invalid SQL syntax for selected database type',
+                        fix: 'Test query in Query Tester. Check parameter syntax ($1 vs ? based on database type)'
+                    },
+                    {
+                        issue: 'Query returned no rows',
+                        cause: 'Query executed but no matching records found',
+                        fix: 'Verify test parameter values match actual data. Check WHERE clause conditions.'
+                    },
+                    {
+                        issue: 'Timeout exceeded',
+                        cause: 'Query took longer than timeoutMs setting',
+                        fix: 'Increase timeout, optimize query with indexes, or limit result set size'
+                    },
+                    {
+                        issue: 'Parameter mismatch: expected 2 got 1',
+                        cause: 'Query has more/fewer parameters than mapped in Query Parameter Builder',
+                        fix: 'Count $1, $2, $3... in query. Add corresponding rows in Query Parameter Builder.'
+                    }
+                ],
+                securityNotes: [
+                    {
+                        note: 'Secure credential storage',
+                        detail: 'Connection strings contain passwords. Use environment variables or secret management systems (HashiCorp Vault, AWS Secrets Manager) instead of hardcoding.',
+                        recommendation: 'Future feature: Named connections with credential vault integration'
+                    },
+                    {
+                        note: 'SQL injection prevention',
+                        detail: 'Always use parameterized queries ($1, $2...) - NEVER concatenate user input into SQL strings',
+                        recommendation: 'Query Tester validates parameter usage. Backend uses prepared statements for safety.'
+                    },
+                    {
+                        note: 'Least privilege database access',
+                        detail: 'Database user should have SELECT-only permissions for read operations',
+                        recommendation: 'Create dedicated integration user with minimal required permissions'
+                    },
+                    {
+                        note: 'Connection pooling',
+                        detail: 'Test queries use isolated connections with max 1 connection to prevent resource exhaustion',
+                        recommendation: 'Production executor uses connection pooling for performance'
+                    }
+                ]
+            },
             'pre.enrichment': {
                 description: 'Enriches HL7 messages with additional data from external systems (EMPI, EHR, etc.). Enhances message content before FHIR transformation.',
                 useCases: [
@@ -3181,6 +4252,184 @@ return {
                 ]
             }
         };
+
+        // Check for general documentation requests (not step-specific)
+        if (stepType === '_general.step_output_chaining') {
+            return {
+                description: 'Use output from previous steps in subsequent steps. Every step can store its output data in the pipeline execution context, and later steps can access this data to create powerful data transformation workflows.',
+                useCases: [
+                    'Multi-Database Enrichment - Use patient insurance ID from MySQL step to query PostgreSQL insurance details table',
+                    'API-Database Hybrid - Verify patient exists in EHR via API, then only if verified, fetch detailed records from database',
+                    'Validation-Enrichment Chain - Check required fields exist, then only if valid, enrich with external data',
+                    'Conditional Processing - Execute steps based on results from previous steps',
+                    'Data Aggregation - Combine results from multiple enrichment steps into single output'
+                ],
+                example: {
+                    step1: {
+                        stepName: 'MySQL Patient Lookup',
+                        stepAlias: 'patient_lookup',
+                        sequence: 10,
+                        query: 'SELECT insurance_id FROM patients WHERE mrn = ?',
+                        output: {
+                            enriched_data: [{ insurance_id: 'INS123456' }],
+                            rows_count: 1
+                        }
+                    },
+                    step2: {
+                        stepName: 'PostgreSQL Insurance Details',
+                        stepAlias: 'insurance_details',
+                        sequence: 20,
+                        query: 'SELECT policy_number, coverage FROM insurance WHERE id = $1',
+                        queryParams: {
+                            '1': 'stepOutput.patient_lookup.enriched_data[0].insurance_id'
+                        },
+                        note: 'Uses insurance_id from step 1!'
+                    }
+                },
+                accessMethods: [
+                    {
+                        method: 'By Step Alias (Recommended)',
+                        format: 'stepOutput.<alias>.<field>',
+                        examples: [
+                            'stepOutput.patient_lookup.enriched_data',
+                            'stepOutput.api_verification.response.patient_name',
+                            'stepOutput.validation.is_valid'
+                        ],
+                        description: 'Use the user-friendly alias you assigned to the step'
+                    },
+                    {
+                        method: 'Array Access',
+                        format: 'stepOutput.<alias>.enriched_data[0].<column>',
+                        examples: [
+                            'stepOutput.patient_lookup.enriched_data[0].insurance_id',
+                            'stepOutput.database_query.enriched_data[0].provider_npi'
+                        ],
+                        description: 'Access specific row and column from database results'
+                    },
+                    {
+                        method: 'Nested Fields',
+                        format: 'stepOutput.<alias>.response.nested.field',
+                        examples: [
+                            'stepOutput.api_call.response.patient.insurance.provider',
+                            'stepOutput.empi_lookup.response.demographics.address.zip'
+                        ],
+                        description: 'Access deeply nested fields in API responses or JSON data'
+                    }
+                ],
+                stepOutputStructure: {
+                    database_enrichment: {
+                        stepID: 'uuid-123',
+                        stepName: 'Database Enrichment MySQL',
+                        stepAlias: 'patient_lookup',
+                        stepType: 'database_enrichment',
+                        sequence: 10,
+                        outputData: {
+                            enriched_data: [
+                                { insurance_id: 'INS123', patient_name: 'John Doe', mrn: 'P123456' }
+                            ],
+                            rows_count: 1,
+                            query_params: { '1': 'P123456' }
+                        },
+                        success: true
+                    },
+                    api_enrichment: {
+                        stepID: 'uuid-456',
+                        stepName: 'API Enrichment Insurance',
+                        stepAlias: 'insurance_verification',
+                        stepType: 'api_enrichment',
+                        sequence: 20,
+                        outputData: {
+                            response: {
+                                policy_number: 'POL789',
+                                coverage: 'Active',
+                                provider: 'Blue Cross'
+                            },
+                            status_code: 200,
+                            content_type: 'application/json'
+                        },
+                        success: true
+                    }
+                },
+                workflow: [
+                    { step: 1, action: 'Assign Step Alias', description: 'Give each step a meaningful alias (e.g., "patient_lookup", "insurance_check")' },
+                    { step: 2, action: 'Configure First Step', description: 'Set up your first enrichment step normally (database query, API call, etc.)' },
+                    { step: 3, action: 'Reference Previous Step', description: 'In subsequent steps, use stepOutput.<alias>.<field> in query parameters or field mappings' },
+                    { step: 4, action: 'Use Field Search', description: 'The Field Path Search component shows available step outputs from previous steps' },
+                    { step: 5, action: 'Test Pipeline', description: 'Run test to see step outputs flow through the pipeline' }
+                ],
+                bestPractices: [
+                    {
+                        practice: 'Use meaningful step aliases',
+                        reason: 'Makes step output references self-documenting and easier to understand',
+                        example: 'Use "empi_lookup" instead of "database_step_1"'
+                    },
+                    {
+                        practice: 'Check array length before accessing',
+                        reason: 'Database queries might return 0 rows, causing undefined errors',
+                        example: 'Use conditional logic: if stepOutput.query1.rows_count > 0, then access [0]'
+                    },
+                    {
+                        practice: 'Use different target paths for each step',
+                        reason: 'Prevents output from one step overwriting another',
+                        example: 'Step 1: enriched.empi, Step 2: enriched.insurance, Step 3: enriched.provider'
+                    },
+                    {
+                        practice: 'Order steps by sequence number',
+                        reason: 'Steps execute in sequence order - ensure dependencies come first',
+                        example: 'Patient lookup (seq 10) → Insurance lookup (seq 20) → Provider lookup (seq 30)'
+                    }
+                ],
+                troubleshooting: [
+                    {
+                        issue: 'stepOutput.<alias> is undefined',
+                        cause: 'Referenced step has not executed yet or failed',
+                        fix: 'Check sequence order - dependency must have lower sequence number. Check if previous step succeeded.'
+                    },
+                    {
+                        issue: 'Cannot read property of undefined',
+                        cause: 'Accessing nested field that doesn\'t exist in step output',
+                        fix: 'Check step output structure in logs. Verify field path is correct.'
+                    },
+                    {
+                        issue: 'Array index out of bounds',
+                        cause: 'Database query returned 0 rows but code tries to access [0]',
+                        fix: 'Check rows_count first: stepOutput.query.rows_count before accessing stepOutput.query.enriched_data[0]'
+                    }
+                ],
+                parameters: [
+                    {
+                        name: 'stepOutput',
+                        type: 'object',
+                        required: false,
+                        description: 'Global object containing outputs from all previous steps, keyed by step alias'
+                    },
+                    {
+                        name: 'stepOutput.<alias>',
+                        type: 'object',
+                        required: false,
+                        description: 'Output from specific step. Contains: enriched_data (for database), response (for API), validation_errors (for validation), etc.'
+                    },
+                    {
+                        name: 'stepOutput.<alias>.enriched_data',
+                        type: 'array',
+                        required: false,
+                        description: 'Array of database query results. Use [0] to access first row, [1] for second row, etc.'
+                    },
+                    {
+                        name: 'stepOutput.<alias>.response',
+                        type: 'object',
+                        required: false,
+                        description: 'API response data. Structure depends on API endpoint.'
+                    },
+                    {
+                        name: 'stepOutput.<alias>.rows_count',
+                        type: 'number',
+                        required: false,
+                        description: 'Number of rows returned by database query. Use to check if results exist before accessing [0]'
+                    }
+                ]
+            };
+        }
 
         // Default documentation for unknown step types
         return docs[stepType] || {

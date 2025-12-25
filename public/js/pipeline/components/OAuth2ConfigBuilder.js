@@ -11,16 +11,17 @@ class OAuth2ConfigBuilder {
 
     init() {
         this.container.innerHTML = '';
-        this.container.className = 'oauth2-config-builder';
+        // Keep existing classes and add oauth2-config-builder
+        if (!this.container.classList.contains('oauth2-config-builder')) {
+            this.container.classList.add('oauth2-config-builder');
+        }
 
         // Create header
         const header = document.createElement('div');
         header.className = 'oauth2-config-header';
         header.innerHTML = `
             <h4>OAuth 2.0 Configuration</h4>
-            <button class="btn btn-sm btn-success test-oauth-btn" type="button">
-                <i class="fas fa-check-circle"></i> Test Connection
-            </button>
+            <small style="color: #6b7280;">Configure OAuth 2.0 settings, then use "🧪 Test API Endpoint" to test</small>
         `;
         this.container.appendChild(header);
 
@@ -95,10 +96,6 @@ class OAuth2ConfigBuilder {
             this.onChange();
         });
 
-        header.querySelector('.test-oauth-btn').addEventListener('click', () => {
-            this.testConnection();
-        });
-
         // Initial render
         this.renderForm();
         this.updateGrantTypeDescription();
@@ -125,8 +122,9 @@ class OAuth2ConfigBuilder {
             this.addFormField('refreshToken', 'Refresh Token', 'textarea', 'your-refresh-token', true);
         }
 
-        // Optional scope field (all grant types)
+        // Optional fields (all grant types)
         this.addFormField('scope', 'Scope', 'text', 'read write', false);
+        this.addFormField('audience', 'Audience', 'text', 'https://api.example.com/', false);
 
         this.updateGrantTypeDescription();
     }

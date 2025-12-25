@@ -217,8 +217,16 @@ class DragDropManager {
         // Templates can specify preferred layers
         if (dragData.type === 'template') {
             const template = dragData.template;
-            // Allow drop if no layer preference or matches target
-            return !template.layer || template.layer === targetLayer || template.layer === 'any';
+            // Allow drop if no layer preference
+            if (!template.layer || template.layer === 'any') {
+                return true;
+            }
+            // Handle array of allowed layers
+            if (Array.isArray(template.layer)) {
+                return template.layer.includes(targetLayer);
+            }
+            // Handle single layer string
+            return template.layer === targetLayer;
         }
 
         // Steps can be moved between layers

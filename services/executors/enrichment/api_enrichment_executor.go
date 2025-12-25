@@ -291,6 +291,7 @@ func (e *APIEnrichmentExecutor) buildAuthConfig(config *models.APIEnrichmentConf
 			ClientSecret: config.OAuth2ClientSecret,
 			GrantType:    httpservice.OAuth2GrantType(config.OAuth2GrantType),
 			Scope:        config.OAuth2Scope,
+			Audience:     config.OAuth2Audience, // Required by Auth0 and some providers
 			Username:     config.OAuth2Username, // For password grant
 			Password:     config.OAuth2Password, // For password grant
 		}

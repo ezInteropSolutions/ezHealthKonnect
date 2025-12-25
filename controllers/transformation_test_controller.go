@@ -350,13 +350,56 @@ func (c *TransformationTestController) executeSteps(steps []*models.Transformati
 				stepOutput["message"] = "No metadata added"
 			}
 
+		case "pre.enrichment.database":
+			// Database enrichment: Extract enriched data from the configured target path
+			targetPath := "enriched.database" // default
+			if tp, ok := step.Config["targetPath"].(string); ok && tp != "" {
+				targetPath = tp
+			}
+
+			// DEBUG: Log what keys exist in output
+			log.Printf("   🔍 DEBUG: Output keys: %v", getMapKeys(output))
+			log.Printf("   🔍 DEBUG: Looking for targetPath: %s", targetPath)
+
+			// Extract the enriched data
+			enrichedData := getNestedValue(output, targetPath)
+
+			// DEBUG: Log what we found
+			log.Printf("   🔍 DEBUG: enrichedData type: %T, value: %+v", enrichedData, enrichedData)
+
+			if enrichedData != nil {
+				stepOutput["enriched_data"] = enrichedData
+				stepOutput["enriched_path"] = targetPath
+
+				// Count fields/rows
+				if dataMap, ok := enrichedData.(map[string]interface{}); ok {
+					stepOutput["fields_count"] = len(dataMap)
+				} else if dataArray, ok := enrichedData.([]interface{}); ok {
+					stepOutput["rows_count"] = len(dataArray)
+				} else if dataArrayMap, ok := enrichedData.([]map[string]interface{}); ok {
+					stepOutput["rows_count"] = len(dataArrayMap)
+				}
+			} else {
+				// DEBUG: Show what's in enriched if it exists
+				if enriched, ok := output["enriched"].(map[string]interface{}); ok {
+					log.Printf("   🔍 DEBUG: enriched object exists with keys: %v", getMapKeys(enriched))
+					stepOutput["debug_enriched_keys"] = getMapKeys(enriched)
+					stepOutput["debug_enriched_content"] = enriched
+				} else {
+					log.Printf("   🔍 DEBUG: enriched is not a map[string]interface{}, type: %T", output["enriched"])
+				}
+				stepOutput["message"] = "No database enrichment data found"
+				stepOutput["debug_output_keys"] = getMapKeys(output)
+			}
+
 		default:
 			// For other steps, copy non-message fields
 			for k, v := range output {
-				// Skip full message structure fields and internal metadata
+				// Skip full message structure fields, internal metadata, AND global metadata
 				if k == "enhancedSegments" || k == "raw" || k == "segmentOrder" ||
 				   k == "messageType" || k == "version" || k == "dictionaryUsed" ||
-				   k == "schemaLoaded" || strings.HasPrefix(k, "_") {
+				   k == "schemaLoaded" || k == "metadata" || k == "enriched" ||
+				   strings.HasPrefix(k, "_") {
 					continue
 				}
 				stepOutput[k] = v
@@ -393,6 +436,14 @@ func formatError(err error) string {
 func getConfigKeys(config map[string]interface{}) []string {
 	keys := make([]string, 0, len(config))
 	for k := range config {
+		keys = append(keys, k)
+	}
+	return keys
+}
+
+func getMapKeys(m map[string]interface{}) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
 		keys = append(keys, k)
 	}
 	return keys

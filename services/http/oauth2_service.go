@@ -29,6 +29,7 @@ type OAuth2Config struct {
 	ClientSecret string          // OAuth 2.0 client secret
 	GrantType    OAuth2GrantType // OAuth 2.0 grant type
 	Scope        string          // Optional: OAuth 2.0 scope
+	Audience     string          // Optional: OAuth 2.0 audience (required by Auth0 and some providers)
 	Username     string          // For password grant type
 	Password     string          // For password grant type
 	RefreshToken string          // For refresh token grant
@@ -106,6 +107,11 @@ func (o *OAuth2Service) requestToken(ctx context.Context, config *OAuth2Config) 
 	// Build request body based on grant type
 	requestBody := map[string]string{
 		"grant_type": string(config.GrantType),
+	}
+
+	// Add audience if provided (required by Auth0 and some providers)
+	if config.Audience != "" {
+		requestBody["audience"] = config.Audience
 	}
 
 	switch config.GrantType {
