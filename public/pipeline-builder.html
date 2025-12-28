@@ -238,6 +238,9 @@
                 <button class="modal-tab active" data-tab="form" style="flex: 1; padding: 12px 20px; border: none; background: white; border-bottom: 3px solid #2563eb; cursor: pointer; font-weight: 500; color: #1e3a8a; transition: all 0.3s;">
                     <i class="fas fa-sliders-h"></i> Configuration
                 </button>
+                <button class="modal-tab" data-tab="variables" style="flex: 1; padding: 12px 20px; border: none; background: transparent; border-bottom: 3px solid transparent; cursor: pointer; font-weight: 500; color: #6b7280; transition: all 0.3s;">
+                    <i class="fas fa-database"></i> Variables
+                </button>
                 <button class="modal-tab" data-tab="json" style="flex: 1; padding: 12px 20px; border: none; background: transparent; border-bottom: 3px solid transparent; cursor: pointer; font-weight: 500; color: #6b7280; transition: all 0.3s;">
                     <i class="fas fa-file-upload"></i> Import JSON
                 </button>
@@ -250,6 +253,11 @@
                 <!-- Form Tab Content -->
                 <div id="formTabContent" class="tab-content active">
                     <!-- Dynamic form UI loaded here -->
+                </div>
+
+                <!-- Variables Tab Content -->
+                <div id="variablesTabContent" class="tab-content" style="display: none; padding: 0; height: 100%;">
+                    <!-- Reference variables panel loaded here -->
                 </div>
 
                 <!-- JSON Tab Content -->
@@ -300,21 +308,25 @@
     <script src="/js/pipeline/managers/DragDropManager.js?v=4.0"></script>
     <script src="/js/pipeline/managers/CanvasRenderer.js?v=4.0"></script>
     <script src="/js/pipeline/managers/StepNodeManager.js?v=6.0"></script>
-    <script src="/js/pipeline/managers/ToolboxManager.js?v=8.5"></script>
-    <script src="/js/pipeline/managers/PropertiesPanel.js?v=21.0"></script>
+    <script src="/js/pipeline/managers/ToolboxManager.js?v=8.8"></script>
+    <script src="/js/pipeline/managers/PropertiesPanel.js?v=21.5"></script>
     <!-- Modular OOP Components -->
     <script src="/js/pipeline/components/FieldPathSearchComponent.js?v=2.1"></script>
     <script src="/js/pipeline/components/FieldPathInputWithAutocomplete.js?v=2.4"></script>
     <script src="/js/pipeline/components/ValidationRuleBuilder.js?v=12.0"></script>
-    <script src="/js/pipeline/components/MetadataBuilder.js?v=1.0"></script>
+    <script src="/js/pipeline/components/MetadataBuilder.js?v=1.1"></script>
     <script src="/js/pipeline/components/HeaderBuilder.js?v=1.0"></script>
     <script src="/js/pipeline/components/QueryParamBuilder.js?v=1.3"></script>
     <script src="/js/pipeline/components/ResultMappingBuilder.js?v=2.0"></script>
     <script src="/js/pipeline/components/DatabaseQueryTester.js?v=1.6"></script>
     <script src="/js/pipeline/components/MongoDBFilterBuilder.js?v=1.0"></script>
     <script src="/js/pipeline/components/MongoDBProjectionBuilder.js?v=1.0"></script>
+    <script src="/js/pipeline/components/RedisQueryBuilder.js?v=1.4"></script>
     <script src="/js/pipeline/components/OAuth2ConfigBuilder.js?v=1.0"></script>
     <script src="/js/pipeline/components/APIEndpointTester.js?v=1.1"></script>
+    <!-- Variables Cache (must load before ReferenceVariablesPanel) -->
+    <script src="/js/pipeline/utils/VariablesCache.js?v=1.0"></script>
+    <script src="/js/pipeline/components/ReferenceVariablesPanel.js?v=1.1"></script>
     <script src="/js/pipeline/managers/LayerContainer.js?v=4.0"></script>
     <script src="/js/pipeline/PipelineBuilder.js?v=9.1"></script>
     <script src="/js/pipeline/init.js?v=7.5"></script>

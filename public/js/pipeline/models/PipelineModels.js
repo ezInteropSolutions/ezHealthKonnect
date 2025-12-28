@@ -196,7 +196,8 @@ class VisualStep {
             id: this.id,
             stepName: this.stepName,
             stepType: this.stepType,
-            instanceOf: this instanceof VisualStep
+            instanceOf: this instanceof VisualStep,
+            config: this.config
         });
         return {
             id: this.id,

@@ -34,6 +34,11 @@ func main() {
 	// Record start time
 	startTime = time.Now()
 
+	// Initialize log rotation service FIRST (before any logging)
+	appLogger := services.GetApplicationLogger()
+	defer appLogger.Close()
+	log.Printf("✅ Log rotation initialized - logs will be rotated at 500MB or daily")
+
 	// Load configuration
 	cfg := config.Load()
 
@@ -342,7 +347,11 @@ func main() {
 			transformTestCtrl := controllers.NewTransformationTestController(db)
 			fhirGroup.POST("/pipeline/test", transformTestCtrl.TestPipeline)
 			fhirGroup.POST("/pipeline/test-api-endpoint", transformTestCtrl.TestAPIEndpoint) // Test API endpoint before configuring mapping
+			fhirGroup.POST("/pipeline/validate-script", transformTestCtrl.ValidateScript)    // Validate JavaScript script
 			fhirGroup.GET("/pipeline/:interfaceId/:messageType", transformTestCtrl.GetPipeline)
+
+			// ADDED: Generic Pipeline Routes (reusable across all transformation types)
+			api.POST("/pipeline/reference-variables", transformTestCtrl.GetAvailableReferenceVariables) // Get available variables per step
 
 			// ADDED: Database Query Test Routes (NO-CODE: Test queries before saving pipeline)
 			dbTestCtrl := controllers.NewDatabaseTestController(db)

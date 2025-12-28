@@ -20,6 +20,14 @@ class StepNodeManager {
 
         node.innerHTML = `
             <div class="step-node-header">
+                <div class="step-reorder-controls">
+                    <button class="step-node-btn btn-move-up" title="Move Up">
+                        <i class="fas fa-arrow-up"></i>
+                    </button>
+                    <button class="step-node-btn btn-move-down" title="Move Down">
+                        <i class="fas fa-arrow-down"></i>
+                    </button>
+                </div>
                 <div class="step-node-title">
                     <i class="${step.icon}"></i>
                     <span>${step.stepName}</span>
@@ -87,6 +95,24 @@ class StepNodeManager {
             deleteBtn.addEventListener('click', (e) => {
                 e.stopPropagation();
                 this.deleteStep(step.id, groupId);
+            });
+        }
+
+        // Move Up button
+        const moveUpBtn = node.querySelector('.btn-move-up');
+        if (moveUpBtn) {
+            moveUpBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                this.moveStepUp(step, groupId);
+            });
+        }
+
+        // Move Down button
+        const moveDownBtn = node.querySelector('.btn-move-down');
+        if (moveDownBtn) {
+            moveDownBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                this.moveStepDown(step, groupId);
             });
         }
     }
@@ -199,6 +225,76 @@ class StepNodeManager {
         const groupId = this.selectedNode.dataset.groupId;
 
         return this.builder.findStep(stepId, groupId);
+    }
+
+    /**
+     * Move step up in the execution order
+     */
+    moveStepUp(step, groupId) {
+        const layer = this.builder.pipeline.layers[step.layer];
+        if (!layer) return;
+
+        // Find the execution group
+        const group = layer.executionGroups.find(g => g.id === groupId);
+        if (!group) return;
+
+        // Find step index
+        const stepIndex = group.steps.findIndex(s => s.id === step.id);
+        if (stepIndex <= 0) {
+            // Already at the top
+            this.builder.dragDropManager.showNotification('Step is already at the top', 'info');
+            return;
+        }
+
+        // Swap with previous step
+        const temp = group.steps[stepIndex - 1];
+        group.steps[stepIndex - 1] = group.steps[stepIndex];
+        group.steps[stepIndex] = temp;
+
+        // Update sequence numbers
+        group.steps.forEach((s, i) => {
+            s.sequence = (i + 1) * 10;
+        });
+
+        // Re-render the layer
+        this.builder.layerContainer.renderLayer(step.layer, layer);
+        this.builder.markAsUnsaved();
+        this.builder.dragDropManager.showNotification(`Moved ${step.stepName} up`, 'success');
+    }
+
+    /**
+     * Move step down in the execution order
+     */
+    moveStepDown(step, groupId) {
+        const layer = this.builder.pipeline.layers[step.layer];
+        if (!layer) return;
+
+        // Find the execution group
+        const group = layer.executionGroups.find(g => g.id === groupId);
+        if (!group) return;
+
+        // Find step index
+        const stepIndex = group.steps.findIndex(s => s.id === step.id);
+        if (stepIndex < 0 || stepIndex >= group.steps.length - 1) {
+            // Already at the bottom
+            this.builder.dragDropManager.showNotification('Step is already at the bottom', 'info');
+            return;
+        }
+
+        // Swap with next step
+        const temp = group.steps[stepIndex + 1];
+        group.steps[stepIndex + 1] = group.steps[stepIndex];
+        group.steps[stepIndex] = temp;
+
+        // Update sequence numbers
+        group.steps.forEach((s, i) => {
+            s.sequence = (i + 1) * 10;
+        });
+
+        // Re-render the layer
+        this.builder.layerContainer.renderLayer(step.layer, layer);
+        this.builder.markAsUnsaved();
+        this.builder.dragDropManager.showNotification(`Moved ${step.stepName} down`, 'success');
     }
 }
 

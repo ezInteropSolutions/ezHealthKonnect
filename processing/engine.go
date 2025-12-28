@@ -33,6 +33,7 @@ type ProcessingEngine struct {
 	errorService         *services.ErrorCaptureService // Error capture service (V23)
 	errorHandler         *ErrorHandler                  // Error handler with panic recovery (V23)
 	transformationService *services.TransformationPipelineService // Pipeline-based transformation (MVC + OOB)
+	connectionWarmer      *services.ConnectionWarmer             // Connection pre-warming for database steps
 
 	// Validation feedback system (universal for all connectors)
 	validationConnectors  map[string]ValidationAwareConnector // interfaceID -> connector
@@ -117,6 +118,10 @@ func NewProcessingEngine(db *sql.DB) *ProcessingEngine {
 	engine.errorHandler = NewErrorHandler(engine.errorService)
 	fmt.Printf("✅ Error Handler initialized - panic recovery enabled\n")
 
+	// OOB: Initialize Connection Warmer (pre-warm database connections at deployment)
+	engine.connectionWarmer = services.NewConnectionWarmer(db)
+	fmt.Printf("✅ Connection Warmer initialized - database connection pre-warming enabled\n")
+
 	return engine
 }
 
@@ -166,13 +171,14 @@ func (pe *ProcessingEngine) ActivateInterface(interfaceID string) error {
 		return fmt.Errorf("interface already active")
 	}
 
-	// Get interface details from database
+	// Get interface details from database (including transformation_mapping for connection warming)
 	var name, sourceConfigJSON, sourceConnectivityJSON string
+	var transformationMappingJSON sql.NullString
 	err := pe.db.QueryRow(`
-		SELECT name, source_config, COALESCE(source_connectivity::text, '{}')
+		SELECT name, source_config, COALESCE(source_connectivity::text, '{}'), transformation_mapping
 		FROM interfaces
 		WHERE id = $1
-	`, interfaceID).Scan(&name, &sourceConfigJSON, &sourceConnectivityJSON)
+	`, interfaceID).Scan(&name, &sourceConfigJSON, &sourceConnectivityJSON, &transformationMappingJSON)
 	if err != nil {
 		return fmt.Errorf("interface not found: %v", err)
 	}
@@ -283,6 +289,29 @@ func (pe *ProcessingEngine) ActivateInterface(interfaceID string) error {
 
 	pe.stats.LastActivity = time.Now()
 	fmt.Printf("✅ Interface activated: %s (%s)\n", name, interfaceID)
+
+	// Connection pre-warming (warm database connections AFTER interface activation)
+	if pe.connectionWarmer != nil && transformationMappingJSON.Valid {
+		// Parse transformation mapping (pipeline configuration)
+		var pipeline map[string]interface{}
+		if err := json.Unmarshal([]byte(transformationMappingJSON.String), &pipeline); err == nil {
+			// Convert interface ID string to int for ConnectionWarmer
+			var interfaceIDInt int
+			fmt.Sscanf(interfaceID, "intf_%d", &interfaceIDInt)
+			if interfaceIDInt == 0 {
+				// Try parsing as direct number (e.g., "1", "2", etc.)
+				fmt.Sscanf(interfaceID, "%d", &interfaceIDInt)
+			}
+
+			// Warm connections asynchronously (don't block activation)
+			go func() {
+				if err := pe.connectionWarmer.WarmInterfaceConnections(interfaceIDInt, pipeline); err != nil {
+					log.Printf("⚠️  Connection warming failed for interface %s: %v", interfaceID, err)
+				}
+			}()
+		}
+	}
+
 	return nil
 }
 

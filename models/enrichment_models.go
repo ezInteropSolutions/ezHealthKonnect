@@ -11,11 +11,24 @@ import (
 
 // MetadataEnrichmentConfig defines configuration for metadata enrichment
 type MetadataEnrichmentConfig struct {
-	AddTimestamp     bool              `json:"addTimestamp"`
-	AddCorrelationID bool              `json:"addCorrelationId"`
-	AddInterfaceID   bool              `json:"addInterfaceId"`
-	AddMessageID     bool              `json:"addMessageId"`
-	CustomMetadata   map[string]string `json:"customMetadata,omitempty"`
+	AddTimestamp     bool                   `json:"addTimestamp"`
+	AddCorrelationID bool                   `json:"addCorrelationId"`
+	AddInterfaceID   bool                   `json:"addInterfaceId"`
+	AddMessageID     bool                   `json:"addMessageId"`
+	CustomMetadata   map[string]interface{} `json:"customMetadata,omitempty"` // Changed to interface{} to support nested objects
+}
+
+// FieldMappingConfig defines configuration for field mapping transformations
+type FieldMappingConfig struct {
+	Mappings []FieldMapping         `json:"mappings"`
+	Metadata map[string]interface{} `json:"metadata,omitempty"` // Optional metadata to add (supports nested objects)
+}
+
+// FieldMapping represents a single field mapping with transformations
+type FieldMapping struct {
+	LHS        string `json:"lhs"`        // Target variable name
+	RHS        string `json:"rhs"`        // Source field path or system variable
+	Transforms string `json:"transforms"` // Comma-separated transformations
 }
 
 // CalculatedEnrichmentConfig defines configuration for calculated field enrichment
@@ -32,12 +45,25 @@ type Calculation struct {
 }
 
 // DatabaseEnrichmentConfig defines configuration for database lookup enrichment
+// NOTE: This is a legacy/simple version. For full features, see DatabaseEnrichmentConfigV2 below.
 type DatabaseEnrichmentConfig struct {
 	Query         string            `json:"query"`
 	SourceField   string            `json:"sourceField"`
 	TargetMapping map[string]string `json:"targetMapping"`
 	CacheResults  bool              `json:"cacheResults,omitempty"`
 	CacheTTL      int               `json:"cacheTTL,omitempty"` // seconds
+	TargetPath    string            `json:"targetPath,omitempty"` // Where to store results (e.g., "enriched.database")
+	OutputSchema  []OutputField     `json:"outputSchema,omitempty"` // Declared output fields
+}
+
+// NOTE: APIEnrichmentConfig and ScriptEnrichmentConfig are defined below in the
+// "STRATEGY-BASED ENRICHMENT MODELS" section with extended configurations
+
+// OutputField declares a field that will be produced by an enrichment step
+type OutputField struct {
+	Name        string `json:"name"`        // Field name (e.g., "chronicConditions")
+	Description string `json:"description"` // Human-readable description
+	Type        string `json:"type"`        // Data type: string, number, boolean, array, object
 }
 
 // ===============================================================
@@ -285,6 +311,8 @@ func (d *DatabaseEnrichmentConfigV2) UnmarshalJSON(data []byte) error {
 // ===============================================================
 // CACHE ENRICHMENT CONFIGURATION
 // ===============================================================
+// DEPRECATED: Use DatabaseEnrichmentConfigV2 with Redis instead.
+// This struct is kept for backward compatibility only.
 
 // CacheEnrichmentConfig configuration for cache-based enrichment
 type CacheEnrichmentConfig struct {
@@ -324,8 +352,8 @@ type ScriptEnrichmentConfig struct {
 	// JavaScript code to execute
 	Script string `json:"script"`
 
-	// Context variables to pass to script
-	// These will be available as global variables in the script
+	// DEPRECATED: Context variables - use Metadata Enrichment or Database Enrichment steps instead
+	// Kept for backward compatibility only
 	Context map[string]interface{} `json:"context,omitempty"`
 
 	// Response mapping

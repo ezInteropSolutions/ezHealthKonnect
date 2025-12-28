@@ -32,9 +32,14 @@ func NewFieldValidationExecutor() *FieldValidationExecutor {
 
 	// Register built-in validators
 	executor.RegisterValidator(NewRequiredValidator())
-	executor.RegisterValidator(NewFormatValidator())
+
+	formatValidator := NewFormatValidator()
+	executor.RegisterValidator(formatValidator)
+	// Map "pattern" to FormatValidator for backward compatibility
+	// PatternValidator is redundant since FormatValidator supports custom regex via options["regex"]
+	executor.validators["pattern"] = formatValidator
+
 	executor.RegisterValidator(NewLengthValidator())
-	executor.RegisterValidator(NewPatternValidator())
 
 	return executor
 }

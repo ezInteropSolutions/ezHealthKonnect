@@ -70,6 +70,10 @@ func (e *ScriptEnrichmentExecutor) Execute(
 		}
 
 		log.Printf("⚠️  Script execution failed, continuing without enrichment: %v", err)
+
+		// Store error in output for debugging (even when not failing)
+		executors.SetNestedValue(inputData, "_script_error", err.Error())
+
 		e.PostExecute(ctx, step, nil, time.Since(start))
 		return inputData, nil
 	}
@@ -156,8 +160,9 @@ func (e *ScriptEnrichmentExecutor) executeScript(
 			return
 		}
 
-		// Set context variables if configured
-		if config.Context != nil {
+		// Set context variables if configured (DEPRECATED)
+		if config.Context != nil && len(config.Context) > 0 {
+			log.Printf("   ⚠️  [DEPRECATED] Context variables used in script. Use Metadata/Database Enrichment steps instead.")
 			for key, value := range config.Context {
 				if err := vm.Set(key, value); err != nil {
 					errorChan <- fmt.Errorf("failed to set context variable %s: %w", key, err)
@@ -166,11 +171,14 @@ func (e *ScriptEnrichmentExecutor) executeScript(
 			}
 		}
 
-		// Add utility functions
-		e.addUtilityFunctions(vm)
+		// Add utility functions with access to input data
+		e.addUtilityFunctions(vm, inputData)
+
+		// Wrap script in a function to allow return statements
+		wrappedScript := fmt.Sprintf("(function() { %s })()", config.Script)
 
 		// Compile and run script
-		script, err := goja.Compile("enrichment_script", config.Script, false)
+		script, err := goja.Compile("enrichment_script", wrappedScript, false)
 		if err != nil {
 			errorChan <- fmt.Errorf("failed to compile script: %w", err)
 			return
@@ -199,7 +207,7 @@ func (e *ScriptEnrichmentExecutor) executeScript(
 }
 
 // addUtilityFunctions adds helpful utility functions to the JavaScript runtime
-func (e *ScriptEnrichmentExecutor) addUtilityFunctions(vm *goja.Runtime) {
+func (e *ScriptEnrichmentExecutor) addUtilityFunctions(vm *goja.Runtime, inputData map[string]interface{}) {
 	// Add console.log for debugging
 	console := vm.NewObject()
 	console.Set("log", func(call goja.FunctionCall) goja.Value {
@@ -240,21 +248,26 @@ func (e *ScriptEnrichmentExecutor) addUtilityFunctions(vm *goja.Runtime) {
 		return vm.ToValue(dateStr)
 	})
 
-	// Add getNestedValue helper
+	// Add getNestedValue helper - extracts nested values from input data
 	vm.Set("getNestedValue", func(call goja.FunctionCall) goja.Value {
-		if len(call.Arguments) < 2 {
+		if len(call.Arguments) < 1 {
 			return goja.Null()
 		}
 
-		obj := call.Arguments[0].Export()
-		path := call.Arguments[1].String()
+		path := call.Arguments[0].String()
+		value := executors.GetNestedValue(inputData, path)
+		return vm.ToValue(value)
+	})
 
-		if objMap, ok := obj.(map[string]interface{}); ok {
-			value := executors.GetNestedValue(objMap, path)
-			return vm.ToValue(value)
+	// Add getHL7Field helper - extracts HL7 field using short notation (e.g., PID.5.1)
+	vm.Set("getHL7Field", func(call goja.FunctionCall) goja.Value {
+		if len(call.Arguments) < 1 {
+			return goja.Null()
 		}
 
-		return goja.Null()
+		fieldPath := call.Arguments[0].String()
+		value := executors.GetNestedValue(inputData, fieldPath)
+		return vm.ToValue(value)
 	})
 
 	// Add calculateAge helper
@@ -303,10 +316,6 @@ func (e *ScriptEnrichmentExecutor) GetConfigSchema() map[string]interface{} {
 				"type":        "string",
 				"description": "JavaScript code to execute (use 'input' variable for message data)",
 			},
-			"context": map[string]interface{}{
-				"type":        "object",
-				"description": "Additional variables to make available in script context",
-			},
 			"targetPath": map[string]interface{}{
 				"type":        "string",
 				"description": "Where to store the script result",
@@ -336,6 +345,9 @@ var dob = getNestedValue(input, "enhancedSegments.PID.fields.7.value"); // PID.7
 // Calculate age using helper function
 var age = calculateAge(dob);
 
+// Get configuration from previous enrichment step (if needed)
+var config = getNestedValue(input, "enriched.metadata.config");
+
 // Determine age group
 var ageGroup = "unknown";
 if (age < 18) {
@@ -356,11 +368,7 @@ return {
     calculatedAt: new Date().toISOString()
 };
 `,
-		"context": map[string]interface{}{
-			"hospitalId":  "HOSPITAL_001",
-			"environment": "production",
-		},
-		"targetPath":  "enriched.demographics.age",
+		"targetPath":  "enriched.script.demographics",
 		"timeoutMs":   5000,
 		"failOnError": false,
 	}

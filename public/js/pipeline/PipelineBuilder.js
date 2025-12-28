@@ -801,6 +801,31 @@ class PipelineBuilder {
     }
 
     /**
+     * Reorder steps within a layer based on current visual order
+     */
+    reorderStepsInLayer(layerName) {
+        const layer = this.pipeline.layers[layerName];
+        if (!layer) return;
+
+        // Get all steps in the layer across all execution groups
+        let allSteps = [];
+        layer.executionGroups.forEach(group => {
+            group.steps.forEach(step => {
+                allSteps.push({ step, group });
+            });
+        });
+
+        // Update sequence numbers based on current order (increments of 10)
+        allSteps.forEach((item, index) => {
+            item.step.sequence = (index + 1) * 10;
+        });
+
+        // Re-render the layer to reflect new order
+        this.layerContainer.renderLayer(layerName, layer);
+        this.markAsUnsaved();
+    }
+
+    /**
      * Update step
      */
     updateStep(updatedStep) {

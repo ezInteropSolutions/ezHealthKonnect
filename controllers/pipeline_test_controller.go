@@ -275,9 +275,8 @@ func (c *PipelineTestController) executeStep(step map[string]interface{}, inputD
 	case "pre.validation":
 		result = c.executeHL7Validation(inputData, config)
 
-	case "pre.enrichment":
-		result.Output["enriched"] = true
-		result.Output["message"] = "Data enrichment (placeholder - needs external service integration)"
+	case "pre.enrichment", "pre.enrichment.metadata", "pre.enrichment.database", "pre.enrichment.api", "pre.enrichment.script":
+		result = c.executeEnrichment(inputData, step)
 
 	case "core.mapping":
 		// REAL HL7→FHIR transformation using wizard mappings
@@ -388,6 +387,132 @@ func (c *PipelineTestController) executeHL7Validation(inputData map[string]inter
 
 	result.ExecutionMs = time.Since(startTime).Milliseconds()
 	return result
+}
+
+// executeEnrichment executes enrichment steps using REAL enrichment executors
+func (c *PipelineTestController) executeEnrichment(inputData map[string]interface{}, step map[string]interface{}) StepExecutionResult {
+	startTime := time.Now()
+
+	stepName, _ := step["step_name"].(string)
+	stepType, _ := step["step_type"].(string)
+	config, _ := step["config"].(map[string]interface{})
+
+	result := StepExecutionResult{
+		StepName: stepName,
+		StepType: stepType,
+		Success:  true,
+		Output:   make(map[string]interface{}),
+	}
+
+	// Parse HL7 first if not already done
+	if _, exists := inputData["enhancedSegments"]; !exists {
+		rawMessage, _ := inputData["raw_message"].(string)
+		if rawMessage != "" {
+			parsed := hl7.ParseWithRealSchema(rawMessage)
+			if parsed != nil {
+				parsedJSON, _ := json.Marshal(parsed)
+				var parsedData map[string]interface{}
+				json.Unmarshal(parsedJSON, &parsedData)
+
+				// Merge parsed data into inputData
+				for k, v := range parsedData {
+					inputData[k] = v
+				}
+			}
+		}
+	}
+
+	// Create transformation step
+	transformStep := &models.TransformationStep{
+		StepName: stepName,
+		StepType: stepType,
+		Config:   config,
+	}
+
+	// Execute using ExecutorRegistry
+	ctx := context.Background()
+	enrichedData, err := c.pipelineService.GetExecutorRegistry().ExecuteStep(ctx, *transformStep, inputData)
+
+	// DEBUG: Log what ExecuteStep returned
+	log.Printf("🐛 [DEBUG] executeEnrichment for '%s':", stepName)
+	log.Printf("🐛 [DEBUG]   Error: %v", err)
+	log.Printf("🐛 [DEBUG]   enrichedData keys: %v", getKeys(enrichedData))
+	if enriched, ok := enrichedData["enriched"].(map[string]interface{}); ok {
+		log.Printf("🐛 [DEBUG]   enriched keys: %v", getKeys(enriched))
+		if script, ok := enriched["script"].(map[string]interface{}); ok {
+			log.Printf("🐛 [DEBUG]   enriched.script keys: %v", getKeys(script))
+		}
+	}
+
+	if err != nil {
+		result.Success = false
+		result.Error = err.Error()
+		result.Output["message"] = fmt.Sprintf("Enrichment failed: %s", err.Error())
+	} else {
+		// Extract enrichment metadata for step output
+		result.Success = true
+
+		// Check what was enriched
+		if enriched, ok := enrichedData["enriched"].(map[string]interface{}); ok {
+			// Count enriched fields
+			enrichedCount := 0
+			var enrichedPath string
+
+			if metadata, ok := enriched["metadata"].(map[string]interface{}); ok {
+				enrichedCount += len(metadata)
+				enrichedPath = "enriched.metadata"
+			}
+			if database, ok := enriched["database"].(map[string]interface{}); ok {
+				enrichedCount += len(database)
+				enrichedPath = "enriched.database"
+			}
+			if api, ok := enriched["api"].(map[string]interface{}); ok {
+				enrichedCount += len(api)
+				enrichedPath = "enriched.api"
+			}
+			if script, ok := enriched["script"].(map[string]interface{}); ok {
+				// Script enrichment stores result at configurable path
+				for key, value := range script {
+					enrichedPath = fmt.Sprintf("enriched.script.%s", key)
+					if valueMap, ok := value.(map[string]interface{}); ok {
+						enrichedCount = len(valueMap)
+						result.Output["enriched_data"] = value
+					}
+				}
+			}
+
+			if enrichedCount > 0 {
+				result.Output["enriched_path"] = enrichedPath
+				result.Output["fields_count"] = enrichedCount
+				result.Output["message"] = fmt.Sprintf("Enriched %d fields", enrichedCount)
+			}
+		}
+
+		// For metadata enrichment, show what was added
+		if metadata, ok := enrichedData["metadata"].(map[string]interface{}); ok {
+			metadataCount := 0
+			for range metadata {
+				metadataCount++
+			}
+			result.Output["metadata_fields"] = metadataCount
+		}
+	}
+
+	result.ExecutionMs = time.Since(startTime).Milliseconds()
+
+	// DEBUG: Log final result output
+	log.Printf("🐛 [DEBUG] executeEnrichment result.Output: %v", result.Output)
+
+	return result
+}
+
+// getKeys helper function for debugging
+func getKeys(m map[string]interface{}) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
 }
 
 // executeHL7ToFHIRTransform performs REAL HL7→FHIR transformation

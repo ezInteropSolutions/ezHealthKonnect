@@ -234,37 +234,46 @@ func GenerateStepNamespace(stepName string, stepID string, alias *string) string
 	return fmt.Sprintf("%s_%s", sanitized, shortID)
 }
 
+// NormalizeStepKey converts a step name to a standardized output key
+// This ensures consistent naming between step names and output keys
+// Examples:
+//   - "Field Mapping" -> "field_mapping"
+//   - "API Enrichment" -> "api"
+//   - "Script Enrichment" -> "script"
+//   - "Database Enrichment" -> "database"
+func NormalizeStepKey(stepName string) string {
+	// Convert to lowercase
+	key := strings.ToLower(stepName)
+
+	// Replace spaces with underscores
+	key = strings.ReplaceAll(key, " ", "_")
+
+	// Remove "enrichment" suffix for enrichment steps (shorter keys)
+	key = strings.TrimSuffix(key, "_enrichment")
+
+	// Special cases for common step types
+	switch key {
+	case "field_mapping", "core_transformation":
+		return "field_mapping"
+	case "metadata":
+		return "metadata"
+	case "api":
+		return "api"
+	case "database":
+		return "database"
+	case "script":
+		return "script"
+	case "calculated":
+		return "calculated"
+	default:
+		return key
+	}
+}
+
 // GenerateDefaultAlias generates a smart default alias from a step name
+// Uses NormalizeStepKey for consistent naming across the system
 func GenerateDefaultAlias(stepName string) string {
-	words := strings.Fields(stepName)
-
-	if len(words) == 0 {
-		return "step"
-	}
-
-	// Simple heuristic: Use last significant word for enrichment/mapping steps
-	lowerName := strings.ToLower(stepName)
-
-	if strings.Contains(lowerName, "enrich") && len(words) >= 2 {
-		// "Enrich EMPI API" → "empi"
-		return strings.ToLower(words[1])
-	}
-
-	if strings.Contains(lowerName, "map") && len(words) >= 1 {
-		// "Map to FHIR" → "fhir"
-		return strings.ToLower(words[len(words)-1])
-	}
-
-	if strings.Contains(lowerName, "validate") && len(words) >= 3 {
-		// "Validate Patient ID" → "validate_pid"
-		lastWord := strings.ToLower(words[len(words)-1])
-		return fmt.Sprintf("validate_%s", lastWord)
-	}
-
-	// Default: Use first word + last word if multiple words
-	if len(words) == 1 {
-		return strings.ToLower(words[0])
-	}
-
-	return fmt.Sprintf("%s_%s", strings.ToLower(words[0]), strings.ToLower(words[len(words)-1]))
+	// Use the centralized normalization function for consistency
+	// This ensures "Field Mapping" → "field_mapping", "Script Enrichment" → "script", etc.
+	return NormalizeStepKey(stepName)
 }

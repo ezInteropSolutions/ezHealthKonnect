@@ -92,7 +92,12 @@
       "Bash(netstat:*)",
       "Bash(findstr:*)",
       "Bash(docker-compose rm:*)",
-      "Bash(docker-compose exec mysql mysql:*)"
+      "Bash(docker-compose exec mysql mysql:*)",
+      "Bash(docker volume rm:*)",
+      "Bash(docker-compose exec app sh -c \"cd /app && go build -o go-api main.go && killall go-api 2>/dev/null; sleep 2\":*)",
+      "Bash(python3:*)",
+      "Bash(python -m json.tool:*)",
+      "Bash(docker-compose build app)"
     ],
     "deny": [],
     "ask": []

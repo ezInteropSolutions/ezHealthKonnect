@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"ezhealthkonnect/models"
+	"ezhealthkonnect/services/executors/control"
 	"ezhealthkonnect/services/executors/enrichment"
 	"ezhealthkonnect/services/executors/validation"
 )
@@ -58,16 +59,16 @@ func (er *ExecutorRegistry) autoRegisterExecutors() {
 	er.Register(NewPassthroughExecutor())
 
 	// Pre-processing executors - Validation
-	er.Register(NewValidationExecutor(er.db))
 	er.Register(validation.NewFieldValidationExecutor())
 
+	// Pre-processing executors - Control Flow
+	er.Register(control.NewIfThenElseExecutor())  // Conditional logic
+	er.Register(control.NewSwitchCaseExecutor())  // Multi-way branching
+
 	// Pre-processing executors - Enrichment (Strategy Pattern)
-	er.Register(enrichment.NewMetadataEnrichmentExecutor())  // Metadata enrichment
 	er.Register(enrichment.NewAPIEnrichmentExecutor())       // API enrichment
-	er.Register(enrichment.NewDatabaseEnrichmentExecutor(er.db)) // Database enrichment
-	er.Register(enrichment.NewCacheEnrichmentExecutor())     // Cache enrichment (Redis/Memcached)
+	er.Register(enrichment.NewDatabaseEnrichmentExecutor(er.db)) // Database enrichment (includes Redis)
 	er.Register(enrichment.NewScriptEnrichmentExecutor())    // Script-based enrichment
-	er.Register(NewEnrichmentExecutor(er.db))                // Legacy enrichment (backward compatibility)
 
 	// Core executors
 	hl7FhirExecutor := NewHL7FHIRMappingExecutor(er.db)
@@ -75,14 +76,16 @@ func (er *ExecutorRegistry) autoRegisterExecutors() {
 	// Also register under legacy type for backward compatibility
 	er.executors["core.mapping"] = hl7FhirExecutor
 
+	// Field Mapping executor (core.transformation)
+	er.Register(enrichment.NewFieldMappingExecutor())
+
 	// Post-processing executors
 	er.Register(NewFHIRValidationExecutor())
 
 	// Custom executors
-	er.Register(NewJavaScriptExecutor())
 	er.Register(NewGenericExecutor())
 
-	log.Println("  ✓ Registered: Passthrough, Validation (Field), Enrichment (Metadata, API, Database, Cache, Script), HL7→FHIR Mapping, FHIR Validation, JavaScript, Generic")
+	log.Println("  ✓ Registered: Passthrough, Field Validation, If-Then-Else, Switch/Case, API Enrichment, Database Enrichment, Script Enrichment, HL7→FHIR Mapping, Field Mapping, FHIR Validation, Generic")
 }
 
 // Register adds an executor to the registry
@@ -134,119 +137,14 @@ func (er *ExecutorRegistry) ListExecutors() []string {
 }
 
 // ===============================================================
-// VALIDATION EXECUTOR
+// LEGACY EXECUTORS REMOVED
 // ===============================================================
-
-// ValidationExecutor handles validation steps
-type ValidationExecutor struct {
-	db *sql.DB
-}
-
-func NewValidationExecutor(db *sql.DB) *ValidationExecutor {
-	return &ValidationExecutor{db: db}
-}
-
-func (ve *ValidationExecutor) GetStepType() string {
-	return "pre.validation"
-}
-
-func (ve *ValidationExecutor) Execute(
-	ctx context.Context,
-	step *models.TransformationStep,
-	inputData map[string]interface{},
-) (map[string]interface{}, error) {
-
-	log.Printf("[DEBUG] Input data keys: %v", getMapKeys(inputData))
-	for k := range inputData {
-		log.Printf("[DEBUG]   - %s (type: %T)", k, inputData[k])
-	}
-
-	// Extract validation rules from config
-	rules, ok := step.Config["rules"].([]interface{})
-	if !ok {
-		return inputData, nil // No rules, pass through
-	}
-
-	var errors []string
-
-	for _, ruleInterface := range rules {
-		rule, ok := ruleInterface.(map[string]interface{})
-		if !ok {
-			continue
-		}
-
-		field, _ := rule["field"].(string)
-		ruleType, _ := rule["type"].(string)
-		errorMessage, _ := rule["errorMessage"].(string)
-
-		if ruleType == "required" {
-			// Check if field exists in input data
-			value := getNestedValue(inputData, field)
-			log.Printf("[DEBUG] Field: %s, Value: %v (type: %T)", field, value, value)
-			if value == nil || value == "" {
-				if errorMessage != "" {
-					errors = append(errors, errorMessage)
-				} else {
-					errors = append(errors, fmt.Sprintf("Required field missing: %s", field))
-				}
-			}
-		}
-	}
-
-	if len(errors) > 0 {
-		return inputData, fmt.Errorf("validation failed: %v", errors)
-	}
-
-	// Validation passed - pass through input
-	return inputData, nil
-}
-
-func (ve *ValidationExecutor) Validate(step *models.TransformationStep) error {
-	if step.Config["rules"] == nil {
-		return fmt.Errorf("validation step requires 'rules' in config")
-	}
-	return nil
-}
-
-// ===============================================================
-// ENRICHMENT EXECUTOR
-// ===============================================================
-
-// EnrichmentExecutor handles enrichment steps (API calls, database lookups)
-type EnrichmentExecutor struct {
-	db *sql.DB
-}
-
-func NewEnrichmentExecutor(db *sql.DB) *EnrichmentExecutor {
-	return &EnrichmentExecutor{db: db}
-}
-
-func (ee *EnrichmentExecutor) GetStepType() string {
-	return "pre.enrichment"
-}
-
-func (ee *EnrichmentExecutor) Execute(
-	ctx context.Context,
-	step *models.TransformationStep,
-	inputData map[string]interface{},
-) (map[string]interface{}, error) {
-
-	// TODO: Implement actual enrichment logic
-	// For MVP, this is a placeholder that passes through
-
-	log.Printf("  📍 Enrichment step: %s (placeholder - implement API call)", step.StepName)
-
-	// Example: Call external API
-	// apiURL := step.Config["api_url"].(string)
-	// response := callExternalAPI(apiURL, inputData)
-	// merge response into inputData
-
-	return inputData, nil
-}
-
-func (ee *EnrichmentExecutor) Validate(step *models.TransformationStep) error {
-	return nil // Placeholder
-}
+// The following executors have been removed during consolidation:
+// - ValidationExecutor (replaced by FieldValidationExecutor)
+// - MetadataEnrichmentExecutor (merged into FieldMappingExecutor)
+// - JavaScriptExecutor (replaced by ScriptEnrichmentExecutor)
+// - EnrichmentExecutor (placeholder with no functionality)
+// See EXECUTOR_CONSOLIDATION_PLAN.md for details
 
 // ===============================================================
 // HL7→FHIR MAPPING EXECUTOR
@@ -573,52 +471,6 @@ func (fve *FHIRValidationExecutor) Execute(
 }
 
 func (fve *FHIRValidationExecutor) Validate(step *models.TransformationStep) error {
-	return nil
-}
-
-// ===============================================================
-// JAVASCRIPT EXECUTOR (Custom Scripts)
-// ===============================================================
-
-// JavaScriptExecutor executes custom JavaScript code
-type JavaScriptExecutor struct{}
-
-func NewJavaScriptExecutor() *JavaScriptExecutor {
-	return &JavaScriptExecutor{}
-}
-
-func (jse *JavaScriptExecutor) GetStepType() string {
-	return "custom.javascript"
-}
-
-func (jse *JavaScriptExecutor) Execute(
-	ctx context.Context,
-	step *models.TransformationStep,
-	inputData map[string]interface{},
-) (map[string]interface{}, error) {
-
-	// TODO: Implement JavaScript runtime (goja)
-	// For MVP, this is a placeholder
-
-	if step.ScriptContent == nil || *step.ScriptContent == "" {
-		return inputData, fmt.Errorf("no script content provided")
-	}
-
-	log.Printf("  📝 JavaScript execution: %s (placeholder - implement goja)", step.StepName)
-
-	// Example goja implementation:
-	// vm := goja.New()
-	// vm.Set("input", inputData)
-	// result, err := vm.RunString(*step.ScriptContent)
-	// return result as map[string]interface{}
-
-	return inputData, nil
-}
-
-func (jse *JavaScriptExecutor) Validate(step *models.TransformationStep) error {
-	if step.ScriptContent == nil || *step.ScriptContent == "" {
-		return fmt.Errorf("JavaScript step requires script_content")
-	}
 	return nil
 }
 

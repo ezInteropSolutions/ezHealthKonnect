@@ -10,6 +10,7 @@ import (
 	"log"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	// SQL database drivers
@@ -23,6 +24,12 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/options"
 	"go.mongodb.org/mongo-driver/bson"
 	"github.com/redis/go-redis/v9"
+)
+
+// Global connection pool with cache and reuse
+var (
+	dbConnectionPool = make(map[string]*sql.DB)
+	dbPoolMutex      sync.RWMutex
 )
 
 // ===============================================================
@@ -179,9 +186,10 @@ func (e *DatabaseEnrichmentExecutor) parseConfig(step *models.TransformationStep
 	}
 
 	// Build connection string from individual fields if not provided
-	if config.ConnectionString == "" && config.ConnectionName == "" {
+	// Skip for Redis and MongoDB - they handle connections internally
+	if config.ConnectionString == "" && config.ConnectionName == "" && dbType != "redis" && dbType != "mongodb" && dbType != "mongo" {
 		if config.DBHost != "" && config.DBPort > 0 && config.DBName != "" && config.DBUser != "" {
-			// Build connection string from individual fields
+			// Build connection string from individual fields (SQL databases only)
 			config.ConnectionString = e.buildConnectionString(&config)
 			log.Printf("   ℹ️  Built connection string from individual fields: %s:****@%s:%d/%s",
 				config.DBUser, config.DBHost, config.DBPort, config.DBName)
@@ -203,7 +211,7 @@ func (e *DatabaseEnrichmentExecutor) parseConfig(step *models.TransformationStep
 	return &config, nil
 }
 
-// getConnection gets the database connection
+// getConnection gets the database connection with connection pooling
 func (e *DatabaseEnrichmentExecutor) getConnection(config *models.DatabaseEnrichmentConfigV2) (*sql.DB, error) {
 	// If connection name is specified, look it up from stored connections
 	if config.ConnectionName != "" {
@@ -212,17 +220,60 @@ func (e *DatabaseEnrichmentExecutor) getConnection(config *models.DatabaseEnrich
 		return e.db, nil
 	}
 
-	// If connection string is specified, create a new connection
+	// If connection string is specified, check connection pool first
 	if config.ConnectionString != "" {
+		// Generate cache key from connection string + database type
+		cacheKey := fmt.Sprintf("%s::%s", config.DatabaseType, config.ConnectionString)
+
+		// Check if connection already exists in pool (READ lock)
+		dbPoolMutex.RLock()
+		if db, exists := dbConnectionPool[cacheKey]; exists {
+			dbPoolMutex.RUnlock()
+			// Verify connection is still alive
+			if err := db.Ping(); err == nil {
+				log.Printf("   ♻️  Reusing cached database connection for %s", config.DatabaseType)
+				return db, nil
+			}
+			// Connection dead, need to recreate
+			log.Printf("   ⚠️  Cached connection dead, recreating for %s", config.DatabaseType)
+		} else {
+			dbPoolMutex.RUnlock()
+		}
+
+		// Create new connection (WRITE lock)
+		dbPoolMutex.Lock()
+		defer dbPoolMutex.Unlock()
+
+		// Double-check in case another goroutine just created it
+		if db, exists := dbConnectionPool[cacheKey]; exists {
+			if err := db.Ping(); err == nil {
+				return db, nil
+			}
+		}
+
+		log.Printf("   🔌 Creating new database connection for %s", config.DatabaseType)
 		db, err := sql.Open(e.getDriverName(config.DatabaseType), config.ConnectionString)
 		if err != nil {
 			return nil, fmt.Errorf("failed to open database connection: %w", err)
 		}
 
-		// Test connection
-		if err := db.Ping(); err != nil {
+		// Configure connection pool settings for performance
+		db.SetMaxOpenConns(10)                 // Max 10 concurrent connections per database
+		db.SetMaxIdleConns(5)                  // Keep 5 idle connections ready
+		db.SetConnMaxLifetime(5 * time.Minute) // Recycle connections every 5 minutes
+
+		// Test connection with timeout
+		pingCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+
+		if err := db.PingContext(pingCtx); err != nil {
+			db.Close()
 			return nil, fmt.Errorf("failed to ping database: %w", err)
 		}
+
+		// Store in pool
+		dbConnectionPool[cacheKey] = db
+		log.Printf("   ✅ Database connection cached for reuse (%s)", config.DatabaseType)
 
 		return db, nil
 	}
@@ -275,6 +326,18 @@ func (e *DatabaseEnrichmentExecutor) buildConnectionString(config *models.Databa
 		// MongoDB without authentication
 		return fmt.Sprintf("mongodb://%s:%d/%s",
 			config.DBHost, config.DBPort, config.DBName)
+	case "redis":
+		// Redis format: redis://[:password@]host:port/db
+		dbNum := 0 // Default database
+		if config.DBName != "" {
+			fmt.Sscanf(config.DBName, "%d", &dbNum)
+		}
+		if config.DBPassword != "" {
+			return fmt.Sprintf("redis://:%s@%s:%d/%d",
+				config.DBPassword, config.DBHost, config.DBPort, dbNum)
+		}
+		return fmt.Sprintf("redis://%s:%d/%d",
+			config.DBHost, config.DBPort, dbNum)
 	default:
 		// Default to PostgreSQL format
 		return fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=disable",
@@ -722,28 +785,58 @@ func (e *DatabaseEnrichmentExecutor) buildRedisKey(
 ) string {
 	result := keyPattern
 
-	// Find all placeholders {fieldPath}
+	// Find all placeholders - support both {{ fieldPath }} and {fieldPath}
 	for {
-		start := strings.Index(result, "{")
-		if start == -1 {
-			break
+		// Try to find double-brace placeholder first {{ }}
+		start := strings.Index(result, "{{")
+		isDoubleBrace := false
+		if start != -1 {
+			isDoubleBrace = true
+		} else {
+			// Try single brace {
+			start = strings.Index(result, "{")
+			if start == -1 {
+				break
+			}
 		}
 
-		end := strings.Index(result[start:], "}")
-		if end == -1 {
-			break
+		// Find matching closing brace
+		var end int
+		if isDoubleBrace {
+			end = strings.Index(result[start:], "}}")
+			if end == -1 {
+				break
+			}
+			// Extract field path (trim {{ }} and spaces)
+			fieldPath := strings.TrimSpace(result[start+2 : start+end])
+			value := executors.GetNestedValue(inputData, fieldPath)
+
+			// Convert value to string
+			var strValue string
+			if value != nil {
+				strValue = fmt.Sprintf("%v", value)
+			}
+
+			// Replace {{ fieldPath }} with value
+			result = result[:start] + strValue + result[start+end+2:]
+		} else {
+			end = strings.Index(result[start:], "}")
+			if end == -1 {
+				break
+			}
+			// Extract field path (trim { } and spaces)
+			fieldPath := strings.TrimSpace(result[start+1 : start+end])
+			value := executors.GetNestedValue(inputData, fieldPath)
+
+			// Convert value to string
+			var strValue string
+			if value != nil {
+				strValue = fmt.Sprintf("%v", value)
+			}
+
+			// Replace {fieldPath} with value
+			result = result[:start] + strValue + result[start+end+1:]
 		}
-
-		fieldPath := result[start+1 : start+end]
-		value := executors.GetNestedValue(inputData, fieldPath)
-
-		// Convert value to string
-		var strValue string
-		if value != nil {
-			strValue = fmt.Sprintf("%v", value)
-		}
-
-		result = result[:start] + strValue + result[start+end+1:]
 	}
 
 	return result

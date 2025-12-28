@@ -1,6 +1,7 @@
 /**
  * Properties Panel Manager
  * Manages the right panel for step configuration
+ * Version: 21.4 - Redis Query Builder integration with inline HTML escaping
  */
 
 class PropertiesPanel {
@@ -23,10 +24,11 @@ class PropertiesPanel {
         const modal = document.getElementById('stepPropertiesModal');
         const modalTitle = document.getElementById('stepModalTitle');
         const formTabContent = document.getElementById('formTabContent');
+        const variablesTabContent = document.getElementById('variablesTabContent');
         const jsonTabContent = document.getElementById('jsonTabContent');
         const docsTabContent = document.getElementById('docsTabContent');
 
-        if (!modal || !formTabContent || !jsonTabContent || !docsTabContent) {
+        if (!modal || !formTabContent || !variablesTabContent || !jsonTabContent || !docsTabContent) {
             console.error('Step properties modal or tab containers not found');
             return;
         }
@@ -41,6 +43,9 @@ class PropertiesPanel {
         formTabContent.innerHTML = '';
         const formUI = this.createFormUI(step, isPreview);
         formTabContent.appendChild(formUI);
+
+        // Populate Variables Tab (Reference Variables)
+        this.setupVariablesTab(step, variablesTabContent);
 
         // Populate JSON Tab
         jsonTabContent.innerHTML = '';
@@ -92,6 +97,120 @@ class PropertiesPanel {
             }
         };
         document.addEventListener('keydown', escHandler);
+    }
+
+    /**
+     * Setup Variables Tab - Shows available reference variables for this step
+     */
+    setupVariablesTab(step, container) {
+        // Find step's position in pipeline to determine available variables
+        const { layerName, stepIndex } = this.findStepPosition(step);
+
+        console.log('📚 Variables Tab - Step position:', {
+            stepName: step.stepName,
+            stepId: step.id,
+            layerName,
+            stepIndex
+        });
+
+        // Initialize reference variables panel if not already created
+        if (!window.referencePanel) {
+            window.referencePanel = new ReferenceVariablesPanel(container, this.builder);
+        } else {
+            window.referencePanel.container = container;
+        }
+
+        // Show variables for this step
+        if (layerName && stepIndex !== -1) {
+            console.log('✅ Showing variables for step in layer:', layerName, 'index:', stepIndex);
+            window.referencePanel.show(step, layerName, stepIndex);
+        } else {
+            console.log('⚠️  Step not found in pipeline - showing preview message');
+            // Step not yet added to pipeline (preview mode)
+            container.innerHTML = `
+                <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 48px; text-align: center;">
+                    <div style="font-size: 48px; opacity: 0.3; margin-bottom: 16px;">ℹ️</div>
+                    <p style="color: #6b7280; margin: 0;">Add this step to the pipeline first</p>
+                    <p style="color: #9ca3af; font-size: 13px; margin: 8px 0 0 0;">
+                        Variables will be available after the step is added
+                    </p>
+                </div>
+            `;
+        }
+    }
+
+    /**
+     * Find step's position in pipeline (layer and index)
+     */
+    findStepPosition(step) {
+        const pipeline = this.builder.pipeline;
+
+        console.log('🔍 Finding step position for:', {
+            stepId: step.id,
+            stepName: step.stepName,
+            stepType: step.stepType
+        });
+
+        if (!pipeline) {
+            console.warn('❌ Pipeline not found');
+            return { layerName: null, stepIndex: -1 };
+        }
+
+        console.log('📋 Pipeline structure:', {
+            hasPipeline: !!pipeline,
+            hasLayers: !!pipeline.layers,
+            layerKeys: pipeline.layers ? Object.keys(pipeline.layers) : []
+        });
+
+        if (!pipeline.layers) {
+            console.warn('❌ Pipeline layers not found');
+            return { layerName: null, stepIndex: -1 };
+        }
+
+        // Search through layers - note: layers have executionGroups, not direct steps
+        const layerNames = ['pre', 'core', 'post'];
+        for (const layerName of layerNames) {
+            const layer = pipeline.layers[layerName];
+
+            console.log(`🔎 Checking ${layerName} layer:`, {
+                exists: !!layer,
+                hasExecutionGroups: !!layer?.executionGroups,
+                groupCount: layer?.executionGroups?.length || 0
+            });
+
+            if (layer && layer.executionGroups && layer.executionGroups.length > 0) {
+                // Flatten all steps from all execution groups to get sequential index
+                const allSteps = [];
+                layer.executionGroups.forEach(group => {
+                    if (group.steps) {
+                        allSteps.push(...group.steps);
+                    }
+                });
+
+                console.log(`Found ${allSteps.length} total steps in ${layerName} layer`);
+                if (allSteps.length > 0) {
+                    console.log('Sample step from layer:', allSteps[0]);
+                }
+
+                const stepIndex = allSteps.findIndex(s => {
+                    const match = s.id === step.id ||                // Match by ID
+                                  (s.stepName === step.stepName && s.stepType === step.stepType); // Fallback: name + type
+
+                    if (match) {
+                        console.log('✅ Found matching step:', s);
+                    }
+                    return match;
+                });
+
+                if (stepIndex !== -1) {
+                    console.log(`✅ Step found in ${layerName} at index ${stepIndex}`);
+                    return { layerName, stepIndex };
+                }
+            }
+        }
+
+        console.warn('⚠️ Step not found in any layer');
+        return { layerName: null, stepIndex: -1 };
     }
 
     /**
@@ -376,6 +495,43 @@ class PropertiesPanel {
     }
 
     /**
+     * Format example for display - handles special cases like script enrichment
+     */
+    formatExampleForDisplay(example, stepType) {
+        // Special handling for script enrichment - display script as raw code
+        if (stepType === 'pre.enrichment.script' && example.script) {
+            // Create a readable format showing the script content directly
+            const exampleCopy = { ...example };
+            const scriptContent = exampleCopy.script;
+            delete exampleCopy.script;
+
+            // Show script separately in a more readable format
+            return `{
+  "script": \`${scriptContent}\`,
+  "timeout_ms": ${exampleCopy.timeout_ms || 5000},
+  "failOnError": ${exampleCopy.failOnError || false}
+}`;
+        }
+
+        // For field mapping with enriched data examples, show without escaping
+        if (stepType === 'core.mapping' && example.mappings) {
+            // Format mappings in a readable way
+            const formatted = {
+                ...example,
+                mappings: example.mappings.map(m => ({
+                    ...m,
+                    // Show comment if exists
+                    ...(m.comment && { comment: m.comment })
+                }))
+            };
+            return JSON.stringify(formatted, null, 2);
+        }
+
+        // Default: standard JSON stringification
+        return JSON.stringify(example, null, 2);
+    }
+
+    /**
      * Create Documentation Tab
      */
     createDocumentation(step) {
@@ -410,7 +566,7 @@ class PropertiesPanel {
                     <h4 style="color: #2563eb; margin-bottom: 0.5rem;">
                         <i class="fas fa-code"></i> Example Configuration
                     </h4>
-                    <pre style="background: #f3f4f6; padding: 1rem; border-radius: 6px; overflow-x: auto; font-size: 0.875rem;"><code>${JSON.stringify(docs.example, null, 2)}</code></pre>
+                    <pre style="background: #f3f4f6; padding: 1rem; border-radius: 6px; overflow-x: auto; font-size: 0.875rem;"><code>${this.formatExampleForDisplay(docs.example, step.stepType)}</code></pre>
                 </div>
 
                 ${docs.validationTypes ? `
@@ -774,7 +930,15 @@ class PropertiesPanel {
      * Create configuration section
      */
     createConfigSection(step) {
-        // Special handling for HL7→FHIR mapping steps
+        // Debug: Log step type to help identify mapping steps
+        console.log('🔍 createConfigSection called with:', {
+            stepType: step.stepType,
+            templateId: step.templateId,
+            stepName: step.name,
+            willUseMappingUI: (step.stepType === 'core.mapping' || step.templateId === 'hl7-fhir-mapping')
+        });
+
+        // Special handling for HL7→FHIR mapping steps ONLY (not generic transformation)
         if (step.stepType === 'core.mapping' || step.templateId === 'hl7-fhir-mapping') {
             return this.createMappingConfigSection(step);
         }
@@ -845,6 +1009,26 @@ class PropertiesPanel {
 
                 <!-- Tab 1: Visual Mapping -->
                 <div class="config-tab-content" data-tab-content="visual">
+                    <!-- Info box about reference variables -->
+                    <div style="margin-bottom: 1rem; padding: 1rem; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 8px; color: white;">
+                        <div style="display: flex; align-items: start; gap: 0.75rem;">
+                            <div style="font-size: 1.5rem;">💡</div>
+                            <div style="flex: 1;">
+                                <div style="font-weight: 600; margin-bottom: 0.5rem; font-size: 0.95rem;">Using Enriched Data in Mappings</div>
+                                <div style="font-size: 0.85rem; line-height: 1.5; opacity: 0.95;">
+                                    You can reference data from previous enrichment steps in your field mappings!
+                                    <br><br>
+                                    <strong>Examples:</strong><br>
+                                    • Use database results: <code style="background: rgba(255,255,255,0.2); padding: 2px 6px; border-radius: 3px; font-size: 0.8rem;">["database_enrichment"].enriched_data.fieldName</code><br>
+                                    • Use script calculations: <code style="background: rgba(255,255,255,0.2); padding: 2px 6px; border-radius: 3px; font-size: 0.8rem;">["Script_Enrichment"].enriched_data.riskScore</code><br>
+                                    • Use API data: <code style="background: rgba(255,255,255,0.2); padding: 2px 6px; border-radius: 3px; font-size: 0.8rem;">["API_Enrichment"].enriched_data.externalId</code>
+                                    <br><br>
+                                    <strong>👉 Click the "Variables" tab above to see all available variables from previous steps with copy-paste ready XPaths!</strong>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
                     <div style="margin-bottom: 1rem; padding: 0.75rem; background: #f8fafc; border-radius: 6px; display: flex; justify-content: space-between; align-items: center;">
                         <span style="color: #475569; font-size: 0.875rem;">
                             <strong>${mappingCount}</strong> mappings configured
@@ -1014,7 +1198,13 @@ class PropertiesPanel {
                 <div class="form-group">
                     <label>Script Code</label>
                     <textarea id="scriptContent" rows="15" style="font-family: 'Courier New', monospace;">${step.scriptContent || ''}</textarea>
-                    <small style="color: #64748b;">
+                    <div style="margin-top: 8px; display: flex; gap: 10px; align-items: center;">
+                        <button type="button" id="validateScriptBtn" class="btn-secondary" style="padding: 6px 12px;">
+                            🔍 Validate Script
+                        </button>
+                        <div id="scriptValidationResult" style="flex: 1;"></div>
+                    </div>
+                    <small style="color: #64748b; display: block; margin-top: 8px;">
                         Available variables: <code>input</code> (parsed message data)<br>
                         Return modified data or throw error
                     </small>
@@ -1049,6 +1239,12 @@ class PropertiesPanel {
         const configTextarea = form.querySelector('#stepConfig');
         if (configTextarea) {
             configTextarea.addEventListener('blur', () => this.validateJSON(configTextarea));
+        }
+
+        // Script validation button
+        const validateScriptBtn = form.querySelector('#validateScriptBtn');
+        if (validateScriptBtn) {
+            validateScriptBtn.addEventListener('click', () => this.validateScript(step));
         }
 
         // Icon is now automatically assigned based on step type - no manual input needed
@@ -1127,6 +1323,23 @@ class PropertiesPanel {
         if (exportBtn) {
             exportBtn.addEventListener('click', () => {
                 this.exportMappingsAsJSON(step);
+            });
+        }
+
+        // === Add Mapping Button (NO-CODE) ===
+        const addMappingBtn = form.querySelector('#addMappingBtn');
+        if (addMappingBtn) {
+            addMappingBtn.addEventListener('click', () => {
+                // Initialize mappings array if it doesn't exist
+                if (!step.config) {
+                    step.config = {};
+                }
+                if (!step.config.mappings) {
+                    step.config.mappings = [];
+                }
+
+                // Show edit modal in "add" mode (index undefined)
+                this.editMapping(undefined);
             });
         }
 
@@ -1300,6 +1513,25 @@ class PropertiesPanel {
                     builder.loadCollectionSchema();
                 });
             }
+        });
+
+        // === Redis Query Builder Initialization ===
+        // NO-CODE: Visual builder for Redis queries
+        const redisQueryBuilderContainers = form.querySelectorAll('.redis-query-builder-container');
+        redisQueryBuilderContainers.forEach(container => {
+            // Get all Redis config from dataset
+            const redisConfig = {
+                redisQuery: container.dataset.redisQuery || '',
+                redisCommand: container.dataset.redisCommand || '',
+                redisKey: container.dataset.redisKey || '',
+                redisHashField: container.dataset.redisHashField || ''
+            };
+
+            // Instantiate RedisQueryBuilder component
+            const builder = new RedisQueryBuilder(container, redisConfig);
+
+            // Store reference for later access
+            container._redisQueryBuilderInstance = builder;
         });
 
         // === Database Query Tester Initialization (Database Enrichment) ===
@@ -1524,6 +1756,46 @@ class PropertiesPanel {
                 messageType: messageType
             });
         }
+
+        // === Generic Field Mapping Button (for core.transformation steps) ===
+        const addGenericMappingBtn = form.querySelector('#addGenericMappingBtn');
+        if (addGenericMappingBtn) {
+            addGenericMappingBtn.addEventListener('click', () => {
+                // Initialize mappings array if needed
+                if (!step.config) step.config = {};
+                if (!step.config.mappings) step.config.mappings = [];
+
+                // Call inline save method
+                this.saveGenericMapping();
+            });
+        }
+
+        // Initialize smart search for RHS field
+        const newMappingRHS = form.querySelector('#newMappingRHS');
+        if (newMappingRHS && typeof FieldPathSearchComponent !== 'undefined') {
+            new FieldPathSearchComponent(newMappingRHS, {
+                placeholder: 'Search HL7 fields or enter variable...',
+                allowCustom: true,
+                showCategories: true,
+                onSelect: (fieldPath) => {
+                    newMappingRHS.value = fieldPath;
+                }
+            });
+        }
+
+        // Allow Enter key to add mapping
+        const newMappingLHS = form.querySelector('#newMappingLHS');
+        const newMappingTransforms = form.querySelector('#newMappingTransforms');
+        [newMappingLHS, newMappingRHS].forEach(input => {
+            if (input) {
+                input.addEventListener('keypress', (e) => {
+                    if (e.key === 'Enter') {
+                        e.preventDefault();
+                        addGenericMappingBtn.click();
+                    }
+                });
+            }
+        });
 
         // === Conditional Field Visibility (Dynamic Auth Form Fields) ===
         this.setupConditionalFieldVisibility(form);
@@ -1769,45 +2041,526 @@ class PropertiesPanel {
     }
 
     /**
-     * Edit a mapping (single-click edit)
+     * Create generic field mapping configuration section (NO-CODE for generic transformations)
+     * Color theme: White background, Navy blue (#1e3a8a) primary, Pastel pink (#ffc0cb) accents
      */
-    editMapping(index) {
+    createGenericFieldMappingSection(step) {
+        // Initialize mappings array if it doesn't exist
+        if (!step.config) {
+            step.config = {};
+        }
+        if (!step.config.mappings) {
+            step.config.mappings = [];
+        }
+
+        const mappings = step.config.mappings || [];
+
+        return `
+            <div class="form-section">
+                <h4 style="color: #1e3a8a; margin-bottom: 1rem; font-weight: 600;">Variable Assignments</h4>
+
+                <!-- Subtle Info Box with Navy Blue theme and Pastel Pink accent -->
+                <div style="background: #f0f4ff; border-left: 4px solid #1e3a8a; border-right: 2px solid #ffc0cb; padding: 12px 16px; border-radius: 4px; margin-bottom: 1rem;">
+                    <div style="color: #1e3a8a; font-weight: 600; font-size: 0.9rem; margin-bottom: 4px;">Create new variables from HL7 fields or existing variables</div>
+                    <div style="color: #64748b; font-size: 0.85rem; line-height: 1.5;">
+                        LHS = new variable name, RHS = source (HL7 field or existing variable). Apply transformations as needed.
+                    </div>
+                </div>
+
+                <!-- System Variables Quick-Add -->
+                <div style="background: white; border: 1px solid #e2e8f0; border-left: 3px solid #ffc0cb; border-radius: 6px; padding: 12px; margin-bottom: 1rem;">
+                    <div style="color: #1e3a8a; font-weight: 600; font-size: 0.85rem; margin-bottom: 8px;">Quick Add System Variables:</div>
+                    <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                        <button type="button" onclick="window.propertiesPanel.addSystemVariable('timestamp')" style="background: white; border: 1px solid #cbd5e1; color: #1e3a8a; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 0.8rem; transition: all 0.2s;" onmouseover="this.style.background='#f0f4ff'; this.style.borderColor='#1e3a8a'" onmouseout="this.style.background='white'; this.style.borderColor='#cbd5e1'">
+                            + Timestamp
+                        </button>
+                        <button type="button" onclick="window.propertiesPanel.addSystemVariable('correlationId')" style="background: white; border: 1px solid #cbd5e1; color: #1e3a8a; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 0.8rem; transition: all 0.2s;" onmouseover="this.style.background='#f0f4ff'; this.style.borderColor='#1e3a8a'" onmouseout="this.style.background='white'; this.style.borderColor='#cbd5e1'">
+                            + Correlation ID (GUID)
+                        </button>
+                        <button type="button" onclick="window.propertiesPanel.addSystemVariable('messageId')" style="background: white; border: 1px solid #cbd5e1; color: #1e3a8a; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 0.8rem; transition: all 0.2s;" onmouseover="this.style.background='#f0f4ff'; this.style.borderColor='#1e3a8a'" onmouseout="this.style.background='white'; this.style.borderColor='#cbd5e1'">
+                            + Message ID (UUID)
+                        </button>
+                        <button type="button" onclick="window.propertiesPanel.addSystemVariable('interfaceId')" style="background: white; border: 1px solid #cbd5e1; color: #1e3a8a; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 0.8rem; transition: all 0.2s;" onmouseover="this.style.background='#f0f4ff'; this.style.borderColor='#1e3a8a'" onmouseout="this.style.background='white'; this.style.borderColor='#cbd5e1'">
+                            + Interface ID
+                        </button>
+                        <button type="button" onclick="window.propertiesPanel.addSystemVariable('interfaceName')" style="background: white; border: 1px solid #cbd5e1; color: #1e3a8a; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 0.8rem; transition: all 0.2s;" onmouseover="this.style.background='#f0f4ff'; this.style.borderColor='#1e3a8a'" onmouseout="this.style.background='white'; this.style.borderColor='#cbd5e1'">
+                            + Interface Name
+                        </button>
+                    </div>
+                    <div style="margin-top: 6px; font-size: 0.7rem; color: #64748b;">
+                        These system-generated values are automatically created at runtime
+                    </div>
+                </div>
+
+                <!-- Inline Add Form -->
+                <div style="background: white; border: 1px solid #e2e8f0; border-top: 2px solid #ffc0cb; border-radius: 6px; padding: 16px; margin-bottom: 1rem;">
+                    <div style="display: grid; grid-template-columns: 1fr 1.5fr 1fr auto; gap: 12px; align-items: end;">
+                        <div>
+                            <label style="display: block; color: #64748b; font-size: 0.8rem; margin-bottom: 4px; font-weight: 500;">LHS (New Variable)</label>
+                            <input type="text" id="newMappingLHS" placeholder="myVariable" style="width: 100%; padding: 8px; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 13px; font-family: 'Courier New', monospace; transition: border-color 0.2s;" onfocus="this.style.borderColor='#ffc0cb'" onblur="this.style.borderColor='#cbd5e1'">
+                        </div>
+                        <div style="position: relative;">
+                            <label style="display: block; color: #64748b; font-size: 0.8rem; margin-bottom: 4px; font-weight: 500;">RHS (Source - HL7 field or variable)</label>
+                            <input type="text" id="newMappingRHS" placeholder="Search HL7 fields or enter variable..." style="width: 100%; padding: 8px; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 13px; font-family: 'Courier New', monospace; transition: border-color 0.2s;" onfocus="this.style.borderColor='#ffc0cb'" onblur="this.style.borderColor='#cbd5e1'">
+                        </div>
+                        <div style="position: relative;">
+                            <label style="display: block; color: #64748b; font-size: 0.8rem; margin-bottom: 4px; font-weight: 500;">
+                                Transformations
+                                <button type="button" onclick="window.propertiesPanel.showTransformHelp()" style="background: none; border: none; color: #ffc0cb; cursor: pointer; padding: 0; font-size: 0.75rem; margin-left: 4px;" title="View transformation guide">ℹ️</button>
+                            </label>
+                            <select id="newMappingTransforms" multiple onchange="window.propertiesPanel.handleTransformSelection()" style="width: 100%; padding: 4px; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 12px; background: white; min-height: 38px; transition: border-color 0.2s;" onfocus="this.style.borderColor='#ffc0cb'" onblur="this.style.borderColor='#cbd5e1'">
+                                <option value="trim">trim - Remove whitespace</option>
+                                <option value="upper">upper - To UPPERCASE</option>
+                                <option value="lower">lower - To lowercase</option>
+                                <option value="regex">regex - Extract pattern</option>
+                                <option value="substring">substring - Extract chars</option>
+                                <option value="replace">replace - Replace text</option>
+                            </select>
+                            <div style="margin-top: 4px; display: none;" id="regexInput">
+                                <input type="text" id="regexPattern" placeholder="Pattern: ^[0-9]+$" style="width: 100%; padding: 4px 8px; border: 1px solid #cbd5e1; border-radius: 3px; font-size: 11px; font-family: 'Courier New', monospace;">
+                            </div>
+                            <div style="margin-top: 4px; display: none;" id="substringInput">
+                                <input type="text" id="substringParams" placeholder="start:end (e.g., 0:10)" style="width: 100%; padding: 4px 8px; border: 1px solid #cbd5e1; border-radius: 3px; font-size: 11px; font-family: 'Courier New', monospace;">
+                            </div>
+                            <div style="margin-top: 4px; display: none;" id="replaceInput">
+                                <input type="text" id="replaceParams" placeholder="old:new (e.g., -:/)" style="width: 100%; padding: 4px 8px; border: 1px solid #cbd5e1; border-radius: 3px; font-size: 11px; font-family: 'Courier New', monospace;">
+                            </div>
+                        </div>
+                        <button id="addGenericMappingBtn" style="background: #1e3a8a; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; font-weight: 500; font-size: 0.9rem; white-space: nowrap; transition: background 0.2s;" onmouseover="this.style.background='#2563eb'" onmouseout="this.style.background='#1e3a8a'">
+                            + Add
+                        </button>
+                    </div>
+                    <div style="margin-top: 8px; font-size: 0.75rem; color: #64748b;">
+                        RHS: Type to search HL7 fields (e.g., "PID", "Patient Name") or paste variable path | Use <strong>Ctrl/Cmd+Click</strong> to select multiple transformations |
+                        <button type="button" id="addRegexBtn" onclick="window.propertiesPanel.addComplexTransform('regex')" style="background: none; border: none; color: #1e3a8a; cursor: pointer; padding: 0; font-size: 0.75rem;">+ Regex</button> |
+                        <button type="button" id="addSubstringBtn" onclick="window.propertiesPanel.addComplexTransform('substring')" style="background: none; border: none; color: #1e3a8a; cursor: pointer; padding: 0; font-size: 0.75rem;">+ Substring</button> |
+                        <button type="button" id="addReplaceBtn" onclick="window.propertiesPanel.addComplexTransform('replace')" style="background: none; border: none; color: #1e3a8a; cursor: pointer; padding: 0; font-size: 0.75rem;">+ Replace</button> |
+                        <button type="button" onclick="window.propertiesPanel.showTransformHelp()" style="background: none; border: none; color: #1e3a8a; text-decoration: underline; cursor: pointer; padding: 0; font-size: 0.75rem;">Transform Guide</button>
+                    </div>
+                </div>
+
+                <!-- Assignments List -->
+                <div id="genericMappingsList" style="margin-top: 1rem;">
+                    ${mappings.length > 0 ? `
+                        <h5 style="color: #1e3a8a; margin-bottom: 0.5rem; font-weight: 600; font-size: 0.9rem;">Configured Variables (${mappings.length}):</h5>
+                        <div style="background: white; border: 1px solid #e2e8f0; border-radius: 6px; overflow: hidden;">
+                            ${mappings.map((mapping, index) => `
+                                <div id="mapping-row-${index}" style="display: flex; align-items: center; gap: 12px; padding: 12px; border-bottom: 1px solid #e2e8f0; transition: background 0.15s;" onmouseover="this.style.background='#f8fafc'" onmouseout="this.style.background='white'">
+                                    <div style="flex: 1;">
+                                        <div style="font-size: 0.75rem; color: #64748b; margin-bottom: 2px;">Variable:</div>
+                                        <input type="text"
+                                               id="edit-lhs-${index}"
+                                               value="${mapping.lhs}"
+                                               onblur="window.propertiesPanel.updateMapping(${index}, 'lhs', this.value)"
+                                               style="width: 100%; background: #f8fafc; padding: 4px 8px; border-radius: 3px; font-size: 12px; color: #334155; border: 1px solid #e2e8f0; font-family: 'Courier New', monospace;"
+                                               onfocus="this.style.borderColor='#ffc0cb'; this.style.background='white'"
+                                               onblur="this.style.borderColor='#e2e8f0'; this.style.background='#f8fafc'; window.propertiesPanel.updateMapping(${index}, 'lhs', this.value)">
+                                    </div>
+                                    <div style="flex: 0 0 40px; text-align: center; color: #64748b; font-size: 1.2rem;">=</div>
+                                    <div style="flex: 1.5;">
+                                        <div style="font-size: 0.75rem; color: #64748b; margin-bottom: 2px;">Source:</div>
+                                        <textarea
+                                               id="edit-rhs-${index}"
+                                               onblur="window.propertiesPanel.updateMapping(${index}, 'rhs', this.value)"
+                                               style="width: 100%; background: #f0f4ff; padding: 4px 8px; border-radius: 3px; font-size: 12px; color: #1e3a8a; border: 1px solid #dbeafe; font-family: 'Courier New', monospace; min-height: 36px; resize: vertical;"
+                                               onfocus="this.style.borderColor='#ffc0cb'; this.style.background='white'"
+                                               onblur="this.style.borderColor='#dbeafe'; this.style.background='#f0f4ff'; window.propertiesPanel.updateMapping(${index}, 'rhs', this.value)">${mapping.rhs}</textarea>
+                                    </div>
+                                    <div style="flex: 1;">
+                                        <div style="font-size: 0.75rem; color: #64748b; margin-bottom: 2px;">Transforms:</div>
+                                        <input type="text"
+                                               id="edit-transforms-${index}"
+                                               value="${mapping.transforms || ''}"
+                                               placeholder="trim, upper, lower..."
+                                               onblur="window.propertiesPanel.updateMapping(${index}, 'transforms', this.value)"
+                                               style="width: 100%; background: #fdf2f8; color: #831843; padding: 4px 8px; border-radius: 3px; font-size: 11px; border: 1px solid #fce7f3; font-family: 'Courier New', monospace;"
+                                               onfocus="this.style.borderColor='#ffc0cb'; this.style.background='white'"
+                                               onblur="this.style.borderColor='#fce7f3'; this.style.background='#fdf2f8'; window.propertiesPanel.updateMapping(${index}, 'transforms', this.value)">
+                                    </div>
+                                    <button onclick="window.propertiesPanel.deleteGenericMapping(${index})" title="Delete" style="background: none; border: none; color: #94a3b8; cursor: pointer; transition: color 0.15s; font-size: 16px; padding: 8px;" onmouseover="this.style.color='#dc2626'" onmouseout="this.style.color='#94a3b8'">
+                                        🗑️
+                                    </button>
+                                </div>
+                            `).join('')}
+                        </div>
+                    ` : ''}
+                </div>
+            </div>
+        `;
+    }
+
+    /**
+     * Handle transformation selection - show input fields for complex transforms
+     */
+    handleTransformSelection() {
+        const transformSelect = document.getElementById('newMappingTransforms');
+        const selectedValues = Array.from(transformSelect.selectedOptions).map(opt => opt.value);
+
+        // Show/hide regex input
+        const regexInput = document.getElementById('regexInput');
+        if (selectedValues.includes('regex')) {
+            regexInput.style.display = 'block';
+            document.getElementById('regexPattern').focus();
+        } else {
+            regexInput.style.display = 'none';
+            document.getElementById('regexPattern').value = '';
+        }
+
+        // Show/hide substring input
+        const substringInput = document.getElementById('substringInput');
+        if (selectedValues.includes('substring')) {
+            substringInput.style.display = 'block';
+            document.getElementById('substringParams').focus();
+        } else {
+            substringInput.style.display = 'none';
+            document.getElementById('substringParams').value = '';
+        }
+
+        // Show/hide replace input
+        const replaceInput = document.getElementById('replaceInput');
+        if (selectedValues.includes('replace')) {
+            replaceInput.style.display = 'block';
+            document.getElementById('replaceParams').focus();
+        } else {
+            replaceInput.style.display = 'none';
+            document.getElementById('replaceParams').value = '';
+        }
+    }
+
+    /**
+     * Add complex transform (regex, substring, replace) - deprecated, using handleTransformSelection instead
+     */
+    addComplexTransform(type) {
+        // This method is kept for backward compatibility with the buttons in helper text
+        // But the main interaction is now through the dropdown onchange
+        const transformSelect = document.getElementById('newMappingTransforms');
+        const option = Array.from(transformSelect.options).find(opt => opt.value === type);
+        if (option && !option.selected) {
+            option.selected = true;
+            this.handleTransformSelection();
+        }
+    }
+
+    /**
+     * Save generic mapping (from inline form)
+     */
+    saveGenericMapping() {
+        // Ensure step and config exist
+        if (!this.currentStep) {
+            this.builder.dragDropManager.showNotification('No step selected', 'error');
+            return;
+        }
+
+        if (!this.currentStep.config) {
+            this.currentStep.config = {};
+        }
+        if (!this.currentStep.config.mappings) {
+            this.currentStep.config.mappings = [];
+        }
+
+        const lhs = document.getElementById('newMappingLHS').value.trim();
+        const rhs = document.getElementById('newMappingRHS').value.trim();
+
+        // Get selected transformations from multi-select
+        const transformSelect = document.getElementById('newMappingTransforms');
+        const selectedOptions = Array.from(transformSelect.selectedOptions).map(opt => opt.value);
+
+        // Build final transform list, replacing simple regex/substring/replace with parameterized versions
+        const finalTransforms = [];
+        const regexPattern = document.getElementById('regexPattern').value.trim();
+        const substringParams = document.getElementById('substringParams').value.trim();
+        const replaceParams = document.getElementById('replaceParams').value.trim();
+
+        selectedOptions.forEach(transform => {
+            if (transform === 'regex' && regexPattern) {
+                finalTransforms.push(`regex:${regexPattern}`);
+            } else if (transform === 'substring' && substringParams) {
+                finalTransforms.push(`substring:${substringParams}`);
+            } else if (transform === 'replace' && replaceParams) {
+                finalTransforms.push(`replace:${replaceParams}`);
+            } else if (transform !== 'regex' && transform !== 'substring' && transform !== 'replace') {
+                // Simple transforms (trim, upper, lower)
+                finalTransforms.push(transform);
+            }
+        });
+
+        const transforms = finalTransforms.join(', ');
+
+        if (!lhs || !rhs) {
+            this.builder.dragDropManager.showNotification('LHS and RHS are required', 'error');
+            return;
+        }
+
+        const mappingObject = {
+            lhs: lhs,
+            rhs: rhs,
+            transforms: transforms || ''
+        };
+
+        // Add new mapping
+        this.currentStep.config.mappings.push(mappingObject);
+
+        console.log('[Field Mapping] Variable added:', mappingObject);
+        console.log('[Field Mapping] Total mappings:', this.currentStep.config.mappings.length);
+        console.log('[Field Mapping] Step config:', this.currentStep.config);
+
+        // Clear form
+        document.getElementById('newMappingLHS').value = '';
+        document.getElementById('newMappingRHS').value = '';
+        transformSelect.selectedIndex = -1;
+        document.getElementById('regexPattern').value = '';
+        document.getElementById('substringParams').value = '';
+        document.getElementById('replaceParams').value = '';
+        document.getElementById('regexInput').style.display = 'none';
+        document.getElementById('substringInput').style.display = 'none';
+        document.getElementById('replaceInput').style.display = 'none';
+
+        this.showStepProperties(this.currentStep);
+        this.builder.dragDropManager.showNotification('Variable added', 'success');
+        this.builder.markAsUnsaved();
+    }
+
+    /**
+     * Delete generic mapping
+     */
+    /**
+     * Update mapping field inline (new feature for better UX)
+     */
+    updateMapping(index, field, value) {
         if (!this.currentStep || !this.currentStep.config || !this.currentStep.config.mappings) {
             return;
         }
 
         const mapping = this.currentStep.config.mappings[index];
-        if (!mapping) {
-            this.builder.dragDropManager.showNotification('Mapping not found', 'error');
+        if (!mapping) return;
+
+        mapping[field] = value;
+        this.builder.markAsUnsaved();
+
+        console.log(`[Field Mapping] Updated ${field} for mapping ${index}:`, value);
+    }
+
+    deleteGenericMapping(index) {
+        if (!confirm('Are you sure you want to delete this mapping?')) {
             return;
         }
 
-        // Create edit modal
+        this.currentStep.config.mappings.splice(index, 1);
+        this.builder.dragDropManager.showNotification('Mapping deleted', 'success');
+        this.showStepProperties(this.currentStep);
+        this.builder.markAsUnsaved();
+    }
+
+    /**
+     * Add system variable quick-add
+     */
+    addSystemVariable(type) {
+        if (!this.currentStep) return;
+        if (!this.currentStep.config) this.currentStep.config = {};
+        if (!this.currentStep.config.mappings) this.currentStep.config.mappings = [];
+
+        let lhs, rhs, transforms = '';
+
+        switch(type) {
+            case 'timestamp':
+                lhs = 'receivedAt';
+                rhs = '${CURRENT_TIMESTAMP}';
+                break;
+            case 'correlationId':
+                lhs = 'correlationId';
+                rhs = '${GUID}';
+                break;
+            case 'messageId':
+                lhs = 'messageId';
+                rhs = '${UUID}';
+                break;
+            case 'interfaceId':
+                lhs = 'interfaceId';
+                rhs = '${INTERFACE_ID}';
+                break;
+            case 'interfaceName':
+                lhs = 'interfaceName';
+                rhs = '${INTERFACE_NAME}';
+                break;
+            default:
+                return;
+        }
+
+        // Check if variable already exists
+        const exists = this.currentStep.config.mappings.some(m => m.lhs === lhs);
+        if (exists) {
+            this.builder.dragDropManager.showNotification(`Variable "${lhs}" already exists`, 'warning');
+            return;
+        }
+
+        const mappingObject = { lhs, rhs, transforms };
+        this.currentStep.config.mappings.push(mappingObject);
+
+        console.log('[Field Mapping] System variable added:', mappingObject);
+
+        this.showStepProperties(this.currentStep);
+        this.builder.dragDropManager.showNotification(`Added system variable: ${lhs}`, 'success');
+        this.builder.markAsUnsaved();
+    }
+
+    /**
+     * Edit a mapping (single-click edit)
+     */
+    editMapping(index) {
+        // Ensure step and config exist
+        if (!this.currentStep) {
+            this.builder.dragDropManager.showNotification('No step selected', 'error');
+            return;
+        }
+
+        // Initialize config if needed
+        if (!this.currentStep.config) {
+            this.currentStep.config = {};
+        }
+        if (!this.currentStep.config.mappings) {
+            this.currentStep.config.mappings = [];
+        }
+
+        // Get mapping (undefined for new mapping)
+        const mapping = index !== undefined ? this.currentStep.config.mappings[index] : {};
+
+        // Create edit modal with NO-CODE enhancements
         const editModalHTML = `
             <div id="editMappingModal" class="modal" style="display: flex;">
-                <div class="modal-content" style="max-width: 600px;">
+                <div class="modal-content" style="max-width: 700px;">
                     <div class="modal-header" style="background: linear-gradient(135deg, #1e3a8a 0%, #2563eb 100%); color: white;">
-                        <h3><i class="fas fa-edit"></i> Edit Mapping</h3>
+                        <h3><i class="fas fa-edit"></i> ${index === undefined ? 'Add' : 'Edit'} Field Mapping</h3>
                         <button class="modal-close" onclick="document.getElementById('editMappingModal').remove()">&times;</button>
                     </div>
                     <div class="modal-body">
-                        <div class="form-group">
-                            <label>HL7 Field</label>
-                            <input type="text" id="editHl7Field" value="${mapping.hl7Field || mapping.sourceField || mapping.sourcePath || ''}" style="width: 100%; padding: 0.5rem; border: 1px solid #cbd5e1; border-radius: 4px;">
+                        <!-- NO-CODE Info Box -->
+                        <div style="margin-bottom: 1.5rem; padding: 0.75rem; background: linear-gradient(135deg, #10b981 0%, #059669 100%); border-radius: 6px; color: white; font-size: 0.85rem;">
+                            <div style="display: flex; align-items: start; gap: 0.5rem;">
+                                <div style="font-size: 1.2rem;">💡</div>
+                                <div>
+                                    <strong>NO-CODE Mapping:</strong> Use dropdowns and buttons to select fields - no manual typing needed!
+                                    <br>Click <strong>"📚 Browse Variables"</strong> to use enriched data from previous steps.
+                                </div>
+                            </div>
                         </div>
+
+                        <!-- Source Field (HL7 or Enriched Data) -->
                         <div class="form-group">
-                            <label>FHIR Path</label>
-                            <input type="text" id="editFhirPath" value="${mapping.fhirPath || mapping.targetField || mapping.targetPath || ''}" style="width: 100%; padding: 0.5rem; border: 1px solid #cbd5e1; border-radius: 4px;">
+                            <label style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem;">
+                                <span style="font-weight: 600;">Source Field</span>
+                                <small style="color: #64748b;">(HL7 field or enriched data)</small>
+                            </label>
+                            <div style="display: flex; gap: 0.5rem; margin-bottom: 0.5rem;">
+                                <select id="editSourceType" style="padding: 0.5rem; border: 1px solid #cbd5e1; border-radius: 4px; background: white; flex: 0 0 140px;" onchange="window.propertiesPanel.toggleSourceInput()">
+                                    <option value="hl7">HL7 Field</option>
+                                    <option value="enriched">Enriched Data</option>
+                                    <option value="custom">Custom XPath</option>
+                                </select>
+                                <button class="btn btn-secondary" style="font-size: 0.85rem; padding: 0.5rem 0.75rem; flex-shrink: 0;" onclick="window.propertiesPanel.browseVariables()">
+                                    📚 Browse Variables
+                                </button>
+                            </div>
+
+                            <!-- HL7 Field Dropdown -->
+                            <select id="editHl7FieldDropdown" style="width: 100%; padding: 0.5rem; border: 1px solid #cbd5e1; border-radius: 4px; background: white; display: block;">
+                                <option value="">-- Select HL7 Field --</option>
+                                <optgroup label="Patient Demographics (PID)">
+                                    <option value="PID.3">PID.3 - Patient ID</option>
+                                    <option value="PID.5">PID.5 - Patient Name</option>
+                                    <option value="PID.7">PID.7 - Date of Birth</option>
+                                    <option value="PID.8">PID.8 - Gender</option>
+                                    <option value="PID.11">PID.11 - Patient Address</option>
+                                    <option value="PID.13">PID.13 - Phone Number</option>
+                                    <option value="PID.16">PID.16 - Marital Status</option>
+                                </optgroup>
+                                <optgroup label="Visit Information (PV1)">
+                                    <option value="PV1.2">PV1.2 - Patient Class</option>
+                                    <option value="PV1.3">PV1.3 - Assigned Location</option>
+                                    <option value="PV1.7">PV1.7 - Attending Doctor</option>
+                                    <option value="PV1.8">PV1.8 - Referring Doctor</option>
+                                    <option value="PV1.19">PV1.19 - Visit Number</option>
+                                    <option value="PV1.44">PV1.44 - Admit Date/Time</option>
+                                </optgroup>
+                                <optgroup label="Observations (OBX)">
+                                    <option value="OBX.3">OBX.3 - Observation Identifier</option>
+                                    <option value="OBX.5">OBX.5 - Observation Value</option>
+                                    <option value="OBX.6">OBX.6 - Units</option>
+                                    <option value="OBX.7">OBX.7 - Reference Range</option>
+                                    <option value="OBX.11">OBX.11 - Observation Status</option>
+                                </optgroup>
+                            </select>
+
+                            <!-- Custom Text Input (hidden by default) -->
+                            <input type="text" id="editHl7Field" value="${mapping.hl7Field || mapping.sourceField || mapping.sourcePath || ''}"
+                                style="width: 100%; padding: 0.5rem; border: 1px solid #cbd5e1; border-radius: 4px; display: none;"
+                                placeholder="e.g., PID.5 or [\\"Step Name\\"].enriched_data.fieldName">
+                            <small style="color: #64748b; font-size: 0.8rem; margin-top: 0.25rem; display: block;">
+                                💡 Tip: Select from dropdown or click "Browse Variables" to use enriched data
+                            </small>
                         </div>
+
+                        <!-- Target Field (FHIR Path) -->
                         <div class="form-group">
-                            <label>Data Type</label>
-                            <input type="text" id="editDataType" value="${mapping.dataType || mapping.hl7DataType || mapping.transformType || ''}" style="width: 100%; padding: 0.5rem; border: 1px solid #cbd5e1; border-radius: 4px;">
+                            <label style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem;">
+                                <span style="font-weight: 600;">FHIR Target Path</span>
+                            </label>
+                            <select id="editFhirPathDropdown" style="width: 100%; padding: 0.5rem; border: 1px solid #cbd5e1; border-radius: 4px; background: white; margin-bottom: 0.5rem;" onchange="window.propertiesPanel.selectFhirPath()">
+                                <option value="">-- Select FHIR Resource Path --</option>
+                                <optgroup label="Patient Resource">
+                                    <option value="Patient.identifier[0].value">Patient.identifier[0].value - Patient ID</option>
+                                    <option value="Patient.name[0].family">Patient.name[0].family - Family Name</option>
+                                    <option value="Patient.name[0].given[0]">Patient.name[0].given[0] - Given Name</option>
+                                    <option value="Patient.birthDate">Patient.birthDate - Date of Birth</option>
+                                    <option value="Patient.gender">Patient.gender - Gender</option>
+                                    <option value="Patient.address[0].line[0]">Patient.address[0].line[0] - Address Line</option>
+                                    <option value="Patient.address[0].city">Patient.address[0].city - City</option>
+                                    <option value="Patient.telecom[0].value">Patient.telecom[0].value - Phone</option>
+                                    <option value="Patient.maritalStatus.text">Patient.maritalStatus.text - Marital Status</option>
+                                </optgroup>
+                                <optgroup label="Encounter Resource">
+                                    <option value="Encounter.identifier[0].value">Encounter.identifier[0].value - Visit ID</option>
+                                    <option value="Encounter.class.code">Encounter.class.code - Encounter Class</option>
+                                    <option value="Encounter.period.start">Encounter.period.start - Admit Date</option>
+                                    <option value="Encounter.location[0].location.display">Encounter.location[0].location.display - Location</option>
+                                    <option value="Encounter.participant[0].individual.display">Encounter.participant[0].individual.display - Provider</option>
+                                </optgroup>
+                                <optgroup label="Observation Resource">
+                                    <option value="Observation.code.coding[0].code">Observation.code.coding[0].code - Test Code</option>
+                                    <option value="Observation.valueQuantity.value">Observation.valueQuantity.value - Numeric Value</option>
+                                    <option value="Observation.valueQuantity.unit">Observation.valueQuantity.unit - Unit</option>
+                                    <option value="Observation.referenceRange[0].text">Observation.referenceRange[0].text - Reference Range</option>
+                                    <option value="Observation.status">Observation.status - Status</option>
+                                </optgroup>
+                            </select>
+                            <input type="text" id="editFhirPath" value="${mapping.fhirPath || mapping.targetField || mapping.targetPath || ''}"
+                                style="width: 100%; padding: 0.5rem; border: 1px solid #cbd5e1; border-radius: 4px;"
+                                placeholder="e.g., Patient.name[0].family">
+                            <small style="color: #64748b; font-size: 0.8rem; margin-top: 0.25rem; display: block;">
+                                💡 Select from dropdown or type custom FHIR path
+                            </small>
+                        </div>
+
+                        <!-- Data Type -->
+                        <div class="form-group">
+                            <label style="font-weight: 600; margin-bottom: 0.5rem; display: block;">Data Type</label>
+                            <select id="editDataTypeDropdown" style="width: 100%; padding: 0.5rem; border: 1px solid #cbd5e1; border-radius: 4px; background: white;" onchange="document.getElementById('editDataType').value = this.value">
+                                <option value="">-- Select Data Type --</option>
+                                <option value="string">string - Text value</option>
+                                <option value="integer">integer - Whole number</option>
+                                <option value="decimal">decimal - Decimal number</option>
+                                <option value="boolean">boolean - True/False</option>
+                                <option value="dateTime">dateTime - Date and time</option>
+                                <option value="date">date - Date only</option>
+                                <option value="code">code - Coded value</option>
+                                <option value="uri">uri - URI/URL</option>
+                            </select>
+                            <input type="hidden" id="editDataType" value="${mapping.dataType || mapping.hl7DataType || mapping.transformType || ''}">
                         </div>
                     </div>
                     <div class="modal-footer">
                         <button class="btn btn-secondary" onclick="document.getElementById('editMappingModal').remove()">Cancel</button>
                         <button class="btn btn-primary" onclick="window.propertiesPanel.saveEditedMapping(${index})">
-                            <i class="fas fa-save"></i> Save Changes
+                            <i class="fas fa-save"></i> ${index === undefined ? 'Add Mapping' : 'Save Changes'}
                         </button>
                     </div>
                 </div>
@@ -1828,23 +2581,218 @@ class PropertiesPanel {
                 modal.remove();
             }
         });
+
+        // Initialize dropdown event handlers
+        this.initializeMappingModalHandlers();
+    }
+
+    /**
+     * Initialize mapping modal event handlers (NO-CODE features)
+     */
+    initializeMappingModalHandlers() {
+        // HL7 Field Dropdown - auto-fill text input when selected
+        const hl7Dropdown = document.getElementById('editHl7FieldDropdown');
+        if (hl7Dropdown) {
+            hl7Dropdown.addEventListener('change', (e) => {
+                if (e.target.value) {
+                    document.getElementById('editHl7Field').value = e.target.value;
+                }
+            });
+        }
+
+        // Data Type Dropdown - pre-select if existing value
+        const dataTypeDropdown = document.getElementById('editDataTypeDropdown');
+        const existingDataType = document.getElementById('editDataType').value;
+        if (dataTypeDropdown && existingDataType) {
+            dataTypeDropdown.value = existingDataType;
+        }
+    }
+
+    /**
+     * Toggle source input based on source type selection (NO-CODE)
+     */
+    toggleSourceInput() {
+        const sourceType = document.getElementById('editSourceType').value;
+        const hl7Dropdown = document.getElementById('editHl7FieldDropdown');
+        const customInput = document.getElementById('editHl7Field');
+
+        if (sourceType === 'hl7') {
+            // Show HL7 dropdown, hide custom input
+            hl7Dropdown.style.display = 'block';
+            customInput.style.display = 'none';
+        } else if (sourceType === 'enriched') {
+            // Hide dropdown, show text input with placeholder for enriched data
+            hl7Dropdown.style.display = 'none';
+            customInput.style.display = 'block';
+            customInput.placeholder = 'e.g., ["database_enrichment"].enriched_data.fieldName';
+        } else {
+            // Custom XPath - show text input with generic placeholder
+            hl7Dropdown.style.display = 'none';
+            customInput.style.display = 'block';
+            customInput.placeholder = 'Enter custom XPath expression';
+        }
+    }
+
+    /**
+     * Browse variables from previous steps (NO-CODE)
+     */
+    browseVariables() {
+        // Switch to Variables tab in properties panel
+        const variablesTab = document.querySelector('.properties-tab[data-tab="variables"]');
+        if (variablesTab) {
+            variablesTab.click();
+            this.builder.dragDropManager.showNotification('Click any XPath in Variables tab to copy it, then return here to paste', 'info');
+        } else {
+            this.builder.dragDropManager.showNotification('Variables tab not available. Add enrichment steps first.', 'warning');
+        }
+    }
+
+    /**
+     * Switch to Variables tab for browsing
+     */
+    switchToVariablesTab() {
+        const variablesTab = document.querySelector('.properties-tab[data-tab="variables"]');
+        if (variablesTab) {
+            variablesTab.click();
+            this.builder.dragDropManager.showNotification('Click any variable path to copy, then switch back to Form tab to paste', 'info');
+        } else {
+            this.builder.dragDropManager.showNotification('Add enrichment steps first to see available variables', 'warning');
+        }
+    }
+
+    /**
+     * Toggle source input type for generic field mapping
+     */
+    toggleGenericSourceInput() {
+        const sourceType = document.getElementById('newMappingSourceType').value;
+        const dropdown = document.getElementById('newMappingRHSDropdown');
+        const textInput = document.getElementById('newMappingRHSText');
+
+        if (sourceType === 'hl7') {
+            // Show HL7 dropdown
+            dropdown.style.display = 'block';
+            textInput.style.display = 'none';
+            textInput.placeholder = 'Enter value...';
+        } else if (sourceType === 'variable') {
+            // Show text input for variable reference
+            dropdown.style.display = 'none';
+            textInput.style.display = 'block';
+            textInput.placeholder = 'e.g., ["step_name"].enriched_data.field';
+        } else {
+            // Show text input for custom value
+            dropdown.style.display = 'none';
+            textInput.style.display = 'block';
+            textInput.placeholder = 'Enter custom value...';
+        }
+    }
+
+    /**
+     * Show transformation help guide
+     */
+    showTransformHelp() {
+        const helpHTML = `
+            <div id="transformHelpModal" class="modal" style="display: flex;">
+                <div class="modal-content" style="max-width: 700px;">
+                    <div class="modal-header" style="background: #1e3a8a; color: white; border-bottom: 3px solid #ffc0cb;">
+                        <h3 style="margin: 0; font-weight: 600; font-size: 1.1rem;">Transformation Guide</h3>
+                        <button class="modal-close" style="background: rgba(255,255,255,0.15); border: none; color: white; font-size: 20px; cursor: pointer; width: 28px; height: 28px; border-radius: 3px;" onclick="this.closest('.modal').remove()">×</button>
+                    </div>
+                    <div class="modal-body" style="padding: 20px; max-height: 60vh; overflow-y: auto;">
+                        <h4 style="color: #1e3a8a; margin-top: 0;">Available Transformations</h4>
+
+                        <div style="margin-bottom: 16px; padding: 12px; background: #f0f4ff; border-left: 3px solid #1e3a8a; border-radius: 4px;">
+                            <strong style="color: #1e3a8a;">trim</strong>
+                            <p style="margin: 4px 0 0 0; color: #64748b; font-size: 0.9rem;">Removes whitespace from both ends of the string.</p>
+                            <code style="display: block; margin-top: 4px; padding: 4px 8px; background: white; border-radius: 3px; font-size: 0.85rem;">Example: trim</code>
+                        </div>
+
+                        <div style="margin-bottom: 16px; padding: 12px; background: #f0f4ff; border-left: 3px solid #1e3a8a; border-radius: 4px;">
+                            <strong style="color: #1e3a8a;">upper</strong>
+                            <p style="margin: 4px 0 0 0; color: #64748b; font-size: 0.9rem;">Converts all characters to uppercase.</p>
+                            <code style="display: block; margin-top: 4px; padding: 4px 8px; background: white; border-radius: 3px; font-size: 0.85rem;">Example: upper</code>
+                        </div>
+
+                        <div style="margin-bottom: 16px; padding: 12px; background: #f0f4ff; border-left: 3px solid #1e3a8a; border-radius: 4px;">
+                            <strong style="color: #1e3a8a;">lower</strong>
+                            <p style="margin: 4px 0 0 0; color: #64748b; font-size: 0.9rem;">Converts all characters to lowercase.</p>
+                            <code style="display: block; margin-top: 4px; padding: 4px 8px; background: white; border-radius: 3px; font-size: 0.85rem;">Example: lower</code>
+                        </div>
+
+                        <div style="margin-bottom: 16px; padding: 12px; background: #f0f4ff; border-left: 3px solid #1e3a8a; border-radius: 4px;">
+                            <strong style="color: #1e3a8a;">regex:pattern</strong>
+                            <p style="margin: 4px 0 0 0; color: #64748b; font-size: 0.9rem;">Extracts text matching a regular expression pattern.</p>
+                            <code style="display: block; margin-top: 4px; padding: 4px 8px; background: white; border-radius: 3px; font-size: 0.85rem;">Example: regex:^[0-9]+$ (numbers only)</code>
+                            <code style="display: block; margin-top: 4px; padding: 4px 8px; background: white; border-radius: 3px; font-size: 0.85rem;">Example: regex:[A-Z]{2}[0-9]{4} (2 letters + 4 digits)</code>
+                        </div>
+
+                        <div style="margin-bottom: 16px; padding: 12px; background: #f0f4ff; border-left: 3px solid #1e3a8a; border-radius: 4px;">
+                            <strong style="color: #1e3a8a;">substring:start:end</strong>
+                            <p style="margin: 4px 0 0 0; color: #64748b; font-size: 0.9rem;">Extracts characters from position start to end (zero-based index).</p>
+                            <code style="display: block; margin-top: 4px; padding: 4px 8px; background: white; border-radius: 3px; font-size: 0.85rem;">Example: substring:0:10 (first 10 characters)</code>
+                            <code style="display: block; margin-top: 4px; padding: 4px 8px; background: white; border-radius: 3px; font-size: 0.85rem;">Example: substring:5:15 (characters 5 through 15)</code>
+                        </div>
+
+                        <div style="margin-bottom: 16px; padding: 12px; background: #f0f4ff; border-left: 3px solid #1e3a8a; border-radius: 4px;">
+                            <strong style="color: #1e3a8a;">replace:old:new</strong>
+                            <p style="margin: 4px 0 0 0; color: #64748b; font-size: 0.9rem;">Replaces all occurrences of "old" text with "new" text.</p>
+                            <code style="display: block; margin-top: 4px; padding: 4px 8px; background: white; border-radius: 3px; font-size: 0.85rem;">Example: replace:-:/ (replace dashes with slashes)</code>
+                            <code style="display: block; margin-top: 4px; padding: 4px 8px; background: white; border-radius: 3px; font-size: 0.85rem;">Example: replace:Dr.:Doctor (expand abbreviation)</code>
+                        </div>
+
+                        <div style="margin-bottom: 16px; padding: 12px; background: #fdf2f8; border-left: 3px solid #ffc0cb; border-radius: 4px;">
+                            <strong style="color: #831843;">Chaining Transformations</strong>
+                            <p style="margin: 4px 0 0 0; color: #64748b; font-size: 0.9rem;">Combine multiple transformations by separating them with commas. They are applied left to right.</p>
+                            <code style="display: block; margin-top: 4px; padding: 4px 8px; background: white; border-radius: 3px; font-size: 0.85rem;">Example: trim, upper</code>
+                            <code style="display: block; margin-top: 4px; padding: 4px 8px; background: white; border-radius: 3px; font-size: 0.85rem;">Example: trim, substring:0:10, upper</code>
+                            <code style="display: block; margin-top: 4px; padding: 4px 8px; background: white; border-radius: 3px; font-size: 0.85rem;">Example: replace:-:/, regex:^[0-9/]+$</code>
+                        </div>
+                    </div>
+                    <div class="modal-footer" style="border-top: 1px solid #e2e8f0; padding: 16px 20px; display: flex; justify-content: flex-end;">
+                        <button onclick="this.closest('.modal').remove()" style="background: #1e3a8a; color: white; border: none; padding: 8px 20px; border-radius: 4px; cursor: pointer; font-weight: 500;">
+                            Got it!
+                        </button>
+                    </div>
+                </div>
+            </div>
+        `;
+        document.body.insertAdjacentHTML('beforeend', helpHTML);
+    }
+
+    /**
+     * Select FHIR path from dropdown (NO-CODE)
+     */
+    selectFhirPath() {
+        const dropdown = document.getElementById('editFhirPathDropdown');
+        const input = document.getElementById('editFhirPath');
+        if (dropdown && input && dropdown.value) {
+            input.value = dropdown.value;
+        }
     }
 
     /**
      * Save edited mapping
      */
     saveEditedMapping(index) {
-        const hl7Field = document.getElementById('editHl7Field').value;
-        const fhirPath = document.getElementById('editFhirPath').value;
-        const dataType = document.getElementById('editDataType').value;
+        // Get value from text input (which is populated by dropdowns or manual entry)
+        let hl7Field = document.getElementById('editHl7Field').value.trim();
+        const fhirPath = document.getElementById('editFhirPath').value.trim();
+        const dataType = document.getElementById('editDataType').value.trim();
+
+        // If hl7Field is empty, check if user selected from dropdown but didn't trigger change
+        if (!hl7Field) {
+            const dropdown = document.getElementById('editHl7FieldDropdown');
+            if (dropdown && dropdown.value) {
+                hl7Field = dropdown.value;
+            }
+        }
 
         if (!hl7Field || !fhirPath) {
             this.builder.dragDropManager.showNotification('HL7 Field and FHIR Path are required', 'error');
             return;
         }
 
-        // Update mapping
-        this.currentStep.config.mappings[index] = {
+        // Create mapping object
+        const mappingObject = {
             hl7Field: hl7Field,
             sourcePath: hl7Field,
             fhirPath: fhirPath,
@@ -1852,6 +2800,17 @@ class PropertiesPanel {
             dataType: dataType,
             transformType: dataType
         };
+
+        // Add or update mapping
+        if (index === undefined) {
+            // Adding new mapping
+            this.currentStep.config.mappings.push(mappingObject);
+            this.builder.dragDropManager.showNotification('Mapping added', 'success');
+        } else {
+            // Updating existing mapping
+            this.currentStep.config.mappings[index] = mappingObject;
+            this.builder.dragDropManager.showNotification('Mapping updated', 'success');
+        }
 
         // Close modal
         document.getElementById('editMappingModal').remove();
@@ -1861,8 +2820,6 @@ class PropertiesPanel {
 
         // Mark as unsaved
         this.builder.markAsUnsaved();
-
-        this.builder.dragDropManager.showNotification('Mapping updated', 'success');
     }
 
     /**
@@ -2233,6 +3190,30 @@ class PropertiesPanel {
             }
         });
 
+        // Collect Redis query from RedisQueryBuilder component
+        const redisQueryBuilderContainers = form.querySelectorAll('.redis-query-builder-container');
+        redisQueryBuilderContainers.forEach(container => {
+            const builder = container._redisQueryBuilderInstance;
+            if (builder) {
+                step.config = step.config || {};
+                const fieldKey = container.dataset.fieldKey;
+                const config = builder.getConfig();
+
+                // Store all Redis fields for backend compatibility
+                step.config.redisKey = config.redisKey;           // Key pattern
+                step.config.redisCommand = config.redisCommand;   // Command (GET, HGETALL, etc.)
+                step.config.redisHashField = config.redisHashField; // Hash field for HGET
+                step.config.redisQuery = config.redisQuery;       // Full command string (for display)
+
+                console.log('[PropertiesPanel] ✅ Saved Redis config:', {
+                    redisKey: config.redisKey,
+                    redisCommand: config.redisCommand,
+                    redisHashField: config.redisHashField,
+                    redisQuery: config.redisQuery
+                });
+            }
+        });
+
         // Collect Basic Auth data from auth container
         const basicAuthContainer = form.querySelector('.basic-auth-container');
         if (basicAuthContainer && !basicAuthContainer.closest('.conditional-field.hidden')) {
@@ -2352,15 +3333,29 @@ class PropertiesPanel {
             step.config.connectionString = '';
         }
 
-        // Configuration textarea (legacy)
+        // Configuration textarea (legacy) - ONLY for steps that use JSON config editor
         const configText = form.querySelector('#stepConfig')?.value;
         if (configText) {
             try {
-                step.config = JSON.parse(configText);
+                const parsedConfig = JSON.parse(configText);
+                // CRITICAL: Preserve mappings array if it exists (for field mapping steps)
+                if (step.config && step.config.mappings && Array.isArray(step.config.mappings)) {
+                    parsedConfig.mappings = step.config.mappings;
+                    console.log('[PropertiesPanel] ✅ Preserved mappings array:', step.config.mappings.length, 'items');
+                }
+                step.config = parsedConfig;
             } catch (error) {
                 throw new Error('Invalid JSON in configuration');
             }
         }
+
+        // FINAL CHECK: Log the final config being saved
+        console.log('[PropertiesPanel] 📦 Final step.config being saved:', {
+            hasConfig: !!step.config,
+            hasMappings: !!(step.config && step.config.mappings),
+            mappingsCount: (step.config && step.config.mappings) ? step.config.mappings.length : 0,
+            configKeys: step.config ? Object.keys(step.config) : []
+        });
 
         // Script (if present)
         const scriptType = form.querySelector('#scriptType')?.value;
@@ -2381,6 +3376,63 @@ class PropertiesPanel {
         } catch (error) {
             textarea.style.borderColor = '#ef4444';
             this.builder.dragDropManager.showNotification('Invalid JSON', 'error');
+        }
+    }
+
+    /**
+     * Validate script for syntax errors and dependency issues
+     */
+    async validateScript(step) {
+        const scriptContent = document.getElementById('scriptContent');
+        const validateBtn = document.getElementById('validateScriptBtn');
+        const resultDiv = document.getElementById('scriptValidationResult');
+
+        if (!scriptContent || !scriptContent.value.trim()) {
+            resultDiv.innerHTML = '<span style="color: #ef4444;">⚠️ Script is empty</span>';
+            return;
+        }
+
+        // Show loading state
+        validateBtn.disabled = true;
+        validateBtn.innerHTML = '⏳ Validating...';
+        resultDiv.innerHTML = '<span style="color: #64748b;">Checking script...</span>';
+
+        try {
+            const response = await fetch('/api/fhir/pipeline/validate-script', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    script: scriptContent.value,
+                    pipelineId: this.builder.currentPipelineId
+                })
+            });
+
+            const result = await response.json();
+
+            if (result.success) {
+                resultDiv.innerHTML = '<span style="color: #10b981;">✅ Script is valid!</span>';
+                scriptContent.style.borderColor = '#10b981';
+                this.builder.dragDropManager.showNotification('Script validation passed', 'success');
+            } else {
+                const errorMsg = result.error || 'Unknown validation error';
+                resultDiv.innerHTML = `<span style="color: #ef4444;">❌ ${errorMsg}</span>`;
+                scriptContent.style.borderColor = '#ef4444';
+                this.builder.dragDropManager.showNotification('Script validation failed', 'error');
+
+                // Show detailed errors if available
+                if (result.details) {
+                    console.error('Script validation details:', result.details);
+                }
+            }
+        } catch (error) {
+            console.error('Script validation error:', error);
+            resultDiv.innerHTML = `<span style="color: #ef4444;">❌ Validation failed: ${error.message}</span>`;
+            this.builder.dragDropManager.showNotification('Failed to validate script', 'error');
+        } finally {
+            validateBtn.disabled = false;
+            validateBtn.innerHTML = '🔍 Validate Script';
         }
     }
 
@@ -2459,6 +3511,18 @@ class PropertiesPanel {
      */
     createDynamicFormFields(step) {
         const stepType = step.stepType || step.type;
+
+        // Special handling for HL7→FHIR mapping steps ONLY (not generic transformation)
+        if (stepType === 'core.mapping' || step.templateId === 'hl7-fhir-mapping') {
+            console.log('🎨 Using enhanced HL7→FHIR mapping UI for step type:', stepType);
+            return this.createMappingConfigSection(step);
+        }
+
+        // Special handling for generic field transformation/mapping (includes both field mapping and metadata)
+        if (stepType === 'core.transformation' || stepType === 'pre.enrichment.metadata') {
+            console.log('🎨 Using unified field mapping UI for:', stepType);
+            return this.createGenericFieldMappingSection(step);
+        }
 
         // Get step-specific configuration
         const stepConfig = this.getStepConfiguration(stepType);
@@ -2694,6 +3758,30 @@ class PropertiesPanel {
                     }
 
                     html += `<div class="mongodb-projection-builder-container" data-field-key="${field.key}" data-initial-projection='${JSON.stringify(projectionValue)}'></div>`;
+                    break;
+
+                case 'redis-query-builder':
+                    // Redis Query Builder - NO-CODE visual query builder
+                    // Get Redis config from step.config (backend format)
+                    const redisCommand = step.config?.redisCommand || '';
+                    const redisKey = step.config?.redisKey || '';
+                    const redisHashField = step.config?.redisHashField || '';
+                    const redisQuery = step.config?.redisQuery || '';
+
+                    // Escape function for safe attributes
+                    const escapeAttr = (str) => String(str || '')
+                        .replace(/&/g, '&amp;')
+                        .replace(/'/g, '&#39;')
+                        .replace(/"/g, '&quot;')
+                        .replace(/</g, '&lt;')
+                        .replace(/>/g, '&gt;');
+
+                    html += `<div class="redis-query-builder-container"
+                                  data-field-key="${field.key}"
+                                  data-redis-query='${escapeAttr(redisQuery)}'
+                                  data-redis-command='${escapeAttr(redisCommand)}'
+                                  data-redis-key='${escapeAttr(redisKey)}'
+                                  data-redis-hash-field='${escapeAttr(redisHashField)}'></div>`;
                     break;
 
                 case 'basic-auth-container':
@@ -3023,49 +4111,7 @@ class PropertiesPanel {
                     }
                 ]
             },
-            'pre.enrichment.metadata': {
-                fields: [
-                    {
-                        key: 'addTimestamp',
-                        label: 'Add Timestamp',
-                        type: 'checkbox',
-                        default: true,
-                        checkboxLabel: 'Add receivedAt and processedAt timestamps',
-                        help: 'Automatically adds timestamp metadata to messages'
-                    },
-                    {
-                        key: 'addCorrelationId',
-                        label: 'Add Correlation ID',
-                        type: 'checkbox',
-                        default: true,
-                        checkboxLabel: 'Generate unique correlation ID (UUID)',
-                        help: 'Adds a unique correlation ID for message tracking'
-                    },
-                    {
-                        key: 'addInterfaceId',
-                        label: 'Add Interface ID',
-                        type: 'checkbox',
-                        default: false,
-                        checkboxLabel: 'Include interface ID in metadata',
-                        help: 'Adds the current interface ID to message metadata'
-                    },
-                    {
-                        key: 'addMessageId',
-                        label: 'Add/Extract Message ID',
-                        type: 'checkbox',
-                        default: false,
-                        checkboxLabel: 'Extract or generate message ID',
-                        help: 'Extracts message ID from HL7 MSH.10 or generates a new one'
-                    },
-                    {
-                        key: 'customMetadata',
-                        label: 'Custom Metadata',
-                        type: 'metadata-builder',
-                        required: false,
-                        help: 'Add custom key-value pairs (e.g., environment, processingNode, facility). Non-technical users can use the form below, technical users can import JSON.'
-                    }
-                ]
-            },
+            // REMOVED: 'pre.enrichment.metadata' configuration - now merged with Field Mapping (core.transformation)
             'pre.enrichment.api': {
                 fields: [
                     {
@@ -3238,17 +4284,18 @@ class PropertiesPanel {
                         type: 'text',
                         required: true,
                         default: 'ezhealthkonnect',
-                        placeholder: 'database_name',
-                        help: 'Database name to connect to'
+                        placeholder: 'database_name or Redis DB number (0-15)',
+                        help: 'Database name to connect to. For Redis, use database number 0-15 (default: 0)'
                     },
                     {
                         key: 'dbUser',
                         label: 'Username',
                         type: 'text',
-                        required: true,
+                        required: false,
                         default: 'ezhealth_user',
                         placeholder: 'username',
-                        help: 'Database username'
+                        help: 'Database username (not required for Redis)',
+                        hideIf: { field: 'databaseType', values: ['redis'] }
                     },
                     {
                         key: 'dbPassword',
@@ -3310,27 +4357,11 @@ class PropertiesPanel {
                         visibleWhen: { field: 'mongodbQueryMode', value: 'advanced' }
                     },
                     {
-                        key: 'redisKey',
-                        label: 'Redis Key Pattern',
-                        type: 'text',
+                        key: 'redisQueryBuilder',
+                        label: '🔧 Redis Query (NO CODE)',
+                        type: 'redis-query-builder',
                         required: false,
-                        placeholder: 'patient:{PID.3}',
-                        help: 'Redis key pattern with field placeholders. Example: patient:{PID.3}',
-                        showIf: { field: 'databaseType', values: ['redis'] }
-                    },
-                    {
-                        key: 'redisCommand',
-                        label: 'Redis Command',
-                        type: 'select',
-                        required: false,
-                        options: [
-                            { value: 'GET', label: 'GET - Get string value' },
-                            { value: 'HGETALL', label: 'HGETALL - Get all hash fields' },
-                            { value: 'SMEMBERS', label: 'SMEMBERS - Get all set members' },
-                            { value: 'LRANGE', label: 'LRANGE - Get list range' }
-                        ],
-                        default: 'GET',
-                        help: 'Redis command to execute (only for Redis)',
+                        help: 'Build Redis query using visual form - no syntax knowledge needed! Select command, build key pattern, and preview the final command.',
                         showIf: { field: 'databaseType', values: ['redis'] }
                     },
                     {
@@ -3482,27 +4513,66 @@ class PropertiesPanel {
                         label: 'JavaScript Code',
                         type: 'textarea',
                         required: true,
-                        rows: 12,
-                        placeholder: `// Extract patient date of birth
+                        rows: 15,
+                        placeholder: `// ═══════════════════════════════════════════════
+// SCRIPT ENRICHMENT - Calculate Patient Risk Score
+// ═══════════════════════════════════════════════
+
+// Access previous step data (Metadata & Database enrichment)
+var riskConfig = getNestedValue(input, "metadata.riskWeights");
+var patient = getNestedValue(input, "enriched.database");
+
+// Calculate risk factors
+var riskScore = 0;
+var factors = [];
+
+// Age-based risk (access HL7 field directly)
 var dob = getNestedValue(input, "enhancedSegments.PID.fields.7.value");
-
-// Calculate age
 var age = calculateAge(dob);
+if (age > 65) {
+    riskScore += riskConfig.weights.ageOver65;
+    factors.push("Age over 65");
+}
 
-// Return enrichment data
+// Chronic conditions risk
+if (patient.chronicConditions > 0) {
+    riskScore += patient.chronicConditions * riskConfig.weights.chronicCondition;
+    factors.push(patient.chronicConditions + " chronic conditions");
+}
+
+// Smoking status
+if (patient.smokingStatus === "current") {
+    riskScore += riskConfig.weights.currentSmoker;
+    factors.push("Current smoker");
+}
+
+// Determine risk level
+var riskLevel = "low";
+if (riskScore >= riskConfig.thresholds.highRisk) riskLevel = "high";
+else if (riskScore >= riskConfig.thresholds.moderateRisk) riskLevel = "moderate";
+
+// Return calculated data (stored at targetPath)
 return {
-    age: age,
-    ageGroup: age < 18 ? "pediatric" : "adult"
+    riskScore: riskScore,
+    riskLevel: riskLevel,
+    riskFactors: factors,
+    patientName: patient.name,
+    calculatedAt: new Date().toISOString()
 };`,
-                        help: 'JavaScript code to execute. Use "input" variable for message data. Available functions: getNestedValue(), calculateAge(), parseHL7Date(), console.log()'
-                    },
-                    {
-                        key: 'context',
-                        label: 'Context Variables (JSON)',
-                        type: 'textarea',
-                        rows: 3,
-                        placeholder: '{"hospitalId": "HOSPITAL_001", "environment": "production"}',
-                        help: 'Additional variables to make available in script context (JSON format)'
+                        help: `<div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 12px; border-radius: 8px; margin-bottom: 8px; font-size: 13px;">
+    <strong>📘 Available Functions:</strong><br>
+    • <code style="background: rgba(255,255,255,0.2); padding: 2px 6px; border-radius: 3px;">getNestedValue(input, "path.to.field")</code> - Access HL7 fields or enriched data<br>
+    • <code style="background: rgba(255,255,255,0.2); padding: 2px 6px; border-radius: 3px;">calculateAge(hl7Date)</code> - Calculate age from HL7 date (YYYYMMDD)<br>
+    • <code style="background: rgba(255,255,255,0.2); padding: 2px 6px; border-radius: 3px;">parseHL7Date(hl7Date)</code> - Convert HL7 date to JavaScript Date<br>
+    • <code style="background: rgba(255,255,255,0.2); padding: 2px 6px; border-radius: 3px;">console.log(message)</code> - Debug logging (check container logs)
+</div>
+<div style="background: #ecfdf5; border-left: 4px solid #059669; padding: 10px; border-radius: 4px; margin-top: 8px; font-size: 13px;">
+    <strong style="color: #059669;">💡 Data Access Patterns:</strong><br>
+    • <strong>HL7 Fields:</strong> <code style="background: #d1fae5; padding: 2px 6px; border-radius: 3px; color: #065f46;">enhancedSegments.PID.fields.5.value</code><br>
+    • <strong>Metadata:</strong> <code style="background: #d1fae5; padding: 2px 6px; border-radius: 3px; color: #065f46;">metadata.yourKey</code> (from Metadata Enrichment)<br>
+    • <strong>Database:</strong> <code style="background: #d1fae5; padding: 2px 6px; border-radius: 3px; color: #065f46;">enriched.database</code> (from Database Enrichment)<br>
+    • <strong>Previous Script:</strong> <code style="background: #d1fae5; padding: 2px 6px; border-radius: 3px; color: #065f46;">enriched.script</code> (from earlier Script step)
+</div>`
                     },
                     {
                         key: 'targetPath',
@@ -3510,7 +4580,14 @@ return {
                         type: 'text',
                         default: 'enriched.script',
                         placeholder: 'enriched.script',
-                        help: 'Where to store script result in message data'
+                        help: `<div style="background: #fef3c7; border-left: 4px solid #f59e0b; padding: 10px; border-radius: 4px; font-size: 13px;">
+    <strong style="color: #d97706;">💾 Storage Path:</strong> Where to store script output in the message<br>
+    <strong style="color: #92400e;">Examples:</strong><br>
+    • <code style="background: #fde68a; padding: 2px 6px; border-radius: 3px;">enriched.script</code> - Default location<br>
+    • <code style="background: #fde68a; padding: 2px 6px; border-radius: 3px;">enriched.risk.score</code> - Custom nested path<br>
+    • <code style="background: #fde68a; padding: 2px 6px; border-radius: 3px;">enriched.patient.demographics</code> - Organized structure<br>
+    <em style="color: #78350f;">💡 Use different paths for multiple script steps to avoid overwriting</em>
+</div>`
                     },
                     {
                         key: 'timeoutMs',
@@ -4118,6 +5195,187 @@ return {
                     }
                 ]
             },
+            'pre.enrichment.script': {
+                description: 'Execute custom JavaScript logic to calculate, transform, or enrich data from HL7 messages and previous enrichment steps. Use this for complex business rules, risk scoring, data validation, custom calculations, and conditional logic that cannot be achieved through simple mappings. Results are stored in enriched_data and can be referenced by subsequent steps.',
+                useCases: [
+                    'Calculate patient risk scores based on age, diagnoses, and lab values',
+                    'Determine insurance eligibility by combining patient demographics with external data',
+                    'Perform complex date calculations (e.g., days since last admission, appointment intervals)',
+                    'Apply business rules for message routing or prioritization',
+                    'Validate and transform data formats (e.g., normalize phone numbers, format addresses)',
+                    'Enrich data by combining HL7 fields with database/API results from previous steps',
+                    'Generate derived fields (e.g., BMI from height/weight, age from date of birth)',
+                    'Implement conditional logic for data transformation (if-then-else scenarios)'
+                ],
+                example: {
+                    script: `// Access HL7 message fields
+var patientName = getHL7Field(input, "PID.5");
+var dateOfBirth = getHL7Field(input, "PID.7");
+var smokingStatus = getHL7Field(input, "PV1.17");
+
+// Access enriched data from previous database enrichment step
+var chronicConditions = getNestedValue(input, '["database_enrichment"].enriched_data.chronicConditions');
+var lastAdmission = getNestedValue(input, '["database_enrichment"].enriched_data.lastAdmission');
+
+// Access data from previous API enrichment step
+var insuranceStatus = getNestedValue(input, '["API_Enrichment"].enriched_data.insuranceActive');
+
+// Perform calculations
+var patientAge = calculateAge(dateOfBirth);
+var daysSinceLastAdmission = calculateDaysSince(lastAdmission);
+
+// Calculate risk score based on multiple factors
+var riskScore = 0;
+if (patientAge > 65) riskScore += 3;
+if (chronicConditions > 2) riskScore += 4;
+if (smokingStatus === "current") riskScore += 2;
+if (daysSinceLastAdmission < 30) riskScore += 3;
+
+// Determine risk level
+var riskLevel = "low";
+if (riskScore >= 8) riskLevel = "high";
+else if (riskScore >= 5) riskLevel = "moderate";
+
+// Build risk factors array
+var riskFactors = [];
+if (chronicConditions > 2) riskFactors.push(chronicConditions + " chronic conditions");
+if (smokingStatus === "current") riskFactors.push("Current smoker");
+if (daysSinceLastAdmission < 30) riskFactors.push("Recent admission (< 30 days)");
+
+// Return enriched data (stored in enriched_data for use in subsequent steps)
+return {
+    patientAge: patientAge,
+    riskScore: riskScore,
+    riskLevel: riskLevel,
+    riskFactors: riskFactors,
+    chronicConditions: chronicConditions,
+    smokingStatus: smokingStatus,
+    daysSinceLastAdmission: daysSinceLastAdmission,
+    calculatedAt: new Date().toISOString()
+};`,
+                    timeout_ms: 5000,
+                    failOnError: false
+                },
+                parameters: [
+                    {
+                        name: 'script',
+                        type: 'string (JavaScript code)',
+                        required: true,
+                        description: 'JavaScript code to execute. The script receives the input object containing HL7 message and enriched data from previous steps. Must return an object with calculated/enriched fields.'
+                    },
+                    {
+                        name: 'timeout_ms',
+                        type: 'number',
+                        required: false,
+                        description: 'Maximum execution time in milliseconds (default: 5000). Script will be terminated if it exceeds this limit.'
+                    },
+                    {
+                        name: 'failOnError',
+                        type: 'boolean',
+                        required: false,
+                        description: 'Whether to fail the entire pipeline if script execution fails (default: false). Set to true for critical calculations.'
+                    }
+                ],
+                referenceVariables: {
+                    title: 'Accessing Data in Script Enrichment',
+                    description: 'Your script can access HL7 message fields and enriched data from previous steps using helper functions. All returned fields are automatically available to subsequent steps.',
+                    examples: [
+                        {
+                            scenario: 'Access HL7 Message Fields',
+                            code: 'var patientId = getHL7Field(input, "PID.3");',
+                            explanation: 'Use getHL7Field(input, "segment.field") to extract values from the HL7 message'
+                        },
+                        {
+                            scenario: 'Access Database Enrichment Results',
+                            code: 'var chronicConditions = getNestedValue(input, \'["database_enrichment"].enriched_data.chronicConditions\');',
+                            explanation: 'Use getNestedValue(input, xpath) to access data from previous database enrichment steps'
+                        },
+                        {
+                            scenario: 'Access API Enrichment Results',
+                            code: 'var externalId = getNestedValue(input, \'["API_Enrichment"].enriched_data.externalPatientId\');',
+                            explanation: 'Access data returned from API calls in previous enrichment steps'
+                        },
+                        {
+                            scenario: 'Access Metadata Fields',
+                            code: 'var customValue = getNestedValue(input, "metadata.customField");',
+                            explanation: 'Access metadata fields added by the metadata enrichment step'
+                        },
+                        {
+                            scenario: 'Return Calculated Values',
+                            code: 'return { riskScore: 9, riskLevel: "moderate", calculatedAt: new Date().toISOString() };',
+                            explanation: 'Return an object with calculated fields. These will be stored in ["Script_Enrichment"].enriched_data and available to subsequent steps including field mapping.'
+                        }
+                    ]
+                },
+                availableFunctions: {
+                    title: 'Available Helper Functions',
+                    description: 'The following functions are available in your script execution environment:',
+                    functions: [
+                        {
+                            name: 'getHL7Field(input, path)',
+                            description: 'Extract a field value from the HL7 message',
+                            parameters: 'input: message object, path: HL7 field path (e.g., "PID.5", "PV1.3")',
+                            returns: 'string',
+                            example: 'var name = getHL7Field(input, "PID.5");'
+                        },
+                        {
+                            name: 'getNestedValue(input, xpath)',
+                            description: 'Access nested data from enriched_data fields using XPath notation',
+                            parameters: 'input: message object, xpath: XPath to enriched field (e.g., \'["database_enrichment"].enriched_data.chronicConditions\')',
+                            returns: 'any',
+                            example: 'var conditions = getNestedValue(input, \'["database_enrichment"].enriched_data.chronicConditions\');'
+                        },
+                        {
+                            name: 'calculateAge(dateOfBirth)',
+                            description: 'Calculate age in years from date of birth',
+                            parameters: 'dateOfBirth: date string in HL7 format (YYYYMMDD)',
+                            returns: 'number',
+                            example: 'var age = calculateAge("19800515");'
+                        },
+                        {
+                            name: 'calculateDaysSince(dateString)',
+                            description: 'Calculate number of days between a date and now',
+                            parameters: 'dateString: date string in HL7 format (YYYYMMDD)',
+                            returns: 'number',
+                            example: 'var days = calculateDaysSince("20240101");'
+                        },
+                        {
+                            name: 'formatDate(hl7Date, format)',
+                            description: 'Convert HL7 date format to custom format',
+                            parameters: 'hl7Date: HL7 date string, format: target format (e.g., "YYYY-MM-DD")',
+                            returns: 'string',
+                            example: 'var isoDate = formatDate("20240115", "YYYY-MM-DD");'
+                        }
+                    ]
+                },
+                bestPractices: [
+                    {
+                        practice: 'Error Handling',
+                        recommendation: 'Always validate input data before performing calculations to avoid runtime errors',
+                        example: 'if (chronicConditions && chronicConditions > 0) { /* safe to use */ }'
+                    },
+                    {
+                        practice: 'Performance',
+                        recommendation: 'Keep scripts lightweight and avoid complex loops. Use database/API enrichment for heavy data operations.',
+                        example: 'Perform database queries in database enrichment step, use script enrichment only for calculations on retrieved data'
+                    },
+                    {
+                        practice: 'Naming',
+                        recommendation: 'Use clear, descriptive field names in your return object for easy reference in subsequent steps',
+                        example: 'return { patientRiskScore: score } instead of return { r: score }'
+                    },
+                    {
+                        practice: 'Testing',
+                        recommendation: 'Use the Test Execution feature to verify script logic with sample HL7 messages before deployment',
+                        example: 'Click "Test Execution" button and review the Script Enrichment output in step_outputs'
+                    },
+                    {
+                        practice: 'Data Access',
+                        recommendation: 'Click the "Variables" tab to see all available data from previous steps with copy-paste ready XPaths',
+                        example: 'Copy XPath from Variables tab and use with getNestedValue() function'
+                    }
+                ]
+            },
             'pre.enrichment': {
                 description: 'Enriches HL7 messages with additional data from external systems (EMPI, EHR, etc.). Enhances message content before FHIR transformation.',
                 useCases: [
@@ -4142,61 +5400,87 @@ return {
                     { name: 'failOnError', type: 'boolean', required: false, description: 'Whether to fail pipeline if enrichment fails (default: false)' }
                 ]
             },
-            'pre.enrichment.metadata': {
-                description: 'Adds processing metadata, timestamps, correlation IDs, and custom organizational fields to messages. Enriches messages with tracking, auditing, and contextual information.',
-                useCases: [
-                    'Add timestamps for message received and processed times (ISO 8601 format)',
-                    'Generate unique correlation IDs for message tracking across systems',
-                    'Add custom organizational metadata (environment, processing node, version)',
-                    'Include interface ID and message ID for troubleshooting',
-                    'Tag messages with source system, facility, or department information',
-                    'Add processing context (server hostname, region, data center)'
-                ],
-                example: {
-                    addTimestamp: true,
-                    addCorrelationId: true,
-                    addInterfaceId: false,
-                    addMessageId: false,
-                    customMetadata: {
-                        "processingNode": "server-01",
-                        "environment": "production",
-                        "facility": "MAIN_CAMPUS",
-                        "department": "RADIOLOGY",
-                        "version": "2.1.0",
-                        "region": "us-east-1"
-                    }
-                },
-                parameters: [
-                    { name: 'addTimestamp', type: 'boolean', required: false, description: 'Add receivedAt and processedAt timestamps in ISO 8601 format (e.g., 2025-10-26T14:30:00Z)' },
-                    { name: 'addCorrelationId', type: 'boolean', required: false, description: 'Generate and add a unique UUID correlation ID for end-to-end message tracking' },
-                    { name: 'addInterfaceId', type: 'boolean', required: false, description: 'Include the interface ID from which the message was received' },
-                    { name: 'addMessageId', type: 'boolean', required: false, description: 'Extract or generate a unique message ID (from MSH.10 if available in HL7 messages)' },
-                    { name: 'customMetadata', type: 'JSON Object', required: false, description: 'Custom key-value pairs to add as metadata. Must be valid JSON format. Example: {"environment": "prod", "version": "1.0", "facility": "MAIN"}. All values are stored as strings.' }
-                ]
-            },
+            // REMOVED: 'pre.enrichment.metadata' documentation - now merged with Field Mapping (core.transformation)
             'core.mapping': {
-                description: 'Transforms HL7 v2 messages to FHIR format using configured mapping rules. This is the core transformation step that converts healthcare data from legacy HL7 format to modern FHIR resources.',
+                description: 'Transforms HL7 v2 messages to FHIR format using configured mapping rules. This is the core transformation step that converts healthcare data from legacy HL7 format to modern FHIR resources. You can use data from previous enrichment steps (database lookups, API calls, scripts) in your field mappings.',
                 useCases: [
                     'Convert ADT^A01 (patient admission) to FHIR Patient + Encounter',
                     'Transform ORU^R01 (lab results) to FHIR Observation + DiagnosticReport',
                     'Map ORM^O01 (order) to FHIR ServiceRequest',
                     'Convert DFT^P03 (billing) to FHIR Claim',
-                    'Apply organization-specific mapping customizations'
+                    'Enrich FHIR resources with data from previous enrichment steps',
+                    'Apply organization-specific mapping customizations with dynamic data'
                 ],
                 example: {
                     fhir_version: 'R4',
                     use_template: true,
-                    mappings: 'Loaded from wizard configuration',
+                    mappings: [
+                        {
+                            comment: 'Basic HL7 field mapping',
+                            hl7Field: 'PID.5',
+                            fhirPath: 'Patient.name[0].family',
+                            dataType: 'string'
+                        },
+                        {
+                            comment: 'Use enriched data from database step',
+                            hl7Field: '["database_enrichment"].enriched_data.insuranceProvider',
+                            fhirPath: 'Coverage.payor[0].display',
+                            dataType: 'string'
+                        },
+                        {
+                            comment: 'Use enriched data from script step',
+                            hl7Field: '["Script_Enrichment"].enriched_data.riskScore',
+                            fhirPath: 'Observation.valueQuantity.value',
+                            dataType: 'decimal'
+                        },
+                        {
+                            comment: 'Use enriched data from API call',
+                            hl7Field: '["API_Enrichment"].enriched_data.externalPatientId',
+                            fhirPath: 'Patient.identifier[1].value',
+                            dataType: 'string'
+                        }
+                    ],
                     resource_mapping: {
-                        'Patient': 'PID segment',
+                        'Patient': 'PID segment + enriched data',
                         'Encounter': 'PV1 segment',
-                        'Observation': 'OBX segments'
+                        'Observation': 'OBX segments + calculated risk scores'
                     }
                 },
                 parameters: [
                     { name: 'fhir_version', type: 'string', required: true, description: 'Target FHIR version (R4, R5, STU3)' },
-                    { name: 'use_template', type: 'boolean', required: false, description: 'Use wizard-configured mappings (default: true)' }
-                ]
+                    { name: 'use_template', type: 'boolean', required: false, description: 'Use wizard-configured mappings (default: true)' },
+                    { name: 'mappings', type: 'array', required: false, description: 'Array of field mappings. Each mapping can reference HL7 fields or enriched data from previous steps using ["step_name"].enriched_data.fieldName format' }
+                ],
+                referenceVariables: {
+                    title: 'Using Enriched Data in Field Mappings',
+                    description: 'You can reference data from previous enrichment steps in your field mappings. Click the "Variables" tab to see all available variables from previous steps.',
+                    examples: [
+                        {
+                            scenario: 'Database Enrichment Result',
+                            hl7Field: '["database_enrichment"].enriched_data.chronicConditions',
+                            fhirPath: 'Patient.extension[0].valueInteger',
+                            explanation: 'Maps the chronicConditions field from database enrichment to a FHIR Patient extension'
+                        },
+                        {
+                            scenario: 'Script Calculation Result',
+                            hl7Field: '["Script_Enrichment"].enriched_data.riskLevel',
+                            fhirPath: 'RiskAssessment.prediction[0].qualitativeRisk.text',
+                            explanation: 'Uses calculated risk level from script enrichment in FHIR RiskAssessment resource'
+                        },
+                        {
+                            scenario: 'API Response Data',
+                            hl7Field: '["API_Enrichment"].enriched_data.externalSystemId',
+                            fhirPath: 'Patient.identifier[1].value',
+                            explanation: 'Adds external system ID from API call as additional patient identifier'
+                        },
+                        {
+                            scenario: 'Metadata Field',
+                            hl7Field: 'metadata.customField',
+                            fhirPath: 'MessageHeader.extension[0].valueString',
+                            explanation: 'Includes custom metadata field added in metadata enrichment step'
+                        }
+                    ]
+                }
             },
             'post.validation': {
                 description: 'Validates FHIR resources after transformation to ensure compliance with FHIR specification. Catches transformation errors before delivery.',

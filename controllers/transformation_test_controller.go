@@ -137,7 +137,9 @@ func (c *TransformationTestController) TestPipeline(ctx *gin.Context) {
 
 		// Step outputs: data produced by the step
 		if stepName != "" && output != nil {
-			stepOutputsMap[stepName] = output
+			// Use normalized key for consistent naming (e.g., "Field Mapping" -> "field_mapping")
+			normalizedKey := models.NormalizeStepKey(stepName)
+			stepOutputsMap[normalizedKey] = output
 		}
 	}
 
@@ -331,11 +333,23 @@ func (c *TransformationTestController) executeSteps(steps []*models.Transformati
 				stepOutput["response"] = apiResponse
 			}
 
-			// Extract enriched path
-			if enrichedPath, ok := output["_api_enriched_path"].(string); ok {
-				stepOutput["enriched_path"] = enrichedPath
-			} else if targetPath, ok := step.Config["targetPath"].(string); ok {
-				stepOutput["enriched_path"] = targetPath
+			// Extract enriched data and show reference path
+			targetPath := "enriched.api"
+			if tp, ok := step.Config["targetPath"].(string); ok && tp != "" {
+				targetPath = tp
+			}
+
+			enrichedData := getNestedValue(output, targetPath)
+			if enrichedData != nil {
+				stepOutput["data"] = enrichedData
+
+				// USER VISIBILITY: Show how to reference this data in subsequent steps
+				stepOutput["reference_path"] = targetPath
+				stepOutput["usage_example"] = fmt.Sprintf("getNestedValue(input, \"%s\")", targetPath)
+
+				if dataMap, ok := enrichedData.(map[string]interface{}); ok {
+					stepOutput["fields_count"] = len(dataMap)
+				}
 			}
 
 			stepOutput["message"] = "API enrichment completed"
@@ -343,11 +357,17 @@ func (c *TransformationTestController) executeSteps(steps []*models.Transformati
 		case "pre.enrichment.metadata":
 			// Metadata enrichment: Show the actual metadata that was added
 			if metadata, ok := output["metadata"].(map[string]interface{}); ok {
-				stepOutput["metadata"] = metadata
+				stepOutput["data"] = metadata
 				stepOutput["fields_added"] = len(metadata)
+
+				// USER VISIBILITY: Show how to reference this data in subsequent steps
+				stepOutput["reference_path"] = "metadata"
+				stepOutput["usage_example"] = "getNestedValue(input, \"metadata.yourKey\")"
+
 				stepOutput["message"] = fmt.Sprintf("Added %d metadata fields", len(metadata))
 			} else {
 				stepOutput["message"] = "No metadata added"
+				stepOutput["reference_path"] = "metadata"
 			}
 
 		case "pre.enrichment.database":
@@ -368,8 +388,11 @@ func (c *TransformationTestController) executeSteps(steps []*models.Transformati
 			log.Printf("   🔍 DEBUG: enrichedData type: %T, value: %+v", enrichedData, enrichedData)
 
 			if enrichedData != nil {
-				stepOutput["enriched_data"] = enrichedData
-				stepOutput["enriched_path"] = targetPath
+				stepOutput["data"] = enrichedData
+
+				// USER VISIBILITY: Show how to reference this data in subsequent steps
+				stepOutput["reference_path"] = targetPath
+				stepOutput["usage_example"] = fmt.Sprintf("getNestedValue(input, \"%s\")", targetPath)
 
 				// Count fields/rows
 				if dataMap, ok := enrichedData.(map[string]interface{}); ok {
@@ -389,7 +412,95 @@ func (c *TransformationTestController) executeSteps(steps []*models.Transformati
 					log.Printf("   🔍 DEBUG: enriched is not a map[string]interface{}, type: %T", output["enriched"])
 				}
 				stepOutput["message"] = "No database enrichment data found"
+				stepOutput["reference_path"] = targetPath
 				stepOutput["debug_output_keys"] = getMapKeys(output)
+			}
+
+		case "pre.enrichment.script":
+			// Script enrichment: Extract enriched data from the configured target path
+			targetPath := "enriched.script" // default
+			if tp, ok := step.Config["targetPath"].(string); ok && tp != "" {
+				targetPath = tp
+			}
+
+			log.Printf("   🔍 DEBUG [Script]: Output keys: %v", getMapKeys(output))
+			log.Printf("   🔍 DEBUG [Script]: Looking for targetPath: %s", targetPath)
+
+			// Extract the enriched data
+			enrichedData := getNestedValue(output, targetPath)
+
+			log.Printf("   🔍 DEBUG [Script]: enrichedData type: %T, value: %+v", enrichedData, enrichedData)
+
+			if enrichedData != nil {
+				stepOutput["data"] = enrichedData
+
+				// USER VISIBILITY: Show how to reference this data in subsequent steps
+				stepOutput["reference_path"] = targetPath
+				stepOutput["usage_example"] = fmt.Sprintf("getNestedValue(input, \"%s\")", targetPath)
+
+				// Count fields if it's a map
+				if dataMap, ok := enrichedData.(map[string]interface{}); ok {
+					stepOutput["fields_count"] = len(dataMap)
+				}
+			} else {
+				log.Printf("   ⚠️  DEBUG [Script]: enrichedData is nil at path %s", targetPath)
+				stepOutput["message"] = "No script enrichment data found"
+				stepOutput["reference_path"] = targetPath
+				stepOutput["debug_output_keys"] = getMapKeys(output)
+
+				// DEBUG: Show what's in enriched if it exists
+				if enriched, ok := output["enriched"].(map[string]interface{}); ok {
+					log.Printf("   🔍 DEBUG [Script]: enriched object exists with keys: %v", getMapKeys(enriched))
+					stepOutput["debug_enriched_keys"] = getMapKeys(enriched)
+
+					// Check if script key exists but is empty/null
+					if scriptData, ok := enriched["script"]; ok {
+						log.Printf("   🔍 DEBUG [Script]: enriched.script exists but is: %T = %+v", scriptData, scriptData)
+						stepOutput["debug_script_value"] = scriptData
+					}
+				}
+
+				// Check for errors in the step execution
+				if errMsg, ok := output["_script_error"].(string); ok && errMsg != "" {
+					stepOutput["script_error"] = errMsg
+					log.Printf("   ❌ DEBUG [Script]: Script execution error: %s", errMsg)
+				}
+			}
+
+		case "core.transformation":
+			// Field Mapping: Extract mapped fields from enriched.field_mapping
+			targetPath := "enriched.field_mapping"
+
+			log.Printf("   🔍 DEBUG [Field Mapping]: Output keys: %v", getMapKeys(output))
+			log.Printf("   🔍 DEBUG [Field Mapping]: Looking for targetPath: %s", targetPath)
+
+			// Extract the mapped fields
+			mappedFields := getNestedValue(output, targetPath)
+
+			log.Printf("   🔍 DEBUG [Field Mapping]: mappedFields type: %T, value: %+v", mappedFields, mappedFields)
+
+			if mappedFields != nil {
+				stepOutput["data"] = mappedFields
+
+				// USER VISIBILITY: Show how to reference this data in subsequent steps
+				stepOutput["reference_path"] = targetPath
+				stepOutput["usage_example"] = fmt.Sprintf("getNestedValue(input, \"%s.yourVariable\")", targetPath)
+
+				// Count mapped fields (consistent with database/script enrichment - no message)
+				if dataMap, ok := mappedFields.(map[string]interface{}); ok {
+					stepOutput["fields_count"] = len(dataMap)
+				}
+			} else {
+				log.Printf("   ⚠️  DEBUG [Field Mapping]: mappedFields is nil at path %s", targetPath)
+				stepOutput["message"] = "No field mapping data found"
+				stepOutput["reference_path"] = targetPath
+				stepOutput["debug_output_keys"] = getMapKeys(output)
+
+				// DEBUG: Show what's in enriched if it exists
+				if enriched, ok := output["enriched"].(map[string]interface{}); ok {
+					log.Printf("   🔍 DEBUG [Field Mapping]: enriched object exists with keys: %v", getMapKeys(enriched))
+					stepOutput["debug_enriched_keys"] = getMapKeys(enriched)
+				}
 			}
 
 		default:
@@ -575,5 +686,317 @@ func (c *TransformationTestController) TestAPIEndpoint(ctx *gin.Context) {
 		"response": responseDetails,
 		"message":  "API call successful - inspect response to configure field mapping",
 		"help":     "Click on fields below to add them to your response mapping configuration",
+	})
+}
+
+// GetAvailableReferenceVariables analyzes pipeline config and returns available reference paths for each step
+func (c *TransformationTestController) GetAvailableReferenceVariables(ctx *gin.Context) {
+	var req struct {
+		Pipeline     map[string]interface{} `json:"pipeline"`
+		CurrentLayer string                 `json:"current_layer"` // e.g., "pre", "core", "post"
+		CurrentStep  int                    `json:"current_step"`  // Step index in current layer
+	}
+
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"success": false, "error": err.Error()})
+		return
+	}
+
+	// Build available variables based on execution order
+	stepVariables := c.buildStepVariables(req.Pipeline, req.CurrentLayer, req.CurrentStep)
+
+	ctx.JSON(http.StatusOK, gin.H{
+		"success":   true,
+		"variables": stepVariables,
+		"message":   "Available reference variables for this step (from previous steps only)",
+	})
+}
+
+// buildStepVariables builds available variables up to a specific step
+func (c *TransformationTestController) buildStepVariables(pipeline map[string]interface{}, currentLayer string, currentStep int) []map[string]interface{} {
+	variables := make([]map[string]interface{}, 0)
+
+	// Always available: HL7 enhanced segments
+	variables = append(variables, map[string]interface{}{
+		"category":    "HL7 Message Fields",
+		"description": "Parsed HL7 message segments and fields (always available)",
+		"variables": []map[string]interface{}{
+			{
+				"name":          "Message Header",
+				"path":          "enhancedSegments.MSH",
+				"usage_example": `getNestedValue(input, "enhancedSegments.MSH.fields.3.value")`,
+				"description":   "Access MSH segment fields (Sending Application, Facility, etc.)",
+			},
+			{
+				"name":          "Patient Identification",
+				"path":          "enhancedSegments.PID",
+				"usage_example": `getNestedValue(input, "enhancedSegments.PID.fields.5.value")`,
+				"description":   "Access PID segment fields (Name, DOB, Gender, etc.)",
+			},
+			{
+				"name":          "Patient Visit",
+				"path":          "enhancedSegments.PV1",
+				"usage_example": `getNestedValue(input, "enhancedSegments.PV1.fields.2.value")`,
+				"description":   "Access PV1 segment fields (Patient Class, Location, etc.)",
+			},
+			{
+				"name":          "All Segments",
+				"path":          "enhancedSegments",
+				"usage_example": `getNestedValue(input, "enhancedSegments.YOUR_SEGMENT.fields.N.value")`,
+				"description":   "Access any HL7 segment in the message",
+			},
+		},
+	})
+
+	// Define layer execution order
+	layerOrder := []string{"pre", "core", "post"}
+
+	// Parse pipeline layers in execution order
+	// Collect all enrichment variables first, then group by step name
+	allEnrichmentVars := make([]map[string]interface{}, 0)
+
+	if layers, ok := pipeline["layers"].(map[string]interface{}); ok {
+		for _, layerName := range layerOrder {
+			// Stop if we've reached the current layer
+			if layerName == currentLayer {
+				// Include steps BEFORE current step in this layer
+				if layerData, ok := layers[layerName].(map[string]interface{}); ok {
+					if steps, ok := layerData["steps"].([]interface{}); ok {
+						enrichmentVars := c.extractEnrichmentVariablesUpTo(steps, currentStep)
+						allEnrichmentVars = append(allEnrichmentVars, enrichmentVars...)
+					}
+				}
+				break
+			}
+
+			// Include all steps from previous layers
+			if layerData, ok := layers[layerName].(map[string]interface{}); ok {
+				if steps, ok := layerData["steps"].([]interface{}); ok {
+					enrichmentVars := c.extractEnrichmentVariablesUpTo(steps, -1) // -1 means all steps
+					allEnrichmentVars = append(allEnrichmentVars, enrichmentVars...)
+				}
+			}
+		}
+	}
+
+	// Group variables by step name
+	stepGroups := make(map[string][]map[string]interface{})
+	for _, variable := range allEnrichmentVars {
+		stepName, _ := variable["step_name"].(string)
+		if stepName == "" {
+			stepName = "Unknown_Step"
+		}
+		stepGroups[stepName] = append(stepGroups[stepName], variable)
+	}
+
+	// Convert groups to category format
+	for stepName, vars := range stepGroups {
+		variables = append(variables, map[string]interface{}{
+			"category":    stepName,
+			"description": fmt.Sprintf("Variables from %s", stepName),
+			"variables":   vars,
+		})
+	}
+
+	return variables
+}
+
+// extractEnrichmentVariablesUpTo extracts reference variables up to a specific step index
+func (c *TransformationTestController) extractEnrichmentVariablesUpTo(steps []interface{}, upToStep int) []map[string]interface{} {
+	variables := make([]map[string]interface{}, 0)
+
+	maxSteps := len(steps)
+	if upToStep >= 0 && upToStep < maxSteps {
+		maxSteps = upToStep
+	}
+
+	for i := 0; i < maxSteps; i++ {
+		if stepMap, ok := steps[i].(map[string]interface{}); ok {
+			stepType, _ := stepMap["step_type"].(string)
+			stepName, _ := stepMap["step_name"].(string)
+			config, _ := stepMap["config"].(map[string]interface{})
+
+			if stepName == "" {
+				stepName = fmt.Sprintf("Step_%d", i+1)
+			}
+
+			// Sanitize step name - replace spaces with underscores
+			sanitizedStepName := strings.ReplaceAll(stepName, " ", "_")
+
+			switch stepType {
+			case "pre.enrichment.metadata":
+				// Metadata enrichment adds custom metadata fields
+				customMetadata, _ := config["customMetadata"].(map[string]interface{})
+				if len(customMetadata) > 0 {
+					// Add individual variables for each metadata field
+					for key := range customMetadata {
+						variables = append(variables, map[string]interface{}{
+							"name":          key,
+							"path":          fmt.Sprintf("metadata.%s", key),
+							"usage_example": fmt.Sprintf(`getNestedValue(input, "metadata.%s")`, key),
+							"description":   fmt.Sprintf("Metadata field from %s", sanitizedStepName),
+							"step_index":    i,
+							"step_name":     sanitizedStepName,
+						})
+					}
+				}
+
+			case "pre.enrichment.database", "pre.enrichment.api", "pre.enrichment.script":
+				// All enrichment steps store data as ["step_name"].enriched_data
+				basePath := fmt.Sprintf("[\"%s\"].enriched_data", stepName)
+
+				// Build description with examples
+				var description string
+				var examples []string
+				switch stepType {
+				case "pre.enrichment.database":
+					description = "Database enrichment results"
+					examples = []string{
+						fmt.Sprintf(`%s.chronicConditions`, basePath),
+						fmt.Sprintf(`%s.dob`, basePath),
+						fmt.Sprintf(`%s.lastAdmission`, basePath),
+					}
+				case "pre.enrichment.api":
+					description = "API enrichment results"
+					examples = []string{
+						fmt.Sprintf(`%s.responseData`, basePath),
+						fmt.Sprintf(`%s.status`, basePath),
+						fmt.Sprintf(`%s.timestamp`, basePath),
+					}
+				case "pre.enrichment.script":
+					description = "Script enrichment results"
+					examples = []string{
+						fmt.Sprintf(`%s.riskScore`, basePath),
+						fmt.Sprintf(`%s.riskLevel`, basePath),
+						fmt.Sprintf(`%s.calculatedAt`, basePath),
+					}
+				}
+
+				// Add description with examples
+				descriptionWithExamples := fmt.Sprintf("%s | Examples: %s", description, strings.Join(examples, " • "))
+
+				variables = append(variables, map[string]interface{}{
+					"name":          "enriched_data",
+					"path":          basePath,
+					"usage_example": fmt.Sprintf(`getNestedValue(input, "%s.fieldName")`, basePath),
+					"description":   descriptionWithExamples,
+					"examples":      examples,
+					"step_index":    i,
+					"step_name":     sanitizedStepName,
+				})
+			}
+		}
+	}
+
+	return variables
+}
+
+// ValidateScript validates a JavaScript script for syntax and dependency errors
+func (c *TransformationTestController) ValidateScript(ctx *gin.Context) {
+	var request struct {
+		Script     string `json:"script"`
+		PipelineID string `json:"pipelineId"`
+	}
+
+	if err := ctx.ShouldBindJSON(&request); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"error":   "Invalid request format",
+			"details": err.Error(),
+		})
+		return
+	}
+
+	if request.Script == "" {
+		ctx.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"error":   "Script cannot be empty",
+		})
+		return
+	}
+
+	// Get the script enrichment executor
+	executor := c.executorRegistry.GetExecutor("pre.enrichment.script")
+	if executor == nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"error":   "Script executor not available",
+		})
+		return
+	}
+
+	// Create a dummy transformation step for validation
+	step := &models.TransformationStep{
+		StepName: "Script Validation",
+		StepType: "pre.enrichment.script",
+		Sequence: 1,
+		Config: map[string]interface{}{
+			"script":      request.Script,
+			"timeout_ms":  5000,
+			"failOnError": false,
+			"targetPath":  "enriched.script",
+		},
+	}
+
+	// Create dummy input data with common structures that scripts might reference
+	dummyInput := map[string]interface{}{
+		"enhancedSegments": map[string]interface{}{
+			"MSH": map[string]interface{}{
+				"fields": []interface{}{
+					map[string]interface{}{"value": "test"},
+				},
+			},
+			"PID": map[string]interface{}{
+				"fields": []interface{}{
+					map[string]interface{}{"value": "test"},
+				},
+			},
+		},
+		"enriched": map[string]interface{}{
+			"api":      map[string]interface{}{},
+			"database": map[string]interface{}{},
+		},
+		"metadata": map[string]interface{}{},
+	}
+
+	// Try to execute the script with dummy data
+	_, err := executor.Execute(context.Background(), step, dummyInput)
+
+	if err != nil {
+		// Script has errors
+		errorMsg := err.Error()
+
+		// Parse error to provide helpful feedback
+		var friendlyError string
+		if strings.Contains(errorMsg, "Cannot read property") {
+			friendlyError = "Script tries to access undefined property. " + errorMsg
+		} else if strings.Contains(errorMsg, "undefined") {
+			friendlyError = "Script references undefined variable. " + errorMsg
+		} else if strings.Contains(errorMsg, "SyntaxError") {
+			friendlyError = "Script has syntax error. " + errorMsg
+		} else {
+			friendlyError = errorMsg
+		}
+
+		ctx.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"error":   friendlyError,
+			"details": map[string]interface{}{
+				"raw_error": errorMsg,
+				"suggestions": []string{
+					"Check that all referenced variables exist (metadata, enriched, etc.)",
+					"Add defensive checks: if (!variable) { return {...}; }",
+					"Verify field paths are correct",
+					"Test script with actual pipeline data using 'Test Execution'",
+				},
+			},
+		})
+		return
+	}
+
+	// Script is valid
+	ctx.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "Script syntax is valid and executes without errors",
 	})
 }

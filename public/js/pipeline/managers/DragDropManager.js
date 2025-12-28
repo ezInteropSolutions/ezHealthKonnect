@@ -195,12 +195,14 @@ class DragDropManager {
     /**
      * Handle drop from canvas (reordering)
      */
-    handleCanvasDrop(data, targetLayer) {
+    handleCanvasDrop(data, targetLayer, dropPosition = null) {
         const { step, groupId, sourceLayer } = data;
 
         if (sourceLayer === targetLayer) {
             // Reordering within same layer
-            this.showNotification('Reordering within layer', 'info');
+            // For now, just update the sequence numbers to match the current order
+            this.builder.reorderStepsInLayer(sourceLayer);
+            this.showNotification(`Reordered ${step.stepName} in ${targetLayer} layer`, 'success');
         } else {
             // Moving to different layer
             this.builder.moveStepToLayer(step.id, groupId, sourceLayer, targetLayer);

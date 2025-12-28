@@ -2,6 +2,7 @@
  * ================================================================
  * METADATA BUILDER COMPONENT
  * ================================================================
+ * Version: 1.1 - Fixed nested JSON display
  *
  * User-friendly key-value pair builder for custom metadata
  * Similar to ValidationRuleBuilder but simpler (just key-value pairs)
@@ -11,6 +12,7 @@
  * - Import/export JSON for technical users
  * - Real-time validation
  * - Common metadata suggestions
+ * - Proper display of nested JSON objects
  */
 
 class MetadataBuilder {
@@ -64,7 +66,16 @@ class MetadataBuilder {
 
             if (keyInput && valueInput) {
                 const key = keyInput.value.trim();
-                const value = valueInput.value;
+                let value = valueInput.value;
+
+                // Try to parse as JSON if it looks like JSON
+                if (value && (value.trim().startsWith('{') || value.trim().startsWith('['))) {
+                    try {
+                        value = JSON.parse(value);
+                    } catch (e) {
+                        // Keep as string if parse fails
+                    }
+                }
 
                 if (key) { // Only add if key is not empty
                     this.metadataArray.push({ key, value });
@@ -163,15 +174,25 @@ class MetadataBuilder {
      * Render a single metadata row
      */
     renderRow(item, index) {
+        // Check if value is an object/array
+        const isObject = typeof item.value === 'object' && item.value !== null;
+        const displayValue = isObject ? JSON.stringify(item.value, null, 2) : (item.value || '');
+        const escapedValue = this.escapeHtml(displayValue);
+
         return `
             <div class="metadata-row" data-index="${index}" style="display: flex; gap: 0.5rem; margin-bottom: 0.5rem; padding: 0.75rem; background: white; border: 1px solid #e5e7eb; border-radius: 6px; align-items: flex-start;">
                 <div style="flex: 1; min-width: 0;">
                     <label style="display: block; font-size: 0.75rem; color: #6b7280; margin-bottom: 0.25rem;">Key</label>
-                    <input type="text" class="metadata-key" value="${item.key || ''}" placeholder="e.g., environment" style="width: 100%; padding: 0.5rem; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 0.875rem;">
+                    <input type="text" class="metadata-key" value="${this.escapeHtml(item.key || '')}" placeholder="e.g., environment" style="width: 100%; padding: 0.5rem; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 0.875rem;">
                 </div>
                 <div style="flex: 2; min-width: 0;">
-                    <label style="display: block; font-size: 0.75rem; color: #6b7280; margin-bottom: 0.25rem;">Value</label>
-                    <input type="text" class="metadata-value" value="${item.value || ''}" placeholder="e.g., production" style="width: 100%; padding: 0.5rem; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 0.875rem;">
+                    <label style="display: block; font-size: 0.75rem; color: #6b7280; margin-bottom: 0.25rem;">
+                        Value ${isObject ? '<span style="color: #059669; font-weight: 500;">(JSON Object)</span>' : ''}
+                    </label>
+                    ${isObject ?
+                        `<textarea class="metadata-value" rows="6" placeholder="e.g., production" style="width: 100%; padding: 0.5rem; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 0.875rem; font-family: 'Courier New', monospace; resize: vertical;">${escapedValue}</textarea>` :
+                        `<input type="text" class="metadata-value" value="${escapedValue}" placeholder="e.g., production" style="width: 100%; padding: 0.5rem; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 0.875rem;">`
+                    }
                 </div>
                 <div style="padding-top: 1.5rem;">
                     <button type="button" class="btn-delete-metadata" data-index="${index}" title="Delete" style="padding: 0.5rem 0.75rem; background: #fee; color: #dc2626; border: 1px solid #fecaca; border-radius: 4px; cursor: pointer; transition: all 0.2s;">
@@ -180,6 +201,15 @@ class MetadataBuilder {
                 </div>
             </div>
         `;
+    }
+
+    /**
+     * Escape HTML to prevent XSS
+     */
+    escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
     }
 
     /**

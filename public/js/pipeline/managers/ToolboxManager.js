@@ -1,6 +1,7 @@
 /**
  * Toolbox Manager
  * Manages the left panel toolbox with templates and step library
+ * Version: 8.8 - Removed context from Script Enrichment (use step chaining instead)
  */
 
 class ToolboxManager {
@@ -70,9 +71,9 @@ class ToolboxManager {
         return [
             new StepTemplate({
                 id: 'validate-fields',
-                name: 'field_validation',
-                type: 'pre.validation',
-                description: 'Validate fields (required, format, length, pattern)',
+                name: 'Field Validation',
+                type: 'core.validation',  // Updated to use FieldValidationExecutor
+                description: 'Validate fields with support for required, format (email, phone, ssn, date, etc.), length, and pattern validation',
                 layer: 'pre',
                 icon: this.getIconForType('pre.validation'),
                 isSystem: true,
@@ -80,42 +81,28 @@ class ToolboxManager {
                 required: false,  // Uncheck to accept messages with warnings (ACK)
                 onErrorStrategy: 'continue',  // Continue = ACK with warnings, Fail = NACK
                 defaultConfig: {
-                    rules: [
-                        { field: 'enhancedSegments.MSH.fields[1].value', type: 'required', errorMessage: 'Message type is required' },
-                        { field: 'enhancedSegments.PID.fields[0].value', type: 'required', errorMessage: 'Patient ID is required' },
-                        { field: 'enhancedSegments.PID.fields[2].value', type: 'required', errorMessage: 'Date of birth is required' }
-                    ]
+                    validations: [
+                        {
+                            field: 'PID.3',
+                            validatorType: 'required',
+                            errorMessage: 'Patient ID is required'
+                        },
+                        {
+                            field: 'PID.5',
+                            validatorType: 'required',
+                            errorMessage: 'Patient name is required'
+                        },
+                        {
+                            field: 'PID.7',
+                            validatorType: 'format',
+                            options: { format: 'date' },
+                            errorMessage: 'Date of birth must be in YYYYMMDD format'
+                        }
+                    ],
+                    addFieldNames: true  // Include field names in error messages
                 }
             }),
-            new StepTemplate({
-                id: 'enrich-patient-data',
-                name: 'Data Enrichment',
-                type: 'pre.enrichment',
-                description: 'Enrich from external system',
-                layer: 'pre',
-                icon: this.getIconForType('pre.enrichment'),
-                isSystem: true,
-                defaultConfig: {
-                    source: 'epic',
-                    fields: ['demographics', 'insurance']
-                }
-            }),
-            new StepTemplate({
-                id: 'add-metadata',
-                name: 'add_metadata',
-                type: 'pre.enrichment.metadata',
-                description: 'Add processing metadata (timestamps, IDs, custom fields)',
-                layer: 'pre',
-                icon: this.getIconForType('pre.enrichment.metadata'),
-                isSystem: true,
-                defaultConfig: {
-                    addTimestamp: true,
-                    addCorrelationId: true,
-                    addInterfaceId: false,
-                    addMessageId: false,
-                    customMetadata: {}
-                }
-            }),
+            // REMOVED: "Add Metadata" step - metadata functionality merged into Field Mapping
             new StepTemplate({
                 id: 'enrich-api',
                 name: 'api_enrichment',
@@ -153,26 +140,9 @@ class ToolboxManager {
                     failOnError: false
                 }
             }),
-            new StepTemplate({
-                id: 'enrich-cache',
-                name: 'Cache Enrichment',
-                type: 'pre.enrichment.cache',
-                description: 'Lookup enrichment data from Redis or Memcached',
-                layer: 'pre',
-                icon: this.getIconForType('pre.enrichment.cache'),
-                isSystem: true,
-                defaultConfig: {
-                    cacheType: 'redis',
-                    connectionString: 'redis://localhost:6379',
-                    keyTemplate: 'patient:{patientId}',
-                    keyMappings: { patientId: 'PID.3' },
-                    targetPath: 'enriched.cache',
-                    timeoutMs: 1000,
-                    writeBack: false,
-                    ttlSeconds: 3600,
-                    failOnError: false
-                }
-            }),
+            // REMOVED: Cache Enrichment - Not implemented yet (cache_enrichment_executor.go returns placeholder)
+            // Use "Database Enrichment" with Redis instead for cache lookups
+            // Will be re-added when cache-aside pattern automation is fully implemented
             new StepTemplate({
                 id: 'enrich-script',
                 name: 'Script Enrichment',
@@ -182,8 +152,7 @@ class ToolboxManager {
                 icon: this.getIconForType('pre.enrichment.script'),
                 isSystem: true,
                 defaultConfig: {
-                    script: `// Extract patient date of birth\nvar dob = getNestedValue(input, "enhancedSegments.PID.fields.7.value");\n\n// Calculate age\nvar age = calculateAge(dob);\n\n// Return enrichment data\nreturn {\n    age: age,\n    ageGroup: age < 18 ? "pediatric" : "adult"\n};`,
-                    context: {},
+                    script: `// Extract patient date of birth\nvar dob = getNestedValue(input, "enhancedSegments.PID.fields.7.value");\n\n// Calculate age\nvar age = calculateAge(dob);\n\n// Get config from previous enrichment step (if needed)\nvar config = getNestedValue(input, "enriched.metadata");\n\n// Return enrichment data\nreturn {\n    age: age,\n    ageGroup: age < 18 ? "pediatric" : "adult"\n};`,
                     targetPath: 'enriched.script',
                     timeoutMs: 5000,
                     failOnError: false
@@ -296,81 +265,38 @@ class ToolboxManager {
             // ============================================
             // DATA VALIDATION STEPS (Pre-Processing)
             // ============================================
-            new StepTemplate({
-                id: 'validate-data-types',
-                name: 'Data Type Validation',
-                type: 'pre.validation',
-                description: 'Validate field data types (string, number, date)',
-                layer: 'pre',
-                icon: this.getIconForType('pre.validation'),
-                isSystem: true,
-                defaultConfig: {
-                    rules: [
-                        { field: 'PID.7', type: 'date', format: 'YYYYMMDD' },
-                        { field: 'PID.3', type: 'string', pattern: '^[0-9]+$' }
-                    ],
-                    on_error: 'fail' // fail, warn, skip
-                }
-            }),
+            // NOTE: The following validation templates have been removed and consolidated
+            // into the unified Field Validation step (core.validation):
+            //
+            // ❌ REMOVED:
+            // - Data Type Validation (validate-data-types) - Use Field Validation with format/pattern
+            // - Format Validation (validate-format) - Use Field Validation with format option (phone, ssn, email, etc.)
+            // - Range Validation (validate-range) - Use Field Validation with custom regex or add RangeValidator if needed
+            //
+            // ✅ USE INSTEAD: Field Validation step which supports:
+            //    - required: Field must exist and not be empty
+            //    - format: Preset formats (email, phone, ssn, date, hl7_date, mrn, zip) + custom regex
+            //    - length: Min/max/exact string length
+            //    - pattern: Custom regex patterns
+            //
+            // TODO: If numeric range validation is needed, add RangeValidator to built_in_validators.go
 
-            new StepTemplate({
-                id: 'validate-format',
-                name: 'Format Validation',
-                type: 'pre.validation',
-                description: 'Validate specific formats (Phone, SSN, Email, etc.)',
-                layer: 'pre',
-                icon: this.getIconForType('pre.validation'),
-                isSystem: true,
-                defaultConfig: {
-                    validations: [
-                        { field: 'PID.13', format: 'phone' },
-                        { field: 'PID.19', format: 'ssn' },
-                        { field: 'NK1.5', format: 'phone' }
-                    ],
-                    formats: {
-                        phone: '^\\(?([0-9]{3})\\)?[-. ]?([0-9]{3})[-. ]?([0-9]{4})$',
-                        ssn: '^[0-9]{3}-[0-9]{2}-[0-9]{4}$',
-                        email: '^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$'
-                    }
-                }
-            }),
-
-            new StepTemplate({
-                id: 'validate-range',
-                name: 'Range Validation',
-                type: 'pre.validation',
-                description: 'Validate numeric ranges (min/max values)',
-                layer: 'pre',
-                icon: this.getIconForType('pre.validation'),
-                isSystem: true,
-                defaultConfig: {
-                    rules: [
-                        { field: 'OBX.5', min: 0, max: 300, unit: 'mg/dL', description: 'Blood Glucose' },
-                        { field: 'age', min: 0, max: 120, description: 'Patient Age' }
-                    ]
-                }
-            }),
-
-            new StepTemplate({
-                id: 'cross-field-validation',
-                name: 'Cross-Field Validation',
-                type: 'pre.validation',
-                description: 'Validate relationships between fields',
-                layer: 'pre',
-                icon: this.getIconForType('pre.validation.cross-field'),
-                isSystem: true,
-                defaultConfig: {
-                    rules: [
-                        {
-                            name: 'Discharge after Admit',
-                            field1: 'PV1.44', // Discharge date
-                            operator: 'greater_than',
-                            field2: 'PV1.44', // Admit date
-                            message: 'Discharge date must be after admit date'
-                        }
-                    ]
-                }
-            }),
+            // ❌ REMOVED: Cross-Field Validation (cross-field-validation)
+            // USER FEEDBACK: "Whenever you do comparison, there is an action right after that, so if/else should take care of it"
+            // USER IS CORRECT: Cross-field validation is just conditional logic with a "reject" action
+            // REASON: All comparisons lead to actions:
+            //   - If discharge < admit → reject message (validation)
+            //   - If age > 65 → route to geriatrics (routing)
+            //   - If PID.3 != PV1.5 → log warning (data quality)
+            // MIGRATION: Use Conditional Logic step (to be implemented) with these actions:
+            //   - continue, reject, log_warning, log_error, set_metadata, set_field, route_to
+            // REPLACEMENT: Conditional Logic step (core.conditional) - more flexible, covers all use cases
+            // Example:
+            //   {
+            //     condition: { field1: 'PV1.45', operator: 'greater_than', field2: 'PV1.44' },
+            //     onTrue: { action: 'continue' },
+            //     onFalse: { action: 'reject', errorMessage: 'Discharge must be after admit' }
+            //   }
 
             // ============================================
             // DATA TRANSFORMATION STEPS (Pre/Core)
@@ -379,70 +305,42 @@ class ToolboxManager {
                 id: 'field-mapping',
                 name: 'Field Mapping',
                 type: 'core.transformation',
-                description: 'Map source fields to target fields',
+                description: 'Map source fields to target fields with powerful transforms (trim, upper, lower, substring, replace, regex). Supports HL7 component paths (PID.5.1, PID.5.2) and chained transforms.',
                 layer: 'core',
                 icon: this.getIconForType('core.transformation'),
                 isSystem: true,
                 defaultConfig: {
                     mappings: [
-                        { source: 'PID.5[0].1', target: 'patient.name.family' },
-                        { source: 'PID.5[0].2', target: 'patient.name.given[0]' },
-                        { source: 'PID.7', target: 'patient.birthDate', transform: 'formatDate' }
+                        { lhs: 'patient.name.family', rhs: 'PID.5.1', transforms: 'trim, upper' },
+                        { lhs: 'patient.name.given', rhs: 'PID.5.2', transforms: 'trim' },
+                        { lhs: 'patient.birthDate', rhs: 'PID.7', transforms: 'substring:0:4' }
                     ]
                 }
             }),
 
-            new StepTemplate({
-                id: 'split-combine-fields',
-                name: 'Split/Combine Fields',
-                type: 'pre.transformation',
-                description: 'Split or combine field values',
-                layer: 'pre',
-                icon: this.getIconForType('pre.transformation'),
-                isSystem: true,
-                defaultConfig: {
-                    operations: [
-                        {
-                            type: 'split',
-                            source: 'PID.5', // "Smith^John^M"
-                            delimiter: '^',
-                            targets: ['lastName', 'firstName', 'middleName']
-                        },
-                        {
-                            type: 'combine',
-                            sources: ['firstName', 'lastName'],
-                            delimiter: ' ',
-                            target: 'fullName'
-                        }
-                    ]
-                }
-            }),
+            // ❌ REMOVED: Split/Combine Fields (split-combine-fields)
+            // REASON: Field Mapping handles splits via HL7 component paths (PID.5.1, PID.5.2), combines via Script Enrichment
+            // MIGRATION FOR SPLIT: Use Field Mapping with component paths:
+            //   { lhs: 'lastName', rhs: 'PID.5.1' }, { lhs: 'firstName', rhs: 'PID.5.2' }
+            // MIGRATION FOR COMBINE: Use Script Enrichment:
+            //   script: "function transform(input) { input.fullName = input.firstName + ' ' + input.lastName; return input; }"
 
-            new StepTemplate({
-                id: 'date-time-conversion',
-                name: 'Date/Time Format Conversion',
-                type: 'pre.transformation',
-                description: 'Convert date/time formats',
-                layer: 'pre',
-                icon: this.getIconForType('pre.transformation'),
-                isSystem: true,
-                defaultConfig: {
-                    conversions: [
-                        {
-                            field: 'PID.7',
-                            from_format: 'YYYYMMDD',
-                            to_format: 'YYYY-MM-DD',
-                            timezone: 'UTC'
-                        }
-                    ]
-                }
-            }),
+            // ❌ REMOVED: Date/Time Format Conversion (date-time-conversion)
+            // REASON: Simple conversions use Field Mapping transforms, complex ones use Script Enrichment
+            // MIGRATION (SIMPLE): Use Field Mapping with substring/regex transforms:
+            //   { lhs: 'birthDate', rhs: 'PID.7', transforms: 'substring:0:4,substring:4:6,substring:6:8' }
+            // MIGRATION (COMPLEX): Use Script Enrichment with JavaScript Date objects for timezone conversions
 
+            // ⚠️ TODO: Unit Conversion - Backend implementation required
+            // UNIQUE FUNCTIONALITY: Mathematical unit conversions (lb→kg, F→C, in→cm) with formulas
+            // CANNOT BE REPLACED BY: Field Mapping (no mathematical operations) or Script Enrichment (too complex for simple conversions)
+            // IMPLEMENTATION NEEDED: UnitConversionExecutor with formula evaluation or MathematicalTransformExecutor
+            // KEEP THIS TEMPLATE: Will be used once backend executor is implemented
             new StepTemplate({
                 id: 'unit-conversion',
-                name: 'Unit Conversion',
+                name: 'Unit Conversion (TODO)',
                 type: 'pre.transformation',
-                description: 'Convert units (lb→kg, F→C, in→cm)',
+                description: '⚠️ TODO: Convert units (lb→kg, F→C, in→cm) - requires backend implementation',
                 layer: 'pre',
                 icon: this.getIconForType('pre.transformation'),
                 isSystem: true,
@@ -454,22 +352,10 @@ class ToolboxManager {
                 }
             }),
 
-            new StepTemplate({
-                id: 'string-manipulation',
-                name: 'String Manipulation',
-                type: 'pre.transformation',
-                description: 'Uppercase, lowercase, trim, substring operations',
-                layer: 'pre',
-                icon: this.getIconForType('pre.transformation'),
-                isSystem: true,
-                defaultConfig: {
-                    operations: [
-                        { field: 'PID.5[0].1', operation: 'uppercase' },
-                        { field: 'PID.11', operation: 'trim' },
-                        { field: 'comments', operation: 'substring', start: 0, length: 100 }
-                    ]
-                }
-            }),
+            // ❌ REMOVED: String Manipulation (string-manipulation)
+            // REASON: 100% redundant - Field Mapping already supports all string operations via transforms
+            // MIGRATION: Use Field Mapping with transforms: 'trim', 'upper', 'lower', 'substring:start:end', 'replace:old:new', 'regex:pattern'
+            // Example: { lhs: 'lastName', rhs: 'PID.5.1', transforms: 'trim, upper, substring:0:50' }
 
             new StepTemplate({
                 id: 'value-lookup',
@@ -519,74 +405,11 @@ class ToolboxManager {
             // ============================================
             // DATA ENRICHMENT STEPS (Pre-Processing)
             // ============================================
-            new StepTemplate({
-                id: 'calculate-age',
-                name: 'Calculate Age from DOB',
-                type: 'pre.enrichment',
-                description: 'Calculate age in years from date of birth',
-                layer: 'pre',
-                icon: this.getIconForType('pre.enrichment'),
-                isSystem: true,
-                defaultConfig: {
-                    dob_field: 'PID.7',
-                    output_field: 'patient_age',
-                    as_of_date: 'today' // or specific date
-                }
-            }),
-
-            new StepTemplate({
-                id: 'generate-uuid',
-                name: 'Generate UUID/IDs',
-                type: 'pre.enrichment',
-                description: 'Generate unique identifiers',
-                layer: 'pre',
-                icon: this.getIconForType('pre.enrichment'),
-                isSystem: true,
-                defaultConfig: {
-                    fields: [
-                        { target: 'bundle_id', type: 'uuid' },
-                        { target: 'message_id', type: 'timestamp' }
-                    ]
-                }
-            }),
-
-            new StepTemplate({
-                id: 'api-call',
-                name: 'External API Call',
-                type: 'pre.enrichment',
-                description: 'Call external REST API for data enrichment',
-                layer: 'pre',
-                icon: this.getIconForType('pre.enrichment'),
-                isSystem: true,
-                defaultConfig: {
-                    url: 'https://api.example.com/patient/{{patientId}}',
-                    method: 'GET',
-                    headers: {
-                        'Authorization': 'Bearer {{token}}',
-                        'Content-Type': 'application/json'
-                    },
-                    timeout_ms: 5000,
-                    retry_count: 3,
-                    store_response_in: 'api_response',
-                    on_error: 'continue'
-                }
-            }),
-
-            new StepTemplate({
-                id: 'database-lookup',
-                name: 'Database Lookup',
-                type: 'pre.enrichment',
-                description: 'Lookup data from database',
-                layer: 'pre',
-                icon: this.getIconForType('pre.enrichment.database'),
-                isSystem: true,
-                defaultConfig: {
-                    query: 'SELECT * FROM providers WHERE npi = $1',
-                    parameters: ['{{parsed.PV1.7.1}}'],
-                    store_result_in: 'provider_data',
-                    cache_ttl_seconds: 300
-                }
-            }),
+            // REMOVED: Duplicate enrichment steps - use specialized enrichment steps instead:
+            //   - For age calculation: Use "Script Enrichment" step
+            //   - For UUID generation: Use "Add Metadata" step
+            //   - For API calls: Use "API Enrichment" step (enrich-api)
+            //   - For database lookups: Use "Database Enrichment" step (enrich-database)
 
             // ============================================
             // CONDITIONAL LOGIC STEPS (All Layers)
