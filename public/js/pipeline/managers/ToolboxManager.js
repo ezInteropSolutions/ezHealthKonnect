@@ -332,25 +332,10 @@ class ToolboxManager {
             // MIGRATION (COMPLEX): Use Script Enrichment with JavaScript Date objects for timezone conversions
 
             // ⚠️ TODO: Unit Conversion - Backend implementation required
-            // UNIQUE FUNCTIONALITY: Mathematical unit conversions (lb→kg, F→C, in→cm) with formulas
-            // CANNOT BE REPLACED BY: Field Mapping (no mathematical operations) or Script Enrichment (too complex for simple conversions)
-            // IMPLEMENTATION NEEDED: UnitConversionExecutor with formula evaluation or MathematicalTransformExecutor
-            // KEEP THIS TEMPLATE: Will be used once backend executor is implemented
-            new StepTemplate({
-                id: 'unit-conversion',
-                name: 'Unit Conversion (TODO)',
-                type: 'pre.transformation',
-                description: '⚠️ TODO: Convert units (lb→kg, F→C, in→cm) - requires backend implementation',
-                layer: 'pre',
-                icon: this.getIconForType('pre.transformation'),
-                isSystem: true,
-                defaultConfig: {
-                    conversions: [
-                        { field: 'OBX.5', from: 'lb', to: 'kg', factor: 0.453592 },
-                        { field: 'temp', from: 'F', to: 'C', formula: '(x - 32) * 5/9' }
-                    ]
-                }
-            }),
+            // ❌ REMOVED: Unit Conversion (unit-conversion)
+            // REASON: Decision to remove - conversions can be handled via Script Enrichment for complex cases
+            // MIGRATION: Use Script Enrichment with custom JavaScript for unit conversions as needed
+            // Example: function transform(data) { data.weightKg = data.weightLb * 0.453592; return data; }
 
             // ❌ REMOVED: String Manipulation (string-manipulation)
             // REASON: 100% redundant - Field Mapping already supports all string operations via transforms
