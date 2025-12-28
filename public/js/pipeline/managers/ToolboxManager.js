@@ -306,7 +306,7 @@ class ToolboxManager {
                 name: 'Field Mapping',
                 type: 'core.transformation',
                 description: 'Map source fields to target fields with powerful transforms (trim, upper, lower, substring, replace, regex). Supports HL7 component paths (PID.5.1, PID.5.2) and chained transforms.',
-                layer: 'core',
+                layer: ['pre', 'core'],  // Allow in both pre-processing and core layers
                 icon: this.getIconForType('core.transformation'),
                 isSystem: true,
                 defaultConfig: {
