@@ -601,7 +601,13 @@ class ToolboxManager {
 
         container.innerHTML = '';
 
-        const layerTemplates = this.templates.filter(t => t.layer === layer);
+        // Filter templates - handle both single layer string and array of layers
+        const layerTemplates = this.templates.filter(t => {
+            if (Array.isArray(t.layer)) {
+                return t.layer.includes(layer);
+            }
+            return t.layer === layer;
+        });
 
         layerTemplates.forEach(template => {
             const card = this.createTemplateCard(template);
