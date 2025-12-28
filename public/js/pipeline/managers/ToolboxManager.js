@@ -342,29 +342,16 @@ class ToolboxManager {
             // MIGRATION: Use Field Mapping with transforms: 'trim', 'upper', 'lower', 'substring:start:end', 'replace:old:new', 'regex:pattern'
             // Example: { lhs: 'lastName', rhs: 'PID.5.1', transforms: 'trim, upper, substring:0:50' }
 
-            new StepTemplate({
-                id: 'value-lookup',
-                name: 'Value Lookup Table',
-                type: 'pre.transformation',
-                description: 'Map values using lookup tables (M→Male, F→Female)',
-                layer: 'pre',
-                icon: this.getIconForType('pre.transformation'),
-                isSystem: true,
-                defaultConfig: {
-                    lookups: [
-                        {
-                            field: 'PID.8',
-                            table: {
-                                'M': 'male',
-                                'F': 'female',
-                                'O': 'other',
-                                'U': 'unknown'
-                            },
-                            default: 'unknown'
-                        }
-                    ]
-                }
-            }),
+            // ❌ REMOVED: Value Lookup Table (value-lookup)
+            // REASON: 100% redundant - Switch/Case executor does this + much more
+            // USER INSIGHT: "Value lookup is just static case statement assignments" - correct!
+            // MIGRATION: Use Switch/Case with set_field actions
+            // Example migration:
+            //   OLD: { field: 'PID.8', table: { 'M': 'male', 'F': 'female' }, default: 'unknown' }
+            //   NEW: { field: 'PID.8', cases: [
+            //     { when: 'M', actions: [{ action: 'set_field', field: 'PID.8', value: 'male' }] },
+            //     { when: 'F', actions: [{ action: 'set_field', field: 'PID.8', value: 'female' }] }
+            //   ], default: [{ action: 'set_field', field: 'PID.8', value: 'unknown' }] }
 
             new StepTemplate({
                 id: 'code-system-mapping',
