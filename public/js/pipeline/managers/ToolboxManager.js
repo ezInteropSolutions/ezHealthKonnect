@@ -391,7 +391,7 @@ class ToolboxManager {
                 name: 'If-Then-Else',
                 type: 'pre.logic',
                 description: 'Conditional execution based on rules',
-                layer: 'pre',
+                layer: ['pre', 'core', 'post'],  // Allow in all layers - conditional logic needed everywhere
                 icon: this.getIconForType('pre.logic'),
                 isSystem: true,
                 defaultConfig: {
@@ -415,7 +415,7 @@ class ToolboxManager {
                 name: 'Switch/Case',
                 type: 'pre.logic',
                 description: 'Multiple condition branching',
-                layer: 'pre',
+                layer: ['pre', 'core', 'post'],  // Allow in all layers - conditional logic needed everywhere
                 icon: this.getIconForType('pre.logic'),
                 isSystem: true,
                 defaultConfig: {
@@ -434,7 +434,7 @@ class ToolboxManager {
                 name: 'For Each Loop',
                 type: 'core.logic',
                 description: 'Iterate over array elements',
-                layer: 'core',
+                layer: ['pre', 'core', 'post'],  // Allow in all layers - iteration needed everywhere
                 icon: this.getIconForType('core.logic'),
                 isSystem: true,
                 defaultConfig: {
