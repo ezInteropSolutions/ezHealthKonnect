@@ -5,7 +5,7 @@
 
 const interfaceService = require('../services/interfaceService');
 const auditService = require('../services/auditService');
-const MessageTypeMappingService = require('../services/MessageTypeMappingService');
+const TransformationPipelineService = require('../services/TransformationPipelineService');
 const { v4: uuidv4 } = require('uuid');
 
 class WizardController {
@@ -22,8 +22,8 @@ class WizardController {
         this.checkDuplicateName = this.checkDuplicateName.bind(this);
         this.debugWizardData = this.debugWizardData.bind(this);
 
-        // Initialize the message-type mapping service for HL7-FHIR mapping management
-        this.mappingService = new MessageTypeMappingService();
+        // CANONICAL FLOW: Use transformation pipeline service for mapping storage
+        this.pipelineService = new TransformationPipelineService();
     }
 
     /**
@@ -345,7 +345,7 @@ class WizardController {
                 status: interfaceData.status,
                 sourceConfig: interfaceData.sourceConfig,
                 targetConfig: interfaceData.targetConfig,
-                transformationMapping: interfaceData.transformationMapping
+                transformationMapping: null  // DEPRECATED - using pipeline architecture
             };
 
             console.log('📝 Creating interface record via interfaceService...');
@@ -380,36 +380,22 @@ class WizardController {
                 name: interfaceName
             });
 
-            // Step 2: Save message-type-specific HL7-FHIR mappings using MessageTypeMappingService
-            if (interfaceData.transformationMapping) {
-                console.log('💾 Saving message-type-specific HL7-FHIR mappings...');
+            // Step 2: Create transformation pipeline with HL7→FHIR mapping step
+            console.log('📦 Creating transformation pipeline...');
 
-                try {
-                    const mappingResult = await this.mappingService.saveWizardConfiguration(
-                        interfaceId,
-                        {
-                            messageType: interfaceData.messageType,
-                            transformationMapping: interfaceData.transformationMapping
-                        }
-                    );
+            const pipelineResult = await this.pipelineService.createPipelineForInterface(
+                interfaceId,
+                interfaceData.messageType,
+                interfaceData.name,
+                interfaceData.transformationMapping,
+                userId
+            );
 
-                    console.log('✅ Message-type mappings saved successfully:', {
-                        messageType: mappingResult.messageType,
-                        usesStandardTemplate: mappingResult.usesStandardTemplate,
-                        mappingId: mappingResult.mappingId
-                    });
-
-                } catch (mappingError) {
-                    console.error('⚠️ Failed to save message-type mappings:', mappingError.message);
-                    console.log('📝 Interface was created successfully, but message-type mappings failed');
-                    console.log('🔄 This can be retried later or mappings can be configured manually');
-
-                    // Don't fail the entire operation - interface was created successfully
-                    // The transformation mapping is still stored in the interfaces table as fallback
-                }
-            } else {
-                console.log('ℹ️ No transformation mapping found, skipping message-type mapping save');
-            }
+            console.log('✅ Transformation pipeline created:', {
+                pipelineId: pipelineResult.pipelineId,
+                templateId: pipelineResult.templateId,
+                messageType: interfaceData.messageType
+            });
 
             return {
                 interfaceId: interfaceId,
