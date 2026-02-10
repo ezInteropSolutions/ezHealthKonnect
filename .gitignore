@@ -8,4 +8,5 @@ Ignore local Claude memory file
 .claude/
 .vscode/
 .idea/
+*.md
 
