@@ -13,6 +13,7 @@ import (
 	"ezhealthkonnect/models"
 	"ezhealthkonnect/services/executors/control"
 	"ezhealthkonnect/services/executors/enrichment"
+	"ezhealthkonnect/services/executors/transform"
 	"ezhealthkonnect/services/executors/validation"
 )
 
@@ -58,34 +59,56 @@ func (er *ExecutorRegistry) autoRegisterExecutors() {
 	// Essential OOB executor
 	er.Register(NewPassthroughExecutor())
 
-	// Pre-processing executors - Validation
-	er.Register(validation.NewFieldValidationExecutor())
+	// Validation executors
+	er.Register(validation.NewFieldValidationExecutor()) // field_validation
+	er.Register(validation.NewFHIRValidationExecutor())  // fhir_validation
 
-	// Pre-processing executors - Control Flow
-	er.Register(control.NewIfThenElseExecutor())  // Conditional logic
-	er.Register(control.NewSwitchCaseExecutor())  // Multi-way branching
+	// Control flow executors
+	er.Register(control.NewIfThenElseExecutor())  // if_then_else
+	er.Register(control.NewSwitchCaseExecutor())  // switch_case
+	er.Register(control.NewLoopExecutor())        // control.loop
+	er.Register(control.NewTryCatchExecutor())    // control.try_catch
+	er.Register(control.NewRetryExecutor())       // control.retry
 
-	// Pre-processing executors - Enrichment (Strategy Pattern)
-	er.Register(enrichment.NewAPIEnrichmentExecutor())       // API enrichment
-	er.Register(enrichment.NewDatabaseEnrichmentExecutor(er.db)) // Database enrichment (includes Redis)
-	er.Register(enrichment.NewScriptEnrichmentExecutor())    // Script-based enrichment
+	// Enrichment executors
+	er.Register(enrichment.NewAPIEnrichmentExecutor())           // enrichment.api
+	er.Register(enrichment.NewDatabaseEnrichmentExecutor(er.db)) // enrichment.database
+	er.Register(enrichment.NewScriptEnrichmentExecutor())        // enrichment.script
 
-	// Core executors
+	// Transformation executors
 	hl7FhirExecutor := NewHL7FHIRMappingExecutor(er.db)
-	er.Register(hl7FhirExecutor)
-	// Also register under legacy type for backward compatibility
-	er.executors["core.mapping"] = hl7FhirExecutor
+	er.Register(hl7FhirExecutor)                             // hl7_fhir_transform
+	er.Register(enrichment.NewFieldMappingExecutor())        // field_mapping
 
-	// Field Mapping executor (core.transformation)
-	er.Register(enrichment.NewFieldMappingExecutor())
+	// Data transform executors
+	er.Register(transform.NewDataMaskingExecutor())          // data_masking
+	er.Register(transform.NewRemoveDuplicatesExecutor())     // remove_duplicates
+	er.Register(transform.NewNormalizerExecutor())           // normalizer
 
-	// Post-processing executors
-	er.Register(NewFHIRValidationExecutor())
+	// Connector bridge executors
+	er.Register(transform.NewOutboundConnectorExecutor())    // connector.outbound
+	er.Register(transform.NewInboundConnectorExecutor())     // connector.inbound
 
 	// Custom executors
 	er.Register(NewGenericExecutor())
 
-	log.Println("  ✓ Registered: Passthrough, Field Validation, If-Then-Else, Switch/Case, API Enrichment, Database Enrichment, Script Enrichment, HL7→FHIR Mapping, Field Mapping, FHIR Validation, Generic")
+	// Backward-compat aliases: old layer-prefixed type names → new executors
+	er.executors["pre.validation"] = er.executors["field_validation"]
+	er.executors["core.validation"] = er.executors["field_validation"]
+	er.executors["post.validation"] = er.executors["fhir_validation"]
+	er.executors["pre.logic"] = er.executors["if_then_else"]
+	er.executors["pre.logic.switch"] = er.executors["switch_case"]
+	er.executors["pre.enrichment.api"] = er.executors["enrichment.api"]
+	er.executors["pre.enrichment.database"] = er.executors["enrichment.database"]
+	er.executors["pre.enrichment.script"] = er.executors["enrichment.script"]
+	er.executors["core.mapping"] = hl7FhirExecutor
+	er.executors["hl7_to_fhir_mapping"] = hl7FhirExecutor
+	er.executors["core.transformation"] = er.executors["field_mapping"]
+	er.executors["post.data_masking"] = er.executors["data_masking"]
+	er.executors["post.remove_duplicates"] = er.executors["remove_duplicates"]
+	er.executors["post.normalizer"] = er.executors["normalizer"]
+
+	log.Println("  ✓ All executors registered with backward-compatible aliases")
 }
 
 // Register adds an executor to the registry
@@ -164,7 +187,7 @@ func NewHL7FHIRMappingExecutor(db *sql.DB) *HL7FHIRMappingExecutor {
 }
 
 func (hme *HL7FHIRMappingExecutor) GetStepType() string {
-	return "hl7_to_fhir_mapping"
+	return "hl7_fhir_transform"
 }
 
 func (hme *HL7FHIRMappingExecutor) Execute(
@@ -174,27 +197,48 @@ func (hme *HL7FHIRMappingExecutor) Execute(
 ) (map[string]interface{}, error) {
 
 	log.Printf("  🔄 HL7→FHIR transformation starting...")
+	log.Printf("  🔍 [DEBUG] Transform service initialized: %v", hme.transformService != nil)
+	log.Printf("  🔍 [DEBUG] Database connection: %v", hme.db != nil)
+
+	// Extract the actual HL7 message data from the pipeline context
+	// Pipeline wraps message under "message" key in executeStepWithContext
+	parsedHL7Data := inputData
+	if msg, ok := inputData["message"].(map[string]interface{}); ok {
+		parsedHL7Data = msg
+		log.Printf("  🔍 [DEBUG] Extracted HL7 data from 'message' wrapper")
+	}
 
 	// Get interface ID from config or input
 	interfaceID, _ := step.Config["interface_id"].(string)
 	if interfaceID == "" {
 		interfaceID, _ = inputData["interface_id"].(string)
 	}
+	if interfaceID == "" {
+		interfaceID, _ = parsedHL7Data["interface_id"].(string)
+	}
 
-	messageType, _ := inputData["messageType"].(string)
-	messageID, _ := inputData["message_id"].(string)
-	correlationID, _ := inputData["correlation_id"].(string)
+	messageType, _ := parsedHL7Data["messageType"].(string)
+	if messageType == "" {
+		messageType, _ = inputData["messageType"].(string)
+	}
+	messageID, _ := parsedHL7Data["message_id"].(string)
+	correlationID, _ := parsedHL7Data["correlation_id"].(string)
+
+	log.Printf("  🔍 [DEBUG] MessageType: '%s', InterfaceID: '%s'", messageType, interfaceID)
+	log.Printf("  🔍 [DEBUG] MessageID: '%s', CorrelationID: '%s'", messageID, correlationID)
 
 	// Call existing transformation service using Transform method
 	req := &TransformRequest{
-		ParsedHL7Data: inputData,
+		ParsedHL7Data: parsedHL7Data,
 		MessageType:   messageType,
 		FHIRVersion:   "R4",
 		CreateBundle:  true,
 		InterfaceID:   interfaceID,
 	}
 
+	log.Printf("  🔍 [DEBUG] Calling Transform service...")
 	resp, err := hme.transformService.Transform(ctx, req)
+	log.Printf("  🔍 [DEBUG] Transform returned - err: %v, resp: %v", err, resp != nil)
 	if err != nil {
 		return nil, fmt.Errorf("HL7→FHIR transformation failed: %w", err)
 	}
@@ -232,10 +276,25 @@ func (hme *HL7FHIRMappingExecutor) Execute(
 	// Store delivery payload (this will be extracted by engine for transmission)
 	outputData["_deliveryPayload"] = deliveryPayload
 
-	// Keep transformed content for storage
+	// Keep transformed content for storage and downstream access
 	outputData["fhirBundle"] = resp.Bundle
 
-	log.Printf("  ✅ HL7→FHIR transformation complete with delivery payload")
+	// Also store in the message so downstream steps (FHIR Validation, etc.) can access it
+	if msg, ok := outputData["message"].(map[string]interface{}); ok {
+		msg["fhirBundle"] = resp.Bundle
+	}
+
+	// STANDARDIZED: Variables (the FHIR bundle) + execution details
+	outputData["_stepOutput"] = map[string]interface{}{
+		"fhirBundle": resp.Bundle,
+	}
+	outputData["_executionDetails"] = map[string]interface{}{
+		"format":         "fhir-r4",
+		"resourceType":   resp.Bundle["resourceType"],
+		"transformation": "hl7_to_fhir",
+	}
+
+	log.Printf("  ✅ HL7→FHIR transformation complete with delivery payload and step output")
 
 	return outputData, nil
 }
@@ -431,48 +490,7 @@ func (hme *HL7FHIRMappingExecutor) Validate(step *models.TransformationStep) err
 // FHIR VALIDATION EXECUTOR
 // ===============================================================
 
-// FHIRValidationExecutor validates FHIR bundles
-type FHIRValidationExecutor struct{}
-
-func NewFHIRValidationExecutor() *FHIRValidationExecutor {
-	return &FHIRValidationExecutor{}
-}
-
-func (fve *FHIRValidationExecutor) GetStepType() string {
-	return "post.validation"
-}
-
-func (fve *FHIRValidationExecutor) Execute(
-	ctx context.Context,
-	step *models.TransformationStep,
-	inputData map[string]interface{},
-) (map[string]interface{}, error) {
-
-	// Extract FHIR bundle
-	fhirBundle, ok := inputData["fhirBundle"].(map[string]interface{})
-	if !ok {
-		return nil, fmt.Errorf("no fhirBundle found for validation")
-	}
-
-	// Basic validation
-	resourceType, _ := fhirBundle["resourceType"].(string)
-	if resourceType != "Bundle" {
-		return nil, fmt.Errorf("invalid FHIR resource type: %s (expected Bundle)", resourceType)
-	}
-
-	// TODO: Add comprehensive FHIR validation
-	// - Validate against R4 schema
-	// - Check required fields
-	// - Validate references
-
-	log.Printf("  ✅ FHIR validation passed")
-
-	return inputData, nil
-}
-
-func (fve *FHIRValidationExecutor) Validate(step *models.TransformationStep) error {
-	return nil
-}
+// FHIRValidationExecutor - moved to services/executors/validation/fhir_validation_executor.go
 
 // ===============================================================
 // GENERIC EXECUTOR (Fallback)

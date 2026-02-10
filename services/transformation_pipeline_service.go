@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"ezhealthkonnect/models"
+	"ezhealthkonnect/services/executors/control"
 	"fmt"
 	"log"
 	"time"
@@ -16,6 +17,7 @@ import (
 type TransformationPipelineService struct {
 	db               *sql.DB
 	executorRegistry *ExecutorRegistry
+	branchResolver   *BranchResolverFactory            // OOP-based branch resolution
 	executors        map[string]TransformationExecutor // Legacy - kept for compatibility
 }
 
@@ -29,7 +31,8 @@ type TransformationExecutor interface {
 func NewTransformationPipelineService(db *sql.DB) *TransformationPipelineService {
 	service := &TransformationPipelineService{
 		db:               db,
-		executorRegistry: NewExecutorRegistry(db), // Use ExecutorRegistry with all built-in executors
+		executorRegistry: NewExecutorRegistry(db),     // Use ExecutorRegistry with all built-in executors
+		branchResolver:   NewBranchResolverFactory(),  // OOP-based branch resolution for conditionals
 		executors:        make(map[string]TransformationExecutor),
 	}
 
@@ -82,22 +85,17 @@ func (tps *TransformationPipelineService) GetPipeline(ctx context.Context, inter
 	return pipeline, nil
 }
 
-// GetPipelineSteps retrieves all steps for a pipeline, ordered by layer and sequence
+// GetPipelineSteps retrieves all steps for a pipeline, ordered by sequence
 func (tps *TransformationPipelineService) GetPipelineSteps(ctx context.Context, pipelineID string) ([]models.TransformationStep, error) {
 	query := `
 		SELECT id, pipeline_id, step_name, step_alias, step_type, sequence, layer, required, timeout_ms,
 		       enabled, config, script_type, script_content, on_error_strategy, execution_mode,
+		       position_x, position_y, parent_conditional_step_id, branch_type, case_value,
+		       parent_step_id, container_zone,
 		       created_at, updated_at
 		FROM transformation_steps
 		WHERE pipeline_id = $1 AND enabled = true
-		ORDER BY
-		    CASE layer
-		        WHEN 'pre' THEN 1
-		        WHEN 'core' THEN 2
-		        WHEN 'post' THEN 3
-		        ELSE 4
-		    END,
-		    sequence ASC
+		ORDER BY sequence ASC
 	`
 
 	rows, err := tps.db.QueryContext(ctx, query, pipelineID)
@@ -127,6 +125,13 @@ func (tps *TransformationPipelineService) GetPipelineSteps(ctx context.Context, 
 			&step.ScriptContent,
 			&step.OnErrorStrategy,
 			&step.ExecutionMode,
+			&step.PositionX,
+			&step.PositionY,
+			&step.ParentConditionalStepID,
+			&step.BranchType,
+			&step.CaseValue,
+			&step.ParentStepID,
+			&step.ContainerZone,
 			&step.CreatedAt,
 			&step.UpdatedAt,
 		)
@@ -251,8 +256,49 @@ func (tps *TransformationPipelineService) executePipeline(
 		TotalTimeMs:       0,
 	}
 
+	// Build step index for conditional routing lookup
+	stepIndex := make(map[string]int) // stepID -> index in pipeline.Steps
+	stepByID := make(map[string]*models.TransformationStep) // stepID -> step
+	for i, step := range pipeline.Steps {
+		stepIndex[step.ID] = i
+		stepCopy := step // Copy to avoid closure capture issues
+		stepByID[step.ID] = &stepCopy
+	}
+
+	// Create child executor callback for loop steps
+	childExecutor := tps.createChildExecutorCallback(ctx, stepByID, execContext)
+
 	// Execute steps in order (already ordered by layer + sequence)
-	for _, step := range pipeline.Steps {
+	// Support conditional routing via _routing.nextStep and _routing.skipSteps
+	skipToStepID := ""                    // If set, skip steps until we reach this step ID
+	skipStepIDs := make(map[string]bool)  // Set of step IDs to skip (for branch exclusion)
+	loopChildStepIDs := make(map[string]bool) // Child steps already executed by loop containers
+
+	for i := 0; i < len(pipeline.Steps); i++ {
+		step := pipeline.Steps[i]
+
+		// Check if this step should be skipped (branch exclusion)
+		if skipStepIDs[step.ID] {
+			fmt.Printf("⏭️  Skipping step (branch excluded): %s\n", step.StepName)
+			continue
+		}
+
+		// ✅ Skip child steps already executed by a loop container
+		if loopChildStepIDs[step.ID] {
+			fmt.Printf("⏭️  Skipping step (executed by loop): %s\n", step.StepName)
+			continue
+		}
+
+		// Handle conditional routing - skip steps until we reach the target
+		if skipToStepID != "" {
+			if step.ID != skipToStepID {
+				fmt.Printf("⏭️  Skipping step (routing): %s (waiting for %s)\n", step.StepName, skipToStepID)
+				continue
+			}
+			// Found the target step, reset skip mode
+			fmt.Printf("🎯 Reached routing target: %s\n", step.StepName)
+			skipToStepID = ""
+		}
 		stepStartTime := time.Now()
 
 		fmt.Printf("🔄 Executing step: %s (%s)\n", step.StepName, step.StepType)
@@ -261,6 +307,76 @@ func (tps *TransformationPipelineService) executePipeline(
 		executor := tps.executorRegistry.GetExecutor(step.StepType)
 		if executor == nil {
 			return nil, fmt.Errorf("no executor available for step type: %s", step.StepType)
+		}
+
+		// ✅ LOOP HANDLING: Inject child executor callback and mark child steps
+		if step.StepType == "control.loop" {
+			if loopExecutor, ok := executor.(*control.LoopExecutor); ok {
+				loopExecutor.SetChildExecutor(childExecutor)
+				fmt.Printf("🔄 Injected child executor into loop step: %s\n", step.StepName)
+			}
+			// Mark child steps so they're skipped in the main pipeline flow
+			if childIDs, ok := step.Config["childStepIds"].([]interface{}); ok {
+				for _, cid := range childIDs {
+					if cidStr, ok := cid.(string); ok {
+						loopChildStepIDs[cidStr] = true
+						fmt.Printf("   📌 Marked child step for loop-only execution: %s\n", cidStr)
+					}
+				}
+			}
+			// Also handle []string format
+			if childIDs, ok := step.Config["childStepIds"].([]string); ok {
+				for _, cidStr := range childIDs {
+					loopChildStepIDs[cidStr] = true
+					fmt.Printf("   📌 Marked child step for loop-only execution: %s\n", cidStr)
+				}
+			}
+		}
+
+		// ✅ TRY-CATCH HANDLING: Inject child executor callback and mark child steps
+		if step.StepType == "control.try_catch" {
+			if tcExecutor, ok := executor.(*control.TryCatchExecutor); ok {
+				tcExecutor.SetChildExecutor(childExecutor)
+				fmt.Printf("🛡️ Injected child executor into try-catch step: %s\n", step.StepName)
+			}
+			for _, key := range []string{"trySteps", "catchSteps", "finallySteps"} {
+				if ids, ok := step.Config[key].([]interface{}); ok {
+					for _, cid := range ids {
+						if cidStr, ok := cid.(string); ok {
+							loopChildStepIDs[cidStr] = true
+							fmt.Printf("   📌 Marked %s child for container-only execution: %s\n", key, cidStr)
+						}
+					}
+				}
+				if ids, ok := step.Config[key].([]string); ok {
+					for _, cidStr := range ids {
+						loopChildStepIDs[cidStr] = true
+						fmt.Printf("   📌 Marked %s child for container-only execution: %s\n", key, cidStr)
+					}
+				}
+			}
+		}
+
+		// ✅ RETRY HANDLING: Inject child executor callback and mark child steps
+		if step.StepType == "control.retry" {
+			if retryExecutor, ok := executor.(*control.RetryExecutor); ok {
+				retryExecutor.SetChildExecutor(childExecutor)
+				fmt.Printf("🔁 Injected child executor into retry step: %s\n", step.StepName)
+			}
+			if childIDs, ok := step.Config["childSteps"].([]interface{}); ok {
+				for _, cid := range childIDs {
+					if cidStr, ok := cid.(string); ok {
+						loopChildStepIDs[cidStr] = true
+						fmt.Printf("   📌 Marked child step for retry-only execution: %s\n", cidStr)
+					}
+				}
+			}
+			if childIDs, ok := step.Config["childSteps"].([]string); ok {
+				for _, cidStr := range childIDs {
+					loopChildStepIDs[cidStr] = true
+					fmt.Printf("   📌 Marked child step for retry-only execution: %s\n", cidStr)
+				}
+			}
 		}
 
 		// Execute step with timeout (legacy executors still use old signature)
@@ -386,6 +502,42 @@ func (tps *TransformationPipelineService) executePipeline(
 			}
 			result.OutputData = execContext.Message
 			fmt.Printf("✅ Step completed: %s (took %dms)\n", step.StepName, stepDuration.Milliseconds())
+
+			// Check for conditional routing directive from this step
+			// Supports both _routing.nextStep (jump to) and _routing.skipSteps (skip specific steps)
+			if routing, ok := outputData["_routing"].(map[string]interface{}); ok {
+				// Handle nextStep - jump to a specific step, skip everything in between
+				if nextStepID, ok := routing["nextStep"].(string); ok && nextStepID != "" {
+					fmt.Printf("🔀 Conditional routing detected: jumping to step %s\n", nextStepID)
+					skipToStepID = nextStepID
+				}
+
+				// Handle skipSteps - mark specific steps to be skipped (branch exclusion)
+				// This is used for conditional branches where FALSE branch steps should be skipped
+				if stepsToSkip, ok := routing["skipSteps"].([]interface{}); ok && len(stepsToSkip) > 0 {
+					for _, stepID := range stepsToSkip {
+						if sid, ok := stepID.(string); ok {
+							skipStepIDs[sid] = true
+							fmt.Printf("🚫 Marking step for skip (branch exclusion): %s\n", sid)
+						}
+					}
+				}
+				// Also support []string format (from Go code)
+				if stepsToSkip, ok := routing["skipSteps"].([]string); ok && len(stepsToSkip) > 0 {
+					for _, stepID := range stepsToSkip {
+						skipStepIDs[stepID] = true
+						fmt.Printf("🚫 Marking step for skip (branch exclusion): %s\n", stepID)
+					}
+				}
+
+				// OOP-BASED BRANCH RESOLUTION
+				// Use BranchResolver to determine which steps to skip based on routing decision
+				// Supports both IfThenElse (branchTaken) and Switch/Case (caseMatched)
+				stepsToAutoSkip := tps.branchResolver.GetStepsToSkip(&step, routing, pipeline.Steps)
+				for _, stepID := range stepsToAutoSkip {
+					skipStepIDs[stepID] = true
+				}
+			}
 		}
 
 		result.TransformationLog = append(result.TransformationLog, stepLog)
@@ -399,6 +551,44 @@ func (tps *TransformationPipelineService) executePipeline(
 		result.TotalTimeMs, len(execContext.StepOutputs))
 
 	return result, nil
+}
+
+// createChildExecutorCallback creates a callback function for loop steps to execute child steps
+// This enables loops to actually execute their child steps and collect outputs
+func (tps *TransformationPipelineService) createChildExecutorCallback(
+	ctx context.Context,
+	stepByID map[string]*models.TransformationStep,
+	execContext *models.PipelineExecutionContext,
+) control.ChildStepExecutor {
+	return func(
+		childCtx context.Context,
+		stepID string,
+		inputData map[string]interface{},
+	) (map[string]interface{}, string, error) {
+		// Look up the child step
+		step, exists := stepByID[stepID]
+		if !exists {
+			return nil, "", fmt.Errorf("child step not found: %s", stepID)
+		}
+
+		log.Printf("     🔧 Executing child step: %s (%s)", step.StepName, step.StepType)
+
+		// Get executor for the child step type
+		executor := tps.executorRegistry.GetExecutor(step.StepType)
+		if executor == nil {
+			return nil, step.StepName, fmt.Errorf("no executor for child step type: %s", step.StepType)
+		}
+
+		// Execute the child step with the full input data (includes message + loop context)
+		outputData, err := executor.Execute(childCtx, step, inputData)
+		if err != nil {
+			return nil, step.StepName, err
+		}
+
+		// Return the full output data for chaining to next child step
+		// The loop executor will use the step name as the aggregation key
+		return outputData, step.StepName, nil
+	}
 }
 
 // createExecutionRecord creates a new execution record in the database
@@ -496,8 +686,9 @@ func (tps *TransformationPipelineService) CreateStep(ctx context.Context, step *
 		INSERT INTO transformation_steps (
 			id, pipeline_id, step_name, step_type, sequence, layer, required,
 			timeout_ms, enabled, config, script_type, script_content,
-			on_error_strategy, execution_mode, created_at, updated_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+			on_error_strategy, execution_mode, parent_step_id, container_zone,
+			created_at, updated_at
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
 	`
 
 	_, err = tps.db.ExecContext(ctx, query,
@@ -515,6 +706,8 @@ func (tps *TransformationPipelineService) CreateStep(ctx context.Context, step *
 		step.ScriptContent,
 		step.OnErrorStrategy,
 		step.ExecutionMode,
+		step.ParentStepID,
+		step.ContainerZone,
 		step.CreatedAt,
 		step.UpdatedAt,
 	)

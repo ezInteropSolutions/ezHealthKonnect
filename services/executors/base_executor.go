@@ -70,6 +70,79 @@ func (b *BaseExecutor) PostExecute(ctx context.Context, step *models.Transformat
 	}
 }
 
+// ===============================================================
+// STANDARDIZED STEP OUTPUT METHODS
+// ===============================================================
+// All executors MUST use these methods to ensure consistent output structure:
+//   - step_output: Contains ONLY user-created variables
+//   - step_metadata: Contains duration_ms, success, plus executor-specific details
+//   - step_error: Only present on failure
+//
+// Example final output:
+//   {
+//     "switch_case": {
+//       "step_output": { "male_case": "1" },
+//       "step_metadata": {
+//         "duration_ms": 5,
+//         "success": true,
+//         "field_evaluated": "PID.8",
+//         "case_matched": true
+//       }
+//     }
+//   }
+
+// SetOutputVariables sets ONLY user-created variables as step output
+// Use this when step produces variables but no special execution details
+func (b *BaseExecutor) SetOutputVariables(inputData map[string]interface{}, variables map[string]interface{}) {
+	if variables == nil {
+		variables = make(map[string]interface{})
+	}
+	inputData["_stepOutput"] = variables
+	log.Printf("   📤 Step output: %d variables: %v", len(variables), getSimpleMapKeys(variables))
+}
+
+// SetStepOutputWithDetails sets both user variables AND execution details
+// STANDARDIZED: Use this method for all executors that need to report execution info
+// - variables: User-created data (goes to step_output)
+// - executionDetails: Executor-specific info (merged into step_metadata by controller)
+func (b *BaseExecutor) SetStepOutputWithDetails(inputData map[string]interface{}, variables map[string]interface{}, executionDetails map[string]interface{}) {
+	if variables == nil {
+		variables = make(map[string]interface{})
+	}
+	inputData["_stepOutput"] = variables
+
+	if executionDetails != nil && len(executionDetails) > 0 {
+		inputData["_executionDetails"] = executionDetails
+		log.Printf("   📤 Step output: %d variables, %d execution details", len(variables), len(executionDetails))
+	} else {
+		log.Printf("   📤 Step output: %d variables", len(variables))
+	}
+}
+
+// DEPRECATED: Use SetOutputVariables or SetStepOutputWithDetails instead
+// SetSimpleStepOutput is kept for backward compatibility
+func (b *BaseExecutor) SetSimpleStepOutput(inputData map[string]interface{}, output map[string]interface{}) {
+	b.SetOutputVariables(inputData, output)
+}
+
+// DEPRECATED: Use SetStepOutputWithDetails instead
+// SetStepOutputWithMetadata is kept for backward compatibility
+func (b *BaseExecutor) SetStepOutputWithMetadata(inputData map[string]interface{}, output map[string]interface{}, metadata map[string]interface{}) {
+	b.SetStepOutputWithDetails(inputData, output, metadata)
+}
+
+// Helper function to get map keys for logging
+func getSimpleMapKeys(m map[string]interface{}) []string {
+	if m == nil {
+		return []string{}
+	}
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
+}
+
 // ValidateConfig is a helper for validating required config fields
 func (b *BaseExecutor) ValidateConfig(step *models.TransformationStep, requiredFields []string) error {
 	if step.Config == nil {
@@ -153,8 +226,15 @@ func GetNestedValue(data map[string]interface{}, path string) interface{} {
 		return nil
 	}
 
+	// CRITICAL: If data is wrapped in "message" key (from TransformationPipelineService),
+	// unwrap it first to access the actual message data
+	actualData := data
+	if messageData, ok := data["message"].(map[string]interface{}); ok {
+		actualData = messageData
+	}
+
 	// Try direct key first (for simple paths)
-	if val, ok := data[path]; ok {
+	if val, ok := actualData[path]; ok {
 		return val
 	}
 
@@ -162,7 +242,7 @@ func GetNestedValue(data map[string]interface{}, path string) interface{} {
 	// Example: "PID.3" looks up enhancedSegments["PID"].Fields for Key="PID.3"
 	// Example: "PID.5.1" looks up field PID.5 then searches its Subfields for Key="PID.5.1"
 	if isHL7FieldKey(path) {
-		return getHL7FieldValue(data, path)
+		return getHL7FieldValue(actualData, path)
 	}
 
 	// LEGACY SUPPORT: Convert old format to new format automatically
@@ -262,15 +342,17 @@ func EnsureMapExists(data map[string]interface{}, path string) map[string]interf
 // isHL7FieldKey checks if a path looks like an HL7 field key (e.g., "PID.3", "MSH.9", "PID.5.1")
 func isHL7FieldKey(path string) bool {
 	// HL7 field keys have format: SEGMENT.FIELD or SEGMENT.FIELD.SUBFIELD
-	// Examples: PID.3, MSH.9, PID.5.1, PID.13.4
+	// Examples: PID.3, MSH.9, PID.5.1, PID.13.4, IN1.2, NK1.4
 	parts := strings.Split(path, ".")
 	if len(parts) < 2 || len(parts) > 3 {
 		return false
 	}
-	
-	// First part should be 3-letter segment name (uppercase)
+
+	// First part should be 2-3 uppercase letters (segment name)
+	// Common 3-letter: MSH, PID, PV1, OBX, ORC, etc.
+	// Some 2-letter: IN (insurance), NK (next of kin) - though usually IN1, NK1
 	segment := parts[0]
-	if len(segment) != 3 {
+	if len(segment) < 2 || len(segment) > 3 {
 		return false
 	}
 	for _, c := range segment {
@@ -278,19 +360,19 @@ func isHL7FieldKey(path string) bool {
 			return false
 		}
 	}
-	
+
 	// Second part should be a number (field position)
 	if _, err := strconv.Atoi(parts[1]); err != nil {
 		return false
 	}
-	
+
 	// Third part (if exists) should be a number (subfield position)
 	if len(parts) == 3 {
 		if _, err := strconv.Atoi(parts[2]); err != nil {
 			return false
 		}
 	}
-	
+
 	return true
 }
 
@@ -306,11 +388,14 @@ func getHL7FieldValue(data map[string]interface{}, fieldKey string) interface{} 
 	// 1. Type-assert enhancedSegments as map[string]hl7.EnhancedSegment
 	enhancedSegsRaw, ok := data["enhancedSegments"]
 	if !ok {
+		log.Printf("⚠️  [getHL7FieldValue] enhancedSegments not found in data for field %s", fieldKey)
 		return nil
 	}
 
 	enhancedSegs, ok := enhancedSegsRaw.(map[string]hl7.EnhancedSegment)
 	if !ok {
+		log.Printf("⚠️  [getHL7FieldValue] Type assertion failed for field %s. Got type: %T", fieldKey, enhancedSegsRaw)
+		log.Printf("⚠️  [getHL7FieldValue] This means enhancedSegments lost its Go type (likely JSON marshaling)")
 		return nil
 	}
 
@@ -454,4 +539,68 @@ func SetNestedValue(data map[string]interface{}, path string, value interface{})
 	// Set the final value
 	finalKey := parts[len(parts)-1]
 	current[finalKey] = value
+}
+
+// ===============================================================
+// VARIABLE PROVIDER HELPERS
+// ===============================================================
+
+// BuildVariableDefinition is a helper to create a VariableDefinition with sensible defaults
+// This reduces boilerplate when executors implement VariableProvider interface
+func (b *BaseExecutor) BuildVariableDefinition(
+	name string,
+	basePath string,
+	description string,
+	options ...func(*models.VariableDefinition),
+) models.VariableDefinition {
+	varDef := models.VariableDefinition{
+		Name:         name,
+		Path:         fmt.Sprintf("%s.%s", basePath, name),
+		DataType:     "string", // Default to string
+		Description:  description,
+		UsageExample: fmt.Sprintf(`getNestedValue(input, "%s.%s")`, basePath, name),
+		Category:     b.metadata.Category,
+	}
+
+	// Apply optional customizations
+	for _, option := range options {
+		option(&varDef)
+	}
+
+	return varDef
+}
+
+// WithDataType sets the data type for a variable definition
+func WithDataType(dataType string) func(*models.VariableDefinition) {
+	return func(v *models.VariableDefinition) {
+		v.DataType = dataType
+	}
+}
+
+// WithSourceField sets the source field for a variable definition
+func WithSourceField(sourceField string) func(*models.VariableDefinition) {
+	return func(v *models.VariableDefinition) {
+		v.SourceField = sourceField
+	}
+}
+
+// WithCategory sets the category for a variable definition
+func WithCategory(category string) func(*models.VariableDefinition) {
+	return func(v *models.VariableDefinition) {
+		v.Category = category
+	}
+}
+
+// WithExamples sets examples for a variable definition
+func WithExamples(examples ...string) func(*models.VariableDefinition) {
+	return func(v *models.VariableDefinition) {
+		v.Examples = examples
+	}
+}
+
+// WithRequired marks a variable as required
+func WithRequired(required bool) func(*models.VariableDefinition) {
+	return func(v *models.VariableDefinition) {
+		v.Required = required
+	}
 }

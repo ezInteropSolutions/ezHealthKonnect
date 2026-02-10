@@ -77,7 +77,7 @@
     function checkDependencies() {
         const required = [
             'VisualPipeline',
-            'VisualLayer',
+            // VisualLayer removed - layer system eliminated
             'VisualExecutionGroup',
             'VisualStep',
             'StepTemplate',

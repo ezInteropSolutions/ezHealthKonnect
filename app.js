@@ -213,7 +213,8 @@ app.use('/api/hl7', forwardToGo);
 app.use('/api/system', forwardToGo);
 app.use('/api/processing', forwardToGo);  // NEW: Processing engine routes
 app.use('/api/mllp', forwardToGo);        // NEW: MLLP connectivity routes
-app.use('/api/pipeline', forwardToGo);    // NEW: Generic pipeline routes (reference variables, etc.)
+app.use('/api/connectivity', forwardToGo); // Connector types + interface connectivity
+app.post('/api/pipeline/reference-variables', forwardToGo);  // Exact match - avoid intercepting /api/pipelines/*
 
 // Database query testing routes - use explicit route matching
 app.post('/api/database/test-query', forwardToGo);  // NEW: Database query testing

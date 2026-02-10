@@ -17,6 +17,10 @@ class PipelineBuilder {
         this.toolboxManager = null;
         this.propertiesPanel = null;
         this.layerContainer = null;
+        this.flowchartRenderer = null;
+
+        // View mode state
+        this.viewMode = 'flowchart'; // Default to flowchart (list disabled)
 
         this.init();
     }
@@ -67,6 +71,24 @@ class PipelineBuilder {
         this.propertiesPanel = new PropertiesPanel(this);
         this.layerContainer = new LayerContainer(this);
         this.toolboxManager = new ToolboxManager(this);
+
+        // Initialize flowchart renderer - V2 (horizontal swim lanes)
+        const canvasWrapper = document.getElementById('canvasWrapper');
+        if (canvasWrapper) {
+            // Toggle between V1 and V2 here
+            const useV2 = true; // Set to true to use new horizontal layout
+
+            if (useV2) {
+                this.flowchartRenderer = new FlowchartOrchestratorV2(canvasWrapper, this);
+                console.log('✅ Using Flowchart V2 (Horizontal Swim Lanes)');
+            } else {
+                this.flowchartRenderer = new FlowchartRenderer(canvasWrapper, this);
+                console.log('✅ Using Flowchart V1 (Vertical Layout)');
+            }
+        }
+
+        // Load view mode preference
+        this.loadViewModePreference();
 
         // Make PropertiesPanel globally accessible for row click handlers
         window.propertiesPanel = this.propertiesPanel;
@@ -122,8 +144,9 @@ class PipelineBuilder {
                 });
             }
 
-            // Render pipeline
-            this.renderPipeline();
+            // Render in current view mode (flowchart by default)
+            console.log('🔄 About to switch view mode to:', this.viewMode);
+            this.switchViewMode(this.viewMode, true); // Force initial render
             this.isSaved = true;
 
         } catch (error) {
@@ -131,7 +154,7 @@ class PipelineBuilder {
             this.pipeline = new VisualPipeline({
                 name: 'New Pipeline'
             });
-            this.renderPipeline();
+            this.switchViewMode(this.viewMode, true); // Force initial render
         }
     }
 
@@ -139,13 +162,19 @@ class PipelineBuilder {
      * Render pipeline to canvas
      */
     renderPipeline() {
-        this.layerContainer.renderAllLayers();
+        this.layerContainer.renderCanvas();
         this.updateHeaderInfo();
 
         // Redraw connections after render
         setTimeout(() => {
             this.canvasRenderer.redrawAllConnections();
         }, 100);
+
+        // If flowchart mode is active, also re-render flowchart
+        if (this.viewMode === 'flowchart') {
+            console.log('🔄 Re-rendering flowchart after pipeline load');
+            this.renderFlowchart();
+        }
     }
 
     /**
@@ -187,16 +216,16 @@ class PipelineBuilder {
             testBtn.addEventListener('click', () => this.openTestModal());
         }
 
-        // Execution mode toggle
-        const parallelBtn = document.getElementById('parallelModeBtn');
-        const inlineBtn = document.getElementById('inlineModeBtn');
+        // View mode toggle (List vs Flowchart)
+        const listViewBtn = document.getElementById('listViewBtn');
+        const flowchartViewBtn = document.getElementById('flowchartViewBtn');
 
-        if (parallelBtn) {
-            parallelBtn.addEventListener('click', () => this.setExecutionMode('parallel'));
+        if (listViewBtn) {
+            listViewBtn.addEventListener('click', () => this.switchViewMode('list'));
         }
 
-        if (inlineBtn) {
-            inlineBtn.addEventListener('click', () => this.setExecutionMode('inline'));
+        if (flowchartViewBtn) {
+            flowchartViewBtn.addEventListener('click', () => this.switchViewMode('flowchart'));
         }
 
         // Auto layout
@@ -292,9 +321,11 @@ class PipelineBuilder {
             // Display results with enhanced FHIR resource rendering
             resultsContent.innerHTML = this.renderTestResults(result);
 
+            // Check success field from test response
+            const isSuccess = result.success === true;
             this.dragDropManager.showNotification(
-                result.success ? 'Test passed' : 'Test failed',
-                result.success ? 'success' : 'error'
+                isSuccess ? 'Test passed' : 'Test failed',
+                isSuccess ? 'success' : 'error'
             );
 
         } catch (error) {
@@ -330,30 +361,60 @@ class PipelineBuilder {
      * Render test results with proper FHIR resource display
      */
     renderTestResults(result) {
-        // Extract data from correct structure (Go backend returns execution_results, final_output, errors, warnings)
-        const stepsExecuted = result.execution_results?.length || 0;
-        const finalOutput = result.final_output || {};
-        const validationErrors = result.errors || [];
-        const validationWarnings = result.warnings || [];
+        // STANDARDIZED response format:
+        // - input: MessageContext (what came in)
+        // - output: MessageContext (what went out)
+        // - steps: Object keyed by step name { "stepName": { step_output: {...}, step_metadata: { duration_ms, success } } }
+        // - success: boolean
 
-        // Find the mapping step to get resources and validation errors
+        const stepsExecuted = result.steps ? Object.keys(result.steps).length : 0;
+
+        // Extract final output from MessageContext
+        const finalOutput = result.output?.payload || result.output || {};
+
+        const validationErrors = result.error ? [result.error] : [];
+        const validationWarnings = [];
+
+        // Find FHIR bundle from steps
         let fhirBundle = null;
         let resourcesCreated = [];
         let mappingValidationErrors = [];
 
-        if (result.execution_results) {
-            const mappingStep = result.execution_results.find(r => r.step_type === 'core.mapping');
-            if (mappingStep && mappingStep.output) {
-                fhirBundle = mappingStep.output.fhir_bundle;
-                resourcesCreated = mappingStep.output.resources_created || [];
-                mappingValidationErrors = mappingStep.output.validation_errors || [];
+        if (result.steps) {
+            // Check HL7→FHIR Transform step - using STANDARDIZED structure
+            const transformStep = result.steps['hl7_fhir_transform'] || result.steps['hl7_to_fhir_transform'];
+            if (transformStep?.step_output?.fhir_bundle) {
+                fhirBundle = transformStep.step_output.fhir_bundle;
+            }
+
+            // Check Field Mapping step - using STANDARDIZED structure
+            const mappingStep = result.steps['field_mapping'];
+            if (mappingStep?.step_output) {
+                resourcesCreated = mappingStep.step_output.resources_created || [];
+                mappingValidationErrors = mappingStep.step_output.validation_errors || [];
             }
         }
 
-        // Also check final_output for bundle
+        // Also check final output for bundle
         if (!fhirBundle && finalOutput.fhir_bundle) {
             fhirBundle = finalOutput.fhir_bundle;
         }
+
+        // Also check if finalOutput IS a FHIR bundle
+        if (!fhirBundle && finalOutput.resourceType === 'Bundle') {
+            fhirBundle = finalOutput;
+        }
+
+        // Check if test passed
+        const isSuccess = result.success === true;
+
+        // Calculate total execution time from all steps - using STANDARDIZED structure
+        let totalTimeMs = 0;
+        if (result.steps) {
+            totalTimeMs = Object.values(result.steps).reduce((sum, step) =>
+                sum + (step.step_metadata?.duration_ms || step.duration_ms || 0), 0);
+        }
+        const executionTimeMs = totalTimeMs > 0 ? totalTimeMs : 'N/A';
 
         let html = `
             <div style="margin-bottom: 15px; text-align: right;">
@@ -361,16 +422,76 @@ class PipelineBuilder {
                     <i class="fas fa-redo"></i> Run Test Again
                 </button>
             </div>
-            <div class="test-result ${result.success ? 'success' : 'error'}">
+            <div class="test-result ${isSuccess ? 'success' : 'error'}">
                 <h4>
-                    <i class="fas fa-${result.success ? 'check-circle' : 'times-circle'}"></i>
-                    ${result.success ? 'Test Passed' : 'Test Failed'}
+                    <i class="fas fa-${isSuccess ? 'check-circle' : 'times-circle'}"></i>
+                    ${isSuccess ? 'Test Passed' : 'Test Failed'}
                 </h4>
-                <p><strong>Execution Time:</strong> ${result.execution_time_ms || 'N/A'}ms</p>
+                <p><strong>Execution Time:</strong> ${executionTimeMs}ms</p>
                 <p><strong>Steps Executed:</strong> ${stepsExecuted}</p>
-                ${result.error ? `<p class="error-message"><strong>Error:</strong> ${this.escapeHtml(result.error)}</p>` : ''}
+                <p><strong>Status:</strong> ${result.status || 'unknown'}</p>
+                ${result.errors?.length > 0 ? `<p class="error-message"><strong>Errors:</strong> ${result.errors.length} error(s) occurred</p>` : ''}
             </div>
         `;
+
+        // Render per-step results with pass/fail indicators
+        console.log('[TestResults] result keys:', Object.keys(result));
+        console.log('[TestResults] typeof result.steps:', typeof result.steps);
+        if (result.steps) {
+            console.log('[TestResults] step names:', Object.keys(result.steps));
+            const firstKey = Object.keys(result.steps)[0];
+            if (firstKey) console.log('[TestResults] first step structure:', JSON.stringify(result.steps[firstKey], null, 2).substring(0, 500));
+        } else {
+            console.log('[TestResults] NO steps field! Full result keys:', JSON.stringify(result, null, 2).substring(0, 2000));
+        }
+        if (result.steps && Object.keys(result.steps).length > 0) {
+            const stepEntries = Object.entries(result.steps);
+            // Support both formats: step_metadata.success (TransformationTestController) and flat success (PipelineTestController)
+            const getSuccess = (s) => s.step_metadata?.success ?? s.success ?? true;
+            const failedCount = stepEntries.filter(([, s]) => getSuccess(s) === false).length;
+            const passedCount = stepEntries.length - failedCount;
+
+            html += `
+                <div class="step-results-section">
+                    <h4 class="step-results-header">
+                        <i class="fas fa-tasks"></i> Step Results
+                        <span class="step-results-summary">
+                            <span class="step-count-pass">${passedCount} passed</span>
+                            ${failedCount > 0 ? `<span class="step-count-fail">${failedCount} failed</span>` : ''}
+                        </span>
+                    </h4>
+                    <div class="step-results-list">
+            `;
+
+            for (const [stepName, stepData] of stepEntries) {
+                const stepSuccess = getSuccess(stepData);
+                const durationMs = stepData.step_metadata?.duration_ms ?? stepData.duration_ms;
+                const duration = durationMs != null ? `${durationMs}ms` : '';
+                const statusClass = stepSuccess ? 'step-pass' : 'step-fail';
+                const statusIcon = stepSuccess ? 'fa-check-circle' : 'fa-times-circle';
+                const errorMsg = stepData.step_error || stepData.error || '';
+
+                html += `
+                    <div class="step-result-item ${statusClass}">
+                        <div class="step-result-main">
+                            <i class="fas ${statusIcon} step-result-icon"></i>
+                            <span class="step-result-name">${this.escapeHtml(stepName)}</span>
+                            ${duration ? `<span class="step-result-duration">${duration}</span>` : ''}
+                        </div>
+                        ${!stepSuccess && errorMsg ? `
+                            <div class="step-result-error">
+                                <i class="fas fa-exclamation-triangle"></i> ${this.escapeHtml(String(errorMsg))}
+                            </div>
+                        ` : ''}
+                    </div>
+                `;
+            }
+
+            html += `
+                    </div>
+                </div>
+            `;
+        }
 
         // Show validation warnings prominently if any
         if (validationWarnings.length > 0) {
@@ -611,6 +732,165 @@ class PipelineBuilder {
     }
 
     /**
+     * Synchronize branch relationships before saving
+     * Updates parentConditionalStepId and branchType on target steps
+     * based on conditional step configs (onTrue/onFalse route_to_step actions)
+     * AND propagates branch membership through chains based on visual position
+     */
+    synchronizeBranchRelationships() {
+        const allSteps = this.getAllSteps();
+        if (!allSteps || allSteps.length === 0) return;
+
+        console.log('[PipelineBuilder] Synchronizing branch relationships...');
+
+        // First, clear existing branch relationships (they'll be re-established)
+        allSteps.forEach(step => {
+            step.parentConditionalStepId = null;
+            step.branchType = null;
+        });
+
+        // PHASE 1: Mark direct routing targets from conditional steps
+        allSteps.forEach(conditionalStep => {
+            // Use VisualStep utility for OOP-compliant type detection
+            const isLogicStep = VisualStep.isConditionalStep(conditionalStep);
+
+            if (!isLogicStep || !conditionalStep.config || !conditionalStep.config.conditions) {
+                return;
+            }
+
+            conditionalStep.config.conditions.forEach(condition => {
+                // Check onTrue action
+                const trueAction = condition.onTrue || condition.ifTrue;
+                if (trueAction && trueAction.action === 'route_to_step' && trueAction.stepId) {
+                    const targetStep = allSteps.find(s => s.id === trueAction.stepId);
+                    if (targetStep) {
+                        targetStep.parentConditionalStepId = conditionalStep.id;
+                        targetStep.branchType = 'true';
+                        console.log(`  TRUE branch (direct): ${conditionalStep.stepName} → ${targetStep.stepName}`);
+                    }
+                }
+
+                // Check onFalse action
+                const falseAction = condition.onFalse || condition.ifFalse;
+                if (falseAction && falseAction.action === 'route_to_step' && falseAction.stepId) {
+                    const targetStep = allSteps.find(s => s.id === falseAction.stepId);
+                    if (targetStep) {
+                        targetStep.parentConditionalStepId = conditionalStep.id;
+                        targetStep.branchType = 'false';
+                        console.log(`  FALSE branch (direct): ${conditionalStep.stepName} → ${targetStep.stepName}`);
+                    }
+                }
+            });
+        });
+
+        // PHASE 2: Propagate branch membership through chains based on visual position
+        // Steps that come AFTER a branch step (higher X position, same Y band) inherit branch membership
+        this.propagateBranchMembership(allSteps);
+
+        console.log('[PipelineBuilder] Branch relationships synchronized');
+    }
+
+    /**
+     * Propagate branch membership through chains
+     * If step A is in TRUE branch, and step B follows A (by position or sequence),
+     * then B should also be in the TRUE branch
+     */
+    propagateBranchMembership(allSteps) {
+        // Get steps with branch membership (marked in phase 1)
+        let branchSteps = allSteps.filter(s => s.parentConditionalStepId && s.branchType);
+
+        if (branchSteps.length === 0) return;
+
+        console.log('[PipelineBuilder] Propagating branch membership...');
+
+        const Y_TOLERANCE = 50;
+
+        // Keep propagating until no more changes
+        let changed = true;
+        let iterations = 0;
+        const maxIterations = 10; // Prevent infinite loops
+
+        while (changed && iterations < maxIterations) {
+            changed = false;
+            iterations++;
+
+            // Get current branch steps (may have grown from previous iteration)
+            branchSteps = allSteps.filter(s => s.parentConditionalStepId && s.branchType);
+
+            branchSteps.forEach(branchStep => {
+                const branchY = branchStep.position_y || 0;
+                const branchX = branchStep.position_x || 0;
+                const branchSeq = branchStep.sequence || 0;
+                const parentId = branchStep.parentConditionalStepId;
+                const branchType = branchStep.branchType;
+
+                // Find steps that should be in this branch:
+                // 1. Same Y band and higher X position, OR
+                // 2. Higher sequence number (for vertical branch chains)
+                const stepsInChain = allSteps.filter(s => {
+                    if (s.id === branchStep.id) return false;
+                    if (s.parentConditionalStepId) return false; // Already has branch membership
+
+                    const stepY = s.position_y || 0;
+                    const stepX = s.position_x || 0;
+                    const stepSeq = s.sequence || 0;
+
+                    // Option 1: Same Y band and higher X position
+                    const sameRowAndAfter = Math.abs(stepY - branchY) <= Y_TOLERANCE && stepX > branchX;
+
+                    // Option 2: Higher sequence number AND positioned below or to the right
+                    // (for vertical branch chains like FALSE branch)
+                    const higherSequenceAndRelated = stepSeq > branchSeq &&
+                                                     (stepX >= branchX - 100) && // Not too far left
+                                                     (stepY >= branchY - Y_TOLERANCE); // Not above
+
+                    return sameRowAndAfter || higherSequenceAndRelated;
+                });
+
+                // For each candidate, check if it's likely part of this branch
+                // by verifying it's not part of a different branch (different Y region)
+                stepsInChain.forEach(chainStep => {
+                    // Don't propagate to steps that are clearly on a different Y region
+                    // (e.g., TRUE branch is at Y=100, FALSE branch is at Y=300)
+                    const stepY = chainStep.position_y || 0;
+                    const isOnDifferentBranchRegion = Math.abs(stepY - branchY) > Y_TOLERANCE * 3;
+
+                    if (!isOnDifferentBranchRegion) {
+                        chainStep.parentConditionalStepId = parentId;
+                        chainStep.branchType = branchType;
+                        changed = true;
+                        console.log(`  ${branchType.toUpperCase()} branch (propagated): ${branchStep.stepName} → ${chainStep.stepName}`);
+                    }
+                });
+            });
+        }
+
+        console.log(`[PipelineBuilder] Branch propagation completed in ${iterations} iteration(s)`);
+    }
+
+    /**
+     * Sync connections from flowchart to pipeline model
+     * This ensures connections are saved to the database
+     */
+    syncConnectionsToPipeline() {
+        if (!this.flowchartRenderer || !this.flowchartRenderer.layout) {
+            console.log('[PipelineBuilder] No flowchart layout - skipping connection sync');
+            return;
+        }
+
+        const connections = this.flowchartRenderer.layout.connections || [];
+
+        // Convert connections to a serializable format
+        this.pipeline.connections = connections.map(conn => ({
+            from: conn.from,
+            to: conn.to,
+            type: conn.type || 'sequential'
+        }));
+
+        console.log(`[PipelineBuilder] Synced ${this.pipeline.connections.length} connections to pipeline model`);
+    }
+
+    /**
      * Save pipeline
      */
     async savePipeline() {
@@ -620,6 +900,18 @@ class PipelineBuilder {
                 saveBtn.disabled = true;
                 saveBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Saving...';
             }
+
+            // Synchronize branch relationships before saving
+            this.synchronizeBranchRelationships();
+
+            // Auto-sequence steps based on connections (no manual sequence entry needed)
+            if (this.flowchartRenderer && typeof this.flowchartRenderer.autoSequenceSteps === 'function') {
+                console.log('🔢 Auto-sequencing steps before save...');
+                this.flowchartRenderer.autoSequenceSteps(true); // silent mode
+            }
+
+            // Sync connections from flowchart to pipeline model (for database persistence)
+            this.syncConnectionsToPipeline();
 
             const result = await window.pipelineAPI.savePipeline(this.pipeline);
 
@@ -663,6 +955,14 @@ class PipelineBuilder {
     async autoSave() {
         try {
             this.updateAutoSaveStatus('saving');
+            // Synchronize branch relationships before auto-saving
+            this.synchronizeBranchRelationships();
+            // Auto-sequence steps based on connections
+            if (this.flowchartRenderer && typeof this.flowchartRenderer.autoSequenceSteps === 'function') {
+                this.flowchartRenderer.autoSequenceSteps(true); // silent mode
+            }
+            // Sync connections to pipeline model
+            this.syncConnectionsToPipeline();
             await window.pipelineAPI.savePipeline(this.pipeline);
             this.isSaved = true;
             this.updateAutoSaveStatus('saved');
@@ -720,9 +1020,19 @@ class PipelineBuilder {
     /**
      * Clear canvas
      */
-    clearCanvas() {
-        if (confirm('Clear all steps from the canvas? This cannot be undone.')) {
-            this.layerContainer.clearAllLayers();
+    async clearCanvas() {
+        const confirmed = await this.dragDropManager.showConfirmDialog(
+            'Clear all steps from the canvas? This cannot be undone.',
+            {
+                title: 'Clear Canvas',
+                confirmText: 'Clear All',
+                cancelText: 'Cancel',
+                type: 'danger'
+            }
+        );
+
+        if (confirmed) {
+            this.layerContainer.clearCanvas();
             this.canvasRenderer.clearConnections();
             this.markAsUnsaved();
             this.dragDropManager.showNotification('Canvas cleared', 'info');
@@ -732,12 +1042,20 @@ class PipelineBuilder {
     /**
      * Navigate back to interfaces
      */
-    navigateBack() {
+    async navigateBack() {
         console.log('🔙 Navigate back clicked');
         console.log('isSaved:', this.isSaved);
 
         if (!this.isSaved) {
-            const confirmLeave = confirm('You have unsaved changes. Are you sure you want to leave?');
+            const confirmLeave = await this.dragDropManager.showConfirmDialog(
+                'You have unsaved changes. Are you sure you want to leave?',
+                {
+                    title: 'Unsaved Changes',
+                    confirmText: 'Leave',
+                    cancelText: 'Stay',
+                    type: 'warning'
+                }
+            );
             console.log('User confirmation:', confirmLeave);
             if (!confirmLeave) {
                 return;
@@ -759,29 +1077,75 @@ class PipelineBuilder {
     }
 
     /**
-     * Add step to layer (called by DragDropManager)
+     * Add step to pipeline (called by DragDropManager)
      */
-    addStepToLayer(step, layerName) {
-        this.layerContainer.addStepToLayer(step, layerName);
+    addStep(step) {
+        this.layerContainer.addStep(step);
         this.markAsUnsaved();
+
+        // In flowchart mode, trigger re-render
+        if (this.viewMode === 'flowchart' && this.flowchartRenderer) {
+            console.log('🔄 Triggering flowchart re-render after adding step:', step.stepName);
+            const allSteps = this.getAllStepsFlat();
+            this.flowchartRenderer.render(allSteps);
+        }
+    }
+
+    /**
+     * @deprecated Use addStep() instead
+     */
+    addStepToLayer(step, _layerName) {
+        this.addStep(step);
     }
 
     /**
      * Add step to specific group
      */
     addStepToGroup(step, groupId) {
-        // Find group and add step
-        for (const visualLayer of Object.values(this.pipeline.layers)) {
-            const group = visualLayer.getGroup(groupId);
-            if (group) {
+        for (const group of this.pipeline.executionGroups) {
+            if (group.id === groupId || group.groupId === groupId) {
+                if (!(step instanceof VisualStep)) {
+                    step = new VisualStep(step);
+                }
                 step.sequence = this.layerContainer.getNextStepSequence(group);
                 group.addStep(step);
-                this.layerContainer.renderLayer(group.layer, visualLayer);
+                this.layerContainer.renderCanvas();
                 this.canvasRenderer.redrawAllConnections();
                 this.markAsUnsaved();
                 return;
             }
         }
+    }
+
+    /**
+     * Delete step from pipeline (finds the group automatically)
+     */
+    deleteStep(stepId) {
+        console.log('🗑️ Deleting step from pipeline:', stepId);
+
+        for (let i = 0; i < this.pipeline.executionGroups.length; i++) {
+            const group = this.pipeline.executionGroups[i];
+            const stepIndex = group.steps.findIndex(s => s.id === stepId);
+            if (stepIndex !== -1) {
+                console.log(`✅ Found step at index ${stepIndex} in group ${group.groupId || group.id}`);
+
+                // Remove the step
+                group.steps.splice(stepIndex, 1);
+
+                // Mark as unsaved
+                this.markAsUnsaved();
+
+                // Show notification
+                if (this.dragDropManager) {
+                    this.dragDropManager.showNotification(`Deleted step`, 'success');
+                }
+
+                return true;
+            }
+        }
+
+        console.error('❌ Step not found:', stepId);
+        return false;
     }
 
     /**
@@ -793,23 +1157,11 @@ class PipelineBuilder {
     }
 
     /**
-     * Move step to different layer
+     * Reorder steps based on current visual order
      */
-    moveStepToLayer(stepId, groupId, sourceLayer, targetLayer) {
-        this.layerContainer.moveStepToLayer(stepId, groupId, sourceLayer, targetLayer);
-        this.markAsUnsaved();
-    }
-
-    /**
-     * Reorder steps within a layer based on current visual order
-     */
-    reorderStepsInLayer(layerName) {
-        const layer = this.pipeline.layers[layerName];
-        if (!layer) return;
-
-        // Get all steps in the layer across all execution groups
+    reorderSteps() {
         let allSteps = [];
-        layer.executionGroups.forEach(group => {
+        this.pipeline.executionGroups.forEach(group => {
             group.steps.forEach(step => {
                 allSteps.push({ step, group });
             });
@@ -820,24 +1172,30 @@ class PipelineBuilder {
             item.step.sequence = (index + 1) * 10;
         });
 
-        // Re-render the layer to reflect new order
-        this.layerContainer.renderLayer(layerName, layer);
+        this.layerContainer.renderCanvas();
         this.markAsUnsaved();
+    }
+
+    /**
+     * @deprecated Use reorderSteps() instead
+     */
+    reorderStepsInLayer(_layerName) {
+        this.reorderSteps();
     }
 
     /**
      * Update step
      */
     updateStep(updatedStep) {
-        // Find and update step in pipeline
-        for (const visualLayer of Object.values(this.pipeline.layers)) {
-            for (const group of visualLayer.executionGroups) {
-                const stepIndex = group.steps.findIndex(s => s.id === updatedStep.id);
-                if (stepIndex !== -1) {
-                    group.steps[stepIndex] = updatedStep;
-                    this.markAsUnsaved();
-                    return;
+        for (const group of this.pipeline.executionGroups) {
+            const stepIndex = group.steps.findIndex(s => s.id === updatedStep.id);
+            if (stepIndex !== -1) {
+                if (!(updatedStep instanceof VisualStep)) {
+                    updatedStep = new VisualStep(updatedStep);
                 }
+                group.steps[stepIndex] = updatedStep;
+                this.markAsUnsaved();
+                return;
             }
         }
     }
@@ -846,13 +1204,210 @@ class PipelineBuilder {
      * Find step in pipeline
      */
     findStep(stepId, groupId) {
-        for (const visualLayer of Object.values(this.pipeline.layers)) {
-            const group = visualLayer.getGroup(groupId);
-            if (group) {
-                return group.getStep(stepId);
-            }
+        for (const group of this.pipeline.executionGroups) {
+            if (groupId && (group.id !== groupId && group.groupId !== groupId)) continue;
+            const step = group.getStep ? group.getStep(stepId) : group.steps.find(s => s.id === stepId);
+            if (step) return step;
         }
         return null;
+    }
+
+    /**
+     * Switch view mode (list vs flowchart)
+     */
+    switchViewMode(mode, force = false) {
+        console.log(`🔄 switchViewMode called:`, { currentMode: this.viewMode, requestedMode: mode, force });
+
+        if (this.viewMode === mode && !force) {
+            console.log('⏭️ Already in requested mode, skipping switch');
+            return;
+        }
+
+        this.viewMode = mode;
+
+        // Update button states
+        const listBtn = document.getElementById('listViewBtn');
+        const flowchartBtn = document.getElementById('flowchartViewBtn');
+
+        if (listBtn && flowchartBtn) {
+            if (mode === 'list') {
+                listBtn.classList.add('active');
+                flowchartBtn.classList.remove('active');
+            } else {
+                listBtn.classList.remove('active');
+                flowchartBtn.classList.add('active');
+            }
+        }
+
+        // Switch canvas display
+        const canvasWrapper = document.getElementById('canvasWrapper');
+        const canvasLayers = document.getElementById('canvasLayers');
+
+        if (!canvasWrapper) return;
+
+        if (mode === 'flowchart') {
+            // Hide list view
+            if (canvasLayers) {
+                canvasLayers.style.display = 'none';
+            }
+
+            // Add flowchart mode class
+            canvasWrapper.classList.add('flowchart-mode');
+
+            // Show flowchart canvas
+            const flowchartCanvas = this.flowchartRenderer.getCanvas();
+            if (flowchartCanvas && !flowchartCanvas.parentNode) {
+                canvasWrapper.appendChild(flowchartCanvas);
+            }
+
+            // Ensure canvas is populated first (needed for getAllStepsFlat)
+            if (this.pipeline && this.pipeline.executionGroups.length > 0) {
+                this.layerContainer.renderCanvas();
+            }
+
+            // Render flowchart
+            this.renderFlowchart();
+        } else {
+            // Hide flowchart
+            const flowchartCanvas = this.flowchartRenderer.getCanvas();
+            if (flowchartCanvas && flowchartCanvas.parentNode) {
+                flowchartCanvas.remove();
+            }
+
+            // Remove flowchart mode class
+            canvasWrapper.classList.remove('flowchart-mode');
+
+            // Show list view
+            if (canvasLayers) {
+                canvasLayers.style.display = '';
+            }
+
+            // Re-render list view
+            this.renderPipeline();
+        }
+
+        // Reinitialize drag-drop zones for new view mode
+        if (this.dragDropManager) {
+            this.dragDropManager.reinitialize();
+        }
+
+        // Save preference
+        this.saveViewModePreference(mode);
+
+        console.log(`✅ Switched to ${mode} view`);
+    }
+
+    /**
+     * Render flowchart mode
+     */
+    renderFlowchart() {
+        if (!this.flowchartRenderer) {
+            console.error('❌ No flowchart renderer available');
+            return;
+        }
+
+        console.log('🔍 Pipeline state:', {
+            hasPipeline: !!this.pipeline,
+            executionGroups: this.pipeline?.executionGroups?.length || 0
+        });
+
+        const steps = this.getAllStepsFlat();
+        console.log('🎨 Rendering flowchart with steps:', steps.length, steps);
+
+        if (steps.length === 0) {
+            console.warn('⚠️ No steps to render in flowchart - pipeline may be empty');
+        }
+
+        this.flowchartRenderer.render(steps);
+    }
+
+    /**
+     * Get pipeline data (for external components like IfThenElseBuilder)
+     */
+    getPipeline() {
+        return {
+            ...this.pipeline,
+            steps: this.getAllStepsFlat()
+        };
+    }
+
+    /**
+     * Get all steps as flat array
+     */
+    getAllStepsFlat() {
+        if (!this.pipeline) {
+            return [];
+        }
+
+        // Use getAllSteps if available (from VisualPipeline)
+        if (this.pipeline.getAllSteps) {
+            return this.pipeline.getAllSteps();
+        }
+
+        // Fallback: iterate executionGroups directly
+        const steps = [];
+        const groups = this.pipeline.executionGroups || [];
+        groups.forEach(group => {
+            if (group.steps && Array.isArray(group.steps)) {
+                steps.push(...group.steps);
+            }
+        });
+
+        steps.sort((a, b) => (a.sequence || 0) - (b.sequence || 0));
+        return steps;
+    }
+
+    /**
+     * Alias for getAllStepsFlat (for backward compatibility)
+     */
+    getAllSteps() {
+        return this.getAllStepsFlat();
+    }
+
+    /**
+     * Load view mode preference from localStorage
+     */
+    loadViewModePreference() {
+        const savedMode = localStorage.getItem('pipelineViewMode');
+        console.log('🔍 Loading view mode preference:', { savedMode, currentViewMode: this.viewMode });
+
+        if (savedMode === 'flowchart' || savedMode === 'list') {
+            this.viewMode = savedMode;
+        }
+
+        // Always initialize with flowchart mode (hide list view from start)
+        const canvasLayers = document.getElementById('canvasLayers');
+        if (canvasLayers && this.viewMode === 'flowchart') {
+            console.log('✅ Hiding canvasLayers during initialization');
+            canvasLayers.style.display = 'none';
+        }
+    }
+
+    /**
+     * Save view mode preference to localStorage
+     */
+    saveViewModePreference(mode) {
+        localStorage.setItem('pipelineViewMode', mode);
+    }
+
+    /**
+     * Callback for step selection (from flowchart)
+     */
+    onStepSelected(stepId) {
+        const allSteps = this.getAllStepsFlat();
+        const step = allSteps.find(s => s.id === stepId);
+        if (step) {
+            this.openStepProperties(step);
+        }
+    }
+
+    /**
+     * Open step properties modal
+     */
+    openStepProperties(step) {
+        if (this.propertiesPanel) {
+            this.propertiesPanel.openStepModal(step);
+        }
     }
 }
 

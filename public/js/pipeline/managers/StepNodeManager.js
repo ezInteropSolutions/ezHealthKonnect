@@ -167,8 +167,18 @@ class StepNodeManager {
     /**
      * Delete step
      */
-    deleteStep(stepId, groupId) {
-        if (confirm('Are you sure you want to delete this step?')) {
+    async deleteStep(stepId, groupId) {
+        const confirmed = await this.builder.dragDropManager.showConfirmDialog(
+            'Are you sure you want to delete this step?',
+            {
+                title: 'Delete Step',
+                confirmText: 'Delete',
+                cancelText: 'Cancel',
+                type: 'danger'
+            }
+        );
+
+        if (confirmed) {
             this.builder.removeStepFromGroup(stepId, groupId);
             this.deselectNode();
             this.builder.dragDropManager.showNotification('Step deleted', 'info');

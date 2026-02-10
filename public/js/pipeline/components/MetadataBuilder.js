@@ -367,7 +367,7 @@ class MetadataBuilder {
                 const imported = JSON.parse(textarea.value);
 
                 if (typeof imported !== 'object' || Array.isArray(imported)) {
-                    alert('Invalid JSON: Expected an object with key-value pairs');
+                    this.showNotification('Invalid JSON: Expected an object with key-value pairs', 'error');
                     return;
                 }
 
@@ -375,9 +375,30 @@ class MetadataBuilder {
                 this.render();
                 this.hideJsonModal();
             } catch (error) {
-                alert('Invalid JSON: ' + error.message);
+                this.showNotification('Invalid JSON: ' + error.message, 'error');
             }
         }
+    }
+
+    /**
+     * Show in-app notification
+     */
+    showNotification(message, type = 'info') {
+        const notification = document.createElement('div');
+        notification.style.cssText = `
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background: ${type === 'success' ? '#10b981' : type === 'error' ? '#ef4444' : type === 'warning' ? '#f59e0b' : '#06b6d4'};
+            color: white;
+            padding: 12px 20px;
+            border-radius: 6px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            z-index: 10000;
+        `;
+        notification.textContent = message;
+        document.body.appendChild(notification);
+        setTimeout(() => notification.remove(), 4000);
     }
 
     /**

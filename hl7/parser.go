@@ -43,6 +43,7 @@ type FieldComponent struct {
 }
 
 // ParseHL7MessageEnhanced performs complete HL7 parsing with full delimiter support
+// ✅ UPDATED: Now properly handles repeating segments (OBX, IN1, NK1, etc.)
 func ParseHL7MessageEnhanced(rawMessage string) *BasicParsedMessage {
 	// Normalize line endings
 	normalizedMessage := strings.ReplaceAll(rawMessage, "\r\n", "\n")
@@ -52,6 +53,9 @@ func ParseHL7MessageEnhanced(rawMessage string) *BasicParsedMessage {
 	lines := strings.Split(normalizedMessage, "\n")
 
 	segments := make(map[string]BasicSegment)
+	segmentGroups := make(map[string][]BasicSegment)  // ✅ NEW: Collect all instances
+	segmentOrder := make([]string, 0)                  // ✅ NEW: Track order including repeats
+	segmentCounts := make(map[string]int)              // ✅ NEW: Track index within each segment type
 	messageType := "UNKNOWN"
 
 	// Go through each line
@@ -82,11 +86,22 @@ func ParseHL7MessageEnhanced(rawMessage string) *BasicParsedMessage {
 				}
 			}
 
-			segments[segmentName] = BasicSegment{
-				Name:   segmentName,
-				Fields: segmentFields,
-				Raw:    line,
+			// ✅ NEW: Get segment index within its type
+			segmentIndex := segmentCounts[segmentName]
+			segmentCounts[segmentName]++
+
+			basicSeg := BasicSegment{
+				Name:         segmentName,
+				Fields:       segmentFields,
+				Raw:          line,
+				SegmentIndex: segmentIndex, // ✅ NEW: Track which instance this is
 			}
+
+			// Store in both single-segment map (last wins for backwards compatibility)
+			// and in segment groups array (all instances preserved)
+			segments[segmentName] = basicSeg
+			segmentGroups[segmentName] = append(segmentGroups[segmentName], basicSeg)
+			segmentOrder = append(segmentOrder, segmentName)
 
 			// Extract message type from MSH segment
 			if segmentName == "MSH" {
@@ -96,10 +111,12 @@ func ParseHL7MessageEnhanced(rawMessage string) *BasicParsedMessage {
 	}
 
 	return &BasicParsedMessage{
-		Raw:         rawMessage,
-		MessageType: messageType,
-		Segments:    segments,
-		ParsedAt:    time.Now().Format(time.RFC3339),
+		Raw:           rawMessage,
+		MessageType:   messageType,
+		Segments:      segments,
+		SegmentGroups: segmentGroups, // ✅ NEW: All segment instances
+		SegmentOrder:  segmentOrder,  // ✅ NEW: Order including repeats
+		ParsedAt:      time.Now().Format(time.RFC3339),
 	}
 }
 

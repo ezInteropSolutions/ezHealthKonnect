@@ -20,7 +20,7 @@ type FieldValidationExecutor struct {
 // NewFieldValidationExecutor creates a new field validation executor
 func NewFieldValidationExecutor() *FieldValidationExecutor {
 	executor := &FieldValidationExecutor{
-		BaseExecutor: executors.NewBaseExecutor("pre.validation", models.ExecutorMetadata{
+		BaseExecutor: executors.NewBaseExecutor("field_validation", models.ExecutorMetadata{
 			Name:        "Field Validation",
 			Description: "Validates message fields against configurable rules",
 			Version:     "1.0.0",
@@ -102,6 +102,36 @@ func (e *FieldValidationExecutor) Execute(
 
 	// Store field-level results for step output tracking
 	inputData["_field_validation_results"] = fieldResults
+
+	// Build a cleaner validations map for user output (field -> result)
+	validationsOutput := make(map[string]interface{})
+	for _, fr := range fieldResults {
+		fieldName := fr["field"].(string)
+		validationsOutput[fieldName] = map[string]interface{}{
+			"valid": fr["valid"],
+			"type":  fr["validation_type"],
+		}
+		if err, ok := fr["error"]; ok && err != "" {
+			validationsOutput[fieldName].(map[string]interface{})["error"] = err
+		}
+	}
+
+	// STANDARDIZED: Separate variables (user-visible output) from execution details (metadata)
+	// Variables: What the step produces that users care about
+	variables := map[string]interface{}{
+		"valid":       result.Valid,
+		"validations": validationsOutput, // Per-field validation results
+		"errorCount":  len(result.Errors),
+	}
+
+	// Execution details: Technical info for debugging/auditing
+	executionDetails := map[string]interface{}{
+		"fields_validated": len(fieldResults),
+		"error_count":      len(result.Errors),
+		"field_results":    fieldResults,
+	}
+
+	e.SetStepOutputWithDetails(inputData, variables, executionDetails)
 
 	// Handle validation errors based on standard step controls
 	if !result.Valid {

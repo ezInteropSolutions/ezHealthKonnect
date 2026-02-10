@@ -12,18 +12,21 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/dop251/goja"
 	"github.com/gin-gonic/gin"
 )
 
 type TransformationTestController struct {
 	db               *sql.DB
 	executorRegistry *services.ExecutorRegistry
+	pipelineService  *services.TransformationPipelineService
 }
 
 func NewTransformationTestController(db *sql.DB) *TransformationTestController {
 	return &TransformationTestController{
 		db:               db,
 		executorRegistry: services.NewExecutorRegistry(db),
+		pipelineService:  services.NewTransformationPipelineService(db),
 	}
 }
 
@@ -40,124 +43,259 @@ func (c *TransformationTestController) TestPipeline(ctx *gin.Context) {
 		return
 	}
 
+	log.Printf("🧪 Testing pipeline with TransformationPipelineService (supports routing)")
+	log.Printf("   pipeline_id: %s", req.PipelineID)
+	if req.Pipeline != nil {
+		log.Printf("   pipeline.interfaceId: %v", req.Pipeline["interfaceId"])
+		log.Printf("   pipeline.messageType: %v", req.Pipeline["messageType"])
+		log.Printf("   pipeline.id: %v", req.Pipeline["id"])
+	}
+
 	testMessage := req.TestMessage
 	if testMessage == "" {
 		testMessage = req.SampleMessage
 	}
 
 	if testMessage == "" {
-		ctx.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "test_message is required"})
-		return
-	}
-
-	// Step 1: Parse HL7 message to JSON (simplified for now)
-	parsedJSON := c.parseTestMessage(testMessage)
-	log.Printf("🧪 [Test] Parsed test message (simplified)")
-	log.Printf("🔍 [Test] Data structure: %+v", parsedJSON)
-
-	// Step 2: Load pipeline steps
-	steps, err := c.loadPipelineSteps(req.PipelineID)
-	if err != nil {
-		log.Printf("❌ [Test] Failed to load pipeline: %v", err)
-		ctx.JSON(http.StatusInternalServerError, gin.H{
+		ctx.JSON(http.StatusBadRequest, gin.H{
 			"success": false,
-			"error":   fmt.Sprintf("Failed to load pipeline: %v", err),
+			"error":   "test_message is required",
 		})
 		return
 	}
-	log.Printf("✅ [Test] Loaded %d steps from pipeline %s", len(steps), req.PipelineID)
 
-	// Step 3: Execute steps
-	log.Printf("🔄 [Test] Executing %d steps...", len(steps))
-	results, execErr := c.executeSteps(steps, parsedJSON)
+	// Get interface_id and message_type - try from pipeline_id first, then from pipeline object
+	var interfaceID, messageType string
+	var err error
 
-	// Extract warnings from results
-	warnings := []string{}
-	if allWarnings, ok := parsedJSON["_all_warnings"].([]string); ok {
-		warnings = allWarnings
-		log.Printf("⚠️ [Test] Found %d warnings during execution", len(warnings))
-	}
-
-	if execErr != nil {
-		log.Printf("❌ [Test] Execution failed: %v", execErr)
-	} else {
-		log.Printf("✅ [Test] Execution completed, %d results", len(results))
-		if len(warnings) > 0 {
-			log.Printf("⚠️ [Test] Execution succeeded with %d warnings", len(warnings))
+	if req.PipelineID != "" {
+		// Load pipeline metadata from database by ID
+		query := `SELECT interface_id, message_type FROM transformation_pipelines WHERE id = $1`
+		err = c.db.QueryRow(query, req.PipelineID).Scan(&interfaceID, &messageType)
+		if err != nil {
+			log.Printf("⚠️  Pipeline not found by ID, trying pipeline object...")
+		} else {
+			log.Printf("✅ Found pipeline by ID: interface=%s, message_type=%s", interfaceID, messageType)
 		}
 	}
 
-	// Clean parsed message - remove internal metadata and step-added fields
-	cleanedMessage := make(map[string]interface{})
-	for k, v := range parsedJSON {
-		// Skip internal/temporary fields added by executors
-		if strings.HasPrefix(k, "_") {
-			continue
+	// Fallback: extract from pipeline object if not found by ID
+	if interfaceID == "" && req.Pipeline != nil {
+		if iid, ok := req.Pipeline["interfaceId"].(string); ok {
+			interfaceID = iid
 		}
-		// Skip metadata field - it's shown in the enrichment step output
-		if k == "metadata" {
-			continue
+		if mt, ok := req.Pipeline["messageType"].(string); ok {
+			messageType = mt
 		}
-		cleanedMessage[k] = v
+		log.Printf("📋 Using pipeline object: interface=%s, message_type=%s", interfaceID, messageType)
+
+		// Look up the pipeline ID from interface + message type
+		query := `SELECT id FROM transformation_pipelines WHERE interface_id = $1 AND message_type = $2`
+		err = c.db.QueryRow(query, interfaceID, messageType).Scan(&req.PipelineID)
+		if err != nil {
+			ctx.JSON(http.StatusNotFound, gin.H{
+				"success": false,
+				"error":   fmt.Sprintf("Pipeline not found for interface %s and message type %s", interfaceID, messageType),
+			})
+			return
+		}
+		log.Printf("✅ Found pipeline ID from interface+messageType: %s", req.PipelineID)
 	}
 
-	// Build execution metadata (order, timing, success/fail) and step outputs (data produced)
-	executionMetadata := make([]map[string]interface{}, 0, len(results))
-	stepOutputsMap := make(map[string]interface{})
+	if interfaceID == "" || messageType == "" {
+		ctx.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"error":   "Could not determine interface_id and message_type from request",
+		})
+		return
+	}
 
-	for _, result := range results {
-		stepName, _ := result["step_name"].(string)
-		stepType, _ := result["step_type"].(string)
-		success, _ := result["success"].(bool)
-		output, _ := result["output"].(map[string]interface{})
+	// IMPORTANT: Use the pipeline from the frontend request (current UI state)
+	// This allows testing unsaved changes before committing them
+	var pipeline *models.TransformationPipeline
 
-		// Execution metadata: timing, order, status (NO output data)
-		metadata := map[string]interface{}{
-			"step_name": stepName,
-			"step_type": stepType,
-			"success":   success,
-		}
-
-		// Add sequence if available
-		if seq, ok := result["sequence"].(int); ok {
-			metadata["sequence"] = seq
-		}
-
-		// Add duration if available
-		if duration, ok := result["duration_ms"].(int64); ok {
-			metadata["duration_ms"] = duration
-		}
-
-		// Add error if present
-		if err, ok := result["error"].(string); ok && err != "" {
-			metadata["error"] = err
-		}
-
-		executionMetadata = append(executionMetadata, metadata)
-
-		// Step outputs: data produced by the step
-		if stepName != "" && output != nil {
-			// Use normalized key for consistent naming (e.g., "Field Mapping" -> "field_mapping")
-			normalizedKey := models.NormalizeStepKey(stepName)
-			stepOutputsMap[normalizedKey] = output
+	if req.Pipeline != nil {
+		// Convert frontend pipeline object to model
+		log.Printf("📋 Using pipeline from frontend request (current UI state, may include unsaved changes)")
+		pipeline, err = c.convertFrontendPipeline(req.Pipeline, interfaceID, messageType)
+		if err != nil {
+			log.Printf("⚠️ Failed to convert frontend pipeline: %v, falling back to database", err)
+			pipeline = nil
 		}
 	}
 
+	// Fallback: Load from database if frontend pipeline not available or conversion failed
+	if pipeline == nil {
+		log.Printf("📋 Loading pipeline from database (saved state)")
+		pipeline, err = c.pipelineService.GetPipeline(ctx, interfaceID, messageType)
+		if err != nil {
+			ctx.JSON(http.StatusNotFound, gin.H{
+				"success": false,
+				"error":   fmt.Sprintf("Failed to load pipeline: %v", err),
+			})
+			return
+		}
+	}
+
+	log.Printf("🚀 Executing pipeline via TransformationPipelineService (supports conditional routing)")
+	fmt.Printf("🚀🚀🚀 EXECUTING PIPELINE: %d steps loaded\n", len(pipeline.Steps))
+	for i, s := range pipeline.Steps {
+		fmt.Printf("   Step %d: %s (%s) - ID=%s, enabled=%v\n", i, s.StepName, s.StepType, s.ID, s.Enabled)
+	}
+
+	// Parse test message - production uses parseResult.ParsedJSON directly
+	parsedJSON := c.parseTestMessage(testMessage)
+
+	// Execute pipeline with real service (supports routing)
+	// Set test mode so connector steps are skipped/dry-run (not real connections)
+	testCtx := models.WithTestMode(ctx.Request.Context())
+	result, err := c.pipelineService.ExecutePipeline(testCtx, pipeline, parsedJSON)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"error":   fmt.Sprintf("Pipeline execution failed: %v", err),
+		})
+		return
+	}
+
+	log.Printf("✅ Pipeline execution completed successfully, starting response transformation")
+	log.Printf("   Status: %s", result.Status)
+	log.Printf("   Execution log entries: %d", len(result.ExecutionLog))
+	fmt.Printf("✅✅✅ EXECUTION COMPLETE: Status=%s, ExecutionLog=%d entries\n", result.Status, len(result.ExecutionLog))
+
+	// Initialize OOP normalizer for consistent output format
+	normalizer := models.NewOutputNormalizer()
+	log.Printf("🔧 Normalizer initialized: %s", normalizer)
+
+	// Build simplified step outputs keyed by step name (user-friendly)
+	// STANDARDIZED STRUCTURE: All steps use step_output and step_metadata
+	steps := make(map[string]interface{})
+	stepNameCounts := make(map[string]int) // Track duplicate step names
+
+	for _, stepLog := range result.ExecutionLog {
+		log.Printf("🔍 Processing step: '%s'", stepLog.StepName)
+
+		// Standardized metadata for ALL step types
+		// Base metadata: duration_ms, success (always present)
+		stepMetadata := map[string]interface{}{
+			"duration_ms": stepLog.DurationMs,
+			"success":     stepLog.Success,
+		}
+
+		// Merge executor-specific execution details into step_metadata
+		// This provides a SINGLE step_metadata object with all info
+		if stepLog.StepOutput != nil && stepLog.StepOutput.ExecutionDetails != nil {
+			for key, value := range stepLog.StepOutput.ExecutionDetails {
+				stepMetadata[key] = value
+			}
+			log.Printf("  📊 Merged execution details: %v", getMapKeys(stepLog.StepOutput.ExecutionDetails))
+		}
+
+		// Process step output - normalize and flatten for ALL step types
+		// OutputData now contains ONLY user-created variables (no step_metadata inside)
+		var stepOutput map[string]interface{}
+		if stepLog.StepOutput != nil && stepLog.StepOutput.OutputData != nil {
+			fmt.Printf("  📊 [%s] Original output keys: %v\n", stepLog.StepName, getMapKeys(stepLog.StepOutput.OutputData))
+			fmt.Printf("  📊 [%s] Original output data: %+v\n", stepLog.StepName, stepLog.StepOutput.OutputData)
+
+			// Use OOP normalizer: flattens nested structures + normalizes keys to snake_case
+			normalizedOutput := normalizer.NormalizeStepOutput(stepLog.StepOutput.OutputData)
+			fmt.Printf("  ✅ [%s] Normalized output keys: %v\n", stepLog.StepName, getMapKeys(normalizedOutput))
+			fmt.Printf("  ✅ [%s] Normalized output data: %+v\n", stepLog.StepName, normalizedOutput)
+
+			stepOutput = normalizedOutput
+		} else {
+			stepOutput = map[string]interface{}{}
+		}
+
+		// Break circular references in step output via JSON round-trip
+		// Some executors (e.g., Loop) store references to parent context that create cycles
+		safeStepOutput := breakCycles(stepOutput)
+
+		// STANDARDIZED STRUCTURE: step_output, step_metadata, step_error (3 keys max)
+		stepData := map[string]interface{}{
+			"step_output":   safeStepOutput,
+			"step_metadata": stepMetadata,
+		}
+
+		// Add step_error ONLY if failed (separate from metadata)
+		if !stepLog.Success && stepLog.Error != "" {
+			stepData["step_error"] = stepLog.Error
+		}
+
+		// Use normalized step name as key (consistent snake_case)
+		// Handle duplicate step names by appending a counter (_2, _3, etc.)
+		normalizedStepName := normalizer.NormalizeKey(stepLog.StepName)
+		stepNameCounts[normalizedStepName]++
+
+		// If this is not the first occurrence, append counter
+		stepKey := normalizedStepName
+		if stepNameCounts[normalizedStepName] > 1 {
+			stepKey = fmt.Sprintf("%s_%d", normalizedStepName, stepNameCounts[normalizedStepName])
+		}
+
+		log.Printf("  🏷️ Step name: '%s' -> '%s' (key: '%s')", stepLog.StepName, normalizedStepName, stepKey)
+
+		steps[stepKey] = stepData
+	}
+
+	// Build lightweight response (avoid sending huge input/output payloads)
 	response := gin.H{
-		"success":           execErr == nil,
-		"error":             formatError(execErr),
-		"execution_results": executionMetadata,  // Execution metadata only (timing, order, status)
-		"step_outputs":      stepOutputsMap,     // Data produced by steps (validation results, API responses, etc.)
-		"parsed_message":    cleanedMessage,     // Final transformed message
-		"steps_count":       len(steps),
+		"success": result.Status == "completed",
+		"status":  result.Status,
+		"steps":   steps, // Keyed by step name for easy lookup
 	}
 
-	// Add warnings if any
-	if len(warnings) > 0 {
-		response["warnings"] = warnings
+	// Include lightweight input/output metadata (without full payload to avoid huge responses)
+	if result.Input != nil {
+		response["input"] = gin.H{
+			"format":       result.Input.Format,
+			"message_type": result.Input.MessageType,
+			"version":      result.Input.Version,
+			"size_bytes":   result.Input.SizeBytes,
+		}
+	}
+	if result.Output != nil {
+		response["output"] = gin.H{
+			"format":       result.Output.Format,
+			"message_type": result.Output.MessageType,
+			"version":      result.Output.Version,
+			"size_bytes":   result.Output.SizeBytes,
+			"payload":      result.Output.Payload, // Include output payload for FHIR bundle display
+		}
 	}
 
-	ctx.JSON(http.StatusOK, response)
+	if result.Status == "failed" && len(result.Errors) > 0 {
+		response["error"] = result.Errors[0].Message
+		// Include all errors for detailed reporting
+		errMsgs := make([]string, len(result.Errors))
+		for i, e := range result.Errors {
+			errMsgs[i] = e.Message
+		}
+		response["errors"] = errMsgs
+	}
+
+	log.Printf("✅ Test completed: %d steps executed, status=%s", len(result.ExecutionLog), result.Status)
+
+	// Pre-serialize to JSON to catch any serialization errors from typed Go structs
+	// (Gin's ctx.JSON writes 200 header first, then serializes - if serialization fails,
+	// the client sees 200 with empty body instead of an error)
+	jsonBytes, err := json.Marshal(response)
+	if err != nil {
+		log.Printf("❌ JSON serialization failed: %v", err)
+		// Return a safe fallback response without step outputs that may contain unserializable types
+		fallback := gin.H{
+			"success": result.Status == "completed",
+			"status":  result.Status,
+			"error":   fmt.Sprintf("Response serialization error: %v", err),
+			"steps":   gin.H{},
+		}
+		ctx.JSON(http.StatusOK, fallback)
+		return
+	}
+
+	log.Printf("✅ Response serialized: %d bytes", len(jsonBytes))
+	ctx.Data(http.StatusOK, "application/json; charset=utf-8", jsonBytes)
 }
 
 func (c *TransformationTestController) parseTestMessage(message string) map[string]interface{} {
@@ -180,6 +318,8 @@ func (c *TransformationTestController) parseTestMessage(message string) map[stri
 	result := map[string]interface{}{
 		"raw":              message,
 		"enhancedSegments": enhancedResult.EnhancedSegments, // Keep typed structure
+		"segmentGroups":    enhancedResult.SegmentGroups,    // ALL instances of each segment type (for loops over IN1, OBX, etc.)
+		"segmentOrder":     enhancedResult.SegmentOrder,     // Segment order including repeats
 		"messageType":      enhancedResult.MessageType,
 		"version":          enhancedResult.Version,
 		"dictionaryUsed":   enhancedResult.DictionaryUsed,
@@ -188,6 +328,147 @@ func (c *TransformationTestController) parseTestMessage(message string) map[stri
 
 	log.Printf("✅ [Test] Parsed message type: %v", enhancedResult.MessageType)
 	return result
+}
+
+// convertFrontendPipeline converts the frontend pipeline JSON to a TransformationPipeline model
+// This allows testing unsaved changes directly from the UI without saving first
+func (c *TransformationTestController) convertFrontendPipeline(pipelineData map[string]interface{}, interfaceID, messageType string) (*models.TransformationPipeline, error) {
+	fmt.Printf("🔄🔄🔄 Converting frontend pipeline to model...\n")
+	fmt.Printf("   pipelineData keys: %v\n", getMapKeys(pipelineData))
+
+	// Create pipeline with basic info
+	pipeline := &models.TransformationPipeline{
+		InterfaceID: interfaceID,
+		MessageType: messageType,
+		Steps:       make([]models.TransformationStep, 0),
+	}
+
+	// Get pipeline ID if available
+	if id, ok := pipelineData["id"].(string); ok {
+		pipeline.ID = id
+	}
+
+	// Get pipeline name
+	if name, ok := pipelineData["name"].(string); ok {
+		pipeline.PipelineName = name
+	}
+
+	// Process layers (pre, core, post)
+	layers, ok := pipelineData["layers"].(map[string]interface{})
+	if !ok {
+		fmt.Printf("   ❌ pipeline missing 'layers' field!\n")
+		return nil, fmt.Errorf("pipeline missing 'layers' field")
+	}
+	fmt.Printf("   ✅ Found layers: %v\n", getMapKeys(layers))
+
+	// Layer order for consistent processing
+	layerOrder := []string{"pre", "core", "post"}
+	sequence := 10
+
+	for _, layerName := range layerOrder {
+		layerData, exists := layers[layerName]
+		if !exists {
+			fmt.Printf("   ⚠️ Layer '%s' not found\n", layerName)
+			continue
+		}
+
+		layerMap, ok := layerData.(map[string]interface{})
+		if !ok {
+			fmt.Printf("   ⚠️ Layer '%s' is not a map (type=%T)\n", layerName, layerData)
+			continue
+		}
+		fmt.Printf("   📦 Layer '%s' keys: %v\n", layerName, getMapKeys(layerMap))
+
+		// Get steps from this layer - check both "steps" and "execution_groups" formats
+		var steps []interface{}
+
+		// Try "steps" first (simpler format)
+		if directSteps, hasSteps := layerMap["steps"].([]interface{}); hasSteps {
+			steps = directSteps
+			fmt.Printf("   📦 Layer '%s' has %d direct steps\n", layerName, len(steps))
+		} else if execGroups, hasGroups := layerMap["execution_groups"].([]interface{}); hasGroups {
+			// Try "execution_groups" format (frontend sends this)
+			fmt.Printf("   📦 Layer '%s' has %d execution_groups\n", layerName, len(execGroups))
+			// Extract steps from each execution group
+			for _, group := range execGroups {
+				if groupMap, ok := group.(map[string]interface{}); ok {
+					if groupSteps, ok := groupMap["steps"].([]interface{}); ok {
+						steps = append(steps, groupSteps...)
+					}
+				}
+			}
+			fmt.Printf("   📦 Layer '%s' extracted %d steps from execution_groups\n", layerName, len(steps))
+		} else {
+			fmt.Printf("   ⚠️ Layer '%s' has no 'steps' or 'execution_groups'\n", layerName)
+			continue
+		}
+
+		if len(steps) == 0 {
+			fmt.Printf("   ⚠️ Layer '%s' has 0 steps after extraction\n", layerName)
+			continue
+		}
+		fmt.Printf("   ✅ Layer '%s' processing %d steps\n", layerName, len(steps))
+
+		for _, stepData := range steps {
+			stepMap, ok := stepData.(map[string]interface{})
+			if !ok {
+				continue
+			}
+
+			// Convert step (value type, not pointer)
+			step := models.TransformationStep{
+				Sequence: sequence,
+				Layer:    layerName,
+				Enabled:  true, // Default to enabled
+			}
+
+			// CRITICAL: Extract step ID - needed for conditional routing (skipSteps, nextStep)
+			if id, ok := stepMap["id"].(string); ok {
+				step.ID = id
+			} else if id, ok := stepMap["stepId"].(string); ok {
+				step.ID = id
+			} else if id, ok := stepMap["step_id"].(string); ok {
+				step.ID = id
+			}
+
+			// Extract step fields - support both camelCase (frontend model) and snake_case (database model)
+			if name, ok := stepMap["stepName"].(string); ok {
+				step.StepName = name
+			} else if name, ok := stepMap["step_name"].(string); ok {
+				step.StepName = name
+			}
+			if stepType, ok := stepMap["stepType"].(string); ok {
+				step.StepType = stepType
+			} else if stepType, ok := stepMap["step_type"].(string); ok {
+				step.StepType = stepType
+			}
+			if seq, ok := stepMap["sequence"].(float64); ok {
+				step.Sequence = int(seq)
+			}
+			if enabled, ok := stepMap["enabled"].(bool); ok {
+				step.Enabled = enabled
+			}
+			if config, ok := stepMap["config"].(map[string]interface{}); ok {
+				step.Config = config
+			}
+
+			// Debug logging to understand what's being processed
+			log.Printf("   🔍 Processing step: id=%v, stepName=%v, stepType=%v",
+				step.ID, step.StepName, step.StepType)
+			fmt.Printf("   🔍 Raw stepMap keys: %v, id=%v\n", getConfigKeys(stepMap), stepMap["id"])
+
+			// Only add enabled steps
+			if step.Enabled && step.StepName != "" {
+				pipeline.Steps = append(pipeline.Steps, step)
+				log.Printf("   ✅ Added step: %s (%s) - sequence %d", step.StepName, step.StepType, step.Sequence)
+			}
+
+			sequence += 10
+		}
+	}
+
+	log.Printf("✅ Converted frontend pipeline: %d steps", len(pipeline.Steps))
+	return pipeline, nil
 }
 
 func (c *TransformationTestController) loadPipelineSteps(pipelineID string) ([]*models.TransformationStep, error) {
@@ -702,8 +983,18 @@ func (c *TransformationTestController) GetAvailableReferenceVariables(ctx *gin.C
 		return
 	}
 
+	log.Printf("🔍 [GetAvailableReferenceVariables] Called for layer=%s, step=%d", req.CurrentLayer, req.CurrentStep)
+
+	// DEBUG: Log the entire pipeline to see if resultMapping is present
+	if req.Pipeline != nil && req.Pipeline["layers"] != nil {
+		pipelineJSON, _ := json.MarshalIndent(req.Pipeline, "", "  ")
+		log.Printf("📦 [DEBUG] Full Pipeline JSON:\n%s", string(pipelineJSON))
+	}
+
 	// Build available variables based on execution order
 	stepVariables := c.buildStepVariables(req.Pipeline, req.CurrentLayer, req.CurrentStep)
+
+	log.Printf("📊 [GetAvailableReferenceVariables] Returning %d variable categories", len(stepVariables))
 
 	ctx.JSON(http.StatusOK, gin.H{
 		"success":   true,
@@ -802,6 +1093,7 @@ func (c *TransformationTestController) buildStepVariables(pipeline map[string]in
 }
 
 // extractEnrichmentVariablesUpTo extracts reference variables up to a specific step index
+// NEW IMPLEMENTATION: Uses VariableProvider interface for systematic variable discovery
 func (c *TransformationTestController) extractEnrichmentVariablesUpTo(steps []interface{}, upToStep int) []map[string]interface{} {
 	variables := make([]map[string]interface{}, 0)
 
@@ -811,24 +1103,71 @@ func (c *TransformationTestController) extractEnrichmentVariablesUpTo(steps []in
 	}
 
 	for i := 0; i < maxSteps; i++ {
-		if stepMap, ok := steps[i].(map[string]interface{}); ok {
-			stepType, _ := stepMap["step_type"].(string)
-			stepName, _ := stepMap["step_name"].(string)
-			config, _ := stepMap["config"].(map[string]interface{})
+		stepMap, ok := steps[i].(map[string]interface{})
+		if !ok {
+			continue
+		}
 
-			if stepName == "" {
-				stepName = fmt.Sprintf("Step_%d", i+1)
+		stepType, _ := stepMap["step_type"].(string)
+		stepName, _ := stepMap["step_name"].(string)
+		config, _ := stepMap["config"].(map[string]interface{})
+
+		if stepName == "" {
+			stepName = fmt.Sprintf("Step_%d", i+1)
+		}
+
+		// Sanitize step name - replace spaces with underscores
+		sanitizedStepName := strings.ReplaceAll(stepName, " ", "_")
+
+		// Create a TransformationStep from the step map
+		step := &models.TransformationStep{
+			StepName: stepName,
+			StepType: stepType,
+			Sequence: i,
+			Config:   config,
+		}
+
+		// Get executor for this step type
+		executor := c.executorRegistry.GetExecutor(stepType)
+		if executor == nil {
+			log.Printf("⚠️  [extractEnrichmentVariables] No executor found for step type: %s", stepType)
+			continue
+		}
+
+		// Check if executor implements VariableProvider interface
+		if variableProvider, ok := executor.(interface {
+			GetOutputVariables(step *models.TransformationStep) []models.VariableDefinition
+		}); ok {
+			// Use VariableProvider interface - SYSTEMATIC APPROACH
+			log.Printf("✅ [extractEnrichmentVariables] Using VariableProvider for %s (step: %s)", stepType, sanitizedStepName)
+
+			outputVars := variableProvider.GetOutputVariables(step)
+			log.Printf("   📦 Got %d output variables from VariableProvider", len(outputVars))
+			for _, varDef := range outputVars {
+				log.Printf("      • %s: %s (path: %s)", varDef.Name, varDef.Description, varDef.Path)
+				variables = append(variables, map[string]interface{}{
+					"name":          varDef.Name,
+					"path":          varDef.Path,
+					"usage_example": varDef.UsageExample,
+					"description":   varDef.Description,
+					"data_type":     varDef.DataType,
+					"source_field":  varDef.SourceField,
+					"examples":      varDef.Examples,
+					"category":      varDef.Category,
+					"required":      varDef.Required,
+					"step_index":    i,
+					"step_name":     sanitizedStepName,
+				})
 			}
-
-			// Sanitize step name - replace spaces with underscores
-			sanitizedStepName := strings.ReplaceAll(stepName, " ", "_")
+		} else {
+			// LEGACY FALLBACK: For executors that don't implement VariableProvider yet
+			log.Printf("⚠️  [extractEnrichmentVariables] Executor %s doesn't implement VariableProvider, using legacy logic", stepType)
 
 			switch stepType {
 			case "pre.enrichment.metadata":
 				// Metadata enrichment adds custom metadata fields
 				customMetadata, _ := config["customMetadata"].(map[string]interface{})
 				if len(customMetadata) > 0 {
-					// Add individual variables for each metadata field
 					for key := range customMetadata {
 						variables = append(variables, map[string]interface{}{
 							"name":          key,
@@ -841,21 +1180,13 @@ func (c *TransformationTestController) extractEnrichmentVariablesUpTo(steps []in
 					}
 				}
 
-			case "pre.enrichment.database", "pre.enrichment.api", "pre.enrichment.script":
-				// All enrichment steps store data as ["step_name"].enriched_data
+			case "pre.enrichment.api", "pre.enrichment.script":
+				// API and Script enrichment: Generic variables
 				basePath := fmt.Sprintf("[\"%s\"].enriched_data", stepName)
 
-				// Build description with examples
 				var description string
 				var examples []string
 				switch stepType {
-				case "pre.enrichment.database":
-					description = "Database enrichment results"
-					examples = []string{
-						fmt.Sprintf(`%s.chronicConditions`, basePath),
-						fmt.Sprintf(`%s.dob`, basePath),
-						fmt.Sprintf(`%s.lastAdmission`, basePath),
-					}
 				case "pre.enrichment.api":
 					description = "API enrichment results"
 					examples = []string{
@@ -872,7 +1203,6 @@ func (c *TransformationTestController) extractEnrichmentVariablesUpTo(steps []in
 					}
 				}
 
-				// Add description with examples
 				descriptionWithExamples := fmt.Sprintf("%s | Examples: %s", description, strings.Join(examples, " • "))
 
 				variables = append(variables, map[string]interface{}{
@@ -889,6 +1219,70 @@ func (c *TransformationTestController) extractEnrichmentVariablesUpTo(steps []in
 	}
 
 	return variables
+}
+
+// extractColumnsFromQuery parses a SQL query and extracts column names from SELECT
+func (c *TransformationTestController) extractColumnsFromQuery(query string) []string {
+	if query == "" {
+		return nil
+	}
+
+	// Convert to lowercase for easier parsing
+	lowerQuery := strings.ToLower(strings.TrimSpace(query))
+
+	// Find SELECT and FROM positions
+	selectPos := strings.Index(lowerQuery, "select")
+	fromPos := strings.Index(lowerQuery, "from")
+
+	if selectPos == -1 || fromPos == -1 || fromPos <= selectPos {
+		return nil
+	}
+
+	// Extract column list between SELECT and FROM
+	columnsPart := query[selectPos+6 : fromPos] // +6 for "select"
+	columnsPart = strings.TrimSpace(columnsPart)
+
+	// Handle SELECT *
+	if strings.TrimSpace(columnsPart) == "*" {
+		return nil // Can't determine columns from SELECT *
+	}
+
+	// Split by comma and extract column names/aliases
+	columns := []string{}
+	parts := strings.Split(columnsPart, ",")
+
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+
+		// Check for AS alias
+		asPos := strings.LastIndex(strings.ToLower(part), " as ")
+		if asPos != -1 {
+			// Use the alias
+			alias := strings.TrimSpace(part[asPos+4:])
+			columns = append(columns, alias)
+			continue
+		}
+
+		// Check for space-separated alias (e.g., "column_name alias")
+		spaceParts := strings.Fields(part)
+		if len(spaceParts) > 1 {
+			// Last part is likely the alias
+			columns = append(columns, spaceParts[len(spaceParts)-1])
+		} else {
+			// Extract column name after last dot (for table.column)
+			dotPos := strings.LastIndex(part, ".")
+			if dotPos != -1 {
+				columns = append(columns, part[dotPos+1:])
+			} else {
+				columns = append(columns, part)
+			}
+		}
+	}
+
+	return columns
 }
 
 // ValidateScript validates a JavaScript script for syntax and dependency errors
@@ -930,6 +1324,7 @@ func (c *TransformationTestController) ValidateScript(ctx *gin.Context) {
 		StepName: "Script Validation",
 		StepType: "pre.enrichment.script",
 		Sequence: 1,
+		Enabled:  true, // CRITICAL: Step must be enabled for validation to work
 		Config: map[string]interface{}{
 			"script":      request.Script,
 			"timeout_ms":  5000,
@@ -959,44 +1354,73 @@ func (c *TransformationTestController) ValidateScript(ctx *gin.Context) {
 		"metadata": map[string]interface{}{},
 	}
 
-	// Try to execute the script with dummy data
-	_, err := executor.Execute(context.Background(), step, dummyInput)
-
-	if err != nil {
-		// Script has errors
-		errorMsg := err.Error()
-
-		// Parse error to provide helpful feedback
-		var friendlyError string
-		if strings.Contains(errorMsg, "Cannot read property") {
-			friendlyError = "Script tries to access undefined property. " + errorMsg
-		} else if strings.Contains(errorMsg, "undefined") {
-			friendlyError = "Script references undefined variable. " + errorMsg
-		} else if strings.Contains(errorMsg, "SyntaxError") {
-			friendlyError = "Script has syntax error. " + errorMsg
-		} else {
-			friendlyError = errorMsg
-		}
-
+	// FIRST: Do a syntax-only check by compiling without executing
+	// Wrap in function to allow return statements, just like the executor does
+	wrappedScript := fmt.Sprintf("(function() { %s })()", request.Script)
+	_, compileErr := goja.Compile("syntax_check", wrappedScript, false)
+	if compileErr != nil {
 		ctx.JSON(http.StatusOK, gin.H{
 			"success": false,
-			"error":   friendlyError,
+			"error":   fmt.Sprintf("Syntax error: %s", compileErr.Error()),
 			"details": map[string]interface{}{
-				"raw_error": errorMsg,
+				"raw_error": compileErr.Error(),
 				"suggestions": []string{
-					"Check that all referenced variables exist (metadata, enriched, etc.)",
-					"Add defensive checks: if (!variable) { return {...}; }",
-					"Verify field paths are correct",
-					"Test script with actual pipeline data using 'Test Execution'",
+					"Check for missing brackets, parentheses, or semicolons",
+					"Ensure all variables are properly declared",
+					"Verify JavaScript syntax is correct",
 				},
 			},
 		})
 		return
 	}
 
-	// Script is valid
+	// SECOND: Try to execute the script with dummy data to catch runtime errors
+	_, err := executor.Execute(context.Background(), step, dummyInput)
+	if err != nil {
+		ctx.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"error":   err.Error(),
+			"details": map[string]interface{}{
+				"raw_error": err.Error(),
+			},
+		})
+		return
+	}
+
+	// Script is valid (syntax OK, no runtime errors)
+	// Note: We don't check return values - validation is ONLY for syntax
 	ctx.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"message": "Script syntax is valid and executes without errors",
+		"message": "Script is syntactically valid",
 	})
+}
+
+// breakCycles converts a map through JSON round-trip to eliminate circular references.
+// Some executors (e.g., Loop) pass context maps that reference parent data, creating
+// cycles that cause json.Marshal to fail with "encountered a cycle via []interface{}".
+// The round-trip produces a clean copy with all cycles broken.
+func breakCycles(data map[string]interface{}) map[string]interface{} {
+	if data == nil {
+		return map[string]interface{}{}
+	}
+	jsonBytes, err := json.Marshal(data)
+	if err != nil {
+		log.Printf("⚠️ breakCycles: marshal failed (%v), stripping step output", err)
+		// If even the round-trip fails, return just the keys for debugging
+		keys := make([]string, 0, len(data))
+		for k := range data {
+			keys = append(keys, k)
+		}
+		return map[string]interface{}{
+			"_error":         "circular reference in step output",
+			"_original_keys": keys,
+		}
+	}
+	var clean map[string]interface{}
+	if err := json.Unmarshal(jsonBytes, &clean); err != nil {
+		return map[string]interface{}{
+			"_error": "failed to unmarshal step output",
+		}
+	}
+	return clean
 }

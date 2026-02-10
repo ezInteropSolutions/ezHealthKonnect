@@ -195,17 +195,17 @@ class OAuth2ConfigBuilder {
 
         // Validate required fields
         if (!config.tokenURL || !config.clientID || !config.clientSecret) {
-            alert('Please fill in all required fields (Token URL, Client ID, Client Secret)');
+            this.showNotification('Please fill in all required fields (Token URL, Client ID, Client Secret)', 'warning');
             return;
         }
 
         if (config.grantType === 'password' && (!config.username || !config.password)) {
-            alert('Please fill in username and password for Password Grant');
+            this.showNotification('Please fill in username and password for Password Grant', 'warning');
             return;
         }
 
         if (config.grantType === 'refresh_token' && !config.refreshToken) {
-            alert('Please provide a refresh token');
+            this.showNotification('Please provide a refresh token', 'warning');
             return;
         }
 
@@ -237,7 +237,7 @@ class OAuth2ConfigBuilder {
             btn.innerHTML = '<i class="fas fa-exclamation-circle"></i> Failed';
             btn.classList.add('btn-danger');
 
-            alert(`OAuth 2.0 Test Failed:\n\n${error.message}`);
+            this.showNotification(`OAuth 2.0 Test Failed: ${error.message}`, 'error');
 
             setTimeout(() => {
                 btn.innerHTML = originalHTML;
@@ -245,6 +245,28 @@ class OAuth2ConfigBuilder {
                 btn.disabled = false;
             }, 3000);
         }
+    }
+
+    /**
+     * Show in-app notification
+     */
+    showNotification(message, type = 'info') {
+        const notification = document.createElement('div');
+        notification.style.cssText = `
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background: ${type === 'success' ? '#10b981' : type === 'error' ? '#ef4444' : type === 'warning' ? '#f59e0b' : '#06b6d4'};
+            color: white;
+            padding: 12px 20px;
+            border-radius: 6px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            z-index: 10000;
+            max-width: 400px;
+        `;
+        notification.textContent = message;
+        document.body.appendChild(notification);
+        setTimeout(() => notification.remove(), 4000);
     }
 
     async requestToken(config) {

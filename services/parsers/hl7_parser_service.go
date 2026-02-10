@@ -94,6 +94,8 @@ func convertToStandardJSON(enhanced *hl7.EnhancedParsedMessage) map[string]inter
 
 	// Enhanced segments with full schema metadata
 	result["enhancedSegments"] = enhanced.EnhancedSegments
+	result["segmentGroups"] = enhanced.SegmentGroups           // ALL instances of each segment type (for loops over IN1, OBX, etc.)
+	result["observationGroups"] = enhanced.ObservationGroups  // OBR-OBX grouped relationships for nested loops
 	result["segmentOrder"] = enhanced.SegmentOrder
 
 	// Basic segments (if available)

@@ -1,11 +1,33 @@
 package models
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
 )
+
+// Context key for pipeline execution modes
+type contextKey string
+
+const (
+	// ContextKeyTestMode indicates the pipeline is running in test/dry-run mode
+	ContextKeyTestMode contextKey = "pipeline_test_mode"
+)
+
+// IsTestMode checks if the context indicates test mode execution
+func IsTestMode(ctx context.Context) bool {
+	if val, ok := ctx.Value(ContextKeyTestMode).(bool); ok {
+		return val
+	}
+	return false
+}
+
+// WithTestMode returns a new context with test mode enabled
+func WithTestMode(ctx context.Context) context.Context {
+	return context.WithValue(ctx, ContextKeyTestMode, true)
+}
 
 // TransformationPipeline represents a transformation pipeline for an interface/message type
 type TransformationPipeline struct {
@@ -37,6 +59,21 @@ type TransformationStep struct {
 	ScriptContent   *string                `json:"script_content,omitempty" db:"script_content"`
 	OnErrorStrategy string                 `json:"on_error_strategy" db:"on_error_strategy"` // fail, skip, default
 	ExecutionMode   string                 `json:"execution_mode" db:"execution_mode"` // sequential, parallel
+
+	// Canvas position (for visual layout persistence)
+	PositionX       *float64               `json:"position_x,omitempty" db:"position_x"`
+	PositionY       *float64               `json:"position_y,omitempty" db:"position_y"`
+
+	// Conditional branch tracking (for visual layout persistence)
+	// Tracks which conditional step this step is connected to and which branch
+	ParentConditionalStepID *string        `json:"parent_conditional_step_id,omitempty" db:"parent_conditional_step_id"`
+	BranchType              *string        `json:"branch_type,omitempty" db:"branch_type"`  // For IfThenElse: "true" or "false"
+	CaseValue               *string        `json:"case_value,omitempty" db:"case_value"`    // For Switch/Case: the case value (e.g., "M", "F", "default")
+
+	// Container system: tracks which container step this step belongs to
+	ParentStepID  *string `json:"parent_step_id,omitempty" db:"parent_step_id"`    // ID of parent container (Loop, Try-Catch, Retry). NULL = top-level
+	ContainerZone *string `json:"container_zone,omitempty" db:"container_zone"`    // Zone: "body" (Loop/Retry), "try"/"catch"/"finally" (Try-Catch)
+
 	CreatedAt       time.Time              `json:"created_at" db:"created_at"`
 	UpdatedAt       time.Time              `json:"updated_at" db:"updated_at"`
 }
@@ -138,17 +175,61 @@ func (te *TransformationExecution) UnmarshalExecutionLog(data []byte) error {
 }
 
 // TransformationExecutionResult represents the result of a pipeline execution (MVC + OOB)
+// TransformationExecutionResult represents the complete result of a pipeline execution
 type TransformationExecutionResult struct {
-	PipelineID    string                 `json:"pipeline_id"`
-	CorrelationID string                 `json:"correlation_id"`
-	Status        string                 `json:"status"` // in_progress, completed, failed, partial
-	StartedAt     time.Time              `json:"started_at"`
-	CompletedAt   time.Time              `json:"completed_at"`
-	ExecutionTime time.Duration          `json:"execution_time"`
-	Output        map[string]interface{} `json:"output"`         // Transformed content (FHIR bundle, JSON, etc.)
-	DeliveryPayload *DeliveryPayload     `json:"delivery_payload,omitempty"` // Prepared for transmission
-	ExecutionLog  []StepExecutionLog     `json:"execution_log"`  // Step-by-step execution tracking
-	Errors        []TransformationError  `json:"errors"`
+	// === IDENTIFICATION ===
+	PipelineID    string `json:"pipeline_id"`
+	CorrelationID string `json:"correlation_id"`
+
+	// === STATUS ===
+	Status string `json:"status"` // in_progress, completed, failed, partial
+
+	// === TIMING ===
+	StartedAt       time.Time `json:"started_at"`
+	CompletedAt     time.Time `json:"completed_at"`
+	ExecutionTimeNs int64     `json:"execution_time_ns"` // Nanoseconds (explicit for clarity)
+
+	// === DATA LINEAGE (Format-Agnostic) ===
+	Input  *MessageContext `json:"input"`  // What came in
+	Output *MessageContext `json:"output"` // What went out
+
+	// === EXECUTION TRACKING ===
+	ExecutionLog []StepExecutionLog `json:"execution_log"` // Step-by-step execution tracking
+
+	// === DELIVERY ===
+	DeliveryPayload *DeliveryPayload `json:"delivery_payload,omitempty"` // Prepared for transmission
+
+	// === ERRORS ===
+	Errors []TransformationError `json:"errors,omitempty"`
+}
+
+// MessageContext represents a message at any stage of transformation (input or output)
+// Supports any format: HL7v2, FHIR, JSON, XML, EDI X12, CSV, etc.
+type MessageContext struct {
+	// Format identification
+	Format      string `json:"format"`                 // hl7v2, fhir-r4, json, xml, edi-x12, csv, etc.
+	ContentType string `json:"content_type,omitempty"` // application/json, text/xml, etc.
+
+	// Message metadata
+	MessageType string `json:"message_type,omitempty"` // ADT^A01, Bundle, OrderRequest, etc.
+	Version     string `json:"version,omitempty"`      // 2.5, 4.0.1, etc.
+
+	// Size tracking
+	SizeBytes int64 `json:"size_bytes"`
+
+	// Timestamps
+	ReceivedAt    time.Time `json:"received_at,omitempty"`
+	TransformedAt time.Time `json:"transformed_at,omitempty"`
+
+	// Storage reference (MongoDB document ID or S3 key)
+	PayloadRef  string `json:"payload_ref,omitempty"`  // Reference to full payload in MongoDB
+	PayloadHash string `json:"payload_hash,omitempty"` // SHA256 hash for integrity verification
+
+	// Actual payload (included for small messages, omitted for large ones stored in MongoDB)
+	Payload interface{} `json:"payload,omitempty"`
+
+	// Format-specific metadata
+	Metadata map[string]interface{} `json:"metadata,omitempty"`
 }
 
 // TransformationError represents an error during transformation execution
@@ -162,23 +243,30 @@ type TransformationError struct {
 
 // PipelineExecutionContext represents the full execution context with step outputs
 type PipelineExecutionContext struct {
-	Message     map[string]interface{} `json:"message"`      // The actual message being transformed
-	StepOutputs map[string]StepOutput  `json:"step_outputs"` // Namespaced step-specific outputs
-	Metadata    map[string]interface{} `json:"metadata"`     // Pipeline execution metadata
+	Message         map[string]interface{}    `json:"message"`          // The actual message being transformed
+	StepOutputs     map[string]StepOutput     `json:"step_outputs"`     // Namespaced step-specific outputs
+	Metadata        map[string]interface{}    `json:"metadata"`         // Pipeline execution metadata
+	VariableContext *PipelineVariableContext  `json:"variable_context"` // Flat namespace variable registry (NO-CODE)
 }
 
 // StepOutput represents output from a single step execution
+// STANDARDIZED STRUCTURE:
+//   - OutputData: Contains ONLY user-created variables (e.g., {male_case: "1"})
+//   - ExecutionDetails: Contains step-specific execution info (e.g., {field_evaluated: "PID.8", case_matched: true})
+//   - Success/DurationMs/Error: Standard execution status fields
+// The controller merges ExecutionDetails into step_metadata along with Success/DurationMs
 type StepOutput struct {
-	StepID     string                 `json:"step_id"`     // Full UUID of the step
-	StepName   string                 `json:"step_name"`   // Human-readable step name
-	StepAlias  string                 `json:"step_alias"`  // User-friendly alias (e.g., "empi")
-	StepType   string                 `json:"step_type"`   // Executor type (pre.enrichment.api, etc.)
-	Namespace  string                 `json:"namespace"`   // "alias_shortID" (e.g., "empi_b4c9f1")
-	Sequence   int                    `json:"sequence"`    // Step execution order
-	OutputData map[string]interface{} `json:"output_data"` // Step-specific output data
-	Success    bool                   `json:"success"`     // Execution success status
-	Error      string                 `json:"error,omitempty"`
-	DurationMs int64                  `json:"duration_ms"` // Execution time in milliseconds
+	StepID           string                 `json:"step_id"`                     // Full UUID of the step
+	StepName         string                 `json:"step_name"`                   // Human-readable step name
+	StepAlias        string                 `json:"step_alias"`                  // User-friendly alias (e.g., "empi")
+	StepType         string                 `json:"step_type"`                   // Executor type (pre.enrichment.api, etc.)
+	Namespace        string                 `json:"namespace"`                   // "alias_shortID" (e.g., "empi_b4c9f1")
+	Sequence         int                    `json:"sequence"`                    // Step execution order
+	OutputData       map[string]interface{} `json:"output_data"`                 // Step-specific output data (variables only)
+	ExecutionDetails map[string]interface{} `json:"execution_details,omitempty"` // Step-specific execution info (for step_metadata)
+	Success          bool                   `json:"success"`                     // Execution success status
+	Error            string                 `json:"error,omitempty"`
+	DurationMs       int64                  `json:"duration_ms"` // Execution time in milliseconds
 }
 
 // GetStepOutputByAlias retrieves step output by its user-friendly alias

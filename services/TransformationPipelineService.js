@@ -45,7 +45,7 @@ class TransformationPipelineService {
      * Create complete pipeline for interface
      * This is the main entry point called by wizard
      */
-    async createPipelineForInterface(interfaceId, messageType, interfaceName, wizardMappings, userId) {
+    async createPipelineForInterface(interfaceId, messageType, interfaceName, wizardMappings, userId, connectivityInfo = null) {
         const client = await this.pool.connect();
 
         try {
@@ -55,6 +55,7 @@ class TransformationPipelineService {
             console.log('Interface ID:', interfaceId);
             console.log('Message Type:', messageType);
             console.log('Mappings:', wizardMappings?.atomicMappings?.length || 0);
+            console.log('Connectivity:', connectivityInfo);
 
             // Step 1: Create pipeline record
             const pipelineId = await this.createPipeline(
@@ -73,7 +74,12 @@ class TransformationPipelineService {
                 userId
             );
 
-            // Step 3: Add HL7→FHIR mapping step (sequence 100)
+            // Step 3: Add inbound connector step (sequence 5, before validation)
+            if (connectivityInfo?.sourceConnectivity) {
+                await this.addConnectorStep(client, pipelineId, 'inbound', connectivityInfo.sourceConnectivity, userId, connectivityInfo.sourceConfig);
+            }
+
+            // Step 4: Add HL7→FHIR mapping step (sequence 100)
             await this.addMappingStep(
                 client,
                 pipelineId,
@@ -82,19 +88,25 @@ class TransformationPipelineService {
                 userId
             );
 
-            // Step 4: Add default pipeline steps
+            // Step 5: Add default pipeline steps
             await this.addDefaultPipelineSteps(
                 client,
                 pipelineId,
                 userId
             );
 
+            // Step 6: Add outbound connector step (sequence 295, after all processing)
+            if (connectivityInfo?.targetConnectivity) {
+                await this.addConnectorStep(client, pipelineId, 'outbound', connectivityInfo.targetConnectivity, userId, connectivityInfo.targetConfig);
+            }
+
             await client.query('COMMIT');
 
+            const totalSteps = 6 + (connectivityInfo?.sourceConnectivity ? 1 : 0) + (connectivityInfo?.targetConnectivity ? 1 : 0);
             console.log('✅ Pipeline created successfully:', {
                 pipelineId,
                 templateId,
-                stepsCreated: 6 // 1 mapping + 5 default
+                stepsCreated: totalSteps
             });
 
             return {
@@ -262,8 +274,8 @@ class TransformationPipelineService {
         const result = await client.query(query, [
             pipelineId,
             'HL7→FHIR Transform',
-            'core.mapping',
-            100,  // Core mapping always at sequence 100
+            'hl7_fhir_transform',
+            60,  // After default steps
             JSON.stringify(stepConfig),
             userId
         ]);
@@ -278,11 +290,11 @@ class TransformationPipelineService {
         console.log('⚙️ Adding default pipeline steps...');
 
         const defaultSteps = [
-            { sequence: 10, name: 'Field Validation', type: 'core.validation', config: { validations: [] } },
-            { sequence: 20, name: 'API Enrichment', type: 'pre.enrichment.api', config: {} },
-            { sequence: 30, name: 'Database Enrichment', type: 'pre.enrichment.database', config: {} },
-            { sequence: 50, name: 'Field Mapping', type: 'core.transformation', config: { mappings: [] } },
-            { sequence: 60, name: 'Script Enrichment', type: 'pre.enrichment.script', config: {} }
+            { sequence: 10, name: 'Field Validation', type: 'field_validation', config: { validations: [] } },
+            { sequence: 20, name: 'API Enrichment', type: 'enrichment.api', config: {} },
+            { sequence: 30, name: 'Database Enrichment', type: 'enrichment.database', config: {} },
+            { sequence: 40, name: 'Field Mapping', type: 'field_mapping', config: { mappings: [] } },
+            { sequence: 50, name: 'Script Enrichment', type: 'enrichment.script', config: {} }
         ];
 
         const query = `
@@ -309,6 +321,125 @@ class TransformationPipelineService {
         }
 
         console.log(`✅ Added ${defaultSteps.length} default steps`);
+    }
+
+    /**
+     * Add a connector step (inbound or outbound) to the pipeline
+     */
+    async addConnectorStep(client, pipelineId, direction, connectivityType, userId, wizardConfig = {}) {
+        // Map wizard connectivity strings to actual connector type_names from connectivity_types table
+        const SOURCE_TYPE_MAP = {
+            'tcp': { typeName: 'tcp_mllp', name: 'TCP/MLLP Inbound' },
+            'http': { typeName: 'http_rest', name: 'HTTP REST Inbound' },
+            'file': { typeName: 'file_listener', name: 'File Listener' },
+            'database': { typeName: 'postgresql_inbound', name: 'Database Inbound' }
+        };
+
+        const TARGET_TYPE_MAP = {
+            'http': { typeName: 'http_outbound', name: 'HTTP Outbound' },
+            'fhir': { typeName: 'http_outbound', name: 'FHIR Outbound' },
+            'tcp': { typeName: 'tcp_mllp_outbound', name: 'TCP/MLLP Outbound' },
+            'file': { typeName: 'file_writer', name: 'File Writer' },
+            'database': { typeName: 'postgresql_outbound', name: 'Database Outbound' }
+        };
+
+        const typeMap = direction === 'inbound' ? SOURCE_TYPE_MAP : TARGET_TYPE_MAP;
+        const mapping = typeMap[connectivityType];
+
+        if (!mapping) {
+            console.log(`⚠️ No connector mapping for ${direction} type: ${connectivityType}, skipping`);
+            return;
+        }
+
+        const stepType = `connector.${direction}`;
+        const sequence = direction === 'inbound' ? 5 : 295;
+
+        // Normalize wizard config keys to connector schema keys
+        const normalizedConfig = this.normalizeWizardConfig(wizardConfig, mapping.typeName);
+
+        const config = {
+            connectorType: mapping.typeName,
+            config: normalizedConfig
+        };
+
+        if (direction === 'outbound') {
+            config.contentField = 'transformed';
+            config.contentType = 'application/json';
+        } else {
+            config.outputField = 'enriched.connector_result';
+            config.timeoutMs = 30000;
+        }
+
+        const query = `
+            INSERT INTO transformation_steps (
+                pipeline_id,
+                step_name,
+                step_type,
+                sequence,
+                config,
+                enabled,
+                created_by
+            ) VALUES ($1, $2, $3, $4, $5, true, $6)
+        `;
+
+        await client.query(query, [
+            pipelineId,
+            mapping.name,
+            stepType,
+            sequence,
+            JSON.stringify(config),
+            userId
+        ]);
+
+        console.log(`🔌 Added ${direction} connector step: ${mapping.name} (seq ${sequence}, type: ${mapping.typeName})`);
+    }
+
+    /**
+     * Normalize wizard config keys to match connector config_schema field names
+     * Wizard uses its own naming (endpoint, authType), connectors use schema names (url, authentication_type)
+     */
+    normalizeWizardConfig(wizardConfig, connectorTypeName) {
+        if (!wizardConfig || Object.keys(wizardConfig).length === 0) return {};
+
+        const normalized = {};
+
+        // HTTP outbound: wizard → schema key mapping
+        if (connectorTypeName === 'http_outbound') {
+            if (wizardConfig.endpoint) normalized.url = wizardConfig.endpoint;
+            if (wizardConfig.authType) normalized.authentication_type = wizardConfig.authType;
+            if (wizardConfig.method) normalized.method = wizardConfig.method;
+            // Pass through keys that already match
+            if (wizardConfig.url) normalized.url = wizardConfig.url;
+            if (wizardConfig.content_type) normalized.content_type = wizardConfig.content_type;
+            if (wizardConfig.timeout_seconds) normalized.timeout_seconds = wizardConfig.timeout_seconds;
+            return normalized;
+        }
+
+        // TCP/MLLP: keys already match (host, port)
+        if (connectorTypeName === 'tcp_mllp' || connectorTypeName === 'tcp_mllp_outbound') {
+            if (wizardConfig.host) normalized.host = wizardConfig.host;
+            if (wizardConfig.port) normalized.port = parseInt(wizardConfig.port, 10) || wizardConfig.port;
+            return normalized;
+        }
+
+        // File: wizard → schema key mapping
+        if (connectorTypeName === 'file_listener' || connectorTypeName === 'file_writer') {
+            if (wizardConfig.directory_path) normalized.directory_path = wizardConfig.directory_path;
+            if (wizardConfig.file_pattern) normalized.file_pattern = wizardConfig.file_pattern;
+            return normalized;
+        }
+
+        // Database: pass through common keys
+        if (connectorTypeName.includes('postgresql') || connectorTypeName.includes('mysql') ||
+            connectorTypeName.includes('mongodb') || connectorTypeName.includes('sqlserver')) {
+            ['host', 'port', 'database', 'username', 'password', 'ssl_mode', 'query', 'table_name'].forEach(key => {
+                if (wizardConfig[key] !== undefined) normalized[key] = wizardConfig[key];
+            });
+            return normalized;
+        }
+
+        // Default: pass through all keys
+        return { ...wizardConfig };
     }
 
     /**

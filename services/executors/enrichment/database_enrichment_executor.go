@@ -53,7 +53,7 @@ func NewDatabaseEnrichmentExecutor(db *sql.DB) *DatabaseEnrichmentExecutor {
 		Category:    "enrichment",
 	}
 
-	base := executors.NewBaseExecutor("pre.enrichment.database", metadata)
+	base := executors.NewBaseExecutor("enrichment.database", metadata)
 
 	return &DatabaseEnrichmentExecutor{
 		BaseExecutor: base,
@@ -106,12 +106,34 @@ func (e *DatabaseEnrichmentExecutor) Execute(
 
 	if err != nil {
 		if config.FailOnError {
+			// STANDARDIZED: No variables on error + execution details
+			e.SetStepOutputWithDetails(inputData, map[string]interface{}{}, map[string]interface{}{
+				"database_type": config.DatabaseType,
+				"error":         err.Error(),
+				"target_path":   config.TargetPath,
+			})
 			e.PostExecute(ctx, step, err, time.Since(start))
 			return inputData, err
 		}
 		log.Printf("⚠️  Query failed: %v", err)
 		if config.DefaultValue != nil {
 			e.storeResult(inputData, config.TargetPath, config.DefaultValue)
+			// STANDARDIZED: Default value used + execution details
+			e.SetStepOutputWithDetails(inputData, map[string]interface{}{
+				"value": config.DefaultValue,
+			}, map[string]interface{}{
+				"database_type":      config.DatabaseType,
+				"default_value_used": true,
+				"error":              err.Error(),
+				"target_path":        config.TargetPath,
+			})
+		} else {
+			// STANDARDIZED: No variables + execution details with error
+			e.SetStepOutputWithDetails(inputData, map[string]interface{}{}, map[string]interface{}{
+				"database_type": config.DatabaseType,
+				"error":         err.Error(),
+				"target_path":   config.TargetPath,
+			})
 		}
 		e.PostExecute(ctx, step, nil, time.Since(start))
 		return inputData, nil
@@ -132,6 +154,32 @@ func (e *DatabaseEnrichmentExecutor) Execute(
 	}
 
 	e.storeResult(inputData, targetPath, mappedResult)
+
+	// Build variables (the enriched data) and execution details
+	// CONSISTENT STRUCTURE: Always use "rows" array format for predictable output
+	var variables map[string]interface{}
+	var rowCount int
+
+	if resultArray, ok := mappedResult.([]map[string]interface{}); ok {
+		// Multiple rows - use as-is
+		variables = map[string]interface{}{"rows": resultArray}
+		rowCount = len(resultArray)
+	} else if resultMap, ok := mappedResult.(map[string]interface{}); ok {
+		// Single row - wrap in array for consistency
+		variables = map[string]interface{}{"rows": []map[string]interface{}{resultMap}}
+		rowCount = 1
+	} else {
+		// Other types - wrap in result
+		variables = map[string]interface{}{"rows": []interface{}{mappedResult}}
+		rowCount = 1
+	}
+
+	// STANDARDIZED: Variables (query result) + execution details
+	e.SetStepOutputWithDetails(inputData, variables, map[string]interface{}{
+		"database_type": config.DatabaseType,
+		"target_path":   targetPath,
+		"rows_returned": rowCount,
+	})
 
 	// Log success
 	if resultArray, ok := result.([]map[string]interface{}); ok {
@@ -967,5 +1015,209 @@ func (e *DatabaseEnrichmentExecutor) substituteFieldPlaceholders(
 		// Return as-is (numbers, booleans, etc.)
 		return v
 	}
+}
+
+// ===============================================================
+// VARIABLE PROVIDER INTERFACE IMPLEMENTATION
+// ===============================================================
+
+// GetOutputVariables returns the list of variables this executor will produce
+// Implements the VariableProvider interface for automatic variable discovery
+func (e *DatabaseEnrichmentExecutor) GetOutputVariables(step *models.TransformationStep) []models.VariableDefinition {
+	variables := []models.VariableDefinition{}
+
+	// Parse config to extract database query and determine output variables
+	log.Printf("🔧 [GetOutputVariables] RAW step.Config: %+v", step.Config)
+
+	config, err := e.parseConfig(step)
+	if err != nil {
+		log.Printf("⚠️  [DatabaseEnrichment] Failed to parse config for variable discovery: %v", err)
+		return variables
+	}
+
+	// Determine base path where results will be stored
+	basePath := config.TargetPath
+	if basePath == "" {
+		basePath = "enriched.database"
+	}
+
+	// DEBUG: Log the config to see what we're working with
+	log.Printf("🔍 [GetOutputVariables] Database type: %s, Query: %s, ResultMapping count: %d",
+		config.DatabaseType, config.Query, len(config.ResultMapping))
+	if len(config.ResultMapping) > 0 {
+		log.Printf("   ResultMapping entries:")
+		for dbCol, outField := range config.ResultMapping {
+			log.Printf("      %s → %s", dbCol, outField)
+		}
+	}
+
+	// Extract variables based on database type
+	dbType := strings.ToLower(config.DatabaseType)
+	switch dbType {
+	case "mongodb", "mongo":
+		// MongoDB: Extract fields from projection if specified
+		if config.Projection != nil && len(config.Projection) > 0 {
+			for fieldName := range config.Projection {
+				if fieldName == "_id" {
+					continue // Skip MongoDB internal ID
+				}
+				variables = append(variables, models.VariableDefinition{
+					Name:         fieldName,
+					Path:         fmt.Sprintf("%s.%s", basePath, fieldName),
+					DataType:     "string", // Default to string, actual type varies
+					Description:  fmt.Sprintf("MongoDB field from %s collection", config.Collection),
+					UsageExample: fmt.Sprintf(`getNestedValue(input, "%s.%s")`, basePath, fieldName),
+					Category:     "Database",
+				})
+			}
+		} else {
+			// No projection specified, return generic enriched_data variable
+			variables = append(variables, models.VariableDefinition{
+				Name:         "enriched_data",
+				Path:         basePath,
+				DataType:     "object",
+				Description:  fmt.Sprintf("MongoDB document from %s collection", config.Collection),
+				UsageExample: fmt.Sprintf(`getNestedValue(input, "%s.fieldName")`, basePath),
+				Category:     "Database",
+			})
+		}
+
+	case "redis":
+		// Redis: Single variable based on command type
+		command := strings.ToUpper(config.RedisCommand)
+		if command == "" {
+			command = "GET"
+		}
+
+		dataType := "string"
+		if command == "HGETALL" {
+			dataType = "object"
+		} else if command == "SMEMBERS" || command == "LRANGE" {
+			dataType = "array"
+		}
+
+		variables = append(variables, models.VariableDefinition{
+			Name:         "redis_value",
+			Path:         basePath,
+			DataType:     dataType,
+			Description:  fmt.Sprintf("Redis %s result for key: %s", command, config.RedisKey),
+			UsageExample: fmt.Sprintf(`getNestedValue(input, "%s")`, basePath),
+			Category:     "Database",
+		})
+
+	default:
+		// SQL databases: Check for Result Mapping first (user-defined output fields)
+		if len(config.ResultMapping) > 0 {
+			// Use mapped field names as variable names
+			log.Printf("✅ [GetOutputVariables] Found %d result mappings for %s", len(config.ResultMapping), config.DatabaseType)
+			for dbCol, outputField := range config.ResultMapping {
+				log.Printf("   • Mapping: %s → %s", dbCol, outputField)
+				variables = append(variables, models.VariableDefinition{
+					Name:         outputField,
+					Path:         fmt.Sprintf("%s.%s", basePath, outputField),
+					DataType:     "string", // Default to string, actual type varies
+					Description:  fmt.Sprintf("Database column '%s' from %s query", dbCol, config.DatabaseType),
+					UsageExample: fmt.Sprintf(`getNestedValue(input, "%s.%s")`, basePath, outputField),
+					Category:     "Database",
+					SourceField:  dbCol,
+				})
+			}
+		} else {
+			// No result mapping - try to extract column names from SELECT query
+			columnNames := e.extractColumnsFromQuery(config.Query)
+
+			if len(columnNames) > 0 {
+				// Use original column names as variable names
+				log.Printf("✅ [GetOutputVariables] Extracted %d columns from query for %s", len(columnNames), config.DatabaseType)
+				for _, colName := range columnNames {
+					varDef := e.BuildVariableDefinition(
+						colName,
+						basePath,
+						fmt.Sprintf("Database column from %s query", config.DatabaseType),
+						executors.WithCategory("Database"),
+					)
+					variables = append(variables, varDef)
+				}
+			} else {
+				// Fallback to generic enriched_data variable (SELECT * or unparseable query)
+				log.Printf("⚠️  [GetOutputVariables] No result mapping and couldn't parse query - using generic variable for %s", config.DatabaseType)
+				variables = append(variables, models.VariableDefinition{
+					Name:         "enriched_data",
+					Path:         basePath,
+					DataType:     "object",
+					Description:  fmt.Sprintf("Database enrichment results from %s", config.DatabaseType),
+					UsageExample: fmt.Sprintf(`getNestedValue(input, "%s.fieldName")`, basePath),
+					Category:     "Database",
+				})
+			}
+		}
+	}
+
+	return variables
+}
+
+// extractColumnsFromQuery parses a SQL query and extracts column names from SELECT
+// This is reused from the controller logic to maintain consistency
+func (e *DatabaseEnrichmentExecutor) extractColumnsFromQuery(query string) []string {
+	if query == "" {
+		return nil
+	}
+
+	// Convert to lowercase for easier parsing
+	lowerQuery := strings.ToLower(strings.TrimSpace(query))
+
+	// Find SELECT and FROM positions
+	selectPos := strings.Index(lowerQuery, "select")
+	fromPos := strings.Index(lowerQuery, "from")
+
+	if selectPos == -1 || fromPos == -1 || fromPos <= selectPos {
+		return nil
+	}
+
+	// Extract column list between SELECT and FROM
+	columnsPart := query[selectPos+6 : fromPos] // +6 for "select"
+	columnsPart = strings.TrimSpace(columnsPart)
+
+	// Handle SELECT *
+	if strings.TrimSpace(columnsPart) == "*" {
+		return nil // Can't determine columns from SELECT *
+	}
+
+	// Split by comma and extract column names/aliases
+	columns := []string{}
+	parts := strings.Split(columnsPart, ",")
+
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+
+		// Check for AS alias
+		asPos := strings.LastIndex(strings.ToLower(part), " as ")
+		if asPos != -1 {
+			// Use the alias
+			alias := strings.TrimSpace(part[asPos+4:])
+			columns = append(columns, alias)
+			continue
+		}
+
+		// Check for space-separated alias (e.g., "column_name alias")
+		spaceParts := strings.Fields(part)
+		if len(spaceParts) > 1 {
+			// Last part is likely the alias
+			columns = append(columns, spaceParts[len(spaceParts)-1])
+		} else {
+			// Extract column name after last dot (for table.column)
+			dotPos := strings.LastIndex(part, ".")
+			if dotPos != -1 {
+				columns = append(columns, part[dotPos+1:])
+			} else {
+				columns = append(columns, part)
+			}
+		}
+	}
+
+	return columns
 }
 

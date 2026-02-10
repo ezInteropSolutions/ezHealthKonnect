@@ -72,10 +72,10 @@ class ToolboxManager {
             new StepTemplate({
                 id: 'validate-fields',
                 name: 'Field Validation',
-                type: 'core.validation',  // Updated to use FieldValidationExecutor
+                type: 'field_validation',
                 description: 'Validate fields with support for required, format (email, phone, ssn, date, etc.), length, and pattern validation',
-                layer: 'pre',
-                icon: this.getIconForType('pre.validation'),
+                layer: 'core',
+                icon: this.getIconForType('field_validation'),
                 isSystem: true,
                 // Validation defaults: Use standard step controls
                 required: false,  // Uncheck to accept messages with warnings (ACK)
@@ -105,11 +105,11 @@ class ToolboxManager {
             // REMOVED: "Add Metadata" step - metadata functionality merged into Field Mapping
             new StepTemplate({
                 id: 'enrich-api',
-                name: 'api_enrichment',
-                type: 'pre.enrichment.api',
+                name: 'API Enrichment',
+                type: 'enrichment.api',
                 description: 'Enrich message data from external REST API (EMPI, EHR, LIMS)',
-                layer: 'pre',
-                icon: this.getIconForType('pre.enrichment.api'),
+                layer: 'core',
+                icon: this.getIconForType('enrichment.api'),
                 isSystem: true,
                 defaultConfig: {
                     endpoint: 'https://api.example.com/patients/{patientId}',
@@ -124,11 +124,11 @@ class ToolboxManager {
             }),
             new StepTemplate({
                 id: 'enrich-database',
-                name: 'database_enrichment',
-                type: 'pre.enrichment.database',
+                name: 'Database Enrichment',
+                type: 'enrichment.database',
                 description: 'Query database for additional patient or order data',
-                layer: ['pre', 'core'],  // Allow in both pre-processing and core layers
-                icon: this.getIconForType('pre.enrichment.database'),
+                layer: 'core',
+                icon: this.getIconForType('enrichment.database'),
                 isSystem: true,
                 defaultConfig: {
                     databaseType: 'postgresql',
@@ -146,13 +146,13 @@ class ToolboxManager {
             new StepTemplate({
                 id: 'enrich-script',
                 name: 'Script Enrichment',
-                type: 'pre.enrichment.script',
+                type: 'enrichment.script',
                 description: 'Calculate custom fields using JavaScript (age, BMI, etc.)',
-                layer: 'pre',
-                icon: this.getIconForType('pre.enrichment.script'),
+                layer: 'core',
+                icon: this.getIconForType('enrichment.script'),
                 isSystem: true,
                 defaultConfig: {
-                    script: `// Extract patient date of birth\nvar dob = getNestedValue(input, "enhancedSegments.PID.fields.7.value");\n\n// Calculate age\nvar age = calculateAge(dob);\n\n// Get config from previous enrichment step (if needed)\nvar config = getNestedValue(input, "enriched.metadata");\n\n// Return enrichment data\nreturn {\n    age: age,\n    ageGroup: age < 18 ? "pediatric" : "adult"\n};`,
+                    script: '',  // Start with empty script - user writes their own code
                     targetPath: 'enriched.script',
                     timeoutMs: 5000,
                     failOnError: false
@@ -162,10 +162,10 @@ class ToolboxManager {
             new StepTemplate({
                 id: 'hl7-fhir-mapping',
                 name: 'HL7→FHIR Transform',
-                type: 'core.mapping',
+                type: 'hl7_fhir_transform',
                 description: 'Transform HL7 v2.x to FHIR R4',
                 layer: 'core',
-                icon: this.getIconForType('core.mapping.hl7-fhir'),
+                icon: this.getIconForType('hl7_fhir_transform'),
                 isSystem: true,
                 defaultConfig: {
                     fhir_version: 'R4',
@@ -175,90 +175,35 @@ class ToolboxManager {
             new StepTemplate({
                 id: 'validate-fhir',
                 name: 'FHIR Validation',
-                type: 'post.validation',
+                type: 'fhir_validation',
                 description: 'Validate FHIR bundle against R4 specification',
-                layer: 'post',
-                icon: this.getIconForType('post.fhir.validation'),
+                layer: 'core',
+                icon: this.getIconForType('fhir_validation'),
                 isSystem: true,
                 defaultConfig: {
-                    fhir_version: 'R4',
-                    validation_level: 'STANDARD', // MINIMAL, STANDARD, STRICT
-                    schema_path: 'schemas/fhir/R4',
-
-                    // Bundle-level validation
-                    bundle_rules: {
-                        require_bundle_type: true,
-                        allowed_bundle_types: ['transaction', 'collection', 'document', 'message'],
-                        require_timestamp: true,
-                        require_total: false
-                    },
-
-                    // Resource-level validation
-                    resource_rules: {
-                        validate_structure: true,      // Structural validation (required fields, data types)
-                        validate_cardinality: true,    // Check min/max occurrences (0..1, 0..*, 1..1)
-                        validate_data_types: true,     // Data type compliance (string, date, boolean, etc.)
-                        validate_references: true,     // Reference integrity checks
-                        validate_terminology: false,   // CodeSystem/ValueSet bindings (strict mode only)
-                        validate_profiles: false,      // US Core / other profile validation
-                        validate_constraints: true     // FHIRPath constraints
-                    },
-
-                    // Required resources validation
-                    required_resources: {
-                        MessageHeader: { min: 0, max: 1 },
-                        Patient: { min: 1, max: 1 },      // At least one Patient required
-                        Encounter: { min: 0, max: 999 }
-                    },
-
-                    // Patient-specific validation rules (from schema)
-                    patient_validation: {
-                        require_identifier: true,          // Patient.identifier (0..*)
-                        require_name: true,               // Patient.name (0..*)
-                        validate_gender: true,            // Patient.gender must be from ValueSet
-                        validate_birthdate_format: true,  // Must be valid FHIR date (YYYY-MM-DD)
-                        validate_address_structure: true, // Address.line, city, state, postalCode
-                        validate_telecom_system: true     // telecom.system must be phone|fax|email|pager|url|sms|other
-                    },
-
-                    // Encounter-specific validation rules
-                    encounter_validation: {
-                        require_status: true,             // Encounter.status (required)
-                        require_class: true,              // Encounter.class (required)
-                        validate_status_values: true,     // Status from: planned|arrived|triaged|in-progress|onleave|finished|cancelled
-                        validate_period: true,            // period.start < period.end
-                        validate_subject_reference: true  // subject must reference Patient
-                    },
-
-                    // MessageHeader-specific validation
-                    messageheader_validation: {
-                        require_event_coding: true,       // eventCoding (required)
-                        require_source: true,             // source (required)
-                        validate_source_structure: true,  // source.name + source.endpoint
-                        validate_destination: false       // destination (optional)
-                    },
-
-                    // Error handling
-                    fail_on_error: false,    // Stop processing on validation error
-                    fail_on_warning: false,  // Stop processing on warning
-                    log_all_issues: true,    // Log all validation issues
-
-                    // Output
-                    include_validation_report: true,
-                    attach_issues_to_bundle: false
+                    validation_level: 'standard',
+                    required_resources: [],
+                    validate_references: true,
+                    validate_required_fields: true
                 }
             }),
             new StepTemplate({
-                id: 'deliver-fhir',
-                name: 'FHIR Server Delivery',
-                type: 'post.delivery',
-                description: 'Send FHIR bundle to destination',
-                layer: 'post',
+                id: 'outbound-connector',
+                name: 'Outbound Connector',
+                type: 'connector.outbound',
+                description: 'Deliver data to external systems (HTTP, TCP/MLLP, DB, MQ, Cloud, File)',
+                layer: 'core',
                 icon: this.getIconForType('post.delivery'),
                 isSystem: true,
                 defaultConfig: {
-                    endpoint: 'http://fhir-server:8080/fhir',
-                    resource: 'Patient'
+                    connectorType: 'http_outbound',
+                    contentField: 'fhirBundle',
+                    contentType: 'application/fhir+json',
+                    config: {
+                        url: 'http://fhir-server:8080/fhir',
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/fhir+json' }
+                    }
                 }
             }),
 
@@ -304,10 +249,10 @@ class ToolboxManager {
             new StepTemplate({
                 id: 'field-mapping',
                 name: 'Field Mapping',
-                type: 'core.transformation',
+                type: 'field_mapping',
                 description: 'Map source fields to target fields with powerful transforms (trim, upper, lower, substring, replace, regex). Supports HL7 component paths (PID.5.1, PID.5.2) and chained transforms.',
-                layer: ['pre', 'core'],  // Allow in both pre-processing and core layers
-                icon: this.getIconForType('core.transformation'),
+                layer: 'core',
+                icon: this.getIconForType('field_mapping'),
                 isSystem: true,
                 defaultConfig: {
                     mappings: [
@@ -353,26 +298,9 @@ class ToolboxManager {
             //     { when: 'F', actions: [{ action: 'set_field', field: 'PID.8', value: 'female' }] }
             //   ], default: [{ action: 'set_field', field: 'PID.8', value: 'unknown' }] }
 
-            new StepTemplate({
-                id: 'code-system-mapping',
-                name: 'Code System Mapping',
-                type: 'core.transformation',
-                description: 'Map between code systems (ICD-9→ICD-10, LOINC)',
-                layer: 'core',
-                icon: this.getIconForType('pre.enrichment.script'),
-                isSystem: true,
-                defaultConfig: {
-                    mappings: [
-                        {
-                            source_system: 'ICD-9',
-                            target_system: 'ICD-10',
-                            field: 'DG1.3',
-                            use_api: false,
-                            fallback: 'unmapped'
-                        }
-                    ]
-                }
-            }),
+            // ❌ REMOVED: Code System Mapping (code-system-mapping)
+            // REASON: No backend executor - use Script Enrichment or Switch/Case for code mapping
+            // MIGRATION: Use Script Enrichment with lookup tables, or Switch/Case for static mappings
 
             // ============================================
             // DATA ENRICHMENT STEPS (Pre-Processing)
@@ -389,23 +317,29 @@ class ToolboxManager {
             new StepTemplate({
                 id: 'if-then-else',
                 name: 'If-Then-Else',
-                type: 'pre.logic',
+                type: 'if_then_else',
                 description: 'Conditional execution based on rules',
-                layer: ['pre', 'core', 'post'],  // Allow in all layers - conditional logic needed everywhere
-                icon: this.getIconForType('pre.logic'),
+                layer: 'core',
+                icon: this.getIconForType('if_then_else'),
                 isSystem: true,
                 defaultConfig: {
-                    condition: {
-                        field: 'parsed.PID.7.value',
-                        operator: 'age_greater_than',
-                        value: 65
-                    },
-                    then_actions: [
-                        { action: 'set_field', field: 'priority', value: 'high' },
-                        { action: 'add_tag', value: 'geriatric' }
-                    ],
-                    else_actions: [
-                        { action: 'set_field', field: 'priority', value: 'normal' }
+                    // NEW FORMAT: conditions array with onTrue/onFalse actions
+                    conditions: [
+                        {
+                            name: 'Condition 1',
+                            condition: {
+                                field: '',
+                                operator: 'equals',
+                                value: '',
+                                compareToField: ''
+                            },
+                            onTrue: {
+                                action: 'continue'
+                            },
+                            onFalse: {
+                                action: 'continue'
+                            }
+                        }
                     ]
                 }
             }),
@@ -413,70 +347,53 @@ class ToolboxManager {
             new StepTemplate({
                 id: 'switch-case',
                 name: 'Switch/Case',
-                type: 'pre.logic',
+                type: 'switch_case',
                 description: 'Multiple condition branching',
-                layer: ['pre', 'core', 'post'],  // Allow in all layers - conditional logic needed everywhere
-                icon: this.getIconForType('pre.logic'),
+                layer: 'core',
+                icon: this.getIconForType('switch_case'),
                 isSystem: true,
                 defaultConfig: {
-                    switch_field: 'parsed.PV1.2.value',
+                    field: '',  // Field to switch on (matches SwitchCaseBuilder)
                     cases: [
-                        { value: 'E', actions: [{ action: 'set_field', field: 'visit_type', value: 'Emergency' }] },
-                        { value: 'I', actions: [{ action: 'set_field', field: 'visit_type', value: 'Inpatient' }] },
-                        { value: 'O', actions: [{ action: 'set_field', field: 'visit_type', value: 'Outpatient' }] }
+                        { value: '', label: 'Case 1', actions: [{ action: 'continue' }] }
                     ],
-                    default_actions: [{ action: 'set_field', field: 'visit_type', value: 'Unknown' }]
+                    default: { actions: [{ action: 'continue' }] },
+                    options: { caseInsensitive: false, trimWhitespace: true }
                 }
             }),
 
             new StepTemplate({
-                id: 'for-each-loop',
-                name: 'For Each Loop',
-                type: 'core.logic',
-                description: 'Iterate over array elements',
-                layer: ['pre', 'core', 'post'],  // Allow in all layers - iteration needed everywhere
-                icon: this.getIconForType('core.logic'),
+                id: 'loop-container',
+                name: 'Loop',
+                type: 'control.loop',
+                description: 'Container step - executes nested steps in a loop (For Each, For, While)',
+                layer: 'core',
+                icon: 'fas fa-redo-alt',
                 isSystem: true,
+                isContainer: true,  // Mark as container step
                 defaultConfig: {
-                    array_field: 'parsed.OBX',
-                    item_variable: 'observation',
-                    actions: [
-                        { action: 'transform', template: 'OBX_to_Observation' }
-                    ]
+                    loopType: 'foreach',           // 'foreach', 'for', 'while'
+                    collection: '',                 // For 'foreach': array field path
+                    itemVariable: 'item',           // Variable name for current item
+                    indexVariable: 'index',         // Variable name for current index
+                    iterations: 10,                 // For 'for': number of iterations
+                    condition: {                    // For 'while': condition object
+                        field: '',
+                        operator: 'not_empty',
+                        value: ''
+                    },
+                    childStepIds: [],               // IDs of steps in loop body
+                    maxIterations: 1000,            // Safety limit
+                    breakOnError: false,            // Stop loop on first error
+                    continueOnEmpty: true           // Continue pipeline if collection empty
                 }
             }),
 
             // ============================================
             // HL7/FHIR SPECIFIC STEPS (Core)
             // ============================================
-            new StepTemplate({
-                id: 'hl7-segment-extractor',
-                name: 'HL7 Segment Extractor',
-                type: 'pre.extraction',
-                description: 'Extract specific HL7 segments',
-                layer: 'pre',
-                icon: this.getIconForType('pre.extraction'),
-                isSystem: true,
-                defaultConfig: {
-                    segments: ['PID', 'PV1', 'OBX'],
-                    include_all_occurrences: true
-                }
-            }),
-
-            new StepTemplate({
-                id: 'fhir-resource-builder',
-                name: 'FHIR Resource Builder',
-                type: 'core.transformation',
-                description: 'Build FHIR resource from data',
-                layer: 'core',
-                icon: this.getIconForType('core.transformation'),
-                isSystem: true,
-                defaultConfig: {
-                    resource_type: 'Patient',
-                    fhir_version: 'R4',
-                    template: 'default'
-                }
-            }),
+            // REMOVED: HL7 Segment Extractor - segments already available in parsed data (enhancedSegments, segmentGroups)
+            // REMOVED: FHIR Resource Builder - use HL7-FHIR Transform (core.mapping) or Field Mapping instead
 
             // ============================================
             // ERROR HANDLING STEPS (All Layers)
@@ -484,34 +401,35 @@ class ToolboxManager {
             new StepTemplate({
                 id: 'try-catch',
                 name: 'Try-Catch Block',
-                type: 'pre.error_handling',
-                description: 'Error handling with fallback',
-                layer: 'pre',
+                type: 'control.try_catch',
+                description: 'Wrap steps in error handling with try/catch/finally blocks',
+                layer: 'core',
                 icon: this.getIconForType('post.fhir.validation'),
                 isSystem: true,
                 defaultConfig: {
-                    try_steps: ['step_id_1', 'step_id_2'],
-                    catch_actions: [
-                        { action: 'log_error', level: 'error' },
-                        { action: 'set_fallback_value', field: 'status', value: 'failed' }
-                    ],
-                    finally_actions: []
+                    trySteps: [],
+                    catchSteps: [],
+                    finallySteps: [],
+                    onError: 'catch'  // "catch", "suppress", "rethrow"
                 }
             }),
 
             new StepTemplate({
                 id: 'retry-logic',
                 name: 'Retry Logic',
-                type: 'post.error_handling',
-                description: 'Retry failed operations with backoff',
-                layer: 'post',
+                type: 'control.retry',
+                description: 'Retry failed operations with configurable backoff',
+                layer: 'core',
                 icon: this.getIconForType('post.error_handling'),
                 isSystem: true,
+                isContainer: true,
                 defaultConfig: {
-                    max_retries: 3,
-                    initial_delay_ms: 1000,
-                    backoff_multiplier: 2, // exponential backoff
-                    max_delay_ms: 30000
+                    childSteps: [],
+                    maxRetries: 3,
+                    delayMs: 1000,
+                    backoffType: 'exponential',  // "fixed", "exponential", "linear"
+                    maxDelayMs: 30000,
+                    retryOnErrors: []  // empty = retry on any error
                 }
             }),
 
@@ -521,31 +439,84 @@ class ToolboxManager {
             new StepTemplate({
                 id: 'remove-duplicates',
                 name: 'Remove Duplicates',
-                type: 'post.quality',
-                description: 'Remove duplicate entries',
-                layer: 'post',
+                type: 'remove_duplicates',
+                description: 'Remove duplicate entries from arrays/collections',
+                layer: 'core',
                 icon: this.getIconForType('post.quality'),
                 isSystem: true,
                 defaultConfig: {
-                    array_field: 'bundle.entry',
-                    unique_key: 'resource.id'
+                    sourceField: 'bundle.entry',
+                    keyFields: ['resource.id'],
+                    strategy: 'first',  // "first", "last", "merge"
+                    caseSensitive: true
                 }
             }),
 
             new StepTemplate({
                 id: 'data-masking',
                 name: 'Data Masking/Anonymization',
-                type: 'post.quality',
-                description: 'Mask or anonymize PHI data',
-                layer: 'post',
+                type: 'data_masking',
+                description: 'Mask or anonymize PHI/PII data for HIPAA compliance',
+                layer: 'core',
                 icon: this.getIconForType('post.quality'),
                 isSystem: true,
                 defaultConfig: {
-                    fields_to_mask: [
-                        { field: 'patient.name', method: 'partial', keep_first: 1 },
-                        { field: 'patient.ssn', method: 'hash' },
-                        { field: 'patient.address', method: 'remove' }
-                    ]
+                    rules: [
+                        { field: 'PID.5', strategy: 'partial', keepFirst: 1, keepLast: 0 },
+                        { field: 'PID.19', strategy: 'hash' },
+                        { field: 'PID.13', strategy: 'redact' }
+                    ],
+                    maskAllPHI: false  // Auto-mask common PHI fields (PID.3, PID.5, PID.7, PID.13, PID.19, PID.18)
+                }
+            }),
+
+            // ============================================
+            // DATA TRANSFORMATION STEPS (Post-Processing)
+            // ============================================
+            new StepTemplate({
+                id: 'normalizer',
+                name: 'Normalizer / Pivot / Transpose',
+                type: 'normalizer',
+                description: 'Normalize, pivot, transpose, flatten or unflatten data structures',
+                layer: 'core',
+                icon: 'fas fa-exchange-alt',
+                isSystem: true,
+                defaultConfig: {
+                    operation: 'normalize',  // "normalize", "pivot", "transpose", "flatten", "unflatten"
+                    sourceField: '',
+                    outputField: '',
+                    // For normalize (unpivot):
+                    keyColumn: 'attribute',
+                    valueColumn: 'value',
+                    // For pivot:
+                    pivotField: '',
+                    valueField: '',
+                    aggregation: 'first',  // "first", "last", "sum", "count", "list"
+                    // For flatten/unflatten:
+                    delimiter: '.',
+                    maxDepth: 10,
+                    // Optional transforms:
+                    renameMap: {},
+                    caseTransform: ''  // "", "lower", "upper", "camel", "snake"
+                }
+            }),
+
+            // ============================================
+            // CONNECTIVITY STEPS (All Layers)
+            // ============================================
+            new StepTemplate({
+                id: 'inbound-connector',
+                name: 'Inbound Connector',
+                type: 'connector.inbound',
+                description: 'Fetch data from external systems mid-pipeline (DB, API, MQ, Cloud)',
+                layer: 'core',
+                icon: 'fas fa-download',
+                isSystem: true,
+                defaultConfig: {
+                    connectorType: '',  // e.g., "postgresql_inbound", "mongodb_inbound", "http_rest_inbound"
+                    config: {},         // Connector-specific configuration
+                    outputField: 'enriched.connector_result',
+                    timeoutMs: 30000
                 }
             })
         ];
@@ -556,7 +527,7 @@ class ToolboxManager {
      */
     renderToolbox() {
         this.renderTemplateSection();
-        this.renderLayerSections();
+        this.renderAllSteps();
         this.renderCustomScripts();
     }
 
@@ -579,43 +550,20 @@ class ToolboxManager {
     }
 
     /**
-     * Render layer-specific sections
+     * Render all steps in single list
      */
-    renderLayerSections() {
-        // Pre-processing
-        this.renderLayerSection('pre', 'pre-steps-list');
-
-        // Core transformation
-        this.renderLayerSection('core', 'core-steps-list');
-
-        // Post-processing
-        this.renderLayerSection('post', 'post-steps-list');
-    }
-
-    /**
-     * Render steps for specific layer
-     */
-    renderLayerSection(layer, containerId) {
-        const container = document.getElementById(containerId);
+    renderAllSteps() {
+        const container = document.getElementById('all-steps-list');
         if (!container) return;
 
         container.innerHTML = '';
 
-        // Filter templates - handle both single layer string and array of layers
-        const layerTemplates = this.templates.filter(t => {
-            if (Array.isArray(t.layer)) {
-                return t.layer.includes(layer);
-            }
-            return t.layer === layer;
-        });
-
-        layerTemplates.forEach(template => {
+        this.templates.forEach(template => {
             const card = this.createTemplateCard(template);
             container.appendChild(card);
         });
 
-        // Add empty state
-        if (layerTemplates.length === 0) {
+        if (this.templates.length === 0) {
             container.innerHTML = '<p style="text-align: center; color: #94a3b8; font-size: 0.75rem;">No templates available</p>';
         }
     }
@@ -717,8 +665,7 @@ class ToolboxManager {
             description: 'Custom JavaScript transformation'
         });
 
-        // Add to core layer by default
-        this.builder.addStepToLayer(customStep, 'core');
+        this.builder.addStep(customStep);
         this.builder.dragDropManager.showNotification('Custom script added', 'success');
     }
 
@@ -799,16 +746,28 @@ class ToolboxManager {
         // Comprehensive icon mapping based on step type
         const iconMap = {
             // ============================================
-            // VALIDATION STEPS (Pre-Processing)
+            // NEW TYPE NAMES (primary)
+            // ============================================
+            'field_validation': 'fas fa-check-circle',
+            'fhir_validation': 'fas fa-shield-alt',
+            'enrichment.api': 'fas fa-cloud',
+            'enrichment.database': 'fas fa-database',
+            'enrichment.script': 'fas fa-code',
+            'field_mapping': 'fas fa-arrows-alt-h',
+            'hl7_fhir_transform': 'fas fa-exchange-alt',
+            'if_then_else': 'fas fa-sitemap',
+            'switch_case': 'fas fa-project-diagram',
+            'data_masking': 'fas fa-user-secret',
+            'remove_duplicates': 'fas fa-check-double',
+            'normalizer': 'fas fa-exchange-alt',
+
+            // ============================================
+            // LEGACY TYPE NAMES (backward compat)
             // ============================================
             'pre.validation': 'fas fa-check-circle',
             'pre.validation.field': 'fas fa-check-square',
             'pre.validation.schema': 'fas fa-clipboard-check',
             'pre.validation.cross-field': 'fas fa-code-branch',
-
-            // ============================================
-            // ENRICHMENT STEPS (Pre-Processing)
-            // ============================================
             'pre.enrichment': 'fas fa-plus-circle',
             'pre.enrichment.api': 'fas fa-cloud',
             'pre.enrichment.database': 'fas fa-database',
@@ -816,18 +775,10 @@ class ToolboxManager {
             'pre.enrichment.script': 'fas fa-code',
             'pre.enrichment.metadata': 'fas fa-tags',
             'pre.extraction': 'fas fa-filter',
-
-            // ============================================
-            // TRANSFORMATION STEPS (Core Processing)
-            // ============================================
             'core.transformation': 'fas fa-arrows-alt-h',
             'core.mapping': 'fas fa-project-diagram',
             'core.mapping.hl7-fhir': 'fas fa-exchange-alt',
             'core.mapping.custom': 'fas fa-wrench',
-
-            // ============================================
-            // POST-PROCESSING STEPS
-            // ============================================
             'post.validation': 'fas fa-shield-alt',
             'post.fhir.validation': 'fas fa-shield-alt',
             'post.anonymization': 'fas fa-user-secret',
@@ -835,13 +786,19 @@ class ToolboxManager {
             'post.delivery': 'fas fa-paper-plane',
             'post.error_handling': 'fas fa-exclamation-triangle',
             'post.quality': 'fas fa-check-double',
-
-            // ============================================
-            // CONDITIONAL LOGIC
-            // ============================================
             'pre.logic': 'fas fa-sitemap',
+            'pre.logic.switch': 'fas fa-project-diagram',
             'core.logic': 'fas fa-sitemap',
             'post.logic': 'fas fa-sitemap',
+
+            // ============================================
+            // CONTROL FLOW / CONTAINERS
+            // ============================================
+            'control.loop': 'fas fa-redo-alt',             // Loop container
+            'control.foreach': 'fas fa-list',              // For Each loop
+            'control.for': 'fas fa-sort-numeric-down',     // For loop
+            'control.while': 'fas fa-sync',                // While loop
+            'control.parallel': 'fas fa-columns',          // Parallel execution
 
             // ============================================
             // ERROR HANDLING

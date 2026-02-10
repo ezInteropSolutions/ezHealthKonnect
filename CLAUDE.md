@@ -678,3 +678,150 @@ type OutboundConnector interface {
 5. **Graceful Shutdown** - Context cancellation + stop channels for clean termination
 6. **Middleware Support** - TCP/MLLP outbound enables bidirectional scenarios (user feedback)
 
+## Format-Agnostic Field Utilities (January 2025)
+
+### Overview
+Shared utilities for reading and updating message fields across different healthcare message formats (HL7v2, FHIR, generic JSON). Uses **Strategy Pattern** for format-specific resolvers with a unified API.
+
+### Key File
+- **[services/executors/field_utils.go](services/executors/field_utils.go)** - Format-agnostic field operations
+
+### Supported Path Types
+```go
+const (
+    PathTypeHL7     FieldPathType = "hl7"     // e.g., PID.3, MSH.9.1, OBX.5.2
+    PathTypeFHIR    FieldPathType = "fhir"    // e.g., Patient.name[0].given
+    PathTypeJSON    FieldPathType = "json"    // e.g., data.patient.name
+    PathTypeUnknown FieldPathType = "unknown"
+)
+```
+
+### Public API (Exported Functions)
+```go
+// Auto-detect path type
+func DetectPathType(path string) FieldPathType
+
+// Format-agnostic getter - retrieves value from any message format
+func GetFieldValue(data map[string]interface{}, path string) interface{}
+
+// Format-agnostic setter - updates value in any message format
+func UpdateFieldValue(data map[string]interface{}, path string, newValue interface{}) bool
+
+// Path detection helpers
+func IsHL7FieldPath(path string) bool   // Detects PID.3, MSH.9.1 patterns
+func IsFHIRPath(path string) bool       // Detects Patient.name, Observation.value patterns
+
+// Path conversion for UI display
+func GetAbsolutePath(path string) string // Converts short notation to full JSON path
+```
+
+### Internal Functions (Private)
+- `resolveHL7FieldValue`, `resolveHL7FieldFromMap` - HL7 getters
+- `resolveFHIRFieldValue` - FHIR getter
+- `resolveJSONPathValue` - Generic JSON getter with array support
+- `modifyHL7FieldValue`, `modifyHL7FieldInMap` - HL7 setters
+- `modifyFHIRFieldValue` - FHIR setter
+- `modifyJSONPathValue` - Generic JSON setter with array support
+- `parseJSONPath` - Parses paths like `data.items[0].name` into parts
+
+### Path Format Examples
+| Format | Example Path | Description |
+|--------|-------------|-------------|
+| HL7 | `PID.3` | Patient ID field |
+| HL7 | `PID.5.1` | Patient name, family component |
+| HL7 | `MSH.9.1` | Message type code |
+| FHIR | `Patient.name[0].given` | First name in FHIR Patient |
+| FHIR | `Observation.value` | Observation value |
+| JSON | `data.items[0].name` | Generic JSON with array |
+| JSON | `metadata.source` | Simple dot notation |
+
+### Usage in Executors
+```go
+// In conditional_executor.go (transform action)
+import "ezhealthkonnect/services/executors"
+
+// Get field value (auto-detects format)
+value := executors.GetFieldValue(outputData, "PID.13.4")
+
+// Update field value (auto-detects format)
+if executors.UpdateFieldValue(outputData, targetField, transformedValue) {
+    fmt.Printf("Updated %s = %v\n", targetField, transformedValue)
+}
+
+// Get absolute path for UI tooltip display
+absolutePath := executors.GetAbsolutePath("PID.13.4")
+// Returns: "enhancedSegments.PID.fields[key=PID.13].subfields[key=PID.13.4].value"
+```
+
+### HL7 Data Structure Support
+The utilities support both:
+1. **Typed Go structs**: `map[string]hl7.EnhancedSegment` (runtime)
+2. **Generic maps**: `map[string]interface{}` (after JSON marshaling)
+
+### Design Principles
+- **DRY**: Single implementation used by all executors
+- **Strategy Pattern**: Different resolvers for different formats
+- **Extensible**: Easy to add new formats (X12, CDA, etc.)
+- **Dual Support**: Works with both typed structs and generic maps
+
+### Related Files
+- [services/executors/base_executor.go](services/executors/base_executor.go) - Contains original `getHL7FieldValue` for typed structs only
+- [services/executors/control/conditional_executor.go](services/executors/control/conditional_executor.go) - Uses field utilities in transform action
+- [models/output_normalizer.go](models/output_normalizer.go) - Preserves HL7 keys (PID.3) instead of sanitizing to snake_case
+
+## Multi-Step Routing in Switch/Case and If-Then-Else (January 2025)
+
+### Overview
+The `route_to_step` action now supports routing to **multiple target steps** from a single case or condition. This enables complex workflows where a single condition triggers a sequence of steps to execute.
+
+### Key Files
+- **Backend**: [services/executors/control/conditional_executor.go](services/executors/control/conditional_executor.go)
+- **SwitchCase UI**: [public/js/pipeline/components/SwitchCaseBuilder.js](public/js/pipeline/components/SwitchCaseBuilder.js)
+- **IfThenElse UI**: [public/js/pipeline/components/IfThenElseBuilder.js](public/js/pipeline/components/IfThenElseBuilder.js)
+
+### Config Schema
+
+**Legacy (single step)**:
+```json
+{
+    "action": "route_to_step",
+    "targetStepId": "step-123"
+}
+```
+
+**New (multiple steps)**:
+```json
+{
+    "action": "route_to_step",
+    "targetStepIds": ["step-1", "step-2", "step-3"]
+}
+```
+
+### Backend Behavior
+The executor sets `_routing` in the output data:
+
+```go
+// Single step routing
+routingMap["nextStep"] = stepId
+
+// Multi-step routing (takes priority)
+routingMap["nextSteps"] = targetStepIds  // []string
+```
+
+### UI Features
+- **Dropdown to add steps**: Select from available pipeline steps
+- **Chip/tag display**: Shows selected steps in execution order (1., 2., 3.)
+- **Remove button**: Click × on any chip to remove a step
+- **Skip steps**: Still supported for exclusive branching
+
+### Usage Example
+A Switch/Case on `MSH.9.1` (message type) could route:
+- Case "ADT" → Execute: [Validate Patient, Enrich Demographics, Route to ADT Handler]
+- Case "ORU" → Execute: [Validate Results, Route to Lab Handler]
+- Default → Execute: [Log Warning, Route to Error Handler]
+
+### Backward Compatibility
+- Existing `targetStepId` (single) configs still work
+- System auto-migrates to `targetStepIds` array when editing
+- Backend accepts both `stepId` and `targetStepIds`
+

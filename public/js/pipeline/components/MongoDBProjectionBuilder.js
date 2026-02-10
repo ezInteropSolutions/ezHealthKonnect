@@ -519,15 +519,75 @@ class MongoDBProjectionBuilder {
         }
     }
 
-    clearAll() {
+    async clearAll() {
         if (this.fields.length === 0) return;
 
-        if (confirm('Remove all selected fields?')) {
+        const confirmed = await this.showConfirmDialog(
+            'Remove all selected fields?',
+            {
+                title: 'Clear All Fields',
+                confirmText: 'Clear All',
+                cancelText: 'Cancel',
+                type: 'warning'
+            }
+        );
+
+        if (confirmed) {
             this.fields = [];
             this.renderTags();
             this.updatePreview();
             this.updateSelectAllButton();
         }
+    }
+
+    /**
+     * Show in-app confirm dialog
+     */
+    showConfirmDialog(message, options = {}) {
+        return new Promise((resolve) => {
+            const {
+                title = 'Confirm',
+                confirmText = 'Yes',
+                cancelText = 'Cancel',
+                type = 'warning'
+            } = options;
+
+            const colors = {
+                warning: { primary: '#f59e0b', bg: '#fef3c7' },
+                danger: { primary: '#ef4444', bg: '#fee2e2' }
+            };
+            const color = colors[type] || colors.warning;
+
+            const overlay = document.createElement('div');
+            overlay.style.cssText = `
+                position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+                background: rgba(0, 0, 0, 0.5);
+                display: flex; align-items: center; justify-content: center;
+                z-index: 100000;
+            `;
+
+            overlay.innerHTML = `
+                <div style="background: white; border-radius: 12px; max-width: 400px; width: 90%; overflow: hidden; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1);">
+                    <div style="padding: 16px 20px; background: ${color.bg}; display: flex; align-items: center; gap: 10px;">
+                        <span style="font-size: 20px;">${type === 'danger' ? '⚠️' : '❓'}</span>
+                        <span style="font-weight: 600; color: #1e293b;">${title}</span>
+                    </div>
+                    <div style="padding: 20px; color: #475569; font-size: 14px;">${message}</div>
+                    <div style="padding: 12px 20px; background: #f8fafc; display: flex; justify-content: flex-end; gap: 10px;">
+                        <button class="cancel-btn" style="padding: 8px 16px; border: 1px solid #e2e8f0; background: white; color: #64748b; border-radius: 6px; cursor: pointer;">${cancelText}</button>
+                        <button class="confirm-btn" style="padding: 8px 16px; border: none; background: ${color.primary}; color: white; border-radius: 6px; cursor: pointer;">${confirmText}</button>
+                    </div>
+                </div>
+            `;
+
+            document.body.appendChild(overlay);
+
+            const cleanup = (result) => { overlay.remove(); resolve(result); };
+
+            overlay.querySelector('.confirm-btn').onclick = () => cleanup(true);
+            overlay.querySelector('.cancel-btn').onclick = () => cleanup(false);
+            overlay.onclick = (e) => { if (e.target === overlay) cleanup(false); };
+        });
     }
 
     updatePreview() {

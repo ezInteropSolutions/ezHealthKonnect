@@ -50,3 +50,12 @@ type Describable interface {
 	GetConfigSchema() map[string]interface{}
 	GetConfigExample() map[string]interface{}
 }
+
+// VariableProvider interface for executors that declare their output variables
+// This enables automatic variable discovery for downstream steps (IntelliSense/autocomplete)
+type VariableProvider interface {
+	// GetOutputVariables returns the list of variables this executor will produce
+	// based on its configuration. Returns variable definitions that can be used
+	// for autocomplete, validation, and reference documentation.
+	GetOutputVariables(step *models.TransformationStep) []models.VariableDefinition
+}

@@ -212,6 +212,7 @@ exports.loadPipelineByInterface = async (req, res) => {
                 tp.interface_id::text,
                 tp.message_type,
                 tp.enabled,
+                tp.connections,
                 i.name as interface_name,
                 ts.id::text as step_id,
                 ts.step_name,
@@ -222,7 +223,12 @@ exports.loadPipelineByInterface = async (req, res) => {
                 ts.enabled as step_enabled,
                 ts.config,
                 ts.timeout_ms,
-                ts.on_error_strategy
+                ts.on_error_strategy,
+                ts.position_x,
+                ts.position_y,
+                ts.parent_conditional_step_id::text,
+                ts.branch_type,
+                ts.case_value
             FROM transformation_pipelines tp
             LEFT JOIN interfaces i ON i.id = tp.interface_id
             LEFT JOIN transformation_steps ts ON ts.pipeline_id = tp.id
@@ -236,80 +242,61 @@ exports.loadPipelineByInterface = async (req, res) => {
         if (pipelineData && pipelineData.length > 0) {
             console.log(`✅ Loaded pipeline with ${pipelineData.filter(r => r.step_id).length} steps from database`);
 
-            // Group steps by layer for frontend VisualPipeline format
-            const stepsByLayer = {
-                pre: [],
-                core: [],
-                post: []
-            };
-
-            pipelineData
+            // Collect all steps into a single flat list
+            const allSteps = pipelineData
                 .filter(row => row.step_id)
-                .forEach(row => {
-                    const step = {
-                        id: row.step_id,
-                        step_name: row.step_name,        // snake_case for VisualStep.fromJSON
-                        step_type: row.step_type,
-                        sequence: row.sequence,
-                        required: row.required,
-                        enabled: row.step_enabled,
-                        config: row.config,
-                        timeout_ms: row.timeout_ms,
-                        on_error_strategy: row.on_error_strategy,
-                        layer: row.layer
-                    };
+                .map(row => ({
+                    id: row.step_id,
+                    step_name: row.step_name,
+                    step_type: row.step_type,
+                    sequence: row.sequence,
+                    required: row.required,
+                    enabled: row.step_enabled,
+                    config: row.config,
+                    timeout_ms: row.timeout_ms,
+                    on_error_strategy: row.on_error_strategy,
+                    layer: row.layer || 'core',
+                    position_x: row.position_x,
+                    position_y: row.position_y,
+                    parent_conditional_step_id: row.parent_conditional_step_id,
+                    branch_type: row.branch_type,
+                    case_value: row.case_value
+                }));
 
-                    const layer = row.layer || 'core';
-                    if (stepsByLayer[layer]) {
-                        stepsByLayer[layer].push(step);
-                    }
-                });
-
-            // Convert to visual pipeline format (matches VisualPipeline.fromJSON expectations)
-            // Steps must be wrapped in execution_groups for the frontend
+            // New format: flat execution_groups array (single group with all steps)
             const pipeline = {
                 id: pipelineData[0].pipeline_id,
                 interface_id: pipelineData[0].interface_id,
                 message_type: pipelineData[0].message_type,
                 name: pipelineData[0].interface_name || pipelineData[0].pipeline_name,
                 enabled: pipelineData[0].enabled,
+                connections: pipelineData[0].connections || [],
+                // New flat format (snake_case for consistency with VisualExecutionGroup.fromJSON)
+                execution_groups: allSteps.length > 0 ? [{
+                    id: `group_${Date.now()}`,
+                    group_type: 'inline',
+                    layer: 'core',
+                    sequence: 100,
+                    steps: allSteps
+                }] : [],
+                // Legacy format for backward compat (also use snake_case)
                 layers: {
-                    pre: {
-                        execution_groups: stepsByLayer.pre.length > 0 ? [{
-                            id: `pre_group_${Date.now()}`,
-                            groupType: 'inline',
-                            layer: 'pre',
-                            steps: stepsByLayer.pre
-                        }] : []
-                    },
+                    pre: { execution_groups: [] },
                     core: {
-                        execution_groups: stepsByLayer.core.length > 0 ? [{
+                        execution_groups: allSteps.length > 0 ? [{
                             id: `core_group_${Date.now()}`,
-                            groupType: 'inline',
+                            group_type: 'inline',
                             layer: 'core',
-                            steps: stepsByLayer.core
+                            sequence: 100,
+                            steps: allSteps
                         }] : []
                     },
-                    post: {
-                        execution_groups: stepsByLayer.post.length > 0 ? [{
-                            id: `post_group_${Date.now()}`,
-                            groupType: 'inline',
-                            layer: 'post',
-                            steps: stepsByLayer.post
-                        }] : []
-                    }
+                    post: { execution_groups: [] }
                 }
             };
 
-            console.log('📤 Returning pipeline to frontend:', JSON.stringify({
-                id: pipeline.id,
-                name: pipeline.name,
-                layers: {
-                    pre: { count: stepsByLayer.pre.length },
-                    core: { count: stepsByLayer.core.length },
-                    post: { count: stepsByLayer.post.length }
-                }
-            }, null, 2));
+            console.log(`🔗 Loaded ${(pipeline.connections || []).length} connections from database`);
+            console.log(`📤 Returning pipeline with ${allSteps.length} steps`);
 
             return res.json({
                 success: true,
@@ -854,46 +841,45 @@ async function loadWizardMappings(interfaceId, messageType) {
 function generatePipelineFromWizard(interfaceId, messageType, wizardMappings) {
     const { v4: uuidv4 } = require('uuid');
 
+    const groupId = uuidv4();
+    const stepId = uuidv4();
+    const step = {
+        id: stepId,
+        step_name: 'HL7 to FHIR Mapping',
+        step_type: 'hl7_fhir_transform',
+        template_id: 'hl7-fhir-mapping',
+        layer: 'core',
+        sequence: 100,
+        config: {
+            mappings: wizardMappings.mappings || wizardMappings.custom_mapping_config || [],
+            template_id: wizardMappings.standard_template_id,
+            uses_standard_template: wizardMappings.uses_standard_template,
+            source: 'wizard',
+            description: 'Auto-configured from wizard'
+        }
+    };
+
+    const group = {
+        id: groupId,
+        group_type: 'inline',
+        layer: 'core',
+        sequence: 100,
+        steps: [step]
+    };
+
     return {
         id: uuidv4(),
-        interface_id: interfaceId,  // snake_case for frontend
-        message_type: messageType,  // snake_case for frontend
+        interface_id: interfaceId,
+        message_type: messageType,
         name: `${messageType} Pipeline`,
         description: `Auto-generated from wizard mappings`,
+        // New flat format (takes priority in fromJSON)
+        execution_groups: [group],
+        // Legacy format for backward compat
         layers: {
-            pre: {
-                name: 'Pre-Processing',
-                execution_groups: []  // snake_case for frontend
-            },
-            core: {
-                name: 'Core Transformation',
-                execution_groups: [  // snake_case for frontend
-                    {
-                        id: uuidv4(),
-                        name: 'HL7 to FHIR Mapping',
-                        mode: 'sequential',
-                        steps: [
-                            {
-                                id: uuidv4(),
-                                step_name: 'HL7 to FHIR Mapping',  // Standard template name
-                                step_type: 'core.mapping',
-                                template_id: 'hl7-fhir-mapping',
-                                config: {
-                                    mappings: wizardMappings.mappings || wizardMappings.custom_mapping_config || [],
-                                    template_id: wizardMappings.standard_template_id,
-                                    uses_standard_template: wizardMappings.uses_standard_template,
-                                    source: 'wizard',
-                                    description: 'Auto-configured from wizard'
-                                }
-                            }
-                        ]
-                    }
-                ]
-            },
-            post: {
-                name: 'Post-Processing',
-                execution_groups: []  // snake_case for frontend
-            }
+            pre: { name: 'Pre-Processing', execution_groups: [] },
+            core: { name: 'Core Transformation', execution_groups: [group] },
+            post: { name: 'Post-Processing', execution_groups: [] }
         },
         metadata: {
             created_from: 'wizard',
@@ -911,23 +897,17 @@ function generateEmptyPipeline(interfaceId, messageType) {
 
     return {
         id: uuidv4(),
-        interface_id: interfaceId,  // snake_case for frontend
-        message_type: messageType,  // snake_case for frontend
+        interface_id: interfaceId,
+        message_type: messageType,
         name: `${messageType} Pipeline`,
         description: 'New pipeline - add steps from the toolbox',
+        // New flat format (empty)
+        execution_groups: [],
+        // Legacy format for backward compat (also empty)
         layers: {
-            pre: {
-                name: 'Pre-Processing',
-                execution_groups: []  // snake_case for frontend
-            },
-            core: {
-                name: 'Core Transformation',
-                execution_groups: []  // snake_case for frontend
-            },
-            post: {
-                name: 'Post-Processing',
-                execution_groups: []  // snake_case for frontend
-            }
+            pre: { name: 'Pre-Processing', execution_groups: [] },
+            core: { name: 'Core Transformation', execution_groups: [] },
+            post: { name: 'Post-Processing', execution_groups: [] }
         },
         metadata: {
             created_from: 'scratch',

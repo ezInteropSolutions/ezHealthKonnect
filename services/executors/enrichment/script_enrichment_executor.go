@@ -32,7 +32,7 @@ func NewScriptEnrichmentExecutor() *ScriptEnrichmentExecutor {
 		Category:    "enrichment",
 	}
 
-	base := executors.NewBaseExecutor("pre.enrichment.script", metadata)
+	base := executors.NewBaseExecutor("enrichment.script", metadata)
 
 	return &ScriptEnrichmentExecutor{
 		BaseExecutor: base,
@@ -59,10 +59,11 @@ func (e *ScriptEnrichmentExecutor) Execute(
 		return inputData, err
 	}
 
-	log.Printf("📜 [Script Enrichment] Executing custom script")
+	log.Printf("📜📜📜 [Script Enrichment] EXECUTING CUSTOM SCRIPT FOR STEP: %s 📜📜📜", step.StepName)
 
 	// Execute script with timeout
 	result, err := e.executeScript(ctx, config, inputData)
+	log.Printf("📜📜📜 [Script Enrichment] Script execution completed. Error: %v, Result is nil: %v", err, result == nil)
 	if err != nil {
 		if config.FailOnError {
 			e.PostExecute(ctx, step, err, time.Since(start))
@@ -73,6 +74,12 @@ func (e *ScriptEnrichmentExecutor) Execute(
 
 		// Store error in output for debugging (even when not failing)
 		executors.SetNestedValue(inputData, "_script_error", err.Error())
+
+		// STANDARDIZED: No variables on error + execution details
+		e.SetStepOutputWithDetails(inputData, map[string]interface{}{}, map[string]interface{}{
+			"script_error": err.Error(),
+			"target_path":  config.TargetPath,
+		})
 
 		e.PostExecute(ctx, step, nil, time.Since(start))
 		return inputData, nil
@@ -85,6 +92,30 @@ func (e *ScriptEnrichmentExecutor) Execute(
 	}
 
 	executors.SetNestedValue(inputData, targetPath, result)
+
+	// STANDARDIZED: Set step output for tracking
+	// Store the actual script result directly (flatten if it's a map)
+	var variables map[string]interface{}
+
+	// Debug: Log the actual result type and value
+	log.Printf("🔍 [Script Enrichment] Result type: %T, value: %v, isNil: %v", result, result, result == nil)
+
+	if resultMap, ok := result.(map[string]interface{}); ok {
+		// Script returned an object - store fields directly as variables
+		log.Printf("   📦 Script returned object with %d fields", len(resultMap))
+		variables = resultMap
+	} else {
+		// Script returned a primitive or array - wrap it
+		log.Printf("   📦 Script returned primitive/array, wrapping in script_result")
+		variables = map[string]interface{}{
+			"script_result": result,
+		}
+	}
+
+	// STANDARDIZED: Variables (script output) + execution details
+	e.SetStepOutputWithDetails(inputData, variables, map[string]interface{}{
+		"target_path": targetPath,
+	})
 
 	log.Printf("✅ [Script Enrichment] Result stored at: %s", targetPath)
 	e.PostExecute(ctx, step, nil, time.Since(start))
@@ -154,10 +185,39 @@ func (e *ScriptEnrichmentExecutor) executeScript(
 			}
 		}()
 
-		// Set input data in VM
+		// Debug: Log what the script receives
+		inputKeys := make([]string, 0, len(inputData))
+		for k := range inputData {
+			inputKeys = append(inputKeys, k)
+		}
+		log.Printf("   🔍 Script input keys: %v", inputKeys)
+
+		// Check if enriched exists
+		if enriched, ok := inputData["enriched"].(map[string]interface{}); ok {
+			enrichedKeys := make([]string, 0, len(enriched))
+			for k := range enriched {
+				enrichedKeys = append(enrichedKeys, k)
+			}
+			log.Printf("   🔍 enriched subkeys: %v", enrichedKeys)
+		} else {
+			log.Printf("   ⚠️  'enriched' key not found or not a map in inputData!")
+		}
+
+		// Set input data in VM (DEPRECATED - use $vars instead)
 		if err := vm.Set("input", inputData); err != nil {
 			errorChan <- fmt.Errorf("failed to set input data: %w", err)
 			return
+		}
+
+		// NO-CODE: Inject flat variable namespace for easy access
+		// Example: $vars.field_mapping.risk_weights instead of input.enriched.field_mapping.riskWeights
+		if varContext, ok := inputData["_variableContext"].(*models.PipelineVariableContext); ok {
+			vars := varContext.GetAll()
+			if err := vm.Set("$vars", vars); err != nil {
+				log.Printf("   ⚠️  Failed to set $vars: %v", err)
+			} else {
+				log.Printf("   📋 Injected $vars with %d variables", len(vars))
+			}
 		}
 
 		// Set context variables if configured (DEPRECATED)
@@ -372,4 +432,46 @@ return {
 		"timeoutMs":   5000,
 		"failOnError": false,
 	}
+}
+
+// ===============================================================
+// VARIABLE PROVIDER INTERFACE IMPLEMENTATION
+// ===============================================================
+
+// GetOutputVariables returns the list of variables this executor will produce
+// For script enrichment, we can't parse JavaScript to determine exact output fields,
+// so we return a generic variable pointing to the target path
+func (e *ScriptEnrichmentExecutor) GetOutputVariables(step *models.TransformationStep) []models.VariableDefinition {
+	variables := []models.VariableDefinition{}
+
+	// Parse config to get target path
+	config, err := e.parseConfig(step)
+	if err != nil {
+		log.Printf("⚠️  [ScriptEnrichment] Failed to parse config for variable discovery: %v", err)
+		return variables
+	}
+
+	// Determine target path where results will be stored
+	targetPath := config.TargetPath
+	if targetPath == "" {
+		targetPath = "enriched.script"
+	}
+
+	// For script enrichment, we can't determine exact output fields without executing the script
+	// Return a generic object variable that users can reference with dot notation
+	variables = append(variables, models.VariableDefinition{
+		Name:         "script_result",
+		Path:         targetPath,
+		DataType:     "object",
+		Description:  "JavaScript enrichment results (access fields with .fieldName)",
+		UsageExample: fmt.Sprintf(`getNestedValue(input, "%s.fieldName")`, targetPath),
+		Category:     "Script",
+		Examples: []string{
+			fmt.Sprintf(`%s.age`, targetPath),
+			fmt.Sprintf(`%s.riskScore`, targetPath),
+			fmt.Sprintf(`%s.calculatedAt`, targetPath),
+		},
+	})
+
+	return variables
 }

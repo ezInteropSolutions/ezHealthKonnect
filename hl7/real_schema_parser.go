@@ -811,24 +811,32 @@ func ParseWithRealSchema(rawMessage string) *EnhancedParsedMessage {
 		}
 	}
 
-	// Enhance segments with loaded schema
-	enhancedSegments, segmentOrder := enhanceWithRealSchema(basicResult.Segments, schema)
+	// Enhance segments with loaded schema (single instance per segment type for backwards compatibility)
+	enhancedSegments, _ := enhanceWithRealSchema(basicResult.Segments, schema)
+
+	// ✅ NEW: Enhance ALL segment instances (including repeating segments like OBX, IN1)
+	segmentGroups := enhanceSegmentGroups(basicResult.SegmentGroups, schema)
+
+	// ✅ NEW: Create OBR-OBX observation groups for nested loop support
+	observationGroups := createObservationGroups(segmentGroups, basicResult.SegmentOrder)
 
 	// Add validation for missing required fields
 	validationErrors := validateRequiredFields(enhancedSegments, schema)
 
 	result := &EnhancedParsedMessage{
-		Raw:              rawMessage,
-		Success:          true,
-		Version:          version,
-		MessageType:      createMessageTypeInfo(messageType, triggerEvent),
-		BasicSegments:    basicResult.Segments,
-		EnhancedSegments: enhancedSegments,
-		SegmentOrder:     segmentOrder,
-		ParsedAt:         time.Now().Format(time.RFC3339),
-		DictionaryUsed:   true,
-		SchemaLoaded:     true,
-		ValidationErrors: validationErrors,
+		Raw:               rawMessage,
+		Success:           true,
+		Version:           version,
+		MessageType:       createMessageTypeInfo(messageType, triggerEvent),
+		BasicSegments:     basicResult.Segments,
+		EnhancedSegments:  enhancedSegments,
+		SegmentGroups:     segmentGroups,         // All segment instances
+		ObservationGroups: observationGroups,     // ✅ NEW: OBR-OBX grouped for nested loops
+		SegmentOrder:      basicResult.SegmentOrder,
+		ParsedAt:          time.Now().Format(time.RFC3339),
+		DictionaryUsed:    true,
+		SchemaLoaded:      true,
+		ValidationErrors:  validationErrors,
 	}
 
 	return result
@@ -868,6 +876,216 @@ func enhanceWithRealSchema(basicSegments map[string]BasicSegment, schema *RealHL
 	}
 
 	return enhancedSegments, segmentOrder
+}
+
+// ✅ NEW: enhanceSegmentGroups enhances ALL segment instances (including repeating segments)
+// This is critical for proper iteration over OBX, IN1, NK1, and other repeating segments
+func enhanceSegmentGroups(basicGroups map[string][]BasicSegment, schema *RealHL7Schema) map[string][]EnhancedSegment {
+	if basicGroups == nil {
+		return nil
+	}
+
+	enhancedGroups := make(map[string][]EnhancedSegment)
+
+	for segmentName, basicSegments := range basicGroups {
+		enhancedList := make([]EnhancedSegment, 0, len(basicSegments))
+
+		for _, basicSeg := range basicSegments {
+			enhancedSeg := createEnhancedSegmentFromBasic(segmentName, basicSeg, schema)
+			// ✅ Copy the segment index from basic segment
+			enhancedSeg.SegmentIndex = basicSeg.SegmentIndex
+			// Mark as repeating if there are multiple instances
+			enhancedSeg.Repeating = len(basicSegments) > 1
+			enhancedList = append(enhancedList, enhancedSeg)
+		}
+
+		enhancedGroups[segmentName] = enhancedList
+	}
+
+	return enhancedGroups
+}
+
+// ✅ NEW: createObservationGroups creates OBR-OBX grouped structures for nested loop support
+// This enables patterns like: Loop over OBR → Loop over OBX within each OBR
+// The grouping follows HL7 message structure where OBX segments belong to the preceding OBR
+func createObservationGroups(segmentGroups map[string][]EnhancedSegment, segmentOrder []string) []ObservationGroup {
+	if segmentGroups == nil || len(segmentOrder) == 0 {
+		return nil
+	}
+
+	// Get OBR and OBX segments
+	obrSegments := segmentGroups["OBR"]
+	obxSegments := segmentGroups["OBX"]
+	nteSegments := segmentGroups["NTE"]
+
+	// If no OBR segments, return nil (no observation groups to create)
+	if len(obrSegments) == 0 {
+		return nil
+	}
+
+	// Create observation groups by tracking which OBX/NTE segments belong to which OBR
+	// Logic: OBX segments after an OBR belong to that OBR until the next OBR is encountered
+	groups := make([]ObservationGroup, 0, len(obrSegments))
+
+	// Track current OBR index as we iterate through segment order
+	currentOBRIndex := -1
+	obrOBXMap := make(map[int][]EnhancedSegment)  // OBR index -> OBX segments
+	obrNTEMap := make(map[int][]EnhancedSegment)  // OBR index -> NTE segments
+
+	// Build maps by iterating through segment order
+	for _, segName := range segmentOrder {
+		switch segName {
+		case "OBR":
+			currentOBRIndex++
+			obrOBXMap[currentOBRIndex] = make([]EnhancedSegment, 0)
+			obrNTEMap[currentOBRIndex] = make([]EnhancedSegment, 0)
+		case "OBX":
+			if currentOBRIndex >= 0 {
+				// Find the OBX segment with matching index
+				obxIndex := len(obrOBXMap[currentOBRIndex])
+				for _, obx := range obxSegments {
+					if obx.SegmentIndex == countOBXBefore(segmentOrder, currentOBRIndex, obxIndex) {
+						obrOBXMap[currentOBRIndex] = append(obrOBXMap[currentOBRIndex], obx)
+						break
+					}
+				}
+			}
+		case "NTE":
+			if currentOBRIndex >= 0 {
+				nteIndex := len(obrNTEMap[currentOBRIndex])
+				for _, nte := range nteSegments {
+					if nte.SegmentIndex == countNTEBefore(segmentOrder, currentOBRIndex, nteIndex) {
+						obrNTEMap[currentOBRIndex] = append(obrNTEMap[currentOBRIndex], nte)
+						break
+					}
+				}
+			}
+		}
+	}
+
+	// Alternative simpler approach: distribute OBX segments sequentially to OBRs
+	// This works for most standard HL7 messages
+	if len(obrOBXMap[0]) == 0 && len(obxSegments) > 0 {
+		// Fall back to sequential distribution based on segment order
+		obrOBXMap = distributeOBXToOBR(obrSegments, obxSegments, segmentOrder)
+		obrNTEMap = distributeNTEToOBR(obrSegments, nteSegments, segmentOrder)
+	}
+
+	// Create ObservationGroup structures
+	for i, obr := range obrSegments {
+		obrCopy := obr // Create a copy to get pointer
+		group := ObservationGroup{
+			Index:      i,
+			OBR:        &obrCopy,
+			OBXList:    obrOBXMap[i],
+			NTEList:    obrNTEMap[i],
+			OBXCount:   len(obrOBXMap[i]),
+			HasResults: len(obrOBXMap[i]) > 0,
+		}
+		groups = append(groups, group)
+	}
+
+	return groups
+}
+
+// distributeOBXToOBR distributes OBX segments to OBR groups based on segment order
+func distributeOBXToOBR(obrSegments, obxSegments []EnhancedSegment, segmentOrder []string) map[int][]EnhancedSegment {
+	result := make(map[int][]EnhancedSegment)
+	for i := range obrSegments {
+		result[i] = make([]EnhancedSegment, 0)
+	}
+
+	if len(obrSegments) == 0 {
+		return result
+	}
+
+	currentOBRIndex := -1
+	obxCounter := 0
+
+	for _, segName := range segmentOrder {
+		switch segName {
+		case "OBR":
+			currentOBRIndex++
+		case "OBX":
+			if currentOBRIndex >= 0 && obxCounter < len(obxSegments) {
+				result[currentOBRIndex] = append(result[currentOBRIndex], obxSegments[obxCounter])
+				obxCounter++
+			}
+		}
+	}
+
+	return result
+}
+
+// distributeNTEToOBR distributes NTE segments to OBR groups based on segment order
+func distributeNTEToOBR(obrSegments, nteSegments []EnhancedSegment, segmentOrder []string) map[int][]EnhancedSegment {
+	result := make(map[int][]EnhancedSegment)
+	for i := range obrSegments {
+		result[i] = make([]EnhancedSegment, 0)
+	}
+
+	if len(obrSegments) == 0 || len(nteSegments) == 0 {
+		return result
+	}
+
+	currentOBRIndex := -1
+	nteCounter := 0
+
+	for _, segName := range segmentOrder {
+		switch segName {
+		case "OBR":
+			currentOBRIndex++
+		case "NTE":
+			if currentOBRIndex >= 0 && nteCounter < len(nteSegments) {
+				result[currentOBRIndex] = append(result[currentOBRIndex], nteSegments[nteCounter])
+				nteCounter++
+			}
+		}
+	}
+
+	return result
+}
+
+// countOBXBefore counts OBX segments before the current position (helper for matching)
+func countOBXBefore(segmentOrder []string, obrIndex, obxIndexInGroup int) int {
+	count := 0
+	currentOBR := -1
+	for _, seg := range segmentOrder {
+		if seg == "OBR" {
+			currentOBR++
+			if currentOBR > obrIndex {
+				break
+			}
+		}
+		if seg == "OBX" && currentOBR == obrIndex {
+			if count == obxIndexInGroup {
+				return count
+			}
+			count++
+		}
+	}
+	return count
+}
+
+// countNTEBefore counts NTE segments before the current position (helper for matching)
+func countNTEBefore(segmentOrder []string, obrIndex, nteIndexInGroup int) int {
+	count := 0
+	currentOBR := -1
+	for _, seg := range segmentOrder {
+		if seg == "OBR" {
+			currentOBR++
+			if currentOBR > obrIndex {
+				break
+			}
+		}
+		if seg == "NTE" && currentOBR == obrIndex {
+			if count == nteIndexInGroup {
+				return count
+			}
+			count++
+		}
+	}
+	return count
 }
 
 // Helper function to create enhanced segment (uses schema if available, falls back to basic conversion)

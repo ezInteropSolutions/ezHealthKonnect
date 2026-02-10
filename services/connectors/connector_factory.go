@@ -89,8 +89,10 @@ func (f *DefaultConnectorFactory) RegisterOutbound(typeName string, constructor 
 func (f *DefaultConnectorFactory) registerBuiltInConnectors() {
 	// Network Connectors
 	f.RegisterInbound("tcp_mllp_inbound", NewTCPMLLPInboundConnector)
+	f.RegisterInbound("tcp_mllp", NewTCPMLLPInboundConnector)            // Alias for V45 migration compatibility
 	f.RegisterOutbound("tcp_mllp_outbound", NewTCPMLLPOutboundConnector)
 	f.RegisterInbound("http_rest_inbound", NewHTTPFHIRInboundConnector) // HTTP FHIR receiver
+	f.RegisterInbound("http_rest", NewHTTPFHIRInboundConnector)          // Alias for V45 migration compatibility
 	f.RegisterInbound("http", NewHTTPFHIRInboundConnector)               // Alias for http connectivity
 	f.RegisterOutbound("http_outbound", NewHTTPOutboundConnector)        // HTTP delivery (full implementation)
 	f.RegisterOutbound("http", NewHTTPOutboundConnector)                 // Alias for http connectivity

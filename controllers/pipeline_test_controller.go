@@ -74,32 +74,19 @@ func (c *PipelineTestController) TestPipeline(ctx *gin.Context) {
 		return
 	}
 
-	log.Printf("🧪 Testing pipeline: pipeline_id=%s, has_pipeline_object=%v",
-		req.PipelineID, req.Pipeline != nil)
+	log.Printf("🧪 Testing pipeline: pipeline_id=%s, test_message_length=%d",
+		req.PipelineID, len(req.TestMessage))
 
-	// Load pipeline from database if pipeline_id provided
-	var pipeline map[string]interface{}
-	if req.PipelineID != "" {
-		loadedPipeline, err := c.loadPipelineFromDB(req.PipelineID)
-		if err != nil {
-			ctx.JSON(http.StatusNotFound, gin.H{
-				"success": false,
-				"error":   fmt.Sprintf("Failed to load pipeline: %v", err),
-			})
-			return
-		}
-		pipeline = loadedPipeline
-	} else if req.Pipeline != nil {
-		pipeline = req.Pipeline
-	} else {
+	// Validate pipeline_id
+	if req.PipelineID == "" {
 		ctx.JSON(http.StatusBadRequest, gin.H{
 			"success": false,
-			"error":   "Either pipeline_id or pipeline object is required",
+			"error":   "pipeline_id is required",
 		})
 		return
 	}
 
-	// Validate test message provided
+	// Validate test message
 	if req.TestMessage == "" {
 		ctx.JSON(http.StatusBadRequest, gin.H{
 			"success": false,
@@ -108,9 +95,108 @@ func (c *PipelineTestController) TestPipeline(ctx *gin.Context) {
 		return
 	}
 
-	// Execute pipeline
-	response := c.executePipeline(pipeline, req.TestMessage, req.InputData)
+	// FIXED: Load pipeline metadata from database by ID
+	var interfaceID, messageType string
+	query := `SELECT interface_id, message_type FROM transformation_pipelines WHERE id = $1`
+	err := c.db.QueryRow(query, req.PipelineID).Scan(&interfaceID, &messageType)
+	if err != nil {
+		ctx.JSON(http.StatusNotFound, gin.H{
+			"success": false,
+			"error":   fmt.Sprintf("Pipeline not found: %v", err),
+		})
+		return
+	}
 
+	// Load full pipeline with steps
+	pipeline, err := c.pipelineService.GetPipeline(ctx, interfaceID, messageType)
+	if err != nil {
+		ctx.JSON(http.StatusNotFound, gin.H{
+			"success": false,
+			"error":   fmt.Sprintf("Failed to load pipeline: %v", err),
+		})
+		return
+	}
+
+	log.Printf("🚀 Executing pipeline via TransformationPipelineService (supports routing)")
+
+	// Parse HL7 message into structured data (enhancedSegments) for pipeline steps
+	inputData := map[string]interface{}{
+		"message": map[string]interface{}{
+			"raw_content": req.TestMessage,
+		},
+	}
+
+	// Try to parse the HL7 message to provide structured data to pipeline steps
+	parsedMsg := hl7.ParseWithRealSchema(req.TestMessage)
+	if parsedMsg != nil && parsedMsg.Success {
+		log.Printf("✅ [Test] HL7 message parsed successfully with real schema")
+
+		// Convert struct to map[string]interface{} via JSON round-trip
+		parsedJSON, jsonErr := json.Marshal(parsedMsg)
+		if jsonErr == nil {
+			var parsedMap map[string]interface{}
+			if json.Unmarshal(parsedJSON, &parsedMap) == nil {
+				// Merge parsed data into inputData for pipeline steps
+				for key, value := range parsedMap {
+					inputData[key] = value
+				}
+				log.Printf("✅ [Test] Merged parsed HL7 into inputData (keys: %v)", getMapKeys(parsedMap))
+			}
+		}
+	} else {
+		log.Printf("⚠️  [Test] HL7 message parsing failed - pipeline will use raw content only")
+		if parsedMsg != nil {
+			log.Printf("   Error: %s", parsedMsg.Error)
+		}
+	}
+
+	// Execute pipeline with real service (supports routing)
+	result, err := c.pipelineService.ExecutePipeline(ctx, pipeline, inputData)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"error":   fmt.Sprintf("Pipeline execution failed: %v", err),
+		})
+		return
+	}
+
+	// Build simplified step outputs keyed by step name (user-friendly)
+	steps := make(map[string]interface{})
+	for _, stepLog := range result.ExecutionLog {
+		stepData := map[string]interface{}{
+			"duration_ms": stepLog.DurationMs,
+			"success":     stepLog.Success,
+		}
+
+		// Include step output if available (flattened, not nested)
+		if stepLog.StepOutput != nil && stepLog.StepOutput.OutputData != nil {
+			stepData["output"] = stepLog.StepOutput.OutputData
+		} else {
+			stepData["output"] = map[string]interface{}{}
+		}
+
+		// Include error if failed
+		if !stepLog.Success && stepLog.Error != "" {
+			stepData["error"] = stepLog.Error
+		}
+
+		// Use step name as key (user-friendly lookup)
+		steps[stepLog.StepName] = stepData
+	}
+
+	// Simplified response format: input, output, steps
+	response := gin.H{
+		"success": result.Status == "completed",
+		"input":   result.Input,   // Parsed HL7 message context
+		"output":  result.Output,  // Final transformed message context
+		"steps":   steps,          // Keyed by step name for easy lookup
+	}
+
+	if result.Status == "failed" && len(result.Errors) > 0 {
+		response["error"] = result.Errors[0].Message
+	}
+
+	log.Printf("✅ Test completed: %d steps executed, status=%s", len(result.ExecutionLog), result.Status)
 	ctx.JSON(http.StatusOK, response)
 }
 

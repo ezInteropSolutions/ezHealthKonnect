@@ -1,29 +1,20 @@
 /**
  * Layer Container Manager
- * Manages the three-layer canvas (pre, core, post)
+ * Manages the single pipeline canvas (unified - no pre/core/post layers)
  */
 
 class LayerContainer {
     constructor(pipelineBuilder) {
         this.builder = pipelineBuilder;
-        this.layers = {
-            pre: document.getElementById('preLayer'),
-            core: document.getElementById('coreLayer'),
-            post: document.getElementById('postLayer')
-        };
-        this.badges = {
-            pre: document.getElementById('preLayerBadge'),
-            core: document.getElementById('coreLayerBadge'),
-            post: document.getElementById('postLayerBadge')
-        };
+        this.canvas = document.getElementById('canvasDropZone');
         this.executionMode = 'inline'; // Default mode
     }
 
     /**
-     * Render entire layer
+     * Render the entire canvas
      */
-    renderLayer(layerName, visualLayer) {
-        const container = this.layers[layerName];
+    renderCanvas() {
+        const container = this.canvas;
         if (!container) return;
 
         // Clear existing content (except placeholder)
@@ -33,17 +24,19 @@ class LayerContainer {
             container.appendChild(placeholder);
         }
 
+        // Sort execution groups by sequence
+        const groups = [...this.builder.pipeline.executionGroups].sort((a, b) => a.sequence - b.sequence);
+
         // Render execution groups
-        visualLayer.executionGroups.forEach(group => {
+        groups.forEach(group => {
             this.renderExecutionGroup(group, container);
         });
 
-        // Update badge
-        this.updateLayerBadge(layerName, visualLayer);
-
         // Hide placeholder if has content
-        if (visualLayer.executionGroups.length > 0 && placeholder) {
+        if (groups.length > 0 && placeholder) {
             placeholder.style.display = 'none';
+        } else if (groups.length === 0 && placeholder) {
+            placeholder.style.display = 'flex';
         }
     }
 
@@ -78,7 +71,7 @@ class LayerContainer {
         const deleteBtn = header.querySelector('.group-delete-btn');
         if (deleteBtn) {
             deleteBtn.addEventListener('click', () => {
-                this.deleteGroup(group.id, group.layer);
+                this.deleteGroup(group.id);
             });
         }
 
@@ -86,67 +79,95 @@ class LayerContainer {
     }
 
     /**
-     * Add step to layer
+     * Add step to canvas
      */
-    addStepToLayer(step, layerName) {
-        const visualLayer = this.builder.pipeline.layers[layerName];
+    addStep(step) {
+        const pipeline = this.builder.pipeline;
 
         // Check if we should create new group or add to existing
         let targetGroup;
 
-        if (visualLayer.executionGroups.length === 0) {
+        if (pipeline.executionGroups.length === 0) {
             // Create first group
             targetGroup = new VisualExecutionGroup({
                 groupType: this.executionMode,
-                layer: layerName,
-                sequence: this.getNextSequence(layerName)
+                layer: 'core',
+                sequence: this.getNextSequence()
             });
-            visualLayer.addGroup(targetGroup);
+            pipeline.addExecutionGroup(targetGroup);
         } else {
             // Add to last group of same type, or create new group
-            const lastGroup = visualLayer.executionGroups[visualLayer.executionGroups.length - 1];
+            const lastGroup = pipeline.executionGroups[pipeline.executionGroups.length - 1];
 
             if (lastGroup.groupType === this.executionMode) {
                 targetGroup = lastGroup;
             } else {
                 targetGroup = new VisualExecutionGroup({
                     groupType: this.executionMode,
-                    layer: layerName,
-                    sequence: this.getNextSequence(layerName)
+                    layer: 'core',
+                    sequence: this.getNextSequence()
                 });
-                visualLayer.addGroup(targetGroup);
+                pipeline.addExecutionGroup(targetGroup);
             }
         }
 
-        // Add step to group
-        step.layer = layerName;
+        // Add step to group - ensure it's a VisualStep instance
+        step.layer = 'core';
         step.sequence = this.getNextStepSequence(targetGroup);
-        targetGroup.addStep(step);
 
-        // Re-render layer
-        this.renderLayer(layerName, visualLayer);
+        // Convert plain object to VisualStep if needed
+        let visualStep = step;
+        if (!(step instanceof VisualStep)) {
+            visualStep = new VisualStep({
+                id: step.id,
+                stepName: step.stepName || step.step_name,
+                stepType: step.stepType || step.step_type,
+                templateId: step.templateId || step.template_id,
+                layer: step.layer,
+                sequence: step.sequence,
+                required: step.required,
+                timeoutMs: step.timeoutMs || step.timeout_ms,
+                enabled: step.enabled,
+                config: step.config || {},
+                scriptType: step.scriptType || step.script_type,
+                scriptContent: step.scriptContent || step.script_content,
+                onErrorStrategy: step.onErrorStrategy || step.on_error_strategy,
+                executionMode: step.executionMode || step.execution_mode,
+                description: step.description,
+                icon: step.icon,
+                position_x: step.position_x,
+                position_y: step.position_y,
+                parentConditionalStepId: step.parentConditionalStepId || step.parent_conditional_step_id,
+                branchType: step.branchType || step.branch_type,
+                caseValue: step.caseValue || step.case_value
+            });
+        }
+        targetGroup.addStep(visualStep);
+
+        // Re-render canvas
+        this.renderCanvas();
 
         // Redraw connections
         this.builder.canvasRenderer.redrawAllConnections();
     }
 
     /**
-     * Remove step from layer
+     * Remove step from group
      */
     removeStepFromGroup(stepId, groupId) {
-        // Find the group
-        for (const [layerName, visualLayer] of Object.entries(this.builder.pipeline.layers)) {
-            const group = visualLayer.getGroup(groupId);
-            if (group) {
+        const pipeline = this.builder.pipeline;
+
+        for (const group of pipeline.executionGroups) {
+            if (group.id === groupId || group.groupId === groupId) {
                 group.removeStep(stepId);
 
                 // If group is empty, remove it
                 if (group.steps.length === 0) {
-                    visualLayer.removeGroup(groupId);
+                    pipeline.removeExecutionGroup(group.id || group.groupId);
                 }
 
                 // Re-render
-                this.renderLayer(layerName, visualLayer);
+                this.renderCanvas();
                 this.builder.canvasRenderer.redrawAllConnections();
                 return;
             }
@@ -154,55 +175,25 @@ class LayerContainer {
     }
 
     /**
-     * Move step to different layer
-     */
-    moveStepToLayer(stepId, sourceGroupId, sourceLayer, targetLayer) {
-        // Find and remove from source
-        const sourceVisualLayer = this.builder.pipeline.layers[sourceLayer];
-        const sourceGroup = sourceVisualLayer.getGroup(sourceGroupId);
-
-        if (!sourceGroup) return;
-
-        const step = sourceGroup.getStep(stepId);
-        if (!step) return;
-
-        sourceGroup.removeStep(stepId);
-
-        // Remove empty group
-        if (sourceGroup.steps.length === 0) {
-            sourceVisualLayer.removeGroup(sourceGroupId);
-        }
-
-        // Add to target layer
-        this.addStepToLayer(step, targetLayer);
-
-        // Re-render both layers
-        this.renderLayer(sourceLayer, sourceVisualLayer);
-    }
-
-    /**
      * Delete execution group
      */
-    deleteGroup(groupId, layerName) {
-        if (!confirm('Delete this execution group and all its steps?')) return;
+    async deleteGroup(groupId) {
+        const confirmed = await this.builder.dragDropManager.showConfirmDialog(
+            'Delete this execution group and all its steps?',
+            {
+                title: 'Delete Group',
+                confirmText: 'Delete',
+                cancelText: 'Cancel',
+                type: 'danger'
+            }
+        );
 
-        const visualLayer = this.builder.pipeline.layers[layerName];
-        visualLayer.removeGroup(groupId);
+        if (!confirmed) return;
 
-        this.renderLayer(layerName, visualLayer);
+        this.builder.pipeline.removeExecutionGroup(groupId);
+        this.renderCanvas();
         this.builder.canvasRenderer.redrawAllConnections();
         this.builder.dragDropManager.showNotification('Group deleted', 'info');
-    }
-
-    /**
-     * Update layer badge
-     */
-    updateLayerBadge(layerName, visualLayer) {
-        const badge = this.badges[layerName];
-        if (!badge) return;
-
-        const stepCount = visualLayer.executionGroups.reduce((sum, group) => sum + group.steps.length, 0);
-        badge.textContent = `${stepCount} step${stepCount !== 1 ? 's' : ''}`;
     }
 
     /**
@@ -213,21 +204,15 @@ class LayerContainer {
     }
 
     /**
-     * Get next sequence number for layer
+     * Get next sequence number
      */
-    getNextSequence(layerName) {
-        const baseSequences = {
-            pre: 0,
-            core: 100,
-            post: 200
-        };
-
-        const visualLayer = this.builder.pipeline.layers[layerName];
-        if (visualLayer.executionGroups.length === 0) {
-            return baseSequences[layerName] + 10;
+    getNextSequence() {
+        const groups = this.builder.pipeline.executionGroups;
+        if (groups.length === 0) {
+            return 10;
         }
 
-        const maxSequence = Math.max(...visualLayer.executionGroups.map(g => g.sequence));
+        const maxSequence = Math.max(...groups.map(g => g.sequence));
         return maxSequence + 10;
     }
 
@@ -244,30 +229,58 @@ class LayerContainer {
     }
 
     /**
-     * Clear all layers
+     * Clear canvas
      */
-    clearAllLayers() {
-        ['pre', 'core', 'post'].forEach(layerName => {
-            const visualLayer = this.builder.pipeline.layers[layerName];
-            visualLayer.executionGroups = [];
-            this.renderLayer(layerName, visualLayer);
+    clearCanvas() {
+        this.builder.pipeline.executionGroups = [];
+        this.renderCanvas();
+    }
 
-            // Show placeholder
-            const placeholder = this.layers[layerName]?.querySelector('.drop-zone-placeholder');
-            if (placeholder) {
-                placeholder.style.display = 'flex';
-            }
-        });
+    // ============================================================
+    // BACKWARD COMPATIBILITY ALIASES
+    // These methods delegate to the new names so old code still works
+    // ============================================================
+
+    /**
+     * @deprecated Use addStep() instead
+     */
+    addStepToLayer(step, _layerName) {
+        this.addStep(step);
     }
 
     /**
-     * Render all layers
+     * @deprecated Use renderCanvas() instead
      */
     renderAllLayers() {
-        ['pre', 'core', 'post'].forEach(layerName => {
-            const visualLayer = this.builder.pipeline.layers[layerName];
-            this.renderLayer(layerName, visualLayer);
-        });
+        this.renderCanvas();
+    }
+
+    /**
+     * @deprecated Use clearCanvas() instead
+     */
+    clearAllLayers() {
+        this.clearCanvas();
+    }
+
+    /**
+     * @deprecated Use renderCanvas() instead
+     */
+    renderLayer(_layerName, _visualLayer) {
+        this.renderCanvas();
+    }
+
+    /**
+     * @deprecated No longer needed (single canvas)
+     */
+    moveStepToLayer(_stepId, _sourceGroupId, _sourceLayer, _targetLayer) {
+        // No-op: layers no longer exist
+    }
+
+    /**
+     * @deprecated No longer needed
+     */
+    updateLayerBadge(_layerName, _visualLayer) {
+        // No-op: badges removed
     }
 }
 

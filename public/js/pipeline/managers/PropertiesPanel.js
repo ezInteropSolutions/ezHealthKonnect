@@ -308,7 +308,45 @@ class PropertiesPanel {
         const form = document.createElement('div');
         form.className = 'properties-form';
 
-        // Different button layout for preview vs edit mode
+        // SPECIAL HANDLING: Script Enrichment uses new beautiful editor
+        // Use VisualStep utility for type detection (handles old and new type names)
+        if (VisualStep.isScriptEnrichment(step)) {
+            form.innerHTML = '<div id="scriptEnrichmentEditorContainer"></div>';
+
+            // Find the step's position in the pipeline to show correct variables
+            const stepPosition = this.findStepPosition(step);
+            console.log('📍 Script editor - step position:', stepPosition);
+
+            // Initialize the beautiful script editor after DOM insertion
+            setTimeout(() => {
+                const container = document.getElementById('scriptEnrichmentEditorContainer');
+                if (container && typeof ScriptEnrichmentEditor !== 'undefined') {
+                    new ScriptEnrichmentEditor('scriptEnrichmentEditorContainer', {
+                        pipelineId: this.builder.pipeline?.id,
+                        pipelineBuilder: this.builder, // Pass the builder instance for ReferenceVariablesPanel
+                        stepName: step.stepName,
+                        stepConfig: step.config || {},
+                        // Pass step position for correct variable display
+                        layerName: stepPosition.layerName,
+                        stepIndex: stepPosition.stepIndex,
+                        onSave: (config) => {
+                            step.config = config;
+                            this.saveStep(step, isPreview);
+                        },
+                        onCancel: () => {
+                            this.closeModal();
+                        },
+                        onChange: (config) => {
+                            step.config = config;
+                        }
+                    });
+                }
+            }, 100);
+
+            return form;
+        }
+
+        // DEFAULT HANDLING: Regular form for other step types
         const actionButtons = isPreview ? `
             <div class="form-actions" style="margin-top: 1.5rem; display: flex; gap: 0.5rem;">
                 <button class="btn btn-primary" id="addToPipelineBtn">
@@ -499,7 +537,7 @@ class PropertiesPanel {
      */
     formatExampleForDisplay(example, stepType) {
         // Special handling for script enrichment - display script as raw code
-        if (stepType === 'pre.enrichment.script' && example.script) {
+        if ((stepType === 'enrichment.script' || stepType === 'pre.enrichment.script') && example.script) {
             // Create a readable format showing the script content directly
             const exampleCopy = { ...example };
             const scriptContent = exampleCopy.script;
@@ -817,6 +855,82 @@ class PropertiesPanel {
                     </table>
                 </div>
                 ` : ''}
+
+                ${docs.actions ? `
+                <div class="doc-section" style="margin-bottom: 1.5rem;">
+                    <h4 style="color: #2563eb; margin-bottom: 0.5rem;">
+                        <i class="fas fa-bolt"></i> Available Actions
+                    </h4>
+                    <div style="display: grid; gap: 0.75rem;">
+                        ${docs.actions.map(a => `
+                            <div style="padding: 1rem; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px;">
+                                <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem;">
+                                    <code style="background: #3b82f6; color: white; padding: 0.25rem 0.5rem; border-radius: 4px; font-weight: 600;">${a.action}</code>
+                                </div>
+                                <p style="color: #475569; font-size: 0.875rem; margin-bottom: 0.5rem;">${a.description}</p>
+                                <p style="color: #64748b; font-size: 0.8rem;"><strong>Use for:</strong> ${a.usedFor}</p>
+                                ${a.parameters ? `<p style="color: #64748b; font-size: 0.8rem;"><strong>Parameters:</strong> ${a.parameters}</p>` : ''}
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+                ` : ''}
+
+                ${docs.multiStepRouting ? `
+                <div class="doc-section" style="margin-bottom: 1.5rem;">
+                    <h4 style="color: #2563eb; margin-bottom: 0.5rem;">
+                        <i class="fas fa-route"></i> ${docs.multiStepRouting.title}
+                    </h4>
+                    <p style="color: #4b5563; margin-bottom: 1rem;">${docs.multiStepRouting.description}</p>
+
+                    <div style="background: #f0f9ff; border: 1px solid #bae6fd; border-radius: 6px; padding: 1rem; margin-bottom: 1rem;">
+                        <h5 style="color: #0369a1; margin-bottom: 0.5rem;">How to Use</h5>
+                        <ol style="padding-left: 1.5rem; color: #0369a1; font-size: 0.875rem; line-height: 1.8;">
+                            ${docs.multiStepRouting.howToUse.map(step => `<li>${step}</li>`).join('')}
+                        </ol>
+                    </div>
+
+                    ${docs.multiStepRouting.example ? `
+                    <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 1rem;">
+                        <h5 style="color: #334155; margin-bottom: 0.5rem;">Example: ${docs.multiStepRouting.example.scenario}</h5>
+                        <pre style="background: #1e293b; color: #e2e8f0; padding: 0.75rem; border-radius: 4px; font-size: 0.8rem; overflow-x: auto;"><code>${JSON.stringify(docs.multiStepRouting.example.config, null, 2)}</code></pre>
+                        <p style="color: #64748b; font-size: 0.8rem; margin-top: 0.5rem;"><strong>Execution:</strong> ${docs.multiStepRouting.example.execution}</p>
+                    </div>
+                    ` : ''}
+                </div>
+                ` : ''}
+
+                ${docs.comparisonWithIfThenElse ? `
+                <div class="doc-section" style="margin-bottom: 1.5rem;">
+                    <h4 style="color: #2563eb; margin-bottom: 0.5rem;">
+                        <i class="fas fa-balance-scale"></i> ${docs.comparisonWithIfThenElse.title}
+                    </h4>
+                    ${docs.comparisonWithIfThenElse.description ? `<p style="color: #4b5563; margin-bottom: 1rem;">${docs.comparisonWithIfThenElse.description}</p>` : ''}
+                    <table style="width: 100%; border-collapse: collapse; font-size: 0.875rem;">
+                        <thead>
+                            <tr style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);">
+                                <th style="padding: 0.75rem; text-align: left; border: 1px solid #e5e7eb; color: white;">Feature</th>
+                                <th style="padding: 0.75rem; text-align: left; border: 1px solid #e5e7eb; color: white;">Switch/Case</th>
+                                <th style="padding: 0.75rem; text-align: left; border: 1px solid #e5e7eb; color: white;">If-Then-Else</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${docs.comparisonWithIfThenElse.comparison.map((row, i) => `
+                                <tr style="background: ${i % 2 === 0 ? '#f8fafc' : 'white'};">
+                                    <td style="padding: 0.75rem; border: 1px solid #e5e7eb; font-weight: 600; color: #334155;">${row.feature}</td>
+                                    <td style="padding: 0.75rem; border: 1px solid #e5e7eb; color: #059669;">${row.switchCase}</td>
+                                    <td style="padding: 0.75rem; border: 1px solid #e5e7eb; color: #7c3aed;">${row.ifThenElse}</td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                    ${docs.comparisonWithIfThenElse.recommendation ? `
+                    <div style="margin-top: 1rem; padding: 0.75rem; background: #fef3c7; border-left: 4px solid #f59e0b; border-radius: 4px;">
+                        <p style="color: #92400e; font-size: 0.875rem; margin: 0;"><strong>Recommendation:</strong> ${docs.comparisonWithIfThenElse.recommendation}</p>
+                    </div>
+                    ` : ''}
+                </div>
+                ` : ''}
             </div>
         `;
 
@@ -890,8 +1004,10 @@ class PropertiesPanel {
 
                 <div class="form-group-inline">
                     <div class="form-group">
-                        <label>Sequence Order</label>
-                        <input type="number" id="stepSequence" value="${step.sequence}" min="1">
+                        <label>Sequence <span style="font-weight: normal; color: #6b7280; font-size: 11px;">(auto from connections)</span></label>
+                        <input type="number" id="stepSequence" value="${step.sequence}" min="1" readonly
+                               style="background: #f3f4f6; cursor: not-allowed;"
+                               title="Sequence is auto-calculated from flowchart connections on save">
                     </div>
 
                     <div class="form-group">
@@ -930,16 +1046,17 @@ class PropertiesPanel {
      * Create configuration section
      */
     createConfigSection(step) {
-        // Debug: Log step type to help identify mapping steps
+        // Use VisualStep utility for step type detection (handles old and new type names)
+        const isHL7FHIR = VisualStep.isHL7FHIRTransform(step);
         console.log('🔍 createConfigSection called with:', {
             stepType: step.stepType,
             templateId: step.templateId,
             stepName: step.name,
-            willUseMappingUI: (step.stepType === 'core.mapping' || step.templateId === 'hl7-fhir-mapping')
+            willUseMappingUI: isHL7FHIR
         });
 
         // Special handling for HL7→FHIR mapping steps ONLY (not generic transformation)
-        if (step.stepType === 'core.mapping' || step.templateId === 'hl7-fhir-mapping') {
+        if (isHL7FHIR) {
             return this.createMappingConfigSection(step);
         }
 
@@ -961,9 +1078,48 @@ class PropertiesPanel {
 
     /**
      * Create HL7→FHIR mapping configuration section (enhanced UI)
+     * Uses reference-based template system: step stores template reference,
+     * UI fetches and displays template mappings + any custom overrides
      */
     createMappingConfigSection(step) {
-        const mappings = step.config?.mappings || [];
+        console.log('🗺️ ========== HL7-FHIR MAPPING DEBUG ==========');
+        console.log('🗺️ step.config:', step.config);
+        console.log('🗺️ use_standard_template:', step.config?.use_standard_template);
+        console.log('🗺️ =============================================');
+
+        // Reference-based template system:
+        // 1. Check if step uses standard template (use_standard_template: true)
+        // 2. If so, we'll fetch template mappings asynchronously
+        // 3. Custom overrides can be stored in step.config.custom_overrides
+        const usesStandardTemplate = step.config?.use_standard_template === true;
+        const customOverrides = step.config?.custom_overrides || [];
+        const embeddedMappings = step.config?.embedded_mappings;
+        let mappings = [];
+        let mappingSource = 'none';
+
+        // Priority: embedded_mappings > mappings array > template reference
+        if (embeddedMappings) {
+            if (Array.isArray(embeddedMappings)) {
+                mappings = embeddedMappings;
+            } else if (embeddedMappings.atomicMappings && Array.isArray(embeddedMappings.atomicMappings)) {
+                mappings = embeddedMappings.atomicMappings;
+            } else if (embeddedMappings.mappings && Array.isArray(embeddedMappings.mappings)) {
+                mappings = embeddedMappings.mappings;
+            } else if (embeddedMappings.custom_mapping_config && Array.isArray(embeddedMappings.custom_mapping_config)) {
+                mappings = embeddedMappings.custom_mapping_config;
+            }
+            mappingSource = 'embedded';
+            console.log('🗺️ Using embedded_mappings:', mappings.length, 'mappings');
+        } else if (step.config?.mappings && Array.isArray(step.config.mappings) && step.config.mappings.length > 0) {
+            mappings = step.config.mappings;
+            mappingSource = 'config';
+            console.log('🗺️ Using config.mappings:', mappings.length, 'mappings');
+        } else if (usesStandardTemplate) {
+            // Template reference - will be loaded asynchronously
+            mappingSource = 'template_reference';
+            console.log('🗺️ Uses standard template - will fetch asynchronously');
+        }
+
         const mappingCount = mappings.length;
         const configJSON = JSON.stringify(step.config, null, 2);
 
@@ -1029,18 +1185,28 @@ class PropertiesPanel {
                         </div>
                     </div>
 
-                    <div style="margin-bottom: 1rem; padding: 0.75rem; background: #f8fafc; border-radius: 6px; display: flex; justify-content: space-between; align-items: center;">
-                        <span style="color: #475569; font-size: 0.875rem;">
-                            <strong>${mappingCount}</strong> mappings configured
-                            ${step.config?.source === 'wizard' ? '(from wizard)' : ''}
+                    <div id="mappingStatusBar" style="margin-bottom: 1rem; padding: 0.75rem; background: #f8fafc; border-radius: 6px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem;">
+                        <span id="mappingStatusText" style="color: #475569; font-size: 0.875rem;">
+                            ${mappingSource === 'template_reference' ?
+                                '<i class="fas fa-spinner fa-spin"></i> Loading standard template...' :
+                                `<strong>${mappingCount}</strong> mappings configured`
+                            }
+                            ${mappingSource === 'embedded' ? '<span style="color: #059669; font-weight: 500;">(from wizard)</span>' : ''}
+                            ${mappingSource === 'config' && mappingCount > 0 ? '<span style="color: #3b82f6; font-weight: 500;">(custom)</span>' : ''}
+                            ${mappingSource === 'none' ? '<span style="color: #f59e0b; font-weight: 500;">(using standard template at runtime)</span>' : ''}
                         </span>
-                        <input type="text" id="mappingSearchInput" placeholder="Search mappings..." style="
-                            padding: 0.375rem 0.75rem;
-                            border: 1px solid #cbd5e1;
-                            border-radius: 4px;
-                            font-size: 0.875rem;
-                            width: 200px;
-                        ">
+                        <div style="display: flex; gap: 0.5rem; align-items: center;">
+                            <button id="loadStandardTemplateBtn" class="btn btn-secondary" style="font-size: 0.8rem; padding: 0.4rem 0.8rem;" title="Load mappings from the standard template for this message type">
+                                <i class="fas fa-download"></i> Load Standard Template
+                            </button>
+                            <input type="text" id="mappingSearchInput" placeholder="Search mappings..." style="
+                                padding: 0.375rem 0.75rem;
+                                border: 1px solid #cbd5e1;
+                                border-radius: 4px;
+                                font-size: 0.875rem;
+                                width: 200px;
+                            ">
+                        </div>
                     </div>
 
                     <div id="mappingTableContainer" style="
@@ -1048,8 +1214,11 @@ class PropertiesPanel {
                         overflow-y: auto;
                         border: 1px solid #e5e7eb;
                         border-radius: 6px;
-                    ">
-                        ${this.renderMappingTable(mappings)}
+                    " data-auto-load-template="${mappingSource === 'template_reference' || mappingSource === 'none' ? 'true' : 'false'}">
+                        ${mappingSource === 'template_reference' ?
+                            '<div style="padding: 2rem; text-align: center; color: #64748b;"><i class="fas fa-spinner fa-spin fa-2x"></i><p style="margin-top: 1rem;">Loading standard template mappings...</p></div>' :
+                            this.renderMappingTable(mappings)
+                        }
                     </div>
 
                     <div style="margin-top: 0.75rem; display: flex; gap: 0.5rem;">
@@ -1343,6 +1512,22 @@ class PropertiesPanel {
             });
         }
 
+        // === Load Standard Template Button ===
+        const loadTemplateBtn = form.querySelector('#loadStandardTemplateBtn');
+        if (loadTemplateBtn) {
+            loadTemplateBtn.addEventListener('click', async () => {
+                await this.loadStandardTemplateMappings(step);
+            });
+        }
+
+        // === Auto-load standard template if needed ===
+        const mappingTableContainer = form.querySelector('#mappingTableContainer');
+        if (mappingTableContainer && mappingTableContainer.dataset.autoLoadTemplate === 'true') {
+            console.log('🔄 Auto-loading standard template mappings...');
+            // Auto-fetch template mappings asynchronously
+            this.autoLoadTemplateMappings(step, mappingTableContainer);
+        }
+
         // === JSON Format Button ===
         const formatJsonBtn = form.querySelector('#formatJsonBtn');
         if (formatJsonBtn) {
@@ -1465,6 +1650,22 @@ class PropertiesPanel {
 
             // Store reference for later access
             container._resultMappingBuilderInstance = builder;
+        });
+
+        // === API Response Mapping Builder Initialization (API Enrichment) ===
+        // NO-CODE: Visual builder for mapping API response fields to output variables
+        const apiResponseMappingContainers = form.querySelectorAll('.api-response-mapping-builder-container');
+        apiResponseMappingContainers.forEach(container => {
+            const initialMappingsJSON = container.dataset.initialMappings;
+            let initialMappings = { extractors: [] };
+            try {
+                initialMappings = initialMappingsJSON ? JSON.parse(initialMappingsJSON) : { extractors: [] };
+            } catch (e) {
+                console.warn('[PropertiesPanel] Failed to parse initial API response mappings:', e);
+            }
+
+            // Render the API Response Mapping Builder UI
+            this.renderApiResponseMappingBuilder(container, initialMappings, step);
         });
 
         // === MongoDB Filter Builder Initialization ===
@@ -1738,8 +1939,8 @@ class PropertiesPanel {
                 return config;
             };
 
-            // Render the tester
-            tester.render(getCurrentStepConfig());
+            // Render the tester - pass the FUNCTION so it gets fresh config on each test
+            tester.render(getCurrentStepConfig);
 
             // Store reference for later access
             container._apiEndpointTesterInstance = tester;
@@ -1992,9 +2193,18 @@ class PropertiesPanel {
         // Clear JSON button
         const clearBtn = container.querySelector('#clearJsonBtn');
         if (clearBtn) {
-            clearBtn.addEventListener('click', () => {
+            clearBtn.addEventListener('click', async () => {
                 const textarea = container.querySelector('#jsonConfigInput');
-                if (confirm('Are you sure you want to clear the JSON configuration?')) {
+                const confirmed = await this.builder.dragDropManager.showConfirmDialog(
+                    'Are you sure you want to clear the JSON configuration?',
+                    {
+                        title: 'Clear JSON',
+                        confirmText: 'Clear',
+                        cancelText: 'Cancel',
+                        type: 'warning'
+                    }
+                );
+                if (confirmed) {
                     textarea.value = '';
                     this.showValidationStatus(container, true, 'JSON cleared');
                 }
@@ -2190,6 +2400,624 @@ class PropertiesPanel {
     }
 
     /**
+     * Create If-Then-Else visual builder UI
+     */
+    createIfThenElseUI(step) {
+        // Initialize config if it doesn't exist
+        if (!step.config) {
+            step.config = {
+                conditions: [
+                    {
+                        name: 'Condition 1',
+                        condition: {
+                            field: '',
+                            operator: 'equals',
+                            value: '',
+                            compareToField: ''
+                        },
+                        onTrue: {
+                            action: 'continue'
+                        },
+                        onFalse: {
+                            action: 'continue'
+                        }
+                    }
+                ]
+            };
+        }
+
+        const section = document.createElement('div');
+        section.className = 'form-section';
+        section.innerHTML = `
+            <h4 style="color: var(--primary-color); margin-bottom: 1rem; display: flex; align-items: center; gap: 0.5rem;">
+                <i class="fas fa-code-branch"></i>
+                Conditional Logic Configuration
+            </h4>
+            <div id="if-then-else-builder-container" style="margin-top: 1rem;"></div>
+        `;
+
+        // Initialize builder after DOM insertion
+        setTimeout(() => {
+            const container = document.getElementById('if-then-else-builder-container');
+            if (container && typeof IfThenElseBuilder !== 'undefined') {
+                this.ifThenElseBuilder = new IfThenElseBuilder(container, step.config);
+                console.log('✅ IfThenElseBuilder initialized with config:', step.config);
+            } else {
+                console.error('❌ IfThenElseBuilder not loaded or container not found');
+                console.log('IfThenElseBuilder type:', typeof IfThenElseBuilder);
+                console.log('Container:', container);
+            }
+        }, 0);
+
+        return section.outerHTML;
+    }
+
+    /**
+     * Create Switch/Case visual builder UI
+     * Uses OOP pattern with BaseStepConfigBuilder.init()
+     */
+    createSwitchCaseUI(step) {
+        // Initialize config if it doesn't exist (let builder handle defaults)
+        if (!step.config) {
+            step.config = {};
+        }
+
+        const section = document.createElement('div');
+        section.className = 'form-section';
+        section.innerHTML = `
+            <div id="switch-case-builder-container" style="margin-top: 1rem;"></div>
+        `;
+
+        // Initialize builder after DOM insertion using OOP pattern
+        setTimeout(() => {
+            const container = document.getElementById('switch-case-builder-container');
+            if (container && typeof SwitchCaseBuilder !== 'undefined') {
+                // Create builder instance
+                this.switchCaseBuilder = new SwitchCaseBuilder(container, step.config);
+
+                // Call init() - Template Method Pattern from BaseStepConfigBuilder
+                this.switchCaseBuilder.init();
+                console.log('✅ SwitchCaseBuilder initialized (OOP pattern) with config:', step.config);
+
+                // Listen for config changes from the builder
+                container.addEventListener('configChange', (e) => {
+                    step.config = e.detail.config;
+                    console.log('📝 Switch/Case config updated:', step.config);
+                });
+            } else {
+                console.error('❌ SwitchCaseBuilder not loaded or container not found');
+                console.log('SwitchCaseBuilder type:', typeof SwitchCaseBuilder);
+                console.log('Container:', container);
+            }
+        }, 0);
+
+        return section.outerHTML;
+    }
+
+    /**
+     * Create Loop Container visual builder UI
+     * Uses OOP pattern with BaseStepConfigBuilder.init()
+     */
+    createLoopContainerUI(step) {
+        // Initialize config if it doesn't exist (let builder handle defaults)
+        if (!step.config) {
+            step.config = {};
+        }
+
+        const section = document.createElement('div');
+        section.className = 'form-section';
+        section.innerHTML = `
+            <div id="loop-container-builder-container" style="margin-top: 1rem;"></div>
+        `;
+
+        // Initialize builder after DOM insertion using OOP pattern
+        setTimeout(() => {
+            const container = document.getElementById('loop-container-builder-container');
+            if (container && typeof ForEachLoopBuilder !== 'undefined') {
+                // Create builder instance
+                this.loopContainerBuilder = new ForEachLoopBuilder(container, step.config);
+
+                // Call init() - Template Method Pattern from BaseStepConfigBuilder
+                this.loopContainerBuilder.init();
+                console.log('✅ ForEachLoopBuilder initialized (OOP pattern) with config:', step.config);
+
+                // Listen for config changes from the builder
+                container.addEventListener('configChange', (e) => {
+                    step.config = e.detail.config;
+                    console.log('📝 Loop config updated:', step.config);
+                });
+            } else {
+                console.error('❌ ForEachLoopBuilder not loaded or container not found');
+                console.log('ForEachLoopBuilder type:', typeof ForEachLoopBuilder);
+                console.log('Container:', container);
+            }
+        }, 0);
+
+        return section.outerHTML;
+    }
+
+    /**
+     * Create Try-Catch Configuration UI
+     * Uses TryCatchBuilder OOP component
+     */
+    createTryCatchUI(step) {
+        if (!step.config) {
+            step.config = {};
+        }
+
+        const section = document.createElement('div');
+        section.className = 'form-section';
+        section.innerHTML = `
+            <div id="try-catch-builder-container" style="margin-top: 1rem;"></div>
+        `;
+
+        setTimeout(() => {
+            const container = document.getElementById('try-catch-builder-container');
+            if (container && typeof TryCatchBuilder !== 'undefined') {
+                this.tryCatchBuilder = new TryCatchBuilder(container, step.config);
+                this.tryCatchBuilder.init();
+                console.log('✅ TryCatchBuilder initialized with config:', step.config);
+
+                container.addEventListener('configChange', (e) => {
+                    step.config = e.detail.config;
+                    console.log('📝 Try-Catch config updated:', step.config);
+                });
+            } else {
+                console.error('❌ TryCatchBuilder not loaded or container not found');
+            }
+        }, 0);
+
+        return section.outerHTML;
+    }
+
+    /**
+     * Create Retry Configuration UI
+     * Inline form (no separate builder needed - simple config)
+     */
+    createRetryUI(step) {
+        if (!step.config) {
+            step.config = {};
+        }
+
+        const config = step.config;
+        const maxRetries = config.maxRetries || 3;
+        const delayMs = config.delayMs || 1000;
+        const backoffType = config.backoffType || 'fixed';
+        const maxDelayMs = config.maxDelayMs || 30000;
+        const childSteps = config.childSteps || [];
+
+        // Get available steps for assignment
+        let availableSteps = [];
+        try {
+            const pipeline = window.pipelineBuilder?.getPipeline();
+            const currentStep = window.pipelineBuilder?.currentStep;
+            let allSteps = [];
+            if (pipeline?.getAllSteps) {
+                allSteps = pipeline.getAllSteps();
+            } else {
+                (pipeline?.executionGroups || []).forEach(g => { if (g.steps) allSteps.push(...g.steps); });
+            }
+            availableSteps = allSteps.filter(s => currentStep && s.id !== currentStep.id);
+        } catch (e) { /* ignore */ }
+
+        const usedIds = new Set(childSteps);
+        const available = availableSteps.filter(s => !usedIds.has(s.id));
+
+        const chipsHtml = childSteps.map((id, idx) => {
+            const s = availableSteps.find(st => st.id === id);
+            const name = s ? (s.stepName || s.step_name || id.substring(0, 12)) : id.substring(0, 12);
+            return `<span class="retry-step-chip" style="
+                display: inline-flex; align-items: center; gap: 4px;
+                padding: 4px 10px; border-radius: 6px; font-size: 12px;
+                background: rgba(168, 85, 247, 0.1); border: 1px solid rgba(168, 85, 247, 0.25);
+                margin: 2px;">
+                <span style="font-weight: 600; color: #a855f7; font-size: 10px;">${idx + 1}.</span>
+                ${name}
+                <button class="retry-remove-step" data-step-id="${id}" style="
+                    background: none; border: none; cursor: pointer; color: var(--text-tertiary);
+                    padding: 0 2px; font-size: 14px; line-height: 1;">&times;</button>
+            </span>`;
+        }).join('') || '<span style="font-size: 12px; color: var(--text-tertiary); font-style: italic;">No steps assigned</span>';
+
+        const section = document.createElement('div');
+        section.className = 'form-section';
+        section.innerHTML = `
+            <div class="retry-builder" style="padding: 0;">
+                <h4 style="margin: 0 0 4px; font-size: 14px;">Retry Configuration</h4>
+                <p style="margin: 0 0 12px; font-size: 12px; color: var(--text-secondary);">
+                    Retries child steps on failure with configurable backoff strategy.
+                </p>
+
+                <div class="form-group" style="margin-bottom: 10px;">
+                    <label style="font-weight: 600; font-size: 13px;">Max Retries</label>
+                    <input type="number" id="retryMaxRetries" class="form-control" value="${maxRetries}" min="1" max="20" style="margin-top: 4px;">
+                </div>
+
+                <div class="form-group" style="margin-bottom: 10px;">
+                    <label style="font-weight: 600; font-size: 13px;">Backoff Type</label>
+                    <select id="retryBackoffType" class="form-control" style="margin-top: 4px;">
+                        <option value="fixed" ${backoffType === 'fixed' ? 'selected' : ''}>Fixed - Same delay each time</option>
+                        <option value="exponential" ${backoffType === 'exponential' ? 'selected' : ''}>Exponential - 1s, 2s, 4s, 8s...</option>
+                        <option value="linear" ${backoffType === 'linear' ? 'selected' : ''}>Linear - 1s, 2s, 3s, 4s...</option>
+                    </select>
+                </div>
+
+                <div class="form-group" style="margin-bottom: 10px;">
+                    <label style="font-weight: 600; font-size: 13px;">Initial Delay (ms)</label>
+                    <input type="number" id="retryDelayMs" class="form-control" value="${delayMs}" min="0" step="100" style="margin-top: 4px;">
+                </div>
+
+                <div class="form-group" style="margin-bottom: 10px;">
+                    <label style="font-weight: 600; font-size: 13px;">Max Delay Cap (ms)</label>
+                    <input type="number" id="retryMaxDelayMs" class="form-control" value="${maxDelayMs}" min="0" step="1000" style="margin-top: 4px;">
+                    <small style="color: var(--text-tertiary);">Caps delay for exponential/linear backoff</small>
+                </div>
+
+                <div style="margin-top: 12px; padding: 10px 14px; border: 1px dashed rgba(168, 85, 247, 0.3); border-radius: 10px; background: rgba(168, 85, 247, 0.04);">
+                    <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 6px;">
+                        <span style="font-weight: 700; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; color: #a855f7;">Child Steps</span>
+                        <span style="font-size: 11px; color: var(--text-tertiary);">${childSteps.length} step${childSteps.length !== 1 ? 's' : ''}</span>
+                    </div>
+                    <p style="margin: 0 0 8px; font-size: 11px; color: var(--text-secondary);">Steps to execute (and retry on failure)</p>
+                    <div id="retryChildChips" style="min-height: 28px; margin-bottom: 8px;">${chipsHtml}</div>
+                    ${available.length > 0 ? `
+                        <div style="display: flex; gap: 6px; align-items: center;">
+                            <select id="retryAddStepSelect" class="form-control" style="flex: 1; font-size: 12px; padding: 4px 8px;">
+                                <option value="">-- Add step --</option>
+                                ${available.map(s => `<option value="${s.id}">${s.stepName || s.step_name || s.id.substring(0, 12)}</option>`).join('')}
+                            </select>
+                            <button id="retryAddStepBtn" class="btn btn-sm" style="
+                                font-size: 12px; padding: 4px 10px; background: #a855f7; color: white;
+                                border: none; border-radius: 6px; cursor: pointer;">+ Add</button>
+                        </div>
+                    ` : ''}
+                </div>
+
+                <div style="margin-top: 12px; padding: 10px 14px; background: rgba(168, 85, 247, 0.06); border: 1px solid rgba(168, 85, 247, 0.15); border-radius: 8px; font-size: 12px; color: var(--text-secondary);">
+                    <strong style="color: var(--text-primary);">Context Variables:</strong><br>
+                    Child steps receive <code>_retry.attempt</code>, <code>_retry.maxRetries</code>, <code>_retry.isRetry</code>
+                </div>
+            </div>
+        `;
+
+        // Attach events after DOM insertion
+        setTimeout(() => {
+            const updateConfig = () => {
+                step.config.maxRetries = parseInt(document.getElementById('retryMaxRetries')?.value) || 3;
+                step.config.backoffType = document.getElementById('retryBackoffType')?.value || 'fixed';
+                step.config.delayMs = parseInt(document.getElementById('retryDelayMs')?.value) || 1000;
+                step.config.maxDelayMs = parseInt(document.getElementById('retryMaxDelayMs')?.value) || 30000;
+                console.log('📝 Retry config updated:', step.config);
+            };
+
+            ['retryMaxRetries', 'retryBackoffType', 'retryDelayMs', 'retryMaxDelayMs'].forEach(id => {
+                const el = document.getElementById(id);
+                if (el) el.addEventListener('change', updateConfig);
+            });
+
+            // Add step button
+            const addBtn = document.getElementById('retryAddStepBtn');
+            const addSelect = document.getElementById('retryAddStepSelect');
+            if (addBtn && addSelect) {
+                addBtn.addEventListener('click', () => {
+                    if (!addSelect.value) return;
+                    if (!step.config.childSteps) step.config.childSteps = [];
+                    if (!step.config.childSteps.includes(addSelect.value)) {
+                        step.config.childSteps.push(addSelect.value);
+                        console.log('📝 Retry child step added:', addSelect.value);
+                        // Re-render the properties panel to show updated chips
+                        if (window.pipelineBuilder?.propertiesPanel) {
+                            window.pipelineBuilder.propertiesPanel.showStepProperties(step);
+                        }
+                    }
+                });
+            }
+
+            // Remove step buttons
+            document.querySelectorAll('.retry-remove-step').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    const stepId = btn.dataset.stepId;
+                    if (step.config.childSteps) {
+                        step.config.childSteps = step.config.childSteps.filter(id => id !== stepId);
+                        console.log('📝 Retry child step removed:', stepId);
+                        if (window.pipelineBuilder?.propertiesPanel) {
+                            window.pipelineBuilder.propertiesPanel.showStepProperties(step);
+                        }
+                    }
+                });
+            });
+        }, 0);
+
+        return section.outerHTML;
+    }
+
+    /**
+     * Create Connector Configuration UI (Inbound/Outbound)
+     * Uses ConnectorConfigBuilder OOP component
+     */
+    createConnectorConfigUI(step, direction) {
+        if (!step.config) {
+            step.config = {};
+        }
+
+        const section = document.createElement('div');
+        section.className = 'form-section';
+        section.innerHTML = `
+            <div id="connector-config-builder-container" style="margin-top: 1rem;"></div>
+        `;
+
+        // Initialize builder after DOM insertion using OOP pattern
+        setTimeout(() => {
+            const container = document.getElementById('connector-config-builder-container');
+            if (container && typeof ConnectorConfigBuilder !== 'undefined') {
+                this.connectorConfigBuilder = new ConnectorConfigBuilder(container, step.config, direction);
+                this.connectorConfigBuilder.init();
+                console.log(`🔌 ConnectorConfigBuilder initialized (${direction}) with config:`, step.config);
+
+                // Listen for config changes from the builder
+                container.addEventListener('connectorConfigChanged', (e) => {
+                    step.config = e.detail.config;
+                    console.log('🔌 Connector config updated:', step.config);
+                });
+            } else {
+                console.error('ConnectorConfigBuilder not loaded or container not found');
+                if (container) {
+                    container.innerHTML = `
+                        <div class="alert alert-warning" style="margin: 12px 0;">
+                            <i class="fas fa-exclamation-triangle"></i>
+                            Connector configuration builder not available. Ensure ConnectorConfigBuilder.js is loaded.
+                        </div>
+                    `;
+                }
+            }
+        }, 0);
+
+        return section.outerHTML;
+    }
+
+    /**
+     * Create FHIR Validation configuration UI
+     * Exposes all 4 backend config options with clear descriptions
+     */
+    createFHIRValidationUI(step) {
+        if (!step.config) step.config = {};
+
+        // Read current config with defaults matching backend (fhir_validation_executor.go line 56-60)
+        const validationLevel = (step.config.validation_level || 'standard').toLowerCase();
+        const requiredResources = step.config.required_resources || [];
+        const validateReferences = step.config.validate_references !== false;
+        const validateRequiredFields = step.config.validate_required_fields !== false;
+        const failOnError = step.config.fail_on_error === true;
+
+        // 14 resource types with hardcoded required field checks in the backend (line 304-319)
+        const commonResources = [
+            { value: 'Patient', desc: 'Demographics and administrative information' },
+            { value: 'Encounter', desc: 'Interaction between patient and provider' },
+            { value: 'Observation', desc: 'Measurements, lab results, vital signs' },
+            { value: 'Condition', desc: 'Clinical conditions, diagnoses' },
+            { value: 'Procedure', desc: 'Actions performed on patient' },
+            { value: 'AllergyIntolerance', desc: 'Allergy or intolerance record' },
+            { value: 'DiagnosticReport', desc: 'Diagnostic test findings' },
+            { value: 'MedicationRequest', desc: 'Medication prescriptions/orders' },
+            { value: 'Immunization', desc: 'Vaccination records' },
+            { value: 'Coverage', desc: 'Insurance/payment coverage' },
+            { value: 'MessageHeader', desc: 'Message routing metadata' },
+            { value: 'Practitioner', desc: 'Healthcare provider information' },
+            { value: 'Organization', desc: 'Organization details' },
+            { value: 'Location', desc: 'Physical location information' }
+        ];
+
+        const levelDescriptions = {
+            basic: 'Checks only that each resource has a valid <code>resourceType</code> and <code>id</code> field. Fastest execution.',
+            standard: 'Basic checks + required field validation per resource type (14 types) + internal bundle reference checking. Recommended for most pipelines.',
+            strict: 'Standard checks + full R4 JSON schema validation using FHIR specification schemas (146 resource types). Most thorough but slower.'
+        };
+
+        // Build resource checkboxes
+        let resourceCheckboxesHtml = commonResources.map(res => {
+            const checked = requiredResources.includes(res.value) ? 'checked' : '';
+            return `<label class="fhir-resource-checkbox" title="${res.desc}">
+                <input type="checkbox" name="fhir_required_resource" value="${res.value}" ${checked}>
+                <span class="fhir-resource-name">${res.value}</span>
+                <span class="fhir-resource-desc">${res.desc}</span>
+            </label>`;
+        }).join('');
+
+        // Custom resource chips (resources selected but not in the common 14)
+        const commonValues = commonResources.map(r => r.value);
+        const customResources = requiredResources.filter(r => !commonValues.includes(r));
+        const customChipsHtml = customResources.map(r =>
+            `<span class="fhir-custom-resource-chip" data-resource="${r}">
+                ${r}
+                <button type="button" class="remove-custom-resource-btn" title="Remove ${r}">&times;</button>
+            </span>`
+        ).join('');
+
+        const isBasic = validationLevel === 'basic';
+        const toggleOpacity = isBasic ? '0.5' : '1';
+
+        const section = document.createElement('div');
+        section.className = 'form-section';
+        section.innerHTML = `
+            <h4><i class="fas fa-shield-alt" style="color: var(--success-color, #28a745); margin-right: 6px;"></i>FHIR Validation Configuration</h4>
+
+            <!-- Validation Level -->
+            <div class="form-group">
+                <label>Validation Level <span style="color: var(--danger-color, #dc3545);">*</span></label>
+                <select id="fhirValidationLevel" name="fhir_validation_level" class="form-control">
+                    <option value="basic" ${validationLevel === 'basic' ? 'selected' : ''}>Basic - Structure only</option>
+                    <option value="standard" ${validationLevel === 'standard' ? 'selected' : ''}>Standard - Structure + required fields + references</option>
+                    <option value="strict" ${validationLevel === 'strict' ? 'selected' : ''}>Strict - Full R4 schema compliance</option>
+                </select>
+                <div id="fhirLevelDescription" class="fhir-level-description">
+                    ${levelDescriptions[validationLevel]}
+                </div>
+            </div>
+
+            <!-- Validate Required Fields -->
+            <div class="form-group" id="fhirValidateRequiredFieldsGroup" style="opacity: ${toggleOpacity};">
+                <label class="fhir-toggle-label">
+                    <input type="checkbox" id="fhirValidateRequiredFields" ${validateRequiredFields ? 'checked' : ''}>
+                    <span>Validate Required Fields</span>
+                </label>
+                <small class="form-text text-muted" style="display: block; margin-top: 4px;">
+                    Check that FHIR-spec-required fields are present per resource type (e.g., Encounter must have <code>status</code> and <code>class</code>). Applies at Standard and Strict levels.
+                </small>
+            </div>
+
+            <!-- Validate References -->
+            <div class="form-group" id="fhirValidateReferencesGroup" style="opacity: ${toggleOpacity};">
+                <label class="fhir-toggle-label">
+                    <input type="checkbox" id="fhirValidateReferences" ${validateReferences ? 'checked' : ''}>
+                    <span>Validate Internal References</span>
+                </label>
+                <small class="form-text text-muted" style="display: block; margin-top: 4px;">
+                    Check that <code>reference</code> fields point to existing resources (by fullUrl or ResourceType/id). Most useful in bundle mode where references can be cross-checked. Applies at Standard and Strict levels.
+                </small>
+            </div>
+
+            <!-- Required Resources -->
+            <div class="form-group">
+                <label>Required Resources</label>
+                <small class="form-text text-muted" style="display: block; margin-bottom: 8px;">
+                    Resource types that <strong>must</strong> be present. In bundle mode, checks all entries. In resource mode, checks the single resource type matches.
+                </small>
+                <div class="fhir-resource-grid" id="fhirResourceGrid">
+                    ${resourceCheckboxesHtml}
+                </div>
+
+                <!-- Custom resource entry -->
+                <div style="margin-top: 10px;">
+                    <div class="fhir-custom-resource-chips" id="fhirCustomResourceChips">
+                        ${customChipsHtml}
+                    </div>
+                    <div style="display: flex; gap: 8px; align-items: center; margin-top: 6px;">
+                        <input type="text" id="fhirCustomResourceInput" class="form-control" placeholder="Other resource type (e.g., Specimen)"
+                               style="flex: 1; font-size: 0.85rem;">
+                        <button type="button" id="fhirAddCustomResource" class="btn btn-sm btn-outline-secondary" style="white-space: nowrap;">
+                            + Add
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Fail on Error -->
+            <div class="form-group" style="margin-top: 12px; padding: 10px 12px; background: ${failOnError ? '#fff5f5' : 'var(--bg-secondary, #f8f9fa)'}; border: 1px solid ${failOnError ? '#feb2b2' : 'var(--border-color, #dee2e6)'}; border-radius: 6px;">
+                <label class="fhir-toggle-label">
+                    <input type="checkbox" id="fhirFailOnError" ${failOnError ? 'checked' : ''}>
+                    <span>Fail on Error</span>
+                </label>
+                <small class="form-text text-muted" style="display: block; margin-top: 4px;">
+                    When enabled, the pipeline <strong>stops</strong> if any validation error is found. When disabled, errors are reported in the step output but the pipeline continues.
+                </small>
+            </div>
+
+            <!-- Info box -->
+            <div class="fhir-info-box">
+                <div style="font-weight: 600; margin-bottom: 6px;">
+                    <i class="fas fa-info-circle"></i> How it works
+                </div>
+                <div style="font-size: 0.82rem; line-height: 1.5;">
+                    <strong>Input:</strong> Auto-detects FHIR data from <code>fhirBundle</code> or <code>fhirResource</code> keys. Works with both full Bundles and standalone resources.<br><br>
+                    <strong>Basic:</strong> Only checks <code>resourceType</code> and <code>id</code> exist.<br>
+                    <strong>Standard:</strong> Basic + required field checks (14 resource types) + reference validation.<br>
+                    <strong>Strict:</strong> Standard + full R4 JSON schema validation (146 resource schemas).
+                </div>
+            </div>
+        `;
+
+        // Attach events after DOM insertion
+        setTimeout(() => {
+            // Validation Level change → update description + toggle visibility
+            const levelSelect = document.getElementById('fhirValidationLevel');
+            const levelDesc = document.getElementById('fhirLevelDescription');
+            const reqFieldsGroup = document.getElementById('fhirValidateRequiredFieldsGroup');
+            const refsGroup = document.getElementById('fhirValidateReferencesGroup');
+
+            if (levelSelect) {
+                levelSelect.addEventListener('change', () => {
+                    const level = levelSelect.value;
+                    if (levelDesc) levelDesc.innerHTML = levelDescriptions[level] || '';
+                    const dim = level === 'basic' ? '0.5' : '1';
+                    if (reqFieldsGroup) reqFieldsGroup.style.opacity = dim;
+                    if (refsGroup) refsGroup.style.opacity = dim;
+                });
+            }
+
+            // Custom resource Add button
+            const addBtn = document.getElementById('fhirAddCustomResource');
+            const customInput = document.getElementById('fhirCustomResourceInput');
+            const chipsContainer = document.getElementById('fhirCustomResourceChips');
+
+            if (addBtn && customInput && chipsContainer) {
+                const addCustomResource = () => {
+                    const value = customInput.value.trim();
+                    if (!value) return;
+
+                    // PascalCase validation
+                    if (!/^[A-Z][a-zA-Z]+$/.test(value)) {
+                        customInput.style.borderColor = 'var(--danger-color, #dc3545)';
+                        setTimeout(() => { customInput.style.borderColor = ''; }, 2000);
+                        return;
+                    }
+
+                    // Check if already in grid checkboxes
+                    const existingCheckbox = document.querySelector(`input[name="fhir_required_resource"][value="${value}"]`);
+                    if (existingCheckbox) {
+                        existingCheckbox.checked = true;
+                        customInput.value = '';
+                        return;
+                    }
+                    // Check if already a custom chip
+                    if (chipsContainer.querySelector(`[data-resource="${value}"]`)) {
+                        customInput.value = '';
+                        return;
+                    }
+
+                    // Add chip
+                    const chip = document.createElement('span');
+                    chip.className = 'fhir-custom-resource-chip';
+                    chip.dataset.resource = value;
+                    chip.innerHTML = `${value} <button type="button" class="remove-custom-resource-btn" title="Remove ${value}">&times;</button>`;
+                    chip.querySelector('.remove-custom-resource-btn').addEventListener('click', () => chip.remove());
+                    chipsContainer.appendChild(chip);
+                    customInput.value = '';
+                };
+
+                addBtn.addEventListener('click', addCustomResource);
+                customInput.addEventListener('keydown', (e) => {
+                    if (e.key === 'Enter') {
+                        e.preventDefault();
+                        addCustomResource();
+                    }
+                });
+            }
+
+            // Attach remove handlers for existing custom chips
+            if (chipsContainer) {
+                chipsContainer.querySelectorAll('.remove-custom-resource-btn').forEach(btn => {
+                    btn.addEventListener('click', () => btn.closest('.fhir-custom-resource-chip').remove());
+                });
+            }
+
+            // Fail on Error toggle — visual feedback
+            const failToggle = document.getElementById('fhirFailOnError');
+            if (failToggle) {
+                failToggle.addEventListener('change', () => {
+                    const container = failToggle.closest('.form-group');
+                    if (container) {
+                        container.style.background = failToggle.checked ? '#fff5f5' : 'var(--bg-secondary, #f8f9fa)';
+                        container.style.borderColor = failToggle.checked ? '#feb2b2' : 'var(--border-color, #dee2e6)';
+                    }
+                });
+            }
+        }, 0);
+
+        return section.outerHTML;
+    }
+
+    /**
      * Handle transformation selection - show input fields for complex transforms
      */
     handleTransformSelection() {
@@ -2302,7 +3130,7 @@ class PropertiesPanel {
 
         console.log('[Field Mapping] Variable added:', mappingObject);
         console.log('[Field Mapping] Total mappings:', this.currentStep.config.mappings.length);
-        console.log('[Field Mapping] Step config:', this.currentStep.config);
+        console.log('[Field Mapping] Step ID:', this.currentStep.id);
 
         // Clear form
         document.getElementById('newMappingLHS').value = '';
@@ -2315,14 +3143,161 @@ class PropertiesPanel {
         document.getElementById('substringInput').style.display = 'none';
         document.getElementById('replaceInput').style.display = 'none';
 
+        // Update step in pipeline model and auto-save immediately
+        this.builder.updateStep(this.currentStep);
+        this.builder.savePipeline().then(() => {
+            console.log('[Field Mapping] Pipeline auto-saved after adding variable');
+        }).catch(err => {
+            console.error('[Field Mapping] Auto-save failed:', err);
+            this.builder.dragDropManager.showNotification('Warning: Variable added but save failed. Click Save Pipeline manually.', 'warning');
+        });
+
         this.showStepProperties(this.currentStep);
-        this.builder.dragDropManager.showNotification('Variable added', 'success');
+        this.builder.dragDropManager.showNotification('Variable added & saved', 'success');
         this.builder.markAsUnsaved();
     }
 
     /**
-     * Delete generic mapping
+     * Render API Response Mapping Builder UI
+     * Shows configured output variable mappings from API response
      */
+    renderApiResponseMappingBuilder(container, initialMappings, step) {
+        const extractors = initialMappings.extractors || [];
+
+        let html = `
+            <div class="api-response-mapping-builder">
+                <div class="mapping-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                    <span style="font-size: 12px; color: #666;">
+                        ${extractors.length} output variable${extractors.length !== 1 ? 's' : ''} configured
+                    </span>
+                    <button type="button" class="add-mapping-btn" style="
+                        padding: 4px 10px;
+                        background: #e3f2fd;
+                        border: 1px solid #90caf9;
+                        border-radius: 4px;
+                        cursor: pointer;
+                        font-size: 12px;
+                    ">+ Add Variable</button>
+                </div>
+        `;
+
+        if (extractors.length === 0) {
+            html += `
+                <div class="no-mappings" style="
+                    padding: 20px;
+                    background: #f5f5f5;
+                    border-radius: 6px;
+                    text-align: center;
+                    color: #888;
+                    font-style: italic;
+                ">
+                    <p style="margin: 0 0 10px 0;">No output variables configured.</p>
+                    <p style="margin: 0; font-size: 12px;">Use "Test API Endpoint" above to test your API and click response fields to add them as output variables.</p>
+                </div>
+            `;
+        } else {
+            html += `<div class="mapping-list" style="display: flex; flex-direction: column; gap: 8px;">`;
+
+            extractors.forEach((extractor, index) => {
+                html += `
+                    <div class="mapping-item" data-index="${index}" style="
+                        display: flex;
+                        align-items: center;
+                        gap: 8px;
+                        padding: 8px 12px;
+                        background: #fff;
+                        border: 1px solid #e0e0e0;
+                        border-radius: 6px;
+                    ">
+                        <div class="mapping-source" style="flex: 1; min-width: 0;">
+                            <label style="font-size: 10px; color: #888; display: block;">Source Path</label>
+                            <input type="text" class="extractor-source-path" value="${this.builder.escapeHtml(extractor.sourcePath || '')}"
+                                   style="width: 100%; padding: 4px 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 12px;"
+                                   placeholder="response.data.field">
+                        </div>
+                        <span style="color: #666; font-size: 16px;">→</span>
+                        <div class="mapping-target" style="flex: 1; min-width: 0;">
+                            <label style="font-size: 10px; color: #888; display: block;">Output Variable</label>
+                            <input type="text" class="extractor-target-field" value="${this.builder.escapeHtml(extractor.targetField || '')}"
+                                   style="width: 100%; padding: 4px 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 12px;"
+                                   placeholder="variableName">
+                        </div>
+                        <button type="button" class="delete-mapping-btn" data-index="${index}" style="
+                            padding: 4px 8px;
+                            background: none;
+                            border: none;
+                            color: #999;
+                            cursor: pointer;
+                            font-size: 16px;
+                        " title="Remove mapping">×</button>
+                    </div>
+                `;
+            });
+
+            html += `</div>`;
+        }
+
+        html += `</div>`;
+
+        container.innerHTML = html;
+
+        // Attach events
+        const addBtn = container.querySelector('.add-mapping-btn');
+        if (addBtn) {
+            addBtn.addEventListener('click', () => {
+                if (!step.config.responseMapping) {
+                    step.config.responseMapping = { mode: 'custom', extractors: [] };
+                }
+                step.config.responseMapping.extractors.push({
+                    sourcePath: '',
+                    targetField: '',
+                    transformType: 'none',
+                    required: false
+                });
+                this.renderApiResponseMappingBuilder(container, step.config.responseMapping, step);
+                this.builder.markAsUnsaved();
+            });
+        }
+
+        // Attach input change events
+        container.querySelectorAll('.mapping-item').forEach((item, index) => {
+            const sourceInput = item.querySelector('.extractor-source-path');
+            const targetInput = item.querySelector('.extractor-target-field');
+            const deleteBtn = item.querySelector('.delete-mapping-btn');
+
+            if (sourceInput) {
+                sourceInput.addEventListener('change', () => {
+                    if (step.config.responseMapping?.extractors?.[index]) {
+                        step.config.responseMapping.extractors[index].sourcePath = sourceInput.value;
+                        this.builder.markAsUnsaved();
+                    }
+                });
+            }
+
+            if (targetInput) {
+                targetInput.addEventListener('change', () => {
+                    if (step.config.responseMapping?.extractors?.[index]) {
+                        step.config.responseMapping.extractors[index].targetField = targetInput.value;
+                        this.builder.markAsUnsaved();
+                    }
+                });
+            }
+
+            if (deleteBtn) {
+                deleteBtn.addEventListener('click', () => {
+                    if (step.config.responseMapping?.extractors) {
+                        step.config.responseMapping.extractors.splice(index, 1);
+                        this.renderApiResponseMappingBuilder(container, step.config.responseMapping, step);
+                        this.builder.markAsUnsaved();
+                    }
+                });
+            }
+        });
+
+        // Store reference
+        container._apiResponseMappingBuilderInstance = { getMappings: () => step.config.responseMapping };
+    }
+
     /**
      * Update mapping field inline (new feature for better UX)
      */
@@ -2338,17 +3313,43 @@ class PropertiesPanel {
         this.builder.markAsUnsaved();
 
         console.log(`[Field Mapping] Updated ${field} for mapping ${index}:`, value);
+
+        // Auto-save after inline edit (debounced via pipeline save mechanism)
+        this.builder.updateStep(this.currentStep);
+        this.builder.savePipeline().then(() => {
+            console.log('[Field Mapping] Pipeline auto-saved after mapping edit');
+        }).catch(err => {
+            console.error('[Field Mapping] Auto-save failed:', err);
+        });
     }
 
-    deleteGenericMapping(index) {
-        if (!confirm('Are you sure you want to delete this mapping?')) {
+    async deleteGenericMapping(index) {
+        const confirmed = await this.builder.dragDropManager.showConfirmDialog(
+            'Are you sure you want to delete this mapping?',
+            {
+                title: 'Delete Mapping',
+                confirmText: 'Delete',
+                cancelText: 'Cancel',
+                type: 'danger'
+            }
+        );
+
+        if (!confirmed) {
             return;
         }
 
         this.currentStep.config.mappings.splice(index, 1);
-        this.builder.dragDropManager.showNotification('Mapping deleted', 'success');
+        this.builder.dragDropManager.showNotification('Mapping deleted & saved', 'success');
         this.showStepProperties(this.currentStep);
         this.builder.markAsUnsaved();
+
+        // Auto-save after deletion
+        this.builder.updateStep(this.currentStep);
+        this.builder.savePipeline().then(() => {
+            console.log('[Field Mapping] Pipeline auto-saved after mapping deletion');
+        }).catch(err => {
+            console.error('[Field Mapping] Auto-save failed:', err);
+        });
     }
 
     /**
@@ -2397,6 +3398,14 @@ class PropertiesPanel {
         this.currentStep.config.mappings.push(mappingObject);
 
         console.log('[Field Mapping] System variable added:', mappingObject);
+
+        // Auto-save immediately
+        this.builder.updateStep(this.currentStep);
+        this.builder.savePipeline().then(() => {
+            console.log('[Field Mapping] Pipeline auto-saved after system variable');
+        }).catch(err => {
+            console.error('[Field Mapping] Auto-save failed:', err);
+        });
 
         this.showStepProperties(this.currentStep);
         this.builder.dragDropManager.showNotification(`Added system variable: ${lhs}`, 'success');
@@ -2815,6 +3824,14 @@ class PropertiesPanel {
         // Close modal
         document.getElementById('editMappingModal').remove();
 
+        // Auto-save immediately
+        this.builder.updateStep(this.currentStep);
+        this.builder.savePipeline().then(() => {
+            console.log('[Field Mapping] Pipeline auto-saved after mapping change');
+        }).catch(err => {
+            console.error('[Field Mapping] Auto-save failed:', err);
+        });
+
         // Refresh properties panel
         this.showStepProperties(this.currentStep);
 
@@ -2825,17 +3842,35 @@ class PropertiesPanel {
     /**
      * Delete a mapping
      */
-    deleteMapping(index) {
+    async deleteMapping(index) {
         if (!this.currentStep || !this.currentStep.config || !this.currentStep.config.mappings) {
             return;
         }
 
-        if (!confirm('Are you sure you want to delete this mapping?')) {
+        const confirmed = await this.builder.dragDropManager.showConfirmDialog(
+            'Are you sure you want to delete this mapping?',
+            {
+                title: 'Delete Mapping',
+                confirmText: 'Delete',
+                cancelText: 'Cancel',
+                type: 'danger'
+            }
+        );
+
+        if (!confirmed) {
             return;
         }
 
         // Remove mapping
         this.currentStep.config.mappings.splice(index, 1);
+
+        // Auto-save immediately
+        this.builder.updateStep(this.currentStep);
+        this.builder.savePipeline().then(() => {
+            console.log('[Field Mapping] Pipeline auto-saved after mapping deletion');
+        }).catch(err => {
+            console.error('[Field Mapping] Auto-save failed:', err);
+        });
 
         // Refresh properties panel
         this.showStepProperties(this.currentStep);
@@ -2884,8 +3919,131 @@ class PropertiesPanel {
     }
 
     /**
-     * Save step properties
+     * Load standard HL7-FHIR template mappings from the database
      */
+    async loadStandardTemplateMappings(step) {
+        try {
+            // Get the message type from the pipeline
+            const messageType = this.builder.pipeline?.messageType || 'ADT^A01';
+
+            this.builder.dragDropManager.showNotification(`Loading standard template for ${messageType}...`, 'info');
+
+            // Fetch the standard template mappings from the API
+            const response = await window.pipelineAPI.getStandardTemplateMappings(messageType);
+
+            if (!response.success) {
+                throw new Error(response.error || 'Failed to fetch template mappings');
+            }
+
+            const { template, mappings, mappingCount } = response.data;
+
+            if (!mappings || mappings.length === 0) {
+                this.builder.dragDropManager.showNotification(`No standard template found for ${messageType}`, 'warning');
+                return;
+            }
+
+            // Initialize step config if needed
+            if (!step.config) {
+                step.config = {};
+            }
+
+            // Store the mappings in the step config
+            step.config.mappings = mappings;
+            step.config.use_template = true;
+            step.config.template_id = template?.id;
+            step.config.template_name = template?.name;
+
+            console.log(`📚 Loaded ${mappingCount} mappings from template "${template?.name}"`, mappings);
+
+            // Update the mapping table in-place (avoid full modal re-render which loses state)
+            const tableContainer = document.getElementById('mappingTableContainer');
+            if (tableContainer) {
+                tableContainer.innerHTML = this.renderMappingTable(mappings);
+                console.log('✅ Mapping table updated in-place');
+            }
+
+            // Update the status bar
+            const statusText = document.getElementById('mappingStatusText');
+            if (statusText) {
+                statusText.innerHTML = `<strong>${mappingCount}</strong> mappings configured <span style="color: #059669; font-weight: 500;">(from template: ${template?.name || 'standard'})</span>`;
+            }
+
+            this.builder.dragDropManager.showNotification(`Loaded ${mappingCount} mappings from standard template`, 'success');
+
+            // Mark as unsaved
+            this.builder.markAsUnsaved();
+
+        } catch (error) {
+            console.error('Error loading standard template mappings:', error);
+            this.builder.dragDropManager.showNotification(`Failed to load template: ${error.message}`, 'error');
+        }
+    }
+
+    /**
+     * Auto-load template mappings for display only (doesn't modify step config)
+     * Called when opening an HL7-FHIR step that uses standard template
+     */
+    async autoLoadTemplateMappings(step, container) {
+        try {
+            const messageType = this.builder.pipeline?.messageType || 'ADT^A01';
+            console.log(`🔄 Auto-fetching template for ${messageType}...`);
+
+            const response = await window.pipelineAPI.getStandardTemplateMappings(messageType);
+
+            if (!response.success) {
+                throw new Error(response.error || 'Failed to fetch template');
+            }
+
+            const { template, mappings, mappingCount } = response.data;
+
+            if (!mappings || mappings.length === 0) {
+                container.innerHTML = `
+                    <div style="padding: 2rem; text-align: center; color: #64748b;">
+                        <i class="fas fa-info-circle fa-2x" style="color: #f59e0b;"></i>
+                        <p style="margin-top: 1rem;">No standard template found for ${messageType}</p>
+                        <p style="font-size: 0.85rem;">Click "Load Standard Template" to import one, or add custom mappings below.</p>
+                    </div>
+                `;
+                return;
+            }
+
+            // Update the status bar
+            const statusText = document.getElementById('mappingStatusText');
+            if (statusText) {
+                statusText.innerHTML = `
+                    <strong>${mappingCount}</strong> mappings
+                    <span style="color: #059669; font-weight: 500;">(standard template: ${template?.name || messageType})</span>
+                `;
+            }
+
+            // Render the mappings table
+            container.innerHTML = this.renderMappingTable(mappings);
+
+            // Store template reference for display purposes (not modifying step config)
+            this._displayedTemplateMappings = mappings;
+            this._displayedTemplateName = template?.name;
+
+            console.log(`✅ Auto-loaded ${mappingCount} mappings from template "${template?.name}"`);
+
+        } catch (error) {
+            console.error('Error auto-loading template mappings:', error);
+            container.innerHTML = `
+                <div style="padding: 2rem; text-align: center; color: #ef4444;">
+                    <i class="fas fa-exclamation-triangle fa-2x"></i>
+                    <p style="margin-top: 1rem;">Failed to load template: ${error.message}</p>
+                    <button id="retryLoadTemplateBtn" class="btn btn-secondary" style="margin-top: 0.5rem;">
+                        <i class="fas fa-redo"></i> Retry
+                    </button>
+                </div>
+            `;
+            // Add retry handler
+            const retryBtn = container.querySelector('#retryLoadTemplateBtn');
+            if (retryBtn) {
+                retryBtn.addEventListener('click', () => this.autoLoadTemplateMappings(step, container));
+            }
+        }
+    }
+
     /**
      * Add step to pipeline (from preview mode)
      */
@@ -2958,6 +4116,17 @@ class PropertiesPanel {
     }
 
     /**
+     * Save step (used by ScriptEnrichmentEditor)
+     */
+    saveStep(step, isPreview = false) {
+        if (isPreview) {
+            this.addStepToPipeline(step);
+        } else {
+            this.saveStepProperties(step);
+        }
+    }
+
+    /**
      * Close step properties modal
      */
     closeModal() {
@@ -2966,6 +4135,7 @@ class PropertiesPanel {
             modal.style.display = 'none';
         }
         this.currentStep = null;
+        this.ifThenElseBuilder = null; // Clean up builder instance
     }
 
     /**
@@ -3280,6 +4450,69 @@ class PropertiesPanel {
             }
         });
 
+        // Collect If-Then-Else configuration from IfThenElseBuilder component
+        // Use VisualStep utility for OOP-compliant type detection
+        if (this.ifThenElseBuilder && VisualStep.isIfThenElse(step)) {
+            step.config = step.config || {};
+            const conditions = this.ifThenElseBuilder.getConfig();
+            step.config = conditions; // Replace entire config with conditions object
+            console.log('[PropertiesPanel] ✅ Saved If-Then-Else conditions to step.config:', conditions);
+        }
+
+        // Collect Connector configuration from ConnectorConfigBuilder component
+        if (this.connectorConfigBuilder && VisualStep.isConnectorStep(step)) {
+            const connectorConfig = this.connectorConfigBuilder.getConfig();
+            step.config = connectorConfig;
+            console.log('[PropertiesPanel] ✅ Saved Connector config to step.config:', connectorConfig);
+        }
+
+        // Collect FHIR Validation configuration
+        if (VisualStep.isFHIRValidation(step)) {
+            step.config = step.config || {};
+
+            // Validation level (lowercase values from select)
+            const levelSelect = form.querySelector('#fhirValidationLevel');
+            if (levelSelect) {
+                step.config.validation_level = levelSelect.value;
+            }
+
+            // Validate references toggle
+            const refsCheckbox = form.querySelector('#fhirValidateReferences');
+            if (refsCheckbox) {
+                step.config.validate_references = refsCheckbox.checked;
+            }
+
+            // Validate required fields toggle
+            const reqFieldsCheckbox = form.querySelector('#fhirValidateRequiredFields');
+            if (reqFieldsCheckbox) {
+                step.config.validate_required_fields = reqFieldsCheckbox.checked;
+            }
+
+            // Required resources: grid checkboxes + custom chips
+            const requiredResources = [];
+            form.querySelectorAll('input[name="fhir_required_resource"]:checked').forEach(cb => {
+                requiredResources.push(cb.value);
+            });
+            form.querySelectorAll('.fhir-custom-resource-chip').forEach(chip => {
+                const resource = chip.dataset.resource;
+                if (resource && !requiredResources.includes(resource)) {
+                    requiredResources.push(resource);
+                }
+            });
+            step.config.required_resources = requiredResources;
+
+            // Fail on error toggle
+            const failOnErrorCheckbox = form.querySelector('#fhirFailOnError');
+            if (failOnErrorCheckbox) {
+                step.config.fail_on_error = failOnErrorCheckbox.checked;
+            }
+
+            // Remove dead fhir_version key from old config
+            delete step.config.fhir_version;
+
+            console.log('[PropertiesPanel] ✅ Saved FHIR Validation config:', step.config);
+        }
+
         // Collect dynamic configuration fields (enrichment checkboxes, text inputs, etc.)
         step.config = step.config || {};
 
@@ -3512,16 +4745,69 @@ class PropertiesPanel {
     createDynamicFormFields(step) {
         const stepType = step.stepType || step.type;
 
+        // DEBUG: Log step details to understand why builder not appearing
+        // Use VisualStep utilities for OOP-compliant type detection
+        console.log('🔍 createDynamicFormFields called with:', {
+            stepType,
+            templateId: step.templateId,
+            stepName: step.stepName,
+            checkingIfThenElse: VisualStep.isIfThenElse(step)
+        });
+
+        // Special handling for If-Then-Else conditional logic
+        // Use VisualStep.isIfThenElse() for centralized type detection
+        if (VisualStep.isIfThenElse(step)) {
+            console.log('🎨 Using If-Then-Else Builder for conditional logic');
+            return this.createIfThenElseUI(step);
+        }
+
+        // Special handling for Switch/Case conditional logic
+        if (VisualStep.isSwitchCase(step)) {
+            console.log('🎨 Using Switch/Case Builder for conditional logic');
+            return this.createSwitchCaseUI(step);
+        }
+
+        // Special handling for Loop container step
+        if (VisualStep.isLoopStep(step)) {
+            console.log('🎨 Using ForEachLoop Builder for loop container');
+            return this.createLoopContainerUI(step);
+        }
+
+        // Special handling for Try-Catch container step
+        if (VisualStep.isTryCatchStep(step)) {
+            console.log('🛡️ Using TryCatch Builder for try-catch container');
+            return this.createTryCatchUI(step);
+        }
+
+        // Special handling for Retry container step
+        if (VisualStep.isRetryStep(step)) {
+            console.log('🔄 Using Retry Builder for retry container');
+            return this.createRetryUI(step);
+        }
+
         // Special handling for HL7→FHIR mapping steps ONLY (not generic transformation)
-        if (stepType === 'core.mapping' || step.templateId === 'hl7-fhir-mapping') {
+        if (VisualStep.isHL7FHIRTransform(step)) {
             console.log('🎨 Using enhanced HL7→FHIR mapping UI for step type:', stepType);
             return this.createMappingConfigSection(step);
         }
 
         // Special handling for generic field transformation/mapping (includes both field mapping and metadata)
-        if (stepType === 'core.transformation' || stepType === 'pre.enrichment.metadata') {
+        if (VisualStep.isFieldMapping(step) || stepType === 'pre.enrichment.metadata') {
             console.log('🎨 Using unified field mapping UI for:', stepType);
             return this.createGenericFieldMappingSection(step);
+        }
+
+        // Special handling for Connector steps (Inbound/Outbound)
+        if (VisualStep.isConnectorStep(step)) {
+            const direction = VisualStep.isInboundConnector(step) ? 'inbound' : 'outbound';
+            console.log(`🔌 Using ConnectorConfigBuilder for ${direction} connector`);
+            return this.createConnectorConfigUI(step, direction);
+        }
+
+        // Special handling for FHIR Validation step
+        if (VisualStep.isFHIRValidation(step)) {
+            console.log('🛡️ Using enhanced FHIR Validation UI for step type:', stepType);
+            return this.createFHIRValidationUI(step);
         }
 
         // Get step-specific configuration
@@ -3538,6 +4824,16 @@ class PropertiesPanel {
 
         stepConfig.fields.forEach(field => {
             const rawValue = step.config?.[field.key] || field.default || '';
+
+            // DEBUG: Log script field value for Script Enrichment steps
+            if (field.key === 'script' && VisualStep.isScriptEnrichment(step)) {
+                console.log('🐛 DEBUG Script field:');
+                console.log('   step.config:', step.config);
+                console.log('   step.config.script:', step.config?.script);
+                console.log('   field.default:', field.default);
+                console.log('   rawValue (first 100 chars):', typeof rawValue === 'string' ? rawValue.substring(0, 100) : rawValue);
+            }
+
             // For textareas that expect JSON, stringify objects/arrays
             const value = (field.type === 'textarea' && (typeof rawValue === 'object' && rawValue !== null))
                 ? JSON.stringify(rawValue, null, 2)
@@ -3718,6 +5014,23 @@ class PropertiesPanel {
                     // API Endpoint Tester - NO-CODE: Test API and visually pick response fields
                     // This enables first-time users to see actual API response before configuration
                     html += `<div class="api-endpoint-tester-container" id="api-endpoint-tester-container"></div>`;
+                    break;
+
+                case 'api-response-mapping-builder':
+                    // API Response Mapping Builder - Shows configured output variable mappings
+                    let responseMapping = { extractors: [] };
+                    try {
+                        if (typeof value === 'string') {
+                            responseMapping = JSON.parse(value);
+                        } else if (typeof value === 'object' && value !== null) {
+                            responseMapping = value;
+                        }
+                    } catch (e) {
+                        responseMapping = { extractors: [] };
+                    }
+
+                    // Create container for API Response Mapping Builder component
+                    html += `<div class="api-response-mapping-builder-container" data-field-key="${field.key}" data-initial-mappings='${JSON.stringify(responseMapping)}'></div>`;
                     break;
 
                 case 'database-query-tester':
@@ -4236,6 +5549,13 @@ class PropertiesPanel {
                         type: 'api-endpoint-tester',
                         required: false,
                         help: 'Test your API configuration and see the actual response before configuring field mappings. NO-CODE: Click fields to automatically add them to response mapping.'
+                    },
+                    {
+                        key: 'responseMapping',
+                        label: '📤 Response Mapping (Output Variables)',
+                        type: 'api-response-mapping-builder',
+                        required: false,
+                        help: 'Configure which fields from the API response to extract as step output variables. These variables can be referenced by subsequent steps.'
                     }
                     // Note: Error handling is controlled by step-level "On Error Strategy" setting:
                     // - "Fail" = Stop pipeline on API error
@@ -4514,51 +5834,7 @@ class PropertiesPanel {
                         type: 'textarea',
                         required: true,
                         rows: 15,
-                        placeholder: `// ═══════════════════════════════════════════════
-// SCRIPT ENRICHMENT - Calculate Patient Risk Score
-// ═══════════════════════════════════════════════
-
-// Access previous step data (Metadata & Database enrichment)
-var riskConfig = getNestedValue(input, "metadata.riskWeights");
-var patient = getNestedValue(input, "enriched.database");
-
-// Calculate risk factors
-var riskScore = 0;
-var factors = [];
-
-// Age-based risk (access HL7 field directly)
-var dob = getNestedValue(input, "enhancedSegments.PID.fields.7.value");
-var age = calculateAge(dob);
-if (age > 65) {
-    riskScore += riskConfig.weights.ageOver65;
-    factors.push("Age over 65");
-}
-
-// Chronic conditions risk
-if (patient.chronicConditions > 0) {
-    riskScore += patient.chronicConditions * riskConfig.weights.chronicCondition;
-    factors.push(patient.chronicConditions + " chronic conditions");
-}
-
-// Smoking status
-if (patient.smokingStatus === "current") {
-    riskScore += riskConfig.weights.currentSmoker;
-    factors.push("Current smoker");
-}
-
-// Determine risk level
-var riskLevel = "low";
-if (riskScore >= riskConfig.thresholds.highRisk) riskLevel = "high";
-else if (riskScore >= riskConfig.thresholds.moderateRisk) riskLevel = "moderate";
-
-// Return calculated data (stored at targetPath)
-return {
-    riskScore: riskScore,
-    riskLevel: riskLevel,
-    riskFactors: factors,
-    patientName: patient.name,
-    calculatedAt: new Date().toISOString()
-};`,
+                        // NO placeholder - start with completely blank textarea
                         help: `<div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 12px; border-radius: 8px; margin-bottom: 8px; font-size: 13px;">
     <strong>📘 Available Functions:</strong><br>
     • <code style="background: rgba(255,255,255,0.2); padding: 2px 6px; border-radius: 3px;">getNestedValue(input, "path.to.field")</code> - Access HL7 fields or enriched data<br>
@@ -4608,6 +5884,8 @@ return {
                     }
                 ]
             },
+            // Alias for new type name (layer prefix removed)
+            'enrichment.script': null, // Will be aliased below
             'pre.enrichment': {
                 fields: [
                     {
@@ -4670,31 +5948,8 @@ return {
                 ]
             },
             'post.validation': {
-                fields: [
-                    {
-                        key: 'fhir_version',
-                        label: 'FHIR Version',
-                        type: 'select',
-                        required: true,
-                        options: [
-                            { value: 'R4', label: 'FHIR R4' },
-                            { value: 'R5', label: 'FHIR R5' }
-                        ],
-                        default: 'R4'
-                    },
-                    {
-                        key: 'validation_level',
-                        label: 'Validation Level',
-                        type: 'select',
-                        required: true,
-                        options: [
-                            { value: 'BASIC', label: 'Basic - Structure only' },
-                            { value: 'STANDARD', label: 'Standard - Structure + required fields' },
-                            { value: 'STRICT', label: 'Strict - Full spec compliance' }
-                        ],
-                        default: 'STANDARD'
-                    }
-                ]
+                // FHIR validation now uses dedicated createFHIRValidationUI() method
+                fields: []
             },
             'post.delivery': {
                 fields: [
@@ -4731,6 +5986,15 @@ return {
                 ]
             }
         };
+
+        // Add aliases for renamed step types (layer prefix removed)
+        configurations['enrichment.script'] = configurations['pre.enrichment.script'];
+        configurations['enrichment.api'] = configurations['pre.enrichment.api'];
+        configurations['enrichment.database'] = configurations['pre.enrichment.database'];
+        configurations['field_validation'] = configurations['pre.validation'];
+        configurations['hl7_fhir_transform'] = configurations['core.mapping'];
+        configurations['field_mapping'] = configurations['core.transformation'];
+        configurations['fhir_validation'] = configurations['post.validation'];
 
         return configurations[stepType] || null;
     }
@@ -5483,30 +6747,59 @@ return {
                 }
             },
             'post.validation': {
-                description: 'Validates FHIR resources after transformation to ensure compliance with FHIR specification. Catches transformation errors before delivery.',
+                description: 'Validates FHIR data against the R4 specification. Works in two modes: <strong>Bundle mode</strong> (validates bundle structure + all entry resources) when <code>fhirBundle</code> contains a Bundle, and <strong>Resource mode</strong> (validates a single standalone resource) when <code>fhirResource</code> is present or <code>fhirBundle</code> contains a non-Bundle resource. Searches <code>fhirBundle</code>, <code>fhirResource</code>, <code>message.*</code>, and <code>enriched.*</code>.',
                 useCases: [
-                    'Verify FHIR resource structure matches spec',
-                    'Validate required fields are present in FHIR resources',
-                    'Check cardinality constraints (min/max occurrences)',
-                    'Validate data types and code systems',
-                    'Ensure references between resources are valid'
+                    'Validate FHIR bundle from HL7→FHIR Transform (bundle mode)',
+                    'Validate a standalone FHIR resource from an API enrichment step (resource mode)',
+                    'Validate required fields per resource type (14 types with hardcoded rules)',
+                    'Check internal bundle references point to existing resources (bundle mode)',
+                    'Enforce specific resource types must be present (e.g., Patient + Encounter)',
+                    'Full R4 schema validation using 146 JSON schema definitions (strict mode)',
+                    'Stop the pipeline on validation failure (fail_on_error: true)'
                 ],
                 example: {
-                    fhir_version: 'R4',
-                    validation_level: 'STANDARD',
-                    resource_rules: {
-                        validate_structure: true,
-                        validate_cardinality: true,
-                        validate_data_types: true,
-                        validate_references: true
-                    },
-                    required_resources: {
-                        'Patient': { min: 1, max: 1 }
-                    }
+                    validation_level: 'standard',
+                    required_resources: ['Patient', 'Encounter'],
+                    validate_references: true,
+                    validate_required_fields: true,
+                    fail_on_error: false
                 },
                 parameters: [
-                    { name: 'fhir_version', type: 'string', required: true, description: 'FHIR version to validate against' },
-                    { name: 'validation_level', type: 'string', required: true, description: 'BASIC, STANDARD, or STRICT validation' }
+                    { name: 'validation_level', type: 'string', required: true, description: '"basic" (resourceType + id only), "standard" (+ required fields + references), "strict" (+ full R4 JSON schema). Default: "standard".' },
+                    { name: 'required_resources', type: 'string[]', required: false, description: 'FHIR resource types that must be present. In bundle mode, checks all entries. In resource mode, checks the single resource matches. Example: ["Patient", "Encounter"].' },
+                    { name: 'validate_references', type: 'boolean', required: false, description: 'Check that reference fields resolve to existing resources (by fullUrl or ResourceType/id). Most useful in bundle mode where references can be cross-checked. Default: true.' },
+                    { name: 'validate_required_fields', type: 'boolean', required: false, description: 'Check FHIR-spec-required fields per resource type (e.g., Encounter must have status and class, Observation must have status and code). Default: true.' },
+                    { name: 'fail_on_error', type: 'boolean', required: false, description: 'When true, the pipeline stops if any validation error is found. When false, errors are reported in step output but the pipeline continues. Default: false.' }
+                ],
+                validationTypes: [
+                    {
+                        type: 'basic',
+                        description: 'Minimal structural check. Only verifies that each resource in the bundle has a resourceType and id.',
+                        usedFor: 'Quick sanity check, development/debugging, high-throughput pipelines where speed matters.',
+                        example: { validation_level: 'basic' }
+                    },
+                    {
+                        type: 'standard',
+                        description: 'Checks required fields per resource type using hardcoded rules for 14 common FHIR resource types. Also validates that internal bundle references point to existing resources.',
+                        usedFor: 'Production pipelines. Catches common mapping errors like missing Encounter.status or MessageHeader.event.',
+                        example: {
+                            validation_level: 'standard',
+                            required_resources: ['Patient', 'Encounter'],
+                            validate_references: true,
+                            validate_required_fields: true,
+                            fail_on_error: true
+                        }
+                    },
+                    {
+                        type: 'strict',
+                        description: 'Full R4 JSON schema validation using 146 FHIR resource schema definitions. Validates required fields from the official spec, element data types, and cardinality constraints.',
+                        usedFor: 'Compliance validation, regulatory submissions, interoperability testing.',
+                        example: {
+                            validation_level: 'strict',
+                            required_resources: ['Patient', 'Encounter', 'Observation'],
+                            fail_on_error: true
+                        }
+                    }
                 ]
             },
             'post.delivery': {
@@ -5533,6 +6826,356 @@ return {
                     { name: 'endpoint', type: 'string', required: true, description: 'FHIR server URL' },
                     { name: 'resource', type: 'string', required: true, description: 'Resource type to send (Patient, Bundle, etc.)' },
                     { name: 'retry_count', type: 'number', required: false, description: 'Number of retry attempts (default: 3)' }
+                ]
+            },
+            'pre.logic.switch': {
+                description: 'Routes messages through different processing paths based on field value matching. Evaluates a single field against multiple case values and executes corresponding actions. Supports multi-step routing where a single case can trigger a sequence of steps to execute in order. Ideal for message type routing, status-based processing, and complex multi-branch conditional workflows.',
+                useCases: [
+                    'Route messages by type (ADT^A01 → admission flow, ADT^A03 → discharge flow, ORU^R01 → lab flow)',
+                    'Process by patient class (I → inpatient enrichment, O → outpatient enrichment, E → emergency fast-track)',
+                    'Handle status codes (A → active processing, C → cancelled cleanup, P → pending queue)',
+                    'Route by facility (FAC001 → Epic integration, FAC002 → Cerner integration, FAC003 → custom flow)',
+                    'Process by priority (STAT → immediate, ROUTINE → normal queue, ASAP → expedited)',
+                    'Branch by insurance type (MEDICARE → CMS validation, MEDICAID → state rules, COMMERCIAL → standard)',
+                    'Multi-step workflows (ADT^A01 → [Validate Patient, Enrich Demographics, Route to ADT Handler])',
+                    'Skip specific steps for certain cases (ORU^R01 → skip patient enrichment, go directly to lab processing)'
+                ],
+                example: {
+                    description: 'Route by message type with multi-step execution',
+                    field: 'MSH.9.1',
+                    cases: [
+                        {
+                            value: 'ADT',
+                            label: 'ADT Messages',
+                            actions: [
+                                { action: 'set_value', targetField: 'metadata.category', value: 'admission' },
+                                { action: 'route_to_step', targetStepIds: ['validate-patient', 'enrich-demographics', 'adt-handler'] }
+                            ]
+                        },
+                        {
+                            value: 'ORU',
+                            label: 'Lab Results',
+                            actions: [
+                                { action: 'set_value', targetField: 'metadata.category', value: 'lab' },
+                                { action: 'route_to_step', targetStepIds: ['validate-results', 'lab-handler'] }
+                            ]
+                        },
+                        {
+                            value: 'ORM',
+                            label: 'Orders',
+                            actions: [
+                                { action: 'route_to_step', targetStepId: 'order-handler' }
+                            ]
+                        }
+                    ],
+                    default: {
+                        actions: [
+                            { action: 'set_value', targetField: 'metadata.category', value: 'unknown' },
+                            { action: 'route_to_step', targetStepIds: ['log-warning', 'error-handler'] }
+                        ]
+                    },
+                    options: { caseInsensitive: false, trimWhitespace: true }
+                },
+                parameters: [
+                    { name: 'field', type: 'string', required: true, description: 'HL7 field path to evaluate. Use the field selector to choose from available fields. Examples: "MSH.9.1" for message type code, "PV1.2" for patient class, "PID.8" for gender.' },
+                    { name: 'cases', type: 'Array<CaseDefinition>', required: true, description: 'Array of case definitions. Each case has a value to match and actions to execute when matched. Cases are evaluated in order; first match wins.' },
+                    { name: 'cases[].value', type: 'string', required: true, description: 'The value to match against the field. Exact match by default (use options.caseInsensitive for case-insensitive matching).' },
+                    { name: 'cases[].label', type: 'string', required: false, description: 'Human-readable label for this case. Displayed in the UI for documentation purposes.' },
+                    { name: 'cases[].actions', type: 'Array<Action>', required: true, description: 'Actions to execute when this case matches. Multiple actions can be defined and execute in order.' },
+                    { name: 'default', type: 'object', required: false, description: 'Fallback configuration when no cases match. Contains actions array.' },
+                    { name: 'default.actions', type: 'Array<Action>', required: false, description: 'Actions to execute when no cases match. Typically "continue" or error handling.' },
+                    { name: 'options.caseInsensitive', type: 'boolean', required: false, description: 'Perform case-insensitive value matching. Default: false. Set to true for values like "M"/"m" or "STAT"/"stat".' },
+                    { name: 'options.trimWhitespace', type: 'boolean', required: false, description: 'Trim leading/trailing whitespace before comparison. Default: true. Handles HL7 padding automatically.' }
+                ],
+                actions: [
+                    {
+                        action: 'continue',
+                        description: 'Continue to the next step in sequence',
+                        usedFor: 'Normal flow - process continues to the next step based on sequence number',
+                        parameters: 'None'
+                    },
+                    {
+                        action: 'stop',
+                        description: 'Stop pipeline execution immediately',
+                        usedFor: 'Halting processing for invalid/unsupported message types, or when no further processing needed',
+                        parameters: 'None'
+                    },
+                    {
+                        action: 'set_value',
+                        description: 'Set a field value in the message data',
+                        usedFor: 'Tagging messages with category, routing metadata, or computed values',
+                        parameters: 'targetField (where to set), value (what to set)'
+                    },
+                    {
+                        action: 'copy_field',
+                        description: 'Copy value from one field to another',
+                        usedFor: 'Duplicating field values, creating backup copies, or preparing data for downstream steps',
+                        parameters: 'sourceField (copy from), targetField (copy to)'
+                    },
+                    {
+                        action: 'transform',
+                        description: 'Apply a transformation to a field value',
+                        usedFor: 'Formatting field values - uppercase, lowercase, trim, capitalize, substring',
+                        parameters: 'targetField (field to transform), transformType (uppercase|lowercase|trim|capitalize)'
+                    },
+                    {
+                        action: 'route_to_step',
+                        description: 'Route to one or more specific steps by ID',
+                        usedFor: 'Branching to different processing paths. Supports multi-step routing for complex workflows.',
+                        parameters: 'targetStepId (single step) OR targetStepIds (array of steps to execute in order)'
+                    },
+                    {
+                        action: 'skip_steps',
+                        description: 'Skip specified steps and continue',
+                        usedFor: 'Bypassing steps that are not relevant for this case (e.g., skip patient enrichment for lab messages)',
+                        parameters: 'skipStepIds (array of step IDs to skip)'
+                    }
+                ],
+                multiStepRouting: {
+                    title: 'Multi-Step Routing',
+                    description: 'A single case can route to multiple steps that execute in sequence. This enables complex workflows where one condition triggers a chain of processing steps.',
+                    howToUse: [
+                        'In the Configuration tab, select a case',
+                        'Choose "Route to Step(s)" action',
+                        'Use the dropdown to add multiple target steps',
+                        'Steps are displayed as numbered chips (1. Step A, 2. Step B, etc.)',
+                        'Click × on any chip to remove a step from the sequence'
+                    ],
+                    example: {
+                        scenario: 'ADT messages need validation, enrichment, then specialized handling',
+                        config: {
+                            value: 'ADT',
+                            actions: [{
+                                action: 'route_to_step',
+                                targetStepIds: ['validate-patient', 'enrich-demographics', 'adt-handler']
+                            }]
+                        },
+                        execution: 'validate-patient runs first, then enrich-demographics, then adt-handler'
+                    }
+                },
+                comparisonWithIfThenElse: {
+                    title: 'Switch/Case vs If-Then-Else',
+                    description: 'Both steps support conditional logic but are optimized for different scenarios:',
+                    comparison: [
+                        { feature: 'Best for', switchCase: 'Single field with multiple possible values', ifThenElse: 'Complex conditions with multiple fields and operators' },
+                        { feature: 'Condition type', switchCase: 'Exact value matching (equals)', ifThenElse: 'Any comparison (equals, contains, greater than, less than, regex, is_empty)' },
+                        { feature: 'Number of branches', switchCase: 'Many branches (3+ cases)', ifThenElse: 'Two branches (true path / false path)' },
+                        { feature: 'Default handling', switchCase: 'Explicit default case', ifThenElse: 'Else branch for false conditions' },
+                        { feature: 'Use Case Example', switchCase: 'Route ADT^A01/A02/A03/A04 to different flows', ifThenElse: 'If patient age > 65 AND has chronic condition, flag high-risk' }
+                    ],
+                    recommendation: 'Use Switch/Case when you have a single field with many possible values (like message type, patient class, facility code). Use If-Then-Else when you need complex boolean logic combining multiple conditions.'
+                },
+                bestPractices: [
+                    {
+                        practice: 'Use meaningful case labels',
+                        reason: 'Labels make the configuration self-documenting and easier to maintain',
+                        example: 'Label "Admission" for value "ADT^A01" instead of leaving blank'
+                    },
+                    {
+                        practice: 'Always define a default case',
+                        reason: 'Handles unexpected values gracefully instead of silent failures',
+                        example: 'Default: log warning + continue, or route to error handler'
+                    },
+                    {
+                        practice: 'Use caseInsensitive for user-entered data',
+                        reason: 'HL7 data may have inconsistent casing (e.g., "M" vs "m" for male)',
+                        example: 'Enable caseInsensitive for PID.8 (gender), PV1.2 (patient class)'
+                    },
+                    {
+                        practice: 'Keep actions simple per case',
+                        reason: 'Complex logic should be in dedicated steps, not crammed into switch actions',
+                        example: 'Use route_to_step to branch to specialized processing steps rather than multiple set_value actions'
+                    },
+                    {
+                        practice: 'Test with edge cases',
+                        reason: 'Empty values, null fields, and whitespace can cause unexpected matching',
+                        example: 'Test with empty MSH.9, whitespace-padded values, and unexpected message types'
+                    }
+                ],
+                troubleshooting: [
+                    {
+                        issue: 'Case not matching expected value',
+                        cause: 'Whitespace in field value, case sensitivity mismatch, or wrong field path',
+                        fix: 'Enable trimWhitespace option (default), enable caseInsensitive option if needed, and verify field path using field selector'
+                    },
+                    {
+                        issue: 'Default case always executing',
+                        cause: 'Field path returns null/undefined, no cases defined, or field value has unexpected format',
+                        fix: 'Check field path is correct using field selector, add case definitions, and use test message to verify actual field values'
+                    },
+                    {
+                        issue: 'Multi-step routing not executing all steps',
+                        cause: 'Step IDs are incorrect, target steps are disabled, or an earlier step has a stop action',
+                        fix: 'Verify step IDs match exactly (case-sensitive), check that target steps are enabled, and review step configurations for stop actions'
+                    },
+                    {
+                        issue: 'Actions not being applied',
+                        cause: 'Wrong action type selected, missing required parameters, or target field path invalid',
+                        fix: 'Verify action type matches your intent, ensure all required parameters are filled (e.g., targetField for set_value), and check field paths are valid'
+                    }
+                ]
+            },
+            'control.loop': {
+                description: 'Container step that executes nested steps in a loop. Supports three loop types: For Each (iterate over collections like OBX segments), For (repeat N times), and While (condition-based). Child steps are visually nested inside the loop container and execute on each iteration with access to loop variables.',
+                useCases: [
+                    'Process all OBX segments in a lab result message (For Each over enhancedSegments.OBX)',
+                    'Transform multiple diagnosis codes (For Each over DG1 segments)',
+                    'Retry failed operations up to N times (For loop with retry logic)',
+                    'Poll external API until data is ready (While loop with condition check)',
+                    'Process patient encounters in batch (For Each over encounter list)',
+                    'Apply transformations to all observations (For Each with nested transform steps)',
+                    'Generate multiple FHIR resources from repeating HL7 segments'
+                ],
+                example: {
+                    description: 'Process all OBX segments and transform to FHIR Observations',
+                    loopType: 'foreach',
+                    collection: 'enhancedSegments.OBX',
+                    itemVariable: 'observation',
+                    indexVariable: 'index',
+                    childStepIds: ['validate-obx', 'transform-to-fhir', 'enrich-observation'],
+                    maxIterations: 1000,
+                    breakOnError: false,
+                    continueOnEmpty: true
+                },
+                parameters: [
+                    { name: 'loopType', type: 'enum', required: true, description: 'Type of loop: "foreach" (iterate collection), "for" (repeat N times), "while" (condition-based)' },
+                    { name: 'collection', type: 'string', required: false, description: 'For "foreach": Field path to the array/collection to iterate over. Example: "enhancedSegments.OBX" for all OBX segments.' },
+                    { name: 'itemVariable', type: 'string', required: false, description: 'Variable name for current item. Access as loop.{name} in child steps. Default: "item"' },
+                    { name: 'indexVariable', type: 'string', required: false, description: 'Variable name for current index. Access as loop.{name} in child steps. Default: "index"' },
+                    { name: 'iterations', type: 'number', required: false, description: 'For "for" loops: Number of times to execute the loop body.' },
+                    { name: 'condition', type: 'object', required: false, description: 'For "while" loops: Condition object with field, operator, and value. Loop continues while condition is true.' },
+                    { name: 'childStepIds', type: 'Array<string>', required: true, description: 'IDs of steps to execute in the loop body. Steps execute in order for each iteration.' },
+                    { name: 'maxIterations', type: 'number', required: false, description: 'Safety limit to prevent infinite loops. Default: 1000' },
+                    { name: 'breakOnError', type: 'boolean', required: false, description: 'Stop loop execution if a child step fails. Default: false (continue to next iteration)' },
+                    { name: 'continueOnEmpty', type: 'boolean', required: false, description: 'Continue pipeline if collection is empty. Default: true' }
+                ],
+                loopVariables: {
+                    title: 'Available Loop Variables',
+                    description: 'Variables available inside child steps during loop execution:',
+                    variables: [
+                        { name: 'loop.{itemVariable}', description: 'Current item being processed (For Each only)', example: 'loop.observation' },
+                        { name: 'loop.{indexVariable}', description: 'Current iteration index (0-based)', example: 'loop.index' },
+                        { name: 'loop.iteration', description: 'Current iteration number (1-based)', example: 'loop.iteration' },
+                        { name: 'loop.isFirst', description: 'True if this is the first iteration', example: 'loop.isFirst' },
+                        { name: 'loop.isLast', description: 'True if this is the last iteration', example: 'loop.isLast' },
+                        { name: 'loop.length', description: 'Total number of items (For Each only)', example: 'loop.length' },
+                        { name: 'loop.total', description: 'Total number of iterations (For loop only)', example: 'loop.total' }
+                    ]
+                },
+                loopTypes: {
+                    title: 'Loop Type Comparison',
+                    types: [
+                        {
+                            type: 'foreach',
+                            name: 'For Each',
+                            description: 'Iterates over each item in a collection',
+                            useCase: 'Process all OBX segments, transform multiple diagnosis codes',
+                            config: 'Requires: collection path'
+                        },
+                        {
+                            type: 'for',
+                            name: 'For (N times)',
+                            description: 'Repeats execution a fixed number of times',
+                            useCase: 'Retry operations, batch processing with fixed count',
+                            config: 'Requires: iterations count'
+                        },
+                        {
+                            type: 'while',
+                            name: 'While',
+                            description: 'Continues while a condition is true',
+                            useCase: 'Poll until ready, process until quota reached',
+                            config: 'Requires: condition (field, operator, value)'
+                        }
+                    ]
+                },
+                bestPractices: [
+                    {
+                        practice: 'Always set maxIterations',
+                        reason: 'Prevents infinite loops that could hang the pipeline',
+                        example: 'Set maxIterations to a reasonable value like 100 or 1000 based on expected data size'
+                    },
+                    {
+                        practice: 'Use meaningful variable names',
+                        reason: 'Makes child step configuration more readable',
+                        example: 'Use "observation" instead of "item" when iterating OBX segments'
+                    },
+                    {
+                        practice: 'Consider breakOnError setting',
+                        reason: 'Decide if one failed iteration should stop all processing',
+                        example: 'Set breakOnError=true for critical data, false for best-effort processing'
+                    },
+                    {
+                        practice: 'Handle empty collections',
+                        reason: 'Messages may not always have the expected segments',
+                        example: 'Set continueOnEmpty=true to gracefully handle messages without OBX segments'
+                    }
+                ],
+                troubleshooting: [
+                    {
+                        issue: 'Loop not executing any iterations',
+                        cause: 'Collection path is incorrect or collection is empty',
+                        fix: 'Verify collection path using the field selector. Check if continueOnEmpty is set correctly.'
+                    },
+                    {
+                        issue: 'Loop stops after max iterations',
+                        cause: 'maxIterations limit reached',
+                        fix: 'Increase maxIterations if you expect more items, or check for infinite loop conditions in While loops'
+                    },
+                    {
+                        issue: 'Child steps not receiving loop variables',
+                        cause: 'Variable names not matching between loop config and child step config',
+                        fix: 'Ensure itemVariable and indexVariable names match what child steps expect'
+                    },
+                    {
+                        issue: 'While loop runs forever',
+                        cause: 'Condition never becomes false',
+                        fix: 'Verify condition field is being updated by child steps. Always have maxIterations as safety limit.'
+                    }
+                ]
+            },
+            'control.try_catch': {
+                description: 'Container step that wraps child steps in error handling with try/catch/finally blocks. If a step in the Try block fails, execution moves to the Catch block. The Finally block always executes regardless of success or failure.',
+                useCases: [
+                    'Wrap risky API enrichment calls - catch errors and use fallback data',
+                    'Handle database connection failures gracefully during enrichment',
+                    'Ensure cleanup/audit logging always runs in Finally block',
+                    'Suppress non-critical transformation errors to avoid pipeline failure',
+                    'Log errors for monitoring while allowing pipeline to continue'
+                ],
+                example: {
+                    trySteps: ['api-enrichment-step', 'transform-result'],
+                    catchSteps: ['log-error', 'use-fallback-data'],
+                    finallySteps: ['audit-log'],
+                    onError: 'catch'
+                },
+                parameters: [
+                    { name: 'trySteps', type: 'Array<string>', required: true, description: 'Step IDs to execute in the try block. Execution stops at first failure.' },
+                    { name: 'catchSteps', type: 'Array<string>', required: false, description: 'Step IDs to execute when a try step fails. Receives _error context.' },
+                    { name: 'finallySteps', type: 'Array<string>', required: false, description: 'Step IDs that always execute (success or failure). Receives _trySuccess context.' },
+                    { name: 'onError', type: 'enum', required: false, description: '"catch" (default) - run catch steps and continue; "suppress" - ignore error, continue; "rethrow" - propagate error, stop pipeline' }
+                ]
+            },
+            'control.retry': {
+                description: 'Container step that retries child steps on failure with configurable backoff strategy. Useful for transient errors like network timeouts or temporary service unavailability.',
+                useCases: [
+                    'Retry failed API calls with exponential backoff',
+                    'Handle transient database connection errors',
+                    'Retry file operations that may fail due to locks',
+                    'Resilient external service integration'
+                ],
+                example: {
+                    childSteps: ['call-external-api', 'process-response'],
+                    maxRetries: 3,
+                    delayMs: 1000,
+                    backoffType: 'exponential',
+                    maxDelayMs: 30000
+                },
+                parameters: [
+                    { name: 'childSteps', type: 'Array<string>', required: true, description: 'Step IDs to execute (and retry on failure).' },
+                    { name: 'maxRetries', type: 'number', required: false, description: 'Maximum retry attempts. Default: 3' },
+                    { name: 'delayMs', type: 'number', required: false, description: 'Initial delay between retries in milliseconds. Default: 1000' },
+                    { name: 'backoffType', type: 'enum', required: false, description: '"fixed" (same delay), "exponential" (doubles each time), "linear" (increases linearly)' },
+                    { name: 'maxDelayMs', type: 'number', required: false, description: 'Maximum delay cap for exponential/linear backoff. Default: 30000' }
                 ]
             }
         };
@@ -5714,6 +7357,51 @@ return {
                 ]
             };
         }
+
+        // Connector step documentation
+        docs['connector.inbound'] = {
+            description: 'Fetches data from external systems via configurable inbound connectors. Supports TCP/MLLP, HTTP/REST, file listeners, databases, message queues, and cloud storage.',
+            useCases: [
+                'Fetch patient data from an external database mid-pipeline',
+                'Read configuration from a file or cloud storage',
+                'Poll a message queue for additional data',
+                'Query a REST API for supplemental information'
+            ],
+            example: { connectorType: 'postgresql_inbound', config: { host: 'db-server', port: 5432, database: 'ehr' }, outputField: 'enriched.external_data', timeoutMs: 30000 },
+            parameters: [
+                { name: 'connectorType', type: 'string', required: true, description: 'The type of inbound connector (e.g., tcp_mllp_inbound, http_rest_inbound, postgresql_inbound)' },
+                { name: 'config', type: 'object', required: true, description: 'Connector-specific configuration (host, port, credentials, etc.) - fields are driven by the connector type config_schema' },
+                { name: 'outputField', type: 'string', required: false, description: 'Where to store fetched data in the pipeline (default: enriched.connector_result)' },
+                { name: 'timeoutMs', type: 'number', required: false, description: 'Maximum wait time for data fetch in milliseconds (default: 30000)' }
+            ]
+        };
+
+        docs['connector.outbound'] = {
+            description: 'Sends data to external systems via configurable outbound connectors. Supports TCP/MLLP, HTTP/REST, file writers, databases, message queues, and cloud storage.',
+            useCases: [
+                'Deliver transformed FHIR bundles to a REST endpoint',
+                'Send HL7 messages to downstream systems via TCP/MLLP',
+                'Write processed data to a database',
+                'Archive messages to cloud storage (S3, Azure Blob, GCS)',
+                'Publish events to Kafka or RabbitMQ'
+            ],
+            example: { connectorType: 'http_outbound', config: { url: 'https://fhir-server/api/Bundle', method: 'POST' }, contentField: 'transformed', contentType: 'application/fhir+json' },
+            parameters: [
+                { name: 'connectorType', type: 'string', required: true, description: 'The type of outbound connector (e.g., http_outbound, tcp_mllp_outbound, file_writer)' },
+                { name: 'config', type: 'object', required: true, description: 'Connector-specific configuration (host, port, URL, credentials, etc.) - fields are driven by the connector type config_schema' },
+                { name: 'contentField', type: 'string', required: false, description: 'Which field from the pipeline data to send (default: transformed)' },
+                { name: 'contentType', type: 'string', required: false, description: 'Content type of the outgoing data (default: application/json)' }
+            ]
+        };
+
+        // Add aliases for renamed step types (layer prefix removed)
+        docs['enrichment.script'] = docs['pre.enrichment.script'];
+        docs['enrichment.api'] = docs['pre.enrichment.api'];
+        docs['enrichment.database'] = docs['pre.enrichment.database'];
+        docs['field_validation'] = docs['pre.validation'];
+        docs['hl7_fhir_transform'] = docs['core.mapping'];
+        docs['field_mapping'] = docs['core.transformation'];
+        docs['fhir_validation'] = docs['post.validation'];
 
         // Default documentation for unknown step types
         return docs[stepType] || {

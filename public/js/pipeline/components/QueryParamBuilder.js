@@ -286,8 +286,18 @@ class QueryParamBuilder {
         this.updateUrlPreview();
     }
 
-    bulkDelete() {
-        if (!confirm('Are you sure you want to delete all query parameters?')) {
+    async bulkDelete() {
+        const confirmed = await this.showConfirmDialog(
+            'Are you sure you want to delete all query parameters?',
+            {
+                title: 'Delete All Parameters',
+                confirmText: 'Delete All',
+                cancelText: 'Cancel',
+                type: 'danger'
+            }
+        );
+
+        if (!confirmed) {
             return;
         }
 
@@ -296,6 +306,58 @@ class QueryParamBuilder {
         this.addParamRow('', '', '', true);
         this.onChange();
         this.updateUrlPreview();
+    }
+
+    /**
+     * Show in-app confirm dialog
+     */
+    showConfirmDialog(message, options = {}) {
+        // Simple Promise-based confirm dialog
+        return new Promise((resolve) => {
+            const {
+                title = 'Confirm',
+                confirmText = 'Yes',
+                cancelText = 'Cancel',
+                type = 'warning'
+            } = options;
+
+            const colors = {
+                warning: { primary: '#f59e0b', bg: '#fef3c7', border: '#fcd34d' },
+                danger: { primary: '#ef4444', bg: '#fee2e2', border: '#fca5a5' },
+                info: { primary: '#3b82f6', bg: '#dbeafe', border: '#93c5fd' }
+            };
+            const color = colors[type] || colors.warning;
+
+            const overlay = document.createElement('div');
+            overlay.style.cssText = `
+                position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+                background: rgba(0, 0, 0, 0.5);
+                display: flex; align-items: center; justify-content: center;
+                z-index: 100000;
+            `;
+
+            overlay.innerHTML = `
+                <div style="background: white; border-radius: 12px; max-width: 400px; width: 90%; overflow: hidden; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1);">
+                    <div style="padding: 16px 20px; border-bottom: 1px solid ${color.border}; background: ${color.bg}; display: flex; align-items: center; gap: 10px;">
+                        <span style="font-size: 20px;">${type === 'danger' ? '⚠️' : '❓'}</span>
+                        <span style="font-weight: 600; color: #1e293b;">${this.escapeHtml(title)}</span>
+                    </div>
+                    <div style="padding: 20px; color: #475569; font-size: 14px;">${this.escapeHtml(message)}</div>
+                    <div style="padding: 12px 20px; background: #f8fafc; border-top: 1px solid #e2e8f0; display: flex; justify-content: flex-end; gap: 10px;">
+                        <button class="cancel-btn" style="padding: 8px 16px; border: 1px solid #e2e8f0; background: white; color: #64748b; border-radius: 6px; cursor: pointer; font-size: 14px;">${this.escapeHtml(cancelText)}</button>
+                        <button class="confirm-btn" style="padding: 8px 16px; border: none; background: ${color.primary}; color: white; border-radius: 6px; cursor: pointer; font-size: 14px;">${this.escapeHtml(confirmText)}</button>
+                    </div>
+                </div>
+            `;
+
+            document.body.appendChild(overlay);
+
+            const cleanup = (result) => { overlay.remove(); resolve(result); };
+
+            overlay.querySelector('.confirm-btn').onclick = () => cleanup(true);
+            overlay.querySelector('.cancel-btn').onclick = () => cleanup(false);
+            overlay.onclick = (e) => { if (e.target === overlay) cleanup(false); };
+        });
     }
 
     onChange() {

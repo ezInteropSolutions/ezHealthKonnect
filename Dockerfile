@@ -22,4 +22,5 @@ RUN go mod tidy && go build -o go-api main.go
 EXPOSE 3000 8080
 
 # Start both Go backend and Node.js frontend
-CMD ["sh", "-c", "./go-api & sleep 5 && node server.js"]
+# Recompile Go at startup to pick up volume-mounted source changes
+CMD ["sh", "-c", "echo 'Recompiling Go...' && go build -o go-api main.go && echo 'Go build complete' && ./go-api & sleep 5 && node server.js"]

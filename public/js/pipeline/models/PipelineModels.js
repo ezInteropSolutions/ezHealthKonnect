@@ -12,11 +12,10 @@ class VisualPipeline {
         this.description = data.description || '';
         this.version = data.version || 1;
         this.status = data.status || 'draft'; // draft, active, paused
-        this.layers = data.layers || {
-            pre: new VisualLayer('pre'),
-            core: new VisualLayer('core'),
-            post: new VisualLayer('post')
-        };
+        // Flat execution groups (no layers)
+        this.executionGroups = data.executionGroups || [];
+        // Connections between steps (saved to database for persistence)
+        this.connections = data.connections || [];
         this.createdAt = data.createdAt || new Date().toISOString();
         this.updatedAt = data.updatedAt || new Date().toISOString();
     }
@@ -29,6 +28,46 @@ class VisualPipeline {
         });
     }
 
+    /**
+     * Backward-compat getter: code that reads pipeline.layers still works.
+     * Returns a synthetic layers object with all groups under 'core'.
+     */
+    get layers() {
+        const syntheticLayer = {
+            name: 'core',
+            executionGroups: this.executionGroups,
+            toJSON: () => ({ name: 'core', execution_groups: this.executionGroups.map(g => g.toJSON()) })
+        };
+        return {
+            pre: { name: 'pre', executionGroups: [], toJSON: () => ({ name: 'pre', execution_groups: [] }) },
+            core: syntheticLayer,
+            post: { name: 'post', executionGroups: [], toJSON: () => ({ name: 'post', execution_groups: [] }) }
+        };
+    }
+
+    addExecutionGroup(group) {
+        this.executionGroups.push(group);
+    }
+
+    removeExecutionGroup(groupId) {
+        this.executionGroups = this.executionGroups.filter(g => g.id !== groupId);
+    }
+
+    getExecutionGroup(groupId) {
+        return this.executionGroups.find(g => g.id === groupId);
+    }
+
+    getAllSteps() {
+        const steps = [];
+        for (const group of this.executionGroups) {
+            if (group.steps && Array.isArray(group.steps)) {
+                steps.push(...group.steps);
+            }
+        }
+        steps.sort((a, b) => (a.sequence || 0) - (b.sequence || 0));
+        return steps;
+    }
+
     toJSON() {
         return {
             id: this.id,
@@ -38,17 +77,52 @@ class VisualPipeline {
             description: this.description,
             version: this.version,
             status: this.status,
+            // New flat format
+            execution_groups: this.executionGroups.map(g => g.toJSON()),
+            // Backward compat: also emit layers for old code
             layers: {
-                pre: this.layers.pre.toJSON(),
-                core: this.layers.core.toJSON(),
-                post: this.layers.post.toJSON()
+                pre: { name: 'pre', execution_groups: [] },
+                core: { name: 'core', execution_groups: this.executionGroups.map(g => g.toJSON()) },
+                post: { name: 'post', execution_groups: [] }
             },
+            connections: this.connections || [],
             created_at: this.createdAt,
             updated_at: this.updatedAt
         };
     }
 
     static fromJSON(json) {
+        console.log('🔄 VisualPipeline.fromJSON called with:', json);
+        // Migration: flatten layers into executionGroups
+        let executionGroups = [];
+
+        if (json.execution_groups && json.execution_groups.length > 0) {
+            // New format: flat execution_groups array
+            console.log('🔄 Using NEW format (execution_groups):', json.execution_groups.length, 'groups');
+            executionGroups = json.execution_groups.map(g => {
+                console.log('🔄 Parsing group:', g);
+                return VisualExecutionGroup.fromJSON(g);
+            });
+        } else if (json.layers) {
+            // Old format: extract groups from all 3 layers
+            console.log('🔄 Using OLD format (layers)');
+            for (const layerName of ['pre', 'core', 'post']) {
+                const layer = json.layers[layerName];
+                if (layer && layer.execution_groups) {
+                    layer.execution_groups.forEach(g => {
+                        executionGroups.push(VisualExecutionGroup.fromJSON(g));
+                    });
+                }
+            }
+        } else {
+            console.log('🔄 No execution_groups or layers found in JSON');
+        }
+
+        console.log('🔄 Parsed executionGroups:', executionGroups.length, 'groups');
+        executionGroups.forEach((g, i) => {
+            console.log(`🔄 Group ${i}: ${g.steps?.length || 0} steps`);
+        });
+
         return new VisualPipeline({
             id: json.id,
             interfaceId: json.interface_id,
@@ -57,48 +131,15 @@ class VisualPipeline {
             description: json.description,
             version: json.version,
             status: json.status,
-            layers: {
-                pre: VisualLayer.fromJSON(json.layers?.pre || {}),
-                core: VisualLayer.fromJSON(json.layers?.core || {}),
-                post: VisualLayer.fromJSON(json.layers?.post || {})
-            },
+            executionGroups: executionGroups,
+            connections: json.connections || [],
             createdAt: json.created_at,
             updatedAt: json.updated_at
         });
     }
 }
 
-class VisualLayer {
-    constructor(name, data = {}) {
-        this.name = name;
-        this.executionGroups = data.executionGroups || [];
-    }
-
-    addGroup(group) {
-        this.executionGroups.push(group);
-    }
-
-    removeGroup(groupId) {
-        this.executionGroups = this.executionGroups.filter(g => g.id !== groupId);
-    }
-
-    getGroup(groupId) {
-        return this.executionGroups.find(g => g.id === groupId);
-    }
-
-    toJSON() {
-        return {
-            name: this.name,
-            execution_groups: this.executionGroups.map(g => g.toJSON())
-        };
-    }
-
-    static fromJSON(json) {
-        return new VisualLayer(json.name, {
-            executionGroups: (json.execution_groups || []).map(g => VisualExecutionGroup.fromJSON(g))
-        });
-    }
-}
+// VisualLayer removed — layer concept eliminated. All groups are flat in VisualPipeline.executionGroups.
 
 class VisualExecutionGroup {
     constructor(data = {}) {
@@ -141,22 +182,33 @@ class VisualExecutionGroup {
             layer: this.layer,
             sequence: this.sequence,
             merge_strategy: this.mergeStrategy,
-            steps: this.steps.map(s => s.toJSON()),
+            steps: this.steps.map(s => {
+                // Safety: convert plain objects to VisualStep before serializing
+                if (typeof s.toJSON === 'function') return s.toJSON();
+                return new VisualStep(s).toJSON();
+            }),
             depends_on: this.dependsOn,
             position: this.position
         };
     }
 
     static fromJSON(json) {
+        console.log('🔄 VisualExecutionGroup.fromJSON called with:', json);
+        console.log('🔄 Group has', json.steps?.length || 0, 'steps');
+        const steps = (json.steps || []).map(s => {
+            console.log('🔄 Parsing step:', s.step_name || s.stepName || 'unnamed');
+            return VisualStep.fromJSON(s);
+        });
+        console.log('🔄 Parsed', steps.length, 'VisualStep objects');
         return new VisualExecutionGroup({
             id: json.id,
-            groupId: json.group_id,
-            groupType: json.group_type,
+            groupId: json.group_id || json.groupId,
+            groupType: json.group_type || json.groupType,
             layer: json.layer,
             sequence: json.sequence,
-            mergeStrategy: json.merge_strategy,
-            steps: (json.steps || []).map(s => VisualStep.fromJSON(s)),
-            dependsOn: json.depends_on || [],
+            mergeStrategy: json.merge_strategy || json.mergeStrategy,
+            steps: steps,
+            dependsOn: json.depends_on || json.dependsOn || [],
             position: json.position || { x: 0, y: 0 }
         });
     }
@@ -173,7 +225,13 @@ class VisualStep {
         this.required = data.required !== undefined ? data.required : true;
         this.timeoutMs = data.timeoutMs || 5000;
         this.enabled = data.enabled !== undefined ? data.enabled : true;
-        this.config = data.config || {};
+        // Deep clone config to prevent reference sharing between steps
+        // Use structuredClone if available (modern browsers), fallback to JSON method
+        this.config = data.config
+            ? (typeof structuredClone === 'function'
+                ? structuredClone(data.config)
+                : JSON.parse(JSON.stringify(data.config)))
+            : {};
         this.scriptType = data.scriptType || null;
         this.scriptContent = data.scriptContent || null;
         this.onErrorStrategy = data.onErrorStrategy || 'fail';
@@ -181,6 +239,18 @@ class VisualStep {
         this.description = data.description || '';
         // Auto-assign icon based on step type if not provided
         this.icon = data.icon || this.getIconForType(this.stepType);
+        // Canvas position persistence (V39)
+        this.position_x = data.position_x !== undefined ? data.position_x : null;
+        this.position_y = data.position_y !== undefined ? data.position_y : null;
+        // Conditional branch tracking - which conditional step this belongs to and which branch
+        // branchType: 'true' | 'false' | null (null = not connected to a conditional branch) - for IfThenElse
+        // caseValue: string | null (e.g., "M", "F", "default") - for Switch/Case
+        this.parentConditionalStepId = data.parentConditionalStepId || null;
+        this.branchType = data.branchType || null;
+        this.caseValue = data.caseValue || null;
+        // Container system: which container step this step belongs to and which zone
+        this.parentStepId = data.parentStepId || null;
+        this.containerZone = data.containerZone || null;
     }
 
     generateUUID() {
@@ -197,7 +267,12 @@ class VisualStep {
             stepName: this.stepName,
             stepType: this.stepType,
             instanceOf: this instanceof VisualStep,
-            config: this.config
+            config: this.config,
+            position_x: this.position_x,
+            position_y: this.position_y,
+            parentConditionalStepId: this.parentConditionalStepId,
+            branchType: this.branchType,
+            caseValue: this.caseValue
         });
         return {
             id: this.id,
@@ -215,7 +290,17 @@ class VisualStep {
             on_error_strategy: this.onErrorStrategy,
             execution_mode: this.executionMode,
             description: this.description,
-            icon: this.icon
+            icon: this.icon,
+            position_x: this.position_x,
+            position_y: this.position_y,
+            // WORKAROUND: Don't send parent_conditional_step_id to avoid FK constraint issues
+            // The backend topological sort should handle this, but there's a Docker volume issue
+            // Branch membership can be determined from connections graph during execution
+            parent_conditional_step_id: null,
+            branch_type: this.branchType,
+            case_value: this.caseValue,
+            parent_step_id: this.parentStepId,
+            container_zone: this.containerZone
         };
     }
 
@@ -236,7 +321,14 @@ class VisualStep {
             onErrorStrategy: json.on_error_strategy,
             executionMode: json.execution_mode,
             description: json.description,
-            icon: json.icon
+            icon: json.icon,
+            position_x: json.position_x,
+            position_y: json.position_y,
+            parentConditionalStepId: json.parent_conditional_step_id,
+            branchType: json.branch_type,
+            caseValue: json.case_value,
+            parentStepId: json.parent_step_id,
+            containerZone: json.container_zone
         });
     }
 
@@ -247,27 +339,36 @@ class VisualStep {
      */
     getIconForType(stepType) {
         const iconMap = {
+            // New type names
+            'field_validation': 'fas fa-check-circle',
+            'fhir_validation': 'fas fa-shield-alt',
+            'enrichment.api': 'fas fa-cloud',
+            'enrichment.database': 'fas fa-database',
+            'enrichment.script': 'fas fa-code',
+            'if_then_else': 'fas fa-sitemap',
+            'switch_case': 'fas fa-code-branch',
+            'hl7_fhir_transform': 'fas fa-exchange-alt',
+            'field_mapping': 'fas fa-arrows-alt-h',
+            'data_masking': 'fas fa-user-secret',
+            'remove_duplicates': 'fas fa-filter',
+            'normalizer': 'fas fa-exchange-alt',
+            'control.loop': 'fas fa-redo-alt',
+            'control.try_catch': 'fas fa-exclamation-triangle',
+            'control.retry': 'fas fa-sync',
+            'connector.inbound': 'fas fa-download',
+            'connector.outbound': 'fas fa-upload',
+            // Legacy type names (backward compat)
             'pre.validation': 'fas fa-check-circle',
-            'pre.validation.field': 'fas fa-check-square',
-            'pre.enrichment': 'fas fa-plus-circle',
             'pre.enrichment.api': 'fas fa-cloud',
             'pre.enrichment.database': 'fas fa-database',
-            'pre.enrichment.cache': 'fas fa-bolt',
-            'pre.enrichment.metadata': 'fas fa-tags',
-            'pre.extraction': 'fas fa-filter',
+            'pre.enrichment.script': 'fas fa-code',
+            'pre.enrichment': 'fas fa-plus-circle',
             'core.transformation': 'fas fa-arrows-alt-h',
             'core.mapping': 'fas fa-project-diagram',
-            'core.mapping.hl7-fhir': 'fas fa-exchange-alt',
             'post.validation': 'fas fa-shield-alt',
-            'post.fhir.validation': 'fas fa-shield-alt',
-            'post.anonymization': 'fas fa-user-secret',
-            'post.audit': 'fas fa-clipboard-list',
-            'post.delivery': 'fas fa-paper-plane',
             'post.error_handling': 'fas fa-exclamation-triangle',
             'post.quality': 'fas fa-check-double',
             'pre.logic': 'fas fa-sitemap',
-            'core.logic': 'fas fa-sitemap',
-            'post.logic': 'fas fa-sitemap',
             'custom': 'fas fa-cog',
             'default': 'fas fa-cog'
         };
@@ -300,7 +401,8 @@ class VisualStep {
             required: this.required,
             timeoutMs: this.timeoutMs,
             enabled: this.enabled,
-            config: JSON.parse(JSON.stringify(this.config)),
+            // Note: config will be deep cloned again by VisualStep constructor
+            config: this.config,
             scriptType: this.scriptType,
             scriptContent: this.scriptContent,
             onErrorStrategy: this.onErrorStrategy,
@@ -308,6 +410,281 @@ class VisualStep {
             description: this.description,
             icon: this.icon
         });
+    }
+
+    // ========================================================================
+    // STATIC UTILITY METHODS - Centralized step type detection
+    // Use these instead of scattering type checks throughout the codebase
+    // ========================================================================
+
+    /**
+     * Check if a step is an HL7-FHIR transform step
+     * Handles both old (core.mapping) and new (hl7_fhir_transform) type names
+     * @param {VisualStep|Object} step - Step object with stepType and/or templateId
+     * @returns {boolean}
+     */
+    static isHL7FHIRTransform(step) {
+        if (!step) return false;
+        const type = step.stepType || step.step_type || '';
+        const templateId = step.templateId || step.template_id || '';
+        return type === 'hl7_fhir_transform' ||
+               type === 'core.mapping' ||
+               templateId === 'hl7-fhir-mapping';
+    }
+
+    /**
+     * Check if a step is a Script Enrichment step
+     * @param {VisualStep|Object} step
+     * @returns {boolean}
+     */
+    static isScriptEnrichment(step) {
+        if (!step) return false;
+        const type = step.stepType || step.step_type || '';
+        return type === 'enrichment.script' || type === 'pre.enrichment.script';
+    }
+
+    /**
+     * Check if a step is an API Enrichment step
+     * @param {VisualStep|Object} step
+     * @returns {boolean}
+     */
+    static isAPIEnrichment(step) {
+        if (!step) return false;
+        const type = step.stepType || step.step_type || '';
+        return type === 'enrichment.api' || type === 'pre.enrichment.api';
+    }
+
+    /**
+     * Check if a step is a Database Enrichment step
+     * @param {VisualStep|Object} step
+     * @returns {boolean}
+     */
+    static isDatabaseEnrichment(step) {
+        if (!step) return false;
+        const type = step.stepType || step.step_type || '';
+        return type === 'enrichment.database' || type === 'pre.enrichment.database';
+    }
+
+    /**
+     * Check if a step is a Field Validation step
+     * @param {VisualStep|Object} step
+     * @returns {boolean}
+     */
+    static isFieldValidation(step) {
+        if (!step) return false;
+        const type = step.stepType || step.step_type || '';
+        return type === 'field_validation' || type === 'pre.validation';
+    }
+
+    /**
+     * Check if a step is a FHIR Validation step
+     * @param {VisualStep|Object} step
+     * @returns {boolean}
+     */
+    static isFHIRValidation(step) {
+        if (!step) return false;
+        const type = step.stepType || step.step_type || '';
+        return type === 'fhir_validation' || type === 'post.validation';
+    }
+
+    /**
+     * Check if a step is a Field Mapping (transformation) step
+     * @param {VisualStep|Object} step
+     * @returns {boolean}
+     */
+    static isFieldMapping(step) {
+        if (!step) return false;
+        const type = step.stepType || step.step_type || '';
+        return type === 'field_mapping' || type === 'core.transformation';
+    }
+
+    /**
+     * Check if a step is an If-Then-Else conditional step
+     * @param {VisualStep|Object} step
+     * @returns {boolean}
+     */
+    static isIfThenElse(step) {
+        if (!step) return false;
+        const type = step.stepType || step.step_type || '';
+        return type === 'if_then_else' || type === 'pre.logic';
+    }
+
+    /**
+     * Check if a step is a Switch/Case conditional step
+     * @param {VisualStep|Object} step
+     * @returns {boolean}
+     */
+    static isSwitchCase(step) {
+        if (!step) return false;
+        const type = step.stepType || step.step_type || '';
+        return type === 'switch_case' || type === 'pre.logic.switch';
+    }
+
+    /**
+     * Get the canonical (new) type name for any step type
+     * @param {string} stepType - Old or new type name
+     * @returns {string} Canonical type name
+     */
+    static getCanonicalType(stepType) {
+        const typeMap = {
+            // Old → New mappings
+            'pre.validation': 'field_validation',
+            'core.validation': 'field_validation',
+            'pre.enrichment.api': 'enrichment.api',
+            'pre.enrichment.database': 'enrichment.database',
+            'pre.enrichment.script': 'enrichment.script',
+            'core.mapping': 'hl7_fhir_transform',
+            'core.transformation': 'field_mapping',
+            'post.validation': 'fhir_validation',
+            'pre.logic': 'if_then_else',
+            'pre.logic.switch': 'switch_case',
+            'post.data_masking': 'data_masking',
+            'post.remove_duplicates': 'remove_duplicates',
+            'post.normalizer': 'normalizer'
+        };
+        return typeMap[stepType] || stepType;
+    }
+
+    /**
+     * Check if a step is ANY conditional/logic step (if-then-else OR switch-case)
+     * Use this for layout engines and flowchart rendering
+     * @param {VisualStep|Object} step
+     * @returns {boolean}
+     */
+    static isConditionalStep(step) {
+        if (!step) return false;
+        const type = step.stepType || step.step_type || '';
+        const templateId = step.templateId || step.template_id || '';
+        return type === 'if_then_else' ||
+               type === 'switch_case' ||
+               type === 'pre.logic' ||
+               type === 'pre.logic.switch' ||
+               type === 'core.logic' ||
+               type === 'post.logic' ||
+               type === 'control' ||
+               templateId === 'if-then-else' ||
+               templateId === 'switch-case';
+    }
+
+    /**
+     * Check if a step is a Loop step
+     * @param {VisualStep|Object} step
+     * @returns {boolean}
+     */
+    static isLoopStep(step) {
+        if (!step) return false;
+        const type = step.stepType || step.step_type || '';
+        const templateId = step.templateId || step.template_id || '';
+        return type === 'control.loop' ||
+               templateId === 'loop-container';
+    }
+
+    /**
+     * Check if a step is a Try-Catch step
+     * @param {VisualStep|Object} step
+     * @returns {boolean}
+     */
+    static isTryCatchStep(step) {
+        if (!step) return false;
+        const type = step.stepType || step.step_type || '';
+        const templateId = step.templateId || step.template_id || '';
+        return type === 'control.try_catch' || templateId === 'try-catch';
+    }
+
+    /**
+     * Check if a step is a Retry step
+     * @param {VisualStep|Object} step
+     * @returns {boolean}
+     */
+    static isRetryStep(step) {
+        if (!step) return false;
+        const type = step.stepType || step.step_type || '';
+        const templateId = step.templateId || step.template_id || '';
+        return type === 'control.retry' || templateId === 'retry-logic';
+    }
+
+    /**
+     * Check if a step is a container step (Loop, Try-Catch, Retry)
+     * @param {VisualStep|Object} step
+     * @returns {boolean}
+     */
+    static isContainerStep(step) {
+        return VisualStep.isLoopStep(step) ||
+               VisualStep.isTryCatchStep(step) ||
+               VisualStep.isRetryStep(step);
+    }
+
+    /**
+     * Get the container zones for a container step
+     * @param {VisualStep|Object} step
+     * @returns {string[]} Zone names
+     */
+    static getContainerZones(step) {
+        if (VisualStep.isTryCatchStep(step)) return ['try', 'catch', 'finally'];
+        return ['body'];
+    }
+
+    /**
+     * Check if a step is a Custom (user-defined script) step
+     * @param {VisualStep|Object} step
+     * @returns {boolean}
+     */
+    static isCustomStep(step) {
+        if (!step) return false;
+        const type = step.stepType || step.step_type || '';
+        return type === 'custom' || !!step.scriptContent;
+    }
+
+    /**
+     * Check if a step is an Outbound Connector step
+     * @param {VisualStep|Object} step
+     * @returns {boolean}
+     */
+    static isOutboundConnector(step) {
+        if (!step) return false;
+        const type = step.stepType || step.step_type || '';
+        return type === 'connector.outbound';
+    }
+
+    /**
+     * Check if a step is an Inbound Connector step
+     * @param {VisualStep|Object} step
+     * @returns {boolean}
+     */
+    static isInboundConnector(step) {
+        if (!step) return false;
+        const type = step.stepType || step.step_type || '';
+        return type === 'connector.inbound';
+    }
+
+    /**
+     * Check if a step is any type of Connector step (Inbound or Outbound)
+     * @param {VisualStep|Object} step
+     * @returns {boolean}
+     */
+    static isConnectorStep(step) {
+        return VisualStep.isInboundConnector(step) || VisualStep.isOutboundConnector(step);
+    }
+
+    /**
+     * Check if a step is any type of Enrichment step (API, Database, or Script)
+     * @param {VisualStep|Object} step
+     * @returns {boolean}
+     */
+    static isEnrichmentStep(step) {
+        return VisualStep.isAPIEnrichment(step) ||
+               VisualStep.isDatabaseEnrichment(step) ||
+               VisualStep.isScriptEnrichment(step);
+    }
+
+    /**
+     * Check if a step is any type of Validation step (Field or FHIR)
+     * @param {VisualStep|Object} step
+     * @returns {boolean}
+     */
+    static isValidationStep(step) {
+        return VisualStep.isFieldValidation(step) ||
+               VisualStep.isFHIRValidation(step);
     }
 }
 
@@ -319,7 +696,27 @@ class StepTemplate {
         this.description = data.description || '';
         this.layer = data.layer || 'core';
         this.icon = data.icon || 'fas fa-cog';
-        this.defaultConfig = data.defaultConfig || {};
+        // CRITICAL: Deep clone defaultConfig to prevent mutations to the template object
+        // Templates are singletons in ToolboxManager, so we must protect defaultConfig from being modified
+        if (data.defaultConfig) {
+            // Force JSON method to ensure deep clone works
+            const cloneMethod = typeof structuredClone === 'function' ? 'structuredClone' : 'JSON';
+            this.defaultConfig = JSON.parse(JSON.stringify(data.defaultConfig));
+
+            // Debug: Add mutation detection
+            if (data.name === 'Script Enrichment' && this.defaultConfig.script) {
+                console.log(`🔧 Template "${data.name}" constructor - cloned defaultConfig using ${cloneMethod}`);
+                console.log('   Script preview:', this.defaultConfig.script.substring(0, 60) + '...');
+
+                // Freeze the config to prevent mutations
+                Object.freeze(this.defaultConfig);
+                if (this.defaultConfig.script) {
+                    console.log('   ⚠️ Froze defaultConfig to prevent mutations');
+                }
+            }
+        } else {
+            this.defaultConfig = {};
+        }
         this.scriptTemplate = data.scriptTemplate || null;
         this.isSystem = data.isSystem !== undefined ? data.isSystem : false;
         // Template-level defaults for required and onErrorStrategy (override VisualStep defaults)
@@ -328,12 +725,28 @@ class StepTemplate {
     }
 
     createStep() {
+        // Deep clone defaultConfig to ensure complete isolation between step instances
+        // Use structuredClone if available (modern browsers), fallback to JSON method
+        const clonedConfig = typeof structuredClone === 'function'
+            ? structuredClone(this.defaultConfig)
+            : JSON.parse(JSON.stringify(this.defaultConfig || {}));
+
+        console.log('🏭 Template.createStep() called for:', this.name);
+        console.log('   Template ID:', this.id);
+        console.log('   Template defaultConfig.script (first 100 chars):',
+            this.defaultConfig.script ? this.defaultConfig.script.substring(0, 100) + '...' : 'N/A');
+        console.log('   Cloned config.script (first 100 chars):',
+            clonedConfig.script ? clonedConfig.script.substring(0, 100) + '...' : 'N/A');
+        console.log('   Are they different objects?', this.defaultConfig !== clonedConfig);
+        console.log('   Are script values equal?',
+            this.defaultConfig.script === clonedConfig.script ? 'YES (expected)' : 'NO (unexpected)');
+
         return new VisualStep({
             stepName: this.name,
             stepType: this.type,
             templateId: this.id,
             layer: this.layer,
-            config: JSON.parse(JSON.stringify(this.defaultConfig)),
+            config: clonedConfig,
             scriptContent: this.scriptTemplate,
             description: this.description,
             icon: this.icon,
@@ -361,7 +774,6 @@ class StepTemplate {
 // Export for browser (window object)
 if (typeof window !== 'undefined') {
     window.VisualPipeline = VisualPipeline;
-    window.VisualLayer = VisualLayer;
     window.VisualExecutionGroup = VisualExecutionGroup;
     window.VisualStep = VisualStep;
     window.StepTemplate = StepTemplate;
@@ -371,7 +783,6 @@ if (typeof window !== 'undefined') {
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = {
         VisualPipeline,
-        VisualLayer,
         VisualExecutionGroup,
         VisualStep,
         StepTemplate

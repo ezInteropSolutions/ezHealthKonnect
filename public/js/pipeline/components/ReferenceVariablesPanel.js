@@ -48,39 +48,37 @@ class ReferenceVariablesPanel {
         console.log('📡 Fetching reference variables:', {
             layerName,
             stepIndex,
-            pipelineHasLayers: !!pipeline?.layers,
+            pipelineHasSteps: !!(pipeline?.getAllSteps || pipeline?.executionGroups),
             pipelineId,
             pipelineVersion
         });
 
+        // TEMPORARILY DISABLED CACHE FOR DEBUGGING - Force fresh fetch every time
         // Try cache first (if available)
-        if (window.variablesCache) {
-            const cached = window.variablesCache.get(pipelineId, pipelineVersion);
-            if (cached) {
-                console.log('⚡ Cache HIT! Using cached variables (instant response)');
-                return cached;
-            }
-        }
+        // if (window.variablesCache) {
+        //     const cached = window.variablesCache.get(pipelineId, pipelineVersion);
+        //     if (cached) {
+        //         console.log('⚡ Cache HIT! Using cached variables (instant response)');
+        //         return cached;
+        //     }
+        // }
+        console.log('🔄 CACHE DISABLED - Forcing fresh API call');
 
-        // Convert visual pipeline format (executionGroups) to backend format (flat steps array)
-        const backendLayers = {};
-        if (pipeline?.layers) {
-            for (const [layerKey, layer] of Object.entries(pipeline.layers)) {
-                // Flatten execution groups into a simple steps array
-                const flatSteps = [];
-                if (layer.executionGroups) {
-                    layer.executionGroups.forEach(group => {
-                        if (group.steps) {
-                            flatSteps.push(...group.steps);
-                        }
-                    });
+        // Collect all steps using flat collection pattern
+        let allSteps = [];
+        if (pipeline?.getAllSteps) {
+            allSteps = pipeline.getAllSteps();
+        } else if (pipeline?.executionGroups) {
+            (pipeline.executionGroups || []).forEach(group => {
+                if (group.steps) {
+                    allSteps.push(...group.steps);
                 }
-
-                backendLayers[layerKey] = {
-                    steps: flatSteps
-                };
-            }
+            });
         }
+
+        // Build backend format with all steps under current layer
+        const backendLayers = {};
+        backendLayers[layerName] = { steps: allSteps };
 
         // Build request payload matching backend expectation
         const payload = {
@@ -110,6 +108,7 @@ class ReferenceVariablesPanel {
         const data = await response.json();
         const variables = data.variables || [];
         console.log('✅ Received variables:', variables.length, 'categories');
+        console.log('📋 RAW VARIABLES DATA:', JSON.stringify(variables, null, 2));
 
         // Store in cache for future requests
         if (window.variablesCache) {
@@ -121,26 +120,32 @@ class ReferenceVariablesPanel {
 
     // Calculate pipeline hash for cache versioning (when pipeline.version not available)
     _calculatePipelineHash(pipeline) {
-        if (!pipeline?.layers) return 0;
+        if (!pipeline) return 0;
+
+        // Collect all steps using flat collection pattern
+        let allSteps = [];
+        if (pipeline.getAllSteps) {
+            allSteps = pipeline.getAllSteps();
+        } else if (pipeline.executionGroups) {
+            (pipeline.executionGroups || []).forEach(group => {
+                if (group.steps) {
+                    allSteps.push(...group.steps);
+                }
+            });
+        }
+
+        if (allSteps.length === 0) return 0;
 
         // Simple hash based on step count and types
         let hash = 0;
-        for (const [layerName, layer] of Object.entries(pipeline.layers)) {
-            if (layer.executionGroups) {
-                layer.executionGroups.forEach(group => {
-                    if (group.steps) {
-                        group.steps.forEach(step => {
-                            // Hash based on step type and config
-                            const stepStr = `${step.stepType || ''}:${JSON.stringify(step.config || {})}`;
-                            for (let i = 0; i < stepStr.length; i++) {
-                                hash = ((hash << 5) - hash) + stepStr.charCodeAt(i);
-                                hash |= 0; // Convert to 32-bit integer
-                            }
-                        });
-                    }
-                });
+        allSteps.forEach(step => {
+            // Hash based on step type and config
+            const stepStr = `${step.stepType || ''}:${JSON.stringify(step.config || {})}`;
+            for (let i = 0; i < stepStr.length; i++) {
+                hash = ((hash << 5) - hash) + stepStr.charCodeAt(i);
+                hash |= 0; // Convert to 32-bit integer
             }
-        }
+        });
 
         return Math.abs(hash);
     }
@@ -162,12 +167,18 @@ class ReferenceVariablesPanel {
         const html = `
             <div class="reference-variables-panel">
                 <div class="panel-header">
-                    <h4 style="margin: 0; display: flex; align-items: center; gap: 8px;">
-                        <span style="font-size: 20px;">📚</span>
-                        <span>Available Variables</span>
-                    </h4>
-                    <button class="close-btn" onclick="window.referencePanel.hide()">✕</button>
+                    <h4 style="margin: 0;">Reference Variables</h4>
                 </div>
+
+                ${this.variables.length > 0 ? `
+                    <div class="search-container">
+                        <input type="text"
+                               class="search-input"
+                               id="variableSearchInput"
+                               placeholder="🔍 Search variables..."
+                               autocomplete="off">
+                    </div>
+                ` : ''}
 
                 <div class="panel-content">
                     ${this.variables.length === 0 ? this.renderEmpty() : this.renderVariables()}
@@ -180,6 +191,7 @@ class ReferenceVariablesPanel {
         console.log('✅ Container HTML set, children count:', this.container.children.length);
 
         this.attachEventListeners();
+        this.attachSearchListener();
     }
 
     // Render empty state
@@ -200,8 +212,7 @@ class ReferenceVariablesPanel {
         this.container.innerHTML = `
             <div class="reference-variables-panel">
                 <div class="panel-header">
-                    <h4 style="margin: 0;">📚 Available Variables</h4>
-                    <button class="close-btn" onclick="window.referencePanel.hide()">✕</button>
+                    <h4 style="margin: 0;">Reference Variables</h4>
                 </div>
                 <div class="panel-content">
                     <div class="error-state">
@@ -214,14 +225,17 @@ class ReferenceVariablesPanel {
         `;
     }
 
-    // Render variables as simple table
+    // Render variables as compact list (better for narrow sidebars)
     renderVariables() {
-        // Flatten all variables from all categories
-        const allVariables = [];
+        // Group variables by step
+        const groupedByStep = {};
         this.variables.forEach(category => {
+            const stepName = category.category;
+            if (!groupedByStep[stepName]) {
+                groupedByStep[stepName] = [];
+            }
             category.variables.forEach(variable => {
-                allVariables.push({
-                    stepName: category.category,
+                groupedByStep[stepName].push({
                     variableName: variable.name,
                     xpath: variable.path,
                     examples: variable.examples || [],
@@ -231,43 +245,105 @@ class ReferenceVariablesPanel {
         });
 
         return `
-            <table class="variables-table">
-                <thead>
-                    <tr>
-                        <th>Step Name</th>
-                        <th>Variable</th>
-                        <th>XPath</th>
-                        <th>Usage Examples</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    ${allVariables.map(v => `
-                        <tr>
-                            <td>${v.stepName}</td>
-                            <td>${v.variableName}</td>
-                            <td>
+            <div class="variables-list">
+                ${Object.entries(groupedByStep).map(([stepName, variables]) => `
+                    <div class="variable-group" data-step="${stepName}">
+                        <div class="group-header">${stepName}</div>
+                        ${variables.map(v => `
+                            <div class="variable-item" data-variable="${v.variableName}" data-xpath="${v.xpath}">
+                                <div class="variable-header">
+                                    <span class="variable-name">${v.variableName}</span>
+                                    <button class="copy-btn-small" data-text="${v.xpath}" title="Copy XPath">📋</button>
+                                </div>
                                 <code class="xpath-code">${v.xpath}</code>
-                                <button class="copy-btn-small" data-text="${v.xpath}" title="Copy XPath">📋</button>
-                            </td>
-                            <td class="examples-cell">
                                 ${v.examples.length > 0 ? `
-                                    <div class="examples-list">
-                                        ${v.examples.map(ex => `
+                                    <div class="examples-container">
+                                        ${v.examples.slice(0, 2).map(ex => `
                                             <div class="example-item">
                                                 <code class="example-code">${ex}</code>
                                                 <button class="copy-btn-tiny" data-text="${ex}" title="Copy">📋</button>
                                             </div>
                                         `).join('')}
                                     </div>
-                                ` : '<span style="color: #9ca3af; font-size: 12px;">—</span>'}
-                            </td>
-                        </tr>
-                    `).join('')}
-                </tbody>
-            </table>
+                                ` : ''}
+                            </div>
+                        `).join('')}
+                    </div>
+                `).join('')}
+            </div>
         `;
     }
 
+
+    // Attach search listener
+    attachSearchListener() {
+        const searchInput = this.container.querySelector('#variableSearchInput');
+        console.log('🔍 Attaching search listener:', {
+            searchInput: searchInput,
+            container: this.container
+        });
+
+        if (!searchInput) {
+            console.warn('⚠️ Search input not found!');
+            return;
+        }
+
+        searchInput.addEventListener('input', (e) => {
+            const searchTerm = e.target.value.toLowerCase().trim();
+            console.log('🔎 Search term:', searchTerm);
+            this.filterVariables(searchTerm);
+        });
+
+        console.log('✅ Search listener attached successfully');
+    }
+
+    // Filter variables based on search term
+    filterVariables(searchTerm) {
+        const variableItems = this.container.querySelectorAll('.variable-item');
+        const variableGroups = this.container.querySelectorAll('.variable-group');
+
+        console.log('🔍 Filtering variables:', {
+            searchTerm: searchTerm,
+            itemCount: variableItems.length,
+            groupCount: variableGroups.length
+        });
+
+        if (!searchTerm) {
+            // Show all
+            variableItems.forEach(item => item.style.display = '');
+            variableGroups.forEach(group => group.style.display = '');
+            console.log('✅ Showing all variables (empty search)');
+            return;
+        }
+
+        // Hide all first
+        variableItems.forEach(item => item.style.display = 'none');
+        variableGroups.forEach(group => group.style.display = 'none');
+
+        let matchCount = 0;
+
+        // Show matching items and their groups
+        variableItems.forEach(item => {
+            // Search in data attributes
+            const variableName = (item.getAttribute('data-variable') || '').toLowerCase();
+            const xpath = (item.getAttribute('data-xpath') || '').toLowerCase();
+
+            // Also search in the full text content of the item
+            const itemText = (item.textContent || '').toLowerCase();
+
+            if (variableName.includes(searchTerm) ||
+                xpath.includes(searchTerm) ||
+                itemText.includes(searchTerm)) {
+                item.style.display = '';
+                matchCount++;
+                // Show the parent group
+                const group = item.closest('.variable-group');
+                if (group) group.style.display = '';
+            }
+        });
+
+        console.log(`✅ Filtered: ${matchCount} matches found`);
+    }
 
     // Attach event listeners
     attachEventListeners() {
@@ -297,8 +373,29 @@ class ReferenceVariablesPanel {
             }, 1500);
         } catch (error) {
             console.error('Failed to copy:', error);
-            alert('Failed to copy to clipboard');
+            this.showNotification('Failed to copy to clipboard', 'error');
         }
+    }
+
+    /**
+     * Show in-app notification
+     */
+    showNotification(message, type = 'info') {
+        const notification = document.createElement('div');
+        notification.style.cssText = `
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background: ${type === 'success' ? '#10b981' : type === 'error' ? '#ef4444' : type === 'warning' ? '#f59e0b' : '#06b6d4'};
+            color: white;
+            padding: 12px 20px;
+            border-radius: 6px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            z-index: 10000;
+        `;
+        notification.textContent = message;
+        document.body.appendChild(notification);
+        setTimeout(() => notification.remove(), 3000);
     }
 
     // Escape HTML for safe rendering
@@ -326,11 +423,11 @@ if (!document.getElementById('reference-variables-styles')) {
 
         .panel-header {
             padding: 16px 20px;
-            border-bottom: 2px solid #e5e7eb;
+            border-bottom: 1px solid #e5e7eb;
             display: flex;
             align-items: center;
             justify-content: space-between;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: #1e3a8a;
             color: white;
         }
 
@@ -410,7 +507,7 @@ if (!document.getElementById('reference-variables-styles')) {
 
         .variables-table td:first-child {
             font-weight: 500;
-            color: #6366f1;
+            color: #1e3a8a;
         }
 
         .variables-table td:nth-child(2) {
@@ -434,8 +531,9 @@ if (!document.getElementById('reference-variables-styles')) {
         }
 
         .copy-btn-small {
-            background: #667eea;
-            border: none;
+            background: #fce7f3;
+            border: 1px solid #fbcfe8;
+            color: #831843;
             border-radius: 4px;
             padding: 4px 8px;
             cursor: pointer;
@@ -445,7 +543,8 @@ if (!document.getElementById('reference-variables-styles')) {
         }
 
         .copy-btn-small:hover {
-            background: #5568d3;
+            background: #fbcfe8;
+            border-color: #f9a8d4;
             transform: scale(1.05);
         }
 
@@ -499,8 +598,9 @@ if (!document.getElementById('reference-variables-styles')) {
         }
 
         .copy-btn-tiny {
-            background: #818cf8;
-            border: none;
+            background: #fce7f3;
+            border: 1px solid #fbcfe8;
+            color: #831843;
             border-radius: 3px;
             padding: 2px 6px;
             cursor: pointer;
@@ -510,7 +610,137 @@ if (!document.getElementById('reference-variables-styles')) {
         }
 
         .copy-btn-tiny:hover {
-            background: #6366f1;
+            background: #fbcfe8;
+            border-color: #f9a8d4;
+            transform: scale(1.05);
+        }
+
+        /* Search Container */
+        .search-container {
+            padding: 12px 16px;
+            border-bottom: 1px solid #e5e7eb;
+        }
+
+        .search-input {
+            width: 100%;
+            padding: 8px 12px;
+            border: 1px solid #d1d5db;
+            border-radius: 6px;
+            font-size: 13px;
+            outline: none;
+            transition: all 0.2s;
+        }
+
+        .search-input:focus {
+            border-color: #1e3a8a;
+            box-shadow: 0 0 0 3px rgba(30, 58, 138, 0.1);
+        }
+
+        /* Variables List (Compact Layout) */
+        .variables-list {
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        .variable-group {
+            border-bottom: 1px solid #e5e7eb;
+            padding-bottom: 12px;
+        }
+
+        .variable-group:last-child {
+            border-bottom: none;
+        }
+
+        .group-header {
+            font-size: 12px;
+            font-weight: 600;
+            color: #1e3a8a;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 8px;
+            padding-bottom: 4px;
+            border-bottom: 2px solid #1e3a8a;
+        }
+
+        .variable-item {
+            padding: 8px;
+            margin-bottom: 8px;
+            background: #f9fafb;
+            border-radius: 6px;
+            border-left: 3px solid #fce7f3;
+            transition: all 0.2s;
+        }
+
+        .variable-item:hover {
+            background: #f3f4f6;
+            border-left-color: #f9a8d4;
+        }
+
+        .variable-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 4px;
+        }
+
+        .variable-name {
+            font-weight: 600;
+            font-size: 13px;
+            color: #1f2937;
+        }
+
+        .variable-item .xpath-code {
+            display: block;
+            background: #fef3c7;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            color: #92400e;
+            font-family: 'Courier New', monospace;
+            margin: 4px 0;
+            word-break: break-all;
+        }
+
+        .examples-container {
+            margin-top: 6px;
+            padding-top: 6px;
+            border-top: 1px solid #e5e7eb;
+        }
+
+        .example-item {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            margin-bottom: 4px;
+        }
+
+        .example-code {
+            flex: 1;
+            background: #eff6ff;
+            padding: 3px 6px;
+            border-radius: 3px;
+            font-size: 11px;
+            color: #1e40af;
+            font-family: 'Courier New', monospace;
+            word-break: break-all;
+        }
+
+        .copy-btn-small {
+            background: #fce7f3;
+            border: 1px solid #fbcfe8;
+            color: #831843;
+            border-radius: 4px;
+            padding: 4px 8px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.2s;
+            flex-shrink: 0;
+        }
+
+        .copy-btn-small:hover {
+            background: #fbcfe8;
+            border-color: #f9a8d4;
             transform: scale(1.05);
         }
     `;

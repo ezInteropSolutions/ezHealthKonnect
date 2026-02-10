@@ -5,6 +5,134 @@ const axios = require('axios');
 const GO_BACKEND_URL = process.env.GO_BACKEND_URL || `http://127.0.0.1:${process.env.API_PORT || 8080}`;
 
 /**
+ * Topological sort for steps based on parent_conditional_step_id relationships
+ * Ensures parent steps are inserted before their children (FK constraint)
+ * @param {Array} steps - Array of step objects
+ * @returns {Array} - Sorted array where parents come before children
+ */
+function topologicalSortSteps(steps) {
+    // Build a map of step ID to step
+    const stepMap = new Map();
+    steps.forEach(step => {
+        stepMap.set(step.id, step);
+    });
+
+    // Build adjacency list (parent → children)
+    const children = new Map(); // parent_id → [child steps]
+    const inDegree = new Map(); // step_id → number of parents
+
+    steps.forEach(step => {
+        if (!children.has(step.id)) {
+            children.set(step.id, []);
+        }
+        inDegree.set(step.id, 0);
+    });
+
+    steps.forEach(step => {
+        const parentId = step.parent_conditional_step_id || step.parentConditionalStepId;
+        if (parentId && stepMap.has(parentId)) {
+            // This step has a parent that's in our list
+            children.get(parentId).push(step);
+            inDegree.set(step.id, (inDegree.get(step.id) || 0) + 1);
+        }
+    });
+
+    // Kahn's algorithm for topological sort
+    const queue = [];
+    const sorted = [];
+
+    // Start with steps that have no parents (in-degree 0)
+    steps.forEach(step => {
+        if (inDegree.get(step.id) === 0) {
+            queue.push(step);
+        }
+    });
+
+    while (queue.length > 0) {
+        const step = queue.shift();
+        sorted.push(step);
+
+        // Process children of this step
+        const childSteps = children.get(step.id) || [];
+        childSteps.forEach(child => {
+            inDegree.set(child.id, inDegree.get(child.id) - 1);
+            if (inDegree.get(child.id) === 0) {
+                queue.push(child);
+            }
+        });
+    }
+
+    // If there are steps not in sorted (cycle or orphan references), add them
+    // This handles cases where parent_conditional_step_id references a step not in the pipeline
+    steps.forEach(step => {
+        if (!sorted.includes(step)) {
+            console.warn(`⚠️ Step ${step.id} (${step.stepName || step.step_name}) has orphan parent reference - adding to end`);
+            sorted.push(step);
+        }
+    });
+
+    return sorted;
+}
+
+/**
+ * Test pipeline with sample message
+ * POST /api/pipelines/test
+ * Proxies request to Go backend for execution
+ */
+exports.testPipeline = async (req, res) => {
+    try {
+        console.log('🧪 [Node.js] Proxying test request to Go backend:', GO_BACKEND_URL);
+
+        // Forward request to Go backend with increased limits for large pipeline responses
+        const response = await axios.post(
+            `${GO_BACKEND_URL}/api/fhir/pipeline/test`,
+            req.body,
+            {
+                timeout: 60000,
+                maxContentLength: 50 * 1024 * 1024,  // 50MB
+                maxBodyLength: 50 * 1024 * 1024,
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            }
+        );
+
+        // Debug: Log what Go returned
+        const dataType = typeof response.data;
+        const dataKeys = response.data && dataType === 'object' ? Object.keys(response.data) : 'NOT_OBJECT';
+        console.log(`🧪 [Node.js] Go response: status=${response.status}, type=${dataType}, keys=${JSON.stringify(dataKeys)}`);
+
+        // Guard against empty response from Go
+        if (!response.data || dataType === 'string') {
+            console.error('❌ [Node.js] Go returned empty or non-JSON response:', response.data);
+            return res.status(500).json({
+                success: false,
+                error: 'Go backend returned empty response',
+                _debug: { dataType, responseStatus: response.status, headers: response.headers }
+            });
+        }
+
+        return res.status(200).json(response.data);
+    } catch (error) {
+        console.error('❌ [Node.js] Test pipeline proxy error:', error.message);
+
+        // If Go returned an error response, pass it through
+        if (error.response) {
+            console.error('❌ [Node.js] Go error status:', error.response.status);
+            console.error('❌ [Node.js] Go error data:', JSON.stringify(error.response.data).substring(0, 500));
+            return res.status(error.response.status).json(
+                error.response.data || { success: false, error: error.message }
+            );
+        }
+
+        return res.status(500).json({
+            success: false,
+            error: error.message || 'Failed to test pipeline'
+        });
+    }
+};
+
+/**
  * Save pipeline (create or update) - V20 Schema with Embedded Mappings
  * POST /api/pipelines
  *
@@ -14,6 +142,14 @@ const GO_BACKEND_URL = process.env.GO_BACKEND_URL || `http://127.0.0.1:${process
  * 3. Auto-embeds wizard mappings into HL7→FHIR step config (self-contained)
  */
 exports.savePipeline = async (req, res) => {
+    // DEBUG: Topological Sort Implementation v2.0
+    console.log('');
+    console.log('=================================================================');
+    console.log('SAVE PIPELINE v2.0 - WITH TOPOLOGICAL SORT');
+    console.log('Timestamp:', new Date().toISOString());
+    console.log('=================================================================');
+    console.log('');
+
     try {
         const pipelineData = req.body;
 
@@ -64,19 +200,23 @@ exports.savePipeline = async (req, res) => {
         await sequelize.query('BEGIN');
 
         try {
-            // 1. Upsert pipeline metadata
+            // 1. Upsert pipeline metadata (including connections)
+            const connections = pipelineData.connections || [];
+            console.log(`🔗 Saving ${connections.length} connections to pipeline`);
+
             const pipelineResult = await sequelize.query(`
                 INSERT INTO transformation_pipelines
-                    (id, interface_id, message_type, pipeline_name, enabled, version, created_at, updated_at)
+                    (id, interface_id, message_type, pipeline_name, enabled, version, connections, created_at, updated_at)
                 VALUES
-                    ($1, $2, $3, $4, $5, $6, NOW(), NOW())
+                    ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW())
                 ON CONFLICT (interface_id, message_type)
                 DO UPDATE SET
                     pipeline_name = EXCLUDED.pipeline_name,
                     enabled = EXCLUDED.enabled,
+                    connections = EXCLUDED.connections,
                     version = transformation_pipelines.version + 1,
                     updated_at = NOW()
-                RETURNING id::text, interface_id::text, message_type, pipeline_name, enabled, version;
+                RETURNING id::text, interface_id::text, message_type, pipeline_name, enabled, version, connections;
             `, {
                 bind: [
                     pipelineId,
@@ -84,7 +224,8 @@ exports.savePipeline = async (req, res) => {
                     messageType,
                     pipelineData.name || `${messageType} Pipeline`,
                     pipelineData.status !== 'disabled',
-                    1
+                    1,
+                    JSON.stringify(connections)
                 ],
                 type: QueryTypes.SELECT
             });
@@ -101,88 +242,137 @@ exports.savePipeline = async (req, res) => {
 
             console.log(`🗑️  Cleared old steps for pipeline ${pipelineId}`);
 
-            // 3. Save each step from all layers
+            // 3. Collect ALL steps (supports both new flat format and legacy layers format)
             let stepsSaved = 0;
-            const layers = ['pre', 'core', 'post'];
+            const allSteps = [];
 
-            for (const layer of layers) {
-                // Extract steps from execution groups (frontend uses visual pipeline model)
-                const layerData = pipelineData.layers?.[layer];
-                let layerSteps = [];
+            // NEW FORMAT: flat execution_groups array
+            if (pipelineData.execution_groups && pipelineData.execution_groups.length > 0) {
+                pipelineData.execution_groups.forEach(group => {
+                    if (group.steps && Array.isArray(group.steps)) {
+                        group.steps.forEach(step => {
+                            allSteps.push({ ...step, _layer: step.layer || 'core' });
+                        });
+                    }
+                });
+                console.log(`📊 Collected ${allSteps.length} steps from execution_groups`);
+            }
+            // LEGACY FORMAT: layers { pre, core, post }
+            else if (pipelineData.layers) {
+                for (const layer of ['pre', 'core', 'post']) {
+                    const layerData = pipelineData.layers[layer];
+                    let layerSteps = [];
 
-                if (layerData?.steps) {
-                    // Direct steps array (legacy format)
-                    layerSteps = layerData.steps;
-                } else if (layerData?.execution_groups) {
-                    // Visual pipeline format - extract steps from execution groups
-                    layerData.execution_groups.forEach(group => {
-                        if (group.steps && Array.isArray(group.steps)) {
-                            layerSteps.push(...group.steps);
-                        }
-                    });
-                }
-
-                console.log(`📊 Layer "${layer}": Found ${layerSteps.length} steps`);
-
-                for (const step of layerSteps) {
-                    console.log(`📦 RAW STEP OBJECT:`, JSON.stringify(step, null, 2));
-                    console.log(`📦 Processing step - ALL KEYS:`, Object.keys(step));
-                    console.log(`📦 step_name:`, step.step_name);
-                    console.log(`📦 stepName:`, step.stepName);
-                    const stepId = step.id || uuidv4();
-                    let stepConfig = step.config || {};
-
-                    // 🔥 CRITICAL: Embed wizard mappings into HL7→FHIR mapping steps
-                    const isHL7FHIRStep = (
-                        step.stepType === 'core.mapping' ||
-                        step.type === 'core.mapping' ||
-                        step.templateId === 'hl7-fhir-mapping' ||
-                        (step.stepName && step.stepName.includes('HL7') && step.stepName.includes('FHIR'))
-                    );
-
-                    if (isHL7FHIRStep && embeddedMappings) {
-                        console.log('\n💾 === EMBEDDING WIZARD MAPPINGS ===');
-                        console.log('Step name:', step.stepName || step.name);
-                        console.log('Step type:', step.stepType || step.type);
-                        console.log('Embedding mappings of type:', typeof embeddedMappings);
-                        stepConfig = {
-                            ...stepConfig,
-                            interface_id: interfaceId,
-                            embedded_mappings: embeddedMappings,
-                            _embedded_at: new Date().toISOString(),
-                            _mapping_version: embeddedMappings.version || 1
-                        };
-                        console.log('✅ Step config after embedding:', JSON.stringify(stepConfig).substring(0, 300));
-                    } else if (isHL7FHIRStep && !embeddedMappings) {
-                        console.warn('⚠️ HL7→FHIR step detected but NO mappings to embed!');
+                    if (layerData?.steps) {
+                        layerSteps = layerData.steps;
+                    } else if (layerData?.execution_groups) {
+                        layerData.execution_groups.forEach(group => {
+                            if (group.steps && Array.isArray(group.steps)) {
+                                layerSteps.push(...group.steps);
+                            }
+                        });
                     }
 
-                    await sequelize.query(`
-                        INSERT INTO transformation_steps
-                            (id, pipeline_id, step_name, step_type, sequence, layer, required, timeout_ms, enabled, config, script_type, script_content, on_error_strategy, created_at, updated_at)
-                        VALUES
-                            ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NOW(), NOW())
-                    `, {
-                        bind: [
-                            stepId,
-                            pipelineId,
-                            step.step_name || step.stepName || step.name || 'Unnamed Step',
-                            step.step_type || step.stepType || step.type || 'custom',
-                            step.sequence || 100,
-                            layer,
-                            step.required !== false,
-                            step.timeoutMs || step.timeout_ms || 5000,
-                            step.enabled !== false,
-                            JSON.stringify(stepConfig),
-                            step.scriptType || null,
-                            step.scriptContent || null,
-                            step.onErrorStrategy || step.on_error_strategy || 'fail'
-                        ],
-                        type: QueryTypes.INSERT
+                    console.log(`📊 Layer "${layer}": Found ${layerSteps.length} steps`);
+                    layerSteps.forEach(step => {
+                        allSteps.push({ ...step, _layer: 'core' });
                     });
-
-                    stepsSaved++;
                 }
+            }
+
+            // TOPOLOGICAL SORT: Parent steps must be inserted before child steps (FK constraint)
+            // This handles multi-level dependencies: A -> B -> C
+            console.log('');
+            console.log('========== TOPOLOGICAL SORT DEBUG ==========');
+            console.log('Pre-sort:', allSteps.length, 'steps collected from all layers');
+            allSteps.forEach(s => {
+                const parentId = s.parent_conditional_step_id || s.parentConditionalStepId;
+                if (parentId) {
+                    console.log('  Step', s.stepName || s.step_name, '(' + s.id + ') has parent:', parentId);
+                }
+            });
+
+            const sortedSteps = topologicalSortSteps(allSteps);
+            console.log('');
+            console.log('Post-sort:', sortedSteps.length, 'steps in insertion order:');
+            sortedSteps.forEach((s, i) => {
+                const parentId = s.parent_conditional_step_id || s.parentConditionalStepId;
+                const stepIdShort = s.id ? s.id.substring(0, 8) + '...' : 'no-id';
+                const parentIdShort = parentId ? parentId.substring(0, 8) + '...' : 'none';
+                console.log('  ' + (i + 1) + '. "' + (s.stepName || s.step_name) + '" (' + stepIdShort + ') parent: ' + parentIdShort);
+            });
+            console.log('========== END TOPOLOGICAL SORT DEBUG ==========');
+            console.log('');
+
+            for (const step of sortedSteps) {
+                const layer = step._layer;
+                const stepId = step.id || uuidv4();
+                let stepConfig = step.config || {};
+
+                // 🔥 CRITICAL: Embed wizard mappings into HL7→FHIR mapping steps
+                // Check both camelCase and snake_case since frontend sends snake_case via toJSON()
+                const stepType = step.stepType || step.step_type || step.type || '';
+                const templateId = step.templateId || step.template_id || '';
+                const stepName = step.stepName || step.step_name || step.name || '';
+
+                console.log(`🔍 Step Detection: name="${stepName}" type="${stepType}" template="${templateId}"`);
+
+                const isHL7FHIRStep = (
+                    stepType === 'hl7_fhir_transform' ||
+                    stepType === 'core.mapping' ||
+                    templateId === 'hl7-fhir-mapping' ||
+                    (stepName.includes('HL7') && stepName.includes('FHIR'))
+                );
+
+                if (isHL7FHIRStep && embeddedMappings) {
+                    console.log('\n💾 === EMBEDDING WIZARD MAPPINGS ===');
+                    console.log('Step name:', stepName);
+                    console.log('Step type:', stepType);
+                    console.log('Template ID:', templateId);
+                    console.log('Embedding mappings of type:', typeof embeddedMappings);
+                    stepConfig = {
+                        ...stepConfig,
+                        interface_id: interfaceId,
+                        embedded_mappings: embeddedMappings,
+                        _embedded_at: new Date().toISOString(),
+                        _mapping_version: embeddedMappings.version || 1
+                    };
+                    console.log('✅ Step config after embedding:', JSON.stringify(stepConfig).substring(0, 300));
+                } else if (isHL7FHIRStep && !embeddedMappings) {
+                    console.warn('⚠️ HL7→FHIR step detected but NO mappings to embed!');
+                }
+
+                await sequelize.query(`
+                    INSERT INTO transformation_steps
+                        (id, pipeline_id, step_name, step_type, sequence, layer, required, timeout_ms, enabled, config, script_type, script_content, on_error_strategy, position_x, position_y, parent_conditional_step_id, branch_type, case_value, created_at, updated_at)
+                    VALUES
+                        ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, NOW(), NOW())
+                `, {
+                    bind: [
+                        stepId,
+                        pipelineId,
+                        step.step_name || step.stepName || step.name || 'Unnamed Step',
+                        step.step_type || step.stepType || step.type || 'custom',
+                        step.sequence || 100,
+                        layer,
+                        step.required !== false,
+                        step.timeoutMs || step.timeout_ms || 5000,
+                        step.enabled !== false,
+                        JSON.stringify(stepConfig),
+                        step.scriptType || null,
+                        step.scriptContent || null,
+                        step.onErrorStrategy || step.on_error_strategy || 'fail',
+                        step.position_x !== undefined ? step.position_x : null,
+                        step.position_y !== undefined ? step.position_y : null,
+                        // Support both snake_case (DB) and camelCase (JS) property names
+                        step.parent_conditional_step_id || step.parentConditionalStepId || null,
+                        step.branch_type || step.branchType || null,
+                        step.case_value || step.caseValue || null
+                    ],
+                    type: QueryTypes.INSERT
+                });
+
+                stepsSaved++;
             }
 
             console.log(`✅ Saved ${stepsSaved} steps to pipeline ${pipelineId}`);
@@ -214,10 +404,134 @@ exports.savePipeline = async (req, res) => {
     }
 };
 
+/**
+ * Get standard HL7-FHIR template mappings
+ * Used by Pipeline Builder UI to display default mappings when no custom mappings exist
+ */
+exports.getStandardTemplateMappings = async (req, res) => {
+    try {
+        const { messageType } = req.params;
+
+        if (!messageType) {
+            return res.status(400).json({
+                success: false,
+                error: 'Message type is required'
+            });
+        }
+
+        console.log(`📚 Fetching standard template mappings for message type: ${messageType}`);
+
+        // Get database connection
+        const database = require('../config/database');
+        const sequelize = database.sequelize;
+        const { QueryTypes } = require('sequelize');
+
+        // Query the hl7_fhir_templates table for the default template
+        const result = await sequelize.query(`
+            SELECT
+                id,
+                template_name,
+                template_description,
+                message_type,
+                hl7_version,
+                template_config,
+                is_default,
+                created_at
+            FROM hl7_fhir_templates
+            WHERE message_type = $1 AND is_default = true
+            ORDER BY created_at DESC
+            LIMIT 1
+        `, {
+            bind: [messageType],
+            type: QueryTypes.SELECT
+        });
+
+        if (!result || result.length === 0) {
+            console.log(`⚠️ No default template found for message type: ${messageType}`);
+            return res.json({
+                success: true,
+                data: {
+                    messageType,
+                    template: null,
+                    mappings: [],
+                    message: 'No default template found for this message type'
+                }
+            });
+        }
+
+        const template = result[0];
+        let mappings = [];
+
+        // Extract mappings from template_config
+        if (template.template_config) {
+            const config = typeof template.template_config === 'string'
+                ? JSON.parse(template.template_config)
+                : template.template_config;
+
+            // Handle different mapping formats
+            if (Array.isArray(config)) {
+                mappings = config;
+            } else if (config.mappings && Array.isArray(config.mappings)) {
+                mappings = config.mappings;
+            } else if (config.atomicMappings && Array.isArray(config.atomicMappings)) {
+                mappings = config.atomicMappings;
+            } else if (config.fieldMappings && Array.isArray(config.fieldMappings)) {
+                mappings = config.fieldMappings;
+            } else if (config.resources && typeof config.resources === 'object') {
+                // OOB template format: mappings are nested under resources.{ResourceType}.mappings
+                // e.g., resources.Patient.mappings, resources.Encounter.mappings
+                for (const resourceType of Object.keys(config.resources)) {
+                    const resource = config.resources[resourceType];
+                    if (resource && resource.mappings && Array.isArray(resource.mappings)) {
+                        // Normalize mapping field names to match UI expectations
+                        const resourceMappings = resource.mappings.map(m => ({
+                            // Keep original fields
+                            ...m,
+                            // Add resourceType for context
+                            fhirResource: resourceType,
+                            // Normalize field names for UI compatibility
+                            hl7Field: m.hl7Path || m.hl7Field || m.sourceField || m.sourcePath,
+                            sourcePath: m.hl7Path || m.sourcePath || m.hl7Field,
+                            targetPath: m.fhirPath || m.targetPath,
+                            dataType: m.hl7DataType || m.dataType || ''
+                        }));
+                        mappings.push(...resourceMappings);
+                    }
+                }
+            }
+        }
+
+        console.log(`✅ Found template "${template.template_name}" with ${mappings.length} mappings`);
+
+        return res.json({
+            success: true,
+            data: {
+                messageType,
+                template: {
+                    id: template.id,
+                    name: template.template_name,
+                    description: template.template_description,
+                    hl7Version: template.hl7_version,
+                    isDefault: template.is_default
+                },
+                mappings,
+                mappingCount: mappings.length
+            }
+        });
+
+    } catch (error) {
+        console.error('❌ Error fetching standard template mappings:', error);
+        return res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
+};
+
 // Export all other functions from original controller (the OLD one, renamed)
 const originalController = require('./pipelineController_old');
 Object.keys(originalController).forEach(key => {
-    if (key !== 'savePipeline') {
+    if (key !== 'savePipeline' && key !== 'testPipeline') {
         exports[key] = originalController[key];
     }
 });

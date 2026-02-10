@@ -515,7 +515,7 @@ func (pe *ProcessingEngine) storeTransformedMessage(
 		"transformation_status":      result.Status,
 		"created_at":                 time.Now(),
 		"completed_at":               result.CompletedAt,
-		"transformation_time_ms":     int32(result.ExecutionTime.Milliseconds()), // Convert to int32 for MongoDB schema
+		"transformation_time_ms":     int32(result.ExecutionTimeNs / 1000000), // Convert nanoseconds to milliseconds
 		"error_count":                len(result.Errors),
 		"errors":                     result.Errors,
 	}

@@ -28,12 +28,21 @@ class FieldPathSearchComponent {
             showCategories: options.showCategories !== false, // Default true
             maxSuggestions: options.maxSuggestions || 10,
             caseSensitive: options.caseSensitive || false,
+            // NEW: Additional fields to include (e.g., step output variables)
+            // Format: [{ name: 'var_name', path: 'steps.step_alias.var_name', description: '...', category: 'Step Outputs' }]
+            additionalFields: options.additionalFields || [],
+            // NEW: Callback to dynamically fetch step variables
+            getStepVariables: options.getStepVariables || null,
+            // NEW: Include predefined HL7 fields (default true)
+            includeHL7Fields: options.includeHL7Fields !== false,
             ...options
         };
 
         this.dropdown = null;
         this.activeIndex = -1;
         this.recentPaths = this.loadRecentPaths();
+        // Cache for dynamically loaded step variables
+        this.cachedStepVariables = null;
 
         this.initialize();
     }
@@ -77,6 +86,7 @@ class FieldPathSearchComponent {
         // Dropdown clicks - use mousedown to fire before blur
         this.dropdown.addEventListener('mousedown', (e) => {
             e.preventDefault(); // Prevent input from losing focus
+            e.stopPropagation(); // Stop event from bubbling
             const item = e.target.closest('.field-path-item');
             if (item) {
                 const fieldPath = item.dataset.path;
@@ -84,12 +94,38 @@ class FieldPathSearchComponent {
             }
         });
 
-        // Close on outside click
-        document.addEventListener('click', (e) => {
-            if (!this.input.contains(e.target) && !this.dropdown.contains(e.target)) {
-                this.hideDropdown();
-            }
+        // Click on dropdown should not close it
+        this.dropdown.addEventListener('click', (e) => {
+            e.stopPropagation();
         });
+
+        // Store bound handler for cleanup
+        this._documentClickHandler = (e) => {
+            // Only process if dropdown is visible
+            if (this.dropdown.style.display === 'none') return;
+
+            // Don't close if clicking on input or dropdown
+            if (this.input.contains(e.target) || this.dropdown.contains(e.target)) {
+                return;
+            }
+
+            this.hideDropdown();
+        };
+
+        // Use capture phase to handle before other handlers
+        document.addEventListener('click', this._documentClickHandler, true);
+    }
+
+    /**
+     * Cleanup method to remove event listeners when component is destroyed
+     */
+    destroy() {
+        if (this._documentClickHandler) {
+            document.removeEventListener('click', this._documentClickHandler, true);
+        }
+        if (this.dropdown && this.dropdown.parentNode) {
+            this.dropdown.parentNode.removeChild(this.dropdown);
+        }
     }
 
     handleInput(e) {
@@ -398,13 +434,18 @@ class FieldPathSearchComponent {
 
     getCategoryColor(category) {
         const colors = {
-            'Patient': '#3b82f6',      // Blue
-            'Visit': '#8b5cf6',        // Purple
-            'Insurance': '#f59e0b',    // Amber
-            'Clinical': '#ef4444',     // Red
-            'Contact': '#10b981',      // Green
-            'Provider': '#06b6d4',     // Cyan
-            'Administrative': '#64748b' // Gray
+            'Patient': '#3b82f6',       // Blue
+            'Visit': '#8b5cf6',         // Purple
+            'Insurance': '#f59e0b',     // Amber
+            'Clinical': '#ef4444',      // Red
+            'Contact': '#10b981',       // Green
+            'Provider': '#06b6d4',      // Cyan
+            'Administrative': '#64748b', // Gray
+            'Step Outputs': '#22c55e',  // Emerald - for step variables
+            'Variables': '#a855f7',     // Purple - for user variables
+            'Database': '#f97316',      // Orange - for database enrichment
+            'API': '#0ea5e9',           // Sky - for API enrichment
+            'Script': '#eab308'         // Yellow - for script enrichment
         };
         return colors[category] || '#9ca3af';
     }
@@ -417,7 +458,12 @@ class FieldPathSearchComponent {
             'Clinical': '⚕️',
             'Contact': '📞',
             'Provider': '👨‍⚕️',
-            'Administrative': '📋'
+            'Administrative': '📋',
+            'Step Outputs': '📦',    // Package icon for step outputs
+            'Variables': '📝',       // Memo icon for variables
+            'Database': '🗄️',        // File cabinet for DB
+            'API': '🌐',             // Globe for API
+            'Script': '⚡'           // Lightning for scripts
         };
         return icons[category] || '📄';
     }
@@ -453,18 +499,66 @@ class FieldPathSearchComponent {
         }
     }
 
+    /**
+     * Get all available fields for search
+     * Combines: HL7 fields + step output variables + additional custom fields
+     */
+    getAllFields() {
+        let fields = [];
+
+        // 1. Add predefined HL7 fields (if enabled)
+        if (this.options.includeHL7Fields) {
+            fields = fields.concat(this.getHL7Fields());
+        }
+
+        // 2. Add step output variables (if callback provided)
+        if (this.options.getStepVariables) {
+            const stepVars = this.options.getStepVariables();
+            if (Array.isArray(stepVars) && stepVars.length > 0) {
+                fields = fields.concat(stepVars.map(v => ({
+                    ...v,
+                    category: v.category || 'Step Outputs'
+                })));
+            }
+        }
+
+        // 3. Add additional fields passed via options
+        if (this.options.additionalFields && this.options.additionalFields.length > 0) {
+            fields = fields.concat(this.options.additionalFields);
+        }
+
+        return fields;
+    }
+
+    /**
+     * Alias for backward compatibility
+     */
     getCommonFields() {
+        return this.getAllFields();
+    }
+
+    /**
+     * Get predefined HL7 fields
+     */
+    getHL7Fields() {
         return [
-            // Patient Identification (PID) - NEW SIMPLIFIED FORMAT
-            { name: 'Patient MRN (ID Only)', path: 'PID.3.1', description: 'MRN ID Number only (PID-3.1) - for database lookups', category: 'Patient' },
-            { name: 'Patient MRN (Full)', path: 'PID.3', description: 'Full MRN with authority (PID-3)', category: 'Patient' },
+            // Patient Identification (PID) - Atomic and Composite fields
+            { name: 'Patient MRN (ID Only)', path: 'PID.3.1', description: 'MRN ID Number only (PID-3.1) - atomic, for database lookups', category: 'Patient' },
+            { name: 'Patient MRN (Full)', path: 'PID.3', description: 'Full MRN with authority (PID-3) - composite', category: 'Patient' },
+            { name: 'MRN Assigning Authority', path: 'PID.3.4', description: 'Assigning Authority (PID-3.4) - atomic', category: 'Patient' },
             { name: 'Patient ID', path: 'PID.2', description: 'Patient ID (PID-2)', category: 'Patient' },
-            { name: 'Patient First Name', path: 'PID.5.2', description: 'Given Name (PID-5.2)', category: 'Patient' },
-            { name: 'Patient Last Name', path: 'PID.5.1', description: 'Family Name (PID-5.1)', category: 'Patient' },
-            { name: 'Patient Full Name', path: 'PID.5', description: 'Full Name (PID-5)', category: 'Patient' },
-            { name: 'Date of Birth', path: 'PID.7', description: 'Birth Date (PID-7)', category: 'Patient' },
-            { name: 'Gender', path: 'PID.8', description: 'Administrative Sex (PID-8)', category: 'Patient' },
-            { name: 'SSN', path: 'PID.19', description: 'Social Security Number (PID-19)', category: 'Patient' },
+            { name: 'Patient First Name', path: 'PID.5.2', description: 'Given Name (PID-5.2) - atomic', category: 'Patient' },
+            { name: 'Patient Last Name', path: 'PID.5.1', description: 'Family Name (PID-5.1) - atomic', category: 'Patient' },
+            { name: 'Patient Middle Name', path: 'PID.5.3', description: 'Second Name/Middle (PID-5.3) - atomic', category: 'Patient' },
+            { name: 'Patient Name Suffix', path: 'PID.5.4', description: 'Suffix e.g., Jr, Sr (PID-5.4) - atomic', category: 'Patient' },
+            { name: 'Patient Name Prefix', path: 'PID.5.5', description: 'Prefix e.g., Dr, Mr (PID-5.5) - atomic', category: 'Patient' },
+            { name: 'Patient Full Name', path: 'PID.5', description: 'Full Name (PID-5) - composite', category: 'Patient' },
+            { name: 'Date of Birth', path: 'PID.7', description: 'Birth Date (PID-7) - atomic', category: 'Patient' },
+            { name: 'Gender', path: 'PID.8', description: 'Administrative Sex M/F/U (PID-8) - atomic', category: 'Patient' },
+            { name: 'Race', path: 'PID.10', description: 'Race (PID-10)', category: 'Patient' },
+            { name: 'Marital Status', path: 'PID.16', description: 'Marital Status (PID-16)', category: 'Patient' },
+            { name: 'SSN', path: 'PID.19', description: 'Social Security Number (PID-19) - atomic', category: 'Patient' },
+            { name: 'Account Number', path: 'PID.18', description: 'Patient Account Number (PID-18)', category: 'Patient' },
 
             // Contact Information
             { name: 'Phone Number', path: 'PID.13', description: 'Phone Number Home (PID-13)', category: 'Contact' },
@@ -498,9 +592,18 @@ class FieldPathSearchComponent {
 
             // Message Control (MSH)
             { name: 'Message Control ID', path: 'MSH.10', description: 'Message Control ID (MSH-10)', category: 'Administrative' },
-            { name: 'Message Type', path: 'MSH.9', description: 'Message Type (MSH-9)', category: 'Administrative' },
+            { name: 'Message Type (Full)', path: 'MSH.9', description: 'Full Message Type ADT^A01 (MSH-9)', category: 'Administrative' },
+            { name: 'Message Type Code', path: 'MSH.9.1', description: 'Message Code e.g., ADT (MSH-9.1) - atomic', category: 'Administrative' },
+            { name: 'Trigger Event', path: 'MSH.9.2', description: 'Trigger Event e.g., A01 (MSH-9.2) - atomic', category: 'Administrative' },
+            { name: 'Message Structure', path: 'MSH.9.3', description: 'Message Structure (MSH-9.3) - atomic', category: 'Administrative' },
             { name: 'Sending Application', path: 'MSH.3', description: 'Sending Application (MSH-3)', category: 'Administrative' },
+            { name: 'Sending App Name', path: 'MSH.3.1', description: 'Sending Application Name (MSH-3.1) - atomic', category: 'Administrative' },
             { name: 'Sending Facility', path: 'MSH.4', description: 'Sending Facility (MSH-4)', category: 'Administrative' },
+            { name: 'Sending Facility Name', path: 'MSH.4.1', description: 'Sending Facility Name (MSH-4.1) - atomic', category: 'Administrative' },
+            { name: 'Receiving Application', path: 'MSH.5', description: 'Receiving Application (MSH-5)', category: 'Administrative' },
+            { name: 'Receiving Facility', path: 'MSH.6', description: 'Receiving Facility (MSH-6)', category: 'Administrative' },
+            { name: 'Message DateTime', path: 'MSH.7', description: 'Message Date/Time (MSH-7)', category: 'Administrative' },
+            { name: 'HL7 Version', path: 'MSH.12', description: 'HL7 Version ID (MSH-12)', category: 'Administrative' },
 
             // Clinical (OBX)
             { name: 'Observation Value', path: 'OBX.5', description: 'Observation Value (OBX-5)', category: 'Clinical' },

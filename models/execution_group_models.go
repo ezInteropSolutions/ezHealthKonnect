@@ -151,13 +151,21 @@ type GroupExecutionLog struct {
 	StepsExecuted  []StepExecutionLog     `json:"steps_executed"`
 }
 
+// VisualConnection represents a connection between steps in the flowchart
+type VisualConnection struct {
+	From string `json:"from"` // Source step ID
+	To   string `json:"to"`   // Target step ID
+	Type string `json:"type"` // "sequential", "conditional_true", "conditional_false", "custom"
+}
+
 // VisualPipeline represents pipeline in visual/UI format
 type VisualPipeline struct {
 	ID          string                 `json:"id"`
 	InterfaceID string                 `json:"interface_id"`
 	MessageType string                 `json:"message_type"`
 	Name        string                 `json:"name"`
-	Layers      map[string]VisualLayer `json:"layers"` // "pre", "core", "post"
+	Layers      map[string]VisualLayer `json:"layers"`      // "pre", "core", "post"
+	Connections []VisualConnection     `json:"connections"` // Flowchart connections
 }
 
 // VisualLayer represents a layer in visual format

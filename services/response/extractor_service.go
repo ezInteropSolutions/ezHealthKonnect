@@ -4,13 +4,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
 
 	"ezhealthkonnect/models"
-
-	"github.com/oliveagle/jsonpath"
 )
 
 // ResponseExtractorService handles extraction and transformation of API response data
@@ -89,6 +88,7 @@ func (s *ResponseExtractorService) ExtractField(apiResponse interface{}, rule mo
 }
 
 // extractByJSONPath extracts a value using JSONPath expression
+// Custom implementation to avoid dependency on broken external library
 func (s *ResponseExtractorService) extractByJSONPath(data interface{}, path string) (interface{}, error) {
 	// Convert data to JSON-compatible format
 	var jsonData interface{}
@@ -108,13 +108,152 @@ func (s *ResponseExtractorService) extractByJSONPath(data interface{}, path stri
 		}
 	}
 
-	// Apply JSONPath
-	result, err := jsonpath.JsonPathLookup(jsonData, path)
+	// Apply custom JSONPath resolver
+	result, err := s.resolveJSONPath(jsonData, path)
 	if err != nil {
 		return nil, fmt.Errorf("JSONPath lookup failed for %s: %w", path, err)
 	}
 
 	return result, nil
+}
+
+// resolveJSONPath is a custom JSONPath implementation supporting common patterns:
+// - $.field or field - direct field access
+// - $.field.nested - nested field access
+// - $.array[0] - array index access
+// - $.array[*] - all array elements
+// - $.field[0].nested - combined patterns
+func (s *ResponseExtractorService) resolveJSONPath(data interface{}, path string) (interface{}, error) {
+	// Remove leading $. or $ if present
+	path = strings.TrimPrefix(path, "$.")
+	path = strings.TrimPrefix(path, "$")
+
+	if path == "" {
+		return data, nil
+	}
+
+	// Parse path into segments
+	segments := s.parseJSONPathSegments(path)
+
+	current := data
+	for _, segment := range segments {
+		var err error
+		current, err = s.resolvePathSegment(current, segment)
+		if err != nil {
+			return nil, err
+		}
+		if current == nil {
+			return nil, nil
+		}
+	}
+
+	return current, nil
+}
+
+// jsonPathSegment represents a single segment in a JSONPath
+type jsonPathSegment struct {
+	field    string
+	isArray  bool
+	index    int
+	isWild   bool // [*] selector
+}
+
+// parseJSONPathSegments parses a JSONPath into segments
+// Examples:
+//   "field.nested" -> [{field: "field"}, {field: "nested"}]
+//   "array[0].field" -> [{field: "array", isArray: true, index: 0}, {field: "field"}]
+//   "items[*].name" -> [{field: "items", isArray: true, isWild: true}, {field: "name"}]
+func (s *ResponseExtractorService) parseJSONPathSegments(path string) []jsonPathSegment {
+	var segments []jsonPathSegment
+
+	// Regex to match field names with optional array index
+	// Matches: fieldName, fieldName[0], fieldName[*]
+	re := regexp.MustCompile(`([^.\[\]]+)(?:\[(\d+|\*)\])?`)
+
+	matches := re.FindAllStringSubmatch(path, -1)
+	for _, match := range matches {
+		if len(match) < 2 || match[1] == "" {
+			continue
+		}
+
+		seg := jsonPathSegment{field: match[1]}
+
+		if len(match) >= 3 && match[2] != "" {
+			seg.isArray = true
+			if match[2] == "*" {
+				seg.isWild = true
+			} else {
+				idx, _ := strconv.Atoi(match[2])
+				seg.index = idx
+			}
+		}
+
+		segments = append(segments, seg)
+	}
+
+	return segments
+}
+
+// resolvePathSegment resolves a single path segment against data
+func (s *ResponseExtractorService) resolvePathSegment(data interface{}, seg jsonPathSegment) (interface{}, error) {
+	// First, get the field value
+	var fieldValue interface{}
+
+	switch v := data.(type) {
+	case map[string]interface{}:
+		var exists bool
+		fieldValue, exists = v[seg.field]
+		if !exists {
+			return nil, fmt.Errorf("field '%s' not found", seg.field)
+		}
+	case []interface{}:
+		// If data is already an array and we have a field name,
+		// extract that field from each array element (for wildcard results)
+		if seg.field != "" {
+			results := []interface{}{}
+			for _, item := range v {
+				if itemMap, ok := item.(map[string]interface{}); ok {
+					if val, exists := itemMap[seg.field]; exists {
+						results = append(results, val)
+					}
+				}
+			}
+			if len(results) == 0 {
+				return nil, fmt.Errorf("field '%s' not found in array elements", seg.field)
+			}
+			if !seg.isArray {
+				return results, nil
+			}
+			fieldValue = results
+		} else {
+			fieldValue = v
+		}
+	default:
+		return nil, fmt.Errorf("cannot navigate into type %T", data)
+	}
+
+	// If no array access needed, return the field value
+	if !seg.isArray {
+		return fieldValue, nil
+	}
+
+	// Array access required
+	arr, ok := fieldValue.([]interface{})
+	if !ok {
+		return nil, fmt.Errorf("field '%s' is not an array", seg.field)
+	}
+
+	// Wildcard access - return all elements
+	if seg.isWild {
+		return arr, nil
+	}
+
+	// Specific index access
+	if seg.index < 0 || seg.index >= len(arr) {
+		return nil, fmt.Errorf("array index %d out of bounds (length %d)", seg.index, len(arr))
+	}
+
+	return arr[seg.index], nil
 }
 
 // transformCombine combines multiple fields into a single value

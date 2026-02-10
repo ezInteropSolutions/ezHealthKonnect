@@ -104,7 +104,7 @@ class APIEndpointTester {
         try {
             testData = testDataInput ? JSON.parse(testDataInput) : {};
         } catch (e) {
-            alert('Invalid test data JSON: ' + e.message);
+            this.showNotification('Invalid test data JSON: ' + e.message, 'error');
             return;
         }
 
@@ -134,11 +134,33 @@ class APIEndpointTester {
 
         } catch (error) {
             console.error('API test failed:', error);
-            alert('API test failed: ' + error.message);
+            this.showNotification('API test failed: ' + error.message, 'error');
         } finally {
             btn.disabled = false;
             btn.textContent = '🧪 Test API Endpoint';
         }
+    }
+
+    /**
+     * Show in-app notification
+     */
+    showNotification(message, type = 'info') {
+        const notification = document.createElement('div');
+        notification.style.cssText = `
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background: ${type === 'success' ? '#10b981' : type === 'error' ? '#ef4444' : type === 'warning' ? '#f59e0b' : '#06b6d4'};
+            color: white;
+            padding: 12px 20px;
+            border-radius: 6px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            z-index: 10000;
+            max-width: 400px;
+        `;
+        notification.textContent = message;
+        document.body.appendChild(notification);
+        setTimeout(() => notification.remove(), 4000);
     }
 
     /**

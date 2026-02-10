@@ -35,7 +35,7 @@ func NewAPIEnrichmentExecutor() *APIEnrichmentExecutor {
 		Category:    "enrichment",
 	}
 
-	base := executors.NewBaseExecutor("pre.enrichment.api", metadata)
+	base := executors.NewBaseExecutor("enrichment.api", metadata)
 
 	return &APIEnrichmentExecutor{
 		BaseExecutor: base,
@@ -114,6 +114,15 @@ func (e *APIEnrichmentExecutor) Execute(
 			// Store failed API call details in output data for visibility
 			inputData["_api_request"] = requestDetails
 			inputData["_api_response"] = responseDetails
+
+			// STANDARDIZED: Variables (empty on error) + execution details
+			e.SetStepOutputWithDetails(inputData, map[string]interface{}{}, map[string]interface{}{
+				"error":         err.Error(),
+				"duration_ms":   apiDuration,
+				"http_request":  requestDetails,
+				"http_response": responseDetails,
+			})
+
 			e.PostExecute(ctx, step, err, time.Since(start))
 			return inputData, err
 		}
@@ -122,8 +131,25 @@ func (e *APIEnrichmentExecutor) Execute(
 		if config.DefaultValue != nil {
 			log.Printf("⚠️  API call failed, using default value: %v", config.DefaultValue)
 			executors.SetNestedValue(inputData, e.getTargetPath(config), config.DefaultValue)
+
+			// STANDARDIZED: Variables (default value) + execution details
+			e.SetStepOutputWithDetails(inputData, map[string]interface{}{
+				"value": config.DefaultValue,
+			}, map[string]interface{}{
+				"default_value_used": true,
+				"error":              err.Error(),
+				"http_request":       requestDetails,
+				"http_response":      responseDetails,
+			})
 		} else {
 			log.Printf("⚠️  API call failed, continuing without enrichment: %v", err)
+
+			// STANDARDIZED: No variables + execution details with error
+			e.SetStepOutputWithDetails(inputData, map[string]interface{}{}, map[string]interface{}{
+				"error":         err.Error(),
+				"http_request":  requestDetails,
+				"http_response": responseDetails,
+			})
 		}
 
 		// Still store request/response details for debugging
@@ -169,6 +195,39 @@ func (e *APIEnrichmentExecutor) Execute(
 	inputData["_api_request"] = requestDetails
 	inputData["_api_response"] = responseDetails
 	inputData["_api_enriched_path"] = targetPath
+
+	// STANDARDIZED: Set step output for tracking (store the actual API response data)
+	var stepOutput map[string]interface{}
+	if responseMappingRaw, hasMappingConfig := step.Config["responseMapping"]; hasMappingConfig {
+		// With response mapping, store the mapped fields
+		mappedData, err := e.applyResponseMapping(resp.JSON, responseMappingRaw)
+		if err == nil {
+			stepOutput = mappedData
+		} else {
+			// Fallback to full response if mapping fails (with type assertion)
+			if jsonMap, ok := resp.JSON.(map[string]interface{}); ok {
+				stepOutput = jsonMap
+			} else {
+				stepOutput = map[string]interface{}{"response": resp.JSON}
+			}
+		}
+	} else {
+		// Without response mapping, store the full API response (with type assertion)
+		if jsonMap, ok := resp.JSON.(map[string]interface{}); ok {
+			stepOutput = jsonMap
+		} else {
+			// If not a map, wrap it
+			stepOutput = map[string]interface{}{"response": resp.JSON}
+		}
+	}
+
+	// STANDARDIZED: Variables (API response data) + execution details (HTTP metadata)
+	e.SetStepOutputWithDetails(inputData, stepOutput, map[string]interface{}{
+		"http_request":   requestDetails,
+		"http_response":  responseDetails,
+		"target_path":    targetPath,
+		"fields_fetched": enrichedFields,
+	})
 
 	log.Printf("✅ [API Enrichment] Response stored at: %s (%d fields, %dms)",
 		targetPath, enrichedFields, apiDuration)
@@ -719,4 +778,46 @@ func (e *APIEnrichmentExecutor) getSampleValue(value interface{}) interface{} {
 	default:
 		return value
 	}
+}
+
+// ===============================================================
+// VARIABLE PROVIDER INTERFACE IMPLEMENTATION
+// ===============================================================
+
+// GetOutputVariables returns the list of variables this executor will produce
+// For API enrichment, we can extract variable names from response_mapping if configured
+func (e *APIEnrichmentExecutor) GetOutputVariables(step *models.TransformationStep) []models.VariableDefinition {
+	variables := []models.VariableDefinition{}
+
+	// Parse config to get response mapping and target path
+	config, err := e.parseConfig(step)
+	if err != nil {
+		log.Printf("⚠️  [APIEnrichment] Failed to parse config for variable discovery: %v", err)
+		return variables
+	}
+
+	// Determine target path where results will be stored
+	targetPath := config.TargetPath
+	if targetPath == "" {
+		targetPath = "enriched.api"
+	}
+
+	// API enrichment returns the full response object
+	// Users can configure FieldMappings to extract specific fields, but we can't determine
+	// the response structure without calling the API, so return a generic object variable
+	variables = append(variables, models.VariableDefinition{
+		Name:         "api_response",
+		Path:         targetPath,
+		DataType:     "object",
+		Description:  fmt.Sprintf("API response from %s", config.Endpoint),
+		UsageExample: fmt.Sprintf(`getNestedValue(input, "%s.fieldName")`, targetPath),
+		Category:     "API",
+		Examples: []string{
+			fmt.Sprintf(`%s.data`, targetPath),
+			fmt.Sprintf(`%s.status`, targetPath),
+			fmt.Sprintf(`%s.timestamp`, targetPath),
+		},
+	})
+
+	return variables
 }

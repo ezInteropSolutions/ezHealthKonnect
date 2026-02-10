@@ -353,6 +353,10 @@ func main() {
 			// ADDED: Generic Pipeline Routes (reusable across all transformation types)
 			api.POST("/pipeline/reference-variables", transformTestCtrl.GetAvailableReferenceVariables) // Get available variables per step
 
+			// TODO: Pipeline Variables Controller needs refactoring to work with interface_id + message_type
+			// pipelineVarsCtrl := controllers.NewPipelineVariablesController(db)
+			// api.POST("/pipelines/variables", pipelineVarsCtrl.GetAvailableVariables)
+
 			// ADDED: Database Query Test Routes (NO-CODE: Test queries before saving pipeline)
 			dbTestCtrl := controllers.NewDatabaseTestController(db)
 			api.POST("/database/test-query", dbTestCtrl.TestQuery)

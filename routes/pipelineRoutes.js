@@ -103,4 +103,14 @@ router.post('/processing/execute/custom',
     pipelineController.executeCustomStep
 );
 
+// ============================================================================
+// HL7-FHIR MAPPING TEMPLATES
+// ============================================================================
+
+// Get standard HL7-FHIR template mappings by message type
+router.get('/hl7-fhir-templates/:messageType',
+    requireAuth,
+    pipelineController.getStandardTemplateMappings
+);
+
 module.exports = router;

@@ -49,33 +49,49 @@ type CacheStats struct {
 
 // BasicParsedMessage represents a basic HL7 parsing result
 type BasicParsedMessage struct {
-	Raw         string                  `json:"raw"`
-	MessageType string                  `json:"messageType"`
-	Segments    map[string]BasicSegment `json:"segments"`
-	ParsedAt    string                  `json:"parsedAt"`
+	Raw           string                    `json:"raw"`
+	MessageType   string                    `json:"messageType"`
+	Segments      map[string]BasicSegment   `json:"segments"`               // Single segment per type (last instance)
+	SegmentGroups map[string][]BasicSegment `json:"segmentGroups,omitempty"` // ✅ NEW: All instances of each segment type
+	SegmentOrder  []string                  `json:"segmentOrder,omitempty"`  // ✅ NEW: Order of segments including repeats
+	ParsedAt      string                    `json:"parsedAt"`
 }
 
 // BasicSegment represents a basic HL7 segment
 type BasicSegment struct {
-	Name   string            `json:"name"`
-	Fields map[string]string `json:"fields"` // Key format: "SEGMENT.POSITION" (e.g., "PID.5")
-	Raw    string            `json:"raw"`
+	Name         string            `json:"name"`
+	Fields       map[string]string `json:"fields"`       // Key format: "SEGMENT.POSITION" (e.g., "PID.5")
+	Raw          string            `json:"raw"`
+	SegmentIndex int               `json:"segmentIndex"` // ✅ NEW: Index within same segment type (0-based, e.g., OBX[0], OBX[1])
 }
 
 // ✅ UPDATED: EnhancedParsedMessage with map-based segments (keyed by segment name)
 type EnhancedParsedMessage struct {
-	Raw              string                     `json:"raw"`
-	Success          bool                       `json:"success"`
-	Error            string                     `json:"error,omitempty"`
-	Version          string                     `json:"version"`
-	MessageType      MessageTypeInfo            `json:"messageType"`
-	BasicSegments    map[string]BasicSegment    `json:"basicSegments,omitempty"`
-	EnhancedSegments map[string]EnhancedSegment `json:"enhancedSegments"` // ✅ FIXED: Map keyed by segment name
-	SegmentOrder     []string                   `json:"segmentOrder"`     // ✅ NEW: Maintain order separately
-	ParsedAt         string                     `json:"parsedAt"`
-	DictionaryUsed   bool                       `json:"dictionaryUsed"`
-	SchemaLoaded     bool                       `json:"schemaLoaded"`
-	ValidationErrors []ValidationError          `json:"validationErrors,omitempty"`
+	Raw              string                       `json:"raw"`
+	Success          bool                         `json:"success"`
+	Error            string                       `json:"error,omitempty"`
+	Version          string                       `json:"version"`
+	MessageType      MessageTypeInfo              `json:"messageType"`
+	BasicSegments     map[string]BasicSegment      `json:"basicSegments,omitempty"`
+	EnhancedSegments  map[string]EnhancedSegment   `json:"enhancedSegments"`        // Single segment per type (last instance for backwards compatibility)
+	SegmentGroups     map[string][]EnhancedSegment `json:"segmentGroups"`           // All instances of each segment type (for repeating segments like OBX, IN1)
+	ObservationGroups []ObservationGroup           `json:"observationGroups"`       // ✅ NEW: OBR-OBX grouped relationships for nested loops
+	SegmentOrder      []string                     `json:"segmentOrder"`            // Maintains order of all segments including repeats
+	ParsedAt          string                       `json:"parsedAt"`
+	DictionaryUsed    bool                         `json:"dictionaryUsed"`
+	SchemaLoaded      bool                         `json:"schemaLoaded"`
+	ValidationErrors  []ValidationError            `json:"validationErrors,omitempty"`
+}
+
+// ✅ NEW: ObservationGroup represents an OBR segment with its associated OBX segments
+// This enables nested loop iteration: outer loop over OBR, inner loop over OBX within each OBR
+type ObservationGroup struct {
+	Index       int               `json:"index"`       // Group index (0-based)
+	OBR         *EnhancedSegment  `json:"obr"`         // The OBR (Observation Request) segment
+	OBXList     []EnhancedSegment `json:"obxList"`     // All OBX segments belonging to this OBR
+	NTEList     []EnhancedSegment `json:"nteList"`     // Optional NTE (Notes) segments for this group
+	OBXCount    int               `json:"obxCount"`    // Number of OBX segments in this group
+	HasResults  bool              `json:"hasResults"`  // True if OBXList is not empty
 }
 
 // MessageTypeInfo contains information about the HL7 message type
@@ -89,17 +105,18 @@ type MessageTypeInfo struct {
 
 // ✅ UPDATED: EnhancedSegment with sequence support and position validation
 type EnhancedSegment struct {
-	Key              string      `json:"key"` // Segment key (MSH, PID, etc.)
+	Key              string      `json:"key"`          // Segment key (MSH, PID, etc.)
 	Raw              string      `json:"raw"`
 	Name             string      `json:"name"`
 	Description      string      `json:"description"`
 	Purpose          string      `json:"purpose"`
-	Fields           []FieldInfo `json:"fields"` // Array maintains order, sorted by position
+	Fields           []FieldInfo `json:"fields"`       // Array maintains order, sorted by position
 	FieldCount       int         `json:"fieldCount"`
 	DictionarySource string      `json:"dictionarySource"`
 	Required         bool        `json:"required"`
 	Repeating        bool        `json:"repeating"`
-	Sequence         int         `json:"sequence,omitempty"` // ✅ Segment sequence for ordering
+	Sequence         int         `json:"sequence,omitempty"`     // Segment sequence for ordering
+	SegmentIndex     int         `json:"segmentIndex,omitempty"` // ✅ NEW: Index within same segment type (0-based, e.g., OBX[0], OBX[1])
 }
 
 // ✅ ENHANCED: FieldInfo with strict position validation and sequence support

@@ -7,6 +7,9 @@ const interfaceService = require('../services/interfaceService');
 const auditService = require('../services/auditService');
 const TransformationPipelineService = require('../services/TransformationPipelineService');
 const { v4: uuidv4 } = require('uuid');
+const axios = require('axios');
+
+const GO_BACKEND_URL = `http://localhost:${process.env.API_PORT || 8080}`;
 
 class WizardController {
     /**
@@ -280,6 +283,23 @@ class WizardController {
                 configSizeKB: Math.round(JSON.stringify(transformationMapping).length / 1024)
             });
 
+            // Activate interface in Go backend
+            try {
+                console.log('🚀 Activating interface in Go backend...');
+                const activateResponse = await axios.post(
+                    `${GO_BACKEND_URL}/api/processing/interfaces/${result.interfaceId}/activate`,
+                    {},
+                    { timeout: 10000 }
+                );
+                if (activateResponse.data.success) {
+                    console.log('✅ Interface activated successfully in Go backend');
+                } else {
+                    console.warn('⚠️ Interface activation returned non-success:', activateResponse.data);
+                }
+            } catch (activateError) {
+                console.error('⚠️ Failed to activate interface (interface still created):', activateError.message);
+            }
+
             // Audit logging
             await auditService.logActivity({
                 userId: userId,
@@ -380,15 +400,23 @@ class WizardController {
                 name: interfaceName
             });
 
-            // Step 2: Create transformation pipeline with HL7→FHIR mapping step
+            // Step 2: Create transformation pipeline with HL7→FHIR mapping step + connector steps
             console.log('📦 Creating transformation pipeline...');
+
+            const connectivityInfo = {
+                sourceConnectivity: interfaceData.sourceConnectivity,
+                sourceConfig: interfaceData.sourceConfig || {},
+                targetConnectivity: interfaceData.targetConnectivity,
+                targetConfig: interfaceData.targetConfig || {}
+            };
 
             const pipelineResult = await this.pipelineService.createPipelineForInterface(
                 interfaceId,
                 interfaceData.messageType,
                 interfaceData.name,
                 interfaceData.transformationMapping,
-                userId
+                userId,
+                connectivityInfo
             );
 
             console.log('✅ Transformation pipeline created:', {
@@ -1030,7 +1058,14 @@ class WizardController {
                 targetConfig: wizardData.targetConfig || {},
                 messageType: wizardData.messageType || 'ADT^A01',
                 mappings: wizardData.mappings || wizardData.customMappings || [],
-                status: wizardData.status || 'active'
+                status: wizardData.status || 'active',
+                // Deployment settings from wizard Step 5
+                auto_start: wizardData.auto_start || false,
+                deployment_mode: wizardData.deployment_mode || 'manual',
+                deployment_delay_seconds: wizardData.deployment_delay_seconds || 0,
+                // Logging settings
+                debug_logging: wizardData.debug_logging || false,
+                log_retention_days: wizardData.log_retention_days || 30
             };
 
             console.log('Creating interface with optimized data:', {
@@ -1064,6 +1099,52 @@ class WizardController {
                     console.log('✅ Message-type mappings stored successfully');
                 } catch (mappingError) {
                     console.error('⚠️ Failed to store mappings (interface still created):', mappingError);
+                }
+            }
+
+            // Create transformation pipeline with connector steps
+            try {
+                console.log('📦 Creating transformation pipeline with connector steps...');
+                const connectivityInfo = {
+                    sourceConnectivity: interfaceData.sourceConnectivity,
+                    sourceConfig: interfaceData.sourceConfig,
+                    targetConnectivity: interfaceData.targetConnectivity,
+                    targetConfig: interfaceData.targetConfig
+                };
+
+                const pipelineResult = await this.pipelineService.createPipelineForInterface(
+                    interfaceId,
+                    interfaceData.messageType,
+                    interfaceData.name,
+                    { atomicMappings: wizardData.mappings || [] },
+                    userId,
+                    connectivityInfo
+                );
+
+                console.log('✅ Transformation pipeline created:', {
+                    pipelineId: pipelineResult.pipelineId,
+                    stepsCreated: pipelineResult.stepsCreated
+                });
+            } catch (pipelineError) {
+                console.error('⚠️ Failed to create pipeline (interface still created):', pipelineError.message);
+            }
+
+            // Activate interface in Go backend if auto_start or auto deployment mode
+            if (wizardData.auto_start || wizardData.deployment_mode === 'auto' || interfaceData.status === 'active') {
+                try {
+                    console.log('🚀 Auto-starting interface in Go backend...');
+                    const activateResponse = await axios.post(
+                        `${GO_BACKEND_URL}/api/processing/interfaces/${interfaceId}/activate`,
+                        {},
+                        { timeout: 10000 }
+                    );
+                    if (activateResponse.data.success) {
+                        console.log('✅ Interface activated successfully in Go backend');
+                    } else {
+                        console.warn('⚠️ Interface activation returned non-success:', activateResponse.data);
+                    }
+                } catch (activateError) {
+                    console.error('⚠️ Failed to activate interface (interface still created):', activateError.message);
                 }
             }
 

@@ -43,8 +43,17 @@ class PipelineAPIService {
             if (contentType && contentType.includes('application/json')) {
                 responseData = await response.json();
             } else {
-                responseData = await response.text();
+                const text = await response.text();
+                console.warn(`[API] Non-JSON response (${contentType}), status=${response.status}, body length=${text.length}`);
+                // Try parsing as JSON anyway (some proxies strip content-type)
+                try {
+                    responseData = JSON.parse(text);
+                } catch {
+                    responseData = text;
+                }
             }
+
+            console.log(`[API] ${method} ${endpoint} -> status=${response.status}, type=${typeof responseData}, keys=${typeof responseData === 'object' && responseData ? Object.keys(responseData).join(',') : 'N/A'}`);
 
             if (!response.ok) {
                 throw new Error(responseData.error || responseData || `HTTP ${response.status}`);
@@ -119,14 +128,32 @@ class PipelineAPIService {
      * Load pipeline by interface and message type
      */
     async loadPipelineByInterface(interfaceId, messageType) {
+        console.log('🔍 loadPipelineByInterface called:', { interfaceId, messageType });
         const response = await this.request('GET', `/pipelines/interface/${interfaceId}/${messageType}`);
         console.log('📥 Pipeline API response:', response);
+        console.log('📥 Response type:', typeof response);
+        console.log('📥 Response keys:', response ? Object.keys(response) : 'null');
 
         if (response.data || response.pipeline) {
             const pipelineData = response.data || response.pipeline;
             console.log('📋 Pipeline data to load:', pipelineData);
-            return VisualPipeline.fromJSON(pipelineData);
+            console.log('📋 execution_groups:', pipelineData.execution_groups);
+            console.log('📋 execution_groups length:', pipelineData.execution_groups?.length);
+            if (pipelineData.execution_groups && pipelineData.execution_groups.length > 0) {
+                console.log('📋 First group:', pipelineData.execution_groups[0]);
+                console.log('📋 First group steps count:', pipelineData.execution_groups[0]?.steps?.length);
+            }
+            const pipeline = VisualPipeline.fromJSON(pipelineData);
+            console.log('📋 Parsed VisualPipeline:', pipeline);
+            console.log('📋 VisualPipeline.executionGroups:', pipeline.executionGroups);
+            console.log('📋 VisualPipeline.executionGroups length:', pipeline.executionGroups?.length);
+            if (pipeline.executionGroups && pipeline.executionGroups.length > 0) {
+                console.log('📋 First parsed group:', pipeline.executionGroups[0]);
+                console.log('📋 First parsed group steps count:', pipeline.executionGroups[0]?.steps?.length);
+            }
+            return pipeline;
         }
+        console.log('⚠️ No pipeline data found in response');
         return null;
     }
 
@@ -233,6 +260,37 @@ class PipelineAPIService {
      */
     async deleteTemplate(templateId) {
         return await this.request('DELETE', `/templates/${templateId}`);
+    }
+
+    /**
+     * Get standard HL7-FHIR template mappings by message type
+     * @param {string} messageType - e.g., "ADT^A01", "ORU^R01"
+     * @returns {Promise<Object>} Template info and mappings array
+     */
+    async getStandardTemplateMappings(messageType) {
+        const encodedType = encodeURIComponent(messageType);
+        return await this.request('GET', `/hl7-fhir-templates/${encodedType}`);
+    }
+
+    /**
+     * Get available connector types from the OOB connector catalog
+     * @param {string|null} category - 'inbound', 'outbound', or null for all
+     * @returns {Promise<Object>} Array of connector type definitions with config_schema
+     */
+    async getConnectorTypes(category = null) {
+        const path = category
+            ? `/connectivity/types/category/${category}`
+            : `/connectivity/types`;
+        return await this.request('GET', path);
+    }
+
+    /**
+     * Get a specific connector type by name (includes full config_schema)
+     * @param {string} typeName - e.g., 'tcp_mllp_inbound', 'http_outbound'
+     * @returns {Promise<Object>} Connector type definition
+     */
+    async getConnectorType(typeName) {
+        return await this.request('GET', `/connectivity/types/${typeName}`);
     }
 
     /**

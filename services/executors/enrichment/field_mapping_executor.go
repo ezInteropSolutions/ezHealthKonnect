@@ -7,7 +7,6 @@ import (
 	"ezhealthkonnect/services/executors"
 	"fmt"
 	"log"
-	"regexp"
 	"strings"
 	"time"
 
@@ -34,7 +33,7 @@ func NewFieldMappingExecutor() *FieldMappingExecutor {
 		Category:    "transformation",
 	}
 
-	base := executors.NewBaseExecutor("core.transformation", metadata)
+	base := executors.NewBaseExecutor("field_mapping", metadata)
 
 	return &FieldMappingExecutor{
 		BaseExecutor: base,
@@ -67,11 +66,9 @@ func (e *FieldMappingExecutor) Execute(
 	// Create field mapping results
 	mappedFields := make(map[string]interface{})
 
-	log.Printf("🔍 [FieldMapping] Processing %d mappings...", len(config.Mappings))
-
 	// Process each mapping
 	for i, mapping := range config.Mappings {
-		log.Printf("   [%d] %s = %s (transforms: %s)", i+1, mapping.LHS, mapping.RHS, mapping.Transforms)
+		_ = i // used for iteration
 
 		// Resolve source value
 		sourceValue, err := e.resolveSourceValue(mapping.RHS, inputData)
@@ -80,8 +77,8 @@ func (e *FieldMappingExecutor) Execute(
 			continue
 		}
 
-		// Apply transformations
-		transformedValue := e.applyTransformations(sourceValue, mapping.Transforms)
+		// Apply transformations using shared utility (OOP - DRY principle)
+		transformedValue := fmt.Sprintf("%v", executors.ApplyTransformations(sourceValue, mapping.Transforms))
 
 		// Try to parse as JSON if it looks like JSON
 		var finalValue interface{} = transformedValue
@@ -116,6 +113,14 @@ func (e *FieldMappingExecutor) Execute(
 		log.Printf("✅ [FieldMapping] Added %d metadata entries", len(config.Metadata))
 	}
 
+	// STANDARDIZED: Variables (the mapped fields) + execution details
+	e.SetStepOutputWithDetails(inputData, map[string]interface{}{
+		"mapped_fields": mappedFields,
+	}, map[string]interface{}{
+		"field_count":    len(mappedFields),
+		"transformation": "field_mapping",
+	})
+
 	// Post-execution logging
 	e.PostExecute(ctx, step, nil, time.Since(start))
 
@@ -139,8 +144,20 @@ func (e *FieldMappingExecutor) resolveSourceValue(rhs string, inputData map[stri
 		return "", nil
 	}
 
-	// Handle HL7 field paths using BaseExecutor utility - format: PID.5.1, MSH.9, etc.
+	// Handle HL7 field paths - format: PID.5.1, MSH.9, IN1.2, etc.
 	if e.isHL7FieldPath(rhs) {
+		// LOOP-AWARE: When running inside a loop, resolve from the current loop item first.
+		// The loop executor puts the current item in inputData["item"].
+		// The item is a single HL7 segment (generic map with "fields" array).
+		if item, hasLoopItem := inputData["item"]; hasLoopItem {
+			value := resolveFieldFromLoopItem(item, rhs)
+			if value != nil {
+				return fmt.Sprintf("%v", value), nil
+			}
+			// Fall through to resolve from the full message
+		}
+
+		// Fallback: resolve from the full message
 		value := executors.GetNestedValue(inputData, rhs)
 		if value != nil {
 			return fmt.Sprintf("%v", value), nil
@@ -160,6 +177,83 @@ func (e *FieldMappingExecutor) resolveSourceValue(rhs string, inputData map[stri
 	return rhs, nil
 }
 
+// resolveFieldFromLoopItem resolves an HL7 field path from a single loop item (segment).
+// The loop item is a generic map (from JSON round-trip of hl7.EnhancedSegment) with structure:
+//
+//	{ "key": "IN1", "name": "Insurance", "fields": [ { "key": "IN1.2", "value": "PPO123", "subfields": [...] }, ... ] }
+//
+// Supports both field-level (IN1.2) and subfield-level (IN1.2.1) paths.
+func resolveFieldFromLoopItem(item interface{}, fieldKey string) interface{} {
+	itemMap, ok := item.(map[string]interface{})
+	if !ok {
+		return nil
+	}
+
+	// Get the fields array from the loop item
+	fieldsRaw, ok := itemMap["fields"]
+	if !ok {
+		return nil
+	}
+
+	fields, ok := fieldsRaw.([]interface{})
+	if !ok {
+		return nil
+	}
+
+	// Parse the field key: "IN1.2" -> field key "IN1.2", or "IN1.2.1" -> parent "IN1.2", subfield "IN1.2.1"
+	parts := strings.Split(fieldKey, ".")
+	if len(parts) < 2 {
+		return nil
+	}
+
+	// Build the target field key (segment.field, e.g., "IN1.2")
+	targetFieldKey := parts[0] + "." + parts[1]
+
+	// Search fields for the matching key
+	for _, fieldRaw := range fields {
+		field, ok := fieldRaw.(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		key, _ := field["key"].(string)
+		if key != targetFieldKey {
+			continue
+		}
+
+		// Field-level access (e.g., IN1.2)
+		if len(parts) == 2 {
+			return field["value"]
+		}
+
+		// Subfield-level access (e.g., IN1.2.1) - search subfields
+		subfieldsRaw, ok := field["subfields"]
+		if !ok {
+			return field["value"] // No subfields, return field value
+		}
+
+		subfields, ok := subfieldsRaw.([]interface{})
+		if !ok {
+			return field["value"]
+		}
+
+		for _, subfieldRaw := range subfields {
+			subfield, ok := subfieldRaw.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			subKey, _ := subfield["key"].(string)
+			if subKey == fieldKey {
+				return subfield["value"]
+			}
+		}
+
+		return field["value"] // Subfield not found, return field value
+	}
+
+	return nil
+}
+
 // isHL7FieldPath checks if a path looks like an HL7 field (e.g., PID.5.1, MSH.9)
 func (e *FieldMappingExecutor) isHL7FieldPath(path string) bool {
 	parts := strings.Split(path, ".")
@@ -167,13 +261,13 @@ func (e *FieldMappingExecutor) isHL7FieldPath(path string) bool {
 		return false
 	}
 
-	// First part should be 3-letter uppercase segment name
+	// First part should be 2-3 char uppercase segment name (e.g., MSH, PID, IN1, NK1, PV1)
 	segment := parts[0]
-	if len(segment) != 3 {
+	if len(segment) < 2 || len(segment) > 3 {
 		return false
 	}
 	for _, c := range segment {
-		if c < 'A' || c > 'Z' {
+		if !((c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')) {
 			return false
 		}
 	}
@@ -212,60 +306,8 @@ func (e *FieldMappingExecutor) resolveSystemVariable(varName string, inputData m
 	}
 }
 
-// applyTransformations applies transformation functions to a value
-func (e *FieldMappingExecutor) applyTransformations(value string, transforms string) string {
-	if transforms == "" {
-		return value
-	}
-
-	// Split multiple transformations (comma-separated)
-	transformList := strings.Split(transforms, ",")
-	result := value
-
-	for _, transform := range transformList {
-		transform = strings.TrimSpace(transform)
-
-		// Simple transformations
-		if transform == "trim" {
-			result = strings.TrimSpace(result)
-		} else if transform == "upper" {
-			result = strings.ToUpper(result)
-		} else if transform == "lower" {
-			result = strings.ToLower(result)
-		} else if strings.HasPrefix(transform, "regex:") {
-			// Regex extraction: regex:pattern
-			pattern := strings.TrimPrefix(transform, "regex:")
-			re, err := regexp.Compile(pattern)
-			if err == nil {
-				matches := re.FindStringSubmatch(result)
-				if len(matches) > 0 {
-					result = matches[0]
-				}
-			}
-		} else if strings.HasPrefix(transform, "substring:") {
-			// Substring: substring:start:end
-			params := strings.TrimPrefix(transform, "substring:")
-			parts := strings.Split(params, ":")
-			if len(parts) == 2 {
-				var start, end int
-				fmt.Sscanf(parts[0], "%d", &start)
-				fmt.Sscanf(parts[1], "%d", &end)
-				if start >= 0 && end <= len(result) && start < end {
-					result = result[start:end]
-				}
-			}
-		} else if strings.HasPrefix(transform, "replace:") {
-			// Replace: replace:old:new
-			params := strings.TrimPrefix(transform, "replace:")
-			parts := strings.Split(params, ":")
-			if len(parts) == 2 {
-				result = strings.ReplaceAll(result, parts[0], parts[1])
-			}
-		}
-	}
-
-	return result
-}
+// NOTE: applyTransformations has been moved to shared utility: executors.ApplyTransformations()
+// This enables code reuse across FieldMapping, SwitchCase, IfThenElse executors
 
 // isJSONString checks if a string looks like JSON (starts with { or [)
 func (e *FieldMappingExecutor) isJSONString(value string) bool {
@@ -356,4 +398,48 @@ func (e *FieldMappingExecutor) GetConfigExample() map[string]interface{} {
 			},
 		},
 	}
+}
+
+// ===============================================================
+// VARIABLE PROVIDER INTERFACE IMPLEMENTATION
+// ===============================================================
+
+// GetOutputVariables returns the list of variables this executor will produce
+// Implements the VariableProvider interface for automatic variable discovery
+func (e *FieldMappingExecutor) GetOutputVariables(step *models.TransformationStep) []models.VariableDefinition {
+	variables := []models.VariableDefinition{}
+
+	// Parse config to extract field mappings
+	config, err := e.parseConfig(step)
+	if err != nil {
+		log.Printf("⚠️  [FieldMapping] Failed to parse config for variable discovery: %v", err)
+		return variables
+	}
+
+	// Extract output variables from each mapping's LHS (left-hand side)
+	basePath := "enriched.field_mapping"
+
+	for _, mapping := range config.Mappings {
+		if mapping.LHS == "" {
+			continue
+		}
+
+		// Determine description based on source
+		description := fmt.Sprintf("Mapped from %s", mapping.RHS)
+		if mapping.Transforms != "" {
+			description += fmt.Sprintf(" with transformations: %s", mapping.Transforms)
+		}
+
+		variables = append(variables, models.VariableDefinition{
+			Name:         mapping.LHS,
+			Path:         fmt.Sprintf("%s.%s", basePath, mapping.LHS),
+			DataType:     "string", // Field mappings typically produce strings after transformations
+			Description:  description,
+			SourceField:  mapping.RHS,
+			UsageExample: fmt.Sprintf(`getNestedValue(input, "%s.%s")`, basePath, mapping.LHS),
+			Category:     "Field Mapping",
+		})
+	}
+
+	return variables
 }
