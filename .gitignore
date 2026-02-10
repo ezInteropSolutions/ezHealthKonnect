@@ -1,12 +1,19 @@
-node_modules
-.claude/memory.md
-add
-.gitignoregit
-commit
--m
-Ignore local Claude memory file
+# Dependencies
+node_modules/
+
+# Claude / AI tooling
 .claude/
+
+# Editors
 .vscode/
 .idea/
-*.md
 
+# OS junk
+Thumbs.db
+desktop.ini
+.DS_Store
+nul
+
+# Temp / logs
+*docker_logs.txt
+scratchpad*
