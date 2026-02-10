@@ -1,1 +1,11 @@
 node_modules
+.claude/memory.md
+add
+.gitignoregit
+commit
+-m
+Ignore local Claude memory file
+.claude/
+.vscode/
+.idea/
+
