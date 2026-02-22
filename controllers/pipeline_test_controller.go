@@ -26,7 +26,7 @@ type PipelineTestController struct {
 // NewPipelineTestController creates a new pipeline test controller
 func NewPipelineTestController(db *sql.DB) *PipelineTestController {
 	transformService := services.NewHL7FHIRTransformServiceV3(db)
-	pipelineService := services.NewTransformationPipelineService(db)
+	pipelineService := services.NewTransformationPipelineService(db, nil) // nil credStore: unused controller
 	return &PipelineTestController{
 		db:               db,
 		transformService: transformService,

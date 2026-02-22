@@ -136,7 +136,7 @@ class FlowchartOrchestratorV2 {
      * Handle mouse down - start drag or pan
      */
     handleMouseDown(e) {
-        // Check if clicking on a step node
+        // Check if clicking on a step node (includes container steps)
         const clickedNode = e.target.closest('.flowchart-step-node');
 
         if (clickedNode) {
@@ -145,7 +145,7 @@ class FlowchartOrchestratorV2 {
             this.draggedNode = clickedNode;
             this.dragStartX = e.clientX;
             this.dragStartY = e.clientY;
-            this.ctrlKeyPressed = e.ctrlKey; // Capture Ctrl key state at mousedown
+            this.ctrlKeyPressed = e.ctrlKey;
 
             // Get current position
             const stepId = clickedNode.getAttribute('data-step-id');
@@ -157,7 +157,7 @@ class FlowchartOrchestratorV2 {
             clickedNode.style.cursor = 'grabbing';
             clickedNode.style.zIndex = '1000';
 
-            this.hasMoved = false; // Reset move flag
+            this.hasMoved = false;
 
             console.log(`🖱️ Started dragging step: ${stepId}, Ctrl: ${this.ctrlKeyPressed}`);
         } else {
@@ -197,7 +197,7 @@ class FlowchartOrchestratorV2 {
             const newX = this.dragNodeStartPos.x + worldDx;
             const newY = this.dragNodeStartPos.y + worldDy;
 
-            // Update node position
+            // Move step node
             this.draggedNode.style.left = `${newX}px`;
             this.draggedNode.style.top = `${newY}px`;
 
@@ -230,9 +230,11 @@ class FlowchartOrchestratorV2 {
      */
     handleMouseUp(e) {
         if (this.isDragging && this.draggedNode) {
+            // Reset visual feedback
             this.draggedNode.style.cursor = 'pointer';
             this.draggedNode.style.zIndex = '';
 
+            // Get step ID
             const stepId = this.draggedNode.getAttribute('data-step-id');
 
             // If didn't move, treat as click
@@ -259,7 +261,7 @@ class FlowchartOrchestratorV2 {
                 }
             } else {
                 console.log(`✅ Finished dragging step: ${stepId}`);
-                // Save position to localStorage
+                // Save position
                 this.savePositions();
             }
 
@@ -269,7 +271,7 @@ class FlowchartOrchestratorV2 {
             this.dragStartY = null;
             this.dragNodeStartPos = null;
             this.hasMoved = false;
-            this.ctrlKeyPressed = false; // Reset Ctrl key state
+            this.ctrlKeyPressed = false;
         }
 
         if (this.isPanning) {
@@ -383,9 +385,11 @@ class FlowchartOrchestratorV2 {
             console.log('🔗 Source step selected:', step.stepName);
             this.showNotification(`Source: ${step.stepName} - Now Ctrl+Click target step`, 'info');
 
-            // Highlight source node
+            // Highlight source node (save original border to restore later)
             const node = this.canvas.getStepNode(step.id);
             if (node) {
+                node._origBorder = node.style.border;
+                node._origBoxShadow = node.style.boxShadow;
                 node.style.border = '3px solid #3b82f6';
                 node.style.boxShadow = '0 0 0 4px rgba(59, 130, 246, 0.3)';
             }
@@ -428,11 +432,11 @@ class FlowchartOrchestratorV2 {
                 }
             }
 
-            // Remove highlight
+            // Remove highlight (restore original border)
             const sourceNode = this.canvas.getStepNode(this.connectSourceStep.id);
             if (sourceNode) {
-                sourceNode.style.border = '2px solid #f8bbd9';
-                sourceNode.style.boxShadow = '';
+                sourceNode.style.border = sourceNode._origBorder || '2px solid #f8bbd9';
+                sourceNode.style.boxShadow = sourceNode._origBoxShadow || '';
             }
 
             // Reset for next connection
@@ -1005,6 +1009,7 @@ class FlowchartOrchestratorV2 {
 
         console.log('✅ Auto-sequence button setup complete (Ctrl+Shift+S shortcut)');
     }
+
 }
 
 // Export for use in other modules

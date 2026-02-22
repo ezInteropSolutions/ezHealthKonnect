@@ -18,9 +18,9 @@ type ConnectivityController struct {
 	service *services.ConnectivityService
 }
 
-func NewConnectivityController(db *sql.DB) *ConnectivityController {
+func NewConnectivityController(db *sql.DB, credStore *services.CredentialStore) *ConnectivityController {
 	return &ConnectivityController{
-		service: services.NewConnectivityService(db),
+		service: services.NewConnectivityService(db, credStore),
 	}
 }
 

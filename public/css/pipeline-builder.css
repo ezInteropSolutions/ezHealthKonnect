@@ -1006,6 +1006,15 @@ body {
     background: #fef8f8;
 }
 
+.step-result-item.step-caught {
+    border-left-color: var(--warning-color);
+    background: #fffcf5;
+}
+
+.step-caught .step-result-icon {
+    color: var(--warning-color);
+}
+
 .step-result-main {
     display: flex;
     align-items: center;
@@ -2272,7 +2281,7 @@ details[open] summary {
 }
 
 /* ============================================
-   Container System - Loop, Try-Catch, Retry
+   Container System - Loop
    ============================================ */
 .container-box {
     position: absolute;
@@ -2374,24 +2383,6 @@ details[open] summary {
 }
 
 /* Zone color themes */
-.container-zone.zone-try {
-    background: rgba(34, 197, 94, 0.06);
-    border-color: rgba(34, 197, 94, 0.2);
-}
-.container-zone.zone-try .zone-label { color: #16a34a; }
-
-.container-zone.zone-catch {
-    background: rgba(239, 68, 68, 0.06);
-    border-color: rgba(239, 68, 68, 0.2);
-}
-.container-zone.zone-catch .zone-label { color: #dc2626; }
-
-.container-zone.zone-finally {
-    background: rgba(59, 130, 246, 0.06);
-    border-color: rgba(59, 130, 246, 0.2);
-}
-.container-zone.zone-finally .zone-label { color: #2563eb; }
-
 .container-zone.zone-body {
     background: rgba(148, 163, 184, 0.04);
     border-color: rgba(148, 163, 184, 0.15);
@@ -2406,24 +2397,6 @@ details[open] summary {
 .container-loop .container-header {
     background: linear-gradient(135deg, rgba(59, 130, 246, 0.12) 0%, rgba(59, 130, 246, 0.04) 100%);
     border-bottom-color: rgba(59, 130, 246, 0.15);
-}
-
-.container-try-catch {
-    border-color: #f59e0b;
-    background: rgba(245, 158, 11, 0.04);
-}
-.container-try-catch .container-header {
-    background: linear-gradient(135deg, rgba(245, 158, 11, 0.12) 0%, rgba(245, 158, 11, 0.04) 100%);
-    border-bottom-color: rgba(245, 158, 11, 0.15);
-}
-
-.container-retry {
-    border-color: #a855f7;
-    background: rgba(168, 85, 247, 0.04);
-}
-.container-retry .container-header {
-    background: linear-gradient(135deg, rgba(168, 85, 247, 0.12) 0%, rgba(168, 85, 247, 0.04) 100%);
-    border-bottom-color: rgba(168, 85, 247, 0.15);
 }
 
 /* Container drag hover state */
@@ -4314,4 +4287,174 @@ body.connection-dragging .input-port {
     padding: 1px 4px;
     border-radius: 3px;
     font-size: 0.8rem;
+}
+
+/* ── Remove Duplicates no-code UI ────────────────────────── */
+.rd-chips-container {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    min-height: 36px;
+    padding: 6px 8px;
+    background: var(--bg-secondary, #f8f9fa);
+    border: 1px solid var(--border-color, #dee2e6);
+    border-radius: 6px;
+    margin-bottom: 6px;
+}
+
+.rd-field-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    background: var(--primary-light, #dbeafe);
+    color: var(--primary, #1d4ed8);
+    border: 1px solid var(--primary-border, #93c5fd);
+    border-radius: 20px;
+    padding: 2px 10px 2px 10px;
+    font-size: 12px;
+    font-weight: 500;
+    white-space: nowrap;
+}
+
+.rd-chip-remove {
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: var(--primary, #1d4ed8);
+    font-size: 14px;
+    line-height: 1;
+    padding: 0 0 0 2px;
+    opacity: 0.7;
+    transition: opacity 0.1s;
+}
+.rd-chip-remove:hover { opacity: 1; }
+
+.rd-chip-input-row {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+}
+
+/* Styled radio button group for strategy + null-key */
+.rd-radio-group {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.rd-radio-option {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 10px 12px;
+    border: 1px solid var(--border-color, #dee2e6);
+    border-radius: 8px;
+    cursor: pointer;
+    transition: border-color 0.15s, background 0.15s;
+    background: var(--bg-primary, #fff);
+}
+.rd-radio-option:hover {
+    border-color: var(--primary, #3b82f6);
+    background: var(--primary-light, #eff6ff);
+}
+.rd-radio-option.active {
+    border-color: var(--primary, #3b82f6);
+    background: var(--primary-light, #eff6ff);
+}
+.rd-radio-option input[type="radio"] {
+    margin-top: 2px;
+    flex-shrink: 0;
+    accent-color: var(--primary, #3b82f6);
+}
+.rd-radio-content {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+.rd-radio-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-primary, #1a1a2e);
+}
+.rd-radio-desc {
+    font-size: 11px;
+    color: var(--text-muted, #6b7280);
+}
+
+/* Compact variant for 3-option null-key group */
+.rd-radio-group-sm .rd-radio-option {
+    padding: 7px 12px;
+}
+.rd-radio-group-sm .rd-radio-desc {
+    display: none;
+}
+.rd-radio-group-sm .rd-radio-option:hover .rd-radio-desc,
+.rd-radio-group-sm .rd-radio-option.active .rd-radio-desc {
+    display: block;
+}
+
+/* Candidates popover */
+.rd-candidates-popover {
+    position: absolute;
+    z-index: 1000;
+    background: var(--bg-primary, #fff);
+    border: 1px solid var(--border-color, #dee2e6);
+    border-radius: 8px;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.12);
+    min-width: 220px;
+    max-width: 320px;
+    max-height: 260px;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    margin-top: 4px;
+}
+.rd-candidates-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--border-color, #dee2e6);
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-muted, #6b7280);
+}
+.rd-candidates-list {
+    overflow-y: auto;
+    padding: 6px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+.rd-candidate-item {
+    text-align: left;
+    padding: 6px 10px;
+    border: none;
+    background: none;
+    border-radius: 5px;
+    font-size: 12px;
+    cursor: pointer;
+    color: var(--text-primary, #1a1a2e);
+    transition: background 0.1s;
+}
+.rd-candidate-item:hover { background: var(--primary-light, #eff6ff); }
+.rd-candidate-item.rd-candidate-added {
+    color: var(--text-muted, #6b7280);
+    text-decoration: line-through;
+    cursor: default;
+}
+
+/* Advanced section toggle */
+.form-section-advanced {
+    margin-top: 8px;
+}
+.form-section-advanced summary {
+    cursor: pointer;
+    color: var(--text-muted, #6b7280);
+    font-size: 12px;
+    margin-bottom: 8px;
+    user-select: none;
+}
+.form-section-advanced[open] summary {
+    margin-bottom: 12px;
 }

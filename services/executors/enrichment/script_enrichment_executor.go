@@ -65,14 +65,9 @@ func (e *ScriptEnrichmentExecutor) Execute(
 	result, err := e.executeScript(ctx, config, inputData)
 	log.Printf("📜📜📜 [Script Enrichment] Script execution completed. Error: %v, Result is nil: %v", err, result == nil)
 	if err != nil {
-		if config.FailOnError {
-			e.PostExecute(ctx, step, err, time.Since(start))
-			return inputData, err
-		}
+		log.Printf("⚠️  Script execution failed: %v", err)
 
-		log.Printf("⚠️  Script execution failed, continuing without enrichment: %v", err)
-
-		// Store error in output for debugging (even when not failing)
+		// Store error in output for debugging
 		executors.SetNestedValue(inputData, "_script_error", err.Error())
 
 		// STANDARDIZED: No variables on error + execution details
@@ -81,8 +76,9 @@ func (e *ScriptEnrichmentExecutor) Execute(
 			"target_path":  config.TargetPath,
 		})
 
-		e.PostExecute(ctx, step, nil, time.Since(start))
-		return inputData, nil
+		// Always return error — pipeline service decides retry/catch behavior
+		e.PostExecute(ctx, step, err, time.Since(start))
+		return inputData, err
 	}
 
 	// Store result in target path
@@ -386,11 +382,6 @@ func (e *ScriptEnrichmentExecutor) GetConfigSchema() map[string]interface{} {
 				"description": "Script execution timeout in milliseconds",
 				"default":     5000,
 			},
-			"failOnError": map[string]interface{}{
-				"type":        "boolean",
-				"description": "Stop pipeline if script fails",
-				"default":     false,
-			},
 		},
 	}
 }
@@ -428,9 +419,8 @@ return {
     calculatedAt: new Date().toISOString()
 };
 `,
-		"targetPath":  "enriched.script.demographics",
-		"timeoutMs":   5000,
-		"failOnError": false,
+		"targetPath": "enriched.script.demographics",
+		"timeoutMs":  5000,
 	}
 }
 

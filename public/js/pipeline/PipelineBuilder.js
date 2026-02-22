@@ -240,6 +240,12 @@ class PipelineBuilder {
             clearBtn.addEventListener('click', () => this.clearCanvas());
         }
 
+        // Pipeline Settings button
+        const settingsBtn = document.getElementById('pipelineSettingsBtn');
+        if (settingsBtn) {
+            settingsBtn.addEventListener('click', () => this.openPipelineSettings());
+        }
+
         // Test modal
         this.setupTestModal();
 
@@ -275,6 +281,208 @@ class PipelineBuilder {
         modal?.addEventListener('click', (e) => {
             if (e.target === modal) {
                 modal.classList.remove('active');
+            }
+        });
+    }
+
+    /**
+     * Open Pipeline Settings modal for configuring pipeline-level defaults
+     */
+    openPipelineSettings() {
+        const config = this.pipeline.pipelineConfig || {};
+        const dr = config.defaultRetry || {};
+        const deh = config.defaultErrorHandling || {};
+
+        // Create modal if it doesn't exist
+        let modal = document.getElementById('pipelineSettingsModal');
+        if (modal) modal.remove();
+
+        modal = document.createElement('div');
+        modal.id = 'pipelineSettingsModal';
+        modal.className = 'modal active';
+        modal.innerHTML = `
+            <div class="modal-content" style="max-width:560px;">
+                <div class="modal-header">
+                    <h3><i class="fas fa-cog" style="color:var(--primary-color);"></i> Pipeline Settings</h3>
+                    <button class="modal-close">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <p style="color:var(--text-secondary);margin-bottom:16px;font-size:13px;">
+                        Configure defaults that apply to <strong>all steps</strong> unless overridden at the step level.
+                    </p>
+
+                    <!-- Default Retry Section -->
+                    <div style="margin-bottom:16px;border:2px solid var(--border-color);border-radius:8px;padding:16px;background:var(--bg-primary);">
+                        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+                            <h4 style="margin:0;color:var(--primary-color);font-size:14px;font-weight:600;">
+                                <i class="fas fa-redo" style="color:var(--primary-light);margin-right:6px;"></i>Default Retry
+                            </h4>
+                            <label style="position:relative;display:inline-block;width:40px;height:22px;cursor:pointer;">
+                                <input type="checkbox" id="ps-retryEnabled" ${dr.enabled ? 'checked' : ''}
+                                    style="opacity:0;width:0;height:0;position:absolute;">
+                                <span class="ps-toggle-track" style="position:absolute;cursor:pointer;top:0;left:0;right:0;bottom:0;
+                                    background:${dr.enabled ? 'var(--primary-color)' : 'var(--border-hover)'};border-radius:22px;transition:.3s;">
+                                    <span style="position:absolute;height:16px;width:16px;left:${dr.enabled ? '20px' : '3px'};bottom:3px;
+                                        background:#fff;border-radius:50%;transition:.3s;box-shadow:0 1px 3px rgba(0,0,0,0.2);"></span>
+                                </span>
+                            </label>
+                        </div>
+                        <div id="ps-retryConfig" style="display:${dr.enabled ? 'block' : 'none'};">
+                            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+                                <div>
+                                    <label style="color:var(--text-secondary);font-size:12px;font-weight:500;display:block;margin-bottom:4px;">Max Retries</label>
+                                    <input type="number" id="ps-maxRetries" value="${dr.maxRetries || 3}" min="1" max="10"
+                                        style="width:100%;padding:8px 10px;border:2px solid var(--border-color);border-radius:6px;font-size:13px;color:var(--text-primary);background:var(--bg-primary);transition:border-color 0.2s;"
+                                        onfocus="this.style.borderColor='var(--primary-color)';this.style.boxShadow='0 0 0 3px rgba(30,58,138,0.1)'"
+                                        onblur="this.style.borderColor='var(--border-color)';this.style.boxShadow='none'">
+                                </div>
+                                <div>
+                                    <label style="color:var(--text-secondary);font-size:12px;font-weight:500;display:block;margin-bottom:4px;">Delay (ms)</label>
+                                    <input type="number" id="ps-delayMs" value="${dr.delayMs || 1000}" min="100" max="60000" step="100"
+                                        style="width:100%;padding:8px 10px;border:2px solid var(--border-color);border-radius:6px;font-size:13px;color:var(--text-primary);background:var(--bg-primary);transition:border-color 0.2s;"
+                                        onfocus="this.style.borderColor='var(--primary-color)';this.style.boxShadow='0 0 0 3px rgba(30,58,138,0.1)'"
+                                        onblur="this.style.borderColor='var(--border-color)';this.style.boxShadow='none'">
+                                </div>
+                                <div>
+                                    <label style="color:var(--text-secondary);font-size:12px;font-weight:500;display:block;margin-bottom:4px;">Backoff Multiplier</label>
+                                    <input type="number" id="ps-backoffMultiplier" value="${dr.backoffMultiplier || 2.0}" min="1" max="5" step="0.5"
+                                        style="width:100%;padding:8px 10px;border:2px solid var(--border-color);border-radius:6px;font-size:13px;color:var(--text-primary);background:var(--bg-primary);transition:border-color 0.2s;"
+                                        onfocus="this.style.borderColor='var(--primary-color)';this.style.boxShadow='0 0 0 3px rgba(30,58,138,0.1)'"
+                                        onblur="this.style.borderColor='var(--border-color)';this.style.boxShadow='none'">
+                                </div>
+                                <div>
+                                    <label style="color:var(--text-secondary);font-size:12px;font-weight:500;display:block;margin-bottom:4px;">Max Delay (ms)</label>
+                                    <input type="number" id="ps-maxDelayMs" value="${dr.maxDelayMs || 60000}" min="1000" max="300000" step="1000"
+                                        style="width:100%;padding:8px 10px;border:2px solid var(--border-color);border-radius:6px;font-size:13px;color:var(--text-primary);background:var(--bg-primary);transition:border-color 0.2s;"
+                                        onfocus="this.style.borderColor='var(--primary-color)';this.style.boxShadow='0 0 0 3px rgba(30,58,138,0.1)'"
+                                        onblur="this.style.borderColor='var(--border-color)';this.style.boxShadow='none'">
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Default Error Handling Section -->
+                    <div style="margin-bottom:16px;border:2px solid var(--border-color);border-radius:8px;padding:16px;background:var(--bg-primary);">
+                        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+                            <h4 style="margin:0;color:var(--primary-color);font-size:14px;font-weight:600;">
+                                <i class="fas fa-shield-alt" style="color:var(--danger-color);margin-right:6px;"></i>Default Error Handling
+                            </h4>
+                            <label style="position:relative;display:inline-block;width:40px;height:22px;cursor:pointer;">
+                                <input type="checkbox" id="ps-ehEnabled" ${deh.enabled ? 'checked' : ''}
+                                    style="opacity:0;width:0;height:0;position:absolute;">
+                                <span class="ps-toggle-track" style="position:absolute;cursor:pointer;top:0;left:0;right:0;bottom:0;
+                                    background:${deh.enabled ? 'var(--danger-color)' : 'var(--border-hover)'};border-radius:22px;transition:.3s;">
+                                    <span style="position:absolute;height:16px;width:16px;left:${deh.enabled ? '20px' : '3px'};bottom:3px;
+                                        background:#fff;border-radius:50%;transition:.3s;box-shadow:0 1px 3px rgba(0,0,0,0.2);"></span>
+                                </span>
+                            </label>
+                        </div>
+                        <div id="ps-ehConfig" style="display:${deh.enabled ? 'block' : 'none'};">
+                            <div style="margin-bottom:12px;">
+                                <label style="color:var(--text-secondary);font-size:12px;font-weight:500;display:block;margin-bottom:4px;">On Error</label>
+                                <select id="ps-onError"
+                                    style="width:100%;padding:8px 10px;border:2px solid var(--border-color);border-radius:6px;font-size:13px;color:var(--text-primary);background:var(--bg-primary);cursor:pointer;transition:border-color 0.2s;"
+                                    onfocus="this.style.borderColor='var(--primary-color)';this.style.boxShadow='0 0 0 3px rgba(30,58,138,0.1)'"
+                                    onblur="this.style.borderColor='var(--border-color)';this.style.boxShadow='none'">
+                                    <option value="catch" ${(deh.onError || 'catch') === 'catch' ? 'selected' : ''}>Catch (suppress & continue)</option>
+                                    <option value="suppress" ${deh.onError === 'suppress' ? 'selected' : ''}>Suppress (ignore & continue)</option>
+                                    <option value="rethrow" ${deh.onError === 'rethrow' ? 'selected' : ''}>Rethrow (stop pipeline)</option>
+                                </select>
+                            </div>
+                            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+                                <div>
+                                    <label style="color:var(--text-secondary);font-size:12px;font-weight:500;display:block;margin-bottom:4px;">Default Field (optional)</label>
+                                    <input type="text" id="ps-defaultField" value="${deh.defaultField || ''}" placeholder="e.g. PID.3"
+                                        style="width:100%;padding:8px 10px;border:2px solid var(--border-color);border-radius:6px;font-size:13px;color:var(--text-primary);background:var(--bg-primary);transition:border-color 0.2s;"
+                                        onfocus="this.style.borderColor='var(--primary-color)';this.style.boxShadow='0 0 0 3px rgba(30,58,138,0.1)'"
+                                        onblur="this.style.borderColor='var(--border-color)';this.style.boxShadow='none'">
+                                </div>
+                                <div>
+                                    <label style="color:var(--text-secondary);font-size:12px;font-weight:500;display:block;margin-bottom:4px;">Default Value (optional)</label>
+                                    <input type="text" id="ps-defaultValue" value="${deh.defaultValue || ''}" placeholder="e.g. UNKNOWN"
+                                        style="width:100%;padding:8px 10px;border:2px solid var(--border-color);border-radius:6px;font-size:13px;color:var(--text-primary);background:var(--bg-primary);transition:border-color 0.2s;"
+                                        onfocus="this.style.borderColor='var(--primary-color)';this.style.boxShadow='0 0 0 3px rgba(30,58,138,0.1)'"
+                                        onblur="this.style.borderColor='var(--border-color)';this.style.boxShadow='none'">
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div style="color:var(--text-secondary);font-size:12px;padding:10px 14px;background:var(--bg-tertiary);border-radius:6px;border-left:3px solid var(--primary-light);">
+                        <i class="fas fa-info-circle" style="color:var(--primary-light);margin-right:4px;"></i>
+                        Steps inherit these defaults unless they have their own config. Steps can opt-out by explicitly disabling retry or error handling.
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button id="ps-cancelBtn" class="btn btn-secondary">Cancel</button>
+                    <button id="ps-saveBtn" class="btn btn-primary">Apply Settings</button>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(modal);
+
+        // Wire up toggle switches
+        const retryToggle = document.getElementById('ps-retryEnabled');
+        const ehToggle = document.getElementById('ps-ehEnabled');
+        const retryConfig = document.getElementById('ps-retryConfig');
+        const ehConfig = document.getElementById('ps-ehConfig');
+
+        const updateToggleVisual = (checkbox, track) => {
+            const dot = track.querySelector('span');
+            if (checkbox.checked) {
+                track.style.background = checkbox.id.includes('retry') ? 'var(--primary-color)' : 'var(--danger-color)';
+                dot.style.left = '20px';
+            } else {
+                track.style.background = 'var(--border-hover)';
+                dot.style.left = '3px';
+            }
+        };
+
+        retryToggle.addEventListener('change', () => {
+            retryConfig.style.display = retryToggle.checked ? 'block' : 'none';
+            updateToggleVisual(retryToggle, retryToggle.nextElementSibling);
+        });
+
+        ehToggle.addEventListener('change', () => {
+            ehConfig.style.display = ehToggle.checked ? 'block' : 'none';
+            updateToggleVisual(ehToggle, ehToggle.nextElementSibling);
+        });
+
+        // Close handlers
+        modal.querySelector('.modal-close').addEventListener('click', () => modal.remove());
+        document.getElementById('ps-cancelBtn').addEventListener('click', () => modal.remove());
+        modal.addEventListener('click', (e) => { if (e.target === modal) modal.remove(); });
+
+        // Save handler
+        document.getElementById('ps-saveBtn').addEventListener('click', () => {
+            const newConfig = {};
+
+            if (retryToggle.checked) {
+                newConfig.defaultRetry = {
+                    enabled: true,
+                    maxRetries: parseInt(document.getElementById('ps-maxRetries').value) || 3,
+                    delayMs: parseInt(document.getElementById('ps-delayMs').value) || 1000,
+                    backoffMultiplier: parseFloat(document.getElementById('ps-backoffMultiplier').value) || 2.0,
+                    maxDelayMs: parseInt(document.getElementById('ps-maxDelayMs').value) || 60000
+                };
+            }
+
+            if (ehToggle.checked) {
+                newConfig.defaultErrorHandling = {
+                    enabled: true,
+                    onError: document.getElementById('ps-onError').value || 'catch',
+                    defaultField: document.getElementById('ps-defaultField').value || '',
+                    defaultValue: document.getElementById('ps-defaultValue').value || ''
+                };
+            }
+
+            this.pipeline.pipelineConfig = newConfig;
+            this.isSaved = false;
+            this.updateAutoSaveStatus('unsaved');
+            modal.remove();
+
+            if (this.dragDropManager) {
+                this.dragDropManager.showNotification('Pipeline settings updated. Save pipeline to persist.', 'success');
             }
         });
     }
@@ -317,6 +525,13 @@ class PipelineBuilder {
             resultsDiv.style.display = 'block';
 
             const result = await window.pipelineAPI.testPipeline(this.pipeline, sampleMessage);
+
+            // Cache test output so IntelliSense can walk runtime step variables
+            // without requiring a re-test when the properties panel opens
+            if (result?.steps) {
+                window.pipelineLastTestOutput = result;
+                console.log('[PipelineBuilder] Cached test output for IntelliSense:', Object.keys(result.steps));
+            }
 
             // Display results with enhanced FHIR resource rendering
             resultsContent.innerHTML = this.renderTestResults(result);
@@ -444,12 +659,22 @@ class PipelineBuilder {
         } else {
             console.log('[TestResults] NO steps field! Full result keys:', JSON.stringify(result, null, 2).substring(0, 2000));
         }
+        // Build error lookup from top-level errors array
+        const errorsByStep = {};
+        if (result.errors && Array.isArray(result.errors)) {
+            for (const err of result.errors) {
+                if (err.step && err.step !== '_pipeline') {
+                    errorsByStep[err.step] = err;
+                }
+            }
+        }
+
         if (result.steps && Object.keys(result.steps).length > 0) {
             const stepEntries = Object.entries(result.steps);
-            // Support both formats: step_metadata.success (TransformationTestController) and flat success (PipelineTestController)
             const getSuccess = (s) => s.step_metadata?.success ?? s.success ?? true;
-            const failedCount = stepEntries.filter(([, s]) => getSuccess(s) === false).length;
-            const passedCount = stepEntries.length - failedCount;
+            const failedCount = stepEntries.filter(([name, s]) => !getSuccess(s) || (errorsByStep[name] && !errorsByStep[name].caught)).length;
+            const caughtCount = stepEntries.filter(([name]) => errorsByStep[name]?.caught === true).length;
+            const passedCount = stepEntries.length - failedCount - caughtCount;
 
             html += `
                 <div class="step-results-section">
@@ -457,6 +682,7 @@ class PipelineBuilder {
                         <i class="fas fa-tasks"></i> Step Results
                         <span class="step-results-summary">
                             <span class="step-count-pass">${passedCount} passed</span>
+                            ${caughtCount > 0 ? `<span style="color:var(--warning-color);font-weight:600;">${caughtCount} caught</span>` : ''}
                             ${failedCount > 0 ? `<span class="step-count-fail">${failedCount} failed</span>` : ''}
                         </span>
                     </h4>
@@ -467,26 +693,82 @@ class PipelineBuilder {
                 const stepSuccess = getSuccess(stepData);
                 const durationMs = stepData.step_metadata?.duration_ms ?? stepData.duration_ms;
                 const duration = durationMs != null ? `${durationMs}ms` : '';
-                const statusClass = stepSuccess ? 'step-pass' : 'step-fail';
-                const statusIcon = stepSuccess ? 'fa-check-circle' : 'fa-times-circle';
-                const errorMsg = stepData.step_error || stepData.error || '';
+                const stepError = errorsByStep[stepName];
+                const isCaughtError = stepError?.caught === true;
+                const isFailedError = stepError && !stepError.caught;
+                const statusClass = isFailedError ? 'step-fail' : (isCaughtError ? 'step-caught' : 'step-pass');
+                const statusIcon = isFailedError ? 'fa-times-circle' : (isCaughtError ? 'fa-shield-alt' : 'fa-check-circle');
 
                 html += `
                     <div class="step-result-item ${statusClass}">
                         <div class="step-result-main">
                             <i class="fas ${statusIcon} step-result-icon"></i>
                             <span class="step-result-name">${this.escapeHtml(stepName)}</span>
+                            ${isCaughtError ? '<span style="font-size:11px;background:var(--warning-color);color:#fff;padding:1px 6px;border-radius:4px;margin-left:6px;">CAUGHT</span>' : ''}
                             ${duration ? `<span class="step-result-duration">${duration}</span>` : ''}
                         </div>
-                        ${!stepSuccess && errorMsg ? `
+                        ${isFailedError ? `
                             <div class="step-result-error">
-                                <i class="fas fa-exclamation-triangle"></i> ${this.escapeHtml(String(errorMsg))}
+                                <i class="fas fa-exclamation-triangle"></i> ${this.escapeHtml(stepError.error)}
+                            </div>
+                        ` : ''}
+                        ${isCaughtError ? `
+                            <div class="step-result-error" style="color:var(--warning-color);background:rgba(245,158,11,0.08);border-left-color:var(--warning-color);">
+                                <i class="fas fa-shield-alt"></i> ${this.escapeHtml(stepError.error)}
+                                ${stepError.default_applied ? `<br><i class="fas fa-edit" style="margin-left:2px;"></i> Default: <code>${this.escapeHtml(stepError.default_applied.field)} = ${this.escapeHtml(String(stepError.default_applied.value))}</code>` : ''}
                             </div>
                         ` : ''}
                     </div>
                 `;
             }
 
+            html += `
+                    </div>
+                </div>
+            `;
+        }
+
+        // Render top-level errors summary (above FHIR output)
+        if (result.errors && Array.isArray(result.errors) && result.errors.length > 0) {
+            const uncaught = result.errors.filter(e => !e.caught);
+            const caught = result.errors.filter(e => e.caught);
+            html += `
+                <div style="margin:16px 0;border-radius:8px;overflow:hidden;border:2px solid ${uncaught.length > 0 ? 'var(--danger-color)' : 'var(--warning-color)'};">
+                    <div style="padding:10px 14px;background:${uncaught.length > 0 ? 'rgba(239,68,68,0.08)' : 'rgba(245,158,11,0.08)'};display:flex;align-items:center;gap:8px;">
+                        <i class="fas fa-exclamation-circle" style="color:${uncaught.length > 0 ? 'var(--danger-color)' : 'var(--warning-color)'};"></i>
+                        <strong style="font-size:14px;">Pipeline Errors (${result.errors.length})</strong>
+                        ${caught.length > 0 ? `<span style="font-size:12px;color:var(--warning-color);margin-left:auto;">${caught.length} caught</span>` : ''}
+                        ${uncaught.length > 0 ? `<span style="font-size:12px;color:var(--danger-color);margin-left:${caught.length > 0 ? '8px' : 'auto'};">${uncaught.length} uncaught</span>` : ''}
+                    </div>
+                    <div style="padding:0;">
+            `;
+            for (const err of result.errors) {
+                if (err.step === '_pipeline') continue;
+                const bg = err.caught ? 'rgba(245,158,11,0.04)' : 'rgba(239,68,68,0.04)';
+                const borderColor = err.caught ? 'var(--warning-color)' : 'var(--danger-color)';
+                const icon = err.caught ? 'fa-shield-alt' : 'fa-times-circle';
+                const iconColor = err.caught ? 'var(--warning-color)' : 'var(--danger-color)';
+                html += `
+                    <div style="padding:10px 14px;border-top:1px solid var(--border-color);background:${bg};display:flex;gap:10px;align-items:flex-start;">
+                        <i class="fas ${icon}" style="color:${iconColor};margin-top:2px;flex-shrink:0;"></i>
+                        <div style="flex:1;min-width:0;">
+                            <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
+                                <strong style="font-size:13px;">${this.escapeHtml(err.step)}</strong>
+                                <span style="font-size:11px;padding:1px 6px;border-radius:4px;color:#fff;background:${err.caught ? 'var(--warning-color)' : 'var(--danger-color)'};">
+                                    ${err.caught ? 'CAUGHT' : 'FAILED'}
+                                </span>
+                                ${err.handler ? `<span style="font-size:11px;color:var(--text-tertiary);">handler: ${this.escapeHtml(err.handler)}</span>` : ''}
+                            </div>
+                            <div style="font-size:12px;color:var(--text-secondary);word-break:break-word;">${this.escapeHtml(err.error)}</div>
+                            ${err.default_applied ? `
+                                <div style="font-size:12px;margin-top:4px;color:var(--primary-light);">
+                                    <i class="fas fa-edit"></i> Default applied: <code style="background:var(--bg-tertiary);padding:1px 4px;border-radius:3px;">${this.escapeHtml(err.default_applied.field)} = ${this.escapeHtml(String(err.default_applied.value))}</code>
+                                </div>
+                            ` : ''}
+                        </div>
+                    </div>
+                `;
+            }
             html += `
                     </div>
                 </div>
@@ -919,6 +1201,9 @@ class PipelineBuilder {
                 this.isSaved = true;
                 this.updateAutoSaveStatus('saved');
                 this.dragDropManager.showNotification('Pipeline saved successfully', 'success');
+
+                // Invalidate test output cache — pipeline changed, re-test needed for runtime paths
+                window.pipelineLastTestOutput = null;
 
                 // Update pipeline ID if new
                 if (result.data?.id) {

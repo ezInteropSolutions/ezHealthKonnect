@@ -154,7 +154,8 @@ class FlowchartCanvas {
         console.log('🎨 FlowchartCanvas rendering...', {
             steps: steps.length,
             positions: layout.positions.size,
-            connections: layout.connections.length
+            connections: layout.connections.length,
+            containers: layout.containers ? layout.containers.size : 0
         });
 
         // Clear all
@@ -163,7 +164,7 @@ class FlowchartCanvas {
         // Render swim lanes
         this.renderSwimLanes(layout.swimLanes);
 
-        // Render step nodes
+        // Render step nodes (containers render as regular steps with sub-flow preview)
         this.renderStepNodes(layout.positions, steps);
 
         // Render connections
@@ -210,8 +211,12 @@ class FlowchartCanvas {
      * Create a step node DOM element
      */
     createStepNode(step, pos) {
+        const isContainer = typeof VisualStep !== 'undefined' && VisualStep.isContainerStep(step);
+        const containerBorderColor = isContainer ? this.getContainerBorderColor(step) : '#f8bbd9';
+
         const node = document.createElement('div');
         node.className = 'flowchart-step-node';
+        if (isContainer) node.classList.add('container-step-node');
         node.id = `flowchart-v2-node-${step.id}`;
         node.setAttribute('data-step-id', step.id);
         node.style.cssText = `
@@ -221,7 +226,7 @@ class FlowchartCanvas {
             width: ${pos.width}px;
             height: ${pos.height}px;
             background: white;
-            border: 2px solid #f8bbd9;
+            border: 2px solid ${containerBorderColor};
             border-radius: 8px;
             padding: 8px;
             cursor: pointer;
@@ -229,7 +234,7 @@ class FlowchartCanvas {
             display: flex;
             flex-direction: column;
             align-items: center;
-            justify-content: center;
+            justify-content: ${isContainer ? 'flex-start' : 'center'};
             box-shadow: 0 2px 4px rgba(0,0,0,0.1);
             pointer-events: auto;
         `;
@@ -289,19 +294,19 @@ class FlowchartCanvas {
             this.handleDeleteStep(step);
         });
 
-        // Icon (FontAwesome) - grayscale
+        // Icon (FontAwesome) - grayscale, smaller for containers to save space
         const icon = document.createElement('i');
         icon.className = this.getStepIcon(step);
         icon.style.cssText = `
-            font-size: 28px;
-            margin-bottom: 6px;
-            color: #6b7280;
+            font-size: ${isContainer ? '20px' : '28px'};
+            margin-bottom: ${isContainer ? '3px' : '6px'};
+            color: ${isContainer ? containerBorderColor : '#6b7280'};
         `;
 
         // Name
         const name = document.createElement('div');
         name.style.cssText = `
-            font-size: 12px;
+            font-size: ${isContainer ? '11px' : '12px'};
             font-weight: 500;
             text-align: center;
             overflow: hidden;
@@ -393,6 +398,33 @@ class FlowchartCanvas {
             this.startConnection(step, outputPort, e);
         });
 
+        // Error handling shield badge (shows when step has error handling enabled)
+        const hasEH = step.config?.errorHandling?.enabled === true;
+        if (hasEH) {
+            const shieldBadge = document.createElement('div');
+            shieldBadge.className = 'step-error-handling-badge';
+            shieldBadge.title = 'Error handling enabled';
+            shieldBadge.style.cssText = `
+                position: absolute;
+                top: -6px;
+                right: -6px;
+                width: 18px;
+                height: 18px;
+                background: #ef4444;
+                border-radius: 50%;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                font-size: 10px;
+                color: white;
+                border: 2px solid white;
+                z-index: 5;
+                pointer-events: none;
+            `;
+            shieldBadge.innerHTML = '<i class="fas fa-shield-alt" style="font-size: 8px;"></i>';
+            node.appendChild(shieldBadge);
+        }
+
         node.appendChild(badge);
         node.appendChild(deleteBtn);
         node.appendChild(inputPort);
@@ -400,24 +432,297 @@ class FlowchartCanvas {
         node.appendChild(icon);
         node.appendChild(name);
 
-        // Hover effect - show delete button
+        // Container sub-flow preview (shows child steps as colored dots per zone)
+        if (isContainer) {
+            const preview = this.createContainerPreview(step);
+            if (preview) {
+                node.appendChild(preview);
+            }
+        }
+
+        // Hover effect - show delete button + container tooltip
         node.addEventListener('mouseenter', () => {
             node.style.borderColor = '#1e3a8a';
             node.style.boxShadow = '0 4px 12px rgba(30, 58, 138, 0.3)';
             node.style.transform = 'translateY(-2px)';
             deleteBtn.style.opacity = '1';
+
+            // Show container children tooltip
+            if (isContainer) {
+                this.showContainerTooltip(step, node);
+            }
         });
 
         node.addEventListener('mouseleave', () => {
-            node.style.borderColor = '#f8bbd9';
+            node.style.borderColor = containerBorderColor;
             node.style.boxShadow = '0 2px 4px rgba(0,0,0,0.1)';
             node.style.transform = 'translateY(0)';
             deleteBtn.style.opacity = '0';
+
+            // Hide container tooltip
+            if (isContainer) {
+                this.hideContainerTooltip();
+            }
         });
 
         // Click handler is in FlowchartOrchestratorV2 (detects click vs drag)
 
         return node;
+    }
+
+    /**
+     * Create compact sub-flow preview for container steps.
+     * Shows child steps as colored dots per zone with count badges.
+     */
+    createContainerPreview(step) {
+        const containerInfo = this.layout?.containers?.get(step.id);
+        const zones = VisualStep.getContainerZones(step);
+
+        const preview = document.createElement('div');
+        preview.className = 'container-preview';
+        preview.style.cssText = `
+            width: 100%;
+            border-top: 1px solid #e2e8f0;
+            margin-top: 4px;
+            padding-top: 2px;
+        `;
+
+        zones.forEach(zone => {
+            const zoneRow = document.createElement('div');
+            zoneRow.style.cssText = `
+                display: flex;
+                align-items: center;
+                gap: 3px;
+                padding: 2px 4px;
+            `;
+
+            const color = this.getZoneColor(zone);
+
+            // Zone label (only for multi-zone containers like try-catch)
+            if (zones.length > 1) {
+                const zoneLabel = document.createElement('span');
+                zoneLabel.style.cssText = `
+                    color: ${color};
+                    font-weight: 700;
+                    text-transform: uppercase;
+                    font-size: 8px;
+                    min-width: 24px;
+                `;
+                zoneLabel.textContent = zone;
+                zoneRow.appendChild(zoneLabel);
+            }
+
+            // Get children for this zone
+            const children = containerInfo?.children?.[zone] || [];
+
+            // Dots container
+            const dotsContainer = document.createElement('div');
+            dotsContainer.style.cssText = `
+                display: flex;
+                align-items: center;
+                gap: 2px;
+                flex: 1;
+                overflow: hidden;
+            `;
+
+            if (children.length > 0) {
+                const maxDots = zones.length > 1 ? 3 : 4;
+                const displayCount = Math.min(children.length, maxDots);
+
+                for (let i = 0; i < displayCount; i++) {
+                    if (i > 0) {
+                        const arrow = document.createElement('span');
+                        arrow.style.cssText = 'color: #94a3b8; font-size: 7px; flex-shrink: 0;';
+                        arrow.textContent = '\u2192';
+                        dotsContainer.appendChild(arrow);
+                    }
+
+                    const dot = document.createElement('span');
+                    dot.style.cssText = `
+                        width: 8px; height: 8px;
+                        border-radius: 50%;
+                        background: ${color};
+                        display: inline-block;
+                        flex-shrink: 0;
+                    `;
+                    dot.title = children[i].stepName || children[i].step_name || 'Step';
+                    dotsContainer.appendChild(dot);
+                }
+
+                if (children.length > maxDots) {
+                    const more = document.createElement('span');
+                    more.style.cssText = 'color: #94a3b8; font-size: 8px; flex-shrink: 0;';
+                    more.textContent = `+${children.length - maxDots}`;
+                    dotsContainer.appendChild(more);
+                }
+            } else {
+                const empty = document.createElement('span');
+                empty.style.cssText = 'color: #cbd5e1; font-size: 9px; font-style: italic;';
+                empty.textContent = 'empty';
+                dotsContainer.appendChild(empty);
+            }
+
+            zoneRow.appendChild(dotsContainer);
+
+            // Count badge
+            const countBadge = document.createElement('span');
+            countBadge.style.cssText = `
+                background: ${color}20;
+                color: ${color};
+                font-size: 9px;
+                font-weight: 600;
+                padding: 1px 4px;
+                border-radius: 3px;
+                flex-shrink: 0;
+            `;
+            countBadge.textContent = children.length;
+            zoneRow.appendChild(countBadge);
+
+            preview.appendChild(zoneRow);
+        });
+
+        return preview;
+    }
+
+    /**
+     * Get border color for container step types
+     */
+    getContainerBorderColor(step) {
+        if (VisualStep.isLoopStep(step)) return '#3b82f6';      // Blue
+        return '#f8bbd9';
+    }
+
+    /**
+     * Get color for a container zone
+     */
+    getZoneColor(zone) {
+        const colors = {
+            body: '#3b82f6'        // Blue
+        };
+        return colors[zone] || '#94a3b8';
+    }
+
+    /**
+     * Show tooltip listing child steps when hovering a container step
+     */
+    showContainerTooltip(step, node) {
+        this.hideContainerTooltip(); // Remove any existing tooltip
+
+        const containerInfo = this.layout?.containers?.get(step.id);
+        if (!containerInfo) return;
+
+        const zones = VisualStep.getContainerZones(step);
+        const totalChildren = Object.values(containerInfo.children)
+            .reduce((sum, arr) => sum + arr.length, 0);
+
+        if (totalChildren === 0) return; // No tooltip for empty containers
+
+        const tooltip = document.createElement('div');
+        tooltip.className = 'container-hover-tooltip';
+        tooltip.style.cssText = `
+            position: absolute;
+            left: ${node.offsetLeft + node.offsetWidth + 12}px;
+            top: ${node.offsetTop}px;
+            background: #1e293b;
+            color: white;
+            padding: 10px 14px;
+            border-radius: 8px;
+            font-size: 12px;
+            z-index: 1000;
+            min-width: 160px;
+            max-width: 260px;
+            box-shadow: 0 8px 16px rgba(0,0,0,0.25);
+            pointer-events: none;
+        `;
+
+        // Title
+        const title = document.createElement('div');
+        title.style.cssText = 'font-weight: 600; margin-bottom: 6px; font-size: 11px; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px;';
+        title.textContent = `${totalChildren} step${totalChildren !== 1 ? 's' : ''} inside`;
+        tooltip.appendChild(title);
+
+        zones.forEach(zone => {
+            const children = containerInfo.children[zone] || [];
+            if (children.length === 0 && zones.length === 1) return;
+
+            const color = this.getZoneColor(zone);
+
+            // Zone header (only for multi-zone)
+            if (zones.length > 1) {
+                const zoneHeader = document.createElement('div');
+                zoneHeader.style.cssText = `
+                    color: ${color};
+                    font-weight: 600;
+                    font-size: 10px;
+                    text-transform: uppercase;
+                    margin-top: 6px;
+                    margin-bottom: 2px;
+                    padding-bottom: 2px;
+                    border-bottom: 1px solid ${color}40;
+                `;
+                zoneHeader.textContent = `${zone} (${children.length})`;
+                tooltip.appendChild(zoneHeader);
+            }
+
+            if (children.length === 0) {
+                const empty = document.createElement('div');
+                empty.style.cssText = 'color: #64748b; font-style: italic; font-size: 11px; padding: 2px 0;';
+                empty.textContent = 'No steps';
+                tooltip.appendChild(empty);
+            } else {
+                children.forEach((child, idx) => {
+                    const row = document.createElement('div');
+                    row.style.cssText = `
+                        display: flex;
+                        align-items: center;
+                        gap: 6px;
+                        padding: 2px 0;
+                    `;
+
+                    const dot = document.createElement('span');
+                    dot.style.cssText = `
+                        width: 6px; height: 6px;
+                        border-radius: 50%;
+                        background: ${color};
+                        flex-shrink: 0;
+                    `;
+
+                    const label = document.createElement('span');
+                    label.style.cssText = 'font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;';
+                    label.textContent = `${idx + 1}. ${child.stepName || child.step_name || 'Unnamed'}`;
+
+                    row.appendChild(dot);
+                    row.appendChild(label);
+                    tooltip.appendChild(row);
+                });
+            }
+        });
+
+        // Arrow pointer on left side
+        const arrow = document.createElement('div');
+        arrow.style.cssText = `
+            position: absolute;
+            left: -6px;
+            top: 14px;
+            width: 0; height: 0;
+            border-top: 6px solid transparent;
+            border-bottom: 6px solid transparent;
+            border-right: 6px solid #1e293b;
+        `;
+        tooltip.appendChild(arrow);
+
+        this.nodesContainer.appendChild(tooltip);
+        this._containerTooltip = tooltip;
+    }
+
+    /**
+     * Hide container children tooltip
+     */
+    hideContainerTooltip() {
+        if (this._containerTooltip) {
+            this._containerTooltip.remove();
+            this._containerTooltip = null;
+        }
     }
 
     /**
@@ -538,13 +843,9 @@ class FlowchartCanvas {
 
             // Highlight hovered target
             if (targetPort && targetPort.getAttribute('data-step-id') !== sourceStep.id) {
-                const targetId = targetPort.getAttribute('data-step-id');
-                console.log('🎯 Hovering over INPUT PORT of step:', targetId);
                 targetPort.style.background = '#059669';  // Darker green
                 targetPort.style.transform = 'translateY(-50%) scale(1.5)';
             } else if (targetNode && targetNode.getAttribute('data-step-id') !== sourceStep.id) {
-                const targetId = targetNode.getAttribute('data-step-id');
-                console.log('🎯 Hovering over STEP NODE:', targetId);
                 targetNode.style.borderColor = '#10b981';
                 targetNode.style.borderWidth = '3px';
             }
@@ -613,20 +914,14 @@ class FlowchartCanvas {
             } else {
                 // Check for step node
                 targetNode = targetElement?.closest('.flowchart-step-node');
-                console.log('🔍 Target node found:', targetNode ? 'YES' : 'NO');
 
                 if (targetNode) {
                     const targetStepId = targetNode.getAttribute('data-step-id');
                     const targetStep = this.steps.find(s => s.id === targetStepId);
 
-                    console.log('🟦 Dropped on STEP NODE - Target step ID:', targetStepId);
-                    console.log('🟦 Target step found in steps array:', targetStep ? 'YES' : 'NO');
-
                     if (targetStep && targetStep.id !== sourceStep.id) {
                         console.log('✅ Connection created to step:', sourceStep.id, '→', targetStep.id);
                         this.createConnection(sourceStep, targetStep);
-                    } else {
-                        console.log('❌ Cannot connect to self');
                     }
                 } else {
                     // No target found - use suggested step if available AND user didn't drag
@@ -766,7 +1061,6 @@ class FlowchartCanvas {
             'validate-fhir': 'fas fa-check-circle',            // Check for FHIR validation
             'deliver-fhir': 'fas fa-paper-plane',              // Send for delivery
             'try-catch': 'fas fa-life-ring',                   // Life ring for error handling
-            'retry-logic': 'fas fa-sync-alt',                  // Sync for retry
             'hl7-segment-extractor': 'fas fa-cut',             // Cut for extract
             'fhir-resource-builder': 'fas fa-hammer',          // Hammer for builder
             'remove-duplicates': 'fas fa-compress',            // Compress for dedup
@@ -816,8 +1110,6 @@ class FlowchartCanvas {
             'if_then_else': 'fas fa-code-branch',
             'switch_case': 'fas fa-project-diagram',
             'control.loop': 'fas fa-redo',
-            'control.try_catch': 'fas fa-life-ring',
-            'control.retry': 'fas fa-sync-alt',
             'core.validation': 'fas fa-shield-alt',
             'pre.validation': 'fas fa-shield-alt',
             'core.enrichment': 'fas fa-plus-square',
@@ -998,6 +1290,12 @@ class FlowchartCanvas {
             arrowColor = '#dc2626';
             lineWidth = 4;
             label = connection.label || 'FALSE';
+        } else if (connection.type === 'container-internal') {
+            // Container-internal - lighter, thinner
+            strokeColor = '#94a3b8';
+            arrowColor = '#94a3b8';
+            lineWidth = 2;
+            label = null;
         } else if (connection.type === 'custom') {
             // Custom user-created connection - Blue (same as sequential)
             strokeColor = '#1e40af';

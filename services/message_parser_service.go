@@ -152,8 +152,9 @@ func InitializeMessageParserService(db *sql.DB) *MessageParserService {
 	mongoService := NewMongoDBMessageService(mongoClient, mongoDatabase)
 	postgresService := NewInterfaceMessageService(db)
 
-	// OOB: Initialize transformation pipeline service
-	transformationPipeline := NewTransformationPipelineService(db)
+	// OOB: Initialize transformation pipeline service (nil credStore: message parser
+	// service doesn't perform S3 credential lookups — pass nil for passthrough mode)
+	transformationPipeline := NewTransformationPipelineService(db, nil)
 
 	// OOB: Initialize hybrid output message service
 	outputMessageService := NewOutputMessageService(db, mongoClient, mongoDatabase)

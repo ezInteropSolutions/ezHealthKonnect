@@ -19,6 +19,66 @@ class TryCatchBuilder extends BaseStepConfigBuilder {
         super(container, initialConfig);
         this.availableSteps = [];
         this.loadAvailableSteps();
+
+        // Pre-planned catch actions catalog
+        this.catchActionCatalog = [
+            {
+                type: 'log_error',
+                label: 'Log Exception',
+                icon: 'fas fa-file-alt',
+                description: 'Log the error message with configurable severity level',
+                color: '#ef4444',
+                defaultConfig: { level: 'error', includeStepName: true },
+                configFields: [
+                    { key: 'level', label: 'Log Level', type: 'select', options: ['error', 'warn', 'info'] }
+                ]
+            },
+            {
+                type: 'set_error_flag',
+                label: 'Set Error Flag',
+                icon: 'fas fa-flag',
+                description: 'Set _errorHandled = true for downstream steps to check',
+                color: '#f59e0b',
+                defaultConfig: { flagName: '_errorHandled' },
+                configFields: [
+                    { key: 'flagName', label: 'Flag Variable', type: 'text', placeholder: '_errorHandled' }
+                ]
+            },
+            {
+                type: 'store_error_details',
+                label: 'Store Error Details',
+                icon: 'fas fa-database',
+                description: 'Save full error context (message, timestamp, step) to a variable',
+                color: '#8b5cf6',
+                defaultConfig: { variableName: '_lastError' },
+                configFields: [
+                    { key: 'variableName', label: 'Variable Name', type: 'text', placeholder: '_lastError' }
+                ]
+            },
+            {
+                type: 'increment_error_counter',
+                label: 'Increment Error Counter',
+                icon: 'fas fa-plus-circle',
+                description: 'Track error count in _errorCount for alerting thresholds',
+                color: '#06b6d4',
+                defaultConfig: { counterName: '_errorCount' },
+                configFields: [
+                    { key: 'counterName', label: 'Counter Variable', type: 'text', placeholder: '_errorCount' }
+                ]
+            },
+            {
+                type: 'set_default_value',
+                label: 'Set Default Value',
+                icon: 'fas fa-edit',
+                description: 'Set a fallback value for a field when the try block fails',
+                color: '#10b981',
+                defaultConfig: { fieldName: '', defaultValue: '' },
+                configFields: [
+                    { key: 'fieldName', label: 'Field Name', type: 'text', placeholder: 'e.g. patient_status' },
+                    { key: 'defaultValue', label: 'Default Value', type: 'text', placeholder: 'e.g. unknown' }
+                ]
+            }
+        ];
     }
 
     /**
@@ -61,7 +121,8 @@ class TryCatchBuilder extends BaseStepConfigBuilder {
             trySteps: [],
             catchSteps: [],
             finallySteps: [],
-            onError: 'catch'
+            onError: 'catch',
+            catchActions: []
         };
     }
 
@@ -100,6 +161,10 @@ class TryCatchBuilder extends BaseStepConfigBuilder {
                 <!-- Zone Sections -->
                 ${this.renderZone('try', 'Try Block', config.trySteps, '#22c55e', 'Steps to execute. If any fail, execution moves to Catch block.')}
                 ${this.renderZone('catch', 'Catch Block', config.catchSteps, '#ef4444', 'Steps to execute when an error occurs. Receives _error context variable.')}
+
+                <!-- Built-in Catch Actions -->
+                ${this.renderCatchActions(config.catchActions || [])}
+
                 ${this.renderZone('finally', 'Finally Block', config.finallySteps, '#3b82f6', 'Steps that ALWAYS execute (success or failure). Receives _trySuccess context variable.')}
 
                 <!-- Info Box -->
@@ -176,6 +241,97 @@ class TryCatchBuilder extends BaseStepConfigBuilder {
         `;
     }
 
+    /**
+     * Render built-in catch actions as toggle cards
+     */
+    renderCatchActions(activeActions) {
+        const activeMap = new Map();
+        (activeActions || []).forEach(a => activeMap.set(a.type, a));
+
+        const cards = this.catchActionCatalog.map(action => {
+            const active = activeMap.get(action.type);
+            const isEnabled = active?.enabled || false;
+            const currentConfig = active?.config || action.defaultConfig;
+
+            const configFieldsHtml = (action.configFields || []).map(field => {
+                const value = currentConfig[field.key] ?? '';
+                if (field.type === 'select') {
+                    const options = field.options.map(opt =>
+                        `<option value="${opt}" ${value === opt ? 'selected' : ''}>${opt}</option>`
+                    ).join('');
+                    return `
+                        <div style="margin-top: 6px; ${!isEnabled ? 'opacity: 0.4; pointer-events: none;' : ''}">
+                            <label style="font-size: 10px; color: var(--text-secondary);">${field.label}</label>
+                            <select class="catch-action-config form-control" data-action-type="${action.type}" data-config-key="${field.key}"
+                                style="font-size: 11px; padding: 2px 6px; margin-top: 2px;">
+                                ${options}
+                            </select>
+                        </div>
+                    `;
+                }
+                return `
+                    <div style="margin-top: 6px; ${!isEnabled ? 'opacity: 0.4; pointer-events: none;' : ''}">
+                        <label style="font-size: 10px; color: var(--text-secondary);">${field.label}</label>
+                        <input type="text" class="catch-action-config form-control" data-action-type="${action.type}" data-config-key="${field.key}"
+                            value="${value}" placeholder="${field.placeholder || ''}"
+                            style="font-size: 11px; padding: 2px 6px; margin-top: 2px;">
+                    </div>
+                `;
+            }).join('');
+
+            return `
+                <div class="catch-action-card" data-action-type="${action.type}" style="
+                    display: flex; gap: 10px; padding: 8px 10px;
+                    border: 1px solid ${isEnabled ? action.color + '40' : '#e2e8f020'};
+                    border-radius: 8px; margin-bottom: 6px;
+                    background: ${isEnabled ? action.color + '08' : 'transparent'};
+                    transition: all 0.15s;">
+                    <div style="flex-shrink: 0; padding-top: 2px;">
+                        <label class="catch-action-toggle" style="position: relative; display: inline-block; width: 32px; height: 18px; cursor: pointer;">
+                            <input type="checkbox" class="catch-action-checkbox" data-action-type="${action.type}"
+                                ${isEnabled ? 'checked' : ''}
+                                style="opacity: 0; width: 0; height: 0;">
+                            <span style="
+                                position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+                                background: ${isEnabled ? action.color : '#cbd5e1'};
+                                border-radius: 9px; transition: 0.2s;
+                            "></span>
+                            <span style="
+                                position: absolute; top: 2px; left: ${isEnabled ? '16px' : '2px'};
+                                width: 14px; height: 14px; background: white;
+                                border-radius: 50%; transition: 0.2s;
+                            "></span>
+                        </label>
+                    </div>
+                    <div style="flex: 1; min-width: 0;">
+                        <div style="display: flex; align-items: center; gap: 6px;">
+                            <i class="${action.icon}" style="font-size: 12px; color: ${action.color};"></i>
+                            <span style="font-weight: 600; font-size: 12px; color: var(--text-primary);">${action.label}</span>
+                        </div>
+                        <p style="margin: 2px 0 0; font-size: 11px; color: var(--text-secondary); line-height: 1.3;">
+                            ${action.description}
+                        </p>
+                        ${configFieldsHtml}
+                    </div>
+                </div>
+            `;
+        }).join('');
+
+        return `
+            <div class="tc-catch-actions-section" style="
+                margin-top: 12px; padding: 10px 14px;
+                border: 1px solid rgba(239, 68, 68, 0.15); border-radius: 10px;
+                background: rgba(239, 68, 68, 0.02);">
+                <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+                    <span style="font-weight: 700; font-size: 11px; text-transform: uppercase;
+                        letter-spacing: 0.5px; color: #ef4444;">Quick Actions</span>
+                    <span style="font-size: 11px; color: var(--text-tertiary);">Built-in error handlers (run before catch steps)</span>
+                </div>
+                ${cards}
+            </div>
+        `;
+    }
+
     attachEvents() {
         // Error handling mode change
         const onErrorSelect = this.container.querySelector('#tcOnError');
@@ -204,6 +360,21 @@ class TryCatchBuilder extends BaseStepConfigBuilder {
             });
         });
 
+        // Catch action toggles
+        this.container.querySelectorAll('.catch-action-checkbox').forEach(checkbox => {
+            checkbox.addEventListener('change', () => {
+                this.updateCatchActions();
+            });
+        });
+
+        // Catch action config inputs
+        this.container.querySelectorAll('.catch-action-config').forEach(input => {
+            const eventType = input.tagName === 'SELECT' ? 'change' : 'blur';
+            input.addEventListener(eventType, () => {
+                this.updateCatchActions();
+            });
+        });
+
         // Remove step buttons
         this.container.querySelectorAll('.tc-remove-step').forEach(btn => {
             btn.addEventListener('click', (e) => {
@@ -218,6 +389,41 @@ class TryCatchBuilder extends BaseStepConfigBuilder {
                 }
             });
         });
+    }
+
+    /**
+     * Collect current catch action state from the UI toggle cards
+     * and update config.catchActions
+     */
+    updateCatchActions() {
+        const actions = [];
+
+        this.container.querySelectorAll('.catch-action-checkbox').forEach(checkbox => {
+            const actionType = checkbox.dataset.actionType;
+            const catalogEntry = this.catchActionCatalog.find(a => a.type === actionType);
+            if (!catalogEntry) return;
+
+            const actionConfig = { ...catalogEntry.defaultConfig };
+
+            // Read config field values from DOM
+            this.container.querySelectorAll(`.catch-action-config[data-action-type="${actionType}"]`).forEach(input => {
+                const key = input.dataset.configKey;
+                actionConfig[key] = input.value;
+            });
+
+            actions.push({
+                type: actionType,
+                enabled: checkbox.checked,
+                config: actionConfig
+            });
+        });
+
+        // Only store enabled actions (or actions with non-default config)
+        this.config.catchActions = actions.filter(a => a.enabled);
+        this.emitChange();
+
+        // Re-render to update toggle card visuals (border, background, field opacity)
+        this.reRender();
     }
 
     /**

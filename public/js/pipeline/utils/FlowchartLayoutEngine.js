@@ -92,32 +92,9 @@ class FlowchartLayoutEngine {
 
             const config = step.config || {};
 
-            if (VisualStep.isTryCatchStep(step)) {
-                // Try-Catch: 3 config arrays
-                ['try', 'catch', 'finally'].forEach(zone => {
-                    const key = zone + 'Steps';
-                    const ids = config[key] || [];
-                    ids.forEach(id => {
-                        const child = stepMap.get(id);
-                        if (child) {
-                            children[zone].push(child);
-                            this.childStepIds.add(id);
-                        }
-                    });
-                });
-            } else if (VisualStep.isLoopStep(step)) {
+            if (VisualStep.isLoopStep(step)) {
                 // Loop: childStepIds array
                 const ids = config.childStepIds || [];
-                ids.forEach(id => {
-                    const child = stepMap.get(id);
-                    if (child) {
-                        children.body.push(child);
-                        this.childStepIds.add(id);
-                    }
-                });
-            } else if (VisualStep.isRetryStep(step)) {
-                // Retry: childSteps array
-                const ids = config.childSteps || [];
                 ids.forEach(id => {
                     const child = stepMap.get(id);
                     if (child) {

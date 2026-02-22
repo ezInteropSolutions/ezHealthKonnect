@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"ezhealthkonnect/models"
+	"ezhealthkonnect/services/executors"
 	"ezhealthkonnect/services/executors/control"
 	"fmt"
 	"log"
@@ -27,12 +28,14 @@ type TransformationExecutor interface {
 	GetSupportedType() string
 }
 
-// NewTransformationPipelineService creates a new transformation pipeline service
-func NewTransformationPipelineService(db *sql.DB) *TransformationPipelineService {
+// NewTransformationPipelineService creates a new transformation pipeline service.
+// credStore may be nil; if provided, encrypted connectivity configs are decrypted
+// transparently by any executor that reads credentials from the database.
+func NewTransformationPipelineService(db *sql.DB, credStore *CredentialStore) *TransformationPipelineService {
 	service := &TransformationPipelineService{
 		db:               db,
-		executorRegistry: NewExecutorRegistry(db),     // Use ExecutorRegistry with all built-in executors
-		branchResolver:   NewBranchResolverFactory(),  // OOP-based branch resolution for conditionals
+		executorRegistry: NewExecutorRegistry(db, credStore), // Use ExecutorRegistry with all built-in executors
+		branchResolver:   NewBranchResolverFactory(),          // OOP-based branch resolution for conditionals
 		executors:        make(map[string]TransformationExecutor),
 	}
 
@@ -52,13 +55,16 @@ func (tps *TransformationPipelineService) GetExecutorRegistry() *ExecutorRegistr
 // GetPipeline retrieves a transformation pipeline for an interface/message type
 func (tps *TransformationPipelineService) GetPipeline(ctx context.Context, interfaceID string, messageType string) (*models.TransformationPipeline, error) {
 	query := `
-		SELECT id, interface_id, message_type, pipeline_name, enabled, version, created_at, updated_at
+		SELECT id, interface_id, message_type, pipeline_name, enabled, version,
+		       COALESCE(pipeline_config, '{}') AS pipeline_config,
+		       created_at, updated_at
 		FROM transformation_pipelines
 		WHERE interface_id = $1 AND message_type = $2 AND enabled = true
 		LIMIT 1
 	`
 
 	pipeline := &models.TransformationPipeline{}
+	var pipelineConfigJSON []byte
 	err := tps.db.QueryRowContext(ctx, query, interfaceID, messageType).Scan(
 		&pipeline.ID,
 		&pipeline.InterfaceID,
@@ -66,9 +72,15 @@ func (tps *TransformationPipelineService) GetPipeline(ctx context.Context, inter
 		&pipeline.PipelineName,
 		&pipeline.Enabled,
 		&pipeline.Version,
+		&pipelineConfigJSON,
 		&pipeline.CreatedAt,
 		&pipeline.UpdatedAt,
 	)
+
+	if err == nil && len(pipelineConfigJSON) > 0 {
+		pipeline.PipelineConfig = make(map[string]interface{})
+		json.Unmarshal(pipelineConfigJSON, &pipeline.PipelineConfig)
+	}
 
 	if err != nil {
 		return nil, fmt.Errorf("failed to get pipeline: %w", err)
@@ -256,6 +268,17 @@ func (tps *TransformationPipelineService) executePipeline(
 		TotalTimeMs:       0,
 	}
 
+	// Extract pipeline-level defaults for error handling and retry
+	pipelineRetryDefaults := executors.ParsePipelineRetryDefaults(pipeline.PipelineConfig)
+	pipelineEHDefaults := executors.ParsePipelineErrorHandlingDefaults(pipeline.PipelineConfig)
+	if pipelineRetryDefaults != nil {
+		fmt.Printf("🔄 Pipeline-level retry defaults: max=%d, delay=%dms, backoff=%.1fx\n",
+			pipelineRetryDefaults.MaxRetries, pipelineRetryDefaults.DelayMs, pipelineRetryDefaults.BackoffMultiplier)
+	}
+	if pipelineEHDefaults != nil {
+		fmt.Printf("🛡️ Pipeline-level error handling defaults: onError=%s\n", pipelineEHDefaults.OnError)
+	}
+
 	// Build step index for conditional routing lookup
 	stepIndex := make(map[string]int) // stepID -> index in pipeline.Steps
 	stepByID := make(map[string]*models.TransformationStep) // stepID -> step
@@ -333,61 +356,65 @@ func (tps *TransformationPipelineService) executePipeline(
 			}
 		}
 
-		// ✅ TRY-CATCH HANDLING: Inject child executor callback and mark child steps
-		if step.StepType == "control.try_catch" {
-			if tcExecutor, ok := executor.(*control.TryCatchExecutor); ok {
-				tcExecutor.SetChildExecutor(childExecutor)
-				fmt.Printf("🛡️ Injected child executor into try-catch step: %s\n", step.StepName)
-			}
-			for _, key := range []string{"trySteps", "catchSteps", "finallySteps"} {
-				if ids, ok := step.Config[key].([]interface{}); ok {
-					for _, cid := range ids {
-						if cidStr, ok := cid.(string); ok {
-							loopChildStepIDs[cidStr] = true
-							fmt.Printf("   📌 Marked %s child for container-only execution: %s\n", key, cidStr)
-						}
-					}
-				}
-				if ids, ok := step.Config[key].([]string); ok {
-					for _, cidStr := range ids {
-						loopChildStepIDs[cidStr] = true
-						fmt.Printf("   📌 Marked %s child for container-only execution: %s\n", key, cidStr)
-					}
-				}
-			}
+		// Debug: Log step config keys for troubleshooting error handling resolution
+		configKeys := make([]string, 0, len(step.Config))
+		for k := range step.Config {
+			configKeys = append(configKeys, k)
+		}
+		fmt.Printf("🔍 Step '%s' config keys: %v\n", step.StepName, configKeys)
+		if eh, ok := step.Config["errorHandling"]; ok {
+			fmt.Printf("🔍 Step '%s' errorHandling config: %v\n", step.StepName, eh)
+		} else {
+			fmt.Printf("🔍 Step '%s' has NO errorHandling in config\n", step.StepName)
+		}
+		if rt, ok := step.Config["retry"]; ok {
+			fmt.Printf("🔍 Step '%s' retry config: %v\n", step.StepName, rt)
+		}
+		fmt.Printf("🔍 Pipeline EH defaults: %v\n", pipelineEHDefaults)
+
+		// Resolve retry config: step override > pipeline default > nil
+		retryConfig := executors.ResolveRetryConfig(step.Config, pipelineRetryDefaults)
+		if retryConfig != nil {
+			fmt.Printf("🔄 Retry enabled for: %s (max=%d, delay=%dms, backoff=%.1fx)\n",
+				step.StepName, retryConfig.MaxRetries, retryConfig.DelayMs, retryConfig.BackoffMultiplier)
 		}
 
-		// ✅ RETRY HANDLING: Inject child executor callback and mark child steps
-		if step.StepType == "control.retry" {
-			if retryExecutor, ok := executor.(*control.RetryExecutor); ok {
-				retryExecutor.SetChildExecutor(childExecutor)
-				fmt.Printf("🔁 Injected child executor into retry step: %s\n", step.StepName)
-			}
-			if childIDs, ok := step.Config["childSteps"].([]interface{}); ok {
-				for _, cid := range childIDs {
-					if cidStr, ok := cid.(string); ok {
-						loopChildStepIDs[cidStr] = true
-						fmt.Printf("   📌 Marked child step for retry-only execution: %s\n", cidStr)
-					}
-				}
-			}
-			if childIDs, ok := step.Config["childSteps"].([]string); ok {
-				for _, cidStr := range childIDs {
-					loopChildStepIDs[cidStr] = true
-					fmt.Printf("   📌 Marked child step for retry-only execution: %s\n", cidStr)
-				}
-			}
+		// Resolve error handling config: step override > pipeline default > nil
+		ehConfig := executors.ResolveErrorHandlingConfig(step.Config, pipelineEHDefaults)
+		if ehConfig != nil {
+			fmt.Printf("🛡️ Error handling RESOLVED for: %s (onError=%s, defaultField=%s, defaultValue=%s)\n",
+				step.StepName, ehConfig.OnError, ehConfig.DefaultField, ehConfig.DefaultValue)
+		} else {
+			fmt.Printf("⚠️ Error handling NOT resolved for: %s (ehConfig is nil)\n", step.StepName)
 		}
 
-		// Execute step with timeout (legacy executors still use old signature)
-		stepCtx, cancel := context.WithTimeout(ctx, time.Duration(step.TimeoutMs)*time.Millisecond)
-		defer cancel()
+		// Execute step with retry (ExecuteWithRetry handles single-exec when retryConfig is nil)
+		retryResult := executors.ExecuteWithRetry(ctx, retryConfig, func(attempt int) (map[string]interface{}, error) {
+			stepCtx, cancel := context.WithTimeout(ctx, time.Duration(step.TimeoutMs)*time.Millisecond)
+			defer cancel()
+			return executor.Execute(stepCtx, &step, execContext.Message)
+		})
 
-		// Call legacy Execute method (still returns map, modifies execContext.Message)
-		apiCallStart := time.Now()
-		outputData, stepErr := executor.Execute(stepCtx, &step, execContext.Message)
+		outputData := retryResult.Output
+		stepErr := retryResult.Err
+		originalErr := stepErr // preserve original error for logging
 		stepDuration := time.Now().Sub(stepStartTime)
-		apiCallDuration := time.Now().Sub(apiCallStart).Milliseconds()
+
+		// Apply error handling if step failed after all retries
+		errorWasCaught := false
+		fmt.Printf("🔍 Step '%s' post-exec: stepErr=%v, ehConfig=%v\n", step.StepName, stepErr != nil, ehConfig != nil)
+		if stepErr != nil && ehConfig != nil {
+			fmt.Printf("🛡️ APPLYING error handling for: %s (error: %s)\n", step.StepName, stepErr.Error())
+			outputData, stepErr = executors.ApplyErrorHandling(ehConfig, stepErr, outputData, execContext.Message, step.StepName)
+			if stepErr == nil {
+				errorWasCaught = true // error was caught/suppressed — treat as success
+				fmt.Printf("🛡️ Error CAUGHT for: %s\n", step.StepName)
+			} else {
+				fmt.Printf("🛡️ Error RETHROWN for: %s\n", step.StepName)
+			}
+		} else if stepErr != nil {
+			fmt.Printf("⚠️ Step '%s' failed but NO error handler: stepErr=%s\n", step.StepName, stepErr.Error())
+		}
 
 		// Generate namespace for this step
 		namespace := models.GenerateStepNamespace(step.StepName, step.ID, step.StepAlias)
@@ -407,13 +434,26 @@ func (tps *TransformationPipelineService) executePipeline(
 			if stepErr != nil {
 				stepOutput.Success = false
 				stepOutput.Error = stepErr.Error()
+			} else if errorWasCaught {
+				// Error was caught by handler — mark as success with note
+				stepOutput.Success = true
+				stepOutput.Error = fmt.Sprintf("caught: %s", originalErr.Error())
+				if stepOutput.OutputData == nil {
+					stepOutput.OutputData = make(map[string]interface{})
+				}
+				stepOutput.OutputData["error_caught"] = originalErr.Error()
+				stepOutput.OutputData["error_handler"] = ehConfig.OnError
+				if ehConfig.DefaultField != "" && ehConfig.DefaultValue != "" {
+					stepOutput.OutputData["default_applied_field"] = ehConfig.DefaultField
+					stepOutput.OutputData["default_applied_value"] = ehConfig.DefaultValue
+				}
 			}
 			execContext.StepOutputs[namespace] = stepOutput
 		} else {
 			// Executor didn't set output - create automatic output with basic metadata
 			stepOutputData := map[string]interface{}{
 				"step_type":         step.StepType,
-				"execution_time_ms": apiCallDuration,
+				"execution_time_ms": stepDuration.Milliseconds(),
 			}
 
 			// For API enrichment steps, capture additional metadata automatically
@@ -441,6 +481,26 @@ func (tps *TransformationPipelineService) executePipeline(
 					OutputData: stepOutputData,
 					Success:    false,
 					Error:      stepErr.Error(),
+					DurationMs: stepDuration.Milliseconds(),
+				}
+			} else if errorWasCaught {
+				// Error was caught by handler — mark as success with note
+				stepOutputData["error_caught"] = originalErr.Error()
+				stepOutputData["error_handler"] = ehConfig.OnError
+				if ehConfig.DefaultField != "" && ehConfig.DefaultValue != "" {
+					stepOutputData["default_applied_field"] = ehConfig.DefaultField
+					stepOutputData["default_applied_value"] = ehConfig.DefaultValue
+				}
+				execContext.StepOutputs[namespace] = models.StepOutput{
+					StepID:     step.ID,
+					StepName:   step.StepName,
+					StepAlias:  alias,
+					StepType:   step.StepType,
+					Namespace:  namespace,
+					Sequence:   step.Sequence,
+					OutputData: stepOutputData,
+					Success:    true,
+					Error:      fmt.Sprintf("caught: %s", originalErr.Error()),
 					DurationMs: stepDuration.Milliseconds(),
 				}
 			} else {
@@ -495,6 +555,14 @@ func (tps *TransformationPipelineService) executePipeline(
 				// For now, continue with previous message data
 				fmt.Printf("⚠️  Using default value for failed step: %s\n", step.StepName)
 			}
+		} else if errorWasCaught {
+			// Error was caught by handler — continue pipeline with updated output
+			// outputData now contains _lastError, _lastErrorStep, and any default field values
+			if outputData != nil {
+				execContext.Message = outputData
+			}
+			result.OutputData = execContext.Message
+			fmt.Printf("🛡️ Step error caught: %s (error: %s, took %dms)\n", step.StepName, originalErr.Error(), stepDuration.Milliseconds())
 		} else {
 			// Step succeeded, update message data (executors still modify the map directly)
 			if outputData != nil {

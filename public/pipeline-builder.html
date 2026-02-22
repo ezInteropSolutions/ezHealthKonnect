@@ -7,7 +7,7 @@
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
     <title>Pipeline Builder - ezHealthKonnect</title>
-    <link rel="stylesheet" href="/css/pipeline-builder.css?v=10.0">
+    <link rel="stylesheet" href="/css/pipeline-builder.css?v=11.0">
     <link rel="stylesheet" href="/css/components/field-path-autocomplete.css">
     <link rel="stylesheet" href="/css/api-endpoint-tester.css">
     <link rel="stylesheet" href="/css/result-mapping-builder.css?v=1.0">
@@ -33,6 +33,9 @@
             </div>
         </div>
         <div class="header-right">
+            <button id="pipelineSettingsBtn" class="btn btn-secondary" title="Pipeline Settings">
+                <i class="fas fa-cog"></i> Settings
+            </button>
             <button id="testPipelineBtn" class="btn btn-secondary">
                 <i class="fas fa-flask"></i> Test
             </button>
@@ -251,12 +254,12 @@
     <script src="/js/services/AuthService.js"></script>
 
     <!-- JavaScript Dependencies -->
-    <script src="/js/pipeline/models/PipelineModels.js?v=6.0"></script>
+    <script src="/js/pipeline/models/PipelineModels.js?v=7.0"></script>
     <script src="/js/pipeline/services/PipelineAPIService.js?v=5.0"></script>
-    <script src="/js/pipeline/managers/DragDropManager.js?v=4.0"></script>
+    <script src="/js/pipeline/managers/DragDropManager.js?v=5.0"></script>
     <script src="/js/pipeline/managers/CanvasRenderer.js?v=4.0"></script>
     <script src="/js/pipeline/managers/StepNodeManager.js?v=6.0"></script>
-    <script src="/js/pipeline/managers/ToolboxManager.js?v=8.8"></script>
+    <script src="/js/pipeline/managers/ToolboxManager.js?v=9.0"></script>
     <script src="/js/pipeline/managers/PropertiesPanel.js?v=27.0"></script>
     <!-- Modular OOP Components -->
     <script src="/js/pipeline/components/FieldPathSearchComponent.js?v=2.3"></script>
@@ -289,8 +292,6 @@
     <script src="/js/pipeline/utils/loopProviders/FHIRLoopProvider.js?v=1.0"></script>
     <script src="/js/pipeline/utils/loopProviders/LoopTypeRegistry.js?v=1.0"></script>
     <script src="/js/pipeline/components/ForEachLoopBuilder.js?v=1.4"></script>
-    <!-- Try-Catch Builder (OOP, extends BaseStepConfigBuilder) -->
-    <script src="/js/pipeline/components/TryCatchBuilder.js?v=1.0"></script>
     <!-- Connector Config Builder (OOP, extends BaseStepConfigBuilder) -->
     <script src="/js/pipeline/components/ConnectorConfigBuilder.js?v=1.0"></script>
     <!-- Variables Cache (must load before ReferenceVariablesPanel) -->
@@ -300,14 +301,14 @@
     <script src="/js/pipeline/components/VariablePanelBuilder.js?v=2.0"></script>
     <script src="/js/pipeline/components/ScriptEnrichmentEditor.js?v=2.5"></script>
     <!-- Flowchart Mode Components - V1 (Legacy) -->
-    <script src="/js/pipeline/utils/FlowchartLayoutEngine.js?v=1.3"></script>
-    <script src="/js/pipeline/utils/FlowchartConnector.js?v=1.3"></script>
-    <script src="/js/pipeline/managers/FlowchartRenderer.js?v=1.3"></script>
+    <script src="/js/pipeline/utils/FlowchartLayoutEngine.js?v=2.0"></script>
+    <script src="/js/pipeline/utils/FlowchartConnector.js?v=2.0"></script>
+    <script src="/js/pipeline/managers/FlowchartRenderer.js?v=2.0"></script>
     <!-- Flowchart Mode Components - V2 (New Horizontal Layout) -->
     <script src="/js/pipeline/flowchart-v2/core/CoordinateSystem.js?v=1.0"></script>
-    <script src="/js/pipeline/flowchart-v2/layout/HorizontalLayoutEngine.js?v=1.3"></script>
-    <script src="/js/pipeline/flowchart-v2/rendering/FlowchartCanvas.js?v=1.4"></script>
-    <script src="/js/pipeline/flowchart-v2/FlowchartOrchestratorV2.js?v=1.2"></script>
+    <script src="/js/pipeline/flowchart-v2/layout/HorizontalLayoutEngine.js?v=2.0"></script>
+    <script src="/js/pipeline/flowchart-v2/rendering/FlowchartCanvas.js?v=2.0"></script>
+    <script src="/js/pipeline/flowchart-v2/FlowchartOrchestratorV2.js?v=2.0"></script>
     <!-- Pipeline Core -->
     <script src="/js/pipeline/managers/LayerContainer.js?v=5.0"></script>
     <script src="/js/pipeline/PipelineBuilder.js?v=13.0"></script>

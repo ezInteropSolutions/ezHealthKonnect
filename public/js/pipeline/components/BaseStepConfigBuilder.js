@@ -269,6 +269,43 @@ class BaseStepConfigBuilder {
     }
 
     // ========================================
+    // ERROR HANDLING (base-level, inherited by all builders)
+    // ========================================
+
+    /**
+     * Get error handling configuration from this step's config.
+     * All steps inherit this — error handling is a base concern, not step-specific.
+     *
+     * @returns {Object|null} Error handling config or null if disabled
+     */
+    getErrorHandlingConfig() {
+        return this.config?.errorHandling?.enabled ? this.config.errorHandling : null;
+    }
+
+    /**
+     * Set error handling configuration.
+     * Called by PropertiesPanel when collecting form data.
+     *
+     * @param {Object} errorHandlingConfig - Error handling config object
+     */
+    setErrorHandlingConfig(errorHandlingConfig) {
+        this.config = this.config || {};
+        if (errorHandlingConfig && errorHandlingConfig.enabled) {
+            this.config.errorHandling = errorHandlingConfig;
+        } else {
+            this.config.errorHandling = null;
+        }
+    }
+
+    /**
+     * Check if error handling is enabled for this step
+     * @returns {boolean}
+     */
+    hasErrorHandling() {
+        return this.config?.errorHandling?.enabled === true;
+    }
+
+    // ========================================
     // PROTECTED UTILITY METHODS (delegated to utilities)
     // ========================================
 

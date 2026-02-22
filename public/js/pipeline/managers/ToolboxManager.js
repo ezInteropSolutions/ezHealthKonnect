@@ -208,6 +208,39 @@ class ToolboxManager {
             }),
 
             // ============================================
+            // FILE PARSING STEPS
+            // ============================================
+            new StepTemplate({
+                id: 'parse-file',
+                name: 'File Parser',
+                type: 'file_parser',
+                description: 'Smart file parser with auto-detect — supports CSV, TSV, fixed-width (CCLF, NACHA, X12), Excel .xlsx/.xls and OOB healthcare templates',
+                layer: 'core',
+                icon: this.getIconForType('file_parser'),
+                isSystem: true,
+                defaultConfig: {
+                    sourceType: 'field',
+                    filePath: '',
+                    batchMode: false,
+                    filePattern: '',
+                    sourceField: '',
+                    autoDetect: false,
+                    fileFormat: 'csv',
+                    delimiter: ',',
+                    hasHeader: true,
+                    columns: [],
+                    template: '',
+                    sheetName: '',
+                    sheetIndex: 0,
+                    contentEncoding: '',
+                    trimFields: true,
+                    skipRows: 0,
+                    maxRecords: 0,
+                    maxFileSizeMB: 0
+                }
+            }),
+
+            // ============================================
             // DATA VALIDATION STEPS (Pre-Processing)
             // ============================================
             // NOTE: The following validation templates have been removed and consolidated
@@ -395,43 +428,8 @@ class ToolboxManager {
             // REMOVED: HL7 Segment Extractor - segments already available in parsed data (enhancedSegments, segmentGroups)
             // REMOVED: FHIR Resource Builder - use HL7-FHIR Transform (core.mapping) or Field Mapping instead
 
-            // ============================================
-            // ERROR HANDLING STEPS (All Layers)
-            // ============================================
-            new StepTemplate({
-                id: 'try-catch',
-                name: 'Try-Catch Block',
-                type: 'control.try_catch',
-                description: 'Wrap steps in error handling with try/catch/finally blocks',
-                layer: 'core',
-                icon: this.getIconForType('post.fhir.validation'),
-                isSystem: true,
-                defaultConfig: {
-                    trySteps: [],
-                    catchSteps: [],
-                    finallySteps: [],
-                    onError: 'catch'  // "catch", "suppress", "rethrow"
-                }
-            }),
-
-            new StepTemplate({
-                id: 'retry-logic',
-                name: 'Retry Logic',
-                type: 'control.retry',
-                description: 'Retry failed operations with configurable backoff',
-                layer: 'core',
-                icon: this.getIconForType('post.error_handling'),
-                isSystem: true,
-                isContainer: true,
-                defaultConfig: {
-                    childSteps: [],
-                    maxRetries: 3,
-                    delayMs: 1000,
-                    backoffType: 'exponential',  // "fixed", "exponential", "linear"
-                    maxDelayMs: 30000,
-                    retryOnErrors: []  // empty = retry on any error
-                }
-            }),
+            // REMOVED: Try-Catch Block & Retry Logic - both are now per-step properties
+            // (Enable via "Error Handling & Retry" section in any step's properties panel)
 
             // ============================================
             // DATA QUALITY STEPS (Post-Processing)
@@ -484,7 +482,6 @@ class ToolboxManager {
                 defaultConfig: {
                     operation: 'normalize',  // "normalize", "pivot", "transpose", "flatten", "unflatten"
                     sourceField: '',
-                    outputField: '',
                     // For normalize (unpivot):
                     keyColumn: 'attribute',
                     valueColumn: 'value',
@@ -515,7 +512,6 @@ class ToolboxManager {
                 defaultConfig: {
                     connectorType: '',  // e.g., "postgresql_inbound", "mongodb_inbound", "http_rest_inbound"
                     config: {},         // Connector-specific configuration
-                    outputField: 'enriched.connector_result',
                     timeoutMs: 30000
                 }
             })
@@ -760,6 +756,7 @@ class ToolboxManager {
             'data_masking': 'fas fa-user-secret',
             'remove_duplicates': 'fas fa-check-double',
             'normalizer': 'fas fa-exchange-alt',
+            'file_parser': 'fas fa-file-csv',
 
             // ============================================
             // LEGACY TYPE NAMES (backward compat)

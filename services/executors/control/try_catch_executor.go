@@ -32,11 +32,21 @@ func (e *TryCatchExecutor) SetChildExecutor(executor ChildStepExecutor) {
 	e.childExecutor = executor
 }
 
+// CatchAction represents a built-in action to execute when an error is caught.
+// These run automatically before any catch steps, providing common error handling
+// patterns without requiring separate pipeline steps.
+type CatchAction struct {
+	Type    string                 `json:"type"`              // Action type identifier
+	Enabled bool                   `json:"enabled"`           // Whether this action is active
+	Config  map[string]interface{} `json:"config,omitempty"`  // Action-specific configuration
+}
+
 type tryCatchConfig struct {
-	TrySteps     []string `json:"trySteps"`     // Step IDs to execute in try block
-	CatchSteps   []string `json:"catchSteps"`   // Step IDs to execute on error
-	FinallySteps []string `json:"finallySteps"` // Step IDs to always execute
-	OnError      string   `json:"onError"`      // "catch" (default), "suppress", "rethrow"
+	TrySteps     []string      `json:"trySteps"`          // Step IDs to execute in try block
+	CatchSteps   []string      `json:"catchSteps"`        // Step IDs to execute on error
+	FinallySteps []string      `json:"finallySteps"`      // Step IDs to always execute
+	OnError      string        `json:"onError"`           // "catch" (default), "suppress", "rethrow"
+	CatchActions []CatchAction `json:"catchActions,omitempty"` // Built-in catch actions
 }
 
 func (e *TryCatchExecutor) Execute(
@@ -99,7 +109,7 @@ func (e *TryCatchExecutor) Execute(
 	}
 
 	// === CATCH BLOCK ===
-	if !trySuccess && e.childExecutor != nil && len(config.CatchSteps) > 0 && config.OnError != "rethrow" {
+	if !trySuccess && config.OnError != "rethrow" {
 		log.Printf("  🔄 Entering catch block...")
 
 		// Inject error info into catch input
@@ -113,19 +123,24 @@ func (e *TryCatchExecutor) Execute(
 			"timestamp": time.Now().Format(time.RFC3339),
 		}
 
-		for i, childStepID := range config.CatchSteps {
-			childOutput, stepName, err := e.childExecutor(ctx, childStepID, catchInput)
-			if err != nil {
-				log.Printf("  ⚠️ Catch step %d/%d (%s) failed: %v", i+1, len(config.CatchSteps), stepName, err)
-				break
-			}
-			if childOutput != nil {
-				catchInput = childOutput
-				for k, v := range childOutput {
-					outputData[k] = v
+		// Execute built-in catch actions (before catch steps)
+		e.ExecuteCatchActions(config.CatchActions, tryErrorMessage, outputData, step)
+
+		if e.childExecutor != nil && len(config.CatchSteps) > 0 {
+			for i, childStepID := range config.CatchSteps {
+				childOutput, stepName, err := e.childExecutor(ctx, childStepID, catchInput)
+				if err != nil {
+					log.Printf("  ⚠️ Catch step %d/%d (%s) failed: %v", i+1, len(config.CatchSteps), stepName, err)
+					break
 				}
+				if childOutput != nil {
+					catchInput = childOutput
+					for k, v := range childOutput {
+						outputData[k] = v
+					}
+				}
+				log.Printf("  ✅ Catch step %d/%d (%s) completed", i+1, len(config.CatchSteps), stepName)
 			}
-			log.Printf("  ✅ Catch step %d/%d (%s) completed", i+1, len(config.CatchSteps), stepName)
 		}
 	}
 
@@ -188,6 +203,176 @@ func (e *TryCatchExecutor) Execute(
 	}
 
 	return outputData, nil
+}
+
+// ExecuteCatchActions runs built-in catch actions when an error is caught.
+// These execute before any catch steps, providing common error handling patterns.
+// Exported so pipeline service can reuse for per-step error handling.
+func (e *TryCatchExecutor) ExecuteCatchActions(
+	actions []CatchAction,
+	errorMessage string,
+	outputData map[string]interface{},
+	step *models.TransformationStep,
+) {
+	if len(actions) == 0 {
+		return
+	}
+
+	for _, action := range actions {
+		if !action.Enabled {
+			continue
+		}
+
+		switch action.Type {
+		case "log_error":
+			// Log the error with configurable severity level
+			level := "error"
+			if l, ok := action.Config["level"].(string); ok {
+				level = l
+			}
+			includeStepName := true
+			if inc, ok := action.Config["includeStepName"].(bool); ok {
+				includeStepName = inc
+			}
+			stepLabel := ""
+			if includeStepName && step != nil {
+				stepLabel = fmt.Sprintf(" [step: %s]", step.StepName)
+			}
+			switch level {
+			case "warn":
+				log.Printf("  ⚠️ [CATCH-LOG/WARN]%s %s", stepLabel, errorMessage)
+			case "info":
+				log.Printf("  ℹ️ [CATCH-LOG/INFO]%s %s", stepLabel, errorMessage)
+			default:
+				log.Printf("  🚨 [CATCH-LOG/ERROR]%s %s", stepLabel, errorMessage)
+			}
+
+		case "set_error_flag":
+			// Set a boolean flag in output so downstream steps know an error was caught
+			flagName := "_errorHandled"
+			if fn, ok := action.Config["flagName"].(string); ok && fn != "" {
+				flagName = fn
+			}
+			outputData[flagName] = true
+			log.Printf("  🏴 [CATCH-ACTION] Set %s = true", flagName)
+
+		case "store_error_details":
+			// Store structured error details in output for downstream consumption
+			varName := "_lastError"
+			if vn, ok := action.Config["variableName"].(string); ok && vn != "" {
+				varName = vn
+			}
+			outputData[varName] = map[string]interface{}{
+				"message":   errorMessage,
+				"timestamp": time.Now().Format(time.RFC3339),
+				"stepId":    step.ID,
+				"stepName":  step.StepName,
+				"handled":   true,
+			}
+			log.Printf("  📦 [CATCH-ACTION] Stored error details in %s", varName)
+
+		case "increment_error_counter":
+			// Increment an error counter in output (useful for monitoring/alerting thresholds)
+			counterName := "_errorCount"
+			if cn, ok := action.Config["counterName"].(string); ok && cn != "" {
+				counterName = cn
+			}
+			current := 0
+			if v, ok := outputData[counterName].(int); ok {
+				current = v
+			} else if v, ok := outputData[counterName].(float64); ok {
+				current = int(v)
+			}
+			outputData[counterName] = current + 1
+			log.Printf("  🔢 [CATCH-ACTION] %s = %d", counterName, current+1)
+
+		case "set_default_value":
+			// Set a fallback/default value for a field when the try block fails
+			fieldName := ""
+			if fn, ok := action.Config["fieldName"].(string); ok {
+				fieldName = fn
+			}
+			defaultValue := action.Config["defaultValue"]
+			if fieldName != "" && defaultValue != nil {
+				outputData[fieldName] = defaultValue
+				log.Printf("  📝 [CATCH-ACTION] Set default %s = %v", fieldName, defaultValue)
+			}
+
+		case "send_alert":
+			// Trigger an alert notification on failure
+			channel := "system"
+			if ch, ok := action.Config["channel"].(string); ok {
+				channel = ch
+			}
+			severity := "high"
+			if sv, ok := action.Config["severity"].(string); ok {
+				severity = sv
+			}
+			stepName := ""
+			if step != nil {
+				stepName = step.StepName
+			}
+			log.Printf("  🔔 [CATCH-ACTION] Alert [%s/%s] Step '%s' failed: %s", channel, severity, stepName, errorMessage)
+			// Store alert info in output for downstream alert service to pick up
+			outputData["_alert"] = map[string]interface{}{
+				"channel":   channel,
+				"severity":  severity,
+				"stepName":  stepName,
+				"message":   errorMessage,
+				"timestamp": time.Now().Format(time.RFC3339),
+			}
+
+		case "send_email":
+			// Email notification on failure (stores intent for async email service)
+			to := ""
+			if t, ok := action.Config["to"].(string); ok {
+				to = t
+			}
+			subject := "Pipeline step failed"
+			if s, ok := action.Config["subject"].(string); ok && s != "" {
+				subject = s
+			}
+			stepName := ""
+			if step != nil {
+				stepName = step.StepName
+			}
+			log.Printf("  📧 [CATCH-ACTION] Email to=%s subject='%s' step='%s'", to, subject, stepName)
+			outputData["_emailNotification"] = map[string]interface{}{
+				"to":        to,
+				"subject":   subject,
+				"body":      fmt.Sprintf("Step '%s' failed: %s", stepName, errorMessage),
+				"stepName":  stepName,
+				"timestamp": time.Now().Format(time.RFC3339),
+			}
+
+		case "record_metric":
+			// Record failure metric for monitoring
+			metricName := "step_failures_total"
+			if mn, ok := action.Config["metricName"].(string); ok && mn != "" {
+				metricName = mn
+			}
+			stepName := ""
+			if step != nil {
+				stepName = step.StepName
+			}
+			log.Printf("  📊 [CATCH-ACTION] Metric %s{step=\"%s\"} incremented", metricName, stepName)
+			// Store metric for monitoring service to consume
+			if outputData["_metrics"] == nil {
+				outputData["_metrics"] = []interface{}{}
+			}
+			if metrics, ok := outputData["_metrics"].([]interface{}); ok {
+				outputData["_metrics"] = append(metrics, map[string]interface{}{
+					"name":      metricName,
+					"value":     1,
+					"labels":    map[string]string{"step": stepName},
+					"timestamp": time.Now().Format(time.RFC3339),
+				})
+			}
+
+		default:
+			log.Printf("  ❓ [CATCH-ACTION] Unknown action type: %s", action.Type)
+		}
+	}
 }
 
 func (e *TryCatchExecutor) Validate(step *models.TransformationStep) error {

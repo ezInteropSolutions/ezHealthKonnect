@@ -105,17 +105,9 @@ func (e *DatabaseEnrichmentExecutor) Execute(
 	}
 
 	if err != nil {
-		if config.FailOnError {
-			// STANDARDIZED: No variables on error + execution details
-			e.SetStepOutputWithDetails(inputData, map[string]interface{}{}, map[string]interface{}{
-				"database_type": config.DatabaseType,
-				"error":         err.Error(),
-				"target_path":   config.TargetPath,
-			})
-			e.PostExecute(ctx, step, err, time.Since(start))
-			return inputData, err
-		}
 		log.Printf("⚠️  Query failed: %v", err)
+
+		// Apply default value if configured (executor-level fallback)
 		if config.DefaultValue != nil {
 			e.storeResult(inputData, config.TargetPath, config.DefaultValue)
 			// STANDARDIZED: Default value used + execution details
@@ -135,8 +127,10 @@ func (e *DatabaseEnrichmentExecutor) Execute(
 				"target_path":   config.TargetPath,
 			})
 		}
-		e.PostExecute(ctx, step, nil, time.Since(start))
-		return inputData, nil
+
+		// Always return error — pipeline service decides retry/catch behavior
+		e.PostExecute(ctx, step, err, time.Since(start))
+		return inputData, err
 	}
 
 	// Map results if configured (for SQL results, NoSQL results come pre-mapped)
@@ -932,11 +926,6 @@ func (e *DatabaseEnrichmentExecutor) GetConfigSchema() map[string]interface{} {
 				"description": "Cache query results",
 				"default":     false,
 			},
-			"failOnError": map[string]interface{}{
-				"type":        "boolean",
-				"description": "Stop pipeline if query fails",
-				"default":     false,
-			},
 		},
 	}
 }
@@ -960,7 +949,6 @@ func (e *DatabaseEnrichmentExecutor) GetConfigExample() map[string]interface{} {
 		"timeoutMs":    3000,
 		"cacheResults": true,
 		"cacheTTL":     3600,
-		"failOnError":  false,
 	}
 }
 

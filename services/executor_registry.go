@@ -37,13 +37,17 @@ type StepExecutor interface {
 type ExecutorRegistry struct {
 	executors map[string]StepExecutor
 	db        *sql.DB
+	credStore *CredentialStore // nil = passthrough (dev/test only)
 }
 
-// NewExecutorRegistry creates a new executor registry with auto-registration (OOB)
-func NewExecutorRegistry(db *sql.DB) *ExecutorRegistry {
+// NewExecutorRegistry creates a new executor registry with auto-registration (OOB).
+// credStore may be nil; if set, encrypted connectivity configs are decrypted transparently
+// when executors read credentials from the database.
+func NewExecutorRegistry(db *sql.DB, credStore *CredentialStore) *ExecutorRegistry {
 	registry := &ExecutorRegistry{
 		executors: make(map[string]StepExecutor),
 		db:        db,
+		credStore: credStore,
 	}
 
 	// OOB: Auto-register all built-in executors
@@ -79,6 +83,7 @@ func (er *ExecutorRegistry) autoRegisterExecutors() {
 	hl7FhirExecutor := NewHL7FHIRMappingExecutor(er.db)
 	er.Register(hl7FhirExecutor)                             // hl7_fhir_transform
 	er.Register(enrichment.NewFieldMappingExecutor())        // field_mapping
+	er.Register(enrichment.NewFileParserExecutor(er.db, er.credStore.DecryptConfigBytes)) // file_parser
 
 	// Data transform executors
 	er.Register(transform.NewDataMaskingExecutor())          // data_masking
@@ -129,7 +134,10 @@ func (er *ExecutorRegistry) GetExecutor(stepType string) StepExecutor {
 	return er.executors["generic"]
 }
 
-// ExecuteStep executes a transformation step (MVC Controller pattern)
+// ExecuteStep executes a transformation step (MVC Controller pattern).
+// Before dispatching to the executor, any ENC:v1:-prefixed credential values in
+// step.Config are transparently decrypted by the CredentialStore. This covers DB
+// passwords, API keys, connection strings, etc. saved by pipelineController.js.
 func (er *ExecutorRegistry) ExecuteStep(
 	ctx context.Context,
 	step models.TransformationStep,
@@ -139,6 +147,18 @@ func (er *ExecutorRegistry) ExecuteStep(
 	executor := er.GetExecutor(step.StepType)
 	if executor == nil {
 		return nil, fmt.Errorf("no executor available for step type: %s", step.StepType)
+	}
+
+	// Decrypt any encrypted credential values before the executor sees them.
+	// DecryptConfigFields is a no-op when credStore is nil (dev mode) or when
+	// no values start with ENC:v1: (backward compat with unencrypted configs).
+	if len(step.Config) > 0 {
+		decrypted, err := er.credStore.DecryptConfigFields(step.Config)
+		if err != nil {
+			log.Printf("⚠️  [CredentialStore] Failed to decrypt step config for %q: %v — executing with original config", step.StepName, err)
+		} else {
+			step.Config = decrypted
+		}
 	}
 
 	// Validate step configuration

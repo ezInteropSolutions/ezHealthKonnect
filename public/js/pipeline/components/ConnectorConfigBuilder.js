@@ -49,7 +49,6 @@ class ConnectorConfigBuilder extends BaseStepConfigBuilder {
             config: {},
             contentField: this.direction === 'outbound' ? 'transformed' : '',
             contentType: 'application/json',
-            outputField: 'enriched.connector_result',
             timeoutMs: 30000
         };
     }
@@ -112,13 +111,6 @@ class ConnectorConfigBuilder extends BaseStepConfigBuilder {
         } else {
             extraFields.innerHTML = `
                 <div class="form-group">
-                    <label>Output Field</label>
-                    <input type="text" class="form-control connector-output-field"
-                           value="${this.escapeHtml(this.config.outputField || 'enriched.connector_result')}"
-                           placeholder="e.g., enriched.connector_result">
-                    <small class="form-text text-muted">Where to store fetched data in the pipeline</small>
-                </div>
-                <div class="form-group">
                     <label>Timeout (ms)</label>
                     <input type="number" class="form-control connector-timeout"
                            value="${this.config.timeoutMs || 30000}"
@@ -162,11 +154,6 @@ class ConnectorConfigBuilder extends BaseStepConfigBuilder {
         const contentType = this.container.querySelector('.connector-content-type');
         if (contentType) {
             contentType.addEventListener('change', () => this.onChange());
-        }
-
-        const outputField = this.container.querySelector('.connector-output-field');
-        if (outputField) {
-            outputField.addEventListener('input', () => this.onChange());
         }
 
         const timeoutField = this.container.querySelector('.connector-timeout');
@@ -800,9 +787,7 @@ class ConnectorConfigBuilder extends BaseStepConfigBuilder {
             stepConfig.contentField = contentField ? contentField.value.trim() : 'transformed';
             stepConfig.contentType = contentType ? contentType.value : 'application/json';
         } else {
-            const outputField = this.container.querySelector('.connector-output-field');
             const timeoutField = this.container.querySelector('.connector-timeout');
-            stepConfig.outputField = outputField ? outputField.value.trim() : 'enriched.connector_result';
             stepConfig.timeoutMs = timeoutField ? Number(timeoutField.value) || 30000 : 30000;
         }
 

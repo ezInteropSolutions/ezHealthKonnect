@@ -194,8 +194,7 @@ type APIEnrichmentConfig struct {
 	RetryCount   int `json:"retryCount,omitempty"`   // Default: 0
 	RetryDelayMs int `json:"retryDelayMs,omitempty"` // Default: 1000
 
-	// Error handling
-	FailOnError  bool        `json:"failOnError,omitempty"`  // Default: false (continue on failure)
+	// Default value fallback (executor-level; error handling is at pipeline/step level)
 	DefaultValue interface{} `json:"defaultValue,omitempty"` // Value to use if API call fails
 }
 
@@ -263,8 +262,7 @@ type DatabaseEnrichmentConfigV2 struct {
 	CacheResults bool `json:"cacheResults,omitempty"`
 	CacheTTL     int  `json:"cacheTTL,omitempty"` // seconds
 
-	// Error handling
-	FailOnError  bool        `json:"failOnError,omitempty"` // Default: false
+	// Default value fallback (executor-level; error handling is at pipeline/step level)
 	DefaultValue interface{} `json:"defaultValue,omitempty"`
 }
 
@@ -334,8 +332,7 @@ type CacheEnrichmentConfig struct {
 	// Timeout in milliseconds
 	TimeoutMs int `json:"timeoutMs,omitempty"` // Default: 1000
 
-	// Error handling
-	FailOnError  bool        `json:"failOnError,omitempty"` // Default: false
+	// Default value fallback (executor-level; error handling is at pipeline/step level)
 	DefaultValue interface{} `json:"defaultValue,omitempty"`
 
 	// Optional: Write back to cache
@@ -362,8 +359,49 @@ type ScriptEnrichmentConfig struct {
 	// Timeout in milliseconds
 	TimeoutMs int `json:"timeoutMs,omitempty"` // Default: 5000
 
-	// Error handling
-	FailOnError bool `json:"failOnError,omitempty"` // Default: false
+}
+
+// ===============================================================
+// FILE PARSER CONFIGURATION
+// ===============================================================
+
+// FileParserConfig defines configuration for the file parser executor
+type FileParserConfig struct {
+	SourceField string      `json:"sourceField"`            // field containing raw file content
+	FileFormat  string      `json:"fileFormat"`             // csv, tsv, fixed_width, xlsx
+	Delimiter   string      `json:"delimiter,omitempty"`    // for delimited files (default: ",")
+	HasHeader   bool        `json:"hasHeader"`              // first row = column names
+	Columns     []ColumnDef `json:"columns,omitempty"`      // for fixed_width: name + position
+	Encoding    string      `json:"encoding,omitempty"`     // utf-8, latin1, etc.
+	SkipRows    int         `json:"skipRows,omitempty"`     // skip N rows from top
+	MaxRecords    int `json:"maxRecords,omitempty"`    // limit (0 = unlimited)
+	MaxFileSizeMB int `json:"maxFileSizeMB,omitempty"` // file size gate in MB (0 = default 100 MB, hard cap 500 MB)
+	TrimFields      bool        `json:"trimFields"`                     // trim whitespace from values
+	QuoteChar       string      `json:"quoteChar,omitempty"`            // quote character (default: `"`)
+	SheetName       string      `json:"sheetName,omitempty"`            // xlsx/xls: which sheet to parse (default: first sheet)
+	SheetIndex      int         `json:"sheetIndex,omitempty"`           // xlsx/xls: 0-based sheet index (used if sheetName is empty)
+	ContentEncoding string      `json:"contentEncoding,omitempty"`      // "base64" if content is base64-encoded binary
+	AutoDetect      bool        `json:"autoDetect,omitempty"`           // auto-detect format, delimiter, header
+	Template        string      `json:"template,omitempty"`             // OOB template name (e.g., "cclf1", "nacha_entry")
+
+	// Source configuration — WHERE to get the file content
+	// "field" (default): read raw file content from SourceField pipeline variable
+	// "local_path":      read from FilePath on the server's local file system (or container volume mount)
+	// "field_as_path":   read a file URI from SourceField, then resolve it:
+	//                      s3://bucket/key  → AWS S3 (credentials from interface connectivity config or IAM role)
+	//                      https://...      → HTTP GET
+	//                      file:///...      → local filesystem
+	SourceType  string `json:"sourceType,omitempty"`   // "field" | "local_path" | "field_as_path"
+	FilePath    string `json:"filePath,omitempty"`      // absolute path or glob (e.g. /data/claims/*.csv)
+	BatchMode   bool   `json:"batchMode,omitempty"`     // true = process all files matching FilePath/FilePattern
+	FilePattern string `json:"filePattern,omitempty"`   // sub-glob when FilePath is a directory (e.g. "*.csv")
+}
+
+// ColumnDef defines a column for fixed-width file parsing
+type ColumnDef struct {
+	Name   string `json:"name"`   // column/field name
+	Start  int    `json:"start"`  // 1-based start position
+	Length int    `json:"length"` // character length
 }
 
 // ===============================================================

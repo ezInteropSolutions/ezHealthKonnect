@@ -31,7 +31,6 @@ func NewNormalizerExecutor() *NormalizerExecutor {
 type normalizerConfig struct {
 	Operation    string            `json:"operation"`    // "normalize", "pivot", "transpose", "flatten", "unflatten"
 	SourceField  string            `json:"sourceField"`  // Path to source data
-	OutputField  string            `json:"outputField"`  // Where to store result
 	// Normalize config
 	NormalizeFields []string       `json:"normalizeFields"` // Fields to normalize into rows
 	KeyColumn       string         `json:"keyColumn"`       // Name for the key column
@@ -121,13 +120,9 @@ func (e *NormalizerExecutor) Execute(
 		result = e.applyCaseTransform(result, config.CaseTransform)
 	}
 
-	// Store result
-	outField := config.OutputField
-	if outField == "" {
-		outField = config.SourceField
-	}
-	if outField != "" {
-		executors.UpdateFieldValue(outputData, outField, result)
+	// Store result back at the source field (in-place transformation)
+	if config.SourceField != "" {
+		executors.UpdateFieldValue(outputData, config.SourceField, result)
 	}
 
 	durationMs := time.Since(startTime).Milliseconds()

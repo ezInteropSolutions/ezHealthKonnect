@@ -366,7 +366,6 @@ class TransformationPipelineService {
             config.contentField = 'transformed';
             config.contentType = 'application/json';
         } else {
-            config.outputField = 'enriched.connector_result';
             config.timeoutMs = 30000;
         }
 

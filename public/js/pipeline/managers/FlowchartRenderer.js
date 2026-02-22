@@ -283,7 +283,7 @@ class FlowchartRenderer {
     }
 
     /**
-     * Render a visual container box (Loop, Try-Catch, Retry)
+     * Render a visual container box (Loop)
      */
     renderContainerBox(containerStep, position, containerInfo) {
         const box = document.createElement('div');
@@ -293,12 +293,8 @@ class FlowchartRenderer {
         box.setAttribute('data-container-type', containerStep.stepType);
 
         // Add type-specific class
-        if (VisualStep.isTryCatchStep(containerStep)) {
-            box.classList.add('container-try-catch');
-        } else if (VisualStep.isLoopStep(containerStep)) {
+        if (VisualStep.isLoopStep(containerStep)) {
             box.classList.add('container-loop');
-        } else if (VisualStep.isRetryStep(containerStep)) {
-            box.classList.add('container-retry');
         }
 
         // Position the container
@@ -398,8 +394,6 @@ class FlowchartRenderer {
      */
     getContainerIcon(step) {
         if (VisualStep.isLoopStep(step)) return '\uD83D\uDD01';      // 🔁
-        if (VisualStep.isTryCatchStep(step)) return '\u26A0\uFE0F';   // ⚠️
-        if (VisualStep.isRetryStep(step)) return '\uD83D\uDD04';      // 🔄
         return '\uD83D\uDCE6';                                         // 📦
     }
 
@@ -408,8 +402,6 @@ class FlowchartRenderer {
      */
     getContainerLabel(step) {
         if (VisualStep.isLoopStep(step)) return 'For-Each Loop';
-        if (VisualStep.isTryCatchStep(step)) return 'Try-Catch Block';
-        if (VisualStep.isRetryStep(step)) return 'Retry Block';
         return 'Container';
     }
 
@@ -535,8 +527,6 @@ class FlowchartRenderer {
             'connector.inbound': '📥',
             'connector.outbound': '📤',
             'control.loop': '🔁',
-            'control.try_catch': '⚠️',
-            'control.retry': '🔄',
             // Generic fallbacks
             validation: '✅',
             enrichment: '🔍',
@@ -652,13 +642,11 @@ class FlowchartRenderer {
             initialTop = rect.top - canvasRect.top;
 
             node.classList.add('dragging');
-            console.log('🖱️ [v1.2] Started dragging step:', step.stepName);
             e.stopPropagation(); // Prevent canvas pan
             e.preventDefault();
         });
 
         const throttledRedraw = this.throttle(() => {
-            console.log('🔄 [v1.2] Redrawing connections (throttled)');
             this.redrawConnections();
         }, 16); // 60fps max
 
@@ -681,22 +669,117 @@ class FlowchartRenderer {
                 position.y = newTop;
             }
 
+            // Highlight container zone if dragging over one
+            // Temporarily hide the node so elementFromPoint can see what's behind it
+            node.style.pointerEvents = 'none';
+            document.querySelectorAll('.container-zone.drag-hover').forEach(z => z.classList.remove('drag-hover'));
+            const elementBelow = document.elementFromPoint(e.clientX, e.clientY);
+            const zoneBelow = elementBelow?.closest('.container-zone');
+            if (zoneBelow) {
+                // Don't allow dropping a container into itself
+                const targetContainerId = zoneBelow.dataset.containerId;
+                if (targetContainerId !== step.id) {
+                    zoneBelow.classList.add('drag-hover');
+                }
+            }
+            node.style.pointerEvents = '';
+
             // Throttled redraw for performance
             throttledRedraw();
         });
 
-        document.addEventListener('mouseup', () => {
+        document.addEventListener('mouseup', (e) => {
             if (isDragging) {
                 isDragging = false;
                 node.classList.remove('dragging');
 
-                // Save position to localStorage
+                // Check if dropped onto a container zone
+                node.style.pointerEvents = 'none';
+                const elementBelow = document.elementFromPoint(e.clientX, e.clientY);
+                node.style.pointerEvents = '';
+                const droppedZone = elementBelow?.closest('.container-zone');
+
+                // Clear all zone highlights
+                document.querySelectorAll('.container-zone.drag-hover').forEach(z => z.classList.remove('drag-hover'));
+
+                if (droppedZone) {
+                    const containerId = droppedZone.dataset.containerId;
+                    const zone = droppedZone.dataset.zone;
+
+                    // Don't allow container to contain itself
+                    if (containerId && zone && containerId !== step.id) {
+                        this.assignStepToContainer(step, containerId, zone);
+                        return; // Skip normal save - re-render will reposition
+                    }
+                }
+
+                // Normal drop (not into container) - save position
                 this.saveNodePosition(step.id, {
                     x: parseInt(node.style.left),
                     y: parseInt(node.style.top)
                 });
             }
         });
+    }
+
+    /**
+     * Assign a step to a container zone (from canvas drag-drop).
+     * Updates the step's parentStepId/containerZone AND the container's config arrays.
+     * Then re-renders to reflow the layout.
+     */
+    assignStepToContainer(step, containerId, zone) {
+        // Find container step
+        const allSteps = this.currentSteps || [];
+        const containerStep = allSteps.find(s => s.id === containerId);
+        if (!containerStep) return;
+
+        // Remove from previous container if any
+        if (step.parentStepId && step.parentStepId !== containerId) {
+            this.removeStepFromContainer(step);
+        }
+
+        // Set parent relationship on the step
+        step.parentStepId = containerId;
+        step.containerZone = zone;
+
+        // Update container config arrays
+        if (!containerStep.config) containerStep.config = {};
+
+        if (VisualStep.isLoopStep(containerStep)) {
+            if (!containerStep.config.childStepIds) containerStep.config.childStepIds = [];
+            if (!containerStep.config.childStepIds.includes(step.id)) {
+                containerStep.config.childStepIds.push(step.id);
+            }
+        }
+
+        console.log(`📦 Assigned "${step.stepName}" to container "${containerStep.stepName}" zone=${zone}`);
+
+        // Mark pipeline as unsaved and re-render
+        this.pipelineBuilder.markAsUnsaved();
+        this.refresh();
+    }
+
+    /**
+     * Remove a step from its current container.
+     * Clears parentStepId/containerZone and removes from config arrays.
+     */
+    removeStepFromContainer(step) {
+        if (!step.parentStepId) return;
+
+        const allSteps = this.currentSteps || [];
+        const containerStep = allSteps.find(s => s.id === step.parentStepId);
+
+        if (containerStep && containerStep.config) {
+            // Remove from loop array
+            if (Array.isArray(containerStep.config.childStepIds)) {
+                containerStep.config.childStepIds = containerStep.config.childStepIds.filter(id => id !== step.id);
+            }
+        }
+
+        step.parentStepId = null;
+        step.containerZone = null;
+
+        console.log(`📤 Removed "${step.stepName}" from container`);
     }
 
     /**

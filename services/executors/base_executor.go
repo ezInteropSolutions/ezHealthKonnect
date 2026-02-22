@@ -143,6 +143,20 @@ func getSimpleMapKeys(m map[string]interface{}) []string {
 	return keys
 }
 
+// ExecuteWithRetry wraps an operation with retry logic from the step's config.
+// Convenience method that delegates to the standalone ExecuteWithRetry utility.
+// Executors can call this to add retry behavior to any sub-operation.
+//
+// Usage in an executor:
+//
+//	result := b.ExecuteWithRetry(ctx, step.Config, func(attempt int) (map[string]interface{}, error) {
+//	    return callExternalAPI(ctx, url, payload)
+//	})
+func (b *BaseExecutor) ExecuteWithRetry(ctx context.Context, config map[string]interface{}, operation func(attempt int) (map[string]interface{}, error)) RetryResult {
+	retryConfig := ParseRetryConfig(config)
+	return ExecuteWithRetry(ctx, retryConfig, operation)
+}
+
 // ValidateConfig is a helper for validating required config fields
 func (b *BaseExecutor) ValidateConfig(step *models.TransformationStep, requiredFields []string) error {
 	if step.Config == nil {

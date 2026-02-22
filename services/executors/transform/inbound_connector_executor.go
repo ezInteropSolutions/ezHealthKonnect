@@ -32,7 +32,6 @@ func NewInboundConnectorExecutor() *InboundConnectorExecutor {
 type inboundConnectorConfig struct {
 	ConnectorType string                 `json:"connectorType"` // e.g., "postgresql_inbound", "mongodb_inbound", etc.
 	Config        map[string]interface{} `json:"config"`        // Connector-specific configuration
-	OutputField   string                 `json:"outputField"`   // Where to store fetched data (default: "enriched.connector_result")
 	TimeoutMs     int                    `json:"timeoutMs"`     // Fetch timeout in ms (default: 30000)
 }
 
@@ -44,8 +43,7 @@ func (e *InboundConnectorExecutor) Execute(
 	startTime := time.Now()
 
 	config := inboundConnectorConfig{
-		OutputField: "enriched.connector_result",
-		TimeoutMs:   30000,
+		TimeoutMs: 30000,
 	}
 	if step.Config != nil {
 		configJSON, _ := json.Marshal(step.Config)
@@ -125,11 +123,6 @@ func (e *InboundConnectorExecutor) Execute(
 	}
 
 	durationMs := time.Since(startTime).Milliseconds()
-
-	// Store results
-	if config.OutputField != "" {
-		executors.UpdateFieldValue(outputData, config.OutputField, messages)
-	}
 
 	variables := map[string]interface{}{
 		"success":        true,

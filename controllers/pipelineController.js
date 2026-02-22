@@ -2,7 +2,71 @@
 // FIXED: Saves pipeline to V20 schema with embedded wizard mappings
 
 const axios = require('axios');
+const crypto = require('crypto');
 const GO_BACKEND_URL = process.env.GO_BACKEND_URL || `http://127.0.0.1:${process.env.API_PORT || 8080}`;
+
+// ── Credential encryption for step configs ─────────────────────────────────
+// Uses the same APP_CREDENTIAL_KEY + AES-256-GCM algorithm as the Go
+// CredentialStore so the Go executor can transparently decrypt on execution.
+// Wire-format: nonce(12 bytes) || ciphertext(N bytes) || tag(16 bytes), base64-
+// encoded, prefixed with 'ENC:v1:'.
+//
+// Sensitive keys are detected by substring (case-insensitive), matching the same
+// logic as Go's isSensitiveKey(). This catches dbPassword, connectionString,
+// secretAccessKey, apiKey, etc. without an exhaustive allowlist.
+
+const SENSITIVE_KEY_SUBSTRINGS = [
+    'password', 'passwd',
+    'secret',
+    'token',
+    'passphrase',
+    'apikey', 'api_key',
+    'privatekey', 'private_key',
+    'connectionstring', 'connection_string',
+    'accesskey', 'access_key',
+];
+
+function isSensitiveConfigKey(key) {
+    const lower = key.toLowerCase();
+    return SENSITIVE_KEY_SUBSTRINGS.some(s => lower.includes(s));
+}
+
+/**
+ * Encrypts sensitive field values in a step config object.
+ * Returns a shallow copy — the original is not mutated.
+ * Passthrough if APP_CREDENTIAL_KEY is not set (dev mode).
+ * Idempotent: values already starting with 'ENC:v1:' are skipped.
+ */
+function encryptSensitiveConfigFields(config) {
+    if (!config || typeof config !== 'object' || Array.isArray(config)) return config;
+
+    const credKeyB64 = process.env.APP_CREDENTIAL_KEY;
+    if (!credKeyB64) return config; // passthrough in dev mode
+
+    let credKey;
+    try {
+        credKey = Buffer.from(credKeyB64, 'base64');
+        if (credKey.length !== 32) return config; // wrong key length — passthrough
+    } catch (e) {
+        return config;
+    }
+
+    const result = Object.assign({}, config);
+    for (const [k, v] of Object.entries(result)) {
+        if (!isSensitiveConfigKey(k)) continue;
+        if (typeof v !== 'string' || v === '' || v.startsWith('ENC:v1:')) continue;
+
+        // AES-256-GCM: layout must match Go's gcm.Seal output:
+        //   nonce(12) || ciphertext(N) || tag(16)  →  base64  →  'ENC:v1:' prefix
+        const nonce = crypto.randomBytes(12);
+        const cipher = crypto.createCipheriv('aes-256-gcm', credKey, nonce);
+        const enc = Buffer.concat([cipher.update(v, 'utf8'), cipher.final()]);
+        const tag = cipher.getAuthTag(); // 16 bytes
+        result[k] = 'ENC:v1:' + Buffer.concat([nonce, enc, tag]).toString('base64');
+    }
+    return result;
+}
+// ──────────────────────────────────────────────────────────────────────────────
 
 /**
  * Topological sort for steps based on parent_conditional_step_id relationships
@@ -200,23 +264,26 @@ exports.savePipeline = async (req, res) => {
         await sequelize.query('BEGIN');
 
         try {
-            // 1. Upsert pipeline metadata (including connections)
+            // 1. Upsert pipeline metadata (including connections and pipeline_config)
             const connections = pipelineData.connections || [];
+            const pipelineConfig = pipelineData.pipeline_config || {};
             console.log(`🔗 Saving ${connections.length} connections to pipeline`);
+            console.log(`⚙️ Saving pipeline_config:`, JSON.stringify(pipelineConfig));
 
             const pipelineResult = await sequelize.query(`
                 INSERT INTO transformation_pipelines
-                    (id, interface_id, message_type, pipeline_name, enabled, version, connections, created_at, updated_at)
+                    (id, interface_id, message_type, pipeline_name, enabled, version, connections, pipeline_config, created_at, updated_at)
                 VALUES
-                    ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW())
+                    ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), NOW())
                 ON CONFLICT (interface_id, message_type)
                 DO UPDATE SET
                     pipeline_name = EXCLUDED.pipeline_name,
                     enabled = EXCLUDED.enabled,
                     connections = EXCLUDED.connections,
+                    pipeline_config = EXCLUDED.pipeline_config,
                     version = transformation_pipelines.version + 1,
                     updated_at = NOW()
-                RETURNING id::text, interface_id::text, message_type, pipeline_name, enabled, version, connections;
+                RETURNING id::text, interface_id::text, message_type, pipeline_name, enabled, version, connections, pipeline_config;
             `, {
                 bind: [
                     pipelineId,
@@ -225,7 +292,8 @@ exports.savePipeline = async (req, res) => {
                     pipelineData.name || `${messageType} Pipeline`,
                     pipelineData.status !== 'disabled',
                     1,
-                    JSON.stringify(connections)
+                    JSON.stringify(connections),
+                    JSON.stringify(pipelineConfig)
                 ],
                 type: QueryTypes.SELECT
             });
@@ -358,7 +426,7 @@ exports.savePipeline = async (req, res) => {
                         step.required !== false,
                         step.timeoutMs || step.timeout_ms || 5000,
                         step.enabled !== false,
-                        JSON.stringify(stepConfig),
+                        JSON.stringify(encryptSensitiveConfigFields(stepConfig)),
                         step.scriptType || null,
                         step.scriptContent || null,
                         step.onErrorStrategy || step.on_error_strategy || 'fail',

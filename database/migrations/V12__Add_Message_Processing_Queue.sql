@@ -82,7 +82,7 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON message_processing_queue TO PUBLIC;
 COMMENT ON TABLE message_processing_queue IS 'Message processing queue for interface runtime engine';
 COMMENT ON COLUMN message_processing_queue.status IS 'Current processing status of the queued message';
 COMMENT ON COLUMN message_processing_queue.priority IS 'Processing priority (1=highest, 10=lowest)';
-COMMENT ON COLUMN message_processing_queue.message_content IS 'Raw message content and metadata';
+COMMENT ON COLUMN message_processing_queue.message_data IS 'Raw message content and metadata';
 
 -- =========================================================================
 -- Migration completion summary

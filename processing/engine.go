@@ -60,9 +60,11 @@ type EngineStats struct {
 	AverageProcessingTime    string    `json:"average_processing_time"`
 }
 
-// NewProcessingEngine creates a new processing engine
+// NewProcessingEngine creates a new processing engine.
+// credStore may be nil; if provided, encrypted connectivity configs are decrypted
+// transparently by executors that read credentials from the database (e.g. field_as_path + S3).
 // OOB: Auto-initializes MongoDB and parser service if available
-func NewProcessingEngine(db *sql.DB) *ProcessingEngine {
+func NewProcessingEngine(db *sql.DB, credStore *services.CredentialStore) *ProcessingEngine {
 	engine := &ProcessingEngine{
 		db:               db,
 		activeInterfaces: make(map[string]*InterfaceStatus),
@@ -101,7 +103,7 @@ func NewProcessingEngine(db *sql.DB) *ProcessingEngine {
 	}
 
 	// OOB: Auto-initialize transformation pipeline service (MVC pattern)
-	engine.transformationService = services.NewTransformationPipelineService(db)
+	engine.transformationService = services.NewTransformationPipelineService(db, credStore)
 	if engine.transformationService != nil {
 		fmt.Printf("✅ Transformation Pipeline Service initialized (MVC + OOB)\n")
 	}

@@ -212,6 +212,13 @@ services:
       # Mount app.js for hot-reload (DISABLED - causes require() cache issues)
       # - ./app.js:/app/app.js
       # - ./server.js:/app/server.js
+      - ./test-results:/app/test-results      # Test/sample files dropped here are accessible in container
+      # ── Host file access for File Parser step ──────────────────────────────
+      # Set HOST_DATA_PATH in your .env file (or export it) to mount a Windows
+      # folder into the container so the File Parser can read your local files.
+      # Example .env:  HOST_DATA_PATH=C:/Users/ShanawazKhan/Documents/HealthData
+      # Inside the container the files appear at:  /mnt/host/
+      - ${HOST_DATA_PATH:-C:/Users/Public}:/mnt/host
     
     # Wait for PostgreSQL, MongoDB, and migrations to complete
     depends_on:

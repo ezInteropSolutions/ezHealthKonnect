@@ -22,11 +22,11 @@ type TransformationTestController struct {
 	pipelineService  *services.TransformationPipelineService
 }
 
-func NewTransformationTestController(db *sql.DB) *TransformationTestController {
+func NewTransformationTestController(db *sql.DB, credStore *services.CredentialStore) *TransformationTestController {
 	return &TransformationTestController{
 		db:               db,
-		executorRegistry: services.NewExecutorRegistry(db),
-		pipelineService:  services.NewTransformationPipelineService(db),
+		executorRegistry: services.NewExecutorRegistry(db, credStore),
+		pipelineService:  services.NewTransformationPipelineService(db, credStore),
 	}
 }
 
@@ -170,7 +170,8 @@ func (c *TransformationTestController) TestPipeline(ctx *gin.Context) {
 	// Build simplified step outputs keyed by step name (user-friendly)
 	// STANDARDIZED STRUCTURE: All steps use step_output and step_metadata
 	steps := make(map[string]interface{})
-	stepNameCounts := make(map[string]int) // Track duplicate step names
+	stepNameCounts := make(map[string]int)                // Track duplicate step names
+	pipelineErrors := make([]map[string]interface{}, 0)  // Top-level error aggregation
 
 	for _, stepLog := range result.ExecutionLog {
 		log.Printf("🔍 Processing step: '%s'", stepLog.StepName)
@@ -212,15 +213,11 @@ func (c *TransformationTestController) TestPipeline(ctx *gin.Context) {
 		// Some executors (e.g., Loop) store references to parent context that create cycles
 		safeStepOutput := breakCycles(stepOutput)
 
-		// STANDARDIZED STRUCTURE: step_output, step_metadata, step_error (3 keys max)
+		// STANDARDIZED STRUCTURE: step_output + step_metadata (2 keys only)
+		// Errors are aggregated into a top-level "errors" array, NOT per-step
 		stepData := map[string]interface{}{
 			"step_output":   safeStepOutput,
 			"step_metadata": stepMetadata,
-		}
-
-		// Add step_error ONLY if failed (separate from metadata)
-		if !stepLog.Success && stepLog.Error != "" {
-			stepData["step_error"] = stepLog.Error
 		}
 
 		// Use normalized step name as key (consistent snake_case)
@@ -237,6 +234,40 @@ func (c *TransformationTestController) TestPipeline(ctx *gin.Context) {
 		log.Printf("  🏷️ Step name: '%s' -> '%s' (key: '%s')", stepLog.StepName, normalizedStepName, stepKey)
 
 		steps[stepKey] = stepData
+
+		// Collect errors into top-level array
+		stepSequence := 0
+		if stepLog.StepOutput != nil {
+			stepSequence = stepLog.StepOutput.Sequence
+		}
+
+		if !stepLog.Success && stepLog.Error != "" {
+			// Uncaught error — step failed
+			pipelineErrors = append(pipelineErrors, map[string]interface{}{
+				"step":     stepKey,
+				"sequence": stepSequence,
+				"error":    stepLog.Error,
+				"caught":   false,
+			})
+		} else if stepLog.Success && stepLog.StepOutput != nil && strings.HasPrefix(stepLog.StepOutput.Error, "caught:") {
+			// Caught error — step succeeded via error handler
+			errorEntry := map[string]interface{}{
+				"step":     stepKey,
+				"sequence": stepSequence,
+				"error":    strings.TrimPrefix(stepLog.StepOutput.Error, "caught: "),
+				"caught":   true,
+				"handler":  stepLog.StepOutput.OutputData["error_handler"],
+			}
+			// Include default value applied info if present
+			if df, ok := stepLog.StepOutput.OutputData["default_applied_field"]; ok {
+				errorEntry["default_applied"] = map[string]interface{}{
+					"field": df,
+					"value": stepLog.StepOutput.OutputData["default_applied_value"],
+				}
+			}
+			pipelineErrors = append(pipelineErrors, errorEntry)
+			stepMetadata["error_caught"] = true
+		}
 	}
 
 	// Build lightweight response (avoid sending huge input/output payloads)
@@ -244,6 +275,11 @@ func (c *TransformationTestController) TestPipeline(ctx *gin.Context) {
 		"success": result.Status == "completed",
 		"status":  result.Status,
 		"steps":   steps, // Keyed by step name for easy lookup
+	}
+
+	// Add top-level errors array (all step errors aggregated)
+	if len(pipelineErrors) > 0 {
+		response["errors"] = pipelineErrors
 	}
 
 	// Include lightweight input/output metadata (without full payload to avoid huge responses)
@@ -267,12 +303,15 @@ func (c *TransformationTestController) TestPipeline(ctx *gin.Context) {
 
 	if result.Status == "failed" && len(result.Errors) > 0 {
 		response["error"] = result.Errors[0].Message
-		// Include all errors for detailed reporting
-		errMsgs := make([]string, len(result.Errors))
-		for i, e := range result.Errors {
-			errMsgs[i] = e.Message
+		// Merge pipeline-level errors into the top-level errors array
+		for _, e := range result.Errors {
+			pipelineErrors = append(pipelineErrors, map[string]interface{}{
+				"step":   "_pipeline",
+				"error":  e.Message,
+				"caught": false,
+			})
 		}
-		response["errors"] = errMsgs
+		response["errors"] = pipelineErrors
 	}
 
 	log.Printf("✅ Test completed: %d steps executed, status=%s", len(result.ExecutionLog), result.Status)
@@ -351,6 +390,12 @@ func (c *TransformationTestController) convertFrontendPipeline(pipelineData map[
 	// Get pipeline name
 	if name, ok := pipelineData["name"].(string); ok {
 		pipeline.PipelineName = name
+	}
+
+	// Get pipeline config (error handling & retry defaults)
+	if pc, ok := pipelineData["pipeline_config"].(map[string]interface{}); ok {
+		pipeline.PipelineConfig = pc
+		fmt.Printf("   ✅ Pipeline config loaded: %v\n", getMapKeys(pc))
 	}
 
 	// Process layers (pre, core, post)
@@ -450,6 +495,14 @@ func (c *TransformationTestController) convertFrontendPipeline(pipelineData map[
 			}
 			if config, ok := stepMap["config"].(map[string]interface{}); ok {
 				step.Config = config
+			}
+			if timeout, ok := stepMap["timeoutMs"].(float64); ok {
+				step.TimeoutMs = int(timeout)
+			} else if timeout, ok := stepMap["timeout_ms"].(float64); ok {
+				step.TimeoutMs = int(timeout)
+			}
+			if step.TimeoutMs <= 0 {
+				step.TimeoutMs = 30000 // Default 30s timeout
 			}
 
 			// Debug logging to understand what's being processed

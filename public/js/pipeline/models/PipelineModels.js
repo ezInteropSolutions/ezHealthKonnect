@@ -16,6 +16,8 @@ class VisualPipeline {
         this.executionGroups = data.executionGroups || [];
         // Connections between steps (saved to database for persistence)
         this.connections = data.connections || [];
+        // Pipeline-level config (default error handling, retry, etc.)
+        this.pipelineConfig = data.pipelineConfig || {};
         this.createdAt = data.createdAt || new Date().toISOString();
         this.updatedAt = data.updatedAt || new Date().toISOString();
     }
@@ -86,6 +88,7 @@ class VisualPipeline {
                 post: { name: 'post', execution_groups: [] }
             },
             connections: this.connections || [],
+            pipeline_config: this.pipelineConfig || {},
             created_at: this.createdAt,
             updated_at: this.updatedAt
         };
@@ -133,6 +136,7 @@ class VisualPipeline {
             status: json.status,
             executionGroups: executionGroups,
             connections: json.connections || [],
+            pipelineConfig: json.pipeline_config || {},
             createdAt: json.created_at,
             updatedAt: json.updated_at
         });
@@ -251,6 +255,28 @@ class VisualStep {
         // Container system: which container step this step belongs to and which zone
         this.parentStepId = data.parentStepId || null;
         this.containerZone = data.containerZone || null;
+
+        // Error handling: per-step try-catch (base property inherited by all steps)
+        // Stored in config.errorHandling but exposed as first-class accessor
+        if (!this.config.errorHandling) {
+            this.config.errorHandling = null; // null = not enabled (no overhead)
+        }
+    }
+
+    /**
+     * Check if this step has error handling enabled
+     * @returns {boolean}
+     */
+    get hasErrorHandling() {
+        return this.config?.errorHandling?.enabled === true;
+    }
+
+    /**
+     * Get error handling configuration (or null if disabled)
+     * @returns {Object|null}
+     */
+    get errorHandlingConfig() {
+        return this.hasErrorHandling ? this.config.errorHandling : null;
     }
 
     generateUUID() {
@@ -353,8 +379,6 @@ class VisualStep {
             'remove_duplicates': 'fas fa-filter',
             'normalizer': 'fas fa-exchange-alt',
             'control.loop': 'fas fa-redo-alt',
-            'control.try_catch': 'fas fa-exclamation-triangle',
-            'control.retry': 'fas fa-sync',
             'connector.inbound': 'fas fa-download',
             'connector.outbound': 'fas fa-upload',
             // Legacy type names (backward compat)
@@ -499,6 +523,28 @@ class VisualStep {
     }
 
     /**
+     * Check if a step is a File Parser step
+     * @param {VisualStep|Object} step
+     * @returns {boolean}
+     */
+    static isFileParser(step) {
+        if (!step) return false;
+        const type = step.stepType || step.step_type || '';
+        return type === 'file_parser';
+    }
+
+    /**
+     * Check if a step is a Remove Duplicates step
+     * @param {VisualStep|Object} step
+     * @returns {boolean}
+     */
+    static isRemoveDuplicates(step) {
+        if (!step) return false;
+        const type = step.stepType || step.step_type || '';
+        return type === 'remove_duplicates';
+    }
+
+    /**
      * Check if a step is an If-Then-Else conditional step
      * @param {VisualStep|Object} step
      * @returns {boolean}
@@ -580,38 +626,12 @@ class VisualStep {
     }
 
     /**
-     * Check if a step is a Try-Catch step
-     * @param {VisualStep|Object} step
-     * @returns {boolean}
-     */
-    static isTryCatchStep(step) {
-        if (!step) return false;
-        const type = step.stepType || step.step_type || '';
-        const templateId = step.templateId || step.template_id || '';
-        return type === 'control.try_catch' || templateId === 'try-catch';
-    }
-
-    /**
-     * Check if a step is a Retry step
-     * @param {VisualStep|Object} step
-     * @returns {boolean}
-     */
-    static isRetryStep(step) {
-        if (!step) return false;
-        const type = step.stepType || step.step_type || '';
-        const templateId = step.templateId || step.template_id || '';
-        return type === 'control.retry' || templateId === 'retry-logic';
-    }
-
-    /**
-     * Check if a step is a container step (Loop, Try-Catch, Retry)
+     * Check if a step is a container step (Loop only)
      * @param {VisualStep|Object} step
      * @returns {boolean}
      */
     static isContainerStep(step) {
-        return VisualStep.isLoopStep(step) ||
-               VisualStep.isTryCatchStep(step) ||
-               VisualStep.isRetryStep(step);
+        return VisualStep.isLoopStep(step);
     }
 
     /**
@@ -620,7 +640,6 @@ class VisualStep {
      * @returns {string[]} Zone names
      */
     static getContainerZones(step) {
-        if (VisualStep.isTryCatchStep(step)) return ['try', 'catch', 'finally'];
         return ['body'];
     }
 

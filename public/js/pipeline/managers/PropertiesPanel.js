@@ -376,6 +376,7 @@ class PropertiesPanel {
             ${this.createBasicPropertiesSection(step)}
             ${this.createExecutionPropertiesSection(step)}
             ${this.createDynamicFormFields(step)}
+            ${this.createErrorHandlingSection(step)}
             ${step.stepType === 'custom' || step.scriptContent ? this.createScriptSection(step) : ''}
 
             ${actionButtons}
@@ -607,6 +608,26 @@ class PropertiesPanel {
                     <pre style="background: #f3f4f6; padding: 1rem; border-radius: 6px; overflow-x: auto; font-size: 0.875rem;"><code>${this.formatExampleForDisplay(docs.example, step.stepType)}</code></pre>
                 </div>
 
+                ${docs.examples ? `
+                <div class="doc-section" style="margin-bottom: 1.5rem;">
+                    <h4 style="color: #2563eb; margin-bottom: 0.5rem;">
+                        <i class="fas fa-copy"></i> Examples
+                    </h4>
+                    <p style="color: #6b7280; font-size: 0.875rem; margin-bottom: 1rem;">Click an example to expand the full configuration.</p>
+                    ${docs.examples.map(ex => `
+                        <details style="margin-bottom: 0.75rem; border: 1px solid #e5e7eb; border-radius: 6px; background: #f9fafb;">
+                            <summary style="padding: 0.75rem; cursor: pointer; font-weight: 600; color: #1e3a8a; display: flex; align-items: center; gap: 0.5rem;">
+                                <i class="fas fa-chevron-right" style="font-size: 0.75rem;"></i>
+                                ${ex.label}
+                            </summary>
+                            <div style="padding: 1rem; background: white; border-top: 1px solid #e5e7eb;">
+                                <pre style="background: #f3f4f6; padding: 0.75rem; border-radius: 4px; font-size: 0.8rem; overflow-x: auto; line-height: 1.6;"><code>${JSON.stringify(ex.config, null, 2)}</code></pre>
+                            </div>
+                        </details>
+                    `).join('')}
+                </div>
+                ` : ''}
+
                 ${docs.validationTypes ? `
                 <div class="doc-section" style="margin-bottom: 1.5rem;">
                     <h4 style="color: #2563eb; margin-bottom: 0.5rem;">
@@ -828,6 +849,60 @@ class PropertiesPanel {
                 </div>
                 ` : ''}
 
+                ${docs.oobTemplates ? `
+                <div class="doc-section" style="margin-bottom: 1.5rem;">
+                    <h4 style="color: #2563eb; margin-bottom: 0.5rem;">
+                        <i class="fas fa-table"></i> Built-in Templates
+                    </h4>
+                    <p style="color: #6b7280; font-size: 0.875rem; margin-bottom: 0.75rem;">Select a template in the Format tab — column definitions are applied automatically. No manual mapping needed.</p>
+                    <table style="width: 100%; border-collapse: collapse; font-size: 0.875rem;">
+                        <thead>
+                            <tr style="background: #f3f4f6;">
+                                <th style="padding: 0.6rem; text-align: left; border: 1px solid #e5e7eb;">Template Key</th>
+                                <th style="padding: 0.6rem; text-align: left; border: 1px solid #e5e7eb;">Name</th>
+                                <th style="padding: 0.6rem; text-align: left; border: 1px solid #e5e7eb;">Notes</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${docs.oobTemplates.map(t => `
+                                <tr>
+                                    <td style="padding: 0.6rem; border: 1px solid #e5e7eb;"><code style="background: #e0e7ff; padding: 0.2rem 0.4rem; border-radius: 3px;">${t.key}</code></td>
+                                    <td style="padding: 0.6rem; border: 1px solid #e5e7eb; font-weight: 500;">${t.name}</td>
+                                    <td style="padding: 0.6rem; border: 1px solid #e5e7eb; color: #6b7280;">${t.note}</td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                </div>
+                ` : ''}
+
+                ${docs.stepOutput ? `
+                <div class="doc-section" style="margin-bottom: 1.5rem;">
+                    <h4 style="color: #2563eb; margin-bottom: 0.5rem;">
+                        <i class="fas fa-poll"></i> Step Output Variables
+                    </h4>
+                    <p style="color: #6b7280; font-size: 0.875rem; margin-bottom: 0.75rem;">${docs.stepOutput.description}</p>
+                    <table style="width: 100%; border-collapse: collapse; font-size: 0.875rem;">
+                        <thead>
+                            <tr style="background: #f3f4f6;">
+                                <th style="padding: 0.6rem; text-align: left; border: 1px solid #e5e7eb;">Variable</th>
+                                <th style="padding: 0.6rem; text-align: left; border: 1px solid #e5e7eb;">Type</th>
+                                <th style="padding: 0.6rem; text-align: left; border: 1px solid #e5e7eb;">Description</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${docs.stepOutput.fields.map(f => `
+                                <tr>
+                                    <td style="padding: 0.6rem; border: 1px solid #e5e7eb;"><code style="background: #dcfce7; padding: 0.2rem 0.4rem; border-radius: 3px; color: #166534;">${f.name}</code></td>
+                                    <td style="padding: 0.6rem; border: 1px solid #e5e7eb;"><code style="font-size: 0.8rem;">${f.type}</code></td>
+                                    <td style="padding: 0.6rem; border: 1px solid #e5e7eb; color: #4b5563;">${f.description}</td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                </div>
+                ` : ''}
+
                 ${docs.parameters ? `
                 <div class="doc-section">
                     <h4 style="color: #2563eb; margin-bottom: 0.5rem;">
@@ -1037,6 +1112,152 @@ class PropertiesPanel {
                         <input type="checkbox" id="stepEnabled" ${step.enabled ? 'checked' : ''}>
                         <span>Enabled</span>
                     </label>
+                </div>
+            </div>
+        `;
+    }
+
+    /**
+     * Create universal Error Handling section for all steps.
+     * Provides per-step try-catch with built-in catch actions.
+     */
+    createErrorHandlingSection(step) {
+        const eh = step.config?.errorHandling || {};
+        const isEnabled = eh.enabled || false;
+        const onError = eh.onError || 'catch';
+        const defaultField = eh.defaultField || '';
+        const defaultValue = eh.defaultValue || '';
+
+        // Retry config (per-step retry)
+        const retry = step.config?.retry || {};
+        const retryEnabled = retry.enabled || false;
+        const maxRetries = retry.maxRetries || 3;
+        const delayMs = retry.delayMs || 1000;
+        const backoffMultiplier = retry.backoffMultiplier || 2;
+
+        // Inheritance detection: check if pipeline has defaults
+        const pipelineConfig = window.pipelineBuilder?.pipeline?.pipelineConfig || {};
+        const hasRetryDefault = pipelineConfig.defaultRetry?.enabled;
+        const hasEHDefault = pipelineConfig.defaultErrorHandling?.enabled;
+        const hasStepRetry = step.config?.retry !== undefined;
+        const hasStepEH = step.config?.errorHandling !== undefined;
+
+        // Build inheritance badges
+        let inheritanceBadge = '';
+        if ((hasRetryDefault || hasEHDefault) && !hasStepRetry && !hasStepEH) {
+            inheritanceBadge = '<span style="font-size:10px; font-weight:normal; color:#3b82f6; background:rgba(59,130,246,0.1); padding:1px 6px; border-radius:4px;">Inherited</span>';
+        } else if ((hasRetryDefault || hasEHDefault) && (hasStepRetry || hasStepEH)) {
+            inheritanceBadge = '<span style="font-size:10px; font-weight:normal; color:#8b5cf6; background:rgba(139,92,246,0.1); padding:1px 6px; border-radius:4px;">Override</span>';
+        }
+
+        return `
+            <div class="form-section error-handling-section">
+                <h4 style="display:flex; align-items:center; gap:8px; cursor:pointer;" onclick="
+                    const body = this.nextElementSibling;
+                    const arrow = this.querySelector('.eh-arrow');
+                    if (body.style.display === 'none') {
+                        body.style.display = 'block';
+                        arrow.style.transform = 'rotate(90deg)';
+                    } else {
+                        body.style.display = 'none';
+                        arrow.style.transform = 'rotate(0deg)';
+                    }
+                ">
+                    <span class="eh-arrow" style="transition:0.2s; transform:rotate(${isEnabled || retryEnabled ? '90deg' : '0deg'}); font-size:12px;">&#9654;</span>
+                    Error Handling & Retry
+                    ${isEnabled ? '<span style="font-size:10px; font-weight:normal; color:#ef4444; background:rgba(239,68,68,0.1); padding:1px 6px; border-radius:4px;">ERROR ON</span>' : ''}
+                    ${retryEnabled ? '<span style="font-size:10px; font-weight:normal; color:#8b5cf6; background:rgba(139,92,246,0.1); padding:1px 6px; border-radius:4px;">RETRY ON</span>' : ''}
+                    ${inheritanceBadge}
+                </h4>
+                <div style="display:${isEnabled || retryEnabled ? 'block' : 'none'};">
+
+                    <!-- Retry Section -->
+                    <div style="margin-bottom:12px; padding:10px; border:1px solid rgba(139,92,246,0.2); border-radius:6px; background:rgba(139,92,246,0.03);">
+                        <div style="display:flex; align-items:center; gap:8px; margin-bottom:8px;">
+                            <label style="position:relative; display:inline-block; width:36px; height:20px; cursor:pointer;">
+                                <input type="checkbox" id="retryEnabled" ${retryEnabled ? 'checked' : ''}
+                                    style="opacity:0; width:0; height:0;">
+                                <span style="position:absolute; top:0; left:0; right:0; bottom:0;
+                                    background:${retryEnabled ? '#8b5cf6' : '#cbd5e1'}; border-radius:10px; transition:0.2s;"></span>
+                                <span style="position:absolute; top:2px; left:${retryEnabled ? '18px' : '2px'};
+                                    width:16px; height:16px; background:white; border-radius:50%; transition:0.2s;"></span>
+                            </label>
+                            <span style="font-size:12px; font-weight:500;"><i class="fas fa-sync" style="color:#8b5cf6; margin-right:4px;"></i>Retry on failure</span>
+                        </div>
+                        <div id="retryConfigArea" style="${!retryEnabled ? 'opacity:0.4; pointer-events:none;' : ''}">
+                            <div style="display:flex; gap:8px;">
+                                <div style="flex:1;">
+                                    <label style="font-size:10px; color:var(--text-secondary);">Max Retries</label>
+                                    <input type="number" id="retryMaxRetries" class="form-control"
+                                        value="${maxRetries}" min="1" max="10"
+                                        style="font-size:11px; padding:4px 8px; margin-top:2px;">
+                                </div>
+                                <div style="flex:1;">
+                                    <label style="font-size:10px; color:var(--text-secondary);">Delay (ms)</label>
+                                    <input type="number" id="retryDelayMs" class="form-control"
+                                        value="${delayMs}" min="0" step="100"
+                                        style="font-size:11px; padding:4px 8px; margin-top:2px;">
+                                </div>
+                                <div style="flex:1;">
+                                    <label style="font-size:10px; color:var(--text-secondary);">Backoff x</label>
+                                    <input type="number" id="retryBackoffMultiplier" class="form-control"
+                                        value="${backoffMultiplier}" min="1" max="5" step="0.5"
+                                        style="font-size:11px; padding:4px 8px; margin-top:2px;">
+                                </div>
+                            </div>
+                            <p style="font-size:10px; color:var(--text-secondary); margin:6px 0 0;">
+                                Retries with exponential backoff: ${delayMs}ms, ${delayMs * backoffMultiplier}ms, ${delayMs * backoffMultiplier * backoffMultiplier}ms...
+                            </p>
+                        </div>
+                    </div>
+
+                    <!-- Error Handling Section -->
+                    <div style="padding:10px; border:1px solid rgba(239,68,68,0.2); border-radius:6px; background:rgba(239,68,68,0.03);">
+                        <div style="display:flex; align-items:center; gap:8px; margin-bottom:8px;">
+                            <label style="position:relative; display:inline-block; width:36px; height:20px; cursor:pointer;">
+                                <input type="checkbox" id="ehEnabled" ${isEnabled ? 'checked' : ''}
+                                    style="opacity:0; width:0; height:0;">
+                                <span style="position:absolute; top:0; left:0; right:0; bottom:0;
+                                    background:${isEnabled ? '#ef4444' : '#cbd5e1'}; border-radius:10px; transition:0.2s;"></span>
+                                <span style="position:absolute; top:2px; left:${isEnabled ? '18px' : '2px'};
+                                    width:16px; height:16px; background:white; border-radius:50%; transition:0.2s;"></span>
+                            </label>
+                            <span style="font-size:12px; font-weight:500;"><i class="fas fa-shield-alt" style="color:#ef4444; margin-right:4px;"></i>Error handling (after retries exhausted)</span>
+                        </div>
+
+                        <div id="ehConfigArea" style="${!isEnabled ? 'opacity:0.4; pointer-events:none;' : ''}">
+                            <div class="form-group" style="margin-bottom:10px;">
+                                <label style="font-size:12px; font-weight:600;">On Error</label>
+                                <select id="ehOnError" class="form-control" style="font-size:12px; margin-top:3px;">
+                                    <option value="catch" ${onError === 'catch' ? 'selected' : ''}>Catch &amp; Continue - Log error, continue pipeline</option>
+                                    <option value="suppress" ${onError === 'suppress' ? 'selected' : ''}>Suppress - Ignore error silently</option>
+                                    <option value="rethrow" ${onError === 'rethrow' ? 'selected' : ''}>Rethrow - Stop pipeline on error</option>
+                                </select>
+                            </div>
+
+                            <div style="border-top:1px solid var(--border-color, #e2e8f0); padding-top:10px; margin-top:10px;">
+                                <label style="font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:0.5px; color:#10b981;">
+                                    <i class="fas fa-edit" style="margin-right:4px;"></i> Default Value (optional)
+                                </label>
+                                <p style="font-size:10px; color:var(--text-secondary); margin:2px 0 8px;">Set a fallback value for a field when this step fails</p>
+                                <div style="display:flex; gap:8px;">
+                                    <div style="flex:1;">
+                                        <label style="font-size:10px; color:var(--text-secondary);">Field name</label>
+                                        <input type="text" id="ehDefaultField" class="form-control"
+                                            value="${defaultField}" placeholder="e.g. patient_status"
+                                            style="font-size:11px; padding:4px 8px; margin-top:2px;">
+                                    </div>
+                                    <div style="flex:1;">
+                                        <label style="font-size:10px; color:var(--text-secondary);">Fallback value</label>
+                                        <input type="text" id="ehDefaultValue" class="form-control"
+                                            value="${defaultValue}" placeholder="e.g. unknown"
+                                            style="font-size:11px; padding:4px 8px; margin-top:2px;">
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
                 </div>
             </div>
         `;
@@ -1998,6 +2219,42 @@ class PropertiesPanel {
             }
         });
 
+        // === Error Handling & Retry Toggle Events ===
+        const ehSection = form.querySelector('.error-handling-section');
+        if (ehSection) {
+            const ehCheckbox = ehSection.querySelector('#ehEnabled');
+            if (ehCheckbox) {
+                ehCheckbox.addEventListener('change', () => {
+                    const on = ehCheckbox.checked;
+                    const track = ehCheckbox.nextElementSibling;
+                    const knob = track?.nextElementSibling;
+                    if (track) track.style.background = on ? '#ef4444' : '#cbd5e1';
+                    if (knob) knob.style.left = on ? '18px' : '2px';
+                    const configArea = ehSection.querySelector('#ehConfigArea');
+                    if (configArea) {
+                        configArea.style.opacity = on ? '1' : '0.4';
+                        configArea.style.pointerEvents = on ? 'auto' : 'none';
+                    }
+                });
+            }
+
+            const retryCheckbox = ehSection.querySelector('#retryEnabled');
+            if (retryCheckbox) {
+                retryCheckbox.addEventListener('change', () => {
+                    const on = retryCheckbox.checked;
+                    const track = retryCheckbox.nextElementSibling;
+                    const knob = track?.nextElementSibling;
+                    if (track) track.style.background = on ? '#8b5cf6' : '#cbd5e1';
+                    if (knob) knob.style.left = on ? '18px' : '2px';
+                    const configArea = ehSection.querySelector('#retryConfigArea');
+                    if (configArea) {
+                        configArea.style.opacity = on ? '1' : '0.4';
+                        configArea.style.pointerEvents = on ? 'auto' : 'none';
+                    }
+                });
+            }
+        }
+
         // === Conditional Field Visibility (Dynamic Auth Form Fields) ===
         this.setupConditionalFieldVisibility(form);
 
@@ -2537,202 +2794,6 @@ class PropertiesPanel {
     }
 
     /**
-     * Create Try-Catch Configuration UI
-     * Uses TryCatchBuilder OOP component
-     */
-    createTryCatchUI(step) {
-        if (!step.config) {
-            step.config = {};
-        }
-
-        const section = document.createElement('div');
-        section.className = 'form-section';
-        section.innerHTML = `
-            <div id="try-catch-builder-container" style="margin-top: 1rem;"></div>
-        `;
-
-        setTimeout(() => {
-            const container = document.getElementById('try-catch-builder-container');
-            if (container && typeof TryCatchBuilder !== 'undefined') {
-                this.tryCatchBuilder = new TryCatchBuilder(container, step.config);
-                this.tryCatchBuilder.init();
-                console.log('✅ TryCatchBuilder initialized with config:', step.config);
-
-                container.addEventListener('configChange', (e) => {
-                    step.config = e.detail.config;
-                    console.log('📝 Try-Catch config updated:', step.config);
-                });
-            } else {
-                console.error('❌ TryCatchBuilder not loaded or container not found');
-            }
-        }, 0);
-
-        return section.outerHTML;
-    }
-
-    /**
-     * Create Retry Configuration UI
-     * Inline form (no separate builder needed - simple config)
-     */
-    createRetryUI(step) {
-        if (!step.config) {
-            step.config = {};
-        }
-
-        const config = step.config;
-        const maxRetries = config.maxRetries || 3;
-        const delayMs = config.delayMs || 1000;
-        const backoffType = config.backoffType || 'fixed';
-        const maxDelayMs = config.maxDelayMs || 30000;
-        const childSteps = config.childSteps || [];
-
-        // Get available steps for assignment
-        let availableSteps = [];
-        try {
-            const pipeline = window.pipelineBuilder?.getPipeline();
-            const currentStep = window.pipelineBuilder?.currentStep;
-            let allSteps = [];
-            if (pipeline?.getAllSteps) {
-                allSteps = pipeline.getAllSteps();
-            } else {
-                (pipeline?.executionGroups || []).forEach(g => { if (g.steps) allSteps.push(...g.steps); });
-            }
-            availableSteps = allSteps.filter(s => currentStep && s.id !== currentStep.id);
-        } catch (e) { /* ignore */ }
-
-        const usedIds = new Set(childSteps);
-        const available = availableSteps.filter(s => !usedIds.has(s.id));
-
-        const chipsHtml = childSteps.map((id, idx) => {
-            const s = availableSteps.find(st => st.id === id);
-            const name = s ? (s.stepName || s.step_name || id.substring(0, 12)) : id.substring(0, 12);
-            return `<span class="retry-step-chip" style="
-                display: inline-flex; align-items: center; gap: 4px;
-                padding: 4px 10px; border-radius: 6px; font-size: 12px;
-                background: rgba(168, 85, 247, 0.1); border: 1px solid rgba(168, 85, 247, 0.25);
-                margin: 2px;">
-                <span style="font-weight: 600; color: #a855f7; font-size: 10px;">${idx + 1}.</span>
-                ${name}
-                <button class="retry-remove-step" data-step-id="${id}" style="
-                    background: none; border: none; cursor: pointer; color: var(--text-tertiary);
-                    padding: 0 2px; font-size: 14px; line-height: 1;">&times;</button>
-            </span>`;
-        }).join('') || '<span style="font-size: 12px; color: var(--text-tertiary); font-style: italic;">No steps assigned</span>';
-
-        const section = document.createElement('div');
-        section.className = 'form-section';
-        section.innerHTML = `
-            <div class="retry-builder" style="padding: 0;">
-                <h4 style="margin: 0 0 4px; font-size: 14px;">Retry Configuration</h4>
-                <p style="margin: 0 0 12px; font-size: 12px; color: var(--text-secondary);">
-                    Retries child steps on failure with configurable backoff strategy.
-                </p>
-
-                <div class="form-group" style="margin-bottom: 10px;">
-                    <label style="font-weight: 600; font-size: 13px;">Max Retries</label>
-                    <input type="number" id="retryMaxRetries" class="form-control" value="${maxRetries}" min="1" max="20" style="margin-top: 4px;">
-                </div>
-
-                <div class="form-group" style="margin-bottom: 10px;">
-                    <label style="font-weight: 600; font-size: 13px;">Backoff Type</label>
-                    <select id="retryBackoffType" class="form-control" style="margin-top: 4px;">
-                        <option value="fixed" ${backoffType === 'fixed' ? 'selected' : ''}>Fixed - Same delay each time</option>
-                        <option value="exponential" ${backoffType === 'exponential' ? 'selected' : ''}>Exponential - 1s, 2s, 4s, 8s...</option>
-                        <option value="linear" ${backoffType === 'linear' ? 'selected' : ''}>Linear - 1s, 2s, 3s, 4s...</option>
-                    </select>
-                </div>
-
-                <div class="form-group" style="margin-bottom: 10px;">
-                    <label style="font-weight: 600; font-size: 13px;">Initial Delay (ms)</label>
-                    <input type="number" id="retryDelayMs" class="form-control" value="${delayMs}" min="0" step="100" style="margin-top: 4px;">
-                </div>
-
-                <div class="form-group" style="margin-bottom: 10px;">
-                    <label style="font-weight: 600; font-size: 13px;">Max Delay Cap (ms)</label>
-                    <input type="number" id="retryMaxDelayMs" class="form-control" value="${maxDelayMs}" min="0" step="1000" style="margin-top: 4px;">
-                    <small style="color: var(--text-tertiary);">Caps delay for exponential/linear backoff</small>
-                </div>
-
-                <div style="margin-top: 12px; padding: 10px 14px; border: 1px dashed rgba(168, 85, 247, 0.3); border-radius: 10px; background: rgba(168, 85, 247, 0.04);">
-                    <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 6px;">
-                        <span style="font-weight: 700; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; color: #a855f7;">Child Steps</span>
-                        <span style="font-size: 11px; color: var(--text-tertiary);">${childSteps.length} step${childSteps.length !== 1 ? 's' : ''}</span>
-                    </div>
-                    <p style="margin: 0 0 8px; font-size: 11px; color: var(--text-secondary);">Steps to execute (and retry on failure)</p>
-                    <div id="retryChildChips" style="min-height: 28px; margin-bottom: 8px;">${chipsHtml}</div>
-                    ${available.length > 0 ? `
-                        <div style="display: flex; gap: 6px; align-items: center;">
-                            <select id="retryAddStepSelect" class="form-control" style="flex: 1; font-size: 12px; padding: 4px 8px;">
-                                <option value="">-- Add step --</option>
-                                ${available.map(s => `<option value="${s.id}">${s.stepName || s.step_name || s.id.substring(0, 12)}</option>`).join('')}
-                            </select>
-                            <button id="retryAddStepBtn" class="btn btn-sm" style="
-                                font-size: 12px; padding: 4px 10px; background: #a855f7; color: white;
-                                border: none; border-radius: 6px; cursor: pointer;">+ Add</button>
-                        </div>
-                    ` : ''}
-                </div>
-
-                <div style="margin-top: 12px; padding: 10px 14px; background: rgba(168, 85, 247, 0.06); border: 1px solid rgba(168, 85, 247, 0.15); border-radius: 8px; font-size: 12px; color: var(--text-secondary);">
-                    <strong style="color: var(--text-primary);">Context Variables:</strong><br>
-                    Child steps receive <code>_retry.attempt</code>, <code>_retry.maxRetries</code>, <code>_retry.isRetry</code>
-                </div>
-            </div>
-        `;
-
-        // Attach events after DOM insertion
-        setTimeout(() => {
-            const updateConfig = () => {
-                step.config.maxRetries = parseInt(document.getElementById('retryMaxRetries')?.value) || 3;
-                step.config.backoffType = document.getElementById('retryBackoffType')?.value || 'fixed';
-                step.config.delayMs = parseInt(document.getElementById('retryDelayMs')?.value) || 1000;
-                step.config.maxDelayMs = parseInt(document.getElementById('retryMaxDelayMs')?.value) || 30000;
-                console.log('📝 Retry config updated:', step.config);
-            };
-
-            ['retryMaxRetries', 'retryBackoffType', 'retryDelayMs', 'retryMaxDelayMs'].forEach(id => {
-                const el = document.getElementById(id);
-                if (el) el.addEventListener('change', updateConfig);
-            });
-
-            // Add step button
-            const addBtn = document.getElementById('retryAddStepBtn');
-            const addSelect = document.getElementById('retryAddStepSelect');
-            if (addBtn && addSelect) {
-                addBtn.addEventListener('click', () => {
-                    if (!addSelect.value) return;
-                    if (!step.config.childSteps) step.config.childSteps = [];
-                    if (!step.config.childSteps.includes(addSelect.value)) {
-                        step.config.childSteps.push(addSelect.value);
-                        console.log('📝 Retry child step added:', addSelect.value);
-                        // Re-render the properties panel to show updated chips
-                        if (window.pipelineBuilder?.propertiesPanel) {
-                            window.pipelineBuilder.propertiesPanel.showStepProperties(step);
-                        }
-                    }
-                });
-            }
-
-            // Remove step buttons
-            document.querySelectorAll('.retry-remove-step').forEach(btn => {
-                btn.addEventListener('click', (e) => {
-                    e.stopPropagation();
-                    const stepId = btn.dataset.stepId;
-                    if (step.config.childSteps) {
-                        step.config.childSteps = step.config.childSteps.filter(id => id !== stepId);
-                        console.log('📝 Retry child step removed:', stepId);
-                        if (window.pipelineBuilder?.propertiesPanel) {
-                            window.pipelineBuilder.propertiesPanel.showStepProperties(step);
-                        }
-                    }
-                });
-            });
-        }, 0);
-
-        return section.outerHTML;
-    }
-
-    /**
      * Create Connector Configuration UI (Inbound/Outbound)
      * Uses ConnectorConfigBuilder OOP component
      */
@@ -3015,6 +3076,1242 @@ class PropertiesPanel {
         }, 0);
 
         return section.outerHTML;
+    }
+
+    /**
+     * Create File Parser configuration UI with fixed-width column definition builder
+     */
+    createFileParserUI(step) {
+        if (!step.config) step.config = {};
+
+        const sourceType = step.config.sourceType || 'field';
+        const sourceField = step.config.sourceField || '';
+        const filePath = step.config.filePath || '';
+        const batchMode = step.config.batchMode === true;
+        const filePattern = step.config.filePattern || '';
+        const isLocalPath = sourceType === 'local_path';
+        const isFieldAsPath = sourceType === 'field_as_path';
+
+        const autoDetect = step.config.autoDetect === true;
+        const fileFormat = step.config.fileFormat || (autoDetect ? 'auto' : 'csv');
+        const delimiter = step.config.delimiter || ',';
+        const hasHeader = step.config.hasHeader !== false;
+        const trimFields = step.config.trimFields !== false;
+        const skipRows = step.config.skipRows || 0;
+        const maxRecords = step.config.maxRecords || 0;
+        const maxFileSizeMB = step.config.maxFileSizeMB || 0;
+        const columns = step.config.columns || [];
+        const sheetName = step.config.sheetName || '';
+        const sheetIndex = step.config.sheetIndex || 0;
+        const template = step.config.template || '';
+        const contentEncoding = step.config.contentEncoding || '';
+
+        const isAuto = fileFormat === 'auto' || autoDetect;
+        const isFixedWidth = fileFormat === 'fixed_width';
+        const isExcel = fileFormat === 'xlsx' || fileFormat === 'xls';
+        const isAvro = fileFormat === 'avro';
+        const isParquet = fileFormat === 'parquet';
+        const isBinary = isExcel || isAvro || isParquet;
+        const isDelimited = !isFixedWidth && !isBinary && !isAuto;
+
+        // Template options are loaded from API — build a minimal placeholder if one is already configured
+        const templateOptions = template
+            ? `<option value="${template}" selected>${template}</option>`
+            : '';
+
+        // Build column definition rows for fixed-width
+        let columnRowsHtml = columns.map((col, idx) =>
+            `<tr data-col-idx="${idx}">
+                <td><input type="text" class="form-control form-control-sm fp-col-name" value="${col.name || ''}" placeholder="Column name"></td>
+                <td><input type="number" class="form-control form-control-sm fp-col-start" value="${col.start || 1}" min="1" style="width:70px"></td>
+                <td><input type="number" class="form-control form-control-sm fp-col-length" value="${col.length || 1}" min="1" style="width:70px"></td>
+                <td><button type="button" class="btn btn-sm btn-outline-danger fp-remove-col-btn" title="Remove column">&times;</button></td>
+            </tr>`
+        ).join('');
+
+        const section = document.createElement('div');
+        section.className = 'form-section';
+        section.innerHTML = `
+            <h4><i class="fas fa-file-csv" style="color: var(--primary-color, #007bff); margin-right: 6px;"></i>File Parser Configuration</h4>
+
+            <!-- ── Source Type ─────────────────────────────── -->
+            <div class="form-group">
+                <label style="font-weight: 600;">Source Type <span style="color: var(--danger-color, #dc3545);">*</span></label>
+                <div class="btn-group btn-group-sm w-100" role="group" style="display:flex;">
+                    <input type="radio" class="btn-check" name="fpSourceType" id="fpSourceTypeField"
+                        value="field" autocomplete="off" ${sourceType === 'field' ? 'checked' : ''}>
+                    <label class="btn btn-outline-secondary flex-fill" for="fpSourceTypeField"
+                        style="font-size:0.8rem; padding:4px 8px;">
+                        <i class="fas fa-exchange-alt" style="margin-right:4px;"></i>Field Content
+                    </label>
+                    <input type="radio" class="btn-check" name="fpSourceType" id="fpSourceTypeFieldAsPath"
+                        value="field_as_path" autocomplete="off" ${isFieldAsPath ? 'checked' : ''}>
+                    <label class="btn btn-outline-secondary flex-fill" for="fpSourceTypeFieldAsPath"
+                        style="font-size:0.8rem; padding:4px 8px;">
+                        🔗 Field URI
+                    </label>
+                    <input type="radio" class="btn-check" name="fpSourceType" id="fpSourceTypeLocal"
+                        value="local_path" autocomplete="off" ${isLocalPath ? 'checked' : ''}>
+                    <label class="btn btn-outline-secondary flex-fill" for="fpSourceTypeLocal"
+                        style="font-size:0.8rem; padding:4px 8px;">
+                        📂 Local Path
+                    </label>
+                </div>
+            </div>
+
+            <!-- ── Pipeline Field source (field + field_as_path) ─── -->
+            <div id="fpFieldSourceGroup" style="display: ${isLocalPath ? 'none' : 'block'};">
+                <div class="form-group">
+                    <label>Source Field <span style="color: var(--danger-color, #dc3545);">*</span></label>
+                    <input type="text" id="fpSourceField" class="form-control" value="${sourceField}"
+                        placeholder="${isFieldAsPath ? 'steps.s3_connector.file_uri' : 'enriched.connector_result.content'}">
+                    <small id="fpSourceFieldHelp" class="form-text text-muted">${
+                        isFieldAsPath
+                            ? 'Field containing a file URI — resolved at runtime. Supported: <code>s3://bucket/key</code>, <code>https://host/file</code>, <code>/data/file.csv</code>. S3 credentials come from the interface connectivity config or IAM role.'
+                            : 'Field containing raw file content (bytes/string from inbound connector)'
+                    }</small>
+                </div>
+            </div>
+
+            <!-- ── Local File Path source ──────────────────── -->
+            <div id="fpLocalSourceGroup" style="display: ${isLocalPath ? 'block' : 'none'};">
+                <div class="form-group">
+                    <label>File Path or Glob Pattern <span style="color: var(--danger-color, #dc3545);">*</span></label>
+                    <div class="input-group">
+                        <input type="text" id="fpFilePath" class="form-control" value="${filePath}"
+                            placeholder="/data/claims/cclf1.dat  or  /data/claims/*.csv">
+                        <div class="input-group-append">
+                            <button type="button" id="fpBrowseBtn" class="btn btn-outline-secondary"
+                                title="Browse server file system" style="white-space:nowrap;">
+                                <i class="fas fa-folder-open"></i> Browse
+                            </button>
+                        </div>
+                    </div>
+                    <small class="form-text text-muted">Absolute path on the server. Glob patterns (e.g. <code>*.csv</code>) enable batch mode.</small>
+                </div>
+
+                <div class="form-group" style="display: flex; align-items: center; gap: 10px;">
+                    <label class="d-flex align-items-center mb-0" style="font-weight: 600; cursor: pointer;">
+                        <input type="checkbox" id="fpBatchMode" ${batchMode ? 'checked' : ''} style="margin-right: 6px;">
+                        Batch Mode
+                        <span style="margin-left: 6px; font-size: 0.75rem; background: #17a2b8; color: #fff; padding: 1px 6px; border-radius: 10px; font-weight: 400;">Folder</span>
+                    </label>
+                </div>
+                <small class="form-text text-muted" style="margin-top: -8px; margin-bottom: 8px; display: block;">
+                    Process all files matching the path/glob. Records are merged with a <code>_source_file</code> column added.
+                </small>
+
+                <div id="fpFilePatternGroup" style="display: ${batchMode ? 'block' : 'none'};">
+                    <div class="form-group">
+                        <label>File Pattern <small class="text-muted">(optional)</small></label>
+                        <input type="text" id="fpFilePattern" class="form-control" value="${filePattern}"
+                            placeholder="*.csv  or  cclf_*.dat">
+                        <small class="form-text text-muted">If set, File Path is treated as a directory and only files matching this pattern are processed.</small>
+                    </div>
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label class="d-flex align-items-center" style="font-weight: 600;">
+                    <input type="checkbox" id="fpAutoDetect" ${autoDetect ? 'checked' : ''} style="margin-right: 6px;">
+                    Auto-Detect Format
+                    <span style="margin-left: 6px; font-size: 0.75rem; background: var(--primary-color, #007bff); color: #fff; padding: 1px 6px; border-radius: 10px; font-weight: 400;">Smart</span>
+                </label>
+                <small class="form-text text-muted">Automatically detect CSV/TSV/fixed-width/XLSX/XLS from content</small>
+            </div>
+
+            <div id="fpManualFormatGroup" style="display: ${autoDetect ? 'none' : 'block'};">
+                <div class="form-group">
+                    <label>File Format <span style="color: var(--danger-color, #dc3545);">*</span></label>
+                    <select id="fpFileFormat" class="form-control">
+                        <option value="csv" ${fileFormat === 'csv' ? 'selected' : ''}>CSV (Comma Separated)</option>
+                        <option value="tsv" ${fileFormat === 'tsv' ? 'selected' : ''}>TSV (Tab Separated)</option>
+                        <option value="fixed_width" ${fileFormat === 'fixed_width' ? 'selected' : ''}>Fixed Width / Positional (CCLF, NACHA, X12)</option>
+                        <option value="xlsx" ${fileFormat === 'xlsx' ? 'selected' : ''}>Excel (.xlsx)</option>
+                        <option value="xls" ${fileFormat === 'xls' ? 'selected' : ''}>Excel Legacy (.xls)</option>
+                        <option value="avro" ${fileFormat === 'avro' ? 'selected' : ''}>Apache Avro (.avro)</option>
+                        <option value="parquet" ${fileFormat === 'parquet' ? 'selected' : ''}>Apache Parquet (.parquet)</option>
+                    </select>
+                </div>
+            </div>
+
+            <div id="fpDelimiterGroup" class="form-group" style="display: ${isDelimited ? 'block' : 'none'};">
+                <label>Delimiter</label>
+                <input type="text" id="fpDelimiter" class="form-control" value="${delimiter}" placeholder="," maxlength="2" style="width: 80px;">
+                <small class="form-text text-muted">Single character delimiter (comma, pipe, semicolon, etc.)</small>
+            </div>
+
+            <div class="form-group" id="fpHasHeaderGroup" style="display: ${isExcel || isFixedWidth || isDelimited ? 'block' : 'none'};">
+                <label class="d-flex align-items-center">
+                    <input type="checkbox" id="fpHasHeader" ${hasHeader ? 'checked' : ''} style="margin-right: 6px;">
+                    First row contains column names
+                </label>
+            </div>
+
+            <!-- Fixed-width: OOB template selector -->
+            <div id="fpTemplateSection" style="display: ${isFixedWidth ? 'block' : 'none'};">
+                <div class="form-group" style="margin-bottom: 0;">
+                    <label>OOB Template</label>
+                    <select id="fpTemplate" class="form-control">
+                        <option value="">— Manual column definitions —</option>
+                        ${templateOptions}
+                    </select>
+                    <small class="form-text text-muted">Pre-built column layouts for CCLF, NACHA, and remittance formats</small>
+                </div>
+
+                <!-- Template preview: confidence badge + field positions table -->
+                <div id="fpTemplatePreview" style="display: none; margin-top: 8px; margin-bottom: 12px; border: 1px solid #e5e7eb; border-radius: 6px; overflow: hidden;">
+                    <div id="fpTemplateConfidenceBar" style="padding: 8px 12px; display: flex; align-items: flex-start; gap: 8px; flex-wrap: wrap;">
+                        <span id="fpTemplateConfidenceBadge" style="flex-shrink: 0;"></span>
+                        <span id="fpTemplateConfidenceNote" style="font-size: 0.79rem; line-height: 1.4;"></span>
+                    </div>
+                    <div style="overflow-x: auto; max-height: 210px; overflow-y: auto;">
+                        <table style="width: 100%; border-collapse: collapse; font-size: 0.8rem;">
+                            <thead>
+                                <tr style="background: #f3f4f6; position: sticky; top: 0; z-index: 1;">
+                                    <th style="padding: 5px 8px; text-align: left; border-bottom: 1px solid #e5e7eb; color: #6b7280; font-weight: 600; white-space: nowrap;">#</th>
+                                    <th style="padding: 5px 8px; text-align: left; border-bottom: 1px solid #e5e7eb; color: #6b7280; font-weight: 600;">Column Name</th>
+                                    <th style="padding: 5px 8px; text-align: right; border-bottom: 1px solid #e5e7eb; color: #6b7280; font-weight: 600; white-space: nowrap;">Start</th>
+                                    <th style="padding: 5px 8px; text-align: right; border-bottom: 1px solid #e5e7eb; color: #6b7280; font-weight: 600; white-space: nowrap;">Length</th>
+                                    <th style="padding: 5px 8px; text-align: right; border-bottom: 1px solid #e5e7eb; color: #6b7280; font-weight: 600; white-space: nowrap;">End</th>
+                                </tr>
+                            </thead>
+                            <tbody id="fpTemplateColumnsBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Fixed-width column definitions -->
+            <div id="fpColumnsSection" style="display: ${isFixedWidth ? 'block' : 'none'};">
+                <div class="form-group">
+                    <label>Column Definitions <span style="color: var(--danger-color, #dc3545);">*</span></label>
+                    <small class="form-text text-muted mb-2">Select an OOB template above to pre-fill columns, then edit freely. Only what is in this table gets saved — the template is just a starting point.</small>
+                    <table class="table table-sm table-bordered" style="font-size: 0.85rem;">
+                        <thead>
+                            <tr>
+                                <th>Name</th>
+                                <th>Start</th>
+                                <th>Length</th>
+                                <th style="width: 40px;"></th>
+                            </tr>
+                        </thead>
+                        <tbody id="fpColumnsBody">
+                            ${columnRowsHtml}
+                        </tbody>
+                    </table>
+                    <button type="button" id="fpAddColumnBtn" class="btn btn-sm btn-outline-primary">
+                        <i class="fas fa-plus"></i> Add Column
+                    </button>
+                </div>
+            </div>
+
+            <!-- Excel-specific settings -->
+            <div id="fpExcelSection" style="display: ${isExcel ? 'block' : 'none'};">
+                <div class="row">
+                    <div class="col-6">
+                        <div class="form-group">
+                            <label>Sheet Name</label>
+                            <input type="text" id="fpSheetName" class="form-control" value="${sheetName}"
+                                placeholder="(default: first sheet)">
+                            <small class="form-text text-muted">Leave empty to use the first sheet</small>
+                        </div>
+                    </div>
+                    <div class="col-6">
+                        <div class="form-group">
+                            <label>Sheet Index</label>
+                            <input type="number" id="fpSheetIndex" class="form-control" value="${sheetIndex}" min="0">
+                            <small class="form-text text-muted">0-based (0 = first sheet)</small>
+                        </div>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>Content Encoding</label>
+                    <select id="fpContentEncoding" class="form-control">
+                        <option value="" ${contentEncoding === '' ? 'selected' : ''}>None (raw binary)</option>
+                        <option value="base64" ${contentEncoding === 'base64' ? 'selected' : ''}>Base64 (JSON-serialized binary)</option>
+                    </select>
+                    <small class="form-text text-muted">Use Base64 if the Excel file was transmitted as a JSON string</small>
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label class="d-flex align-items-center">
+                    <input type="checkbox" id="fpTrimFields" ${trimFields ? 'checked' : ''} style="margin-right: 6px;">
+                    Trim leading/trailing whitespace from values
+                </label>
+            </div>
+
+            <div class="row">
+                <div class="col-6">
+                    <div class="form-group">
+                        <label>Skip Rows</label>
+                        <input type="number" id="fpSkipRows" class="form-control" value="${skipRows}" min="0">
+                        <small class="form-text text-muted">Rows to skip from top</small>
+                    </div>
+                </div>
+                <div class="col-6">
+                    <div class="form-group">
+                        <label>Max Records</label>
+                        <input type="number" id="fpMaxRecords" class="form-control" value="${maxRecords}" min="0">
+                        <small class="form-text text-muted">0 = unlimited</small>
+                    </div>
+                </div>
+            </div>
+
+            <div class="row">
+                <div class="col-6">
+                    <div class="form-group">
+                        <label>Max File Size (MB)</label>
+                        <input type="number" id="fpMaxFileSizeMB" class="form-control" value="${maxFileSizeMB}" min="0" max="500">
+                        <small class="form-text text-muted">0 = default (100 MB), cap 500 MB</small>
+                    </div>
+                </div>
+                <div class="col-6" style="display:flex; align-items:flex-end; padding-bottom:4px;">
+                    <div id="fpLargeFileWarning" style="display:${(maxRecords === 0 && (maxFileSizeMB === 0 || maxFileSizeMB > 50)) ? 'block' : 'none'}; background:#fff3cd; border:1px solid #ffc107; border-radius:4px; padding:7px 10px; font-size:0.8rem; color:#856404; width:100%;">
+                        <i class="fas fa-exclamation-triangle"></i> Large files may use significant memory. Set Max Records or reduce Max File Size.
+                    </div>
+                </div>
+            </div>
+
+            <!-- Preview: paste content (field mode) or read from file path (local_path mode) -->
+            <div class="form-group" style="border-top: 1px solid var(--border-color, #dee2e6); padding-top: 12px; margin-top: 4px;">
+                <label>Preview Parser</label>
+
+                <!-- Shown only when sourceType = local_path -->
+                <div id="fpLocalPreviewNote" style="display: ${isLocalPath ? 'block' : 'none'}; background:#e8f4fd; border:1px solid #b8daff; border-radius:4px; padding:8px 10px; margin-bottom:8px; font-size:0.82rem; color:#004085;">
+                    <i class="fas fa-info-circle"></i>
+                    Preview will read directly from the file at the path above.
+                </div>
+
+                <!-- Shown only when sourceType = field -->
+                <div id="fpPasteSection" style="display: ${isLocalPath ? 'none' : 'block'};">
+                    <textarea id="fpPreviewContent" class="form-control" rows="4"
+                        placeholder="Paste sample file content here to preview how it will be parsed…"
+                        style="font-family: monospace; font-size: 0.8rem;"></textarea>
+                </div>
+
+                <div class="d-flex align-items-center mt-1" style="gap: 8px;">
+                    <button type="button" id="fpRunPreviewBtn" class="btn btn-sm btn-outline-primary">
+                        <i class="fas fa-play"></i> Run Preview
+                    </button>
+                    <span id="fpPreviewStatus" style="font-size: 0.8rem; color: var(--text-muted, #6c757d);"></span>
+                </div>
+                <div id="fpPreviewResult" style="display:none; margin-top: 8px; max-height: 200px; overflow: auto;">
+                    <table class="table table-sm table-bordered table-striped" style="font-size: 0.78rem; margin-bottom: 0;">
+                        <thead id="fpPreviewHead"></thead>
+                        <tbody id="fpPreviewBody"></tbody>
+                    </table>
+                </div>
+            </div>
+        `;
+
+        // Attach events after DOM insertion
+        setTimeout(() => {
+            // ── Source Type radio ─────────────────────────────────────
+            const fieldSourceGroup = document.getElementById('fpFieldSourceGroup');
+            const localSourceGroup = document.getElementById('fpLocalSourceGroup');
+            const batchModeChk = document.getElementById('fpBatchMode');
+            const filePatternGroup = document.getElementById('fpFilePatternGroup');
+
+            document.querySelectorAll('input[name="fpSourceType"]').forEach(radio => {
+                radio.addEventListener('change', () => {
+                    const isLocal = radio.value === 'local_path';
+                    const isURI   = radio.value === 'field_as_path';
+                    if (fieldSourceGroup) fieldSourceGroup.style.display = isLocal ? 'none' : 'block';
+                    if (localSourceGroup) localSourceGroup.style.display = isLocal ? 'block' : 'none';
+                    // Update source field help text based on mode
+                    const helpEl = document.getElementById('fpSourceFieldHelp');
+                    const srcFieldEl = document.getElementById('fpSourceField');
+                    if (helpEl) {
+                        helpEl.innerHTML = isURI
+                            ? 'Field containing a file URI — resolved at runtime. Supported: <code>s3://bucket/key</code>, <code>https://host/file</code>, <code>/data/file.csv</code>. S3 credentials come from the interface connectivity config or IAM role.'
+                            : 'Field containing raw file content (bytes/string from inbound connector)';
+                    }
+                    if (srcFieldEl && !srcFieldEl.value) {
+                        srcFieldEl.placeholder = isURI
+                            ? 'steps.s3_connector.file_uri'
+                            : 'enriched.connector_result.content';
+                    }
+                    // Hide paste-content preview section for local path (file is read server-side)
+                    const pasteSection = document.getElementById('fpPasteSection');
+                    const localPreviewNote = document.getElementById('fpLocalPreviewNote');
+                    if (pasteSection) pasteSection.style.display = isLocal ? 'none' : 'block';
+                    if (localPreviewNote) localPreviewNote.style.display = isLocal ? 'block' : 'none';
+                });
+            });
+
+            // ── IntelliSense for Source Field ─────────────────────────
+            const fpSourceFieldEl = document.getElementById('fpSourceField');
+            if (fpSourceFieldEl && typeof FieldPathSearchComponent !== 'undefined') {
+                // Destroy any previous instance (panel re-render)
+                if (this._fpSourceFieldAC) {
+                    try { this._fpSourceFieldAC.destroy(); } catch (_) {}
+                    this._fpSourceFieldAC = null;
+                }
+                // Kick off the backend variable fetch (same pattern as IfThenElseBuilder /
+                // SwitchCaseBuilder — async, non-blocking, caches into this.cachedStepVariables)
+                if (typeof this.loadStepVariables === 'function') {
+                    this.loadStepVariables();
+                }
+                this._fpSourceFieldAC = new FieldPathSearchComponent(fpSourceFieldEl, {
+                    includeHL7Fields: false,
+                    allowCustom: true,
+                    showCategories: true,
+                    placeholder: isFieldAsPath
+                        ? 'e.g. enriched.sftp.file_uri  or  message.s3_uri'
+                        : 'e.g. enriched.connector_result.content',
+                    getStepVariables: () => this.getStepVariablesForSearch ? this.getStepVariablesForSearch() : [],
+                    onSelect: (path) => {
+                        fpSourceFieldEl.value = path;
+                        fpSourceFieldEl.dispatchEvent(new Event('input', { bubbles: true }));
+                    }
+                });
+            }
+
+            // ── Batch mode checkbox ───────────────────────────────────
+            if (batchModeChk && filePatternGroup) {
+                batchModeChk.addEventListener('change', () => {
+                    filePatternGroup.style.display = batchModeChk.checked ? 'block' : 'none';
+                });
+            }
+
+            const autoDetectChk = document.getElementById('fpAutoDetect');
+            const manualFormatGroup = document.getElementById('fpManualFormatGroup');
+            const formatSelect = document.getElementById('fpFileFormat');
+
+            const refreshSections = (fmt, isAuto) => {
+                const fixed = fmt === 'fixed_width';
+                const excel = fmt === 'xlsx' || fmt === 'xls';
+                const binary = excel || fmt === 'avro' || fmt === 'parquet';
+                const delimited = !fixed && !binary && !isAuto;
+
+                const delimGroup = document.getElementById('fpDelimiterGroup');
+                const colSection = document.getElementById('fpColumnsSection');
+                const tplSection = document.getElementById('fpTemplateSection');
+                const excelSection = document.getElementById('fpExcelSection');
+                const headerGroup = document.getElementById('fpHasHeaderGroup');
+
+                if (delimGroup)   delimGroup.style.display   = delimited ? 'block' : 'none';
+                if (colSection)   colSection.style.display   = fixed ? 'block' : 'none';
+                if (tplSection)   tplSection.style.display   = fixed ? 'block' : 'none';
+                if (excelSection) excelSection.style.display = excel ? 'block' : 'none';
+                if (headerGroup)  headerGroup.style.display  = (fixed || excel || delimited) ? 'block' : 'none';
+            };
+
+            // Auto-detect toggle
+            if (autoDetectChk) {
+                autoDetectChk.addEventListener('change', () => {
+                    const on = autoDetectChk.checked;
+                    if (manualFormatGroup) manualFormatGroup.style.display = on ? 'none' : 'block';
+                    refreshSections(formatSelect ? formatSelect.value : 'csv', on);
+                });
+            }
+
+            // Format select change
+            if (formatSelect) {
+                formatSelect.addEventListener('change', () => {
+                    const fmt = formatSelect.value;
+                    refreshSections(fmt, autoDetectChk ? autoDetectChk.checked : false);
+
+                    // Auto-set delimiter for TSV/CSV
+                    const delimInput = document.getElementById('fpDelimiter');
+                    if (delimInput) {
+                        if (fmt === 'tsv') delimInput.value = '\\t';
+                        else if (fmt === 'csv') delimInput.value = ',';
+                    }
+                });
+            }
+
+            // Large-file warning toggle
+            const updateLargeFileWarning = () => {
+                const warn = document.getElementById('fpLargeFileWarning');
+                if (!warn) return;
+                const mr = parseInt(document.getElementById('fpMaxRecords')?.value) || 0;
+                const ms = parseInt(document.getElementById('fpMaxFileSizeMB')?.value) || 0;
+                const show = mr === 0 && (ms === 0 || ms > 50);
+                warn.style.display = show ? 'block' : 'none';
+            };
+            document.getElementById('fpMaxRecords')?.addEventListener('input', updateLargeFileWarning);
+            document.getElementById('fpMaxFileSizeMB')?.addEventListener('input', updateLargeFileWarning);
+
+            // Add column button
+            const addBtn = document.getElementById('fpAddColumnBtn');
+            if (addBtn) {
+                addBtn.addEventListener('click', () => {
+                    const tbody = document.getElementById('fpColumnsBody');
+                    if (!tbody) return;
+                    const idx = tbody.rows.length;
+                    const tr = document.createElement('tr');
+                    tr.setAttribute('data-col-idx', idx);
+                    tr.innerHTML = `
+                        <td><input type="text" class="form-control form-control-sm fp-col-name" value="" placeholder="Column name"></td>
+                        <td><input type="number" class="form-control form-control-sm fp-col-start" value="1" min="1" style="width:70px"></td>
+                        <td><input type="number" class="form-control form-control-sm fp-col-length" value="1" min="1" style="width:70px"></td>
+                        <td><button type="button" class="btn btn-sm btn-outline-danger fp-remove-col-btn" title="Remove column">&times;</button></td>
+                    `;
+                    tbody.appendChild(tr);
+                    tr.querySelector('.fp-remove-col-btn').addEventListener('click', () => tr.remove());
+                });
+            }
+
+            // Attach remove handlers to existing rows
+            document.querySelectorAll('.fp-remove-col-btn').forEach(btn => {
+                btn.addEventListener('click', () => btn.closest('tr').remove());
+            });
+
+            // ── Template preview: confidence badge + column positions ──
+            const showTemplatePreview = (tpl) => {
+                const preview = document.getElementById('fpTemplatePreview');
+                if (!preview || !tpl) {
+                    if (preview) preview.style.display = 'none';
+                    return;
+                }
+                const confStyles = {
+                    high:   { bg: '#ecfdf5', border: '#10b981', badgeBg: '#059669', noteColor: '#065f46' },
+                    medium: { bg: '#fffbeb', border: '#f59e0b', badgeBg: '#d97706', noteColor: '#78350f' },
+                    low:    { bg: '#fef2f2', border: '#ef4444', badgeBg: '#dc2626', noteColor: '#991b1b' },
+                };
+                const s = confStyles[tpl.confidence] || confStyles.medium;
+
+                const bar = document.getElementById('fpTemplateConfidenceBar');
+                if (bar) {
+                    bar.style.background = s.bg;
+                    bar.style.borderBottom = `1px solid ${s.border}`;
+                }
+
+                const badge = document.getElementById('fpTemplateConfidenceBadge');
+                if (badge) {
+                    const label = (tpl.confidence || 'unknown');
+                    badge.textContent = label.charAt(0).toUpperCase() + label.slice(1) + ' Confidence';
+                    badge.style.cssText = `background:${s.badgeBg}; color:#fff; padding:2px 9px; border-radius:10px; font-size:0.73rem; font-weight:700; white-space:nowrap;`;
+                }
+
+                const noteEl = document.getElementById('fpTemplateConfidenceNote');
+                if (noteEl) {
+                    noteEl.textContent = tpl.confidenceNote || '';
+                    noteEl.style.color = s.noteColor;
+                }
+
+                const tbody = document.getElementById('fpTemplateColumnsBody');
+                if (tbody && tpl.columns) {
+                    const maxEnd = tpl.columns.length
+                        ? Math.max(...tpl.columns.map(c => (c.start || 1) + (c.length || 1) - 1))
+                        : 0;
+                    tbody.innerHTML = tpl.columns.map((col, i) => `
+                        <tr style="background:${i % 2 === 0 ? '#fff' : '#f9fafb'};">
+                            <td style="padding:4px 8px; border-bottom:1px solid #f3f4f6; color:#9ca3af; font-size:0.75rem;">${i + 1}</td>
+                            <td style="padding:4px 8px; border-bottom:1px solid #f3f4f6; font-family:monospace; color:#059669; font-weight:600; font-size:0.8rem;">${col.name}</td>
+                            <td style="padding:4px 8px; border-bottom:1px solid #f3f4f6; text-align:right; color:#4b5563; font-size:0.8rem;">${col.start}</td>
+                            <td style="padding:4px 8px; border-bottom:1px solid #f3f4f6; text-align:right; color:#4b5563; font-size:0.8rem;">${col.length}</td>
+                            <td style="padding:4px 8px; border-bottom:1px solid #f3f4f6; text-align:right; color:#6b7280; font-size:0.8rem;">${(col.start || 1) + (col.length || 1) - 1}</td>
+                        </tr>
+                    `).join('') + `
+                        <tr style="background:#f3f4f6;">
+                            <td colspan="2" style="padding:4px 8px; font-size:0.75rem; color:#4b5563; font-weight:600;">${tpl.columns.length} columns</td>
+                            <td colspan="3" style="padding:4px 8px; text-align:right; font-size:0.75rem; color:#4b5563; font-weight:600;">Record width: ${maxEnd} chars</td>
+                        </tr>
+                    `;
+                }
+
+                preview.style.display = 'block';
+            };
+
+            // Populate the editable fpColumnsBody with template columns (user can then edit)
+            const populateColumnsFromTemplate = (tpl) => {
+                const tbody = document.getElementById('fpColumnsBody');
+                if (!tbody || !tpl.columns || !tpl.columns.length) return;
+                tbody.innerHTML = tpl.columns.map((col, idx) => `
+                    <tr data-col-idx="${idx}">
+                        <td><input type="text" class="form-control form-control-sm fp-col-name" value="${col.name || ''}" placeholder="Column name"></td>
+                        <td><input type="number" class="form-control form-control-sm fp-col-start" value="${col.start || 1}" min="1" style="width:70px"></td>
+                        <td><input type="number" class="form-control form-control-sm fp-col-length" value="${col.length || 1}" min="1" style="width:70px"></td>
+                        <td><button type="button" class="btn btn-sm btn-outline-danger fp-remove-col-btn" title="Remove column">&times;</button></td>
+                    </tr>
+                `).join('');
+                tbody.querySelectorAll('.fp-remove-col-btn').forEach(btn => {
+                    btn.addEventListener('click', () => btn.closest('tr').remove());
+                });
+            };
+
+            const fpTemplateSelect = document.getElementById('fpTemplate');
+            if (fpTemplateSelect) {
+                const currentTemplate = template; // captured from outer scope at render time
+
+                fpTemplateSelect.addEventListener('change', () => {
+                    const key = fpTemplateSelect.value;
+                    if (key && this._fpTemplateCache && this._fpTemplateCache[key]) {
+                        const tpl = this._fpTemplateCache[key];
+                        showTemplatePreview(tpl);
+                        populateColumnsFromTemplate(tpl); // pre-fill editable table; user can modify
+                    } else {
+                        const preview = document.getElementById('fpTemplatePreview');
+                        if (preview) preview.style.display = 'none';
+                    }
+                });
+
+                // Fetch templates from API, populate grouped dropdown, show preview
+                (async () => {
+                    try {
+                        const resp = await fetch('/api/file-parser/templates');
+                        const data = await resp.json();
+                        if (!data.success) return;
+
+                        // Cache by key for O(1) lookup on change
+                        this._fpTemplateCache = {};
+                        (data.templates || []).forEach(t => { this._fpTemplateCache[t.key] = t; });
+
+                        // Rebuild select options grouped by category (sorted)
+                        fpTemplateSelect.innerHTML = '<option value="">— Manual column definitions —</option>';
+                        const byCategory = data.by_category || {};
+                        Object.keys(byCategory).sort().forEach(cat => {
+                            const grp = document.createElement('optgroup');
+                            grp.label = cat;
+                            [...byCategory[cat]]
+                                .sort((a, b) => a.name.localeCompare(b.name))
+                                .forEach(t => {
+                                    const opt = document.createElement('option');
+                                    opt.value = t.key;
+                                    opt.textContent = t.name;
+                                    if (t.key === currentTemplate) opt.selected = true;
+                                    grp.appendChild(opt);
+                                });
+                            fpTemplateSelect.appendChild(grp);
+                        });
+
+                        // On re-open: show confidence preview for the configured template.
+                        // Only auto-fill columns if none are saved yet (first time selecting this template).
+                        if (currentTemplate && this._fpTemplateCache[currentTemplate]) {
+                            const tpl = this._fpTemplateCache[currentTemplate];
+                            showTemplatePreview(tpl);
+                            const tbody = document.getElementById('fpColumnsBody');
+                            if (tbody && tbody.rows.length === 0) {
+                                populateColumnsFromTemplate(tpl);
+                            }
+                        }
+                    } catch (e) {
+                        console.warn('[FileParser] Failed to load templates from API:', e);
+                    }
+                })();
+            }
+
+            // ── File Browser modal ────────────────────────────────────
+            const fpBrowseBtn = document.getElementById('fpBrowseBtn');
+            if (fpBrowseBtn) {
+                // Inject modal into body once (two-panel: shortcuts sidebar + file list)
+                if (!document.getElementById('fpFileBrowserModal')) {
+                    document.body.insertAdjacentHTML('beforeend', `
+                        <div id="fpFileBrowserModal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; z-index:10050; background:rgba(0,0,0,0.5); align-items:center; justify-content:center;">
+                            <div style="background:#fff; width:680px; max-width:96vw; max-height:78vh; border-radius:8px; display:flex; flex-direction:column; box-shadow:0 4px 24px rgba(0,0,0,0.35);">
+                                <!-- Header -->
+                                <div style="padding:11px 16px; border-bottom:1px solid #dee2e6; display:flex; align-items:center; justify-content:space-between; flex-shrink:0;">
+                                    <div style="display:flex; align-items:center; gap:8px;">
+                                        <i class="fas fa-folder-open" style="color:#ffc107;"></i>
+                                        <strong style="font-size:0.93rem;">Browse Server Files</strong>
+                                        <span id="fpBrowserOsBadge" style="font-size:0.72rem; background:#6c757d; color:#fff; padding:1px 7px; border-radius:10px;"></span>
+                                    </div>
+                                    <button id="fpBrowserClose" type="button" style="background:none; border:none; font-size:1.4rem; line-height:1; cursor:pointer; color:#6c757d;">&times;</button>
+                                </div>
+                                <!-- Current path bar -->
+                                <div style="padding:5px 14px; border-bottom:1px solid #dee2e6; font-size:0.78rem; color:#6c757d; word-break:break-all; flex-shrink:0; background:#f8f9fa; font-family:monospace;" id="fpBrowserPath"></div>
+                                <!-- Body: sidebar + file list -->
+                                <div style="display:flex; flex:1; overflow:hidden;">
+                                    <!-- Shortcuts sidebar -->
+                                    <div id="fpBrowserSidebar" style="width:140px; flex-shrink:0; border-right:1px solid #dee2e6; overflow-y:auto; background:#f8f9fa; padding:8px 0;">
+                                        <div style="padding:4px 12px; font-size:0.7rem; text-transform:uppercase; letter-spacing:0.05em; color:#adb5bd; font-weight:600;">Quick Access</div>
+                                    </div>
+                                    <!-- File listing -->
+                                    <div id="fpBrowserList" style="flex:1; overflow-y:auto; font-size:0.875rem;"></div>
+                                </div>
+                                <!-- Footer -->
+                                <div style="padding:9px 14px; border-top:1px solid #dee2e6; display:flex; align-items:center; justify-content:space-between; flex-shrink:0;">
+                                    <span id="fpBrowserSelLabel" style="font-size:0.8rem; color:#6c757d; font-family:monospace; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:65%;"></span>
+                                    <div style="display:flex; gap:8px; flex-shrink:0;">
+                                        <button id="fpBrowserCancel" type="button" class="btn btn-sm btn-secondary">Cancel</button>
+                                        <button id="fpBrowserSelect" type="button" class="btn btn-sm btn-primary" disabled>Select</button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    `);
+                }
+
+                const modal      = document.getElementById('fpFileBrowserModal');
+                const pathEl     = document.getElementById('fpBrowserPath');
+                const listEl     = document.getElementById('fpBrowserList');
+                const sidebarEl  = document.getElementById('fpBrowserSidebar');
+                const selectBtn  = document.getElementById('fpBrowserSelect');
+                const selLabel   = document.getElementById('fpBrowserSelLabel');
+                const osBadge    = document.getElementById('fpBrowserOsBadge');
+                let _selected    = null;
+                let _serverOS    = null;   // cached after first response
+                let _shortcuts   = [];
+
+                const fmtBytes = (b) => {
+                    if (b < 1024) return b + ' B';
+                    if (b < 1048576) return (b / 1024).toFixed(1) + ' KB';
+                    return (b / 1048576).toFixed(1) + ' MB';
+                };
+
+                const setSelected = (path) => {
+                    listEl.querySelectorAll('.fp-br-sel').forEach(e => e.style.outline = '');
+                    _selected = path;
+                    selectBtn.disabled = false;
+                    selLabel.textContent = path;
+                };
+
+                const renderSidebar = (shortcuts) => {
+                    const rows = shortcuts.map(s =>
+                        `<div class="fp-br-shortcut" data-path="${s.path}"
+                            style="padding:6px 12px; cursor:pointer; font-size:0.8rem; display:flex; align-items:center; gap:6px; border-radius:4px; margin:1px 4px;">
+                            <span>${s.icon || '📁'}</span>
+                            <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${s.name}</span>
+                        </div>`
+                    ).join('');
+                    // Preserve the header label
+                    const header = sidebarEl.querySelector('div');
+                    sidebarEl.innerHTML = '';
+                    if (header) sidebarEl.appendChild(header);
+                    sidebarEl.insertAdjacentHTML('beforeend', rows);
+                    sidebarEl.querySelectorAll('.fp-br-shortcut').forEach(el => {
+                        el.addEventListener('mouseenter', () => el.style.background = '#e9ecef');
+                        el.addEventListener('mouseleave', () => el.style.background = '');
+                        el.addEventListener('click', () => loadDir(el.dataset.path));
+                    });
+                };
+
+                const loadDir = async (path) => {
+                    listEl.innerHTML = '<div style="padding:14px 16px; color:#6c757d;">Loading…</div>';
+                    selectBtn.disabled = true;
+                    selLabel.textContent = '';
+                    _selected = null;
+                    try {
+                        const resp = await fetch('/api/file-parser/browse?path=' + encodeURIComponent(path));
+                        const rawText = await resp.text();
+                        let data;
+                        try {
+                            data = JSON.parse(rawText);
+                        } catch (_e) {
+                            listEl.innerHTML = `<div style="padding:14px 16px; color:#dc3545;">
+                                <strong>Cannot reach browse endpoint</strong><br>
+                                <span style="font-size:0.82rem;">HTTP ${resp.status} — Go backend may need to be restarted (docker-compose up --build).</span>
+                            </div>`;
+                            return;
+                        }
+                        if (!data.success) {
+                            listEl.innerHTML = `<div style="padding:14px 16px; color:#dc3545;">${data.error}</div>`;
+                            return;
+                        }
+
+                        // Update OS badge + sidebar on first load
+                        if (data.serverOS && data.serverOS !== _serverOS) {
+                            _serverOS = data.serverOS;
+                            const osLabels = { linux: '🐧 Linux', windows: '🪟 Windows', darwin: '🍎 macOS' };
+                            osBadge.textContent = osLabels[_serverOS] || _serverOS;
+                        }
+                        if (data.shortcuts && data.shortcuts.length) {
+                            _shortcuts = data.shortcuts;
+                            renderSidebar(_shortcuts);
+                        }
+
+                        pathEl.textContent = data.path;
+
+                        const rows = [];
+                        // ── Up ──
+                        if (data.parent !== undefined && data.parent !== null && data.parent !== '') {
+                            const upLabel = (_serverOS === 'windows' && data.parent === '/') ? 'Drives' : '..';
+                            rows.push(`<div class="fp-br-entry fp-br-nav" data-path="${data.parent}"
+                                style="padding:7px 14px; cursor:pointer; display:flex; align-items:center; gap:9px; border-bottom:1px solid #f0f0f0;">
+                                <span style="width:18px; text-align:center; font-size:0.9rem;">⬆</span>
+                                <span style="color:#6c757d; font-size:0.82rem;">${upLabel}</span>
+                            </div>`);
+                        }
+                        // ── Use this folder ──
+                        if (data.path && data.path !== '/') {
+                            rows.push(`<div class="fp-br-entry fp-br-sel" data-path="${data.path}"
+                                style="padding:7px 14px; cursor:pointer; display:flex; align-items:center; gap:9px; background:#fffbea; border-bottom:1px solid #ffe082;">
+                                <span style="width:18px; text-align:center;">📂</span>
+                                <span style="color:#856404; font-size:0.82rem; flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
+                                    Use this folder</span>
+                            </div>`);
+                        }
+                        // ── Folders ──
+                        (data.entries || []).filter(e => e.isDir).forEach(e => {
+                            rows.push(`<div class="fp-br-entry fp-br-nav" data-path="${e.path}"
+                                style="padding:7px 14px; cursor:pointer; display:flex; align-items:center; gap:9px; border-bottom:1px solid #f8f9fa;">
+                                <span style="width:18px; text-align:center;">${e.icon || '📁'}</span>
+                                <span style="flex:1;">${e.name}</span>
+                                <span style="font-size:0.72rem; color:#adb5bd;">folder</span>
+                            </div>`);
+                        });
+                        // ── Files ──
+                        (data.entries || []).filter(e => !e.isDir).forEach(e => {
+                            const isLarge = e.size > 50 * 1024 * 1024;
+                            rows.push(`<div class="fp-br-entry fp-br-sel" data-path="${e.path}"
+                                style="padding:7px 14px; cursor:pointer; display:flex; align-items:center; gap:9px; border-bottom:1px solid #f8f9fa;${isLarge ? ' background:#fffbea;' : ''}">
+                                <span style="width:18px; text-align:center;">📄</span>
+                                <span style="flex:1;">${e.name}</span>
+                                <span style="font-size:0.72rem; color:${isLarge ? '#856404' : '#adb5bd'}; white-space:nowrap;">${fmtBytes(e.size)}${isLarge ? ' ⚠' : ''}</span>
+                            </div>`);
+                        });
+                        if (!rows.length) {
+                            rows.push('<div style="padding:14px 16px; color:#adb5bd; font-style:italic;">Empty directory</div>');
+                        }
+                        listEl.innerHTML = rows.join('');
+
+                        listEl.querySelectorAll('.fp-br-nav').forEach(el => {
+                            el.addEventListener('mouseenter', () => el.style.background = '#f0f4f8');
+                            el.addEventListener('mouseleave', () => el.style.background = '');
+                            el.addEventListener('click', () => loadDir(el.dataset.path));
+                        });
+                        listEl.querySelectorAll('.fp-br-sel').forEach(el => {
+                            el.addEventListener('mouseenter', () => { if (_selected !== el.dataset.path) el.style.background = '#e8f4fd'; });
+                            el.addEventListener('mouseleave', () => { if (_selected !== el.dataset.path) el.style.background = el.style.background.includes('fffbea') ? '#fffbea' : ''; });
+                            el.addEventListener('click', () => setSelected(el.dataset.path));
+                        });
+                    } catch (err) {
+                        listEl.innerHTML = `<div style="padding:14px 16px; color:#dc3545;">Error: ${err.message}</div>`;
+                    }
+                };
+
+                document.getElementById('fpBrowserClose').onclick  = () => { modal.style.display = 'none'; };
+                document.getElementById('fpBrowserCancel').onclick = () => { modal.style.display = 'none'; };
+                modal.onclick = (e) => { if (e.target === modal) modal.style.display = 'none'; };
+                // Helper: infer file format from path extension and update the dropdown
+                const applyFormatFromPath = (path) => {
+                    if (!path) return;
+                    const fmtSel = document.getElementById('fpFileFormat');
+                    if (!fmtSel) return;
+                    const ext = path.split('.').pop().toLowerCase();
+                    const extMap = { xlsx: 'xlsx', xls: 'xls', tsv: 'tsv', tab: 'tsv', csv: 'csv', avro: 'avro', parquet: 'parquet' };
+                    const detected = extMap[ext];
+                    if (detected) {
+                        fmtSel.value = detected;
+                        // Fire a change event so the format-visibility handler runs
+                        fmtSel.dispatchEvent(new Event('change'));
+                    }
+                };
+
+                document.getElementById('fpBrowserSelect').onclick = () => {
+                    if (_selected) {
+                        const inp = document.getElementById('fpFilePath');
+                        if (inp) {
+                            inp.value = _selected;
+                            applyFormatFromPath(_selected);
+                        }
+                    }
+                    modal.style.display = 'none';
+                };
+
+                // Also infer format when user manually types/pastes a path
+                const fpFilePathEl = document.getElementById('fpFilePath');
+                if (fpFilePathEl) {
+                    fpFilePathEl.addEventListener('blur', () => applyFormatFromPath(fpFilePathEl.value.trim()));
+                }
+
+                fpBrowseBtn.addEventListener('click', () => {
+                    _selected = null;
+                    selectBtn.disabled = true;
+                    selLabel.textContent = '';
+                    // Start at current value, or let the server decide the default (empty = OS default)
+                    const currentVal = document.getElementById('fpFilePath')?.value?.trim() || '';
+                    modal.style.display = 'flex';
+                    loadDir(currentVal);
+                });
+            }
+
+            // Preview button
+            const previewBtn = document.getElementById('fpRunPreviewBtn');
+            if (previewBtn) {
+                previewBtn.addEventListener('click', async () => {
+                    const sourceType = document.querySelector('input[name="fpSourceType"]:checked')?.value || 'field';
+                    const isLocalPath = sourceType === 'local_path';
+                    const filePath = document.getElementById('fpFilePath')?.value?.trim() || '';
+                    const content  = document.getElementById('fpPreviewContent')?.value || '';
+                    const statusEl = document.getElementById('fpPreviewStatus');
+
+                    if (isLocalPath) {
+                        if (!filePath) {
+                            if (statusEl) statusEl.textContent = 'Enter or browse to a file path first.';
+                            return;
+                        }
+                    } else {
+                        if (!content.trim()) {
+                            if (statusEl) statusEl.textContent = 'Paste some content first.';
+                            return;
+                        }
+                    }
+
+                    // Build config from current form state
+                    const autoDetectChk = document.getElementById('fpAutoDetect');
+                    const fmt = document.getElementById('fpFileFormat')?.value || 'csv';
+                    const config = {
+                        fileFormat:  autoDetectChk?.checked ? 'auto' : fmt,
+                        autoDetect:  autoDetectChk?.checked || false,
+                        hasHeader:   document.getElementById('fpHasHeader')?.checked !== false,
+                        delimiter:   document.getElementById('fpDelimiter')?.value || ',',
+                        trimFields:  document.getElementById('fpTrimFields')?.checked !== false,
+                        skipRows:    parseInt(document.getElementById('fpSkipRows')?.value) || 0,
+                        maxRecords:  5,  // preview: up to 5 rows
+                        template:    document.getElementById('fpTemplate')?.value || '',
+                        sheetName:   document.getElementById('fpSheetName')?.value || '',
+                        sheetIndex:  parseInt(document.getElementById('fpSheetIndex')?.value) || 0,
+                        contentEncoding: document.getElementById('fpContentEncoding')?.value || '',
+                    };
+
+                    // Collect column definitions for fixed-width
+                    if (fmt === 'fixed_width') {
+                        const cols = [];
+                        document.querySelectorAll('#fpColumnsBody tr').forEach(row => {
+                            const name = row.querySelector('.fp-col-name')?.value || '';
+                            const start = parseInt(row.querySelector('.fp-col-start')?.value) || 1;
+                            const length = parseInt(row.querySelector('.fp-col-length')?.value) || 1;
+                            if (name) cols.push({ name, start, length });
+                        });
+                        config.columns = cols;
+                    }
+
+                    const resultEl = document.getElementById('fpPreviewResult');
+                    if (statusEl) statusEl.textContent = 'Parsing…';
+                    if (resultEl) resultEl.style.display = 'none';
+
+                    // Build request body: local path or pasted content
+                    const previewBody = isLocalPath
+                        ? { filePath, config }
+                        : { content, config };
+
+                    try {
+                        const resp = await fetch('/api/file-parser/preview', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(previewBody),
+                        });
+                        const json = await resp.json();
+
+                        if (!json.success) {
+                            if (statusEl) statusEl.textContent = `Error: ${json.error}`;
+                            return;
+                        }
+
+                        const { columns, records, record_count, format, detected_format } = json.preview;
+                        const displayFmt = detected_format || format || '?';
+                        if (statusEl) statusEl.textContent = `${record_count} record(s) — format: ${displayFmt}`;
+
+                        if (resultEl && columns && records) {
+                            const head = document.getElementById('fpPreviewHead');
+                            const body = document.getElementById('fpPreviewBody');
+                            if (head) head.innerHTML = `<tr>${columns.map(c => `<th>${c}</th>`).join('')}</tr>`;
+                            if (body) body.innerHTML = records.map(r =>
+                                `<tr>${columns.map(c => `<td>${r[c] ?? ''}</td>`).join('')}</tr>`
+                            ).join('');
+                            resultEl.style.display = 'block';
+                        }
+                    } catch (e) {
+                        if (statusEl) statusEl.textContent = `Request failed: ${e.message}`;
+                    }
+                });
+            }
+        }, 0);
+
+        return section.outerHTML;
+    }
+
+    /**
+     * Create Remove Duplicates configuration UI — chip-based key field picker,
+     * styled radio buttons for strategy and null-key behavior, IntelliSense on
+     * sourceField/outputField, and a maxInputRecords safety guard input.
+     */
+    createRemoveDuplicatesUI(step) {
+        if (!step.config) step.config = {};
+
+        const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
+        // Normalise keyFields from any saved format
+        let keyFields = [];
+        const kf = step.config.keyFields;
+        if (Array.isArray(kf)) {
+            keyFields = kf.filter(Boolean);
+        } else if (typeof kf === 'string' && kf) {
+            keyFields = kf.split(',').map(f => f.trim()).filter(Boolean);
+        }
+
+        const sourceField     = step.config.sourceField     || '';
+        const strategy        = step.config.strategy        || 'first';
+        const nullKeyBehavior = step.config.nullKeyBehavior  || 'group';
+        const caseSensitive   = step.config.caseSensitive   !== false;
+        const outputField     = step.config.outputField     || '';
+        const maxInputRecords = step.config.maxInputRecords  || 0;
+
+        const chipsHtml = keyFields.map(f =>
+            `<span class="rd-field-chip">${esc(f)}<button type="button" class="rd-chip-remove" data-field="${esc(f)}" title="Remove">&#x00D7;</button></span>`
+        ).join('');
+
+        const strategyOptions = [
+            { value: 'first', title: 'Keep First',   desc: 'Discard all later duplicates — fast, preserves original ordering' },
+            { value: 'last',  title: 'Keep Last',    desc: 'Overwrite with the most recent — useful when later records are corrections' },
+            { value: 'merge', title: 'Merge Fields', desc: 'Keep first, fill missing fields from later records (non-destructive)' }
+        ];
+        const nullOptions = [
+            { value: 'group',  title: 'Group',    desc: 'Treat all null-key records as one group; apply strategy among them' },
+            { value: 'keep',   title: 'Keep All', desc: 'Always keep records where key fields are missing (bypass dedup)' },
+            { value: 'remove', title: 'Drop',     desc: 'Remove records where key fields are null or absent' }
+        ];
+
+        const radioGroup = (name, options, selected) => options.map(o =>
+            `<label class="rd-radio-option${selected === o.value ? ' active' : ''}">
+                <input type="radio" name="${name}" value="${o.value}"${selected === o.value ? ' checked' : ''}>
+                <div class="rd-radio-content">
+                    <span class="rd-radio-title">${esc(o.title)}</span>
+                    <span class="rd-radio-desc">${esc(o.desc)}</span>
+                </div>
+            </label>`
+        ).join('');
+
+        const section = document.createElement('div');
+        section.className = 'form-section';
+        section.innerHTML = `
+            <div class="form-group">
+                <label class="form-label">Source Array Field <span style="color:#ef4444">*</span></label>
+                <input type="text" id="rdSourceField" class="form-control" value="${esc(sourceField)}"
+                       placeholder="e.g. enriched.file_parser.records" autocomplete="off">
+                <div class="field-help">Dot-path to the array to deduplicate (e.g. <code>enriched.results</code>)</div>
+            </div>
+
+            <div class="form-group">
+                <label class="form-label">
+                    Key Fields
+                    <span style="font-weight:400;color:var(--text-muted,#6b7280);font-size:11px;margin-left:4px">(empty = deduplicate on entire record)</span>
+                </label>
+                <div id="rdKeyChips" class="rd-chips-container">${chipsHtml || '<span style="color:var(--text-muted,#9ca3af);font-size:12px;align-self:center">No key fields — full-record dedup</span>'}</div>
+                <input type="hidden" id="rdKeyFieldsJson" value='${JSON.stringify(keyFields)}'>
+                <div class="rd-chip-input-row">
+                    <input type="text" id="rdKeyFieldInput" class="form-control form-control-sm"
+                           placeholder="Type a field name and press Enter or Add" style="flex:1">
+                    <button type="button" id="rdAddFieldBtn" class="btn btn-sm btn-outline-primary">Add</button>
+                    <button type="button" id="rdDetectBtn" class="btn btn-sm btn-outline-secondary"
+                            title="Auto-detect column names from upstream File Parser step">Detect from source</button>
+                </div>
+                <div class="field-help">Fields forming the unique key. Supports dot-paths for nested fields (e.g. <code>patient.id</code>).</div>
+            </div>
+
+            <div class="form-group">
+                <label class="form-label">Duplicate Strategy</label>
+                <div class="rd-radio-group">
+                    ${radioGroup('rdStrategy', strategyOptions, strategy)}
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label class="form-label">Missing Key Behavior</label>
+                <div class="rd-radio-group rd-radio-group-sm">
+                    ${radioGroup('rdNullKeyBehavior', nullOptions, nullKeyBehavior)}
+                </div>
+            </div>
+
+            <div style="display:flex;gap:12px;align-items:flex-start;flex-wrap:wrap">
+                <div class="form-group" style="flex:1;min-width:160px">
+                    <label class="form-label">Output Field <span style="font-weight:400;color:var(--text-muted,#6b7280)">(optional)</span></label>
+                    <input type="text" id="rdOutputField" class="form-control" value="${esc(outputField)}"
+                           placeholder="(update source field in-place)" autocomplete="off">
+                    <div class="field-help">Write result to a different field, keeping the original array intact</div>
+                </div>
+                <div class="form-group" style="flex-shrink:0">
+                    <label class="form-label" style="display:flex;align-items:center;gap:8px;cursor:pointer">
+                        <input type="checkbox" id="rdCaseSensitive"${caseSensitive ? ' checked' : ''}>
+                        Case-Sensitive Keys
+                    </label>
+                    <div class="field-help">Uncheck to treat "Smith" = "SMITH"</div>
+                </div>
+            </div>
+
+            <details class="form-section-advanced">
+                <summary>Advanced options</summary>
+                <div class="form-group">
+                    <label class="form-label">Max Input Records</label>
+                    <input type="number" id="rdMaxInputRecords" class="form-control" value="${maxInputRecords}"
+                           min="0" max="10000000" style="width:180px">
+                    <div class="field-help">0 = default 1M limit; hard cap 10M. Returns an error if exceeded — prevents OOM on very large datasets.</div>
+                </div>
+            </details>
+        `;
+
+        // Attach events and IntelliSense after DOM insertion (same deferred-init pattern as File Parser)
+        setTimeout(() => {
+            // Wire chip picker, strategy radio active-class sync, Detect button
+            this._initRemoveDuplicatesChips();
+
+            // IntelliSense on sourceField
+            const rdSrcEl = document.getElementById('rdSourceField');
+            if (rdSrcEl && typeof FieldPathSearchComponent !== 'undefined') {
+                if (typeof this.loadStepVariables === 'function') {
+                    this.loadStepVariables(); // async, non-blocking, caches step variables
+                }
+                if (this._rdSourceFieldAC) { try { this._rdSourceFieldAC.destroy(); } catch (_) {} }
+                this._rdSourceFieldAC = new FieldPathSearchComponent(rdSrcEl, {
+                    includeHL7Fields: false,
+                    allowCustom: true,
+                    showCategories: true,
+                    placeholder: 'e.g. enriched.file_parser.records',
+                    getStepVariables: () => this.getStepVariablesForSearch ? this.getStepVariablesForSearch() : [],
+                    onSelect: path => {
+                        rdSrcEl.value = path;
+                        rdSrcEl.dispatchEvent(new Event('input', { bubbles: true }));
+                    }
+                });
+            }
+
+            // IntelliSense on outputField
+            const rdOutEl = document.getElementById('rdOutputField');
+            if (rdOutEl && typeof FieldPathSearchComponent !== 'undefined') {
+                if (this._rdOutputFieldAC) { try { this._rdOutputFieldAC.destroy(); } catch (_) {} }
+                this._rdOutputFieldAC = new FieldPathSearchComponent(rdOutEl, {
+                    includeHL7Fields: false,
+                    allowCustom: true,
+                    showCategories: true,
+                    placeholder: 'e.g. enriched.deduped_results',
+                    getStepVariables: () => this.getStepVariablesForSearch ? this.getStepVariablesForSearch() : [],
+                    onSelect: path => { rdOutEl.value = path; }
+                });
+            }
+        }, 0);
+
+        return section.outerHTML;
+    }
+
+    /**
+     * Wire chip picker, radio active states, and Detect button for Remove Duplicates UI.
+     * Called inside setTimeout(0) after the HTML is injected into the DOM.
+     */
+    _initRemoveDuplicatesChips() {
+        const chipsContainer = document.getElementById('rdKeyChips');
+        const keyFieldInput  = document.getElementById('rdKeyFieldInput');
+        const keyFieldsJson  = document.getElementById('rdKeyFieldsJson');
+        const addBtn         = document.getElementById('rdAddFieldBtn');
+        const detectBtn      = document.getElementById('rdDetectBtn');
+
+        if (!chipsContainer || !keyFieldInput || !keyFieldsJson) return;
+
+        const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
+        const getFields = () => { try { return JSON.parse(keyFieldsJson.value) || []; } catch { return []; } };
+        const setFields = fields => { keyFieldsJson.value = JSON.stringify(fields); };
+
+        const renderChips = fields => {
+            chipsContainer.innerHTML = fields.length
+                ? fields.map(f =>
+                    `<span class="rd-field-chip">${esc(f)}<button type="button" class="rd-chip-remove" data-field="${esc(f)}" title="Remove">&#x00D7;</button></span>`
+                  ).join('')
+                : '<span style="color:var(--text-muted,#9ca3af);font-size:12px;align-self:center">No key fields — full-record dedup</span>';
+
+            chipsContainer.querySelectorAll('.rd-chip-remove').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    setFields(getFields().filter(f => f !== btn.dataset.field));
+                    renderChips(getFields());
+                });
+            });
+        };
+
+        const addField = () => {
+            const val = keyFieldInput.value.trim();
+            if (!val) return;
+            const fields = getFields();
+            if (!fields.includes(val)) { fields.push(val); setFields(fields); renderChips(fields); }
+            keyFieldInput.value = '';
+            keyFieldInput.focus();
+        };
+
+        renderChips(getFields()); // initial render — wires existing chip × buttons
+
+        if (addBtn) addBtn.addEventListener('click', addField);
+        keyFieldInput.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); addField(); } });
+
+        // Keep active CSS class in sync with radio selections
+        const syncRadioActive = name => {
+            document.querySelectorAll(`input[name="${name}"]`).forEach(radio => {
+                radio.addEventListener('change', () => {
+                    document.querySelectorAll('.rd-radio-option').forEach(opt => {
+                        const r = opt.querySelector(`input[name="${name}"]`);
+                        if (r) opt.classList.toggle('active', r.checked);
+                    });
+                });
+            });
+        };
+        syncRadioActive('rdStrategy');
+        syncRadioActive('rdNullKeyBehavior');
+
+        // Detect from source — auto-discover column names from an upstream file_parser step
+        if (detectBtn) {
+            detectBtn.addEventListener('click', () => {
+                const pipeline = window.pipelineBuilder?.pipeline || window.pipelineBuilder?.getPipeline?.();
+                const allSteps = pipeline
+                    ? (pipeline.getAllSteps?.() || Object.values(pipeline.steps || {}))
+                    : [];
+
+                let candidates = [];
+                for (const s of allSteps) {
+                    if ((s.stepType || s.step_type) !== 'file_parser') continue;
+                    const cols = s.config?.columns;
+                    if (Array.isArray(cols) && cols.length > 0) {
+                        candidates = cols.map(c => (typeof c === 'string' ? c : (c.name || c.key || ''))).filter(Boolean);
+                        break;
+                    }
+                }
+
+                if (candidates.length === 0) {
+                    const manual = prompt('No column definitions found in an upstream File Parser step.\nEnter field names to add (comma-separated):');
+                    if (manual) candidates = manual.split(',').map(f => f.trim()).filter(Boolean);
+                }
+
+                if (candidates.length > 0) {
+                    this._showRdFieldCandidates(candidates, detectBtn, getFields, setFields, renderChips);
+                }
+            });
+        }
+    }
+
+    /**
+     * Show a candidate field popover anchored below the Detect button.
+     */
+    _showRdFieldCandidates(candidates, anchor, getFields, setFields, renderChips) {
+        document.getElementById('rdFieldCandidatesPopover')?.remove();
+
+        const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
+        const popover = document.createElement('div');
+        popover.id = 'rdFieldCandidatesPopover';
+        popover.className = 'rd-candidates-popover';
+        popover.innerHTML = `
+            <div class="rd-candidates-header">
+                <span>Click to add field</span>
+                <button type="button" id="rdCloseCandidates" style="background:none;border:none;cursor:pointer;font-size:16px;line-height:1;color:var(--text-muted,#6b7280)">&times;</button>
+            </div>
+            <div class="rd-candidates-list">
+                ${candidates.map(c => `<button type="button" class="rd-candidate-item" data-field="${esc(c)}">${esc(c)}</button>`).join('')}
+            </div>
+        `;
+
+        anchor.parentElement.appendChild(popover);
+        popover.querySelector('#rdCloseCandidates').addEventListener('click', () => popover.remove());
+
+        popover.querySelectorAll('.rd-candidate-item').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const field = btn.dataset.field;
+                const fields = getFields();
+                if (!fields.includes(field)) { fields.push(field); setFields(fields); renderChips(fields); }
+                btn.classList.add('rd-candidate-added');
+                btn.disabled = true;
+            });
+        });
+
+        setTimeout(() => {
+            const closeOnOutside = e => {
+                if (!popover.contains(e.target) && e.target !== anchor) {
+                    popover.remove();
+                    document.removeEventListener('click', closeOnOutside);
+                }
+            };
+            document.addEventListener('click', closeOnOutside);
+        }, 50);
     }
 
     /**
@@ -4513,6 +5810,84 @@ class PropertiesPanel {
             console.log('[PropertiesPanel] ✅ Saved FHIR Validation config:', step.config);
         }
 
+        // Collect File Parser configuration
+        if (VisualStep.isFileParser(step)) {
+            step.config = step.config || {};
+
+            // Source type and source-specific fields
+            const fpSourceTypeRadio = form.querySelector('input[name="fpSourceType"]:checked');
+            const sourceType = fpSourceTypeRadio ? fpSourceTypeRadio.value : 'field';
+            step.config.sourceType = sourceType;
+            if (sourceType === 'local_path') {
+                const fpFilePath = form.querySelector('#fpFilePath');
+                if (fpFilePath) step.config.filePath = fpFilePath.value.trim();
+                const fpBatchMode = form.querySelector('#fpBatchMode');
+                step.config.batchMode = fpBatchMode ? fpBatchMode.checked : false;
+                const fpFilePattern = form.querySelector('#fpFilePattern');
+                if (fpFilePattern) step.config.filePattern = fpFilePattern.value.trim();
+            } else {
+                const fpSourceField = form.querySelector('#fpSourceField');
+                if (fpSourceField) step.config.sourceField = fpSourceField.value;
+            }
+
+            const fpAutoDetect = form.querySelector('#fpAutoDetect');
+            step.config.autoDetect = fpAutoDetect ? fpAutoDetect.checked : false;
+
+            const fpFileFormat = form.querySelector('#fpFileFormat');
+            if (fpFileFormat) step.config.fileFormat = fpFileFormat.value;
+            else if (step.config.autoDetect) step.config.fileFormat = 'auto';
+
+            const fpDelimiter = form.querySelector('#fpDelimiter');
+            if (fpDelimiter) step.config.delimiter = fpDelimiter.value;
+
+            const fpHasHeader = form.querySelector('#fpHasHeader');
+            if (fpHasHeader) step.config.hasHeader = fpHasHeader.checked;
+
+
+            const fpTrimFields = form.querySelector('#fpTrimFields');
+            if (fpTrimFields) step.config.trimFields = fpTrimFields.checked;
+
+            const fpSkipRows = form.querySelector('#fpSkipRows');
+            if (fpSkipRows) step.config.skipRows = parseInt(fpSkipRows.value) || 0;
+
+            const fpMaxRecords = form.querySelector('#fpMaxRecords');
+            if (fpMaxRecords) step.config.maxRecords = parseInt(fpMaxRecords.value) || 0;
+
+            const fpMaxFileSizeMB = form.querySelector('#fpMaxFileSizeMB');
+            if (fpMaxFileSizeMB) step.config.maxFileSizeMB = parseInt(fpMaxFileSizeMB.value) || 0;
+
+            // Excel-specific fields
+            const fpSheetName = form.querySelector('#fpSheetName');
+            if (fpSheetName) step.config.sheetName = fpSheetName.value;
+
+            const fpSheetIndex = form.querySelector('#fpSheetIndex');
+            if (fpSheetIndex) step.config.sheetIndex = parseInt(fpSheetIndex.value) || 0;
+
+            const fpContentEncoding = form.querySelector('#fpContentEncoding');
+            if (fpContentEncoding) step.config.contentEncoding = fpContentEncoding.value;
+
+            // OOB template selection (fixed-width)
+            const fpTemplate = form.querySelector('#fpTemplate');
+            if (fpTemplate) step.config.template = fpTemplate.value;
+
+            // Collect fixed-width column definitions
+            const columnsBody = form.querySelector('#fpColumnsBody');
+            if (columnsBody) {
+                const columns = [];
+                columnsBody.querySelectorAll('tr').forEach(row => {
+                    const name = row.querySelector('.fp-col-name')?.value || '';
+                    const start = parseInt(row.querySelector('.fp-col-start')?.value) || 1;
+                    const length = parseInt(row.querySelector('.fp-col-length')?.value) || 1;
+                    if (name) {
+                        columns.push({ name, start, length });
+                    }
+                });
+                step.config.columns = columns;
+            }
+
+            console.log('[PropertiesPanel] ✅ Saved File Parser config:', step.config);
+        }
+
         // Collect dynamic configuration fields (enrichment checkboxes, text inputs, etc.)
         step.config = step.config || {};
 
@@ -4557,6 +5932,34 @@ class PropertiesPanel {
 
         console.log('[PropertiesPanel] Collected config fields:', step.config);
 
+        // Collect Remove Duplicates config from custom no-code UI
+        if (VisualStep.isRemoveDuplicates(step)) {
+            const rdSrc = document.getElementById('rdSourceField')?.value?.trim();
+            if (rdSrc !== undefined) step.config.sourceField = rdSrc;
+
+            const rdKeyJson = document.getElementById('rdKeyFieldsJson')?.value;
+            if (rdKeyJson) {
+                try { step.config.keyFields = JSON.parse(rdKeyJson) || []; } catch (_) { step.config.keyFields = []; }
+            }
+
+            const rdStrategy = document.querySelector('input[name="rdStrategy"]:checked')?.value;
+            if (rdStrategy) step.config.strategy = rdStrategy;
+
+            const rdNullKey = document.querySelector('input[name="rdNullKeyBehavior"]:checked')?.value;
+            if (rdNullKey) step.config.nullKeyBehavior = rdNullKey;
+
+            const rdCaseSens = document.getElementById('rdCaseSensitive');
+            if (rdCaseSens) step.config.caseSensitive = rdCaseSens.checked;
+
+            const rdOut = document.getElementById('rdOutputField')?.value?.trim();
+            if (rdOut !== undefined) step.config.outputField = rdOut;
+
+            const rdMax = document.getElementById('rdMaxInputRecords')?.value;
+            if (rdMax !== undefined && rdMax !== '') step.config.maxInputRecords = parseInt(rdMax, 10) || 0;
+
+            console.log('[PropertiesPanel] ✅ Remove Duplicates config collected:', step.config);
+        }
+
         // CRITICAL FIX: For database enrichment steps, if individual connection fields are provided,
         // force connectionString to be empty so executor builds it from individual fields
         if (step.config.databaseType &&
@@ -4589,6 +5992,49 @@ class PropertiesPanel {
             mappingsCount: (step.config && step.config.mappings) ? step.config.mappings.length : 0,
             configKeys: step.config ? Object.keys(step.config) : []
         });
+
+        // Error Handling (universal - applies to all steps)
+        const errorHandlingSection = form.querySelector('.error-handling-section');
+        if (errorHandlingSection) {
+            const ehEnabled = errorHandlingSection.querySelector('#ehEnabled');
+            if (ehEnabled) {
+                step.config = step.config || {};
+                if (ehEnabled.checked) {
+                    const onError = errorHandlingSection.querySelector('#ehOnError')?.value || 'catch';
+                    const defaultField = errorHandlingSection.querySelector('#ehDefaultField')?.value?.trim() || '';
+                    const defaultValue = errorHandlingSection.querySelector('#ehDefaultValue')?.value?.trim() || '';
+
+                    step.config.errorHandling = {
+                        enabled: true,
+                        onError: onError
+                    };
+                    // Only store default value if both field and value are provided
+                    if (defaultField && defaultValue) {
+                        step.config.errorHandling.defaultField = defaultField;
+                        step.config.errorHandling.defaultValue = defaultValue;
+                    }
+                    console.log('[PropertiesPanel] Saved Error Handling config:', step.config.errorHandling);
+                } else {
+                    delete step.config.errorHandling;
+                }
+            }
+
+            // Retry config (per-step retry)
+            const retryEnabled = errorHandlingSection.querySelector('#retryEnabled');
+            if (retryEnabled) {
+                if (retryEnabled.checked) {
+                    step.config.retry = {
+                        enabled: true,
+                        maxRetries: parseInt(errorHandlingSection.querySelector('#retryMaxRetries')?.value) || 3,
+                        delayMs: parseInt(errorHandlingSection.querySelector('#retryDelayMs')?.value) || 1000,
+                        backoffMultiplier: parseFloat(errorHandlingSection.querySelector('#retryBackoffMultiplier')?.value) || 2
+                    };
+                    console.log('[PropertiesPanel] Saved Retry config:', step.config.retry);
+                } else {
+                    delete step.config.retry;
+                }
+            }
+        }
 
         // Script (if present)
         const scriptType = form.querySelector('#scriptType')?.value;
@@ -4773,18 +6219,6 @@ class PropertiesPanel {
             return this.createLoopContainerUI(step);
         }
 
-        // Special handling for Try-Catch container step
-        if (VisualStep.isTryCatchStep(step)) {
-            console.log('🛡️ Using TryCatch Builder for try-catch container');
-            return this.createTryCatchUI(step);
-        }
-
-        // Special handling for Retry container step
-        if (VisualStep.isRetryStep(step)) {
-            console.log('🔄 Using Retry Builder for retry container');
-            return this.createRetryUI(step);
-        }
-
         // Special handling for HL7→FHIR mapping steps ONLY (not generic transformation)
         if (VisualStep.isHL7FHIRTransform(step)) {
             console.log('🎨 Using enhanced HL7→FHIR mapping UI for step type:', stepType);
@@ -4808,6 +6242,18 @@ class PropertiesPanel {
         if (VisualStep.isFHIRValidation(step)) {
             console.log('🛡️ Using enhanced FHIR Validation UI for step type:', stepType);
             return this.createFHIRValidationUI(step);
+        }
+
+        // Special handling for File Parser step (fixed-width column builder)
+        if (VisualStep.isFileParser(step)) {
+            console.log('📄 Using File Parser UI with column definition builder');
+            return this.createFileParserUI(step);
+        }
+
+        // Special handling for Remove Duplicates step (chip-based no-code UI)
+        if (VisualStep.isRemoveDuplicates(step)) {
+            console.log('🔧 Using Remove Duplicates no-code UI');
+            return this.createRemoveDuplicatesUI(step);
         }
 
         // Get step-specific configuration
@@ -4902,10 +6348,14 @@ class PropertiesPanel {
                     html += `</select>`;
                     break;
 
-                case 'checkbox':
-                    const checked = value === true || value === 'true' ? 'checked' : '';
+                case 'checkbox': {
+                    // Use explicit config value when present; only fall back to field.default for undefined.
+                    // This prevents `false` being overridden by `default: true` via the `||` short-circuit.
+                    const boolVal = step.config?.[field.key] !== undefined ? step.config[field.key] : field.default;
+                    const checked = boolVal === true || boolVal === 'true' ? 'checked' : '';
                     html += `<label class="checkbox-label"><input type="checkbox" name="config_${field.key}" ${checked}> ${field.checkboxLabel || field.label}</label>`;
                     break;
+                }
 
                 case 'multiselect':
                     html += `<div class="multiselect-group">`;
@@ -5984,7 +7434,77 @@ class PropertiesPanel {
                         help: 'Number of times to retry failed deliveries'
                     }
                 ]
-            }
+            },
+            'file_parser': {
+                fields: [
+                    {
+                        key: 'sourceField',
+                        label: 'Source Field',
+                        type: 'text',
+                        required: true,
+                        placeholder: 'enriched.connector_result.content',
+                        help: 'Field containing raw file content (e.g., from an inbound connector)'
+                    },
+                    {
+                        key: 'fileFormat',
+                        label: 'File Format',
+                        type: 'select',
+                        required: true,
+                        options: [
+                            { value: 'csv', label: 'CSV (Comma Separated)' },
+                            { value: 'tsv', label: 'TSV (Tab Separated)' },
+                            { value: 'fixed_width', label: 'Fixed Width / Positional (CCLF)' },
+                            { value: 'xlsx', label: 'Excel (.xlsx)' }
+                        ],
+                        help: 'Format of the file to parse'
+                    },
+                    {
+                        key: 'delimiter',
+                        label: 'Delimiter',
+                        type: 'text',
+                        default: ',',
+                        placeholder: ',',
+                        help: 'Field delimiter character (default: comma for CSV, tab for TSV)'
+                    },
+                    {
+                        key: 'hasHeader',
+                        label: 'Has Header Row',
+                        type: 'checkbox',
+                        default: true,
+                        checkboxLabel: 'First row contains column names'
+                    },
+                    {
+                        key: 'sheetName',
+                        label: 'Sheet Name (xlsx)',
+                        type: 'text',
+                        placeholder: '(default: first sheet)',
+                        help: 'Which Excel sheet to parse (leave empty for first sheet)'
+                    },
+                    {
+                        key: 'trimFields',
+                        label: 'Trim Whitespace',
+                        type: 'checkbox',
+                        default: true,
+                        checkboxLabel: 'Trim leading/trailing whitespace from values'
+                    },
+                    {
+                        key: 'skipRows',
+                        label: 'Skip Rows',
+                        type: 'number',
+                        default: 0,
+                        min: 0,
+                        help: 'Number of rows to skip from the top'
+                    },
+                    {
+                        key: 'maxRecords',
+                        label: 'Max Records',
+                        type: 'number',
+                        default: 0,
+                        min: 0,
+                        help: 'Maximum records to parse (0 = unlimited)'
+                    }
+                ]
+            },
         };
 
         // Add aliases for renamed step types (layer prefix removed)
@@ -7133,51 +8653,6 @@ return {
                     }
                 ]
             },
-            'control.try_catch': {
-                description: 'Container step that wraps child steps in error handling with try/catch/finally blocks. If a step in the Try block fails, execution moves to the Catch block. The Finally block always executes regardless of success or failure.',
-                useCases: [
-                    'Wrap risky API enrichment calls - catch errors and use fallback data',
-                    'Handle database connection failures gracefully during enrichment',
-                    'Ensure cleanup/audit logging always runs in Finally block',
-                    'Suppress non-critical transformation errors to avoid pipeline failure',
-                    'Log errors for monitoring while allowing pipeline to continue'
-                ],
-                example: {
-                    trySteps: ['api-enrichment-step', 'transform-result'],
-                    catchSteps: ['log-error', 'use-fallback-data'],
-                    finallySteps: ['audit-log'],
-                    onError: 'catch'
-                },
-                parameters: [
-                    { name: 'trySteps', type: 'Array<string>', required: true, description: 'Step IDs to execute in the try block. Execution stops at first failure.' },
-                    { name: 'catchSteps', type: 'Array<string>', required: false, description: 'Step IDs to execute when a try step fails. Receives _error context.' },
-                    { name: 'finallySteps', type: 'Array<string>', required: false, description: 'Step IDs that always execute (success or failure). Receives _trySuccess context.' },
-                    { name: 'onError', type: 'enum', required: false, description: '"catch" (default) - run catch steps and continue; "suppress" - ignore error, continue; "rethrow" - propagate error, stop pipeline' }
-                ]
-            },
-            'control.retry': {
-                description: 'Container step that retries child steps on failure with configurable backoff strategy. Useful for transient errors like network timeouts or temporary service unavailability.',
-                useCases: [
-                    'Retry failed API calls with exponential backoff',
-                    'Handle transient database connection errors',
-                    'Retry file operations that may fail due to locks',
-                    'Resilient external service integration'
-                ],
-                example: {
-                    childSteps: ['call-external-api', 'process-response'],
-                    maxRetries: 3,
-                    delayMs: 1000,
-                    backoffType: 'exponential',
-                    maxDelayMs: 30000
-                },
-                parameters: [
-                    { name: 'childSteps', type: 'Array<string>', required: true, description: 'Step IDs to execute (and retry on failure).' },
-                    { name: 'maxRetries', type: 'number', required: false, description: 'Maximum retry attempts. Default: 3' },
-                    { name: 'delayMs', type: 'number', required: false, description: 'Initial delay between retries in milliseconds. Default: 1000' },
-                    { name: 'backoffType', type: 'enum', required: false, description: '"fixed" (same delay), "exponential" (doubles each time), "linear" (increases linearly)' },
-                    { name: 'maxDelayMs', type: 'number', required: false, description: 'Maximum delay cap for exponential/linear backoff. Default: 30000' }
-                ]
-            }
         };
 
         // Check for general documentation requests (not step-specific)
@@ -7367,11 +8842,10 @@ return {
                 'Poll a message queue for additional data',
                 'Query a REST API for supplemental information'
             ],
-            example: { connectorType: 'postgresql_inbound', config: { host: 'db-server', port: 5432, database: 'ehr' }, outputField: 'enriched.external_data', timeoutMs: 30000 },
+            example: { connectorType: 'postgresql_inbound', config: { host: 'db-server', port: 5432, database: 'ehr' }, timeoutMs: 30000 },
             parameters: [
                 { name: 'connectorType', type: 'string', required: true, description: 'The type of inbound connector (e.g., tcp_mllp_inbound, http_rest_inbound, postgresql_inbound)' },
                 { name: 'config', type: 'object', required: true, description: 'Connector-specific configuration (host, port, credentials, etc.) - fields are driven by the connector type config_schema' },
-                { name: 'outputField', type: 'string', required: false, description: 'Where to store fetched data in the pipeline (default: enriched.connector_result)' },
                 { name: 'timeoutMs', type: 'number', required: false, description: 'Maximum wait time for data fetch in milliseconds (default: 30000)' }
             ]
         };
@@ -7392,6 +8866,285 @@ return {
                 { name: 'contentField', type: 'string', required: false, description: 'Which field from the pipeline data to send (default: transformed)' },
                 { name: 'contentType', type: 'string', required: false, description: 'Content type of the outgoing data (default: application/json)' }
             ]
+        };
+
+        // File Parser documentation
+        docs['file_parser'] = {
+            description: 'Parses structured files into an array of records for downstream pipeline steps. Supports CSV, TSV, fixed-width positional (CCLF, NACHA, X12), Excel .xlsx/.xls, Apache Avro, and Apache Parquet. Three source modes: read content from a pipeline field (field), from the server filesystem (local_path), or from a URI stored in a pipeline field — including s3://, https://, and file:// (field_as_path). Includes OOB healthcare templates for common fixed-width formats so no column mapping is needed. Typically placed after an Inbound Connector step, followed by Remove Duplicates and a Loop to process each record.',
+            useCases: [
+                'Parse a CSV feed received via SFTP — content stored in a pipeline field by the Inbound Connector',
+                'Parse a fixed-width CCLF Part A file from a local volume mount using the cclf1 OOB template — no column mapping required',
+                'Parse a NACHA ACH payment file using the nacha_entry OOB template',
+                'Read a CSV from S3: a prior API step stores the S3 URI in a field, field_as_path fetches and parses it (credentials from interface connectivity config)',
+                'Parse an Excel .xlsx spreadsheet received as base64 content in a pipeline field',
+                'Parse Apache Avro files from Kafka consumers or data pipelines — column names come from the embedded Avro schema',
+                'Parse Apache Parquet exports from data warehouses (Snowflake, BigQuery, Databricks) — supports files up to 500 MB',
+                'Batch mode: parse all CCLF files in a directory matching a glob pattern and combine into one record array',
+                'Auto-detect format: drop any file and let magic bytes and heuristics determine CSV/TSV/XLSX/Avro/Parquet automatically',
+                'Sample a large CSV with maxRecords: 100 — streaming read, only 100 rows loaded into memory regardless of file size'
+            ],
+            example: {
+                sourceType: 'field',
+                sourceField: 'enriched.connector_result.content',
+                autoDetect: true
+            },
+            parameters: [
+                {
+                    name: 'sourceType',
+                    type: 'enum: field | local_path | field_as_path',
+                    required: false,
+                    description: 'Where to read the file from. "field" (default) — raw file content already in a pipeline field (set by an Inbound Connector). "local_path" — read directly from the server/container filesystem; supports glob pattern + batch mode. "field_as_path" — a pipeline field holds a URI that is resolved at runtime: s3://bucket/key (AWS S3, credentials from interface connectivity config), https://... (HTTP GET), file:///... (local filesystem).'
+                },
+                {
+                    name: 'sourceField',
+                    type: 'string',
+                    required: true,
+                    description: 'For sourceType=field: the pipeline field holding raw file content (e.g. "enriched.sftp_content"). For sourceType=field_as_path: the pipeline field holding the URI to resolve (e.g. "enriched.s3_uri").'
+                },
+                {
+                    name: 'filePath',
+                    type: 'string',
+                    required: false,
+                    description: 'For sourceType=local_path: absolute path to the file or directory on the server/container (e.g. "/data/cclf/PARTA.T.ACO.D250101.T000001"). With batchMode=true, this is the base directory and filePattern is the glob.'
+                },
+                {
+                    name: 'batchMode',
+                    type: 'boolean',
+                    required: false,
+                    description: 'local_path only. When true, processes all files matching filePattern in the filePath directory and returns a combined array of results with per-file record counts. Use for daily batch feeds where an entire directory needs to be processed.'
+                },
+                {
+                    name: 'filePattern',
+                    type: 'string',
+                    required: false,
+                    description: 'Glob filename pattern used in batch mode (e.g. "PARTA*.T.*"). Combined with filePath to produce the full glob. Example: filePath="/data/cclf" + filePattern="PARTA*.T.*" matches all Part A files in the directory.'
+                },
+                {
+                    name: 'autoDetect',
+                    type: 'boolean',
+                    required: false,
+                    description: 'Enable automatic format detection. Magic bytes are checked first (detects XLSX, XLS, Avro, Parquet from binary headers). Then file extension (for local_path). Then delimiter heuristics (CSV vs TSV). Also auto-infers hasHeader from column name patterns. Overrides fileFormat.'
+                },
+                {
+                    name: 'fileFormat',
+                    type: 'enum',
+                    required: false,
+                    description: 'Explicit format: csv, tsv, fixed_width, xlsx, xls, avro, parquet, auto. Binary formats (xlsx, xls, avro, parquet) are auto-detected from magic bytes when sourceType=local_path, overriding whatever is configured. Avro and Parquet derive column names from their embedded schema — hasHeader is ignored for these.'
+                },
+                {
+                    name: 'template',
+                    type: 'string',
+                    required: false,
+                    description: 'OOB template key for fixed-width formats — no manual column mapping needed. Available templates: cclf1 (Part A Claims Header), cclf2 (Part A Revenue), cclf3 (Part A PPS/SNF), cclf4 (Part B Physicians), cclf5 (Part B DME), cclf6 (Part D Drug Events), cclf7 (Beneficiary Demographics), cclf8 (Beneficiary XREF), nacha_entry (ACH Entry Detail), era_835_header (X12 835 Interchange).'
+                },
+                {
+                    name: 'columns',
+                    type: 'array',
+                    required: false,
+                    description: 'Manual column definitions for fixed-width format. Each entry: { name, start, length }. Start is 1-based byte position, length is field width in bytes. Overrides template if both are set.'
+                },
+                {
+                    name: 'delimiter',
+                    type: 'string',
+                    required: false,
+                    description: 'Field separator character for CSV/TSV. Default: comma for CSV, tab for TSV. Ignored for binary formats (xlsx, xls, avro, parquet).'
+                },
+                {
+                    name: 'hasHeader',
+                    type: 'boolean',
+                    required: false,
+                    description: 'Whether the first row contains column names. Default: true. When false, columns are named col_1, col_2, ... for CSV/TSV. Ignored for Avro and Parquet (schema is embedded).'
+                },
+                {
+                    name: 'sheetName',
+                    type: 'string',
+                    required: false,
+                    description: 'xlsx/xls: Name of the sheet to parse. Leave empty to use the first sheet. Use sheetIndex if the sheet has no name.'
+                },
+                {
+                    name: 'sheetIndex',
+                    type: 'number',
+                    required: false,
+                    description: 'xlsx/xls: 0-based sheet index. Used when sheetName is empty. Default: 0 (first sheet).'
+                },
+                {
+                    name: 'contentEncoding',
+                    type: 'enum',
+                    required: false,
+                    description: 'Set to "base64" when binary file content (Excel, Avro, Parquet) was base64-encoded before being stored in a pipeline field. Common when binary data passes through JSON-based APIs or message queues. The executor decodes it before parsing.'
+                },
+                {
+                    name: 'trimFields',
+                    type: 'boolean',
+                    required: false,
+                    description: 'Trim leading/trailing whitespace from all string values. Default: true. Applies to CSV, TSV, fixed-width, and string fields in Avro/Parquet.'
+                },
+                {
+                    name: 'skipRows',
+                    type: 'number',
+                    required: false,
+                    description: 'Number of rows/records to skip from the top before parsing begins. Useful for files with non-data header rows (e.g. report title, generation date). For Avro/Parquet: skips that many records in the stream.'
+                },
+                {
+                    name: 'maxRecords',
+                    type: 'number',
+                    required: false,
+                    description: 'Maximum records to parse (0 = unlimited). For CSV/TSV: uses streaming when set — only maxRecords rows are read from the file, making it O(maxRecords) memory regardless of file size. Ideal for sampling large files. For Avro/Parquet: stops reading after maxRecords records.'
+                },
+                {
+                    name: 'maxFileSizeMB',
+                    type: 'number',
+                    required: false,
+                    description: 'File size limit in MB for local_path and file:// sources (0 = default 100 MB, hard cap 500 MB). The file size is checked via stat() before reading — oversized files are rejected immediately with a descriptive error. Use maxRecords to sample files larger than the limit.'
+                },
+                {
+                    name: 'interface_id',
+                    type: 'string',
+                    required: false,
+                    description: 'Required when sourceType=field_as_path and the URI is an s3:// address. Identifies which interface connectivity config to look up for AWS credentials (access key ID, secret access key, region). Credentials are AES-256-GCM decrypted at runtime — never stored in plaintext in the step config.'
+                }
+            ],
+            examples: [
+                {
+                    label: 'CSV from pipeline field (SFTP content)',
+                    config: { sourceType: 'field', sourceField: 'enriched.sftp_content', fileFormat: 'csv', hasHeader: true, trimFields: true }
+                },
+                {
+                    label: 'CCLF1 fixed-width from local file (OOB template)',
+                    config: { sourceType: 'local_path', filePath: '/data/cclf/PARTA.T.A0001.ACO.ZC1Y24.D250101.T000001', fileFormat: 'fixed_width', template: 'cclf1' }
+                },
+                {
+                    label: 'NACHA ACH payment file (OOB template)',
+                    config: { sourceType: 'local_path', filePath: '/data/nacha/ACH20260201.txt', fileFormat: 'fixed_width', template: 'nacha_entry' }
+                },
+                {
+                    label: 'S3 file via URI in pipeline field',
+                    config: { sourceType: 'field_as_path', sourceField: 'enriched.s3_uri', fileFormat: 'csv', hasHeader: true, interface_id: 'your-interface-id' }
+                },
+                {
+                    label: 'Excel from pipeline field (base64-encoded)',
+                    config: { sourceType: 'field', sourceField: 'enriched.excel_b64', fileFormat: 'xlsx', contentEncoding: 'base64', sheetName: 'Claims', hasHeader: true }
+                },
+                {
+                    label: 'Apache Avro — auto-detect format',
+                    config: { sourceType: 'field', sourceField: 'enriched.avro_bytes', autoDetect: true }
+                },
+                {
+                    label: 'Apache Parquet from local file with size limit',
+                    config: { sourceType: 'local_path', filePath: '/data/warehouse/claims_2026.parquet', fileFormat: 'parquet', maxRecords: 5000, maxFileSizeMB: 200 }
+                },
+                {
+                    label: 'Batch: all CCLF1 files in a directory',
+                    config: { sourceType: 'local_path', filePath: '/data/cclf/', filePattern: 'PARTA*.T.*.ZC1*.T*', fileFormat: 'fixed_width', template: 'cclf1', batchMode: true }
+                },
+                {
+                    label: 'Sample first 100 rows from a large CSV',
+                    config: { sourceType: 'local_path', filePath: '/data/large_feed.csv', fileFormat: 'csv', hasHeader: true, maxRecords: 100 }
+                }
+            ],
+            oobTemplates: [
+                { key: 'cclf1', name: 'CCLF1 — Part A Claims Header', note: 'CMS Medicare claims, Part A inpatient' },
+                { key: 'cclf2', name: 'CCLF2 — Part A Claims Revenue', note: 'Revenue center detail lines' },
+                { key: 'cclf3', name: 'CCLF3 — Part A PPS / SNF', note: 'Prospective Payment System / Skilled Nursing' },
+                { key: 'cclf4', name: 'CCLF4 — Part B Physicians', note: 'Physician and supplier claims' },
+                { key: 'cclf5', name: 'CCLF5 — Part B DME', note: 'Durable Medical Equipment claims' },
+                { key: 'cclf6', name: 'CCLF6 — Part D Drug Events', note: 'Prescription drug events' },
+                { key: 'cclf7', name: 'CCLF7 — Beneficiary Demographics', note: 'Patient demographic data' },
+                { key: 'cclf8', name: 'CCLF8 — Beneficiary XREF', note: 'Beneficiary cross-reference' },
+                { key: 'nacha_entry', name: 'NACHA ACH Entry Detail', note: 'ACH payment record (94-char fixed)' },
+                { key: 'era_835_header', name: 'ERA 835 Interchange Header', note: 'X12 835 remittance advice' }
+            ]
+        };
+
+        // Remove Duplicates documentation
+        docs['remove_duplicates'] = {
+            description: 'Removes duplicate records from an array field using configurable key fields and merge strategies. Supports full-record hashing (no config needed), key-field dedup, merge strategies, case-insensitive matching, and flexible handling of records with missing keys. Typically placed after a File Parser or Database Enrichment step to clean up data before processing.',
+            useCases: [
+                'Dedup FHIR resources by resource.id before loading into a FHIR server',
+                'Remove duplicate claims rows parsed from a CCLF or 835 file (key: claim_id)',
+                'Dedup HL7 OBX observations by test code + observation date within one message',
+                'Remove duplicate patient rows from a CSV export from an EHR (key: patient_mrn)',
+                'Deduplicate API enrichment results that return the same record multiple times',
+                'Merge partial records: keep first occurrence and fill missing fields from later duplicates (strategy: merge)',
+                'Drop records with null patient_id (nullKeyBehavior: remove) before FHIR mapping'
+            ],
+            example: {
+                sourceField: 'enriched.results',
+                keyFields: ['patient_id', 'visit_date'],
+                strategy: 'first',
+                caseSensitive: false,
+                nullKeyBehavior: 'remove'
+            },
+            examples: [
+                {
+                    label: 'Dedup by patient ID (keep first)',
+                    config: { sourceField: 'enriched.results', keyFields: ['patient_id'], strategy: 'first', caseSensitive: false }
+                },
+                {
+                    label: 'Dedup claims by claim ID + line number',
+                    config: { sourceField: 'parsed.records', keyFields: ['claim_id', 'line_num'], strategy: 'last', caseSensitive: true }
+                },
+                {
+                    label: 'Merge partial records (fill missing fields)',
+                    config: { sourceField: 'enriched.observations', keyFields: ['test_code', 'obs_date'], strategy: 'merge', nullKeyBehavior: 'keep' }
+                },
+                {
+                    label: 'Full-record strict dedup (no key fields)',
+                    config: { sourceField: 'enriched.items', strategy: 'first' }
+                },
+                {
+                    label: 'Dedup to a new field (keep original)',
+                    config: { sourceField: 'enriched.raw', keyFields: ['id'], strategy: 'first', outputField: 'enriched.deduped' }
+                }
+            ],
+            parameters: [
+                {
+                    name: 'sourceField',
+                    type: 'string',
+                    required: true,
+                    description: 'Dot-path to the array field to deduplicate. The array must be set in a prior step (e.g. File Parser → enriched.results, Database Enrichment → enriched.query.rows). Example: "enriched.results".'
+                },
+                {
+                    name: 'keyFields',
+                    type: 'Array<string>',
+                    required: false,
+                    description: 'One or more field names within each record that together form the unique key. Supports dot-paths for nested fields (e.g. "patient.id"). Leave empty to hash the entire record — every field must match for a record to be considered a duplicate.'
+                },
+                {
+                    name: 'strategy',
+                    type: 'enum: first | last | merge',
+                    required: false,
+                    description: '"first" (default) — keep the first occurrence, discard all later duplicates. "last" — keep the last occurrence (overwrites previous). "merge" — keep the first record and non-destructively copy any fields absent in it from later records.'
+                },
+                {
+                    name: 'caseSensitive',
+                    type: 'boolean',
+                    required: false,
+                    description: 'When false, key field values are lowercased before hashing. Useful when source data has inconsistent casing ("SMITH" = "smith"). Default: true.'
+                },
+                {
+                    name: 'nullKeyBehavior',
+                    type: 'enum: group | keep | remove',
+                    required: false,
+                    description: '"group" (default) — records with null/missing key fields share one dedup bucket and are deduplicated among themselves. "keep" — records with missing keys are always kept (bypass dedup entirely). "remove" — records with null/missing key fields are dropped.'
+                },
+                {
+                    name: 'outputField',
+                    type: 'string',
+                    required: false,
+                    description: 'Write the deduplicated array to this field instead of updating sourceField in-place. Useful to preserve the original array alongside the deduplicated version. Example: "enriched.deduped_results".'
+                }
+            ],
+            stepOutput: {
+                description: 'Step statistics are available in step output variables:',
+                fields: [
+                    { name: 'original_count', type: 'number', description: 'Total records in the source array before dedup' },
+                    { name: 'dedup_count', type: 'number', description: 'Records in the output after dedup' },
+                    { name: 'removed_count', type: 'number', description: 'Duplicate records discarded' },
+                    { name: 'null_key_kept', type: 'number', description: 'Records with missing keys that were kept (nullKeyBehavior=keep)' },
+                    { name: 'null_key_removed', type: 'number', description: 'Records with missing keys that were dropped (nullKeyBehavior=remove)' }
+                ]
+            }
         };
 
         // Add aliases for renamed step types (layer prefix removed)

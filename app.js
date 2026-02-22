@@ -221,6 +221,11 @@ app.post('/api/database/test-query', forwardToGo);  // NEW: Database query testi
 console.log('✅ Database test-query route registered');
 console.log('✅ Pipeline routes registered (generic, reusable)');
 
+// File parser routes - preview + template listing + server file browser
+app.get('/api/file-parser/browse', forwardToGo);   // explicit GET before the catch-all use()
+app.use('/api/file-parser', forwardToGo);           // file-parser/preview + file-parser/templates
+console.log('✅ File parser routes registered (preview + templates + browse)');
+
 console.log('Simple proxy configured successfully');
 
 // Session configuration

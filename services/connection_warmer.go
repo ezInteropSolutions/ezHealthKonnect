@@ -305,7 +305,6 @@ func (s *DatabaseWarmerStrategy) parseConfig(stepConfig map[string]interface{}) 
 
 	// Set warming-specific defaults
 	config.TimeoutMs = 3000
-	config.FailOnError = false
 
 	// Validate essential fields
 	if config.DatabaseType == "" {

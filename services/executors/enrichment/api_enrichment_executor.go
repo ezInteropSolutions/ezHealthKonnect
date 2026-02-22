@@ -110,24 +110,7 @@ func (e *APIEnrichmentExecutor) Execute(
 			"duration_ms": apiDuration,
 		}
 
-		if config.FailOnError {
-			// Store failed API call details in output data for visibility
-			inputData["_api_request"] = requestDetails
-			inputData["_api_response"] = responseDetails
-
-			// STANDARDIZED: Variables (empty on error) + execution details
-			e.SetStepOutputWithDetails(inputData, map[string]interface{}{}, map[string]interface{}{
-				"error":         err.Error(),
-				"duration_ms":   apiDuration,
-				"http_request":  requestDetails,
-				"http_response": responseDetails,
-			})
-
-			e.PostExecute(ctx, step, err, time.Since(start))
-			return inputData, err
-		}
-
-		// Use default value if configured
+		// Apply default value if configured (executor-level fallback)
 		if config.DefaultValue != nil {
 			log.Printf("⚠️  API call failed, using default value: %v", config.DefaultValue)
 			executors.SetNestedValue(inputData, e.getTargetPath(config), config.DefaultValue)
@@ -142,8 +125,6 @@ func (e *APIEnrichmentExecutor) Execute(
 				"http_response":      responseDetails,
 			})
 		} else {
-			log.Printf("⚠️  API call failed, continuing without enrichment: %v", err)
-
 			// STANDARDIZED: No variables + execution details with error
 			e.SetStepOutputWithDetails(inputData, map[string]interface{}{}, map[string]interface{}{
 				"error":         err.Error(),
@@ -152,11 +133,13 @@ func (e *APIEnrichmentExecutor) Execute(
 			})
 		}
 
-		// Still store request/response details for debugging
+		// Store request/response details for debugging
 		inputData["_api_request"] = requestDetails
 		inputData["_api_response"] = responseDetails
-		e.PostExecute(ctx, step, nil, time.Since(start))
-		return inputData, nil
+
+		// Always return error — pipeline service decides retry/catch behavior
+		e.PostExecute(ctx, step, err, time.Since(start))
+		return inputData, err
 	}
 
 	// Check if response mapping is configured
@@ -432,11 +415,6 @@ func (e *APIEnrichmentExecutor) GetConfigSchema() map[string]interface{} {
 				"description": "Number of retry attempts on failure",
 				"default":     0,
 			},
-			"failOnError": map[string]interface{}{
-				"type":        "boolean",
-				"description": "Stop pipeline if API call fails",
-				"default":     false,
-			},
 		},
 	}
 }
@@ -458,7 +436,6 @@ func (e *APIEnrichmentExecutor) GetConfigExample() map[string]interface{} {
 		"timeoutMs":   5000,
 		"retryCount":  2,
 		"retryDelayMs": 1000,
-		"failOnError": false,
 		"defaultValue": map[string]interface{}{
 			"status": "not_found",
 		},
@@ -784,8 +761,12 @@ func (e *APIEnrichmentExecutor) getSampleValue(value interface{}) interface{} {
 // VARIABLE PROVIDER INTERFACE IMPLEMENTATION
 // ===============================================================
 
-// GetOutputVariables returns the list of variables this executor will produce
-// For API enrichment, we can extract variable names from response_mapping if configured
+// GetOutputVariables returns the list of variables this executor will produce.
+//
+// Resolution order:
+//  1. If responseMapping is configured → enumerate every targetField rule as a concrete variable
+//     (path = "{targetPath}.{targetField}", e.g. "enriched.api.username")
+//  2. Otherwise → return the container object so users know the root path and can drill down manually
 func (e *APIEnrichmentExecutor) GetOutputVariables(step *models.TransformationStep) []models.VariableDefinition {
 	variables := []models.VariableDefinition{}
 
@@ -796,27 +777,55 @@ func (e *APIEnrichmentExecutor) GetOutputVariables(step *models.TransformationSt
 		return variables
 	}
 
-	// Determine target path where results will be stored
 	targetPath := config.TargetPath
 	if targetPath == "" {
 		targetPath = "enriched.api"
 	}
 
-	// API enrichment returns the full response object
-	// Users can configure FieldMappings to extract specific fields, but we can't determine
-	// the response structure without calling the API, so return a generic object variable
+	// If responseMapping is configured, enumerate the mapped output fields.
+	// These are KNOWN at config time — each targetField becomes a concrete searchable variable.
+	if responseMappingRaw, ok := step.Config["responseMapping"]; ok && responseMappingRaw != nil {
+		mappingJSON, merr := json.Marshal(responseMappingRaw)
+		if merr == nil {
+			var mappingConfig models.ResponseMappingConfig
+			if json.Unmarshal(mappingJSON, &mappingConfig) == nil {
+				allRules := append(mappingConfig.Extractors, mappingConfig.CustomExtractors...)
+				for _, rule := range allRules {
+					if rule.TargetField == "" {
+						continue
+					}
+					fieldPath := fmt.Sprintf("%s.%s", targetPath, rule.TargetField)
+					desc := rule.Description
+					if desc == "" {
+						desc = fmt.Sprintf("Extracted from API response field '%s'", rule.SourcePath)
+					}
+					variables = append(variables, models.VariableDefinition{
+						Name:         rule.TargetField,
+						Path:         fieldPath,
+						DataType:     "string",
+						Description:  desc,
+						Category:     "API",
+						UsageExample: fieldPath,
+						Examples:     []string{fieldPath},
+					})
+				}
+				if len(variables) > 0 {
+					return variables
+				}
+			}
+		}
+	}
+
+	// Fallback: no responseMapping configured — return the container path.
+	// Users can append ".fieldName" manually; IntelliSense shows this as a starting point.
 	variables = append(variables, models.VariableDefinition{
 		Name:         "api_response",
 		Path:         targetPath,
 		DataType:     "object",
-		Description:  fmt.Sprintf("API response from %s", config.Endpoint),
-		UsageExample: fmt.Sprintf(`getNestedValue(input, "%s.fieldName")`, targetPath),
+		Description:  fmt.Sprintf("Full API response from %s (configure Response Mapping to see individual fields here)", config.Endpoint),
+		UsageExample: fmt.Sprintf("%s.fieldName", targetPath),
 		Category:     "API",
-		Examples: []string{
-			fmt.Sprintf(`%s.data`, targetPath),
-			fmt.Sprintf(`%s.status`, targetPath),
-			fmt.Sprintf(`%s.timestamp`, targetPath),
-		},
+		Examples:     []string{fmt.Sprintf("%s.fieldName", targetPath)},
 	})
 
 	return variables

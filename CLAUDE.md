@@ -825,3 +825,37 @@ A Switch/Case on `MSH.9.1` (message type) could route:
 - System auto-migrates to `targetStepIds` array when editing
 - Backend accepts both `stepId` and `targetStepIds`
 
+## File Parser Executor (February 2026)
+
+### Overview
+Parses structured files (CSV, TSV, fixed-width, Excel, Avro, Parquet) into `[]map[string]interface{}`
+records. Uses the **Strategy Pattern** — format parsers self-register via `init()`; the orchestrator
+calls `GetFormatParser(format)` instead of a switch statement.
+
+### Source Types
+| `sourceType` | Description |
+|---|---|
+| `field` (default) | Raw content already in a pipeline field (from an Inbound Connector) |
+| `local_path` | Read from the server/container filesystem; batch mode via glob pattern |
+| `field_as_path` | A pipeline field holds a URI: `s3://`, `https://`, `file:///` |
+
+### Format Support
+CSV, TSV, fixed-width (CCLF, NACHA, X12), Excel xlsx/xls, Apache Avro, Apache Parquet.
+Binary formats (xlsx, xls, avro, parquet) detected from magic bytes automatically.
+
+### Key Features
+- **File size gate**: `os.Stat()` before `os.ReadFile()`. Default 100 MB, hard cap 500 MB. Configure via `maxFileSizeMB`.
+- **Streaming CSV**: `MaxRecords > 0` → row-by-row via `csv.Reader.Read()` — O(MaxRecords) memory.
+- **Auto-detect**: Magic bytes → extension → delimiter heuristics. Set `autoDetect: true`.
+- **OOB healthcare templates**: `cclf1`–`cclf8`, `nacha_entry`, `era_835_header` — pre-built fixed-width column definitions.
+- **S3 credential decrypt**: `interface_connectivity.source_config` → AES-256-GCM decrypt via `CredentialStore.DecryptConfigBytes` → AWS SDK.
+- **Content encoding**: Set `contentEncoding: "base64"` when binary content was base64-encoded in a pipeline field.
+
+### Key Files
+- Executor: `services/executors/enrichment/file_parser_executor.go`
+- Format interface + registry: `services/executors/enrichment/format_parsers.go`
+- Parsers: `csv_parser.go`, `fixed_width_parser.go`, `excel_parser.go`, `avro_parser.go`, `parquet_parser.go`
+- OOB templates: `services/executors/enrichment/file_parser_templates.go`
+- S3/HTTP resolver: `services/executors/enrichment/file_parser_remote.go`
+- Full architecture: [architecture/FILE_PARSER_ARCHITECTURE.md](architecture/FILE_PARSER_ARCHITECTURE.md)
+

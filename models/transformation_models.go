@@ -31,15 +31,16 @@ func WithTestMode(ctx context.Context) context.Context {
 
 // TransformationPipeline represents a transformation pipeline for an interface/message type
 type TransformationPipeline struct {
-	ID           string    `json:"id" db:"id"`
-	InterfaceID  string    `json:"interface_id" db:"interface_id"`
-	MessageType  string    `json:"message_type" db:"message_type"`
-	PipelineName string    `json:"pipeline_name" db:"pipeline_name"`
-	Enabled      bool      `json:"enabled" db:"enabled"`
-	Version      int       `json:"version" db:"version"`
-	CreatedAt    time.Time `json:"created_at" db:"created_at"`
-	UpdatedAt    time.Time `json:"updated_at" db:"updated_at"`
-	Steps        []TransformationStep `json:"steps,omitempty"`
+	ID             string                 `json:"id" db:"id"`
+	InterfaceID    string                 `json:"interface_id" db:"interface_id"`
+	MessageType    string                 `json:"message_type" db:"message_type"`
+	PipelineName   string                 `json:"pipeline_name" db:"pipeline_name"`
+	Enabled        bool                   `json:"enabled" db:"enabled"`
+	Version        int                    `json:"version" db:"version"`
+	PipelineConfig map[string]interface{} `json:"pipeline_config,omitempty" db:"pipeline_config"`
+	CreatedAt      time.Time              `json:"created_at" db:"created_at"`
+	UpdatedAt      time.Time              `json:"updated_at" db:"updated_at"`
+	Steps          []TransformationStep   `json:"steps,omitempty"`
 }
 
 // TransformationStep represents a single step in a transformation pipeline

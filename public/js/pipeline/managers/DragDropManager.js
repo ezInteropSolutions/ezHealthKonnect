@@ -303,21 +303,10 @@ class DragDropManager {
 
         if (!containerStep.config) containerStep.config = {};
 
-        if (VisualStep.isTryCatchStep(containerStep)) {
-            const key = containerInfo.zone + 'Steps'; // trySteps, catchSteps, finallySteps
-            if (!containerStep.config[key]) containerStep.config[key] = [];
-            if (!containerStep.config[key].includes(step.id)) {
-                containerStep.config[key].push(step.id);
-            }
-        } else if (VisualStep.isLoopStep(containerStep)) {
+        if (VisualStep.isLoopStep(containerStep)) {
             if (!containerStep.config.childStepIds) containerStep.config.childStepIds = [];
             if (!containerStep.config.childStepIds.includes(step.id)) {
                 containerStep.config.childStepIds.push(step.id);
-            }
-        } else if (VisualStep.isRetryStep(containerStep)) {
-            if (!containerStep.config.childSteps) containerStep.config.childSteps = [];
-            if (!containerStep.config.childSteps.includes(step.id)) {
-                containerStep.config.childSteps.push(step.id);
             }
         }
 

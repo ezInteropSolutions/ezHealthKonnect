@@ -37,8 +37,11 @@ const StepVariablesProvider = {
                 return;
             }
 
-            // Get current step context
-            const currentStep = window.pipelineBuilder?.currentStep;
+            // Get current step context.
+            // PropertiesPanel stores the edited step in this.currentStep (set in showStepProperties).
+            // Builders (IfThenElse, SwitchCase, Loop) store it in this.step.
+            // Fall back to window.pipelineBuilder.currentStep as a last resort.
+            const currentStep = this.currentStep || this.step || window.pipelineBuilder?.currentStep;
             const currentLayer = currentStep?.layer || 'pre';
 
             // Collect all steps using flat collection pattern
@@ -118,11 +121,90 @@ const StepVariablesProvider = {
     },
 
     /**
-     * Get step variables for FieldPathSearchComponent
-     * Called as a callback to provide dynamic variables
+     * Walk the last test-run output and enumerate paths under steps.*
+     *
+     * Strategy:
+     *  - Depth 10 (safe because 500-path cap is the real guard)
+     *  - Arrays: show field[] as a hint AND walk arr[0] when it's an object
+     *    so users see concrete sub-field paths (patients[0].name, etc.)
+     *  - Skip internal keys (_metadata, _lastError, _routing, etc.)
+     *  - Deduplication against backend-declared variables happens in getStepVariablesForSearch
+     */
+    _walkTestRunPaths() {
+        const testOutput = window.pipelineLastTestOutput;
+        if (!testOutput || typeof testOutput.steps !== 'object') return [];
+
+        const MAX_DEPTH = 10;
+        const MAX_PATHS = 500;
+        const SKIP_KEYS = new Set([
+            'step_metadata', '_metadata', '_lastError', '_lastErrorStep',
+            '_routing', '_executionDetails', '_stepOutput'
+        ]);
+
+        const paths = [];
+
+        const walk = (obj, prefix, depth) => {
+            if (depth > MAX_DEPTH || paths.length >= MAX_PATHS) return;
+            if (!obj || typeof obj !== 'object') return;
+
+            for (const [key, val] of Object.entries(obj)) {
+                if (SKIP_KEYS.has(key)) continue;
+                const fullPath = prefix ? `${prefix}.${key}` : key;
+
+                if (Array.isArray(val)) {
+                    // Show the array itself so users know it exists
+                    paths.push({
+                        name: `${key}[]`,
+                        path: `steps.${fullPath}`,
+                        description: `Array · ${val.length} item${val.length === 1 ? '' : 's'}`,
+                        category: 'Step Outputs (test run)',
+                        isArray: true
+                    });
+                    // Walk first element when it's an object → exposes concrete sub-field paths
+                    // e.g. patients[0].name, patients[0].dob
+                    if (val.length > 0) {
+                        const first = val[0];
+                        if (first !== null && typeof first === 'object' && !Array.isArray(first)) {
+                            walk(first, `${fullPath}[0]`, depth + 1);
+                        }
+                    }
+                } else if (val !== null && typeof val === 'object') {
+                    walk(val, fullPath, depth + 1);
+                } else {
+                    // Leaf — show current value as a description hint
+                    paths.push({
+                        name: key,
+                        path: `steps.${fullPath}`,
+                        description: String(val ?? ''),
+                        category: 'Step Outputs (test run)',
+                        examples: val !== null && val !== undefined ? [String(val)] : []
+                    });
+                }
+            }
+        };
+
+        walk(testOutput.steps, '', 0);
+        return paths;
+    },
+
+    /**
+     * Get step variables for FieldPathSearchComponent.
+     * Merges two sources:
+     *  1. Backend declared variables (GetOutputVariables) — always available, config-time
+     *  2. Test-run walked paths — available after first test run, depth-10 tree walk
+     * Test-run paths supplement declared paths (deduped by path string).
      */
     getStepVariablesForSearch() {
-        return this.cachedStepVariables || [];
+        const backendVars = this.cachedStepVariables || [];
+        const testRunVars = this._walkTestRunPaths();
+
+        if (testRunVars.length === 0) return backendVars;
+
+        // Deduplicate: only add test-run paths not already declared by the backend
+        const knownPaths = new Set(backendVars.map(v => v.path));
+        const newPaths = testRunVars.filter(v => !knownPaths.has(v.path));
+
+        return newPaths.length > 0 ? [...backendVars, ...newPaths] : backendVars;
     },
 
     /**
@@ -146,6 +228,11 @@ const StepVariablesProvider = {
 // Export for browser
 if (typeof window !== 'undefined') {
     window.StepVariablesProvider = StepVariablesProvider;
+
+    // Apply mixin to PropertiesPanel — loads after PropertiesPanel.js, so prototype exists here
+    if (window.PropertiesPanel) {
+        Object.assign(window.PropertiesPanel.prototype, StepVariablesProvider);
+    }
 }
 
 // Export for Node.js

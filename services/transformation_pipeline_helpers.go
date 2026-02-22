@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"ezhealthkonnect/models"
+	"ezhealthkonnect/services/executors"
 	"ezhealthkonnect/services/executors/control"
 	"fmt"
 	"log"
@@ -81,6 +82,18 @@ func (tps *TransformationPipelineService) ExecutePipeline(
 	}
 
 	log.Printf("🚀 [Pipeline] Initialized execution context for pipeline: %s", pipeline.PipelineName)
+
+	// Extract pipeline-level defaults for error handling and retry
+	pipelineRetryDefaults := executors.ParsePipelineRetryDefaults(pipeline.PipelineConfig)
+	pipelineEHDefaults := executors.ParsePipelineErrorHandlingDefaults(pipeline.PipelineConfig)
+	if pipelineRetryDefaults != nil {
+		fmt.Printf("🔄 Pipeline-level retry defaults: max=%d, delay=%dms, backoff=%.1fx\n",
+			pipelineRetryDefaults.MaxRetries, pipelineRetryDefaults.DelayMs, pipelineRetryDefaults.BackoffMultiplier)
+	}
+	if pipelineEHDefaults != nil {
+		fmt.Printf("🛡️ Pipeline-level error handling defaults: onError=%s, defaultField=%s, defaultValue=%s\n",
+			pipelineEHDefaults.OnError, pipelineEHDefaults.DefaultField, pipelineEHDefaults.DefaultValue)
+	}
 
 	// Track the final output after all steps (starts with input, updated by each step)
 	var finalOutput map[string]interface{} = inputData
@@ -193,29 +206,64 @@ func (tps *TransformationPipelineService) ExecutePipeline(
 				fmt.Printf("🔄 Injected child executor into loop step: %s\n", step.StepName)
 			}
 		}
-		if step.StepType == "control.try_catch" {
-			executor := tps.executorRegistry.GetExecutor(step.StepType)
-			if tryCatchExecutor, ok := executor.(*control.TryCatchExecutor); ok {
-				tryCatchExecutor.SetChildExecutor(loopChildExecutor)
-				fmt.Printf("🔒 Injected child executor into try-catch step: %s\n", step.StepName)
-			}
-		}
-		if step.StepType == "control.retry" {
-			executor := tps.executorRegistry.GetExecutor(step.StepType)
-			if retryExecutor, ok := executor.(*control.RetryExecutor); ok {
-				retryExecutor.SetChildExecutor(loopChildExecutor)
-				fmt.Printf("🔄 Injected child executor into retry step: %s\n", step.StepName)
-			}
-		}
 
 		// PHASE 2: Generate namespace for this step
 		namespace := tps.generateStepNamespace(&step, i)
 		log.Printf("   Namespace: %s", namespace)
 
-		// PHASE 2: Execute step with execution context (backward compatible)
-		// First try new context-aware execution, fall back to legacy
-		output, stepOutput, err := tps.executeStepWithContext(ctx, &step, execCtx, i)
+		// Debug: Log step config keys for troubleshooting error handling resolution
+		configKeys := make([]string, 0, len(step.Config))
+		for k := range step.Config {
+			configKeys = append(configKeys, k)
+		}
+		fmt.Printf("🔍 Step '%s' config keys: %v\n", step.StepName, configKeys)
+
+		// Resolve retry config: step override > pipeline default > nil
+		retryConfig := executors.ResolveRetryConfig(step.Config, pipelineRetryDefaults)
+		if retryConfig != nil {
+			fmt.Printf("🔄 Retry enabled for: %s (max=%d, delay=%dms, backoff=%.1fx)\n",
+				step.StepName, retryConfig.MaxRetries, retryConfig.DelayMs, retryConfig.BackoffMultiplier)
+		}
+
+		// Resolve error handling config: step override > pipeline default > nil
+		ehConfig := executors.ResolveErrorHandlingConfig(step.Config, pipelineEHDefaults)
+		if ehConfig != nil {
+			fmt.Printf("🛡️ Error handling RESOLVED for: %s (onError=%s, defaultField=%s, defaultValue=%s)\n",
+				step.StepName, ehConfig.OnError, ehConfig.DefaultField, ehConfig.DefaultValue)
+		} else {
+			fmt.Printf("🔍 Step '%s' has no error handling config (step-level or pipeline-level)\n", step.StepName)
+		}
+
+		// Execute step with retry (ExecuteWithRetry handles single-exec when retryConfig is nil)
+		var output map[string]interface{}
+		var stepOutput *models.StepOutput
+		var stepErr error
+
+		retryResult := executors.ExecuteWithRetry(ctx, retryConfig, func(attempt int) (map[string]interface{}, error) {
+			o, so, e := tps.executeStepWithContext(ctx, &step, execCtx, i)
+			// Store stepOutput from last attempt (for use after retry loop)
+			stepOutput = so
+			output = o
+			return o, e
+		})
+
+		stepErr = retryResult.Err
+		output = retryResult.Output
+		originalErr := stepErr // preserve for logging
 		stepDuration := time.Since(stepStartTime)
+
+		// Apply error handling if step failed after all retries
+		errorWasCaught := false
+		if stepErr != nil && ehConfig != nil {
+			fmt.Printf("🛡️ APPLYING error handling for: %s (error: %s)\n", step.StepName, stepErr.Error())
+			output, stepErr = executors.ApplyErrorHandling(ehConfig, stepErr, output, execCtx.Message, step.StepName)
+			if stepErr == nil {
+				errorWasCaught = true
+				fmt.Printf("🛡️ Error CAUGHT for: %s\n", step.StepName)
+			}
+		} else if stepErr != nil {
+			fmt.Printf("⚠️ Step '%s' failed but NO error handler\n", step.StepName)
+		}
 
 		// Create step execution log
 		var stepAliasStr string
@@ -232,23 +280,23 @@ func (tps *TransformationPipelineService) ExecutePipeline(
 			StartedAt:   stepStartTime,
 			CompletedAt: time.Now(),
 			DurationMs:  stepDuration.Milliseconds(),
-			Success:     err == nil,
+			Success:     stepErr == nil,
 		}
 
-		if err != nil {
-			stepLog.Error = err.Error()
-			log.Printf("❌ Step failed: %s - %v", step.StepName, err)
+		if stepErr != nil {
+			stepLog.Error = stepErr.Error()
+			log.Printf("❌ Step failed: %s - %v", step.StepName, stepErr)
 
 			// Record error in step output
 			if stepOutput != nil {
 				stepOutput.Success = false
-				stepOutput.Error = err.Error()
+				stepOutput.Error = stepErr.Error()
 			}
 
 			// Record error
 			result.Errors = append(result.Errors, models.TransformationError{
 				Step:      step.StepName,
-				Message:   err.Error(),
+				Message:   stepErr.Error(),
 				Timestamp: time.Now(),
 			})
 
@@ -258,9 +306,56 @@ func (tps *TransformationPipelineService) ExecutePipeline(
 				result.Status = "failed"
 				result.CompletedAt = time.Now()
 				result.ExecutionTimeNs = time.Since(startTime).Nanoseconds()
-				return result, fmt.Errorf("pipeline failed at step %s: %w", step.StepName, err)
+				return result, fmt.Errorf("pipeline failed at step %s: %w", step.StepName, stepErr)
 			} else {
 				log.Printf("⚠️  Continuing despite error (strategy: %s)", step.OnErrorStrategy)
+			}
+		} else if errorWasCaught {
+			// Error was caught by handler — mark step as success with caught info
+			fmt.Printf("🛡️ Step error caught: %s (error: %s, took %dms)\n", step.StepName, originalErr.Error(), stepDuration.Milliseconds())
+
+			// Update step output with caught info
+			if stepOutput != nil {
+				stepOutput.Success = true
+				stepOutput.Error = fmt.Sprintf("caught: %s", originalErr.Error())
+				if stepOutput.OutputData == nil {
+					stepOutput.OutputData = make(map[string]interface{})
+				}
+				stepOutput.OutputData["error_caught"] = originalErr.Error()
+				stepOutput.OutputData["error_handler"] = ehConfig.OnError
+				if ehConfig.DefaultField != "" && ehConfig.DefaultValue != "" {
+					stepOutput.OutputData["default_applied_field"] = ehConfig.DefaultField
+					stepOutput.OutputData["default_applied_value"] = ehConfig.DefaultValue
+				}
+			} else {
+				// Create step output if executor didn't set one
+				stepOutput = &models.StepOutput{
+					StepID:    step.ID,
+					StepName:  step.StepName,
+					StepType:  step.StepType,
+					Namespace: namespace,
+					Sequence:  i,
+					Success:   true,
+					Error:     fmt.Sprintf("caught: %s", originalErr.Error()),
+					OutputData: map[string]interface{}{
+						"error_caught":  originalErr.Error(),
+						"error_handler": ehConfig.OnError,
+					},
+					DurationMs: stepDuration.Milliseconds(),
+				}
+				if ehConfig.DefaultField != "" && ehConfig.DefaultValue != "" {
+					stepOutput.OutputData["default_applied_field"] = ehConfig.DefaultField
+					stepOutput.OutputData["default_applied_value"] = ehConfig.DefaultValue
+				}
+			}
+
+			// Store step output and update message
+			execCtx.StepOutputs[namespace] = *stepOutput
+			stepLog.StepOutput = stepOutput
+
+			if output != nil {
+				finalOutput = output
+				execCtx.Message = output
 			}
 		} else {
 			log.Printf("✅ Step completed: %s (took %dms)", step.StepName, stepDuration.Milliseconds())

@@ -27,6 +27,10 @@ class HorizontalLayoutEngine {
         this.connections = [];           // Array of connection objects
         this.swimLanes = {};             // Layer swim lane metadata
 
+        // Container tracking
+        this.containers = new Map();     // containerId -> { step, children: { zone: [steps] } }
+        this.childStepIds = new Set();   // IDs of steps that are children of a container
+
         console.log('✅ HorizontalLayoutEngine initialized', this.config);
     }
 
@@ -35,7 +39,7 @@ class HorizontalLayoutEngine {
      */
     calculateLayout(steps) {
         if (!steps || steps.length === 0) {
-            return { positions: new Map(), connections: [], swimLanes: {}, bounds: {} };
+            return { positions: new Map(), connections: [], swimLanes: {}, bounds: {}, containers: new Map() };
         }
 
         console.log(`📐 Calculating horizontal layout for ${steps.length} steps`);
@@ -44,14 +48,22 @@ class HorizontalLayoutEngine {
         this.positions.clear();
         this.connections = [];
         this.swimLanes = {};
+        this.containers.clear();
+        this.childStepIds.clear();
+
+        // Identify container steps and their children
+        this.identifyContainers(steps);
+
+        // Filter out child steps from the main flow (they'll be positioned inside containers)
+        const topLevelSteps = steps.filter(s => !this.childStepIds.has(s.id));
 
         // Group steps (single flow)
-        const stepsByLayer = this.groupStepsByLayer(steps);
+        const stepsByLayer = this.groupStepsByLayer(topLevelSteps);
 
         // Calculate swim lane layout
         this.calculateSwimLanes(stepsByLayer);
 
-        // Position steps in single lane
+        // Position steps in single lane (containers get special layout)
         this.positionStepsInSwimLane('main', stepsByLayer.main);
 
         // Calculate connections
@@ -63,7 +75,8 @@ class HorizontalLayoutEngine {
         console.log('✅ Layout calculated:', {
             positions: this.positions.size,
             connections: this.connections.length,
-            swimLanes: Object.keys(this.swimLanes).length,
+            containers: this.containers.size,
+            childSteps: this.childStepIds.size,
             bounds
         });
 
@@ -71,8 +84,63 @@ class HorizontalLayoutEngine {
             positions: this.positions,
             connections: this.connections,
             swimLanes: this.swimLanes,
+            containers: this.containers,
             bounds
         };
+    }
+
+    /**
+     * Identify container steps and their children.
+     * Builds this.containers map and this.childStepIds set.
+     * Uses parentStepId/containerZone properties, falling back to config arrays.
+     */
+    identifyContainers(steps) {
+        const stepMap = new Map(steps.map(s => [s.id, s]));
+
+        // First pass: detect containers and collect children from config arrays
+        for (const step of steps) {
+            if (!VisualStep.isContainerStep(step)) continue;
+
+            const zones = VisualStep.getContainerZones(step);
+            const children = {};
+            zones.forEach(z => { children[z] = []; });
+
+            const config = step.config || {};
+            console.log(`📦 [Container] ${step.stepName} (${step.stepType}), config keys:`, Object.keys(config));
+
+            if (VisualStep.isLoopStep(step)) {
+                const ids = config.childStepIds || config.bodySteps || config.steps || [];
+                console.log(`  📦 Loop body: ${ids.length} child IDs:`, ids);
+                ids.forEach(id => {
+                    const child = stepMap.get(id);
+                    if (child) {
+                        children.body.push(child);
+                        this.childStepIds.add(id);
+                    } else {
+                        console.warn(`  ⚠️ Child ${id} not found in steps array`);
+                    }
+                });
+            }
+
+            this.containers.set(step.id, { step, children });
+        }
+
+        // Second pass: check parentStepId property (from DB) as override
+        for (const step of steps) {
+            if (!step.parentStepId || !step.containerZone) continue;
+            const containerInfo = this.containers.get(step.parentStepId);
+            if (!containerInfo) continue;
+
+            const zone = step.containerZone;
+            if (containerInfo.children[zone]) {
+                if (!containerInfo.children[zone].find(s => s.id === step.id)) {
+                    containerInfo.children[zone].push(step);
+                    this.childStepIds.add(step.id);
+                }
+            }
+        }
+
+        console.log(`📦 [Layout] Identified ${this.containers.size} containers, ${this.childStepIds.size} child steps`);
     }
 
     /**
@@ -148,19 +216,26 @@ class HorizontalLayoutEngine {
                 currentColumn++;
             }
 
-            // Position step
+            // Container steps get dynamic height based on zone count
+            const containerInfo = this.containers.get(step.id);
+            let stepHeight = this.config.stepHeight;
+            if (containerInfo) {
+                const zones = VisualStep.getContainerZones(step);
+                stepHeight = this.config.stepHeight + (zones.length * 28);
+            }
+
             this.positions.set(step.id, {
                 x: currentX,
                 y: currentY,
                 width: this.config.stepWidth,
-                height: this.config.stepHeight,
+                height: stepHeight,
                 layer: layerKey,
                 column: currentColumn,
-                row: stepsInCurrentColumn
+                row: stepsInCurrentColumn,
+                isContainer: !!containerInfo
             });
 
-            // Move to next row in column
-            currentY += this.config.stepHeight + this.config.rowGap;
+            currentY += stepHeight + this.config.rowGap;
             stepsInCurrentColumn++;
         });
     }
@@ -169,6 +244,7 @@ class HorizontalLayoutEngine {
      * Calculate connections between steps (including If-Then-Else routing)
      */
     calculateConnections(steps) {
+        // Reset connections (container-internal connections no longer rendered on canvas)
         this.connections = [];
 
         // STEP 0: Create connections from step's own parentConditionalStepId/branchType

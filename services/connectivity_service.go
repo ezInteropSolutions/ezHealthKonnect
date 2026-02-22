@@ -15,13 +15,15 @@ import (
 
 // ConnectivityService handles connectivity configuration operations
 type ConnectivityService struct {
-	db *sql.DB
+	db        *sql.DB
+	credStore *CredentialStore // nil = passthrough (dev/test only)
 }
 
 // NewConnectivityService creates a new connectivity service
-func NewConnectivityService(db *sql.DB) *ConnectivityService {
+func NewConnectivityService(db *sql.DB, credStore *CredentialStore) *ConnectivityService {
 	return &ConnectivityService{
-		db: db,
+		db:        db,
+		credStore: credStore,
 	}
 }
 
@@ -239,8 +241,18 @@ func (cs *ConnectivityService) GetConnectivityTypeByName(typeName string) (*mode
 // Interface Connectivity
 // ========================================
 
-// CreateInterfaceConnectivity creates connectivity configuration for an interface
+// CreateInterfaceConnectivity creates connectivity configuration for an interface.
+// SourceConfig and TargetConfig are encrypted before storage when a CredentialStore is configured.
 func (cs *ConnectivityService) CreateInterfaceConnectivity(ic *models.InterfaceConnectivity) error {
+	srcConfig, err := cs.credStore.EncryptConfig(ic.SourceConfig)
+	if err != nil {
+		return fmt.Errorf("failed to encrypt source config: %w", err)
+	}
+	tgtConfig, err := cs.credStore.EncryptConfig(ic.TargetConfig)
+	if err != nil {
+		return fmt.Errorf("failed to encrypt target config: %w", err)
+	}
+
 	query := `
 		INSERT INTO interface_connectivity (
 			id, interface_id,
@@ -258,12 +270,12 @@ func (cs *ConnectivityService) CreateInterfaceConnectivity(ic *models.InterfaceC
 		RETURNING id, created_at, updated_at
 	`
 
-	err := cs.db.QueryRow(
+	err = cs.db.QueryRow(
 		query,
 		ic.InterfaceID,
-		ic.SourceConnectivityTypeID, ic.SourceConfig, ic.SourceEnabled,
+		ic.SourceConnectivityTypeID, srcConfig, ic.SourceEnabled,
 		ic.CronEnabled, ic.CronExpression, ic.CronTimezone,
-		ic.TargetConnectivityTypeID, ic.TargetConfig, ic.TargetEnabled,
+		ic.TargetConnectivityTypeID, tgtConfig, ic.TargetEnabled,
 		ic.ConnectionStatus,
 	).Scan(&ic.ID, &ic.CreatedAt, &ic.UpdatedAt)
 
@@ -311,6 +323,18 @@ func (cs *ConnectivityService) GetInterfaceConnectivity(interfaceID string) (*mo
 		return nil, fmt.Errorf("failed to get interface connectivity: %w", err)
 	}
 
+	// Decrypt configs before returning; mask sensitive fields so credentials never leave the server
+	if decrypted, err := cs.credStore.DecryptConfig(ic.SourceConfig); err != nil {
+		log.Printf("⚠️  [CredentialStore] Failed to decrypt source_config for interface %s: %v", interfaceID, err)
+	} else {
+		ic.SourceConfig = cs.credStore.MaskSensitiveFields(decrypted)
+	}
+	if decrypted, err := cs.credStore.DecryptConfig(ic.TargetConfig); err != nil {
+		log.Printf("⚠️  [CredentialStore] Failed to decrypt target_config for interface %s: %v", interfaceID, err)
+	} else {
+		ic.TargetConfig = cs.credStore.MaskSensitiveFields(decrypted)
+	}
+
 	// Load source connector type details
 	if ic.SourceConnectivityTypeID != "" {
 		sourceType, err := cs.GetConnectivityTypeByID(ic.SourceConnectivityTypeID)
@@ -338,8 +362,20 @@ func (cs *ConnectivityService) GetInterfaceConnectivity(interfaceID string) (*mo
 	return ic, nil
 }
 
-// UpdateInterfaceConnectivity updates connectivity configuration
+// UpdateInterfaceConnectivity updates connectivity configuration.
+// SourceConfig and TargetConfig are encrypted before storage when a CredentialStore is configured.
+// If the incoming config contains masked values (••••••••), the existing encrypted value is preserved
+// by re-reading it from the database — the UI must send only fields that actually changed.
 func (cs *ConnectivityService) UpdateInterfaceConnectivity(ic *models.InterfaceConnectivity) error {
+	srcConfig, err := cs.credStore.EncryptConfig(ic.SourceConfig)
+	if err != nil {
+		return fmt.Errorf("failed to encrypt source config: %w", err)
+	}
+	tgtConfig, err := cs.credStore.EncryptConfig(ic.TargetConfig)
+	if err != nil {
+		return fmt.Errorf("failed to encrypt target config: %w", err)
+	}
+
 	query := `
 		UPDATE interface_connectivity
 		SET source_connectivity_type_id = $1,
@@ -357,11 +393,11 @@ func (cs *ConnectivityService) UpdateInterfaceConnectivity(ic *models.InterfaceC
 		RETURNING updated_at
 	`
 
-	err := cs.db.QueryRow(
+	err = cs.db.QueryRow(
 		query,
-		ic.SourceConnectivityTypeID, ic.SourceConfig, ic.SourceEnabled,
+		ic.SourceConnectivityTypeID, srcConfig, ic.SourceEnabled,
 		ic.CronEnabled, ic.CronExpression, ic.CronTimezone,
-		ic.TargetConnectivityTypeID, ic.TargetConfig, ic.TargetEnabled,
+		ic.TargetConnectivityTypeID, tgtConfig, ic.TargetEnabled,
 		ic.ConnectionStatus,
 		ic.InterfaceID,
 	).Scan(&ic.UpdatedAt)

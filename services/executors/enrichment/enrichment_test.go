@@ -243,102 +243,9 @@ var date2 = parseHL7Date("20231215143045");
 // ===============================================================
 // METADATA ENRICHMENT EXECUTOR TESTS
 // ===============================================================
-
-func TestMetadataEnrichment_Timestamps(t *testing.T) {
-	executor := NewMetadataEnrichmentExecutor()
-
-	step := &models.TransformationStep{
-		StepName: "Add Timestamps",
-		StepType: "pre.enrichment.metadata",
-		Enabled:  true,
-		Config: map[string]interface{}{
-			"addTimestamp":     true,
-			"addCorrelationId": false,
-		},
-	}
-
-	ctx := context.Background()
-	result, err := executor.Execute(ctx, step, map[string]interface{}{})
-
-	if err != nil {
-		t.Fatalf("Unexpected error: %v", err)
-	}
-
-	metadata, ok := result["metadata"].(map[string]interface{})
-	if !ok {
-		t.Fatal("Expected metadata map")
-	}
-
-	if _, ok := metadata["receivedAt"]; !ok {
-		t.Error("Expected receivedAt timestamp")
-	}
-}
-
-func TestMetadataEnrichment_CorrelationID(t *testing.T) {
-	executor := NewMetadataEnrichmentExecutor()
-
-	step := &models.TransformationStep{
-		StepName: "Add Correlation ID",
-		StepType: "pre.enrichment.metadata",
-		Enabled:  true,
-		Config: map[string]interface{}{
-			"addCorrelationId": true,
-			"addTimestamp":     false,
-		},
-	}
-
-	ctx := context.Background()
-	result, err := executor.Execute(ctx, step, map[string]interface{}{})
-
-	if err != nil {
-		t.Fatalf("Unexpected error: %v", err)
-	}
-
-	metadata := result["metadata"].(map[string]interface{})
-
-	correlationID, ok := metadata["correlationId"].(string)
-	if !ok || correlationID == "" {
-		t.Error("Expected non-empty correlationId")
-	}
-
-	// UUID should be 36 characters (with hyphens)
-	if len(correlationID) != 36 {
-		t.Errorf("Expected UUID length 36, got: %d", len(correlationID))
-	}
-}
-
-func TestMetadataEnrichment_CustomMetadata(t *testing.T) {
-	executor := NewMetadataEnrichmentExecutor()
-
-	step := &models.TransformationStep{
-		StepName: "Custom Metadata",
-		StepType: "pre.enrichment.metadata",
-		Enabled:  true,
-		Config: map[string]interface{}{
-			"customMetadata": map[string]interface{}{
-				"environment": "test",
-				"version":     "1.0",
-			},
-		},
-	}
-
-	ctx := context.Background()
-	result, err := executor.Execute(ctx, step, map[string]interface{}{})
-
-	if err != nil {
-		t.Fatalf("Unexpected error: %v", err)
-	}
-
-	metadata := result["metadata"].(map[string]interface{})
-
-	if env := metadata["environment"].(string); env != "test" {
-		t.Errorf("Expected environment=test, got: %v", env)
-	}
-
-	if version := metadata["version"].(string); version != "1.0" {
-		t.Errorf("Expected version=1.0, got: %v", version)
-	}
-}
+// REMOVED: MetadataEnrichmentExecutor was consolidated into FieldMappingExecutor.
+// These tests referenced NewMetadataEnrichmentExecutor() which no longer exists.
+// Metadata functionality is now tested via FieldMapping with metadata config.
 
 // ===============================================================
 // BENCHMARK TESTS
@@ -396,24 +303,4 @@ var patientId = getNestedValue(input, "patient.id");
 	}
 }
 
-func BenchmarkMetadataEnrichment(b *testing.B) {
-	executor := NewMetadataEnrichmentExecutor()
-
-	step := &models.TransformationStep{
-		StepName: "Metadata Benchmark",
-		StepType: "pre.enrichment.metadata",
-		Enabled:  true,
-		Config: map[string]interface{}{
-			"addTimestamp":     true,
-			"addCorrelationId": true,
-		},
-	}
-
-	ctx := context.Background()
-	inputData := map[string]interface{}{}
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		_, _ = executor.Execute(ctx, step, inputData)
-	}
-}
+// BenchmarkMetadataEnrichment removed — MetadataEnrichmentExecutor consolidated into FieldMapping

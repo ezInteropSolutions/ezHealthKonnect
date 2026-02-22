@@ -6,13 +6,16 @@ import (
 	"ezhealthkonnect/controllers"
 	"ezhealthkonnect/fhir"
 	"ezhealthkonnect/hl7"
+	"ezhealthkonnect/models"
 	"ezhealthkonnect/processing"
 	"ezhealthkonnect/services"
+	"ezhealthkonnect/services/executors/enrichment"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -46,6 +49,21 @@ func main() {
 	if cfg.VerboseLogging {
 		cfg.LogConfiguration()
 	}
+
+	// ── Credential Store ─────────────────────────────────────────
+	// Encrypts/decrypts connectivity configs (SFTP, S3, DB passwords, etc.)
+	// Set APP_CREDENTIAL_KEY to a base64-encoded 32-byte key:
+	//   openssl rand -base64 32
+	// If unset, credentials are stored in plaintext (dev-only; warning is logged).
+	var credStore *services.CredentialStore
+	if keyB64 := os.Getenv("APP_CREDENTIAL_KEY"); keyB64 != "" {
+		var credErr error
+		credStore, credErr = services.NewCredentialStore(keyB64)
+		if credErr != nil {
+			log.Fatalf("❌ FATAL: APP_CREDENTIAL_KEY is invalid: %v", credErr)
+		}
+	}
+	services.WarnIfNoOpCredentialStore(credStore)
 
 	// Database connection for FHIR transformations with retry logic
 	var db *sql.DB
@@ -94,7 +112,7 @@ func main() {
 			log.Printf("✅ PostgreSQL Transformation Service initialized")
 
 			// Initialize Processing Engine with OOB pattern (auto-detects MongoDB)
-			processingEngine = processing.NewProcessingEngine(db)
+			processingEngine = processing.NewProcessingEngine(db, credStore)
 			if err := processingEngine.Start(); err != nil {
 				log.Printf("❌ Failed to start Processing Engine: %v", err)
 			} else {
@@ -344,7 +362,7 @@ func main() {
 			schemaFHIRCtrl.RegisterRoutes(schemaFHIRGroup)
 
 			// ADDED: Transformation Pipeline Test Routes
-			transformTestCtrl := controllers.NewTransformationTestController(db)
+			transformTestCtrl := controllers.NewTransformationTestController(db, credStore)
 			fhirGroup.POST("/pipeline/test", transformTestCtrl.TestPipeline)
 			fhirGroup.POST("/pipeline/test-api-endpoint", transformTestCtrl.TestAPIEndpoint) // Test API endpoint before configuring mapping
 			fhirGroup.POST("/pipeline/validate-script", transformTestCtrl.ValidateScript)    // Validate JavaScript script
@@ -361,6 +379,227 @@ func main() {
 			dbTestCtrl := controllers.NewDatabaseTestController(db)
 			api.POST("/database/test-query", dbTestCtrl.TestQuery)
 			api.POST("/database/mongodb-schema", dbTestCtrl.GetMongoDBCollectionSchema)
+
+			// ADDED: File Parser Routes (NO-CODE: Preview + OOB Template listing + Server File Browse)
+			api.GET("/file-parser/browse", func(c *gin.Context) {
+				serverOS := runtime.GOOS // "linux", "windows", "darwin"
+				reqPath := c.DefaultQuery("path", "")
+
+				type BrowseEntry struct {
+					Name  string `json:"name"`
+					Path  string `json:"path"`
+					IsDir bool   `json:"isDir"`
+					Size  int64  `json:"size"`
+				}
+
+				// OS-aware shortcuts
+				type Shortcut struct {
+					Name string `json:"name"`
+					Path string `json:"path"`
+					Icon string `json:"icon"`
+				}
+				shortcuts := []Shortcut{}
+				if serverOS == "windows" {
+					for _, drive := range "CDEFGHIJKLMNOPQRSTUVWXYZ" {
+						dp := string(drive) + ":\\"
+						if _, err := os.Stat(dp); err == nil {
+							shortcuts = append(shortcuts, Shortcut{Name: string(drive) + ":", Path: filepath.ToSlash(dp), Icon: "💾"})
+						}
+					}
+				} else {
+					shortcuts = []Shortcut{
+						{Name: "/ (root)", Path: "/", Icon: "🖥️"},
+						{Name: "/app", Path: "/app", Icon: "📦"},
+						{Name: "/data", Path: "/data", Icon: "🗄️"},
+						{Name: "/tmp", Path: "/tmp", Icon: "🗂️"},
+						{Name: "/var", Path: "/var", Icon: "📁"},
+					}
+					// Filter to only paths that exist
+					filtered := []Shortcut{}
+					for _, s := range shortcuts {
+						if _, err := os.Stat(s.Path); err == nil {
+							filtered = append(filtered, s)
+						}
+					}
+					shortcuts = filtered
+				}
+
+				// Default start path
+				if reqPath == "" {
+					if serverOS == "windows" {
+						reqPath = "C:\\"
+					} else {
+						reqPath = "/app"
+						if _, err := os.Stat("/app"); err != nil {
+							reqPath = "/"
+						}
+					}
+				}
+
+				// On Windows, treat "/" as the drives list level
+				if serverOS == "windows" && (reqPath == "/" || reqPath == "") {
+					c.JSON(http.StatusOK, gin.H{
+						"success":   true,
+						"path":      "/",
+						"parent":    "",
+						"entries":   shortcuts,
+						"serverOS":  serverOS,
+						"shortcuts": shortcuts,
+					})
+					return
+				}
+
+				cleanPath := filepath.Clean(reqPath)
+
+				info, err := os.Stat(cleanPath)
+				if err != nil {
+					c.JSON(http.StatusOK, gin.H{"success": false, "error": fmt.Sprintf("path not found: %s", cleanPath)})
+					return
+				}
+				if !info.IsDir() {
+					cleanPath = filepath.Dir(cleanPath)
+				}
+
+				entries, err := os.ReadDir(cleanPath)
+				if err != nil {
+					c.JSON(http.StatusOK, gin.H{"success": false, "error": fmt.Sprintf("cannot read directory: %s", err.Error())})
+					return
+				}
+
+				var dirs []BrowseEntry
+				var files []BrowseEntry
+				for _, entry := range entries {
+					if strings.HasPrefix(entry.Name(), ".") {
+						continue
+					}
+					fi, _ := entry.Info()
+					size := int64(0)
+					if fi != nil && !entry.IsDir() {
+						size = fi.Size()
+					}
+					be := BrowseEntry{
+						Name:  entry.Name(),
+						Path:  filepath.ToSlash(filepath.Join(cleanPath, entry.Name())),
+						IsDir: entry.IsDir(),
+						Size:  size,
+					}
+					if entry.IsDir() {
+						dirs = append(dirs, be)
+					} else {
+						files = append(files, be)
+					}
+				}
+				allEntries := append(dirs, files...)
+
+				// Parent: empty at drive root (Windows) or filesystem root (Linux)
+				parent := ""
+				volRoot := filepath.VolumeName(cleanPath) + string(os.PathSeparator)
+				if filepath.Clean(cleanPath) != filepath.Clean(volRoot) {
+					parent = filepath.ToSlash(filepath.Dir(cleanPath))
+				} else if serverOS == "windows" {
+					parent = "/" // back to drives list
+				}
+
+				c.JSON(http.StatusOK, gin.H{
+					"success":   true,
+					"path":      filepath.ToSlash(cleanPath),
+					"parent":    parent,
+					"entries":   allEntries,
+					"serverOS":  serverOS,
+					"shortcuts": shortcuts,
+				})
+			})
+
+			api.GET("/file-parser/templates", func(c *gin.Context) {
+				list := enrichment.GetTemplateList()
+				byCategory := enrichment.GetTemplatesByCategory()
+				c.JSON(http.StatusOK, gin.H{
+					"success":     true,
+					"templates":   list,
+					"by_category": byCategory,
+					"count":       len(list),
+				})
+			})
+
+			api.POST("/file-parser/preview", func(c *gin.Context) {
+				var req struct {
+					Content  string                 `json:"content"`
+					FilePath string                 `json:"filePath"` // local server path — used when sourceType=local_path
+					Config   map[string]interface{} `json:"config"`
+				}
+				if err := c.ShouldBindJSON(&req); err != nil {
+					c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": err.Error()})
+					return
+				}
+				if req.Config == nil {
+					req.Config = make(map[string]interface{})
+				}
+
+				// Cap preview at 10 records unless caller specifies fewer
+				if maxR, ok := req.Config["maxRecords"]; !ok || maxR == nil || maxR == float64(0) {
+					req.Config["maxRecords"] = 10
+				}
+
+				var inputData map[string]interface{}
+
+				if req.FilePath != "" {
+					// Local file path preview: let executor read the file directly
+					req.Config["sourceType"] = "local_path"
+					req.Config["filePath"] = req.FilePath
+					delete(req.Config, "sourceField")
+					inputData = map[string]interface{}{}
+				} else {
+					// Pasted content preview
+					req.Config["sourceField"] = "_preview_content"
+					inputData = map[string]interface{}{
+						"_preview_content": req.Content,
+					}
+				}
+
+				executor := enrichment.NewFileParserExecutor(nil, nil) // nil db, nil decrypt: preview doesn't need S3 credentials
+				step := &models.TransformationStep{
+					StepName: "preview",
+					StepType: "file_parser",
+					Enabled:  true,
+					Config:   req.Config,
+				}
+
+				output, execErr := executor.Execute(c.Request.Context(), step, inputData)
+				if execErr != nil {
+					c.JSON(http.StatusOK, gin.H{
+						"success": false,
+						"error":   execErr.Error(),
+					})
+					return
+				}
+
+				stepOutput, _ := output["_stepOutput"].(map[string]interface{})
+				execDetails, _ := output["_executionDetails"].(map[string]interface{})
+
+				preview := gin.H{
+					"record_count": stepOutput["record_count"],
+					"column_count": stepOutput["column_count"],
+					"columns":      stepOutput["columns"],
+					"records":      stepOutput["records"],
+				}
+				if execDetails != nil {
+					preview["format"] = execDetails["format"]
+					if autoDetected, ok := execDetails["auto_detected"]; ok {
+						preview["auto_detected"] = autoDetected
+					}
+					if detectedFmt, ok := execDetails["detected_format"]; ok {
+						preview["detected_format"] = detectedFmt
+					}
+					if detectedDelim, ok := execDetails["detected_delimiter"]; ok {
+						preview["detected_delimiter"] = detectedDelim
+					}
+				}
+
+				c.JSON(http.StatusOK, gin.H{
+					"success": true,
+					"preview": preview,
+				})
+			})
 
 			// ADDED: Schema listing endpoint
 			fhirGroup.GET("/transform/schemas", func(c *gin.Context) {
@@ -637,7 +876,7 @@ func main() {
 
 		// CONNECTIVITY CONTROLLER - MULTI-CONNECTIVITY SUPPORT (OOB CONNECTORS)
 		if db != nil {
-			connectivityCtrl := controllers.NewConnectivityController(db)
+			connectivityCtrl := controllers.NewConnectivityController(db, credStore)
 			connectivityGroup := api.Group("/connectivity")
 			{
 				// Connectivity Types (OOB Connector Definitions)

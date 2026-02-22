@@ -213,6 +213,7 @@ exports.loadPipelineByInterface = async (req, res) => {
                 tp.message_type,
                 tp.enabled,
                 tp.connections,
+                tp.pipeline_config,
                 i.name as interface_name,
                 ts.id::text as step_id,
                 ts.step_name,
@@ -271,6 +272,7 @@ exports.loadPipelineByInterface = async (req, res) => {
                 name: pipelineData[0].interface_name || pipelineData[0].pipeline_name,
                 enabled: pipelineData[0].enabled,
                 connections: pipelineData[0].connections || [],
+                pipeline_config: pipelineData[0].pipeline_config || {},
                 // New flat format (snake_case for consistency with VisualExecutionGroup.fromJSON)
                 execution_groups: allSteps.length > 0 ? [{
                     id: `group_${Date.now()}`,
