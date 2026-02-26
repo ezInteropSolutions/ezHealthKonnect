@@ -4458,3 +4458,19 @@ body.connection-dragging .input-port {
 .form-section-advanced[open] summary {
     margin-bottom: 12px;
 }
+
+/* Toolbox search empty state */
+.toolbox-empty-state {
+    padding: 28px 16px;
+    text-align: center;
+    color: var(--text-muted, #888);
+    font-size: 13px;
+    line-height: 1.5;
+}
+.toolbox-empty-state i {
+    font-size: 22px;
+    margin-bottom: 10px;
+    display: block;
+    opacity: 0.4;
+}
+.toolbox-empty-state p { margin: 0; }

@@ -94,6 +94,44 @@ func (e *APIEnrichmentExecutor) Execute(
 	// Create authentication configuration
 	authConfig := e.buildAuthConfig(config)
 
+	// ── Circuit Breaker ────────────────────────────────────────────
+	cb := GetCircuitBreaker(step.ID, config.FailureThreshold, config.OpenDurationSeconds)
+	allowed, cbState := cb.Allow()
+	if !allowed {
+		cbErr := fmt.Errorf("circuit breaker open for step %s — downstream API temporarily unavailable", step.ID)
+		log.Printf("🔴 [API Enrichment] %v", cbErr)
+		e.SetStepOutputWithDetails(inputData, map[string]interface{}{}, map[string]interface{}{
+			"error":                cbErr.Error(),
+			"circuit_breaker_state": cbState,
+		})
+		e.PostExecute(ctx, step, cbErr, time.Since(start))
+		return inputData, cbErr
+	}
+	// ───────────────────────────────────────────────────────────────
+
+	// ── Result Cache (check before HTTP call) ──────────────────────
+	var cacheKey string
+	if config.CacheTtlSeconds > 0 {
+		cacheKey = CacheKey(step.ID, config.Method, config.Endpoint, fmt.Sprintf("%v", queryParams), fmt.Sprintf("%v", requestBody))
+		cache := GetResultCache("api_enrichment", config.CacheMaxEntries)
+		if cached, ok := cache.Get(cacheKey); ok {
+			log.Printf("⚡ [API Enrichment] Cache hit for step %s", step.ID)
+			cb.RecordSuccess()
+			// Restore cached data into inputData
+			targetPath := e.getTargetPath(config)
+			executors.SetNestedValue(inputData, targetPath, cached["_cached_response"])
+			cachedAt, _ := cached["_cached_at"].(string)
+			e.SetStepOutputWithDetails(inputData, cached, map[string]interface{}{
+				"cache_hit":             true,
+				"cached_at":             cachedAt,
+				"circuit_breaker_state": cb.StateName(),
+			})
+			e.PostExecute(ctx, step, nil, time.Since(start))
+			return inputData, nil
+		}
+	}
+	// ───────────────────────────────────────────────────────────────
+
 	// Execute API call using shared service
 	apiStart := time.Now()
 	resp, err := e.httpService.Execute(ctx, requestConfig, authConfig)
@@ -104,6 +142,8 @@ func (e *APIEnrichmentExecutor) Execute(
 	var responseDetails map[string]interface{}
 
 	if err != nil {
+		cb.RecordFailure()
+
 		// Store error response details
 		responseDetails = map[string]interface{}{
 			"error":       err.Error(),
@@ -119,17 +159,19 @@ func (e *APIEnrichmentExecutor) Execute(
 			e.SetStepOutputWithDetails(inputData, map[string]interface{}{
 				"value": config.DefaultValue,
 			}, map[string]interface{}{
-				"default_value_used": true,
-				"error":              err.Error(),
-				"http_request":       requestDetails,
-				"http_response":      responseDetails,
+				"default_value_used":    true,
+				"error":                 err.Error(),
+				"circuit_breaker_state": cb.StateName(),
+				"http_request":          requestDetails,
+				"http_response":         responseDetails,
 			})
 		} else {
 			// STANDARDIZED: No variables + execution details with error
 			e.SetStepOutputWithDetails(inputData, map[string]interface{}{}, map[string]interface{}{
-				"error":         err.Error(),
-				"http_request":  requestDetails,
-				"http_response": responseDetails,
+				"error":                 err.Error(),
+				"circuit_breaker_state": cb.StateName(),
+				"http_request":          requestDetails,
+				"http_response":         responseDetails,
 			})
 		}
 
@@ -141,6 +183,8 @@ func (e *APIEnrichmentExecutor) Execute(
 		e.PostExecute(ctx, step, err, time.Since(start))
 		return inputData, err
 	}
+
+	cb.RecordSuccess()
 
 	// Check if response mapping is configured
 	var enrichedFields int
@@ -204,12 +248,25 @@ func (e *APIEnrichmentExecutor) Execute(
 		}
 	}
 
+	// ── Populate result cache ──────────────────────────────────────
+	if config.CacheTtlSeconds > 0 && cacheKey != "" {
+		cachedValue := deepCopyMap(stepOutput)
+		cachedValue["_cached_response"] = resp.JSON
+		cachedValue["_cached_at"] = time.Now().UTC().Format(time.RFC3339)
+		GetResultCache("api_enrichment", config.CacheMaxEntries).Set(
+			cacheKey, cachedValue, time.Duration(config.CacheTtlSeconds)*time.Second,
+		)
+	}
+	// ───────────────────────────────────────────────────────────────
+
 	// STANDARDIZED: Variables (API response data) + execution details (HTTP metadata)
 	e.SetStepOutputWithDetails(inputData, stepOutput, map[string]interface{}{
-		"http_request":   requestDetails,
-		"http_response":  responseDetails,
-		"target_path":    targetPath,
-		"fields_fetched": enrichedFields,
+		"http_request":          requestDetails,
+		"http_response":         responseDetails,
+		"target_path":           targetPath,
+		"fields_fetched":        enrichedFields,
+		"cache_hit":             false,
+		"circuit_breaker_state": cb.StateName(),
 	})
 
 	log.Printf("✅ [API Enrichment] Response stored at: %s (%d fields, %dms)",
@@ -256,6 +313,15 @@ func (e *APIEnrichmentExecutor) parseConfig(step *models.TransformationStep) (*m
 	}
 	if config.RetryDelayMs == 0 {
 		config.RetryDelayMs = 1000
+	}
+	if config.FailureThreshold == 0 {
+		config.FailureThreshold = 5
+	}
+	if config.OpenDurationSeconds == 0 {
+		config.OpenDurationSeconds = 60
+	}
+	if config.CacheMaxEntries == 0 {
+		config.CacheMaxEntries = 1000
 	}
 
 	return &config, nil
@@ -765,22 +831,21 @@ func (e *APIEnrichmentExecutor) getSampleValue(value interface{}) interface{} {
 //
 // Resolution order:
 //  1. If responseMapping is configured → enumerate every targetField rule as a concrete variable
-//     (path = "{targetPath}.{targetField}", e.g. "enriched.api.username")
-//  2. Otherwise → return the container object so users know the root path and can drill down manually
+//     using the steps.{namespace}.step_output.{field} path (matches what the runtime injects).
+//  2. Otherwise → return the step_output container so users know the root path.
 func (e *APIEnrichmentExecutor) GetOutputVariables(step *models.TransformationStep) []models.VariableDefinition {
 	variables := []models.VariableDefinition{}
 
-	// Parse config to get response mapping and target path
+	// Parse config for endpoint description (used in fallback)
 	config, err := e.parseConfig(step)
 	if err != nil {
 		log.Printf("⚠️  [APIEnrichment] Failed to parse config for variable discovery: %v", err)
 		return variables
 	}
 
-	targetPath := config.TargetPath
-	if targetPath == "" {
-		targetPath = "enriched.api"
-	}
+	// Compute the runtime namespace — same logic as the pipeline service uses
+	namespace := models.GenerateStepNamespace(step.StepName, step.ID, step.StepAlias)
+	stepOutputBase := fmt.Sprintf("steps.%s.step_output", namespace)
 
 	// If responseMapping is configured, enumerate the mapped output fields.
 	// These are KNOWN at config time — each targetField becomes a concrete searchable variable.
@@ -794,7 +859,7 @@ func (e *APIEnrichmentExecutor) GetOutputVariables(step *models.TransformationSt
 					if rule.TargetField == "" {
 						continue
 					}
-					fieldPath := fmt.Sprintf("%s.%s", targetPath, rule.TargetField)
+					fieldPath := fmt.Sprintf("%s.%s", stepOutputBase, rule.TargetField)
 					desc := rule.Description
 					if desc == "" {
 						desc = fmt.Sprintf("Extracted from API response field '%s'", rule.SourcePath)
@@ -820,12 +885,12 @@ func (e *APIEnrichmentExecutor) GetOutputVariables(step *models.TransformationSt
 	// Users can append ".fieldName" manually; IntelliSense shows this as a starting point.
 	variables = append(variables, models.VariableDefinition{
 		Name:         "api_response",
-		Path:         targetPath,
+		Path:         stepOutputBase,
 		DataType:     "object",
-		Description:  fmt.Sprintf("Full API response from %s (configure Response Mapping to see individual fields here)", config.Endpoint),
-		UsageExample: fmt.Sprintf("%s.fieldName", targetPath),
+		Description:  fmt.Sprintf("Full API response from %s (configure Response Mapping to see individual fields)", config.Endpoint),
+		UsageExample: fmt.Sprintf("%s.fieldName", stepOutputBase),
 		Category:     "API",
-		Examples:     []string{fmt.Sprintf("%s.fieldName", targetPath)},
+		Examples:     []string{fmt.Sprintf("%s.fieldName", stepOutputBase)},
 	})
 
 	return variables

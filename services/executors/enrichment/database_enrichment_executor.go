@@ -5,12 +5,13 @@ import (
 	"database/sql"
 	"encoding/json"
 	"ezhealthkonnect/models"
+	"ezhealthkonnect/services/dbpool"
 	"ezhealthkonnect/services/executors"
+	"ezhealthkonnect/services/logger"
 	"fmt"
 	"log"
 	"sort"
 	"strings"
-	"sync"
 	"time"
 
 	// SQL database drivers
@@ -26,11 +27,7 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-// Global connection pool with cache and reuse
-var (
-	dbConnectionPool = make(map[string]*sql.DB)
-	dbPoolMutex      sync.RWMutex
-)
+// Connection pooling is handled by services.GetDBPoolRegistry() (db_pool_registry.go).
 
 // ===============================================================
 // DATABASE ENRICHMENT EXECUTOR
@@ -84,6 +81,31 @@ func (e *DatabaseEnrichmentExecutor) Execute(
 	log.Printf("🗄️  [Database Enrichment] Executing query on %s", config.DatabaseType)
 	log.Printf("   🔍 DEBUG: DatabaseType = %s", config.DatabaseType)
 	log.Printf("   🔍 DEBUG: TargetPath = %s", config.TargetPath)
+
+	// ── Result Cache (check before query) ─────────────────────────
+	var dbCacheKey string
+	if config.CacheResults && config.CacheTTL > 0 {
+		dbCacheKey = CacheKey(step.ID, config.DatabaseType, config.Query, fmt.Sprintf("%v", config.QueryParams))
+		cache := GetResultCache("db_enrichment", config.CacheMaxEntries)
+		if cached, ok := cache.Get(dbCacheKey); ok {
+			log.Printf("⚡ [Database Enrichment] Cache hit for step %s", step.ID)
+			targetPath := config.TargetPath
+			if targetPath == "" {
+				targetPath = "enriched.database"
+			}
+			e.storeResult(inputData, targetPath, cached["_cached_result"])
+			cachedAt, _ := cached["_cached_at"].(string)
+			e.SetStepOutputWithDetails(inputData, cached, map[string]interface{}{
+				"database_type": config.DatabaseType,
+				"target_path":   targetPath,
+				"cache_hit":     true,
+				"cached_at":     cachedAt,
+			})
+			e.PostExecute(ctx, step, nil, time.Since(start))
+			return inputData, nil
+		}
+	}
+	// ───────────────────────────────────────────────────────────────
 
 	// Execute query with timeout
 	queryCtx, cancel := context.WithTimeout(ctx, time.Duration(config.TimeoutMs)*time.Millisecond)
@@ -168,11 +190,23 @@ func (e *DatabaseEnrichmentExecutor) Execute(
 		rowCount = 1
 	}
 
+	// ── Populate result cache ──────────────────────────────────────
+	if config.CacheResults && config.CacheTTL > 0 && dbCacheKey != "" {
+		cachedValue := deepCopyMap(variables)
+		cachedValue["_cached_result"] = mappedResult
+		cachedValue["_cached_at"] = time.Now().UTC().Format(time.RFC3339)
+		GetResultCache("db_enrichment", config.CacheMaxEntries).Set(
+			dbCacheKey, cachedValue, time.Duration(config.CacheTTL)*time.Second,
+		)
+	}
+	// ───────────────────────────────────────────────────────────────
+
 	// STANDARDIZED: Variables (query result) + execution details
 	e.SetStepOutputWithDetails(inputData, variables, map[string]interface{}{
 		"database_type": config.DatabaseType,
 		"target_path":   targetPath,
 		"rows_returned": rowCount,
+		"cache_hit":     false,
 	})
 
 	// Log success
@@ -249,78 +283,38 @@ func (e *DatabaseEnrichmentExecutor) parseConfig(step *models.TransformationStep
 	if config.TimeoutMs == 0 {
 		config.TimeoutMs = 3000
 	}
+	if config.CacheMaxEntries == 0 {
+		config.CacheMaxEntries = 1000
+	}
 
 	return &config, nil
 }
 
-// getConnection gets the database connection with connection pooling
+// getConnection returns a pooled database connection for the given config.
+// Per-step pool settings (maxOpen, maxIdle, maxLifetime) are read from config
+// when present; otherwise the registry defaults (10/5/5m) are used.
 func (e *DatabaseEnrichmentExecutor) getConnection(config *models.DatabaseEnrichmentConfigV2) (*sql.DB, error) {
-	// If connection name is specified, look it up from stored connections
 	if config.ConnectionName != "" {
-		// TODO: Implement connection pool/registry for named connections
-		log.Printf("   ⚠️  Named connections not yet implemented, using main DB")
+		// Named connections (stored in connectivity_types) — fall back to main DB for now.
+		logger.Warn("named db connections not yet implemented, using main DB",
+			"connection_name", config.ConnectionName)
 		return e.db, nil
 	}
 
-	// If connection string is specified, check connection pool first
 	if config.ConnectionString != "" {
-		// Generate cache key from connection string + database type
-		cacheKey := fmt.Sprintf("%s::%s", config.DatabaseType, config.ConnectionString)
-
-		// Check if connection already exists in pool (READ lock)
-		dbPoolMutex.RLock()
-		if db, exists := dbConnectionPool[cacheKey]; exists {
-			dbPoolMutex.RUnlock()
-			// Verify connection is still alive
-			if err := db.Ping(); err == nil {
-				log.Printf("   ♻️  Reusing cached database connection for %s", config.DatabaseType)
-				return db, nil
-			}
-			// Connection dead, need to recreate
-			log.Printf("   ⚠️  Cached connection dead, recreating for %s", config.DatabaseType)
-		} else {
-			dbPoolMutex.RUnlock()
+		poolCfg := dbpool.PoolConfig{
+			MaxOpen:     config.PoolMaxOpen,
+			MaxIdle:     config.PoolMaxIdle,
+			MaxLifetime: time.Duration(config.PoolMaxLifetimeMinutes) * time.Minute,
 		}
-
-		// Create new connection (WRITE lock)
-		dbPoolMutex.Lock()
-		defer dbPoolMutex.Unlock()
-
-		// Double-check in case another goroutine just created it
-		if db, exists := dbConnectionPool[cacheKey]; exists {
-			if err := db.Ping(); err == nil {
-				return db, nil
-			}
-		}
-
-		log.Printf("   🔌 Creating new database connection for %s", config.DatabaseType)
-		db, err := sql.Open(e.getDriverName(config.DatabaseType), config.ConnectionString)
-		if err != nil {
-			return nil, fmt.Errorf("failed to open database connection: %w", err)
-		}
-
-		// Configure connection pool settings for performance
-		db.SetMaxOpenConns(10)                 // Max 10 concurrent connections per database
-		db.SetMaxIdleConns(5)                  // Keep 5 idle connections ready
-		db.SetConnMaxLifetime(5 * time.Minute) // Recycle connections every 5 minutes
-
-		// Test connection with timeout
-		pingCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		defer cancel()
-
-		if err := db.PingContext(pingCtx); err != nil {
-			db.Close()
-			return nil, fmt.Errorf("failed to ping database: %w", err)
-		}
-
-		// Store in pool
-		dbConnectionPool[cacheKey] = db
-		log.Printf("   ✅ Database connection cached for reuse (%s)", config.DatabaseType)
-
-		return db, nil
+		return dbpool.Get().GetOrCreate(
+			config.DatabaseType,
+			config.ConnectionString,
+			e.getDriverName(config.DatabaseType),
+			poolCfg,
+		)
 	}
 
-	// Use main application database as fallback
 	return e.db, nil
 }
 
@@ -739,7 +733,9 @@ func (e *DatabaseEnrichmentExecutor) executeRedisQuery(
 	case "GET":
 		val, err := client.Get(ctx, redisKey).Result()
 		if err == redis.Nil {
-			return nil, fmt.Errorf("key not found: %s", redisKey)
+			// Key not found — treat as empty result (consistent with SQL returning 0 rows)
+			log.Printf("   ℹ️  Redis key not found: %s (returning empty result)", redisKey)
+			return []map[string]interface{}{}, nil
 		} else if err != nil {
 			return nil, fmt.Errorf("GET failed: %w", err)
 		}
@@ -1009,8 +1005,9 @@ func (e *DatabaseEnrichmentExecutor) substituteFieldPlaceholders(
 // VARIABLE PROVIDER INTERFACE IMPLEMENTATION
 // ===============================================================
 
-// GetOutputVariables returns the list of variables this executor will produce
-// Implements the VariableProvider interface for automatic variable discovery
+// GetOutputVariables returns the list of variables this executor will produce.
+// Implements the VariableProvider interface for automatic variable discovery.
+// Paths use steps.{namespace}.step_output.{field} — matching what the runtime injects.
 func (e *DatabaseEnrichmentExecutor) GetOutputVariables(step *models.TransformationStep) []models.VariableDefinition {
 	variables := []models.VariableDefinition{}
 
@@ -1023,21 +1020,12 @@ func (e *DatabaseEnrichmentExecutor) GetOutputVariables(step *models.Transformat
 		return variables
 	}
 
-	// Determine base path where results will be stored
-	basePath := config.TargetPath
-	if basePath == "" {
-		basePath = "enriched.database"
-	}
+	// Compute step namespace — same logic as pipeline service uses at runtime
+	namespace := models.GenerateStepNamespace(step.StepName, step.ID, step.StepAlias)
+	basePath := fmt.Sprintf("steps.%s.step_output", namespace)
 
-	// DEBUG: Log the config to see what we're working with
 	log.Printf("🔍 [GetOutputVariables] Database type: %s, Query: %s, ResultMapping count: %d",
 		config.DatabaseType, config.Query, len(config.ResultMapping))
-	if len(config.ResultMapping) > 0 {
-		log.Printf("   ResultMapping entries:")
-		for dbCol, outField := range config.ResultMapping {
-			log.Printf("      %s → %s", dbCol, outField)
-		}
-	}
 
 	// Extract variables based on database type
 	dbType := strings.ToLower(config.DatabaseType)

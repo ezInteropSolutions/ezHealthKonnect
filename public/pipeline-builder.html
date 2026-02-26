@@ -281,6 +281,8 @@
     <script src="/js/pipeline/utils/TransformUtils.js?v=1.0"></script>
     <script src="/js/pipeline/utils/StepVariablesProvider.js?v=1.0"></script>
     <script src="/js/pipeline/components/BaseStepConfigBuilder.js?v=1.0"></script>
+    <!-- Step Builder Registry — lightweight singleton for component-based step UIs -->
+    <script src="/js/pipeline/components/StepBuilderRegistry.js?v=1.0"></script>
     <!-- Conditional Logic Builders (must load before PropertiesPanel uses them) -->
     <script src="/js/pipeline/utils/IfThenElseActionTranslator.js?v=1.0"></script>
     <script src="/js/pipeline/components/IfThenElseBuilder.js?v=3.1"></script>
@@ -300,6 +302,9 @@
     <!-- NO-CODE Variable System (must load before PropertiesPanel uses it) -->
     <script src="/js/pipeline/components/VariablePanelBuilder.js?v=2.0"></script>
     <script src="/js/pipeline/components/ScriptEnrichmentEditor.js?v=2.5"></script>
+    <!-- Step-specific Builder components (registered with StepBuilderRegistry) -->
+    <script src="/js/pipeline/components/FileParserBuilder.js?v=1.0"></script>
+    <script src="/js/pipeline/components/RemoveDuplicatesBuilder.js?v=1.0"></script>
     <!-- Flowchart Mode Components - V1 (Legacy) -->
     <script src="/js/pipeline/utils/FlowchartLayoutEngine.js?v=2.0"></script>
     <script src="/js/pipeline/utils/FlowchartConnector.js?v=2.0"></script>

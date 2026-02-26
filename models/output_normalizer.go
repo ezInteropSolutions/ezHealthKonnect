@@ -46,22 +46,10 @@ func NewOutputNormalizer() *OutputNormalizer {
 	}
 }
 
-// NormalizeMap normalizes all keys in a map to the configured convention
-// Recursively processes nested maps and arrays
+// NormalizeMap normalizes all keys in a map to the configured convention.
+// Recursively processes nested maps and arrays with depth protection.
 func (n *OutputNormalizer) NormalizeMap(input map[string]interface{}) map[string]interface{} {
-	if input == nil {
-		return nil
-	}
-
-	result := make(map[string]interface{})
-
-	for key, value := range input {
-		normalizedKey := n.NormalizeKey(key)
-		normalizedValue := n.NormalizeValue(value)
-		result[normalizedKey] = normalizedValue
-	}
-
-	return result
+	return n.normalizeMapDepth(input, 0)
 }
 
 // NormalizeKey converts a single key to the configured convention
@@ -133,10 +121,21 @@ func (n *OutputNormalizer) isHL7FieldKey(key string) bool {
 	return true
 }
 
-// NormalizeValue recursively normalizes nested structures
+// NormalizeValue recursively normalizes nested structures.
+// A depth guard (max 30 levels) prevents stack overflow on deeply nested or
+// circular structures — e.g., from user-provided JavaScript script output.
 func (n *OutputNormalizer) NormalizeValue(value interface{}) interface{} {
+	return n.normalizeValueDepth(value, 0)
+}
+
+const maxNormalizeDepth = 30
+
+func (n *OutputNormalizer) normalizeValueDepth(value interface{}, depth int) interface{} {
 	if value == nil {
 		return nil
+	}
+	if depth > maxNormalizeDepth {
+		return value // Stop recursing; return the raw value rather than panic
 	}
 
 	// Use reflection to handle different types
@@ -144,27 +143,36 @@ func (n *OutputNormalizer) NormalizeValue(value interface{}) interface{} {
 
 	switch v.Kind() {
 	case reflect.Map:
-		// Normalize nested map
 		if m, ok := value.(map[string]interface{}); ok {
-			return n.NormalizeMap(m)
+			return n.normalizeMapDepth(m, depth+1)
 		}
 		return value
 
 	case reflect.Slice, reflect.Array:
-		// Normalize array elements
 		if arr, ok := value.([]interface{}); ok {
 			result := make([]interface{}, len(arr))
 			for i, item := range arr {
-				result[i] = n.NormalizeValue(item)
+				result[i] = n.normalizeValueDepth(item, depth+1)
 			}
 			return result
 		}
 		return value
 
 	default:
-		// Primitives (string, int, bool, etc.) - return as-is
 		return value
 	}
+}
+
+// normalizeMapDepth is the depth-aware version of NormalizeMap.
+func (n *OutputNormalizer) normalizeMapDepth(input map[string]interface{}, depth int) map[string]interface{} {
+	if input == nil {
+		return nil
+	}
+	result := make(map[string]interface{}, len(input))
+	for key, value := range input {
+		result[n.NormalizeKey(key)] = n.normalizeValueDepth(value, depth)
+	}
+	return result
 }
 
 // toSnakeCase converts camelCase or PascalCase to snake_case

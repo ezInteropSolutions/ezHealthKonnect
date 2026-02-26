@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"ezhealthkonnect/models"
 	"ezhealthkonnect/services"
+	"ezhealthkonnect/services/executors"
 	"ezhealthkonnect/hl7"
 	"encoding/json"
 	"fmt"
@@ -463,7 +464,6 @@ func (c *TransformationTestController) convertFrontendPipeline(pipelineData map[
 			// Convert step (value type, not pointer)
 			step := models.TransformationStep{
 				Sequence: sequence,
-				Layer:    layerName,
 				Enabled:  true, // Default to enabled
 			}
 
@@ -526,7 +526,7 @@ func (c *TransformationTestController) convertFrontendPipeline(pipelineData map[
 
 func (c *TransformationTestController) loadPipelineSteps(pipelineID string) ([]*models.TransformationStep, error) {
 	query := `
-		SELECT id, step_name, step_type, sequence, layer, config, enabled
+		SELECT id, step_name, step_type, sequence, config, enabled
 		FROM transformation_steps
 		WHERE pipeline_id = $1 AND enabled = true
 		ORDER BY sequence ASC
@@ -548,7 +548,6 @@ func (c *TransformationTestController) loadPipelineSteps(pipelineID string) ([]*
 			&step.StepName,
 			&step.StepType,
 			&step.Sequence,
-			&step.Layer,
 			&configJSON,
 			&step.Enabled,
 		)
@@ -593,14 +592,38 @@ func (c *TransformationTestController) executeSteps(steps []*models.Transformati
 		output, err := executor.Execute(context.Background(), step, currentData)
 		if err != nil {
 			log.Printf("   ❌ Step failed: %v", err)
+
+			// Apply error handling config (same logic as production pipeline service)
+			ehConfig := executors.ResolveErrorHandlingConfig(step.Config, nil)
+			if ehConfig != nil {
+				output, err = executors.ApplyErrorHandling(ehConfig, err, output, currentData, step.StepName)
+			}
+
+			if err != nil {
+				// Error not caught — fail the pipeline
+				results = append(results, map[string]interface{}{
+					"step_name": step.StepName,
+					"step_type": step.StepType,
+					"success":   false,
+					"error":     err.Error(),
+					"output":    output,
+				})
+				return results, err
+			}
+
+			// Error was caught/suppressed — record the caught error and continue
+			log.Printf("   🛡️ Step error caught by handler, continuing: %s", step.StepName)
 			results = append(results, map[string]interface{}{
-				"step_name":  step.StepName,
-				"step_type":  step.StepType,
-				"success":    false,
-				"error":      err.Error(),
-				"output":     output,
+				"step_name":     step.StepName,
+				"step_type":     step.StepType,
+				"success":       false,
+				"error_handled": true,
+				"output":        output,
 			})
-			return results, err
+			if output != nil {
+				currentData = output
+			}
+			continue
 		}
 
 		log.Printf("   ✅ Step completed successfully")

@@ -17,7 +17,7 @@ const BASE_URL = 'http://localhost:3000';
 
 async function login(page) {
     await page.goto(`${BASE_URL}/login.html`);
-    const passwords = ['admin123', 'Admin123!'];
+    const passwords = ['admin123', 'Admin123!', 'password'];
     let loggedIn = false;
 
     for (const password of passwords) {
@@ -510,12 +510,13 @@ test.describe('On Error Dropdown', () => {
         await login(page);
     });
 
-    test('Default selection is "catch"', async ({ page }) => {
+    test('Default selection is "suppress"', async ({ page }) => {
         await openPipelineBuilder(page);
         await selectStep(page);
 
+        // "catch" removed in P5 — default is now "suppress"
         const select = page.locator('#ehOnError');
-        await expect(select).toHaveValue('catch');
+        await expect(select).toHaveValue('suppress');
     });
 
     test('Can select "suppress"', async ({ page }) => {
@@ -544,14 +545,13 @@ test.describe('On Error Dropdown', () => {
         await openPipelineBuilder(page);
         await selectStep(page);
 
+        // "catch" removed in P5 — only suppress + rethrow remain
         const options = page.locator('#ehOnError option');
-        const catchText = await options.nth(0).textContent();
-        const suppressText = await options.nth(1).textContent();
-        const rethrowText = await options.nth(2).textContent();
+        const suppressText = await options.nth(0).textContent();
+        const rethrowText = await options.nth(1).textContent();
 
-        expect(catchText).toContain('Continue');
-        expect(suppressText).toContain('Ignore');
-        expect(rethrowText).toContain('Stop');
+        expect(suppressText).toContain('Suppress');
+        expect(rethrowText).toContain('Rethrow');
     });
 });
 

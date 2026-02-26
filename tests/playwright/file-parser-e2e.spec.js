@@ -16,7 +16,7 @@ const BASE_URL = 'http://localhost:3000';
 
 async function login(page) {
     await page.goto(`${BASE_URL}/login.html`);
-    const passwords = ['admin123', 'Admin123!'];
+    const passwords = ['admin123', 'Admin123!', 'password'];
     let loggedIn = false;
 
     for (const password of passwords) {
@@ -75,7 +75,7 @@ async function openPipelineBuilder(page) {
  * Returns the step's auto-generated ID.
  */
 async function addFileParserStep(page, config = {}) {
-    return await page.evaluate((cfg) => {
+    const stepId = await page.evaluate((cfg) => {
         const builder = window.pipelineBuilder;
         if (!builder) throw new Error('Pipeline builder not initialized');
 
@@ -105,6 +105,12 @@ async function addFileParserStep(page, config = {}) {
         builder.addStep(step);
         return step.id;
     }, config);
+
+    // Click the specific node by data-step-id to avoid ambiguity with any existing
+    // "File Parser" steps already in the pipeline (which may have different configs).
+    await page.waitForSelector(`.flowchart-step-node[data-step-id="${stepId}"]`, { timeout: 5000 });
+    await page.click(`.flowchart-step-node[data-step-id="${stepId}"]`);
+    return stepId;
 }
 
 /**
@@ -169,7 +175,6 @@ test.describe('File Parser Configuration UI', () => {
 
     test('Configuration form renders all fields', async ({ page }) => {
         await addFileParserStep(page);
-        await clickStep(page, 'File Parser');
         await waitForPropertiesPanel(page);
 
         // Check all form fields exist
@@ -184,7 +189,6 @@ test.describe('File Parser Configuration UI', () => {
 
     test('Changing format to Fixed Width shows column builder, hides delimiter', async ({ page }) => {
         await addFileParserStep(page);
-        await clickStep(page, 'File Parser');
         await waitForPropertiesPanel(page);
 
         // Initially delimiter should be visible, columns section hidden
@@ -202,7 +206,6 @@ test.describe('File Parser Configuration UI', () => {
 
     test('Changing format back to CSV shows delimiter, hides column builder', async ({ page }) => {
         await addFileParserStep(page, { fileFormat: 'fixed_width' });
-        await clickStep(page, 'File Parser');
         await waitForPropertiesPanel(page);
 
         // Change to CSV
@@ -215,7 +218,6 @@ test.describe('File Parser Configuration UI', () => {
 
     test('Add Column button creates a new row', async ({ page }) => {
         await addFileParserStep(page, { fileFormat: 'fixed_width' });
-        await clickStep(page, 'File Parser');
         await waitForPropertiesPanel(page);
 
         // Select fixed_width to show the columns section
@@ -240,7 +242,6 @@ test.describe('File Parser Configuration UI', () => {
                 { name: 'COL_B', start: 11, length: 10 }
             ]
         });
-        await clickStep(page, 'File Parser');
         await waitForPropertiesPanel(page);
 
         await page.selectOption('#fpFileFormat', 'fixed_width');
@@ -259,7 +260,6 @@ test.describe('File Parser Configuration UI', () => {
 
     test('Has Header checkbox toggles', async ({ page }) => {
         await addFileParserStep(page);
-        await clickStep(page, 'File Parser');
         await waitForPropertiesPanel(page);
 
         const checkbox = page.locator('#fpHasHeader');
@@ -293,7 +293,6 @@ test.describe('File Parser Config Persistence', () => {
             maxRecords: 100
         });
 
-        await clickStep(page, 'File Parser');
         await waitForPropertiesPanel(page);
 
         // Verify the values are rendered in the form
@@ -315,7 +314,6 @@ test.describe('File Parser Config Collection', () => {
 
     test('All fields are collected correctly', async ({ page }) => {
         await addFileParserStep(page);
-        await clickStep(page, 'File Parser');
         await waitForPropertiesPanel(page);
 
         // Fill in specific values
@@ -347,7 +345,6 @@ test.describe('File Parser Config Collection', () => {
 
     test('Fixed-width columns collected as array', async ({ page }) => {
         await addFileParserStep(page, { fileFormat: 'fixed_width' });
-        await clickStep(page, 'File Parser');
         await waitForPropertiesPanel(page);
 
         await page.selectOption('#fpFileFormat', 'fixed_width');
@@ -484,7 +481,6 @@ test.describe('File Parser Excel (.xlsx) UI', () => {
 
     test('xlsx option is visible in format dropdown', async ({ page }) => {
         await addFileParserStep(page);
-        await clickStep(page, 'File Parser');
         await waitForPropertiesPanel(page);
 
         const xlsxOption = page.locator('#fpFileFormat option[value="xlsx"]');
@@ -494,7 +490,6 @@ test.describe('File Parser Excel (.xlsx) UI', () => {
 
     test('Selecting xlsx shows sheet name input, hides delimiter and columns', async ({ page }) => {
         await addFileParserStep(page);
-        await clickStep(page, 'File Parser');
         await waitForPropertiesPanel(page);
 
         // Switch to xlsx
@@ -512,7 +507,6 @@ test.describe('File Parser Excel (.xlsx) UI', () => {
 
     test('Sheet name field is collected in config', async ({ page }) => {
         await addFileParserStep(page, { fileFormat: 'xlsx' });
-        await clickStep(page, 'File Parser');
         await waitForPropertiesPanel(page);
 
         // Switch to xlsx and fill sheet name
@@ -546,7 +540,6 @@ test.describe('File Parser Auto-Detect Toggle', () => {
 
     test('Auto-detect toggle is present in the configuration form', async ({ page }) => {
         await addFileParserStep(page);
-        await clickStep(page, 'File Parser');
         await waitForPropertiesPanel(page);
 
         await expect(page.locator('#fpAutoDetect')).toBeAttached();
@@ -554,7 +547,6 @@ test.describe('File Parser Auto-Detect Toggle', () => {
 
     test('Enabling auto-detect hides the manual format group', async ({ page }) => {
         await addFileParserStep(page);
-        await clickStep(page, 'File Parser');
         await waitForPropertiesPanel(page);
 
         // Initially the manual format group should be visible
@@ -569,7 +561,6 @@ test.describe('File Parser Auto-Detect Toggle', () => {
 
     test('Disabling auto-detect restores the format group', async ({ page }) => {
         await addFileParserStep(page, { autoDetect: true });
-        await clickStep(page, 'File Parser');
         await waitForPropertiesPanel(page);
 
         // Should be hidden when auto-detect is on
@@ -583,7 +574,6 @@ test.describe('File Parser Auto-Detect Toggle', () => {
 
     test('Auto-detect value is saved in config', async ({ page }) => {
         await addFileParserStep(page);
-        await clickStep(page, 'File Parser');
         await waitForPropertiesPanel(page);
 
         // Enable auto-detect
@@ -614,7 +604,6 @@ test.describe('File Parser XLS (Legacy) Format', () => {
 
     test('xls option is visible in format dropdown', async ({ page }) => {
         await addFileParserStep(page);
-        await clickStep(page, 'File Parser');
         await waitForPropertiesPanel(page);
 
         const xlsOption = page.locator('#fpFileFormat option[value="xls"]');
@@ -624,7 +613,6 @@ test.describe('File Parser XLS (Legacy) Format', () => {
 
     test('Selecting xls shows Excel section, hides delimiter and columns', async ({ page }) => {
         await addFileParserStep(page);
-        await clickStep(page, 'File Parser');
         await waitForPropertiesPanel(page);
 
         await page.selectOption('#fpFileFormat', 'xls');
@@ -637,7 +625,6 @@ test.describe('File Parser XLS (Legacy) Format', () => {
 
     test('Sheet name is collected when xls is selected', async ({ page }) => {
         await addFileParserStep(page, { fileFormat: 'xls' });
-        await clickStep(page, 'File Parser');
         await waitForPropertiesPanel(page);
 
         await page.selectOption('#fpFileFormat', 'xls');
@@ -669,7 +656,6 @@ test.describe('File Parser OOB Template Dropdown', () => {
 
     test('Template dropdown is hidden when CSV is selected', async ({ page }) => {
         await addFileParserStep(page, { fileFormat: 'csv' });
-        await clickStep(page, 'File Parser');
         await waitForPropertiesPanel(page);
 
         await page.selectOption('#fpFileFormat', 'csv');
@@ -680,7 +666,6 @@ test.describe('File Parser OOB Template Dropdown', () => {
 
     test('Template dropdown is visible when fixed_width is selected', async ({ page }) => {
         await addFileParserStep(page);
-        await clickStep(page, 'File Parser');
         await waitForPropertiesPanel(page);
 
         await page.selectOption('#fpFileFormat', 'fixed_width');
@@ -692,7 +677,6 @@ test.describe('File Parser OOB Template Dropdown', () => {
 
     test('Template dropdown contains CCLF and NACHA options', async ({ page }) => {
         await addFileParserStep(page);
-        await clickStep(page, 'File Parser');
         await waitForPropertiesPanel(page);
 
         await page.selectOption('#fpFileFormat', 'fixed_width');
@@ -705,7 +689,6 @@ test.describe('File Parser OOB Template Dropdown', () => {
 
     test('Selecting a template auto-fills the columns table', async ({ page }) => {
         await addFileParserStep(page);
-        await clickStep(page, 'File Parser');
         await waitForPropertiesPanel(page);
 
         await page.selectOption('#fpFileFormat', 'fixed_width');
@@ -726,7 +709,6 @@ test.describe('File Parser OOB Template Dropdown', () => {
 
     test('Template value is saved in collected config', async ({ page }) => {
         await addFileParserStep(page);
-        await clickStep(page, 'File Parser');
         await waitForPropertiesPanel(page);
 
         await page.selectOption('#fpFileFormat', 'fixed_width');
@@ -758,7 +740,6 @@ test.describe('File Parser Sheet Index and Content Encoding', () => {
 
     test('Sheet index field is visible when xlsx selected', async ({ page }) => {
         await addFileParserStep(page);
-        await clickStep(page, 'File Parser');
         await waitForPropertiesPanel(page);
 
         await page.selectOption('#fpFileFormat', 'xlsx');
@@ -769,7 +750,6 @@ test.describe('File Parser Sheet Index and Content Encoding', () => {
 
     test('Sheet index defaults to 0', async ({ page }) => {
         await addFileParserStep(page);
-        await clickStep(page, 'File Parser');
         await waitForPropertiesPanel(page);
 
         await page.selectOption('#fpFileFormat', 'xlsx');
@@ -780,7 +760,6 @@ test.describe('File Parser Sheet Index and Content Encoding', () => {
 
     test('Sheet index value is saved in config', async ({ page }) => {
         await addFileParserStep(page, { fileFormat: 'xlsx' });
-        await clickStep(page, 'File Parser');
         await waitForPropertiesPanel(page);
 
         await page.selectOption('#fpFileFormat', 'xlsx');
@@ -802,7 +781,6 @@ test.describe('File Parser Sheet Index and Content Encoding', () => {
 
     test('Content encoding dropdown is present and has base64 option', async ({ page }) => {
         await addFileParserStep(page);
-        await clickStep(page, 'File Parser');
         await waitForPropertiesPanel(page);
 
         await page.selectOption('#fpFileFormat', 'xlsx');
@@ -814,7 +792,6 @@ test.describe('File Parser Sheet Index and Content Encoding', () => {
 
     test('Content encoding value is saved in config', async ({ page }) => {
         await addFileParserStep(page, { fileFormat: 'xlsx' });
-        await clickStep(page, 'File Parser');
         await waitForPropertiesPanel(page);
 
         await page.selectOption('#fpFileFormat', 'xlsx');
@@ -845,7 +822,6 @@ test.describe('File Parser Inline Data Preview', () => {
 
     test('Preview section is present in the form', async ({ page }) => {
         await addFileParserStep(page);
-        await clickStep(page, 'File Parser');
         await waitForPropertiesPanel(page);
 
         await expect(page.locator('#fpPreviewSection, #fpRunPreviewBtn')).toBeAttached();
@@ -853,7 +829,6 @@ test.describe('File Parser Inline Data Preview', () => {
 
     test('Run Preview button is visible', async ({ page }) => {
         await addFileParserStep(page);
-        await clickStep(page, 'File Parser');
         await waitForPropertiesPanel(page);
 
         await expect(page.locator('#fpRunPreviewBtn')).toBeVisible();
@@ -861,7 +836,6 @@ test.describe('File Parser Inline Data Preview', () => {
 
     test('Preview textarea accepts sample content', async ({ page }) => {
         await addFileParserStep(page);
-        await clickStep(page, 'File Parser');
         await waitForPropertiesPanel(page);
 
         const textarea = page.locator('#fpPreviewContent');
@@ -873,7 +847,6 @@ test.describe('File Parser Inline Data Preview', () => {
 
     test('Clicking preview button with CSV shows result table', async ({ page }) => {
         await addFileParserStep(page);
-        await clickStep(page, 'File Parser');
         await waitForPropertiesPanel(page);
 
         // Fill in some sample CSV data for preview
@@ -905,7 +878,6 @@ test.describe('File Parser Inline Data Preview', () => {
 
     test('Preview status message is shown during/after preview', async ({ page }) => {
         await addFileParserStep(page);
-        await clickStep(page, 'File Parser');
         await waitForPropertiesPanel(page);
 
         await expect(page.locator('#fpPreviewStatus')).toBeAttached();
@@ -1094,7 +1066,6 @@ test.describe('File Parser — Field URI Source Type UI', () => {
 
     test('Three source type radio buttons are present', async ({ page }) => {
         await addFileParserStep(page);
-        await clickStep(page, 'File Parser');
         await waitForPropertiesPanel(page);
 
         await expect(page.locator('#fpSourceTypeField')).toBeAttached();
@@ -1104,7 +1075,6 @@ test.describe('File Parser — Field URI Source Type UI', () => {
 
     test('"Field URI" radio label is visible', async ({ page }) => {
         await addFileParserStep(page);
-        await clickStep(page, 'File Parser');
         await waitForPropertiesPanel(page);
 
         const label = page.locator('label[for="fpSourceTypeFieldAsPath"]');
@@ -1115,7 +1085,6 @@ test.describe('File Parser — Field URI Source Type UI', () => {
 
     test('Selecting "Field URI" shows source field input (not file path)', async ({ page }) => {
         await addFileParserStep(page);
-        await clickStep(page, 'File Parser');
         await waitForPropertiesPanel(page);
 
         // Click the Field URI radio button
@@ -1132,7 +1101,6 @@ test.describe('File Parser — Field URI Source Type UI', () => {
 
     test('Selecting "Field URI" updates placeholder to URI format', async ({ page }) => {
         await addFileParserStep(page);
-        await clickStep(page, 'File Parser');
         await waitForPropertiesPanel(page);
 
         await page.click('label[for="fpSourceTypeFieldAsPath"]');
@@ -1146,7 +1114,6 @@ test.describe('File Parser — Field URI Source Type UI', () => {
 
     test('Selecting "Field URI" shows URI-specific help text', async ({ page }) => {
         await addFileParserStep(page);
-        await clickStep(page, 'File Parser');
         await waitForPropertiesPanel(page);
 
         await page.click('label[for="fpSourceTypeFieldAsPath"]');
@@ -1164,7 +1131,6 @@ test.describe('File Parser — Field URI Source Type UI', () => {
 
     test('Switching from "Field URI" back to "Field Content" restores original help text', async ({ page }) => {
         await addFileParserStep(page);
-        await clickStep(page, 'File Parser');
         await waitForPropertiesPanel(page);
 
         // First go to Field URI
@@ -1187,7 +1153,6 @@ test.describe('File Parser — Field URI Source Type UI', () => {
 
     test('Field URI config is collected correctly in step config', async ({ page }) => {
         await addFileParserStep(page);
-        await clickStep(page, 'File Parser');
         await waitForPropertiesPanel(page);
 
         // Select Field URI radio
@@ -1220,7 +1185,6 @@ test.describe('File Parser — Field URI Source Type UI', () => {
             fileFormat: 'fixed_width'
         });
 
-        await clickStep(page, 'File Parser');
         await waitForPropertiesPanel(page);
 
         // The Field URI radio should be checked
@@ -1233,7 +1197,6 @@ test.describe('File Parser — Field URI Source Type UI', () => {
 
     test('Local Path group is hidden when Field URI is selected', async ({ page }) => {
         await addFileParserStep(page);
-        await clickStep(page, 'File Parser');
         await waitForPropertiesPanel(page);
 
         await page.click('label[for="fpSourceTypeFieldAsPath"]');
@@ -1247,7 +1210,6 @@ test.describe('File Parser — Field URI Source Type UI', () => {
 
     test('Switching to Local Path hides source field group', async ({ page }) => {
         await addFileParserStep(page, { sourceType: 'field_as_path' });
-        await clickStep(page, 'File Parser');
         await waitForPropertiesPanel(page);
 
         // Switch to Local Path
@@ -1296,9 +1258,10 @@ test.describe('File Parser — Field URI API Integration', () => {
     });
 
     test('Preview endpoint handles fixed-width CCLF1 content', async ({ page }) => {
-        // Simulate what a field_as_path step would download and then preview
-        const line1 = '1234567890123MBI12345678' + ' '.repeat(87);
-        const line2 = '9876543210987MBI98765432' + ' '.repeat(87);
+        // CCLF1 (26 fields): CUR_CLM_UNIQ_ID(1-13) PRVDR_OSCAR_NUM(14-19) BENE_MBI_ID(20-30) + pad to 182
+        const pad = ' '.repeat(182 - 30);
+        const line1 = '1234567890123' + 'PRVDR1' + 'MBI12345678' + pad;
+        const line2 = '9876543210987' + 'PRVDR2' + 'MBI98765432' + pad;
         const content = line1 + '\n' + line2 + '\n';
 
         const result = await page.evaluate(async (c) => {
@@ -1450,7 +1413,6 @@ test.describe('File Parser — Template Confidence Badge', () => {
 
     test('CCLF1 template option is visible in template dropdown', async ({ page }) => {
         await addFileParserStep(page, { fileFormat: 'fixed_width' });
-        await clickStep(page, 'File Parser');
         await waitForPropertiesPanel(page);
 
         await page.selectOption('#fpFileFormat', 'fixed_width');
@@ -1462,7 +1424,6 @@ test.describe('File Parser — Template Confidence Badge', () => {
 
     test('CCLF2, CCLF5, CCLF8 template options are visible', async ({ page }) => {
         await addFileParserStep(page, { fileFormat: 'fixed_width' });
-        await clickStep(page, 'File Parser');
         await waitForPropertiesPanel(page);
 
         await page.selectOption('#fpFileFormat', 'fixed_width');
@@ -1473,9 +1434,8 @@ test.describe('File Parser — Template Confidence Badge', () => {
         }
     });
 
-    test('Selecting CCLF1 populates columns with 16 fields', async ({ page }) => {
+    test('Selecting CCLF1 populates columns with 26 fields', async ({ page }) => {
         await addFileParserStep(page, { fileFormat: 'fixed_width' });
-        await clickStep(page, 'File Parser');
         await waitForPropertiesPanel(page);
 
         await page.selectOption('#fpFileFormat', 'fixed_width');
@@ -1484,12 +1444,11 @@ test.describe('File Parser — Template Confidence Badge', () => {
         await page.waitForTimeout(600);
 
         const rows = await page.locator('#fpColumnsBody tr').count();
-        expect(rows).toBe(16);
+        expect(rows).toBe(26);
     });
 
     test('Selecting CCLF2 populates columns (22 fields)', async ({ page }) => {
         await addFileParserStep(page, { fileFormat: 'fixed_width' });
-        await clickStep(page, 'File Parser');
         await waitForPropertiesPanel(page);
 
         await page.selectOption('#fpFileFormat', 'fixed_width');
@@ -1503,7 +1462,6 @@ test.describe('File Parser — Template Confidence Badge', () => {
 
     test('Selecting CCLF5 populates columns (49 fields)', async ({ page }) => {
         await addFileParserStep(page, { fileFormat: 'fixed_width' });
-        await clickStep(page, 'File Parser');
         await waitForPropertiesPanel(page);
 
         await page.selectOption('#fpFileFormat', 'fixed_width');
@@ -1517,7 +1475,6 @@ test.describe('File Parser — Template Confidence Badge', () => {
 
     test('Selecting CCLF8 (Beneficiary Demographics) populates columns (31 fields)', async ({ page }) => {
         await addFileParserStep(page, { fileFormat: 'fixed_width' });
-        await clickStep(page, 'File Parser');
         await waitForPropertiesPanel(page);
 
         await page.selectOption('#fpFileFormat', 'fixed_width');
@@ -1531,7 +1488,6 @@ test.describe('File Parser — Template Confidence Badge', () => {
 
     test('Selecting CCLF8 loads BENE_MBI_ID as first column', async ({ page }) => {
         await addFileParserStep(page, { fileFormat: 'fixed_width' });
-        await clickStep(page, 'File Parser');
         await waitForPropertiesPanel(page);
 
         await page.selectOption('#fpFileFormat', 'fixed_width');
@@ -1555,7 +1511,7 @@ test.describe('File Parser — Template Confidence Badge', () => {
         const cclf1 = result.templates.find(t => t.key === 'cclf1');
         expect(cclf1).toBeDefined();
         expect(cclf1.confidence).toBe('high');
-        expect(cclf1.columnCount).toBe(16);
+        expect(cclf1.columnCount).toBe(26);
         expect(cclf1.category).toBe('CMS/CCLF');
     });
 
@@ -1616,8 +1572,12 @@ test.describe('File Parser — Template Confidence Badge', () => {
     });
 
     test('Template preview: CCLF1 via API parses synthesised line correctly', async ({ page }) => {
-        // Build a synthetic CCLF1 line: CUR_CLM_UNIQ_ID (1-13) + BENE_MBI_ID (14-24) + padding
-        const line = '1234567890123' + 'MBI12345678' + ' '.repeat(87);
+        // CCLF1 (26 fields): CUR_CLM_UNIQ_ID(1-13) PRVDR_OSCAR_NUM(14-19) BENE_MBI_ID(20-30) + padding to 182
+        const line =
+            '1234567890123' +   // pos 1-13: CUR_CLM_UNIQ_ID
+            'PRVDR1' +          // pos 14-19: PRVDR_OSCAR_NUM (6 chars)
+            'MBI12345678' +     // pos 20-30: BENE_MBI_ID (11 chars)
+            ' '.repeat(182 - 30); // pad to minimum record length
 
         const result = await page.evaluate(async (c) => {
             const res = await fetch('/api/file-parser/preview', {
@@ -1640,20 +1600,23 @@ test.describe('File Parser — Template Confidence Badge', () => {
         }, line);
 
         expect(result.success).toBe(true);
-        expect(result.preview.column_count).toBe(16);
+        expect(result.preview.column_count).toBe(26);
         expect(result.preview.records[0].CUR_CLM_UNIQ_ID).toBe('1234567890123');
         expect(result.preview.records[0].BENE_MBI_ID).toBe('MBI12345678');
     });
 
     test('Template preview: CCLF8 includes BENE_DOB and BENE_SEX_CD fields', async ({ page }) => {
-        // CCLF8 Beneficiary Demographics: BENE_MBI_ID (1-11), ..., BENE_DOB (13-20), BENE_SEX_CD (21)
-        // Build a line with known values at those positions
+        // CCLF8: BENE_MBI_ID(1-11) BENE_HIC_NUM(12-22) FIPS_ST(23-24) FIPS_CTY(25-27)
+        //        ZIP_CD(28-32) BENE_DOB(33-42) BENE_SEX_CD(43) ... total 549 chars
         const line =
             'MBI12345678' +   // pos 1-11: BENE_MBI_ID (11 chars)
-            ' ' +             // pos 12: BENE_HIC_NUM placeholder (skipped, not first few fields)
-            '19850615' +      // pos 13-20: BENE_DOB
-            'M' +             // pos 21: BENE_SEX_CD
-            ' '.repeat(549 - 21); // padding to full record length
+            '           ' +   // pos 12-22: BENE_HIC_NUM (11 chars)
+            '  ' +            // pos 23-24: BENE_FIPS_STATE_CD (2 chars)
+            '   ' +           // pos 25-27: BENE_FIPS_CNTY_CD (3 chars)
+            '     ' +         // pos 28-32: BENE_ZIP_CD (5 chars)
+            '1985-06-15' +    // pos 33-42: BENE_DOB (10 chars)
+            'M' +             // pos 43: BENE_SEX_CD (1 char)
+            ' '.repeat(549 - 43); // padding to full record length
 
         const result = await page.evaluate(async (c) => {
             const res = await fetch('/api/file-parser/preview', {

@@ -196,6 +196,14 @@ type APIEnrichmentConfig struct {
 
 	// Default value fallback (executor-level; error handling is at pipeline/step level)
 	DefaultValue interface{} `json:"defaultValue,omitempty"` // Value to use if API call fails
+
+	// Circuit breaker — prevents hammering a failing downstream API
+	FailureThreshold    int `json:"failureThreshold,omitempty"`    // consecutive failures before opening (default 5)
+	OpenDurationSeconds int `json:"openDurationSeconds,omitempty"` // seconds to stay open before half-open probe (default 60)
+
+	// Result caching — in-memory LRU+TTL cache to avoid redundant API calls
+	CacheTtlSeconds int `json:"cacheTtlSeconds,omitempty"` // 0 = disabled; default 0
+	CacheMaxEntries int `json:"cacheMaxEntries,omitempty"` // max cache size; default 1000
 }
 
 // ===============================================================
@@ -258,9 +266,15 @@ type DatabaseEnrichmentConfigV2 struct {
 	// Timeout in milliseconds
 	TimeoutMs int `json:"timeoutMs,omitempty"` // Default: 3000
 
-	// Caching
-	CacheResults bool `json:"cacheResults,omitempty"`
-	CacheTTL     int  `json:"cacheTTL,omitempty"` // seconds
+	// Caching — in-memory LRU+TTL cache to avoid redundant DB queries
+	CacheResults    bool `json:"cacheResults,omitempty"`
+	CacheTTL        int  `json:"cacheTTL,omitempty"`        // seconds (0 = disabled)
+	CacheMaxEntries int  `json:"cacheMaxEntries,omitempty"` // max cache size; default 1000
+
+	// Connection pool tuning (optional; registry defaults used when zero)
+	PoolMaxOpen            int `json:"poolMaxOpen,omitempty"`            // default 10
+	PoolMaxIdle            int `json:"poolMaxIdle,omitempty"`            // default 5
+	PoolMaxLifetimeMinutes int `json:"poolMaxLifetimeMinutes,omitempty"` // default 5
 
 	// Default value fallback (executor-level; error handling is at pipeline/step level)
 	DefaultValue interface{} `json:"defaultValue,omitempty"`

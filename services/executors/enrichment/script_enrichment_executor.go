@@ -169,6 +169,22 @@ func (e *ScriptEnrichmentExecutor) executeScript(
 	// Create JavaScript runtime
 	vm := goja.New()
 
+	// Recursion guard: limits call stack depth to prevent stack-overflow from deeply
+	// recursive scripts. 500 frames ≈ 500 nested function calls before a JS exception fires.
+	vm.SetMaxCallStackSize(500)
+
+	// Fast CPU interrupt: wire the context's Done channel to goja's interrupt mechanism.
+	// vm.Interrupt() fires on the next opcode boundary (typically microseconds), which is
+	// far faster than waiting for Go's goroutine scheduler to preempt the VM goroutine.
+	// This means a `while(true){}` loop stops almost immediately when the timeout fires
+	// instead of burning CPU for the full timeout duration.
+	// NOTE: heap memory limiting (SetMemoryLimit) is not available in the installed goja
+	// version. Container-level memory limits (docker --memory) serve as the outer guard.
+	go func() {
+		<-scriptCtx.Done()
+		vm.Interrupt("script execution limit reached")
+	}()
+
 	// Channel for script result
 	resultChan := make(chan interface{}, 1)
 	errorChan := make(chan error, 1)
@@ -428,38 +444,29 @@ return {
 // VARIABLE PROVIDER INTERFACE IMPLEMENTATION
 // ===============================================================
 
-// GetOutputVariables returns the list of variables this executor will produce
+// GetOutputVariables returns the list of variables this executor will produce.
 // For script enrichment, we can't parse JavaScript to determine exact output fields,
-// so we return a generic variable pointing to the target path
+// so we return the step_output container path — run the test pipeline to see actual fields.
 func (e *ScriptEnrichmentExecutor) GetOutputVariables(step *models.TransformationStep) []models.VariableDefinition {
 	variables := []models.VariableDefinition{}
 
-	// Parse config to get target path
-	config, err := e.parseConfig(step)
-	if err != nil {
-		log.Printf("⚠️  [ScriptEnrichment] Failed to parse config for variable discovery: %v", err)
-		return variables
-	}
+	// Compute the runtime namespace — same logic as the pipeline service uses
+	namespace := models.GenerateStepNamespace(step.StepName, step.ID, step.StepAlias)
+	stepOutputBase := fmt.Sprintf("steps.%s.step_output", namespace)
 
-	// Determine target path where results will be stored
-	targetPath := config.TargetPath
-	if targetPath == "" {
-		targetPath = "enriched.script"
-	}
-
-	// For script enrichment, we can't determine exact output fields without executing the script
-	// Return a generic object variable that users can reference with dot notation
+	// Can't know exact output fields without running the script.
+	// Return the container path; the test-run IntelliSense walk will enumerate actual fields.
 	variables = append(variables, models.VariableDefinition{
 		Name:         "script_result",
-		Path:         targetPath,
+		Path:         stepOutputBase,
 		DataType:     "object",
-		Description:  "JavaScript enrichment results (access fields with .fieldName)",
-		UsageExample: fmt.Sprintf(`getNestedValue(input, "%s.fieldName")`, targetPath),
+		Description:  "JavaScript enrichment results — run the test pipeline to see individual field paths in IntelliSense",
+		UsageExample: fmt.Sprintf("%s.fieldName", stepOutputBase),
 		Category:     "Script",
 		Examples: []string{
-			fmt.Sprintf(`%s.age`, targetPath),
-			fmt.Sprintf(`%s.riskScore`, targetPath),
-			fmt.Sprintf(`%s.calculatedAt`, targetPath),
+			fmt.Sprintf("%s.age", stepOutputBase),
+			fmt.Sprintf("%s.riskScore", stepOutputBase),
+			fmt.Sprintf("%s.calculatedAt", stepOutputBase),
 		},
 	})
 

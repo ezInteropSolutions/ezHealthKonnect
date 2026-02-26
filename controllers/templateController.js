@@ -10,24 +10,16 @@ const { v4: uuidv4 } = require('uuid');
  * GET /api/templates
  *
  * Query params:
- * - layer: Filter by layer (pre, core, post)
  * - is_public: Filter public/private
  * - user_id: Filter by creator
  */
 exports.listTemplates = async (req, res) => {
     try {
-        const { layer, is_public, user_id } = req.query;
+        const { is_public, user_id } = req.query;
 
         let whereConditions = [];
         let bindings = [];
         let bindIndex = 1;
-
-        // Filter by layer
-        if (layer) {
-            whereConditions.push(`layer = $${bindIndex}`);
-            bindings.push(layer);
-            bindIndex++;
-        }
 
         // Filter by visibility (show system + public + own private)
         if (is_public !== undefined) {
@@ -59,7 +51,6 @@ exports.listTemplates = async (req, res) => {
                 template_name,
                 template_type,
                 description,
-                layer,
                 default_config,
                 script_template,
                 is_system,
@@ -104,7 +95,6 @@ exports.getTemplate = async (req, res) => {
                 template_name,
                 template_type,
                 description,
-                layer,
                 default_config,
                 script_template,
                 is_system,
@@ -165,7 +155,7 @@ exports.createTemplateFromStep = async (req, res) => {
 
         // Get the step
         const steps = await sequelize.query(`
-            SELECT step_type, layer, config, script_type, script_content
+            SELECT step_type, config, script_type, script_content
             FROM transformation_steps
             WHERE id = $1
         `, {
@@ -188,17 +178,16 @@ exports.createTemplateFromStep = async (req, res) => {
 
         await sequelize.query(`
             INSERT INTO transformation_templates
-                (id, template_name, template_type, description, layer,
+                (id, template_name, template_type, description,
                  default_config, script_template, is_system, is_public,
                  created_by_user_id, usage_count)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, false, $8, $9, 0)
+            VALUES ($1, $2, $3, $4, $5, $6, false, $7, $8, 0)
         `, {
             bind: [
                 templateId,
                 template_name,
                 step.step_type,
                 description || null,
-                step.layer,
                 step.config || {},
                 step.script_content || null,
                 is_public !== false, // Default to public
@@ -230,8 +219,7 @@ exports.createTemplateFromStep = async (req, res) => {
  * Body:
  * {
  *   template_name: "...",
- *   template_type: "pre.validation",
- *   layer: "pre",
+ *   template_type: "validation",
  *   description: "...",
  *   default_config: {},
  *   script_template: "...",
@@ -243,17 +231,16 @@ exports.createTemplate = async (req, res) => {
         const {
             template_name,
             template_type,
-            layer,
             description,
             default_config,
             script_template,
             is_public
         } = req.body;
 
-        if (!template_name || !template_type || !layer) {
+        if (!template_name || !template_type) {
             return res.status(400).json({
                 success: false,
-                error: 'template_name, template_type, and layer are required'
+                error: 'template_name and template_type are required'
             });
         }
 
@@ -262,17 +249,16 @@ exports.createTemplate = async (req, res) => {
 
         await sequelize.query(`
             INSERT INTO transformation_templates
-                (id, template_name, template_type, description, layer,
+                (id, template_name, template_type, description,
                  default_config, script_template, is_system, is_public,
                  created_by_user_id, usage_count)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, false, $8, $9, 0)
+            VALUES ($1, $2, $3, $4, $5, $6, false, $7, $8, 0)
         `, {
             bind: [
                 templateId,
                 template_name,
                 template_type,
                 description || null,
-                layer,
                 default_config || {},
                 script_template || null,
                 is_public !== false,
@@ -537,7 +523,6 @@ exports.applyTemplate = async (req, res) => {
             SELECT
                 template_name,
                 template_type,
-                layer,
                 default_config,
                 script_template
             FROM transformation_templates
@@ -561,17 +546,16 @@ exports.applyTemplate = async (req, res) => {
 
         await sequelize.query(`
             INSERT INTO transformation_steps
-                (id, pipeline_id, step_name, step_type, layer, sequence,
+                (id, pipeline_id, step_name, step_type, sequence,
                  config, script_content, template_id, is_customized,
                  required, enabled)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, false, true, true)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, false, true, true)
         `, {
             bind: [
                 stepId,
                 pipeline_id,
                 step_name || template.template_name,
                 template.template_type,
-                template.layer,
                 sequence,
                 template.default_config || {},
                 template.script_template || null,

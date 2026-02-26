@@ -160,10 +160,14 @@ func ParseErrorHandlingConfig(config map[string]interface{}) *ErrorHandlingConfi
 	}
 
 	eh := &ErrorHandlingConfig{
-		OnError: "catch", // Default
+		OnError: "suppress", // Default (P2: "catch" was removed from UI; treat as "suppress")
 	}
 	if oe, ok := ehRaw["onError"].(string); ok {
 		eh.OnError = oe
+	}
+	// P2: backward-compat alias — old pipelines saved with "catch" behave as "suppress".
+	if eh.OnError == "catch" {
+		eh.OnError = "suppress"
 	}
 	if df, ok := ehRaw["defaultField"].(string); ok {
 		eh.DefaultField = df
@@ -221,10 +225,13 @@ func ParsePipelineErrorHandlingDefaults(pipelineConfig map[string]interface{}) *
 	}
 
 	eh := &ErrorHandlingConfig{
-		OnError: "catch",
+		OnError: "suppress",
 	}
 	if oe, ok := ehRaw["onError"].(string); ok {
 		eh.OnError = oe
+	}
+	if eh.OnError == "catch" {
+		eh.OnError = "suppress"
 	}
 	if df, ok := ehRaw["defaultField"].(string); ok {
 		eh.DefaultField = df

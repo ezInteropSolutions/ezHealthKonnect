@@ -503,8 +503,12 @@ app.get('/', (req, res) => {
 
 // Error handling middleware
 app.use((error, req, res, next) => {
+    // JSON body parse errors (e.g. sending non-JSON with Content-Type: application/json)
+    if (error.type === 'entity.parse.failed' || error instanceof SyntaxError) {
+        return res.status(400).json({ success: false, error: error.message });
+    }
     console.error('Server error:', error);
-    res.status(500).json({ 
+    res.status(500).json({
         message: 'Internal server error',
         error: process.env.NODE_ENV === 'development' ? error.message : 'Something went wrong'
     });

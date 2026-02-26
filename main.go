@@ -9,7 +9,9 @@ import (
 	"ezhealthkonnect/models"
 	"ezhealthkonnect/processing"
 	"ezhealthkonnect/services"
+	"ezhealthkonnect/services/dbpool"
 	"ezhealthkonnect/services/executors/enrichment"
+	"ezhealthkonnect/services/logger"
 	"fmt"
 	"log"
 	"net/http"
@@ -37,10 +39,18 @@ func main() {
 	// Record start time
 	startTime = time.Now()
 
-	// Initialize log rotation service FIRST (before any logging)
+	// Initialize structured logger first (LOG_FORMAT=json for prod, text for dev)
+	logger.Init()
+	logger.Info("logger initialized", "format", os.Getenv("LOG_FORMAT"), "level", os.Getenv("LOG_LEVEL"))
+
+	// Initialize log rotation service (file-based, for app.log)
 	appLogger := services.GetApplicationLogger()
 	defer appLogger.Close()
-	log.Printf("✅ Log rotation initialized - logs will be rotated at 500MB or daily")
+	// Close all per-interface log file handles on shutdown
+	defer logger.CloseAllInterfaces()
+	// Close all DB enrichment connection pools on shutdown (P6)
+	defer dbpool.Get().CloseAll()
+	log.Printf("log rotation initialized - logs/application/app.log, logs/interfaces/{id}/interface.log")
 
 	// Load configuration
 	cfg := config.Load()

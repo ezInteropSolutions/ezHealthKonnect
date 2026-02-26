@@ -678,21 +678,62 @@ class ToolboxManager {
     }
 
     /**
-     * Filter templates by search query
+     * Filter templates by search query.
+     * Fixes three confirmed bugs:
+     *  1. Collapsed sections auto-expand when they contain a matching card
+     *  2. Empty sections have their header hidden (no orphan section titles)
+     *  3. A "no results" empty state is shown when nothing matches the query
      */
     filterTemplates(query) {
         const allCards = document.querySelectorAll('.step-card');
+        let totalVisible = 0;
 
+        // Show/hide individual cards
         allCards.forEach(card => {
             const title = card.querySelector('.step-card-title')?.textContent.toLowerCase() || '';
-            const description = card.querySelector('.step-card-description')?.textContent.toLowerCase() || '';
+            const desc  = card.querySelector('.step-card-description')?.textContent.toLowerCase() || '';
+            const matches = !query || title.includes(query) || desc.includes(query);
+            card.style.display = matches ? '' : 'none';
+            if (matches) totalVisible++;
+        });
 
-            if (query === '' || title.includes(query) || description.includes(query)) {
-                card.style.display = '';
+        // Per-section: auto-expand if matches inside; hide entirely if empty (no orphan headers)
+        document.querySelectorAll('.toolbox-section').forEach(section => {
+            const sectionCards = [...section.querySelectorAll('.step-card')];
+            const visibleInSection = sectionCards.filter(c => c.style.display !== 'none').length;
+            const content = section.querySelector('.section-content');
+            const header  = section.querySelector('.section-title');
+
+            if (!query) {
+                // No query — restore header visibility; leave user's collapse state intact
+                if (header) header.style.display = '';
+            } else if (visibleInSection > 0) {
+                // Has matches — force expand so cards are actually visible
+                if (content) content.classList.remove('collapsed');
+                if (header)  header.style.display = '';
             } else {
-                card.style.display = 'none';
+                // No matches in this section — hide header too, not just the cards
+                if (header) header.style.display = 'none';
             }
         });
+
+        // Empty-state feedback
+        const toolboxContent = document.querySelector('.toolbox-content');
+        let emptyState = document.getElementById('toolboxEmptyState');
+        if (!emptyState && toolboxContent) {
+            emptyState = document.createElement('div');
+            emptyState.id = 'toolboxEmptyState';
+            emptyState.className = 'toolbox-empty-state';
+            toolboxContent.appendChild(emptyState);
+        }
+        if (emptyState) {
+            if (query && totalVisible === 0) {
+                emptyState.innerHTML = `<i class="fas fa-search"></i><p>No steps match "<strong>${query}</strong>"</p>`;
+                emptyState.style.display = '';
+            } else {
+                emptyState.style.display = 'none';
+            }
+        }
     }
 
     /**

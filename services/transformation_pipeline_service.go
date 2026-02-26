@@ -100,7 +100,7 @@ func (tps *TransformationPipelineService) GetPipeline(ctx context.Context, inter
 // GetPipelineSteps retrieves all steps for a pipeline, ordered by sequence
 func (tps *TransformationPipelineService) GetPipelineSteps(ctx context.Context, pipelineID string) ([]models.TransformationStep, error) {
 	query := `
-		SELECT id, pipeline_id, step_name, step_alias, step_type, sequence, layer, required, timeout_ms,
+		SELECT id, pipeline_id, step_name, step_alias, step_type, sequence, required, timeout_ms,
 		       enabled, config, script_type, script_content, on_error_strategy, execution_mode,
 		       position_x, position_y, parent_conditional_step_id, branch_type, case_value,
 		       parent_step_id, container_zone,
@@ -128,7 +128,6 @@ func (tps *TransformationPipelineService) GetPipelineSteps(ctx context.Context, 
 			&step.StepAlias,
 			&step.StepType,
 			&step.Sequence,
-			&step.Layer,
 			&step.Required,
 			&step.TimeoutMs,
 			&step.Enabled,
@@ -291,7 +290,7 @@ func (tps *TransformationPipelineService) executePipeline(
 	// Create child executor callback for loop steps
 	childExecutor := tps.createChildExecutorCallback(ctx, stepByID, execContext)
 
-	// Execute steps in order (already ordered by layer + sequence)
+	// Execute steps in order (ordered by sequence ASC)
 	// Support conditional routing via _routing.nextStep and _routing.skipSteps
 	skipToStepID := ""                    // If set, skip steps until we reach this step ID
 	skipStepIDs := make(map[string]bool)  // Set of step IDs to skip (for branch exclusion)
@@ -389,10 +388,11 @@ func (tps *TransformationPipelineService) executePipeline(
 		}
 
 		// Execute step with retry (ExecuteWithRetry handles single-exec when retryConfig is nil)
+		// P3: shallow-copy the shared message before each attempt so step mutations are isolated.
 		retryResult := executors.ExecuteWithRetry(ctx, retryConfig, func(attempt int) (map[string]interface{}, error) {
 			stepCtx, cancel := context.WithTimeout(ctx, time.Duration(step.TimeoutMs)*time.Millisecond)
 			defer cancel()
-			return executor.Execute(stepCtx, &step, execContext.Message)
+			return executor.Execute(stepCtx, &step, shallowCopyMap(execContext.Message))
 		})
 
 		outputData := retryResult.Output
@@ -752,11 +752,11 @@ func (tps *TransformationPipelineService) CreateStep(ctx context.Context, step *
 
 	query := `
 		INSERT INTO transformation_steps (
-			id, pipeline_id, step_name, step_type, sequence, layer, required,
+			id, pipeline_id, step_name, step_type, sequence, required,
 			timeout_ms, enabled, config, script_type, script_content,
 			on_error_strategy, execution_mode, parent_step_id, container_zone,
 			created_at, updated_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
 	`
 
 	_, err = tps.db.ExecContext(ctx, query,
@@ -765,7 +765,6 @@ func (tps *TransformationPipelineService) CreateStep(ctx context.Context, step *
 		step.StepName,
 		step.StepType,
 		step.Sequence,
-		step.Layer,
 		step.Required,
 		step.TimeoutMs,
 		step.Enabled,
@@ -781,4 +780,16 @@ func (tps *TransformationPipelineService) CreateStep(ctx context.Context, step *
 	)
 
 	return err
+}
+
+// shallowCopyMap creates a one-level-deep copy of a map so that step executions
+// cannot corrupt the shared execContext.Message.  Values are copied by reference,
+// which is sufficient: executors replace top-level keys (they do not mutate nested
+// structures in-place) and the engine merges outputData back after success.
+func shallowCopyMap(src map[string]interface{}) map[string]interface{} {
+	dst := make(map[string]interface{}, len(src))
+	for k, v := range src {
+		dst[k] = v
+	}
+	return dst
 }

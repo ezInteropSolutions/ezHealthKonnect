@@ -30,23 +30,6 @@ class VisualPipeline {
         });
     }
 
-    /**
-     * Backward-compat getter: code that reads pipeline.layers still works.
-     * Returns a synthetic layers object with all groups under 'core'.
-     */
-    get layers() {
-        const syntheticLayer = {
-            name: 'core',
-            executionGroups: this.executionGroups,
-            toJSON: () => ({ name: 'core', execution_groups: this.executionGroups.map(g => g.toJSON()) })
-        };
-        return {
-            pre: { name: 'pre', executionGroups: [], toJSON: () => ({ name: 'pre', execution_groups: [] }) },
-            core: syntheticLayer,
-            post: { name: 'post', executionGroups: [], toJSON: () => ({ name: 'post', execution_groups: [] }) }
-        };
-    }
-
     addExecutionGroup(group) {
         this.executionGroups.push(group);
     }
@@ -79,14 +62,7 @@ class VisualPipeline {
             description: this.description,
             version: this.version,
             status: this.status,
-            // New flat format
             execution_groups: this.executionGroups.map(g => g.toJSON()),
-            // Backward compat: also emit layers for old code
-            layers: {
-                pre: { name: 'pre', execution_groups: [] },
-                core: { name: 'core', execution_groups: this.executionGroups.map(g => g.toJSON()) },
-                post: { name: 'post', execution_groups: [] }
-            },
             connections: this.connections || [],
             pipeline_config: this.pipelineConfig || {},
             created_at: this.createdAt,
@@ -95,36 +71,10 @@ class VisualPipeline {
     }
 
     static fromJSON(json) {
-        console.log('🔄 VisualPipeline.fromJSON called with:', json);
-        // Migration: flatten layers into executionGroups
         let executionGroups = [];
-
         if (json.execution_groups && json.execution_groups.length > 0) {
-            // New format: flat execution_groups array
-            console.log('🔄 Using NEW format (execution_groups):', json.execution_groups.length, 'groups');
-            executionGroups = json.execution_groups.map(g => {
-                console.log('🔄 Parsing group:', g);
-                return VisualExecutionGroup.fromJSON(g);
-            });
-        } else if (json.layers) {
-            // Old format: extract groups from all 3 layers
-            console.log('🔄 Using OLD format (layers)');
-            for (const layerName of ['pre', 'core', 'post']) {
-                const layer = json.layers[layerName];
-                if (layer && layer.execution_groups) {
-                    layer.execution_groups.forEach(g => {
-                        executionGroups.push(VisualExecutionGroup.fromJSON(g));
-                    });
-                }
-            }
-        } else {
-            console.log('🔄 No execution_groups or layers found in JSON');
+            executionGroups = json.execution_groups.map(g => VisualExecutionGroup.fromJSON(g));
         }
-
-        console.log('🔄 Parsed executionGroups:', executionGroups.length, 'groups');
-        executionGroups.forEach((g, i) => {
-            console.log(`🔄 Group ${i}: ${g.steps?.length || 0} steps`);
-        });
 
         return new VisualPipeline({
             id: json.id,
@@ -150,7 +100,6 @@ class VisualExecutionGroup {
         this.id = data.id || this.generateUUID();
         this.groupId = data.groupId || `group_${Date.now()}`;
         this.groupType = data.groupType || 'inline'; // parallel or inline
-        this.layer = data.layer || 'core';
         this.sequence = data.sequence || 100;
         this.mergeStrategy = data.mergeStrategy || 'deep_merge';
         this.steps = data.steps || [];
@@ -183,7 +132,6 @@ class VisualExecutionGroup {
             id: this.id,
             group_id: this.groupId,
             group_type: this.groupType,
-            layer: this.layer,
             sequence: this.sequence,
             merge_strategy: this.mergeStrategy,
             steps: this.steps.map(s => {
@@ -197,18 +145,11 @@ class VisualExecutionGroup {
     }
 
     static fromJSON(json) {
-        console.log('🔄 VisualExecutionGroup.fromJSON called with:', json);
-        console.log('🔄 Group has', json.steps?.length || 0, 'steps');
-        const steps = (json.steps || []).map(s => {
-            console.log('🔄 Parsing step:', s.step_name || s.stepName || 'unnamed');
-            return VisualStep.fromJSON(s);
-        });
-        console.log('🔄 Parsed', steps.length, 'VisualStep objects');
+        const steps = (json.steps || []).map(s => VisualStep.fromJSON(s));
         return new VisualExecutionGroup({
             id: json.id,
             groupId: json.group_id || json.groupId,
             groupType: json.group_type || json.groupType,
-            layer: json.layer,
             sequence: json.sequence,
             mergeStrategy: json.merge_strategy || json.mergeStrategy,
             steps: steps,
@@ -224,7 +165,6 @@ class VisualStep {
         this.stepName = data.stepName || 'Untitled Step';
         this.stepType = data.stepType || 'custom';
         this.templateId = data.templateId || null;
-        this.layer = data.layer || 'core';
         this.sequence = data.sequence || 100;
         this.required = data.required !== undefined ? data.required : true;
         this.timeoutMs = data.timeoutMs || 5000;
@@ -305,7 +245,6 @@ class VisualStep {
             step_name: this.stepName,
             step_type: this.stepType,
             template_id: this.templateId,
-            layer: this.layer,
             sequence: this.sequence,
             required: this.required,
             timeout_ms: this.timeoutMs,
@@ -336,7 +275,6 @@ class VisualStep {
             stepName: json.step_name,
             stepType: json.step_type,
             templateId: json.template_id,
-            layer: json.layer,
             sequence: json.sequence,
             required: json.required,
             timeoutMs: json.timeout_ms,
@@ -420,7 +358,6 @@ class VisualStep {
             stepName: this.stepName,
             stepType: this.stepType,
             templateId: this.templateId,
-            layer: this.layer,
             sequence: this.sequence,
             required: this.required,
             timeoutMs: this.timeoutMs,
@@ -713,7 +650,6 @@ class StepTemplate {
         this.name = data.name || '';
         this.type = data.type || '';
         this.description = data.description || '';
-        this.layer = data.layer || 'core';
         this.icon = data.icon || 'fas fa-cog';
         // CRITICAL: Deep clone defaultConfig to prevent mutations to the template object
         // Templates are singletons in ToolboxManager, so we must protect defaultConfig from being modified
@@ -764,7 +700,6 @@ class StepTemplate {
             stepName: this.name,
             stepType: this.type,
             templateId: this.id,
-            layer: this.layer,
             config: clonedConfig,
             scriptContent: this.scriptTemplate,
             description: this.description,
@@ -781,7 +716,6 @@ class StepTemplate {
             name: json.name,
             type: json.type,
             description: json.description,
-            layer: json.layer,
             icon: json.icon,
             defaultConfig: json.default_config || json.defaultConfig,
             scriptTemplate: json.script_template || json.scriptTemplate,

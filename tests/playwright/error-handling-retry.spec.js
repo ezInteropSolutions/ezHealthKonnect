@@ -13,7 +13,7 @@ async function login(page) {
     await page.goto(`${BASE_URL}/login.html`);
 
     // Try multiple passwords (seed vs reset)
-    const passwords = ['admin123', 'Admin123!'];
+    const passwords = ['admin123', 'Admin123!', 'password'];
     let loggedIn = false;
 
     for (const password of passwords) {
@@ -197,11 +197,10 @@ test.describe('Error Handling & Retry Section', () => {
         const select = page.locator('#ehOnError');
         const options = select.locator('option');
 
-        await expect(options).toHaveCount(3);
-        // Use getAttribute since <option> elements don't support toHaveValue
-        await expect(options.nth(0)).toHaveAttribute('value', 'catch');
-        await expect(options.nth(1)).toHaveAttribute('value', 'suppress');
-        await expect(options.nth(2)).toHaveAttribute('value', 'rethrow');
+        // "catch" was removed in P5 (identical to "suppress") — only suppress + rethrow remain
+        await expect(options).toHaveCount(2);
+        await expect(options.nth(0)).toHaveAttribute('value', 'suppress');
+        await expect(options.nth(1)).toHaveAttribute('value', 'rethrow');
     });
 
     test('Default value fields are present', async ({ page }) => {

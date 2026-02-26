@@ -12,7 +12,7 @@ type ExecutionGroup struct {
 	PipelineID    string    `json:"pipeline_id" db:"pipeline_id"`
 	GroupID       string    `json:"group_id" db:"group_id"` // User-friendly ID (e.g., "parallel_1")
 	GroupType     string    `json:"group_type" db:"group_type"` // "parallel" or "inline"
-	Layer         string    `json:"layer" db:"layer"` // "pre", "core", "post"
+	Layer         string    `json:"layer"` // deprecated: layer column removed in V50; kept for JSON compat only
 	Sequence      int       `json:"sequence" db:"sequence"`
 	MergeStrategy string    `json:"merge_strategy" db:"merge_strategy"` // For parallel: deep_merge, shallow_merge, override
 	CreatedAt     time.Time `json:"created_at" db:"created_at"`
@@ -229,7 +229,6 @@ func ConvertVisualToDatabase(visual *VisualPipeline) (*TransformationPipeline, [
 					StepName:        step.Name,
 					StepType:        step.Type,
 					Sequence:        sequence,
-					Layer:           layerName,
 					Required:        step.Required,
 					TimeoutMs:       5000,
 					Enabled:         true,

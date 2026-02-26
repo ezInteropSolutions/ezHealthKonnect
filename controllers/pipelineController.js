@@ -412,9 +412,9 @@ exports.savePipeline = async (req, res) => {
 
                 await sequelize.query(`
                     INSERT INTO transformation_steps
-                        (id, pipeline_id, step_name, step_type, sequence, layer, required, timeout_ms, enabled, config, script_type, script_content, on_error_strategy, position_x, position_y, parent_conditional_step_id, branch_type, case_value, created_at, updated_at)
+                        (id, pipeline_id, step_name, step_type, sequence, required, timeout_ms, enabled, config, script_type, script_content, on_error_strategy, position_x, position_y, parent_conditional_step_id, branch_type, case_value, created_at, updated_at)
                     VALUES
-                        ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, NOW(), NOW())
+                        ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, NOW(), NOW())
                 `, {
                     bind: [
                         stepId,
@@ -422,7 +422,6 @@ exports.savePipeline = async (req, res) => {
                         step.step_name || step.stepName || step.name || 'Unnamed Step',
                         step.step_type || step.stepType || step.type || 'custom',
                         step.sequence || 100,
-                        layer,
                         step.required !== false,
                         step.timeoutMs || step.timeout_ms || 5000,
                         step.enabled !== false,
@@ -596,10 +595,211 @@ exports.getStandardTemplateMappings = async (req, res) => {
     }
 };
 
-// Export all other functions from original controller (the OLD one, renamed)
-const originalController = require('./pipelineController_old');
-Object.keys(originalController).forEach(key => {
-    if (key !== 'savePipeline' && key !== 'testPipeline') {
-        exports[key] = originalController[key];
+// ── Pipeline read/manage operations ────────────────────────────────────────────
+// These use direct Sequelize queries (same pattern as savePipeline above).
+// Steps are selected WITHOUT the `layer` column (removed in V50 migration).
+
+const STEPS_SELECT = `
+    SELECT
+        id::text, pipeline_id::text, step_name, step_type, sequence,
+        required, timeout_ms, enabled, config, script_type, script_content,
+        on_error_strategy, position_x, position_y,
+        parent_conditional_step_id::text, branch_type, case_value, step_alias,
+        created_at, updated_at
+    FROM transformation_steps
+    WHERE pipeline_id = $1
+    ORDER BY sequence ASC
+`;
+
+exports.loadPipeline = async (req, res) => {
+    try {
+        const { sequelize } = require('../config/database');
+        const { QueryTypes } = require('sequelize');
+        const { id } = req.params;
+
+        const rows = await sequelize.query(
+            `SELECT id::text, interface_id::text, message_type, pipeline_name, enabled, version,
+                    connections, pipeline_config, created_at, updated_at
+             FROM transformation_pipelines WHERE id = $1`,
+            { bind: [id], type: QueryTypes.SELECT }
+        );
+        if (!rows.length) {
+            return res.status(404).json({ success: false, error: 'Pipeline not found' });
+        }
+        const pipeline = rows[0];
+        const steps = await sequelize.query(STEPS_SELECT, { bind: [id], type: QueryTypes.SELECT });
+        pipeline.execution_groups = [{ steps }];
+        res.json({ success: true, pipeline });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
     }
-});
+};
+
+exports.loadPipelineByInterface = async (req, res) => {
+    try {
+        const { sequelize } = require('../config/database');
+        const { QueryTypes } = require('sequelize');
+        const { interfaceId, messageType } = req.params;
+
+        const rows = await sequelize.query(
+            `SELECT id::text, interface_id::text, message_type, pipeline_name, enabled, version,
+                    connections, pipeline_config, created_at, updated_at
+             FROM transformation_pipelines WHERE interface_id = $1 AND message_type = $2`,
+            { bind: [interfaceId, messageType], type: QueryTypes.SELECT }
+        );
+        if (!rows.length) {
+            return res.json({ success: true, pipeline: null });
+        }
+        const pipeline = rows[0];
+        const steps = await sequelize.query(STEPS_SELECT, { bind: [pipeline.id], type: QueryTypes.SELECT });
+        pipeline.execution_groups = [{ steps }];
+        res.json({ success: true, pipeline });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+};
+
+exports.listPipelines = async (req, res) => {
+    try {
+        const { sequelize } = require('../config/database');
+        const { QueryTypes } = require('sequelize');
+        const { interfaceId } = req.params;
+
+        const pipelines = await sequelize.query(
+            `SELECT id::text, interface_id::text, message_type, pipeline_name, enabled, version,
+                    connections, pipeline_config, created_at, updated_at
+             FROM transformation_pipelines WHERE interface_id = $1 ORDER BY created_at DESC`,
+            { bind: [interfaceId], type: QueryTypes.SELECT }
+        );
+        res.json({ success: true, pipelines, count: pipelines.length });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+};
+
+exports.deletePipeline = async (req, res) => {
+    try {
+        const { sequelize } = require('../config/database');
+        const { id } = req.params;
+        await sequelize.query('DELETE FROM transformation_steps WHERE pipeline_id = $1', { bind: [id] });
+        await sequelize.query('DELETE FROM transformation_pipelines WHERE id = $1', { bind: [id] });
+        res.json({ success: true, message: 'Pipeline deleted' });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+};
+
+exports.clonePipeline = async (req, res) => {
+    try {
+        const { sequelize } = require('../config/database');
+        const { QueryTypes } = require('sequelize');
+        const { v4: uuidv4 } = require('uuid');
+        const { id } = req.params;
+        const newName = req.body.new_name || req.body.newName;
+
+        const rows = await sequelize.query(
+            `SELECT * FROM transformation_pipelines WHERE id = $1`,
+            { bind: [id], type: QueryTypes.SELECT }
+        );
+        if (!rows.length) {
+            return res.status(404).json({ success: false, error: 'Pipeline not found' });
+        }
+        const src = rows[0];
+        const newId = uuidv4();
+
+        await sequelize.query(
+            `INSERT INTO transformation_pipelines
+                 (id, interface_id, message_type, pipeline_name, enabled, version, connections, pipeline_config, created_at, updated_at)
+             VALUES ($1, $2, $3, $4, $5, 1, $6, $7, NOW(), NOW())`,
+            { bind: [newId, src.interface_id, src.message_type, newName || src.pipeline_name + ' (copy)',
+                     src.enabled, JSON.stringify(src.connections || []), JSON.stringify(src.pipeline_config || {})] }
+        );
+
+        const steps = await sequelize.query(STEPS_SELECT, { bind: [id], type: QueryTypes.SELECT });
+        for (const step of steps) {
+            await sequelize.query(
+                `INSERT INTO transformation_steps
+                     (id, pipeline_id, step_name, step_type, sequence, required, timeout_ms, enabled,
+                      config, script_type, script_content, on_error_strategy, position_x, position_y,
+                      parent_conditional_step_id, branch_type, case_value, step_alias, created_at, updated_at)
+                 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,NOW(),NOW())`,
+                { bind: [uuidv4(), newId, step.step_name, step.step_type, step.sequence,
+                         step.required, step.timeout_ms, step.enabled,
+                         JSON.stringify(step.config || {}), step.script_type, step.script_content,
+                         step.on_error_strategy, step.position_x, step.position_y,
+                         step.parent_conditional_step_id, step.branch_type, step.case_value, step.step_alias] }
+            );
+        }
+        res.json({ success: true, pipeline_id: newId, message: 'Pipeline cloned' });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+};
+
+// Proxy execution to Go backend
+exports.executePipeline = async (req, res) => {
+    try {
+        const response = await axios.post(`${GO_BACKEND_URL}/api/fhir/pipeline/test`, req.body);
+        res.json(response.data);
+    } catch (error) {
+        const status = error.response?.status || 500;
+        res.status(status).json(error.response?.data || { success: false, error: error.message });
+    }
+};
+
+exports.getPipelineStats = async (req, res) => {
+    // Stub — execution stats tracking not yet implemented
+    res.json({ success: true, stats: { executions: 0, avg_duration_ms: 0, success_rate: 1 } });
+};
+
+// Step template stubs (stored in transformation_templates, full implementation in Sprint later)
+exports.listTemplates = async (req, res) => {
+    try {
+        const { sequelize } = require('../config/database');
+        const { QueryTypes } = require('sequelize');
+        const rows = await sequelize.query(
+            `SELECT id::text, template_name, step_type, description, config, created_at FROM transformation_templates ORDER BY step_type, template_name`,
+            { type: QueryTypes.SELECT }
+        );
+        res.json({ success: true, templates: rows });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+};
+
+exports.getTemplate = async (req, res) => {
+    try {
+        const { sequelize } = require('../config/database');
+        const { QueryTypes } = require('sequelize');
+        const rows = await sequelize.query(
+            `SELECT id::text, template_name, step_type, description, config, created_at FROM transformation_templates WHERE id = $1`,
+            { bind: [req.params.id], type: QueryTypes.SELECT }
+        );
+        if (!rows.length) return res.status(404).json({ success: false, error: 'Template not found' });
+        res.json({ success: true, template: rows[0] });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+};
+
+exports.createTemplate = async (req, res) => {
+    res.status(501).json({ success: false, error: 'createTemplate not yet implemented' });
+};
+
+// Step execution proxied to Go
+const _proxyStepExec = async (req, res, stepType) => {
+    try {
+        const response = await axios.post(`${GO_BACKEND_URL}/api/fhir/pipeline/test`, {
+            ...req.body, _step_type: stepType
+        });
+        res.json(response.data);
+    } catch (error) {
+        const status = error.response?.status || 500;
+        res.status(status).json(error.response?.data || { success: false, error: error.message });
+    }
+};
+
+exports.executeValidationStep  = (req, res) => _proxyStepExec(req, res, 'validation');
+exports.executeEnrichmentStep  = (req, res) => _proxyStepExec(req, res, 'enrichment');
+exports.executeMappingStep     = (req, res) => _proxyStepExec(req, res, 'mapping');
+exports.executeCustomStep      = (req, res) => _proxyStepExec(req, res, 'custom');

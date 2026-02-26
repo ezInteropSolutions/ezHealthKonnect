@@ -49,9 +49,8 @@ type TransformationStep struct {
 	PipelineID      string                 `json:"pipeline_id" db:"pipeline_id"`
 	StepName        string                 `json:"step_name" db:"step_name"`
 	StepAlias       *string                `json:"step_alias,omitempty" db:"step_alias"` // User-defined alias for referencing step outputs
-	StepType        string                 `json:"step_type" db:"step_type"` // pre.validation, core.mapping, post.validation, custom
+	StepType        string                 `json:"step_type" db:"step_type"`
 	Sequence        int                    `json:"sequence" db:"sequence"`
-	Layer           string                 `json:"layer" db:"layer"` // pre, core, post
 	Required        bool                   `json:"required" db:"required"`
 	TimeoutMs       int                    `json:"timeout_ms" db:"timeout_ms"`
 	Enabled         bool                   `json:"enabled" db:"enabled"`

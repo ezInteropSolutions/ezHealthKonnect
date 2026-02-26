@@ -596,6 +596,23 @@ func (tps *TransformationPipelineService) executeStepWithContext(
 		}
 	}
 
+	// Inject completed step outputs as steps.{namespace}.step_output.{field}
+	// so downstream steps can reference prior step results using the same paths
+	// shown in the test output UI. Uses the existing dot-path resolver in field_utils.go.
+	if len(execCtx.StepOutputs) > 0 {
+		stepsSnapshot := make(map[string]interface{}, len(execCtx.StepOutputs))
+		for ns, so := range execCtx.StepOutputs {
+			if so.Success && so.OutputData != nil {
+				stepsSnapshot[ns] = map[string]interface{}{
+					"step_output": so.OutputData,
+				}
+			}
+		}
+		if len(stepsSnapshot) > 0 {
+			inputData["steps"] = stepsSnapshot
+		}
+	}
+
 	// Execute step using existing executor registry
 	output, err := tps.executorRegistry.ExecuteStep(ctx, *step, inputData)
 
@@ -738,7 +755,6 @@ func (tps *TransformationPipelineService) createHL7ToFHIRSteps(
 			StepName:    "HL7 to FHIR Mapping",
 			StepType:    "hl7_to_fhir_mapping",
 			Sequence:    100,
-			Layer:       "core",
 			Required:    true,
 			TimeoutMs:   10000,
 			Enabled:     true,
@@ -768,7 +784,6 @@ func (tps *TransformationPipelineService) createPassthroughSteps(
 			StepName:    "Passthrough",
 			StepType:    "passthrough",
 			Sequence:    100,
-			Layer:       "core",
 			Required:    true,
 			TimeoutMs:   1000,
 			Enabled:     true,
