@@ -26,14 +26,15 @@ import (
 // =====================================
 
 type TransformRequest struct {
-	ParsedHL7Data  map[string]interface{} `json:"parsedHL7Data" binding:"required"`
-	MessageType    string                 `json:"messageType,omitempty"` // OOB: Injected from pipeline config
-	TargetProfile  string                 `json:"targetProfile,omitempty"`
-	FHIRVersion    string                 `json:"fhirVersion,omitempty"`
-	CreateBundle   bool                   `json:"createBundle,omitempty"`
-	ValidationMode string                 `json:"validationMode,omitempty"`
-	InterfaceID    string                 `json:"interfaceId,omitempty"`
-	RequestID      string                 `json:"requestId,omitempty"`
+	ParsedHL7Data     map[string]interface{} `json:"parsedHL7Data" binding:"required"`
+	MessageType       string                 `json:"messageType,omitempty"` // OOB: Injected from pipeline config
+	TargetProfile     string                 `json:"targetProfile,omitempty"`
+	FHIRVersion       string                 `json:"fhirVersion,omitempty"`
+	CreateBundle      bool                   `json:"createBundle,omitempty"`
+	ValidationMode    string                 `json:"validationMode,omitempty"`
+	InterfaceID       string                 `json:"interfaceId,omitempty"`
+	RequestID         string                 `json:"requestId,omitempty"`
+	SelectedResources []string               `json:"selectedResources,omitempty"` // Optional: filter to specific FHIR resource types
 }
 
 type TransformResponse struct {
@@ -114,6 +115,12 @@ type FieldMapping struct {
 	TransformationRules map[string]interface{} `json:"transformationRules"`
 	IsRequired          bool                   `json:"isRequired"`
 	Cardinality         string                 `json:"cardinality"`
+	// HL7DataType is populated automatically from the HL7 schema (e.g. "TS", "CX", "XPN").
+	// Used by AutoTranslate when DataTypeTransform is empty.
+	HL7DataType  string `json:"hl7DataType,omitempty"`
+	// FHIRDataType is populated automatically from the FHIR schema (e.g. "dateTime", "CodeableConcept").
+	// Used by AutoTranslate when DataTypeTransform is empty.
+	FHIRDataType string `json:"fhirDataType,omitempty"`
 }
 
 type ValueSetMapping struct {

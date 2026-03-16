@@ -4,7 +4,6 @@
 package pkg
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -191,7 +190,7 @@ func (mc *MessageContainer) GetFormatHandler(contentType string) (FormatHandler,
 func (mc *MessageContainer) AutoDetectFormat() (string, error) {
 	content := mc.Message.Content
 
-	for formatType, handler := range mc.formatHandlers {
+	for _, handler := range mc.formatHandlers {
 		if handler.CanHandle(mc.Message.ContentType, content) {
 			if detectedFormat, err := handler.DetectFormat(content); err == nil {
 				return detectedFormat, nil

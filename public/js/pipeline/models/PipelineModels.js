@@ -315,10 +315,13 @@ class VisualStep {
             'field_mapping': 'fas fa-arrows-alt-h',
             'data_masking': 'fas fa-user-secret',
             'remove_duplicates': 'fas fa-filter',
-            'normalizer': 'fas fa-exchange-alt',
+            'normalizer': 'fas fa-random',
+            'deidentify': 'fas fa-shield-alt',
             'control.loop': 'fas fa-redo-alt',
             'connector.inbound': 'fas fa-download',
             'connector.outbound': 'fas fa-upload',
+            'payload.builder': 'fas fa-file-export',
+            'payload_builder': 'fas fa-file-export',
             // Legacy type names (backward compat)
             'pre.validation': 'fas fa-check-circle',
             'pre.enrichment.api': 'fas fa-cloud',
@@ -479,6 +482,52 @@ class VisualStep {
         if (!step) return false;
         const type = step.stepType || step.step_type || '';
         return type === 'remove_duplicates';
+    }
+
+    /**
+     * Checks if a step is a Data Masking/Anonymization step.
+     * Supports both the canonical 'data_masking' type and the legacy
+     * 'post.data_masking' backward-compat alias registered in executor_registry.go.
+     * @param {VisualStep|Object} step
+     * @returns {boolean}
+     */
+    static isDataMasking(step) {
+        if (!step) return false;
+        const type = step.stepType || step.step_type || '';
+        return type === 'data_masking' || type === 'post.data_masking';
+    }
+
+    /**
+     * Check if a step is a Normalizer / Pivot / Transpose step
+     * @param {VisualStep|Object} step
+     * @returns {boolean}
+     */
+    static isNormalizer(step) {
+        if (!step) return false;
+        const type = step.stepType || step.step_type || '';
+        return type === 'normalizer' || type === 'post.normalizer';
+    }
+
+    /**
+     * Check if a step is a De-identify (HIPAA Safe Harbor) step
+     * @param {VisualStep|Object} step
+     * @returns {boolean}
+     */
+    static isDeidentify(step) {
+        if (!step) return false;
+        const type = step.stepType || step.step_type || '';
+        return type === 'deidentify' || type === 'pre.deidentify' || type === 'post.deidentify';
+    }
+
+    /**
+     * Check if a step is a Payload Builder step
+     * @param {VisualStep|Object} step
+     * @returns {boolean}
+     */
+    static isPayloadBuilder(step) {
+        if (!step) return false;
+        const type = step.stepType || step.step_type || '';
+        return type === 'payload.builder' || type === 'payload_builder';
     }
 
     /**

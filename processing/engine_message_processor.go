@@ -5,6 +5,7 @@ package processing
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -14,8 +15,8 @@ import (
 	"ezhealthkonnect/models"
 	"ezhealthkonnect/services"
 	"ezhealthkonnect/services/connectors"
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/mongo"
+	"ezhealthkonnect/services/metrics"
+	"ezhealthkonnect/services/storage"
 )
 
 // processMessages processes incoming messages from ANY connector channel (ALL 32 connectors)
@@ -58,8 +59,49 @@ func (pe *ProcessingEngine) processMessages(interfaceID string, messageChan <-ch
 		log.Printf("✅ Message stored in PostgreSQL for interface %s: ID=%s (took %v)",
 			interfaceID, msg.MessageID, processingTime)
 
-		// STEP 2: Store in MongoDB + Parse to JSON (async with panic recovery)
-		go pe.storeAndParseWithRecovery(interfaceID, msg)
+		// ACK-AFTER-STORE: Send AA to sender now that message is durable in PostgreSQL.
+		// This prevents the gap where the sender had ACK but PostgreSQL write never happened.
+		// NACK on store failure is already handled above (continue skips this).
+		pe.sendACKAfterStore(interfaceID, msg)
+
+		// Prometheus: count durably-stored messages
+		if metrics.MessagesReceived != nil {
+			metrics.MessagesReceived.WithLabelValues(interfaceID, msg.SourceType).Inc()
+		}
+
+		// STEP 2: Store in MongoDB + Parse to JSON — submit to bounded worker pool (P9 backpressure)
+		pool := backpressureRegistry().GetOrCreate(interfaceID)
+		msgCopy := msg // capture for closure
+		ifID := interfaceID
+		submitted := pool.Submit(func() {
+			pe.storeAndParseWithRecovery(ifID, msgCopy)
+		})
+		if !submitted {
+			// Queue full — send NACK via ValidationAwareConnector (e.g. MLLP NAK)
+			log.Printf("⚠️  [backpressure] queue full for interface %s (depth=%d/%d), dropping message %s",
+				interfaceID, pool.QueueDepth(), pool.MaxQueue(), msg.MessageID)
+			pe.validationMutex.RLock()
+			vc, hasVC := pe.validationConnectors[interfaceID]
+			pe.validationMutex.RUnlock()
+			if hasVC && vc.SupportsValidationFeedback() {
+				feedback := models.NewValidationFeedback(
+					msg.MessageID, interfaceID,
+					models.ValidationModeStrictReject,
+					"rejected",
+					[]models.FieldValidationError{
+						{Field: "_backpressure", Type: "QUEUE_FULL", Message: "Server busy — queue at capacity"},
+					},
+					0, "",
+				)
+				go func() {
+					ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+					defer cancel()
+					if err := vc.SendValidationResponse(ctx, feedback); err != nil {
+						log.Printf("⚠️  NACK send failed for interface %s: %v", interfaceID, err)
+					}
+				}()
+			}
+		}
 
 		// Update interface statistics
 		pe.updateInterfaceStats(interfaceID, processingTime)
@@ -78,17 +120,21 @@ func (pe *ProcessingEngine) storeMessage(interfaceID string, msg *models.Inbound
 	sourceIP := msg.SourceIP            // Client IP address
 	messageType := msg.MessageType      // HL7v2, FHIR, JSON, XML, etc.
 
+	// raw_message column is intentionally NULL here.
+	// Raw bytes are written to object storage in storeAndParse() and the URI
+	// is stored in raw_content_uri.  Keeping it NULL avoids duplicating
+	// potentially large payloads inside PostgreSQL.
 	query := fmt.Sprintf(`
 		INSERT INTO %s (
-			message_id, interface_id, status, priority,
+			message_id, interface_id, status,
 			received_at, source_type, source_endpoint, source_ip,
 			message_type, message_size, message_encoding,
-			raw_message, created_at, updated_at
+			created_at, updated_at
 		) VALUES (
-			$1, $2, 'received', 1,
+			$1, $2, 'received',
 			$3, $4, $5, $6,
 			$7, $8, $9,
-			$10, NOW(), NOW()
+			NOW(), NOW()
 		)
 	`, tableName)
 
@@ -101,13 +147,12 @@ func (pe *ProcessingEngine) storeMessage(interfaceID string, msg *models.Inbound
 		msg.MessageID,
 		interfaceID,
 		msg.ReceivedAt,
-		sourceType,      // tcp_mllp, http_rest, etc.
-		sourceEndpoint,  // Connection endpoint
-		sourceIP,        // Client IP
-		messageType,     // Message format
+		sourceType,
+		sourceEndpoint,
+		sourceIP,
+		messageType,
 		msg.MessageSize,
 		encoding,
-		msg.Content,
 	)
 
 	return err
@@ -203,45 +248,36 @@ func (pe *ProcessingEngine) storeAndParse(interfaceID string, msg *models.Inboun
 		})
 	}
 
-	// STEP 1: Store raw message in MongoDB (if available)
-	if pe.mongoService != nil {
-		rawDoc := &services.RawMessageDocument{
-			MessageID:       msg.MessageID,
-			InterfaceID:     interfaceID,
-			MessageType:     messageType,  // Dynamic: hl7v2, fhir, etc.
-			SourceType:      sourceType,   // Dynamic: tcp, http, etc.
-			SourceEndpoint:  msg.SourceType,
-			ReceivedAt:      msg.ReceivedAt,
-			MessageSize:     len(msg.Content),
-			MessageEncoding: "UTF-8",
-			RawContent:      msg.Content,
-		}
-
-		err := pe.mongoService.StoreRawMessage(ctx, rawDoc)
+	// STEP 1: Store raw message in object storage (S3/MinIO/local)
+	if pe.objectStorage != nil {
+		rawBytes := []byte(msg.Content)
+		rawURI, err := pe.objectStorage.StoreRawMessage(ctx, interfaceID, msg.MessageID, rawBytes)
 		if err != nil {
-			log.Printf("⚠️  Failed to store raw message in MongoDB: %v", err)
-
-			// Capture MongoDB error (V23 - Error Handling Enhancement)
+			log.Printf("⚠️  Failed to store raw message in object storage: %v", err)
 			if pe.errorService != nil {
 				errCtx := models.NewErrorContext(
 					models.StageDatabase,
-					models.SeverityWarning, // Warning since PostgreSQL storage already succeeded
+					models.SeverityWarning,
 					models.ErrorTypeDatabase,
-					"Failed to store raw message in MongoDB",
+					"Failed to store raw message in object storage",
 					err.Error(),
 					"",
-					models.RecoveryNone, // Processing continues without MongoDB
+					models.RecoveryNone,
 				)
 				pe.errorService.CaptureError(interfaceID, msg.MessageID, errCtx)
 			}
-
-			// Update PostgreSQL mongo_synced status
-			pe.updateMongoSyncStatus(interfaceID, msg.MessageID, false)
 		} else {
-			log.Printf("💾 Message stored in MongoDB: %s (type: %s, source: %s)",
-				msg.MessageID, messageType, sourceType)
-			// Update PostgreSQL mongo_synced status
-			pe.updateMongoSyncStatus(interfaceID, msg.MessageID, true)
+			log.Printf("💾 Raw message stored in object storage: %s → %s", msg.MessageID, rawURI)
+			// Update PostgreSQL raw_content_uri (best-effort — column may not exist on older tables)
+			pe.updateStorageURI(interfaceID, msg.MessageID, "raw_content_uri", rawURI)
+
+			// Append a log entry
+			_ = pe.objectStorage.AppendLog(ctx, interfaceID, msg.MessageID, storage.LogEntry{
+				Level:   "info",
+				Stage:   "receive",
+				Message: "Raw message stored in object storage",
+				Fields:  map[string]interface{}{"source_type": sourceType, "message_size": len(rawBytes), "uri": rawURI},
+			})
 		}
 	}
 
@@ -257,40 +293,25 @@ func (pe *ProcessingEngine) storeAndParse(interfaceID string, msg *models.Inboun
 			})
 		}
 
-		// Store the FHIR bundle as-is in MongoDB parsed_content
-		if pe.mongoService != nil {
-			collectionName := fmt.Sprintf("raw_messages_intf_%s", strings.ReplaceAll(interfaceID, "-", "_"))
-			collection := pe.mongoService.GetCollection(collectionName)
-
-			// Parse the FHIR bundle to store in parsed_content
+		// Store the FHIR bundle as-is in object storage parsed content
+		if pe.objectStorage != nil {
 			var fhirBundle map[string]interface{}
 			if err := json.Unmarshal([]byte(msg.Content), &fhirBundle); err == nil {
-				updateResult, err := collection.UpdateOne(
-					ctx,
-					bson.M{"message_id": msg.MessageID},
-					bson.M{
-						"$set": bson.M{
-							"parsed_content": fhirBundle,
-							"parsed_at":      time.Now(),
-							"parsed_format":  "fhir",
-							"parsing_status": "completed",
-						},
-					},
-				)
+				parsedURI, err := pe.objectStorage.StoreParsedContent(ctx, interfaceID, msg.MessageID, fhirBundle)
 				if err != nil {
-					log.Printf("⚠️  Failed to store FHIR bundle in MongoDB: %v", err)
+					log.Printf("⚠️  Failed to store FHIR bundle in object storage: %v", err)
 					if logger != nil {
-						logger.Error(services.LogCategoryParsing, "Failed to store FHIR bundle in MongoDB", map[string]interface{}{
+						logger.Error(services.LogCategoryParsing, "Failed to store FHIR bundle in object storage", map[string]interface{}{
 							"error": err.Error(),
 						})
 					}
 				} else {
-					log.Printf("✅ FHIR bundle stored in MongoDB: %s (matched: %d)", msg.MessageID, updateResult.MatchedCount)
+					log.Printf("✅ FHIR bundle stored in object storage: %s → %s", msg.MessageID, parsedURI)
+					pe.updateStorageURI(interfaceID, msg.MessageID, "parsed_content_uri", parsedURI)
 					if logger != nil {
-						logger.Info(services.LogCategoryParsing, "FHIR bundle saved to MongoDB", map[string]interface{}{
-							"collection":    collectionName,
-							"message_id":    msg.MessageID,
-							"matched_count": updateResult.MatchedCount,
+						logger.Info(services.LogCategoryParsing, "FHIR bundle saved to object storage", map[string]interface{}{
+							"message_id": msg.MessageID,
+							"uri":        parsedURI,
 						})
 					}
 				}
@@ -299,7 +320,9 @@ func (pe *ProcessingEngine) storeAndParse(interfaceID string, msg *models.Inboun
 
 		// Update PostgreSQL parsing status
 		tableName := fmt.Sprintf("messages_intf_%s", strings.ReplaceAll(interfaceID, "-", "_"))
-		query := fmt.Sprintf(`UPDATE %s SET parsing_status = 'completed', parsed_at = $1 WHERE message_id = $2`, tableName)
+		query := fmt.Sprintf(`UPDATE %s SET parsing_status = 'completed', parsed_at = $1,
+			status = 'processed', delivery_status = 'not_required',
+			processing_completed_at = $1 WHERE message_id = $2`, tableName)
 		result, err := pe.db.Exec(query, time.Now(), msg.MessageID)
 		if err != nil {
 			log.Printf("⚠️  Failed to update parsing status in PostgreSQL: %v", err)
@@ -355,6 +378,16 @@ func (pe *ProcessingEngine) storeAndParse(interfaceID string, msg *models.Inboun
 
 			if logger != nil {
 				logger.LogParsingComplete(messageType, result.ParsingTime.Milliseconds(), len(result.ParsedJSON))
+			}
+
+			// Store parsed JSON in object storage
+			if pe.objectStorage != nil && result.ParsedJSON != nil {
+				parsedURI, err := pe.objectStorage.StoreParsedContent(ctx, interfaceID, msg.MessageID, result.ParsedJSON)
+				if err != nil {
+					log.Printf("⚠️  Failed to store parsed content in object storage: %v", err)
+				} else {
+					pe.updateStorageURI(interfaceID, msg.MessageID, "parsed_content_uri", parsedURI)
+				}
 			}
 
 			// STEP 3: Trigger transformation pipeline (MVC + OOB pattern)
@@ -451,10 +484,53 @@ func (pe *ProcessingEngine) executeTransformationPipeline(
 
 	log.Printf("📋 [MVC PIPELINE] Executing pipeline: %s (%d steps)", pipeline.PipelineName, len(pipeline.Steps))
 
+	// STATUS: mark as 'processing' before pipeline runs
+	pe.updateMessageStatus(interfaceID, messageID, "processing", map[string]interface{}{
+		"processing_started_at": time.Now(),
+	})
+
+	// Step 2: Wire parsed_format into pipeline message envelope as _format.
+	// enrichMessageEnvelope() in ExecutePipeline will build _semantic_index and _sensitivity_map.
+	if parseResult.ParsedJSON != nil && parseResult.Format != "" {
+		parseResult.ParsedJSON["_format"] = string(parseResult.Format)
+	}
+
 	// Step 2: Execute pipeline (Model layer handles business logic)
+	// Inject delivery callback so OutboundConnectorExecutor can own its DB update.
+	// The executor reads this from context and calls it after connector.Send() completes,
+	// giving us correct delivery_status regardless of how many outbound steps exist.
+	ctx = context.WithValue(ctx, "delivery_status_fn", models.DeliveryStatusFn(pe.updateDeliveryStatus))
+	ctx = context.WithValue(ctx, "message_id", messageID)
+	ctx = context.WithValue(ctx, "interface_id", interfaceID)
+	// Inject store-outbound callback so OutboundConnectorExecutor can persist the exact
+	// payload sent to each connector (full content, no truncation) in object storage.
+	if pe.objectStorage != nil {
+		ctx = context.WithValue(ctx, "store_outbound_fn", models.StoreOutboundFn(func(ifaceID, msgID, content, ct string) string {
+			uri, err := pe.objectStorage.StoreOutboundPayload(context.Background(), ifaceID, msgID, content, ct)
+			if err != nil {
+				log.Printf("⚠️  [Engine] StoreOutboundPayload: %v", err)
+				return ""
+			}
+			pe.updateStorageURI(ifaceID, msgID, "outbound_content_uri", uri)
+			return uri
+		}))
+	}
+
 	result, err := pe.transformationService.ExecutePipeline(ctx, pipeline, parseResult.ParsedJSON)
 	if err != nil {
 		log.Printf("❌ Pipeline execution failed for message %s: %v", messageID, err)
+
+		// STATUS: mark as 'failed'
+		pe.updateMessageStatus(interfaceID, messageID, "failed", map[string]interface{}{
+			"last_error_message":     err.Error(),
+			"error_count":            1,
+			"processing_completed_at": time.Now(),
+		})
+
+		// Prometheus: count pipeline errors
+		if metrics.MessagesProcessed != nil {
+			metrics.MessagesProcessed.WithLabelValues(interfaceID, "failed").Inc()
+		}
 
 		if pe.errorService != nil {
 			errCtx := models.NewErrorContext(
@@ -475,28 +551,59 @@ func (pe *ProcessingEngine) executeTransformationPipeline(
 	log.Printf("✅ Transformation completed for %s in %dms (status: %s)",
 		messageID, executionTime.Milliseconds(), result.Status)
 
-	// Step 3: Store transformed output in MongoDB (View layer)
-	log.Printf("🔍 [MVC PIPELINE] Checking storage conditions: mongoService=%v, status=%s", pe.mongoService != nil, result.Status)
-	if pe.mongoService != nil && result.Status == "completed" {
+	// STATUS: mark as 'processed' (pipeline completed) or 'failed'.
+	// 'processed' means the transformation pipeline ran to completion.
+	// Actual delivery to a downstream system is tracked separately in delivery_status
+	// by the connector.outbound pipeline step via updateDeliveryStatus().
+	finalStatus := "processed"
+	if result.Status != "completed" {
+		finalStatus = "failed"
+	}
+	pe.updateMessageStatus(interfaceID, messageID, finalStatus, map[string]interface{}{
+		"processing_completed_at": time.Now(),
+		"processing_time_ms":      executionTime.Milliseconds(),
+	})
+
+	// delivery_status is written directly by OutboundConnectorExecutor via the
+	// delivery_status_fn callback injected into context above.
+	// If the pipeline had no connector.outbound step at all, delivery_status is
+	// still 'pending' here — flip it to 'not_required' so the UI is meaningful.
+	if finalStatus == "processed" {
+		tbl := fmt.Sprintf("messages_intf_%s", strings.ReplaceAll(interfaceID, "-", "_"))
+		_, _ = pe.db.Exec(
+			fmt.Sprintf(`UPDATE %s SET delivery_status = 'not_required' WHERE message_id = $1 AND delivery_status = 'pending'`, tbl),
+			messageID,
+		)
+	}
+
+	// Prometheus: record pipeline duration and outcome
+	if metrics.ProcessingDuration != nil {
+		metrics.ProcessingDuration.WithLabelValues(interfaceID).Observe(executionTime.Seconds())
+	}
+	if metrics.MessagesProcessed != nil {
+		metrics.MessagesProcessed.WithLabelValues(interfaceID, finalStatus).Inc()
+	}
+
+	// Step 3: Store transformed output in object storage (View layer)
+	log.Printf("🔍 [MVC PIPELINE] Checking storage conditions: objectStorage=%v, status=%s", pe.objectStorage != nil, result.Status)
+	if pe.objectStorage != nil && result.Status == "completed" {
 		log.Printf("🔍 [MVC PIPELINE] Calling storeTransformedMessage for interface %s...", interfaceID)
 		err = pe.storeTransformedMessage(ctx, interfaceID, messageID, messageType, result)
 		if err != nil {
 			log.Printf("⚠️  [MVC PIPELINE] Failed to store transformed message: %v", err)
 		} else {
-			log.Printf("💾 [MVC PIPELINE] Transformed message stored in MongoDB: %s", messageID)
+			log.Printf("💾 [MVC PIPELINE] Transformed message stored in object storage: %s", messageID)
 		}
 	} else {
-		log.Printf("⚠️  [MVC PIPELINE] Skipping storage: mongoService=%v, status=%s", pe.mongoService != nil, result.Status)
+		log.Printf("⚠️  [MVC PIPELINE] Skipping storage: objectStorage=%v, status=%s", pe.objectStorage != nil, result.Status)
 	}
 
-	// Step 4: Deliver to destination endpoint (if delivery payload exists)
-	if result.Status == "completed" && result.DeliveryPayload != nil {
-		log.Printf("📤 [MVC PIPELINE] Initiating delivery to destination: %s", result.DeliveryPayload.DestinationEndpoint)
-		go pe.deliverMessage(ctx, interfaceID, messageID, result.DeliveryPayload)
-	}
+	// Step 4: Delivery is handled by the connector.outbound pipeline step (seq 295).
+	// The OutboundConnectorExecutor calls connector.Send() during ExecutePipeline above.
+	// No separate deliverMessage() call is needed here.
 }
 
-// storeTransformedMessage stores the transformation output in MongoDB (View layer)
+// storeTransformedMessage stores the transformation output in object storage (View layer)
 func (pe *ProcessingEngine) storeTransformedMessage(
 	ctx context.Context,
 	interfaceID string,
@@ -504,8 +611,6 @@ func (pe *ProcessingEngine) storeTransformedMessage(
 	messageType string,
 	result *models.TransformationExecutionResult,
 ) error {
-	collectionName := fmt.Sprintf("transformed_messages_intf_%s", strings.ReplaceAll(interfaceID, "-", "_"))
-
 	transformedDoc := map[string]interface{}{
 		"message_id":                 messageID,
 		"correlation_id":             result.CorrelationID,
@@ -624,24 +729,26 @@ func (pe *ProcessingEngine) storeTransformedMessage(
 		}
 	}
 
-	// Store in MongoDB using the mongoService
-	collection := pe.mongoService.GetCollection(collectionName)
-	_, err := collection.InsertOne(ctx, transformedDoc)
+	// Store in object storage
+	transformedURI, err := pe.objectStorage.StoreTransformedContent(ctx, interfaceID, messageID, transformedDoc)
 	if err != nil {
-		return fmt.Errorf("failed to insert transformed message: %w", err)
+		return fmt.Errorf("failed to store transformed message in object storage: %w", err)
 	}
+
+	// Update PostgreSQL URI column (best-effort)
+	pe.updateStorageURI(interfaceID, messageID, "transformed_content_uri", transformedURI)
 
 	return nil
 }
 
-// updateMongoSyncStatus updates the mongo_synced flag in PostgreSQL
-func (pe *ProcessingEngine) updateMongoSyncStatus(interfaceID string, messageID string, synced bool) {
+// updateStorageURI updates a URI column (raw_content_uri, parsed_content_uri, etc.) in PostgreSQL.
+// The column may not exist on older tables; the error is suppressed silently.
+func (pe *ProcessingEngine) updateStorageURI(interfaceID, messageID, column, uri string) {
 	tableName := fmt.Sprintf("messages_intf_%s", sanitizeInterfaceID(interfaceID))
-	query := fmt.Sprintf(`UPDATE %s SET mongo_synced = $1 WHERE message_id = $2`, tableName)
-
-	_, err := pe.db.Exec(query, synced, messageID)
-	if err != nil {
-		log.Printf("⚠️  Failed to update mongo_synced status: %v", err)
+	query := fmt.Sprintf(`UPDATE %s SET %s = $1 WHERE message_id = $2`, tableName, column)
+	if _, err := pe.db.Exec(query, uri, messageID); err != nil {
+		// Column may not exist on tables created before V56 migration — non-fatal
+		log.Printf("⚠️  updateStorageURI(%s.%s): %v", tableName, column, err)
 	}
 }
 
@@ -756,29 +863,14 @@ func maskSensitiveHeader(key, value string) string {
 	return value
 }
 
-// updateDeliveryStatus updates the delivery status in the transformed messages collection
+// updateDeliveryStatus updates the delivery status in PostgreSQL.
 func (pe *ProcessingEngine) updateDeliveryStatus(interfaceID string, messageID string, status string, details string) {
-	if pe.mongoService == nil {
+	if pe.db == nil {
 		return
 	}
-
-	collectionName := fmt.Sprintf("transformed_messages_intf_%s", strings.ReplaceAll(interfaceID, "-", "_"))
-	collection := pe.mongoService.GetCollection(collectionName)
-
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	filter := bson.M{"message_id": messageID}
-	update := bson.M{
-		"$set": bson.M{
-			"delivery_status":  status,
-			"delivery_details": details,
-			"delivered_at":     time.Now(),
-		},
-	}
-
-	_, err := collection.UpdateOne(ctx, filter, update)
-	if err != nil {
+	tableName := fmt.Sprintf("messages_intf_%s", sanitizeInterfaceID(interfaceID))
+	query := fmt.Sprintf(`UPDATE %s SET delivery_status = $1, updated_at = NOW() WHERE message_id = $2`, tableName)
+	if _, err := pe.db.Exec(query, status, messageID); err != nil {
 		log.Printf("⚠️  [DELIVERY] Failed to update delivery status: %v", err)
 	}
 }
@@ -786,46 +878,6 @@ func (pe *ProcessingEngine) updateDeliveryStatus(interfaceID string, messageID s
 // updateDeliveryStatusWithResponse updates delivery status with full response details
 func (pe *ProcessingEngine) updateDeliveryStatusWithResponse(interfaceID string, messageID string, status string, details string, result *connectors.DeliveryResult) {
 	log.Printf("🔧 [DEBUG] updateDeliveryStatusWithResponse called: msgID=%s, status=%s", messageID, status)
-
-	// Update MongoDB if available
-	if pe.mongoService != nil {
-		collectionName := fmt.Sprintf("transformed_messages_intf_%s", strings.ReplaceAll(interfaceID, "-", "_"))
-		collection := pe.mongoService.GetCollection(collectionName)
-
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-
-		// Build update document with response details
-		updateDoc := bson.M{
-			"delivery_status":  status,
-			"delivery_details": details,
-			"delivered_at":     time.Now(),
-		}
-
-		if result != nil {
-			updateDoc["delivery_duration_ms"] = result.DurationMs
-			updateDoc["delivery_retry_count"] = result.RetryCount
-			updateDoc["delivery_acknowledgment"] = result.Acknowledgment
-
-			// Store response metadata if available
-			if result.Metadata != nil {
-				if statusCode, ok := result.Metadata["status_code"].(int); ok {
-					updateDoc["delivery_http_status"] = statusCode
-				}
-				if respBody, ok := result.Metadata["response_body"].(string); ok {
-					updateDoc["delivery_response_body"] = respBody
-				}
-			}
-		}
-
-		filter := bson.M{"message_id": messageID}
-		update := bson.M{"$set": updateDoc}
-
-		_, err := collection.UpdateOne(ctx, filter, update)
-		if err != nil {
-			log.Printf("⚠️  [DELIVERY] Failed to update MongoDB delivery status: %v", err)
-		}
-	}
 
 	// Update PostgreSQL message table
 	if pe.db != nil {
@@ -851,49 +903,58 @@ func (pe *ProcessingEngine) updateDeliveryStatusWithResponse(interfaceID string,
 	}
 }
 
-// createLogger creates a processing logger for a message if debug logging is enabled
+// createLogger creates a processing logger for a message.
+// Log verbosity is controlled by the per-interface log_level column:
+//
+//	debug   — log everything (default)
+//	info    — errors, warnings, info
+//	warning — errors and warnings only
+//	error   — errors only
+//	off     — no object-storage logging (console only)
 func (pe *ProcessingEngine) createLogger(interfaceID, messageID, correlationID, messageType string) *services.ProcessingLogger {
-	log.Printf("🔍 [CREATE LOGGER] Called for interface: %s, message: %s", interfaceID, messageID)
-
-	// Check if debug logging is enabled for this interface
 	if pe.db == nil {
-		log.Printf("⚠️  [CREATE LOGGER] Database is nil")
 		return nil
 	}
 
-	var debugLogging bool
 	var interfaceName string
+	var logLevel sql.NullString
+	var debugLogging bool
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
-	query := `SELECT name, debug_logging FROM interfaces WHERE id = $1`
-	err := pe.db.QueryRowContext(ctx, query, interfaceID).Scan(&interfaceName, &debugLogging)
+	// Read log_level (V59+) with debug_logging fallback for older schemas
+	query := `SELECT name, COALESCE(log_level, ''), debug_logging FROM interfaces WHERE id = $1`
+	err := pe.db.QueryRowContext(ctx, query, interfaceID).Scan(&interfaceName, &logLevel, &debugLogging)
 	if err != nil {
-		log.Printf("⚠️  [CREATE LOGGER] Query failed: %v", err)
-		return nil
-	}
-
-	log.Printf("🔍 [CREATE LOGGER] Interface: %s, debug_logging: %v", interfaceName, debugLogging)
-
-	// Only create logger if debug logging enabled
-	if !debugLogging {
-		log.Printf("⚠️  [CREATE LOGGER] Debug logging is disabled for %s", interfaceName)
-		return nil
-	}
-
-	// Get MongoDB client for logging
-	var mongoClient *mongo.Client
-	if pe.mongoService != nil {
-		mongoClient = pe.mongoService.GetClient()
-		if mongoClient != nil {
-			log.Printf("✅ [DEBUG LOGGER] MongoDB client available for logging (interface: %s)", interfaceName)
-		} else {
-			log.Printf("⚠️  [DEBUG LOGGER] mongoService exists but GetClient() returned nil (interface: %s)", interfaceName)
+		// Fallback: try without log_level column (pre-V59 schema)
+		err2 := pe.db.QueryRowContext(ctx, `SELECT name, debug_logging FROM interfaces WHERE id = $1`,
+			interfaceID).Scan(&interfaceName, &debugLogging)
+		if err2 != nil {
+			log.Printf("⚠️  [CREATE LOGGER] Query failed: %v", err2)
+			return nil
 		}
-	} else {
-		log.Printf("⚠️  [DEBUG LOGGER] mongoService is nil - logs will only print to console (interface: %s)", interfaceName)
+		if !debugLogging {
+			return nil
+		}
+		logLevel = sql.NullString{String: "debug", Valid: true}
 	}
+
+	// Resolve effective level: log_level column takes precedence; fall back to debug_logging bool
+	level := logLevel.String
+	if level == "" {
+		if debugLogging {
+			level = "debug"
+		} else {
+			level = "debug" // default: log everything per user preference
+		}
+	}
+
+	if level == "off" {
+		return nil // explicitly disabled
+	}
+
+	debugMode := level == "debug" // controls whether Info/Debug entries are written
 
 	return services.NewProcessingLogger(
 		interfaceID,
@@ -901,7 +962,69 @@ func (pe *ProcessingEngine) createLogger(interfaceID, messageID, correlationID, 
 		messageID,
 		correlationID,
 		messageType,
-		debugLogging,
-		mongoClient,
+		debugMode,
+		pe.objectStorage,
 	)
+}
+
+// ==================== DURABILITY HELPERS (Phase 2) ====================
+
+// sendACKAfterStore sends AA to the inbound connector after the message is safely written to PostgreSQL.
+// This closes the ACK-before-store gap: the sender only gets AA once the message is durable.
+// If the connector does not support validation feedback, this is a no-op.
+func (pe *ProcessingEngine) sendACKAfterStore(interfaceID string, msg *models.InboundMessage) {
+	pe.validationMutex.RLock()
+	vc, hasVC := pe.validationConnectors[interfaceID]
+	pe.validationMutex.RUnlock()
+
+	if !hasVC || !vc.SupportsValidationFeedback() {
+		return
+	}
+
+	feedback := models.NewValidationFeedback(
+		msg.MessageID, interfaceID,
+		models.ValidationModeStrictReject,
+		"accepted",
+		nil,
+		0, "",
+	)
+
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := vc.SendValidationResponse(ctx, feedback); err != nil {
+			log.Printf("⚠️  ACK send failed for message %s interface %s: %v", msg.MessageID, interfaceID, err)
+		} else {
+			log.Printf("✅ [ACK-AFTER-STORE] AA sent for message %s", msg.MessageID)
+		}
+	}()
+}
+
+// updateMessageStatus updates the processing status of a message in its interface table.
+// Called at key lifecycle points: processing started, delivered, failed.
+func (pe *ProcessingEngine) updateMessageStatus(interfaceID, messageID, status string, extraFields map[string]interface{}) {
+	if pe.db == nil {
+		return
+	}
+
+	tableName := fmt.Sprintf("messages_intf_%s", strings.ReplaceAll(interfaceID, "-", "_"))
+
+	setClauses := "status = $1, updated_at = NOW()"
+	args := []interface{}{status, messageID}
+	argIdx := 3
+
+	for col, val := range extraFields {
+		setClauses += fmt.Sprintf(", %s = $%d", col, argIdx)
+		args = append(args, val)
+		argIdx++
+	}
+	// message_id is $2
+	query := fmt.Sprintf("UPDATE %s SET %s WHERE message_id = $2", tableName, setClauses)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if _, err := pe.db.ExecContext(ctx, query, args...); err != nil {
+		log.Printf("⚠️  Failed to update message status to '%s' for %s: %v", status, messageID, err)
+	}
 }

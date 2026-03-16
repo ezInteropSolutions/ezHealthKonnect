@@ -497,48 +497,11 @@ class InterfaceService {
 
     /**
      * Create MongoDB collections for interface
-     * Creates: raw_messages_intf_<id> and transformed_messages_intf_<id>
+     * Object storage buckets are created on-demand when messages arrive.
+     * This method is retained as a no-op for backward compatibility.
      */
     async createMongoDBCollections(interfaceId, interfaceName) {
-        console.log(`📦 Creating MongoDB collections for interface: ${interfaceName}`);
-
-        try {
-            // Import MongoDB connection service (Go backend service)
-            const { MongoClient } = require('mongodb');
-
-            // Get MongoDB URI from environment
-            const mongoURI = process.env.MONGODB_URI;
-            if (!mongoURI) {
-                throw new Error('MONGODB_URI environment variable not set');
-            }
-
-            const client = new MongoClient(mongoURI);
-            await client.connect();
-
-            const db = client.db(process.env.MONGODB_DATABASE || 'ezhealthkonnect');
-
-            // Collection names (matching Go backend naming convention)
-            const rawCollectionName = `raw_messages_intf_${interfaceId}`;
-            const transformedCollectionName = `transformed_messages_intf_${interfaceId}`;
-
-            // Create raw messages collection
-            await db.createCollection(rawCollectionName);
-            await db.collection(rawCollectionName).createIndex({ message_id: 1 }, { unique: true });
-            await db.collection(rawCollectionName).createIndex({ received_at: -1 });
-            console.log(`✅ MongoDB collection created: ${rawCollectionName}`);
-
-            // Create transformed messages collection
-            await db.createCollection(transformedCollectionName);
-            await db.collection(transformedCollectionName).createIndex({ message_id: 1 });
-            await db.collection(transformedCollectionName).createIndex({ transformed_at: -1 });
-            console.log(`✅ MongoDB collection created: ${transformedCollectionName}`);
-
-            await client.close();
-
-        } catch (error) {
-            console.error(`❌ Failed to create MongoDB collections:`, error);
-            throw error;
-        }
+        console.log(`ℹ️  createMongoDBCollections: no-op (storage migrated to S3/MinIO)`);
     }
 }
 

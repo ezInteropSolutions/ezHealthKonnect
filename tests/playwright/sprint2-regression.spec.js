@@ -29,6 +29,8 @@ const { test, expect } = require('@playwright/test');
 // ================================================================
 
 const BASE_URL = 'http://localhost:3000';
+// Known test interface with populated pipelines (used as preferred interface)
+const KNOWN_INTERFACE_ID = '762aebb9-0408-4a42-82c5-202f13f28315';
 
 // ─── Helpers ────────────────────────────────────────────────────
 
@@ -55,15 +57,17 @@ async function login(page) {
 }
 
 async function getFirstInterface(page) {
-    return page.evaluate(async () => {
+    return page.evaluate(async (knownId) => {
         const r = await fetch('/api/interfaces', {
             headers: { 'Content-Type': 'application/json' },
             credentials: 'include'
         });
         if (!r.ok) return null;
         const data = await r.json();
-        return Array.isArray(data) ? data[0] : (data.interfaces ? data.interfaces[0] : null);
-    });
+        const list = Array.isArray(data) ? data : (data.interfaces || []);
+        // Prefer the known test interface which has populated pipelines
+        return list.find(i => i.id === knownId) || list[0] || null;
+    }, KNOWN_INTERFACE_ID);
 }
 
 async function getFirstPipeline(page, interfaceId) {
@@ -80,10 +84,14 @@ async function getFirstPipeline(page, interfaceId) {
 
 async function loadPipelineBuilder(page, pipelineId) {
     await page.goto(`${BASE_URL}/pipeline-builder.html?pipelineId=${pipelineId}`);
-    await page.waitForLoadState('networkidle');
-    // Wait for the canvas to initialise
-    await page.waitForSelector('.pipeline-builder-container, #pipeline-canvas, .flowchart-container', { timeout: 10000 })
-        .catch(() => {}); // non-fatal — some views render differently
+    // Use 'load' (DOM + sync scripts ready) instead of 'networkidle' (waits 500ms of quiet
+    // network — unreliable when pipeline builder keeps polling for templates/steps/etc.)
+    await page.waitForLoadState('load');
+    // Wait for pipeline builder object to be initialised (pipeline data loads asynchronously)
+    await page.waitForFunction(
+        () => window.pipelineBuilder?.pipeline != null,
+        { timeout: 8000 }
+    ).catch(() => {});
 }
 
 // ─── Backend API Tests ───────────────────────────────────────────
@@ -195,18 +203,18 @@ test.describe('Sprint 2 — Backend API', () => {
         await login(page);
 
         // Fire the test pipeline endpoint with a minimal HL7 message
-        const result = await page.evaluate(async () => {
-            const r = await fetch('/api/pipeline/pipelines/test', {
+        const result = await page.evaluate(async ({ interfaceId, messageType }) => {
+            const r = await fetch('/api/pipelines/test', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 credentials: 'include',
                 body: JSON.stringify({
-                    message: 'MSH|^~\\&|SEND|RECV|20240101120000||ADT^A01|MSG001|P|2.5',
-                    interfaceId: null
+                    test_message: 'MSH|^~\\&|SEND|RECV|20240101120000||ADT^A01|MSG001|P|2.5',
+                    pipeline: { interfaceId, messageType }
                 })
             });
             return { status: r.status, ok: r.ok || r.status < 500 };
-        });
+        }, { interfaceId: KNOWN_INTERFACE_ID, messageType: 'ADT^A01' });
 
         // 200 (success) or 400/404 (no pipeline configured) — anything but 500
         expect(result.status, 'Test pipeline should not return 500').not.toBe(500);
@@ -240,6 +248,8 @@ test.describe('Sprint 2 — Backend API', () => {
 // ─── Frontend UI Tests ───────────────────────────────────────────
 
 test.describe('Sprint 2 — Frontend UI', () => {
+    // UI tests navigate a real browser + pipeline builder — needs extra time
+    test.setTimeout(60000);
 
     test('7. Error handling section is present for a pipeline step', async ({ page }) => {
         await login(page);
@@ -249,13 +259,28 @@ test.describe('Sprint 2 — Frontend UI', () => {
         if (!pipeline) { test.skip(); return; }
 
         await loadPipelineBuilder(page, pipeline.id);
+        // Wait for VisualStep class to be available (loaded after pipeline builder)
+        await page.waitForFunction(() => window.VisualStep != null, { timeout: 8000 }).catch(() => {});
 
-        // Click the first step node on the canvas
-        const firstNode = page.locator('.flowchart-step-node').first();
-        const count = await firstNode.count();
-        if (count === 0) { test.skip(); return; }
+        // Add a step programmatically — guarantees a node to click regardless of pipeline state
+        const stepId = await page.evaluate(() => {
+            const builder = window.pipelineBuilder;
+            if (!builder || !window.VisualStep) return null;
+            const step = new window.VisualStep({
+                stepName: 'EH Section Test Step',
+                stepType: 'custom',
+                sequence: 993,
+                enabled: true,
+                config: {}
+            });
+            builder.addStep(step);
+            return step.id;
+        });
 
-        await firstNode.click();
+        if (!stepId) { test.skip('Pipeline builder or VisualStep not available'); return; }
+
+        await page.waitForSelector(`.flowchart-step-node[data-step-id="${stepId}"]`, { timeout: 5000 });
+        await page.click(`.flowchart-step-node[data-step-id="${stepId}"]`);
         await page.waitForTimeout(500);
 
         // Error handling section should exist in Properties Panel
@@ -271,16 +296,45 @@ test.describe('Sprint 2 — Frontend UI', () => {
         if (!pipeline) { test.skip(); return; }
 
         await loadPipelineBuilder(page, pipeline.id);
+        await page.waitForFunction(() => window.VisualStep != null, { timeout: 8000 }).catch(() => {});
 
-        const firstNode = page.locator('.flowchart-step-node').first();
-        if (await firstNode.count() === 0) { test.skip(); return; }
-        await firstNode.click();
+        const stepId = await page.evaluate(() => {
+            const builder = window.pipelineBuilder;
+            if (!builder || !window.VisualStep) return null;
+            const step = new window.VisualStep({
+                stepName: 'OnError Default Test Step',
+                stepType: 'custom',
+                sequence: 992,
+                enabled: true,
+                config: {}
+            });
+            builder.addStep(step);
+            return step.id;
+        });
+
+        if (!stepId) { test.skip('Pipeline builder or VisualStep not available'); return; }
+
+        await page.waitForSelector(`.flowchart-step-node[data-step-id="${stepId}"]`, { timeout: 5000 });
+        await page.click(`.flowchart-step-node[data-step-id="${stepId}"]`);
         await page.waitForTimeout(500);
 
-        // Enable error handling toggle to reveal the dropdown
-        const ehToggle = page.locator('#ehEnabled, [id="ehEnabled"]');
-        if (await ehToggle.count() > 0 && !(await ehToggle.isChecked())) {
-            await ehToggle.click();
+        // Expand EH section — body is collapsed by default when EH/retry are both off
+        await page.waitForSelector('.error-handling-section h4', { timeout: 5000 });
+        const ehHeader = page.locator('.error-handling-section h4');
+        const ehBody = page.locator('.error-handling-section > div');
+        const isBodyVisible = await ehBody.isVisible().catch(() => false);
+        if (!isBodyVisible) {
+            await ehHeader.click();
+            await page.waitForTimeout(200);
+        }
+
+        // Enable error handling toggle — input is opacity:0 (custom switch), click the label instead
+        const isEhChecked = await page.evaluate(() => {
+            const cb = document.getElementById('ehEnabled');
+            return cb ? cb.checked : true;
+        });
+        if (!isEhChecked) {
+            await page.locator('label:has(#ehEnabled)').click();
             await page.waitForTimeout(300);
         }
 
@@ -301,15 +355,45 @@ test.describe('Sprint 2 — Frontend UI', () => {
         if (!pipeline) { test.skip(); return; }
 
         await loadPipelineBuilder(page, pipeline.id);
+        await page.waitForFunction(() => window.VisualStep != null, { timeout: 8000 }).catch(() => {});
 
-        const firstNode = page.locator('.flowchart-step-node').first();
-        if (await firstNode.count() === 0) { test.skip(); return; }
-        await firstNode.click();
+        const stepId = await page.evaluate(() => {
+            const builder = window.pipelineBuilder;
+            if (!builder || !window.VisualStep) return null;
+            const step = new window.VisualStep({
+                stepName: 'OnError Options Test Step',
+                stepType: 'custom',
+                sequence: 991,
+                enabled: true,
+                config: {}
+            });
+            builder.addStep(step);
+            return step.id;
+        });
+
+        if (!stepId) { test.skip('Pipeline builder or VisualStep not available'); return; }
+
+        await page.waitForSelector(`.flowchart-step-node[data-step-id="${stepId}"]`, { timeout: 5000 });
+        await page.click(`.flowchart-step-node[data-step-id="${stepId}"]`);
         await page.waitForTimeout(500);
 
-        const ehToggle = page.locator('#ehEnabled');
-        if (await ehToggle.count() > 0 && !(await ehToggle.isChecked())) {
-            await ehToggle.click();
+        // Expand EH section — body is collapsed by default when EH/retry are both off
+        await page.waitForSelector('.error-handling-section h4', { timeout: 5000 });
+        const ehHeader9 = page.locator('.error-handling-section h4');
+        const ehBody9 = page.locator('.error-handling-section > div');
+        const isBodyVisible9 = await ehBody9.isVisible().catch(() => false);
+        if (!isBodyVisible9) {
+            await ehHeader9.click();
+            await page.waitForTimeout(200);
+        }
+
+        // Enable error handling toggle — input is opacity:0 (custom switch), click the label instead
+        const isEhChecked9 = await page.evaluate(() => {
+            const cb = document.getElementById('ehEnabled');
+            return cb ? cb.checked : true;
+        });
+        if (!isEhChecked9) {
+            await page.locator('label:has(#ehEnabled)').click();
             await page.waitForTimeout(300);
         }
 
@@ -331,7 +415,6 @@ test.describe('Sprint 2 — Frontend UI', () => {
         if (!pipeline) { test.skip(); return; }
 
         await loadPipelineBuilder(page, pipeline.id);
-        await page.waitForTimeout(1000);
 
         // Capture the outgoing save request payload
         let savedPayload = null;
@@ -341,7 +424,9 @@ test.describe('Sprint 2 — Frontend UI', () => {
             }
         });
 
-        // Trigger a save
+        // Trigger a save (wait for save button to appear)
+        await page.waitForSelector('button:has-text("Save"), #save-pipeline-btn, [data-action="save"]', { timeout: 10000 })
+            .catch(() => {});
         const saveBtn = page.locator('button:has-text("Save"), #save-pipeline-btn, [data-action="save"]');
         if (await saveBtn.count() > 0) {
             await saveBtn.first().click();
@@ -401,37 +486,39 @@ test.describe('Sprint 2 — DB Pool Registry (P6)', () => {
 
         // Build a minimal test payload with TWO steps that both read the same input field
         // If P3 is broken, step 1's mutation of "input" would corrupt step 2's view of it
-        const result = await page.evaluate(async () => {
-            const r = await fetch('/api/pipeline/pipelines/test', {
+        const result = await page.evaluate(async ({ interfaceId, messageType }) => {
+            const r = await fetch('/api/pipelines/test', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 credentials: 'include',
                 body: JSON.stringify({
-                    message: 'MSH|^~\\&|TEST|TEST|20240101||ADT^A01|123|P|2.5\rPID|||12345^^^MRN||DOE^JOHN',
-                    pipeline_config: {
-                        steps: [
-                            {
-                                id: 'step-1',
-                                stepName: 'Read Input',
-                                step_type: 'custom',
-                                sequence: 10,
-                                enabled: true,
-                                config: {}
-                            },
-                            {
-                                id: 'step-2',
-                                stepName: 'Read Input Again',
-                                step_type: 'custom',
-                                sequence: 20,
-                                enabled: true,
-                                config: {}
-                            }
-                        ]
+                    test_message: 'MSH|^~\\&|TEST|TEST|20240101||ADT^A01|123|P|2.5\rPID|||12345^^^MRN||DOE^JOHN',
+                    pipeline: {
+                        interfaceId,
+                        messageType,
+                        execution_groups: [{
+                            steps: [
+                                {
+                                    stepName: 'Read Input',
+                                    step_type: 'custom',
+                                    sequence: 10,
+                                    enabled: true,
+                                    config: {}
+                                },
+                                {
+                                    stepName: 'Read Input Again',
+                                    step_type: 'custom',
+                                    sequence: 20,
+                                    enabled: true,
+                                    config: {}
+                                }
+                            ]
+                        }]
                     }
                 })
             });
             return { status: r.status, ok: r.status < 500 };
-        });
+        }, { interfaceId: KNOWN_INTERFACE_ID, messageType: 'ADT^A01' });
 
         // Should not 500 — any result is fine as long as the server doesn't crash
         expect(result.ok, `Pipeline test returned ${result.status}`).toBe(true);
@@ -442,6 +529,8 @@ test.describe('Sprint 2 — DB Pool Registry (P6)', () => {
 // ─── Catch→Suppress Alias Tests ─────────────────────────────────
 
 test.describe('Sprint 2 — catch→suppress Backward Compat (P2 Quick Win)', () => {
+    // UI tests navigate a real browser + pipeline builder — needs extra time
+    test.setTimeout(60000);
 
     test('14. Retry utils default onError is "suppress" (not "catch")', async ({ page }) => {
         await login(page);
@@ -451,6 +540,15 @@ test.describe('Sprint 2 — catch→suppress Backward Compat (P2 Quick Win)', ()
         if (!pipeline) { test.skip(); return; }
 
         await loadPipelineBuilder(page, pipeline.id);
+        // Ensure window.pipelineBuilder and VisualStep are ready before calling addStep
+        await page.waitForFunction(
+            () => {
+                const pb = window.pipelineBuilder;
+                if (!pb?.pipeline) return false;
+                return window.VisualStep != null;
+            },
+            { timeout: 15000 }
+        ).catch(() => {});
 
         // Add a step and check its collected config — default onError must not be "catch"
         const stepId = await page.evaluate(() => {

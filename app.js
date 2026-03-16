@@ -284,6 +284,10 @@ console.log('🔄 Mounting /api/interfaces...');
 app.use('/api/interfaces', interfacesRoutes);
 console.log('🔄 Mounting /api/wizard...');
 app.use('/api/wizard', wizardRoutes);
+// Forward object-storage endpoints to Go BEFORE local message routes
+app.get('/api/messages/:messageId/raw', forwardToGo);
+app.get('/api/messages/:messageId/transformed', forwardToGo);
+app.get('/api/messages/:messageId/logs', forwardToGo);
 console.log('🔄 Mounting /api/messages...');
 app.use('/api/messages', messageRoutes);
 

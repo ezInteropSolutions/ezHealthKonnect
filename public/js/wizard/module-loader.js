@@ -8,15 +8,15 @@ class WizardModuleLoader {
         this.config = {
             basePath: '/js/wizard/',
             modules: [
-                'wizard-services.js',
-                'segment-viewer.js', 
-                'step-handlers.js',
-                'wizard-main.js'
+                'wizard-services.js?v=2',
+                'segment-viewer.js?v=2',
+                'step-handlers.js?v=2',
+                'wizard-main.js?v=2'
             ],
             dependencies: {
-                'segment-viewer.js': ['wizard-services.js'],
-                'step-handlers.js': ['wizard-services.js', 'segment-viewer.js'],
-                'wizard-main.js': ['wizard-services.js', 'segment-viewer.js', 'step-handlers.js']
+                'segment-viewer.js?v=2': ['wizard-services.js?v=2'],
+                'step-handlers.js?v=2': ['wizard-services.js?v=2', 'segment-viewer.js?v=2'],
+                'wizard-main.js?v=2': ['wizard-services.js?v=2', 'segment-viewer.js?v=2', 'step-handlers.js?v=2']
             }
         };
     }

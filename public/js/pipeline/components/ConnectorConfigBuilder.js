@@ -29,14 +29,16 @@ class ConnectorConfigBuilder extends BaseStepConfigBuilder {
      * @param {Object} initialConfig - Initial step configuration
      * @param {string} direction - 'inbound' or 'outbound'
      */
-    constructor(container, initialConfig = {}, direction = 'outbound') {
+    constructor(container, initialConfig = {}, direction = 'outbound', panel = null) {
         super(container, initialConfig);
         this.direction = direction;
+        this._panel = panel;
         this.connectorTypes = [];
         this.selectedType = null;
         this.configSchema = null;
         this.parameterGroups = null;
         this.embeddedBuilders = {};
+        this._contentFieldAC = null;
     }
 
     // ========================================
@@ -47,10 +49,17 @@ class ConnectorConfigBuilder extends BaseStepConfigBuilder {
         return {
             connectorType: '',
             config: {},
-            contentField: this.direction === 'outbound' ? 'transformed' : '',
+            contentField: '',
             contentType: 'application/json',
             timeoutMs: 30000
         };
+    }
+
+    // Returns true if the currently selected connector uses MLLP and is inbound
+    get isMLLPInbound() {
+        return this.direction === 'inbound' &&
+            (this.config.connectorType === 'tcp_mllp_inbound' ||
+             (this.config.connectorType || '').includes('mllp'));
     }
 
     render() {
@@ -67,7 +76,40 @@ class ConnectorConfigBuilder extends BaseStepConfigBuilder {
         `);
         this.container.appendChild(header);
 
-        // Connector type selector (loading state initially)
+        // Tab bar — inbound: Connection | Acknowledgment; outbound: Connection | Payload
+        const tabBar = this.createElement('div', { class: 'connector-tab-bar', id: 'connectorTabBar' });
+        if (this.direction === 'inbound') {
+            tabBar.innerHTML = `
+                <button class="connector-tab active" data-tab="connection">
+                    <i class="fas fa-plug"></i> Connection
+                </button>
+                <button class="connector-tab" data-tab="acknowledgment" id="ackTabBtn" style="display:none">
+                    <i class="fas fa-reply"></i> Acknowledgment
+                </button>
+            `;
+        } else {
+            tabBar.innerHTML = `
+                <button class="connector-tab active" data-tab="connection">
+                    <i class="fas fa-plug"></i> Connection
+                </button>
+                <button class="connector-tab" data-tab="payload">
+                    <i class="fas fa-file-export"></i> Payload
+                </button>
+            `;
+        }
+        this.container.appendChild(tabBar);
+
+        // Tab panels wrapper
+        const panels = this.createElement('div', { class: 'connector-tab-panels' });
+
+        // ── Connection panel ──────────────────────────────────────────────────
+        const connPanel = this.createElement('div', {
+            class: 'connector-tab-panel',
+            id: 'connPanel-connection',
+            'data-panel': 'connection'
+        });
+
+        // Connector type selector
         const typeSection = this.createElement('div', { class: 'connector-type-section' });
         typeSection.innerHTML = `
             <div class="form-group">
@@ -78,37 +120,19 @@ class ConnectorConfigBuilder extends BaseStepConfigBuilder {
                 <small class="form-text text-muted connector-type-description"></small>
             </div>
         `;
-        this.container.appendChild(typeSection);
+        connPanel.appendChild(typeSection);
 
-        // Dynamic config section (populated when connector type is selected)
+        // Dynamic config section
         const configSection = this.createElement('div', {
             class: 'connector-dynamic-config',
             id: 'connectorDynamicConfig'
         });
-        this.container.appendChild(configSection);
+        connPanel.appendChild(configSection);
 
-        // Direction-specific fields
-        const extraFields = this.createElement('div', { class: 'connector-extra-fields' });
-        if (this.direction === 'outbound') {
-            extraFields.innerHTML = `
-                <div class="form-group">
-                    <label>Content Field</label>
-                    <input type="text" class="form-control connector-content-field"
-                           value="${this.escapeHtml(this.config.contentField || 'transformed')}"
-                           placeholder="e.g., transformed, fhirBundle">
-                    <small class="form-text text-muted">Which field from the pipeline data to send</small>
-                </div>
-                <div class="form-group">
-                    <label>Content Type</label>
-                    <select class="form-control connector-content-type">
-                        <option value="application/json" ${this.config.contentType === 'application/json' ? 'selected' : ''}>application/json</option>
-                        <option value="application/fhir+json" ${this.config.contentType === 'application/fhir+json' ? 'selected' : ''}>application/fhir+json</option>
-                        <option value="text/plain" ${this.config.contentType === 'text/plain' ? 'selected' : ''}>text/plain</option>
-                        <option value="application/hl7-v2" ${this.config.contentType === 'application/hl7-v2' ? 'selected' : ''}>application/hl7-v2</option>
-                    </select>
-                </div>
-            `;
-        } else {
+        // Direction-specific fields in Connection panel (inbound only - timeout)
+        // Outbound payload source / content-type moved to dedicated Payload tab
+        if (this.direction === 'inbound') {
+            const extraFields = this.createElement('div', { class: 'connector-extra-fields' });
             extraFields.innerHTML = `
                 <div class="form-group">
                     <label>Timeout (ms)</label>
@@ -118,8 +142,8 @@ class ConnectorConfigBuilder extends BaseStepConfigBuilder {
                     <small class="form-text text-muted">Maximum wait time for data fetch</small>
                 </div>
             `;
+            connPanel.appendChild(extraFields);
         }
-        this.container.appendChild(extraFields);
 
         // Test connection button
         const testSection = this.createElement('div', { class: 'connector-test-section' });
@@ -129,13 +153,235 @@ class ConnectorConfigBuilder extends BaseStepConfigBuilder {
             </button>
             <span class="test-connection-status"></span>
         `;
-        this.container.appendChild(testSection);
+        connPanel.appendChild(testSection);
+        panels.appendChild(connPanel);
+
+        // ── Acknowledgment panel (inbound only, rendered but hidden until MLLP selected) ──
+        if (this.direction === 'inbound') {
+            const ackPanel = this.createElement('div', {
+                class: 'connector-tab-panel',
+                id: 'connPanel-acknowledgment',
+                'data-panel': 'acknowledgment',
+                style: 'display:none'
+            });
+            ackPanel.appendChild(this._buildACKPanel());
+            panels.appendChild(ackPanel);
+        }
+
+        // ── Payload panel (outbound only) ──
+        if (this.direction === 'outbound') {
+            const payloadPanel = this.createElement('div', {
+                class: 'connector-tab-panel',
+                id: 'connPanel-payload',
+                'data-panel': 'payload',
+                style: 'display:none'
+            });
+            payloadPanel.appendChild(this._buildPayloadPanel());
+            panels.appendChild(payloadPanel);
+        }
+
+        this.container.appendChild(panels);
 
         // Load connector types from API
         this.loadConnectorTypes();
     }
 
+    _buildACKPanel() {
+        const ack = (this.config.config && this.config.config.ack) || {};
+        const mode = ack.mode || 'immediate';
+        const onError = ack.on_error || 'suppress';
+        const sendingApp = ack.sending_app || '';
+        const sendingFacility = ack.sending_facility || '';
+        const textSuccess = ack.text_success || '';
+        const textError = ack.text_error || '';
+        const script = ack.script || '';
+
+        const panel = this.createElement('div', { class: 'ack-config-panel' });
+        panel.innerHTML = `
+            <p class="text-muted" style="font-size:12px; margin-bottom:12px;">
+                Configure how this connector acknowledges received HL7 messages.
+                The script option (advanced) gives full control over the ACK content.
+            </p>
+
+            <div class="connector-config-group">
+                <div class="connector-config-group-header">
+                    <span class="connector-config-group-title"><i class="fas fa-cog"></i> Basic</span>
+                    <i class="fas fa-chevron-down connector-config-group-toggle"></i>
+                </div>
+                <div class="connector-config-group-body">
+                    <div class="form-group">
+                        <label>ACK Mode</label>
+                        <select class="form-control form-control-sm ack-field" data-ack-field="mode">
+                            <option value="immediate" selected>Immediate — AA sent as soon as message is accepted</option>
+                        </select>
+                        <small class="form-text text-muted">MLLP protocol requires every received message to get an acknowledgment — this cannot be disabled</small>
+                    </div>
+                    <div class="form-group">
+                        <label>On Error</label>
+                        <select class="form-control form-control-sm ack-field" data-ack-field="on_error">
+                            <option value="suppress" ${onError === 'suppress' ? 'selected' : ''}>Suppress — Sender always gets AA (handle errors internally)</option>
+                            <option value="nack" ${onError === 'nack' ? 'selected' : ''}>NACK — Send AE so sender can retry</option>
+                        </select>
+                        <small class="form-text text-muted">Applies when the message queue is full or a critical error occurs</small>
+                    </div>
+                </div>
+            </div>
+
+            <div class="connector-config-group collapsed">
+                <div class="connector-config-group-header">
+                    <span class="connector-config-group-title"><i class="fas fa-id-card"></i> Sender Identity</span>
+                    <i class="fas fa-chevron-down connector-config-group-toggle"></i>
+                </div>
+                <div class="connector-config-group-body">
+                    <div class="form-group">
+                        <label>Sending Application (MSH-3)</label>
+                        <input type="text" class="form-control form-control-sm ack-field" data-ack-field="sending_app"
+                               value="${this.escapeHtml(sendingApp)}" placeholder="Default: ezHealthKonnect">
+                    </div>
+                    <div class="form-group">
+                        <label>Sending Facility (MSH-4)</label>
+                        <input type="text" class="form-control form-control-sm ack-field" data-ack-field="sending_facility"
+                               value="${this.escapeHtml(sendingFacility)}" placeholder="Default: EHK">
+                    </div>
+                </div>
+            </div>
+
+            <div class="connector-config-group collapsed">
+                <div class="connector-config-group-header">
+                    <span class="connector-config-group-title"><i class="fas fa-comment-alt"></i> Message Text</span>
+                    <i class="fas fa-chevron-down connector-config-group-toggle"></i>
+                </div>
+                <div class="connector-config-group-body">
+                    <div class="form-group">
+                        <label>Success Text (MSA-3)</label>
+                        <input type="text" class="form-control form-control-sm ack-field" data-ack-field="text_success"
+                               value="${this.escapeHtml(textSuccess)}" placeholder="Default: Message received successfully">
+                    </div>
+                    <div class="form-group">
+                        <label>Error Text (MSA-3 on NACK)</label>
+                        <input type="text" class="form-control form-control-sm ack-field" data-ack-field="text_error"
+                               value="${this.escapeHtml(textError)}" placeholder="Default: Message processing error">
+                    </div>
+                </div>
+            </div>
+
+            <div class="connector-config-group collapsed">
+                <div class="connector-config-group-header">
+                    <span class="connector-config-group-title"><i class="fas fa-code"></i> Custom Script (Advanced)</span>
+                    <i class="fas fa-chevron-down connector-config-group-toggle"></i>
+                </div>
+                <div class="connector-config-group-body">
+                    <div class="ack-script-info">
+                        <div class="ack-script-info-title"><i class="fas fa-info-circle"></i> Script contract</div>
+                        <ul class="ack-script-info-list">
+                            <li>Function name must be <code>buildACK(msg)</code></li>
+                            <li>Return <code>{ ackCode, textMessage }</code> — valid codes: <code>AA</code> · <code>AE</code> · <code>AR</code></li>
+                            <li><code>msg</code> properties: <code>controlID</code>, <code>messageType</code>, <code>sendingApp</code>, <code>sendingFacility</code>, <code>raw</code>, <code>defaultCode</code>, <code>defaultText</code></li>
+                            <li>Errors or missing return values fall back to the configured default</li>
+                        </ul>
+                    </div>
+                    <textarea class="form-control ack-field ack-script-editor" data-ack-field="script"
+                              rows="10" spellcheck="false"
+                              placeholder="function buildACK(msg) {&#10;  if (msg.messageType !== 'ADT^A01') {&#10;    return { ackCode: 'AR', textMessage: 'Unsupported message type' };&#10;  }&#10;  return { ackCode: 'AA', textMessage: 'Accepted' };&#10;}">${this.escapeHtml(script)}</textarea>
+                </div>
+            </div>
+        `;
+
+        // Wire collapse toggles
+        panel.querySelectorAll('.connector-config-group-header').forEach(h => {
+            h.addEventListener('click', () => h.closest('.connector-config-group').classList.toggle('collapsed'));
+        });
+
+        // Wire change events
+        panel.querySelectorAll('.ack-field').forEach(el => {
+            el.addEventListener('input', () => this.onChange());
+            el.addEventListener('change', () => this.onChange());
+        });
+
+        return panel;
+    }
+
+    _buildPayloadPanel() {
+        const contentField = this.config.contentField || '';
+        const contentType = this.config.contentType || 'application/json';
+
+        const panel = this.createElement('div', { class: 'payload-config-panel' });
+        panel.innerHTML = `
+            <div class="form-group">
+                <label style="font-weight:600; font-size:13px;">Payload Source</label>
+                <input type="text" class="form-control connector-content-field"
+                       value="${this.escapeHtml(contentField)}"
+                       placeholder="Search pipeline variables or type a path..."
+                       autocomplete="off" spellcheck="false">
+                <div class="connector-payload-quickpick">
+                    <button type="button" class="connector-quickpick-btn" data-value="fhirBundle"
+                            title="FHIR Bundle from HL7→FHIR transform">
+                        <i class="fas fa-fire-alt"></i> FHIR Bundle
+                    </button>
+                    <button type="button" class="connector-quickpick-btn" data-value="raw"
+                            title="Original HL7 v2 wire-format string">
+                        <i class="fas fa-code"></i> HL7 Raw
+                    </button>
+                    <button type="button" class="connector-quickpick-btn" data-value="message"
+                            title="Full parsed message object (JSON)">
+                        <i class="fas fa-envelope-open-text"></i> Full Message
+                    </button>
+                    <button type="button" class="connector-quickpick-btn" data-value="payload"
+                            title="Output from a Payload Builder step">
+                        <i class="fas fa-file-export"></i> Payload Builder
+                    </button>
+                </div>
+                <small class="form-text text-muted">
+                    Start typing to search pipeline variables from the last test run.
+                    Quick-picks cover the most common sources.
+                </small>
+            </div>
+            <div class="form-group">
+                <label style="font-weight:600; font-size:13px;">Content Type</label>
+                <select class="form-control connector-content-type">
+                    <option value="application/json"     ${contentType === 'application/json'     ? 'selected' : ''}>application/json</option>
+                    <option value="application/fhir+json" ${contentType === 'application/fhir+json' ? 'selected' : ''}>application/fhir+json (FHIR R4)</option>
+                    <option value="application/hl7-v2"   ${contentType === 'application/hl7-v2'   ? 'selected' : ''}>application/hl7-v2 (HL7 v2)</option>
+                    <option value="text/plain"            ${contentType === 'text/plain'            ? 'selected' : ''}>text/plain</option>
+                    <option value="text/csv"              ${contentType === 'text/csv'              ? 'selected' : ''}>text/csv</option>
+                    <option value="application/xml"       ${contentType === 'application/xml'       ? 'selected' : ''}>application/xml (CDA / C-CDA)</option>
+                </select>
+                <small class="form-text text-muted">MIME type sent with the payload to the destination system</small>
+            </div>
+        `;
+
+        // Wire quick-pick buttons
+        panel.querySelectorAll('.connector-quickpick-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const val = btn.dataset.value;
+                const input = panel.querySelector('.connector-content-field');
+                if (input) {
+                    input.value = val;
+                    input.dispatchEvent(new Event('input', { bubbles: true }));
+                    this.onChange();
+                }
+            });
+        });
+
+        // Wire change events
+        panel.querySelector('.connector-content-type')?.addEventListener('change', () => this.onChange());
+
+        return panel;
+    }
+
     attachEvents() {
+        // Tab switching
+        this.container.querySelectorAll('.connector-tab').forEach(tab => {
+            tab.addEventListener('click', () => {
+                const target = tab.dataset.tab;
+                this.container.querySelectorAll('.connector-tab').forEach(t => t.classList.remove('active'));
+                tab.classList.add('active');
+                this.container.querySelectorAll('.connector-tab-panel').forEach(p => {
+                    p.style.display = p.dataset.panel === target ? '' : 'none';
+                });
+            });
+        });
+
         // Connector type dropdown change
         const typeSelect = this.container.querySelector('.connector-type-select');
         if (typeSelect) {
@@ -145,10 +391,37 @@ class ConnectorConfigBuilder extends BaseStepConfigBuilder {
             });
         }
 
-        // Extra fields
+        // Payload source field (outbound only) — attach variable autocomplete
         const contentField = this.container.querySelector('.connector-content-field');
         if (contentField) {
             contentField.addEventListener('input', () => this.onChange());
+            if (this.direction === 'outbound' && window.FieldPathSearchComponent) {
+                try {
+                    const commonVars = [
+                        { name: 'fhirBundle',    path: 'fhirBundle',    description: 'FHIR Bundle from HL7→FHIR transform', category: 'Pipeline Variables' },
+                        { name: 'raw',           path: 'raw',           description: 'Original HL7 v2 wire-format string',  category: 'Pipeline Variables' },
+                        { name: 'message',       path: 'message',       description: 'Full parsed message object (JSON)',    category: 'Pipeline Variables' },
+                        { name: 'payload',       path: 'payload',       description: 'Output from a Payload Builder step',  category: 'Pipeline Variables' },
+                        { name: 'fhir_bundle',   path: 'fhir_bundle',   description: 'FHIR Bundle (snake_case key)',         category: 'Pipeline Variables' },
+                        { name: 'transformed',   path: 'transformed',   description: 'Output of the last transform step',   category: 'Pipeline Variables' },
+                    ];
+                    this._contentFieldAC = new FieldPathSearchComponent(contentField, {
+                        placeholder: 'Search pipeline variables...',
+                        allowCustom: true,
+                        includeHL7Fields: false,
+                        maxSuggestions: 20,
+                        additionalFields: commonVars,
+                        getStepVariables: () => {
+                            if (this._panel && typeof this._panel.getStepVariablesForSearch === 'function') {
+                                return this._panel.getStepVariablesForSearch();
+                            }
+                            return [];
+                        },
+                    });
+                } catch (e) {
+                    console.warn('[ConnectorConfigBuilder] FieldPathSearchComponent init failed:', e);
+                }
+            }
         }
 
         const contentType = this.container.querySelector('.connector-content-type');
@@ -340,6 +613,150 @@ class ConnectorConfigBuilder extends BaseStepConfigBuilder {
                 padding: 12px;
                 background: #eef2ff;
             }
+
+            /* Tab bar */
+            .connector-tab-bar {
+                display: flex;
+                gap: 4px;
+                border-bottom: 2px solid #e2e8f0;
+                margin-bottom: 16px;
+            }
+
+            .connector-tab {
+                background: none;
+                border: none;
+                border-bottom: 2px solid transparent;
+                margin-bottom: -2px;
+                padding: 7px 14px;
+                font-size: 13px;
+                font-weight: 500;
+                color: #64748b;
+                cursor: pointer;
+                border-radius: 4px 4px 0 0;
+                display: flex;
+                align-items: center;
+                gap: 5px;
+                transition: color 0.15s, border-color 0.15s;
+            }
+
+            .connector-tab:hover {
+                color: #334155;
+                background: #f1f5f9;
+            }
+
+            .connector-tab.active {
+                color: #6366f1;
+                border-bottom-color: #6366f1;
+                background: none;
+            }
+
+            .connector-tab-panels {
+                /* no extra styling needed */
+            }
+
+            /* ACK panel */
+            .ack-config-panel {
+                padding: 0;
+            }
+
+            /* Script info box */
+            .ack-script-info {
+                background: #f0f4ff;
+                border: 1px solid #c7d2fe;
+                border-radius: 6px;
+                padding: 10px 14px;
+                margin-bottom: 10px;
+                font-size: 12px;
+            }
+            .ack-script-info-title {
+                font-weight: 600;
+                color: #4338ca;
+                margin-bottom: 6px;
+            }
+            .ack-script-info-list {
+                margin: 0;
+                padding-left: 18px;
+                color: #374151;
+                line-height: 1.7;
+            }
+            .ack-script-info-list code {
+                background: #e0e7ff;
+                color: #3730a3;
+                padding: 1px 4px;
+                border-radius: 3px;
+                font-size: 11px;
+            }
+
+            /* Code editor textarea */
+            .ack-script-editor {
+                width: 100%;
+                box-sizing: border-box;
+                display: block;
+                font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+                font-size: 12px;
+                line-height: 1.5;
+                background: #1e1e2e;
+                color: #cdd6f4;
+                border: 1px solid #45475a;
+                border-radius: 6px;
+                padding: 10px 12px;
+                resize: vertical;
+                min-height: 180px;
+                tab-size: 2;
+                white-space: pre;
+                overflow-wrap: normal;
+                overflow-x: auto;
+            }
+            .ack-script-editor::placeholder {
+                color: #585b70;
+            }
+            .ack-script-editor:focus {
+                outline: none;
+                border-color: #6366f1;
+                box-shadow: 0 0 0 2px rgba(99,102,241,0.2);
+            }
+
+            /* Payload panel */
+            .payload-config-panel {
+                padding: 0;
+            }
+            .payload-config-panel .form-group {
+                margin-bottom: 16px;
+            }
+
+            /* Quick-pick chips below the payload source input */
+            .connector-payload-quickpick {
+                display: flex;
+                flex-wrap: wrap;
+                gap: 6px;
+                margin-top: 8px;
+            }
+
+            .connector-quickpick-btn {
+                display: inline-flex;
+                align-items: center;
+                gap: 4px;
+                padding: 3px 10px;
+                font-size: 12px;
+                font-weight: 500;
+                color: #4f46e5;
+                background: #eef2ff;
+                border: 1px solid #c7d2fe;
+                border-radius: 20px;
+                cursor: pointer;
+                transition: background 0.15s, border-color 0.15s, color 0.15s;
+                white-space: nowrap;
+            }
+
+            .connector-quickpick-btn:hover {
+                background: #e0e7ff;
+                border-color: #a5b4fc;
+                color: #3730a3;
+            }
+
+            .connector-quickpick-btn i {
+                font-size: 11px;
+            }
         `;
         document.head.appendChild(style);
     }
@@ -357,22 +774,36 @@ class ConnectorConfigBuilder extends BaseStepConfigBuilder {
             const types = response.data || response || [];
             this.connectorTypes = types;
 
+            // Type name aliases: DB may store 'tcp_mllp' while step config stores 'tcp_mllp_inbound'
+            const TYPE_ALIASES = {
+                'tcp_mllp_inbound': 'tcp_mllp',   'tcp_mllp': 'tcp_mllp_inbound',
+                'http_rest_inbound': 'http_rest',  'http_rest': 'http_rest_inbound'
+            };
+            const storedType = this.config.connectorType || '';
+
             // Build dropdown options
             typeSelect.innerHTML = '<option value="">-- Select Connector Type --</option>';
+            let matchedTypeName = '';
             types.forEach(ct => {
                 const option = document.createElement('option');
                 option.value = ct.type_name;
                 option.textContent = `${ct.icon || ''} ${ct.display_name}`;
                 if (ct.is_beta) option.textContent += ' (Beta)';
-                if (ct.type_name === this.config.connectorType) {
+                const isMatch = ct.type_name === storedType || ct.type_name === TYPE_ALIASES[storedType];
+                if (isMatch) {
                     option.selected = true;
+                    matchedTypeName = ct.type_name;
                 }
                 typeSelect.appendChild(option);
             });
 
             // If we have a pre-selected connector type, load its config
-            if (this.config.connectorType) {
-                this.onConnectorTypeChange(this.config.connectorType);
+            if (storedType) {
+                this.onConnectorTypeChange(storedType);
+                // Ensure dropdown reflects the DB type name (the option's value)
+                if (matchedTypeName && matchedTypeName !== storedType) {
+                    typeSelect.value = matchedTypeName;
+                }
             }
 
             // Enable test button if type is selected
@@ -387,6 +818,13 @@ class ConnectorConfigBuilder extends BaseStepConfigBuilder {
 
     onConnectorTypeChange(typeName) {
         this.config.connectorType = typeName;
+
+        // Update ACK tab visibility immediately — isMLLPInbound is pure (no API dependency)
+        const ackTabBtn = this.container.querySelector('#ackTabBtn');
+        if (ackTabBtn) {
+            ackTabBtn.style.display = this.isMLLPInbound ? '' : 'none';
+        }
+
         const configContainer = this.container.querySelector('#connectorDynamicConfig');
         if (!configContainer) return;
 
@@ -406,8 +844,16 @@ class ConnectorConfigBuilder extends BaseStepConfigBuilder {
             return;
         }
 
-        // Find the selected type data
-        this.selectedType = this.connectorTypes.find(ct => ct.type_name === typeName);
+        // Find the selected type data — try exact match first, then aliases
+        // (DB stores 'tcp_mllp' but wizard may write 'tcp_mllp_inbound'; engine accepts both)
+        const TYPE_ALIASES = {
+            'tcp_mllp_inbound': 'tcp_mllp',
+            'tcp_mllp': 'tcp_mllp_inbound',
+            'http_rest_inbound': 'http_rest',
+            'http_rest': 'http_rest_inbound'
+        };
+        this.selectedType = this.connectorTypes.find(ct => ct.type_name === typeName)
+            || this.connectorTypes.find(ct => ct.type_name === TYPE_ALIASES[typeName]);
         if (!this.selectedType) {
             configContainer.innerHTML = '<div class="connector-no-config">Connector type not found</div>';
             this.updateTestButton();
@@ -420,6 +866,27 @@ class ConnectorConfigBuilder extends BaseStepConfigBuilder {
         this.updateTypeDescription(this.selectedType.description || '');
         this.renderDynamicConfig(configContainer);
         this.updateTestButton();
+
+        // Set smart default contentField when unset (outbound only)
+        if (this.direction === 'outbound') {
+            const contentFieldInput = this.container.querySelector('.connector-content-field');
+            if (contentFieldInput && !contentFieldInput.value) {
+                const smartDefault = this._getSmartContentFieldDefault(typeName);
+                if (smartDefault) {
+                    contentFieldInput.value = smartDefault;
+                    this.config.contentField = smartDefault;
+                }
+            }
+        }
+    }
+
+    /** Returns a sensible default payload source path for the given outbound connector type. */
+    _getSmartContentFieldDefault(connectorType) {
+        const name = (connectorType || '').toLowerCase();
+        if (name.includes('mllp') || name.includes('tcp')) return 'raw';
+        if (name.includes('http')) return 'fhirBundle';
+        // File, MQ, cloud storage, DB — send the whole message object
+        return 'message';
     }
 
     // ========================================
@@ -666,9 +1133,10 @@ class ConnectorConfigBuilder extends BaseStepConfigBuilder {
         } else {
             // Default: text input (or password for sensitive fields)
             inputEl = document.createElement('input');
-            const isSensitive = fieldName.toLowerCase().includes('password') ||
+            const isSensitive = schema.format === 'password' ||
+                                fieldName.toLowerCase().includes('password') ||
                                 fieldName.toLowerCase().includes('secret') ||
-                                fieldName.toLowerCase().includes('key') && !fieldName.toLowerCase().includes('key_path');
+                                (fieldName.toLowerCase().includes('key') && !fieldName.toLowerCase().includes('key_path'));
             inputEl.type = isSensitive ? 'password' : 'text';
             inputEl.className = 'form-control form-control-sm connector-config-field';
             inputEl.dataset.field = fieldName;
@@ -692,6 +1160,29 @@ class ConnectorConfigBuilder extends BaseStepConfigBuilder {
         const isHTTP = typeName.includes('http');
         const authType = existingConfig.authentication_type || '';
 
+        // Credential fields: show/hide based on authentication_type selection
+        if (isHTTP) {
+            const authTypeField = container.querySelector('.connector-config-field[data-field="authentication_type"]');
+            if (authTypeField) {
+                const applyAuthVisibility = (type) => {
+                    const show = (field, visible) => {
+                        const input = container.querySelector(`.connector-config-field[data-field="${field}"]`);
+                        const el = input?.closest('.form-group');
+                        if (el) el.style.display = visible ? '' : 'none';
+                    };
+                    show('username',      type === 'basic_auth');
+                    show('password',      type === 'basic_auth');
+                    show('bearer_token',  type === 'bearer_token');
+                    show('api_key',       type === 'api_key');
+                    show('api_key_header', type === 'api_key');
+                };
+                // Apply on load
+                applyAuthVisibility(authType);
+                // Apply on change
+                authTypeField.addEventListener('change', () => applyAuthVisibility(authTypeField.value));
+            }
+        }
+
         // OAuth2 only for HTTP connectors when authentication_type is 'oauth2'
         if (isHTTP && typeof OAuth2ConfigBuilder !== 'undefined') {
             const authSection = this.createElement('div', {
@@ -712,10 +1203,10 @@ class ConnectorConfigBuilder extends BaseStepConfigBuilder {
             this.embeddedBuilders.oauth2 = authBuilder;
 
             // Listen for authentication_type changes to show/hide OAuth2
-            const authTypeField = container.querySelector('.connector-config-field[data-field="authentication_type"]');
-            if (authTypeField) {
-                authTypeField.addEventListener('change', () => {
-                    authSection.style.display = authTypeField.value === 'oauth2' ? '' : 'none';
+            const authTypeField2 = container.querySelector('.connector-config-field[data-field="authentication_type"]');
+            if (authTypeField2) {
+                authTypeField2.addEventListener('change', () => {
+                    authSection.style.display = authTypeField2.value === 'oauth2' ? '' : 'none';
                 });
             }
         }
@@ -774,6 +1265,21 @@ class ConnectorConfigBuilder extends BaseStepConfigBuilder {
             config.headers = headerConfig;
         }
 
+        // Collect ACK config from acknowledgment tab (inbound MLLP only)
+        const ackFields = this.container.querySelectorAll('.ack-field');
+        if (ackFields.length > 0) {
+            const ackConfig = {};
+            ackFields.forEach(el => {
+                const key = el.dataset.ackField;
+                if (key) ackConfig[key] = el.value.trim();
+            });
+            // Only attach if at least one field is non-default
+            const hasACKConfig = Object.values(ackConfig).some(v => v !== '');
+            if (hasACKConfig) {
+                config.ack = ackConfig;
+            }
+        }
+
         // Build final step config
         const stepConfig = {
             connectorType: this.config.connectorType || '',
@@ -784,7 +1290,7 @@ class ConnectorConfigBuilder extends BaseStepConfigBuilder {
         if (this.direction === 'outbound') {
             const contentField = this.container.querySelector('.connector-content-field');
             const contentType = this.container.querySelector('.connector-content-type');
-            stepConfig.contentField = contentField ? contentField.value.trim() : 'transformed';
+            stepConfig.contentField = contentField ? contentField.value.trim() : '';
             stepConfig.contentType = contentType ? contentType.value : 'application/json';
         } else {
             const timeoutField = this.container.querySelector('.connector-timeout');
@@ -820,6 +1326,11 @@ class ConnectorConfigBuilder extends BaseStepConfigBuilder {
     }
 
     destroy() {
+        // Destroy payload source autocomplete
+        if (this._contentFieldAC && typeof this._contentFieldAC.destroy === 'function') {
+            this._contentFieldAC.destroy();
+            this._contentFieldAC = null;
+        }
         // Destroy embedded builders first
         Object.values(this.embeddedBuilders).forEach(b => {
             if (b && typeof b.destroy === 'function') b.destroy();

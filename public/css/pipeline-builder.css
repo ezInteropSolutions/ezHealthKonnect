@@ -4290,6 +4290,47 @@ body.connection-dragging .input-port {
 }
 
 /* ── Remove Duplicates no-code UI ────────────────────────── */
+
+/* Missing btn-outline classes (used by RD and other builders) */
+.btn-outline-primary {
+    background: transparent;
+    border: 1.5px solid var(--primary-color, #1e3a8a);
+    color: var(--primary-color, #1e3a8a);
+    border-radius: 0.375rem;
+    cursor: pointer;
+    font-size: 0.8rem;
+    padding: 0.3rem 0.75rem;
+    font-weight: 500;
+    transition: background 0.15s, color 0.15s;
+    line-height: 1.4;
+}
+.btn-outline-primary:hover:not(:disabled) {
+    background: var(--primary-color, #1e3a8a);
+    color: #fff;
+}
+.btn-outline-secondary {
+    background: transparent;
+    border: 1.5px solid var(--border-color, #e2e8f0);
+    color: var(--text-secondary, #64748b);
+    border-radius: 0.375rem;
+    cursor: pointer;
+    font-size: 0.8rem;
+    padding: 0.3rem 0.75rem;
+    font-weight: 500;
+    transition: background 0.15s, border-color 0.15s, color 0.15s;
+    line-height: 1.4;
+}
+.btn-outline-secondary:hover:not(:disabled) {
+    background: var(--bg-tertiary, #f1f5f9);
+    border-color: var(--border-hover, #cbd5e1);
+    color: var(--text-primary, #0f172a);
+}
+.btn-sm {
+    font-size: 0.8rem;
+    padding: 0.3rem 0.75rem;
+}
+
+/* Key field chips */
 .rd-chips-container {
     display: flex;
     flex-wrap: wrap;
@@ -4297,7 +4338,7 @@ body.connection-dragging .input-port {
     min-height: 36px;
     padding: 6px 8px;
     background: var(--bg-secondary, #f8f9fa);
-    border: 1px solid var(--border-color, #dee2e6);
+    border: 1px solid var(--border-color, #e2e8f0);
     border-radius: 6px;
     margin-bottom: 6px;
 }
@@ -4306,11 +4347,11 @@ body.connection-dragging .input-port {
     display: inline-flex;
     align-items: center;
     gap: 4px;
-    background: var(--primary-light, #dbeafe);
-    color: var(--primary, #1d4ed8);
-    border: 1px solid var(--primary-border, #93c5fd);
+    background: rgba(30, 58, 138, 0.08);
+    color: var(--primary-color, #1e3a8a);
+    border: 1px solid rgba(30, 58, 138, 0.25);
     border-radius: 20px;
-    padding: 2px 10px 2px 10px;
+    padding: 2px 10px;
     font-size: 12px;
     font-weight: 500;
     white-space: nowrap;
@@ -4320,11 +4361,11 @@ body.connection-dragging .input-port {
     background: none;
     border: none;
     cursor: pointer;
-    color: var(--primary, #1d4ed8);
+    color: var(--primary-color, #1e3a8a);
     font-size: 14px;
     line-height: 1;
     padding: 0 0 0 2px;
-    opacity: 0.7;
+    opacity: 0.6;
     transition: opacity 0.1s;
 }
 .rd-chip-remove:hover { opacity: 1; }
@@ -4335,36 +4376,37 @@ body.connection-dragging .input-port {
     align-items: center;
 }
 
-/* Styled radio button group for strategy + null-key */
+/* Strategy radio group — 3-column horizontal grid */
 .rd-radio-group {
-    display: flex;
-    flex-direction: column;
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
     gap: 6px;
 }
 
 .rd-radio-option {
     display: flex;
+    flex-direction: column;
     align-items: flex-start;
-    gap: 10px;
-    padding: 10px 12px;
-    border: 1px solid var(--border-color, #dee2e6);
+    gap: 4px;
+    padding: 9px 10px;
+    border: 1.5px solid var(--border-color, #e2e8f0);
     border-radius: 8px;
     cursor: pointer;
     transition: border-color 0.15s, background 0.15s;
     background: var(--bg-primary, #fff);
 }
 .rd-radio-option:hover {
-    border-color: var(--primary, #3b82f6);
-    background: var(--primary-light, #eff6ff);
+    border-color: var(--primary-color, #1e3a8a);
+    background: rgba(30, 58, 138, 0.04);
 }
 .rd-radio-option.active {
-    border-color: var(--primary, #3b82f6);
-    background: var(--primary-light, #eff6ff);
+    border-color: var(--primary-color, #1e3a8a);
+    background: rgba(30, 58, 138, 0.06);
 }
 .rd-radio-option input[type="radio"] {
-    margin-top: 2px;
     flex-shrink: 0;
-    accent-color: var(--primary, #3b82f6);
+    accent-color: var(--primary-color, #1e3a8a);
+    margin-bottom: 2px;
 }
 .rd-radio-content {
     display: flex;
@@ -4372,75 +4414,81 @@ body.connection-dragging .input-port {
     gap: 2px;
 }
 .rd-radio-title {
-    font-size: 13px;
+    font-size: 12px;
     font-weight: 600;
-    color: var(--text-primary, #1a1a2e);
+    color: var(--text-primary, #0f172a);
 }
 .rd-radio-desc {
-    font-size: 11px;
-    color: var(--text-muted, #6b7280);
-}
-
-/* Compact variant for 3-option null-key group */
-.rd-radio-group-sm .rd-radio-option {
-    padding: 7px 12px;
-}
-.rd-radio-group-sm .rd-radio-desc {
+    font-size: 10px;
+    color: var(--text-secondary, #64748b);
     display: none;
+    line-height: 1.4;
 }
-.rd-radio-group-sm .rd-radio-option:hover .rd-radio-desc,
-.rd-radio-group-sm .rd-radio-option.active .rd-radio-desc {
+.rd-radio-option:hover .rd-radio-desc,
+.rd-radio-option.active .rd-radio-desc {
     display: block;
 }
 
-/* Candidates popover */
+/* Candidates popover — fixed-position (appended to body) */
 .rd-candidates-popover {
-    position: absolute;
-    z-index: 1000;
+    position: fixed;
+    z-index: 999999;
     background: var(--bg-primary, #fff);
-    border: 1px solid var(--border-color, #dee2e6);
+    border: 1px solid var(--border-color, #e2e8f0);
     border-radius: 8px;
-    box-shadow: 0 4px 16px rgba(0,0,0,0.12);
+    box-shadow: var(--shadow-lg, 0 10px 15px -3px rgba(0,0,0,0.1)), 0 4px 6px -2px rgba(0,0,0,0.05);
     min-width: 220px;
     max-width: 320px;
-    max-height: 260px;
     overflow: hidden;
-    display: flex;
-    flex-direction: column;
-    margin-top: 4px;
+    font-size: 13px;
 }
-.rd-candidates-header {
+.rd-pop-header {
     display: flex;
-    justify-content: space-between;
     align-items: center;
+    justify-content: space-between;
     padding: 8px 12px;
-    border-bottom: 1px solid var(--border-color, #dee2e6);
-    font-size: 12px;
+    background: rgba(30, 58, 138, 0.07);
+    border-bottom: 1px solid rgba(30, 58, 138, 0.12);
+    font-size: 11px;
     font-weight: 600;
-    color: var(--text-muted, #6b7280);
+    color: var(--primary-color, #1e3a8a);
 }
-.rd-candidates-list {
-    overflow-y: auto;
-    padding: 6px;
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-}
-.rd-candidate-item {
-    text-align: left;
-    padding: 6px 10px;
-    border: none;
+.rd-pop-header-close {
     background: none;
-    border-radius: 5px;
-    font-size: 12px;
+    border: none;
     cursor: pointer;
-    color: var(--text-primary, #1a1a2e);
-    transition: background 0.1s;
+    font-size: 16px;
+    line-height: 1;
+    color: var(--text-secondary, #64748b);
+    padding: 0 2px;
+    opacity: 0.7;
 }
-.rd-candidate-item:hover { background: var(--primary-light, #eff6ff); }
-.rd-candidate-item.rd-candidate-added {
-    color: var(--text-muted, #6b7280);
-    text-decoration: line-through;
+.rd-pop-header-close:hover { opacity: 1; color: var(--primary-color, #1e3a8a); }
+.rd-pop-items {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    padding: 10px 12px;
+}
+.rd-candidate-pill {
+    background: rgba(30, 58, 138, 0.06);
+    border: 1px solid rgba(30, 58, 138, 0.2);
+    border-radius: 20px;
+    padding: 3px 11px;
+    cursor: pointer;
+    font-size: 12px;
+    color: var(--primary-color, #1e3a8a);
+    font-family: monospace;
+    transition: background 0.15s, border-color 0.15s;
+}
+.rd-candidate-pill:hover:not(:disabled) {
+    background: rgba(30, 58, 138, 0.14);
+    border-color: rgba(30, 58, 138, 0.4);
+}
+.rd-candidate-pill:disabled {
+    background: rgba(34, 197, 94, 0.1);
+    border-color: rgba(34, 197, 94, 0.4);
+    color: #166534;
     cursor: default;
 }
 

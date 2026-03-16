@@ -56,62 +56,111 @@
     font-weight: 500;
 }
 
-/* Main Content Layout */
+/* Main Content Layout — flex:1 fills space inside .dashboard-container */
 .main-content {
-    padding: 20px;
+    padding: 8px;
     background: #f9fafb;
-    min-height: 100vh;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;  /* scrolling happens inside .table-container */
+    min-height: 0;     /* allow flex shrink below content size */
+    min-width: 0;
 }
 
-/* Interfaces Section */
-.interfaces-section {
-    background: white;
-    border-radius: 12px;
-    border: 2px solid #f8bbd9;
-    padding: 0;
-    margin-top: 20px;
+/* Interfaces table wrapper — must be flex column so .interfaces-section can grow */
+#interfaces-table-container {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
     overflow: hidden;
 }
 
+/* Header above table — fixed height, never grows */
+#interface-header-container {
+    flex-shrink: 0;
+}
+
+/* Engine status bar — compact, fixed height */
+.engine-control-panel {
+    flex-shrink: 0;
+    padding: 10px 16px;   /* interface-cards.css sets 20px — reduce to reclaim space */
+    margin-bottom: 6px;   /* interface-cards.css sets 24px — reduce to reclaim space */
+    border-radius: 6px;
+}
+
+/* Interfaces Section — fills all remaining space */
+.interfaces-section {
+    background: white;
+    border-radius: 8px;
+    border: 1px solid #f8bbd9;
+    padding: 0;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    min-height: 0;
+}
+
+/* Filter bar — auto height, never clips */
 .section-header {
     background: linear-gradient(135deg, #f9fafb 0%, white 100%);
     border-bottom: 1px solid #f8bbd9;
-    padding: 20px 24px;
+    padding: 8px 12px;
     display: flex;
-    justify-content: space-between;
+    justify-content: flex-end;
     align-items: center;
+    flex-shrink: 0;
+    height: auto;
+    min-height: 50px;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+/* Scrollable table area */
+.table-container {
+    flex: 1;
+    overflow: auto;
+    min-height: 0;
+}
+
+/* Pagination footer — always pinned at bottom */
+.table-footer {
+    flex-shrink: 0;
 }
 
 .section-title {
-    font-size: 18px;
+    font-size: 14px;
     font-weight: 700;
     color: #1e3a8a;
     margin: 0;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
 }
 
-/* Header Layout */
+/* Header Layout — compact to leave max space for table */
 .main-header {
     background: white;
-    border: 2px solid #f8bbd9;
-    border-radius: 12px;
-    margin-bottom: 24px;
-    padding: 20px 24px;
+    border: 1px solid #f8bbd9;
+    border-radius: 6px;
+    margin-bottom: 6px;
+    padding: 8px 12px;
     display: flex;
     justify-content: space-between;
     align-items: center;
+    flex-shrink: 0;
+    height: 50px;
+    gap: 12px;
 }
 
 .page-title {
-    font-size: 28px;
+    font-size: 16px;
     font-weight: 700;
     color: #1e3a8a;
-    margin: 0 0 8px 0;
+    margin: 0;
 }
 
 .page-subtitle {
-    font-size: 14px;
+    font-size: 11px;
     color: #6b7280;
     margin: 0;
 }
@@ -144,48 +193,57 @@
 }
 
 .status-tile {
-    background: linear-gradient(135deg, #f8f9ff 0%, #ffffff 100%);
+    background: white;
     border: 1px solid #e2e8f0;
     border-radius: 8px;
-    padding: 8px 12px;
-    text-align: center;
-    min-width: 70px;
+    padding: 5px 10px;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    min-width: 0;
 }
 
 .status-tile-value {
-    display: block;
-    font-size: 16px;
+    font-size: 14px;
     font-weight: 700;
     color: #1e3a8a;
     line-height: 1;
 }
 
 .status-tile-label {
-    display: block;
     font-size: 10px;
     color: #6b7280;
     text-transform: uppercase;
-    letter-spacing: 0.5px;
-    margin-top: 2px;
+    letter-spacing: 0.4px;
 }
 
+/* Icon sits to the left; colour variants */
 .status-tile-icon {
-    font-size: 14px;
-    margin-right: 4px;
+    font-size: 12px;
+    color: #94a3b8;
+    flex-shrink: 0;
 }
+.tile-icon-running { color: #10b981; }
+.tile-icon-stopped { color: #94a3b8; }
+.tile-icon-paused  { color: #f59e0b; }
+.tile-icon-auto    { color: #3b82f6; }
 
 /* Section Filters */
 .section-filters {
     display: flex;
-    gap: 12px;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
 }
 
 .filter-select {
-    padding: 8px 12px;
-    border: 1px solid #e2e8f0;
-    border-radius: 6px;
-    font-size: 14px;
-    min-width: 160px;
+    padding: 5px 8px;
+    border: 1px solid #f8bbd9;
+    border-radius: 5px;
+    font-size: 12px;
+    height: 32px;
+    background: white;
+    cursor: pointer;
 }
 
 /* Responsive Design */

@@ -73,7 +73,6 @@ func (e *ScriptEnrichmentExecutor) Execute(
 		// STANDARDIZED: No variables on error + execution details
 		e.SetStepOutputWithDetails(inputData, map[string]interface{}{}, map[string]interface{}{
 			"script_error": err.Error(),
-			"target_path":  config.TargetPath,
 		})
 
 		// Always return error — pipeline service decides retry/catch behavior
@@ -81,16 +80,9 @@ func (e *ScriptEnrichmentExecutor) Execute(
 		return inputData, err
 	}
 
-	// Store result in target path
-	targetPath := config.TargetPath
-	if targetPath == "" {
-		targetPath = "enriched.script"
-	}
-
-	executors.SetNestedValue(inputData, targetPath, result)
-
-	// STANDARDIZED: Set step output for tracking
-	// Store the actual script result directly (flatten if it's a map)
+	// STANDARDIZED: Set step output for tracking.
+	// P7: stop writing to enriched.script; _stepOutput is the canonical output.
+	// Downstream steps access via steps.{ns}.step_output.{field}.
 	var variables map[string]interface{}
 
 	// Debug: Log the actual result type and value
@@ -109,11 +101,9 @@ func (e *ScriptEnrichmentExecutor) Execute(
 	}
 
 	// STANDARDIZED: Variables (script output) + execution details
-	e.SetStepOutputWithDetails(inputData, variables, map[string]interface{}{
-		"target_path": targetPath,
-	})
+	e.SetStepOutputWithDetails(inputData, variables, map[string]interface{}{})
 
-	log.Printf("✅ [Script Enrichment] Result stored at: %s", targetPath)
+	log.Printf("✅ [Script Enrichment] Script executed successfully")
 	e.PostExecute(ctx, step, nil, time.Since(start))
 
 	return inputData, nil
@@ -215,9 +205,17 @@ func (e *ScriptEnrichmentExecutor) executeScript(
 			log.Printf("   ⚠️  'enriched' key not found or not a map in inputData!")
 		}
 
-		// Set input data in VM (DEPRECATED - use $vars instead)
+		// Set input data in VM (read-only view of the pipeline message)
 		if err := vm.Set("input", inputData); err != nil {
 			errorChan <- fmt.Errorf("failed to set input data: %w", err)
+			return
+		}
+
+		// Pre-inject an empty `output` object so scripts can write to it without
+		// declaring it first.  If the script neither returns a value nor modifies
+		// output, the step produces an empty step_output (no-op, not an error).
+		if err := vm.Set("output", map[string]interface{}{}); err != nil {
+			errorChan <- fmt.Errorf("failed to set output object: %w", err)
 			return
 		}
 
@@ -262,8 +260,19 @@ func (e *ScriptEnrichmentExecutor) executeScript(
 			return
 		}
 
-		// Export the result
-		result := value.Export()
+		// Determine the result:
+		//  1. If the script returned a non-undefined, non-null value → use it.
+		//  2. Otherwise fall back to the `output` variable the script may have
+		//     mutated (e.g. `output.patientId = "123"` without an explicit return).
+		var result interface{}
+		if exported := value.Export(); exported != nil {
+			result = exported
+		} else {
+			outputVal := vm.Get("output")
+			if outputVal != nil && !goja.IsUndefined(outputVal) && !goja.IsNull(outputVal) {
+				result = outputVal.Export()
+			}
+		}
 		resultChan <- result
 	}()
 
@@ -390,8 +399,8 @@ func (e *ScriptEnrichmentExecutor) GetConfigSchema() map[string]interface{} {
 			},
 			"targetPath": map[string]interface{}{
 				"type":        "string",
-				"description": "Where to store the script result",
-				"default":     "enriched.script",
+				"description": "Deprecated (P7): script output is now accessed via steps.{ns}.step_output.*",
+				"deprecated":  true,
 			},
 			"timeoutMs": map[string]interface{}{
 				"type":        "integer",

@@ -31,21 +31,21 @@ func NewNormalizerExecutor() *NormalizerExecutor {
 type normalizerConfig struct {
 	Operation    string            `json:"operation"`    // "normalize", "pivot", "transpose", "flatten", "unflatten"
 	SourceField  string            `json:"sourceField"`  // Path to source data
+	OutputField  string            `json:"outputField"`  // Path to write result (blank = overwrite sourceField)
 	// Normalize config
-	NormalizeFields []string       `json:"normalizeFields"` // Fields to normalize into rows
+	NormalizeFields []string       `json:"normalizeFields"` // Fields to normalize into rows (empty = all)
 	KeyColumn       string         `json:"keyColumn"`       // Name for the key column
 	ValueColumn     string         `json:"valueColumn"`     // Name for the value column
-	PreserveFields  []string       `json:"preserveFields"`  // Fields to keep in each row
+	PreserveFields  []string       `json:"preserveFields"`  // Fields to carry into every output row
 	// Pivot config
-	PivotField   string            `json:"pivotField"`   // Field whose values become columns
-	ValueField   string            `json:"valueField"`   // Field to use as values
-	GroupBy      []string          `json:"groupBy"`      // Fields to group by
-	// Flatten config
+	PivotField   string            `json:"pivotField"`   // Field whose values become column headers
+	ValueField   string            `json:"valueField"`   // Field whose values fill the new columns
+	GroupBy      []string          `json:"groupBy"`      // Fields that define a unique output row
+	// Flatten / Unflatten config
 	Delimiter    string            `json:"delimiter"`    // Separator for flattened keys (default: ".")
-	MaxDepth     int               `json:"maxDepth"`     // Max depth for flattening (0 = unlimited)
-	// Column rename
-	RenameMap    map[string]string `json:"renameMap"`    // Old name -> new name
-	// Case transform
+	MaxDepth     int               `json:"maxDepth"`     // Max flatten depth (0 = unlimited)
+	// Post-processing
+	RenameMap    map[string]string `json:"renameMap"`    // Old column name -> new column name
 	CaseTransform string           `json:"caseTransform"` // "lower", "upper", "camel", "snake"
 }
 
@@ -120,22 +120,30 @@ func (e *NormalizerExecutor) Execute(
 		result = e.applyCaseTransform(result, config.CaseTransform)
 	}
 
-	// Store result back at the source field (in-place transformation)
-	if config.SourceField != "" {
-		executors.UpdateFieldValue(outputData, config.SourceField, result)
+	// Write result: outputField takes priority; falls back to overwriting sourceField
+	targetField := config.OutputField
+	if targetField == "" {
+		targetField = config.SourceField
+	}
+	if targetField != "" {
+		executors.UpdateFieldValue(outputData, targetField, result)
 	}
 
 	durationMs := time.Since(startTime).Milliseconds()
+	resultCount := e.countItems(result)
 
 	variables := map[string]interface{}{
+		"result":       result,
+		"result_count": resultCount,
 		"operation":    config.Operation,
-		"result_count": e.countItems(result),
 	}
 	details := map[string]interface{}{
 		"duration_ms":  durationMs,
 		"success":      true,
 		"operation":    config.Operation,
-		"result_count": e.countItems(result),
+		"result_count": resultCount,
+		"source_field": config.SourceField,
+		"output_field": targetField,
 	}
 	e.SetStepOutputWithDetails(outputData, variables, details)
 
@@ -167,8 +175,15 @@ func (e *NormalizerExecutor) normalize(data interface{}, config normalizerConfig
 		}
 
 		for _, field := range fieldsToNormalize {
+			// Apply caseTransform to the field name going into keyColumn so that
+			// camelCase source column names (e.g. "PatientID") become snake_case
+			// ("patient_i_d") when caseTransform="snake" is requested.
+			keyValue := field
+			if config.CaseTransform != "" {
+				keyValue = e.transformString(field, config.CaseTransform)
+			}
 			row := map[string]interface{}{
-				config.KeyColumn:   field,
+				config.KeyColumn:   keyValue,
 				config.ValueColumn: itemMap[field],
 			}
 			// Preserve specified fields
@@ -395,6 +410,23 @@ func (e *NormalizerExecutor) transformKeys(m map[string]interface{}, transform s
 	return result
 }
 
+// transformString applies the given case transform to a single string value.
+// Used by normalize() to transform field names going into the keyColumn.
+func (e *NormalizerExecutor) transformString(s, transform string) string {
+	switch transform {
+	case "lower":
+		return strings.ToLower(s)
+	case "upper":
+		return strings.ToUpper(s)
+	case "snake":
+		return toSnakeCase(s)
+	case "camel":
+		return toCamelCase(s)
+	default:
+		return s
+	}
+}
+
 func (e *NormalizerExecutor) buildGroupKey(item map[string]interface{}, groupBy []string) string {
 	if len(groupBy) == 0 {
 		return "default"
@@ -460,6 +492,18 @@ func toCamelCase(s string) string {
 		parts[0] = strings.ToLower(parts[0][:1]) + parts[0][1:]
 	}
 	return strings.Join(parts, "")
+}
+
+func (e *NormalizerExecutor) GetOutputVariables(step *models.TransformationStep) []models.VariableDefinition {
+	op, _ := step.Config["operation"].(string)
+	return []models.VariableDefinition{
+		e.BuildVariableDefinition("result", "_stepOutput.result",
+			fmt.Sprintf("Transformed data after %s operation", op)),
+		e.BuildVariableDefinition("result_count", "_stepOutput.result_count",
+			"Number of records/fields in the result"),
+		e.BuildVariableDefinition("operation", "_stepOutput.operation",
+			"Operation that was applied"),
+	}
 }
 
 func (e *NormalizerExecutor) Validate(step *models.TransformationStep) error {

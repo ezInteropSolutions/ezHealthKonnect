@@ -3,10 +3,17 @@
 
 const ProcessingEngineService = require('../services/ProcessingEngineService');
 
+const GO_BACKEND_URL = process.env.GO_BACKEND_URL || `http://localhost:${process.env.API_PORT || 8080}`;
+
+async function goFetch(path, options = {}) {
+    let fetch;
+    try { fetch = require('node-fetch'); } catch { fetch = global.fetch; }
+    return fetch(`${GO_BACKEND_URL}${path}`, { timeout: 10000, ...options });
+}
+
 class InterfaceLifecycleController {
     constructor() {
         this.processingEngine = new ProcessingEngineService();
-        this.isEngineRunning = false;
     }
 
     /**
@@ -312,154 +319,149 @@ class InterfaceLifecycleController {
     }
 
     /**
-     * Get interface runtime status
+     * Get interface runtime status — proxies Go backend, falls back to DB
      */
     async getInterfaceStatus(req, res) {
-        try {
-            const { interfaceId } = req.params;
-            const userId = req.user?.id || req.session?.user?.id;
+        const { interfaceId } = req.params;
+        const userId = req.session?.user?.id;
 
-            // Get interface configuration from database
+        // 1. Try Go backend for real runtime status
+        let goStatus = null;
+        try {
+            const goRes = await goFetch(`/api/processing/interfaces/${interfaceId}/status`);
+            if (goRes.ok) {
+                const goData = await goRes.json();
+                goStatus = goData.status;  // { status, messages_processed, ... }
+            }
+        } catch (e) {
+            console.warn(`⚠️ Go status unavailable for ${interfaceId}:`, e.message);
+        }
+
+        // 2. Get DB record for interface metadata
+        try {
             const database = require('../config/database');
             const sequelize = database.sequelize;
+            const rows = await sequelize.query(
+                `SELECT id, name, status, source_type, target_type, total_processed, failed_processed
+                 FROM interfaces WHERE id = :id AND is_active = TRUE`,
+                { replacements: { id: interfaceId }, type: sequelize.QueryTypes.SELECT }
+            );
 
-            const result = await sequelize.query(`
-                SELECT
-                    i.*,
-                    ipm.messages_processed,
-                    ipm.messages_failed,
-                    ipm.avg_processing_time_ms,
-                    CASE
-                        WHEN (ipm.messages_processed + ipm.messages_failed) > 0
-                        THEN ROUND((ipm.messages_processed::numeric / (ipm.messages_processed + ipm.messages_failed)) * 100, 2)
-                        ELSE 100
-                    END as success_rate_percent
-                FROM interfaces i
-                LEFT JOIN interface_processing_metrics ipm ON i.id = ipm.interface_id
-                    AND ipm.metric_date = CURRENT_DATE
-                WHERE i.id = :interface_id AND i.user_id = :user_id
-            `, {
-                replacements: { interface_id: interfaceId, user_id: userId },
-                type: sequelize.QueryTypes.SELECT
-            });
-
-            if (result.length === 0) {
-                return res.status(404).json({
-                    success: false,
-                    message: 'Interface not found'
-                });
+            if (rows.length === 0) {
+                return res.status(404).json({ success: false, message: 'Interface not found' });
             }
 
-            const interfaceData = result[0];
+            const iface = rows[0];
+            // Go runtime status takes precedence over DB status for the "active" determination
+            const runtimeStatus = goStatus?.status || iface.status;
 
-            // Get REAL runtime status from Go backend
-            let goBackendStatus = null;
-            let processingActive = false;
-            let processedCount = 0;
-
-            try {
-                // Get fetch implementation
-                let fetch;
-                try {
-                    fetch = require('node-fetch');
-                } catch {
-                    fetch = global.fetch;
-                }
-
-                if (fetch) {
-                    const goBackendUrl = process.env.GO_BACKEND_URL || 'http://localhost:8080';
-                    const response = await fetch(`${goBackendUrl}/api/processing/interfaces/${interfaceId}/status`, {
-                        method: 'GET',
-                        timeout: 5000
-                    });
-
-                    if (response.ok) {
-                        const goData = await response.json();
-                        goBackendStatus = goData.status;
-                        processingActive = goBackendStatus?.status === 'active';
-                        processedCount = goBackendStatus?.messages_processed || 0;
-                        console.log(`✅ Got runtime status from Go backend:`, { interfaceId, status: goBackendStatus?.status, processedCount });
-                    }
-                }
-            } catch (goError) {
-                console.warn(`⚠️ Failed to get Go backend status for ${interfaceId}:`, goError.message);
-                // Continue with database status only
-            }
-
-            res.json({
+            return res.json({
                 success: true,
                 interface: {
-                    ...interfaceData,
-                    engineRunning: this.isEngineRunning,
-                    processingActive: processingActive,
+                    ...iface,
+                    status: runtimeStatus,
+                    processingActive: runtimeStatus === 'active',
                     processingStats: {
-                        processedCount: processedCount,
-                        status: goBackendStatus?.status || 'unknown'
+                        processedCount: goStatus?.messages_processed || iface.total_processed || 0,
+                        status: runtimeStatus
                     }
                 }
             });
-
-        } catch (error) {
-            console.error(`❌ Failed to get interface status ${req.params.interfaceId}:`, error);
-            res.status(500).json({
-                success: false,
-                message: 'Failed to get interface status',
-                error: error.message
-            });
+        } catch (err) {
+            console.error(`❌ getInterfaceStatus DB error for ${interfaceId}:`, err.message);
+            // Last resort: return whatever Go gave us
+            if (goStatus) {
+                return res.json({ success: true, interface: { status: goStatus.status, processingActive: goStatus.status === 'active' } });
+            }
+            return res.status(500).json({ success: false, message: err.message });
         }
     }
 
     /**
-     * Get overall processing engine status
+     * Get all interface runtime statuses (batch) — proxies Go backend
+     */
+    async getAllInterfaceStatuses(req, res) {
+        try {
+            const goRes = await goFetch('/api/processing/interfaces/statuses');
+            if (goRes.ok) {
+                return res.json(await goRes.json());
+            }
+        } catch (e) {
+            console.warn('⚠️ Go batch statuses unavailable:', e.message);
+        }
+        // Fallback: empty statuses so UI falls to individual calls
+        return res.json({ success: true, statuses: {} });
+    }
+
+    /**
+     * Get overall processing engine status — proxies Go backend for real state
      */
     async getEngineStatus(req, res) {
-        try {
-            const stats = this.processingEngine.getProcessingStats();
+        let running = false;
+        let goEngineData = {};
 
-            // Get database statistics using existing database config
+        // Try Go backend first for live engine state
+        try {
+            const goRes = await goFetch('/api/processing/engine/status');
+            if (goRes.ok) {
+                const goData = await goRes.json();
+                running = goData.engine?.running ?? goData.stats?.running ?? false;
+                goEngineData = goData.engine || {};
+            }
+        } catch (e) {
+            console.warn('⚠️ Go engine status unavailable:', e.message);
+        }
+
+        // Always query DB for the stats the UI needs
+        try {
             const database = require('../config/database');
             const sequelize = database.sequelize;
 
-            const dbStats = await sequelize.query(`
-                SELECT
-                    COUNT(*) as total_interfaces,
-                    COUNT(CASE WHEN interface_status = 'active' THEN 1 END) as active_interfaces,
-                    COUNT(CASE WHEN interface_status = 'error' THEN 1 END) as error_interfaces,
-                    SUM(COALESCE(total_processed, 0)) as total_messages_processed,
-                    SUM(COALESCE(failed_processed, 0)) as total_messages_failed,
-                    SUM(COALESCE(successful_processed, 0)) as total_messages_successful
-                FROM interfaces
-                WHERE is_active = TRUE
-            `, {
-                type: sequelize.QueryTypes.SELECT
-            });
+            // Active interfaces: running or paused (operational states)
+            const [[activeRow], [statsRow]] = await Promise.all([
+                sequelize.query(
+                    `SELECT COUNT(*) AS cnt FROM interfaces
+                     WHERE interface_status IN ('running','active','paused') AND deleted_at IS NULL`,
+                    { type: sequelize.QueryTypes.SELECT }
+                ),
+                sequelize.query(
+                    `SELECT
+                        COALESCE(SUM(total_processed), 0) AS total,
+                        COALESCE(SUM(successful_processed), 0) AS successful,
+                        COALESCE(SUM(failed_processed), 0) AS failed
+                     FROM interfaces WHERE deleted_at IS NULL`,
+                    { type: sequelize.QueryTypes.SELECT }
+                ).catch(() => [{ total: 0, successful: 0, failed: 0 }])
+            ]);
 
-            const recentActivity = await sequelize.query(`
-                SELECT
-                    COUNT(*) as messages_today,
-                    COUNT(CASE WHEN event_type = 'ERROR' THEN 1 END) as errors_today
-                FROM message_audit_log
-                WHERE created_at >= CURRENT_DATE
-            `, {
-                type: sequelize.QueryTypes.SELECT
-            });
+            const activeCount = parseInt(activeRow?.cnt) || 0;
+            const totalProcessed = parseInt(statsRow?.total) || 0;
+            const totalFailed = parseInt(statsRow?.failed) || 0;
+            const successRate = totalProcessed > 0
+                ? ((totalProcessed / (totalProcessed + totalFailed)) * 100).toFixed(1)
+                : 0;
 
-            res.json({
+            return res.json({
                 success: true,
                 engine: {
-                    ...stats,
-                    isRunning: this.isEngineRunning,
-                    database: dbStats[0],
-                    today: recentActivity[0]
+                    isRunning: running,
+                    ...goEngineData,
+                    database: {
+                        active_interfaces: activeCount,
+                        total_messages_processed: totalProcessed,
+                        total_messages_failed: totalFailed,
+                        success_rate: successRate
+                    },
+                    today: {
+                        messages_today: totalProcessed  // best approximation without per-day counters
+                    }
                 }
             });
-
-        } catch (error) {
-            console.error('❌ Failed to get engine status:', error);
-            res.status(500).json({
-                success: false,
-                message: 'Failed to get engine status',
-                error: error.message
+        } catch (dbErr) {
+            console.error('❌ getEngineStatus DB error:', dbErr.message);
+            return res.json({
+                success: true,
+                engine: { isRunning: running, database: {}, today: {} }
             });
         }
     }

@@ -21,38 +21,38 @@
                     <!-- Status tiles inline in header -->
                     <div class="header-status-tiles">
                         <div class="status-tile">
+                            <i class="far fa-layer-group status-tile-icon"></i>
                             <span class="status-tile-value" id="totalInterfaces">0</span>
                             <span class="status-tile-label">Total</span>
-                            <span class="status-tile-icon">📊</span>
                         </div>
-                        
+
                         <div class="status-tile">
+                            <i class="far fa-circle status-tile-icon tile-icon-running"></i>
                             <span class="status-tile-value" id="runningInterfaces">0</span>
                             <span class="status-tile-label">Running</span>
-                            <span class="status-tile-icon">🟢</span>
                         </div>
-                        
+
                         <div class="status-tile">
+                            <i class="far fa-circle status-tile-icon tile-icon-stopped"></i>
                             <span class="status-tile-value" id="stoppedInterfaces">0</span>
                             <span class="status-tile-label">Stopped</span>
-                            <span class="status-tile-icon">🔴</span>
                         </div>
-                        
+
                         <div class="status-tile">
+                            <i class="far fa-pause-circle status-tile-icon tile-icon-paused"></i>
                             <span class="status-tile-value" id="pausedInterfaces">0</span>
                             <span class="status-tile-label">Paused</span>
-                            <span class="status-tile-icon">⏸️</span>
                         </div>
-                        
-                        <!-- Auto-refresh indicator in header -->
+
+                        <!-- Auto-refresh indicator -->
                         <div class="status-tile" id="autoRefreshIndicator">
-                            <span class="status-tile-icon">🔄</span>
+                            <i class="far fa-clock status-tile-icon tile-icon-auto"></i>
                             <span class="status-tile-label">Auto: <span id="refreshStatus">ON</span></span>
                         </div>
-                        
-                        <!-- Last updated in header -->
+
+                        <!-- Clock -->
                         <div class="status-tile" id="timeDisplay">
-                            <span class="status-tile-icon">🕐</span>
+                            <i class="far fa-clock status-tile-icon"></i>
                             <span class="status-tile-label"><span id="currentTime">Loading...</span></span>
                         </div>
                     </div>

@@ -774,6 +774,64 @@ func (rsl *RealSchemaLoader) GetStats() RealSchemaStats {
 	return stats
 }
 
+// GetFieldDataType returns the HL7 data type for a specific field in a message schema.
+//
+// messageType may be in either "ADT^A01" or "ADT_A01" form — it is normalised internally.
+// segmentName is the three-letter segment identifier, e.g. "PID", "MSH".
+// fieldKey is the field reference, e.g. "PID.7", "7", or just "7".
+//
+// The method tries v2.3, v2.5, and v2.5.1 in order and returns the DataType from the
+// first schema that contains the requested segment and field.
+// Returns "" when nothing is found; never panics.
+func (rsl *RealSchemaLoader) GetFieldDataType(messageType, segmentName, fieldKey string) string {
+	if rsl == nil || messageType == "" || segmentName == "" || fieldKey == "" {
+		return ""
+	}
+
+	// Normalise ADT^A01 → ADT_A01 then split into base + trigger
+	normalised := strings.ReplaceAll(messageType, "^", "_")
+	parts := strings.SplitN(normalised, "_", 2)
+	msgBase := parts[0]
+	triggerEvent := ""
+	if len(parts) == 2 {
+		triggerEvent = parts[1]
+	}
+
+	// Normalise fieldKey: accept "PID.7" or "7" or "07"
+	normField := fieldKey
+	if strings.HasPrefix(strings.ToUpper(fieldKey), strings.ToUpper(segmentName)+".") {
+		normField = fieldKey[len(segmentName)+1:]
+	}
+	// Build the canonical key "SEG.N" for map lookup
+	canonicalKey := segmentName + "." + normField
+
+	// Try multiple HL7 versions in order
+	versions := []string{"v2.5.1", "v2.5", "v2.3", "v2.6", "v2.4"}
+	for _, version := range versions {
+		schema, err := rsl.LoadRealSchema(version, msgBase, triggerEvent)
+		if err != nil {
+			continue
+		}
+
+		segDef, ok := schema.Segments[segmentName]
+		if !ok {
+			continue
+		}
+
+		// Try canonical key first
+		if fieldDef, found := segDef.Fields[canonicalKey]; found {
+			return fieldDef.DataType
+		}
+
+		// Try with just the numeric portion
+		if fieldDef, found := segDef.Fields[normField]; found {
+			return fieldDef.DataType
+		}
+	}
+
+	return ""
+}
+
 // =====================================
 // PARSING FUNCTIONS WITH MAP-BASED SEGMENTS
 // =====================================

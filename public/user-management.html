@@ -6,6 +6,7 @@
     <title>User Management - ezHealthKonnect</title>
     <link rel="stylesheet" href="css/dashboard.css">
     <link rel="stylesheet" href="css/user-management.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 </head>
 <body>
     <div class="dashboard-container">
@@ -27,60 +28,60 @@
 
             <!-- Navigation Menu -->
             <div class="nav-menu">
-                <!-- Main Section -->
                 <div class="nav-section">
                     <div class="section-header">
                         <span class="section-title">Main</span>
+                        <i class="fas fa-chevron-down nav-section-chevron"></i>
                     </div>
                     <div class="nav-items">
                         <a href="dashboard.html" class="nav-item">
-                            <span class="nav-icon">🏠</span>
+                            <span class="nav-icon"><i class="far fa-house"></i></span>
                             <span class="nav-label">Dashboard</span>
                         </a>
-                        <a href="#interfaces" class="nav-item">
-                            <span class="nav-icon">🔗</span>
+                        <a href="interfaces.html" class="nav-item">
+                            <span class="nav-icon"><i class="fas fa-plug"></i></span>
                             <span class="nav-label">Interfaces</span>
                         </a>
-                        <a href="#messages" class="nav-item">
-                            <span class="nav-icon">📧</span>
+                        <a href="messages.html" class="nav-item">
+                            <span class="nav-icon"><i class="far fa-envelope"></i></span>
                             <span class="nav-label">Messages</span>
                         </a>
                         <a href="#templates" class="nav-item">
-                            <span class="nav-icon">📄</span>
+                            <span class="nav-icon"><i class="far fa-file-lines"></i></span>
                             <span class="nav-label">Templates</span>
                         </a>
                     </div>
                 </div>
 
-                <!-- Analytics Section -->
                 <div class="nav-section">
                     <div class="section-header">
                         <span class="section-title">Analytics</span>
+                        <i class="fas fa-chevron-down nav-section-chevron"></i>
                     </div>
                     <div class="nav-items">
                         <a href="#monitoring" class="nav-item">
-                            <span class="nav-icon">📊</span>
-                            <span class="nav-label">Monitor</span>
+                            <span class="nav-icon"><i class="far fa-chart-bar"></i></span>
+                            <span class="nav-label">Monitoring</span>
                         </a>
                         <a href="#reports" class="nav-item">
-                            <span class="nav-icon">📈</span>
+                            <span class="nav-icon"><i class="fas fa-chart-line"></i></span>
                             <span class="nav-label">Reports</span>
                         </a>
                     </div>
                 </div>
 
-                <!-- Admin Section -->
                 <div class="nav-section admin-section" id="adminSection">
                     <div class="section-header">
                         <span class="section-title">Admin</span>
+                        <i class="fas fa-chevron-down nav-section-chevron"></i>
                     </div>
                     <div class="nav-items">
                         <a href="user-management.html" class="nav-item active">
-                            <span class="nav-icon">👥</span>
+                            <span class="nav-icon"><i class="fas fa-users"></i></span>
                             <span class="nav-label">Users</span>
                         </a>
-                        <a href="#settings" class="nav-item">
-                            <span class="nav-icon">⚙️</span>
+                        <a href="settings.html" class="nav-item">
+                            <span class="nav-icon"><i class="fas fa-sliders"></i></span>
                             <span class="nav-label">Settings</span>
                         </a>
                     </div>
@@ -97,7 +98,7 @@
                     </div>
                 </div>
                 <button class="logout-btn" onclick="logout()" title="Logout">
-                    <span class="nav-icon">🚪</span>
+                    <span class="nav-icon"><i class="fas fa-right-from-bracket"></i></span>
                     <span class="nav-label">Logout</span>
                 </button>
             </div>
@@ -255,6 +256,7 @@
     </div>
 
     <!-- External JavaScript -->
+    <script src="js/components/sidebar-nav.js"></script>
     <script src="js/user-management.js"></script>
 </body>
 </html>

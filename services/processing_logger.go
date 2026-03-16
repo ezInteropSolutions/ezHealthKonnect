@@ -1,3 +1,10 @@
+// services/processing_logger.go
+// ProcessingLogger — writes structured log entries to object storage (S3/MinIO/local)
+// as NDJSON files, one file per message.
+//
+// Public API is backward-compatible: callers that previously passed a *mongo.Client
+// now pass a *storage.ObjectStorageService (or nil for console-only logging).
+
 package services
 
 import (
@@ -6,8 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/bson"
+	"ezhealthkonnect/services/storage"
 )
 
 // LogLevel represents the severity of a log entry
@@ -31,48 +37,47 @@ const (
 	LogCategoryDelivery       LogCategory = "delivery"
 )
 
-// LogEntry represents a single log entry
+// LogEntry represents a single log entry (kept for API compatibility).
 type LogEntry struct {
-	MessageID     string                 `bson:"message_id"`
-	CorrelationID string                 `bson:"correlation_id"`
-	LogLevel      LogLevel               `bson:"log_level"`
-	Category      LogCategory            `bson:"category"`
-	Timestamp     time.Time              `bson:"timestamp"`
-	Message       string                 `bson:"message"`
-	Details       map[string]interface{} `bson:"details,omitempty"`
-	Context       map[string]interface{} `bson:"context,omitempty"`
-	StackTrace    string                 `bson:"stack_trace,omitempty"`
-	ErrorCode     string                 `bson:"error_code,omitempty"`
+	MessageID     string                 `json:"message_id"`
+	CorrelationID string                 `json:"correlation_id"`
+	LogLevel      LogLevel               `json:"log_level"`
+	Category      LogCategory            `json:"category"`
+	Timestamp     time.Time              `json:"timestamp"`
+	Message       string                 `json:"message"`
+	Details       map[string]interface{} `json:"details,omitempty"`
+	Context       map[string]interface{} `json:"context,omitempty"`
+	StackTrace    string                 `json:"stack_trace,omitempty"`
+	ErrorCode     string                 `json:"error_code,omitempty"`
 }
 
-// ProcessingLogger handles logging for message processing
+// ProcessingLogger handles logging for message processing.
 type ProcessingLogger struct {
-	interfaceID     string
-	interfaceName   string
-	messageID       string
-	correlationID   string
-	messageType     string
-	debugMode       bool
-	mongoClient     *mongo.Client
-	collectionName  string
-	context         map[string]interface{}
+	interfaceID   string
+	interfaceName string
+	messageID     string
+	correlationID string
+	messageType   string
+	debugMode     bool
+	objStorage    *storage.ObjectStorageService
+	context       map[string]interface{}
 }
 
-// NewProcessingLogger creates a new logger instance
+// NewProcessingLogger creates a new logger instance backed by object storage.
+// Pass nil for objStorage to fall back to console-only logging.
 func NewProcessingLogger(
 	interfaceID, interfaceName, messageID, correlationID, messageType string,
 	debugMode bool,
-	mongoClient *mongo.Client,
+	objStorage *storage.ObjectStorageService,
 ) *ProcessingLogger {
 	return &ProcessingLogger{
-		interfaceID:    interfaceID,
-		interfaceName:  interfaceName,
-		messageID:      messageID,
-		correlationID:  correlationID,
-		messageType:    messageType,
-		debugMode:      debugMode,
-		mongoClient:    mongoClient,
-		collectionName: fmt.Sprintf("processing_logs_intf_%s", strings.ReplaceAll(interfaceID, "-", "_")),
+		interfaceID:   interfaceID,
+		interfaceName: interfaceName,
+		messageID:     messageID,
+		correlationID: correlationID,
+		messageType:   messageType,
+		debugMode:     debugMode,
+		objStorage:    objStorage,
 		context: map[string]interface{}{
 			"interface_id":   interfaceID,
 			"interface_name": interfaceName,
@@ -81,72 +86,72 @@ func NewProcessingLogger(
 	}
 }
 
-// Error logs an error (always captured)
+// Error logs an error (always captured regardless of debugMode).
 func (l *ProcessingLogger) Error(category LogCategory, message string, details map[string]interface{}) {
 	l.log(LogLevelError, category, message, details)
 }
 
-// Warning logs a warning (always captured)
+// Warning logs a warning (always captured regardless of debugMode).
 func (l *ProcessingLogger) Warning(category LogCategory, message string, details map[string]interface{}) {
 	l.log(LogLevelWarning, category, message, details)
 }
 
-// Info logs an informational message (only in debug mode)
+// Info logs an informational message (only in debug mode).
 func (l *ProcessingLogger) Info(category LogCategory, message string, details map[string]interface{}) {
 	if l.debugMode {
 		l.log(LogLevelInfo, category, message, details)
 	}
 }
 
-// Debug logs detailed debug information (only in debug mode)
+// Debug logs detailed debug information (only in debug mode).
 func (l *ProcessingLogger) Debug(category LogCategory, message string, details map[string]interface{}) {
 	if l.debugMode {
 		l.log(LogLevelDebug, category, message, details)
 	}
 }
 
-// log writes a log entry to MongoDB (async)
+// log writes a log entry to object storage as NDJSON (async) and to console.
 func (l *ProcessingLogger) log(level LogLevel, category LogCategory, message string, details map[string]interface{}) {
-	// Skip if MongoDB client not available
-	if l.mongoClient == nil {
-		fmt.Printf("[%s] %s: %s - %s\n", level, category, l.messageID, message)
+	// Always print to console for immediate visibility
+	fmt.Printf("[%s] %s: %s - %s\n", level, category, l.messageID, message)
+
+	if l.objStorage == nil {
 		return
 	}
 
-	// Create log entry
-	entry := LogEntry{
-		MessageID:     l.messageID,
-		CorrelationID: l.correlationID,
-		LogLevel:      level,
-		Category:      category,
-		Timestamp:     time.Now(),
-		Message:       message,
-		Details:       details,
-		Context:       l.context,
+	entry := storage.LogEntry{
+		Timestamp: time.Now().UTC(),
+		Level:     string(level),
+		Stage:     string(category),
+		Message:   message,
 	}
 
-	// Write to MongoDB asynchronously
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
+	// Merge details and context into Fields
+	if len(details) > 0 || len(l.context) > 0 {
+		fields := make(map[string]interface{})
+		for k, v := range l.context {
+			fields[k] = v
+		}
+		for k, v := range details {
+			fields[k] = v
+		}
+		entry.Fields = fields
+	}
 
-		collection := l.mongoClient.Database("ezhealthkonnect").Collection(l.collectionName)
-		_, err := collection.InsertOne(ctx, entry)
-		if err != nil {
-			fmt.Printf("❌ Failed to write log to MongoDB: %v\n", err)
+	go func() {
+		ctx := context.Background()
+		if err := l.objStorage.AppendLog(ctx, l.interfaceID, l.messageID, entry); err != nil {
+			fmt.Printf("❌ Failed to write log to object storage: %v\n", err)
 		}
 	}()
-
-	// Also print to console for immediate visibility
-	fmt.Printf("[%s] %s: %s - %s\n", level, category, l.messageID, message)
 }
 
-// AddContext adds contextual information to all future logs
+// AddContext adds contextual information to all future logs.
 func (l *ProcessingLogger) AddContext(key string, value interface{}) {
 	l.context[key] = value
 }
 
-// LogConnectionAttempt logs a connection attempt
+// LogConnectionAttempt logs a connection attempt.
 func (l *ProcessingLogger) LogConnectionAttempt(endpoint, protocol string) {
 	l.Info(LogCategoryConnection, "Connecting to destination", map[string]interface{}{
 		"endpoint": endpoint,
@@ -154,7 +159,7 @@ func (l *ProcessingLogger) LogConnectionAttempt(endpoint, protocol string) {
 	})
 }
 
-// LogConnectionSuccess logs successful connection
+// LogConnectionSuccess logs successful connection.
 func (l *ProcessingLogger) LogConnectionSuccess(endpoint string, durationMs int64) {
 	l.Info(LogCategoryConnection, "Connected successfully", map[string]interface{}{
 		"endpoint":    endpoint,
@@ -162,7 +167,7 @@ func (l *ProcessingLogger) LogConnectionSuccess(endpoint string, durationMs int6
 	})
 }
 
-// LogConnectionFailure logs connection failure
+// LogConnectionFailure logs connection failure.
 func (l *ProcessingLogger) LogConnectionFailure(endpoint, errorMsg string, retryAttempt int) {
 	l.Error(LogCategoryConnection, "Connection failed", map[string]interface{}{
 		"endpoint":      endpoint,
@@ -171,12 +176,12 @@ func (l *ProcessingLogger) LogConnectionFailure(endpoint, errorMsg string, retry
 	})
 }
 
-// LogParsingStart logs the start of parsing
+// LogParsingStart logs the start of parsing.
 func (l *ProcessingLogger) LogParsingStart(format string) {
 	l.Debug(LogCategoryParsing, fmt.Sprintf("Starting %s parsing", format), nil)
 }
 
-// LogParsingComplete logs successful parsing
+// LogParsingComplete logs successful parsing.
 func (l *ProcessingLogger) LogParsingComplete(format string, durationMs int64, segmentCount int) {
 	l.Info(LogCategoryParsing, "Parsing completed", map[string]interface{}{
 		"format":        format,
@@ -185,7 +190,7 @@ func (l *ProcessingLogger) LogParsingComplete(format string, durationMs int64, s
 	})
 }
 
-// LogParsingError logs parsing error
+// LogParsingError logs parsing error.
 func (l *ProcessingLogger) LogParsingError(format, errorMsg string, lineNumber int) {
 	l.Error(LogCategoryParsing, "Parsing failed", map[string]interface{}{
 		"format":      format,
@@ -194,7 +199,7 @@ func (l *ProcessingLogger) LogParsingError(format, errorMsg string, lineNumber i
 	})
 }
 
-// LogFieldMapping logs a field transformation (debug only)
+// LogFieldMapping logs a field transformation (debug only).
 func (l *ProcessingLogger) LogFieldMapping(sourceField, targetField, value string) {
 	l.Debug(LogCategoryTransformation, "Field mapped", map[string]interface{}{
 		"source": sourceField,
@@ -203,7 +208,7 @@ func (l *ProcessingLogger) LogFieldMapping(sourceField, targetField, value strin
 	})
 }
 
-// LogTransformationComplete logs transformation completion
+// LogTransformationComplete logs transformation completion.
 func (l *ProcessingLogger) LogTransformationComplete(fieldsMapped int, durationMs int64) {
 	l.Info(LogCategoryTransformation, "Transformation completed", map[string]interface{}{
 		"fields_mapped": fieldsMapped,
@@ -211,7 +216,7 @@ func (l *ProcessingLogger) LogTransformationComplete(fieldsMapped int, durationM
 	})
 }
 
-// LogTransformationError logs transformation error
+// LogTransformationError logs transformation error.
 func (l *ProcessingLogger) LogTransformationError(step, errorMsg string) {
 	l.Error(LogCategoryTransformation, "Transformation failed", map[string]interface{}{
 		"step":  step,
@@ -219,7 +224,7 @@ func (l *ProcessingLogger) LogTransformationError(step, errorMsg string) {
 	})
 }
 
-// LogDeliveryAttempt logs delivery attempt
+// LogDeliveryAttempt logs delivery attempt.
 func (l *ProcessingLogger) LogDeliveryAttempt(endpoint, method string, attempt int) {
 	l.Info(LogCategoryDelivery, "Attempting delivery", map[string]interface{}{
 		"endpoint": endpoint,
@@ -228,7 +233,7 @@ func (l *ProcessingLogger) LogDeliveryAttempt(endpoint, method string, attempt i
 	})
 }
 
-// LogDeliverySuccess logs successful delivery
+// LogDeliverySuccess logs successful delivery.
 func (l *ProcessingLogger) LogDeliverySuccess(endpoint string, statusCode int, durationMs int64) {
 	l.Info(LogCategoryDelivery, "Delivery successful", map[string]interface{}{
 		"endpoint":    endpoint,
@@ -237,7 +242,7 @@ func (l *ProcessingLogger) LogDeliverySuccess(endpoint string, statusCode int, d
 	})
 }
 
-// LogDeliveryFailure logs delivery failure
+// LogDeliveryFailure logs delivery failure.
 func (l *ProcessingLogger) LogDeliveryFailure(endpoint, errorMsg string, statusCode, attempt int) {
 	l.Error(LogCategoryDelivery, "Delivery failed", map[string]interface{}{
 		"endpoint":    endpoint,
@@ -247,7 +252,7 @@ func (l *ProcessingLogger) LogDeliveryFailure(endpoint, errorMsg string, statusC
 	})
 }
 
-// LogValidationWarning logs a validation warning
+// LogValidationWarning logs a validation warning.
 func (l *ProcessingLogger) LogValidationWarning(field, issue string) {
 	l.Warning(LogCategoryValidation, "Validation warning", map[string]interface{}{
 		"field": field,
@@ -255,32 +260,32 @@ func (l *ProcessingLogger) LogValidationWarning(field, issue string) {
 	})
 }
 
-// GetLogs retrieves logs for the current message
-func GetMessageLogs(mongoClient *mongo.Client, interfaceID, messageID string, levelFilter LogLevel) ([]LogEntry, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	collectionName := fmt.Sprintf("processing_logs_intf_%s", strings.ReplaceAll(interfaceID, "-", "_"))
-	collection := mongoClient.Database("ezhealthkonnect").Collection(collectionName)
-
-	// Build filter
-	filter := bson.M{"message_id": messageID}
-	if levelFilter != "" {
-		filter["log_level"] = levelFilter
+// GetMessageLogs retrieves log entries for a message from object storage.
+// objStorage may be nil — returns empty slice in that case.
+func GetMessageLogs(objStorage *storage.ObjectStorageService, interfaceID, messageID string, levelFilter LogLevel) ([]LogEntry, error) {
+	if objStorage == nil {
+		return nil, nil
 	}
 
-	// Query logs
-	cursor, err := collection.Find(ctx, filter)
+	entries, err := objStorage.GetLogs(context.Background(), interfaceID, messageID)
 	if err != nil {
 		return nil, err
 	}
-	defer cursor.Close(ctx)
 
-	// Decode results
-	var logs []LogEntry
-	if err = cursor.All(ctx, &logs); err != nil {
-		return nil, err
+	var result []LogEntry
+	for _, e := range entries {
+		if levelFilter != "" && LogLevel(e.Level) != levelFilter {
+			continue
+		}
+		result = append(result, LogEntry{
+			MessageID:     messageID,
+			CorrelationID: strings.Join([]string{interfaceID, messageID}, "/"),
+			LogLevel:      LogLevel(e.Level),
+			Category:      LogCategory(e.Stage),
+			Timestamp:     e.Timestamp,
+			Message:       e.Message,
+			Details:       e.Fields,
+		})
 	}
-
-	return logs, nil
+	return result, nil
 }

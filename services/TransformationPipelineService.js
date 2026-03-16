@@ -3,208 +3,136 @@
 // CANONICAL FLOW: Wizard → Pipeline → Steps → Template
 
 class TransformationPipelineService {
-    constructor(pgPool = null) {
-        this.pool = pgPool || this.getExistingDatabaseConnection();
-    }
-
     /**
-     * Get existing database connection
+     * Get sequelize instance (lazy - called at request time, not module load)
      */
-    getExistingDatabaseConnection() {
-        try {
-            const interfaceService = require('./interfaceService');
-            if (interfaceService && interfaceService.pool) {
-                console.log('✅ Using interfaceService database pool');
-                return interfaceService.pool;
-            }
-        } catch (error) {
-            console.log('⚠️ interfaceService not available, trying alternatives...');
+    _getSequelize() {
+        const database = require('../config/database');
+        if (!database.sequelize) {
+            throw new Error('Database not connected. Ensure database.connect() was called on startup.');
         }
-
-        try {
-            const { Pool } = require('pg');
-            const pool = new Pool({
-                host: process.env.DB_HOST || 'localhost',
-                port: process.env.DB_PORT || 5432,
-                database: process.env.DB_NAME || 'ezhealthkonnect',
-                user: process.env.DB_USER || 'postgres',
-                password: process.env.DB_PASSWORD || 'password',
-                max: 20,
-                idleTimeoutMillis: 30000,
-                connectionTimeoutMillis: 2000,
-            });
-            console.log('✅ Created new database pool for TransformationPipelineService');
-            return pool;
-        } catch (error) {
-            console.error('❌ Failed to create database connection:', error);
-            throw new Error('Cannot establish database connection');
-        }
+        return database.sequelize;
     }
 
     /**
      * Create complete pipeline for interface
      * This is the main entry point called by wizard
+     *
+     * connectivityInfo shape:
+     *   { sourceConnectivity, sourceConfig, targetConnectivity, targetConfig, sourceType, targetType }
      */
     async createPipelineForInterface(interfaceId, messageType, interfaceName, wizardMappings, userId, connectivityInfo = null) {
-        const client = await this.pool.connect();
+        const sequelize = this._getSequelize();
 
-        try {
-            await client.query('BEGIN');
+        const sourceType = connectivityInfo?.sourceType || 'hl7v2';
+        const targetType = connectivityInfo?.targetType || 'fhir';
 
-            console.log('\n📦 === CREATING TRANSFORMATION PIPELINE ===');
-            console.log('Interface ID:', interfaceId);
-            console.log('Message Type:', messageType);
-            console.log('Mappings:', wizardMappings?.atomicMappings?.length || 0);
-            console.log('Connectivity:', connectivityInfo);
+        console.log('\n📦 === CREATING TRANSFORMATION PIPELINE ===');
+        console.log('Interface ID:', interfaceId);
+        console.log('Message Type:', messageType);
+        console.log('Flow:', `${sourceType} → ${targetType}`);
+        console.log('Mappings:', wizardMappings?.atomicMappings?.length || 0);
 
+        return await sequelize.transaction(async (t) => {
             // Step 1: Create pipeline record
-            const pipelineId = await this.createPipeline(
-                client,
-                interfaceId,
-                messageType,
-                interfaceName,
-                userId
-            );
+            const pipelineId = await this.createPipeline(sequelize, t, interfaceId, messageType, interfaceName);
 
-            // Step 2: Get or create template for mappings
-            const templateId = await this.getOrCreateTemplate(
-                client,
-                messageType,
-                wizardMappings,
-                userId
-            );
-
-            // Step 3: Add inbound connector step (sequence 5, before validation)
-            if (connectivityInfo?.sourceConnectivity) {
-                await this.addConnectorStep(client, pipelineId, 'inbound', connectivityInfo.sourceConnectivity, userId, connectivityInfo.sourceConfig);
+            // Step 2: Look up template (isolated with SAVEPOINT — failure does not abort the transaction)
+            await sequelize.query('SAVEPOINT template_creation', { transaction: t });
+            let templateId = null;
+            try {
+                templateId = await this.getOrCreateTemplate(sequelize, t, messageType, wizardMappings, userId);
+                await sequelize.query('RELEASE SAVEPOINT template_creation', { transaction: t });
+            } catch (templateErr) {
+                await sequelize.query('ROLLBACK TO SAVEPOINT template_creation', { transaction: t });
+                console.warn('⚠️ Template lookup/creation failed (pipeline will still be created):', templateErr.message);
             }
 
-            // Step 4: Add HL7→FHIR mapping step (sequence 100)
-            await this.addMappingStep(
-                client,
-                pipelineId,
-                templateId,
-                wizardMappings,
-                userId
+            // Step 3: Add all pipeline steps based on interface type
+            const stepsCreated = await this.addDefaultPipelineSteps(
+                sequelize, t, pipelineId,
+                { sourceType, targetType, connectivityInfo, templateId, wizardMappings }
             );
 
-            // Step 5: Add default pipeline steps
-            await this.addDefaultPipelineSteps(
-                client,
-                pipelineId,
-                userId
-            );
-
-            // Step 6: Add outbound connector step (sequence 295, after all processing)
-            if (connectivityInfo?.targetConnectivity) {
-                await this.addConnectorStep(client, pipelineId, 'outbound', connectivityInfo.targetConnectivity, userId, connectivityInfo.targetConfig);
-            }
-
-            await client.query('COMMIT');
-
-            const totalSteps = 6 + (connectivityInfo?.sourceConnectivity ? 1 : 0) + (connectivityInfo?.targetConnectivity ? 1 : 0);
-            console.log('✅ Pipeline created successfully:', {
-                pipelineId,
-                templateId,
-                stepsCreated: totalSteps
-            });
-
-            return {
-                success: true,
-                pipelineId,
-                templateId
-            };
-
-        } catch (error) {
-            await client.query('ROLLBACK');
-            console.error('❌ Failed to create pipeline:', error);
-            throw error;
-        } finally {
-            client.release();
-        }
+            console.log('✅ Pipeline created successfully:', { pipelineId, templateId, stepsCreated });
+            return { success: true, pipelineId, templateId };
+        });
     }
 
     /**
      * Create pipeline record
      */
-    async createPipeline(client, interfaceId, messageType, pipelineName, userId) {
+    async createPipeline(sequelize, t, interfaceId, messageType, pipelineName) {
         console.log('📝 Creating pipeline record...');
 
-        const query = `
+        const [rows] = await sequelize.query(`
             INSERT INTO transformation_pipelines (
                 interface_id,
                 message_type,
                 pipeline_name,
-                description,
-                is_active,
-                created_by
-            ) VALUES ($1, $2, $3, $4, true, $5)
-            RETURNING id
-        `;
+                enabled
+            ) VALUES ($1, $2, $3, true)
+            RETURNING id::text
+        `, {
+            bind: [interfaceId, messageType, pipelineName],
+            transaction: t
+        });
 
-        const result = await client.query(query, [
-            interfaceId,
-            messageType,
-            pipelineName,
-            `Auto-generated pipeline for ${messageType}`,
-            userId
-        ]);
-
-        const pipelineId = result.rows[0].id;
+        const pipelineId = rows[0].id;
         console.log('✅ Pipeline created:', pipelineId);
-
         return pipelineId;
     }
 
     /**
      * Get or create template for message type
-     * If standard template exists, use it
-     * Otherwise, create custom template from wizard mappings
      */
-    async getOrCreateTemplate(client, messageType, wizardMappings, userId) {
+    async getOrCreateTemplate(sequelize, t, messageType, wizardMappings, userId) {
         console.log('🔍 Looking for standard template for', messageType);
 
-        // Check if standard template exists (OOB template)
-        const existingTemplate = await this.getStandardTemplate(client, messageType);
+        const existingTemplate = await this.getStandardTemplate(sequelize, t, messageType);
 
         if (existingTemplate) {
             console.log('✅ Using existing standard template:', existingTemplate.template_name);
             return existingTemplate.id;
         }
 
-        // No standard template - create custom from wizard mappings
         if (!wizardMappings || !wizardMappings.atomicMappings || wizardMappings.atomicMappings.length === 0) {
             console.warn('⚠️ No mappings provided and no standard template exists');
             return null;
         }
 
         console.log('📝 Creating custom template from wizard mappings...');
-        return await this.createCustomTemplate(client, messageType, wizardMappings, userId);
+        return await this.createCustomTemplate(sequelize, t, messageType, wizardMappings, userId);
     }
 
     /**
      * Get standard template for message type
      */
-    async getStandardTemplate(client, messageType) {
-        const query = `
+    async getStandardTemplate(sequelize, t, messageType) {
+        const { QueryTypes } = require('sequelize');
+
+        const rows = await sequelize.query(`
             SELECT id, template_name, template_description
             FROM hl7_fhir_templates
             WHERE message_type = $1 AND is_default = true
             ORDER BY created_at DESC
             LIMIT 1
-        `;
+        `, {
+            bind: [messageType],
+            type: QueryTypes.SELECT,
+            transaction: t
+        });
 
-        const result = await client.query(query, [messageType]);
-        return result.rows[0];
+        return rows[0] || null;
     }
 
     /**
      * Create custom template from wizard mappings
      */
-    async createCustomTemplate(client, messageType, wizardMappings, userId) {
+    async createCustomTemplate(sequelize, t, messageType, wizardMappings, userId) {
         const templateConfig = {
             version: '2.0',
-            messageType: messageType,
+            messageType,
             source: 'wizard',
             createdAt: new Date().toISOString(),
             resources: this.convertMappingsToResourceFormat(wizardMappings.atomicMappings),
@@ -212,7 +140,7 @@ class TransformationPipelineService {
             metadata: wizardMappings.metadata || {}
         };
 
-        const query = `
+        const [rows] = await sequelize.query(`
             INSERT INTO hl7_fhir_templates (
                 message_type,
                 hl7_version,
@@ -222,129 +150,117 @@ class TransformationPipelineService {
                 is_default,
                 created_by
             ) VALUES ($1, $2, $3, $4, $5, false, $6)
-            RETURNING id
-        `;
+            RETURNING id::text
+        `, {
+            bind: [
+                messageType,
+                '2.5',
+                `Wizard ${messageType} Mapping`,
+                `Custom mapping created via wizard on ${new Date().toLocaleDateString()}`,
+                JSON.stringify(templateConfig),
+                userId || null
+            ],
+            transaction: t
+        });
 
-        const result = await client.query(query, [
-            messageType,
-            '2.5',
-            `Wizard ${messageType} Mapping`,
-            `Custom mapping created via wizard on ${new Date().toLocaleDateString()}`,
-            JSON.stringify(templateConfig),
-            userId
-        ]);
-
-        const templateId = result.rows[0].id;
+        const templateId = rows[0].id;
         console.log('✅ Custom template created:', templateId);
-
         return templateId;
     }
 
     /**
-     * Add HL7→FHIR mapping step to pipeline
+     * Add the correct pipeline steps for the given interface type.
+     *
+     * Step layout:
+     *   seq   5 — source connector  (always, if connectivity provided)
+     *   seq  60 — flow-specific transforms (e.g. HL7→FHIR)
+     *   seq 295 — target connector  (always, if connectivity provided)
+     *
+     * Supported flows:
+     *   hl7v2 → fhir  : HL7→FHIR Transform (seq 60)
+     *   (others)       : connector → connector only, no transform in between
+     *
+     * @param {object} ctx  { sourceType, targetType, connectivityInfo, templateId, wizardMappings }
+     * @returns {number}    total steps created
      */
-    async addMappingStep(client, pipelineId, templateId, wizardMappings, userId) {
-        console.log('🔀 Adding HL7→FHIR mapping step...');
+    async addDefaultPipelineSteps(sequelize, t, pipelineId, ctx) {
+        const { sourceType, targetType, connectivityInfo, templateId, wizardMappings } = ctx;
+        let count = 0;
 
-        const stepConfig = {
-            fhir_version: 'R4',
-            use_template: !!templateId,
-            template_id: templateId
-        };
-
-        // If no template, embed mappings directly in step config
-        if (!templateId && wizardMappings && wizardMappings.atomicMappings) {
-            stepConfig.use_template = false;
-            stepConfig.custom_mapping = wizardMappings;
+        // ── Source connector (always first) ──────────────────────────────────
+        if (connectivityInfo?.sourceConnectivity) {
+            await this.addConnectorStep(
+                sequelize, t, pipelineId,
+                'inbound', connectivityInfo.sourceConnectivity, connectivityInfo.sourceConfig
+            );
+            count++;
         }
 
-        const query = `
-            INSERT INTO transformation_steps (
-                pipeline_id,
-                step_name,
-                step_type,
-                sequence,
-                config,
-                enabled,
-                created_by
-            ) VALUES ($1, $2, $3, $4, $5, true, $6)
-            RETURNING id
-        `;
+        // ── Flow-specific transform steps ─────────────────────────────────────
+        const flow = `${sourceType}→${targetType}`;
+        console.log(`⚙️ Building transform steps for flow: ${flow}`);
 
-        const result = await client.query(query, [
-            pipelineId,
-            'HL7→FHIR Transform',
-            'hl7_fhir_transform',
-            60,  // After default steps
-            JSON.stringify(stepConfig),
-            userId
-        ]);
+        if (sourceType === 'hl7v2' && targetType === 'fhir') {
+            // HL7 v2 → FHIR R4
+            const stepConfig = {
+                fhir_version: 'R4',
+                use_template: !!templateId,
+                template_id: templateId
+            };
+            if (!templateId && wizardMappings?.atomicMappings?.length) {
+                stepConfig.use_template = false;
+                stepConfig.custom_mapping = wizardMappings;
+            }
+            await sequelize.query(`
+                INSERT INTO transformation_steps
+                    (pipeline_id, step_name, step_type, sequence, config, enabled)
+                VALUES ($1, $2, $3, $4, $5, true)
+            `, {
+                bind: [pipelineId, 'HL7→FHIR Transform', 'hl7_fhir_transform', 60, JSON.stringify(stepConfig)],
+                transaction: t
+            });
+            count++;
+            console.log('✅ Added HL7→FHIR Transform step');
 
-        console.log('✅ HL7→FHIR step created:', result.rows[0].id);
-    }
-
-    /**
-     * Add default pipeline steps
-     */
-    async addDefaultPipelineSteps(client, pipelineId, userId) {
-        console.log('⚙️ Adding default pipeline steps...');
-
-        const defaultSteps = [
-            { sequence: 10, name: 'Field Validation', type: 'field_validation', config: { validations: [] } },
-            { sequence: 20, name: 'API Enrichment', type: 'enrichment.api', config: {} },
-            { sequence: 30, name: 'Database Enrichment', type: 'enrichment.database', config: {} },
-            { sequence: 40, name: 'Field Mapping', type: 'field_mapping', config: { mappings: [] } },
-            { sequence: 50, name: 'Script Enrichment', type: 'enrichment.script', config: {} }
-        ];
-
-        const query = `
-            INSERT INTO transformation_steps (
-                pipeline_id,
-                step_name,
-                step_type,
-                sequence,
-                config,
-                enabled,
-                created_by
-            ) VALUES ($1, $2, $3, $4, $5, true, $6)
-        `;
-
-        for (const step of defaultSteps) {
-            await client.query(query, [
-                pipelineId,
-                step.name,
-                step.type,
-                step.sequence,
-                JSON.stringify(step.config),
-                userId
-            ]);
+        } else {
+            // Future flows (HL7→HL7 passthrough, FHIR→FHIR, CSV→FHIR, etc.) go here
+            console.log(`ℹ️ No transform steps defined for flow "${flow}" — source and target connectors only`);
         }
 
-        console.log(`✅ Added ${defaultSteps.length} default steps`);
+        // ── Target connector (always last) ────────────────────────────────────
+        if (connectivityInfo?.targetConnectivity) {
+            await this.addConnectorStep(
+                sequelize, t, pipelineId,
+                'outbound', connectivityInfo.targetConnectivity, connectivityInfo.targetConfig
+            );
+            count++;
+        }
+
+        console.log(`✅ Added ${count} step(s) for ${flow} pipeline`);
+        return count;
     }
 
     /**
      * Add a connector step (inbound or outbound) to the pipeline
      */
-    async addConnectorStep(client, pipelineId, direction, connectivityType, userId, wizardConfig = {}) {
-        // Map wizard connectivity strings to actual connector type_names from connectivity_types table
+    async addConnectorStep(sequelize, t, pipelineId, direction, connectivityType, wizardConfig = {}) {
         const SOURCE_TYPE_MAP = {
-            'tcp': { typeName: 'tcp_mllp', name: 'TCP/MLLP Inbound' },
-            'http': { typeName: 'http_rest', name: 'HTTP REST Inbound' },
-            'file': { typeName: 'file_listener', name: 'File Listener' },
+            'tcp':      { typeName: 'tcp_mllp',          name: 'TCP/MLLP Inbound' },   // matches connectivity_types.type_name in DB
+            'http':     { typeName: 'http_rest',          name: 'HTTP REST Inbound' },
+            'file':     { typeName: 'file_listener',      name: 'File Listener' },
             'database': { typeName: 'postgresql_inbound', name: 'Database Inbound' }
         };
 
         const TARGET_TYPE_MAP = {
-            'http': { typeName: 'http_outbound', name: 'HTTP Outbound' },
-            'fhir': { typeName: 'http_outbound', name: 'FHIR Outbound' },
-            'tcp': { typeName: 'tcp_mllp_outbound', name: 'TCP/MLLP Outbound' },
-            'file': { typeName: 'file_writer', name: 'File Writer' },
+            'http':     { typeName: 'http_outbound',      name: 'HTTP Outbound' },
+            'fhir':     { typeName: 'http_outbound',      name: 'FHIR Outbound' },
+            'tcp':      { typeName: 'tcp_mllp_outbound',  name: 'TCP/MLLP Outbound' },
+            'file':     { typeName: 'file_writer',        name: 'File Writer' },
             'database': { typeName: 'postgresql_outbound', name: 'Database Outbound' }
         };
 
-        const typeMap = direction === 'inbound' ? SOURCE_TYPE_MAP : TARGET_TYPE_MAP;
-        const mapping = typeMap[connectivityType];
+        const typeMap  = direction === 'inbound' ? SOURCE_TYPE_MAP : TARGET_TYPE_MAP;
+        const mapping  = typeMap[connectivityType];
 
         if (!mapping) {
             console.log(`⚠️ No connector mapping for ${direction} type: ${connectivityType}, skipping`);
@@ -353,91 +269,142 @@ class TransformationPipelineService {
 
         const stepType = `connector.${direction}`;
         const sequence = direction === 'inbound' ? 5 : 295;
-
-        // Normalize wizard config keys to connector schema keys
         const normalizedConfig = this.normalizeWizardConfig(wizardConfig, mapping.typeName);
 
-        const config = {
-            connectorType: mapping.typeName,
-            config: normalizedConfig
-        };
-
+        const config = { connectorType: mapping.typeName, config: normalizedConfig };
         if (direction === 'outbound') {
-            config.contentField = 'transformed';
-            config.contentType = 'application/json';
+            config.contentField = 'fhirBundle';
+            config.contentType  = 'application/fhir+json';
         } else {
             config.timeoutMs = 30000;
         }
 
-        const query = `
+        await sequelize.query(`
             INSERT INTO transformation_steps (
                 pipeline_id,
                 step_name,
                 step_type,
                 sequence,
                 config,
-                enabled,
-                created_by
-            ) VALUES ($1, $2, $3, $4, $5, true, $6)
-        `;
-
-        await client.query(query, [
-            pipelineId,
-            mapping.name,
-            stepType,
-            sequence,
-            JSON.stringify(config),
-            userId
-        ]);
+                enabled
+            ) VALUES ($1, $2, $3, $4, $5, true)
+        `, {
+            bind: [pipelineId, mapping.name, stepType, sequence, JSON.stringify(config)],
+            transaction: t
+        });
 
         console.log(`🔌 Added ${direction} connector step: ${mapping.name} (seq ${sequence}, type: ${mapping.typeName})`);
     }
 
     /**
+     * Sync wizard connectivity config into the matching connector step for an existing interface.
+     * Called when the wizard is re-run to update an interface — keeps step and wizard in sync.
+     */
+    async syncConnectorStepFromWizard(interfaceId, direction, connectivityType, wizardConfig = {}) {
+        const sequelize = this._getSequelize();
+
+        const TARGET_TYPE_MAP = {
+            'http':     'http_outbound',
+            'fhir':     'http_outbound',
+            'tcp':      'tcp_mllp_outbound',
+            'file':     'file_writer',
+            'database': 'postgresql_outbound'
+        };
+        const SOURCE_TYPE_MAP = {
+            'tcp':      'tcp_mllp',
+            'http':     'http_rest',
+            'file':     'file_listener',
+            'database': 'postgresql_inbound'
+        };
+
+        const typeMap      = direction === 'outbound' ? TARGET_TYPE_MAP : SOURCE_TYPE_MAP;
+        const connTypeName = typeMap[connectivityType] || connectivityType;
+        const stepType     = `connector.${direction}`;
+        const normalizedConfig = this.normalizeWizardConfig(wizardConfig, connTypeName);
+
+        try {
+            // Find the pipeline for this interface
+            const pipelines = await sequelize.query(
+                `SELECT id FROM transformation_pipelines WHERE interface_id = $1 LIMIT 1`,
+                { bind: [interfaceId], type: sequelize.QueryTypes.SELECT }
+            );
+            if (!pipelines.length) return;
+
+            const pipelineId = pipelines[0].id;
+
+            // Update the matching connector step's config sub-object (preserve connectorType, contentField etc.)
+            await sequelize.query(`
+                UPDATE transformation_steps
+                SET config = jsonb_set(config, '{config}', config->'config' || $1::jsonb, true)
+                WHERE pipeline_id = $2
+                  AND step_type = $3
+                  AND config->>'connectorType' = $4
+            `, {
+                bind: [JSON.stringify(normalizedConfig), pipelineId, stepType, connTypeName]
+            });
+
+            console.log(`🔄 Synced ${direction} connector step config for interface ${interfaceId}`);
+        } catch (err) {
+            console.warn('⚠️ syncConnectorStepFromWizard failed (non-fatal):', err.message);
+        }
+    }
+
+    /**
      * Normalize wizard config keys to match connector config_schema field names
-     * Wizard uses its own naming (endpoint, authType), connectors use schema names (url, authentication_type)
      */
     normalizeWizardConfig(wizardConfig, connectorTypeName) {
         if (!wizardConfig || Object.keys(wizardConfig).length === 0) return {};
 
         const normalized = {};
 
-        // HTTP outbound: wizard → schema key mapping
         if (connectorTypeName === 'http_outbound') {
             if (wizardConfig.endpoint) normalized.url = wizardConfig.endpoint;
-            if (wizardConfig.authType) normalized.authentication_type = wizardConfig.authType;
-            if (wizardConfig.method) normalized.method = wizardConfig.method;
-            // Pass through keys that already match
-            if (wizardConfig.url) normalized.url = wizardConfig.url;
-            if (wizardConfig.content_type) normalized.content_type = wizardConfig.content_type;
+            if (wizardConfig.url)      normalized.url = wizardConfig.url;
+
+            // Normalize authType → authentication_type
+            // Wizard may save 'basic'/'bearer' (form values) or already-normalized 'basic_auth'/'bearer_token'
+            const authTypeMap = { basic: 'basic_auth', bearer: 'bearer_token', api_key: 'api_key', none: 'none' };
+            const rawAuthType = wizardConfig.authType || wizardConfig.authentication_type || '';
+            if (rawAuthType) {
+                normalized.authentication_type = authTypeMap[rawAuthType] || rawAuthType;
+            }
+
+            // Credentials — accept both camelCase form keys (authUsername) AND direct keys (username)
+            // Direct keys (username/password) are what `target_connectivity.config` stores
+            normalized.username     = wizardConfig.username     || wizardConfig.authUsername  || undefined;
+            normalized.password     = wizardConfig.password     || wizardConfig.authPassword  || undefined;
+            normalized.bearer_token = wizardConfig.bearer_token || wizardConfig.bearerToken   || undefined;
+            normalized.api_key      = wizardConfig.api_key      || wizardConfig.apiKey        || undefined;
+            normalized.api_key_header = wizardConfig.api_key_header || wizardConfig.apiKeyHeader || undefined;
+
+            // Strip undefined keys so they don't pollute the stored config
+            Object.keys(normalized).forEach(k => { if (normalized[k] === undefined) delete normalized[k]; });
+
+            if (wizardConfig.method)          normalized.method          = wizardConfig.method;
+            if (wizardConfig.content_type)    normalized.content_type    = wizardConfig.content_type;
             if (wizardConfig.timeout_seconds) normalized.timeout_seconds = wizardConfig.timeout_seconds;
             return normalized;
         }
 
-        // TCP/MLLP: keys already match (host, port)
-        if (connectorTypeName === 'tcp_mllp' || connectorTypeName === 'tcp_mllp_outbound') {
+        if (connectorTypeName === 'tcp_mllp' || connectorTypeName === 'tcp_mllp_inbound' || connectorTypeName === 'tcp_mllp_outbound') {
             if (wizardConfig.host) normalized.host = wizardConfig.host;
             if (wizardConfig.port) normalized.port = parseInt(wizardConfig.port, 10) || wizardConfig.port;
             return normalized;
         }
 
-        // File: wizard → schema key mapping
         if (connectorTypeName === 'file_listener' || connectorTypeName === 'file_writer') {
             if (wizardConfig.directory_path) normalized.directory_path = wizardConfig.directory_path;
-            if (wizardConfig.file_pattern) normalized.file_pattern = wizardConfig.file_pattern;
+            if (wizardConfig.file_pattern)   normalized.file_pattern   = wizardConfig.file_pattern;
             return normalized;
         }
 
-        // Database: pass through common keys
         if (connectorTypeName.includes('postgresql') || connectorTypeName.includes('mysql') ||
-            connectorTypeName.includes('mongodb') || connectorTypeName.includes('sqlserver')) {
-            ['host', 'port', 'database', 'username', 'password', 'ssl_mode', 'query', 'table_name'].forEach(key => {
-                if (wizardConfig[key] !== undefined) normalized[key] = wizardConfig[key];
-            });
+            connectorTypeName.includes('mongodb')    || connectorTypeName.includes('sqlserver')) {
+            ['host', 'port', 'database', 'username', 'password', 'ssl_mode', 'query', 'table_name']
+                .forEach(key => { if (wizardConfig[key] !== undefined) normalized[key] = wizardConfig[key]; });
             return normalized;
         }
 
-        // Default: pass through all keys
         return { ...wizardConfig };
     }
 
@@ -446,17 +413,11 @@ class TransformationPipelineService {
      */
     convertMappingsToResourceFormat(atomicMappings) {
         const resources = {};
-
         for (const mapping of atomicMappings) {
             const resourceType = this.extractResourceType(mapping.fhirPath);
-
-            if (!resources[resourceType]) {
-                resources[resourceType] = { mappings: [] };
-            }
-
+            if (!resources[resourceType]) resources[resourceType] = { mappings: [] };
             resources[resourceType].mappings.push(mapping);
         }
-
         return resources;
     }
 

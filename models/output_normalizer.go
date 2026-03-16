@@ -156,7 +156,15 @@ func (n *OutputNormalizer) normalizeValueDepth(value interface{}, depth int) int
 			}
 			return result
 		}
-		return value
+		// Handle any Go-native typed slice via reflection (covers []map[string]interface{},
+		// []string, []int, etc. — whatever the FHIR/HL7 service returns as concrete types).
+		// v is already reflect.ValueOf(value) from the outer switch.
+		length := v.Len()
+		result := make([]interface{}, length)
+		for i := 0; i < length; i++ {
+			result[i] = n.normalizeValueDepth(v.Index(i).Interface(), depth+1)
+		}
+		return result
 
 	default:
 		return value
@@ -252,7 +260,12 @@ func toSnakeCaseLower(r rune) rune {
 }
 
 // NormalizeStepOutput is a convenience method for normalizing step outputs
-// Flattens ALL nested structures AND normalizes keys
+// Flattens ALL nested structures AND normalizes keys.
+// The "result" key is treated specially: its value is preserved without
+// recursive key normalization because it contains user-controlled data
+// (e.g. pivot column names like "GLUC", ICD codes like "E11.9",
+// caseTransform=upper output like "PATIENT_ID"). Normalizing these would
+// silently corrupt the user's intended output.
 func (n *OutputNormalizer) NormalizeStepOutput(output map[string]interface{}) map[string]interface{} {
 	// First flatten enrichment structures (enriched.xxx pattern)
 	flattened := n.flattenEnrichment(output)
@@ -260,8 +273,27 @@ func (n *OutputNormalizer) NormalizeStepOutput(output map[string]interface{}) ma
 	// Then flatten any other wrapper keys (mapped_fields, field_results, etc.)
 	unwrapped := n.flattenWrapperKeys(flattened)
 
-	// Then normalize all keys
-	return n.NormalizeMap(unwrapped)
+	// Extract user-controlled result data before key normalization.
+	// The "result" key holds the actual transformed output of normalizer/
+	// pivot/transpose/flatten/unflatten steps. Its column names are
+	// user-defined and must not be snake_cased by the output normalizer.
+	var resultVal interface{}
+	hasResult := false
+	if v, ok := unwrapped["result"]; ok {
+		resultVal = v
+		hasResult = true
+		delete(unwrapped, "result")
+	}
+
+	// Normalize all metadata keys (result_count, operation, duration_ms, etc.)
+	normalized := n.NormalizeMap(unwrapped)
+
+	// Restore the user-controlled result data without key normalization
+	if hasResult {
+		normalized["result"] = resultVal
+	}
+
+	return normalized
 }
 
 // flattenEnrichment extracts data from nested enrichment structures

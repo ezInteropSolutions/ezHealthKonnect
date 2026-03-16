@@ -8,6 +8,10 @@ let currentPage = 1;
 let pageSize = 25;
 let totalPages = 1;
 
+// Sort state
+let sortColumn = 'name';
+let sortDirection = 'asc';
+
 // Auto-refresh state
 let autoRefreshInterval = null;
 let autoRefreshEnabled = true;
@@ -18,7 +22,64 @@ let interactionTimeout = null;
 // Initialize on page load
 window.addEventListener('load', function() {
     initializeInterfacesPage();
+    fitTableToViewport();
 });
+
+window.addEventListener('resize', fitTableToViewport);
+
+/**
+ * Two-pass layout fix — guarantees the pagination footer is always fully
+ * visible regardless of CSS cascade or browser sub-pixel rounding.
+ *
+ * Pass 1: size #interfaces-table-container to exactly fill .main-content
+ *         below the header, using getBoundingClientRect() for sub-pixel
+ *         precision (avoids the 1px clientHeight/viewport mismatch).
+ *
+ * Pass 2 (rAF — after browser has laid out pass-1 heights): explicitly
+ *         size .table-container (the scrollable tbody area) to whatever
+ *         space remains after the filter bar and footer are measured.
+ *         This prevents the 5px flex-overflow that causes overflow:hidden
+ *         on .interfaces-section to clip the footer.
+ */
+function fitTableToViewport() {
+    const mainContent     = document.querySelector('.main-content');
+    const headerContainer = document.getElementById('interface-header-container');
+    const tableContainer  = document.getElementById('interfaces-table-container');
+    if (!mainContent || !headerContainer || !tableContainer) return;
+
+    // --- Pass 1: size the outer wrapper ---
+    const mainRect  = mainContent.getBoundingClientRect();
+    const hdrRect   = headerContainer.getBoundingClientRect();
+    const mainStyle = window.getComputedStyle(mainContent);
+    const padBottom = parseFloat(mainStyle.paddingBottom) || 0;
+    const available = Math.floor(mainRect.bottom - padBottom - hdrRect.bottom);
+    if (available > 0) {
+        tableContainer.style.height    = available + 'px';
+        tableContainer.style.flex      = 'none';
+        tableContainer.style.minHeight = '0';
+    }
+
+    // --- Pass 2: size the inner scroll area so footer is never clipped ---
+    requestAnimationFrame(() => {
+        const section    = document.querySelector('.interfaces-section');
+        const filterBar  = document.querySelector('.section-header');
+        const footer     = document.querySelector('.table-footer');
+        const scrollArea = document.querySelector('.table-container');
+        if (!section || !filterBar || !footer || !scrollArea) return;
+
+        const filterH  = filterBar.getBoundingClientRect().height || filterBar.scrollHeight;
+        // scrollHeight captures true content height even when flex clips it
+        const footerH  = Math.max(footer.scrollHeight, footer.getBoundingClientRect().height, 44);
+        const sectionH = section.getBoundingClientRect().height;
+        const scrollH  = Math.floor(sectionH - filterH - footerH) - 2; // 2px safety buffer
+
+        if (scrollH > 50) {   // sanity: never collapse the scroll area
+            scrollArea.style.height    = scrollH + 'px';
+            scrollArea.style.flex      = 'none';
+            scrollArea.style.minHeight = '0';
+        }
+    });
+}
 
 // Initialize the interfaces page
 async function initializeInterfacesPage() {
@@ -37,6 +98,8 @@ async function initializeInterfacesPage() {
     setupEventListeners();
     setupAutoRefresh();
     setupRuntimeMonitoring();
+    // Re-measure after all components have injected their HTML
+    setTimeout(fitTableToViewport, 150);
 
     // FIX: Add tooltip setup
     setupTooltips();
@@ -246,16 +309,32 @@ function setupEventListeners() {
     // Filter event listeners
     const statusFilter = document.getElementById('statusFilter');
     const typeFilter = document.getElementById('typeFilter');
+    const messageTypeFilter = document.getElementById('messageTypeFilter');
+    const searchInput = document.getElementById('interfaceSearchInput');
     const createForm = document.getElementById('createInterfaceForm');
-    
+
     if (statusFilter) {
         statusFilter.addEventListener('change', applyFilters);
         console.log('✅ Status filter listener attached');
     }
-    
+
     if (typeFilter) {
         typeFilter.addEventListener('change', applyFilters);
         console.log('✅ Type filter listener attached');
+    }
+
+    if (messageTypeFilter) {
+        messageTypeFilter.addEventListener('change', applyFilters);
+        console.log('✅ Message type filter listener attached');
+    }
+
+    if (searchInput) {
+        let searchDebounce;
+        searchInput.addEventListener('input', () => {
+            clearTimeout(searchDebounce);
+            searchDebounce = setTimeout(applyFilters, 200);
+        });
+        console.log('✅ Search input listener attached');
     }
     
     if (createForm) {
@@ -607,7 +686,8 @@ async function performAutoRefresh() {
             if (newInterfacesJson !== currentInterfacesJson) {
                 interfaces = data.interfaces || [];
                 filteredInterfaces = [...interfaces];
-                
+
+                populateMessageTypeFilter();
                 updateSummaryCards();
                 calculatePagination();
                 renderInterfacesTable();
@@ -641,7 +721,8 @@ async function loadInterfaces() {
             interfaces = data.interfaces || [];
             filteredInterfaces = [...interfaces];
             console.log('✅ Interfaces loaded:', interfaces.length);
-            
+
+            populateMessageTypeFilter();
             updateSummaryCards();
             calculatePagination();
             renderInterfacesTable();
@@ -804,6 +885,71 @@ function calculatePagination() {
     if (totalPages === 0) totalPages = 1;
 }
 
+// Toggle sort column / direction and re-render
+function sortBy(col) {
+    if (sortColumn === col) {
+        sortDirection = sortDirection === 'asc' ? 'desc' : 'asc';
+    } else {
+        sortColumn = col;
+        sortDirection = 'asc';
+    }
+    updateSortHeaders();
+    renderInterfacesTable();
+}
+
+// Update header arrow indicators
+function updateSortHeaders() {
+    document.querySelectorAll('.th-sortable').forEach(th => th.classList.remove('sort-active'));
+    document.querySelectorAll('.sort-arrow').forEach(el => el.textContent = '↕');
+    const activeArrow = document.getElementById(`sort-arrow-${sortColumn}`);
+    if (activeArrow) {
+        activeArrow.closest('th').classList.add('sort-active');
+        activeArrow.textContent = sortDirection === 'asc' ? '↑' : '↓';
+    }
+}
+
+// Return a sorted copy of filteredInterfaces
+function getSortedInterfaces() {
+    const sorted = [...filteredInterfaces];
+    sorted.sort((a, b) => {
+        let av, bv;
+        switch (sortColumn) {
+            case 'name':
+                av = (a.name || '').toLowerCase();
+                bv = (b.name || '').toLowerCase();
+                break;
+            case 'status':
+                av = (a.status || a.interfaceStatus || '').toLowerCase();
+                bv = (b.status || b.interfaceStatus || '').toLowerCase();
+                break;
+            case 'runtime': {
+                const ra = getInitialStatusDisplay(a).statusText.toLowerCase();
+                const rb = getInitialStatusDisplay(b).statusText.toLowerCase();
+                av = ra; bv = rb;
+                break;
+            }
+            case 'lastUpdated':
+                av = a.lastUpdated ? new Date(a.lastUpdated).getTime() : 0;
+                bv = b.lastUpdated ? new Date(b.lastUpdated).getTime() : 0;
+                break;
+            case 'statistics':
+                av = a.statistics?.totalProcessed || 0;
+                bv = b.statistics?.totalProcessed || 0;
+                break;
+            case 'lastActivity':
+                av = a.lastActivity ? new Date(a.lastActivity).getTime() : 0;
+                bv = b.lastActivity ? new Date(b.lastActivity).getTime() : 0;
+                break;
+            default:
+                return 0;
+        }
+        if (av < bv) return sortDirection === 'asc' ? -1 : 1;
+        if (av > bv) return sortDirection === 'asc' ? 1 : -1;
+        return 0;
+    });
+    return sorted;
+}
+
 // Render ultra compact interfaces table
 function renderInterfacesTable() {
     const tbody = document.getElementById('interfacesTableBody');
@@ -822,12 +968,13 @@ function renderInterfacesTable() {
         return;
     }
     
-    // Get items for current page
+    // Get items for current page (sorted)
     const startIndex = (currentPage - 1) * pageSize;
     const endIndex = startIndex + pageSize;
-    const pageItems = filteredInterfaces.slice(startIndex, endIndex);
-    
+    const pageItems = getSortedInterfaces().slice(startIndex, endIndex);
+
     tbody.innerHTML = pageItems.map(interface => createCompactTableRow(interface)).join('');
+    updateSortHeaders();
     updatePaginationInfo();
     updatePaginationControls();
 }
@@ -842,7 +989,7 @@ function getInitialStatusDisplay(interface) {
 
     let indicatorClass, statusText;
     if (isActive) {
-        indicatorClass = 'running';
+        indicatorClass = 'active';
         statusText = 'Running';
     } else if (isPaused) {
         indicatorClass = 'paused';
@@ -856,6 +1003,25 @@ function getInitialStatusDisplay(interface) {
     }
 
     return { indicatorClass, statusText, isActive, isPaused, isStopped };
+}
+
+// Source format label map — mirrors InterfaceConfigComponents.js sourceType values
+const SOURCE_FORMAT_LABELS = {
+    'hl7v2': 'HL7 v2.x',
+    'fhir':  'FHIR R4',
+    'cda':   'CDA',
+    'x12':   'X12',
+    'json':  'JSON',
+    'xml':   'XML',
+    'csv':   'CSV',
+};
+
+// Returns a badge showing the inbound source format (not the defaulted message_type)
+function getSourceFormatBadge(iface) {
+    const fmt = (iface.sourceType || iface.source_type || '').toLowerCase();
+    if (!fmt) return '';
+    const label = SOURCE_FORMAT_LABELS[fmt] || fmt.toUpperCase();
+    return `<span class="msg-type-badge">${label}</span>`;
 }
 
 // Create ultra compact table row
@@ -884,6 +1050,7 @@ function createCompactTableRow(interface) {
                 <div class="interface-name-cell">
                     <div class="interface-name">${interface.name}</div>
                     <div class="interface-description">${interface.description}</div>
+                    ${getSourceFormatBadge(interface)}
                 </div>
             </td>
             <td>
@@ -892,7 +1059,7 @@ function createCompactTableRow(interface) {
             <td>
                 <div class="runtime-status-cell">
                     <span class="runtime-status" id="runtime-${interface.id}">
-                        <span class="status-indicator ${initialStatus.indicatorClass}">●</span>
+                        <span class="status-indicator ${initialStatus.indicatorClass}"></span>
                         <span class="status-text">${initialStatus.statusText}</span>
                     </span>
                 </div>
@@ -936,94 +1103,70 @@ function createCompactTableRow(interface) {
     `;
 }
 
-// Get mini icon-only action buttons - CONSOLIDATED
+// Get mini icon-only action buttons — refined neutral-first design
 function getMiniActionButtons(interface) {
     const initialStatus = getInitialStatusDisplay(interface);
-    const showStart = !initialStatus.isActive;
-    const showPause = initialStatus.isActive && !initialStatus.isPaused;
-    const showStop = initialStatus.isActive || initialStatus.isPaused;
-    const canDelete = !initialStatus.isActive && !initialStatus.isPaused;
+    const showPause  = initialStatus.isActive && !initialStatus.isPaused;
+    const showStop   = initialStatus.isActive || initialStatus.isPaused;
+    const canDelete  = !initialStatus.isActive && !initialStatus.isPaused;
 
-    // Determine runtime control icon and action (Start/Pause only, Stop is separate)
-    let runtimeIcon = '<i class="far fa-play-circle"></i>';
-    let runtimeAction = `activateInterfaceProcessing('${interface.id}')`;
-    let runtimeTitle = 'Start Processing';
-    let runtimeColor = '#10b981'; // Green
-
-    if (showPause) {
-        // Running: Show pause button
-        runtimeIcon = '<i class="far fa-pause-circle"></i>';
-        runtimeAction = `pauseInterfaceProcessing('${interface.id}')`;
-        runtimeTitle = 'Pause Processing';
-        runtimeColor = '#f59e0b'; // Amber
-    }
-    // Note: Stop button is now always separate, not part of the morphing button
+    const runtimeIcon   = showPause
+        ? '<i class="fas fa-pause"></i>'
+        : '<i class="fas fa-play"></i>';
+    const runtimeAction = showPause
+        ? `pauseInterfaceProcessing('${interface.id}')`
+        : `activateInterfaceProcessing('${interface.id}')`;
+    const runtimeTitle  = showPause ? 'Pause Processing' : 'Start Processing';
+    const runtimeColor  = showPause ? 'act-btn-amber' : 'act-btn-green';
 
     return `
-        <div style="display: flex; gap: 0.5rem; align-items: center; justify-content: flex-end;">
-            <!-- Button 1: Runtime Control - Start/Pause (Outline) -->
-            <button class="action-btn-outline" title="${runtimeTitle}"
+        <div style="display:flex;gap:4px;align-items:center;justify-content:flex-end;">
+            <button class="act-btn ${runtimeColor}" title="${runtimeTitle}"
                     onclick="event.stopPropagation(); ${runtimeAction}"
-                    style="color: ${runtimeColor}; border-color: ${runtimeColor};"
                     id="runtime-btn-${interface.id}">
                 ${runtimeIcon}
             </button>
 
-            <!-- Button 2: Stop (Always Visible) -->
-            <button class="action-btn-outline" title="Stop Processing"
+            <button class="act-btn act-btn-red" title="Stop Processing"
                     onclick="event.stopPropagation(); deactivateInterfaceProcessing('${interface.id}')"
-                    style="color: #ef4444; border-color: #ef4444; ${!showStop ? 'opacity: 0.3; cursor: not-allowed;' : ''}"
                     id="stop-btn-${interface.id}"
                     ${!showStop ? 'disabled' : ''}>
-                <i class="far fa-stop-circle"></i>
+                <i class="fas fa-stop"></i>
             </button>
 
-            <!-- Button 3: View Messages (Outline) -->
-            <button class="action-btn-outline" title="View Messages"
-                    onclick="event.stopPropagation(); viewInterfaceMessages('${interface.id}')"
-                    style="color: #3b82f6; border-color: #3b82f6;">
-                <i class="far fa-envelope"></i>
+            <button class="act-btn act-btn-blue" title="View Messages"
+                    onclick="event.stopPropagation(); viewInterfaceMessages('${interface.id}')">
+                <i class="far fa-comment-dots"></i>
             </button>
 
-            <!-- Button 4: More Actions (Outline) -->
-            <div class="action-dropdown" style="position: relative; display: inline-block;">
-                <button class="action-btn-outline" title="More Actions"
+            <div class="action-dropdown" style="position:relative;display:inline-block;">
+                <button class="act-btn act-btn-slate" title="More Actions"
                         onclick="event.stopPropagation(); toggleActionsMenu('${interface.id}')"
-                        style="color: #64748b; border-color: #64748b;"
                         id="actions-menu-btn-${interface.id}">
                     <i class="fas fa-ellipsis-h"></i>
                 </button>
                 <div class="dropdown-menu-minimal" id="actions-menu-${interface.id}">
                     <div class="dropdown-item-minimal" onclick="event.stopPropagation(); showEditModal('${interface.id}'); closeActionsMenu('${interface.id}')">
-                        <i class="far fa-edit"></i>
-                        <span>Edit</span>
+                        <i class="far fa-edit"></i><span>Edit</span>
                     </div>
                     <div class="dropdown-item-minimal" onclick="event.stopPropagation(); configurePipeline('${interface.id}', '${interface.messageType || 'ADT^A01'}'); closeActionsMenu('${interface.id}')">
-                        <i class="fas fa-network-wired"></i>
-                        <span>Pipeline</span>
+                        <i class="fas fa-network-wired"></i><span>Pipeline</span>
                     </div>
                     <div class="dropdown-item-minimal" onclick="event.stopPropagation(); showInterfaceDetails('${interface.id}'); closeActionsMenu('${interface.id}')">
-                        <i class="far fa-file-alt"></i>
-                        <span>Details</span>
+                        <i class="far fa-file-alt"></i><span>Details</span>
                     </div>
                     ${interface.status === 'error' ? `
                     <div class="dropdown-item-minimal" onclick="event.stopPropagation(); resetInterface('${interface.id}'); closeActionsMenu('${interface.id}')">
-                        <i class="fas fa-sync"></i>
-                        <span>Reset</span>
-                    </div>
-                    ` : ''}
+                        <i class="fas fa-sync"></i><span>Reset</span>
+                    </div>` : ''}
                     <div class="dropdown-divider-minimal"></div>
                     ${canDelete ? `
                     <div class="dropdown-item-minimal danger" onclick="event.stopPropagation(); confirmDeleteInterface('${interface.id}', '${interface.name?.replace(/'/g, "\\'")}'); closeActionsMenu('${interface.id}')">
-                        <i class="far fa-trash-alt"></i>
-                        <span>Delete</span>
-                    </div>
-                    ` : `
+                        <i class="far fa-trash-alt"></i><span>Delete</span>
+                    </div>` : `
                     <div class="dropdown-item-minimal disabled" title="Stop interface first">
-                        <i class="far fa-trash-alt"></i>
-                        <span>Delete</span>
-                    </div>
-                    `}
+                        <i class="far fa-trash-alt"></i><span>Delete</span>
+                    </div>`}
                 </div>
             </div>
         </div>
@@ -1306,17 +1449,33 @@ function formatCompactNumber(num) {
     return num.toString();
 }
 
+// No-op: message type dropdown is now a static curated list
+function populateMessageTypeFilter() {}
+
 // Apply filters
 function applyFilters() {
-    const statusFilter = document.getElementById('statusFilter').value;
-    const typeFilter = document.getElementById('typeFilter').value;
-    
-    filteredInterfaces = interfaces.filter(interface => {
-        const statusMatch = statusFilter === 'all' || interface.status === statusFilter;
-        const typeMatch = typeFilter === 'all' || interface.sourceType === typeFilter;
-        return statusMatch && typeMatch;
+    const statusFilter = document.getElementById('statusFilter')?.value || 'all';
+    const typeFilter = document.getElementById('typeFilter')?.value || 'all';
+    const messageTypeFilter = document.getElementById('messageTypeFilter')?.value || 'all';
+    const searchQuery = (document.getElementById('interfaceSearchInput')?.value || '').trim().toLowerCase();
+
+    filteredInterfaces = interfaces.filter(iface => {
+        const statusMatch = statusFilter === 'all' ||
+            (iface.status || '').toLowerCase() === statusFilter ||
+            (iface.interfaceStatus || iface.interface_status || '').toLowerCase() === statusFilter;
+        const typeMatch = typeFilter === 'all' ||
+            (iface.sourceType || iface.source_type || '').toLowerCase().includes(typeFilter);
+        // Format filter operates on sourceType (hl7v2, fhir, cda, x12, json, xml, csv)
+        // This is the actual inbound source format, not the generic message_type default
+        const srcFmt = (iface.sourceType || iface.source_type || '').toLowerCase().trim();
+        const fmtFilter = messageTypeFilter.toLowerCase().trim();
+        const msgTypeMatch = fmtFilter === 'all' || srcFmt === fmtFilter;
+        const nameMatch = !searchQuery ||
+            (iface.name || '').toLowerCase().includes(searchQuery) ||
+            (iface.description || '').toLowerCase().includes(searchQuery);
+        return statusMatch && typeMatch && msgTypeMatch && nameMatch;
     });
-    
+
     currentPage = 1;
     calculatePagination();
     renderInterfacesTable();
@@ -1345,41 +1504,70 @@ function goToNextPage() {
 
 // Update pagination info and controls
 function updatePaginationInfo() {
-    const startItem = (currentPage - 1) * pageSize + 1;
-    const endItem = Math.min(currentPage * pageSize, filteredInterfaces.length);
     const totalItems = filteredInterfaces.length;
-    
     const infoElement = document.querySelector('.pagination-info');
-    if (infoElement) {
-        infoElement.textContent = `${startItem}-${endItem} of ${totalItems}`;
+    if (!infoElement) return;
+
+    if (totalItems === 0) {
+        infoElement.textContent = 'No interfaces found';
+        return;
     }
+
+    const startItem = (currentPage - 1) * pageSize + 1;
+    const endItem = Math.min(currentPage * pageSize, totalItems);
+    const filtered = totalItems < interfaces.length ? ` (filtered from ${interfaces.length})` : '';
+    infoElement.innerHTML = `Showing <strong>${startItem}–${endItem}</strong> of <strong>${totalItems}</strong> interfaces${filtered}`;
 }
 
 function updatePaginationControls() {
     const paginationContainer = document.querySelector('.pagination-controls');
     if (!paginationContainer) return;
-    
+
+    if (totalPages <= 1 && filteredInterfaces.length === 0) {
+        paginationContainer.innerHTML = '';
+        return;
+    }
+
+    const btnStyle = (disabled, active) => `
+        style="padding:0.3rem 0.6rem;min-width:32px;border:1px solid ${active ? '#1e3a8a' : '#e2e8f0'};
+        border-radius:5px;background:${active ? '#1e3a8a' : '#fff'};color:${active ? '#fff' : disabled ? '#cbd5e1' : '#374151'};
+        font-size:0.8rem;cursor:${disabled ? 'default' : 'pointer'};font-weight:${active ? '600' : '400'};
+        transition:all 0.15s;" ${disabled ? 'disabled' : ''}`;
+
     let html = '';
-    
-    // Previous button
-    html += `<button class="pagination-btn" onclick="goToPreviousPage()" ${currentPage === 1 ? 'disabled' : ''}>‹</button>`;
-    
-    // Page numbers (max 3 visible)
-    const maxVisiblePages = 3;
-    let startPage = Math.max(1, currentPage - 1);
-    let endPage = Math.min(totalPages, startPage + maxVisiblePages - 1);
-    
-    if (endPage - startPage < maxVisiblePages - 1) {
-        startPage = Math.max(1, endPage - maxVisiblePages + 1);
+
+    // First page
+    html += `<button ${btnStyle(currentPage === 1, false)} onclick="goToPage(1)" title="First page">«</button>`;
+    // Prev
+    html += `<button ${btnStyle(currentPage === 1, false)} onclick="goToPreviousPage()" title="Previous page">‹ Prev</button>`;
+
+    // Page numbers — show up to 5 with ellipsis
+    const maxVisible = 5;
+    let startPage = Math.max(1, currentPage - Math.floor(maxVisible / 2));
+    let endPage = Math.min(totalPages, startPage + maxVisible - 1);
+    if (endPage - startPage < maxVisible - 1) {
+        startPage = Math.max(1, endPage - maxVisible + 1);
     }
-    
+
+    if (startPage > 1) {
+        html += `<button ${btnStyle(false, false)} onclick="goToPage(1)">1</button>`;
+        if (startPage > 2) html += `<span style="padding:0 4px;color:#94a3b8;font-size:0.8rem;">…</span>`;
+    }
+
     for (let i = startPage; i <= endPage; i++) {
-        html += `<button class="pagination-btn ${i === currentPage ? 'active' : ''}" onclick="goToPage(${i})">${i}</button>`;
+        html += `<button ${btnStyle(false, i === currentPage)} onclick="goToPage(${i})">${i}</button>`;
     }
-    
-    // Next button
-    html += `<button class="pagination-btn" onclick="goToNextPage()" ${currentPage === totalPages ? 'disabled' : ''}>›</button>`;
-    
+
+    if (endPage < totalPages) {
+        if (endPage < totalPages - 1) html += `<span style="padding:0 4px;color:#94a3b8;font-size:0.8rem;">…</span>`;
+        html += `<button ${btnStyle(false, false)} onclick="goToPage(${totalPages})">${totalPages}</button>`;
+    }
+
+    // Next
+    html += `<button ${btnStyle(currentPage === totalPages, false)} onclick="goToNextPage()" title="Next page">Next ›</button>`;
+    // Last page
+    html += `<button ${btnStyle(currentPage === totalPages, false)} onclick="goToPage(${totalPages})" title="Last page">»</button>`;
+
     paginationContainer.innerHTML = html;
 }
 
@@ -1695,6 +1883,11 @@ function showEditModal(interfaceId) {
     // CRITICAL FIX: Clear any inline styles that prevent showing
     editModal.removeAttribute('style');
     editModal.classList.add('show');
+
+    // Wire log-level chip click handlers now that the modal DOM is visible
+    if (typeof initLogLevelSelector === 'function') {
+        initLogLevelSelector();
+    }
 
     console.log('🔍 Modal after show:', {
         classes: editModal.className,
@@ -2816,29 +3009,36 @@ async function updateInterfaceRuntimeStatus(interfaceId) {
                 // Paused: Show Start + Stop
                 updateRuntimeStatusDisplay(statusElement, false, stats, 'paused');
                 updateActionButtonsVisibility(interfaceId, false, true);
+                updateDeleteButtonState(interfaceId, false);
             } else if (isActive) {
                 // Active: Show Pause + Stop (status is active, regardless of processingActive flag)
                 updateRuntimeStatusDisplay(statusElement, true, stats, null);
                 updateActionButtonsVisibility(interfaceId, true, false);
+                updateDeleteButtonState(interfaceId, false);
             } else if (isStopped) {
-                // Stopped: Show Start only
+                // Stopped: Show Start only — delete is now allowed
                 updateRuntimeStatusDisplay(statusElement, false, stats, null);
                 updateActionButtonsVisibility(interfaceId, false, false);
+                updateDeleteButtonState(interfaceId, true);
             } else {
-                // Default (unknown, error, etc.): Show Start only
+                // Default (unknown, error, etc.): Show Start only — delete is allowed
                 updateRuntimeStatusDisplay(statusElement, false, stats, null);
                 updateActionButtonsVisibility(interfaceId, false, false);
+                updateDeleteButtonState(interfaceId, true);
             }
         } else if (response.status === 404) {
             updateRuntimeStatusDisplay(statusElement, false, null, 'not_configured');
             updateActionButtonsVisibility(interfaceId, false, false);
+            updateDeleteButtonState(interfaceId, true);
         } else {
             updateRuntimeStatusDisplay(statusElement, false, null, 'error');
             updateActionButtonsVisibility(interfaceId, false, false);
+            updateDeleteButtonState(interfaceId, true);
         }
     } catch (error) {
         updateRuntimeStatusDisplay(statusElement, false, null, 'offline');
         updateActionButtonsVisibility(interfaceId, false, false);
+        updateDeleteButtonState(interfaceId, true);
     }
 }
 
@@ -3268,6 +3468,58 @@ function configurePipeline(interfaceId) {
     // Navigate to pipeline builder with interface context only
     // Message type will be loaded from the interface configuration
     window.location.href = `/pipeline-builder.html?interfaceId=${interfaceId}`;
+}
+
+// ─── Log-level selector helpers ──────────────────────────────────────────────
+const LOG_LEVEL_STYLES = {
+    debug:   { bg: '#dbeafe', border: '#3b82f6', color: '#1e40af', hint: '🔬 <strong>Debug</strong> — captures every step. Best for development and troubleshooting. Uses more storage.' },
+    info:    { bg: '#dcfce7', border: '#22c55e', color: '#166534', hint: 'ℹ️ <strong>Info</strong> — key lifecycle events (receive, parse, transform, deliver). Balanced storage use.' },
+    warning: { bg: '#fef9c3', border: '#eab308', color: '#854d0e', hint: '⚠️ <strong>Warning</strong> — warnings and errors only. Minimal storage use.' },
+    error:   { bg: '#fee2e2', border: '#ef4444', color: '#991b1b', hint: '❌ <strong>Error</strong> — errors only. Smallest footprint, but limited visibility.' },
+    off:     { bg: '#f1f5f9', border: '#94a3b8', color: '#475569', hint: '🔕 <strong>Off</strong> — no logs written to object storage. Only console output.' },
+};
+
+function setLogLevel(level) {
+    const group = document.getElementById('logLevelGroup');
+    if (!group) return;
+    group.querySelectorAll('.log-level-option').forEach(label => {
+        const lvl = label.dataset.level;
+        const chip = label.querySelector('.log-level-chip');
+        const radio = label.querySelector('input[type=radio]');
+        if (!chip) return;
+        const s = LOG_LEVEL_STYLES[lvl] || LOG_LEVEL_STYLES.debug;
+        if (lvl === level) {
+            radio.checked = true;
+            chip.style.background  = s.bg;
+            chip.style.borderColor = s.border;
+            chip.style.color       = s.color;
+        } else {
+            radio.checked = false;
+            chip.style.background  = '';
+            chip.style.borderColor = '#e2e8f0';
+            chip.style.color       = '#374151';
+        }
+    });
+    const hint = document.getElementById('logLevelHint');
+    if (hint) hint.innerHTML = (LOG_LEVEL_STYLES[level] || LOG_LEVEL_STYLES.debug).hint;
+    const cb = document.getElementById('editDebugLogging');
+    if (cb) cb.checked = (level !== 'off');
+}
+
+function getLogLevel() {
+    const group = document.getElementById('logLevelGroup');
+    if (!group) return 'debug';
+    const checked = group.querySelector('input[type=radio]:checked');
+    return checked ? checked.value : 'debug';
+}
+
+function initLogLevelSelector() {
+    const group = document.getElementById('logLevelGroup');
+    if (!group) return;
+    group.querySelectorAll('.log-level-option').forEach(label => {
+        label.addEventListener('click', () => setLogLevel(label.dataset.level));
+    });
+    setLogLevel(getLogLevel() || 'debug');
 }
 
 // Cleanup on page unload

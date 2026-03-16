@@ -616,12 +616,13 @@ type OutboundConnector interface {
    - Full MLLP protocol parser (0x0B start, 0x1C/0x0D end)
    - TLS 1.2/1.3 support with certificate configuration
    - Connection pooling with configurable max connections
-   - Automatic ACK/NACK generation
+   - Configurable ACK/NACK generation (see ACK/NACK section below)
    - Keep-alive with configurable period
    - Read/write timeout handling
    - Graceful shutdown with active connection tracking
    - Message type extraction from MSH segment
    - Message control ID correlation
+   - Segment delimiter: **CRLF** (`\r\n`) in generated ACK/NACK messages
 
 **Priority Queue** (Next 3-4 weeks):
 2. ⏳ TCP/MLLP Outbound (middleware scenario - send HL7 to downstream)
@@ -677,6 +678,96 @@ type OutboundConnector interface {
 4. **Thread Safety** - All connectors use mutex-protected state management
 5. **Graceful Shutdown** - Context cancellation + stop channels for clean termination
 6. **Middleware Support** - TCP/MLLP outbound enables bidirectional scenarios (user feedback)
+
+## TCP/MLLP ACK/NACK Configuration (March 2026)
+
+### Overview
+Configurable acknowledgment behaviour on the TCP/MLLP Inbound connector. Each inbound listener can independently control how it ACKs messages, including a custom JavaScript script for fully dynamic ACK logic.
+
+### ACKConfig struct (`tcp_mllp_inbound.go`)
+```go
+type ACKConfig struct {
+    Mode            string // "immediate" (default) | "none"
+    OnError         string // "suppress" (default — always AA) | "nack" (send AE on queue full)
+    SendingApp      string // MSH-3 in generated ACK (default: "ezHealthKonnect")
+    SendingFacility string // MSH-4 in generated ACK (default: "EHK")
+    TextSuccess     string // MSA-3 on AA (default: "Message received successfully")
+    TextError       string // MSA-3 on AE/AR (default: "Message processing error")
+    Script          string // Optional JS override — see Custom Script below
+}
+```
+
+### ACK Message Format
+Generated ACKs use **CRLF** (`\r\n`) as segment terminators:
+```
+MSH|^~\&|<sendingApp>|<sendingFacility>|SENDER|SENDER|<ts>||ACK|<controlID>|P|2.5\r\n
+MSA|<AA|AE|AR>|<controlID>|<textMessage>\r\n
+```
+- MSH-10 (control ID) is echoed from the original message's MSH-10 field
+- Inbound parsers (`extractMessageControlID`, `extractMSHField`) normalise both `\r` and `\r\n` for robustness
+
+### ACK Modes
+| Mode | Behaviour |
+|---|---|
+| `immediate` | AA sent after message is placed on queue |
+| `none` | No ACK sent — sender must not expect a response |
+
+### On Error Behaviour
+| onError | Behaviour |
+|---|---|
+| `suppress` | Always send AA regardless of errors (sender retries externally) |
+| `nack` | Send AE when queue is full or critical processing error occurs |
+
+### Custom ACK Script (goja JS runtime)
+Script runs in a goja VM (Go). Function must be named `buildACK`:
+```javascript
+function buildACK(msg) {
+    // msg properties: controlID, messageType, sendingApp, sendingFacility,
+    //                 raw, defaultCode, defaultText
+    if (msg.messageType !== 'ADT^A01') {
+        return { ackCode: 'AR', textMessage: 'Unsupported message type' };
+    }
+    return { ackCode: 'AA', textMessage: 'Accepted' };
+}
+```
+- Valid `ackCode` values: `AA`, `AE`, `AR`
+- Errors, missing return, or missing function → falls back to default ACK (no crash)
+- Script has access to full message context including raw HL7
+
+### Pipeline Step Config (connector.inbound)
+```json
+{
+  "connectorType": "tcp_mllp_inbound",
+  "config": {
+    "host": "0.0.0.0",
+    "port": 2575,
+    "ack": {
+      "mode": "immediate",
+      "on_error": "suppress",
+      "sending_app": "MyHIS",
+      "sending_facility": "WARD_7B",
+      "text_success": "Routed to Epic ADT feed",
+      "text_error": "Queue full — please retry",
+      "script": "function buildACK(msg) { ... }"
+    }
+  }
+}
+```
+
+### UI — Acknowledgment Tab
+The `ConnectorConfigBuilder` renders an **Acknowledgment** tab (hidden for non-MLLP/outbound types) with four collapsible groups:
+- **Basic** (expanded): ACK Mode + On Error
+- **Sender Identity** (collapsed): MSH-3, MSH-4 overrides
+- **Message Text** (collapsed): success and error text
+- **Custom Script** (collapsed): dark-themed code editor textarea
+
+Tab visibility is controlled by `get isMLLPInbound()` and updated immediately in `onConnectorTypeChange()` before the connector-type lookup guard.
+
+### Test Coverage
+| File | Tests | Coverage |
+|---|---|---|
+| `services/connectors/tcp_mllp_ack_test.go` | 36 Go tests | Unit (getStringFromMap, generateACKMessage, runACKScript, Initialize) + Integration (real TCP round-trips) |
+| `tests/playwright/ack-nack-e2e.spec.js` | 43 E2E tests | Tab visibility, field defaults, collapsible groups, getConfig(), pipeline save, API, dry-run, XSS, regression |
 
 ## Format-Agnostic Field Utilities (January 2025)
 

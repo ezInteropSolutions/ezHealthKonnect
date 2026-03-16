@@ -80,6 +80,19 @@ func (e *FileParserExecutor) Execute(
 		return inputData, err
 	}
 
+	// Streaming path: local CSV/TSV with MaxRecords > 0 → O(chunk) memory, no size gate.
+	// This bypasses os.ReadFile entirely — the file descriptor is streamed row-by-row.
+	// Use with a Loop step: feed next_offset back into config.offset each iteration.
+	if config.SourceType == "local_path" && config.MaxRecords > 0 && !config.BatchMode {
+		ext := strings.ToLower(filepath.Ext(config.FilePath))
+		isCSVTSV := config.FileFormat == "csv" || config.FileFormat == "tsv" ||
+			(config.FileFormat == "" && (ext == ".csv" || ext == ".tsv" || ext == ".tab")) ||
+			config.FileFormat == "auto"
+		if isCSVTSV {
+			return e.executeStreamingLocalCSV(ctx, step, config, inputData, start)
+		}
+	}
+
 	// Batch mode: list + process all matching local files, then return early
 	if config.SourceType == "local_path" && config.BatchMode {
 		return e.executeBatch(ctx, step, config, inputData, start)
@@ -216,6 +229,121 @@ func (e *FileParserExecutor) Execute(
 		"columns":      columns,
 		"records":      records,
 	}, metadata)
+
+	e.PostExecute(ctx, step, nil, time.Since(start))
+	return inputData, nil
+}
+
+// ===============================================================
+// GB-SCALE STREAMING PATH
+// ===============================================================
+
+// executeStreamingLocalCSV streams a local CSV or TSV file directly without loading
+// the full content into memory. Bypasses the file size gate entirely — only the
+// current chunk (MaxRecords rows) is held in memory at once.
+//
+// Design:
+//   - Opens the file with os.Open() (O(1) — no ReadFile, no string copy)
+//   - Delegates row-by-row reading to ParseCSVFromReaderChunked
+//   - Supports chunked iteration via Offset + MaxRecords + has_more + next_offset
+//
+// Step output:
+//
+//	records      []map[string]interface{} — up to MaxRecords rows for this chunk
+//	columns      []string                  — ordered column names
+//	record_count int                       — len(records) for this chunk
+//	has_more     bool                      — true if more rows exist after this chunk
+//	next_offset  int                       — Offset value to use for the next iteration
+//	chunk_info   map                       — diagnostic: chunk_size, offset, format, file_path
+//
+// Loop step integration (chunked processing of arbitrarily large files):
+//
+//	iteration 1: file_parser config.offset=0, maxRecords=10000  → has_more=true,  next_offset=10000
+//	iteration 2: file_parser config.offset=10000, maxRecords=10000 → has_more=true, next_offset=20000
+//	iteration N: ...                                             → has_more=false (done)
+func (e *FileParserExecutor) executeStreamingLocalCSV(
+	ctx context.Context,
+	step *models.TransformationStep,
+	config *models.FileParserConfig,
+	inputData map[string]interface{},
+	start time.Time,
+) (map[string]interface{}, error) {
+	if config.FilePath == "" {
+		err := fmt.Errorf("filePath is required for local_path streaming")
+		e.PostExecute(ctx, step, err, time.Since(start))
+		return inputData, err
+	}
+
+	// Detect effective format from extension when not explicitly set
+	effectiveFormat := config.FileFormat
+	if effectiveFormat == "" || effectiveFormat == "auto" {
+		ext := strings.ToLower(filepath.Ext(config.FilePath))
+		switch ext {
+		case ".tsv", ".tab":
+			effectiveFormat = "tsv"
+		default:
+			effectiveFormat = "csv"
+		}
+	}
+
+	// Shallow copy so format/delimiter adjustments don't mutate the caller's config
+	streamConfig := *config
+	streamConfig.FileFormat = effectiveFormat
+	if effectiveFormat == "tsv" && streamConfig.Delimiter == "" {
+		streamConfig.Delimiter = "\t"
+	}
+
+	// Open the file descriptor — OS pages only what the csv.Reader requests
+	// No size gate: with MaxRecords > 0, memory use is bounded by chunk size
+	f, err := os.Open(config.FilePath)
+	if err != nil {
+		err = fmt.Errorf("cannot open file '%s': %w", config.FilePath, err)
+		e.PostExecute(ctx, step, err, time.Since(start))
+		return inputData, err
+	}
+	defer f.Close()
+
+	log.Printf("   📂 [StreamingCSV] '%s' | format=%s offset=%d maxRecords=%d",
+		filepath.Base(config.FilePath), effectiveFormat, streamConfig.Offset, streamConfig.MaxRecords)
+
+	records, columns, hasMore, parseErr := ParseCSVFromReaderChunked(ctx, f, &streamConfig)
+	if parseErr != nil {
+		e.PostExecute(ctx, step, parseErr, time.Since(start))
+		return inputData, fmt.Errorf("streaming CSV parse error: %w", parseErr)
+	}
+
+	nextOffset := streamConfig.Offset + len(records)
+
+	log.Printf("✅ [StreamingCSV] chunk: %d records (offset %d→%d) has_more=%v parse_time=%dms",
+		len(records), streamConfig.Offset, nextOffset, hasMore, time.Since(start).Milliseconds())
+
+	chunkInfo := map[string]interface{}{
+		"chunk_size":  streamConfig.MaxRecords,
+		"offset":      streamConfig.Offset,
+		"next_offset": nextOffset,
+		"format":      effectiveFormat,
+		"file_name":   filepath.Base(config.FilePath),
+		"file_path":   config.FilePath,
+	}
+
+	e.SetStepOutputWithDetails(inputData, map[string]interface{}{
+		"record_count": len(records),
+		"column_count": len(columns),
+		"columns":      columns,
+		"records":      records,
+		"has_more":     hasMore,
+		"next_offset":  nextOffset,
+		"chunk_info":   chunkInfo,
+	}, map[string]interface{}{
+		"source_type":   "local_path",
+		"streaming":     true,
+		"format":        effectiveFormat,
+		"offset":        streamConfig.Offset,
+		"max_records":   streamConfig.MaxRecords,
+		"has_more":      hasMore,
+		"next_offset":   nextOffset,
+		"parse_time_ms": time.Since(start).Milliseconds(),
+	})
 
 	e.PostExecute(ctx, step, nil, time.Since(start))
 	return inputData, nil
@@ -755,8 +883,9 @@ func (e *FileParserExecutor) GetConfigSchema() map[string]interface{} {
 			"fileFormat":      map[string]interface{}{"type": "string", "enum": formats, "description": "File format (use 'auto' for automatic detection)"},
 			"delimiter":       map[string]interface{}{"type": "string", "description": "Field delimiter (CSV/TSV; default: , for CSV, \\t for TSV)"},
 			"hasHeader":       map[string]interface{}{"type": "boolean", "description": "Whether first row contains column names"},
-			"maxRecords":      map[string]interface{}{"type": "integer", "description": "Maximum records to parse (0 = unlimited)"},
-			"maxFileSizeMB":   map[string]interface{}{"type": "integer", "description": "File size limit in MB (0 = default 100 MB, hard cap 500 MB)"},
+			"maxRecords":    map[string]interface{}{"type": "integer", "description": "Chunk size: stop after N records (0 = unlimited). When > 0 with local_path CSV/TSV, enables GB-scale streaming — no size gate, O(N) memory"},
+			"offset":        map[string]interface{}{"type": "integer", "description": "Skip N data rows before collecting (used with maxRecords for chunked Loop iteration). Inject next_offset from previous step_output here."},
+			"maxFileSizeMB": map[string]interface{}{"type": "integer", "description": "File size gate in MB (0 = default 100 MB, hard cap 500 MB). Ignored when maxRecords > 0 and format is CSV/TSV (streaming path bypasses the gate)."},
 			"trimFields":      map[string]interface{}{"type": "boolean", "description": "Trim leading/trailing whitespace from values"},
 			"skipRows":        map[string]interface{}{"type": "integer", "description": "Number of rows to skip from top"},
 			"sheetName":       map[string]interface{}{"type": "string", "description": "xlsx/xls: sheet name to parse (default: first sheet)"},
@@ -810,7 +939,7 @@ func (e *FileParserExecutor) GetOutputVariables(step *models.TransformationStep)
 	basePath := "enriched.file_parser"
 
 	variables = append(variables,
-		e.BuildVariableDefinition("record_count", basePath, "Number of records parsed",
+		e.BuildVariableDefinition("record_count", basePath, "Number of records in this chunk",
 			executors.WithDataType("number"),
 			executors.WithCategory("File Parser"),
 		),
@@ -822,11 +951,32 @@ func (e *FileParserExecutor) GetOutputVariables(step *models.TransformationStep)
 			executors.WithDataType("array"),
 			executors.WithCategory("File Parser"),
 		),
-		e.BuildVariableDefinition("records", basePath, "Array of parsed records",
+		e.BuildVariableDefinition("records", basePath, "Array of parsed records (this chunk)",
 			executors.WithDataType("array"),
 			executors.WithCategory("File Parser"),
 		),
 	)
+
+	// Streaming/chunked iteration variables (local_path CSV/TSV with maxRecords > 0)
+	if config.SourceType == "local_path" && config.MaxRecords > 0 {
+		variables = append(variables,
+			e.BuildVariableDefinition("has_more", basePath,
+				"true if more rows exist past this chunk — use in Loop step condition",
+				executors.WithDataType("boolean"),
+				executors.WithCategory("File Parser — Chunked"),
+			),
+			e.BuildVariableDefinition("next_offset", basePath,
+				"Row offset to use for the next chunk iteration (offset + record_count)",
+				executors.WithDataType("number"),
+				executors.WithCategory("File Parser — Chunked"),
+			),
+			e.BuildVariableDefinition("chunk_info", basePath,
+				"Diagnostic info: chunk_size, offset, next_offset, format, file_name",
+				executors.WithDataType("object"),
+				executors.WithCategory("File Parser — Chunked"),
+			),
+		)
+	}
 
 	if config.FileFormat == "xlsx" || config.FileFormat == "xls" {
 		variables = append(variables,

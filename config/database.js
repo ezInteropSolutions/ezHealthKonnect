@@ -1,5 +1,3 @@
-//hl7_admin-- HL7Admin2024!
-
 // Load environment variables FIRST
 require('dotenv').config();
 
@@ -312,6 +310,32 @@ class DatabaseManager {
             last_processed_at: {
                 type: DataTypes.DATE,
                 allowNull: true
+            },
+            // Deployment configuration
+            deployment_mode: {
+                type: DataTypes.STRING(50),
+                defaultValue: 'manual'
+            },
+            auto_start: {
+                type: DataTypes.BOOLEAN,
+                defaultValue: false
+            },
+            deployment_delay_seconds: {
+                type: DataTypes.INTEGER,
+                defaultValue: 0
+            },
+            deployment_status: {
+                type: DataTypes.STRING(50),
+                defaultValue: 'not_deployed'
+            },
+            // Logging configuration
+            debug_logging: {
+                type: DataTypes.BOOLEAN,
+                defaultValue: false
+            },
+            log_retention_days: {
+                type: DataTypes.INTEGER,
+                defaultValue: 30
             },
             created_by: {
                 type: DataTypes.UUID,

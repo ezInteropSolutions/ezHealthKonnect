@@ -155,22 +155,54 @@
                                             <i class="fas fa-file-alt"></i> Logging & Troubleshooting
                                         </h4>
 
-                                        <!-- Debug Logging Toggle -->
+                                        <!-- Log Level Selector -->
                                         <div class="form-group">
                                             <div style="background: linear-gradient(to right, #f0f9ff, #f5f3ff); border-left: 3px solid #60a5fa; padding: 14px; border-radius: 6px;">
-                                                <label style="display: flex; align-items: center; cursor: pointer; margin: 0;">
-                                                    <input type="checkbox" id="editDebugLogging" name="debug_logging"
-                                                           style="margin-right: 10px; width: 20px; height: 20px; cursor: pointer; accent-color: #60a5fa;">
-                                                    <div style="flex: 1;">
-                                                        <span style="font-weight: 600; color: #1e3a8a; font-size: 0.95rem;">Enable Debug Logging</span>
-                                                        <div style="font-size: 0.85rem; color: #6b7280; margin-top: 4px; line-height: 1.4;">
-                                                            📝 Captures detailed logs for all message processing operations
-                                                        </div>
-                                                        <div style="font-size: 0.85rem; color: #7c3aed; margin-top: 4px; font-weight: 500;">
-                                                            💡 Note: Increases storage usage for detailed troubleshooting
-                                                        </div>
-                                                    </div>
+                                                <label for="editLogLevel" style="font-weight: 600; color: #1e3a8a; font-size: 0.95rem; display: block; margin-bottom: 10px;">
+                                                    📝 Log Level
                                                 </label>
+                                                <div style="display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px;" id="logLevelGroup">
+                                                    <label class="log-level-option" data-level="debug" style="cursor:pointer;text-align:center;">
+                                                        <input type="radio" name="log_level" id="editLogLevel" value="debug" style="display:none;">
+                                                        <div class="log-level-chip" style="padding:6px 4px;border-radius:6px;border:2px solid #e2e8f0;font-size:0.78rem;font-weight:600;transition:all 0.15s;">
+                                                            🔬 Debug
+                                                        </div>
+                                                        <div style="font-size:0.7rem;color:#94a3b8;margin-top:3px;">All logs</div>
+                                                    </label>
+                                                    <label class="log-level-option" data-level="info" style="cursor:pointer;text-align:center;">
+                                                        <input type="radio" name="log_level" value="info" style="display:none;">
+                                                        <div class="log-level-chip" style="padding:6px 4px;border-radius:6px;border:2px solid #e2e8f0;font-size:0.78rem;font-weight:600;transition:all 0.15s;">
+                                                            ℹ️ Info
+                                                        </div>
+                                                        <div style="font-size:0.7rem;color:#94a3b8;margin-top:3px;">Info+</div>
+                                                    </label>
+                                                    <label class="log-level-option" data-level="warning" style="cursor:pointer;text-align:center;">
+                                                        <input type="radio" name="log_level" value="warning" style="display:none;">
+                                                        <div class="log-level-chip" style="padding:6px 4px;border-radius:6px;border:2px solid #e2e8f0;font-size:0.78rem;font-weight:600;transition:all 0.15s;">
+                                                            ⚠️ Warn
+                                                        </div>
+                                                        <div style="font-size:0.7rem;color:#94a3b8;margin-top:3px;">Warn+</div>
+                                                    </label>
+                                                    <label class="log-level-option" data-level="error" style="cursor:pointer;text-align:center;">
+                                                        <input type="radio" name="log_level" value="error" style="display:none;">
+                                                        <div class="log-level-chip" style="padding:6px 4px;border-radius:6px;border:2px solid #e2e8f0;font-size:0.78rem;font-weight:600;transition:all 0.15s;">
+                                                            ❌ Error
+                                                        </div>
+                                                        <div style="font-size:0.7rem;color:#94a3b8;margin-top:3px;">Errors only</div>
+                                                    </label>
+                                                    <label class="log-level-option" data-level="off" style="cursor:pointer;text-align:center;">
+                                                        <input type="radio" name="log_level" value="off" style="display:none;">
+                                                        <div class="log-level-chip" style="padding:6px 4px;border-radius:6px;border:2px solid #e2e8f0;font-size:0.78rem;font-weight:600;transition:all 0.15s;">
+                                                            🔕 Off
+                                                        </div>
+                                                        <div style="font-size:0.7rem;color:#94a3b8;margin-top:3px;">No logs</div>
+                                                    </label>
+                                                </div>
+                                                <div id="logLevelHint" style="font-size:0.82rem;color:#6b7280;margin-top:10px;line-height:1.4;">
+                                                    🔬 <strong>Debug</strong> — captures every step for full visibility. Uses more storage.
+                                                </div>
+                                                <!-- hidden checkbox kept for backward-compat with save logic -->
+                                                <input type="checkbox" id="editDebugLogging" name="debug_logging" checked style="display:none;">
                                             </div>
                                         </div>
 
@@ -307,8 +339,9 @@
         document.getElementById('editInterfaceDescription').value = interfaceData.description || '';
         document.getElementById('editStatus').value = interfaceData.status || 'inactive';
 
-        // Logging settings
-        document.getElementById('editDebugLogging').checked = interfaceData.debug_logging || false;
+        // Logging settings — set log_level selector (default: debug)
+        const effectiveLevel = interfaceData.log_level || (interfaceData.debug_logging ? 'debug' : 'debug');
+        setLogLevel(effectiveLevel);
         document.getElementById('editLogRetention').value = interfaceData.log_retention_days || 30;
         document.getElementById('editRetainErrors').checked = interfaceData.retain_error_logs_forever !== false;
         // Extract connectivity from V30 JSONB structure or fallback to string

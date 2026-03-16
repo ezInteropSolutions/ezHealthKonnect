@@ -117,9 +117,7 @@ func (e *APIEnrichmentExecutor) Execute(
 		if cached, ok := cache.Get(cacheKey); ok {
 			log.Printf("⚡ [API Enrichment] Cache hit for step %s", step.ID)
 			cb.RecordSuccess()
-			// Restore cached data into inputData
-			targetPath := e.getTargetPath(config)
-			executors.SetNestedValue(inputData, targetPath, cached["_cached_response"])
+			// P7: no SetNestedValue to enriched.*; cached data goes into _stepOutput only
 			cachedAt, _ := cached["_cached_at"].(string)
 			e.SetStepOutputWithDetails(inputData, cached, map[string]interface{}{
 				"cache_hit":             true,
@@ -153,7 +151,7 @@ func (e *APIEnrichmentExecutor) Execute(
 		// Apply default value if configured (executor-level fallback)
 		if config.DefaultValue != nil {
 			log.Printf("⚠️  API call failed, using default value: %v", config.DefaultValue)
-			executors.SetNestedValue(inputData, e.getTargetPath(config), config.DefaultValue)
+			// P7: no SetNestedValue to enriched.*; default value goes into _stepOutput only
 
 			// STANDARDIZED: Variables (default value) + execution details
 			e.SetStepOutputWithDetails(inputData, map[string]interface{}{
@@ -186,9 +184,10 @@ func (e *APIEnrichmentExecutor) Execute(
 
 	cb.RecordSuccess()
 
-	// Check if response mapping is configured
+	// P7: stop writing to enriched.* — _stepOutput is the canonical output.
+	// Response mapping writes to user-configured destination paths are still supported
+	// (they're intentional field-level writes, not enriched.* accumulation).
 	var enrichedFields int
-	targetPath := e.getTargetPath(config)
 
 	if responseMappingRaw, hasMappingConfig := step.Config["responseMapping"]; hasMappingConfig {
 		// Apply response mapping to extract specific fields
@@ -196,12 +195,10 @@ func (e *APIEnrichmentExecutor) Execute(
 		mappedData, mappingErr := e.applyResponseMapping(resp.JSON, responseMappingRaw)
 
 		if mappingErr != nil {
-			log.Printf("⚠️  Response mapping failed: %v, storing full response instead", mappingErr)
-			// Fallback: Store full response at target path
-			executors.SetNestedValue(inputData, targetPath, resp.JSON)
+			log.Printf("⚠️  Response mapping failed: %v, using full response in _stepOutput", mappingErr)
 			enrichedFields = e.countFields(resp.JSON)
 		} else {
-			// Store mapped fields directly in message (not nested under targetPath)
+			// Write each mapped field to its user-configured destination path in inputData
 			for field, value := range mappedData {
 				executors.SetNestedValue(inputData, field, value)
 			}
@@ -209,29 +206,24 @@ func (e *APIEnrichmentExecutor) Execute(
 			log.Printf("✅ [API Enrichment] Extracted %d fields using response mapping", enrichedFields)
 		}
 	} else {
-		// No response mapping - store full response at target path (existing behavior)
-		executors.SetNestedValue(inputData, targetPath, resp.JSON)
 		enrichedFields = e.countFields(resp.JSON)
-		log.Printf("✅ [API Enrichment] Stored full response at: %s", targetPath)
+		log.Printf("✅ [API Enrichment] API call successful (%d fields)", enrichedFields)
 	}
 
 	// Build response details with full information
 	responseDetails = e.buildResponseDetails(resp, apiDuration, enrichedFields)
 
-	// Store request/response details for step output tracking
+	// Store request/response details for debugging
 	inputData["_api_request"] = requestDetails
 	inputData["_api_response"] = responseDetails
-	inputData["_api_enriched_path"] = targetPath
 
-	// STANDARDIZED: Set step output for tracking (store the actual API response data)
+	// Compute _stepOutput: mapped fields (if response mapping) or full API response
 	var stepOutput map[string]interface{}
 	if responseMappingRaw, hasMappingConfig := step.Config["responseMapping"]; hasMappingConfig {
-		// With response mapping, store the mapped fields
 		mappedData, err := e.applyResponseMapping(resp.JSON, responseMappingRaw)
 		if err == nil {
 			stepOutput = mappedData
 		} else {
-			// Fallback to full response if mapping fails (with type assertion)
 			if jsonMap, ok := resp.JSON.(map[string]interface{}); ok {
 				stepOutput = jsonMap
 			} else {
@@ -239,11 +231,9 @@ func (e *APIEnrichmentExecutor) Execute(
 			}
 		}
 	} else {
-		// Without response mapping, store the full API response (with type assertion)
 		if jsonMap, ok := resp.JSON.(map[string]interface{}); ok {
 			stepOutput = jsonMap
 		} else {
-			// If not a map, wrap it
 			stepOutput = map[string]interface{}{"response": resp.JSON}
 		}
 	}
@@ -263,14 +253,13 @@ func (e *APIEnrichmentExecutor) Execute(
 	e.SetStepOutputWithDetails(inputData, stepOutput, map[string]interface{}{
 		"http_request":          requestDetails,
 		"http_response":         responseDetails,
-		"target_path":           targetPath,
 		"fields_fetched":        enrichedFields,
 		"cache_hit":             false,
 		"circuit_breaker_state": cb.StateName(),
 	})
 
-	log.Printf("✅ [API Enrichment] Response stored at: %s (%d fields, %dms)",
-		targetPath, enrichedFields, apiDuration)
+	log.Printf("✅ [API Enrichment] API call completed (%d fields, %dms)",
+		enrichedFields, apiDuration)
 	e.PostExecute(ctx, step, nil, time.Since(start))
 
 	return inputData, nil
@@ -408,14 +397,6 @@ func (e *APIEnrichmentExecutor) buildAuthConfig(config *models.APIEnrichmentConf
 	return authConfig
 }
 
-// getTargetPath returns the target path for storing API response
-func (e *APIEnrichmentExecutor) getTargetPath(config *models.APIEnrichmentConfig) string {
-	if config.TargetPath != "" {
-		return config.TargetPath
-	}
-	return "enriched.api"
-}
-
 // replaceFieldMappings replaces field mappings in a map
 func (e *APIEnrichmentExecutor) replaceFieldMappings(
 	data map[string]interface{},
@@ -468,8 +449,8 @@ func (e *APIEnrichmentExecutor) GetConfigSchema() map[string]interface{} {
 			},
 			"targetPath": map[string]interface{}{
 				"type":        "string",
-				"description": "Where to store the API response in the message",
-				"default":     "enriched.api",
+				"description": "Deprecated (P7): API response is now accessed via steps.{ns}.step_output.*",
+				"deprecated":  true,
 			},
 			"timeoutMs": map[string]interface{}{
 				"type":        "integer",

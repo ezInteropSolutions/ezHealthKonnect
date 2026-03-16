@@ -547,6 +547,8 @@ class WizardModel extends EventTarget {
             // Basic interface info
             name: this.data.name,
             description: this.data.description,
+            // Include interfaceId when editing an existing interface (enables update path)
+            ...(this.data.interfaceId ? { interfaceId: this.data.interfaceId } : {}),
 
             // Source configuration
             sourceType: this.data.sourceType,
@@ -600,7 +602,7 @@ class WizardModel extends EventTarget {
     /**
      * Parse HL7 message
      */
-    async parseHL7Message(hl7Content) {
+    async parseHL7Message(hl7Content, escapeHandling) {
         try {
             console.log('📋 Parsing HL7 message...');
 
@@ -621,7 +623,8 @@ class WizardModel extends EventTarget {
                 },
                 body: JSON.stringify({
                     rawMessage: hl7Content.trim(),
-                    useEnhanced: true
+                    useEnhanced: true,
+                    escapeHandling: escapeHandling || 'passthrough'
                 })
             });
 

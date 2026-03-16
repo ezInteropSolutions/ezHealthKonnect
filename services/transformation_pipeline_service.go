@@ -7,8 +7,9 @@ import (
 	"ezhealthkonnect/models"
 	"ezhealthkonnect/services/executors"
 	"ezhealthkonnect/services/executors/control"
+	"ezhealthkonnect/services/logger"
+	"ezhealthkonnect/services/storage"
 	"fmt"
-	"log"
 	"time"
 
 	"github.com/google/uuid"
@@ -20,6 +21,7 @@ type TransformationPipelineService struct {
 	executorRegistry *ExecutorRegistry
 	branchResolver   *BranchResolverFactory            // OOP-based branch resolution
 	executors        map[string]TransformationExecutor // Legacy - kept for compatibility
+	objectStorage    *storage.ObjectStorageService     // For writing connector delivery logs
 }
 
 // TransformationExecutor interface for step execution
@@ -37,9 +39,15 @@ func NewTransformationPipelineService(db *sql.DB, credStore *CredentialStore) *T
 		executorRegistry: NewExecutorRegistry(db, credStore), // Use ExecutorRegistry with all built-in executors
 		branchResolver:   NewBranchResolverFactory(),          // OOP-based branch resolution for conditionals
 		executors:        make(map[string]TransformationExecutor),
+		objectStorage:    nil, // Set via SetObjectStorage after construction
 	}
 
 	return service
+}
+
+// SetObjectStorage wires the object storage service for connector delivery logging.
+func (tps *TransformationPipelineService) SetObjectStorage(svc *storage.ObjectStorageService) {
+	tps.objectStorage = svc
 }
 
 // RegisterExecutor registers a transformation executor
@@ -180,11 +188,11 @@ func (tps *TransformationPipelineService) ExecuteTransformation(
 	// Get pipeline
 	pipeline, err := tps.GetPipeline(ctx, interfaceID, messageType)
 	if err != nil {
-		log.Printf("❌ GetPipeline FAILED for interface=%s, messageType=%s: %v", interfaceID, messageType, err)
+		logger.Error("GetPipeline failed", "interface", interfaceID, "message_type", messageType, "error", err)
 		return nil, fmt.Errorf("failed to get pipeline: %w", err)
 	}
 
-	log.Printf("✅ GetPipeline SUCCESS: found %d steps for interface=%s, messageType=%s", len(pipeline.Steps), interfaceID, messageType)
+	logger.Info("GetPipeline success", "steps", len(pipeline.Steps), "interface", interfaceID, "message_type", messageType)
 
 	// Inject runtime context into each step's config (OOB: auto-configure steps)
 	for i := range pipeline.Steps {
@@ -195,9 +203,7 @@ func (tps *TransformationPipelineService) ExecuteTransformation(
 		pipeline.Steps[i].Config["message_type"] = messageType
 		pipeline.Steps[i].Config["message_id"] = messageID
 
-		// DEBUG
-		log.Printf("🔍 Pipeline: Injected into step %d (%s): interface_id=%s, message_type=%s",
-			i, pipeline.Steps[i].StepName, interfaceID, messageType)
+		logger.Debug("pipeline context injected", "seq", i, "step", pipeline.Steps[i].StepName, "interface", interfaceID, "message_type", messageType)
 	}
 
 	// Create execution record
@@ -213,7 +219,7 @@ func (tps *TransformationPipelineService) ExecuteTransformation(
 	}
 
 	if err := tps.createExecutionRecord(ctx, execution); err != nil {
-		fmt.Printf("⚠️  Failed to create execution record: %v\n", err)
+		logger.Warn("failed to create execution record", "error", err)
 	}
 
 	// Execute pipeline
@@ -236,7 +242,7 @@ func (tps *TransformationPipelineService) ExecuteTransformation(
 	}
 
 	if updateErr := tps.updateExecutionRecord(ctx, execution); updateErr != nil {
-		fmt.Printf("⚠️  Failed to update execution record: %v\n", updateErr)
+		logger.Warn("failed to update execution record", "error", updateErr)
 	}
 
 	return result, err
@@ -271,11 +277,10 @@ func (tps *TransformationPipelineService) executePipeline(
 	pipelineRetryDefaults := executors.ParsePipelineRetryDefaults(pipeline.PipelineConfig)
 	pipelineEHDefaults := executors.ParsePipelineErrorHandlingDefaults(pipeline.PipelineConfig)
 	if pipelineRetryDefaults != nil {
-		fmt.Printf("🔄 Pipeline-level retry defaults: max=%d, delay=%dms, backoff=%.1fx\n",
-			pipelineRetryDefaults.MaxRetries, pipelineRetryDefaults.DelayMs, pipelineRetryDefaults.BackoffMultiplier)
+		logger.Debug("pipeline-level retry defaults", "max_retries", pipelineRetryDefaults.MaxRetries, "delay_ms", pipelineRetryDefaults.DelayMs, "backoff", pipelineRetryDefaults.BackoffMultiplier)
 	}
 	if pipelineEHDefaults != nil {
-		fmt.Printf("🛡️ Pipeline-level error handling defaults: onError=%s\n", pipelineEHDefaults.OnError)
+		logger.Debug("pipeline-level error handling defaults", "on_error", pipelineEHDefaults.OnError)
 	}
 
 	// Build step index for conditional routing lookup
@@ -301,29 +306,29 @@ func (tps *TransformationPipelineService) executePipeline(
 
 		// Check if this step should be skipped (branch exclusion)
 		if skipStepIDs[step.ID] {
-			fmt.Printf("⏭️  Skipping step (branch excluded): %s\n", step.StepName)
+			logger.Debug("skipping step (branch excluded)", "step", step.StepName)
 			continue
 		}
 
 		// ✅ Skip child steps already executed by a loop container
 		if loopChildStepIDs[step.ID] {
-			fmt.Printf("⏭️  Skipping step (executed by loop): %s\n", step.StepName)
+			logger.Debug("skipping step (executed by loop)", "step", step.StepName)
 			continue
 		}
 
 		// Handle conditional routing - skip steps until we reach the target
 		if skipToStepID != "" {
 			if step.ID != skipToStepID {
-				fmt.Printf("⏭️  Skipping step (routing): %s (waiting for %s)\n", step.StepName, skipToStepID)
+				logger.Debug("skipping step (routing)", "step", step.StepName, "waiting_for", skipToStepID)
 				continue
 			}
 			// Found the target step, reset skip mode
-			fmt.Printf("🎯 Reached routing target: %s\n", step.StepName)
+			logger.Debug("reached routing target", "step", step.StepName)
 			skipToStepID = ""
 		}
 		stepStartTime := time.Now()
 
-		fmt.Printf("🔄 Executing step: %s (%s)\n", step.StepName, step.StepType)
+		logger.Debug("executing step", "step", step.StepName, "type", step.StepType)
 
 		// Get executor from registry (with automatic fallback to generic)
 		executor := tps.executorRegistry.GetExecutor(step.StepType)
@@ -331,18 +336,25 @@ func (tps *TransformationPipelineService) executePipeline(
 			return nil, fmt.Errorf("no executor available for step type: %s", step.StepType)
 		}
 
+		// Normalize aliased step types (e.g. "pre.enrichment.script" → "enrichment.script")
+		// so that BaseExecutor.PreExecute() doesn't fail the strict type-equality check.
+		if canonical := executor.GetStepType(); canonical != "" && canonical != "generic" && canonical != step.StepType {
+			logger.Debug("normalizing step type alias", "from", step.StepType, "to", canonical)
+			step.StepType = canonical
+		}
+
 		// ✅ LOOP HANDLING: Inject child executor callback and mark child steps
 		if step.StepType == "control.loop" {
 			if loopExecutor, ok := executor.(*control.LoopExecutor); ok {
 				loopExecutor.SetChildExecutor(childExecutor)
-				fmt.Printf("🔄 Injected child executor into loop step: %s\n", step.StepName)
+				logger.Debug("injected child executor into loop step", "step", step.StepName)
 			}
 			// Mark child steps so they're skipped in the main pipeline flow
 			if childIDs, ok := step.Config["childStepIds"].([]interface{}); ok {
 				for _, cid := range childIDs {
 					if cidStr, ok := cid.(string); ok {
 						loopChildStepIDs[cidStr] = true
-						fmt.Printf("   📌 Marked child step for loop-only execution: %s\n", cidStr)
+						logger.Debug("marked child step for loop-only execution", "child_step", cidStr)
 					}
 				}
 			}
@@ -350,7 +362,7 @@ func (tps *TransformationPipelineService) executePipeline(
 			if childIDs, ok := step.Config["childStepIds"].([]string); ok {
 				for _, cidStr := range childIDs {
 					loopChildStepIDs[cidStr] = true
-					fmt.Printf("   📌 Marked child step for loop-only execution: %s\n", cidStr)
+					logger.Debug("marked child step for loop-only execution", "child_step", cidStr)
 				}
 			}
 		}
@@ -360,31 +372,29 @@ func (tps *TransformationPipelineService) executePipeline(
 		for k := range step.Config {
 			configKeys = append(configKeys, k)
 		}
-		fmt.Printf("🔍 Step '%s' config keys: %v\n", step.StepName, configKeys)
+		logger.Debug("step config keys", "step", step.StepName, "keys", configKeys)
 		if eh, ok := step.Config["errorHandling"]; ok {
-			fmt.Printf("🔍 Step '%s' errorHandling config: %v\n", step.StepName, eh)
+			logger.Debug("step errorHandling config", "step", step.StepName, "config", eh)
 		} else {
-			fmt.Printf("🔍 Step '%s' has NO errorHandling in config\n", step.StepName)
+			logger.Debug("step has no errorHandling in config", "step", step.StepName)
 		}
 		if rt, ok := step.Config["retry"]; ok {
-			fmt.Printf("🔍 Step '%s' retry config: %v\n", step.StepName, rt)
+			logger.Debug("step retry config", "step", step.StepName, "config", rt)
 		}
-		fmt.Printf("🔍 Pipeline EH defaults: %v\n", pipelineEHDefaults)
+		logger.Debug("pipeline EH defaults", "defaults", pipelineEHDefaults)
 
 		// Resolve retry config: step override > pipeline default > nil
 		retryConfig := executors.ResolveRetryConfig(step.Config, pipelineRetryDefaults)
 		if retryConfig != nil {
-			fmt.Printf("🔄 Retry enabled for: %s (max=%d, delay=%dms, backoff=%.1fx)\n",
-				step.StepName, retryConfig.MaxRetries, retryConfig.DelayMs, retryConfig.BackoffMultiplier)
+			logger.Debug("retry enabled for step", "step", step.StepName, "max_retries", retryConfig.MaxRetries, "delay_ms", retryConfig.DelayMs, "backoff", retryConfig.BackoffMultiplier)
 		}
 
 		// Resolve error handling config: step override > pipeline default > nil
 		ehConfig := executors.ResolveErrorHandlingConfig(step.Config, pipelineEHDefaults)
 		if ehConfig != nil {
-			fmt.Printf("🛡️ Error handling RESOLVED for: %s (onError=%s, defaultField=%s, defaultValue=%s)\n",
-				step.StepName, ehConfig.OnError, ehConfig.DefaultField, ehConfig.DefaultValue)
+			logger.Debug("error handling resolved", "step", step.StepName, "on_error", ehConfig.OnError, "default_field", ehConfig.DefaultField)
 		} else {
-			fmt.Printf("⚠️ Error handling NOT resolved for: %s (ehConfig is nil)\n", step.StepName)
+			logger.Debug("error handling not configured", "step", step.StepName)
 		}
 
 		// Execute step with retry (ExecuteWithRetry handles single-exec when retryConfig is nil)
@@ -402,18 +412,18 @@ func (tps *TransformationPipelineService) executePipeline(
 
 		// Apply error handling if step failed after all retries
 		errorWasCaught := false
-		fmt.Printf("🔍 Step '%s' post-exec: stepErr=%v, ehConfig=%v\n", step.StepName, stepErr != nil, ehConfig != nil)
+		logger.Debug("step post-exec", "step", step.StepName, "has_error", stepErr != nil, "has_eh_config", ehConfig != nil)
 		if stepErr != nil && ehConfig != nil {
-			fmt.Printf("🛡️ APPLYING error handling for: %s (error: %s)\n", step.StepName, stepErr.Error())
+			logger.Debug("applying error handling", "step", step.StepName, "error", stepErr.Error())
 			outputData, stepErr = executors.ApplyErrorHandling(ehConfig, stepErr, outputData, execContext.Message, step.StepName)
 			if stepErr == nil {
 				errorWasCaught = true // error was caught/suppressed — treat as success
-				fmt.Printf("🛡️ Error CAUGHT for: %s\n", step.StepName)
+				logger.Debug("error caught (suppressed)", "step", step.StepName)
 			} else {
-				fmt.Printf("🛡️ Error RETHROWN for: %s\n", step.StepName)
+				logger.Debug("error rethrown", "step", step.StepName)
 			}
 		} else if stepErr != nil {
-			fmt.Printf("⚠️ Step '%s' failed but NO error handler: stepErr=%s\n", step.StepName, stepErr.Error())
+			logger.Warn("step failed with no error handler", "step", step.StepName, "error", stepErr.Error())
 		}
 
 		// Generate namespace for this step
@@ -539,7 +549,7 @@ func (tps *TransformationPipelineService) executePipeline(
 
 		if stepErr != nil {
 			stepLog.Error = stepErr.Error()
-			fmt.Printf("❌ Step failed: %s - %v\n", step.StepName, stepErr)
+			logger.Error("step failed", "step", step.StepName, "error", stepErr)
 
 			// Handle error based on strategy
 			if step.Required && step.OnErrorStrategy == "fail" {
@@ -548,12 +558,12 @@ func (tps *TransformationPipelineService) executePipeline(
 				result.TransformationLog = append(result.TransformationLog, stepLog)
 				return result, fmt.Errorf("pipeline failed at step %s: %w", step.StepName, stepErr)
 			} else if step.OnErrorStrategy == "skip" {
-				fmt.Printf("⚠️  Skipping failed optional step: %s\n", step.StepName)
+				logger.Warn("skipping failed optional step", "step", step.StepName)
 				// Continue with previous message data
 			} else if step.OnErrorStrategy == "default" {
 				// Use default value from config (if provided)
 				// For now, continue with previous message data
-				fmt.Printf("⚠️  Using default value for failed step: %s\n", step.StepName)
+				logger.Warn("using default value for failed step", "step", step.StepName)
 			}
 		} else if errorWasCaught {
 			// Error was caught by handler — continue pipeline with updated output
@@ -562,21 +572,21 @@ func (tps *TransformationPipelineService) executePipeline(
 				execContext.Message = outputData
 			}
 			result.OutputData = execContext.Message
-			fmt.Printf("🛡️ Step error caught: %s (error: %s, took %dms)\n", step.StepName, originalErr.Error(), stepDuration.Milliseconds())
+			logger.Info("step error caught", "step", step.StepName, "error", originalErr.Error(), "duration_ms", stepDuration.Milliseconds())
 		} else {
 			// Step succeeded, update message data (executors still modify the map directly)
 			if outputData != nil {
 				execContext.Message = outputData
 			}
 			result.OutputData = execContext.Message
-			fmt.Printf("✅ Step completed: %s (took %dms)\n", step.StepName, stepDuration.Milliseconds())
+			logger.Info("step completed", "step", step.StepName, "duration_ms", stepDuration.Milliseconds())
 
 			// Check for conditional routing directive from this step
 			// Supports both _routing.nextStep (jump to) and _routing.skipSteps (skip specific steps)
 			if routing, ok := outputData["_routing"].(map[string]interface{}); ok {
 				// Handle nextStep - jump to a specific step, skip everything in between
 				if nextStepID, ok := routing["nextStep"].(string); ok && nextStepID != "" {
-					fmt.Printf("🔀 Conditional routing detected: jumping to step %s\n", nextStepID)
+					logger.Debug("conditional routing: jump to step", "target", nextStepID)
 					skipToStepID = nextStepID
 				}
 
@@ -586,7 +596,7 @@ func (tps *TransformationPipelineService) executePipeline(
 					for _, stepID := range stepsToSkip {
 						if sid, ok := stepID.(string); ok {
 							skipStepIDs[sid] = true
-							fmt.Printf("🚫 Marking step for skip (branch exclusion): %s\n", sid)
+							logger.Debug("marking step for skip (branch exclusion)", "step", sid)
 						}
 					}
 				}
@@ -594,7 +604,7 @@ func (tps *TransformationPipelineService) executePipeline(
 				if stepsToSkip, ok := routing["skipSteps"].([]string); ok && len(stepsToSkip) > 0 {
 					for _, stepID := range stepsToSkip {
 						skipStepIDs[stepID] = true
-						fmt.Printf("🚫 Marking step for skip (branch exclusion): %s\n", stepID)
+						logger.Debug("marking step for skip (branch exclusion)", "step", stepID)
 					}
 				}
 
@@ -615,8 +625,7 @@ func (tps *TransformationPipelineService) executePipeline(
 	// Final output is the transformed message
 	result.OutputData = execContext.Message
 
-	fmt.Printf("✅ Pipeline completed successfully (total: %dms, %d step outputs tracked)\n",
-		result.TotalTimeMs, len(execContext.StepOutputs))
+	logger.Info("pipeline completed", "total_ms", result.TotalTimeMs, "step_outputs", len(execContext.StepOutputs))
 
 	return result, nil
 }
@@ -639,7 +648,7 @@ func (tps *TransformationPipelineService) createChildExecutorCallback(
 			return nil, "", fmt.Errorf("child step not found: %s", stepID)
 		}
 
-		log.Printf("     🔧 Executing child step: %s (%s)", step.StepName, step.StepType)
+		logger.Debug("executing child step", "step", step.StepName, "type", step.StepType)
 
 		// Get executor for the child step type
 		executor := tps.executorRegistry.GetExecutor(step.StepType)
@@ -656,6 +665,111 @@ func (tps *TransformationPipelineService) createChildExecutorCallback(
 		// Return the full output data for chaining to next child step
 		// The loop executor will use the step name as the aggregation key
 		return outputData, step.StepName, nil
+	}
+}
+
+// persistExecutionRecords saves the full execution + per-step records for a live message.
+// Called from ExecutePipeline (helpers.go) in a goroutine so it doesn't block the pipeline.
+func (tps *TransformationPipelineService) persistExecutionRecords(
+	pipelineID string,
+	messageID string,
+	interfaceID string,
+	startedAt time.Time,
+	result *models.TransformationExecutionResult,
+) {
+	if tps.db == nil {
+		return
+	}
+	ctx := context.Background()
+
+	executionID := uuid.New().String()
+	status := result.Status
+	if status == "" || status == "in_progress" {
+		status = "completed"
+	}
+	var errMsg string
+	if len(result.Errors) > 0 {
+		errMsg = result.Errors[0].Message
+	}
+	completedAt := result.CompletedAt
+	totalMs := result.ExecutionTimeNs / 1_000_000
+
+	stepsFailed := 0
+	for _, s := range result.ExecutionLog {
+		if !s.Success {
+			stepsFailed++
+		}
+	}
+
+	var outputData map[string]interface{}
+	if result.Output != nil {
+		outputData = map[string]interface{}{
+			"size_bytes": result.Output.SizeBytes,
+			"format":     result.Output.Format,
+		}
+	}
+	outputJSON, _ := json.Marshal(outputData)
+	execLogJSON, _ := json.Marshal(result.ExecutionLog)
+
+	_, err := tps.db.ExecContext(ctx, `
+		INSERT INTO transformation_executions
+			(id, message_id, interface_id, pipeline_id, started_at, completed_at,
+			 total_time_ms, status, steps_executed, steps_failed, output_data, error_message, execution_log)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+		ON CONFLICT DO NOTHING`,
+		executionID, messageID, interfaceID, pipelineID,
+		startedAt, completedAt,
+		totalMs, status,
+		len(result.ExecutionLog), stepsFailed,
+		outputJSON, errMsg, execLogJSON,
+	)
+	if err != nil {
+		logger.Warn("persistExecutionRecords: failed to insert execution row", "error", err)
+		return
+	}
+
+	// Insert one step_executions row per step
+	for _, s := range result.ExecutionLog {
+		stepStatus := "completed"
+		if !s.Success {
+			stepStatus = "failed"
+		}
+
+		var stepOutputJSON []byte
+		if s.StepOutput != nil {
+			// Merge OutputData + ExecutionDetails into a single JSON blob stored as step_output.
+			// This is what feeds the UI — connector request/response lives in ExecutionDetails.
+			merged := make(map[string]interface{})
+			for k, v := range s.StepOutput.OutputData {
+				merged[k] = v
+			}
+			for k, v := range s.StepOutput.ExecutionDetails {
+				merged[k] = v
+			}
+			merged["success"] = s.StepOutput.Success
+			merged["duration_ms"] = s.StepOutput.DurationMs
+			if s.StepOutput.Error != "" {
+				merged["error"] = s.StepOutput.Error
+			}
+			stepOutputJSON, _ = json.Marshal(merged)
+		}
+
+		completed := s.CompletedAt
+		_, serr := tps.db.ExecContext(ctx, `
+			INSERT INTO step_executions
+				(id, execution_id, step_id, step_name, step_type,
+				 started_at, completed_at, duration_ms, status,
+				 error_message, namespace, step_alias, step_output)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+			ON CONFLICT DO NOTHING`,
+			uuid.New().String(), executionID, s.StepID, s.StepName, s.StepType,
+			s.StartedAt, completed, s.DurationMs, stepStatus,
+			s.Error, s.Namespace, s.StepAlias, stepOutputJSON,
+		)
+		if serr != nil {
+			logger.Warn("persistExecutionRecords: failed to insert step row",
+				"step", s.StepName, "error", serr)
+		}
 	}
 }
 

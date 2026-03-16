@@ -10,9 +10,11 @@ import (
 	"strconv"
 	"strings"
 
+	"ezhealthkonnect/hl7"
 	"ezhealthkonnect/models"
 	"ezhealthkonnect/services/executors/control"
 	"ezhealthkonnect/services/executors/enrichment"
+	payloadexecutor "ezhealthkonnect/services/executors/payload"
 	"ezhealthkonnect/services/executors/transform"
 	"ezhealthkonnect/services/executors/validation"
 )
@@ -89,10 +91,16 @@ func (er *ExecutorRegistry) autoRegisterExecutors() {
 	er.Register(transform.NewDataMaskingExecutor())          // data_masking
 	er.Register(transform.NewRemoveDuplicatesExecutor())     // remove_duplicates
 	er.Register(transform.NewNormalizerExecutor())           // normalizer
+	er.Register(transform.NewDeidentifyExecutor())           // deidentify (HIPAA P1)
 
 	// Connector bridge executors
 	er.Register(transform.NewOutboundConnectorExecutor())    // connector.outbound
 	er.Register(transform.NewInboundConnectorExecutor())     // connector.inbound
+
+	// Payload builder executor
+	payloadBuilder := payloadexecutor.NewPayloadBuilderExecutor()
+	er.Register(payloadBuilder)                              // payload.builder
+	er.executors["payload_builder"] = payloadBuilder        // alias: underscore variant
 
 	// Custom executors
 	er.Register(NewGenericExecutor())
@@ -112,6 +120,8 @@ func (er *ExecutorRegistry) autoRegisterExecutors() {
 	er.executors["post.data_masking"] = er.executors["data_masking"]
 	er.executors["post.remove_duplicates"] = er.executors["remove_duplicates"]
 	er.executors["post.normalizer"] = er.executors["normalizer"]
+	er.executors["pre.deidentify"] = er.executors["deidentify"]
+	er.executors["post.deidentify"] = er.executors["deidentify"]
 
 	log.Println("  ✓ All executors registered with backward-compatible aliases")
 }
@@ -147,6 +157,14 @@ func (er *ExecutorRegistry) ExecuteStep(
 	executor := er.GetExecutor(step.StepType)
 	if executor == nil {
 		return nil, fmt.Errorf("no executor available for step type: %s", step.StepType)
+	}
+
+	// Normalize aliased step types to their canonical executor type so that
+	// BaseExecutor.PreExecute() doesn't fail the type-equality check.
+	// e.g. "pre.enrichment.script" → "enrichment.script"
+	if canonical := executor.GetStepType(); canonical != "" && canonical != "generic" && canonical != step.StepType {
+		log.Printf("  📌 Normalizing step type alias: %s → %s", step.StepType, canonical)
+		step.StepType = canonical
 	}
 
 	// Decrypt any encrypted credential values before the executor sees them.
@@ -237,9 +255,49 @@ func (hme *HL7FHIRMappingExecutor) Execute(
 		interfaceID, _ = parsedHL7Data["interface_id"].(string)
 	}
 
-	messageType, _ := parsedHL7Data["messageType"].(string)
+	// resolveHL7Data walks nested "message" keys to find the innermost map that
+	// contains "enhancedSegments" (the actual parsed HL7 data). This is necessary
+	// because when a prior step's error is caught, execCtx.Message is replaced with
+	// the full step output, burying the real HL7 data under successive "message" nesting.
+	resolveHL7Data := func(m map[string]interface{}) map[string]interface{} {
+		current := m
+		for i := 0; i < 5; i++ { // guard against infinite nesting
+			if _, hasSegments := current["enhancedSegments"]; hasSegments {
+				return current
+			}
+			nested, ok := current["message"].(map[string]interface{})
+			if !ok {
+				break
+			}
+			current = nested
+		}
+		return m // return original if no enhancedSegments found
+	}
+	parsedHL7Data = resolveHL7Data(parsedHL7Data)
+
+	// extractMsgType extracts the messageType string from a map value that may be
+	// a plain string, a hl7.MessageTypeInfo struct, or a generic map.
+	extractMsgType := func(m map[string]interface{}) string {
+		switch mt := m["messageType"].(type) {
+		case string:
+			return mt
+		case hl7.MessageTypeInfo:
+			return mt.Name
+		case map[string]interface{}:
+			if name, ok := mt["name"].(string); ok {
+				return name
+			}
+		}
+		return ""
+	}
+
+	messageType := extractMsgType(parsedHL7Data)
 	if messageType == "" {
-		messageType, _ = inputData["messageType"].(string)
+		messageType = extractMsgType(inputData)
+	}
+	// Also check step config (production path injects message_type via ExecuteTransformation)
+	if messageType == "" {
+		messageType, _ = step.Config["message_type"].(string)
 	}
 	messageID, _ := parsedHL7Data["message_id"].(string)
 	correlationID, _ := parsedHL7Data["correlation_id"].(string)
@@ -247,13 +305,29 @@ func (hme *HL7FHIRMappingExecutor) Execute(
 	log.Printf("  🔍 [DEBUG] MessageType: '%s', InterfaceID: '%s'", messageType, interfaceID)
 	log.Printf("  🔍 [DEBUG] MessageID: '%s', CorrelationID: '%s'", messageID, correlationID)
 
+	// Read selected_resources from step config (user-chosen FHIR resource types)
+	var selectedResources []string
+	if raw, ok := step.Config["selected_resources"]; ok {
+		switch v := raw.(type) {
+		case []string:
+			selectedResources = v
+		case []interface{}:
+			for _, item := range v {
+				if s, ok := item.(string); ok {
+					selectedResources = append(selectedResources, s)
+				}
+			}
+		}
+	}
+
 	// Call existing transformation service using Transform method
 	req := &TransformRequest{
-		ParsedHL7Data: parsedHL7Data,
-		MessageType:   messageType,
-		FHIRVersion:   "R4",
-		CreateBundle:  true,
-		InterfaceID:   interfaceID,
+		ParsedHL7Data:     parsedHL7Data,
+		MessageType:       messageType,
+		FHIRVersion:       "R4",
+		CreateBundle:      true,
+		InterfaceID:       interfaceID,
+		SelectedResources: selectedResources,
 	}
 
 	log.Printf("  🔍 [DEBUG] Calling Transform service...")
@@ -305,18 +379,78 @@ func (hme *HL7FHIRMappingExecutor) Execute(
 	}
 
 	// STANDARDIZED: Variables (the FHIR bundle) + execution details
-	outputData["_stepOutput"] = map[string]interface{}{
-		"fhirBundle": resp.Bundle,
-	}
-	outputData["_executionDetails"] = map[string]interface{}{
-		"format":         "fhir-r4",
-		"resourceType":   resp.Bundle["resourceType"],
-		"transformation": "hl7_to_fhir",
+	if resp.Bundle == nil {
+		errMsg := fmt.Sprintf("No FHIR bundle produced for message type '%s' — no field mappings found", messageType)
+		if len(resp.Errors) > 0 {
+			errMsg = fmt.Sprintf("%s; transform errors: %v", errMsg, resp.Errors)
+		}
+		log.Printf("  ⚠️  HL7→FHIR: %s", errMsg)
+		outputData["_stepOutput"] = map[string]interface{}{
+			"fhirBundle": nil,
+			"error":      errMsg,
+			"errors":     resp.Errors,
+		}
+		outputData["_executionDetails"] = map[string]interface{}{
+			"format":         "fhir-r4",
+			"transformation": "hl7_to_fhir",
+			"success":        false,
+			"messageType":    messageType,
+		}
+	} else {
+		outputData["_stepOutput"] = map[string]interface{}{
+			"fhirBundle": resp.Bundle,
+		}
+		outputData["_executionDetails"] = map[string]interface{}{
+			"format":         "fhir-r4",
+			"resourceType":   resp.Bundle["resourceType"],
+			"transformation": "hl7_to_fhir",
+			"success":        true,
+			"messageType":    messageType,
+		}
 	}
 
 	log.Printf("  ✅ HL7→FHIR transformation complete with delivery payload and step output")
 
 	return outputData, nil
+}
+
+// GetOutputVariables declares the FHIR R4 output schema so the path picker can show
+// all available fields without requiring a test pipeline run.
+// The step always produces step_output.fhir_bundle (a FHIR Bundle), which after
+// output normalization has snake_case keys. All standard Patient, Encounter, and
+// Observation resource fields are declared here.
+func (hme *HL7FHIRMappingExecutor) GetOutputVariables(step *models.TransformationStep) []models.VariableDefinition {
+	base := "fhir_bundle.entry[0].resource"
+	return []models.VariableDefinition{
+		// Bundle root
+		{Name: "FHIR Bundle", Path: "fhir_bundle", DataType: "object", Description: "Full FHIR R4 Bundle produced by HL7→FHIR transform", Category: "FHIR Transform"},
+		{Name: "Bundle entries", Path: "fhir_bundle.entry", DataType: "array", Description: "Array of FHIR Bundle entries (resources)", Category: "FHIR Transform"},
+		// Patient
+		{Name: "Patient ID", Path: base + ".patient.id", DataType: "string", Description: "FHIR Patient resource id", Category: "FHIR Patient"},
+		{Name: "Patient family name", Path: base + ".patient.name[0].family", DataType: "string", Description: "Patient family (last) name", Category: "FHIR Patient"},
+		{Name: "Patient given name", Path: base + ".patient.name[0].given[0]", DataType: "string", Description: "Patient first given name", Category: "FHIR Patient"},
+		{Name: "Patient birth date", Path: base + ".patient.birth_date", DataType: "string", Description: "Patient date of birth (YYYY-MM-DD)", Category: "FHIR Patient"},
+		{Name: "Patient gender", Path: base + ".patient.gender", DataType: "string", Description: "Patient administrative gender", Category: "FHIR Patient"},
+		{Name: "Patient MRN", Path: base + ".patient.identifier[0].value", DataType: "string", Description: "Patient MRN (first identifier value)", Category: "FHIR Patient"},
+		{Name: "Patient SSN", Path: base + ".patient.identifier[1].value", DataType: "string", Description: "Patient SSN (second identifier value, if mapped)", Category: "FHIR Patient"},
+		{Name: "Patient phone", Path: base + ".patient.telecom[0].value", DataType: "string", Description: "Patient phone number", Category: "FHIR Patient"},
+		{Name: "Patient email", Path: base + ".patient.telecom[1].value", DataType: "string", Description: "Patient email (if mapped)", Category: "FHIR Patient"},
+		{Name: "Patient address street", Path: base + ".patient.address[0].line[0]", DataType: "string", Description: "Patient street address", Category: "FHIR Patient"},
+		{Name: "Patient address city", Path: base + ".patient.address[0].city", DataType: "string", Description: "Patient city", Category: "FHIR Patient"},
+		{Name: "Patient address state", Path: base + ".patient.address[0].state", DataType: "string", Description: "Patient state", Category: "FHIR Patient"},
+		{Name: "Patient address zip", Path: base + ".patient.address[0].postal_code", DataType: "string", Description: "Patient postal code", Category: "FHIR Patient"},
+		// Encounter
+		{Name: "Encounter ID", Path: base + ".encounter.id", DataType: "string", Description: "FHIR Encounter resource id", Category: "FHIR Encounter"},
+		{Name: "Encounter class", Path: base + ".encounter.class.code", DataType: "string", Description: "Encounter class code (IMP, AMB, etc.)", Category: "FHIR Encounter"},
+		{Name: "Encounter status", Path: base + ".encounter.status", DataType: "string", Description: "Encounter status", Category: "FHIR Encounter"},
+		{Name: "Encounter start", Path: base + ".encounter.period.start", DataType: "string", Description: "Encounter start date/time", Category: "FHIR Encounter"},
+		{Name: "Encounter end", Path: base + ".encounter.period.end", DataType: "string", Description: "Encounter end date/time", Category: "FHIR Encounter"},
+		// Observation
+		{Name: "Observation ID", Path: base + ".observation.id", DataType: "string", Description: "FHIR Observation resource id", Category: "FHIR Observation"},
+		{Name: "Observation status", Path: base + ".observation.status", DataType: "string", Description: "Observation status", Category: "FHIR Observation"},
+		{Name: "Observation value", Path: base + ".observation.value_quantity.value", DataType: "number", Description: "Observation numeric value", Category: "FHIR Observation"},
+		{Name: "Observation unit", Path: base + ".observation.value_quantity.unit", DataType: "string", Description: "Observation unit of measure", Category: "FHIR Observation"},
+	}
 }
 
 // getDestinationConfig retrieves the target endpoint and auth headers from interface configuration

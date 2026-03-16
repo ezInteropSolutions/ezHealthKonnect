@@ -388,8 +388,9 @@ type FileParserConfig struct {
 	Columns     []ColumnDef `json:"columns,omitempty"`      // for fixed_width: name + position
 	Encoding    string      `json:"encoding,omitempty"`     // utf-8, latin1, etc.
 	SkipRows    int         `json:"skipRows,omitempty"`     // skip N rows from top
-	MaxRecords    int `json:"maxRecords,omitempty"`    // limit (0 = unlimited)
-	MaxFileSizeMB int `json:"maxFileSizeMB,omitempty"` // file size gate in MB (0 = default 100 MB, hard cap 500 MB)
+	MaxRecords    int `json:"maxRecords,omitempty"`    // chunk size: stop after N records (0 = unlimited)
+	Offset        int `json:"offset,omitempty"`        // skip N data records before collecting — use with maxRecords for chunked iteration
+	MaxFileSizeMB int `json:"maxFileSizeMB,omitempty"` // file size gate in MB (0 = default 100 MB, hard cap 500 MB); ignored when maxRecords > 0 and format is CSV/TSV
 	TrimFields      bool        `json:"trimFields"`                     // trim whitespace from values
 	QuoteChar       string      `json:"quoteChar,omitempty"`            // quote character (default: `"`)
 	SheetName       string      `json:"sheetName,omitempty"`            // xlsx/xls: which sheet to parse (default: first sheet)

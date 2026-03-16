@@ -30,6 +30,7 @@ router.get('/engine/status', requireAuth, InterfaceLifecycleController.getEngine
 router.post('/interfaces/:interfaceId/activate', requireAuth, InterfaceLifecycleController.activateInterface.bind(InterfaceLifecycleController));
 router.post('/interfaces/:interfaceId/deactivate', requireAuth, InterfaceLifecycleController.deactivateInterface.bind(InterfaceLifecycleController));
 router.post('/interfaces/:interfaceId/pause', requireAuth, InterfaceLifecycleController.pauseInterface.bind(InterfaceLifecycleController));
+router.get('/interfaces/statuses', requireAuth, InterfaceLifecycleController.getAllInterfaceStatuses.bind(InterfaceLifecycleController));
 router.get('/interfaces/:interfaceId/status', requireAuth, InterfaceLifecycleController.getInterfaceStatus.bind(InterfaceLifecycleController));
 router.get('/interfaces/:interfaceId/history', requireAuth, InterfaceLifecycleController.getInterfaceHistory.bind(InterfaceLifecycleController));
 

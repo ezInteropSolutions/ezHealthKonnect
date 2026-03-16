@@ -2,6 +2,7 @@ package main
 
 import (
 	"database/sql"
+	"encoding/json"
 	"ezhealthkonnect/config"
 	"ezhealthkonnect/controllers"
 	"ezhealthkonnect/fhir"
@@ -9,21 +10,26 @@ import (
 	"ezhealthkonnect/models"
 	"ezhealthkonnect/processing"
 	"ezhealthkonnect/services"
+	"ezhealthkonnect/services/backpressure"
+	"ezhealthkonnect/services/storage"
 	"ezhealthkonnect/services/dbpool"
 	"ezhealthkonnect/services/executors/enrichment"
 	"ezhealthkonnect/services/logger"
+	appmetrics "ezhealthkonnect/services/metrics"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"time"
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 	_ "github.com/lib/pq"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 // Track server start time for uptime calculation
@@ -35,6 +41,9 @@ var postgresTransformationService *services.PostgresTransformationService
 // Global Processing Engine
 var processingEngine *processing.ProcessingEngine
 
+// Global Object Storage Service
+var objectStorageService *storage.ObjectStorageService
+
 func main() {
 	// Record start time
 	startTime = time.Now()
@@ -43,6 +52,10 @@ func main() {
 	logger.Init()
 	logger.Info("logger initialized", "format", os.Getenv("LOG_FORMAT"), "level", os.Getenv("LOG_LEVEL"))
 
+	// Initialize Prometheus metrics (P3-2)
+	appmetrics.Init()
+	log.Printf("✅ Prometheus metrics initialized")
+
 	// Initialize log rotation service (file-based, for app.log)
 	appLogger := services.GetApplicationLogger()
 	defer appLogger.Close()
@@ -50,6 +63,8 @@ func main() {
 	defer logger.CloseAllInterfaces()
 	// Close all DB enrichment connection pools on shutdown (P6)
 	defer dbpool.Get().CloseAll()
+	// Drain and shut down all per-interface worker pools (P9)
+	defer backpressure.Get().ShutdownAll()
 	log.Printf("log rotation initialized - logs/application/app.log, logs/interfaces/{id}/interface.log")
 
 	// Load configuration
@@ -121,7 +136,33 @@ func main() {
 			postgresTransformationService = services.NewPostgresTransformationService(db)
 			log.Printf("✅ PostgreSQL Transformation Service initialized")
 
-			// Initialize Processing Engine with OOB pattern (auto-detects MongoDB)
+			// Initialize Object Storage Service
+			if storageDriver, storageErr := storage.NewDriverFromEnv(); storageErr == nil {
+				bucket := storage.DefaultBucketName()
+				if objSvc, objErr := storage.NewObjectStorageService(storageDriver, bucket); objErr == nil {
+					objectStorageService = objSvc
+					log.Printf("✅ Object Storage Service initialized (driver=%s, bucket=%s)", storageDriver.DriverName(), bucket)
+				} else {
+					log.Printf("⚠️  Object Storage Service init failed: %v", objErr)
+				}
+			} else {
+				log.Printf("⚠️  Object Storage driver unavailable: %v — falling back to DB-only mode", storageErr)
+			}
+
+			// Initialize schema systems BEFORE the processing engine so the FHIR
+			// schema loader is ready when the first queued messages are processed.
+			if cfg.UseFilesystemSchema() {
+				hl7SchemaPath := filepath.Join(cfg.GetSchemaDirectory(), "hl7")
+				hl7.InitSchemaLoader(hl7SchemaPath)
+				if sl := hl7.GetSchemaLoader(); sl != nil {
+					sl.SetMaxCacheSize(cfg.SchemaCacheSize)
+				}
+				fhirSchemaDir := cfg.GetFHIRSchemaDirectory()
+				log.Printf("🔧 Initializing FHIR schema system from: %s", fhirSchemaDir)
+				fhir.InitFHIRSchemaLoader(fhirSchemaDir)
+			}
+
+			// Initialize Processing Engine
 			processingEngine = processing.NewProcessingEngine(db, credStore)
 			if err := processingEngine.Start(); err != nil {
 				log.Printf("❌ Failed to start Processing Engine: %v", err)
@@ -133,8 +174,6 @@ func main() {
 		}
 	}
 
-// Note: MongoDB is now auto-detected via ProcessingEngineFactory (OOB pattern)
-// If MONGODB_HOST or MONGODB_URI is configured, hybrid storage is enabled automatically
 
 
 
@@ -233,6 +272,53 @@ func main() {
 		MaxAge:           12 * time.Hour,
 	}
 	router.Use(cors.New(corsConfig))
+
+	// ── Observability endpoints ────────────────────────────────────────────────
+	// GET /metrics  — Prometheus scrape endpoint (P3-2)
+	router.GET("/metrics", gin.WrapH(promhttp.Handler()))
+
+	// ── Kubernetes / Docker health probes ─────────────────────────────────────
+	// GET /healthz  — liveness:  returns 200 as long as the process is alive
+	// GET /readyz   — readiness: returns 503 until DB is reachable + engine running
+	router.GET("/healthz", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"status": "alive"})
+	})
+
+	router.GET("/readyz", func(c *gin.Context) {
+		type check struct {
+			OK      bool   `json:"ok"`
+			Message string `json:"message,omitempty"`
+		}
+		checks := map[string]check{}
+		ready := true
+
+		// Database reachability
+		if db == nil {
+			checks["database"] = check{OK: false, Message: "not configured"}
+			ready = false
+		} else if err := db.Ping(); err != nil {
+			checks["database"] = check{OK: false, Message: err.Error()}
+			ready = false
+		} else {
+			checks["database"] = check{OK: true}
+		}
+
+		// Processing engine
+		if processingEngine == nil || !processingEngine.IsRunning() {
+			checks["engine"] = check{OK: false, Message: "not running"}
+			ready = false
+		} else {
+			checks["engine"] = check{OK: true}
+		}
+
+		status := http.StatusOK
+		statusText := "ready"
+		if !ready {
+			status = http.StatusServiceUnavailable
+			statusText = "not ready"
+		}
+		c.JSON(status, gin.H{"status": statusText, "checks": checks})
+	})
 
 	// Static files
 	router.Static("/static", "./public")
@@ -351,6 +437,25 @@ func main() {
 			systemGroup.GET("/health", systemCtrl.HealthCheck)
 			systemGroup.GET("/info", systemCtrl.GetInfo)
 			systemGroup.GET("/metrics", systemCtrl.GetMetrics)
+			// P9 backpressure metrics — queue depth per interface
+			systemGroup.GET("/queue-depths", func(c *gin.Context) {
+				depths := backpressure.Get().QueueDepths()
+				c.JSON(200, gin.H{"success": true, "data": depths, "count": len(depths)})
+			})
+
+			// P2-5 Dead Letter Queue management
+			if db != nil {
+				dlqCtrl := controllers.NewDLQController(db)
+				dlqCtrl.RegisterRoutes(systemGroup.Group("/dlq"))
+				log.Printf("✅ DLQ Controller initialized")
+			}
+
+			// Admin settings (object storage, etc.)
+			if db != nil {
+				settingsCtrl := controllers.NewSettingsController(db, credStore)
+				settingsCtrl.RegisterRoutes(systemGroup.Group("/settings"))
+				log.Printf("✅ Settings Controller initialized")
+			}
 		}
 
 		// FHIR ROUTES
@@ -377,6 +482,94 @@ func main() {
 			fhirGroup.POST("/pipeline/test-api-endpoint", transformTestCtrl.TestAPIEndpoint) // Test API endpoint before configuring mapping
 			fhirGroup.POST("/pipeline/validate-script", transformTestCtrl.ValidateScript)    // Validate JavaScript script
 			fhirGroup.GET("/pipeline/:interfaceId/:messageType", transformTestCtrl.GetPipeline)
+
+			// ADDED: Template Preview — resource list + confidence data for a message type
+			fhirGroup.GET("/template/preview", func(c *gin.Context) {
+				messageType := c.Query("messageType")
+				if messageType == "" {
+					c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "messageType query param required"})
+					return
+				}
+
+				type ResourcePreview struct {
+					Name           string  `json:"name"`
+					FieldCount     int     `json:"field_count"`
+					AvgConfidence  float64 `json:"avg_confidence"`
+					MinConfidence  float64 `json:"min_confidence"`
+					MaxConfidence  float64 `json:"max_confidence"`
+					RequiredFields int     `json:"required_fields"`
+					Optional       bool    `json:"optional"`
+				}
+
+				// Query the OOB template for this message type
+				var templateConfigJSON []byte
+				err := db.QueryRowContext(c.Request.Context(),
+					`SELECT template_config FROM hl7_fhir_templates WHERE message_type = $1 AND is_default = true LIMIT 1`,
+					messageType,
+				).Scan(&templateConfigJSON)
+				if err != nil {
+					c.JSON(http.StatusNotFound, gin.H{"success": false, "error": fmt.Sprintf("No template found for message type: %s", messageType)})
+					return
+				}
+
+				var tmplConfig map[string]interface{}
+				if err := json.Unmarshal(templateConfigJSON, &tmplConfig); err != nil {
+					c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "Failed to parse template config"})
+					return
+				}
+
+				resourcesRaw, _ := tmplConfig["resources"].(map[string]interface{})
+				previews := make([]ResourcePreview, 0, len(resourcesRaw))
+
+				for resourceName, resourceData := range resourcesRaw {
+					rMap, _ := resourceData.(map[string]interface{})
+					mappingsRaw, _ := rMap["mappings"].([]interface{})
+					optional, _ := rMap["optional"].(bool)
+
+					preview := ResourcePreview{
+						Name:     resourceName,
+						Optional: optional,
+						MinConfidence: 1.0,
+					}
+
+					var totalConf float64
+					for _, m := range mappingsRaw {
+						mMap, _ := m.(map[string]interface{})
+						conf, _ := mMap["confidence"].(float64)
+						required, _ := mMap["required"].(bool)
+						totalConf += conf
+						preview.FieldCount++
+						if conf < preview.MinConfidence {
+							preview.MinConfidence = conf
+						}
+						if conf > preview.MaxConfidence {
+							preview.MaxConfidence = conf
+						}
+						if required {
+							preview.RequiredFields++
+						}
+					}
+
+					if preview.FieldCount > 0 {
+						preview.AvgConfidence = totalConf / float64(preview.FieldCount)
+					}
+					previews = append(previews, preview)
+				}
+
+				// Sort: required resources first, then by name
+				sort.Slice(previews, func(i, j int) bool {
+					if previews[i].Optional != previews[j].Optional {
+						return !previews[i].Optional
+					}
+					return previews[i].Name < previews[j].Name
+				})
+
+				c.JSON(http.StatusOK, gin.H{
+					"success":     true,
+					"messageType": messageType,
+					"resources":   previews,
+				})
+			})
 
 			// ADDED: Generic Pipeline Routes (reusable across all transformation types)
 			api.POST("/pipeline/reference-variables", transformTestCtrl.GetAvailableReferenceVariables) // Get available variables per step
@@ -915,9 +1108,22 @@ func main() {
 
 				// Cron Expression Preview Helper
 				connectivityGroup.POST("/cron/preview", connectivityCtrl.PreviewCronSchedule)
+
+				// Ad-hoc connector test (pipeline step context — no interface_id needed)
+				connectivityGroup.POST("/test", connectivityCtrl.TestConnectorAdHoc)
 			}
 			log.Printf("✅ Connectivity Controller initialized (Multi-Connectivity Support)")
 		}
+
+		// MESSAGE CONTENT CONTROLLER — raw content and processing logs from object storage
+		msgContentCtrl := controllers.NewMessageContentController(db, objectStorageService)
+		msgContentCtrl.RegisterRoutes(api)
+		log.Printf("✅ Message Content Controller initialized (driver=%s)", func() string {
+			if objectStorageService != nil {
+				return objectStorageService.DriverName()
+			}
+			return "none"
+		}())
 
 		// OUTPUT MESSAGE CONTROLLER - TRANSFORMATION OUTPUT MANAGEMENT
 		outputMsgCtrl := controllers.NewOutputMessageController(db)

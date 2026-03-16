@@ -6,6 +6,7 @@ import (
 	"ezhealthkonnect/models"
 	"ezhealthkonnect/services/connectors"
 	"ezhealthkonnect/services/executors"
+	"ezhealthkonnect/services/executors/format"
 	"fmt"
 	"log"
 	"time"
@@ -66,31 +67,8 @@ func (e *OutboundConnectorExecutor) Execute(
 	if models.IsTestMode(ctx) {
 		log.Printf("  🧪 [Test Mode] Outbound connector dry-run: %s", config.ConnectorType)
 
-		// Resolve content (same logic as production, for accurate preview)
-		var content string
-		if config.ContentField != "" {
-			val := executors.GetFieldValue(inputData, config.ContentField)
-			if val == nil {
-				if msg, ok := inputData["message"].(map[string]interface{}); ok {
-					val = executors.GetFieldValue(msg, config.ContentField)
-				}
-			}
-			if val != nil {
-				switch v := val.(type) {
-				case string:
-					content = v
-				default:
-					contentBytes, _ := json.Marshal(v)
-					content = string(contentBytes)
-				}
-			}
-		}
-		if content == "" {
-			if msg, ok := inputData["message"].(map[string]interface{}); ok {
-				contentBytes, _ := json.Marshal(msg)
-				content = string(contentBytes)
-			}
-		}
+		// Resolve and serialize content (same logic as production, for accurate preview)
+		content, resolvedContentType := resolveAndSerializeContent(inputData, config)
 
 		durationMs := time.Since(startTime).Milliseconds()
 
@@ -125,7 +103,7 @@ func (e *OutboundConnectorExecutor) Execute(
 			"connector_type":     config.ConnectorType,
 			"config_valid":       configValid,
 			"payload_size_bytes": len(content),
-			"content_type":       config.ContentType,
+			"content_type":       resolvedContentType,
 			"message":            "Dry-run: payload prepared but NOT sent (test mode)",
 		}
 		details := map[string]interface{}{
@@ -137,7 +115,7 @@ func (e *OutboundConnectorExecutor) Execute(
 			"config_message":     configMessage,
 			"payload_preview":    payloadPreview,
 			"payload_size_bytes": len(content),
-			"content_type":       config.ContentType,
+			"content_type":       resolvedContentType,
 		}
 		e.SetStepOutputWithDetails(outputData, variables, details)
 
@@ -149,48 +127,34 @@ func (e *OutboundConnectorExecutor) Execute(
 	factory := connectors.GetFactory()
 	connector, err := factory.CreateOutbound(config.ConnectorType)
 	if err != nil {
+		if fn := models.GetDeliveryStatusFn(ctx); fn != nil {
+			ifaceID, _ := ctx.Value("interface_id").(string)
+			msgID, _ := ctx.Value("message_id").(string)
+			fn(ifaceID, msgID, "failed", fmt.Sprintf("connector type '%s' not found", config.ConnectorType))
+		}
 		return nil, fmt.Errorf("failed to create outbound connector '%s': %w", config.ConnectorType, err)
 	}
 
 	// Initialize with config
 	connConfig, _ := json.Marshal(config.Config)
 	if err := connector.Initialize(connConfig); err != nil {
+		if fn := models.GetDeliveryStatusFn(ctx); fn != nil {
+			ifaceID, _ := ctx.Value("interface_id").(string)
+			msgID, _ := ctx.Value("message_id").(string)
+			fn(ifaceID, msgID, "failed", fmt.Sprintf("connector initialization failed: %v", err))
+		}
 		return nil, fmt.Errorf("failed to initialize connector '%s': %w", config.ConnectorType, err)
 	}
 	defer connector.Close()
 
-	// Get content to send
-	var content string
-	if config.ContentField != "" {
-		val := executors.GetFieldValue(inputData, config.ContentField)
-		if val == nil {
-			if msg, ok := inputData["message"].(map[string]interface{}); ok {
-				val = executors.GetFieldValue(msg, config.ContentField)
-			}
-		}
-		if val != nil {
-			switch v := val.(type) {
-			case string:
-				content = v
-			default:
-				contentBytes, _ := json.Marshal(v)
-				content = string(contentBytes)
-			}
-		}
-	}
-	if content == "" {
-		// Default: send entire message as JSON
-		if msg, ok := inputData["message"].(map[string]interface{}); ok {
-			contentBytes, _ := json.Marshal(msg)
-			content = string(contentBytes)
-		}
-	}
+	// Get content to send — format-aware serialization via Phase 4 serializer
+	content, resolvedContentType := resolveAndSerializeContent(inputData, config)
 
 	// Build outbound message
 	outMsg := &models.OutboundMessage{
 		MessageID:       fmt.Sprintf("pipeline-%d", time.Now().UnixNano()),
 		Content:         content,
-		ContentType:     config.ContentType,
+		ContentType:     resolvedContentType,
 		DestinationType: config.ConnectorType,
 		MessageSize:     len(content),
 		Metadata: map[string]string{
@@ -205,6 +169,12 @@ func (e *OutboundConnectorExecutor) Execute(
 	durationMs := time.Since(startTime).Milliseconds()
 
 	if err != nil {
+		// Notify engine of delivery failure so it can update delivery_status in PostgreSQL
+		if fn := models.GetDeliveryStatusFn(ctx); fn != nil {
+			interfaceID, _ := ctx.Value("interface_id").(string)
+			messageID, _ := ctx.Value("message_id").(string)
+			fn(interfaceID, messageID, "failed", err.Error())
+		}
 		variables := map[string]interface{}{
 			"success":        false,
 			"connector_type": config.ConnectorType,
@@ -212,7 +182,7 @@ func (e *OutboundConnectorExecutor) Execute(
 		}
 		details := map[string]interface{}{
 			"duration_ms":    durationMs,
-			"success":        true,
+			"success":        false,
 			"connector_type": config.ConnectorType,
 			"delivery_error": err.Error(),
 		}
@@ -226,9 +196,35 @@ func (e *OutboundConnectorExecutor) Execute(
 		"message_id":     outMsg.MessageID,
 		"bytes_sent":     len(content),
 	}
-	if result != nil {
-		variables["delivery_success"] = result.Success
-		variables["acknowledgment"] = result.Acknowledgment
+	// Resolve destination address — HTTP uses "endpoint", TCP uses "host"+"port", others vary
+	destination := config.Config["endpoint"]
+	if destination == nil {
+		destination = config.Config["url"]
+	}
+	if destination == nil {
+		if host, ok := config.Config["host"].(string); ok {
+			if port, ok := config.Config["port"]; ok {
+				destination = fmt.Sprintf("%s:%v", host, port)
+			} else {
+				destination = host
+			}
+		}
+	}
+
+	// Persist exact sent payload to object storage (full content, no truncation).
+	// The URI is stored in the NDJSON log so the frontend can load the full payload on demand.
+	outboundURI := ""
+	if storeFn := models.GetStoreOutboundFn(ctx); storeFn != nil {
+		ifaceID, _ := ctx.Value("interface_id").(string)
+		msgID, _ := ctx.Value("message_id").(string)
+		outboundURI = storeFn(ifaceID, msgID, content, resolvedContentType)
+	}
+
+	// body_preview in step_executions (DB) stays truncated for row-size efficiency.
+	// The full payload is in object storage, referenced by body_uri in the NDJSON log.
+	bodyPreview := content
+	if len(bodyPreview) > 500 {
+		bodyPreview = bodyPreview[:500] + "... (truncated)"
 	}
 
 	details := map[string]interface{}{
@@ -236,11 +232,114 @@ func (e *OutboundConnectorExecutor) Execute(
 		"success":        true,
 		"connector_type": config.ConnectorType,
 		"bytes_sent":     len(content),
+		"request": map[string]interface{}{
+			"method":       "POST",
+			"endpoint":     destination,
+			"content_type": resolvedContentType,
+			"body_size":    len(content),
+			"body_preview": bodyPreview,
+			"body_uri":     outboundURI,
+		},
+	}
+	if result != nil {
+		variables["delivery_success"] = result.Success
+		variables["acknowledgment"] = result.Acknowledgment
+		// Surface HTTP response details as accessible pipeline variables
+		if statusCode, ok := result.Metadata["status_code"]; ok {
+			variables["response_status"] = statusCode
+			details["response_status"] = statusCode
+		}
+		if respBody, ok := result.Metadata["response_body"]; ok {
+			variables["response_body"] = respBody
+			// Truncate in details to keep step metadata lean
+			bodyStr := fmt.Sprintf("%v", respBody)
+			if len(bodyStr) > 500 {
+				bodyStr = bodyStr[:500] + "… (truncated)"
+			}
+			details["response_body_preview"] = bodyStr
+		}
+		if headers, ok := result.Metadata["response_headers"]; ok {
+			details["response_headers"] = headers
+		}
+		details["duration_ms"] = result.DurationMs
 	}
 	e.SetStepOutputWithDetails(outputData, variables, details)
 
+	// Notify engine of delivery outcome — updates delivery_status in PostgreSQL directly
+	// Works for all 16 connector types; multiple outbound steps each write their own status
+	if fn := models.GetDeliveryStatusFn(ctx); fn != nil {
+		interfaceID, _ := ctx.Value("interface_id").(string)
+		messageID, _ := ctx.Value("message_id").(string)
+		ack := ""
+		if result != nil {
+			ack = result.Acknowledgment
+		}
+		deliveryStatus := "delivered"
+		if result != nil && !result.Success {
+			deliveryStatus = "failed"
+		}
+		fn(interfaceID, messageID, deliveryStatus, ack)
+	}
+
 	log.Printf("  ✅ Outbound Connector delivery complete: %s (%d bytes)", config.ConnectorType, len(content))
 	return outputData, nil
+}
+
+// resolveAndSerializeContent resolves contentField (or falls back to whole message)
+// and serializes it using the Phase 4 format serializer.
+// Returns (serialized string, effective content-type).
+func resolveAndSerializeContent(inputData map[string]interface{}, config outboundConnectorConfig) (string, string) {
+	// Determine output format from message envelope
+	outputFormat := ""
+	if msg, ok := inputData["message"].(map[string]interface{}); ok {
+		outputFormat, _ = msg["_format"].(string)
+	}
+	// ContentType config can override the format
+	switch config.ContentType {
+	case "application/hl7-v2":
+		outputFormat = "hl7v2"
+	case "application/fhir+json":
+		outputFormat = "fhir"
+	case "text/csv":
+		outputFormat = "csv"
+	}
+
+	// Resolve raw content value
+	var raw interface{}
+	if config.ContentField != "" {
+		raw = executors.GetFieldValue(inputData, config.ContentField)
+		if raw == nil {
+			if msg, ok := inputData["message"].(map[string]interface{}); ok {
+				raw = executors.GetFieldValue(msg, config.ContentField)
+			}
+		}
+	}
+	if raw == nil {
+		// Default: whole message envelope
+		if msg, ok := inputData["message"].(map[string]interface{}); ok {
+			raw = msg
+		} else {
+			raw = inputData
+		}
+	}
+
+	// If the resolved value is already a string — use it as-is (no double serialization)
+	if s, ok := raw.(string); ok {
+		ct := config.ContentType
+		if ct == "" {
+			ct = "application/json"
+		}
+		return s, ct
+	}
+
+	// Serialize via format serializer
+	body, ct, err := format.SerializeForOutput(raw, outputFormat)
+	if err != nil {
+		log.Printf("⚠️  [OutboundConnector] Serialization error (falling back to JSON): %v", err)
+		b, _ := json.Marshal(raw)
+		return string(b), "application/json"
+	}
+	return body, ct
 }
 
 func (e *OutboundConnectorExecutor) Validate(step *models.TransformationStep) error {

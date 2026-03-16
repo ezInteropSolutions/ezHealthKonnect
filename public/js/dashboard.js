@@ -27,37 +27,6 @@ function updateTime() {
 // Global variable to store user info
 let currentUser = null;
 
-// Load user info - using your backend's /api/user-info endpoint
-async function loadUserInfo() {
-    try {
-        const response = await fetch('/api/user-info');
-        if (response.ok) {
-            const user = await response.json();
-            currentUser = user; // Store user info globally
-            
-            // Update user info
-            const firstName = user.name ? user.name.split(' ')[0] : 'User';
-            document.getElementById('userName').textContent = firstName;
-            document.getElementById('userRole').textContent = (user.role || 'USER').toUpperCase();
-            document.getElementById('userAvatar').textContent = firstName.charAt(0).toUpperCase();
-            
-            // Update welcome message
-            document.querySelector('.page-title').textContent = `Welcome back, ${firstName}!`;
-            
-            // Show admin sections if user is admin
-            if (user.role === 'admin') {
-                document.getElementById('adminSection').style.display = 'block';
-                document.getElementById('adminCard').style.display = 'block';
-            }
-        } else if (response.status === 401) {
-            window.location.href = 'login.html';
-        }
-    } catch (error) {
-        console.error('Error loading user info:', error);
-        window.location.href = 'login.html';
-    }
-}
-
 // Logout function - using your backend's /api/logout endpoint
 async function logout() {
     if (confirm('Are you sure you want to logout?')) {
@@ -299,14 +268,100 @@ function showDashboard() {
     
     // Update active nav
     document.querySelectorAll('.nav-item').forEach(nav => nav.classList.remove('active'));
-    document.querySelector('.nav-item[href="#dashboard"]').classList.add('active');
+    const dashNav = document.querySelector('.nav-item[href="dashboard.html"]');
+    if (dashNav) dashNav.classList.add('active');
     
     updatePageTitle('Welcome back!', 'Dashboard overview');
+}
+
+// Fetch interface count and update tile
+async function loadInterfaceCount() {
+    try {
+        const response = await fetch('/api/interfaces', { credentials: 'include' });
+        if (response.ok) {
+            const data = await response.json();
+            const count = data.total ?? (Array.isArray(data.interfaces) ? data.interfaces.length : 0);
+            const el = document.getElementById('interfaceCount');
+            if (el) el.textContent = count;
+
+            // Also update the header "Active" stat with running interfaces
+            const active = Array.isArray(data.interfaces)
+                ? data.interfaces.filter(i => i.status === 'active' || i.status === 'running').length
+                : 0;
+            const activeEl = document.querySelector('.header-stats .stat-item:first-child .stat-value');
+            if (activeEl) activeEl.textContent = active;
+        }
+    } catch (e) {
+        console.warn('Could not load interface count:', e);
+    }
+}
+
+// Fetch user count (admin only — silently skip if not admin)
+async function loadUserCount() {
+    try {
+        const response = await fetch('/api/users', { credentials: 'include' });
+        if (response.ok) {
+            const data = await response.json();
+            const count = Array.isArray(data) ? data.length : (data.total ?? 0);
+            const el = document.getElementById('userCount');
+            if (el) el.textContent = count;
+        }
+    } catch (e) {
+        // Non-admin users will get 403 — expected, no need to log
+    }
+}
+
+// Fetch system status (engine/health)
+async function loadSystemStatus() {
+    try {
+        const response = await fetch('/api/wizard/engine/status', { credentials: 'include' });
+        if (response.ok) {
+            const data = await response.json();
+            const memEl = document.getElementById('memoryStatus');
+            if (memEl && data.memory) {
+                const pct = Math.round((data.memory.used / data.memory.total) * 100);
+                memEl.textContent = pct + '%';
+                memEl.className = 'status-value' + (pct > 80 ? ' error' : pct > 60 ? ' warning' : '');
+            }
+        }
+    } catch (e) {
+        // Engine status endpoint may not always be available
+    }
 }
 
 // Initialize on page load
 window.addEventListener('load', function() {
     loadUserInfo();
+    loadInterfaceCount();
+    loadSystemStatus();
     updateTime();
     setInterval(updateTime, 60000); // Update time every minute
 });
+
+// Load user count after user info resolves (needs admin check)
+async function loadUserInfo() {
+    try {
+        const response = await fetch('/api/user-info');
+        if (response.ok) {
+            const user = await response.json();
+            currentUser = user;
+
+            const firstName = user.name ? user.name.split(' ')[0] : 'User';
+            document.getElementById('userName').textContent = firstName;
+            document.getElementById('userRole').textContent = (user.role || 'USER').toUpperCase();
+            document.getElementById('userAvatar').textContent = firstName.charAt(0).toUpperCase();
+            document.querySelector('.page-title').textContent = `Welcome back, ${firstName}!`;
+
+            if (user.role === 'admin') {
+                document.getElementById('adminSection').style.display = 'block';
+                document.getElementById('adminCard').style.display = 'block';
+                loadUserCount();
+            }
+        } else if (response.status === 401) {
+            window.location.href = 'login.html';
+        }
+    } catch (error) {
+        console.error('Error loading user info:', error);
+        window.location.href = 'login.html';
+    }
+}

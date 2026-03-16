@@ -24,13 +24,13 @@ class SegmentViewer {
      */
     renderSegmentList(apiResponse, containerId) {
         const container = document.getElementById(containerId);
-        if (!container || !apiResponse?.data?.enhancedSegments) {
+        if (!container || !(apiResponse?.data?.enhancedSegments || apiResponse?.data?.segmentGroups)) {
             console.warn('Cannot render segments - missing container or data');
             return;
         }
 
         const data = apiResponse.data;
-        const segments = this.getSegmentsInMessageOrder(data.enhancedSegments);
+        const segments = this.getSegmentsFromGroups(data);
         const validationErrors = data.validationErrors || [];
 
         // ✅ CRITICAL FIX: Validate field positioning before rendering
@@ -290,12 +290,15 @@ renderCompactHeader(validationErrors, messageType, segments, data) {
      * ✅ ENHANCED: Compact segment card with specific required field validation
      */
     renderCompactSegment(segName, segment, validationErrors) {
+        // segName may be an instance key like "IN1[1]" for repeated segments.
+        // baseSeg is the plain HL7 name used for display and validation lookups.
+        const baseSeg = segName.replace(/\[\d+\]$/, '');
         const isExpanded = this.expandedSegments.has(segName);
-        const segmentErrors = validationErrors.filter(err => err.segment === segName);
+        const segmentErrors = validationErrors.filter(err => err.segment === baseSeg);
         const hasIssues = segmentErrors.length > 0;
-        
+
         // ✅ NEW: Get specific missing required fields for this segment
-        const missingRequiredFields = segmentErrors.filter(err => 
+        const missingRequiredFields = segmentErrors.filter(err =>
             err.code === 'MISSING_REQUIRED_FIELD' || err.code === 'EMPTY_REQUIRED_FIELD'
         );
         
@@ -309,19 +312,19 @@ renderCompactHeader(validationErrors, messageType, segments, data) {
             err.code === 'MISSING_REQUIRED_FIELD'
         );
         
-        const keyFields = this.getKeyFields(segName, segment);
+        const keyFields = this.getKeyFields(baseSeg, segment);
 
         return `
             <div class="segment-compact ${hasIssues ? 'has-issues' : ''} ${isExpanded ? 'expanded' : ''} ${missingRequiredFields.length > 0 ? 'has-missing-required' : ''}">
                 <div class="segment-row" onclick="console.log('🔥 Click detected for segment:', '${segName}'); window.toggleSegmentGlobal('${segName}')">
                     <div class="segment-info">
                         <div class="segment-name-badge">
-                            <span class="seg-name">${segName}</span>
-                            ${this.renderDynamicBadges(segName, segment, segmentErrors)}
+                            <span class="seg-name">${baseSeg}</span>
+                            ${this.renderDynamicBadges(baseSeg, segment, segmentErrors)}
                             ${this.renderRequiredFieldsBadge(missingRequiredFields)}
                         </div>
                         <div class="segment-summary">
-                            <span class="seg-desc">${this.truncateText(segment.description || `${segName} Segment`, 40)}</span>
+                            <span class="seg-desc">${this.truncateText(segment.description || `${baseSeg} Segment`, 40)}</span>
                             ${keyFields.length > 0 ? `<span class="key-values">${keyFields.join(' • ')}</span>` : ''}
                             ${this.renderRequiredFieldsSummary(missingRequiredFields, emptyRequiredFields, trulyMissingFields)}
                         </div>
@@ -331,8 +334,8 @@ renderCompactHeader(validationErrors, messageType, segments, data) {
                         <span class="expand-icon ${isExpanded ? 'expanded' : ''}">${isExpanded ? '−' : '+'}</span>
                     </div>
                 </div>
-                
-                ${isExpanded ? this.renderSegmentFields(segName, segment, validationErrors) : ''}
+
+                ${isExpanded ? this.renderSegmentFields(baseSeg, segment, validationErrors) : ''}
                 ${hasIssues && !isExpanded ? this.renderInlineValidation(segmentErrors, missingRequiredFields) : ''}
             </div>
         `;
@@ -469,17 +472,18 @@ renderCompactHeader(validationErrors, messageType, segments, data) {
      * Table row for each segment
      */
     renderSegmentTableRow(segName, segment, validationErrors) {
-        const segmentErrors = validationErrors.filter(err => err.segment === segName);
+        const baseSeg = segName.replace(/\[\d+\]$/, '');
+        const segmentErrors = validationErrors.filter(err => err.segment === baseSeg);
         const hasIssues = segmentErrors.length > 0;
-        const keyFields = this.getKeyFields(segName, segment);
+        const keyFields = this.getKeyFields(baseSeg, segment);
 
         return `
             <tr class="segment-table-row ${hasIssues ? 'has-issues' : ''}" onclick="window.viewSegmentDetailsGlobal('${segName}')">
                 <td class="seg-name-cell">
-                    <span class="seg-name">${segName}</span>
-                    ${this.renderDynamicBadges(segName, segment, segmentErrors)}
+                    <span class="seg-name">${baseSeg}</span>
+                    ${this.renderDynamicBadges(baseSeg, segment, segmentErrors)}
                 </td>
-                <td class="seg-desc-cell">${this.truncateText(segment.description || `${segName} Segment`, 30)}</td>
+                <td class="seg-desc-cell">${this.truncateText(segment.description || `${baseSeg} Segment`, 30)}</td>
                 <td class="field-count-cell">${segment.fieldCount || 0}</td>
                 <td class="status-cell">
                     ${hasIssues ? 
@@ -1163,6 +1167,48 @@ renderCompactHeader(validationErrors, messageType, segments, data) {
         });
         
         return segmentEntries;
+    }
+
+    /**
+     * Build segment list from segmentGroups (handles repeating segments like two IN1s).
+     * Returns [instanceKey, segment] tuples where instanceKey is unique per occurrence:
+     * first IN1 → "IN1", second IN1 → "IN1[1]", third → "IN1[2]", etc.
+     */
+    getSegmentsFromGroups(data) {
+        const segmentGroups = data.segmentGroups || {};
+        const segmentOrder = data.segmentOrder || [];
+        const enhancedSegments = data.enhancedSegments || {};
+
+        if (segmentOrder.length > 0 && Object.keys(segmentGroups).length > 0) {
+            const segmentEntries = [];
+            const instanceCounts = {};
+
+            for (const segName of segmentOrder) {
+                const idx = instanceCounts[segName] || 0;
+                instanceCounts[segName] = idx + 1;
+
+                const group = segmentGroups[segName];
+                if (group && group[idx]) {
+                    // First instance uses plain name so default expandedSegments still work
+                    const instanceKey = idx === 0 ? segName : `${segName}[${idx}]`;
+                    segmentEntries.push([instanceKey, group[idx]]);
+                } else if (idx === 0 && enhancedSegments[segName]) {
+                    segmentEntries.push([segName, enhancedSegments[segName]]);
+                }
+            }
+
+            // Append any segments not listed in segmentOrder
+            Object.entries(enhancedSegments).forEach(([segName, seg]) => {
+                if (!segmentOrder.includes(segName)) {
+                    segmentEntries.push([segName, seg]);
+                }
+            });
+
+            return segmentEntries;
+        }
+
+        // Fallback: original single-instance behaviour
+        return this.getSegmentsInMessageOrder(enhancedSegments);
     }
 
     /**

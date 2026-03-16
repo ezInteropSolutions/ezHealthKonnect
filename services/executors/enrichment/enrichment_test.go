@@ -15,11 +15,10 @@ func TestScriptEnrichment_BasicExecution(t *testing.T) {
 
 	step := &models.TransformationStep{
 		StepName: "Basic Test",
-		StepType: "pre.enrichment.script",
+		StepType: "enrichment.script",
 		Enabled:  true,
 		Config: map[string]interface{}{
 			"script":     `({ result: 42, status: "success" });`,
-			"targetPath": "enriched.test",
 		},
 	}
 
@@ -31,18 +30,14 @@ func TestScriptEnrichment_BasicExecution(t *testing.T) {
 		t.Fatalf("Unexpected error: %v", err)
 	}
 
-	enriched, ok := result["enriched"].(map[string]interface{})
+	// P7: data is now in _stepOutput (flat), not enriched.test
+	stepOutput, ok := result["_stepOutput"].(map[string]interface{})
 	if !ok {
-		t.Fatal("Expected enriched map")
+		t.Fatal("Expected _stepOutput map")
 	}
 
-	testData, ok := enriched["test"].(map[string]interface{})
-	if !ok {
-		t.Fatal("Expected test data")
-	}
-
-	if result, ok := testData["result"].(int64); !ok || result != 42 {
-		t.Errorf("Expected result=42, got: %v", testData["result"])
+	if v, ok := stepOutput["result"].(int64); !ok || v != 42 {
+		t.Errorf("Expected result=42, got: %v", stepOutput["result"])
 	}
 }
 
@@ -51,7 +46,7 @@ func TestScriptEnrichment_CalculateAge(t *testing.T) {
 
 	step := &models.TransformationStep{
 		StepName: "Age Calculation",
-		StepType: "pre.enrichment.script",
+		StepType: "enrichment.script",
 		Enabled:  true,
 		Config: map[string]interface{}{
 			"script": `
@@ -61,7 +56,6 @@ var ageGroup = age < 18 ? "pediatric" : (age < 65 ? "adult" : "geriatric");
 
 ({ age: age, ageGroup: ageGroup });
 			`,
-			"targetPath": "enriched.patient",
 		},
 	}
 
@@ -72,15 +66,15 @@ var ageGroup = age < 18 ? "pediatric" : (age < 65 ? "adult" : "geriatric");
 		t.Fatalf("Unexpected error: %v", err)
 	}
 
-	enriched := result["enriched"].(map[string]interface{})
-	patient := enriched["patient"].(map[string]interface{})
+	// P7: data is now in _stepOutput (flat), not enriched.patient
+	stepOutput := result["_stepOutput"].(map[string]interface{})
 
-	age, ok := patient["age"].(int64)
+	age, ok := stepOutput["age"].(int64)
 	if !ok || age < 30 || age > 40 {
 		t.Errorf("Expected age ~34-35, got: %v", age)
 	}
 
-	if ageGroup := patient["ageGroup"].(string); ageGroup != "adult" {
+	if ageGroup := stepOutput["ageGroup"].(string); ageGroup != "adult" {
 		t.Errorf("Expected ageGroup=adult, got: %v", ageGroup)
 	}
 }
@@ -90,7 +84,7 @@ func TestScriptEnrichment_GetNestedValue(t *testing.T) {
 
 	step := &models.TransformationStep{
 		StepName: "Extract Values",
-		StepType: "pre.enrichment.script",
+		StepType: "enrichment.script",
 		Enabled:  true,
 		Config: map[string]interface{}{
 			"script": `
@@ -99,7 +93,6 @@ var msgType = getNestedValue(input, "messageType");
 
 ({ patientId: patientId, messageType: msgType });
 			`,
-			"targetPath": "enriched.extracted",
 		},
 	}
 
@@ -117,14 +110,14 @@ var msgType = getNestedValue(input, "messageType");
 		t.Fatalf("Unexpected error: %v", err)
 	}
 
-	enriched := result["enriched"].(map[string]interface{})
-	extracted := enriched["extracted"].(map[string]interface{})
+	// P7: data is now in _stepOutput (flat), not enriched.extracted
+	stepOutput := result["_stepOutput"].(map[string]interface{})
 
-	if patientId := extracted["patientId"].(string); patientId != "P123456" {
+	if patientId := stepOutput["patientId"].(string); patientId != "P123456" {
 		t.Errorf("Expected patientId=P123456, got: %v", patientId)
 	}
 
-	if msgType := extracted["messageType"].(string); msgType != "ADT^A01" {
+	if msgType := stepOutput["messageType"].(string); msgType != "ADT^A01" {
 		t.Errorf("Expected messageType=ADT^A01, got: %v", msgType)
 	}
 }
@@ -134,7 +127,7 @@ func TestScriptEnrichment_ContextVariables(t *testing.T) {
 
 	step := &models.TransformationStep{
 		StepName: "Context Test",
-		StepType: "pre.enrichment.script",
+		StepType: "enrichment.script",
 		Enabled:  true,
 		Config: map[string]interface{}{
 			"script": `({ hospitalId: hospitalId, env: environment, combined: hospitalId + "-" + environment });`,
@@ -142,7 +135,6 @@ func TestScriptEnrichment_ContextVariables(t *testing.T) {
 				"hospitalId":  "HOSP001",
 				"environment": "prod",
 			},
-			"targetPath": "enriched.context",
 		},
 	}
 
@@ -153,14 +145,14 @@ func TestScriptEnrichment_ContextVariables(t *testing.T) {
 		t.Fatalf("Unexpected error: %v", err)
 	}
 
-	enriched := result["enriched"].(map[string]interface{})
-	contextData := enriched["context"].(map[string]interface{})
+	// P7: data is now in _stepOutput (flat), not enriched.context
+	stepOutput := result["_stepOutput"].(map[string]interface{})
 
-	if hospitalId := contextData["hospitalId"].(string); hospitalId != "HOSP001" {
+	if hospitalId := stepOutput["hospitalId"].(string); hospitalId != "HOSP001" {
 		t.Errorf("Expected HOSP001, got: %v", hospitalId)
 	}
 
-	if combined := contextData["combined"].(string); combined != "HOSP001-prod" {
+	if combined := stepOutput["combined"].(string); combined != "HOSP001-prod" {
 		t.Errorf("Expected HOSP001-prod, got: %v", combined)
 	}
 }
@@ -171,11 +163,10 @@ func TestScriptEnrichment_ErrorHandling(t *testing.T) {
 	// Test with failOnError=false
 	step := &models.TransformationStep{
 		StepName: "Error Test",
-		StepType: "pre.enrichment.script",
+		StepType: "enrichment.script",
 		Enabled:  true,
 		Config: map[string]interface{}{
 			"script":      `throw new Error("Test error");`,
-			"targetPath":  "enriched.error",
 			"failOnError": false,
 		},
 	}
@@ -208,7 +199,7 @@ func TestScriptEnrichment_ParseHL7Date(t *testing.T) {
 
 	step := &models.TransformationStep{
 		StepName: "Date Parsing",
-		StepType: "pre.enrichment.script",
+		StepType: "enrichment.script",
 		Enabled:  true,
 		Config: map[string]interface{}{
 			"script": `
@@ -217,7 +208,6 @@ var date2 = parseHL7Date("20231215143045");
 
 ({ date1: date1, date2: date2 });
 			`,
-			"targetPath": "enriched.dates",
 		},
 	}
 
@@ -228,14 +218,14 @@ var date2 = parseHL7Date("20231215143045");
 		t.Fatalf("Unexpected error: %v", err)
 	}
 
-	enriched := result["enriched"].(map[string]interface{})
-	dates := enriched["dates"].(map[string]interface{})
+	// P7: data is now in _stepOutput (flat), not enriched.dates
+	stepOutput := result["_stepOutput"].(map[string]interface{})
 
-	if date1 := dates["date1"].(string); date1 != "2023-12-15" {
+	if date1 := stepOutput["date1"].(string); date1 != "2023-12-15" {
 		t.Errorf("Expected 2023-12-15, got: %v", date1)
 	}
 
-	if date2 := dates["date2"].(string); date2 != "2023-12-15T14:30:45" {
+	if date2 := stepOutput["date2"].(string); date2 != "2023-12-15T14:30:45" {
 		t.Errorf("Expected 2023-12-15T14:30:45, got: %v", date2)
 	}
 }
@@ -248,6 +238,112 @@ var date2 = parseHL7Date("20231215143045");
 // Metadata functionality is now tested via FieldMapping with metadata config.
 
 // ===============================================================
+// OUTPUT VARIABLE MUTATION TESTS
+// ===============================================================
+// The executor pre-injects an empty `output` object into the VM.
+// Scripts can write to it (e.g. `output.patientId = "123"`) and omit
+// an explicit return — the VM reads back the mutated `output` value.
+
+func TestScriptEnrichment_OutputMutation_NoReturn(t *testing.T) {
+	executor := NewScriptEnrichmentExecutor()
+
+	step := &models.TransformationStep{
+		StepName: "Output Mutation",
+		StepType: "enrichment.script",
+		Enabled:  true,
+		Config: map[string]interface{}{
+			// Script writes to `output` but does NOT return a value
+			"script": `
+output.patientId = "P12345";
+output.status = "active";
+`,
+		},
+	}
+
+	result, err := executor.Execute(context.Background(), step, map[string]interface{}{})
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	stepOutput, ok := result["_stepOutput"].(map[string]interface{})
+	if !ok {
+		t.Fatal("Expected _stepOutput map")
+	}
+	if stepOutput["patientId"] != "P12345" {
+		t.Errorf("Expected patientId=P12345, got: %v", stepOutput["patientId"])
+	}
+	if stepOutput["status"] != "active" {
+		t.Errorf("Expected status=active, got: %v", stepOutput["status"])
+	}
+}
+
+func TestScriptEnrichment_ExplicitReturnTakesPrecedence(t *testing.T) {
+	executor := NewScriptEnrichmentExecutor()
+
+	step := &models.TransformationStep{
+		StepName: "Return Precedence",
+		StepType: "enrichment.script",
+		Enabled:  true,
+		Config: map[string]interface{}{
+			// Script mutates output AND returns a value — return wins
+			"script": `
+output.shouldBeIgnored = "yes";
+({ returnedValue: 99 });
+`,
+		},
+	}
+
+	result, err := executor.Execute(context.Background(), step, map[string]interface{}{})
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	stepOutput, ok := result["_stepOutput"].(map[string]interface{})
+	if !ok {
+		t.Fatal("Expected _stepOutput map")
+	}
+	// The explicit return value should be used
+	if v, _ := stepOutput["returnedValue"].(int64); v != 99 {
+		t.Errorf("Expected returnedValue=99, got: %v", stepOutput["returnedValue"])
+	}
+	// The output mutation should NOT appear (return value takes precedence)
+	if _, found := stepOutput["shouldBeIgnored"]; found {
+		t.Error("Expected shouldBeIgnored to be absent when explicit return is present")
+	}
+}
+
+func TestScriptEnrichment_OutputMutation_ComputedFields(t *testing.T) {
+	executor := NewScriptEnrichmentExecutor()
+
+	step := &models.TransformationStep{
+		StepName: "Computed via output",
+		StepType: "enrichment.script",
+		Enabled:  true,
+		Config: map[string]interface{}{
+			"script": `
+var dob = "19900115";
+output.age = calculateAge(dob);
+output.ageGroup = output.age < 18 ? "pediatric" : "adult";
+`,
+		},
+	}
+
+	result, err := executor.Execute(context.Background(), step, map[string]interface{}{})
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	stepOutput := result["_stepOutput"].(map[string]interface{})
+	age, ok := stepOutput["age"].(int64)
+	if !ok || age < 30 || age > 40 {
+		t.Errorf("Expected age ~34-35 via output mutation, got: %v", stepOutput["age"])
+	}
+	if stepOutput["ageGroup"] != "adult" {
+		t.Errorf("Expected ageGroup=adult, got: %v", stepOutput["ageGroup"])
+	}
+}
+
+// ===============================================================
 // BENCHMARK TESTS
 // ===============================================================
 
@@ -256,11 +352,10 @@ func BenchmarkScriptEnrichment_Simple(b *testing.B) {
 
 	step := &models.TransformationStep{
 		StepName: "Benchmark",
-		StepType: "pre.enrichment.script",
+		StepType: "enrichment.script",
 		Enabled:  true,
 		Config: map[string]interface{}{
-			"script":     `({ result: 42 });`,
-			"targetPath": "enriched.bench",
+			"script": `({ result: 42 });`,
 		},
 	}
 
@@ -278,7 +373,7 @@ func BenchmarkScriptEnrichment_Complex(b *testing.B) {
 
 	step := &models.TransformationStep{
 		StepName: "Complex Benchmark",
-		StepType: "pre.enrichment.script",
+		StepType: "enrichment.script",
 		Enabled:  true,
 		Config: map[string]interface{}{
 			"script": `
@@ -288,7 +383,6 @@ var patientId = getNestedValue(input, "patient.id");
 
 ({ age: age, ageGroup: age < 18 ? "pediatric" : "adult", patientId: patientId });
 			`,
-			"targetPath": "enriched.bench",
 		},
 	}
 

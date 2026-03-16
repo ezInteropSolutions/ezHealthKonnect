@@ -78,6 +78,23 @@ docs/
 go-api
 main
 
+# Large data/archive files
+postgres_data.tar.gz
+*.tar.gz
+*.tar
+*.zip
+
+# Architecture and docs (large markdown + diagrams)
+architecture/
+connectivity/
+
+# Test infrastructure
+tests/
+test-results/
+
+# Database migrations are volume-mounted at runtime
+# database/migrations are needed for Flyway but NOT for the app image
+
 # Unused scripts
 setup_sample_transformations.js
 setup_transformation_pipeline.js
