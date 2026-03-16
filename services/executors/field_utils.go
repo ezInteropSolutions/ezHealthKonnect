@@ -336,6 +336,155 @@ func parseJSONPath(path string) []pathPart {
 }
 
 // ===============================================================
+// FORMAT-AGNOSTIC LEAF PATH EXPANSION
+// ===============================================================
+
+// GetLeafPaths returns all terminal (primitive-value) paths reachable from path.
+//
+// Design intent — called by DataMaskingExecutor before masking so that a single
+// rule targeting a composite/container path automatically covers every nested
+// field, regardless of the message format:
+//
+//   HL7v2  PID.5      → ["PID.5", "PID.5.1", "PID.5.2", "PID.5.3", ...]
+//   HL7v2  PID.5.1    → ["PID.5.1"]          (already a leaf, no expansion)
+//   FHIR   Patient.name[0]  → ["Patient.name[0].family", "Patient.name[0].given"]
+//   JSON   patient.address  → ["patient.address.street", "patient.address.city", ...]
+//   JSON   patient.lastName → ["patient.lastName"]   (scalar → no expansion)
+//
+// Returns nil when the path cannot be resolved in data (field absent).
+func GetLeafPaths(data map[string]interface{}, path string) []string {
+	switch DetectPathType(path) {
+	case PathTypeHL7:
+		return getHL7LeafPaths(data, path)
+	default:
+		// FHIR paths resolve through the same JSON walk after the resource root
+		// is located; generic JSON paths are walked directly.
+		return getJSONLeafPaths(data, path)
+	}
+}
+
+// getHL7LeafPaths expands an HL7 path to all reachable leaf paths.
+// A 3-part path (PID.5.1) is already a leaf — returned as-is.
+// A 2-part path (PID.5)   is a composite field — expanded to include its subfields.
+func getHL7LeafPaths(data map[string]interface{}, path string) []string {
+	parts := strings.Split(path, ".")
+
+	// Already a subfield path (PID.5.1) — terminal leaf.
+	if len(parts) == 3 {
+		if GetFieldValue(data, path) != nil {
+			return []string{path}
+		}
+		return nil
+	}
+
+	if len(parts) != 2 {
+		return nil
+	}
+
+	segmentKey := parts[0]
+	fieldKey := fmt.Sprintf("%s.%s", parts[0], parts[1])
+
+	// Locate enhancedSegments — same discovery logic as resolveHL7FieldValue.
+	var enhancedSegments interface{}
+	if es, ok := data["enhancedSegments"]; ok {
+		enhancedSegments = es
+	} else if msg, ok := data["message"].(map[string]interface{}); ok {
+		enhancedSegments = msg["enhancedSegments"]
+	}
+	if enhancedSegments == nil {
+		return nil
+	}
+
+	// ── Typed Go struct ──────────────────────────────────────────────────────
+	if typedSegments, ok := enhancedSegments.(map[string]hl7.EnhancedSegment); ok {
+		segment, exists := typedSegments[segmentKey]
+		if !exists {
+			return nil
+		}
+		for _, field := range segment.Fields {
+			if field.Key != fieldKey {
+				continue
+			}
+			paths := []string{path} // composite path always included
+			for _, sf := range field.Subfields {
+				paths = append(paths, sf.Key)
+			}
+			return paths
+		}
+		return nil
+	}
+
+	// ── map[string]interface{} ───────────────────────────────────────────────
+	if segmentsMap, ok := enhancedSegments.(map[string]interface{}); ok {
+		segmentData, exists := segmentsMap[segmentKey]
+		if !exists {
+			return nil
+		}
+		segmentMap, ok := segmentData.(map[string]interface{})
+		if !ok {
+			return nil
+		}
+		fields, ok := segmentMap["fields"].([]interface{})
+		if !ok {
+			return nil
+		}
+		for _, f := range fields {
+			fieldMap, ok := f.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			if fieldMap["key"] != fieldKey {
+				continue
+			}
+			paths := []string{path} // composite path always included
+			if subfields, ok := fieldMap["subfields"].([]interface{}); ok {
+				for _, sf := range subfields {
+					if sfMap, ok := sf.(map[string]interface{}); ok {
+						if key, ok := sfMap["key"].(string); ok && key != "" {
+							paths = append(paths, key)
+						}
+					}
+				}
+			}
+			return paths
+		}
+	}
+
+	return nil
+}
+
+// getJSONLeafPaths resolves path in data and, if the result is a container
+// (map or slice), recursively enumerates every leaf path within it.
+// For primitive results the original path is returned unchanged.
+func getJSONLeafPaths(data map[string]interface{}, path string) []string {
+	value := GetFieldValue(data, path)
+	if value == nil {
+		return nil
+	}
+	var leaves []string
+	collectLeafPaths(path, value, &leaves)
+	return leaves
+}
+
+// collectLeafPaths recursively walks value, appending fully-qualified leaf
+// paths to out.  Primitive types (string, number, bool) are the leaves.
+func collectLeafPaths(prefix string, value interface{}, out *[]string) {
+	switch v := value.(type) {
+	case map[string]interface{}:
+		for k, child := range v {
+			collectLeafPaths(prefix+"."+k, child, out)
+		}
+	case []interface{}:
+		for i, child := range v {
+			collectLeafPaths(fmt.Sprintf("%s[%d]", prefix, i), child, out)
+		}
+	default:
+		// Primitive (string, number, bool, nil already filtered above)
+		*out = append(*out, prefix)
+	}
+}
+
+// ===============================================================
 // FORMAT-AGNOSTIC FIELD VALUE SETTER
 // ===============================================================
 
@@ -587,4 +736,45 @@ func getFHIRAbsolutePath(fhirPath string) string {
 	// FHIR paths are already fairly absolute
 	// Could add "fhirBundle." prefix if needed
 	return fhirPath
+}
+
+// ===============================================================
+// UNIVERSAL VARIABLE RESOLVER (Phase 2 — Format-Agnostic Pipeline)
+// ===============================================================
+//
+// ResolveVariable resolves any path from the full pipeline inputData map.
+// Priority order:
+//  1. _semantic_index in message envelope  (semantic paths: "patient.name.family")
+//  2. Existing GetFieldValue               (HL7 PID.5.1, FHIR Patient.name[0].given, JSON dot-path, steps.*)
+//
+// All existing executors that call GetFieldValue continue to work unchanged.
+// New executors call ResolveVariable to get semantic path support for free.
+func ResolveVariable(inputData map[string]interface{}, path string) interface{} {
+	// 1. Try semantic index inside the message envelope
+	if msg, ok := inputData["message"].(map[string]interface{}); ok {
+		if idx, ok := msg["_semantic_index"].(map[string]interface{}); ok {
+			if nativePath, ok := idx[path].(string); ok {
+				if v := GetFieldValue(msg, nativePath); v != nil {
+					return v
+				}
+			}
+		}
+	}
+	// 2. Fall through to existing format-agnostic resolver (HL7/FHIR/JSON/steps.*)
+	return GetFieldValue(inputData, path)
+}
+
+// SetVariable sets a value using semantic path resolution (mirrors ResolveVariable).
+// Returns true if the field was found and updated.
+func SetVariable(inputData map[string]interface{}, path string, value interface{}) bool {
+	// 1. Try semantic index inside the message envelope
+	if msg, ok := inputData["message"].(map[string]interface{}); ok {
+		if idx, ok := msg["_semantic_index"].(map[string]interface{}); ok {
+			if nativePath, ok := idx[path].(string); ok {
+				return UpdateFieldValue(msg, nativePath, value)
+			}
+		}
+	}
+	// 2. Fall through to existing format-agnostic setter
+	return UpdateFieldValue(inputData, path, value)
 }

@@ -120,6 +120,64 @@ func ParseHL7MessageEnhanced(rawMessage string) *BasicParsedMessage {
 	}
 }
 
+// DecodeHL7Escapes replaces standard HL7 escape sequences with their literal characters.
+// encodingChars is the value of MSH.2, e.g. "^~\&".
+// If empty, the HL7 standard defaults (^~\&) are assumed.
+// The following sequences are decoded:
+//   \F\  → | (field separator)
+//   \S\  → ^ (component separator, from MSH.2[0])
+//   \T\  → & (subcomponent separator, from MSH.2[3])
+//   \R\  → ~ (repetition separator, from MSH.2[1])
+//   \E\  → \ (escape character itself) — decoded LAST
+//   \H\  → "" (start highlight — tag stripped)
+//   \N\  → "" (end highlight — tag stripped)
+//   \.br\ → \n (line break)
+func DecodeHL7Escapes(value string, encodingChars string) string {
+	if value == "" || !strings.Contains(value, EscapeCharacter) {
+		return value
+	}
+
+	// Extract actual delimiter characters from MSH.2
+	comp := "^"
+	rep := "~"
+	esc := "\\"
+	sub := "&"
+	if len(encodingChars) >= 1 {
+		comp = string(encodingChars[0])
+	}
+	if len(encodingChars) >= 2 {
+		rep = string(encodingChars[1])
+	}
+	if len(encodingChars) >= 3 {
+		esc = string(encodingChars[2])
+	}
+	if len(encodingChars) >= 4 {
+		sub = string(encodingChars[3])
+	}
+
+	result := value
+	result = strings.ReplaceAll(result, `\F\`, FieldSeparator) // always "|"
+	result = strings.ReplaceAll(result, `\S\`, comp)
+	result = strings.ReplaceAll(result, `\T\`, sub)
+	result = strings.ReplaceAll(result, `\R\`, rep)
+	result = strings.ReplaceAll(result, `\.br\`, "\n")
+	result = strings.ReplaceAll(result, `\H\`, "") // strip highlight start
+	result = strings.ReplaceAll(result, `\N\`, "") // strip highlight end
+	result = strings.ReplaceAll(result, `\E\`, esc) // MUST be last to avoid double-decode
+	return result
+}
+
+// ExtractEncodingChars extracts MSH.2 (encoding characters) from a raw HL7 message.
+// Returns standard defaults "^~\\&" if not found.
+func ExtractEncodingChars(rawMessage string) string {
+	for _, line := range strings.SplitN(strings.ReplaceAll(rawMessage, "\r", "\n"), "\n", 5) {
+		if strings.HasPrefix(line, "MSH") && len(line) >= 8 {
+			return line[4:8] // characters at positions 4-7 are MSH.2
+		}
+	}
+	return `^~\&`
+}
+
 // ParseHL7Field parses a single HL7 field with all delimiters
 func ParseHL7Field(fieldValue string) *EnhancedFieldData {
 	if fieldValue == "" {

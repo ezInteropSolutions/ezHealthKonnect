@@ -67,13 +67,16 @@ func (h *HTTPOutboundConnector) Initialize(config []byte) error {
 		return fmt.Errorf("failed to parse config: %w", err)
 	}
 
-	// Endpoint (required)
-	if endpoint, ok := cfg["endpoint"].(string); ok && endpoint != "" {
-		h.endpoint = endpoint
-		log.Printf("🔍 Endpoint set to: %s", h.endpoint)
-	} else {
+	// Endpoint (required) — schema field is "url", legacy field is "endpoint"
+	endpoint, _ := cfg["url"].(string)
+	if endpoint == "" {
+		endpoint, _ = cfg["endpoint"].(string)
+	}
+	if endpoint == "" {
 		return fmt.Errorf("endpoint is required")
 	}
+	h.endpoint = endpoint
+	log.Printf("🔍 Endpoint set to: %s", h.endpoint)
 
 	// HTTP method (optional, defaults to POST)
 	if method, ok := cfg["method"].(string); ok && method != "" {
@@ -81,48 +84,70 @@ func (h *HTTPOutboundConnector) Initialize(config []byte) error {
 		log.Printf("🔍 Method set to: %s", h.method)
 	}
 
-	// Timeout (optional)
-	if timeout, ok := cfg["timeout"].(float64); ok && timeout > 0 {
+	// Timeout — schema field is "timeout_seconds", legacy field is "timeout"
+	if timeout, ok := cfg["timeout_seconds"].(float64); ok && timeout > 0 {
+		h.timeout = time.Duration(timeout) * time.Second
+		log.Printf("🔍 Timeout set to: %v", h.timeout)
+	} else if timeout, ok := cfg["timeout"].(float64); ok && timeout > 0 {
 		h.timeout = time.Duration(timeout) * time.Second
 		log.Printf("🔍 Timeout set to: %v", h.timeout)
 	}
 
-	// Retry settings (optional)
-	if retryAttempts, ok := cfg["retryAttempts"].(float64); ok {
+	// Retry settings — schema fields are "retry_attempts"/"retry_delay_seconds"
+	if retryAttempts, ok := cfg["retry_attempts"].(float64); ok {
 		h.retryAttempts = int(retryAttempts)
-		log.Printf("🔍 Retry attempts set to: %d", h.retryAttempts)
+	} else if retryAttempts, ok := cfg["retryAttempts"].(float64); ok {
+		h.retryAttempts = int(retryAttempts)
 	}
-	if retryDelay, ok := cfg["retryDelay"].(float64); ok {
+	if retryDelay, ok := cfg["retry_delay_seconds"].(float64); ok {
 		h.retryDelay = time.Duration(retryDelay) * time.Second
-		log.Printf("🔍 Retry delay set to: %v", h.retryDelay)
+	} else if retryDelay, ok := cfg["retryDelay"].(float64); ok {
+		h.retryDelay = time.Duration(retryDelay) * time.Second
 	}
 
-	// Authentication
-	if authType, ok := cfg["authType"].(string); ok && authType != "" && authType != "none" {
+	// Authentication — schema field is "authentication_type", values: basic_auth/bearer_token/api_key
+	authType, _ := cfg["authentication_type"].(string)
+	if authType == "" {
+		authType, _ = cfg["authType"].(string)
+	}
+	if authType != "" && authType != "none" {
 		log.Printf("🔍 Auth type set to: %s", authType)
 
 		h.authConfig = &httpservice.AuthConfig{}
 
 		switch authType {
-		case "basic":
+		case "basic_auth", "basic":
 			h.authConfig.Type = httpservice.AuthTypeBasic
 			h.authConfig.Username, _ = cfg["username"].(string)
 			h.authConfig.Password, _ = cfg["password"].(string)
 			log.Printf("🔐 Basic Auth configured: username='%s'", h.authConfig.Username)
 
-		case "bearer":
+		case "bearer_token", "bearer":
 			h.authConfig.Type = httpservice.AuthTypeBearer
-			h.authConfig.BearerToken, _ = cfg["bearerToken"].(string)
+			// Schema field is "bearer_token", legacy is "bearerToken"
+			token, _ := cfg["bearer_token"].(string)
+			if token == "" {
+				token, _ = cfg["bearerToken"].(string)
+			}
+			h.authConfig.BearerToken = token
 			log.Printf("🔐 Bearer Token configured")
 
 		case "api_key":
 			h.authConfig.Type = httpservice.AuthTypeAPIKey
-			h.authConfig.APIKey, _ = cfg["apiKey"].(string)
-			if header, ok := cfg["apiKeyHeader"].(string); ok && header != "" {
-				h.authConfig.APIKeyHeader = header
-			} else {
-				h.authConfig.APIKeyHeader = "X-API-Key"
+			// Schema field is "api_key", legacy is "apiKey"
+			apiKey, _ := cfg["api_key"].(string)
+			if apiKey == "" {
+				apiKey, _ = cfg["apiKey"].(string)
 			}
+			h.authConfig.APIKey = apiKey
+			header, _ := cfg["api_key_header"].(string)
+			if header == "" {
+				header, _ = cfg["apiKeyHeader"].(string)
+			}
+			if header == "" {
+				header = "X-API-Key"
+			}
+			h.authConfig.APIKeyHeader = header
 			log.Printf("🔐 API Key configured (header: %s)", h.authConfig.APIKeyHeader)
 		}
 	}

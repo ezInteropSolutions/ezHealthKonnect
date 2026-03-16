@@ -16,6 +16,33 @@ const (
 	ContextKeyTestMode contextKey = "pipeline_test_mode"
 )
 
+// DeliveryStatusFn is injected into the pipeline context by the processing engine.
+// OutboundConnectorExecutor calls it after each connector.Send() so that every
+// outbound step owns its own delivery_status update in PostgreSQL.
+// Signature: (interfaceID, messageID, status, detail string)
+type DeliveryStatusFn func(interfaceID, messageID, status, detail string)
+
+// GetDeliveryStatusFn reads the DeliveryStatusFn from context. Returns nil if not set.
+func GetDeliveryStatusFn(ctx context.Context) DeliveryStatusFn {
+	if fn, ok := ctx.Value("delivery_status_fn").(DeliveryStatusFn); ok {
+		return fn
+	}
+	return nil
+}
+
+// StoreOutboundFn is injected into the pipeline context so OutboundConnectorExecutor
+// can persist the exact payload sent to a connector without importing services/storage.
+// Returns the storage URI (empty string on error).
+type StoreOutboundFn func(interfaceID, messageID, content, contentType string) string
+
+// GetStoreOutboundFn reads the StoreOutboundFn from context. Returns nil if not set.
+func GetStoreOutboundFn(ctx context.Context) StoreOutboundFn {
+	if fn, ok := ctx.Value("store_outbound_fn").(StoreOutboundFn); ok {
+		return fn
+	}
+	return nil
+}
+
 // IsTestMode checks if the context indicates test mode execution
 func IsTestMode(ctx context.Context) bool {
 	if val, ok := ctx.Value(ContextKeyTestMode).(bool); ok {
@@ -201,6 +228,23 @@ type TransformationExecutionResult struct {
 
 	// === ERRORS ===
 	Errors []TransformationError `json:"errors,omitempty"`
+
+	// === STEP-LEVEL ERROR CONTEXT (Phase 3) ===
+	// Per-step error state for UI display — keyed by step namespace.
+	// Additive to ExecutionLog; enables fast O(1) lookup per step.
+	StepErrors map[string]StepErrorDetail `json:"step_errors,omitempty"`
+}
+
+// StepErrorDetail captures how an individual step handled its error.
+type StepErrorDetail struct {
+	StepID           string   `json:"step_id"`
+	StepName         string   `json:"step_name"`
+	Namespace        string   `json:"namespace"`
+	Error            string   `json:"error"`
+	RetriesAttempted int      `json:"retries_attempted"`
+	ErrorStrategy    string   `json:"error_strategy"` // "suppress" | "rethrow" | "default_applied"
+	DefaultApplied   bool     `json:"default_applied"`
+	PHIViolations    []string `json:"phi_violations,omitempty"` // fields not masked before egress
 }
 
 // MessageContext represents a message at any stage of transformation (input or output)

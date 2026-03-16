@@ -1068,17 +1068,47 @@ class WizardController {
                 log_retention_days: wizardData.log_retention_days || 30
             };
 
-            console.log('Creating interface with optimized data:', {
-                name: interfaceData.name,
-                messageType: interfaceData.messageType,
-                mappingsCount: wizardData.mappings?.length || 0
-            });
+            // Detect re-run: wizard sends interfaceId when editing an existing interface
+            const existingInterfaceId = wizardData.interfaceId || wizardData.interface_id || null;
 
-            // Create the interface using the service
-            const result = await interfaceService.createInterface(interfaceData, userId);
-            const createdInterface = result.interface || result;
-            const interfaceId = result.interfaceId || createdInterface.id;
-            console.log('✅ Interface created successfully:', interfaceId);
+            let interfaceId;
+            if (existingInterfaceId) {
+                // ── UPDATE path: re-running wizard for an existing interface ──────────────
+                console.log('🔄 Updating existing interface:', existingInterfaceId);
+                await interfaceService.updateInterface(existingInterfaceId, {
+                    name:                interfaceData.name,
+                    description:         interfaceData.description,
+                    source_type:         interfaceData.sourceType,
+                    source_connectivity: { type: interfaceData.sourceConnectivity, config: interfaceData.sourceConfig },
+                    target_connectivity: { type: interfaceData.targetConnectivity, config: interfaceData.targetConfig },
+                    message_type:        interfaceData.messageType,
+                    status:              interfaceData.status,
+                    auto_start:          interfaceData.auto_start,
+                    deployment_mode:     interfaceData.deployment_mode,
+                }, userId);
+
+                // Sync credentials into the matching connector.outbound step
+                await this.pipelineService.syncConnectorStepFromWizard(
+                    existingInterfaceId,
+                    'outbound',
+                    interfaceData.targetConnectivity,
+                    interfaceData.targetConfig
+                );
+
+                interfaceId = existingInterfaceId;
+                console.log('✅ Interface updated and connector step synced:', interfaceId);
+            } else {
+                // ── CREATE path: new interface ─────────────────────────────────────────
+                console.log('Creating interface with optimized data:', {
+                    name: interfaceData.name,
+                    messageType: interfaceData.messageType,
+                    mappingsCount: wizardData.mappings?.length || 0
+                });
+                const result = await interfaceService.createInterface(interfaceData, userId);
+                const createdInterface = result.interface || result;
+                interfaceId = result.interfaceId || createdInterface.id;
+                console.log('✅ Interface created successfully:', interfaceId);
+            }
 
             // Store message-type-specific mappings if provided
             if (wizardData.mappings && Array.isArray(wizardData.mappings) && wizardData.mappings.length > 0) {
@@ -1109,7 +1139,9 @@ class WizardController {
                     sourceConnectivity: interfaceData.sourceConnectivity,
                     sourceConfig: interfaceData.sourceConfig,
                     targetConnectivity: interfaceData.targetConnectivity,
-                    targetConfig: interfaceData.targetConfig
+                    targetConfig: interfaceData.targetConfig,
+                    sourceType: interfaceData.sourceType,   // e.g. 'hl7v2', 'fhir', 'csv'
+                    targetType: interfaceData.targetType    // e.g. 'fhir', 'hl7v2', 'database'
                 };
 
                 const pipelineResult = await this.pipelineService.createPipelineForInterface(

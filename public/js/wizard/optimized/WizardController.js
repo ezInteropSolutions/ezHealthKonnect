@@ -170,7 +170,7 @@ class WizardController extends EventTarget {
         // HL7 Parsing events
         this.view.addEventListener('parseHL7Requested', (event) => {
             console.log('🔍 Controller received parseHL7Requested event:', event.detail);
-            this.parseHL7Message(event.detail.message);
+            this.parseHL7Message(event.detail.message, event.detail.escapeHandling);
         });
 
         this.view.addEventListener('sampleHL7Requested', (event) => {
@@ -714,7 +714,7 @@ class WizardController extends EventTarget {
     /**
      * Parse HL7 message
      */
-    async parseHL7Message(hl7Content) {
+    async parseHL7Message(hl7Content, escapeHandling) {
         try {
             console.log('🔍 Controller: Starting HL7 message parsing...');
             this.view.showLoading('Parsing HL7 message...');
@@ -730,7 +730,7 @@ class WizardController extends EventTarget {
             }
 
             // Call the model's parseHL7Message method which handles the API call
-            const parseResult = await this.model.parseHL7Message(hl7Content);
+            const parseResult = await this.model.parseHL7Message(hl7Content, escapeHandling);
 
             if (parseResult.success) {
                 console.log('✅ HL7 parsing successful:', parseResult);

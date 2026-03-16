@@ -60,23 +60,18 @@ func TestAPIEnrichmentExecutor_BasicGET(t *testing.T) {
 		t.Fatalf("Execute failed: %v", err)
 	}
 
-	// Verify enriched data exists
-	enriched, ok := output["enriched"].(map[string]interface{})
+	// P7: data is now in _stepOutput (flat), not enriched.patient
+	stepOutput, ok := output["_stepOutput"].(map[string]interface{})
 	if !ok {
-		t.Fatal("enriched field not found or not a map")
+		t.Fatal("_stepOutput field not found or not a map")
 	}
 
-	patient, ok := enriched["patient"].(map[string]interface{})
-	if !ok {
-		t.Fatal("enriched.patient field not found or not a map")
+	// Verify patient data (flat in step output)
+	if stepOutput["patientId"] != "12345" {
+		t.Errorf("Expected patientId 12345, got %v", stepOutput["patientId"])
 	}
-
-	// Verify patient data
-	if patient["patientId"] != "12345" {
-		t.Errorf("Expected patientId 12345, got %v", patient["patientId"])
-	}
-	if patient["name"] != "John Doe" {
-		t.Errorf("Expected name John Doe, got %v", patient["name"])
+	if stepOutput["name"] != "John Doe" {
+		t.Errorf("Expected name John Doe, got %v", stepOutput["name"])
 	}
 }
 
@@ -132,11 +127,10 @@ func TestAPIEnrichmentExecutor_FieldMapping(t *testing.T) {
 		t.Fatalf("Execute failed: %v", err)
 	}
 
-	// Verify lookup result
-	enriched := output["enriched"].(map[string]interface{})
-	lookup := enriched["lookup"].(map[string]interface{})
+	// P7: data is now in _stepOutput (flat), not enriched.lookup
+	stepOutput := output["_stepOutput"].(map[string]interface{})
 
-	if lookup["found"] != true {
+	if stepOutput["found"] != true {
 		t.Error("Expected found=true in lookup result")
 	}
 }
@@ -181,10 +175,10 @@ func TestAPIEnrichmentExecutor_BasicAuth(t *testing.T) {
 		t.Fatalf("Execute failed: %v", err)
 	}
 
-	enriched := output["enriched"].(map[string]interface{})
-	auth := enriched["auth"].(map[string]interface{})
+	// P7: data is now in _stepOutput (flat), not enriched.auth
+	stepOutput := output["_stepOutput"].(map[string]interface{})
 
-	if auth["authenticated"] != true {
+	if stepOutput["authenticated"] != true {
 		t.Error("Expected authenticated=true")
 	}
 }
@@ -227,10 +221,10 @@ func TestAPIEnrichmentExecutor_BearerToken(t *testing.T) {
 		t.Fatalf("Execute failed: %v", err)
 	}
 
-	enriched := output["enriched"].(map[string]interface{})
-	token := enriched["token"].(map[string]interface{})
+	// P7: data is now in _stepOutput (flat), not enriched.token
+	stepOutput := output["_stepOutput"].(map[string]interface{})
 
-	if token["valid"] != true {
+	if stepOutput["valid"] != true {
 		t.Error("Expected valid=true")
 	}
 }
@@ -277,10 +271,10 @@ func TestAPIEnrichmentExecutor_RetryOnFailure(t *testing.T) {
 		t.Errorf("Expected 3 attempts, got %d", attemptCount)
 	}
 
-	enriched := output["enriched"].(map[string]interface{})
-	retry := enriched["retry"].(map[string]interface{})
+	// P7: data is now in _stepOutput (flat), not enriched.retry
+	stepOutput := output["_stepOutput"].(map[string]interface{})
 
-	if retry["success"] != true {
+	if stepOutput["success"] != true {
 		t.Error("Expected success=true after retries")
 	}
 }
@@ -347,8 +341,9 @@ func TestAPIEnrichmentExecutor_DefaultValue(t *testing.T) {
 		t.Fatalf("Execute failed: %v", err)
 	}
 
-	enriched := output["enriched"].(map[string]interface{})
-	result := enriched["default"].(map[string]interface{})
+	// P7: default value is in _stepOutput["value"], not enriched.default
+	stepOutput := output["_stepOutput"].(map[string]interface{})
+	result := stepOutput["value"].(map[string]interface{})
 
 	if result["status"] != "not_found" {
 		t.Errorf("Expected default value, got %v", result)
@@ -425,10 +420,10 @@ func TestAPIEnrichmentExecutor_CustomHeaders(t *testing.T) {
 		t.Fatalf("Execute failed: %v", err)
 	}
 
-	enriched := output["enriched"].(map[string]interface{})
-	headers := enriched["headers"].(map[string]interface{})
+	// P7: data is now in _stepOutput (flat), not enriched.headers
+	stepOutput := output["_stepOutput"].(map[string]interface{})
 
-	if headers["headers"] != "verified" {
+	if stepOutput["headers"] != "verified" {
 		t.Error("Headers not verified correctly")
 	}
 }
@@ -476,10 +471,10 @@ func TestAPIEnrichmentExecutor_POST_WithBody(t *testing.T) {
 		t.Fatalf("Execute failed: %v", err)
 	}
 
-	enriched := output["enriched"].(map[string]interface{})
-	post := enriched["post"].(map[string]interface{})
+	// P7: data is now in _stepOutput (flat), not enriched.post
+	stepOutput := output["_stepOutput"].(map[string]interface{})
 
-	if post["result"] != "success" {
+	if stepOutput["result"] != "success" {
 		t.Error("POST request failed")
 	}
 }

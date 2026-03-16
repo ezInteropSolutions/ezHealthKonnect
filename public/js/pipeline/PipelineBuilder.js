@@ -527,10 +527,18 @@ class PipelineBuilder {
             const result = await window.pipelineAPI.testPipeline(this.pipeline, sampleMessage);
 
             // Cache test output so IntelliSense can walk runtime step variables
-            // without requiring a re-test when the properties panel opens
+            // without requiring a re-test when the properties panel opens.
+            // Also persist the sample message so silent background refreshes work
+            // automatically (no-code UX: user never needs to re-open the test modal).
             if (result?.steps) {
                 window.pipelineLastTestOutput = result;
                 console.log('[PipelineBuilder] Cached test output for IntelliSense:', Object.keys(result.steps));
+                // Persist both the message and the step output so the path picker
+                // works across page reloads with no user action required.
+                try {
+                    localStorage.setItem('pipeline_last_sample_message', sampleMessage);
+                    localStorage.setItem('pipeline_last_test_output', JSON.stringify(result));
+                } catch (_) {}
             }
 
             // Display results with enhanced FHIR resource rendering

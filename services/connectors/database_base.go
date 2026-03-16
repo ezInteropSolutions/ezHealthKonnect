@@ -10,6 +10,7 @@ import (
 	"ezhealthkonnect/models"
 	"fmt"
 	"log"
+	"strings"
 	"sync"
 	"time"
 
@@ -184,6 +185,122 @@ func ParseDatabaseOutboundConfig(config []byte) (*DatabaseOutboundConfig, error)
 	return &cfg, nil
 }
 
+// =============================================================================
+// SQLDialect — Strategy Pattern for database-specific SQL syntax (P1)
+// =============================================================================
+
+// SQLDialect provides database-specific SQL syntax variations.
+// Connectors call Placeholder/QuoteIdent instead of hard-coding $1, ?, @p1, :1.
+type SQLDialect interface {
+	// Placeholder returns the nth bind-parameter token (1-based index).
+	Placeholder(n int) string
+	// QuoteIdent wraps an identifier with dialect-specific quoting.
+	QuoteIdent(name string) string
+	// DriverName returns the Go sql driver registration name.
+	DriverName() string
+}
+
+// Singleton dialect instances — use these directly in connectors.
+var (
+	PostgreSQLDialect SQLDialect = postgresDialect{}
+	MySQLDialect      SQLDialect = mysqlDialect{}
+	SQLServerDialect  SQLDialect = sqlserverDialect{}
+	OracleDialect     SQLDialect = oracleDialect{}
+)
+
+type postgresDialect struct{}
+
+func (postgresDialect) Placeholder(n int) string    { return fmt.Sprintf("$%d", n) }
+func (postgresDialect) QuoteIdent(name string) string { return `"` + name + `"` }
+func (postgresDialect) DriverName() string            { return "postgres" }
+
+type mysqlDialect struct{}
+
+func (mysqlDialect) Placeholder(_ int) string      { return "?" }
+func (mysqlDialect) QuoteIdent(name string) string { return "`" + name + "`" }
+func (mysqlDialect) DriverName() string            { return "mysql" }
+
+type sqlserverDialect struct{}
+
+func (sqlserverDialect) Placeholder(n int) string    { return fmt.Sprintf("@p%d", n) }
+func (sqlserverDialect) QuoteIdent(name string) string { return "[" + name + "]" }
+func (sqlserverDialect) DriverName() string            { return "sqlserver" }
+
+type oracleDialect struct{}
+
+// Oracle identifiers are case-insensitive without quotes — no quoting needed.
+func (oracleDialect) Placeholder(n int) string    { return fmt.Sprintf(":%d", n) }
+func (oracleDialect) QuoteIdent(name string) string { return name }
+func (oracleDialect) DriverName() string            { return "oracle" }
+
+// =============================================================================
+// Shared helpers (P1 / P4)
+// =============================================================================
+
+// SharedAfterProcess executes update_flag or delete after a row is read.
+// It replaces the per-connector mysqlAfterProcess, sqlServerAfterProcess,
+// oracleAfterProcess, and the PostgreSQL HandleAfterProcessing(pq.Array) path.
+// Each connector passes its own dialect singleton so placeholder/quoting is correct.
+func SharedAfterProcess(db *sql.DB, config DatabaseInboundConfig, recordID interface{}, dialect SQLDialect) error {
+	switch config.AfterProcessing {
+	case "update_flag":
+		if config.ProcessedFlagCol == "" || config.TableName == "" {
+			return fmt.Errorf("update_flag requires processed_flag_col and table_name")
+		}
+		query := fmt.Sprintf("UPDATE %s SET %s = %s WHERE id = %s",
+			dialect.QuoteIdent(config.TableName),
+			dialect.QuoteIdent(config.ProcessedFlagCol),
+			dialect.Placeholder(1),
+			dialect.Placeholder(2),
+		)
+		if _, err := db.Exec(query, config.ProcessedFlagVal, recordID); err != nil {
+			return fmt.Errorf("update_flag failed: %w", err)
+		}
+		return nil
+
+	case "delete":
+		if config.TableName == "" {
+			return fmt.Errorf("delete requires table_name")
+		}
+		query := fmt.Sprintf("DELETE FROM %s WHERE id = %s",
+			dialect.QuoteIdent(config.TableName),
+			dialect.Placeholder(1),
+		)
+		if _, err := db.Exec(query, recordID); err != nil {
+			return fmt.Errorf("delete failed: %w", err)
+		}
+		return nil
+
+	case "nothing", "":
+		return nil
+
+	default:
+		return fmt.Errorf("unknown after_processing mode: %s", config.AfterProcessing)
+	}
+}
+
+// IsConnectionError reports whether err indicates a lost or unreachable DB connection.
+// Connectors use this to trigger reconnect-with-backoff instead of simply logging.
+func IsConnectionError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	keywords := []string{
+		"connection refused", "connection reset", "broken pipe",
+		"eof", "no such host", "i/o timeout", "dial tcp",
+		"connection closed", "connection lost", "bad connection",
+		"invalid connection", "driver: bad connection",
+		"network error", "server has gone away",
+	}
+	for _, kw := range keywords {
+		if strings.Contains(msg, kw) {
+			return true
+		}
+	}
+	return false
+}
+
 // ConfigureConnectionPool sets up database connection pool
 func ConfigureConnectionPool(db *sql.DB, maxOpen, maxIdle int) {
 	db.SetMaxOpenConns(maxOpen)
@@ -323,7 +440,7 @@ func ConvertRowToMessageWithRecord(rows *sql.Rows, tableName string) (*models.In
 	// Find raw message content
 	for _, col := range messageColumns {
 		if val, ok := record[col]; ok && val != nil {
-			// Convert to string
+			// Convert to string — covers Oracle CLOB (go-ora's Clob implements fmt.Stringer)
 			switch v := val.(type) {
 			case string:
 				content = v
@@ -331,6 +448,12 @@ func ConvertRowToMessageWithRecord(rows *sql.Rows, tableName string) (*models.In
 			case []byte:
 				content = string(v)
 				foundRawContent = true
+			case fmt.Stringer: // Oracle CLOB and similar large object types
+				s := v.String()
+				if s != "" {
+					content = s
+					foundRawContent = true
+				}
 			}
 			if foundRawContent {
 				break
@@ -478,7 +601,7 @@ func ConvertRowToMessage(rows *sql.Rows, tableName string) (*models.InboundMessa
 	// Find raw message content
 	for _, col := range messageColumns {
 		if val, ok := record[col]; ok && val != nil {
-			// Convert to string
+			// Convert to string — covers Oracle CLOB (go-ora's Clob implements fmt.Stringer)
 			switch v := val.(type) {
 			case string:
 				content = v
@@ -486,6 +609,12 @@ func ConvertRowToMessage(rows *sql.Rows, tableName string) (*models.InboundMessa
 			case []byte:
 				content = string(v)
 				foundRawContent = true
+			case fmt.Stringer: // Oracle CLOB and similar large object types
+				s := v.String()
+				if s != "" {
+					content = s
+					foundRawContent = true
+				}
 			}
 			if foundRawContent {
 				log.Printf("🔍 ConvertRowToMessage: Found raw content in column '%s' (length: %d)", col, len(content))

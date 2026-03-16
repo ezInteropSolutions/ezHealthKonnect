@@ -197,6 +197,92 @@ exports.testPipeline = async (req, res) => {
 };
 
 /**
+ * Sprint 4 / P7 migration: rewrite enriched.* path references → steps.{ns}.step_output.*
+ * Called on every pipeline save to transparently migrate configs written before P7.
+ *
+ * Mapping rules (default enriched keys → step type):
+ *   enriched.api          → api_enrichment step
+ *   enriched.database     → database_enrichment step
+ *   enriched.script       → script_enrichment step
+ *   enriched.field_mapping → field_mapping step
+ *   enriched.file_parser  → file_parser step
+ *
+ * Namespace format (mirrors Go generateStepNamespace):
+ *   {alias_or_stepName}_{first6charsOfStepId}  (lowercase, spaces → underscores)
+ *
+ * Ambiguous case (multiple steps of same type) → path left unchanged, warning logged.
+ */
+function migrateEnrichedPaths(steps) {
+    const TYPE_TO_KEY = {
+        'api_enrichment':      'api',
+        'database_enrichment': 'database',
+        'script_enrichment':   'script',
+        'field_mapping':       'field_mapping',
+        'file_parser':         'file_parser',
+    };
+
+    // Build {enrichedKey: namespace} map from the pipeline's steps
+    const keyToNs = {};
+    const ambiguous = new Set();
+    for (const step of steps) {
+        const stepType = step.stepType || step.step_type || step.type || '';
+        const eKey = TYPE_TO_KEY[stepType];
+        if (!eKey) continue;
+        const rawName = step.alias || step.stepAlias || step.stepName || step.step_name || step.name || '';
+        const baseName = rawName.replace(/\s+/g, '_').toLowerCase();
+        const shortId  = (step.id || '').substring(0, 6);
+        const ns       = `${baseName}_${shortId}`;
+        if (keyToNs[eKey]) {
+            ambiguous.add(eKey);
+        } else {
+            keyToNs[eKey] = ns;
+        }
+    }
+
+    // Recursively rewrite enriched.* strings in any config value
+    function rewrite(value) {
+        if (typeof value === 'string') {
+            return value.replace(
+                /\benriched\.(api|database|script|field_mapping|file_parser)((?:\.[^"'\s,)}\]]+)*)/g,
+                (match, eKey, rest) => {
+                    if (ambiguous.has(eKey)) {
+                        console.warn(`[P7 migration] Ambiguous enriched.${eKey} path — multiple steps of same type, skipping rewrite`);
+                        return match;
+                    }
+                    const ns = keyToNs[eKey];
+                    if (!ns) return match; // No step of this type in this pipeline
+                    const stripped = rest.startsWith('.') ? rest.slice(1) : rest;
+                    return stripped
+                        ? `steps.${ns}.step_output.${stripped}`
+                        : `steps.${ns}.step_output`;
+                }
+            );
+        }
+        if (Array.isArray(value)) return value.map(rewrite);
+        if (value && typeof value === 'object') {
+            const out = {};
+            for (const [k, v] of Object.entries(value)) out[k] = rewrite(v);
+            return out;
+        }
+        return value;
+    }
+
+    let migratedCount = 0;
+    for (const step of steps) {
+        if (step.config) {
+            const rewritten = rewrite(step.config);
+            if (JSON.stringify(rewritten) !== JSON.stringify(step.config)) {
+                step.config = rewritten;
+                migratedCount++;
+            }
+        }
+    }
+    if (migratedCount > 0) {
+        console.log(`[P7 migration] Rewrote enriched.* paths in ${migratedCount} step config(s)`);
+    }
+}
+
+/**
  * Save pipeline (create or update) - V20 Schema with Embedded Mappings
  * POST /api/pipelines
  *
@@ -347,6 +433,9 @@ exports.savePipeline = async (req, res) => {
                     });
                 }
             }
+
+            // P7 migration: rewrite enriched.* path references in step configs → steps.{ns}.step_output.*
+            migrateEnrichedPaths(allSteps);
 
             // TOPOLOGICAL SORT: Parent steps must be inserted before child steps (FK constraint)
             // This handles multi-level dependencies: A -> B -> C

@@ -99,20 +99,33 @@
     padding: 8px;
 }
 
-/* Main content should never overlay */
+/* Main content — fills remaining space next to sidebar, clips overflow internally */
 .main-content {
-    padding: 8px; /* Increased from 4px */
+    padding: 8px;
     background: #f9fafb;
-    height: 100vh;
     display: flex;
     flex-direction: column;
-    overflow-y: auto; /* Allow vertical scrolling */
-    overflow-x: hidden; /* Prevent horizontal scroll */
+    overflow: hidden;        /* clip; scrolling handled by .table-container */
     flex: 1;
+    min-height: 0;           /* critical: allows flex children to shrink below content size */
     min-width: 0;
     position: relative;
     z-index: 1;
     transition: all 0.3s ease;
+}
+
+/* Make the injected table wrapper a proper flex column so .interfaces-section can grow */
+#interfaces-table-container {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    overflow: hidden;
+}
+
+/* Header injected above the table — must not grow/shrink */
+#interface-header-container {
+    flex-shrink: 0;
 }
 
 /* Ensure proper spacing when sidebar changes */
@@ -264,26 +277,32 @@
 .interfaces-section {
     background: white;
     border: 1px solid var(--pink-200);
-    border-radius: 6px; /* Increased from 4px */
+    border-radius: 6px;
     flex: 1;
     display: flex;
     flex-direction: column;
     overflow: hidden;
-    min-height: 0;
-    height: calc(100vh - 80px); /* Better calculation, increased from 70px */
-    min-height: 400px; /* Minimum usable height */
+    min-height: 0;           /* allow flex to shrink below content size */
 }
 
-/* Minimal section header */
+/* Engine panel must not flex-grow — it's a fixed-height status bar */
+.engine-control-panel {
+    flex-shrink: 0;
+}
+
+/* Section header — flex row that wraps on small screens */
 .section-header {
     background: linear-gradient(135deg, var(--gray-50) 0%, white 100%);
     border-bottom: 1px solid var(--pink-200);
-    padding: 2px 8px;
+    padding: 8px 12px;
     display: flex;
     justify-content: flex-end;
     align-items: center;
     flex-shrink: 0;
-    height: 20px;
+    height: auto;
+    min-height: 52px;
+    flex-wrap: wrap;
+    gap: 6px;
 }
 
 .section-title {
@@ -292,20 +311,28 @@
 
 .section-filters {
     display: flex;
-    gap: 4px;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
 }
 
 .filter-select {
-    padding: 1px 4px;
+    padding: 5px 8px;
     border: 1px solid var(--pink-200);
-    border-radius: 2px;
-    font-size: 8px;
+    border-radius: 5px;
+    font-size: 12px;
     background: white;
     color: var(--navy-primary);
-    height: 40px;           /* Increased from 16px */
-    line-height: 1.2;       /* Added for text clarity */
-    min-height: 20px;       /* Fallback */
-    box-sizing: border-box; /* Ensure padding is included */
+    height: 32px;
+    line-height: 1.4;
+    box-sizing: border-box;
+    cursor: pointer;
+    transition: border-color 0.15s;
+}
+
+.filter-select:focus {
+    outline: none;
+    border-color: #3b82f6;
 }
 
 /* FIXED: Table container fills all remaining space */
@@ -390,12 +417,13 @@
 }
 
 .interfaces-table td {
-    padding: 8px 12px; /* Increased from 1px 6px */
+    padding: 6px 12px;
     vertical-align: middle;
     border-right: 1px solid rgba(248, 187, 217, 0.2);
-    height: 40px; /* Increased from 18px */
+    height: auto;
+    min-height: 46px;
     line-height: 1.3;
-    overflow: hidden; /* Keep hidden for text columns */
+    overflow: hidden;
     text-overflow: ellipsis;
 }
 
@@ -413,10 +441,27 @@
 .interface-name-cell {
     display: flex;
     flex-direction: column;
-    gap: 2px; /* Increased from 0 */
-    height: 36px; /* Increased from 16px */
+    gap: 2px;
+    height: auto;
+    min-height: 36px;
     justify-content: center;
     overflow: hidden;
+}
+
+/* Inbound message type pill — visible in each row */
+.msg-type-badge {
+    display: inline-block;
+    font-size: 9px;
+    font-weight: 600;
+    color: #1e40af;
+    background: #dbeafe;
+    border: 1px solid #bfdbfe;
+    border-radius: 3px;
+    padding: 1px 5px;
+    letter-spacing: 0.3px;
+    white-space: nowrap;
+    width: fit-content;
+    margin-top: 1px;
 }
 
 .interface-name {
@@ -1603,39 +1648,63 @@
     display: none;
 }
 
-/* MINIMALIST OUTLINE BUTTONS (Pencil/Line Style) */
-.action-btn-outline {
-    background: transparent;
-    border: 1.5px solid currentColor;
-    padding: 0;
-    width: 32px;
-    height: 32px;
+/* ── Refined action buttons ──────────────────────────────────────────── */
+/* Neutral by default; colour reveals only on hover for a calmer baseline  */
+.act-btn {
+    width: 28px;
+    height: 28px;
     border-radius: 6px;
+    border: 1px solid #e2e8f0;
+    background: transparent;
+    color: #94a3b8;
+    font-size: 0.78rem;
     cursor: pointer;
-    transition: all 0.2s ease;
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    font-size: 0.95rem;
+    transition: color 0.15s, border-color 0.15s, background 0.15s, transform 0.1s;
     position: relative;
+    flex-shrink: 0;
+}
+.act-btn:active  { transform: scale(0.92); }
+.act-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+
+/* colour variants — only activate on hover */
+.act-btn-green:hover  { color: #059669; border-color: #6ee7b7; background: #ecfdf5; }
+.act-btn-amber:hover  { color: #d97706; border-color: #fcd34d; background: #fffbeb; }
+.act-btn-red:hover    { color: #dc2626; border-color: #fca5a5; background: #fef2f2; }
+.act-btn-blue:hover   { color: #2563eb; border-color: #93c5fd; background: #eff6ff; }
+.act-btn-slate:hover  { color: #475569; border-color: #cbd5e1; background: #f8fafc; }
+
+/* Backwards-compat alias — keep any remaining .action-btn-outline working */
+.action-btn-outline {
+    width: 28px; height: 28px; border-radius: 6px;
+    border: 1px solid #e2e8f0; background: transparent;
+    color: #94a3b8; font-size: 0.78rem; cursor: pointer;
+    display: inline-flex; align-items: center; justify-content: center;
+    transition: color 0.15s, border-color 0.15s, background 0.15s;
+    position: relative; flex-shrink: 0;
 }
 
-.action-btn-outline:hover {
-    background: currentColor;
-    transform: translateY(-1px);
+/* ── Sortable column headers ─────────────────────────────────────────── */
+.interfaces-table thead th.th-sortable {
+    cursor: pointer;
+    user-select: none;
+    white-space: nowrap;
 }
-
-.action-btn-outline:hover i {
-    color: white !important;
+.interfaces-table thead th.th-sortable:hover {
+    background: #f0f4ff;
 }
-
-.action-btn-outline:active {
-    transform: translateY(0);
+.sort-arrow {
+    display: inline-block;
+    margin-left: 5px;
+    font-size: 0.7rem;
+    color: #cbd5e1;
+    vertical-align: middle;
+    transition: color 0.15s;
 }
-
-.action-btn-outline i {
-    color: inherit;
-    transition: color 0.2s ease;
+.th-sortable.sort-active .sort-arrow {
+    color: #1e3a8a;
 }
 
 /* Minimal dropdown menu */

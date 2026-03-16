@@ -51,28 +51,26 @@ func (ims *InterfaceMessageService) StoreMessage(interfaceID string, messageData
 		return fmt.Errorf("failed to ensure interface table exists: %w", err)
 	}
 
-	// Insert message metadata only (raw content stored in MongoDB)
+	// Insert message metadata only (raw content stored in object storage)
 	query := fmt.Sprintf(`
 		INSERT INTO %s (
-			id, message_id, correlation_id, interface_id, status, priority,
+			id, message_id, interface_id, status,
 			received_at, source_type, source_endpoint, source_ip, message_type,
-			message_size, message_encoding, mongo_document_id, processing_completed_at,
+			message_size, message_encoding, processing_completed_at,
 			processing_time_ms, error_count, last_error_message, delivery_status,
 			delivery_attempts, created_at, updated_at
 		) VALUES (
-			gen_random_uuid(), $1, $2, $3, $4, $5,
-			$6, $7, $8, $9, $10,
-			$11, $12, $13, NULL,
+			gen_random_uuid(), $1, $2, $3,
+			$4, $5, $6, $7, $8,
+			$9, $10, NULL,
 			NULL, 0, NULL, 'pending',
 			0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
 		)`, tableName)
 
 	_, err := ims.db.Exec(query,
 		messageData.MessageID,
-		messageData.CorrelationID,
 		messageData.InterfaceID,
 		messageData.Status,
-		messageData.Priority,
 		messageData.ReceivedAt,
 		messageData.SourceType,
 		messageData.SourceEndpoint,
@@ -80,7 +78,6 @@ func (ims *InterfaceMessageService) StoreMessage(interfaceID string, messageData
 		messageData.MessageType,
 		messageData.MessageSize,
 		messageData.MessageEncoding,
-		messageData.MongoDocumentID,
 	)
 
 	if err != nil {
@@ -118,76 +115,72 @@ func (ims *InterfaceMessageService) getInterfaceTableName(interfaceID string) st
 	return fmt.Sprintf("messages_intf_%s", strings.ReplaceAll(interfaceID, "-", "_"))
 }
 
-// ensureInterfaceTableExists creates the interface table if it doesn't exist
+// ensureInterfaceTableExists creates the interface-specific message table if it doesn't exist.
+// Each interface gets its own dedicated PostgreSQL table (messages_intf_{uuid}) and MongoDB
+// collection (raw_messages_intf_{uuid}). This table-per-interface design is intentional:
+//   - Natural tenant isolation: no cross-interface queries without explicit JOIN
+//   - Independent purge/archive: TRUNCATE or DROP TABLE per interface, O(1)
+//   - Independent backup: pg_dump a single table per interface
+//   - Dynamic queries target the specific table directly — no routing overhead
 func (ims *InterfaceMessageService) ensureInterfaceTableExists(tableName, interfaceID string) error {
-	// Check if table exists
 	var exists bool
-	checkQuery := `
-		SELECT EXISTS (
-			SELECT FROM information_schema.tables
-			WHERE table_name = $1
-		);
-	`
-	err := ims.db.QueryRow(checkQuery, tableName).Scan(&exists)
-	if err != nil {
+	if err := ims.db.QueryRow(
+		`SELECT EXISTS (SELECT 1 FROM pg_tables WHERE schemaname = 'public' AND tablename = $1)`,
+		tableName,
+	).Scan(&exists); err != nil {
 		return fmt.Errorf("failed to check table existence: %w", err)
 	}
-
 	if exists {
-		return nil // Table already exists
+		return nil
 	}
 
-	// Create the table with standardized schema (METADATA ONLY - no raw_message)
-	// Raw message content is stored in MongoDB for better scalability
 	createQuery := fmt.Sprintf(`
 		CREATE TABLE %s (
-			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-			message_id VARCHAR(255) NOT NULL,
-			correlation_id VARCHAR(255),
-			interface_id UUID NOT NULL,
-			status VARCHAR(50) DEFAULT 'received',
-			priority INTEGER DEFAULT 5,
-			received_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-			source_type VARCHAR(50),
-			source_endpoint VARCHAR(255),
-			source_ip VARCHAR(45),
-			message_type VARCHAR(100),
-			message_size INTEGER,
-			message_encoding VARCHAR(50) DEFAULT 'UTF-8',
-			mongo_document_id VARCHAR(255),
-			processing_completed_at TIMESTAMP WITH TIME ZONE,
-			processing_time_ms BIGINT,
-			error_count INTEGER DEFAULT 0,
-			last_error_message TEXT,
-			delivery_status VARCHAR(50) DEFAULT 'pending',
-			delivery_attempts INTEGER DEFAULT 0,
-			created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-			updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-		);
-	`, tableName)
+			id                      UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
+			message_id              VARCHAR(255) NOT NULL,
+			interface_id            UUID         NOT NULL,
+			status                  VARCHAR(50)           DEFAULT 'received',
+			received_at             TIMESTAMPTZ           DEFAULT CURRENT_TIMESTAMP,
+			source_type             VARCHAR(50),
+			source_endpoint         VARCHAR(255),
+			source_ip               VARCHAR(45),
+			message_type            VARCHAR(100),
+			message_size            INTEGER,
+			message_encoding        VARCHAR(50)           DEFAULT 'UTF-8',
+			processing_started_at   TIMESTAMPTZ,
+			processing_completed_at TIMESTAMPTZ,
+			processing_time_ms      BIGINT,
+			error_count             INTEGER               DEFAULT 0,
+			last_error_message      TEXT,
+			delivery_status         VARCHAR(50)           DEFAULT 'pending',
+			delivery_attempts       INTEGER               DEFAULT 0,
+			parsed_at               TIMESTAMPTZ,
+			parsing_status          VARCHAR(50),
+			parsing_time_ms         INTEGER,
+			parsing_error           TEXT,
+			raw_content_uri         VARCHAR(500),
+			parsed_content_uri      VARCHAR(500),
+			transformed_content_uri VARCHAR(500),
+			log_uri                 VARCHAR(500),
+			created_at              TIMESTAMPTZ           DEFAULT CURRENT_TIMESTAMP,
+			updated_at              TIMESTAMPTZ           DEFAULT CURRENT_TIMESTAMP
+		)`, tableName)
 
-	_, err = ims.db.Exec(createQuery)
-	if err != nil {
-		return fmt.Errorf("failed to create interface table: %w", err)
+	if _, err := ims.db.Exec(createQuery); err != nil {
+		return fmt.Errorf("failed to create interface table %s: %w", tableName, err)
 	}
 
-	// Create indexes for performance
-	indexQueries := []string{
-		fmt.Sprintf("CREATE INDEX idx_%s_message_id ON %s(message_id);", tableName, tableName),
-		fmt.Sprintf("CREATE INDEX idx_%s_received_at ON %s(received_at);", tableName, tableName),
-		fmt.Sprintf("CREATE INDEX idx_%s_status ON %s(status);", tableName, tableName),
-	}
-
-	for _, indexQuery := range indexQueries {
-		if _, err := ims.db.Exec(indexQuery); err != nil {
-			// Log warning but don't fail - indexes are performance optimization
+	for _, idx := range []string{
+		fmt.Sprintf(`CREATE INDEX IF NOT EXISTS idx_%s_message_id  ON %s (message_id)`, tableName, tableName),
+		fmt.Sprintf(`CREATE INDEX IF NOT EXISTS idx_%s_received_at ON %s (received_at DESC)`, tableName, tableName),
+		fmt.Sprintf(`CREATE INDEX IF NOT EXISTS idx_%s_status      ON %s (status)`, tableName, tableName),
+	} {
+		if _, err := ims.db.Exec(idx); err != nil {
 			fmt.Printf("⚠️ Warning: Failed to create index: %v\n", err)
 		}
 	}
 
-	// Register in metadata table (if it exists)
 	ims.registerTableMetadata(interfaceID, tableName)
-
 	return nil
 }
 
@@ -222,40 +215,27 @@ func (ims *InterfaceMessageService) GetMessageCount(interfaceID string) (int, er
 	return count, nil
 }
 
-// DropInterfaceTable drops the interface-specific message table
+// DropInterfaceTable drops the interface-specific message table and removes its metadata entry.
 func (ims *InterfaceMessageService) DropInterfaceTable(interfaceID string) error {
 	tableName := ims.getInterfaceTableName(interfaceID)
 
-	// Check if table exists first
 	var exists bool
-	checkQuery := `
-		SELECT EXISTS (
-			SELECT FROM information_schema.tables
-			WHERE table_name = $1
-		);
-	`
-	err := ims.db.QueryRow(checkQuery, tableName).Scan(&exists)
-	if err != nil {
+	if err := ims.db.QueryRow(
+		`SELECT EXISTS (SELECT 1 FROM pg_tables WHERE schemaname = 'public' AND tablename = $1)`,
+		tableName,
+	).Scan(&exists); err != nil {
 		return fmt.Errorf("failed to check table existence: %w", err)
 	}
-
 	if !exists {
 		fmt.Printf("⚠️ Table %s doesn't exist, nothing to drop\n", tableName)
 		return nil
 	}
 
-	// Drop the table
-	dropQuery := fmt.Sprintf("DROP TABLE IF EXISTS %s CASCADE", tableName)
-	_, err = ims.db.Exec(dropQuery)
-	if err != nil {
+	if _, err := ims.db.Exec(fmt.Sprintf("DROP TABLE IF EXISTS %s CASCADE", tableName)); err != nil {
 		return fmt.Errorf("failed to drop interface table %s: %w", tableName, err)
 	}
 
-	// Remove from metadata table
-	metadataQuery := `DELETE FROM interface_table_metadata WHERE interface_id = $1`
-	_, err = ims.db.Exec(metadataQuery, interfaceID)
-	if err != nil {
-		// Log warning but don't fail
+	if _, err := ims.db.Exec(`DELETE FROM interface_table_metadata WHERE interface_id = $1`, interfaceID); err != nil {
 		fmt.Printf("⚠️ Warning: Failed to remove table metadata: %v\n", err)
 	}
 

@@ -272,28 +272,23 @@ func TestAPIEnrichment_RealWorld_EMPI_Lookup(t *testing.T) {
 	// STEP 5: Verify Enriched Data
 	// ===================================================================
 
-	// Check enriched field exists
-	enriched, ok := output["enriched"].(map[string]interface{})
+	// P7: data is now in _stepOutput (flat), not enriched.empi
+	stepOutput, ok := output["_stepOutput"].(map[string]interface{})
 	if !ok {
-		t.Fatal("enriched field not found")
-	}
-
-	empi, ok := enriched["empi"].(map[string]interface{})
-	if !ok {
-		t.Fatal("enriched.empi field not found")
+		t.Fatal("_stepOutput not found")
 	}
 
 	// Verify FHIR Patient resource structure
-	if empi["resourceType"] != "Patient" {
-		t.Errorf("Expected resourceType=Patient, got %v", empi["resourceType"])
+	if stepOutput["resourceType"] != "Patient" {
+		t.Errorf("Expected resourceType=Patient, got %v", stepOutput["resourceType"])
 	}
 
-	if empi["id"] != "MRN-12345" {
-		t.Errorf("Expected id=MRN-12345, got %v", empi["id"])
+	if stepOutput["id"] != "MRN-12345" {
+		t.Errorf("Expected id=MRN-12345, got %v", stepOutput["id"])
 	}
 
 	// Verify complete name (missing in original HL7)
-	names, ok := empi["name"].([]interface{})
+	names, ok := stepOutput["name"].([]interface{})
 	if !ok || len(names) == 0 {
 		t.Fatal("Patient name not found in EMPI response")
 	}
@@ -303,7 +298,7 @@ func TestAPIEnrichment_RealWorld_EMPI_Lookup(t *testing.T) {
 	}
 
 	// Verify telecom (phone/email - missing in original HL7)
-	telecom, ok := empi["telecom"].([]interface{})
+	telecom, ok := stepOutput["telecom"].([]interface{})
 	if !ok || len(telecom) == 0 {
 		t.Fatal("Patient telecom not found in EMPI response")
 	}
@@ -312,7 +307,7 @@ func TestAPIEnrichment_RealWorld_EMPI_Lookup(t *testing.T) {
 	}
 
 	// Verify address (missing in original HL7)
-	addresses, ok := empi["address"].([]interface{})
+	addresses, ok := stepOutput["address"].([]interface{})
 	if !ok || len(addresses) == 0 {
 		t.Fatal("Patient address not found in EMPI response")
 	}
@@ -322,13 +317,13 @@ func TestAPIEnrichment_RealWorld_EMPI_Lookup(t *testing.T) {
 	}
 
 	// Verify emergency contact (missing in original HL7)
-	contacts, ok := empi["contact"].([]interface{})
+	contacts, ok := stepOutput["contact"].([]interface{})
 	if !ok || len(contacts) == 0 {
 		t.Fatal("Emergency contact not found in EMPI response")
 	}
 
 	// Verify insurance ID from identifiers (missing in original HL7)
-	identifiers, ok := empi["identifier"].([]interface{})
+	identifiers, ok := stepOutput["identifier"].([]interface{})
 	if !ok || len(identifiers) < 2 {
 		t.Fatal("Expected at least 2 identifiers (MRN + Insurance)")
 	}
@@ -341,7 +336,7 @@ func TestAPIEnrichment_RealWorld_EMPI_Lookup(t *testing.T) {
 	// STEP 6: Verify Data Transformation Impact
 	// ===================================================================
 	// At this point, the enriched data is available for:
-	// - HL7→FHIR mapping step can use enriched.empi.name instead of PID.5
+	// - HL7→FHIR mapping step can use steps.{ns}.step_output.name instead of PID.5
 	// - HL7→FHIR mapping can create complete Patient + Coverage resources
 	// - Validation step can verify insurance exists
 	// - Custom scripts can access complete demographics
@@ -349,7 +344,7 @@ func TestAPIEnrichment_RealWorld_EMPI_Lookup(t *testing.T) {
 	t.Log("✅ EMPI enrichment successful:")
 	t.Logf("   - Original HL7: Minimal demographics (name, DOB, gender)")
 	t.Logf("   - After EMPI:   Complete demographics (full name, phone, email, address, emergency contact, insurance)")
-	t.Logf("   - Fields added: %d", countFields(empi))
+	t.Logf("   - Fields added: %d", countFields(stepOutput))
 }
 
 // Helper function to count fields in nested map
@@ -411,12 +406,12 @@ func TestAPIEnrichment_AuthenticationFailure_GracefulFallback(t *testing.T) {
 		t.Fatalf("Expected graceful fallback, got error: %v", err)
 	}
 
-	// Verify default value was used
-	enriched := output["enriched"].(map[string]interface{})
-	empi := enriched["empi"].(map[string]interface{})
+	// P7: default value is in _stepOutput["value"], not enriched.empi
+	stepOutput := output["_stepOutput"].(map[string]interface{})
+	result := stepOutput["value"].(map[string]interface{})
 
-	if empi["status"] != "auth_failed" {
-		t.Errorf("Expected default value after auth failure, got %v", empi)
+	if result["status"] != "auth_failed" {
+		t.Errorf("Expected default value after auth failure, got %v", result)
 	}
 
 	t.Log("✅ Authentication failure handled gracefully with default value")
@@ -476,10 +471,10 @@ func TestAPIEnrichment_NetworkTimeout_RetrySuccess(t *testing.T) {
 		t.Errorf("Expected 3 attempts, got %d", attemptCount)
 	}
 
-	enriched := output["enriched"].(map[string]interface{})
-	retry := enriched["retry"].(map[string]interface{})
+	// P7: data is now in _stepOutput (flat), not enriched.retry
+	stepOutput := output["_stepOutput"].(map[string]interface{})
 
-	if retry["success"] != true {
+	if stepOutput["success"] != true {
 		t.Error("Expected success=true after retries")
 	}
 

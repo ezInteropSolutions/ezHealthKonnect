@@ -209,6 +209,16 @@ func (c *ConnectorConfig) Has(key string) bool {
 	return ok
 }
 
+// GetMap safely retrieves a map[string]interface{} value from config
+func (c *ConnectorConfig) GetMap(key string) map[string]interface{} {
+	if val, ok := c.Config[key]; ok {
+		if m, ok := val.(map[string]interface{}); ok {
+			return m
+		}
+	}
+	return nil
+}
+
 // ConnectorError represents connector-specific errors
 type ConnectorError struct {
 	ConnectorType string

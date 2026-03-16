@@ -78,16 +78,17 @@ type UniversalMessage struct {
 type MessageStatus string
 
 const (
-	StatusReceived    MessageStatus = "received"
-	StatusValidating  MessageStatus = "validating"
+	StatusReceived     MessageStatus = "received"
+	StatusValidating   MessageStatus = "validating"
 	StatusTransforming MessageStatus = "transforming"
-	StatusRouting     MessageStatus = "routing"
-	StatusDelivering  MessageStatus = "delivering"
-	StatusDelivered   MessageStatus = "delivered"
+	StatusRouting      MessageStatus = "routing"
+	StatusDelivering   MessageStatus = "delivering"
+	StatusProcessed    MessageStatus = "processed"    // pipeline ran to completion (was "delivered")
+	StatusDelivered    MessageStatus = "delivered"    // kept for DeliveryStatus compatibility
 	StatusAcknowledged MessageStatus = "acknowledged"
-	StatusFailed      MessageStatus = "failed"
-	StatusRetrying    MessageStatus = "retrying"
-	StatusExpired     MessageStatus = "expired"
+	StatusFailed       MessageStatus = "failed"
+	StatusRetrying     MessageStatus = "retrying"
+	StatusExpired      MessageStatus = "expired"
 )
 
 // DeliveryStatus represents delivery state

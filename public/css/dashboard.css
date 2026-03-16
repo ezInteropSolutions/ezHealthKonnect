@@ -147,12 +147,49 @@ body {
 }
 
 .nav-section {
-    margin-bottom: 20px;
+    margin-bottom: 2px;
+}
+
+/* Sidebar section header — clickable, overrides any content-area .section-header styles */
+.sidebar .section-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 6px 16px 4px;
+    cursor: pointer;
+    user-select: none;
+    background: none;
+    border-bottom: none;
+    min-height: auto;
+    height: auto;
+    flex-wrap: nowrap;
+    gap: 0;
+    margin-bottom: 0;
+    border-radius: 4px;
+    transition: background 0.15s ease;
+}
+
+.sidebar .section-header:hover {
+    background: rgba(244, 114, 182, 0.06);
 }
 
 .section-header {
     padding: 8px 16px;
     margin-bottom: 8px;
+}
+
+.sidebar .section-title {
+    display: block !important;
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: #94a3b8;
+    transition: color 0.2s ease;
+}
+
+.sidebar .section-header:hover .section-title {
+    color: #cbd5e1;
 }
 
 .section-title {
@@ -162,6 +199,29 @@ body {
     letter-spacing: 0.8px;
     color: #f472b6;
     transition: all 0.3s ease;
+}
+
+/* Chevron arrow on collapsible section headers */
+.nav-section-chevron {
+    font-size: 9px;
+    color: #94a3b8;
+    transition: transform 0.25s ease;
+    flex-shrink: 0;
+}
+
+.nav-section.collapsed .nav-section-chevron {
+    transform: rotate(-90deg);
+}
+
+/* Animate nav-items open/close */
+.sidebar .nav-items {
+    overflow: hidden;
+    max-height: 400px;
+    transition: max-height 0.25s ease;
+}
+
+.sidebar .nav-section.collapsed .nav-items {
+    max-height: 0;
 }
 
 .nav-items {
@@ -194,11 +254,18 @@ body {
 }
 
 .nav-icon {
-    width: 20px;
+    width: 18px;
     text-align: center;
-    margin-right: 12px;
-    font-size: 16px;
+    margin-right: 10px;
+    font-size: 13px;
     flex-shrink: 0;
+    color: inherit;
+    opacity: 0.75;
+}
+
+.nav-item:hover .nav-icon,
+.nav-item.active .nav-icon {
+    opacity: 1;
 }
 
 .nav-label {

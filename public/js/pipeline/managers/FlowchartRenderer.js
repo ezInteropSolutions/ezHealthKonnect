@@ -616,10 +616,19 @@ class FlowchartRenderer {
     }
 
     /**
-     * Make a node draggable
+     * Make a node draggable.
+     *
+     * Uses a 5-px drag threshold so that simple clicks reliably fire the onclick
+     * handler (which opens the properties panel) while intentional drags still
+     * reposition the node on the canvas.  The old implementation set isDragging=true
+     * on mousedown immediately, so even microscopic hand-tremor movement would move
+     * the node AND suppress the click event, preventing properties from opening.
      */
     makeNodeDraggable(node, step) {
-        let isDragging = false;
+        const DRAG_THRESHOLD = 5; // pixels before drag is considered intentional
+
+        let mouseIsDown = false;  // true from mousedown until mouseup
+        let dragStarted = false;  // true once we have crossed the DRAG_THRESHOLD
         let startX = 0;
         let startY = 0;
         let initialLeft = 0;
@@ -631,19 +640,20 @@ class FlowchartRenderer {
                 return;
             }
 
-            isDragging = true;
+            mouseIsDown = true;
+            dragStarted = false;
             startX = e.clientX;
             startY = e.clientY;
 
-            // Get current position
+            // Capture initial position
             const rect = node.getBoundingClientRect();
             const canvasRect = this.flowchartCanvas.getBoundingClientRect();
             initialLeft = rect.left - canvasRect.left;
             initialTop = rect.top - canvasRect.top;
 
-            node.classList.add('dragging');
             e.stopPropagation(); // Prevent canvas pan
-            e.preventDefault();
+            // NOTE: do NOT call e.preventDefault() here — it suppresses the
+            // subsequent click event in some browsers, blocking properties from opening.
         });
 
         const throttledRedraw = this.throttle(() => {
@@ -651,10 +661,25 @@ class FlowchartRenderer {
         }, 16); // 60fps max
 
         document.addEventListener('mousemove', (e) => {
-            if (!isDragging) return;
+            if (!mouseIsDown) return;
 
             const deltaX = e.clientX - startX;
             const deltaY = e.clientY - startY;
+            const distance = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
+
+            // Cross the threshold → begin a real drag
+            if (!dragStarted) {
+                if (distance < DRAG_THRESHOLD) return; // still looks like a click
+                dragStarted = true;
+                node.classList.add('dragging');
+
+                // Suppress the click event that fires after mouseup so that
+                // releasing the mouse after a drag does not also open properties.
+                node.addEventListener('click', (ev) => {
+                    ev.stopImmediatePropagation();
+                    ev.preventDefault();
+                }, { once: true, capture: true });
+            }
 
             const newLeft = initialLeft + deltaX;
             const newTop = initialTop + deltaY;
@@ -689,36 +714,39 @@ class FlowchartRenderer {
         });
 
         document.addEventListener('mouseup', (e) => {
-            if (isDragging) {
-                isDragging = false;
-                node.classList.remove('dragging');
+            if (!mouseIsDown) return;
+            mouseIsDown = false;
 
-                // Check if dropped onto a container zone
-                node.style.pointerEvents = 'none';
-                const elementBelow = document.elementFromPoint(e.clientX, e.clientY);
-                node.style.pointerEvents = '';
-                const droppedZone = elementBelow?.closest('.container-zone');
+            if (!dragStarted) return; // Was a plain click — let onclick handle it
 
-                // Clear all zone highlights
-                document.querySelectorAll('.container-zone.drag-hover').forEach(z => z.classList.remove('drag-hover'));
+            node.classList.remove('dragging');
+            dragStarted = false;
 
-                if (droppedZone) {
-                    const containerId = droppedZone.dataset.containerId;
-                    const zone = droppedZone.dataset.zone;
+            // Check if dropped onto a container zone
+            node.style.pointerEvents = 'none';
+            const elementBelow = document.elementFromPoint(e.clientX, e.clientY);
+            node.style.pointerEvents = '';
+            const droppedZone = elementBelow?.closest('.container-zone');
 
-                    // Don't allow container to contain itself
-                    if (containerId && zone && containerId !== step.id) {
-                        this.assignStepToContainer(step, containerId, zone);
-                        return; // Skip normal save - re-render will reposition
-                    }
+            // Clear all zone highlights
+            document.querySelectorAll('.container-zone.drag-hover').forEach(z => z.classList.remove('drag-hover'));
+
+            if (droppedZone) {
+                const containerId = droppedZone.dataset.containerId;
+                const zone = droppedZone.dataset.zone;
+
+                // Don't allow container to contain itself
+                if (containerId && zone && containerId !== step.id) {
+                    this.assignStepToContainer(step, containerId, zone);
+                    return; // Skip normal save - re-render will reposition
                 }
-
-                // Normal drop (not into container) - save position
-                this.saveNodePosition(step.id, {
-                    x: parseInt(node.style.left),
-                    y: parseInt(node.style.top)
-                });
             }
+
+            // Normal drop (not into container) - save position
+            this.saveNodePosition(step.id, {
+                x: parseInt(node.style.left),
+                y: parseInt(node.style.top)
+            });
         });
     }
 

@@ -1988,6 +1988,379 @@ func TestFileParser_Parquet_AutoDetect(t *testing.T) {
 
 // ─── Test Helpers ─────────────────────────────────────────────
 
+// ─── Chunked / Streaming CSV tests ───────────────────────────────────────────
+// These tests exercise the GB-scale streaming path:
+//   local_path + maxRecords > 0 + CSV/TSV → executeStreamingLocalCSV
+//   which calls ParseCSVFromReaderChunked and returns has_more + next_offset.
+
+// writeTmpCSV writes content to a temp file and returns its path.
+func writeTmpCSV(t *testing.T, content string, ext string) string {
+	t.Helper()
+	if ext == "" {
+		ext = ".csv"
+	}
+	f, err := os.CreateTemp("", "fp_chunk_*"+ext)
+	if err != nil {
+		t.Fatalf("create temp file: %v", err)
+	}
+	if _, err := f.WriteString(content); err != nil {
+		t.Fatalf("write temp file: %v", err)
+	}
+	f.Close()
+	t.Cleanup(func() { os.Remove(f.Name()) })
+	return f.Name()
+}
+
+// getStepOutput returns the _stepOutput map from executor output.
+func getStepOutput(t *testing.T, out map[string]interface{}) map[string]interface{} {
+	t.Helper()
+	so, ok := out["_stepOutput"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("_stepOutput not found or wrong type; keys=%v", mapKeys(out))
+	}
+	return so
+}
+
+func mapKeys(m map[string]interface{}) []string {
+	ks := make([]string, 0, len(m))
+	for k := range m {
+		ks = append(ks, k)
+	}
+	return ks
+}
+
+// TestFileParser_StreamingCSV_FirstChunk verifies that maxRecords=2 on a 5-row file
+// returns exactly 2 records, has_more=true, and next_offset=2.
+func TestFileParser_StreamingCSV_FirstChunk(t *testing.T) {
+	content := "id,name\n1,Alice\n2,Bob\n3,Carol\n4,Dave\n5,Eve\n"
+	path := writeTmpCSV(t, content, ".csv")
+
+	executor := NewFileParserExecutor(nil, nil)
+	step := makeStep(map[string]interface{}{
+		"sourceType": "local_path",
+		"filePath":   path,
+		"fileFormat": "csv",
+		"hasHeader":  true,
+		"maxRecords": 2,
+		"offset":     0,
+	})
+
+	out, err := executor.Execute(context.Background(), step, map[string]interface{}{})
+	if err != nil {
+		t.Fatalf("Execute failed: %v", err)
+	}
+
+	so := getStepOutput(t, out)
+
+	// records
+	recs, ok := so["records"].([]map[string]interface{})
+	if !ok {
+		t.Fatalf("records wrong type: %T", so["records"])
+	}
+	if len(recs) != 2 {
+		t.Fatalf("expected 2 records, got %d", len(recs))
+	}
+	if recs[0]["id"] != "1" || recs[0]["name"] != "Alice" {
+		t.Errorf("unexpected first record: %v", recs[0])
+	}
+	if recs[1]["id"] != "2" || recs[1]["name"] != "Bob" {
+		t.Errorf("unexpected second record: %v", recs[1])
+	}
+
+	// pagination fields
+	hasMore, _ := so["has_more"].(bool)
+	if !hasMore {
+		t.Error("expected has_more=true")
+	}
+	nextOffset, _ := so["next_offset"].(int)
+	if nextOffset != 2 {
+		t.Errorf("expected next_offset=2, got %d", nextOffset)
+	}
+	recordCount, _ := so["record_count"].(int)
+	if recordCount != 2 {
+		t.Errorf("expected record_count=2, got %d", recordCount)
+	}
+
+	// execution details should show streaming=true
+	ed, _ := out["_executionDetails"].(map[string]interface{})
+	if streaming, _ := ed["streaming"].(bool); !streaming {
+		t.Error("expected _executionDetails.streaming=true")
+	}
+}
+
+// TestFileParser_StreamingCSV_SecondChunk reads the second chunk (offset=2, maxRecords=2).
+func TestFileParser_StreamingCSV_SecondChunk(t *testing.T) {
+	content := "id,name\n1,Alice\n2,Bob\n3,Carol\n4,Dave\n5,Eve\n"
+	path := writeTmpCSV(t, content, ".csv")
+
+	executor := NewFileParserExecutor(nil, nil)
+	step := makeStep(map[string]interface{}{
+		"sourceType": "local_path",
+		"filePath":   path,
+		"fileFormat": "csv",
+		"hasHeader":  true,
+		"maxRecords": 2,
+		"offset":     2, // skip first chunk
+	})
+
+	out, err := executor.Execute(context.Background(), step, map[string]interface{}{})
+	if err != nil {
+		t.Fatalf("Execute failed: %v", err)
+	}
+
+	so := getStepOutput(t, out)
+	recs, _ := so["records"].([]map[string]interface{})
+	if len(recs) != 2 {
+		t.Fatalf("expected 2 records for chunk 2, got %d", len(recs))
+	}
+	if recs[0]["id"] != "3" {
+		t.Errorf("expected id=3, got %v", recs[0]["id"])
+	}
+	if recs[1]["id"] != "4" {
+		t.Errorf("expected id=4, got %v", recs[1]["id"])
+	}
+
+	hasMore, _ := so["has_more"].(bool)
+	if !hasMore {
+		t.Error("expected has_more=true (row 5 is still pending)")
+	}
+	nextOffset, _ := so["next_offset"].(int)
+	if nextOffset != 4 {
+		t.Errorf("expected next_offset=4, got %d", nextOffset)
+	}
+}
+
+// TestFileParser_StreamingCSV_LastChunk reads the last chunk and verifies has_more=false.
+func TestFileParser_StreamingCSV_LastChunk(t *testing.T) {
+	content := "id,name\n1,Alice\n2,Bob\n3,Carol\n4,Dave\n5,Eve\n"
+	path := writeTmpCSV(t, content, ".csv")
+
+	executor := NewFileParserExecutor(nil, nil)
+	step := makeStep(map[string]interface{}{
+		"sourceType": "local_path",
+		"filePath":   path,
+		"fileFormat": "csv",
+		"hasHeader":  true,
+		"maxRecords": 2,
+		"offset":     4, // skip first two chunks
+	})
+
+	out, err := executor.Execute(context.Background(), step, map[string]interface{}{})
+	if err != nil {
+		t.Fatalf("Execute failed: %v", err)
+	}
+
+	so := getStepOutput(t, out)
+	recs, _ := so["records"].([]map[string]interface{})
+	if len(recs) != 1 {
+		t.Fatalf("expected 1 record (last row), got %d", len(recs))
+	}
+	if recs[0]["id"] != "5" {
+		t.Errorf("expected id=5, got %v", recs[0]["id"])
+	}
+
+	hasMore, _ := so["has_more"].(bool)
+	if hasMore {
+		t.Error("expected has_more=false on last chunk")
+	}
+	nextOffset, _ := so["next_offset"].(int)
+	if nextOffset != 5 {
+		t.Errorf("expected next_offset=5, got %d", nextOffset)
+	}
+}
+
+// TestFileParser_StreamingCSV_ExactFit verifies has_more=false when the file has
+// exactly maxRecords rows (i.e. the chunk fills perfectly with nothing left).
+func TestFileParser_StreamingCSV_ExactFit(t *testing.T) {
+	content := "id,name\n1,Alice\n2,Bob\n"
+	path := writeTmpCSV(t, content, ".csv")
+
+	executor := NewFileParserExecutor(nil, nil)
+	step := makeStep(map[string]interface{}{
+		"sourceType": "local_path",
+		"filePath":   path,
+		"fileFormat": "csv",
+		"hasHeader":  true,
+		"maxRecords": 2,
+		"offset":     0,
+	})
+
+	out, err := executor.Execute(context.Background(), step, map[string]interface{}{})
+	if err != nil {
+		t.Fatalf("Execute failed: %v", err)
+	}
+
+	so := getStepOutput(t, out)
+	recs, _ := so["records"].([]map[string]interface{})
+	if len(recs) != 2 {
+		t.Fatalf("expected 2 records, got %d", len(recs))
+	}
+	hasMore, _ := so["has_more"].(bool)
+	if hasMore {
+		t.Error("expected has_more=false when file has exactly maxRecords rows")
+	}
+}
+
+// TestFileParser_StreamingTSV verifies TSV detection from extension.
+func TestFileParser_StreamingTSV(t *testing.T) {
+	content := "id\tname\n1\tAlice\n2\tBob\n3\tCarol\n"
+	path := writeTmpCSV(t, content, ".tsv")
+
+	executor := NewFileParserExecutor(nil, nil)
+	step := makeStep(map[string]interface{}{
+		"sourceType": "local_path",
+		"filePath":   path,
+		"hasHeader":  true,
+		"maxRecords": 2,
+		"offset":     0,
+		// no fileFormat — should auto-detect tsv from extension
+	})
+
+	out, err := executor.Execute(context.Background(), step, map[string]interface{}{})
+	if err != nil {
+		t.Fatalf("Execute failed: %v", err)
+	}
+
+	so := getStepOutput(t, out)
+	recs, _ := so["records"].([]map[string]interface{})
+	if len(recs) != 2 {
+		t.Fatalf("expected 2 records, got %d", len(recs))
+	}
+	if recs[0]["name"] != "Alice" {
+		t.Errorf("expected name=Alice, got %v", recs[0]["name"])
+	}
+	hasMore, _ := so["has_more"].(bool)
+	if !hasMore {
+		t.Error("expected has_more=true (row 3 pending)")
+	}
+}
+
+// TestFileParser_StreamingCSV_ContextCancel verifies early termination when context is cancelled.
+func TestFileParser_StreamingCSV_ContextCancel(t *testing.T) {
+	// Build a 100-row CSV
+	var b strings.Builder
+	b.WriteString("id,value\n")
+	for i := 1; i <= 100; i++ {
+		fmt.Fprintf(&b, "%d,v%d\n", i, i)
+	}
+	path := writeTmpCSV(t, b.String(), ".csv")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // cancel immediately
+
+	executor := NewFileParserExecutor(nil, nil)
+	step := makeStep(map[string]interface{}{
+		"sourceType": "local_path",
+		"filePath":   path,
+		"fileFormat": "csv",
+		"hasHeader":  true,
+		"maxRecords": 50,
+	})
+
+	// Should not error — context cancel yields partial (possibly empty) results
+	out, err := executor.Execute(ctx, step, map[string]interface{}{})
+	if err != nil {
+		t.Fatalf("cancelled context should not return an error: %v", err)
+	}
+	so := getStepOutput(t, out)
+	recs, _ := so["records"].([]map[string]interface{})
+	// With immediate cancel, we expect 0 or very few records (not all 50)
+	if len(recs) >= 50 {
+		t.Errorf("expected < 50 records with cancelled context, got %d", len(recs))
+	}
+}
+
+// TestParseCSVFromReaderChunked_Unit directly tests the csv_parser helper.
+func TestParseCSVFromReaderChunked_Unit(t *testing.T) {
+	csvData := "id,name,city\n1,Alice,NYC\n2,Bob,LA\n3,Carol,SF\n4,Dave,CHI\n"
+
+	t.Run("first chunk", func(t *testing.T) {
+		r := strings.NewReader(csvData)
+		cfg := &models.FileParserConfig{
+			HasHeader:  true,
+			MaxRecords: 2,
+			Offset:     0,
+		}
+		records, cols, hasMore, err := ParseCSVFromReaderChunked(context.Background(), r, cfg)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(records) != 2 {
+			t.Fatalf("expected 2 records, got %d", len(records))
+		}
+		if records[0]["id"] != "1" {
+			t.Errorf("expected id=1, got %v", records[0]["id"])
+		}
+		if !hasMore {
+			t.Error("expected hasMore=true")
+		}
+		if len(cols) != 3 {
+			t.Errorf("expected 3 columns, got %d: %v", len(cols), cols)
+		}
+	})
+
+	t.Run("second chunk via fresh reader + offset", func(t *testing.T) {
+		r := strings.NewReader(csvData)
+		cfg := &models.FileParserConfig{
+			HasHeader:  true,
+			MaxRecords: 2,
+			Offset:     2,
+		}
+		records, _, hasMore, err := ParseCSVFromReaderChunked(context.Background(), r, cfg)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(records) != 2 {
+			t.Fatalf("expected 2 records, got %d", len(records))
+		}
+		if records[0]["id"] != "3" {
+			t.Errorf("expected id=3, got %v", records[0]["id"])
+		}
+		if hasMore {
+			t.Error("expected hasMore=false (only 4 rows total)")
+		}
+	})
+
+	t.Run("no header — auto col names", func(t *testing.T) {
+		r := strings.NewReader("A,B\nC,D\n")
+		cfg := &models.FileParserConfig{
+			HasHeader:  false,
+			MaxRecords: 5,
+		}
+		records, cols, _, err := ParseCSVFromReaderChunked(context.Background(), r, cfg)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(records) != 2 {
+			t.Fatalf("expected 2 records, got %d", len(records))
+		}
+		if cols[0] != "col_1" || cols[1] != "col_2" {
+			t.Errorf("expected col_1, col_2; got %v", cols)
+		}
+	})
+
+	t.Run("offset beyond end of file", func(t *testing.T) {
+		r := strings.NewReader(csvData)
+		cfg := &models.FileParserConfig{
+			HasHeader:  true,
+			MaxRecords: 5,
+			Offset:     100, // way past the end
+		}
+		records, _, hasMore, err := ParseCSVFromReaderChunked(context.Background(), r, cfg)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(records) != 0 {
+			t.Errorf("expected 0 records, got %d", len(records))
+		}
+		if hasMore {
+			t.Error("expected hasMore=false when offset is past EOF")
+		}
+	})
+}
+
+// ─── End of Chunked / Streaming CSV tests ────────────────────────────────────
+
 // getRecords extracts parsed records from the output at the given dot-path
 func getRecords(t *testing.T, output map[string]interface{}, path string) []map[string]interface{} {
 	t.Helper()

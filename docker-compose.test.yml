@@ -1,0 +1,191 @@
+version: '3.8'
+
+# ============================================================
+# ezHealthKonnect — Integration Test Infrastructure
+# ============================================================
+# Provides real services for connector integration tests.
+# Usage:
+#   docker-compose -f docker-compose.test.yml up -d
+#   go test ./services/connectors/ -tags integration -v -run "TestIntegration"
+#   docker-compose -f docker-compose.test.yml down -v
+
+services:
+
+  # ── MongoDB ────────────────────────────────────────────────
+  mongo_test:
+    image: mongo:7
+    container_name: ehk_test_mongo
+    ports:
+      - "27018:27017"          # 27018 avoids conflict with production mongo
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: testuser
+      MONGO_INITDB_ROOT_PASSWORD: testpassword
+      MONGO_INITDB_DATABASE: testdb
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    volumes:
+      - mongo_test_data:/data/db
+
+  # ── Redis ──────────────────────────────────────────────────
+  redis_test:
+    image: redis:7-alpine
+    container_name: ehk_test_redis
+    ports:
+      - "6380:6379"            # 6380 avoids conflict with production redis
+    command: redis-server --loglevel warning
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # ── MySQL ──────────────────────────────────────────────────
+  mysql_test:
+    image: mysql:8.0
+    container_name: ehk_test_mysql
+    ports:
+      - "3307:3306"            # 3307 avoids conflict with production mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: testpassword
+      MYSQL_DATABASE: testdb
+      MYSQL_USER: testuser
+      MYSQL_PASSWORD: testpassword
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-ptestpassword"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    volumes:
+      - mysql_test_data:/var/lib/mysql
+      - ./tests/integration/sql/mysql_seed.sql:/docker-entrypoint-initdb.d/seed.sql
+
+  # ── RabbitMQ ───────────────────────────────────────────────
+  rabbitmq_test:
+    image: rabbitmq:3.13-management-alpine
+    container_name: ehk_test_rabbitmq
+    ports:
+      - "5673:5672"            # AMQP — 5673 avoids production conflicts
+      - "15673:15672"          # Management UI
+    environment:
+      RABBITMQ_DEFAULT_USER: testuser
+      RABBITMQ_DEFAULT_PASS: testpassword
+      RABBITMQ_DEFAULT_VHOST: /
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+
+  # ── Kafka (KRaft mode — no Zookeeper needed) ───────────────
+  kafka_test:
+    image: confluentinc/cp-kafka:7.6.0
+    container_name: ehk_test_kafka
+    ports:
+      - "9093:9093"            # External listener — 9093 avoids conflicts
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: "CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT"
+      KAFKA_ADVERTISED_LISTENERS: "PLAINTEXT://kafka_test:29092,PLAINTEXT_HOST://host.docker.internal:9093"
+      KAFKA_PROCESS_ROLES: "broker,controller"
+      KAFKA_CONTROLLER_QUORUM_VOTERS: "1@kafka_test:29093"
+      KAFKA_LISTENERS: "PLAINTEXT://kafka_test:29092,CONTROLLER://kafka_test:29093,PLAINTEXT_HOST://0.0.0.0:9093"
+      KAFKA_INTER_BROKER_LISTENER_NAME: "PLAINTEXT"
+      KAFKA_CONTROLLER_LISTENER_NAMES: "CONTROLLER"
+      KAFKA_LOG_DIRS: "/tmp/kraft-combined-logs"
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      CLUSTER_ID: "MkU3OEVBNTcwNTJENDM2Qk"
+    healthcheck:
+      test: ["CMD-SHELL", "kafka-topics --bootstrap-server localhost:9093 --list || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 20
+
+  # ── LocalStack (AWS S3 emulation) ─────────────────────────
+  localstack_test:
+    image: localstack/localstack:3.4
+    container_name: ehk_test_localstack
+    ports:
+      - "4566:4566"            # LocalStack unified endpoint
+    environment:
+      SERVICES: s3
+      AWS_DEFAULT_REGION: us-east-1
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+      DEBUG: "0"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s http://localhost:4566/_localstack/health | grep -q '\"s3\":\"available\"'"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    volumes:
+      - localstack_test_data:/var/lib/localstack
+      - ./tests/integration/scripts/localstack_init.sh:/etc/localstack/init/ready.d/init.sh
+
+  # ── SQL Server ─────────────────────────────────────────────
+  sqlserver_test:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: ehk_test_sqlserver
+    ports:
+      - "1434:1433"            # 1434 avoids conflict with production SQL Server (1433)
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: "TestPassword123!"
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P 'TestPassword123!' -No -Q 'SELECT 1' || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 15
+      start_period: 30s
+    volumes:
+      - sqlserver_test_data:/var/opt/mssql
+      - ./tests/integration/scripts/sqlserver_seed.sh:/sqlserver_seed.sh
+
+  # ── Oracle XE ──────────────────────────────────────────────
+  oracle_test:
+    image: gvenzl/oracle-xe:21-slim
+    container_name: ehk_test_oracle
+    ports:
+      - "1522:1521"            # 1522 avoids conflict with production Oracle (1521)
+    environment:
+      ORACLE_PASSWORD: "TestPassword123!"
+      APP_USER: testuser
+      APP_USER_PASSWORD: testpassword
+    healthcheck:
+      test: ["CMD", "healthcheck.sh"]
+      interval: 20s
+      timeout: 10s
+      retries: 20
+      start_period: 90s
+    volumes:
+      - oracle_test_data:/opt/oracle/oradata
+      - ./tests/integration/scripts/oracle_seed.sql:/container-entrypoint-initdb.d/01_seed.sql
+
+  # ── SFTP (atmoz/sftp) ──────────────────────────────────────
+  sftp_test:
+    image: atmoz/sftp:alpine
+    container_name: ehk_test_sftp
+    ports:
+      - "2222:22"              # 2222 avoids conflict with host SSH
+    command: testuser:testpassword:::upload
+    volumes:
+      - sftp_test_data:/home/testuser/upload
+      - ./tests/integration/scripts/sftp_seed.sh:/etc/sftp.d/seed.sh
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z localhost 22 || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  mongo_test_data:
+  mysql_test_data:
+  localstack_test_data:
+  sftp_test_data:
+  sqlserver_test_data:
+  oracle_test_data:

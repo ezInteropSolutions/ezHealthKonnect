@@ -131,7 +131,17 @@ const StepVariablesProvider = {
      *  - Deduplication against backend-declared variables happens in getStepVariablesForSearch
      */
     _walkTestRunPaths() {
-        const testOutput = window.pipelineLastTestOutput;
+        // Prefer in-memory cache; restore from localStorage if cleared (e.g. after save)
+        let testOutput = window.pipelineLastTestOutput;
+        if (!testOutput) {
+            try {
+                const stored = localStorage.getItem('pipeline_last_test_output');
+                if (stored) {
+                    testOutput = JSON.parse(stored);
+                    window.pipelineLastTestOutput = testOutput; // restore to avoid re-parsing
+                }
+            } catch (_) {}
+        }
         if (!testOutput || typeof testOutput.steps !== 'object') return [];
 
         const MAX_DEPTH = 10;
@@ -143,7 +153,7 @@ const StepVariablesProvider = {
 
         const paths = [];
 
-        const walk = (obj, prefix, depth) => {
+        const walk = (obj, prefix, depth, stepNs) => {
             if (depth > MAX_DEPTH || paths.length >= MAX_PATHS) return;
             if (!obj || typeof obj !== 'object') return;
 
@@ -151,10 +161,22 @@ const StepVariablesProvider = {
                 if (SKIP_KEYS.has(key)) continue;
                 const fullPath = prefix ? `${prefix}.${key}` : key;
 
+                // At depth 0 the key IS the step namespace (e.g. "hl7_fhir_transform").
+                // Capture it so every descendant can include it in its display name,
+                // making the field searchable by step name without knowing the full path.
+                const currentStepNs = depth === 0 ? key : stepNs;
+
+                // Build a human-friendly display name:
+                //   "hl7_fhir_transform » family"   (so "fhir" or "family" both find it)
+                //   "api_enrichment » email"
+                const displayName = (currentStepNs && key !== currentStepNs)
+                    ? `${currentStepNs} » ${key}`
+                    : key;
+
                 if (Array.isArray(val)) {
                     // Show the array itself so users know it exists
                     paths.push({
-                        name: `${key}[]`,
+                        name: `${displayName}[]`,
                         path: `steps.${fullPath}`,
                         description: `Array · ${val.length} item${val.length === 1 ? '' : 's'}`,
                         category: 'Step Outputs (test run)',
@@ -165,15 +187,15 @@ const StepVariablesProvider = {
                     if (val.length > 0) {
                         const first = val[0];
                         if (first !== null && typeof first === 'object' && !Array.isArray(first)) {
-                            walk(first, `${fullPath}[0]`, depth + 1);
+                            walk(first, `${fullPath}[0]`, depth + 1, currentStepNs);
                         }
                     }
                 } else if (val !== null && typeof val === 'object') {
-                    walk(val, fullPath, depth + 1);
+                    walk(val, fullPath, depth + 1, currentStepNs);
                 } else {
                     // Leaf — show current value as a description hint
                     paths.push({
-                        name: key,
+                        name: displayName,
                         path: `steps.${fullPath}`,
                         description: String(val ?? ''),
                         category: 'Step Outputs (test run)',
@@ -183,7 +205,7 @@ const StepVariablesProvider = {
             }
         };
 
-        walk(testOutput.steps, '', 0);
+        walk(testOutput.steps, '', 0, '');
         return paths;
     },
 

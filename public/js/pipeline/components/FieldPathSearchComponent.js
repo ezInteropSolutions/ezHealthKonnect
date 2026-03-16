@@ -142,7 +142,7 @@ class FieldPathSearchComponent {
 
     handleFocus(e) {
         if (this.input.value.trim().length === 0) {
-            this.showRecentPaths();
+            this.showBrowseMode();
         } else {
             this.searchFields(this.input.value.trim());
         }
@@ -324,6 +324,77 @@ class FieldPathSearchComponent {
                 html += this.renderFieldItem(field, '');
             });
 
+            this.dropdown.innerHTML = html;
+            this.showDropdown();
+        }
+    }
+
+    /**
+     * Browse mode: shown when the input is focused and empty.
+     * Displays step-output leaf paths from the last test run (or backend
+     * declarations) first, then falls back to recently-used paths.
+     * This is the "no-code" experience — users can browse available fields
+     * without knowing any path syntax.
+     */
+    showBrowseMode() {
+        let html = '';
+
+        // 1. Recently used paths (always shown first)
+        const allFields = this.getAllFields();
+        const recentFields = this.recentPaths
+            .map(path => allFields.find(f => f.path === path))
+            .filter(f => f)
+            .slice(0, 5);
+
+        if (recentFields.length > 0) {
+            html += '<div class="field-path-category">⏱️ Recently Used</div>';
+            recentFields.forEach(field => { html += this.renderFieldItem(field, ''); });
+        }
+
+        // 2. Step output variables — leaf paths only (skip array container hints)
+        if (this.options.getStepVariables) {
+            const stepVars = this.options.getStepVariables();
+            if (Array.isArray(stepVars) && stepVars.length > 0) {
+                // isArray=true marks container hints like "entry[]" — skip them
+                const leafVars = stepVars.filter(v => !v.isArray);
+
+                if (leafVars.length > 0) {
+                    const limit = 30;
+                    html += '<div class="field-path-category">📦 Available Step Outputs</div>';
+                    leafVars.slice(0, limit).forEach(v => {
+                        html += this.renderFieldItem({
+                            ...v,
+                            category: v.category || 'Step Outputs'
+                        }, '');
+                    });
+                    if (leafVars.length > limit) {
+                        html += `<div class="field-path-hint">Type to search ${leafVars.length - limit} more fields…</div>`;
+                    }
+                } else if (recentFields.length === 0) {
+                    // Only arrays/containers available — show them with a hint
+                    html += '<div class="field-path-category">📦 Available Step Outputs</div>';
+                    stepVars.slice(0, 15).forEach(v => {
+                        html += this.renderFieldItem({ ...v, category: v.category || 'Step Outputs' }, '');
+                    });
+                }
+            } else if (recentFields.length === 0) {
+                // No step variables and no recents — clickable hint to open test modal
+                html += `
+                    <div class="field-path-hint" style="padding:12px;text-align:center;color:#888;">
+                        💡 <a href="#" style="color:#4a90e2;text-decoration:none;"
+                              onmousedown="event.preventDefault();document.getElementById('testPipelineBtn')?.click();">
+                            Run the test pipeline
+                        </a> once to browse all available fields here,<br>
+                        or type a path directly like <code>PID.5.1</code>
+                    </div>`;
+            }
+        } else if (recentFields.length === 0) {
+            // No callback and no recents — just hide
+            this.hideDropdown();
+            return;
+        }
+
+        if (html) {
             this.dropdown.innerHTML = html;
             this.showDropdown();
         }
@@ -719,6 +790,22 @@ class FieldPathSearchComponent {
                 font-weight: 600;
                 padding: 0 2px;
                 border-radius: 2px;
+            }
+
+            /* Browse-mode hint row */
+            .field-path-hint {
+                padding: 8px 12px;
+                font-size: 11px;
+                color: #888;
+                text-align: center;
+                border-top: 1px solid #f0f0f0;
+            }
+            .field-path-hint code {
+                background: #f0f7ff;
+                color: #4a90e2;
+                padding: 1px 4px;
+                border-radius: 3px;
+                font-size: 11px;
             }
 
             /* Scrollbar */

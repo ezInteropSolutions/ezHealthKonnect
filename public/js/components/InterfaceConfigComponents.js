@@ -2111,15 +2111,18 @@ class InterfaceConfigComponents {
      * @returns {object} - Deployment configuration
      */
     static collectDeploymentSettings(container = document, idPrefix = '') {
-        const deploymentMode = container.querySelector(`#${idPrefix}deploymentMode`)?.value || 'manual';
-        const autoStart = container.querySelector(`#${idPrefix}autoStart`)?.checked || false;
-        const delaySeconds = parseInt(container.querySelector(`#${idPrefix}deploymentDelay`)?.value) || 0;
+        const modeEl  = container.querySelector(`#${idPrefix}deploymentMode`);
+        const startEl = container.querySelector(`#${idPrefix}autoStart`);
+        const delayEl = container.querySelector(`#${idPrefix}deploymentDelay`);
 
-        return {
-            deployment_mode: deploymentMode,
-            auto_start: autoStart,
-            deployment_delay_seconds: delaySeconds
-        };
+        // Only include keys whose elements exist in the DOM.
+        // If the deployment settings panel is not currently rendered (different wizard step),
+        // returning an empty object prevents Object.assign from overwriting saved values with defaults.
+        const result = {};
+        if (modeEl)  result.deployment_mode           = modeEl.value || 'manual';
+        if (startEl) result.auto_start                = startEl.checked;
+        if (delayEl) result.deployment_delay_seconds  = parseInt(delayEl.value) || 0;
+        return result;
     }
 
     // ============================================================
@@ -2366,15 +2369,25 @@ class InterfaceConfigComponents {
         const logRetentionId = idPrefix ? `${idPrefix}LogRetention` : 'logRetentionDays';
         const retainErrorsId = idPrefix ? `${idPrefix}RetainErrors` : 'retainErrorLogs';
 
-        const debugLogging = container.querySelector(`#${debugLoggingId}`)?.checked || false;
-        const logRetentionDays = parseInt(container.querySelector(`#${logRetentionId}`)?.value) || 30;
-        const retainErrorLogs = container.querySelector(`#${retainErrorsId}`)?.checked !== false;
+        const debugEl     = container.querySelector(`#${debugLoggingId}`);
+        const retentionEl = container.querySelector(`#${logRetentionId}`);
+        const retainEl    = container.querySelector(`#${retainErrorsId}`);
 
-        return {
-            debug_logging: debugLogging,
-            log_retention_days: logRetentionDays,
-            retain_error_logs_forever: retainErrorLogs
-        };
+        // Only include keys whose elements exist — prevents overwriting saved values
+        // with defaults when the logging panel is not rendered on the current step.
+        const result = {};
+        // Prefer log_level selector; fall back to debug_logging checkbox for backward compat
+        const level = (typeof getLogLevel === 'function') ? getLogLevel() : null;
+        if (level !== null) {
+            result.log_level    = level;
+            result.debug_logging = level !== 'off';
+        } else if (debugEl) {
+            result.debug_logging = debugEl.checked;
+            result.log_level     = debugEl.checked ? 'debug' : 'off';
+        }
+        if (retentionEl) result.log_retention_days        = parseInt(retentionEl.value) || 30;
+        if (retainEl)    result.retain_error_logs_forever = retainEl.checked;
+        return result;
     }
 
     /**

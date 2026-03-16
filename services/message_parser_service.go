@@ -18,7 +18,6 @@ import (
 type MessageParserService struct {
 	formatDetector         *FormatDetector
 	parserFactory          *ParserFactory
-	mongoService           *MongoDBMessageService
 	postgresService        *InterfaceMessageService
 	transformationPipeline *TransformationPipelineService // OOB: Auto-configured transformation
 	outputMessageService   *OutputMessageService          // OOB: Hybrid output storage
@@ -27,14 +26,10 @@ type MessageParserService struct {
 }
 
 // NewMessageParserService creates new parser service (OOB)
-func NewMessageParserService(
-	mongoService *MongoDBMessageService,
-	postgresService *InterfaceMessageService,
-) *MessageParserService {
+func NewMessageParserService(postgresService *InterfaceMessageService) *MessageParserService {
 	return &MessageParserService{
-		formatDetector:  NewFormatDetector(),  // OOB: Auto-create
-		parserFactory:   NewParserFactory(),   // OOB: Auto-register parsers
-		mongoService:    mongoService,
+		formatDetector:  NewFormatDetector(),
+		parserFactory:   NewParserFactory(),
 		postgresService: postgresService,
 	}
 }
@@ -75,11 +70,7 @@ func (mps *MessageParserService) ParseToJSON(
 	result.ParsingTime = time.Since(startTime)
 	log.Printf("✅ Parsing completed in %dms", result.ParsingTime.Milliseconds())
 
-	// STEP 4: Store parsed JSON in MongoDB
-	if err := mps.storeParsedContent(ctx, interfaceID, messageID, result); err != nil {
-		log.Printf("⚠️  Failed to store parsed content: %v", err)
-		// Don't fail the entire operation - parsing succeeded
-	}
+	// STEP 4: (Parsed content stored in object storage by the processing engine after this returns)
 
 	// STEP 5: Update status in PostgreSQL
 	if err := mps.updateParsingStatus(ctx, interfaceID, messageID, &MessageStatusUpdate{
@@ -101,23 +92,6 @@ func (mps *MessageParserService) ParseToJSON(
 	return result, nil
 }
 
-// storeParsedContent updates MongoDB with parsed JSON
-func (mps *MessageParserService) storeParsedContent(
-	ctx context.Context,
-	interfaceID string,
-	messageID string,
-	result *models.ParserResult,
-) error {
-	return mps.mongoService.UpdateParsedContent(ctx, interfaceID, messageID, &ParsedContentUpdate{
-		ParsedContent:    result.ParsedJSON,
-		ParsedAt:         result.Metadata.ParsedAt,
-		ParsingTimeMs:    int(result.ParsingTime.Milliseconds()),
-		Format:           string(result.Format),
-		MessageType:      result.Metadata.MessageType,
-		ValidationResult: result.ValidationResult,
-	})
-}
-
 // updateParsingStatus updates PostgreSQL with parsing status
 func (mps *MessageParserService) updateParsingStatus(
 	ctx context.Context,
@@ -128,52 +102,28 @@ func (mps *MessageParserService) updateParsingStatus(
 	return mps.postgresService.UpdateMessageParsingStatus(interfaceID, messageID, update)
 }
 
-// InitializeMessageParserService creates parser service with OOB MongoDB detection
+// InitializeMessageParserService creates parser service backed by PostgreSQL.
 func InitializeMessageParserService(db *sql.DB) *MessageParserService {
-	// Try to initialize MongoDB connection service (OOB)
-	mongoConnService, err := NewMongoDBConnectionService()
-	if err != nil {
-		fmt.Printf("ℹ️  MongoDB not configured, JSON parser service unavailable: %v\n", err)
+	if db == nil {
 		return nil
 	}
 
-	// Connect to MongoDB
-	ctx := context.Background()
-	err = mongoConnService.Connect(ctx)
-	if err != nil {
-		fmt.Printf("ℹ️  Failed to connect to MongoDB, JSON parser service unavailable: %v\n", err)
-		return nil
-	}
-
-	mongoClient := mongoConnService.GetClient()
-	mongoDatabase := mongoConnService.GetDatabase()
-
-	// Initialize both MongoDB and PostgreSQL services
-	mongoService := NewMongoDBMessageService(mongoClient, mongoDatabase)
 	postgresService := NewInterfaceMessageService(db)
-
-	// OOB: Initialize transformation pipeline service (nil credStore: message parser
-	// service doesn't perform S3 credential lookups — pass nil for passthrough mode)
 	transformationPipeline := NewTransformationPipelineService(db, nil)
-
-	// OOB: Initialize hybrid output message service
-	outputMessageService := NewOutputMessageService(db, mongoClient, mongoDatabase)
-
-	// V21: Initialize output delivery service (push-based delivery)
 	outputDeliveryService := NewOutputDeliveryService(db)
+	outputMessageService := NewOutputMessageService(db, nil, "") //nolint:staticcheck
 
 	parserService := &MessageParserService{
 		formatDetector:         NewFormatDetector(),
 		parserFactory:          NewParserFactory(),
-		mongoService:           mongoService,
 		postgresService:        postgresService,
-		transformationPipeline: transformationPipeline,     // OOB: Auto-configured
-		outputMessageService:   outputMessageService,       // OOB: Hybrid storage
-		outputDeliveryService:  outputDeliveryService,      // V21: Push-based delivery
-		db:                     db,                         // V21: For querying interface config
+		transformationPipeline: transformationPipeline,
+		outputMessageService:   outputMessageService,
+		outputDeliveryService:  outputDeliveryService,
+		db:                     db,
 	}
 
-	fmt.Printf("✅ Message parser service initialized with MongoDB + PostgreSQL + Transformation Pipeline + Output Storage + Delivery\n")
+	fmt.Printf("✅ Message parser service initialized (PostgreSQL + Transformation Pipeline + Object Storage)\n")
 	return parserService
 }
 

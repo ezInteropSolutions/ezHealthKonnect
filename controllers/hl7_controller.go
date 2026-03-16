@@ -53,8 +53,10 @@ func (ctrl *HL7Controller) ParseMessage(c *gin.Context) {
             req.UseEnhanced, len(req.RawMessage))
     }
 
-    // Always use the enhanced parser (it has proper fallback)
-    result := hl7.ParseHL7Enhanced(req.RawMessage)
+    // Parse with options (escape handling, etc.)
+    result := hl7.ParseHL7EnhancedWithOptions(req.RawMessage, hl7.ParseOptions{
+        EscapeHandling: req.EscapeHandling,
+    })
 
     // Debug logging for parsing flags
     if ctrl.config.VerboseLogging {

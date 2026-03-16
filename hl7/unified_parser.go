@@ -240,6 +240,45 @@ func ParseHL7Enhanced(rawMessage string) *EnhancedParsedMessage {
 	return validatedResult
 }
 
+// ParseHL7EnhancedWithOptions parses an HL7 message and applies optional post-processing.
+// Currently supports opts.EscapeHandling: "decode" | "passthrough" (default).
+func ParseHL7EnhancedWithOptions(rawMessage string, opts ParseOptions) *EnhancedParsedMessage {
+	result := ParseHL7Enhanced(rawMessage)
+	if result == nil || !result.Success {
+		return result
+	}
+	if opts.EscapeHandling == "decode" {
+		encodingChars := ExtractEncodingChars(rawMessage)
+		applyEscapeDecoding(result, encodingChars)
+	}
+	return result
+}
+
+// applyEscapeDecoding walks all field/subfield values in an EnhancedParsedMessage
+// and replaces HL7 escape sequences with their literal characters.
+func applyEscapeDecoding(result *EnhancedParsedMessage, encodingChars string) {
+	decodeFields := func(fields []FieldInfo) {
+		for i := range fields {
+			fields[i].Value = DecodeHL7Escapes(fields[i].Value, encodingChars)
+			for j := range fields[i].Subfields {
+				fields[i].Subfields[j].Value = DecodeHL7Escapes(fields[i].Subfields[j].Value, encodingChars)
+			}
+		}
+	}
+
+	for k, seg := range result.EnhancedSegments {
+		decodeFields(seg.Fields)
+		result.EnhancedSegments[k] = seg
+	}
+
+	for segName, instances := range result.SegmentGroups {
+		for i := range instances {
+			decodeFields(instances[i].Fields)
+		}
+		result.SegmentGroups[segName] = instances
+	}
+}
+
 // =====================================
 // HELPER FUNCTIONS WITH ERROR-ONLY LOGGING
 // =====================================

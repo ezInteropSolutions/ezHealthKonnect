@@ -419,7 +419,8 @@ class BasicInterfaceConfigManager {
             auto_start: configData.auto_start,
             deployment_delay_seconds: configData.deployment_delay_seconds,
             // Logging settings
-            debug_logging: document.getElementById('editDebugLogging')?.checked || false,
+            log_level: getLogLevel(),
+            debug_logging: getLogLevel() !== 'off', // kept for backward compat
             log_retention_days: parseInt(document.getElementById('editLogRetention')?.value) || 30,
             retain_error_logs_forever: document.getElementById('editRetainErrors')?.checked !== false,
         };

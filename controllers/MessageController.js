@@ -5,28 +5,12 @@ class MessageController {
     constructor() {
         this.database = require('../config/database');
         this.tableManager = require('../services/InterfaceTableManager');
-        this.mongoService = null;  // Lazy-loaded MongoDB service
     }
 
     async ensureDatabase() {
         if (!this.database) {
             this.database = require('../config/database');
         }
-    }
-
-    async ensureMongoService() {
-        if (!this.mongoService) {
-            try {
-                const MongoDBConnectionService = require('../services/MongoDBConnectionService');
-                this.mongoService = new MongoDBConnectionService();
-                await this.mongoService.connect();
-                console.log('✅ MongoDB service initialized for MessageController');
-            } catch (error) {
-                console.log('⚠️ MongoDB not available, using PostgreSQL-only mode');
-                this.mongoService = null;
-            }
-        }
-        return this.mongoService;
     }
 
     /**
@@ -61,8 +45,22 @@ class MessageController {
             }
 
             if (status) {
-                whereConditions.push('mpe.status = :status');
-                replacements.status = status;
+                // Map composite display status values to the two DB columns
+                const statusMap = {
+                    'received':         "mpe.status = 'received'",
+                    'processing':       "mpe.status IN ('processing','reprocessing')",
+                    'delivered':        "mpe.status IN ('processed','delivered') AND mpe.delivery_status = 'delivered'",
+                    'completed':        "mpe.status IN ('processed','delivered') AND mpe.delivery_status = 'not_required'",
+                    'pending_delivery': "mpe.status = 'processed' AND mpe.delivery_status = 'pending'",
+                    'failed':           "(mpe.status = 'failed' OR mpe.delivery_status = 'failed')",
+                };
+                if (statusMap[status]) {
+                    whereConditions.push(statusMap[status]);
+                } else {
+                    // Fallback for any raw status value passed directly
+                    whereConditions.push('mpe.status = :status');
+                    replacements.status = status;
+                }
             }
 
             if (messageType) {
@@ -867,8 +865,20 @@ class MessageController {
         let replacements = { interfaceId, limit: parseInt(limit), offset: parseInt(offset) };
 
         if (status) {
-            whereConditions.push('mpe.status = :status');
-            replacements.status = status;
+            const statusMap = {
+                'received':         "mpe.status = 'received'",
+                'processing':       "mpe.status IN ('processing','reprocessing')",
+                'delivered':        "mpe.status IN ('processed','delivered') AND mpe.delivery_status = 'delivered'",
+                'completed':        "mpe.status IN ('processed','delivered') AND mpe.delivery_status = 'not_required'",
+                'pending_delivery': "mpe.status = 'processed' AND mpe.delivery_status = 'pending'",
+                'failed':           "(mpe.status = 'failed' OR mpe.delivery_status = 'failed')",
+            };
+            if (statusMap[status]) {
+                whereConditions.push(statusMap[status]);
+            } else {
+                whereConditions.push('mpe.status = :status');
+                replacements.status = status;
+            }
         }
 
         if (messageType) {
@@ -1528,27 +1538,20 @@ class MessageController {
                 });
             }
 
-            // Step 2: Get the transformed message from MongoDB (hybrid storage architecture)
+            // Step 2: Get the transformed message from object storage via Go API
             let transformedMessage = null;
-            const mongoService = await this.ensureMongoService();
-
-            if (mongoService) {
-                try {
-                    const collectionName = `transformed_messages_intf_${inputMessage.interface_id.replace(/-/g, '_')}`;
-                    const collection = mongoService.db.collection(collectionName);
-
-                    transformedMessage = await collection.findOne({
-                        message_id: inputMessage.message_id
-                    });
-
-                    if (transformedMessage) {
-                        console.log(`✅ Found transformed message in MongoDB collection: ${collectionName}`);
-                        console.log(`   Transformation status: ${transformedMessage.transformation_status}`);
-                        console.log(`   Pipeline steps: ${transformedMessage.transformation_metadata?.steps?.length || 0}`);
-                    }
-                } catch (err) {
-                    console.error(`⚠️ Error querying MongoDB for transformed message:`, err.message);
+            const goBackendUrl = process.env.GO_BACKEND_URL || `http://localhost:${process.env.API_PORT || 8080}`;
+            try {
+                const axios = require('axios');
+                const rawResp = await axios.get(
+                    `${goBackendUrl}/api/messages/${inputMessage.message_id}/raw`,
+                    { params: { interfaceId: inputMessage.interface_id }, timeout: 10000 }
+                );
+                if (rawResp.data && rawResp.data.success && rawResp.data.content) {
+                    transformedMessage = { raw_content: rawResp.data.content, transformation_status: 'completed' };
                 }
+            } catch (err) {
+                console.log(`⚠️ Object storage not available for transformed content: ${err.message}`);
             }
 
             // Fallback: Try PostgreSQL output table (legacy architecture)
@@ -1664,40 +1667,7 @@ class MessageController {
                     if (outputContent.length > 0 && outputContent[0].transformed_message) {
                         transformedContent = outputContent[0].transformed_message;
 
-                        // Check if it's a MongoDB reference and fetch actual content
-                        if (typeof transformedContent === 'object' && transformedContent.mongo_reference) {
-                            console.log('Detected MongoDB reference, fetching actual FHIR bundle...');
-                            try {
-                                const { MongoClient } = require('mongodb');
-                                const mongoUri = process.env.MONGODB_URI || 'mongodb://ezhealth_user:secure_password_change_me@mongodb:27017/ezhealthkonnect?authSource=admin';
-                                const client = new MongoClient(mongoUri);
-                                await client.connect();
-
-                                const db = client.db('ezhealthkonnect');
-                                // Collection name uses hyphens, not underscores
-                                const collectionName = `transformed_messages_intf_${inputMessage.interface_id.replace(/-/g, '_')}`;
-                                const collection = db.collection(collectionName);
-
-                                // Query by correlation_id (which stores message_id when correlation_id is null)
-                                const mongoDoc = await collection.findOne({
-                                    correlation_id: inputMessage.message_id
-                                });
-
-                                await client.close();
-
-                                if (mongoDoc && mongoDoc.fhir_bundle) {
-                                    transformedContent = mongoDoc.fhir_bundle;
-                                    console.log('Successfully fetched FHIR bundle from MongoDB');
-
-                                    // Also store transformation metadata for the transformation steps
-                                    if (mongoDoc.transformation_metadata) {
-                                        outputMessage.transformation_steps = mongoDoc.transformation_metadata.steps;
-                                    }
-                                }
-                            } catch (mongoErr) {
-                                console.error('Error fetching from MongoDB:', mongoErr.message);
-                            }
-                        }
+                        // No further resolution needed — content is already available
                     }
                 } catch (err) {
                     console.log('Could not fetch transformed message:', err.message);
@@ -1734,30 +1704,15 @@ class MessageController {
                     processingTimeMs: inputMessage.processing_time_ms
                 } : null,
 
-                // Output stage (MongoDB or PostgreSQL)
+                // Output stage — prefer object storage, then legacy output table, then message row itself
                 output: transformedMessage ? {
-                    // MongoDB-based transformation data
-                    outputMessageId: transformedMessage._id,
-                    storageType: 'mongodb',
-                    collectionName: `transformed_messages_intf_${inputMessage.interface_id.replace(/-/g, '_')}`,
+                    storageType: 'object_storage',
                     transformationStatus: transformedMessage.transformation_status,
-                    transformedAt: transformedMessage.completed_at,
-                    transformationTimeMs: transformedMessage.transformation_time_ms,
-                    pipelineId: transformedMessage.transformation_pipeline_id,
-                    pipelineSteps: transformationSteps,
-                    deliveryStatus: transformedMessage.delivery_status,
-                    deliveryStartedAt: transformedMessage.delivery_started_at,
-                    deliveryCompletedAt: transformedMessage.delivered_at,
-                    deliveryTimeMs: transformedMessage.delivery_duration_ms,
-                    deliveryStatusCode: transformedMessage.delivery_http_status,
-                    deliveryEndpoint: transformedMessage.destination_endpoint,
-                    deliveryResponse: transformedMessage.delivery_response_body,
-                    deliveryAcknowledgment: transformedMessage.delivery_acknowledgment,
-                    retryCount: transformedMessage.delivery_retry_count || 0,
-                    errorCount: transformedMessage.error_count || 0,
-                    errors: transformedMessage.errors || [],
-                    transformedContent: transformedContent,
-                    transformedMessage: transformedMessage.transformed_content || transformedMessage.fhir_bundle
+                    rawContent: transformedMessage.raw_content,
+                    deliveryStatus: inputMessage.delivery_status,
+                    deliveryCompletedAt: inputMessage.processing_completed_at,
+                    deliveryEndpoint: inputMessage.source_endpoint,
+                    payloadSizeBytes: inputMessage.message_size
                 } : (outputMessage ? {
                     // Legacy PostgreSQL output table data
                     outputMessageId: outputMessage.id,
@@ -1776,7 +1731,16 @@ class MessageController {
                     retryCount: outputMessage.retry_count,
                     transformedMessage: transformedContent,
                     transformation_steps: outputMessage.transformation_steps || []
-                } : null),
+                } : {
+                    // Current architecture — delivery tracked directly on the message row
+                    storageType: 'message_row',
+                    deliveryStatus: inputMessage.delivery_status || 'pending',
+                    deliveryCompletedAt: inputMessage.processing_completed_at,
+                    payloadSizeBytes: inputMessage.message_size,
+                    rawContentUri: inputMessage.raw_content_uri,
+                    parsedContentUri: inputMessage.parsed_content_uri,
+                    transformedContentUri: inputMessage.transformed_content_uri
+                }),
 
                 // Target interface (where message was delivered)
                 target: deliveredMessage ? {
@@ -1794,10 +1758,12 @@ class MessageController {
                 // Flow summary
                 flowStatus: {
                     inputReceived: !!inputMessage,
-                    transformed: !!outputMessage || !!transformedMessage,
-                    delivered: outputMessage?.delivery_status === 'delivered' || transformedMessage?.delivery_status === 'delivered',
+                    transformed: !!(outputMessage || transformedMessage || inputMessage?.parsed_at),
+                    delivered: inputMessage?.delivery_status === 'delivered' ||
+                               outputMessage?.delivery_status === 'delivered' ||
+                               transformedMessage?.delivery_status === 'delivered',
                     targetReceived: !!deliveredMessage,
-                    complete: !!(inputMessage && (outputMessage || transformedMessage) && deliveredMessage)
+                    complete: !!(inputMessage && inputMessage.delivery_status === 'delivered')
                 }
             };
 
@@ -1923,64 +1889,44 @@ class MessageController {
                 });
             }
 
-            // Use shared MongoDB service
-            const mongoService = await this.ensureMongoService();
+            // Fetch logs from Go API (backed by object storage)
+            const goBackendUrl = process.env.GO_BACKEND_URL || `http://localhost:${process.env.API_PORT || 8080}`;
+            const axios = require('axios');
+            const logsResp = await axios.get(
+                `${goBackendUrl}/api/messages/${messageId}/logs`,
+                { params: { interfaceId }, timeout: 10000 }
+            );
 
-            if (!mongoService) {
-                return res.status(503).json({
-                    success: false,
-                    error: 'MongoDB service not available. Logs require MongoDB.'
-                });
-            }
+            const entries = logsResp.data.logs || [];
 
-            try {
-                const collectionName = `processing_logs_intf_${interfaceId.replace(/-/g, '_')}`;
-                const collection = mongoService.db.collection(collectionName);
+            // Apply level filter client-side
+            const filtered = level && level !== 'all'
+                ? entries.filter(e => level === 'error'
+                    ? (e.level === 'error' || e.level === 'warning')
+                    : e.level === level)
+                : entries;
 
-                // Build filter
-                const filter = { message_id: messageId };
-                if (level && level !== 'all') {
-                    if (level === 'error') {
-                        // Show only errors and warnings
-                        filter.log_level = { $in: ['error', 'warning'] };
-                    } else {
-                        filter.log_level = level;
-                    }
+            const summary = {
+                total: filtered.length,
+                errors:   filtered.filter(l => l.level === 'error').length,
+                warnings: filtered.filter(l => l.level === 'warning').length,
+                info:     filtered.filter(l => l.level === 'info').length,
+                debug:    filtered.filter(l => l.level === 'debug').length
+            };
+
+            res.json({
+                success: true,
+                data: {
+                    logs: filtered.map(e => ({
+                        timestamp: e.ts,
+                        level:     e.level,
+                        category:  e.stage,
+                        message:   e.message,
+                        details:   e.fields
+                    })),
+                    summary
                 }
-
-                // Query logs
-                const logs = await collection.find(filter)
-                    .sort({ timestamp: 1 })
-                    .toArray();
-
-                // Calculate summary
-                const summary = {
-                    total: logs.length,
-                    errors: logs.filter(l => l.log_level === 'error').length,
-                    warnings: logs.filter(l => l.log_level === 'warning').length,
-                    info: logs.filter(l => l.log_level === 'info').length,
-                    debug: logs.filter(l => l.log_level === 'debug').length
-                };
-
-                res.json({
-                    success: true,
-                    data: {
-                        logs: logs.map(log => ({
-                            timestamp: log.timestamp,
-                            level: log.log_level,
-                            category: log.category,
-                            message: log.message,
-                            details: log.details,
-                            context: log.context
-                        })),
-                        summary
-                    }
-                });
-
-            } catch (error) {
-                console.error('Error querying logs collection:', error);
-                throw error;
-            }
+            });
 
         } catch (error) {
             console.error('Failed to retrieve message logs:', error);

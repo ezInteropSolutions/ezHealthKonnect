@@ -106,7 +106,7 @@ func (f *DefaultConnectorFactory) registerBuiltInConnectors() {
 	f.RegisterInbound("postgresql_inbound", NewPostgreSQLInboundConnector)
 	f.RegisterOutbound("postgresql_outbound", NewPostgreSQLOutboundConnector)
 
-	// Database Connectors - MySQL
+	// Database Connectors - MySQL (full implementation in mysql_inbound.go)
 	f.RegisterInbound("mysql_inbound", NewMySQLInboundConnector)
 	f.RegisterOutbound("mysql_outbound", NewMySQLOutboundConnector)
 
@@ -114,7 +114,7 @@ func (f *DefaultConnectorFactory) registerBuiltInConnectors() {
 	f.RegisterInbound("sqlserver_inbound", NewSQLServerInboundConnector)
 	f.RegisterOutbound("sqlserver_outbound", NewSQLServerOutboundConnector)
 
-	// Database Connectors - MongoDB
+	// Database Connectors - MongoDB (inbound: mongodb_inbound.go, outbound: mongodb_outbound.go)
 	f.RegisterInbound("mongodb_inbound", NewMongoDBInboundConnector)
 	f.RegisterOutbound("mongodb_outbound", NewMongoDBOutboundConnector)
 
@@ -150,19 +150,19 @@ func (f *DefaultConnectorFactory) registerBuiltInConnectors() {
 	f.RegisterInbound("timescaledb_inbound", NewTimescaleDBInboundConnector)
 	f.RegisterOutbound("timescaledb_outbound", NewTimescaleDBOutboundConnector)
 
-	// Message Queue Connectors - RabbitMQ
+	// Message Queue Connectors - RabbitMQ (full implementation in rabbitmq_inbound.go)
 	f.RegisterInbound("rabbitmq_inbound", NewRabbitMQInboundConnector)
 	f.RegisterOutbound("rabbitmq_outbound", NewRabbitMQOutboundConnector)
 
-	// Message Queue Connectors - Kafka
+	// Message Queue Connectors - Kafka (full implementation in kafka_inbound.go)
 	f.RegisterInbound("kafka_inbound", NewKafkaInboundConnector)
 	f.RegisterOutbound("kafka_outbound", NewKafkaOutboundConnector)
 
-	// Message Queue Connectors - Redis
+	// Message Queue Connectors - Redis (full implementation in redis_inbound.go)
 	f.RegisterInbound("redis_inbound", NewRedisInboundConnector)
 	f.RegisterOutbound("redis_outbound", NewRedisOutboundConnector)
 
-	// Cloud Storage Connectors - AWS S3
+	// Cloud Storage Connectors - AWS S3 (full implementation in aws_s3_inbound.go)
 	f.RegisterInbound("aws_s3_inbound", NewAWSS3InboundConnector)
 	f.RegisterOutbound("aws_s3_outbound", NewAWSS3OutboundConnector)
 

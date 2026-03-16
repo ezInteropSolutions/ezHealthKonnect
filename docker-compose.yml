@@ -22,22 +22,22 @@ services:
     networks:
       - ezhealthkonnect
 
-  # MongoDB Database Service for Configuration Engine
-  mongodb:
-    image: mongo:7
-    container_name: ezhealthkonnect-mongodb
+  # MinIO — S3-compatible object storage for raw messages, parsed content, and logs
+  minio:
+    image: minio/minio:latest
+    container_name: ezhealthkonnect-minio
     restart: unless-stopped
     environment:
-      MONGO_INITDB_ROOT_USERNAME: ezhealth_user
-      MONGO_INITDB_ROOT_PASSWORD: secure_password_change_me
-      MONGO_INITDB_DATABASE: ezhealthkonnect
+      MINIO_ROOT_USER: ezhealth_user
+      MINIO_ROOT_PASSWORD: secure_password_change_me
     ports:
-      - "27017:27017"
+      - "9000:9000"   # S3 API
+      - "9001:9001"   # MinIO Console (browser UI)
     volumes:
-      # Persistent data for MongoDB
-      - mongodb_data:/data/db
+      - minio_data:/data
+    command: server /data --console-address ":9001"
     healthcheck:
-      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      test: ["CMD", "mc", "ready", "local"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -183,15 +183,21 @@ services:
       EZHEALTHKONNECT_SCHEMA_DIR: /app/schemas/hl7
       FHIR_SCHEMA_DIR: /app/schemas/fhir
 
-      # MongoDB Configuration Engine
-      MONGODB_URI: mongodb://ezhealth_user:secure_password_change_me@mongodb:27017/ezhealthkonnect?authSource=admin
-      MONGODB_DATABASE: ezhealthkonnect
-      
+      # Object Storage (MinIO — S3-compatible)
+      OBJECT_STORAGE_DRIVER: s3
+      OBJECT_STORAGE_BUCKET: ezhealthkonnect
+      OBJECT_STORAGE_REGION: us-east-1
+      OBJECT_STORAGE_ENDPOINT: http://minio:9000
+      OBJECT_STORAGE_PATH_STYLE: "true"
+      OBJECT_STORAGE_ACCESS_KEY: ezhealth_user
+      OBJECT_STORAGE_SECRET_KEY: secure_password_change_me
+
     ports:
       - "3000:3000"    # Node.js frontend
       - "8080:8080"    # Go backend API
       # Interface ports - TCP MLLP range (HL7 receivers)
       - "2575:2575"    # Alternative HL7 TCP port
+      - "6610:6610"    # TCP MLLP port (HL7 interface)
       - "6661-6670:6661-6670"    # TCP MLLP port range for HL7 interfaces
       # Interface ports - HTTP range (FHIR/REST receivers)
       - "8081-8099:8081-8099"    # HTTP port range for FHIR/REST interfaces
@@ -220,15 +226,28 @@ services:
       # Inside the container the files appear at:  /mnt/host/
       - ${HOST_DATA_PATH:-C:/Users/Public}:/mnt/host
     
-    # Wait for PostgreSQL, MongoDB, and migrations to complete
+    # Wait for PostgreSQL, MinIO, and migrations to complete
     depends_on:
       flyway:
         condition: service_completed_successfully
       postgres:
         condition: service_healthy
-      mongodb:
+      minio:
         condition: service_healthy
     
+    command: >
+      sh -c "
+        echo 'Compiling Go...' &&
+        go build -o go-api main.go &&
+        echo 'Go build complete' &&
+        (while true; do
+          ./go-api;
+          echo 'go-api exited (code $?), restarting in 3s...';
+          sleep 3;
+        done) &
+        sleep 5 &&
+        node server.js
+      "
     restart: unless-stopped
     networks:
       - ezhealthkonnect
@@ -239,8 +258,8 @@ volumes:
   postgres_data:
     driver: local
 
-  # MongoDB persistent data for Configuration Engine
-  mongodb_data:
+  # MinIO persistent data (object storage for raw messages, parsed content, logs)
+  minio_data:
     driver: local
 
   # Redis persistent data for enrichment testing

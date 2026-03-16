@@ -581,10 +581,17 @@ class WizardView extends EventTarget {
                                     <textarea id="hl7Message" class="form-control hl7-textarea"
                                               rows="8" placeholder="MSH|^~\\&|HIS|RIH|EKG|EKG~ECG~EKG2|199904140038||ADT^A01|12345|P|2.5&#10;PID|1||123456||DOE^JOHN^||19800101|M|||123 MAIN ST^^ANYTOWN^NY^12345|||||S||123456789|123456789&#10;PV1|1|I|2000^2012^01||||004777^ATTEND^AARON^A|||SUR|||||||004777^ATTEND^AARON^A|INP|INS|||19800101140038|||||||||||||||||||">${data.hl7Message || ''}</textarea>
                                 </div>
-                                <button type="button" class="btn btn-primary" id="parseHL7Btn">
-                                    <span class="btn-icon">🔍</span>
-                                    Parse HL7 Message
-                                </button>
+                                <div class="parse-options-row" style="display:flex;align-items:center;gap:16px;margin-bottom:10px;">
+                                    <button type="button" class="btn btn-primary" id="parseHL7Btn">
+                                        <span class="btn-icon">🔍</span>
+                                        Parse HL7 Message
+                                    </button>
+                                    <label style="display:flex;align-items:center;gap:6px;font-size:0.85em;color:#555;cursor:pointer;" title="When enabled, escape sequences like \\F\\ \\S\\ \\T\\ \\R\\ \\E\\ are converted to their literal characters during parsing.">
+                                        <input type="checkbox" id="decodeEscapes" ${data.decodeEscapes ? 'checked' : ''} style="cursor:pointer;">
+                                        Decode escape sequences
+                                        <span style="color:#888;font-size:0.9em;">(\\F\\→|, \\S\\→^, \\T\\→&amp;, \\R\\→~, \\E\\→\\)</span>
+                                    </label>
+                                </div>
                             </div>
 
                             <div class="option-divider">
@@ -2419,7 +2426,7 @@ class WizardView extends EventTarget {
      * Generate transformation results template - shows parsed HL7 segments first
      */
     getTransformationResultsTemplate(data) {
-        if (!data.parsedHL7Data?.enhancedSegments) {
+        if (!data.parsedHL7Data?.enhancedSegments && !data.parsedHL7Data?.segmentGroups) {
             return '<div style="text-align: center; padding: 40px; color: #6b7280;">No parsed data available</div>';
         }
 
@@ -2434,7 +2441,7 @@ class WizardView extends EventTarget {
             this.viewMode = 'compact'; // compact, detailed, table
         }
 
-        const segments = this.getSegmentsInMessageOrder(data.parsedHL7Data.enhancedSegments, data.parsedHL7Data);
+        const segments = this.getSegmentsFromGroups(data.parsedHL7Data);
         const validationErrors = data.parsedHL7Data.validationErrors || [];
 
         // Build field metadata cache from actual API data
@@ -2548,6 +2555,47 @@ class WizardView extends EventTarget {
     /**
      * Get segments in correct message order using API data
      */
+    /**
+     * ✅ FIXED: Returns segment entries from segmentGroups (preserves all repeated instances).
+     * Falls back to getSegmentsInMessageOrder when segmentGroups is unavailable.
+     */
+    getSegmentsFromGroups(parsedHL7Data) {
+        const segmentGroups = parsedHL7Data?.segmentGroups || {};
+        const segmentOrder = parsedHL7Data?.segmentOrder || [];
+        const enhancedSegments = parsedHL7Data?.enhancedSegments || {};
+
+        if (segmentOrder.length > 0 && Object.keys(segmentGroups).length > 0) {
+            const segmentEntries = [];
+            const instanceCounts = {};
+
+            for (const segName of segmentOrder) {
+                const idx = instanceCounts[segName] || 0;
+                instanceCounts[segName] = idx + 1;
+
+                const group = segmentGroups[segName];
+                if (group && group[idx]) {
+                    // First instance uses plain name so default expandedSegments still work
+                    const instanceKey = idx === 0 ? segName : `${segName}[${idx}]`;
+                    segmentEntries.push([instanceKey, group[idx]]);
+                } else if (idx === 0 && enhancedSegments[segName]) {
+                    segmentEntries.push([segName, enhancedSegments[segName]]);
+                }
+            }
+
+            // Append any segments not listed in segmentOrder
+            Object.keys(enhancedSegments).forEach(segName => {
+                if (!segmentOrder.includes(segName)) {
+                    segmentEntries.push([segName, enhancedSegments[segName]]);
+                }
+            });
+
+            return segmentEntries;
+        }
+
+        // Fallback to original flat-map ordering
+        return this.getSegmentsInMessageOrder(enhancedSegments, parsedHL7Data);
+    }
+
     getSegmentsInMessageOrder(segments, parsedHL7Data) {
         // Use segment order from API if available
         if (parsedHL7Data?.segmentOrder) {
@@ -2607,8 +2655,11 @@ class WizardView extends EventTarget {
      * Render compact segment card (from backup design)
      */
     renderCompactSegment(segName, segment, validationErrors) {
+        // segName may be an instance key like "IN1[1]" for repeated segments.
+        // baseSeg is the plain HL7 name used for display and validation lookups.
+        const baseSeg = segName.replace(/\[\d+\]$/, '');
         const isExpanded = this.expandedSegments.has(segName);
-        const segmentErrors = validationErrors.filter(err => err.segment === segName);
+        const segmentErrors = validationErrors.filter(err => err.segment === baseSeg);
         const hasIssues = segmentErrors.length > 0;
 
         // Get specific missing required fields for this segment
@@ -2616,19 +2667,19 @@ class WizardView extends EventTarget {
             err.code === 'MISSING_REQUIRED_FIELD' || err.code === 'EMPTY_REQUIRED_FIELD'
         );
 
-        const keyFields = this.getKeyFields(segName, segment);
+        const keyFields = this.getKeyFields(baseSeg, segment);
 
         return `
             <div class="segment-compact ${hasIssues ? 'has-issues' : ''} ${isExpanded ? 'expanded' : ''} ${missingRequiredFields.length > 0 ? 'has-missing-required' : ''}">
                 <div class="segment-row" onclick="toggleSegment('${segName}')">
                     <div class="segment-info">
                         <div class="segment-name-badge">
-                            <span class="seg-name">${segName}</span>
-                            ${this.renderDynamicBadges(segName, segment, segmentErrors)}
+                            <span class="seg-name">${baseSeg}</span>
+                            ${this.renderDynamicBadges(baseSeg, segment, segmentErrors)}
                             ${this.renderRequiredFieldsBadge(missingRequiredFields)}
                         </div>
                         <div class="segment-summary">
-                            <span class="seg-desc">${this.truncateText(segment.description || `${segName} Segment`, 40)}</span>
+                            <span class="seg-desc">${this.truncateText(segment.description || `${baseSeg} Segment`, 40)}</span>
                             ${keyFields.length > 0 ? `<span class="key-values">${keyFields.join(' • ')}</span>` : ''}
                         </div>
                     </div>
@@ -2638,7 +2689,7 @@ class WizardView extends EventTarget {
                     </div>
                 </div>
 
-                ${isExpanded ? this.renderSegmentFields(segName, segment, validationErrors) : ''}
+                ${isExpanded ? this.renderSegmentFields(baseSeg, segment, validationErrors) : ''}
                 ${hasIssues && !isExpanded ? this.renderInlineValidation(segmentErrors, missingRequiredFields) : ''}
             </div>
         `;
@@ -4798,8 +4849,10 @@ PV1|1|I|ICU^101^1|||DOC123^Smith^Jane|||EMERGENCY|||
                 const messageContent = currentHL7Message?.value || '';
                 console.log('📝 HL7 message content length:', messageContent.length);
 
+                const decodeEscapesChk = container.querySelector('#decodeEscapes');
+                const escapeHandling = decodeEscapesChk?.checked ? 'decode' : 'passthrough';
                 this.dispatchEvent(new CustomEvent('parseHL7Requested', {
-                    detail: { message: messageContent }
+                    detail: { message: messageContent, escapeHandling }
                 }));
                 console.log('📤 parseHL7Requested event dispatched');
             });
@@ -4928,8 +4981,10 @@ PV1|1|I|ICU^101^1|||DOC123^Smith^Jane|||EMERGENCY|||
                 const messageContent = currentHL7Message?.value || '';
                 console.log('📝 HL7 message content length:', messageContent.length);
 
+                const decodeEscapesChk = container.querySelector('#decodeEscapes');
+                const escapeHandling = decodeEscapesChk?.checked ? 'decode' : 'passthrough';
                 this.dispatchEvent(new CustomEvent('parseHL7Requested', {
-                    detail: { message: messageContent }
+                    detail: { message: messageContent, escapeHandling }
                 }));
                 console.log('📤 parseHL7Requested event dispatched');
             });

@@ -4,9 +4,12 @@
 package controllers
 
 import (
+	"context"
 	"database/sql"
+	"encoding/json"
 	"ezhealthkonnect/models"
 	"ezhealthkonnect/services"
+	"ezhealthkonnect/services/connectors"
 	"net/http"
 	"strconv"
 	"time"
@@ -577,6 +580,64 @@ func (cc *ConnectivityController) GetExecutionStats(c *gin.Context) {
 // @Produce json
 // @Param body body models.CronSchedule true "Cron expression"
 // @Success 200 {object} map[string]interface{}
+// TestConnectorAdHoc godoc
+// @Summary Test a connector configuration ad-hoc (no saved interface needed)
+// @Description Validates and tests a connector config object from a pipeline step
+// @Tags connectivity
+// @Accept json
+// @Produce json
+// @Param body body object true "connector_type (string) and config (object)"
+// @Success 200 {object} map[string]interface{}
+// @Router /api/connectivity/test [post]
+func (cc *ConnectivityController) TestConnectorAdHoc(c *gin.Context) {
+	var req struct {
+		ConnectorType string                 `json:"connector_type"`
+		Config        map[string]interface{} `json:"config"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil || req.ConnectorType == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "connector_type and config are required"})
+		return
+	}
+
+	factory := connectors.GetFactory()
+	configBytes, err := json.Marshal(req.Config)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "invalid config: " + err.Error()})
+		return
+	}
+
+	// Try inbound first, then outbound
+	var testErr error
+	if conn, err2 := factory.CreateInbound(req.ConnectorType); err2 == nil {
+		if initErr := conn.Initialize(configBytes); initErr != nil {
+			c.JSON(http.StatusOK, gin.H{"success": false, "error": "Configuration invalid: " + initErr.Error()})
+			return
+		}
+		ctx, cancel := context.WithTimeout(c.Request.Context(), 10*time.Second)
+		defer cancel()
+		testErr = conn.TestConnection(ctx)
+		conn.Close()
+	} else if conn2, err3 := factory.CreateOutbound(req.ConnectorType); err3 == nil {
+		if initErr := conn2.Initialize(configBytes); initErr != nil {
+			c.JSON(http.StatusOK, gin.H{"success": false, "error": "Configuration invalid: " + initErr.Error()})
+			return
+		}
+		ctx, cancel := context.WithTimeout(c.Request.Context(), 10*time.Second)
+		defer cancel()
+		testErr = conn2.TestConnection(ctx)
+		conn2.Close()
+	} else {
+		c.JSON(http.StatusOK, gin.H{"success": false, "error": "Unknown connector type: " + req.ConnectorType})
+		return
+	}
+
+	if testErr != nil {
+		c.JSON(http.StatusOK, gin.H{"success": false, "error": testErr.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "message": "Connection successful"})
+}
+
 // @Router /api/connectivity/cron/preview [post]
 func (cc *ConnectivityController) PreviewCronSchedule(c *gin.Context) {
 	var cronSchedule models.CronSchedule

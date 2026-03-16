@@ -31,6 +31,9 @@ const { test, expect } = require('@playwright/test');
 // ================================================================
 
 const BASE_URL = 'http://localhost:3000';
+// Known test interface with populated pipelines (used as preferred interface)
+const KNOWN_INTERFACE_ID = '762aebb9-0408-4a42-82c5-202f13f28315';
+const KNOWN_MESSAGE_TYPE = 'ADT^A01';
 
 // ─── Helpers ────────────────────────────────────────────────────
 
@@ -57,15 +60,17 @@ async function login(page) {
 }
 
 async function getFirstInterface(page) {
-    return page.evaluate(async () => {
+    return page.evaluate(async (knownId) => {
         const r = await fetch('/api/interfaces', {
             headers: { 'Content-Type': 'application/json' },
             credentials: 'include'
         });
         if (!r.ok) return null;
         const data = await r.json();
-        return Array.isArray(data) ? data[0] : (data.interfaces ? data.interfaces[0] : null);
-    });
+        const list = Array.isArray(data) ? data : (data.interfaces || []);
+        // Prefer the known test interface which has populated pipelines
+        return list.find(i => i.id === knownId) || list[0] || null;
+    }, KNOWN_INTERFACE_ID);
 }
 
 async function getFirstPipeline(page, interfaceId) {
@@ -87,13 +92,13 @@ async function getFirstPipeline(page, interfaceId) {
 function apiEnrichmentStep(overrides = {}) {
     return {
         step_name: 'API Enrichment Test Step',
-        step_type: 'api_enrichment',
+        step_type: 'enrichment.api',
         sequence: 50,
         enabled: true,
         config: {
             endpoint: `${BASE_URL}/api/system/health`,
             method: 'GET',
-            targetPath: 'enriched.api',
+            targetPath: 'health_response',
             timeoutMs: 3000,
             // Circuit Breaker (P2)
             failureThreshold: 5,
@@ -127,19 +132,23 @@ function dbEnrichmentStep(overrides = {}) {
 }
 
 async function runTestPipeline(page, steps, message) {
-    return page.evaluate(async ({ steps, message }) => {
-        const r = await fetch('/api/pipeline/pipelines/test', {
+    return page.evaluate(async ({ steps, message, interfaceId, messageType }) => {
+        const r = await fetch('/api/pipelines/test', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             credentials: 'include',
             body: JSON.stringify({
-                message: message || 'MSH|^~\\&|SEND|RECV|20240101120000||ADT^A01|MSG001|P|2.5',
-                pipeline_config: { steps }
+                test_message: message || 'MSH|^~\\&|SEND|RECV|20240101120000||ADT^A01|MSG001|P|2.5',
+                pipeline: {
+                    interfaceId,
+                    messageType,
+                    execution_groups: [{ steps }]
+                }
             })
         });
         const body = await r.json().catch(() => ({}));
         return { status: r.status, ok: r.ok, body };
-    }, { steps, message });
+    }, { steps, message, interfaceId: KNOWN_INTERFACE_ID, messageType: KNOWN_MESSAGE_TYPE });
 }
 
 // ─── Sprint 3: Backend API Tests ─────────────────────────────────
@@ -236,20 +245,19 @@ test.describe('Sprint 3 — Circuit Breaker (P2) + Result Cache (P5)', () => {
         }
 
         const body = result.body;
-        // Look for executionDetails in any step output structure the response uses
-        const stepOutputs = body.stepOutputs || body.step_outputs || body.steps || [];
-        const firstOutput = Array.isArray(stepOutputs)
-            ? stepOutputs[0]
-            : Object.values(stepOutputs)[0];
+        // Response: { steps: { step_name: { step_output: {...}, step_metadata: {...} } } }
+        const stepMap = body.steps || {};
+        const firstOutput = Object.values(stepMap)[0];
 
         if (!firstOutput) {
             console.log('No step outputs in response — skipping CB state field check');
             return; // Not fatal — depends on test pipeline configuration
         }
 
-        const details = firstOutput.executionDetails || firstOutput.execution_details || {};
-        expect(details).toHaveProperty('circuit_breaker_state',
-            'executionDetails must include circuit_breaker_state after CB wiring');
+        // Execution details are merged into step_metadata (not a separate executionDetails key)
+        const details = firstOutput.step_metadata || firstOutput.executionDetails || firstOutput.execution_details || {};
+        expect(details, 'step_metadata must include circuit_breaker_state after CB wiring')
+            .toHaveProperty('circuit_breaker_state');
         const validStates = ['closed', 'open', 'half-open'];
         expect(validStates).toContain(details.circuit_breaker_state);
     });
@@ -265,19 +273,19 @@ test.describe('Sprint 3 — Circuit Breaker (P2) + Result Cache (P5)', () => {
         }
 
         const body = result.body;
-        const stepOutputs = body.stepOutputs || body.step_outputs || body.steps || [];
-        const firstOutput = Array.isArray(stepOutputs)
-            ? stepOutputs[0]
-            : Object.values(stepOutputs)[0];
+        // Response: { steps: { step_name: { step_output: {...}, step_metadata: {...} } } }
+        const stepMap = body.steps || {};
+        const firstOutput = Object.values(stepMap)[0];
 
         if (!firstOutput) {
             console.log('No step outputs — skipping cache_hit field check');
             return;
         }
 
-        const details = firstOutput.executionDetails || firstOutput.execution_details || {};
-        expect(details).toHaveProperty('cache_hit',
-            'executionDetails must include cache_hit after result cache wiring');
+        // Execution details are merged into step_metadata
+        const details = firstOutput.step_metadata || firstOutput.executionDetails || firstOutput.execution_details || {};
+        expect(details, 'step_metadata must include cache_hit after result cache wiring')
+            .toHaveProperty('cache_hit');
         expect(typeof details.cache_hit).toBe('boolean');
     });
 
@@ -304,17 +312,17 @@ test.describe('Sprint 3 — Circuit Breaker (P2) + Result Cache (P5)', () => {
             return;
         }
 
-        const stepOutputs = second.body.stepOutputs || second.body.step_outputs || second.body.steps || [];
-        const firstOutput = Array.isArray(stepOutputs)
-            ? stepOutputs[0]
-            : Object.values(stepOutputs)[0];
+        // Response: { steps: { step_name: { step_output: {...}, step_metadata: {...} } } }
+        const stepMap = second.body.steps || {};
+        const firstOutput = Object.values(stepMap)[0];
 
         if (!firstOutput) {
             console.log('No step outputs in second response — skipping cache_hit:true check');
             return;
         }
 
-        const details = firstOutput.executionDetails || firstOutput.execution_details || {};
+        // Execution details are merged into step_metadata
+        const details = firstOutput.step_metadata || firstOutput.executionDetails || firstOutput.execution_details || {};
         // If cache_hit is present, it should be true on the second call
         if ('cache_hit' in details) {
             expect(details.cache_hit).toBe(true);

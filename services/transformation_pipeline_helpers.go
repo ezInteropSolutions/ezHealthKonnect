@@ -9,9 +9,13 @@ import (
 	"ezhealthkonnect/models"
 	"ezhealthkonnect/services/executors"
 	"ezhealthkonnect/services/executors/control"
+	"ezhealthkonnect/services/logger"
+	"ezhealthkonnect/services/storage"
 	"fmt"
 	"log"
+	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -83,16 +87,29 @@ func (tps *TransformationPipelineService) ExecutePipeline(
 
 	log.Printf("🚀 [Pipeline] Initialized execution context for pipeline: %s", pipeline.PipelineName)
 
+	// PHASE 2: Enrich message envelope with _semantic_index + _sensitivity_map.
+	// enrichMessageEnvelope is idempotent — safe to call on already-enriched messages.
+	enrichMessageEnvelope(execCtx.Message)
+	// Register semantic message paths into the variable context for no-code autocomplete.
+	buildInitialVariableContext(execCtx.Message, execCtx.VariableContext)
+
 	// Extract pipeline-level defaults for error handling and retry
 	pipelineRetryDefaults := executors.ParsePipelineRetryDefaults(pipeline.PipelineConfig)
 	pipelineEHDefaults := executors.ParsePipelineErrorHandlingDefaults(pipeline.PipelineConfig)
 	if pipelineRetryDefaults != nil {
-		fmt.Printf("🔄 Pipeline-level retry defaults: max=%d, delay=%dms, backoff=%.1fx\n",
-			pipelineRetryDefaults.MaxRetries, pipelineRetryDefaults.DelayMs, pipelineRetryDefaults.BackoffMultiplier)
+		logger.Debug("pipeline-level retry defaults",
+			"interface_id", pipeline.InterfaceID,
+			"correlation_id", result.CorrelationID,
+			"max_retries", pipelineRetryDefaults.MaxRetries,
+			"delay_ms", pipelineRetryDefaults.DelayMs,
+			"backoff_multiplier", pipelineRetryDefaults.BackoffMultiplier)
 	}
 	if pipelineEHDefaults != nil {
-		fmt.Printf("🛡️ Pipeline-level error handling defaults: onError=%s, defaultField=%s, defaultValue=%s\n",
-			pipelineEHDefaults.OnError, pipelineEHDefaults.DefaultField, pipelineEHDefaults.DefaultValue)
+		logger.Debug("pipeline-level error handling defaults",
+			"interface_id", pipeline.InterfaceID,
+			"correlation_id", result.CorrelationID,
+			"on_error", pipelineEHDefaults.OnError,
+			"default_field", pipelineEHDefaults.DefaultField)
 	}
 
 	// Track the final output after all steps (starts with input, updated by each step)
@@ -122,7 +139,9 @@ func (tps *TransformationPipelineService) ExecutePipeline(
 				for _, cid := range childIDs {
 					if cidStr, ok := cid.(string); ok {
 						loopChildStepIDs[cidStr] = true
-						fmt.Printf("   📌 Pre-marked loop child step: %s (parent loop: %s)\n", cidStr, s.StepName)
+						logger.Debug("pre-marked loop child step",
+							"interface_id", pipeline.InterfaceID,
+							"step_id", cidStr, "parent_loop", s.StepName)
 					}
 				}
 			}
@@ -130,37 +149,83 @@ func (tps *TransformationPipelineService) ExecutePipeline(
 	}
 
 	i := 0
-	fmt.Printf("🔄🔄🔄 [ExecutePipeline] Starting execution loop with %d steps\n", len(pipeline.Steps))
+	logger.Debug("starting pipeline execution loop",
+		"interface_id", pipeline.InterfaceID,
+		"correlation_id", result.CorrelationID,
+		"step_count", len(pipeline.Steps))
 	for i < len(pipeline.Steps) {
 		step := pipeline.Steps[i]
 
 		// Check if this step should be skipped due to exclusive branch routing
 		if skipStepIDs[step.ID] {
-			fmt.Printf("⏭️⏭️⏭️ SKIPPING step (exclusive branch): %s (ID: %s)\n", step.StepName, step.ID)
+			logger.Debug("skipping step (exclusive branch)",
+				"interface_id", pipeline.InterfaceID,
+				"correlation_id", result.CorrelationID,
+				"step_name", step.StepName, "step_id", step.ID)
 			i++
 			continue
 		}
 
 		// ✅ Skip child steps already executed by a loop container
 		if loopChildStepIDs[step.ID] {
-			fmt.Printf("⏭️ Skipping step (executed by loop): %s (ID: %s)\n", step.StepName, step.ID)
+			logger.Debug("skipping step (loop child)",
+				"interface_id", pipeline.InterfaceID,
+				"correlation_id", result.CorrelationID,
+				"step_name", step.StepName, "step_id", step.ID)
 			i++
 			continue
 		}
 
 		if !step.Enabled {
-			fmt.Printf("⏭️ Skipping disabled step: %s\n", step.StepName)
+			logger.Debug("skipping disabled step",
+				"interface_id", pipeline.InterfaceID,
+				"correlation_id", result.CorrelationID,
+				"step_name", step.StepName)
 			i++
 			continue
 		}
 
-		// TEST MODE: Skip inbound connector (user provides test data directly)
-		if step.StepType == "connector.inbound" && models.IsTestMode(ctx) {
-			fmt.Printf("🧪 [Test Mode] Skipping inbound connector: %s (test data provided directly)\n", step.StepName)
-
+		// ALWAYS SKIP connector.inbound during pipeline execution.
+		//
+		// The engine's ActivateInterface() already started the listener (TCP/MLLP, etc.)
+		// and routed the message into this pipeline. If we let InboundConnectorExecutor
+		// call connector.Start() here it would try to bind the same port again →
+		// "bind: address already in use". Instead we mark the step as successful and
+		// expose the already-received message as the step output so downstream steps
+		// can reference steps.<ns>.step_output.content etc.
+		if step.StepType == "connector.inbound" {
 			connectorType := "unknown"
 			if ct, ok := step.Config["connectorType"].(string); ok {
 				connectorType = ct
+			}
+
+			isTest := models.IsTestMode(ctx)
+			if isTest {
+				logger.Debug("test mode: skipping inbound connector",
+					"interface_id", pipeline.InterfaceID,
+					"correlation_id", result.CorrelationID,
+					"step_name", step.StepName)
+			} else {
+				logger.Debug("production mode: inbound connector already running — injecting received message",
+					"interface_id", pipeline.InterfaceID,
+					"correlation_id", result.CorrelationID,
+					"step_name", step.StepName)
+			}
+
+			// Build output: in production inject the live message; in test use placeholder.
+			stepOutputData := map[string]interface{}{
+				"success":        true,
+				"connector_type": connectorType,
+			}
+			if isTest {
+				stepOutputData["message"] = "Test data provided directly - inbound connector skipped in test mode"
+				stepOutputData["test_mode"] = true
+			} else {
+				// Expose the raw message so downstream steps can access it.
+				stepOutputData["content"]      = execCtx.Message["raw"]
+				stepOutputData["message_type"] = execCtx.Message["messageType"]
+				stepOutputData["source_type"]  = connectorType
+				stepOutputData["received"]     = true
 			}
 
 			namespace := tps.generateStepNamespace(&step, i)
@@ -175,17 +240,12 @@ func (tps *TransformationPipelineService) ExecutePipeline(
 				Success:     true,
 			}
 			stepLog.StepOutput = &models.StepOutput{
-				StepID:    step.ID,
-				StepName:  step.StepName,
-				StepType:  step.StepType,
-				Namespace: namespace,
-				Sequence:  i,
-				OutputData: map[string]interface{}{
-					"success":        true,
-					"connector_type": connectorType,
-					"message":        "Test data provided directly - inbound connector skipped in test mode",
-					"test_mode":      true,
-				},
+				StepID:     step.ID,
+				StepName:   step.StepName,
+				StepType:   step.StepType,
+				Namespace:  namespace,
+				Sequence:   i,
+				OutputData: stepOutputData,
 				Success:    true,
 				DurationMs: 0,
 			}
@@ -196,14 +256,46 @@ func (tps *TransformationPipelineService) ExecutePipeline(
 		}
 
 		stepStartTime := time.Now()
-		fmt.Printf("▶️▶️▶️ EXECUTING step %d/%d: %s (type: %s, ID: %s)\n", i+1, len(pipeline.Steps), step.StepName, step.StepType, step.ID)
+		logger.Debug("executing step",
+			"interface_id", pipeline.InterfaceID,
+			"correlation_id", result.CorrelationID,
+			"step_index", i+1, "step_count", len(pipeline.Steps),
+			"step_name", step.StepName, "step_type", step.StepType)
+
+		// PHASE 3: Egress PHI check — warn before any outbound delivery step.
+		if step.StepType == "connector.outbound" {
+			if violations := checkEgressPHI(execCtx.Message); len(violations) > 0 {
+				log.Printf("⚠️  [PHI EGRESS] Step '%s' — %d PHI field(s) not masked before outbound: %v",
+					step.StepName, len(violations), violations)
+				// Record in StepErrors for UI visibility (non-blocking by default)
+				if result.StepErrors == nil {
+					result.StepErrors = make(map[string]models.StepErrorDetail)
+				}
+				ns := tps.generateStepNamespace(&step, i)
+				result.StepErrors[ns] = models.StepErrorDetail{
+					StepID:        step.ID,
+					StepName:      step.StepName,
+					Namespace:     ns,
+					Error:         fmt.Sprintf("PHI fields not masked before egress: %v", violations),
+					ErrorStrategy: "warn",
+					PHIViolations: violations,
+				}
+				// If step config specifies egressPolicy=block, return an error
+				if policy, ok := step.Config["egressPolicy"].(string); ok && policy == "block" {
+					return result, fmt.Errorf("egress blocked: PHI fields not masked before outbound step '%s': %v", step.StepName, violations)
+				}
+			}
+		}
 
 		// ✅ CONTAINER STEP HANDLING: Inject child executor callback
 		if step.StepType == "control.loop" {
 			executor := tps.executorRegistry.GetExecutor(step.StepType)
 			if loopExecutor, ok := executor.(*control.LoopExecutor); ok {
 				loopExecutor.SetChildExecutor(loopChildExecutor)
-				fmt.Printf("🔄 Injected child executor into loop step: %s\n", step.StepName)
+				logger.Debug("injected child executor into loop step",
+					"interface_id", pipeline.InterfaceID,
+					"correlation_id", result.CorrelationID,
+					"step_name", step.StepName)
 			}
 		}
 
@@ -211,28 +303,18 @@ func (tps *TransformationPipelineService) ExecutePipeline(
 		namespace := tps.generateStepNamespace(&step, i)
 		log.Printf("   Namespace: %s", namespace)
 
-		// Debug: Log step config keys for troubleshooting error handling resolution
-		configKeys := make([]string, 0, len(step.Config))
-		for k := range step.Config {
-			configKeys = append(configKeys, k)
-		}
-		fmt.Printf("🔍 Step '%s' config keys: %v\n", step.StepName, configKeys)
-
 		// Resolve retry config: step override > pipeline default > nil
 		retryConfig := executors.ResolveRetryConfig(step.Config, pipelineRetryDefaults)
 		if retryConfig != nil {
-			fmt.Printf("🔄 Retry enabled for: %s (max=%d, delay=%dms, backoff=%.1fx)\n",
-				step.StepName, retryConfig.MaxRetries, retryConfig.DelayMs, retryConfig.BackoffMultiplier)
+			logger.Debug("retry enabled for step",
+				"interface_id", pipeline.InterfaceID,
+				"correlation_id", result.CorrelationID,
+				"step_name", step.StepName,
+				"max_retries", retryConfig.MaxRetries)
 		}
 
 		// Resolve error handling config: step override > pipeline default > nil
 		ehConfig := executors.ResolveErrorHandlingConfig(step.Config, pipelineEHDefaults)
-		if ehConfig != nil {
-			fmt.Printf("🛡️ Error handling RESOLVED for: %s (onError=%s, defaultField=%s, defaultValue=%s)\n",
-				step.StepName, ehConfig.OnError, ehConfig.DefaultField, ehConfig.DefaultValue)
-		} else {
-			fmt.Printf("🔍 Step '%s' has no error handling config (step-level or pipeline-level)\n", step.StepName)
-		}
 
 		// Execute step with retry (ExecuteWithRetry handles single-exec when retryConfig is nil)
 		var output map[string]interface{}
@@ -255,14 +337,23 @@ func (tps *TransformationPipelineService) ExecutePipeline(
 		// Apply error handling if step failed after all retries
 		errorWasCaught := false
 		if stepErr != nil && ehConfig != nil {
-			fmt.Printf("🛡️ APPLYING error handling for: %s (error: %s)\n", step.StepName, stepErr.Error())
+			logger.Debug("applying error handling",
+				"interface_id", pipeline.InterfaceID,
+				"correlation_id", result.CorrelationID,
+				"step_name", step.StepName, "error", stepErr.Error())
 			output, stepErr = executors.ApplyErrorHandling(ehConfig, stepErr, output, execCtx.Message, step.StepName)
 			if stepErr == nil {
 				errorWasCaught = true
-				fmt.Printf("🛡️ Error CAUGHT for: %s\n", step.StepName)
+				logger.Debug("error caught by handler",
+					"interface_id", pipeline.InterfaceID,
+					"correlation_id", result.CorrelationID,
+					"step_name", step.StepName)
 			}
 		} else if stepErr != nil {
-			fmt.Printf("⚠️ Step '%s' failed but NO error handler\n", step.StepName)
+			logger.Warn("step failed without error handler",
+				"interface_id", pipeline.InterfaceID,
+				"correlation_id", result.CorrelationID,
+				"step_name", step.StepName, "error", stepErr.Error())
 		}
 
 		// Create step execution log
@@ -312,7 +403,12 @@ func (tps *TransformationPipelineService) ExecutePipeline(
 			}
 		} else if errorWasCaught {
 			// Error was caught by handler — mark step as success with caught info
-			fmt.Printf("🛡️ Step error caught: %s (error: %s, took %dms)\n", step.StepName, originalErr.Error(), stepDuration.Milliseconds())
+			logger.Info("step error caught by handler",
+				"interface_id", pipeline.InterfaceID,
+				"correlation_id", result.CorrelationID,
+				"step_name", step.StepName,
+				"error", originalErr.Error(),
+				"duration_ms", stepDuration.Milliseconds())
 
 			// Update step output with caught info
 			if stepOutput != nil {
@@ -407,6 +503,43 @@ func (tps *TransformationPipelineService) ExecutePipeline(
 		// Add step log to execution log
 		result.ExecutionLog = append(result.ExecutionLog, stepLog)
 
+		// For connector steps: append delivery details to the NDJSON processing log
+		// so they appear in the message detail Logs tab.
+		if tps.objectStorage != nil && strings.HasPrefix(step.StepType, "connector.") {
+			ifaceIDForLog, _ := ctx.Value("interface_id").(string)
+			msgIDForLog, _ := ctx.Value("message_id").(string)
+			if ifaceIDForLog == "" {
+				ifaceIDForLog = pipeline.InterfaceID
+			}
+			if msgIDForLog != "" && ifaceIDForLog != "" {
+				level := "info"
+				msg := fmt.Sprintf("Connector delivery: %s", step.StepType)
+				fields := map[string]interface{}{
+					"step_name":   step.StepName,
+					"step_type":   step.StepType,
+					"duration_ms": stepDuration.Milliseconds(),
+					"success":     stepErr == nil,
+				}
+				if stepOutput != nil {
+					for k, v := range stepOutput.ExecutionDetails {
+						fields[k] = v
+					}
+				}
+				if stepErr != nil {
+					level = "error"
+					msg = fmt.Sprintf("Connector delivery failed: %s — %v", step.StepType, stepErr)
+					fields["error"] = stepErr.Error()
+				}
+				entry := storage.LogEntry{
+					Level:   level,
+					Stage:   "delivery",
+					Message: msg,
+					Fields:  fields,
+				}
+				go tps.objectStorage.AppendLog(context.Background(), ifaceIDForLog, msgIDForLog, entry)
+			}
+		}
+
 		// PHASE 3: DEBUG - Check what's in metadata
 		log.Printf("🔍 [DEBUG] After step %d, execCtx.Metadata keys: %v", i+1, getMapKeys(execCtx.Metadata))
 		if routing, ok := execCtx.Metadata["_routing"]; ok {
@@ -414,17 +547,21 @@ func (tps *TransformationPipelineService) ExecutePipeline(
 		}
 
 		// PHASE 2: Check for conditional routing (from context metadata)
-		fmt.Printf("🔍🔍🔍 [DEBUG] Checking for _routing in metadata. Metadata keys: %v\n", getMapKeys(execCtx.Metadata))
 		if routingDirective, ok := execCtx.Metadata["_routing"].(map[string]interface{}); ok {
-			fmt.Printf("🔀🔀🔀 ROUTING DIRECTIVE FOUND: %+v\n", routingDirective)
+			logger.Debug("routing directive found",
+				"interface_id", pipeline.InterfaceID,
+				"correlation_id", result.CorrelationID,
+				"step_name", step.StepName)
 
 			// Check for skipSteps (exclusive branch support) - these steps will be skipped
 			if skipSteps, ok := routingDirective["skipSteps"].([]interface{}); ok {
-				fmt.Printf("🔀🔀🔀 skipSteps found ([]interface{}): %v\n", skipSteps)
 				for _, sid := range skipSteps {
 					if stepID, ok := sid.(string); ok {
 						skipStepIDs[stepID] = true
-						fmt.Printf("🔀🔀🔀 MARKING step %s to skip (exclusive branch)\n", stepID)
+						logger.Debug("marking step to skip (exclusive branch)",
+							"interface_id", pipeline.InterfaceID,
+							"correlation_id", result.CorrelationID,
+							"step_id", stepID)
 					}
 				}
 				// Clear skipSteps after processing
@@ -432,10 +569,12 @@ func (tps *TransformationPipelineService) ExecutePipeline(
 			}
 			// Also handle []string type (from some code paths)
 			if skipSteps, ok := routingDirective["skipSteps"].([]string); ok {
-				fmt.Printf("🔀🔀🔀 skipSteps found ([]string): %v\n", skipSteps)
 				for _, stepID := range skipSteps {
 					skipStepIDs[stepID] = true
-					fmt.Printf("🔀🔀🔀 MARKING step %s to skip (exclusive branch)\n", stepID)
+					logger.Debug("marking step to skip (exclusive branch)",
+						"interface_id", pipeline.InterfaceID,
+						"correlation_id", result.CorrelationID,
+						"step_id", stepID)
 				}
 				delete(routingDirective, "skipSteps")
 			}
@@ -495,6 +634,17 @@ func (tps *TransformationPipelineService) ExecutePipeline(
 
 	log.Printf("✅ [Pipeline] Execution complete: %d steps executed, %d step outputs stored",
 		len(result.ExecutionLog), len(execCtx.StepOutputs))
+
+	// Persist execution + per-step records asynchronously (non-blocking).
+	// interfaceID and messageID come from the pipeline's context fields.
+	ifaceID, _ := ctx.Value("interface_id").(string)
+	msgID, _ := ctx.Value("message_id").(string)
+	if ifaceID == "" {
+		ifaceID = pipeline.InterfaceID
+	}
+	if msgID != "" && pipeline.ID != "" {
+		go tps.persistExecutionRecords(pipeline.ID, msgID, ifaceID, startTime, result)
+	}
 
 	return result, nil
 }
@@ -588,24 +738,45 @@ func (tps *TransformationPipelineService) executeStepWithContext(
 		inputData["_routing"] = routing
 	}
 
-	// CRITICAL: Preserve enriched data from previous steps
-	// This allows field_mapping output to be accessed by script_enrichment, etc.
-	if execCtx.Message != nil {
-		if enriched, ok := execCtx.Message["enriched"].(map[string]interface{}); ok {
-			inputData["enriched"] = enriched
-		}
-	}
+	// P7: enriched.* carry-over removed — prior step outputs are accessed via
+	// steps.{namespace}.step_output.{field} (injected below from execCtx.StepOutputs).
 
 	// Inject completed step outputs as steps.{namespace}.step_output.{field}
-	// so downstream steps can reference prior step results using the same paths
-	// shown in the test output UI. Uses the existing dot-path resolver in field_utils.go.
+	// Registers BOTH the full runtime namespace (api_enrichment_b636de) AND the
+	// display key used by the test controller (api_enrichment, api_enrichment_2, …)
+	// so masking / routing rules that reference display keys work at runtime.
 	if len(execCtx.StepOutputs) > 0 {
-		stepsSnapshot := make(map[string]interface{}, len(execCtx.StepOutputs))
+		// Sort by Sequence for deterministic display-counter assignment
+		type soEntry struct {
+			ns string
+			so models.StepOutput
+		}
+		entries := make([]soEntry, 0, len(execCtx.StepOutputs))
 		for ns, so := range execCtx.StepOutputs {
 			if so.Success && so.OutputData != nil {
-				stepsSnapshot[ns] = map[string]interface{}{
-					"step_output": so.OutputData,
-				}
+				entries = append(entries, soEntry{ns, so})
+			}
+		}
+		sort.Slice(entries, func(i, j int) bool {
+			return entries[i].so.Sequence < entries[j].so.Sequence
+		})
+
+		displayNorm := models.NewOutputNormalizer()
+		displayCounts := make(map[string]int)
+		stepsSnapshot := make(map[string]interface{}, len(entries)*2)
+		for _, e := range entries {
+			// Full runtime namespace key (e.g. api_enrichment_b636de)
+			stepsSnapshot[e.ns] = map[string]interface{}{"step_output": e.so.OutputData}
+
+			// Display key matching the test controller (api_enrichment → api_enrichment_2 …)
+			displayBase := displayNorm.NormalizeKey(e.so.StepName)
+			displayCounts[displayBase]++
+			displayKey := displayBase
+			if displayCounts[displayBase] > 1 {
+				displayKey = fmt.Sprintf("%s_%d", displayBase, displayCounts[displayBase])
+			}
+			if displayKey != e.ns {
+				stepsSnapshot[displayKey] = map[string]interface{}{"step_output": e.so.OutputData}
 			}
 		}
 		if len(stepsSnapshot) > 0 {
@@ -638,8 +809,18 @@ func (tps *TransformationPipelineService) executeStepWithContext(
 	}
 
 	// Extract step-specific output from _stepOutput field (Phase 1 compatible)
+	// JSON round-trip first: converts all Go-native typed slices (e.g. []map[string]interface{}
+	// from FHIR bundle createBundle) into []interface{} so the normalizer can traverse them.
+	// Then normalize keys to snake_case so runtime paths match the path picker display.
 	if stepOutputData, ok := output["_stepOutput"].(map[string]interface{}); ok {
-		stepOutput.OutputData = stepOutputData
+		if b, err := json.Marshal(stepOutputData); err == nil {
+			var generic map[string]interface{}
+			if json.Unmarshal(b, &generic) == nil {
+				stepOutputData = generic
+			}
+		}
+		normalizer := models.NewOutputNormalizer()
+		stepOutput.OutputData = normalizer.NormalizeStepOutput(stepOutputData)
 		delete(output, "_stepOutput") // Remove from output after extraction
 	} else {
 		// Fallback: use the entire output as step output (excluding internal fields and large message data)
@@ -653,8 +834,7 @@ func (tps *TransformationPipelineService) executeStepWithContext(
 			if key == "message" || key == "enhancedSegments" || key == "raw" {
 				continue
 			}
-			// Include enriched data - steps store their outputs here
-			// Note: We do NOT skip "enriched" because that's where step outputs are stored
+			// P7: enriched.* is no longer a primary output namespace (see steps.{ns}.step_output)
 			stepOutput.OutputData[key] = value
 		}
 	}
@@ -890,6 +1070,22 @@ func buildOutputContext(outputData map[string]interface{}, transformedAt time.Ti
 			}
 		}
 
+		// If core fields weren't at top level, check inside the "message" wrapper.
+		// executeStepWithContext wraps the parsed message as outputData["message"] so
+		// after any step (e.g. data masking) the HL7 data lives one level down.
+		if len(cleanPayload) == 0 {
+			if msg, ok := outputData["message"].(map[string]interface{}); ok {
+				for _, field := range coreFields {
+					if val, exists := msg[field]; exists {
+						cleanPayload[field] = val
+					}
+				}
+				if len(cleanPayload) > 0 {
+					log.Printf("📦 [Output Context] Extracted core message fields from 'message' wrapper (%d fields)", len(cleanPayload))
+				}
+			}
+		}
+
 		// If we extracted some core fields, use that; otherwise mark as empty
 		if len(cleanPayload) > 0 {
 			actualPayload = cleanPayload
@@ -1024,5 +1220,314 @@ func extractOutputMetadata(data map[string]interface{}, format string) map[strin
 	}
 
 	return metadata
+}
+
+// ===============================================================
+// PHASE 2 — MESSAGE ENVELOPE + SEMANTIC VOCABULARY
+// ===============================================================
+//
+// enrichMessageEnvelope builds _semantic_index and _sensitivity_map into the
+// pipeline message map when _format is present.  Called once per pipeline run
+// before the step loop so every executor can use ResolveVariable transparently.
+//
+// Zero breaking changes: pipelines without _format skip the enrichment silently.
+
+// semanticVocab maps semantic path → format-native path.
+// Hard-coded bootstrap vocabulary (Phase 5 will move this to the DB).
+var semanticVocab = map[string]map[string]string{
+	"hl7v2": {
+		"patient.id":             "PID.3",
+		"patient.name.family":    "PID.5.1",
+		"patient.name.given":     "PID.5.2",
+		"patient.dob":            "PID.7",
+		"patient.gender":         "PID.8",
+		"patient.ssn":            "PID.19",
+		"patient.mrn":            "PID.3.1",
+		"patient.phone":          "PID.13.1",
+		"patient.account":        "PID.18",
+		"patient.address.street": "PID.11.1",
+		"patient.address.city":   "PID.11.3",
+		"patient.address.state":  "PID.11.4",
+		"patient.address.zip":    "PID.11.5",
+		"message.type":           "MSH.9.1",
+		"message.id":             "MSH.10",
+		"message.datetime":       "MSH.7",
+		"encounter.id":           "PV1.19",
+		"encounter.class":        "PV1.2",
+		"provider.attending":     "PV1.7",
+		"obs.value":              "OBX.5",
+		"obs.units":              "OBX.6",
+		"obs.status":             "OBX.11",
+	},
+	"fhir": {
+		"patient.id":          "Patient.id",
+		"patient.name.family": "Patient.name[0].family",
+		"patient.name.given":  "Patient.name[0].given",
+		"patient.dob":         "Patient.birthDate",
+		"patient.gender":      "Patient.gender",
+		"patient.ssn":         "Patient.identifier[type=SS].value",
+		"patient.mrn":         "Patient.identifier[type=MR].value",
+		"patient.phone":       "Patient.telecom[system=phone].value",
+		"encounter.id":        "Encounter.id",
+		"encounter.class":     "Encounter.class.code",
+		"obs.value":           "Observation.valueQuantity.value",
+		"obs.units":           "Observation.valueQuantity.unit",
+	},
+	"csv": {
+		"patient.id":          "PATIENT_ID",
+		"patient.name.family": "LAST_NAME",
+		"patient.name.given":  "FIRST_NAME",
+		"patient.dob":         "DOB",
+		"patient.gender":      "GENDER",
+		"patient.ssn":         "SSN",
+		"patient.mrn":         "MRN",
+		"patient.phone":       "PHONE",
+		"patient.account":     "ACCOUNT_NUM",
+		"obs.value":           "VALUE",
+		"obs.units":           "UNIT",
+	},
+}
+
+// phiSemanticPaths lists semantic paths that are PHI under HIPAA Safe Harbor.
+var phiSemanticPaths = []string{
+	"patient.name.family", "patient.name.given",
+	"patient.dob", "patient.ssn", "patient.mrn",
+	"patient.phone", "patient.account",
+	"patient.address.street", "patient.address.zip",
+}
+
+// enrichMessageEnvelope adds _semantic_index and _sensitivity_map to the message.
+// Uses detectMessageFormat (defined above) for format detection.
+// Idempotent — re-running is safe.
+func enrichMessageEnvelope(message map[string]interface{}) {
+	// Respect _format if already wired by engine (parsed_format → _format)
+	format, _ := message["_format"].(string)
+	if format == "" {
+		// Fall back to structural detection
+		format = detectMessageFormat(message)
+		if format != "" {
+			message["_format"] = format
+		}
+	}
+	// Normalise fhir-r4 → fhir for semantic vocab lookup
+	if format == "fhir-r4" || format == "fhir-r4-bundle" {
+		format = "fhir"
+	}
+	if format == "" {
+		return // Unknown format — skip enrichment
+	}
+
+	// Build _semantic_index only if not already present
+	if _, exists := message["_semantic_index"]; !exists {
+		message["_semantic_index"] = buildSemanticIndex(format)
+	}
+
+	// Build _sensitivity_map only if not already present
+	if _, exists := message["_sensitivity_map"]; !exists {
+		message["_sensitivity_map"] = buildSensitivityMap(format)
+	}
+}
+
+// buildSemanticIndex returns a map of semantic_path → native_path for the given format.
+func buildSemanticIndex(format string) map[string]interface{} {
+	vocab, ok := semanticVocab[format]
+	if !ok {
+		return map[string]interface{}{}
+	}
+	idx := make(map[string]interface{}, len(vocab))
+	for semantic, native := range vocab {
+		idx[semantic] = native
+	}
+	return idx
+}
+
+// buildSensitivityMap returns a map of semantic_path → "phi" | "public" for the format.
+func buildSensitivityMap(format string) map[string]interface{} {
+	vocab, ok := semanticVocab[format]
+	if !ok {
+		return map[string]interface{}{}
+	}
+	phiSet := make(map[string]bool, len(phiSemanticPaths))
+	for _, p := range phiSemanticPaths {
+		phiSet[p] = true
+	}
+	sm := make(map[string]interface{}, len(vocab))
+	for semantic := range vocab {
+		if phiSet[semantic] {
+			sm[semantic] = "phi"
+		} else {
+			sm[semantic] = "public"
+		}
+	}
+	return sm
+}
+
+// buildInitialVariableContext registers semantic message paths into the
+// PipelineVariableContext so the no-code UI can autocomplete them.
+func buildInitialVariableContext(message map[string]interface{}, vc *models.PipelineVariableContext) {
+	idx, ok := message["_semantic_index"].(map[string]interface{})
+	if !ok {
+		return
+	}
+	sm, _ := message["_sensitivity_map"].(map[string]interface{})
+	for semanticPath, nativePath := range idx {
+		sensitivity := ""
+		if sm != nil {
+			sensitivity, _ = sm[semanticPath].(string)
+		}
+		desc := fmt.Sprintf("native: %v | sensitivity: %s", nativePath, sensitivity)
+		// RegisterVariable(stepName, stepType, varName, value, varType)
+		vc.RegisterVariable("message", "input", semanticPath, desc, models.VarTypeString)
+	}
+}
+
+// ===============================================================
+// PHASE 4 — PARALLEL EXECUTION BY SEQUENCE NUMBER
+// ===============================================================
+//
+// Steps with the same Sequence number run in parallel goroutines.
+// Simple rule: same Sequence = same "wave".
+// Control/routing steps (control.loop, conditional, switch/case) are always
+// run sequentially to preserve routing state integrity.
+//
+// The main ExecutePipeline loop handles sequential steps.
+// executeParallelGroup is called by the pipeline service when it detects
+// that multiple enabled non-routing steps share a sequence number.
+
+// parallelSafeStepTypes lists step types that are safe to run in parallel.
+// Control flow steps must remain sequential.
+var parallelSafeTypes = map[string]bool{
+	"enrichment.api":      true,
+	"enrichment.database": true,
+	"enrichment.script":   true,
+	"field_mapping":       true,
+	"data_masking":        true,
+	"remove_duplicates":   true,
+	"normalizer":          true,
+	"deidentify":          true,
+	"connector.outbound":  true,
+}
+
+// groupStepsBySequence returns steps grouped by their Sequence number, preserving order.
+func groupStepsBySequence(steps []models.TransformationStep) [][]models.TransformationStep {
+	if len(steps) == 0 {
+		return nil
+	}
+
+	type group struct {
+		seq   int
+		steps []models.TransformationStep
+	}
+
+	var groups []group
+	seqIdx := make(map[int]int) // sequence → index in groups
+
+	for _, s := range steps {
+		idx, exists := seqIdx[s.Sequence]
+		if !exists {
+			groups = append(groups, group{seq: s.Sequence, steps: []models.TransformationStep{s}})
+			seqIdx[s.Sequence] = len(groups) - 1
+		} else {
+			groups[idx].steps = append(groups[idx].steps, s)
+		}
+	}
+
+	result := make([][]models.TransformationStep, len(groups))
+	for i, g := range groups {
+		result[i] = g.steps
+	}
+	return result
+}
+
+// executeParallelGroup runs a group of steps concurrently when all are parallel-safe.
+// Outputs are merged into execCtx.StepOutputs under each step's own namespace.
+// If any step in the group is NOT parallel-safe, the whole group runs sequentially.
+func (tps *TransformationPipelineService) executeParallelGroup(
+	ctx context.Context,
+	group []models.TransformationStep,
+	execCtx *models.PipelineExecutionContext,
+	seqOffset int,
+) {
+	if len(group) <= 1 {
+		return // Single step — handled by main loop
+	}
+
+	// Check all steps are parallel-safe
+	for _, s := range group {
+		if !parallelSafeTypes[s.StepType] {
+			log.Printf("⏩ Parallel group seq=%d contains non-parallel step '%s' — running sequentially", s.Sequence, s.StepType)
+			return // Caller should fall back to sequential
+		}
+	}
+
+	log.Printf("⚡ Running %d steps in parallel (sequence=%d)", len(group), group[0].Sequence)
+
+	type result struct {
+		output    map[string]interface{}
+		stepOut   *models.StepOutput
+		namespace string
+		err       error
+	}
+
+	results := make([]result, len(group))
+	var wg sync.WaitGroup
+	for idx, step := range group {
+		wg.Add(1)
+		go func(i int, s models.TransformationStep) {
+			defer wg.Done()
+			ns := tps.generateStepNamespace(&s, seqOffset+i)
+			out, stepOut, err := tps.executeStepWithContext(ctx, &s, execCtx, seqOffset+i)
+			results[i] = result{output: out, stepOut: stepOut, namespace: ns, err: err}
+		}(idx, step)
+	}
+	wg.Wait()
+
+	// Merge results — order by group index for determinism
+	for _, r := range results {
+		if r.err != nil {
+			log.Printf("⚠️  Parallel step '%s' error: %v", r.namespace, r.err)
+			continue
+		}
+		if r.stepOut != nil && r.namespace != "" {
+			execCtx.StepOutputs[r.namespace] = *r.stepOut
+		}
+		// Merge output keys into execCtx.Message (use mutex-free approach — parallel steps
+		// should write to DIFFERENT output fields; overlaps are last-write-wins)
+		if r.output != nil {
+			for k, v := range r.output {
+				execCtx.Message[k] = v
+			}
+		}
+	}
+}
+
+// ===============================================================
+// PHASE 3 — PHI EGRESS GATE
+// ===============================================================
+
+// checkEgressPHI returns the list of PHI semantic paths that are present in the
+// message but have NOT been masked (i.e., not listed in _masked_fields).
+// Returns nil/empty when _sensitivity_map is absent (backward compatible).
+func checkEgressPHI(message map[string]interface{}) []string {
+	sm, ok := message["_sensitivity_map"].(map[string]interface{})
+	if !ok {
+		return nil // No sensitivity map — skip check
+	}
+
+	// Build set of already-masked fields
+	maskedSet := make(map[string]bool)
+	if mf, ok := message["_masked_fields"].([]interface{}); ok {
+		for _, f := range mf {
+			maskedSet[fmt.Sprintf("%v", f)] = true
+		}
+	}
+
+	var violations []string
+	for path, sensitivity := range sm {
+		if fmt.Sprintf("%v", sensitivity) == "phi" && !maskedSet[path] {
+			violations = append(violations, path)
+		}
+	}
+	return violations
 }
 

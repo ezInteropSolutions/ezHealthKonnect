@@ -76,6 +76,7 @@ class InterfacesController {
                     i.deployment_mode,
                     i.auto_start,
                     i.deployment_delay_seconds,
+                    i.log_level,
                     i.debug_logging,
                     i.log_retention_days,
                     i.retain_error_logs_forever,
@@ -123,7 +124,8 @@ class InterfacesController {
                 auto_start: item.auto_start || false,
                 deployment_delay_seconds: item.deployment_delay_seconds || 0,
 
-                // Logging settings (V33)
+                // Logging settings (V33 + V59)
+                log_level: item.log_level || 'debug',
                 debug_logging: item.debug_logging || false,
                 log_retention_days: item.log_retention_days || 30,
                 retain_error_logs_forever: item.retain_error_logs_forever !== false,
@@ -300,119 +302,8 @@ class InterfacesController {
                 );
                 console.log(`✅ Created PostgreSQL table: ${tableName}`);
 
-                // Create MongoDB collection proactively
-                try {
-                    const { MongoClient } = require('mongodb');
-                    const mongoUri = process.env.MONGODB_URI;
-                    const mongoDbName = process.env.MONGODB_DATABASE || 'ezhealthkonnect';
-
-                    if (mongoUri) {
-                        const mongoClient = new MongoClient(mongoUri);
-                        await mongoClient.connect();
-                        const db = mongoClient.db(mongoDbName);
-                        const collectionName = `raw_messages_${newInterfaceItem.id}`;
-
-                        // Check if collection exists
-                        const collections = await db.listCollections({ name: collectionName }).toArray();
-                        if (collections.length === 0) {
-                            // Create collection with schema validation
-                            await db.createCollection(collectionName, {
-                                validator: {
-                                    $jsonSchema: {
-                                        bsonType: "object",
-                                        required: ["message_id", "raw_content", "received_at"],
-                                        properties: {
-                                            message_id: { bsonType: "string" },
-                                            raw_content: { bsonType: "string" },
-                                            parsed_content: { bsonType: "object" },
-                                            received_at: { bsonType: "date" },
-                                            parsed_at: { bsonType: "date" },
-                                            parsing_time_ms: { bsonType: "int" },
-                                            parsed_format: { bsonType: "string" }
-                                        }
-                                    }
-                                }
-                            });
-
-                            // Create indexes
-                            const collection = db.collection(collectionName);
-                            await collection.createIndex({ message_id: 1 }, { unique: true });
-                            await collection.createIndex({ received_at: -1 });
-                            await collection.createIndex({ parsed_at: -1 });
-                            await collection.createIndex({ parsed_format: 1 });
-
-                            console.log(`✅ Created MongoDB raw collection: ${collectionName}`);
-                        } else {
-                            console.log(`ℹ️  MongoDB raw collection already exists: ${collectionName}`);
-                        }
-
-                        // Create transformed messages collection
-                        const transformedCollectionName = `transformed_messages_intf_${newInterfaceItem.id.replace(/-/g, '_')}`;
-                        const transformedCollections = await db.listCollections({ name: transformedCollectionName }).toArray();
-
-                        if (transformedCollections.length === 0) {
-                            await db.createCollection(transformedCollectionName, {
-                                validator: {
-                                    $jsonSchema: {
-                                        bsonType: "object",
-                                        required: ["message_id", "interface_id", "created_at"],
-                                        properties: {
-                                            message_id: { bsonType: "string" },
-                                            correlation_id: { bsonType: "string" },
-                                            interface_id: { bsonType: "string" },
-                                            message_type: { bsonType: "string" },
-                                            fhir_bundle: { bsonType: "object" },
-                                            fhir_resources: {
-                                                bsonType: "array",
-                                                items: { bsonType: "object" }
-                                            },
-                                            transformation_pipeline_id: { bsonType: "string" },
-                                            transformation_steps: {
-                                                bsonType: "array",
-                                                items: { bsonType: "object" }
-                                            },
-                                            transformation_status: {
-                                                bsonType: "string",
-                                                enum: ["pending", "in_progress", "completed", "failed", "partial"]
-                                            },
-                                            created_at: { bsonType: "date" },
-                                            completed_at: { bsonType: "date" },
-                                            transformation_time_ms: { bsonType: "int" },
-                                            error_count: { bsonType: "int" },
-                                            errors: {
-                                                bsonType: "array",
-                                                items: { bsonType: "object" }
-                                            },
-                                            validation_results: { bsonType: "object" }
-                                        }
-                                    }
-                                }
-                            });
-
-                            // Create indexes for transformed collection
-                            const transformedCollection = db.collection(transformedCollectionName);
-                            await transformedCollection.createIndex({ message_id: 1 }, { unique: true });
-                            await transformedCollection.createIndex({ interface_id: 1 });
-                            await transformedCollection.createIndex({ correlation_id: 1 });
-                            await transformedCollection.createIndex({ created_at: -1 });
-                            await transformedCollection.createIndex({ completed_at: -1 });
-                            await transformedCollection.createIndex({ transformation_status: 1 });
-                            await transformedCollection.createIndex({ message_type: 1 });
-                            await transformedCollection.createIndex({ 'fhir_resources.resourceType': 1 });
-
-                            console.log(`✅ Created MongoDB transformed collection: ${transformedCollectionName}`);
-                        } else {
-                            console.log(`ℹ️  MongoDB transformed collection already exists: ${transformedCollectionName}`);
-                        }
-
-                        await mongoClient.close();
-                    } else {
-                        console.log(`⚠️  MongoDB URI not configured - collection will be created on first message`);
-                    }
-                } catch (mongoError) {
-                    console.warn(`⚠️  MongoDB collection creation skipped (non-critical):`, mongoError.message);
-                    console.log(`ℹ️  MongoDB collection will be created automatically on first message`);
-                }
+                // Object storage buckets are created on-demand when messages are received.
+                // No pre-provisioning needed.
             } catch (tableError) {
                 console.error(`❌ Failed to create storage for interface ${newInterfaceItem.id}:`, tableError);
                 // Don't fail interface creation if table creation fails - table can be created on first message
@@ -778,7 +669,7 @@ class InterfacesController {
             const interfaceId = req.params.interfaceId;
 
             // New: Support request body parameters from delete modal
-            const deleteType = req.body?.deleteType || req.query.deleteType || 'soft'; // soft or hard
+            const deleteType = req.body?.deleteType || req.query.deleteType || req.query.mode || 'soft'; // soft or hard
             const dataRetention = req.body?.dataRetention || req.query.dataRetention || 'keep_all'; // keep_all, keep_errors, delete_all
 
             // Legacy support: ?retainData=false maps to hard delete + delete_all
@@ -813,16 +704,8 @@ class InterfacesController {
 
             const interfaceItem = interfaceData[0];
 
-            // Check if interface is running
-            if (interfaceItem.status === 'active') {
-                return res.status(400).json({
-                    success: false,
-                    error: 'Cannot delete an active interface. Please stop it first.'
-                });
-            }
-
             // CRITICAL: Deactivate interface in Go backend FIRST to release ports/resources
-            // Even if status is not 'active', there might be zombie listeners
+            // Do this regardless of DB status — Go runtime may be active even if DB shows inactive
             try {
                 console.log(`🛑 Deactivating interface ${interfaceId} in Go backend before delete...`);
                 const goBackendUrl = `http://localhost:${process.env.API_PORT || 8080}/api/processing/interfaces/${interfaceId}/deactivate`;
@@ -839,6 +722,18 @@ class InterfacesController {
             } catch (deactivateError) {
                 console.log(`⚠️  Could not deactivate interface in Go backend: ${deactivateError.message}`);
                 console.log(`   Proceeding with delete anyway (interface may already be stopped)`);
+            }
+
+            // If DB still shows 'active', update to 'inactive' now that Go runtime is stopped
+            if (interfaceItem.status === 'active') {
+                console.log(`📝 Updating DB status from 'active' to 'inactive' for interface ${interfaceId}`);
+                await this.database.sequelize.query(`
+                    UPDATE interfaces SET status = 'inactive', updated_at = NOW()
+                    WHERE id = :interfaceId
+                `, {
+                    replacements: { interfaceId },
+                    type: this.database.sequelize.QueryTypes.UPDATE
+                });
             }
 
             // Step 1: Mark interface as deleted (soft or hard delete)
@@ -966,8 +861,9 @@ class InterfacesController {
                 auto_start,
                 deployment_delay_seconds,
                 status,
-                // Logging settings (V33)
+                // Logging settings (V33 + V59)
                 debug_logging,
+                log_level,
                 log_retention_days,
                 retain_error_logs_forever
             } = req.body;
@@ -1043,8 +939,9 @@ class InterfacesController {
             replacements.deployment_delay_seconds = parseInt(deployment_delay_seconds) || 0;
             replacements.status = status || 'inactive';
 
-            // Add logging settings to replacements (V33)
-            replacements.debug_logging = debug_logging === true || debug_logging === 'true';
+            // Add logging settings to replacements (V33 + V59)
+            replacements.log_level = ['debug','info','warning','error','off'].includes(log_level) ? log_level : 'debug';
+            replacements.debug_logging = replacements.log_level !== 'off';
             replacements.log_retention_days = parseInt(log_retention_days) || 30;
             replacements.retain_error_logs_forever = retain_error_logs_forever !== false && retain_error_logs_forever !== 'false';
 
@@ -1073,6 +970,7 @@ class InterfacesController {
                     deployment_mode = :deployment_mode,
                     auto_start = :auto_start,
                     deployment_delay_seconds = :deployment_delay_seconds,
+                    log_level = :log_level,
                     debug_logging = :debug_logging,
                     log_retention_days = :log_retention_days,
                     retain_error_logs_forever = :retain_error_logs_forever,

@@ -120,8 +120,21 @@ func (h *HTTPClientService) BuildRequest(
 			} else {
 				return nil, fmt.Errorf("form-encoded body must be map[string]string")
 			}
+		} else if bodyStr, ok := config.Body.(string); ok {
+			// Body is already a pre-serialized string (FHIR JSON, HL7, CSV, etc.)
+			// Use as-is — do NOT json.Marshal again or the string gets wrapped in quotes
+			bodyReader = strings.NewReader(bodyStr)
+			if contentType == "" {
+				contentType = "application/json"
+			}
+		} else if bodyBytes, ok := config.Body.([]byte); ok {
+			// Body is raw bytes
+			bodyReader = bytes.NewReader(bodyBytes)
+			if contentType == "" {
+				contentType = "application/octet-stream"
+			}
 		} else {
-			// Default: JSON encoding
+			// Struct/map — JSON-encode it
 			bodyBytes, err := json.Marshal(config.Body)
 			if err != nil {
 				return nil, fmt.Errorf("failed to marshal request body: %w", err)

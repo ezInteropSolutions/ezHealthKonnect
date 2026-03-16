@@ -10,9 +10,19 @@ import "time"
 
 // ParseRequest represents an incoming HL7 parse request
 type ParseRequest struct {
-	RawMessage  string `json:"rawMessage" binding:"required"`
-	UseEnhanced bool   `json:"useEnhanced"`
-	MessageType string `json:"messageType,omitempty"`
+	RawMessage      string `json:"rawMessage" binding:"required"`
+	UseEnhanced     bool   `json:"useEnhanced"`
+	MessageType     string `json:"messageType,omitempty"`
+	// EscapeHandling controls how HL7 escape sequences are handled.
+	// "decode"      – convert \F\→|  \S\→^  \T\→&  \R\→~  \E\→\  \H\/\N\→stripped
+	// "passthrough" – leave raw escape sequences as-is (default)
+	EscapeHandling string `json:"escapeHandling,omitempty"`
+}
+
+// ParseOptions controls optional behaviours during HL7 parsing.
+type ParseOptions struct {
+	// EscapeHandling: "decode" | "passthrough" (default)
+	EscapeHandling string
 }
 
 // ParseResponse represents the response from HL7 parsing

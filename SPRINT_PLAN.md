@@ -1,6 +1,6 @@
 # ezHealthKonnect — Sprint Plan & Tech Debt Tracker
 
-*Last assessed: 2026-02-26*
+*Last assessed: 2026-02-27*
 
 ---
 
@@ -11,10 +11,10 @@
 | Sprint 1 | P12, P11, P8, P13 | ✅ Complete |
 | Sprint 2 | P3, P6 | ✅ Complete |
 | Sprint 3 | P2, P5 | ✅ Complete |
-| Sprint 4 | P7 | 🔶 Partially done |
-| Sprint 5 | P9, P1 | ⬜ Not started |
-| Sprint 6 | P10 | 🔶 Partially done |
-| Sprint 7 | P4 | 🔶 Partially done |
+| Sprint 4 | P7 | ✅ Complete |
+| Sprint 5 | Normalizer step + 31 + 40 E2E tests | ✅ Complete — 241 total passing |
+| Sprint 6 | P9 (backpressure), P1 (HIPAA), P10 (OOP builders) | ✅ Complete |
+| Sprint 7 | P4 Tier 1 connectors | ✅ Complete — tcp_mllp_outbound, sftp_inbound, sftp_outbound, mongodb_outbound |
 
 ---
 
@@ -135,23 +135,25 @@
 
 ---
 
-### 🔶 P7 — enriched.* Accumulation Fix *(Sprint 4 — HIGH RISK)*
+### ✅ P7 — enriched.* Accumulation Fix *(Sprint 4)*
 **Goal**: Remove the `enriched.*` wrapper key. Executors return flat maps; engine stores under `steps.{ns}.step_output.*`.
 
-**Current state** — 16 `"enriched."` references remain in executors:
-- `api_enrichment_executor.go` — default targetPath `"enriched.api"`
-- `database_enrichment_executor.go` — default targetPath `"enriched.database"`
-- `script_enrichment_executor.go` — default targetPath `"enriched.script"`
-- `field_mapping_executor.go` — default targetPath `"enriched.field_mapping"`
-- `file_parser_executor.go` — default targetPath `"enriched.file_parser"`
+**Done**:
+- `api_enrichment_executor.go` — removed `SetNestedValue(inputData, targetPath, ...)` writes + deleted `getTargetPath()` method; `TargetPath` config marked deprecated
+- `database_enrichment_executor.go` — removed all `storeResult()` call sites + deleted `storeResult()` method; `TargetPath` config marked deprecated
+- `script_enrichment_executor.go` — removed `SetNestedValue(inputData, targetPath, result)` + targetPath local var; `TargetPath` config marked deprecated
+- `field_mapping_executor.go` — removed `enriched := EnsureMapExists(inputData, "enriched")` + `enriched["field_mapping"] = mappedFields`; flattened `_stepOutput` from `{"mapped_fields": mappedFields}` → `mappedFields` directly
+- `services/transformation_pipeline_helpers.go` — removed "Preserve enriched data" carry-over block (was lines 591-597); added P7 comment
+- `controllers/pipelineController.js` — added `migrateEnrichedPaths(steps)` function; called on every pipeline save; rewrites `enriched.{type}.{field}` → `steps.{ns}.step_output.{field}`; detects ambiguous cases (multiple steps of same type) and preserves old paths with console.warn
+- Go unit tests updated: `api_enrichment_executor_test.go` (8 tests), `enrichment_test.go` (5 tests), `api_enrichment_integration_test.go` (3 integration tests) — all assertions updated from `output["enriched"]["subkey"]["field"]` → `output["_stepOutput"]["field"]`
+- `tests/playwright/sprint4-enriched-removal.spec.js` — 10 tests (5 migration, 3 executor output, 2 regression)
 
-**What to build**:
-1. Each executor returns flat output map (e.g. `{"mrn": "12345"}` not `{"enriched": {"api": {"mrn": "12345"}}}`)
-2. Engine merges into `steps.{ns}.step_output.*` automatically (P3 prerequisite)
-3. Migration: on first pipeline save, rewrite old `enriched.*` path references in step configs → `steps.{ns}.step_output.*`
-
-**Risk**: HIGH — breaks existing pipeline configs that reference `enriched.*` paths. Requires migration + backward compat period.
-**Prerequisite**: P3 (execCtx immutability) must be done first.
+**Architecture after P7** — clean two-layer model:
+```
+inputData["_stepOutput"]         ← primary output (executor sets this)
+inputData["steps"][ns]           ← runtime injection by engine for downstream reference
+```
+Downstream steps access prior outputs via `steps.{namespace}.step_output.{field}`.
 
 ---
 
@@ -216,6 +218,7 @@ CREATE TABLE dead_letter_queue (
 - `StepConfigBuilderFactory.js` ✅
 - `FileParserBuilder.js` ✅ (registered + wired)
 - `RemoveDuplicatesBuilder.js` ✅ (registered + wired)
+- `DataMaskingBuilder.js` ✅ (registered + wired — 1224 lines, SOLID OOP, 5 strategies + maskAllPHI + preserveFormat, HIPAA PHI chips for HL7v2/FHIR/JSON, `GetOutputVariables()` + `GetConfigSchema()` in executor, 10 Playwright E2E tests)
 - `SwitchCaseBuilder.js`, `IfThenElseBuilder.js`, `ValidationRuleBuilder.js`, `ForEachLoopBuilder.js`, many more ✅
 
 **Remaining** — steps still rendered inline in `PropertiesPanel.js` (not via registry):
@@ -234,22 +237,23 @@ CREATE TABLE dead_letter_queue (
 ### 🔶 P4 — Connector Catalog *(Sprint 7)*
 **Goal**: Implement the 24 stub connectors. Priority order: Tier 1 first.
 
-**Done** (11 files, ~8 real implementations):
+**Done** (15 files, Tier 1 complete):
 - `tcp_mllp_inbound.go` ✅ (full MLLP, TLS, ACK/NACK)
+- `tcp_mllp_outbound.go` ✅ (persistent/per-message, TLS, ACK validation, retry)
 - `http_outbound.go` ✅
 - `http_fhir_inbound.go` ✅
 - `file_listener.go` ✅
 - `file_writer.go` ✅
 - `postgresql_inbound.go` ✅
 - `postgresql_outbound.go` ✅
+- `sftp_inbound.go` ✅ (SSH polling, password+key auth, archive/delete after processing)
+- `sftp_outbound.go` ✅ (SCP-over-SSH upload, password+key auth)
+- `mongodb_outbound.go` ✅ (insert/upsert, BSON, collection override, batch support)
 - `base_connector.go`, `connector_factory.go`, `connector_interface.go`, `database_base.go` — framework
 
-**Remaining** (24 stubs in `connector_stubs.go`):
+**Remaining** (Tier 2–3 stubs in `connector_stubs.go`):
 | Tier | Connector | Priority |
 |------|-----------|----------|
-| 1 | `tcp_mllp_outbound` | HIGH — middleware scenario |
-| 1 | `sftp_inbound`, `sftp_outbound` | HIGH — file exchange |
-| 1 | `mongodb_outbound` | HIGH — FHIR persistence |
 | 2 | `kafka_inbound`, `kafka_outbound` | MEDIUM |
 | 2 | `rabbitmq_inbound`, `rabbitmq_outbound` | MEDIUM |
 | 2 | `aws_s3_inbound`, `aws_s3_outbound` | MEDIUM |
@@ -262,11 +266,12 @@ CREATE TABLE dead_letter_queue (
 ```
 Sprint 1  ✅  P12 (layer), P11 (logging), P8 (normalizer), P13 (standards)
 Sprint 2  ✅  P3 (immutability), P6 (DB pooling)
-Sprint 3  ⬜  P2 (error handling / circuit breaker), P5 (result caching)  ← NEXT
-Sprint 4  ⬜  P7 (enriched.* removal)                      ← HIGH RISK, alone
-Sprint 5  ⬜  P9 (backpressure), P1 (HIPAA)
-Sprint 6  ⬜  P10 (frontend OOP completion)                 ← HIGH RISK, alone
-Sprint 7  ⬜  P4 (connector catalog, Tier 1)
+Sprint 3  ✅  P2 (error handling / circuit breaker), P5 (result caching)
+Sprint 4  ✅  P7 (enriched.* removal)
+Sprint 5  ✅  Normalizer step + 30 E2E tests (200 total passing)
+Sprint 6  ⬜  P9 (backpressure), P1 (HIPAA)
+Sprint 7  ⬜  P10 (frontend OOP completion)                 ← HIGH RISK, alone
+Sprint 8  ⬜  P4 (connector catalog, Tier 1)
 ```
 
 ## Quick Wins (can be done any time, < 1 hour each)
@@ -274,4 +279,4 @@ Sprint 7  ⬜  P4 (connector catalog, Tier 1)
 - [x] ~~Delete `controllers/pipelineController_old.js`~~ *(done — Sprint 2)*
 - [x] ~~`models/execution_group_models.go:15` — remove `db:"layer"` tag~~ *(done — Sprint 2)*
 - [x] ~~`services/transformation_pipeline_service.go` — add `catch → suppress` alias~~ *(done — Sprint 2)*
-- [ ] Remaining `fmt.Printf` → `logger.Info` in `transformation_pipeline_service.go` (~15 calls)
+- [x] ~~`transformation_pipeline_service.go` — migrate all 37 `fmt.Printf`/`log.Printf` calls to structured `logger.*`~~ *(done — 2026-02-26)*

@@ -60,9 +60,6 @@ func (e *FieldMappingExecutor) Execute(
 		return inputData, err
 	}
 
-	// Ensure enriched map exists
-	enriched := executors.EnsureMapExists(inputData, "enriched")
-
 	// Create field mapping results
 	mappedFields := make(map[string]interface{})
 
@@ -98,9 +95,6 @@ func (e *FieldMappingExecutor) Execute(
 		log.Printf("   ✅ %s = %v", mapping.LHS, finalValue)
 	}
 
-	// Store results in enriched.field_mapping
-	enriched["field_mapping"] = mappedFields
-
 	log.Printf("✅ [FieldMapping] Mapped %d fields", len(mappedFields))
 
 	// Add metadata if configured
@@ -113,10 +107,9 @@ func (e *FieldMappingExecutor) Execute(
 		log.Printf("✅ [FieldMapping] Added %d metadata entries", len(config.Metadata))
 	}
 
-	// STANDARDIZED: Variables (the mapped fields) + execution details
-	e.SetStepOutputWithDetails(inputData, map[string]interface{}{
-		"mapped_fields": mappedFields,
-	}, map[string]interface{}{
+	// STANDARDIZED: Variables (the mapped fields, flat) + execution details.
+	// P7: fields are flat in _stepOutput → downstream uses steps.{ns}.step_output.{fieldName}
+	e.SetStepOutputWithDetails(inputData, mappedFields, map[string]interface{}{
 		"field_count":    len(mappedFields),
 		"transformation": "field_mapping",
 	})

@@ -543,6 +543,105 @@ class DragDropManager {
     }
 
     /**
+     * Show a non-blocking error dialog (no cancel button — just "OK" to dismiss).
+     * Use this instead of showNotification when the error message needs to be read,
+     * not just glanced at from a toast at the bottom of the screen.
+     * @param {string} message - Error detail
+     * @param {string} title   - Dialog title (default: 'Error')
+     * @returns {Promise<void>}
+     */
+    showErrorDialog(message, title = 'Error') {
+        return new Promise((resolve) => {
+            const overlay = document.createElement('div');
+            overlay.style.cssText = `
+                position: fixed;
+                top: 0; left: 0; right: 0; bottom: 0;
+                background: rgba(0,0,0,0.5);
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                z-index: 100000;
+                animation: fadeIn 0.2s ease;
+            `;
+
+            const dialog = document.createElement('div');
+            dialog.style.cssText = `
+                background: white;
+                border-radius: 12px;
+                box-shadow: 0 20px 25px -5px rgba(0,0,0,0.15);
+                max-width: 480px;
+                width: 90%;
+                overflow: hidden;
+                animation: scaleIn 0.2s ease;
+            `;
+
+            dialog.innerHTML = `
+                <div style="
+                    padding: 16px 20px;
+                    background: #fee2e2;
+                    border-bottom: 1px solid #fca5a5;
+                    display: flex;
+                    align-items: center;
+                    gap: 10px;
+                ">
+                    <span style="font-size: 20px;">❌</span>
+                    <span style="font-weight: 600; color: #1e293b; font-size: 16px;">${this.escapeHtml(title)}</span>
+                </div>
+                <div style="
+                    padding: 20px;
+                    color: #374151;
+                    font-size: 14px;
+                    line-height: 1.6;
+                    white-space: pre-wrap;
+                    word-break: break-word;
+                ">${this.escapeHtml(message)}</div>
+                <div style="
+                    padding: 12px 20px;
+                    background: #f8fafc;
+                    border-top: 1px solid #e2e8f0;
+                    display: flex;
+                    justify-content: flex-end;
+                ">
+                    <button class="error-ok-btn" style="
+                        padding: 8px 24px;
+                        border: none;
+                        background: #ef4444;
+                        color: white;
+                        border-radius: 6px;
+                        cursor: pointer;
+                        font-size: 14px;
+                        font-weight: 500;
+                    ">OK</button>
+                </div>
+            `;
+
+            overlay.appendChild(dialog);
+            document.body.appendChild(overlay);
+
+            const cleanup = () => {
+                overlay.style.animation = 'fadeOut 0.2s ease';
+                dialog.style.animation = 'scaleOut 0.2s ease';
+                setTimeout(() => { overlay.remove(); resolve(); }, 180);
+            };
+
+            const okBtn = dialog.querySelector('.error-ok-btn');
+            okBtn.focus();
+            okBtn.onmouseenter = () => okBtn.style.filter = 'brightness(1.1)';
+            okBtn.onmouseleave = () => okBtn.style.filter = '';
+            okBtn.onclick = cleanup;
+            overlay.onclick = (e) => { if (e.target === overlay) cleanup(); };
+
+            const handleKeydown = (e) => {
+                if (e.key === 'Escape' || e.key === 'Enter') {
+                    cleanup();
+                    document.removeEventListener('keydown', handleKeydown);
+                }
+            };
+            document.addEventListener('keydown', handleKeydown);
+        });
+    }
+
+    /**
      * Escape HTML to prevent XSS
      */
     escapeHtml(text) {

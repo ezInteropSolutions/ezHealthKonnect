@@ -90,17 +90,24 @@ func (c *TransformationTestController) TestPipeline(ctx *gin.Context) {
 		}
 		log.Printf("📋 Using pipeline object: interface=%s, message_type=%s", interfaceID, messageType)
 
-		// Look up the pipeline ID from interface + message type
-		query := `SELECT id FROM transformation_pipelines WHERE interface_id = $1 AND message_type = $2`
-		err = c.db.QueryRow(query, interfaceID, messageType).Scan(&req.PipelineID)
-		if err != nil {
-			ctx.JSON(http.StatusNotFound, gin.H{
-				"success": false,
-				"error":   fmt.Sprintf("Pipeline not found for interface %s and message type %s", interfaceID, messageType),
-			})
-			return
+		// If the inline pipeline has execution_groups, it is self-contained — no DB lookup needed
+		_, hasExecutionGroups := req.Pipeline["execution_groups"]
+		if hasExecutionGroups {
+			log.Printf("✅ Inline pipeline with execution_groups — skipping DB lookup for pipeline ID")
+			req.PipelineID = "inline-test"
+		} else {
+			// Look up the pipeline ID from interface + message type
+			query := `SELECT id FROM transformation_pipelines WHERE interface_id = $1 AND message_type = $2`
+			err = c.db.QueryRow(query, interfaceID, messageType).Scan(&req.PipelineID)
+			if err != nil {
+				ctx.JSON(http.StatusNotFound, gin.H{
+					"success": false,
+					"error":   fmt.Sprintf("Pipeline not found for interface %s and message type %s", interfaceID, messageType),
+				})
+				return
+			}
+			log.Printf("✅ Found pipeline ID from interface+messageType: %s", req.PipelineID)
 		}
-		log.Printf("✅ Found pipeline ID from interface+messageType: %s", req.PipelineID)
 	}
 
 	if interfaceID == "" || messageType == "" {
@@ -399,125 +406,114 @@ func (c *TransformationTestController) convertFrontendPipeline(pipelineData map[
 		fmt.Printf("   ✅ Pipeline config loaded: %v\n", getMapKeys(pc))
 	}
 
-	// Process layers (pre, core, post)
-	layers, ok := pipelineData["layers"].(map[string]interface{})
-	if !ok {
-		fmt.Printf("   ❌ pipeline missing 'layers' field!\n")
-		return nil, fmt.Errorf("pipeline missing 'layers' field")
-	}
-	fmt.Printf("   ✅ Found layers: %v\n", getMapKeys(layers))
+	// Collect all steps — support both formats:
+	// 1. Top-level execution_groups (V50+, layers removed)
+	// 2. layers map with pre/core/post structure (legacy)
+	var allRawSteps []interface{}
 
-	// Layer order for consistent processing
-	layerOrder := []string{"pre", "core", "post"}
-	sequence := 10
-
-	for _, layerName := range layerOrder {
-		layerData, exists := layers[layerName]
-		if !exists {
-			fmt.Printf("   ⚠️ Layer '%s' not found\n", layerName)
-			continue
-		}
-
-		layerMap, ok := layerData.(map[string]interface{})
-		if !ok {
-			fmt.Printf("   ⚠️ Layer '%s' is not a map (type=%T)\n", layerName, layerData)
-			continue
-		}
-		fmt.Printf("   📦 Layer '%s' keys: %v\n", layerName, getMapKeys(layerMap))
-
-		// Get steps from this layer - check both "steps" and "execution_groups" formats
-		var steps []interface{}
-
-		// Try "steps" first (simpler format)
-		if directSteps, hasSteps := layerMap["steps"].([]interface{}); hasSteps {
-			steps = directSteps
-			fmt.Printf("   📦 Layer '%s' has %d direct steps\n", layerName, len(steps))
-		} else if execGroups, hasGroups := layerMap["execution_groups"].([]interface{}); hasGroups {
-			// Try "execution_groups" format (frontend sends this)
-			fmt.Printf("   📦 Layer '%s' has %d execution_groups\n", layerName, len(execGroups))
-			// Extract steps from each execution group
-			for _, group := range execGroups {
-				if groupMap, ok := group.(map[string]interface{}); ok {
-					if groupSteps, ok := groupMap["steps"].([]interface{}); ok {
-						steps = append(steps, groupSteps...)
-					}
+	if execGroups, ok := pipelineData["execution_groups"].([]interface{}); ok {
+		fmt.Printf("   ✅ Found top-level execution_groups (%d groups)\n", len(execGroups))
+		for _, group := range execGroups {
+			if groupMap, ok := group.(map[string]interface{}); ok {
+				if groupSteps, ok := groupMap["steps"].([]interface{}); ok {
+					allRawSteps = append(allRawSteps, groupSteps...)
 				}
 			}
-			fmt.Printf("   📦 Layer '%s' extracted %d steps from execution_groups\n", layerName, len(steps))
-		} else {
-			fmt.Printf("   ⚠️ Layer '%s' has no 'steps' or 'execution_groups'\n", layerName)
-			continue
 		}
-
-		if len(steps) == 0 {
-			fmt.Printf("   ⚠️ Layer '%s' has 0 steps after extraction\n", layerName)
-			continue
-		}
-		fmt.Printf("   ✅ Layer '%s' processing %d steps\n", layerName, len(steps))
-
-		for _, stepData := range steps {
-			stepMap, ok := stepData.(map[string]interface{})
+		fmt.Printf("   📦 Extracted %d steps from execution_groups\n", len(allRawSteps))
+	} else if layers, ok := pipelineData["layers"].(map[string]interface{}); ok {
+		fmt.Printf("   ✅ Found layers (legacy format): %v\n", getMapKeys(layers))
+		for _, layerName := range []string{"pre", "core", "post"} {
+			layerData, exists := layers[layerName]
+			if !exists {
+				continue
+			}
+			layerMap, ok := layerData.(map[string]interface{})
 			if !ok {
 				continue
 			}
-
-			// Convert step (value type, not pointer)
-			step := models.TransformationStep{
-				Sequence: sequence,
-				Enabled:  true, // Default to enabled
+			if directSteps, ok := layerMap["steps"].([]interface{}); ok {
+				allRawSteps = append(allRawSteps, directSteps...)
+			} else if execGroups, ok := layerMap["execution_groups"].([]interface{}); ok {
+				for _, group := range execGroups {
+					if groupMap, ok := group.(map[string]interface{}); ok {
+						if groupSteps, ok := groupMap["steps"].([]interface{}); ok {
+							allRawSteps = append(allRawSteps, groupSteps...)
+						}
+					}
+				}
 			}
-
-			// CRITICAL: Extract step ID - needed for conditional routing (skipSteps, nextStep)
-			if id, ok := stepMap["id"].(string); ok {
-				step.ID = id
-			} else if id, ok := stepMap["stepId"].(string); ok {
-				step.ID = id
-			} else if id, ok := stepMap["step_id"].(string); ok {
-				step.ID = id
-			}
-
-			// Extract step fields - support both camelCase (frontend model) and snake_case (database model)
-			if name, ok := stepMap["stepName"].(string); ok {
-				step.StepName = name
-			} else if name, ok := stepMap["step_name"].(string); ok {
-				step.StepName = name
-			}
-			if stepType, ok := stepMap["stepType"].(string); ok {
-				step.StepType = stepType
-			} else if stepType, ok := stepMap["step_type"].(string); ok {
-				step.StepType = stepType
-			}
-			if seq, ok := stepMap["sequence"].(float64); ok {
-				step.Sequence = int(seq)
-			}
-			if enabled, ok := stepMap["enabled"].(bool); ok {
-				step.Enabled = enabled
-			}
-			if config, ok := stepMap["config"].(map[string]interface{}); ok {
-				step.Config = config
-			}
-			if timeout, ok := stepMap["timeoutMs"].(float64); ok {
-				step.TimeoutMs = int(timeout)
-			} else if timeout, ok := stepMap["timeout_ms"].(float64); ok {
-				step.TimeoutMs = int(timeout)
-			}
-			if step.TimeoutMs <= 0 {
-				step.TimeoutMs = 30000 // Default 30s timeout
-			}
-
-			// Debug logging to understand what's being processed
-			log.Printf("   🔍 Processing step: id=%v, stepName=%v, stepType=%v",
-				step.ID, step.StepName, step.StepType)
-			fmt.Printf("   🔍 Raw stepMap keys: %v, id=%v\n", getConfigKeys(stepMap), stepMap["id"])
-
-			// Only add enabled steps
-			if step.Enabled && step.StepName != "" {
-				pipeline.Steps = append(pipeline.Steps, step)
-				log.Printf("   ✅ Added step: %s (%s) - sequence %d", step.StepName, step.StepType, step.Sequence)
-			}
-
-			sequence += 10
 		}
+		fmt.Printf("   📦 Extracted %d steps from layers\n", len(allRawSteps))
+	} else {
+		fmt.Printf("   ❌ pipeline missing both 'execution_groups' and 'layers' fields!\n")
+		return nil, fmt.Errorf("pipeline missing 'execution_groups' or 'layers' field")
+	}
+
+	sequence := 10
+
+	for _, stepData := range allRawSteps {
+		stepMap, ok := stepData.(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		// Convert step (value type, not pointer)
+		step := models.TransformationStep{
+			Sequence: sequence,
+			Enabled:  true, // Default to enabled
+		}
+
+		// CRITICAL: Extract step ID - needed for conditional routing (skipSteps, nextStep)
+		if id, ok := stepMap["id"].(string); ok {
+			step.ID = id
+		} else if id, ok := stepMap["stepId"].(string); ok {
+			step.ID = id
+		} else if id, ok := stepMap["step_id"].(string); ok {
+			step.ID = id
+		}
+
+		// Extract step fields - support both camelCase (frontend model) and snake_case (database model)
+		if name, ok := stepMap["stepName"].(string); ok {
+			step.StepName = name
+		} else if name, ok := stepMap["step_name"].(string); ok {
+			step.StepName = name
+		}
+		if stepType, ok := stepMap["stepType"].(string); ok {
+			step.StepType = stepType
+		} else if stepType, ok := stepMap["step_type"].(string); ok {
+			step.StepType = stepType
+		}
+		if seq, ok := stepMap["sequence"].(float64); ok {
+			step.Sequence = int(seq)
+		}
+		if enabled, ok := stepMap["enabled"].(bool); ok {
+			step.Enabled = enabled
+		}
+		if config, ok := stepMap["config"].(map[string]interface{}); ok {
+			step.Config = config
+		}
+		if timeout, ok := stepMap["timeoutMs"].(float64); ok {
+			step.TimeoutMs = int(timeout)
+		} else if timeout, ok := stepMap["timeout_ms"].(float64); ok {
+			step.TimeoutMs = int(timeout)
+		}
+		if step.TimeoutMs <= 0 {
+			step.TimeoutMs = 30000 // Default 30s timeout
+		}
+
+		// Debug logging to understand what's being processed
+		log.Printf("   🔍 Processing step: id=%v, stepName=%v, stepType=%v",
+			step.ID, step.StepName, step.StepType)
+		fmt.Printf("   🔍 Raw stepMap keys: %v, id=%v\n", getConfigKeys(stepMap), stepMap["id"])
+
+		// Only add enabled steps
+		if step.Enabled && step.StepName != "" {
+			pipeline.Steps = append(pipeline.Steps, step)
+			log.Printf("   ✅ Added step: %s (%s) - sequence %d", step.StepName, step.StepType, step.Sequence)
+		}
+
+		sequence += 10
 	}
 
 	log.Printf("✅ Converted frontend pipeline: %d steps", len(pipeline.Steps))
@@ -1395,17 +1391,17 @@ func (c *TransformationTestController) ValidateScript(ctx *gin.Context) {
 		return
 	}
 
-	// Create a dummy transformation step for validation
+	// Create a dummy transformation step for validation.
+	// Use the executor's canonical type (not the alias) so BaseExecutor.PreExecute passes.
 	step := &models.TransformationStep{
 		StepName: "Script Validation",
-		StepType: "pre.enrichment.script",
+		StepType: executor.GetStepType(),
 		Sequence: 1,
 		Enabled:  true, // CRITICAL: Step must be enabled for validation to work
 		Config: map[string]interface{}{
 			"script":      request.Script,
 			"timeout_ms":  5000,
 			"failOnError": false,
-			"targetPath":  "enriched.script",
 		},
 	}
 

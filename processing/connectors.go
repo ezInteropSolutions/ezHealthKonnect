@@ -149,9 +149,9 @@ func MapLegacyConnectorType(legacyType string, direction string) string {
 	// Map legacy names to new OOB type names
 	if direction == "inbound" {
 		switch legacyType {
-		case "tcp", "hl7", "mllp":
+		case "tcp", "hl7", "mllp", "tcp_mllp":
 			return "tcp_mllp_inbound"
-		case "http", "rest", "api", "fhir":
+		case "http", "rest", "api", "fhir", "http_rest":
 			return "http_rest_inbound"
 		case "file", "filesystem":
 			return "file_listener"

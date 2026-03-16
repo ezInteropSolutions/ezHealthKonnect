@@ -15,6 +15,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/dop251/goja"
 )
 
 // MLLP protocol constants
@@ -30,6 +32,23 @@ type ConnectionInfo struct {
 	OriginalMsg   string
 	ConnID        string
 	ReceivedAt    time.Time
+}
+
+// ACKConfig holds acknowledgment behavior configuration.
+//
+// MLLP is a request/response protocol: every received message ALWAYS gets an ACK or NACK.
+// There is no option to suppress the response — doing so would leave the sender blocking.
+type ACKConfig struct {
+	// Mode controls the acknowledgment code sent:
+	//   "immediate" (default) — AA sent as soon as the message is accepted onto the queue
+	// Note: "none" is no longer supported; omitting the ACK violates the MLLP protocol.
+	Mode            string
+	OnError         string // "suppress" (default) → always AA; "nack" → AE on queue-full
+	SendingApp      string // MSH-3 in ACK response
+	SendingFacility string // MSH-4 in ACK response
+	TextSuccess     string // MSA-3 text on success
+	TextError       string // MSA-3 text on error/nack
+	Script          string // Optional JS: function buildACK(msg) { return {ackCode, textMessage} }
 }
 
 // TCPMLLPInboundConnector implements HL7 MLLP protocol listener
@@ -50,8 +69,8 @@ type TCPMLLPInboundConnector struct {
 	authType         string
 	authUsername     string
 	authPassword     string
-	generateACK      bool
 	validateChecksum bool
+	ackConfig        ACKConfig
 
 	// Validation feedback support
 	messageConns      map[string]*ConnectionInfo // messageID -> connection info (for validation feedback)
@@ -133,13 +152,26 @@ func (c *TCPMLLPInboundConnector) Initialize(config []byte) error {
 	c.authUsername = cfg.GetString("username")
 	c.authPassword = cfg.GetString("password")
 
-	// ACK configuration
-	c.generateACK = cfg.GetBool("generate_ack")
-	if !cfg.Has("generate_ack") {
-		c.generateACK = true // Default to generating ACKs
-	}
-
 	c.validateChecksum = cfg.GetBool("validate_checksum")
+
+	// ACK behaviour — read from nested "ack" sub-object in config.
+	// "mode: none" is no longer valid; MLLP requires every message to receive a response.
+	// Old configs that set mode=none are silently upgraded to mode=immediate.
+	ackMap := cfg.GetMap("ack")
+	ackMode := getStringFromMap(ackMap, "mode", "immediate")
+	if ackMode == "none" {
+		log.Printf("⚠️  TCP/MLLP Inbound: ack.mode='none' is not valid — MLLP requires a response for every message. Defaulting to 'immediate'.")
+		ackMode = "immediate"
+	}
+	c.ackConfig = ACKConfig{
+		Mode:            ackMode,
+		OnError:         getStringFromMap(ackMap, "on_error", "suppress"),
+		SendingApp:      getStringFromMap(ackMap, "sending_app", "ezHealthKonnect"),
+		SendingFacility: getStringFromMap(ackMap, "sending_facility", "EHK"),
+		TextSuccess:     getStringFromMap(ackMap, "text_success", "Message received successfully"),
+		TextError:       getStringFromMap(ackMap, "text_error", "Message processing error"),
+		Script:          getStringFromMap(ackMap, "script", ""),
+	}
 
 	// Setup TLS if enabled
 	if c.enableTLS {
@@ -387,28 +419,23 @@ func (c *TCPMLLPInboundConnector) handleConnection(conn net.Conn, connID string,
 			Encoding:       "HL7",
 		}
 
-		// Send to processing pipeline
+		// Send to processing pipeline.
+		// ACK/NACK is ALWAYS sent — MLLP is request/response; leaving the sender
+		// without a response would cause it to block indefinitely.
 		select {
 		case messageChan <- inboundMsg:
 			c.IncrementMessagesReceived()
 			log.Printf("✅ TCP/MLLP Inbound: Message queued for processing: %s", inboundMsg.MessageID)
-
-			// Store connection info for validation feedback (instead of immediate ACK)
-			if c.generateACK {
-				c.messageConnsMutex.Lock()
-				c.messageConns[inboundMsg.MessageID] = &ConnectionInfo{
-					Conn:        conn,
-					OriginalMsg: hl7Message,
-					ConnID:      connID,
-					ReceivedAt:  time.Now(),
-				}
-				c.messageConnsMutex.Unlock()
-				log.Printf("📋 TCP/MLLP Inbound: Connection stored for validation feedback: %s", inboundMsg.MessageID)
-			}
+			c.sendConfiguredACK(conn, hl7Message, "AA", c.ackConfig.TextSuccess)
 
 		case <-time.After(5 * time.Second):
 			log.Printf("⚠️ TCP/MLLP Inbound: Message channel full, sending NACK")
-			c.sendNACK(conn, "Processing queue full")
+			if c.ackConfig.OnError == "nack" {
+				c.sendConfiguredACK(conn, hl7Message, "AE", c.ackConfig.TextError)
+			} else {
+				// "suppress" mode: send AA anyway — caller's backpressure handles retries
+				c.sendConfiguredACK(conn, hl7Message, "AA", c.ackConfig.TextSuccess)
+			}
 		}
 	}
 }
@@ -494,15 +521,131 @@ func (c *TCPMLLPInboundConnector) extractMessageControlID(hl7Message string) str
 	return ""
 }
 
-// generateACKMessage generates an HL7 ACK message
+// generateACKMessage generates an HL7 ACK message using configured sender identity
 func (c *TCPMLLPInboundConnector) generateACKMessage(originalMessage string, ackCode string, textMessage string) string {
 	messageControlID := c.extractMessageControlID(originalMessage)
 	timestamp := time.Now().Format("20060102150405")
 
-	ack := fmt.Sprintf("MSH|^~\\&|ezHealthKonnect|EHK|SENDER|SENDER|%s||ACK|%s|P|2.5\r", timestamp, messageControlID)
-	ack += fmt.Sprintf("MSA|%s|%s|%s\r", ackCode, messageControlID, textMessage)
+	sendingApp := c.ackConfig.SendingApp
+	if sendingApp == "" {
+		sendingApp = "ezHealthKonnect"
+	}
+	sendingFacility := c.ackConfig.SendingFacility
+	if sendingFacility == "" {
+		sendingFacility = "EHK"
+	}
+
+	ack := fmt.Sprintf("MSH|^~\\&|%s|%s|SENDER|SENDER|%s||ACK|%s|P|2.5\r\n",
+		sendingApp, sendingFacility, timestamp, messageControlID)
+	ack += fmt.Sprintf("MSA|%s|%s|%s\r\n", ackCode, messageControlID, textMessage)
 
 	return ack
+}
+
+// sendConfiguredACK applies ackConfig (script override, custom text, sender identity) then sends
+func (c *TCPMLLPInboundConnector) sendConfiguredACK(conn net.Conn, originalMessage string, defaultCode string, defaultText string) {
+	ackCode := defaultCode
+	textMessage := defaultText
+
+	// Run custom script if provided — script can override ackCode and textMessage
+	if c.ackConfig.Script != "" {
+		if code, text, err := c.runACKScript(originalMessage, defaultCode, defaultText); err == nil {
+			ackCode = code
+			textMessage = text
+		} else {
+			log.Printf("⚠️ TCP/MLLP ACK script error: %v — falling back to default", err)
+		}
+	}
+
+	ack := c.generateACKMessage(originalMessage, ackCode, textMessage)
+	if err := c.sendACK(conn, ack); err != nil {
+		log.Printf("⚠️ TCP/MLLP Inbound: Failed to send ACK (%s): %v", ackCode, err)
+	} else {
+		log.Printf("✅ TCP/MLLP Inbound: ACK sent (%s)", ackCode)
+	}
+}
+
+// runACKScript executes a user-supplied JS function:
+//
+//	function buildACK(msg) { return { ackCode: "AA", textMessage: "OK" }; }
+//
+// msg is an object with: controlID, messageType, sendingApp, sendingFacility, raw
+func (c *TCPMLLPInboundConnector) runACKScript(originalMessage string, defaultCode string, defaultText string) (string, string, error) {
+	vm := goja.New()
+
+	// Expose message context to the script
+	msgObj := map[string]interface{}{
+		"raw":             originalMessage,
+		"controlID":       c.extractMessageControlID(originalMessage),
+		"messageType":     c.extractMessageType(originalMessage),
+		"sendingApp":      c.extractMSHField(originalMessage, 2),
+		"sendingFacility": c.extractMSHField(originalMessage, 3),
+		"defaultCode":     defaultCode,
+		"defaultText":     defaultText,
+	}
+	if err := vm.Set("msg", msgObj); err != nil {
+		return defaultCode, defaultText, err
+	}
+
+	// Execute the script
+	if _, err := vm.RunString(c.ackConfig.Script); err != nil {
+		return defaultCode, defaultText, fmt.Errorf("script parse error: %w", err)
+	}
+
+	// Call buildACK(msg)
+	buildACK, ok := goja.AssertFunction(vm.Get("buildACK"))
+	if !ok {
+		return defaultCode, defaultText, fmt.Errorf("script must define function buildACK(msg)")
+	}
+
+	result, err := buildACK(goja.Undefined(), vm.ToValue(msgObj))
+	if err != nil {
+		return defaultCode, defaultText, fmt.Errorf("script execution error: %w", err)
+	}
+
+	// Extract ackCode and textMessage from result object
+	obj := result.ToObject(vm)
+	if obj == nil {
+		return defaultCode, defaultText, fmt.Errorf("buildACK must return an object")
+	}
+
+	ackCode := defaultCode
+	textMessage := defaultText
+
+	if v := obj.Get("ackCode"); v != nil && !goja.IsUndefined(v) && !goja.IsNull(v) {
+		ackCode = v.String()
+	}
+	if v := obj.Get("textMessage"); v != nil && !goja.IsUndefined(v) && !goja.IsNull(v) {
+		textMessage = v.String()
+	}
+
+	return ackCode, textMessage, nil
+}
+
+// extractMSHField extracts a field from the MSH segment by 0-based position after the separator
+func (c *TCPMLLPInboundConnector) extractMSHField(hl7Message string, position int) string {
+	lines := strings.Split(hl7Message, "\r")
+	if len(lines) == 0 {
+		return ""
+	}
+	fields := strings.Split(lines[0], "|")
+	if len(fields) > position {
+		return fields[position]
+	}
+	return ""
+}
+
+// getStringFromMap safely reads a string value from a map with a fallback default
+func getStringFromMap(m map[string]interface{}, key string, defaultVal string) string {
+	if m == nil {
+		return defaultVal
+	}
+	if v, ok := m[key]; ok {
+		if s, ok := v.(string); ok && s != "" {
+			return s
+		}
+	}
+	return defaultVal
 }
 
 // sendACK sends an ACK message
@@ -527,8 +670,8 @@ func (c *TCPMLLPInboundConnector) sendNACK(conn net.Conn, reason string) error {
 	timestamp := time.Now().Format("20060102150405")
 	controlID := fmt.Sprintf("NACK%d", time.Now().UnixNano())
 
-	nack := fmt.Sprintf("MSH|^~\\&|ezHealthKonnect|EHK|SENDER|SENDER|%s||ACK|%s|P|2.5\r", timestamp, controlID)
-	nack += fmt.Sprintf("MSA|AE|%s|%s\r", controlID, reason)
+	nack := fmt.Sprintf("MSH|^~\\&|ezHealthKonnect|EHK|SENDER|SENDER|%s||ACK|%s|P|2.5\r\n", timestamp, controlID)
+	nack += fmt.Sprintf("MSA|AE|%s|%s\r\n", controlID, reason)
 
 	return c.sendACK(conn, nack)
 }

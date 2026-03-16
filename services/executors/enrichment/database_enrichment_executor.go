@@ -89,15 +89,10 @@ func (e *DatabaseEnrichmentExecutor) Execute(
 		cache := GetResultCache("db_enrichment", config.CacheMaxEntries)
 		if cached, ok := cache.Get(dbCacheKey); ok {
 			log.Printf("⚡ [Database Enrichment] Cache hit for step %s", step.ID)
-			targetPath := config.TargetPath
-			if targetPath == "" {
-				targetPath = "enriched.database"
-			}
-			e.storeResult(inputData, targetPath, cached["_cached_result"])
 			cachedAt, _ := cached["_cached_at"].(string)
+			// P7: no storeResult write to enriched.*; _stepOutput is the canonical output
 			e.SetStepOutputWithDetails(inputData, cached, map[string]interface{}{
 				"database_type": config.DatabaseType,
-				"target_path":   targetPath,
 				"cache_hit":     true,
 				"cached_at":     cachedAt,
 			})
@@ -131,22 +126,20 @@ func (e *DatabaseEnrichmentExecutor) Execute(
 
 		// Apply default value if configured (executor-level fallback)
 		if config.DefaultValue != nil {
-			e.storeResult(inputData, config.TargetPath, config.DefaultValue)
 			// STANDARDIZED: Default value used + execution details
+			// P7: no storeResult write to enriched.*; default value goes into _stepOutput
 			e.SetStepOutputWithDetails(inputData, map[string]interface{}{
 				"value": config.DefaultValue,
 			}, map[string]interface{}{
 				"database_type":      config.DatabaseType,
 				"default_value_used": true,
 				"error":              err.Error(),
-				"target_path":        config.TargetPath,
 			})
 		} else {
 			// STANDARDIZED: No variables + execution details with error
 			e.SetStepOutputWithDetails(inputData, map[string]interface{}{}, map[string]interface{}{
 				"database_type": config.DatabaseType,
 				"error":         err.Error(),
-				"target_path":   config.TargetPath,
 			})
 		}
 
@@ -163,15 +156,8 @@ func (e *DatabaseEnrichmentExecutor) Execute(
 		mappedResult = result // Already in correct format (MongoDB, Redis, etc.)
 	}
 
-	// Store result in target path
-	targetPath := config.TargetPath
-	if targetPath == "" {
-		targetPath = "enriched.database"
-	}
-
-	e.storeResult(inputData, targetPath, mappedResult)
-
-	// Build variables (the enriched data) and execution details
+	// P7: storeResult(enriched.*) removed; data flows only through _stepOutput.
+	// Build variables (the query result) and execution details
 	// CONSISTENT STRUCTURE: Always use "rows" array format for predictable output
 	var variables map[string]interface{}
 	var rowCount int
@@ -204,7 +190,6 @@ func (e *DatabaseEnrichmentExecutor) Execute(
 	// STANDARDIZED: Variables (query result) + execution details
 	e.SetStepOutputWithDetails(inputData, variables, map[string]interface{}{
 		"database_type": config.DatabaseType,
-		"target_path":   targetPath,
 		"rows_returned": rowCount,
 		"cache_hit":     false,
 	})
@@ -507,15 +492,6 @@ func (e *DatabaseEnrichmentExecutor) mapResults(
 		return mappedResults[0] // Single row, return as object
 	}
 	return mappedResults // Multiple rows, return as array
-}
-
-// storeResult stores the enrichment result at the target path
-func (e *DatabaseEnrichmentExecutor) storeResult(
-	inputData map[string]interface{},
-	targetPath string,
-	result interface{},
-) {
-	executors.SetNestedValue(inputData, targetPath, result)
 }
 
 // ===============================================================

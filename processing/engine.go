@@ -9,13 +9,21 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"strings"
 	"sync"
 	"time"
 
 	"ezhealthkonnect/models"
 	"ezhealthkonnect/services"
+	"ezhealthkonnect/services/backpressure"
 	. "ezhealthkonnect/services/connectors" // Import connectors package for factory
+	"ezhealthkonnect/services/logger"
+	"ezhealthkonnect/services/storage"
 )
+
+// backpressureRegistry is a package-level alias so engine.go and engine_message_processor.go
+// share the same singleton without circular init dependency.
+func backpressureRegistry() *backpressure.Registry { return backpressure.Get() }
 
 // ProcessingEngine provides basic interface engine functionality
 type ProcessingEngine struct {
@@ -27,8 +35,8 @@ type ProcessingEngine struct {
 	stats               *EngineStats
 	running             bool
 	connectorFactory     ConnectorFactory                        // Factory for creating connectors (OOB pattern)
-	parserService        *services.MessageParserService // JSON conversion service
-	mongoService         *services.MongoDBMessageService // MongoDB storage
+	parserService        *services.MessageParserService   // JSON conversion service
+	objectStorage        *storage.ObjectStorageService    // Object storage (S3/MinIO/local)
 	outputDeliveryService *services.OutputDeliveryService // Output delivery service (V21)
 	errorService         *services.ErrorCaptureService // Error capture service (V23)
 	errorHandler         *ErrorHandler                  // Error handler with panic recovery (V23)
@@ -38,6 +46,9 @@ type ProcessingEngine struct {
 	// Validation feedback system (universal for all connectors)
 	validationConnectors  map[string]ValidationAwareConnector // interfaceID -> connector
 	validationMutex       sync.RWMutex
+
+	// Durable message queue for retry and startup recovery (Phase 2 Durability)
+	messageQueue *MessageQueue
 }
 
 // InterfaceStatus tracks the status of an interface
@@ -80,49 +91,59 @@ func NewProcessingEngine(db *sql.DB, credStore *services.CredentialStore) *Proce
 		validationConnectors: make(map[string]ValidationAwareConnector),
 	}
 
-	fmt.Printf("✅ Connector Factory initialized (32 connectors registered)\n")
+	logger.Info("connector factory initialized", "connectors", 32)
 
-	// OOB: Auto-initialize parser service (includes MongoDB detection)
-	ctx := context.Background()
+	// OOB: Auto-initialize parser service
 	parserService := services.InitializeMessageParserService(db)
 	if parserService != nil {
 		engine.parserService = parserService
+		logger.Info("parser service initialized")
+	}
 
-		// Also get MongoDB service for raw storage
-		mongoConnService, err := services.NewMongoDBConnectionService()
-		if err == nil {
-			err = mongoConnService.Connect(ctx)
-			if err == nil {
-				engine.mongoService = services.NewMongoDBMessageService(
-					mongoConnService.GetClient(),
-					mongoConnService.GetDatabase(),
-				)
-				fmt.Printf("✅ Parser Service initialized with MongoDB\n")
-			}
+	// OOB: Auto-initialize object storage (S3/MinIO or local filesystem)
+	storageDriver, err := storage.NewDriverFromEnv()
+	if err != nil {
+		log.Printf("⚠️  Object storage driver unavailable: %v — falling back to DB-only mode", err)
+	} else {
+		bucket := storage.DefaultBucketName()
+		objSvc, err := storage.NewObjectStorageService(storageDriver, bucket)
+		if err != nil {
+			log.Printf("⚠️  Object storage service init failed: %v", err)
+		} else {
+			engine.objectStorage = objSvc
+			logger.Info("object storage initialized", "driver", storageDriver.DriverName(), "bucket", bucket)
 		}
 	}
 
 	// OOB: Auto-initialize transformation pipeline service (MVC pattern)
 	engine.transformationService = services.NewTransformationPipelineService(db, credStore)
 	if engine.transformationService != nil {
-		fmt.Printf("✅ Transformation Pipeline Service initialized (MVC + OOB)\n")
+		logger.Info("transformation pipeline service initialized")
+		// Wire object storage so the pipeline service can log connector delivery details
+		if engine.objectStorage != nil {
+			engine.transformationService.SetObjectStorage(engine.objectStorage)
+		}
 	}
 
 	// OOB: Initialize Output Delivery Service (V21)
 	engine.outputDeliveryService = services.NewOutputDeliveryService(db)
-	fmt.Printf("✅ Output Delivery Service initialized\n")
+	logger.Info("output delivery service initialized")
 
 	// OOB: Initialize Error Capture Service (V23)
 	engine.errorService = services.NewErrorCaptureService(db)
-	fmt.Printf("✅ Error Capture Service initialized\n")
+	logger.Info("error capture service initialized")
 
 	// OOB: Initialize Error Handler with Panic Recovery (V23)
 	engine.errorHandler = NewErrorHandler(engine.errorService)
-	fmt.Printf("✅ Error Handler initialized - panic recovery enabled\n")
+	logger.Info("error handler initialized (panic recovery enabled)")
 
 	// OOB: Initialize Connection Warmer (pre-warm database connections at deployment)
 	engine.connectionWarmer = services.NewConnectionWarmer(db)
-	fmt.Printf("✅ Connection Warmer initialized - database connection pre-warming enabled\n")
+	logger.Info("connection warmer initialized")
+
+	// Phase 2 Durability: Initialize durable message queue for retry + startup recovery
+	engine.messageQueue = NewMessageQueue(db, engine.transformationService)
+	logger.Info("message queue initialized (retry + startup recovery)")
 
 	return engine
 }
@@ -140,7 +161,53 @@ func (pe *ProcessingEngine) Start() error {
 	pe.stats.StartTime = time.Now()
 	pe.stats.LastActivity = time.Now()
 
+	// Phase 2 Durability: start the durable queue worker and recovery scan.
+	if pe.messageQueue != nil {
+		startCtx := context.Background()
+		if err := pe.messageQueue.Start(startCtx); err != nil {
+			log.Printf("⚠️  Failed to start message queue: %v", err)
+		}
+		go pe.recoverUnprocessedMessages(startCtx)
+	}
+
+	// Auto-restore: re-activate interfaces that were active before restart.
+	// Run in a goroutine so Start() returns immediately.
+	go pe.restoreActiveInterfaces()
+
 	return nil
+}
+
+// restoreActiveInterfaces queries the DB for interfaces with status='active'
+// and re-activates them so listeners restart after an engine restart.
+func (pe *ProcessingEngine) restoreActiveInterfaces() {
+	rows, err := pe.db.Query(`SELECT id FROM interfaces WHERE status = 'active' AND is_active = TRUE`)
+	if err != nil {
+		log.Printf("⚠️  Auto-restore: failed to query active interfaces: %v", err)
+		return
+	}
+	defer rows.Close()
+
+	var ids []string
+	for rows.Next() {
+		var id string
+		if rows.Scan(&id) == nil {
+			ids = append(ids, id)
+		}
+	}
+
+	if len(ids) == 0 {
+		log.Printf("ℹ️  Auto-restore: no active interfaces to restore")
+		return
+	}
+
+	log.Printf("🔄 Auto-restore: restoring %d active interface(s)...", len(ids))
+	for _, id := range ids {
+		if err := pe.ActivateInterface(id); err != nil {
+			log.Printf("⚠️  Auto-restore: failed to activate interface %s: %v", id, err)
+		} else {
+			log.Printf("✅ Auto-restore: interface %s activated", id)
+		}
+	}
 }
 
 // Stop stops the processing engine
@@ -163,7 +230,9 @@ func (pe *ProcessingEngine) IsRunning() bool {
 	return pe.running
 }
 
-// ActivateInterface activates an interface for processing
+// ActivateInterface activates an interface for processing.
+// Primary path: reads connector.inbound steps from the pipeline (pipeline-driven, supports multiple listeners).
+// Fallback: reads source_connectivity from the interfaces table (backward compatibility).
 func (pe *ProcessingEngine) ActivateInterface(interfaceID string) error {
 	pe.mutex.Lock()
 	defer pe.mutex.Unlock()
@@ -173,139 +242,251 @@ func (pe *ProcessingEngine) ActivateInterface(interfaceID string) error {
 		return fmt.Errorf("interface already active")
 	}
 
-	// Get interface details from database (including transformation_mapping for connection warming)
-	var name, sourceConfigJSON, sourceConnectivityJSON string
+	// Get interface name and transformation mapping (for status tracking + connection warming)
+	var name string
 	var transformationMappingJSON sql.NullString
 	err := pe.db.QueryRow(`
-		SELECT name, source_config, COALESCE(source_connectivity::text, '{}'), transformation_mapping
+		SELECT name, transformation_mapping
 		FROM interfaces
 		WHERE id = $1
-	`, interfaceID).Scan(&name, &sourceConfigJSON, &sourceConnectivityJSON, &transformationMappingJSON)
+	`, interfaceID).Scan(&name, &transformationMappingJSON)
 	if err != nil {
 		return fmt.Errorf("interface not found: %v", err)
 	}
 
-	// Parse source config
-	var sourceConfig map[string]interface{}
-	if err := json.Unmarshal([]byte(sourceConfigJSON), &sourceConfig); err != nil {
-		return fmt.Errorf("failed to parse source config: %v", err)
+	// ── PRIMARY PATH: pipeline-driven connector.inbound steps ──────────────────
+	// Query connector.inbound steps from the pipeline for this interface.
+	// One listener goroutine is started per step, enabling multiple inbound sources.
+	type inboundStepRecord struct {
+		stepID     string
+		stepName   string
+		configJSON string
 	}
 
-	// Parse source connectivity (V30 format: {type, config})
-	var sourceConnectivity map[string]interface{}
-	if err := json.Unmarshal([]byte(sourceConnectivityJSON), &sourceConnectivity); err == nil {
-		// Merge connectivity config into source config
-		if connType, ok := sourceConnectivity["type"].(string); ok {
-			sourceConfig["connectivity"] = connType
-			sourceConfig["type"] = connType // For backward compatibility
-		}
-		if connConfig, ok := sourceConnectivity["config"].(map[string]interface{}); ok {
-			// Merge config fields - source_connectivity config takes precedence over source_config
-			for k, v := range connConfig {
-				sourceConfig[k] = v // ALWAYS overwrite - source_connectivity is the authoritative source
+	var pipelineSteps []inboundStepRecord
+	rows, qErr := pe.db.Query(`
+		SELECT ts.id, ts.step_name, COALESCE(ts.config::text, '{}')
+		FROM transformation_steps ts
+		JOIN transformation_pipelines tp ON tp.id = ts.pipeline_id
+		WHERE tp.interface_id = $1
+		  AND ts.step_type = 'connector.inbound'
+		  AND ts.enabled = true
+		ORDER BY ts.sequence
+	`, interfaceID)
+	if qErr == nil {
+		for rows.Next() {
+			var s inboundStepRecord
+			if scanErr := rows.Scan(&s.stepID, &s.stepName, &s.configJSON); scanErr == nil {
+				pipelineSteps = append(pipelineSteps, s)
 			}
 		}
+		rows.Close()
 	}
 
-	// Add interface_id to config for connector
-	sourceConfig["interface_id"] = interfaceID
+	if len(pipelineSteps) > 0 {
+		// Pipeline-driven: start one listener per connector.inbound step
+		for _, step := range pipelineSteps {
+			var stepCfg struct {
+				ConnectorType string                 `json:"connectorType"`
+				Config        map[string]interface{} `json:"config"`
+			}
+			if jsonErr := json.Unmarshal([]byte(step.configJSON), &stepCfg); jsonErr != nil {
+				log.Printf("⚠️  Failed to parse connector.inbound config for step '%s': %v", step.stepName, jsonErr)
+				continue
+			}
+			if stepCfg.ConnectorType == "" {
+				log.Printf("⚠️  connector.inbound step '%s' has no connectorType — skipping", step.stepName)
+				continue
+			}
 
-	// DEBUG: Log source config
-	fmt.Printf("🔍 Source config for %s: %+v\n", interfaceID, sourceConfig)
+			oobType := MapLegacyConnectorType(stepCfg.ConnectorType, "inbound")
+			innerConfig := stepCfg.Config
+			if innerConfig == nil {
+				innerConfig = make(map[string]interface{})
+			}
+			innerConfig["interface_id"] = interfaceID
 
-	// Detect source type and connectivity to determine connector type
-	sourceType, _ := sourceConfig["type"].(string)
-	connectivity, _ := sourceConfig["connectivity"].(string)
+			connector, connErr := CreateInputConnector(oobType, innerConfig)
+			if connErr != nil {
+				log.Printf("⚠️  Failed to create '%s' connector for step '%s': %v", oobType, step.stepName, connErr)
+				continue
+			}
 
-	// DEBUG: Log detected values
-	fmt.Printf("🔍 Detected sourceType='%s', connectivity='%s'\n", sourceType, connectivity)
+			bufferSize := 10000
+			if buf, ok := innerConfig["buffer_size"].(float64); ok {
+				bufferSize = int(buf)
+			}
+			msgChan := make(chan *models.InboundMessage, bufferSize)
 
-	// OOB: Determine connector type from connectivity (supports ALL 32 connector types)
-	var legacyType string
-	if connectivity != "" {
-		// Use connectivity directly (file, tcp, http, database, kafka, etc.)
-		legacyType = connectivity
-	} else if sourceType == "fhir" {
-		// Backward compatibility: fhir without connectivity -> http
-		legacyType = "http"
-	} else if sourceType == "hl7v2" || sourceType == "hl7" {
-		// Backward compatibility: hl7 without connectivity -> tcp
-		legacyType = "tcp"
-	} else {
-		// Default fallback
-		legacyType = "tcp"
-	}
+			ctx := context.Background()
 
-	// OOB: Convert legacy type to OOB type name (supports ALL 32 connectors)
-	oobTypeName := MapLegacyConnectorType(legacyType, "inbound")
+			// Capture immediate start failures (e.g. "bind: address already in use").
+			// Listener-type connectors fail synchronously in Start(); if they succeed
+			// they block in the accept loop and never write to this channel.
+			startErrCh := make(chan error, 1)
+			go func(c InputConnector, sName string) {
+				if startErr := c.Start(ctx, msgChan); startErr != nil {
+					startErrCh <- startErr
+					log.Printf("❌ Connector start error for interface %s (step '%s'): %v", interfaceID, sName, startErr)
+				}
+			}(connector, step.stepName)
 
-	fmt.Printf("🔍 Creating %s connector for interface %s\n", oobTypeName, interfaceID)
+			// 200 ms is generous for a synchronous bind failure to surface.
+			// On success the goroutine is blocked in Accept() and startErrCh stays empty.
+			select {
+			case startErr := <-startErrCh:
+				if isPortConflictError(startErr) {
+					port := extractConnectorPort(innerConfig)
+					log.Printf("🚨 [PHI SAFETY] Port :%d conflict detected activating interface %s — halting both interfaces", port, interfaceID)
+					pe.haltOnPortConflictLocked(interfaceID, port, startErr)
+					return fmt.Errorf("port :%d conflict — both interfaces halted for PHI safety (see HIPAA audit log)", port)
+				}
+				// Non-conflict start error: log and skip this step
+				log.Printf("⚠️  Non-conflict connector error for step '%s': %v", step.stepName, startErr)
+				continue
+			case <-time.After(200 * time.Millisecond):
+				// No immediate error — connector is running normally
+			}
 
-	// OOB: Create connector using unified factory (ALL 32 connectors)
-	connector, err := CreateInputConnector(oobTypeName, sourceConfig)
-	if err != nil {
-		return fmt.Errorf("failed to create connector '%s': %v", oobTypeName, err)
-	}
+			if vc, ok := connector.(ValidationAwareConnector); ok {
+				pe.RegisterValidationConnector(interfaceID, vc)
+			}
 
-	// Create message channel for this interface (HIGH-VOLUME BUFFER for enterprise scale)
-	bufferSize := 10000 // OOB: Configurable per interface for millions/billions of messages
-	if customBuffer, ok := sourceConfig["buffer_size"].(float64); ok {
-		bufferSize = int(customBuffer)
-	}
-	messageChan := make(chan *models.InboundMessage, bufferSize) // UNIFIED MODEL + ENTERPRISE BUFFER
+			// Composite key supports multiple connectors per interface
+			key := interfaceID + ":" + step.stepID
+			pe.activeConnectors[key] = connector
+			pe.messageChan[key] = msgChan
+			go pe.processMessages(interfaceID, msgChan)
 
-	// Start connector
-	ctx := context.Background()
-	go func() {
-		if err := connector.Start(ctx, messageChan); err != nil {
-			fmt.Printf("❌ Connector error for interface %s: %v\n", interfaceID, err)
+			log.Printf("✅ Started %s connector for interface %s (step: '%s')", oobType, interfaceID, step.stepName)
 		}
-	}()
+	} else {
+		// ── FALLBACK: legacy source_connectivity approach ───────────────────────
+		// Used for interfaces that were not configured through the wizard pipeline builder.
+		log.Printf("⚠️  No connector.inbound pipeline steps for interface %s — falling back to source_connectivity", interfaceID)
 
-	// Register connector for validation feedback (if supported)
-	if validationConnector, ok := connector.(ValidationAwareConnector); ok {
-		pe.RegisterValidationConnector(interfaceID, validationConnector)
+		var sourceConfigJSON, sourceConnectivityJSON string
+		err = pe.db.QueryRow(`
+			SELECT source_config, COALESCE(source_connectivity::text, '{}')
+			FROM interfaces WHERE id = $1
+		`, interfaceID).Scan(&sourceConfigJSON, &sourceConnectivityJSON)
+		if err != nil {
+			return fmt.Errorf("failed to read source config: %v", err)
+		}
+
+		var sourceConfig map[string]interface{}
+		if err := json.Unmarshal([]byte(sourceConfigJSON), &sourceConfig); err != nil {
+			return fmt.Errorf("failed to parse source config: %v", err)
+		}
+
+		var sourceConnectivity map[string]interface{}
+		if err := json.Unmarshal([]byte(sourceConnectivityJSON), &sourceConnectivity); err == nil {
+			if connType, ok := sourceConnectivity["type"].(string); ok {
+				sourceConfig["connectivity"] = connType
+				sourceConfig["type"] = connType
+			}
+			if connConfig, ok := sourceConnectivity["config"].(map[string]interface{}); ok {
+				for k, v := range connConfig {
+					sourceConfig[k] = v
+				}
+			}
+		}
+		sourceConfig["interface_id"] = interfaceID
+
+		logger.Debug("source config resolved (legacy fallback)", "interface_id", interfaceID)
+
+		sourceType, _ := sourceConfig["type"].(string)
+		connectivity, _ := sourceConfig["connectivity"].(string)
+		logger.Debug("detected connector type (legacy fallback)",
+			"interface_id", interfaceID,
+			"source_type", sourceType, "connectivity", connectivity)
+
+		var legacyType string
+		if connectivity != "" {
+			legacyType = connectivity
+		} else if sourceType == "fhir" {
+			legacyType = "http"
+		} else if sourceType == "hl7v2" || sourceType == "hl7" {
+			legacyType = "tcp"
+		} else {
+			legacyType = "tcp"
+		}
+
+		oobTypeName := MapLegacyConnectorType(legacyType, "inbound")
+		logger.Debug("creating connector (legacy fallback)",
+			"interface_id", interfaceID, "connector_type", oobTypeName)
+
+		connector, connErr := CreateInputConnector(oobTypeName, sourceConfig)
+		if connErr != nil {
+			return fmt.Errorf("failed to create connector '%s': %v", oobTypeName, connErr)
+		}
+
+		bufferSize := 10000
+		if customBuffer, ok := sourceConfig["buffer_size"].(float64); ok {
+			bufferSize = int(customBuffer)
+		}
+		messageChan := make(chan *models.InboundMessage, bufferSize)
+
+		ctx := context.Background()
+		legacyStartErrCh := make(chan error, 1)
+		go func() {
+			if err := connector.Start(ctx, messageChan); err != nil {
+				legacyStartErrCh <- err
+				logger.Error("connector error", "interface_id", interfaceID, "error", err)
+			}
+		}()
+
+		select {
+		case startErr := <-legacyStartErrCh:
+			if isPortConflictError(startErr) {
+				port := extractConnectorPort(sourceConfig)
+				log.Printf("🚨 [PHI SAFETY] Port :%d conflict detected (legacy path) activating interface %s — halting both interfaces", port, interfaceID)
+				pe.haltOnPortConflictLocked(interfaceID, port, startErr)
+				return fmt.Errorf("port :%d conflict — both interfaces halted for PHI safety (see HIPAA audit log)", port)
+			}
+			logger.Error("non-conflict connector start error", "interface_id", interfaceID, "error", startErr)
+			return fmt.Errorf("connector failed to start: %v", startErr)
+		case <-time.After(200 * time.Millisecond):
+			// No immediate error — connector is running normally
+		}
+
+		if validationConnector, ok := connector.(ValidationAwareConnector); ok {
+			pe.RegisterValidationConnector(interfaceID, validationConnector)
+		}
+
+		pe.activeConnectors[interfaceID] = connector
+		pe.messageChan[interfaceID] = messageChan
+		go pe.processMessages(interfaceID, messageChan)
 	}
 
-	// Start message processor
-	go pe.processMessages(interfaceID, messageChan)
-
-	// Update interface status in database
-	_, err = pe.db.Exec("UPDATE interfaces SET status = 'active' WHERE id = $1", interfaceID)
+	// Update interface status in database (both columns so page-load initial state is correct)
+	_, err = pe.db.Exec("UPDATE interfaces SET status = 'active', interface_status = 'active' WHERE id = $1", interfaceID)
 	if err != nil {
 		return fmt.Errorf("failed to activate interface: %v", err)
 	}
 
-	// Track in memory
+	// Track interface status in memory (one entry per interface regardless of connector count)
 	pe.activeInterfaces[interfaceID] = &InterfaceStatus{
 		InterfaceID:       interfaceID,
-		Name:             name,
-		Status:           "active",
+		Name:              name,
+		Status:            "active",
 		MessagesProcessed: 0,
-		LastActivity:     time.Now(),
-		Errors:           0,
+		LastActivity:      time.Now(),
+		Errors:            0,
 	}
 
-	pe.activeConnectors[interfaceID] = connector
-	pe.messageChan[interfaceID] = messageChan
-
 	pe.stats.LastActivity = time.Now()
-	fmt.Printf("✅ Interface activated: %s (%s)\n", name, interfaceID)
+	logger.Info("interface activated", "interface_id", interfaceID, "name", name)
 
 	// Connection pre-warming (warm database connections AFTER interface activation)
 	if pe.connectionWarmer != nil && transformationMappingJSON.Valid {
-		// Parse transformation mapping (pipeline configuration)
 		var pipeline map[string]interface{}
 		if err := json.Unmarshal([]byte(transformationMappingJSON.String), &pipeline); err == nil {
-			// Convert interface ID string to int for ConnectionWarmer
 			var interfaceIDInt int
 			fmt.Sscanf(interfaceID, "intf_%d", &interfaceIDInt)
 			if interfaceIDInt == 0 {
-				// Try parsing as direct number (e.g., "1", "2", etc.)
 				fmt.Sscanf(interfaceID, "%d", &interfaceIDInt)
 			}
-
-			// Warm connections asynchronously (don't block activation)
 			go func() {
 				if err := pe.connectionWarmer.WarmInterfaceConnections(interfaceIDInt, pipeline); err != nil {
 					log.Printf("⚠️  Connection warming failed for interface %s: %v", interfaceID, err)
@@ -322,8 +503,8 @@ func (pe *ProcessingEngine) DeactivateInterface(interfaceID string) error {
 	pe.mutex.Lock()
 	defer pe.mutex.Unlock()
 
-	// Update interface status in database
-	_, err := pe.db.Exec("UPDATE interfaces SET status = 'inactive' WHERE id = $1", interfaceID)
+	// Update interface status in database (both columns so page-load initial state is correct)
+	_, err := pe.db.Exec("UPDATE interfaces SET status = 'inactive', interface_status = 'configured' WHERE id = $1", interfaceID)
 	if err != nil {
 		return fmt.Errorf("failed to deactivate interface: %v", err)
 	}
@@ -441,6 +622,187 @@ func (pe *ProcessingEngine) GetStats() *EngineStats {
 	return pe.stats
 }
 
+// ==================== PHI SAFETY: PORT CONFLICT HALT ====================
+
+// isPortConflictError returns true when the error indicates a TCP port is already bound.
+func isPortConflictError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "address already in use") ||
+		strings.Contains(msg, "bind: address") ||
+		strings.Contains(msg, "EADDRINUSE")
+}
+
+// extractConnectorPort returns the "port" value from a connector config map, or 0.
+func extractConnectorPort(config map[string]interface{}) int {
+	if config == nil {
+		return 0
+	}
+	switch v := config["port"].(type) {
+	case float64:
+		return int(v)
+	case int:
+		return v
+	case int64:
+		return int(v)
+	}
+	return 0
+}
+
+// haltOnPortConflictLocked stops every connector involved in a port conflict and
+// marks all affected interfaces as 'error'.  It MUST be called while pe.mutex is
+// already held (e.g. from inside ActivateInterface).
+//
+// PHI safety rationale: when two interfaces share an inbound port it is impossible
+// to guarantee that a message lands in the correct pipeline.  Allowing either
+// interface to continue running creates an ambiguous PHI routing risk that cannot
+// be resolved without operator intervention.
+func (pe *ProcessingEngine) haltOnPortConflictLocked(newInterfaceID string, port int, conflictErr error) {
+	// Find other ACTIVE interfaces already bound to this port.
+	conflicting := pe.findActiveInterfacesByPort(port)
+
+	// Union: all interfaces that must be stopped.
+	affected := make(map[string]bool)
+	affected[newInterfaceID] = true
+	for _, id := range conflicting {
+		affected[id] = true
+	}
+
+	reason := fmt.Sprintf(
+		"PHI_SAFETY_HALT: port :%d conflict — ambiguous PHI routing. "+
+			"All interfaces on this port have been stopped. "+
+			"Correct the port configuration and re-activate manually.",
+		port,
+	)
+
+	affectedList := make([]string, 0, len(affected))
+	for id := range affected {
+		affectedList = append(affectedList, id)
+	}
+	log.Printf("🚨 [HIPAA] Halting %d interface(s) due to port :%d conflict: %v", len(affected), port, affectedList)
+
+	// Stop connectors and clean up engine maps (lock already held).
+	for id := range affected {
+		for key, conn := range pe.activeConnectors {
+			if strings.HasPrefix(key, id+":") || key == id {
+				_ = conn.Stop()
+				if ch, ok := pe.messageChan[key]; ok {
+					close(ch)
+					delete(pe.messageChan, key)
+				}
+				delete(pe.activeConnectors, key)
+			}
+		}
+		delete(pe.activeInterfaces, id)
+	}
+
+	// DB updates and HIPAA audit are I/O-bound — run asynchronously so we don't
+	// hold the engine mutex during database writes.
+	go pe.persistPortConflictHalt(affectedList, port, reason)
+}
+
+// findActiveInterfacesByPort returns the IDs of currently-active interfaces whose
+// connector.inbound pipeline step is configured on the given port.
+// Must be called while pe.mutex is held (reads pe.activeInterfaces).
+func (pe *ProcessingEngine) findActiveInterfacesByPort(port int) []string {
+	activeIDs := make([]string, 0, len(pe.activeInterfaces))
+	for id := range pe.activeInterfaces {
+		activeIDs = append(activeIDs, id)
+	}
+
+	var conflicting []string
+	for _, ifaceID := range activeIDs {
+		rows, err := pe.db.Query(`
+			SELECT ts.config::text
+			FROM transformation_steps ts
+			JOIN transformation_pipelines tp ON tp.id = ts.pipeline_id
+			WHERE tp.interface_id = $1
+			  AND ts.step_type = 'connector.inbound'
+			  AND ts.enabled = true
+		`, ifaceID)
+		if err != nil {
+			continue
+		}
+		for rows.Next() {
+			var cfgJSON string
+			if rows.Scan(&cfgJSON) != nil {
+				continue
+			}
+			var wrapper struct {
+				Config map[string]interface{} `json:"config"`
+			}
+			if json.Unmarshal([]byte(cfgJSON), &wrapper) == nil {
+				if extractConnectorPort(wrapper.Config) == port {
+					conflicting = append(conflicting, ifaceID)
+					break
+				}
+			}
+		}
+		rows.Close()
+	}
+	return conflicting
+}
+
+// persistPortConflictHalt updates the database and writes HIPAA audit log entries
+// for every interface that was halted due to a port conflict.
+// Called asynchronously — does NOT hold pe.mutex.
+func (pe *ProcessingEngine) persistPortConflictHalt(interfaceIDs []string, port int, reason string) {
+	for _, id := range interfaceIDs {
+		// Mark interface as error in both status columns.
+		if _, err := pe.db.Exec(`
+			UPDATE interfaces
+			SET status = 'error', interface_status = 'error', updated_at = NOW()
+			WHERE id = $1
+		`, id); err != nil {
+			log.Printf("⚠️  [PHI SAFETY] Failed to update status for interface %s: %v", id, err)
+		}
+
+		// Build HIPAA audit payload.
+		auditDetails := map[string]interface{}{
+			"port":      port,
+			"reason":    reason,
+			"action":    "PHI_SAFETY_HALT",
+			"timestamp": time.Now().UTC(),
+		}
+		detailsJSON, _ := json.Marshal(auditDetails)
+		complianceFlags := map[string]interface{}{
+			"hipaa_safety_halt": true,
+			"phi_risk":          "port_conflict_ambiguous_routing",
+			"requires_operator_review": true,
+		}
+		flagsJSON, _ := json.Marshal(complianceFlags)
+
+		if _, err := pe.db.Exec(`
+			INSERT INTO audit_logs (
+				id, action, entity_type, entity_id,
+				new_values, metadata, result, error_message,
+				risk_level, compliance_flags, created_at
+			) VALUES (
+				gen_random_uuid(), $1, $2, $3,
+				$4::jsonb, $5::jsonb, $6, $7,
+				$8, $9::jsonb, NOW()
+			)
+		`,
+			"PHI_SAFETY_HALT",
+			"interface",
+			id,
+			string(detailsJSON),
+			string(detailsJSON),
+			"blocked",
+			reason,
+			"critical",
+			string(flagsJSON),
+		); err != nil {
+			log.Printf("⚠️  [PHI SAFETY] Failed to write HIPAA audit log for interface %s: %v", id, err)
+		}
+
+		log.Printf("🚨 [HIPAA AUDIT] Interface %s halted — port :%d conflict. "+
+			"Risk: ambiguous PHI routing. Manual operator review required.", id, port)
+	}
+}
+
 // GetActiveInterfaces returns all currently active interfaces
 func (pe *ProcessingEngine) GetActiveInterfaces() map[string]*InterfaceStatus {
 	pe.mutex.RLock()
@@ -480,6 +842,14 @@ func (pe *ProcessingEngine) TransformInterfaceMessages(
 	// TODO: Implement when TransformationService is ready
 	return nil, fmt.Errorf("transformation service not yet implemented")
 }
+// ==================== BACKPRESSURE METRICS ====================
+
+// GetQueueDepths returns current worker pool metrics for all active interfaces.
+// Used by GET /api/system/queue-depths.
+func (pe *ProcessingEngine) GetQueueDepths() map[string]map[string]int {
+	return backpressureRegistry().QueueDepths()
+}
+
 // ==================== VALIDATION FEEDBACK METHODS ====================
 
 // RegisterValidationConnector registers a connector for validation feedback
@@ -514,4 +884,117 @@ func (pe *ProcessingEngine) PublishValidationFeedback(feedback *models.Validatio
 			log.Printf("❌ Failed to send validation response for %s: %v", feedback.MessageID, err)
 		}
 	}()
+}
+
+// ==================== STARTUP RECOVERY (Phase 2 Durability) ====================
+
+// recoverUnprocessedMessages scans all interface message tables on startup and
+// re-enqueues any messages stuck in 'received' or 'processing' state that have not
+// progressed in the last 5 minutes (i.e. the process crashed mid-pipeline).
+// Called as a goroutine from Start() after the message queue is running.
+func (pe *ProcessingEngine) recoverUnprocessedMessages(ctx context.Context) {
+	// Brief startup delay — let connectors initialise before we flood the queue.
+	time.Sleep(10 * time.Second)
+
+	log.Printf("🔍 [Recovery] Scanning interface tables for stale messages...")
+
+	// Discover all interface message tables dynamically (same pattern as V52 migration).
+	rows, err := pe.db.QueryContext(ctx, `
+		SELECT tablename
+		FROM pg_tables
+		WHERE schemaname = 'public'
+		  AND tablename LIKE 'messages_intf_%'
+		ORDER BY tablename
+	`)
+	if err != nil {
+		log.Printf("❌ [Recovery] Failed to list interface tables: %v", err)
+		return
+	}
+
+	var tableNames []string
+	for rows.Next() {
+		var tbl string
+		if scanErr := rows.Scan(&tbl); scanErr == nil {
+			tableNames = append(tableNames, tbl)
+		}
+	}
+	rows.Close()
+
+	if len(tableNames) == 0 {
+		log.Printf("ℹ️  [Recovery] No interface tables found — nothing to recover")
+		return
+	}
+
+	staleThreshold := 5 * time.Minute
+	cutoff := time.Now().Add(-staleThreshold)
+	totalRecovered := 0
+
+	for _, table := range tableNames {
+		interfaceID := extractInterfaceIDFromTable(table)
+		if interfaceID == "" {
+			continue
+		}
+
+		// #nosec G201 — table name sourced from pg_tables (system catalog), not user input
+		query := fmt.Sprintf(`
+			SELECT message_id,
+			       COALESCE(message_type, ''),
+			       COALESCE(raw_message, '')
+			FROM %s
+			WHERE status IN ('received', 'processing')
+			  AND received_at < $1
+		`, table)
+
+		msgRows, queryErr := pe.db.QueryContext(ctx, query, cutoff)
+		if queryErr != nil {
+			log.Printf("⚠️  [Recovery] Failed to query %s: %v", table, queryErr)
+			continue
+		}
+
+		type staleMsg struct{ id, msgType, raw string }
+		var stale []staleMsg
+		for msgRows.Next() {
+			var m staleMsg
+			if scanErr := msgRows.Scan(&m.id, &m.msgType, &m.raw); scanErr == nil {
+				stale = append(stale, m)
+			}
+		}
+		msgRows.Close()
+
+		for _, m := range stale {
+			if enqErr := pe.messageQueue.EnqueueForRecovery(interfaceID, m.id, m.msgType, m.raw); enqErr != nil {
+				log.Printf("⚠️  [Recovery] Failed to re-enqueue %s: %v", m.id, enqErr)
+			} else {
+				totalRecovered++
+				log.Printf("♻️  [Recovery] Re-enqueued stale message %s (interface: %s)", m.id, interfaceID)
+			}
+		}
+	}
+
+	if totalRecovered > 0 {
+		log.Printf("✅ [Recovery] Startup recovery complete — %d message(s) re-enqueued", totalRecovered)
+	} else {
+		log.Printf("✅ [Recovery] Startup recovery complete — no stale messages found")
+	}
+}
+
+// extractInterfaceIDFromTable converts a table name like
+// "messages_intf_085d4474_bc07_449f_9676_dcebf726292c"
+// back to UUID "085d4474-bc07-449f-9676-dcebf726292c".
+func extractInterfaceIDFromTable(tableName string) string {
+	const prefix = "messages_intf_"
+	if len(tableName) <= len(prefix) {
+		return ""
+	}
+	uuidPart := tableName[len(prefix):]
+	// UUID uses hyphens; table name uses underscores as separators.
+	result := make([]byte, len(uuidPart))
+	for i := 0; i < len(uuidPart); i++ {
+		if uuidPart[i] == '_' {
+			result[i] = '-'
+		} else {
+			result[i] = uuidPart[i]
+		}
+	}
+	return string(result)
 }

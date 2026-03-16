@@ -8,17 +8,19 @@ class InterfaceTableManager {
         this.schemaTemplate = this.getMessageTableSchema();
         this.CURRENT_SCHEMA_VERSION = '1.1'; // Increment when schema changes
         this.REQUIRED_COLUMNS = [
-            'id', 'message_id', 'correlation_id', 'interface_id', 'status', 'priority',
+            'id', 'message_id', 'interface_id', 'status',
             'received_at', 'source_type', 'source_endpoint', 'source_ip',
-            'message_type', 'message_size', 'message_encoding', 'raw_message',
+            'message_type', 'message_size', 'message_encoding',
             'processing_started_at', 'processing_completed_at', 'transformation_applied',
             'transformation_type', 'processing_time_ms',
             // V19 JSON Parsing columns
             'parsed_at', 'parsing_status', 'parsing_time_ms', 'parsing_error',
             // Error handling
-            'error_count', 'last_error_message', 'last_error_at', 'retry_count', 'max_retries',
+            'error_count', 'last_error_message', 'last_error_at',
             // Delivery
             'target_endpoint', 'delivery_status', 'delivery_attempts', 'last_delivery_attempt_at',
+            // Object storage URIs
+            'raw_content_uri', 'parsed_content_uri', 'transformed_content_uri', 'log_uri',
             // Audit
             'created_at', 'updated_at'
         ];
@@ -205,13 +207,11 @@ class InterfaceTableManager {
             CREATE TABLE {table_name} (
                 id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
                 message_id VARCHAR(255) NOT NULL,
-                correlation_id VARCHAR(255),
                 interface_id UUID NOT NULL,
 
                 -- Message status and processing
                 status VARCHAR(50) NOT NULL DEFAULT 'received'
-                    CHECK (status IN ('received', 'processing', 'transformed', 'sent', 'delivered', 'failed', 'error', 'reprocessing')),
-                priority INTEGER NOT NULL DEFAULT 5,
+                    CHECK (status IN ('received', 'processing', 'transformed', 'sent', 'delivered', 'failed', 'error', 'reprocessing', 'processed')),
 
                 -- Timing information
                 received_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -227,7 +227,6 @@ class InterfaceTableManager {
                 message_type VARCHAR(100),
                 message_size INTEGER,
                 message_encoding VARCHAR(50) DEFAULT 'UTF-8',
-                raw_message TEXT,
 
                 -- Processing results
                 transformation_applied BOOLEAN DEFAULT false,
@@ -244,14 +243,18 @@ class InterfaceTableManager {
                 error_count INTEGER DEFAULT 0,
                 last_error_message TEXT,
                 last_error_at TIMESTAMP WITH TIME ZONE,
-                retry_count INTEGER DEFAULT 0,
-                max_retries INTEGER DEFAULT 3,
 
                 -- Delivery information
                 target_endpoint VARCHAR(500),
                 delivery_status VARCHAR(50),
                 delivery_attempts INTEGER DEFAULT 0,
                 last_delivery_attempt_at TIMESTAMP WITH TIME ZONE,
+
+                -- Object storage URIs (V56)
+                raw_content_uri TEXT,
+                parsed_content_uri TEXT,
+                transformed_content_uri TEXT,
+                log_uri TEXT,
 
                 -- Audit fields
                 created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
@@ -267,7 +270,6 @@ class InterfaceTableManager {
         return [
             `CREATE INDEX idx_${tableName}_received_at ON ${tableName}(received_at DESC)`,
             `CREATE INDEX idx_${tableName}_status ON ${tableName}(status, received_at DESC)`,
-            `CREATE INDEX idx_${tableName}_correlation ON ${tableName}(correlation_id) WHERE correlation_id IS NOT NULL`,
             `CREATE INDEX idx_${tableName}_message_id ON ${tableName}(message_id)`,
             `CREATE INDEX idx_${tableName}_message_type ON ${tableName}(message_type) WHERE message_type IS NOT NULL`,
             `CREATE INDEX idx_${tableName}_processing_time ON ${tableName}(processing_started_at, processing_completed_at) WHERE processing_completed_at IS NOT NULL`
@@ -303,35 +305,31 @@ class InterfaceTableManager {
     async insertMessage(interfaceId, messageData) {
         const tableName = await this.ensureInterfaceTable(interfaceId, messageData.interfaceName || 'Unknown');
 
-        // Clean development schema - only new format fields (legacy source is now nullable)
         const insertSQL = `
             INSERT INTO ${tableName} (
-                message_id, correlation_id, interface_id, status, priority,
+                message_id, interface_id, status,
                 source_type, source_endpoint, source_ip,
                 message_type, message_size, message_encoding,
-                raw_message, received_at
+                received_at
             ) VALUES (
-                :message_id, :correlation_id, :interface_id, :status, :priority,
+                :message_id, :interface_id, :status,
                 :source_type, :source_endpoint, :source_ip,
                 :message_type, :message_size, :message_encoding,
-                :raw_message, :received_at
+                :received_at
             )
             RETURNING id
         `;
 
         const replacements = {
             message_id: messageData.messageId,
-            correlation_id: messageData.correlationId,
             interface_id: messageData.interfaceId,
             status: messageData.status || 'received',
-            priority: messageData.priority || 5,
             source_type: messageData.sourceType,
             source_endpoint: messageData.sourceEndpoint,
             source_ip: messageData.sourceIP,
             message_type: messageData.messageType,
             message_size: messageData.messageSize,
             message_encoding: messageData.messageEncoding || 'UTF-8',
-            raw_message: messageData.rawMessage,
             received_at: messageData.receivedAt || new Date()
         };
 
@@ -392,10 +390,22 @@ class InterfaceTableManager {
         let whereConditions = [];
         let replacements = { limit: parseInt(limit), offset: parseInt(offset) };
 
-        // Build dynamic filters
+        // Build dynamic filters — map composite display status to DB columns
         if (status) {
-            whereConditions.push('status = :status');
-            replacements.status = status;
+            const statusMap = {
+                'received':         "status = 'received'",
+                'processing':       "status IN ('processing','reprocessing')",
+                'delivered':        "status IN ('processed','delivered') AND delivery_status = 'delivered'",
+                'completed':        "status IN ('processed','delivered') AND delivery_status = 'not_required'",
+                'pending_delivery': "status = 'processed' AND delivery_status = 'pending'",
+                'failed':           "(status = 'failed' OR delivery_status = 'failed')",
+            };
+            if (statusMap[status]) {
+                whereConditions.push(statusMap[status]);
+            } else {
+                whereConditions.push('status = :status');
+                replacements.status = status;
+            }
         }
 
         if (messageType) {
@@ -418,8 +428,8 @@ class InterfaceTableManager {
         const finalSortBy = validSortColumns.includes(sortBy) ? sortBy : 'received_at';
         const finalSortOrder = ['ASC', 'DESC'].includes(sortOrder.toUpperCase()) ? sortOrder.toUpperCase() : 'DESC';
 
-        // Standard schema - all interface tables use the same format
-        let selectColumns = 'id, message_id, correlation_id, status, priority, message_type, message_size, received_at, source_type, source_endpoint, processing_completed_at, processing_time_ms, parsed_at, parsing_time_ms, error_count, last_error_message, delivery_status, delivery_attempts';
+        // Standard schema — dropped columns: correlation_id, priority, raw_message, retry_count, max_retries (V60)
+        let selectColumns = 'id, message_id, status, message_type, message_size, received_at, source_type, source_endpoint, processing_completed_at, processing_time_ms, parsed_at, parsing_time_ms, error_count, last_error_message, delivery_status, delivery_attempts, raw_content_uri, parsed_content_uri, transformed_content_uri';
 
         // PERFORMANCE QUERY: Only this interface's table
         const messagesQuery = `

@@ -20,6 +20,15 @@ class PropertiesPanel {
         this.currentStep = step;
         this.isPreviewMode = isPreview;
 
+        // Kick off async loads for the path picker so data is ready by the time
+        // the user clicks a field input (both are fire-and-forget):
+        // 1. Backend-declared step variables via GetOutputVariables()
+        // 2. Silent test-run refresh using stored localStorage sample message
+        if (!isPreview) {
+            if (typeof this.initStepVariables === 'function') this.initStepVariables();
+            this._silentRefreshTestOutput();
+        }
+
         // Get modal elements
         const modal = document.getElementById('stepPropertiesModal');
         const modalTitle = document.getElementById('stepModalTitle');
@@ -33,10 +42,20 @@ class PropertiesPanel {
             return;
         }
 
-        // Update modal title
+        // Update modal title input (now an editable field)
         if (modalTitle) {
             const prefix = isPreview ? 'Preview: ' : '';
-            modalTitle.textContent = prefix + (step.stepName || 'Step Configuration');
+            modalTitle.value = prefix + (step.stepName || 'Step Configuration');
+            modalTitle.readOnly = isPreview;
+
+            // Live rename: update step.stepName as the user types
+            modalTitle.oninput = null; // remove previous listener
+            if (!isPreview) {
+                modalTitle.oninput = () => {
+                    const newName = modalTitle.value.trim();
+                    if (newName) step.stepName = newName;
+                };
+            }
         }
 
         // Populate Form Tab
@@ -68,6 +87,7 @@ class PropertiesPanel {
 
         // Setup modal close handlers
         this.setupModalCloseHandlers(modal, isPreview);
+
     }
 
     /**
@@ -141,22 +161,30 @@ class PropertiesPanel {
 
     /**
      * Find step's position (flat sequential index) across all execution groups.
+     * Returns { layerName, stepIndex } — layerName is the group name/id (truthy when found).
      */
     findStepPosition(step) {
         const pipeline = this.builder.pipeline;
         if (!pipeline || !pipeline.executionGroups) {
-            return { stepIndex: -1 };
+            return { layerName: null, stepIndex: -1 };
         }
 
-        const allSteps = [];
-        pipeline.executionGroups.forEach(group => {
-            if (group.steps) allSteps.push(...group.steps);
-        });
-
-        const stepIndex = allSteps.findIndex(s =>
-            s.id === step.id || (s.stepName === step.stepName && s.stepType === step.stepType)
-        );
-        return { stepIndex };
+        let flatIndex = 0;
+        for (const group of pipeline.executionGroups) {
+            if (!group.steps) continue;
+            for (let i = 0; i < group.steps.length; i++) {
+                const s = group.steps[i];
+                if (s.id === step.id ||
+                    (s.stepName === step.stepName && s.stepType === step.stepType)) {
+                    return {
+                        layerName: group.name || group.id || 'main',
+                        stepIndex: flatIndex,
+                    };
+                }
+                flatIndex++;
+            }
+        }
+        return { layerName: null, stepIndex: -1 };
     }
 
     /**
@@ -333,6 +361,172 @@ class PropertiesPanel {
     }
 
     /**
+     * Returns a step-type-aware JSON placeholder shown in the Import JSON textarea
+     * after the user clears it. Each placeholder is a complete, runnable example.
+     */
+    _getJSONPlaceholder(stepType) {
+        const examples = {
+            remove_duplicates: JSON.stringify({
+                stepName: 'Remove Duplicate Patients',
+                stepType: 'remove_duplicates',
+                sequence: 30,
+                enabled: true,
+                config: {
+                    sourceField: 'steps.file_parser_a1b2c3.step_output.records',
+                    keyFields: ['patient_id', 'visit_date'],
+                    strategy: 'first',
+                    caseSensitive: false,
+                    nullKeyBehavior: 'remove',
+                    outputField: ''
+                }
+            }, null, 2),
+            file_parser: JSON.stringify({
+                stepName: 'Parse Claims CSV',
+                stepType: 'file_parser',
+                sequence: 10,
+                enabled: true,
+                config: {
+                    sourceType: 'local_path',
+                    filePath: '/data/claims/claims_export.csv',
+                    fileFormat: 'csv',
+                    hasHeader: true,
+                    delimiter: ',',
+                    trimFields: true,
+                    maxRecords: 10000,
+                    offset: 0,
+                    skipRows: 0
+                }
+            }, null, 2),
+            'enrichment.api': JSON.stringify({
+                stepName: 'Enrich from EMPI',
+                stepType: 'enrichment.api',
+                sequence: 20,
+                enabled: true,
+                config: {
+                    endpoint: 'https://empi.hospital.org/patients/{patientId}',
+                    method: 'GET',
+                    authType: 'bearer',
+                    fieldMappings: { patientId: 'PID.3' },
+                    timeoutMs: 5000,
+                    failOnError: false
+                }
+            }, null, 2),
+            'enrichment.database': JSON.stringify({
+                stepName: 'Lookup Insurance Plan',
+                stepType: 'enrichment.database',
+                sequence: 20,
+                enabled: true,
+                config: {
+                    databaseType: 'postgresql',
+                    query: 'SELECT plan_name, group_id, effective_date FROM insurance_plans WHERE member_id = $1',
+                    queryParams: { memberId: 'IN1.36' },
+                    cacheResults: true,
+                    cacheTTL: 300,
+                    failOnError: false
+                }
+            }, null, 2),
+            data_masking: JSON.stringify({
+                stepName: 'Mask PHI Fields',
+                stepType: 'data_masking',
+                sequence: 200,
+                enabled: true,
+                config: {
+                    maskAllPHI: false,
+                    maskAllPHIFormat: 'hl7v2',
+                    preserveFormat: false,
+                    rules: [
+                        {
+                            field: 'PID.5',
+                            strategy: 'mask',
+                            comment: 'Patient name — full mask (HL7 v2 path)'
+                        },
+                        {
+                            field: 'PID.19',
+                            strategy: 'hash',
+                            hashSalt: 'myOrgSecret2025',
+                            comment: 'SSN — SHA-256 hash, same salt = same hash across datasets (join-safe)'
+                        },
+                        {
+                            field: 'PID.13',
+                            strategy: 'partial',
+                            keepFirst: 0,
+                            keepLast: 4,
+                            preserveFormat: true,
+                            comment: 'Phone — keep last 4 digits, preserve dashes: 555-867-5309 → ***-***-5309'
+                        },
+                        {
+                            field: 'PID.5',
+                            strategy: 'substitute',
+                            substituteType: 'name',
+                            comment: 'Replace with realistic fake name (deterministic — same input = same fake output)'
+                        },
+                        {
+                            field: 'steps.hl7_fhir_transform.step_output.fhir_bundle.entry[0].resource.patient.name[0].family',
+                            strategy: 'mask',
+                            comment: 'FHIR Patient family name from prior HL7→FHIR transform step (entry index auto-resolved)'
+                        },
+                        {
+                            field: 'steps.api_enrichment.step_output.email',
+                            strategy: 'mask',
+                            comment: 'Email returned by a prior API enrichment step'
+                        }
+                    ]
+                }
+            }, null, 2),
+            'data_masking_fhir': JSON.stringify({
+                stepName: 'Mask FHIR PHI',
+                stepType: 'data_masking',
+                sequence: 200,
+                enabled: true,
+                config: {
+                    maskAllPHI: true,
+                    maskAllPHIFormat: 'fhir',
+                    preserveFormat: false,
+                    rules: [
+                        {
+                            field: 'steps.hl7_fhir_transform.step_output.fhir_bundle.entry[0].resource.patient.name[0].family',
+                            strategy: 'substitute',
+                            substituteType: 'name',
+                            comment: 'Replace FHIR Patient family name with deterministic fake name'
+                        }
+                    ]
+                }
+            }, null, 2),
+            'data_masking_csv': JSON.stringify({
+                stepName: 'Mask CSV Patient Records',
+                stepType: 'data_masking',
+                sequence: 200,
+                enabled: true,
+                config: {
+                    maskAllPHI: false,
+                    preserveFormat: false,
+                    rules: [
+                        {
+                            field: 'steps.file_parser.step_output.records[0].ssn',
+                            strategy: 'hash',
+                            hashSalt: 'myOrgSecret2025',
+                            comment: 'SSN in CSV records — index [0] auto-resolved to search all records'
+                        },
+                        {
+                            field: 'steps.file_parser.step_output.records[0].patient_name',
+                            strategy: 'substitute',
+                            substituteType: 'name',
+                            comment: 'Replace name in every matching CSV row'
+                        }
+                    ]
+                }
+            }, null, 2),
+        };
+        return examples[stepType] || JSON.stringify({
+            stepName: 'My Step',
+            stepType: stepType || 'field_mapping',
+            sequence: 10,
+            enabled: true,
+            config: {}
+        }, null, 2);
+    }
+
+    /**
      * Create JSON Import/Export Interface
      */
     createJSONEditor(step, isPreview = false) {
@@ -350,6 +544,9 @@ class PropertiesPanel {
         };
 
         const formattedJSON = JSON.stringify(currentConfig, null, 2);
+
+        // Step-type-aware placeholder shown after the user clears the textarea
+        const jsonPlaceholder = this._getJSONPlaceholder(step.stepType || '');
 
         container.innerHTML = `
             <div class="json-editor-wrapper">
@@ -405,15 +602,7 @@ class PropertiesPanel {
                             id="jsonConfigInput"
                             class="json-textarea"
                             rows="16"
-                            placeholder='{
-  "stepName": "My Custom Step",
-  "stepType": "pre.validation",
-  "sequence": 10,
-  "enabled": true,
-  "config": {
-    "key": "value"
-  }
-}'
+                            placeholder="${jsonPlaceholder.replace(/"/g, '&quot;')}"
                             spellcheck="false"
                         >${formattedJSON}</textarea>
                     </div>
@@ -565,10 +754,24 @@ class PropertiesPanel {
                                 ${ex.label}
                             </summary>
                             <div style="padding: 1rem; background: white; border-top: 1px solid #e5e7eb;">
-                                <pre style="background: #f3f4f6; padding: 0.75rem; border-radius: 4px; font-size: 0.8rem; overflow-x: auto; line-height: 1.6;"><code>${JSON.stringify(ex.config, null, 2)}</code></pre>
+                                ${ex.description ? `<p style="color:#4b5563;font-size:0.85rem;margin-bottom:0.75rem;">${ex.description}</p>` : ''}
+                                <pre style="background: #f3f4f6; padding: 0.75rem; border-radius: 4px; font-size: 0.8rem; overflow-x: auto; line-height: 1.6;"><code>${JSON.stringify(ex.config, null, 2).replace(/\\n/g, '\n').replace(/\\t/g, '  ')}</code></pre>
                             </div>
                         </details>
                     `).join('')}
+                </div>
+                ` : ''}
+
+                ${docs.connectorTypeCards ? `
+                <div class="doc-section" style="margin-bottom: 1.5rem;" id="connectorTypeDocsSection">
+                    <h4 style="color: #2563eb; margin-bottom: 0.75rem;">
+                        <i class="fas fa-plug"></i> Connector Type Reference
+                    </h4>
+                    <select id="connectorTypeDocSelect" style="width:100%;padding:0.5rem;border:1px solid #d1d5db;border-radius:6px;font-size:0.875rem;margin-bottom:0.75rem;background:#fff;">
+                        <option value="">— Select a connector type to view its documentation —</option>
+                        ${docs.connectorTypeCards.map(ct => `<option value="${ct.typeName}">${ct.icon} ${ct.displayName} (${ct.typeName})</option>`).join('')}
+                    </select>
+                    <div id="connectorTypeDocDetail" style="display:none;"></div>
                 </div>
                 ` : ''}
 
@@ -862,14 +1065,20 @@ class PropertiesPanel {
                             </tr>
                         </thead>
                         <tbody>
-                            ${docs.parameters.map(p => `
-                                <tr>
-                                    <td style="padding: 0.75rem; border: 1px solid #e5e7eb; font-family: monospace; color: #059669;">${p.name}</td>
-                                    <td style="padding: 0.75rem; border: 1px solid #e5e7eb;"><code style="font-size: 0.85rem;">${p.type}</code></td>
-                                    <td style="padding: 0.75rem; border: 1px solid #e5e7eb; text-align: center;">${p.required ? '✓' : '-'}</td>
-                                    <td style="padding: 0.75rem; border: 1px solid #e5e7eb; line-height: 1.5;">${p.description}</td>
-                                </tr>
-                            `).join('')}
+                            ${docs.parameters.map(p => {
+                                const depth = (p.name.match(/\./g) || []).length;
+                                const indent = depth > 0 ? `padding-left: ${depth * 16 + 12}px;` : 'padding: 0.75rem;';
+                                const nameColor = depth === 0 ? '#059669' : depth === 1 ? '#0891b2' : '#7c3aed';
+                                const prefix = depth > 0 ? '└ ' : '';
+                                const rowBg = depth > 0 ? 'background: #fafafa;' : '';
+                                return `
+                                <tr style="${rowBg}">
+                                    <td style="${indent} padding-top: 0.6rem; padding-bottom: 0.6rem; border: 1px solid #e5e7eb; font-family: monospace; color: ${nameColor}; white-space: nowrap;">${prefix}${p.name}</td>
+                                    <td style="padding: 0.6rem 0.75rem; border: 1px solid #e5e7eb;"><code style="font-size: 0.85rem;">${p.type}</code></td>
+                                    <td style="padding: 0.6rem 0.75rem; border: 1px solid #e5e7eb; text-align: center;">${p.required ? '✓' : '-'}</td>
+                                    <td style="padding: 0.6rem 0.75rem; border: 1px solid #e5e7eb; line-height: 1.5;">${p.description}</td>
+                                </tr>`;
+                            }).join('')}
                         </tbody>
                     </table>
                 </div>
@@ -952,6 +1161,57 @@ class PropertiesPanel {
                 ` : ''}
             </div>
         `;
+
+        // Wire connector type documentation dropdown
+        if (docs.connectorTypeCards) {
+            const sel = container.querySelector('#connectorTypeDocSelect');
+            const detail = container.querySelector('#connectorTypeDocDetail');
+            if (sel && detail) {
+                sel.addEventListener('change', () => {
+                    const ct = docs.connectorTypeCards.find(c => c.typeName === sel.value);
+                    if (!ct) { detail.style.display = 'none'; return; }
+                    const scriptRows = ct.example && JSON.stringify(ct.example, null, 2).replace(/\\n/g, '\n');
+                    detail.style.display = '';
+                    detail.innerHTML = `
+                        <div style="border:1px solid #e5e7eb;border-radius:6px;background:#f9fafb;overflow:hidden;">
+                            <div style="padding:0.7rem 1rem;background:#1e3a8a;color:white;display:flex;align-items:center;gap:0.6rem;">
+                                <span style="font-size:1.1rem;">${ct.icon}</span>
+                                <strong>${ct.displayName}</strong>
+                                <code style="background:rgba(255,255,255,0.2);padding:0.1rem 0.5rem;border-radius:3px;font-size:0.75rem;">${ct.typeName}</code>
+                                <span style="margin-left:auto;font-size:0.75rem;background:${ct.mode==='push'?'#dcfce7':'#fef3c7'};color:${ct.mode==='push'?'#166534':'#92400e'};padding:0.1rem 0.5rem;border-radius:10px;">${ct.mode==='push'?'⚡ push (long-lived listener)':'🔄 pull (cron / scheduled)'}</span>
+                            </div>
+                            <div style="padding:0.75rem 1rem;">
+                                <p style="color:#4b5563;font-size:0.875rem;margin-bottom:0.6rem;">${ct.description}</p>
+                                ${ct.notes ? `<p style="color:#92400e;background:#fffbeb;border:1px solid #fde68a;border-radius:4px;padding:0.4rem 0.7rem;font-size:0.8rem;margin-bottom:0.6rem;"><strong>⚠ Note:</strong> ${ct.notes}</p>` : ''}
+                                <div style="margin-bottom:0.75rem;">
+                                    <strong style="font-size:0.8rem;color:#374151;">Required fields: </strong>
+                                    ${ct.required.map(f => `<code style="background:#fee2e2;color:#991b1b;padding:0.1rem 0.4rem;border-radius:3px;font-size:0.75rem;margin-right:3px;">${f}</code>`).join('')}
+                                </div>
+                                ${ct.keyFields && ct.keyFields.length ? `
+                                <table style="width:100%;border-collapse:collapse;font-size:0.8rem;margin-bottom:0.75rem;">
+                                    <thead><tr style="background:#f3f4f6;">
+                                        <th style="padding:0.4rem 0.6rem;text-align:left;border:1px solid #e5e7eb;">Field</th>
+                                        <th style="padding:0.4rem 0.6rem;text-align:left;border:1px solid #e5e7eb;">Type</th>
+                                        <th style="padding:0.4rem 0.6rem;text-align:left;border:1px solid #e5e7eb;">Default</th>
+                                        <th style="padding:0.4rem 0.6rem;text-align:left;border:1px solid #e5e7eb;">Notes</th>
+                                    </tr></thead>
+                                    <tbody>${ct.keyFields.map(f => `<tr>
+                                        <td style="padding:0.4rem 0.6rem;border:1px solid #e5e7eb;font-family:monospace;color:#0891b2;">${f.name}${f.required?' <span style="color:#ef4444">*</span>':''}</td>
+                                        <td style="padding:0.4rem 0.6rem;border:1px solid #e5e7eb;"><code>${f.type}</code></td>
+                                        <td style="padding:0.4rem 0.6rem;border:1px solid #e5e7eb;color:#6b7280;">${f.default || '—'}</td>
+                                        <td style="padding:0.4rem 0.6rem;border:1px solid #e5e7eb;color:#4b5563;">${f.notes || ''}</td>
+                                    </tr>`).join('')}</tbody>
+                                </table>` : ''}
+                                <details style="margin-top:0.25rem;">
+                                    <summary style="cursor:pointer;color:#2563eb;font-size:0.8rem;font-weight:600;">📋 View example config</summary>
+                                    <pre style="background:#1e1e2e;color:#cdd6f4;padding:0.75rem;border-radius:4px;margin-top:0.5rem;font-size:0.78rem;overflow-x:auto;line-height:1.5;"><code>${scriptRows}</code></pre>
+                                </details>
+                            </div>
+                        </div>
+                    `;
+                });
+            }
+        }
 
         return container;
     }
@@ -1053,7 +1313,7 @@ class PropertiesPanel {
 
                 <div class="form-group">
                     <label style="display: flex; align-items: center; gap: 0.5rem;">
-                        <input type="checkbox" id="stepEnabled" ${step.enabled ? 'checked' : ''}>
+                        <input type="checkbox" id="stepEnabled" ${step.enabled !== false ? 'checked' : ''}>
                         <span>Enabled</span>
                     </label>
                 </div>
@@ -1305,6 +1565,16 @@ class PropertiesPanel {
                     ">
                         <i class="fas fa-table"></i> Visual Mapping
                     </button>
+                    <button class="config-tab" data-tab="resources" style="
+                        padding: 0.5rem 1rem;
+                        border: none;
+                        background: none;
+                        cursor: pointer;
+                        color: #64748b;
+                        font-weight: 500;
+                    ">
+                        <i class="fas fa-sitemap"></i> Resources
+                    </button>
                     <button class="config-tab" data-tab="json" style="
                         padding: 0.5rem 1rem;
                         border: none;
@@ -1392,7 +1662,27 @@ class PropertiesPanel {
                     </div>
                 </div>
 
-                <!-- Tab 2: JSON Editor -->
+                <!-- Tab 2: Resources -->
+                <div class="config-tab-content" data-tab-content="resources" style="display: none;">
+                    <div id="resourceSelectorContainer" style="padding: 0.5rem 0;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+                            <p style="color: #475569; font-size: 0.875rem; margin: 0;">
+                                Choose which FHIR resources to include in the output. Deselect resources you don't need (e.g., MessageHeader).
+                            </p>
+                            <button id="loadResourcePreviewBtn" class="btn btn-secondary" style="font-size: 0.8rem; padding: 0.4rem 0.8rem; white-space: nowrap; margin-left: 1rem;">
+                                <i class="fas fa-sync-alt"></i> Load
+                            </button>
+                        </div>
+                        <div id="resourceCardsArea">
+                            <div style="padding: 2rem; text-align: center; color: #94a3b8;">
+                                <i class="fas fa-sitemap" style="font-size: 2rem; margin-bottom: 0.75rem; opacity: 0.4;"></i>
+                                <p style="margin: 0; font-size: 0.875rem;">Click <strong>Load</strong> to see available FHIR resources for this message type</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Tab 3: JSON Editor -->
                 <div class="config-tab-content" data-tab-content="json" style="display: none;">
                     <div class="form-group">
                         <label>Configuration (JSON)</label>
@@ -1538,8 +1828,10 @@ class PropertiesPanel {
                         <div id="scriptValidationResult" style="flex: 1;"></div>
                     </div>
                     <small style="color: #64748b; display: block; margin-top: 8px;">
-                        Available variables: <code>input</code> (parsed message data)<br>
-                        Return modified data or throw error
+                        <strong>Read:</strong> <code>input</code> — full pipeline message data<br>
+                        <strong>Write (option A):</strong> assign to <code>output</code> — <code>output.patientId = "123";</code><br>
+                        <strong>Write (option B):</strong> return an object — <code>return { patientId: "123" };</code><br>
+                        <strong>Write (option C):</strong> end with an expression — <code>({ patientId: "123" })</code>
                     </small>
                 </div>
             </div>
@@ -1690,6 +1982,24 @@ class PropertiesPanel {
             console.log('🔄 Auto-loading standard template mappings...');
             // Auto-fetch template mappings asynchronously
             this.autoLoadTemplateMappings(step, mappingTableContainer);
+        }
+
+        // === Resources Tab: Load Preview Button ===
+        const loadResourcePreviewBtn = form.querySelector('#loadResourcePreviewBtn');
+        if (loadResourcePreviewBtn) {
+            loadResourcePreviewBtn.addEventListener('click', () => {
+                this.loadResourcePreview(step, form);
+            });
+            // Auto-load if switching to resources tab
+            const resourcesTab = form.querySelector('[data-tab="resources"]');
+            if (resourcesTab) {
+                resourcesTab.addEventListener('click', () => {
+                    const cardsArea = form.querySelector('#resourceCardsArea');
+                    if (cardsArea && cardsArea.querySelector('.resource-card') === null) {
+                        this.loadResourcePreview(step, form);
+                    }
+                });
+            }
         }
 
         // === JSON Format Button ===
@@ -2755,7 +3065,7 @@ class PropertiesPanel {
         setTimeout(() => {
             const container = document.getElementById('connector-config-builder-container');
             if (container && typeof ConnectorConfigBuilder !== 'undefined') {
-                this.connectorConfigBuilder = new ConnectorConfigBuilder(container, step.config, direction);
+                this.connectorConfigBuilder = new ConnectorConfigBuilder(container, step.config, direction, this);
                 this.connectorConfigBuilder.init();
                 console.log(`🔌 ConnectorConfigBuilder initialized (${direction}) with config:`, step.config);
 
@@ -4049,6 +4359,107 @@ class PropertiesPanel {
     }
 
     /**
+     * Load FHIR resource preview (confidence + field counts) for the Resources tab
+     */
+    async loadResourcePreview(step, form) {
+        const cardsArea = form.querySelector('#resourceCardsArea');
+        if (!cardsArea) return;
+
+        const messageType = this.builder.pipeline?.messageType || step.config?.message_type || 'ADT^A01';
+
+        cardsArea.innerHTML = `<div style="padding: 1.5rem; text-align: center; color: #64748b;">
+            <i class="fas fa-spinner fa-spin fa-lg"></i>
+            <p style="margin-top: 0.5rem; font-size: 0.875rem;">Loading resource info for ${messageType}…</p>
+        </div>`;
+
+        try {
+            const resp = await fetch(`/api/fhir/template/preview?messageType=${encodeURIComponent(messageType)}`, {
+                credentials: 'include'
+            });
+            const data = await resp.json();
+            if (!data.success) throw new Error(data.error || 'Unknown error');
+
+            // Current selection stored in step config
+            const selectedResources = Array.isArray(step.config?.selected_resources)
+                ? step.config.selected_resources
+                : null; // null = all selected (default)
+
+            const confColor = (avg) => {
+                if (avg >= 0.9) return '#059669';
+                if (avg >= 0.75) return '#d97706';
+                return '#dc2626';
+            };
+            const confLabel = (avg) => {
+                if (avg >= 0.9) return 'High';
+                if (avg >= 0.75) return 'Medium';
+                return 'Low';
+            };
+
+            cardsArea.innerHTML = data.resources.map(r => {
+                const isChecked = selectedResources === null || selectedResources.includes(r.name);
+                const pct = Math.round(r.avg_confidence * 100);
+                const color = confColor(r.avg_confidence);
+                return `
+                <div class="resource-card" style="
+                    display: flex; align-items: flex-start; gap: 0.75rem;
+                    padding: 0.875rem 1rem;
+                    margin-bottom: 0.5rem;
+                    border: 1px solid ${isChecked ? '#bfdbfe' : '#e5e7eb'};
+                    border-radius: 8px;
+                    background: ${isChecked ? '#f0f9ff' : '#f8fafc'};
+                    transition: all 0.2s ease;
+                ">
+                    <input type="checkbox" class="resource-checkbox" data-resource="${r.name}"
+                        ${isChecked ? 'checked' : ''}
+                        style="margin-top: 3px; width: 16px; height: 16px; cursor: pointer; accent-color: #1e3a8a;">
+                    <div style="flex: 1; min-width: 0;">
+                        <div style="display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 0.35rem;">
+                            <span style="font-weight: 600; font-size: 0.9rem; color: #1e293b;">${r.name}</span>
+                            ${r.optional ? '<span style="font-size: 0.7rem; background: #fef3c7; color: #92400e; padding: 1px 6px; border-radius: 10px;">optional</span>' : '<span style="font-size: 0.7rem; background: #dcfce7; color: #166534; padding: 1px 6px; border-radius: 10px;">core</span>'}
+                            <span style="font-size: 0.75rem; color: #64748b; margin-left: auto;">${r.field_count} fields · ${r.required_fields} required</span>
+                        </div>
+                        <!-- Confidence bar -->
+                        <div style="display: flex; align-items: center; gap: 0.5rem;">
+                            <div style="flex: 1; height: 6px; background: #e5e7eb; border-radius: 3px; overflow: hidden;">
+                                <div style="width: ${pct}%; height: 100%; background: ${color}; border-radius: 3px; transition: width 0.4s ease;"></div>
+                            </div>
+                            <span style="font-size: 0.75rem; font-weight: 600; color: ${color}; white-space: nowrap;">${pct}% ${confLabel(r.avg_confidence)}</span>
+                        </div>
+                    </div>
+                </div>`;
+            }).join('');
+
+            // Wire up checkboxes → update step.config.selected_resources
+            cardsArea.querySelectorAll('.resource-checkbox').forEach(cb => {
+                cb.addEventListener('change', () => {
+                    const checked = [...cardsArea.querySelectorAll('.resource-checkbox:checked')]
+                        .map(el => el.dataset.resource);
+                    // If all resources selected, store empty array (means "all")
+                    const allResources = data.resources.map(r => r.name);
+                    if (checked.length === allResources.length) {
+                        delete step.config.selected_resources;
+                    } else {
+                        if (!step.config) step.config = {};
+                        step.config.selected_resources = checked;
+                    }
+                    // Update card styles
+                    cardsArea.querySelectorAll('.resource-card').forEach(card => {
+                        const cardCb = card.querySelector('.resource-checkbox');
+                        card.style.borderColor = cardCb.checked ? '#bfdbfe' : '#e5e7eb';
+                        card.style.background = cardCb.checked ? '#f0f9ff' : '#f8fafc';
+                    });
+                });
+            });
+
+        } catch (err) {
+            cardsArea.innerHTML = `<div style="padding: 1.5rem; text-align: center; color: #dc2626;">
+                <i class="fas fa-exclamation-circle fa-lg"></i>
+                <p style="margin-top: 0.5rem; font-size: 0.875rem;">Failed to load resource info: ${err.message}</p>
+            </div>`;
+        }
+    }
+
+    /**
      * Add step to pipeline (from preview mode)
      */
     addStepToPipeline(step) {
@@ -4069,6 +4480,7 @@ class PropertiesPanel {
             console.log('[PropertiesPanel] Auto-saving pipeline after step add...');
             this.builder.savePipeline().then(() => {
                 console.log('[PropertiesPanel] Pipeline auto-saved successfully');
+                this._silentRefreshTestOutput();
             }).catch(err => {
                 console.error('[PropertiesPanel] Auto-save failed:', err);
                 this.builder.dragDropManager.showNotification('Warning: Step added but auto-save failed. Please click Save Pipeline manually.', 'warning');
@@ -4106,6 +4518,7 @@ class PropertiesPanel {
             console.log('[PropertiesPanel] Auto-saving pipeline after step add...');
             this.builder.savePipeline().then(() => {
                 console.log('[PropertiesPanel] Pipeline auto-saved successfully');
+                this._silentRefreshTestOutput();
             }).catch(err => {
                 console.error('[PropertiesPanel] Auto-save failed:', err);
                 this.builder.dragDropManager.showNotification('Warning: Step added but auto-save failed. Please click Save Pipeline manually.', 'warning');
@@ -4516,8 +4929,13 @@ class PropertiesPanel {
             console.log('[PropertiesPanel] ✅ Saved FHIR Validation config:', step.config);
         }
 
-        // File Parser / Remove Duplicates — delegated to active step builder
-        if (this.activeStepBuilder && (VisualStep.isFileParser(step) || VisualStep.isRemoveDuplicates(step))) {
+        // File Parser / Remove Duplicates / Data Masking / Normalizer / API & DB Enrichment / Payload Builder — delegated to active step builder
+        if (this.activeStepBuilder && (
+            VisualStep.isFileParser(step) || VisualStep.isRemoveDuplicates(step) ||
+            VisualStep.isDataMasking(step) || VisualStep.isNormalizer(step) ||
+            VisualStep.isAPIEnrichment(step) || VisualStep.isDatabaseEnrichment(step) ||
+            VisualStep.isDeidentify(step) || VisualStep.isPayloadBuilder(step)
+        )) {
             this.activeStepBuilder.collectConfig(step);
         }
 
@@ -4701,22 +5119,107 @@ class PropertiesPanel {
                 this.builder.dragDropManager.showNotification('Script validation passed', 'success');
             } else {
                 const errorMsg = result.error || 'Unknown validation error';
-                resultDiv.innerHTML = `<span style="color: #ef4444;">❌ ${errorMsg}</span>`;
+                resultDiv.innerHTML = `<span style="color: #ef4444; font-weight: 500;">❌ ${errorMsg}</span>`;
                 scriptContent.style.borderColor = '#ef4444';
-                this.builder.dragDropManager.showNotification('Script validation failed', 'error');
+                // Show as a modal prompt so the error is always readable
+                this.builder.dragDropManager.showErrorDialog(errorMsg, 'Script Validation Failed');
 
-                // Show detailed errors if available
+                // Log detailed errors to console if available
                 if (result.details) {
                     console.error('Script validation details:', result.details);
                 }
             }
         } catch (error) {
             console.error('Script validation error:', error);
-            resultDiv.innerHTML = `<span style="color: #ef4444;">❌ Validation failed: ${error.message}</span>`;
-            this.builder.dragDropManager.showNotification('Failed to validate script', 'error');
+            resultDiv.innerHTML = `<span style="color: #ef4444; font-weight: 500;">❌ ${error.message}</span>`;
+            this.builder.dragDropManager.showErrorDialog(error.message, 'Script Validation Error');
         } finally {
             validateBtn.disabled = false;
             validateBtn.innerHTML = '🔍 Validate Script';
+        }
+    }
+
+    /**
+     * Silently refresh pipelineLastTestOutput after a step is saved/opened.
+     *
+     * Sample message resolution order (first non-empty wins):
+     *  1. Live test modal input (user just typed something)
+     *  2. localStorage — persisted from the last manual test run
+     *  3. Last real message received by this interface (fetched from the API)
+     *     — this means: as long as one real message has ever come in, the path
+     *       picker self-populates with no user action required at all.
+     */
+    async _silentRefreshTestOutput() {
+        if (!this.builder?.pipeline) return;
+
+        // Source 1: live modal input
+        const messageInput = document.getElementById('testMessageInput');
+        let sampleMessage = messageInput?.value?.trim() || '';
+
+        // Source 2: persisted from previous test run
+        if (!sampleMessage) {
+            try { sampleMessage = localStorage.getItem('pipeline_last_sample_message') || ''; } catch (_) {}
+        }
+
+        // Source 3: last real message received by this interface
+        if (!sampleMessage) {
+            try {
+                const interfaceId = this.builder?.interfaceId
+                    || new URLSearchParams(window.location.search).get('interfaceId');
+                if (interfaceId) {
+                    const resp = await fetch(`/api/messages/interface/${interfaceId}?limit=1&order=received_at+DESC`);
+                    if (resp.ok) {
+                        const data = await resp.json();
+                        const lastMsg = Array.isArray(data.messages) ? data.messages[0] : null;
+                        if (lastMsg?.raw_message) {
+                            sampleMessage = lastMsg.raw_message;
+                            // Persist so future refreshes skip this fetch
+                            try { localStorage.setItem('pipeline_last_sample_message', sampleMessage); } catch (_) {}
+                        }
+                    }
+                }
+            } catch (_) {}
+        }
+
+        if (!sampleMessage) return;
+
+        // Build a partial pipeline copy with remove_duplicates stripped so the test
+        // succeeds even when those steps have an unconfigured or invalid sourceField.
+        const makePartialPipeline = () => {
+            try {
+                const data = JSON.parse(JSON.stringify(this.builder.pipeline.toJSON()));
+                for (const group of (data.execution_groups || [])) {
+                    group.steps = (group.steps || []).filter(s => {
+                        const t = s.step_type || s.stepType || s.type || '';
+                        return t !== 'remove_duplicates';
+                    });
+                }
+                return { toJSON: () => data };
+            } catch { return null; }
+        };
+
+        try {
+            const result = await window.pipelineAPI.testPipeline(this.builder.pipeline, sampleMessage);
+            if (result?.steps) {
+                window.pipelineLastTestOutput = result;
+                console.log('[PropertiesPanel] Silently refreshed test output after step save:', Object.keys(result.steps));
+                try { localStorage.setItem('pipeline_last_test_output', JSON.stringify(result)); } catch (_) {}
+            }
+        } catch (err) {
+            // Full pipeline failed — try partial run without remove_duplicates
+            console.debug('[PropertiesPanel] Full pipeline test failed, trying partial run:', err.message);
+            try {
+                const partial = makePartialPipeline();
+                if (!partial) return;
+                const result = await window.pipelineAPI.testPipeline(partial, sampleMessage);
+                if (result?.steps) {
+                    window.pipelineLastTestOutput = result;
+                    console.log('[PropertiesPanel] Silently refreshed test output (partial run):', Object.keys(result.steps));
+                    try { localStorage.setItem('pipeline_last_test_output', JSON.stringify(result)); } catch (_) {}
+                }
+            } catch (err2) {
+                console.debug('[PropertiesPanel] Partial silent refresh also failed:', err2.message);
+            }
         }
     }
 
@@ -4862,6 +5365,49 @@ class PropertiesPanel {
             console.log('🔧 Using Remove Duplicates no-code UI');
             if (this.activeStepBuilder) { this.activeStepBuilder.destroy(); }
             this.activeStepBuilder = StepBuilderRegistry.create('remove_duplicates', this);
+            return this.activeStepBuilder.render(step);
+        }
+
+        // Special handling for Data Masking step (rule-based no-code UI)
+        if (VisualStep.isDataMasking(step)) {
+            console.log('🔒 Using Data Masking no-code UI');
+            if (this.activeStepBuilder) { this.activeStepBuilder.destroy(); }
+            this.activeStepBuilder = StepBuilderRegistry.create('data_masking', this);
+            return this.activeStepBuilder.render(step);
+        }
+
+        if (VisualStep.isNormalizer(step)) {
+            console.log('📐 Using Normalizer / Pivot / Transpose no-code UI');
+            if (this.activeStepBuilder) { this.activeStepBuilder.destroy(); }
+            this.activeStepBuilder = StepBuilderRegistry.create('normalizer', this);
+            return this.activeStepBuilder.render(step);
+        }
+
+        if (VisualStep.isAPIEnrichment(step)) {
+            console.log('🌐 Using API Enrichment no-code UI');
+            if (this.activeStepBuilder) { this.activeStepBuilder.destroy(); }
+            this.activeStepBuilder = StepBuilderRegistry.create('enrichment.api', this);
+            return this.activeStepBuilder.render(step);
+        }
+
+        if (VisualStep.isDatabaseEnrichment(step)) {
+            console.log('🗄️ Using Database Enrichment no-code UI');
+            if (this.activeStepBuilder) { this.activeStepBuilder.destroy(); }
+            this.activeStepBuilder = StepBuilderRegistry.create('database_enrichment', this);
+            return this.activeStepBuilder.render(step);
+        }
+
+        if (VisualStep.isDeidentify(step)) {
+            console.log('🛡️ Using HIPAA De-identify no-code UI');
+            if (this.activeStepBuilder) { this.activeStepBuilder.destroy(); }
+            this.activeStepBuilder = StepBuilderRegistry.create('deidentify', this);
+            return this.activeStepBuilder.render(step);
+        }
+
+        if (VisualStep.isPayloadBuilder(step)) {
+            console.log('📤 Using Payload Builder no-code UI');
+            if (this.activeStepBuilder) { this.activeStepBuilder.destroy(); }
+            this.activeStepBuilder = StepBuilderRegistry.create('payload.builder', this);
             return this.activeStepBuilder.render(step);
         }
 
@@ -7447,18 +7993,372 @@ return {
 
         // Connector step documentation
         docs['connector.inbound'] = {
-            description: 'Fetches data from external systems via configurable inbound connectors. Supports TCP/MLLP, HTTP/REST, file listeners, databases, message queues, and cloud storage.',
+            description: 'Starts a long-lived listener that receives messages from external systems. The most common type is TCP/MLLP Inbound which receives HL7 v2 messages from EHRs, lab systems, and other healthcare senders. Placed at sequence 5 in a pipeline — the engine starts one listener goroutine per connector.inbound step.',
             useCases: [
-                'Fetch patient data from an external database mid-pipeline',
-                'Read configuration from a file or cloud storage',
-                'Poll a message queue for additional data',
-                'Query a REST API for supplemental information'
+                'Receive HL7 ADT, ORU, or SIU messages from an EHR via TCP/MLLP (port 2575)',
+                'Listen on multiple ports simultaneously by adding multiple connector.inbound steps',
+                'Accept TLS-encrypted MLLP connections from external partners',
+                'Receive messages and send AA/AE/AR acknowledgments back to the sender'
             ],
-            example: { connectorType: 'postgresql_inbound', config: { host: 'db-server', port: 5432, database: 'ehr' }, timeoutMs: 30000 },
+            example: {
+                connectorType: 'tcp_mllp',
+                config: {
+                    host: '0.0.0.0',
+                    port: 2575,
+                    max_connections: 10,
+                    ack: {
+                        mode: 'immediate',
+                        on_error: 'suppress',
+                        sending_app: 'ezHealthKonnect',
+                        sending_facility: 'EHK',
+                        text_success: 'Message received successfully',
+                        text_error: 'Message processing error'
+                    }
+                }
+            },
+            examples: [
+                {
+                    label: 'Basic TCP/MLLP — receive HL7 on port 6610 with immediate ACK',
+                    config: {
+                        connectorType: 'tcp_mllp',
+                        config: {
+                            host: '0.0.0.0',
+                            port: 6610,
+                            max_connections: 20,
+                            timeout_seconds: 300,
+                            ack: {
+                                mode: 'immediate',
+                                on_error: 'suppress',
+                                sending_app: 'ezHealthKonnect',
+                                sending_facility: 'EHK',
+                                text_success: 'Message received',
+                                text_error: 'Processing error'
+                            }
+                        }
+                    }
+                },
+                {
+                    label: 'TCP/MLLP with TLS — encrypted connections (port 2576)',
+                    config: {
+                        connectorType: 'tcp_mllp',
+                        config: {
+                            host: '0.0.0.0',
+                            port: 2576,
+                            enable_tls: true,
+                            tls_cert_path: '/certs/server.crt',
+                            tls_key_path: '/certs/server.key',
+                            max_connections: 10,
+                            ack: {
+                                mode: 'immediate',
+                                on_error: 'nack',
+                                sending_app: 'SecureHIS',
+                                sending_facility: 'PROD'
+                            }
+                        }
+                    }
+                },
+                {
+                    label: 'Custom ACK script — reject non-ADT messages with AR, accept all others with AA',
+                    description: 'Use a custom script when you need conditional ACK logic beyond the standard mode/on_error settings. The function must be named buildACK(msg) and return { ackCode, textMessage }. Valid codes: AA (Accept), AE (Application Error), AR (Application Reject).',
+                    config: {
+                        connectorType: 'tcp_mllp',
+                        config: {
+                            host: '0.0.0.0',
+                            port: 2575,
+                            ack: {
+                                mode: 'immediate',
+                                on_error: 'nack',
+                                sending_app: 'ezHealthKonnect',
+                                sending_facility: 'EHK',
+                                script: [
+                                    'function buildACK(msg) {',
+                                    '  // msg properties available:',
+                                    '  //   msg.controlID      — MSH-10 message control ID',
+                                    '  //   msg.messageType    — e.g. "ADT^A01", "ORU^R01"',
+                                    '  //   msg.sendingApp     — MSH-3',
+                                    '  //   msg.sendingFacility — MSH-4',
+                                    '  //   msg.raw            — full raw HL7 message string',
+                                    '  //   msg.defaultCode    — "AA" or "AE" (from mode/on_error)',
+                                    '  //   msg.defaultText    — default MSA-3 text',
+                                    '  var type = (msg.messageType || "").split("^")[0];',
+                                    '  if (type !== "ADT" && type !== "ORU") {',
+                                    '    return {',
+                                    '      ackCode: "AR",',
+                                    '      textMessage: "Unsupported message type: " + type',
+                                    '    };',
+                                    '  }',
+                                    '  return {',
+                                    '    ackCode: "AA",',
+                                    '    textMessage: "Message accepted"',
+                                    '  };',
+                                    '}'
+                                ].join('\n')
+                            }
+                        }
+                    }
+                },
+                {
+                    label: 'Custom ACK script — add patient ID to ACK text from parsed HL7',
+                    config: {
+                        connectorType: 'tcp_mllp',
+                        config: {
+                            host: '0.0.0.0',
+                            port: 2575,
+                            ack: {
+                                mode: 'immediate',
+                                on_error: 'suppress',
+                                sending_app: 'ezHealthKonnect',
+                                sending_facility: 'EHK',
+                                script: [
+                                    'function buildACK(msg) {',
+                                    '  // Extract PID-3 (patient ID) from raw HL7',
+                                    '  var patientId = "";',
+                                    '  var lines = (msg.raw || "").split("\\r");',
+                                    '  for (var i = 0; i < lines.length; i++) {',
+                                    '    if (lines[i].indexOf("PID") === 0) {',
+                                    '      var fields = lines[i].split("|");',
+                                    '      patientId = fields[3] || "";',
+                                    '      break;',
+                                    '    }',
+                                    '  }',
+                                    '  return {',
+                                    '    ackCode: "AA",',
+                                    '    textMessage: patientId',
+                                    '      ? "Accepted patient " + patientId',
+                                    '      : "Message received"',
+                                    '  };',
+                                    '}'
+                                ].join('\n')
+                            }
+                        }
+                    }
+                }
+            ],
+            connectorTypeCards: [
+                {
+                    typeName: 'tcp_mllp', displayName: 'TCP/MLLP (HL7 v2.x)', icon: '🔌', mode: 'push',
+                    description: 'Long-lived TCP socket listener using the MLLP (Minimal Lower Layer Protocol) framing. The primary transport for HL7 v2 messages between EHRs, lab systems, and healthcare intermediaries. Sends AA/AE/AR acknowledgments back to the sender.',
+                    notes: 'Supports TLS 1.2/1.3. Configure ACK behaviour in the Acknowledgment tab.',
+                    required: ['port'],
+                    keyFields: [
+                        { name: 'port', type: 'integer', required: true, default: '2575', notes: 'Standard MLLP port. Use 2576 for TLS.' },
+                        { name: 'host', type: 'string', default: '0.0.0.0', notes: 'Bind address. 0.0.0.0 listens on all interfaces.' },
+                        { name: 'max_connections', type: 'integer', default: '10', notes: 'Max simultaneous HL7 sender connections.' },
+                        { name: 'enable_tls', type: 'boolean', default: 'false', notes: 'Require TLS; also set tls_cert_path and tls_key_path.' },
+                        { name: 'tls_cert_path', type: 'string', default: '—', notes: 'Path to PEM certificate file (when TLS enabled).' },
+                        { name: 'tls_key_path', type: 'string', default: '—', notes: 'Path to PEM private key file (when TLS enabled).' }
+                    ],
+                    example: { connectorType: 'tcp_mllp', config: { host: '0.0.0.0', port: 2575, max_connections: 10, ack: { mode: 'immediate', on_error: 'suppress' } } }
+                },
+                {
+                    typeName: 'http_rest', displayName: 'HTTP/REST API', icon: '🌐', mode: 'push',
+                    description: 'Exposes an HTTP endpoint that external systems POST messages to. Useful for FHIR R4 sources, webhooks, and any system that speaks REST. Supports API key and bearer token authentication.',
+                    required: ['endpoint_path'],
+                    keyFields: [
+                        { name: 'endpoint_path', type: 'string', required: true, default: '/api/hl7/receive', notes: 'URL path the server listens on.' },
+                        { name: 'http_methods', type: 'array', default: '["POST"]', notes: 'Allowed HTTP methods: POST or PUT.' },
+                        { name: 'authentication_type', type: 'enum', default: 'api_key', notes: 'none | api_key | basic_auth | bearer_token.' },
+                        { name: 'api_key_header', type: 'string', default: 'X-API-Key', notes: 'Header name carrying the API key.' }
+                    ],
+                    example: { connectorType: 'http_rest', config: { endpoint_path: '/api/hl7/receive', http_methods: ['POST'], authentication_type: 'api_key', api_key_header: 'X-API-Key' } }
+                },
+                {
+                    typeName: 'sftp_inbound', displayName: 'SFTP File Reader', icon: '🔐', mode: 'pull',
+                    description: 'Polls a remote SFTP server directory for new files on a configurable schedule (cron). After downloading each file it can delete, move, or rename it on the server. Supports both password and SSH private key authentication.',
+                    notes: 'Requires a cron schedule on the interface. Set "After Processing" to delete or move to prevent reprocessing the same file.',
+                    required: ['host', 'port', 'username', 'remote_directory'],
+                    keyFields: [
+                        { name: 'host', type: 'string', required: true, default: '—', notes: 'SFTP server hostname or IP.' },
+                        { name: 'port', type: 'integer', required: true, default: '22', notes: 'Standard SSH/SFTP port.' },
+                        { name: 'username', type: 'string', required: true, default: '—', notes: 'SSH login username.' },
+                        { name: 'password', type: 'string (password)', default: '—', notes: 'SSH password. Leave blank if using private key.' },
+                        { name: 'private_key_path', type: 'string', default: '—', notes: 'Path to SSH private key file (alternative to password).' },
+                        { name: 'remote_directory', type: 'string', required: true, default: '—', notes: 'Remote path to poll for new files.' },
+                        { name: 'file_pattern', type: 'string', default: '*.hl7', notes: 'Glob pattern to match files (e.g. *.hl7, ADT_*.txt).' },
+                        { name: 'after_processing', type: 'enum', default: 'move', notes: 'delete | move | rename | nothing.' },
+                        { name: 'archive_directory', type: 'string', default: '—', notes: 'Remote path to move processed files to.' },
+                        { name: 'max_files_per_poll', type: 'integer', default: '100', notes: 'Cap per cron run to avoid overload.' }
+                    ],
+                    example: { connectorType: 'sftp_inbound', config: { host: 'sftp.partner.org', port: 22, username: 'hl7feed', private_key_path: '/certs/sftp_key', remote_directory: '/outbound/hl7', file_pattern: '*.hl7', after_processing: 'move', archive_directory: '/processed/hl7', max_files_per_poll: 50 } }
+                },
+                {
+                    typeName: 'file_listener', displayName: 'File System Listener', icon: '📁', mode: 'pull',
+                    description: 'Monitors a local directory on the server/container filesystem for new files on a schedule. Best for shared NFS mounts, local drop folders, or integration test scenarios where files are placed by another process.',
+                    notes: 'Requires a cron schedule. The directory must be accessible inside the container — use a Docker volume mount.',
+                    required: ['directory_path', 'file_pattern'],
+                    keyFields: [
+                        { name: 'directory_path', type: 'string', required: true, default: '—', notes: 'Absolute path on server, e.g. /data/hl7/inbox.' },
+                        { name: 'file_pattern', type: 'string', required: true, default: '*.hl7', notes: 'Glob to match new files.' },
+                        { name: 'after_processing', type: 'enum', default: 'move', notes: 'delete | move | archive | nothing.' },
+                        { name: 'archive_directory', type: 'string', default: '—', notes: 'Path to move processed files.' },
+                        { name: 'file_encoding', type: 'string', default: 'UTF-8', notes: 'Character encoding of incoming files.' }
+                    ],
+                    example: { connectorType: 'file_listener', config: { directory_path: '/data/hl7/inbox', file_pattern: '*.hl7', after_processing: 'move', archive_directory: '/data/hl7/archive' } }
+                },
+                {
+                    typeName: 'postgresql_inbound', displayName: 'PostgreSQL Database Reader', icon: '🐘', mode: 'pull',
+                    description: 'Polls a PostgreSQL table or view for new records on a schedule. Use an incremental column (e.g. id or updated_at) to fetch only new/changed rows. After fetching, can mark rows as processed via an update flag or delete them.',
+                    notes: 'Requires a cron schedule. Use incremental_column to avoid reprocessing rows on every poll.',
+                    required: ['host', 'port', 'database', 'query'],
+                    keyFields: [
+                        { name: 'host', type: 'string', required: true, default: 'localhost', notes: 'PostgreSQL host.' },
+                        { name: 'port', type: 'integer', required: true, default: '5432', notes: 'PostgreSQL port.' },
+                        { name: 'database', type: 'string', required: true, default: '—', notes: 'Database name.' },
+                        { name: 'username', type: 'string', default: '—', notes: 'Login user.' },
+                        { name: 'password', type: 'string (password)', default: '—', notes: 'Login password.' },
+                        { name: 'query', type: 'string', required: true, default: '—', notes: 'SELECT query to fetch records. Use WHERE processed_flag = false for incremental.' },
+                        { name: 'incremental_column', type: 'string', default: '—', notes: 'Column to track last polled value (id or updated_at).' },
+                        { name: 'after_processing', type: 'enum', default: 'update_flag', notes: 'update_flag | delete | archive | nothing.' },
+                        { name: 'update_column', type: 'string', default: '—', notes: 'Column to set when after_processing=update_flag.' },
+                        { name: 'update_value', type: 'string', default: 'processed', notes: 'Value to set in update_column.' },
+                        { name: 'max_records_per_poll', type: 'integer', default: '100', notes: 'LIMIT applied to the query per cron run.' }
+                    ],
+                    example: { connectorType: 'postgresql_inbound', config: { host: 'db.internal', port: 5432, database: 'ehr', username: 'reader', password: '••••', query: 'SELECT * FROM hl7_outbox WHERE processed = false ORDER BY created_at LIMIT 100', after_processing: 'update_flag', update_column: 'processed', update_value: 'true', max_records_per_poll: 100 } }
+                },
+                {
+                    typeName: 'rabbitmq_inbound', displayName: 'RabbitMQ Consumer', icon: '🐰', mode: 'push',
+                    description: 'Connects to a RabbitMQ broker and consumes messages from a queue using AMQP. Long-lived subscription — no cron needed. Supports exchange binding, manual acknowledgment, and TLS connections.',
+                    required: ['host', 'port', 'queue_name'],
+                    keyFields: [
+                        { name: 'host', type: 'string', required: true, default: 'localhost', notes: 'RabbitMQ broker host.' },
+                        { name: 'port', type: 'integer', required: true, default: '5672', notes: 'AMQP port (5671 for TLS).' },
+                        { name: 'username', type: 'string', default: 'guest', notes: 'AMQP username.' },
+                        { name: 'password', type: 'string (password)', default: 'guest', notes: 'AMQP password.' },
+                        { name: 'vhost', type: 'string', default: '/', notes: 'RabbitMQ virtual host.' },
+                        { name: 'queue_name', type: 'string', required: true, default: '—', notes: 'Queue to consume from.' },
+                        { name: 'exchange_name', type: 'string', default: '—', notes: 'Optional exchange to bind the queue to.' },
+                        { name: 'routing_key', type: 'string', default: '—', notes: 'Routing key for exchange binding.' },
+                        { name: 'prefetch_count', type: 'integer', default: '1', notes: 'Messages to prefetch per consumer (flow control).' },
+                        { name: 'auto_ack', type: 'boolean', default: 'false', notes: 'false = manual ack (safer); true = auto-ack.' }
+                    ],
+                    example: { connectorType: 'rabbitmq_inbound', config: { host: 'rabbitmq.internal', port: 5672, username: 'hl7consumer', password: '••••', vhost: '/healthcare', queue_name: 'hl7.inbound.adt', prefetch_count: 5, auto_ack: false, durable_queue: true } }
+                },
+                {
+                    typeName: 'kafka_inbound', displayName: 'Kafka Consumer', icon: '⚡', mode: 'push',
+                    description: 'Subscribes to a Kafka topic as a consumer group member. Long-lived connection — no cron needed. Offsets are committed after successful processing. Supports SASL/SCRAM authentication and SSL for secured Kafka clusters.',
+                    required: ['bootstrap_servers', 'topic', 'group_id'],
+                    keyFields: [
+                        { name: 'bootstrap_servers', type: 'string', required: true, default: 'localhost:9092', notes: 'Comma-separated broker list, e.g. broker1:9092,broker2:9092.' },
+                        { name: 'topic', type: 'string', required: true, default: '—', notes: 'Kafka topic name to consume from.' },
+                        { name: 'group_id', type: 'string', required: true, default: '—', notes: 'Consumer group ID — use a unique ID per pipeline.' },
+                        { name: 'client_id', type: 'string', default: '—', notes: 'Optional client identifier for monitoring.' },
+                        { name: 'auto_offset_reset', type: 'enum', default: 'latest', notes: 'earliest = read from start; latest = only new messages.' },
+                        { name: 'security_protocol', type: 'enum', default: 'PLAINTEXT', notes: 'PLAINTEXT | SSL | SASL_PLAINTEXT | SASL_SSL.' },
+                        { name: 'sasl_mechanism', type: 'enum', default: 'PLAIN', notes: 'PLAIN | SCRAM-SHA-256 | SCRAM-SHA-512.' },
+                        { name: 'sasl_username', type: 'string', default: '—', notes: 'SASL username for secured clusters.' },
+                        { name: 'sasl_password', type: 'string (password)', default: '—', notes: 'SASL password.' },
+                        { name: 'max_poll_records', type: 'integer', default: '500', notes: 'Max records per poll cycle.' }
+                    ],
+                    example: { connectorType: 'kafka_inbound', config: { bootstrap_servers: 'kafka1:9092,kafka2:9092', topic: 'hl7.inbound.adt', group_id: 'ezHealthKonnect-adt-pipeline', auto_offset_reset: 'latest', security_protocol: 'SASL_SSL', sasl_mechanism: 'SCRAM-SHA-256', sasl_username: 'hl7consumer', sasl_password: '••••' } }
+                },
+                {
+                    typeName: 'redis_inbound', displayName: 'Redis Consumer', icon: '🔴', mode: 'push',
+                    description: 'Consumes messages from Redis using list (LPOP/BRPOP), pub/sub channel subscription, or Redis Streams. Long-lived connection — no cron needed. List mode with blocking timeout is the simplest queue pattern.',
+                    required: ['host', 'port', 'mode'],
+                    keyFields: [
+                        { name: 'host', type: 'string', required: true, default: 'localhost', notes: 'Redis host.' },
+                        { name: 'port', type: 'integer', required: true, default: '6379', notes: 'Redis port.' },
+                        { name: 'password', type: 'string (password)', default: '—', notes: 'AUTH password (if Redis requires auth).' },
+                        { name: 'database', type: 'integer', default: '0', notes: 'Redis DB number (0–15).' },
+                        { name: 'mode', type: 'enum', required: true, default: 'list_pop', notes: 'list_pop | pub_sub | stream.' },
+                        { name: 'key_name', type: 'string', default: '—', notes: 'List key / channel name / stream name.' },
+                        { name: 'consumer_group', type: 'string', default: '—', notes: 'For stream mode — consumer group name.' },
+                        { name: 'blocking_timeout', type: 'integer', default: '0', notes: 'BLPOP timeout in seconds; 0 = block indefinitely.' }
+                    ],
+                    example: { connectorType: 'redis_inbound', config: { host: 'redis.internal', port: 6379, password: '••••', database: 0, mode: 'list_pop', key_name: 'hl7:queue:adt', blocking_timeout: 30 } }
+                },
+                {
+                    typeName: 'aws_s3_inbound', displayName: 'AWS S3 Bucket Reader', icon: '☁️', mode: 'pull',
+                    description: 'Polls an S3 bucket prefix for new objects on a schedule. After downloading each object, can delete, move to another prefix, or tag it. Supports IAM role (ECS/EKS task role) or explicit access keys. Credentials are stored encrypted.',
+                    notes: 'Requires a cron schedule. Use IAM role auth in AWS-hosted deployments — no keys needed.',
+                    required: ['bucket_name', 'region'],
+                    keyFields: [
+                        { name: 'bucket_name', type: 'string', required: true, default: '—', notes: 'S3 bucket name.' },
+                        { name: 'region', type: 'string', required: true, default: 'us-east-1', notes: 'AWS region, e.g. us-east-1.' },
+                        { name: 'prefix', type: 'string', default: '—', notes: 'Folder prefix, e.g. hl7/inbound/. Include trailing slash.' },
+                        { name: 'file_pattern', type: 'string', default: '*.hl7', notes: 'Glob to filter object keys.' },
+                        { name: 'authentication_method', type: 'enum', default: 'access_keys', notes: 'access_keys | iam_role | assumed_role.' },
+                        { name: 'access_key_id', type: 'string', default: '—', notes: 'AWS access key (only for access_keys method).' },
+                        { name: 'secret_access_key', type: 'string (password)', default: '—', notes: 'AWS secret key — stored encrypted.' },
+                        { name: 'after_processing', type: 'enum', default: 'move', notes: 'delete | move | tag | nothing.' },
+                        { name: 'max_objects_per_poll', type: 'integer', default: '100', notes: 'Max S3 objects downloaded per cron run.' }
+                    ],
+                    example: { connectorType: 'aws_s3_inbound', config: { bucket_name: 'ehr-hl7-feeds', region: 'us-east-1', prefix: 'inbound/adt/', file_pattern: '*.hl7', authentication_method: 'iam_role', after_processing: 'move', max_objects_per_poll: 100 } }
+                },
+                {
+                    typeName: 'azure_blob_inbound', displayName: 'Azure Blob Storage Reader', icon: '☁️', mode: 'pull',
+                    description: 'Polls an Azure Blob Storage container for new blobs on a schedule. Supports account key or full connection string authentication. After downloading, can delete, move to an archive container, or tag the blob.',
+                    notes: 'Requires a cron schedule. Use connection_string for simplicity in dev; use account_name + account_key in production.',
+                    required: ['account_name', 'container_name'],
+                    keyFields: [
+                        { name: 'account_name', type: 'string', required: true, default: '—', notes: 'Azure Storage account name.' },
+                        { name: 'account_key', type: 'string (password)', default: '—', notes: 'Storage account key — stored encrypted.' },
+                        { name: 'connection_string', type: 'string (password)', default: '—', notes: 'Alternative to account_name+key. Full Azure connection string.' },
+                        { name: 'container_name', type: 'string', required: true, default: '—', notes: 'Blob container name.' },
+                        { name: 'prefix', type: 'string', default: '—', notes: 'Blob prefix / virtual folder.' },
+                        { name: 'blob_pattern', type: 'string', default: '*.hl7', notes: 'Glob to filter blob names.' },
+                        { name: 'after_processing', type: 'enum', default: 'move', notes: 'delete | move | tag | nothing.' },
+                        { name: 'archive_container', type: 'string', default: '—', notes: 'Container to move blobs to after processing.' },
+                        { name: 'max_blobs_per_poll', type: 'integer', default: '100', notes: 'Max blobs per cron run.' }
+                    ],
+                    example: { connectorType: 'azure_blob_inbound', config: { account_name: 'myehrstorage', account_key: '••••', container_name: 'hl7-inbound', prefix: 'adt/', blob_pattern: '*.hl7', after_processing: 'move', archive_container: 'hl7-processed', max_blobs_per_poll: 50 } }
+                },
+                {
+                    typeName: 'gcs_inbound', displayName: 'Google Cloud Storage Reader', icon: '☁️', mode: 'pull',
+                    description: 'Polls a GCS bucket for new objects on a schedule. Authenticates using a Google Cloud service account JSON key. After downloading, can delete or move objects to an archive bucket/prefix.',
+                    notes: 'Requires a cron schedule. The service account needs storage.objects.get and storage.objects.list permissions.',
+                    required: ['bucket_name', 'credentials_json'],
+                    keyFields: [
+                        { name: 'bucket_name', type: 'string', required: true, default: '—', notes: 'GCS bucket name.' },
+                        { name: 'credentials_json', type: 'string (password)', required: true, default: '—', notes: 'Full service account JSON content — stored encrypted.' },
+                        { name: 'prefix', type: 'string', default: '—', notes: 'Object prefix / folder, e.g. hl7/inbound/.' },
+                        { name: 'file_pattern', type: 'string', default: '*.hl7', notes: 'Glob pattern to filter object names.' },
+                        { name: 'after_processing', type: 'enum', default: 'move', notes: 'delete | move | nothing.' },
+                        { name: 'archive_bucket', type: 'string', default: '—', notes: 'GCS bucket to copy processed objects to.' },
+                        { name: 'archive_prefix', type: 'string', default: '—', notes: 'Prefix in the archive bucket.' },
+                        { name: 'max_objects_per_poll', type: 'integer', default: '100', notes: 'Max objects per cron run.' }
+                    ],
+                    example: { connectorType: 'gcs_inbound', config: { bucket_name: 'ehr-hl7-bucket', credentials_json: '{ "type": "service_account", ... }', prefix: 'inbound/', file_pattern: '*.hl7', after_processing: 'move', archive_bucket: 'ehr-hl7-archive', max_objects_per_poll: 100 } }
+                }
+            ],
             parameters: [
-                { name: 'connectorType', type: 'string', required: true, description: 'The type of inbound connector (e.g., tcp_mllp_inbound, http_rest_inbound, postgresql_inbound)' },
-                { name: 'config', type: 'object', required: true, description: 'Connector-specific configuration (host, port, credentials, etc.) - fields are driven by the connector type config_schema' },
-                { name: 'timeoutMs', type: 'number', required: false, description: 'Maximum wait time for data fetch in milliseconds (default: 30000)' }
+                { name: 'connectorType', type: 'string', required: true, description: 'The listener type. tcp_mllp is the primary HL7 transport (also accepted as tcp_mllp_inbound). See Connector Type Reference section below for all supported types.' },
+                { name: 'config', type: 'object', required: true, description: 'Connector-specific settings driven by the connector type. See sub-fields below.' },
+                { name: 'config.host', type: 'string', required: false, description: 'Bind address for TCP/MLLP (default: 0.0.0.0 — all interfaces).' },
+                { name: 'config.port', type: 'number', required: false, description: 'TCP port to listen on (default: 2575 — standard MLLP port).' },
+                { name: 'config.tls_enabled', type: 'boolean', required: false, description: 'Enable TLS 1.2/1.3. Requires tls_cert_file and tls_key_file.' },
+                { name: 'config.max_connections', type: 'number', required: false, description: 'Maximum simultaneous client connections (default: 100).' },
+                { name: 'config.ack', type: 'object', required: false, description: 'ACK/NACK configuration for TCP/MLLP Inbound. Controls how the connector acknowledges received HL7 messages.' },
+                { name: 'config.ack.mode', type: 'string', required: false, description: '"immediate" — send AA as soon as the message is queued (default). "none" — do not send any ACK (sender must not expect a response).' },
+                { name: 'config.ack.on_error', type: 'string', required: false, description: '"suppress" — always send AA even on errors, handle failures internally (default). "nack" — send AE so the sender can retry when the queue is full or a critical error occurs.' },
+                { name: 'config.ack.sending_app', type: 'string', required: false, description: 'MSH-3 in the generated ACK message (default: "ezHealthKonnect").' },
+                { name: 'config.ack.sending_facility', type: 'string', required: false, description: 'MSH-4 in the generated ACK message (default: "EHK").' },
+                { name: 'config.ack.text_success', type: 'string', required: false, description: 'MSA-3 text when sending AA (default: "Message received successfully").' },
+                { name: 'config.ack.text_error', type: 'string', required: false, description: 'MSA-3 text when sending AE or AR (default: "Message processing error").' },
+                { name: 'config.ack.script', type: 'string', required: false, description: 'Advanced: JavaScript function that fully overrides ACK logic. Must define buildACK(msg) returning { ackCode, textMessage }. Valid ackCode values: AA, AE, AR. Available on msg: controlID, messageType, sendingApp, sendingFacility, raw, defaultCode, defaultText. Errors fall back to the default ACK.' },
+                { name: 'timeoutMs', type: 'number', required: false, description: 'Maximum wait time for data fetch in milliseconds (default: 30000). Not used for long-lived TCP listeners.' }
+            ],
+            bestPractices: [
+                {
+                    practice: 'Error Handling — configure per-step error handling on the connector.inbound step',
+                    reason: 'If the inbound step itself fails (e.g. port already in use, bad config), the pipeline will not start. Setting onError: "suppress" lets the engine log the failure and continue trying to activate other steps.',
+                    example: 'In the step properties, open "Error Handling & Retry" → set On Error = suppress, Default Value = {} to prevent pipeline abort on transient startup failures.'
+                },
+                {
+                    practice: 'Retry — add retry config for pull-mode connectors (SFTP, S3, DB)',
+                    reason: 'Pull connectors run on a schedule. If the remote server is temporarily unreachable, retry logic can transparently retry 2–3 times within the same poll window before failing.',
+                    example: 'Error Handling & Retry → Enable Retry = on, Max Retries = 3, Delay = 5000 ms, Backoff Multiplier = 2 (exponential: 5s, 10s, 20s).'
+                },
+                {
+                    practice: 'Error Handling — use onError: nack for TCP/MLLP ACK on critical errors',
+                    reason: 'When a message causes a fatal downstream error (e.g. DB unavailable), sending AE (application error) or AR lets the HL7 sender retry rather than silently dropping the message.',
+                    example: 'ACK tab → On Error = nack. The sender receives AE and can retry after its own retry interval.'
+                },
+                {
+                    practice: 'ACK mode = none for fire-and-forget senders',
+                    reason: 'Some legacy HL7 systems do not read ACK responses and will block the socket waiting for data that never matters. Setting mode=none closes the send side immediately.',
+                    example: 'ACK tab → ACK Mode = none. No ACK message is sent; the MLLP session ends after receiving the message.'
+                }
             ]
         };
 
@@ -7670,18 +8570,24 @@ return {
 
         // Remove Duplicates documentation
         docs['remove_duplicates'] = {
-            description: 'Removes duplicate records from an array field using configurable key fields and merge strategies. Supports full-record hashing (no config needed), key-field dedup, merge strategies, case-insensitive matching, and flexible handling of records with missing keys. Typically placed after a File Parser or Database Enrichment step to clean up data before processing.',
+            description: 'Removes duplicate records from an array field using configurable key fields and merge strategies. ' +
+                'Supports full-record hashing (no key fields needed), multi-field composite keys, three merge strategies, ' +
+                'case-insensitive matching, and flexible handling of records with missing keys.\n\n' +
+                'Source arrays come from prior steps via the steps.{namespace}.step_output path — ' +
+                'for example a File Parser step produces steps.{ns}.step_output.records, ' +
+                'a Database Enrichment step produces steps.{ns}.step_output.rows. ' +
+                'Use the "Detect fields" button in the UI to auto-populate key field candidates.',
             useCases: [
-                'Dedup FHIR resources by resource.id before loading into a FHIR server',
-                'Remove duplicate claims rows parsed from a CCLF or 835 file (key: claim_id)',
-                'Dedup HL7 OBX observations by test code + observation date within one message',
-                'Remove duplicate patient rows from a CSV export from an EHR (key: patient_mrn)',
-                'Deduplicate API enrichment results that return the same record multiple times',
-                'Merge partial records: keep first occurrence and fill missing fields from later duplicates (strategy: merge)',
-                'Drop records with null patient_id (nullKeyBehavior: remove) before FHIR mapping'
+                'Remove duplicate patient rows parsed from a CSV or CCLF file (key: patient_mrn)',
+                'Dedup FHIR bundle entries by resource.id before loading into a FHIR server',
+                'Dedup claims rows from an 835/837 file by claim_id + line_num',
+                'Dedup HL7 OBX observations by test_code + observation_date within one message',
+                'Merge partial records — keep first occurrence, backfill missing fields from later duplicates (strategy: merge)',
+                'Drop records with null patient_id (nullKeyBehavior: remove) before FHIR mapping',
+                'Deduplicate API enrichment results that return the same record multiple times'
             ],
             example: {
-                sourceField: 'enriched.results',
+                sourceField: 'steps.file_parser_a1b2c3.step_output.records',
                 keyFields: ['patient_id', 'visit_date'],
                 strategy: 'first',
                 caseSensitive: false,
@@ -7689,24 +8595,53 @@ return {
             },
             examples: [
                 {
-                    label: 'Dedup by patient ID (keep first)',
-                    config: { sourceField: 'enriched.results', keyFields: ['patient_id'], strategy: 'first', caseSensitive: false }
+                    label: 'Dedup CSV records by patient ID (keep first)',
+                    config: {
+                        sourceField: 'steps.file_parser_a1b2c3.step_output.records',
+                        keyFields: ['patient_id'],
+                        strategy: 'first',
+                        caseSensitive: false,
+                        nullKeyBehavior: 'remove'
+                    }
                 },
                 {
-                    label: 'Dedup claims by claim ID + line number',
-                    config: { sourceField: 'parsed.records', keyFields: ['claim_id', 'line_num'], strategy: 'last', caseSensitive: true }
+                    label: 'Dedup claims by claim ID + line number (keep last = most recent correction)',
+                    config: {
+                        sourceField: 'steps.file_parser_a1b2c3.step_output.records',
+                        keyFields: ['claim_id', 'line_num'],
+                        strategy: 'last',
+                        caseSensitive: true,
+                        nullKeyBehavior: 'group'
+                    }
                 },
                 {
-                    label: 'Merge partial records (fill missing fields)',
-                    config: { sourceField: 'enriched.observations', keyFields: ['test_code', 'obs_date'], strategy: 'merge', nullKeyBehavior: 'keep' }
+                    label: 'Merge partial lab records — backfill missing fields from later duplicates',
+                    config: {
+                        sourceField: 'steps.script_enrichment_b9fb33.step_output.observations',
+                        keyFields: ['test_code', 'obs_date'],
+                        strategy: 'merge',
+                        caseSensitive: false,
+                        nullKeyBehavior: 'keep'
+                    }
                 },
                 {
-                    label: 'Full-record strict dedup (no key fields)',
-                    config: { sourceField: 'enriched.items', strategy: 'first' }
+                    label: 'Dedup database rows, write to new field (preserve original)',
+                    config: {
+                        sourceField: 'steps.database_enrichment_c3d4e5.step_output.rows',
+                        keyFields: ['member_id'],
+                        strategy: 'first',
+                        caseSensitive: false,
+                        outputField: 'deduped_members'
+                    }
                 },
                 {
-                    label: 'Dedup to a new field (keep original)',
-                    config: { sourceField: 'enriched.raw', keyFields: ['id'], strategy: 'first', outputField: 'enriched.deduped' }
+                    label: 'Full-record strict dedup — no key fields (every field must match)',
+                    config: {
+                        sourceField: 'steps.api_enrichment_f1e2d3.step_output.results',
+                        strategy: 'first',
+                        caseSensitive: true,
+                        nullKeyBehavior: 'group'
+                    }
                 }
             ],
             parameters: [
@@ -7714,44 +8649,69 @@ return {
                     name: 'sourceField',
                     type: 'string',
                     required: true,
-                    description: 'Dot-path to the array field to deduplicate. The array must be set in a prior step (e.g. File Parser → enriched.results, Database Enrichment → enriched.query.rows). Example: "enriched.results".'
+                    description: 'Dot-path to the array to deduplicate. ' +
+                        'Must point to an array produced by a prior step — ' +
+                        'File Parser: steps.{ns}.step_output.records; ' +
+                        'Database Enrichment: steps.{ns}.step_output.rows; ' +
+                        'Script Enrichment: steps.{ns}.step_output.{yourField}. ' +
+                        'Use the Source Step picker in the UI to auto-build this path.'
                 },
                 {
                     name: 'keyFields',
                     type: 'Array<string>',
                     required: false,
-                    description: 'One or more field names within each record that together form the unique key. Supports dot-paths for nested fields (e.g. "patient.id"). Leave empty to hash the entire record — every field must match for a record to be considered a duplicate.'
+                    description: 'Field names within each record that form the unique key. ' +
+                        'Supports dot-paths for nested fields (e.g. "patient.id"). ' +
+                        'Leave empty to hash the entire record — every field must match for a record to count as a duplicate. ' +
+                        'Use the "Detect fields" button to auto-populate from upstream step output.'
                 },
                 {
                     name: 'strategy',
                     type: 'enum: first | last | merge',
                     required: false,
-                    description: '"first" (default) — keep the first occurrence, discard all later duplicates. "last" — keep the last occurrence (overwrites previous). "merge" — keep the first record and non-destructively copy any fields absent in it from later records.'
+                    description: '"first" (default) — keep the earliest occurrence, discard all later duplicates. ' +
+                        '"last" — keep the most recent occurrence (useful when later records are corrections). ' +
+                        '"merge" — keep the first record and non-destructively backfill any absent fields from later records.'
                 },
                 {
                     name: 'caseSensitive',
                     type: 'boolean',
                     required: false,
-                    description: 'When false, key field values are lowercased before hashing. Useful when source data has inconsistent casing ("SMITH" = "smith"). Default: true.'
+                    description: 'When false, key field values are lowercased before hashing so "SMITH" = "smith". Default: true.'
                 },
                 {
                     name: 'nullKeyBehavior',
                     type: 'enum: group | keep | remove',
                     required: false,
-                    description: '"group" (default) — records with null/missing key fields share one dedup bucket and are deduplicated among themselves. "keep" — records with missing keys are always kept (bypass dedup entirely). "remove" — records with null/missing key fields are dropped.'
+                    description: '"group" (default) — records with null/absent key fields share one dedup bucket. ' +
+                        '"keep" — records with missing keys bypass dedup and are always kept. ' +
+                        '"remove" — records with null or absent key fields are dropped entirely.'
                 },
                 {
                     name: 'outputField',
                     type: 'string',
                     required: false,
-                    description: 'Write the deduplicated array to this field instead of updating sourceField in-place. Useful to preserve the original array alongside the deduplicated version. Example: "enriched.deduped_results".'
+                    description: 'Write the deduplicated array to this field instead of updating sourceField in-place. ' +
+                        'Leave empty to update the source array directly. ' +
+                        'Example: "deduped_patients" — downstream steps access it as steps.{thisStep}.step_output.result_path.'
+                },
+                {
+                    name: 'previewLimit',
+                    type: 'number',
+                    required: false,
+                    description: 'Maximum records to include in the step_output.records preview (default 100, max 1000). ' +
+                        'The full deduplicated array is always written to outputField/sourceField regardless of this setting.'
                 }
             ],
             stepOutput: {
-                description: 'Step statistics are available in step output variables:',
+                description: 'The full deduplicated array is written to outputField (or sourceField when outputField is blank). ' +
+                    'The following variables are also available in downstream steps via steps.{ns}.step_output:',
                 fields: [
+                    { name: 'result_path', type: 'string', description: 'Dot-path where the full deduplicated array was written (use this in downstream sourceField configs)' },
+                    { name: 'records', type: 'array', description: 'Preview of up to previewLimit (default 100) deduplicated records — visible in the test panel' },
+                    { name: 'records_truncated', type: 'boolean', description: 'true when the full result has more rows than the preview limit' },
                     { name: 'original_count', type: 'number', description: 'Total records in the source array before dedup' },
-                    { name: 'dedup_count', type: 'number', description: 'Records in the output after dedup' },
+                    { name: 'dedup_count', type: 'number', description: 'Records in the deduplicated output' },
                     { name: 'removed_count', type: 'number', description: 'Duplicate records discarded' },
                     { name: 'null_key_kept', type: 'number', description: 'Records with missing keys that were kept (nullKeyBehavior=keep)' },
                     { name: 'null_key_removed', type: 'number', description: 'Records with missing keys that were dropped (nullKeyBehavior=remove)' }
@@ -7767,6 +8727,256 @@ return {
         docs['hl7_fhir_transform'] = docs['core.mapping'];
         docs['field_mapping'] = docs['core.transformation'];
         docs['fhir_validation'] = docs['post.validation'];
+
+        // Data Masking / Anonymization documentation
+        docs['data_masking'] = {
+            description:
+                'Masks or anonymizes sensitive PHI/PII fields for HIPAA compliance. Applies ordered masking ' +
+                'rules to individual fields using six strategies:\n\n' +
+                '  • mask — replace every character with maskChar (default *)\n' +
+                '  • redact — replace with [REDACTED]\n' +
+                '  • partial — reveal first N and/or last N characters, mask the middle\n' +
+                '  • hash — SHA-256 deterministic 16-char hex (same salt = same output = join-safe de-ID)\n' +
+                '  • tokenize — non-reversible TOK-{12hex} token\n' +
+                '  • substitute — replace with realistic fake data (name, SSN, phone, email, date, address, or custom fixed value)\n\n' +
+                'Field paths are format-agnostic — any of these work:\n' +
+                '  • HL7 v2:  PID.5, PID.19, MSH.9.1\n' +
+                '  • FHIR R4: steps.hl7_fhir_transform.step_output.fhir_bundle.entry[0].resource.patient.name[0].family\n' +
+                '    (entry index is auto-resolved — if the Patient is at entry[1], it will be found automatically)\n' +
+                '  • Cross-step JSON: steps.api_enrichment.step_output.email\n' +
+                '  • CSV / DB records: steps.file_parser.step_output.records[0].ssn\n' +
+                '    (index [0] is auto-searched across all records in the array)\n\n' +
+                'Enable "Mask All PHI" to instantly apply pre-configured HIPAA Safe Harbor rules for the ' +
+                'selected format (HL7 v2: 23 rules / FHIR R4: 20 rules / JSON: 18 rules). Custom rules run after.\n\n' +
+                'Step output is available downstream via steps.{namespace}.step_output.*',
+
+            useCases: [
+                'Mask HL7 patient name (PID.5) and DOB (PID.7) before sending to a test environment',
+                'Hash SSN (PID.19) for de-identification while keeping cross-dataset join capability',
+                'Partial-mask phone — keep last 4 digits: 555-867-5309 → ***-***-5309 (preserveFormat)',
+                'Substitute patient name with realistic fake name for synthetic test data generation',
+                'Mask FHIR Patient.name.family after an HL7→FHIR transform step — entry index resolved automatically',
+                'Mask email returned by an API enrichment step: steps.api_enrichment.step_output.email',
+                'Mask SSN column in all CSV rows from a File Parser step: steps.file_parser.step_output.records[0].ssn',
+                'Enable Mask All PHI → Format = FHIR to auto-mask 20 FHIR R4 PHI fields with one toggle',
+                'Redact all PHI before storing to audit log (maskAllPHI: true, strategy override: redact)',
+                'Use preserveFormat with partial to keep SSN dashes: 123-45-6789 → ***-**-6789'
+            ],
+
+            example: {
+                maskAllPHI: false,
+                maskAllPHIFormat: 'hl7v2',
+                preserveFormat: false,
+                rules: [
+                    { field: 'PID.5',  strategy: 'mask' },
+                    { field: 'PID.19', strategy: 'hash', hashSalt: 'myOrgSecret2025' },
+                    { field: 'PID.13', strategy: 'partial', keepFirst: 0, keepLast: 4 },
+                    { field: 'PID.5',  strategy: 'substitute', substituteType: 'name' },
+                    {
+                        field: 'steps.hl7_fhir_transform.step_output.fhir_bundle.entry[0].resource.patient.name[0].family',
+                        strategy: 'mask'
+                    },
+                    { field: 'steps.api_enrichment.step_output.email', strategy: 'mask' }
+                ]
+            },
+
+            examples: [
+                {
+                    label: 'HL7 — full mask patient name',
+                    config: { rules: [{ field: 'PID.5', strategy: 'mask' }], maskAllPHI: false }
+                },
+                {
+                    label: 'HL7 — hash SSN for join-safe de-identification',
+                    config: {
+                        rules: [{ field: 'PID.19', strategy: 'hash', hashSalt: 'myOrgSecret2025' }],
+                        maskAllPHI: false
+                    }
+                },
+                {
+                    label: 'HL7 — partial-mask phone, keep last 4, preserve dashes',
+                    config: {
+                        rules: [{ field: 'PID.13', strategy: 'partial', keepFirst: 0, keepLast: 4 }],
+                        maskAllPHI: false,
+                        preserveFormat: true
+                    }
+                },
+                {
+                    label: 'HL7 — substitute patient name with realistic fake name',
+                    config: {
+                        rules: [{ field: 'PID.5', strategy: 'substitute', substituteType: 'name' }],
+                        maskAllPHI: false
+                    }
+                },
+                {
+                    label: 'FHIR — mask family name from HL7→FHIR transform step output',
+                    config: {
+                        rules: [{
+                            field: 'steps.hl7_fhir_transform.step_output.fhir_bundle.entry[0].resource.patient.name[0].family',
+                            strategy: 'mask'
+                        }],
+                        maskAllPHI: false
+                    }
+                },
+                {
+                    label: 'FHIR — auto-mask all 20 FHIR PHI fields (Mask All PHI)',
+                    config: { rules: [], maskAllPHI: true, maskAllPHIFormat: 'fhir' }
+                },
+                {
+                    label: 'Cross-step — mask email from API enrichment result',
+                    config: {
+                        rules: [{ field: 'steps.api_enrichment.step_output.email', strategy: 'mask' }],
+                        maskAllPHI: false
+                    }
+                },
+                {
+                    label: 'CSV / DB records — hash SSN in all records from File Parser',
+                    config: {
+                        rules: [{ field: 'steps.file_parser.step_output.records[0].ssn', strategy: 'hash', hashSalt: 'myOrgSecret2025' }],
+                        maskAllPHI: false
+                    }
+                },
+                {
+                    label: 'Auto-mask all HL7 HIPAA PHI — 23 fields, 13 identifiers',
+                    config: { rules: [], maskAllPHI: true, maskAllPHIFormat: 'hl7v2' }
+                },
+                {
+                    label: 'Substitute DOB with realistic fake date (preserve year)',
+                    config: {
+                        rules: [{ field: 'PID.7', strategy: 'substitute', substituteType: 'date' }],
+                        maskAllPHI: false
+                    }
+                }
+            ],
+
+            parameters: [
+                {
+                    name: 'rules',
+                    type: 'MaskingRule[]',
+                    required: false,
+                    description: 'Ordered list of field masking rules. Each rule specifies a field path and strategy. ' +
+                        'Rules run in sequence. If multiple rules match the same field, the last one applied wins.'
+                },
+                {
+                    name: 'rules[].field',
+                    type: 'string',
+                    required: true,
+                    description: 'Field path to mask. Supports all formats:\n' +
+                        '  HL7 v2: PID.5, PID.19, MSH.9.1, PID.5.1\n' +
+                        '  FHIR R4: steps.{step}.step_output.fhir_bundle.entry[0].resource.patient.name[0].family\n' +
+                        '    (entry[N] index is auto-searched if the field is not found at index N)\n' +
+                        '  Cross-step JSON: steps.{step}.step_output.email\n' +
+                        '  CSV / DB records: steps.{step}.step_output.records[0].field_name\n' +
+                        '    (array index is auto-searched across all records)\n' +
+                        '  Generic JSON: data.patient.ssn, message.payload.name'
+                },
+                {
+                    name: 'rules[].strategy',
+                    type: 'enum',
+                    required: true,
+                    description: 'Masking strategy:\n' +
+                        '  "mask"       — replace all chars with maskChar (default *). Example: John → ****\n' +
+                        '  "redact"     — replace with [REDACTED]. Example: John → [REDACTED]\n' +
+                        '  "partial"    — keep keepFirst chars at start and keepLast chars at end, mask middle.\n' +
+                        '                 Example: 555-867-5309 with keepLast=4 → 555-867-****\n' +
+                        '                 Set preserveFormat=true to also keep non-digit separators in place.\n' +
+                        '  "hash"       — SHA-256 of (hashSalt + value), returns first 16 hex chars.\n' +
+                        '                 Deterministic: same input + same salt = same output (join-safe de-ID).\n' +
+                        '  "tokenize"   — non-reversible token: TOK-{12 hex chars}. Each unique value gets a unique token.\n' +
+                        '  "substitute" — replace with realistic fake data. Set substituteType to control output:\n' +
+                        '                 name, ssn (9XX-XX-XXXX ITIN range), phone ((555) XXX-XXXX),\n' +
+                        '                 email (test.{hex}@example-test.com), date (preserves year),\n' +
+                        '                 address (1000-9999 fictional street), custom (fixed substituteValue).\n' +
+                        '                 All substitute values are deterministic — same input = same fake output.'
+                },
+                {
+                    name: 'rules[].substituteType',
+                    type: 'enum',
+                    required: false,
+                    description: 'Category of fake data to generate (substitute strategy only). Options: ' +
+                        'name, ssn, phone, email, date, address, custom. ' +
+                        'All types produce values that are clearly non-real and safe for test environments.'
+                },
+                {
+                    name: 'rules[].substituteValue',
+                    type: 'string',
+                    required: false,
+                    description: 'Fixed replacement string used when substituteType is "custom". ' +
+                        'Example: substituteValue: "[TEST PATIENT]". The same value is used for every field match.'
+                },
+                {
+                    name: 'rules[].maskChar',
+                    type: 'string (1 char)',
+                    required: false,
+                    description: 'Replacement character for mask and partial strategies. Default: *.'
+                },
+                {
+                    name: 'rules[].keepFirst',
+                    type: 'integer',
+                    required: false,
+                    description: 'Characters to reveal at the start of the value (partial strategy). Default: 0.'
+                },
+                {
+                    name: 'rules[].keepLast',
+                    type: 'integer',
+                    required: false,
+                    description: 'Characters to reveal at the end of the value (partial strategy). Default: 4.'
+                },
+                {
+                    name: 'rules[].hashSalt',
+                    type: 'string',
+                    required: false,
+                    description: 'Salt prepended before SHA-256 hashing (hash strategy). Default: "ezHealthKonnect". ' +
+                        'Use the same salt across environments to preserve cross-dataset join capability on hashed values.'
+                },
+                {
+                    name: 'rules[].pattern',
+                    type: 'string (regex)',
+                    required: false,
+                    description: 'Optional regex. When set, only substrings matching the pattern are masked — ' +
+                        'non-matching characters are preserved. Example: \\d{4} on "Acct 1234-5678" masks only the digits.'
+                },
+                {
+                    name: 'maskAllPHI',
+                    type: 'boolean',
+                    required: false,
+                    description: 'When true, prepends format-specific HIPAA Safe Harbor rules before any custom rules:\n' +
+                        '  HL7 v2 (23 rules): Names (PID.5/6, NK1.2, GT1.3), Geographic (PID.11.x), Dates (PID.7/29, PV1.44/45),\n' +
+                        '    Phone/Fax (PID.13/14), Email (PID.13.4), SSN (PID.19 hash), MRN (PID.3 partial),\n' +
+                        '    Insurance (IN1.49/2), Account (PID.18), License (PID.20 hash), Device ID (OBX.18 hash), Other IDs (PID.2/4)\n' +
+                        '  FHIR R4 (20 rules): Patient.name, Patient.address, Patient.birthDate, Patient.telecom,\n' +
+                        '    Patient.identifier, Encounter.period, Coverage, Account, Practitioner, Device\n' +
+                        '  JSON (18 rules): patient.name/firstName/lastName, patient.dateOfBirth/dob, patient.ssn,\n' +
+                        '    patient.phone/fax, patient.email, patient.mrn, patient.address, patient.zipCode, patient.insuranceId\n' +
+                        'Custom rules still apply after the auto-PHI rules.'
+                },
+                {
+                    name: 'maskAllPHIFormat',
+                    type: 'enum',
+                    required: false,
+                    description: 'Format for auto-PHI rules when maskAllPHI is true. Options: "hl7v2" (default), "fhir", "json". ' +
+                        'Set to "fhir" when masking data after an HL7→FHIR transform step, ' +
+                        'or "json" when masking generic JSON patient records from a DB or CSV source.'
+                },
+                {
+                    name: 'preserveFormat',
+                    type: 'boolean',
+                    required: false,
+                    description: 'For partial strategy: mask digit characters only and keep non-digit separators in place. ' +
+                        'Example: 555-867-5309 with keepLast=4 → ***-***-5309. ' +
+                        'keepFirst/keepLast count only digits — separators are never counted or masked.'
+                }
+            ],
+
+            stepOutput: {
+                description: 'Reference these in downstream steps via steps.{namespace}.step_output.*',
+                fields: [
+                    { name: 'masked_count',  type: 'integer',  description: 'Number of fields successfully masked. A field not found in the message is not counted.' },
+                    { name: 'masked_fields', type: 'string[]', description: 'Ordered list of resolved field paths that were masked (may differ from the configured path when entry index was auto-resolved).' },
+                    { name: 'total_rules',   type: 'integer',  description: 'Total rules evaluated including maskAllPHI auto-rules.' }
+                ]
+            }
+        };
+        docs['post.data_masking'] = docs['data_masking'];
 
         // Default documentation for unknown step types
         return docs[stepType] || {

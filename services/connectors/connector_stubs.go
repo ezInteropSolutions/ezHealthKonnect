@@ -11,25 +11,8 @@ package connectors
 // NewTCPMLLPInboundConnector - IMPLEMENTED in tcp_mllp_inbound.go
 // Removed from stubs - full implementation available
 
-// NewTCPMLLPOutboundConnector creates a TCP/MLLP outbound connector
-func NewTCPMLLPOutboundConnector() OutboundConnector {
-	metadata := ConnectorMetadata{
-		TypeName:           "tcp_mllp_outbound",
-		DisplayName:        "TCP/MLLP (HL7 v2.x) Client",
-		Version:            "1.0.0",
-		Category:           "outbound",
-		Mode:               "push",
-		ImplementationLang: "go",
-		Capabilities: map[string]bool{
-			"supports_batch":  false,
-			"supports_tls":    true,
-			"supports_auth":   true,
-			"supports_retry":  true,
-			"validates_ack":   true,
-		},
-	}
-	return NewBaseOutboundConnector(metadata, false)
-}
+// NewTCPMLLPOutboundConnector — IMPLEMENTED in tcp_mllp_outbound.go
+// See services/connectors/tcp_mllp_outbound.go for the full TCP/MLLP outbound connector.
 
 // NewHTTPRESTInboundConnector creates an HTTP REST API inbound connector
 func NewHTTPRESTInboundConnector() InboundConnector {
@@ -76,24 +59,7 @@ func NewHTTPRESTInboundConnector() InboundConnector {
 // Database Connectors - MySQL (2)
 // -----------------------------------------------------------------------------
 
-// NewMySQLInboundConnector creates a MySQL inbound connector
-func NewMySQLInboundConnector() InboundConnector {
-	metadata := ConnectorMetadata{
-		TypeName:           "mysql_inbound",
-		DisplayName:        "MySQL Database Reader",
-		Version:            "1.0.0",
-		Category:           "inbound",
-		Mode:               "pull",
-		ImplementationLang: "go",
-		Capabilities: map[string]bool{
-			"supports_cron":             true,
-			"supports_tls":              true,
-			"supports_incremental":      true,
-			"supports_after_processing": true,
-		},
-	}
-	return NewBaseInboundConnector(metadata)
-}
+// NewMySQLInboundConnector — IMPLEMENTED in mysql_inbound.go
 
 // NewMySQLOutboundConnector creates a MySQL outbound connector
 func NewMySQLOutboundConnector() OutboundConnector {
@@ -118,130 +84,28 @@ func NewMySQLOutboundConnector() OutboundConnector {
 // Database Connectors - SQL Server (2)
 // -----------------------------------------------------------------------------
 
-// NewSQLServerInboundConnector creates a SQL Server inbound connector
-func NewSQLServerInboundConnector() InboundConnector {
-	metadata := ConnectorMetadata{
-		TypeName:           "sqlserver_inbound",
-		DisplayName:        "SQL Server Database Reader",
-		Version:            "1.0.0",
-		Category:           "inbound",
-		Mode:               "pull",
-		ImplementationLang: "go",
-		Capabilities: map[string]bool{
-			"supports_cron":             true,
-			"supports_encryption":       true,
-			"supports_incremental":      true,
-			"supports_after_processing": true,
-			"supports_windows_auth":     true,
-		},
-	}
-	return NewBaseInboundConnector(metadata)
-}
+// NewSQLServerInboundConnector — IMPLEMENTED in sqlserver_inbound.go
 
-// NewSQLServerOutboundConnector creates a SQL Server outbound connector
-func NewSQLServerOutboundConnector() OutboundConnector {
-	metadata := ConnectorMetadata{
-		TypeName:           "sqlserver_outbound",
-		DisplayName:        "SQL Server Database Writer",
-		Version:            "1.0.0",
-		Category:           "outbound",
-		Mode:               "push",
-		ImplementationLang: "go",
-		Capabilities: map[string]bool{
-			"supports_batch":        true,
-			"supports_encryption":   true,
-			"supports_merge":        true,
-			"supports_pool":         true,
-			"supports_windows_auth": true,
-		},
-	}
-	return NewBaseOutboundConnector(metadata, true)
-}
+// NewSQLServerOutboundConnector — IMPLEMENTED in sqlserver_outbound.go
+// Supports INSERT and MERGE (upsert) write modes with @pN parameter binding.
 
 // -----------------------------------------------------------------------------
 // Database Connectors - MongoDB (2)
 // -----------------------------------------------------------------------------
 
-// NewMongoDBInboundConnector creates a MongoDB inbound connector
-func NewMongoDBInboundConnector() InboundConnector {
-	metadata := ConnectorMetadata{
-		TypeName:           "mongodb_inbound",
-		DisplayName:        "MongoDB Database Reader",
-		Version:            "1.0.0",
-		Category:           "inbound",
-		Mode:               "pull",
-		ImplementationLang: "go",
-		Capabilities: map[string]bool{
-			"supports_cron":             true,
-			"supports_tls":              true,
-			"supports_incremental":      true,
-			"supports_after_processing": true,
-			"supports_filters":          true,
-		},
-	}
-	return NewBaseInboundConnector(metadata)
-}
+// NewMongoDBInboundConnector — IMPLEMENTED in mongodb_inbound.go
 
-// NewMongoDBOutboundConnector creates a MongoDB outbound connector
-func NewMongoDBOutboundConnector() OutboundConnector {
-	metadata := ConnectorMetadata{
-		TypeName:           "mongodb_outbound",
-		DisplayName:        "MongoDB Database Writer",
-		Version:            "1.0.0",
-		Category:           "outbound",
-		Mode:               "push",
-		ImplementationLang: "go",
-		Capabilities: map[string]bool{
-			"supports_batch":  true,
-			"supports_tls":    true,
-			"supports_upsert": true,
-			"supports_pool":   true,
-		},
-	}
-	return NewBaseOutboundConnector(metadata, true)
-}
+// NewMongoDBOutboundConnector — IMPLEMENTED in mongodb_outbound.go
+// See services/connectors/mongodb_outbound.go for the full MongoDB outbound connector.
 
 // -----------------------------------------------------------------------------
 // Database Connectors - Oracle (2)
 // -----------------------------------------------------------------------------
 
-// NewOracleInboundConnector creates an Oracle inbound connector
-func NewOracleInboundConnector() InboundConnector {
-	metadata := ConnectorMetadata{
-		TypeName:           "oracle_inbound",
-		DisplayName:        "Oracle Database Reader",
-		Version:            "1.0.0",
-		Category:           "inbound",
-		Mode:               "pull",
-		ImplementationLang: "go",
-		Capabilities: map[string]bool{
-			"supports_cron":             true,
-			"supports_ssl":              true,
-			"supports_incremental":      true,
-			"supports_after_processing": true,
-		},
-	}
-	return NewBaseInboundConnector(metadata)
-}
+// NewOracleInboundConnector — IMPLEMENTED in oracle_inbound.go
 
-// NewOracleOutboundConnector creates an Oracle outbound connector
-func NewOracleOutboundConnector() OutboundConnector {
-	metadata := ConnectorMetadata{
-		TypeName:           "oracle_outbound",
-		DisplayName:        "Oracle Database Writer",
-		Version:            "1.0.0",
-		Category:           "outbound",
-		Mode:               "push",
-		ImplementationLang: "go",
-		Capabilities: map[string]bool{
-			"supports_batch":  true,
-			"supports_ssl":    true,
-			"supports_merge":  true,
-			"supports_pool":   true,
-		},
-	}
-	return NewBaseOutboundConnector(metadata, true)
-}
+// NewOracleOutboundConnector — IMPLEMENTED in oracle_outbound.go
+// Supports INSERT and MERGE INTO (upsert) write modes with :N positional binding.
 
 // -----------------------------------------------------------------------------
 // Cloud Data Warehouse Connectors - Snowflake (2)
@@ -568,24 +432,7 @@ func NewTimescaleDBOutboundConnector() OutboundConnector {
 // Message Queue Connectors - RabbitMQ (2)
 // -----------------------------------------------------------------------------
 
-// NewRabbitMQInboundConnector creates a RabbitMQ inbound connector
-func NewRabbitMQInboundConnector() InboundConnector {
-	metadata := ConnectorMetadata{
-		TypeName:           "rabbitmq_inbound",
-		DisplayName:        "RabbitMQ Consumer",
-		Version:            "1.0.0",
-		Category:           "inbound",
-		Mode:               "push",
-		ImplementationLang: "go",
-		Capabilities: map[string]bool{
-			"supports_cron":     false,
-			"supports_tls":      true,
-			"supports_prefetch": true,
-			"supports_auto_ack": true,
-		},
-	}
-	return NewBaseInboundConnector(metadata)
-}
+// NewRabbitMQInboundConnector — IMPLEMENTED in rabbitmq_inbound.go
 
 // NewRabbitMQOutboundConnector creates a RabbitMQ outbound connector
 func NewRabbitMQOutboundConnector() OutboundConnector {
@@ -610,24 +457,7 @@ func NewRabbitMQOutboundConnector() OutboundConnector {
 // Message Queue Connectors - Kafka (2)
 // -----------------------------------------------------------------------------
 
-// NewKafkaInboundConnector creates a Kafka inbound connector
-func NewKafkaInboundConnector() InboundConnector {
-	metadata := ConnectorMetadata{
-		TypeName:           "kafka_inbound",
-		DisplayName:        "Kafka Consumer",
-		Version:            "1.0.0",
-		Category:           "inbound",
-		Mode:               "push",
-		ImplementationLang: "go",
-		Capabilities: map[string]bool{
-			"supports_cron":           false,
-			"supports_sasl":           true,
-			"supports_consumer_group": true,
-			"supports_offset_mgmt":    true,
-		},
-	}
-	return NewBaseInboundConnector(metadata)
-}
+// NewKafkaInboundConnector — IMPLEMENTED in kafka_inbound.go
 
 // NewKafkaOutboundConnector creates a Kafka outbound connector
 func NewKafkaOutboundConnector() OutboundConnector {
@@ -652,24 +482,7 @@ func NewKafkaOutboundConnector() OutboundConnector {
 // Message Queue Connectors - Redis (2)
 // -----------------------------------------------------------------------------
 
-// NewRedisInboundConnector creates a Redis inbound connector
-func NewRedisInboundConnector() InboundConnector {
-	metadata := ConnectorMetadata{
-		TypeName:           "redis_inbound",
-		DisplayName:        "Redis Consumer",
-		Version:            "1.0.0",
-		Category:           "inbound",
-		Mode:               "push",
-		ImplementationLang: "go",
-		Capabilities: map[string]bool{
-			"supports_cron":    false,
-			"supports_tls":     true,
-			"supports_pubsub":  true,
-			"supports_streams": true,
-		},
-	}
-	return NewBaseInboundConnector(metadata)
-}
+// NewRedisInboundConnector — IMPLEMENTED in redis_inbound.go
 
 // NewRedisOutboundConnector creates a Redis outbound connector
 func NewRedisOutboundConnector() OutboundConnector {
@@ -695,24 +508,7 @@ func NewRedisOutboundConnector() OutboundConnector {
 // Cloud Storage Connectors - AWS S3 (2)
 // -----------------------------------------------------------------------------
 
-// NewAWSS3InboundConnector creates an AWS S3 inbound connector
-func NewAWSS3InboundConnector() InboundConnector {
-	metadata := ConnectorMetadata{
-		TypeName:           "aws_s3_inbound",
-		DisplayName:        "AWS S3 Bucket Reader",
-		Version:            "1.0.0",
-		Category:           "inbound",
-		Mode:               "pull",
-		ImplementationLang: "go",
-		Capabilities: map[string]bool{
-			"supports_cron":             true,
-			"supports_iam_role":         true,
-			"supports_after_processing": true,
-			"supports_patterns":         true,
-		},
-	}
-	return NewBaseInboundConnector(metadata)
-}
+// NewAWSS3InboundConnector — IMPLEMENTED in aws_s3_inbound.go
 
 // NewAWSS3OutboundConnector creates an AWS S3 outbound connector
 func NewAWSS3OutboundConnector() OutboundConnector {
@@ -820,42 +616,11 @@ func NewGCSOutboundConnector() OutboundConnector {
 // File Transfer Connectors - SFTP (2)
 // -----------------------------------------------------------------------------
 
-// NewSFTPInboundConnector creates an SFTP inbound connector
-func NewSFTPInboundConnector() InboundConnector {
-	metadata := ConnectorMetadata{
-		TypeName:           "sftp_inbound",
-		DisplayName:        "SFTP File Reader",
-		Version:            "1.0.0",
-		Category:           "inbound",
-		Mode:               "pull",
-		ImplementationLang: "go",
-		Capabilities: map[string]bool{
-			"supports_cron":             true,
-			"supports_ssh_key":          true,
-			"supports_after_processing": true,
-			"supports_patterns":         true,
-		},
-	}
-	return NewBaseInboundConnector(metadata)
-}
+// NewSFTPInboundConnector — IMPLEMENTED in sftp_inbound.go
+// See services/connectors/sftp_inbound.go for the full SFTP inbound connector.
 
-// NewSFTPOutboundConnector creates an SFTP outbound connector
-func NewSFTPOutboundConnector() OutboundConnector {
-	metadata := ConnectorMetadata{
-		TypeName:           "sftp_outbound",
-		DisplayName:        "SFTP File Writer",
-		Version:            "1.0.0",
-		Category:           "outbound",
-		Mode:               "push",
-		ImplementationLang: "go",
-		Capabilities: map[string]bool{
-			"supports_batch":       true,
-			"supports_ssh_key":     true,
-			"supports_permissions": true,
-		},
-	}
-	return NewBaseOutboundConnector(metadata, true)
-}
+// NewSFTPOutboundConnector — IMPLEMENTED in sftp_outbound.go
+// See services/connectors/sftp_outbound.go for the full SFTP outbound connector.
 
 // -----------------------------------------------------------------------------
 // File Transfer Connectors - FTP (2)

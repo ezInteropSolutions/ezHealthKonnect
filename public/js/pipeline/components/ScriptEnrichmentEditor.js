@@ -26,6 +26,7 @@ class ScriptEnrichmentEditor {
             ...options
         };
 
+        this.stepName = this.options.stepName || '';
         this.script = this.options.stepConfig.script || '';
         this.targetPath = this.options.stepConfig.targetPath || 'enriched.script';
         this.timeoutMs = this.options.stepConfig.timeoutMs || 5000;
@@ -363,6 +364,10 @@ class ScriptEnrichmentEditor {
         }
 
         // Config fields
+        document.getElementById('scriptStepName')?.addEventListener('input', (e) => {
+            this.stepName = e.target.value;
+        });
+
         document.getElementById('targetPath')?.addEventListener('input', (e) => {
             this.targetPath = e.target.value;
         });
@@ -568,6 +573,7 @@ class ScriptEnrichmentEditor {
 
     getConfig() {
         return {
+            stepName: this.stepName,
             script: this.script,
             targetPath: this.targetPath,
             timeoutMs: this.timeoutMs,

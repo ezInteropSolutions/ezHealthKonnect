@@ -3,8 +3,10 @@ package enrichment
 import (
 	"context"
 	"encoding/csv"
+	"errors"
 	"ezhealthkonnect/models"
 	"fmt"
+	"io"
 	"strings"
 )
 
@@ -151,6 +153,130 @@ func parseCSVStreaming(ctx context.Context, reader *csv.Reader, config *models.F
 		headers = []string{}
 	}
 	return records, headers, nil
+}
+
+// ===============================================================
+// CHUNKED STREAMING — GB-SCALE FILE PROCESSING
+// ===============================================================
+
+// ParseCSVFromReaderChunked reads CSV data row-by-row directly from any io.Reader
+// (typically an *os.File opened with os.Open) without loading the full file into memory.
+//
+// Memory model: O(MaxRecords × fieldsPerRow) — only the current chunk is held in memory.
+// The file descriptor advances naturally; no full-file read or string conversion occurs.
+//
+// Chunked iteration pattern (Loop step):
+//
+//	chunk 1: Offset=0,     MaxRecords=10000 → records + has_more=true,  next_offset=10000
+//	chunk 2: Offset=10000, MaxRecords=10000 → records + has_more=true,  next_offset=20000
+//	chunk N: Offset=X,     MaxRecords=10000 → records + has_more=false (EOF reached)
+//
+// Each call opens a fresh file descriptor and skips Offset data rows (O(Offset) reads).
+// For very large offsets (>1M rows) consider the byte-offset optimisation path:
+// store the file byte position from a previous call and use os.Seek() to skip instantly.
+//
+// Parameters:
+//
+//	ctx    — context for cancellation (safe to break mid-read)
+//	r      — io.Reader positioned at the start of the file
+//	config — FileParserConfig; reads SkipRows, HasHeader, Delimiter, QuoteChar,
+//	         TrimFields, Offset, MaxRecords
+//
+// Returns:
+//
+//	records  — up to MaxRecords data rows as []map[string]interface{}
+//	columns  — ordered column names (from header row or "col_1", "col_2" …)
+//	hasMore  — true if additional data rows exist beyond this chunk
+//	err      — non-nil only on a real parse error (io.EOF is treated as normal termination)
+func ParseCSVFromReaderChunked(
+	ctx context.Context,
+	r io.Reader,
+	config *models.FileParserConfig,
+) (records []map[string]interface{}, columns []string, hasMore bool, err error) {
+	delimiter := ','
+	if config.Delimiter != "" {
+		runes := []rune(config.Delimiter)
+		if len(runes) == 1 {
+			delimiter = runes[0]
+		} else if config.Delimiter == `\t` {
+			delimiter = '\t'
+		}
+	}
+
+	reader := csv.NewReader(r)
+	reader.Comma = delimiter
+	reader.FieldsPerRecord = -1
+	if config.QuoteChar == "" || config.QuoteChar == `"` {
+		reader.LazyQuotes = false
+	} else if config.QuoteChar == "none" {
+		reader.LazyQuotes = true
+	}
+
+	var headers []string
+	headerDone := false
+	rowIdx := 0  // absolute row index from file top (includes SkipRows + header)
+	dataIdx := 0 // data row index (post-header, post-skipRows, pre-offset)
+
+	for {
+		if ctx.Err() != nil {
+			break // context cancelled — return partial results
+		}
+
+		row, readErr := reader.Read()
+		if readErr != nil {
+			if !errors.Is(readErr, io.EOF) {
+				err = fmt.Errorf("CSV parse error at row %d: %w", rowIdx+1, readErr)
+			}
+			break // io.EOF = normal termination
+		}
+
+		// Skip top rows (SkipRows is an absolute count from file top, not data rows)
+		if rowIdx < config.SkipRows {
+			rowIdx++
+			continue
+		}
+
+		// Consume header row
+		if config.HasHeader && !headerDone {
+			headers = applyTrim(row, config.TrimFields)
+			headerDone = true
+			rowIdx++
+			continue
+		}
+
+		// Auto-generate column names from the first data row when no header
+		if !headerDone {
+			for i := range row {
+				headers = append(headers, fmt.Sprintf("col_%d", i+1))
+			}
+			headerDone = true
+		}
+
+		// Row-based offset: skip the first Offset data rows before collecting
+		if dataIdx < config.Offset {
+			dataIdx++
+			rowIdx++
+			continue
+		}
+
+		// Chunk boundary: collected MaxRecords rows.
+		// Peek at the next row to determine hasMore without consuming it for output.
+		if config.MaxRecords > 0 && len(records) >= config.MaxRecords {
+			_, peekErr := reader.Read()
+			hasMore = (peekErr == nil) // nil means another row exists
+			break
+		}
+
+		records = append(records, rowToRecord(row, headers, config.TrimFields))
+		dataIdx++
+		rowIdx++
+	}
+
+	if headers == nil {
+		headers = []string{}
+	}
+	columns = headers
+	return
 }
 
 // ===============================================================
