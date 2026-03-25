@@ -1,0 +1,589 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HL7 Reader - ezHealthKonnect</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="css/dashboard.css">
+    <link rel="stylesheet" href="css/segment-viewer.css">
+    <link rel="stylesheet" href="css/layout/main-layout.css?v=5">
+    <style>
+        .hl7-reader-layout {
+            display: grid;
+            grid-template-columns: 420px 1fr;
+            gap: 0;
+            height: calc(100vh - 60px);
+            overflow: hidden;
+        }
+
+        /* Input panel */
+        .input-panel {
+            display: flex;
+            flex-direction: column;
+            border-right: 1px solid #e5e7eb;
+            background: #fff;
+            overflow: hidden;
+        }
+
+        .input-panel-header {
+            padding: 16px 20px 12px;
+            border-bottom: 1px solid #e5e7eb;
+            background: #f8fafc;
+        }
+
+        .input-panel-header h2 {
+            font-size: 15px;
+            font-weight: 700;
+            color: #1e3a8a;
+            margin: 0 0 4px 0;
+        }
+
+        .input-panel-header p {
+            font-size: 12px;
+            color: #6b7280;
+            margin: 0;
+        }
+
+        .hl7-textarea-wrap {
+            flex: 1;
+            padding: 12px 16px;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        #hl7Input {
+            flex: 1;
+            width: 100%;
+            font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+            font-size: 11.5px;
+            line-height: 1.6;
+            padding: 12px;
+            border: 1px solid #d1d5db;
+            border-radius: 8px;
+            resize: none;
+            color: #1f2937;
+            background: #fafafa;
+            outline: none;
+            transition: border-color 0.2s;
+            box-sizing: border-box;
+        }
+
+        #hl7Input:focus {
+            border-color: #3b82f6;
+            background: #fff;
+        }
+
+        #hl7Input::placeholder {
+            color: #9ca3af;
+            font-style: italic;
+        }
+
+        .input-actions {
+            display: flex;
+            gap: 8px;
+            padding: 0 16px 16px;
+        }
+
+        .btn-parse {
+            flex: 1;
+            padding: 10px 16px;
+            background: #1e3a8a;
+            color: #fff;
+            border: none;
+            border-radius: 8px;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            transition: background 0.2s;
+        }
+
+        .btn-parse:hover { background: #1e40af; }
+        .btn-parse:disabled { background: #9ca3af; cursor: not-allowed; }
+
+        .btn-clear {
+            padding: 10px 14px;
+            background: #f3f4f6;
+            color: #374151;
+            border: 1px solid #d1d5db;
+            border-radius: 8px;
+            font-size: 13px;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .btn-clear:hover { background: #e5e7eb; }
+
+        .sample-btn-row {
+            display: flex;
+            gap: 6px;
+            padding: 0 16px 10px;
+            flex-wrap: wrap;
+        }
+
+        .btn-sample {
+            padding: 5px 10px;
+            font-size: 11px;
+            border: 1px solid #bfdbfe;
+            background: #eff6ff;
+            color: #1d4ed8;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: 500;
+            transition: all 0.15s;
+        }
+
+        .btn-sample:hover { background: #dbeafe; border-color: #93c5fd; }
+
+        /* Results panel */
+        .results-panel {
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            background: #f9fafb;
+        }
+
+        .results-header {
+            padding: 14px 20px;
+            border-bottom: 1px solid #e5e7eb;
+            background: #fff;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .results-header h2 {
+            font-size: 15px;
+            font-weight: 700;
+            color: #1f2937;
+            margin: 0;
+            flex: 1;
+        }
+
+        .parse-meta-badges {
+            display: flex;
+            gap: 6px;
+            align-items: center;
+        }
+
+        .meta-badge {
+            font-size: 11px;
+            padding: 3px 8px;
+            border-radius: 12px;
+            font-weight: 500;
+        }
+
+        .meta-badge.schema   { background: #d1fae5; color: #065f46; }
+        .meta-badge.dict     { background: #dbeafe; color: #1e40af; }
+        .meta-badge.basic    { background: #fef3c7; color: #92400e; }
+        .meta-badge.time     { background: #f3f4f6; color: #374151; }
+        .meta-badge.msgtype  { background: #ede9fe; color: #5b21b6; }
+
+        .results-body {
+            flex: 1;
+            overflow-y: auto;
+            padding: 16px 20px;
+        }
+
+        /* Empty state */
+        .empty-state {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
+            color: #9ca3af;
+            text-align: center;
+            gap: 12px;
+        }
+
+        .empty-state i { font-size: 48px; color: #d1d5db; }
+        .empty-state h3 { font-size: 16px; font-weight: 600; color: #6b7280; margin: 0; }
+        .empty-state p  { font-size: 13px; margin: 0; max-width: 320px; line-height: 1.5; }
+
+        /* Loading */
+        .parse-spinner {
+            display: none;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            color: #6b7280;
+            font-size: 13px;
+            padding: 40px;
+        }
+
+        .parse-spinner.visible { display: flex; }
+
+        .spinner-icon {
+            width: 20px; height: 20px;
+            border: 2px solid #e5e7eb;
+            border-top-color: #3b82f6;
+            border-radius: 50%;
+            animation: spin 0.7s linear infinite;
+        }
+
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        /* Error state */
+        .parse-error {
+            display: none;
+            background: #fef2f2;
+            border: 1px solid #fecaca;
+            border-radius: 8px;
+            padding: 16px;
+            color: #991b1b;
+            font-size: 13px;
+        }
+
+        .parse-error.visible { display: block; }
+
+        /* Page header bar */
+        .page-topbar {
+            height: 56px;
+            background: #fff;
+            border-bottom: 1px solid #e5e7eb;
+            display: flex;
+            align-items: center;
+            padding: 0 24px;
+            gap: 12px;
+        }
+
+        .page-topbar h1 {
+            font-size: 16px;
+            font-weight: 700;
+            color: #1e3a8a;
+            margin: 0;
+        }
+
+        .page-topbar .breadcrumb {
+            font-size: 12px;
+            color: #9ca3af;
+        }
+
+        .page-topbar .breadcrumb a { color: #6b7280; text-decoration: none; }
+        .page-topbar .breadcrumb a:hover { color: #1e3a8a; }
+    </style>
+</head>
+<body>
+    <div class="dashboard-container">
+        <!-- Sidebar Navigation -->
+        <nav class="sidebar" id="sidebar">
+            <button class="sidebar-toggle" id="sidebarToggle">
+                <span class="toggle-icon">‹</span>
+            </button>
+
+            <div class="logo-container">
+                <img src="/assets/logos/ezHealthKonnect.jpeg" alt="ezHealthKonnect" class="logo-image">
+                <div class="logo-text">
+                    <h3 class="brand-name">ez<span class="brand-accent">Health</span>Konnect</h3>
+                    <p class="brand-tagline">Healthcare Integration</p>
+                </div>
+            </div>
+
+            <div class="nav-menu">
+                <div class="nav-section">
+                    <div class="section-header">
+                        <span class="section-title">Main</span>
+                        <i class="fas fa-chevron-down nav-section-chevron"></i>
+                    </div>
+                    <div class="nav-items">
+                        <a href="dashboard.html" class="nav-item">
+                            <span class="nav-icon"><i class="far fa-house"></i></span>
+                            <span class="nav-label">Dashboard</span>
+                        </a>
+                        <a href="interfaces.html" class="nav-item">
+                            <span class="nav-icon"><i class="fas fa-plug"></i></span>
+                            <span class="nav-label">Interfaces</span>
+                        </a>
+                        <a href="messages.html" class="nav-item">
+                            <span class="nav-icon"><i class="far fa-envelope"></i></span>
+                            <span class="nav-label">Messages</span>
+                        </a>
+                        <a href="review-queue.html" class="nav-item">
+                            <span class="nav-icon"><i class="far fa-circle-exclamation"></i></span>
+                            <span class="nav-label">Review Queue</span>
+                        </a>
+                        <a href="#templates" class="nav-item">
+                            <span class="nav-icon"><i class="far fa-file-lines"></i></span>
+                            <span class="nav-label">Templates</span>
+                        </a>
+                    </div>
+                </div>
+
+                <div class="nav-section">
+                    <div class="section-header">
+                        <span class="section-title">Analytics</span>
+                        <i class="fas fa-chevron-down nav-section-chevron"></i>
+                    </div>
+                    <div class="nav-items">
+                        <a href="monitoring.html" class="nav-item">
+                            <span class="nav-icon"><i class="far fa-chart-bar"></i></span>
+                            <span class="nav-label">Monitoring</span>
+                        </a>
+                        <a href="reports.html" class="nav-item">
+                            <span class="nav-icon"><i class="fas fa-chart-line"></i></span>
+                            <span class="nav-label">Reports</span>
+                        </a>
+                    </div>
+                </div>
+
+                <div class="nav-section">
+                    <div class="section-header">
+                        <span class="section-title">Tools</span>
+                        <i class="fas fa-chevron-down nav-section-chevron"></i>
+                    </div>
+                    <div class="nav-items">
+                        <a href="hl7-reader.html" class="nav-item active">
+                            <span class="nav-icon"><i class="fas fa-stethoscope"></i></span>
+                            <span class="nav-label">HL7 Reader</span>
+                        </a>
+                    </div>
+                </div>
+
+                <div class="nav-section admin-section" id="adminSection" style="display:none">
+                    <div class="section-header">
+                        <span class="section-title">Admin</span>
+                        <i class="fas fa-chevron-down nav-section-chevron"></i>
+                    </div>
+                    <div class="nav-items">
+                        <a href="user-management.html" class="nav-item">
+                            <span class="nav-icon"><i class="fas fa-users"></i></span>
+                            <span class="nav-label">Users</span>
+                        </a>
+                        <a href="settings.html" class="nav-item">
+                            <span class="nav-icon"><i class="fas fa-sliders"></i></span>
+                            <span class="nav-label">Settings</span>
+                        </a>
+                    </div>
+                </div>
+            </div>
+
+            <div class="user-profile">
+                <div class="user-info">
+                    <div class="user-avatar" id="userAvatar">U</div>
+                    <div class="user-details">
+                        <span class="user-name" id="userName">Loading...</span>
+                        <span class="user-role" id="userRole">USER</span>
+                    </div>
+                </div>
+                <button class="logout-btn" onclick="logout()" title="Logout">
+                    <span class="nav-icon"><i class="fas fa-right-from-bracket"></i></span>
+                    <span class="nav-label">Logout</span>
+                </button>
+            </div>
+        </nav>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Top bar -->
+            <div class="page-topbar">
+                <i class="fas fa-stethoscope" style="color:#1e3a8a; font-size:16px;"></i>
+                <h1>HL7 Reader</h1>
+                <span class="breadcrumb">
+                    <a href="dashboard.html">Home</a> › Tools › HL7 Reader
+                </span>
+            </div>
+
+            <!-- Two-panel layout -->
+            <div class="hl7-reader-layout">
+
+                <!-- LEFT: Input panel -->
+                <div class="input-panel">
+                    <div class="input-panel-header">
+                        <h2><i class="fas fa-paste" style="margin-right:6px;"></i>Paste HL7 Message</h2>
+                        <p>Paste any HL7 v2.x message to inspect its full enhanced schema breakdown</p>
+                    </div>
+
+                    <div class="hl7-textarea-wrap">
+                        <textarea id="hl7Input" placeholder="MSH|^~\&|SENDING_APP|SENDING_FAC|RECEIVING_APP|RECEIVING_FAC|20240101120000||ADT^A01|MSG001|P|2.5&#10;PID|1||12345^^^MRN||DOE^JOHN^A||19800115|M&#10;PV1|1|I|WARD^101^A..."></textarea>
+                    </div>
+
+                    <div class="sample-btn-row">
+                        <span style="font-size:11px; color:#9ca3af; align-self:center;">Samples:</span>
+                        <button class="btn-sample" onclick="loadSample('adt_a01')">ADT^A01</button>
+                        <button class="btn-sample" onclick="loadSample('oru_r01')">ORU^R01</button>
+                        <button class="btn-sample" onclick="loadSample('siu_s12')">SIU^S12</button>
+                        <button class="btn-sample" onclick="loadSample('orm_o01')">ORM^O01</button>
+                    </div>
+
+                    <div class="input-actions">
+                        <button class="btn-parse" id="parseBtn" onclick="parseMessage()">
+                            <i class="fas fa-magnifying-glass-plus"></i> Parse &amp; Analyze
+                        </button>
+                        <button class="btn-clear" onclick="clearAll()" title="Clear">
+                            <i class="fas fa-xmark"></i>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- RIGHT: Results panel -->
+                <div class="results-panel">
+                    <div class="results-header">
+                        <h2 id="resultsTitle">Results</h2>
+                        <div class="parse-meta-badges" id="metaBadges"></div>
+                    </div>
+
+                    <div class="results-body">
+                        <!-- Loading -->
+                        <div class="parse-spinner" id="parseSpinner">
+                            <div class="spinner-icon"></div>
+                            Parsing message with schema...
+                        </div>
+
+                        <!-- Error -->
+                        <div class="parse-error" id="parseError"></div>
+
+                        <!-- Empty state (default) -->
+                        <div class="empty-state" id="emptyState">
+                            <i class="fas fa-file-medical-alt"></i>
+                            <h3>No message parsed yet</h3>
+                            <p>Paste an HL7 message on the left and click <strong>Parse &amp; Analyze</strong> to see its full schema-enhanced breakdown including all segments, fields, components, and data types.</p>
+                        </div>
+
+                        <!-- Segment viewer output -->
+                        <div id="segmentViewerContainer" style="display:none;"></div>
+                    </div>
+                </div>
+
+            </div>
+        </main>
+    </div>
+
+    <!-- Reuse segment viewer (same as wizard step 2) -->
+    <script src="/js/services/AuthService.js"></script>
+    <script src="js/components/sidebar-nav.js?v=3"></script>
+    <script src="js/wizard/segment-viewer.js"></script>
+
+    <script>
+        // Minimal shim so SegmentViewer can store state (it only reads parsedHL7Data for refresh/debug)
+        let currentParseResult = null;
+        const viewerShim = {
+            get parsedHL7Data() { return currentParseResult; }
+        };
+        const viewer = new SegmentViewer(viewerShim);
+
+        // Sample messages
+        const SAMPLES = {
+            adt_a01: `MSH|^~\\&|SENDING_APP|SENDING_FAC|RECEIVING_APP|RECEIVING_FAC|20240101120000||ADT^A01|MSG001|P|2.5\rPID|1||12345^^^MRN||DOE^JOHN^A||19800115|M|||123 Main St^^Springfield^IL^62701||555-123-4567|||S||ACC001\rPV1|1|I|WARD^101^A^Hospital|E||12345^Smith^Jane^A^MD|67890^Jones^Bob^C^MD||MED|||N|||67890^Jones^Bob^C^MD|INS|V001|||||||||||||||||||ADM|A0|20240101120000`,
+            oru_r01: `MSH|^~\\&|LAB_SYS|LAB_FAC|EHR_SYS|HOSPITAL|20240101130000||ORU^R01|LAB001|P|2.5\rPID|1||67890^^^MRN||SMITH^JANE^B||19750320|F|||456 Oak Ave^^Portland^OR^97201\rOBR|1|ORD001|LAB001|85025^CBC^LN|||20240101125000\rOBX|1|NM|718-7^Hemoglobin^LN||14.2|g/dL|12.0-16.0|N|||F\rOBX|2|NM|787-2^MCV^LN||89|fL|80-100|N|||F`,
+            siu_s12: `MSH|^~\\&|SENDING_APPLICATION|SENDING_FACILITY|RECEIVING_APPLICATION|RECEIVING_FACILITY|20110613061611||SIU^S12|24916560|P|2.3||||||\rSCH|10345^10345|2196178^2196178|||10345|OFFICE^Office visit|reason for the appointment|OFFICE|60|m|^^60^20110617084500^20110617093000|||||9^DENT^ARTHUR^||||9^DENT^ARTHUR^|||||Scheduled\rPID|1||42||BEEBLEBROX^ZAPHOD||19781012|M|||1 Heart of Gold ave^^Fort Wayne^IN^46804||(260)555-1234|||S||999999999|||||||||||||||||||||\rPV1|1|O|||||1^Adams^Douglas^A^MD^^^^|2^Colfer^Eoin^D^MD^^^^||||||||||||||||||||||||||||||||||||||||99158||\rRGS|1|A\rAIG|1|A|1^Adams, Douglas|D^^\rAIL|1|A|OFFICE^^^OFFICE|^Main Office||20110614084500|||45|m^Minutes||Scheduled\rAIP|1|A|1^Adams^Douglas^A^MD^^^^|D^Adams, Douglas||20110614084500|||45|m^Minutes||Scheduled`,
+            orm_o01: `MSH|^~\\&|ORDER_SYS|HOSPITAL|LAB|LAB_FAC|20240101140000||ORM^O01|ORD001|P|2.5\rPID|1||11111^^^MRN||BROWN^CHARLIE||19900601|M\rORC|NW|ORD001||GRPORD001||N|||20240101140000|||12345^ORDERING^DOC\rOBR|1|ORD001||85025^CBC Panel^LN|||20240101140000|||||||||12345^ORDERING^DOC`
+        };
+
+        function loadSample(type) {
+            const msg = SAMPLES[type];
+            if (msg) {
+                document.getElementById('hl7Input').value = msg.replace(/\\r/g, '\r');
+            }
+        }
+
+        function clearAll() {
+            document.getElementById('hl7Input').value = '';
+            currentParseResult = null;
+            showEmpty();
+            document.getElementById('metaBadges').innerHTML = '';
+            document.getElementById('resultsTitle').textContent = 'Results';
+        }
+
+        function showEmpty() {
+            document.getElementById('emptyState').style.display = 'flex';
+            document.getElementById('segmentViewerContainer').style.display = 'none';
+            document.getElementById('parseError').classList.remove('visible');
+            document.getElementById('parseSpinner').classList.remove('visible');
+        }
+
+        async function parseMessage() {
+            const raw = document.getElementById('hl7Input').value.trim();
+            if (!raw) {
+                document.getElementById('hl7Input').focus();
+                return;
+            }
+
+            // Show spinner
+            document.getElementById('emptyState').style.display = 'none';
+            document.getElementById('segmentViewerContainer').style.display = 'none';
+            document.getElementById('parseError').classList.remove('visible');
+            document.getElementById('parseSpinner').classList.add('visible');
+            document.getElementById('parseBtn').disabled = true;
+            document.getElementById('metaBadges').innerHTML = '';
+
+            try {
+                const resp = await fetch('/api/hl7/parse', {
+                    method: 'POST',
+                    credentials: 'include',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ rawMessage: raw, useEnhanced: true })
+                });
+
+                const result = await resp.json();
+
+                document.getElementById('parseSpinner').classList.remove('visible');
+                document.getElementById('parseBtn').disabled = false;
+
+                if (!result.success) {
+                    const errEl = document.getElementById('parseError');
+                    errEl.textContent = result.error || 'Parse failed';
+                    errEl.classList.add('visible');
+                    return;
+                }
+
+                // Store for SegmentViewer shim
+                currentParseResult = result;
+
+                // Update header
+                const msgType = result.data?.messageType;
+                const typeLabel = msgType?.name || (msgType?.code && msgType?.event ? `${msgType.code}^${msgType.event}` : 'Unknown');
+                document.getElementById('resultsTitle').textContent = typeLabel;
+
+                // Meta badges
+                const meta = result.meta || {};
+                const badges = [];
+                if (meta.schemaUsed) {
+                    badges.push(`<span class="meta-badge schema"><i class="fas fa-database" style="margin-right:3px;"></i>Schema Enhanced</span>`);
+                } else if (meta.dictionaryUsed) {
+                    badges.push(`<span class="meta-badge dict"><i class="fas fa-book" style="margin-right:3px;"></i>Dictionary</span>`);
+                } else {
+                    badges.push(`<span class="meta-badge basic">Basic Parse</span>`);
+                }
+                if (meta.parsingTime) {
+                    const ms = typeof meta.parsingTime === 'string'
+                        ? meta.parsingTime
+                        : Math.round(meta.parsingTime / 1e6) + 'ms';
+                    badges.push(`<span class="meta-badge time"><i class="fas fa-clock" style="margin-right:3px;"></i>${ms}</span>`);
+                }
+                if (result.data?.version) {
+                    badges.push(`<span class="meta-badge msgtype">v${result.data.version}</span>`);
+                }
+                document.getElementById('metaBadges').innerHTML = badges.join('');
+
+                // Render segments
+                const container = document.getElementById('segmentViewerContainer');
+                container.style.display = 'block';
+                viewer.renderSegmentList(result, 'segmentViewerContainer');
+
+            } catch (err) {
+                document.getElementById('parseSpinner').classList.remove('visible');
+                document.getElementById('parseBtn').disabled = false;
+                const errEl = document.getElementById('parseError');
+                errEl.textContent = 'Request failed: ' + err.message;
+                errEl.classList.add('visible');
+            }
+        }
+
+        // Allow Ctrl+Enter to parse
+        document.getElementById('hl7Input').addEventListener('keydown', e => {
+            if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') parseMessage();
+        });
+
+        // Auth check — redirect to login if session invalid
+        window.AuthService.initialize();
+    </script>
+    <script src="/js/ai-assistant.js"></script>
+</body>
+</html>

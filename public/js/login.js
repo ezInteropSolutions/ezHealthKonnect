@@ -25,16 +25,26 @@ document.getElementById('loginForm').addEventListener('submit', async function(e
         
         if (response.ok) {
             showMessage('Login successful! Redirecting to dashboard...', 'success');
-            
+
             // Store token securely
             if (result.token) {
                 localStorage.setItem('accessToken', result.token);
             }
-            
+
             // Smooth redirect - use relative path
             setTimeout(() => {
                 window.location.href = 'dashboard.html';
             }, 1500);
+        } else if (response.status === 403 && result.requiresPasswordReset) {
+            // Admin has forced a password reset — redirect to the reset page
+            showMessage('Password reset required. Redirecting…', 'error');
+            setTimeout(() => {
+                window.location.href = `force-reset.html?userId=${result.userId}`;
+            }, 1200);
+        } else if (response.status === 423) {
+            // Account locked
+            const until = result.lockedUntil ? ` Try again after ${new Date(result.lockedUntil).toLocaleTimeString()}.` : '';
+            showMessage((result.message || 'Account is temporarily locked.') + until, 'error');
         } else {
             showMessage(result.message || 'Invalid credentials. Please try again.', 'error');
         }

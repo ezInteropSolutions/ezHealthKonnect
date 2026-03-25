@@ -180,15 +180,54 @@ func serializeHL7Segment(segKey string, segRaw interface{}) string {
 }
 
 // ──────────────────────────────────────────────────────────────
-// FHIR serializer — just JSON marshal (FHIR is already JSON)
+// FHIR serializer
+//
+// Handles three cases:
+//  1. Content is already a serialized FHIR string → pass through as-is
+//  2. Content is a map with resourceType "Bundle" → marshal directly
+//  3. Content is any other map (single resource) → marshal directly
+//     (wrapping into a Bundle is the PayloadBuilder's job, not the serializer's)
 // ──────────────────────────────────────────────────────────────
 
 func serializeToFHIR(content interface{}) (string, string, error) {
+	const ct = "application/fhir+json"
+
+	// Case 1: already a string — validate it looks like FHIR JSON and pass through
+	if s, ok := content.(string); ok {
+		s = strings.TrimSpace(s)
+		if len(s) > 0 && s[0] == '{' {
+			// Quick sanity: unmarshal to verify it's valid JSON
+			var probe map[string]interface{}
+			if err := json.Unmarshal([]byte(s), &probe); err != nil {
+				return "", ct, fmt.Errorf("fhir serialize: string content is not valid JSON: %w", err)
+			}
+			// Ensure resourceType is present (FHIR requirement)
+			if _, hasRT := probe["resourceType"]; !hasRT {
+				return "", ct, fmt.Errorf("fhir serialize: JSON string is missing 'resourceType' field")
+			}
+			return s, ct, nil
+		}
+		return "", ct, fmt.Errorf("fhir serialize: string content does not appear to be a FHIR JSON object")
+	}
+
+	// Case 2 & 3: marshal the map/struct directly
 	b, err := json.Marshal(content)
 	if err != nil {
-		return "", "application/fhir+json", fmt.Errorf("fhir serialize: %w", err)
+		return "", ct, fmt.Errorf("fhir serialize: %w", err)
 	}
-	return string(b), "application/fhir+json", nil
+
+	// Validate resourceType exists in the serialized output
+	var probe map[string]interface{}
+	if err := json.Unmarshal(b, &probe); err == nil {
+		if rt, ok := probe["resourceType"].(string); ok {
+			_ = rt // valid FHIR resource
+		} else {
+			// Not a FHIR resource — still emit it but warn
+			fmt.Printf("⚠️  [FHIR Serializer] serialized map has no resourceType — ensure PayloadBuilder assembled a proper FHIR resource\n")
+		}
+	}
+
+	return string(b), ct, nil
 }
 
 // ──────────────────────────────────────────────────────────────

@@ -384,17 +384,31 @@ exports.savePipeline = async (req, res) => {
                 type: QueryTypes.SELECT
             });
 
-            console.log(`✅ Pipeline saved: ${pipelineId}`);
+            // CRITICAL: Use the ACTUAL database pipeline ID returned by the UPSERT.
+            // On ON CONFLICT DO UPDATE, the RETURNING clause returns the EXISTING row's id,
+            // which may differ from the frontend-generated pipelineId variable.
+            // Using the wrong id for DELETE would leave old steps in place, causing
+            // unique constraint violations when we try to INSERT the same step UUIDs.
+            const actualPipelineId = (pipelineResult[0] && pipelineResult[0].id) || pipelineId;
+            console.log(`✅ Pipeline saved: requested=${pipelineId}, actual DB id=${actualPipelineId}`);
 
-            // 2. Delete old steps
+            // 2. Delete old steps (and their execution history first to avoid FK violation)
+            console.log(`🗑️  Deleting old steps for actualPipelineId="${actualPipelineId}"`);
+            await sequelize.query(`
+                DELETE FROM step_executions
+                WHERE step_id IN (
+                    SELECT id FROM transformation_steps WHERE pipeline_id = $1
+                )
+            `, { bind: [actualPipelineId], type: QueryTypes.DELETE });
+
             await sequelize.query(`
                 DELETE FROM transformation_steps WHERE pipeline_id = $1
             `, {
-                bind: [pipelineId],
+                bind: [actualPipelineId],
                 type: QueryTypes.DELETE
             });
 
-            console.log(`🗑️  Cleared old steps for pipeline ${pipelineId}`);
+            console.log(`🗑️  Cleared old steps for pipeline ${actualPipelineId}`);
 
             // 3. Collect ALL steps (supports both new flat format and legacy layers format)
             let stepsSaved = 0;
@@ -461,7 +475,37 @@ exports.savePipeline = async (req, res) => {
             console.log('========== END TOPOLOGICAL SORT DEBUG ==========');
             console.log('');
 
-            for (const step of sortedSteps) {
+            // Deduplicate steps by ID — if the frontend sends the same step in multiple
+            // execution_groups (e.g. loop children appearing twice), take the first occurrence.
+            const seenIds = new Set();
+            const deduplicatedSteps = [];
+            for (const s of sortedSteps) {
+                const sid = s.id || s.stepId;
+                if (sid && seenIds.has(sid)) {
+                    console.warn(`⚠️ Duplicate step ID detected and skipped: ${sid} ("${s.stepName || s.step_name}")`);
+                    continue;
+                }
+                if (sid) seenIds.add(sid);
+                deduplicatedSteps.push(s);
+            }
+            if (deduplicatedSteps.length !== sortedSteps.length) {
+                console.log(`📊 Deduplicated: ${sortedSteps.length} → ${deduplicatedSteps.length} steps`);
+            }
+
+            // Sanitize helpers: ensure values satisfy DB check constraints before INSERT.
+            const VALID_ON_ERROR = new Set(['fail', 'skip', 'default']);
+            const VALID_BRANCH   = new Set(['true', 'false']);
+            function sanitizeOnError(v) {
+                const s = (v ?? '').toString().toLowerCase();
+                return VALID_ON_ERROR.has(s) ? s : 'fail';
+            }
+            function sanitizeBranchType(v) {
+                if (v === null || v === undefined || v === '') return null;
+                const s = v.toString().toLowerCase();
+                return VALID_BRANCH.has(s) ? s : null;
+            }
+
+            for (const step of deduplicatedSteps) {
                 const layer = step._layer;
                 const stepId = step.id || uuidv4();
                 let stepConfig = step.config || {};
@@ -472,7 +516,7 @@ exports.savePipeline = async (req, res) => {
                 const templateId = step.templateId || step.template_id || '';
                 const stepName = step.stepName || step.step_name || step.name || '';
 
-                console.log(`🔍 Step Detection: name="${stepName}" type="${stepType}" template="${templateId}"`);
+                console.log(`🔍 Step Detection: name="${stepName}" type="${stepType}" template="${templateId}" stepId="${stepId}" pipelineId="${pipelineId}"`);
 
                 const isHL7FHIRStep = (
                     stepType === 'hl7_fhir_transform' ||
@@ -481,7 +525,46 @@ exports.savePipeline = async (req, res) => {
                     (stepName.includes('HL7') && stepName.includes('FHIR'))
                 );
 
-                if (isHL7FHIRStep && embeddedMappings) {
+                // Check if the step already carries real embedded_mappings (e.g. from a saved template)
+                const stepConfigHasRealMappings = (() => {
+                    const e = stepConfig.embedded_mappings;
+                    if (!e) return false;
+                    return Array.isArray(e) ? e.length > 0 :
+                        ((e.atomicMappings && e.atomicMappings.length > 0) || (e.mappings && e.mappings.length > 0));
+                })();
+
+                if (isHL7FHIRStep && stepConfigHasRealMappings) {
+                    // ── Template case ─────────────────────────────────────────────────────
+                    // Step already carries real embedded_mappings (from a saved template).
+                    // Preserve them — only update interface_id to point to THIS interface.
+                    // Also copy into interface_message_mappings so the wizard can find them later.
+                    const mappingCount = stepConfig.embedded_mappings?.atomicMappings?.length ||
+                        stepConfig.embedded_mappings?.mappings?.length ||
+                        (Array.isArray(stepConfig.embedded_mappings) ? stepConfig.embedded_mappings.length : 0);
+                    console.log(`\n📋 === TEMPLATE MAPPINGS — preserving ${mappingCount} mappings from step config ===`);
+                    console.log('Step name:', stepName);
+                    stepConfig = {
+                        ...stepConfig,
+                        interface_id: interfaceId,
+                    };
+
+                    // Copy embedded_mappings → interface_message_mappings (fire-and-forget; failure is non-fatal)
+                    const templateMsgType = stepConfig.message_type || messageType;
+                    sequelize.query(`
+                        INSERT INTO interface_message_mappings
+                            (interface_id, message_type, uses_standard_template,
+                             custom_mapping_config, customization_reason, created_at, updated_at)
+                        VALUES ($1, $2, false, $3, 'Restored from interface template', NOW(), NOW())
+                        ON CONFLICT (interface_id, message_type) DO NOTHING
+                    `, {
+                        bind: [interfaceId, templateMsgType, JSON.stringify(stepConfig.embedded_mappings)],
+                        type: QueryTypes.INSERT,
+                    }).catch(err => console.warn('⚠️ Could not copy template mappings to wizard store:', err.message));
+
+                    console.log('✅ Template mappings preserved; wizard store population queued');
+                } else if (isHL7FHIRStep && embeddedMappings) {
+                    // ── Normal case ───────────────────────────────────────────────────────
+                    // No template mappings in step; use wizard/legacy mappings from DB.
                     console.log('\n💾 === EMBEDDING WIZARD MAPPINGS ===');
                     console.log('Step name:', stepName);
                     console.log('Step type:', stepType);
@@ -499,15 +582,12 @@ exports.savePipeline = async (req, res) => {
                     console.warn('⚠️ HL7→FHIR step detected but NO mappings to embed!');
                 }
 
-                await sequelize.query(`
-                    INSERT INTO transformation_steps
-                        (id, pipeline_id, step_name, step_type, sequence, required, timeout_ms, enabled, config, script_type, script_content, on_error_strategy, position_x, position_y, parent_conditional_step_id, branch_type, case_value, created_at, updated_at)
-                    VALUES
-                        ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, NOW(), NOW())
-                `, {
-                    bind: [
+                const rawOnError   = step.onErrorStrategy || step.on_error_strategy;
+                const rawBranch    = step.branch_type !== undefined ? step.branch_type
+                                   : step.branchType !== undefined ? step.branchType : undefined;
+                const insertBinds = [
                         stepId,
-                        pipelineId,
+                        actualPipelineId,
                         step.step_name || step.stepName || step.name || 'Unnamed Step',
                         step.step_type || step.stepType || step.type || 'custom',
                         step.sequence || 100,
@@ -517,24 +597,35 @@ exports.savePipeline = async (req, res) => {
                         JSON.stringify(encryptSensitiveConfigFields(stepConfig)),
                         step.scriptType || null,
                         step.scriptContent || null,
-                        step.onErrorStrategy || step.on_error_strategy || 'fail',
+                        sanitizeOnError(rawOnError),      // $12 — validates against chk_error_strategy
                         step.position_x !== undefined ? step.position_x : null,
                         step.position_y !== undefined ? step.position_y : null,
-                        // Support both snake_case (DB) and camelCase (JS) property names
                         step.parent_conditional_step_id || step.parentConditionalStepId || null,
-                        step.branch_type || step.branchType || null,
+                        sanitizeBranchType(rawBranch),    // $16 — validates against branch_type_check
                         step.case_value || step.caseValue || null
-                    ],
+                ];
+                console.log(`🔍 INSERT binds[$12=on_error_strategy="${insertBinds[11]}", $16=branch_type="${insertBinds[15]}", $4=step_type="${insertBinds[3]}", raw_on_error="${rawOnError}", raw_branch="${rawBranch}"]`);
+                await sequelize.query(`
+                    INSERT INTO transformation_steps
+                        (id, pipeline_id, step_name, step_type, sequence, required, timeout_ms, enabled, config, script_type, script_content, on_error_strategy, position_x, position_y, parent_conditional_step_id, branch_type, case_value, created_at, updated_at)
+                    VALUES
+                        ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, NOW(), NOW())
+                `, {
+                    bind: insertBinds,
                     type: QueryTypes.INSERT
                 });
 
                 stepsSaved++;
             }
 
-            console.log(`✅ Saved ${stepsSaved} steps to pipeline ${pipelineId}`);
+            console.log(`✅ Saved ${stepsSaved} steps to pipeline ${actualPipelineId}`);
 
             // Commit transaction
             await sequelize.query('COMMIT');
+
+            // Re-ingest pipeline into AI knowledge base (fire-and-forget, non-blocking)
+            axios.post(`${GO_BACKEND_URL}/api/ai/ingest/pipeline/${actualPipelineId}`)
+                .catch(err => console.warn('[AI] Pipeline KB ingestion failed (non-fatal):', err.message));
 
             res.json({
                 success: true,
@@ -553,6 +644,9 @@ exports.savePipeline = async (req, res) => {
     } catch (error) {
         console.error('❌ Save pipeline error:', error.message);
         console.error('Stack:', error.stack);
+        if (error.original) console.error('PG original:', error.original.detail || error.original.message);
+        if (error.parent) console.error('PG parent:', error.parent.detail || error.parent.message);
+        if (error.errors) console.error('Validation items:', JSON.stringify(error.errors?.map(e => e.message)));
         res.status(500).json({
             success: false,
             error: error.message
@@ -770,6 +864,10 @@ exports.deletePipeline = async (req, res) => {
     try {
         const { sequelize } = require('../config/database');
         const { id } = req.params;
+        await sequelize.query(
+            'DELETE FROM step_executions WHERE step_id IN (SELECT id FROM transformation_steps WHERE pipeline_id = $1)',
+            { bind: [id] }
+        );
         await sequelize.query('DELETE FROM transformation_steps WHERE pipeline_id = $1', { bind: [id] });
         await sequelize.query('DELETE FROM transformation_pipelines WHERE id = $1', { bind: [id] });
         res.json({ success: true, message: 'Pipeline deleted' });

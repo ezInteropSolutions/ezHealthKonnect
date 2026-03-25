@@ -201,6 +201,21 @@ class DatabaseManager {
                 }
             },
             
+            // Enterprise User Management Fields (V76)
+            force_password_reset: {
+                type: DataTypes.BOOLEAN,
+                defaultValue: false,
+                allowNull: false
+            },
+            invited_by: {
+                type: DataTypes.UUID,
+                allowNull: true
+            },
+            invitation_expires_at: {
+                type: DataTypes.DATE,
+                allowNull: true
+            },
+
             // Audit Fields
             created_by: {
                 type: DataTypes.UUID,

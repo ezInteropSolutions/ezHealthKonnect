@@ -1,0 +1,914 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Alerts – ezHealthKonnect</title>
+    <link rel="stylesheet" href="css/dashboard.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        :root {
+            --pink:        #db2777;
+            --pink-dark:   #9d174d;
+            --pink-light:  #fce7f3;
+            --pink-mid:    #f9a8d4;
+            --navy:        #1e3a8a;
+            --navy-light:  #eff6ff;
+            --white:       #ffffff;
+            --page-bg:     #ffffff;
+            --card-border: #f0e4ef;
+            --row-hover:   #f9fafb;
+            --text:        #1a202c;
+            --muted:       #6b7280;
+        }
+        body { background: var(--page-bg); }
+        .main-content { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+
+        /* ── Page header ───────────────────────────────────────────────────────── */
+        .page-header {
+            padding: 20px 28px 16px;
+            background: var(--white);
+            border-bottom: 1px solid var(--card-border);
+            display: flex; align-items: center; justify-content: space-between;
+            flex-shrink: 0;
+        }
+        .page-header h1 { font-size: 18px; font-weight: 700; color: var(--text); }
+        .page-header h1 i { color: var(--navy); margin-right: 8px; }
+        .header-actions { display: flex; align-items: center; gap: 10px; }
+        .auto-badge { font-size: 11px; padding: 3px 10px; border-radius: 10px; background: #dcfce7; color: #166534; font-weight: 600; }
+        .last-updated { font-size: 12px; color: #a0aec0; }
+
+        /* ── Two-column alerts layout ──────────────────────────────────────────── */
+        .alerts-layout {
+            flex: 1; display: flex; overflow: hidden;
+        }
+
+        /* ── Left nav ──────────────────────────────────────────────────────────── */
+        .alerts-leftnav {
+            width: 200px; flex-shrink: 0;
+            border-right: 1px solid var(--card-border);
+            background: #fafafa;
+            padding: 16px 0;
+        }
+        .leftnav-section { padding: 0 12px 8px; font-size: 10px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .08em; }
+        .leftnav-tab {
+            display: flex; align-items: center; gap: 9px;
+            padding: 9px 16px; font-size: 13px; color: #374151;
+            text-decoration: none; cursor: pointer; user-select: none;
+            border-left: 3px solid transparent; transition: all .12s;
+            position: relative;
+        }
+        .leftnav-tab:hover { background: var(--navy-light); color: var(--navy); }
+        .leftnav-tab.active { background: var(--navy-light); color: var(--navy); border-left-color: var(--navy); font-weight: 600; }
+        .leftnav-tab i { width: 16px; text-align: center; font-size: 13px; }
+        .leftnav-badge {
+            margin-left: auto; background: var(--pink); color: #fff;
+            font-size: 10px; font-weight: 700; padding: 1px 6px;
+            border-radius: 8px; min-width: 18px; text-align: center;
+        }
+        .leftnav-badge.warn { background: #f59e0b; }
+
+        /* ── Content area ──────────────────────────────────────────────────────── */
+        .alerts-content {
+            flex: 1; overflow-y: auto; padding: 20px 28px 32px;
+        }
+        .tab-section { display: none; }
+        .tab-section.active { display: block; }
+
+        /* ── Section header row ────────────────────────────────────────────────── */
+        .section-header {
+            display: flex; align-items: center; justify-content: space-between;
+            margin-bottom: 16px;
+        }
+        .section-header h2 { font-size: 16px; font-weight: 700; color: var(--text); }
+        .btn-primary {
+            display: inline-flex; align-items: center; gap: 6px;
+            padding: 8px 16px; background: var(--navy); color: #fff;
+            border: none; border-radius: 6px; font-size: 13px; font-weight: 600;
+            cursor: pointer; transition: background .15s;
+        }
+        .btn-primary:hover { background: #1e40af; }
+        .btn-ghost {
+            display: inline-flex; align-items: center; gap: 6px;
+            padding: 7px 14px; background: #f3f4f6; color: #374151;
+            border: 1px solid #e5e7eb; border-radius: 6px; font-size: 13px;
+            cursor: pointer; transition: background .12s;
+        }
+        .btn-ghost:hover { background: #e5e7eb; }
+
+        /* ── Severity chips ────────────────────────────────────────────────────── */
+        .severity-chips { display: flex; gap: 10px; margin-bottom: 16px; flex-wrap: wrap; }
+        .sev-chip {
+            display: flex; align-items: center; gap: 6px;
+            padding: 6px 14px; border-radius: 20px; font-size: 13px; font-weight: 600;
+            cursor: pointer; transition: opacity .12s; border: 2px solid transparent;
+        }
+        .sev-chip:hover { opacity: .85; }
+        .sev-chip.active { border-color: rgba(0,0,0,.15); }
+        .sev-chip.critical { background: #fee2e2; color: #991b1b; }
+        .sev-chip.warning  { background: #fef3c7; color: #92400e; }
+        .sev-chip.info     { background: var(--pink-light); color: var(--pink-dark); }
+        .sev-chip.all      { background: #f3f4f6; color: #374151; }
+
+        /* ── Filter bar ────────────────────────────────────────────────────────── */
+        .filter-bar { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; }
+        .filter-bar select, .filter-bar input {
+            padding: 7px 12px; border: 1px solid #e5e7eb; border-radius: 6px;
+            font-size: 13px; color: var(--text); background: #fff;
+        }
+        .filter-bar select:focus, .filter-bar input:focus { outline: 2px solid #93c5fd; border-color: var(--navy); }
+
+        /* ── Alert cards ───────────────────────────────────────────────────────── */
+        .alert-list { display: flex; flex-direction: column; gap: 10px; }
+        .alert-card {
+            background: #fff; border: 1px solid var(--card-border); border-radius: 8px;
+            padding: 14px 16px; display: flex; align-items: flex-start; gap: 12px;
+            transition: box-shadow .12s;
+        }
+        .alert-card:hover { box-shadow: 0 2px 8px rgba(0,0,0,.06); }
+        .alert-card.critical { border-left: 4px solid #dc2626; }
+        .alert-card.warning  { border-left: 4px solid #f59e0b; }
+        .alert-card.info     { border-left: 4px solid var(--pink); }
+        .alert-sev-dot {
+            width: 10px; height: 10px; border-radius: 50%; margin-top: 5px; flex-shrink: 0;
+        }
+        .alert-sev-dot.critical { background: #dc2626; }
+        .alert-sev-dot.warning  { background: #f59e0b; }
+        .alert-sev-dot.info     { background: var(--pink); }
+        .alert-body { flex: 1; min-width: 0; }
+        .alert-title { font-size: 13px; font-weight: 600; color: var(--text); margin-bottom: 3px; }
+        .alert-meta { font-size: 12px; color: var(--muted); display: flex; gap: 12px; flex-wrap: wrap; }
+        .alert-meta span { display: flex; align-items: center; gap: 4px; }
+        .alert-actions { display: flex; gap: 6px; flex-shrink: 0; }
+        .btn-sm {
+            padding: 5px 12px; font-size: 12px; border-radius: 5px; cursor: pointer;
+            border: 1px solid #e5e7eb; background: #f9fafb; color: #374151;
+            transition: background .1s;
+        }
+        .btn-sm:hover { background: #e5e7eb; }
+        .btn-sm.ack { background: var(--pink-light); color: var(--pink); border-color: var(--pink-mid); }
+        .btn-sm.ack:hover { background: #f9d4e9; }
+        .btn-sm.resolve { background: #dcfce7; color: #166534; border-color: #86efac; }
+        .btn-sm.resolve:hover { background: #bbf7d0; }
+
+        /* ── Empty state ───────────────────────────────────────────────────────── */
+        .empty-state {
+            text-align: center; padding: 48px 24px; color: var(--muted);
+        }
+        .empty-state i { font-size: 40px; color: var(--pink-mid); margin-bottom: 12px; display: block; }
+        .empty-state h3 { font-size: 15px; font-weight: 600; color: #374151; margin-bottom: 6px; }
+        .empty-state p { font-size: 13px; }
+
+        /* ── Rules grid ────────────────────────────────────────────────────────── */
+        .rules-section-label {
+            font-size: 11px; font-weight: 700; text-transform: uppercase;
+            letter-spacing: .07em; color: var(--muted); margin: 20px 0 10px;
+        }
+        .rules-grid { display: flex; flex-direction: column; gap: 8px; }
+        .rule-card {
+            background: #fff; border: 1px solid var(--card-border); border-radius: 8px;
+            padding: 13px 16px; display: flex; align-items: center; gap: 12px;
+        }
+        .rule-type-badge {
+            font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 4px;
+            background: var(--navy-light); color: var(--navy); white-space: nowrap;
+        }
+        .rule-info { flex: 1; min-width: 0; }
+        .rule-name { font-size: 13px; font-weight: 600; color: var(--text); }
+        .rule-desc { font-size: 12px; color: var(--muted); margin-top: 2px; }
+        .rule-thresholds { font-size: 11px; color: #374151; margin-top: 4px; display: flex; gap: 10px; }
+        .threshold-warn { color: #92400e; } .threshold-crit { color: #991b1b; }
+        .rule-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+        .channel-count-chip {
+            font-size: 11px; padding: 2px 8px; border-radius: 12px;
+            background: #f3f4f6; color: var(--muted); cursor: pointer;
+        }
+        .channel-count-chip:hover { background: var(--navy-light); color: var(--navy); }
+        .toggle-switch {
+            position: relative; width: 36px; height: 20px; cursor: pointer;
+        }
+        .toggle-switch input { opacity: 0; width: 0; height: 0; }
+        .toggle-slider {
+            position: absolute; inset: 0; background: #d1d5db; border-radius: 20px; transition: .2s;
+        }
+        .toggle-slider::before {
+            content: ''; position: absolute; width: 14px; height: 14px; border-radius: 50%;
+            background: #fff; left: 3px; top: 3px; transition: .2s;
+        }
+        input:checked + .toggle-slider { background: var(--navy); }
+        input:checked + .toggle-slider::before { transform: translateX(16px); }
+
+        /* ── Channels ──────────────────────────────────────────────────────────── */
+        .channels-grid { display: grid; grid-template-columns: repeat(auto-fill,minmax(280px,1fr)); gap: 14px; }
+        .channel-card {
+            background: #fff; border: 1px solid var(--card-border); border-radius: 8px;
+            padding: 16px; display: flex; flex-direction: column; gap: 10px;
+        }
+        .channel-header { display: flex; align-items: center; gap: 10px; }
+        .channel-icon {
+            width: 36px; height: 36px; border-radius: 8px;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 16px; flex-shrink: 0;
+        }
+        .channel-icon.email   { background: #dbeafe; color: #1d4ed8; }
+        .channel-icon.webhook { background: #f0fdf4; color: #166534; }
+        .channel-icon.slack   { background: #fef3c7; color: #b45309; }
+        .channel-name { font-size: 14px; font-weight: 600; color: var(--text); }
+        .channel-type-label { font-size: 11px; color: var(--muted); }
+        .test-badge {
+            margin-left: auto; font-size: 10px; padding: 2px 8px; border-radius: 10px; font-weight: 600;
+        }
+        .test-badge.success { background: #dcfce7; color: #166534; }
+        .test-badge.failure { background: #fee2e2; color: #991b1b; }
+        .test-badge.untested { background: #f3f4f6; color: var(--muted); }
+        .channel-footer { display: flex; gap: 6px; margin-top: auto; }
+
+        /* ── Silences ──────────────────────────────────────────────────────────── */
+        .silences-list { display: flex; flex-direction: column; gap: 8px; }
+        .silence-card {
+            background: #fff; border: 1px solid var(--card-border); border-radius: 8px;
+            padding: 13px 16px; display: flex; align-items: center; gap: 12px;
+        }
+        .silence-active-dot { width: 8px; height: 8px; border-radius: 50%; background: #22c55e; flex-shrink: 0; }
+        .silence-inactive-dot { width: 8px; height: 8px; border-radius: 50%; background: #d1d5db; flex-shrink: 0; }
+        .silence-info { flex: 1; min-width: 0; }
+        .silence-name { font-size: 13px; font-weight: 600; color: var(--text); }
+        .silence-meta { font-size: 12px; color: var(--muted); margin-top: 2px; }
+
+        /* ── History table ─────────────────────────────────────────────────────── */
+        .history-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+        .history-table th {
+            text-align: left; padding: 8px 12px; font-size: 11px; font-weight: 700;
+            text-transform: uppercase; letter-spacing: .06em; color: var(--muted);
+            border-bottom: 2px solid var(--card-border); background: #fafafa;
+        }
+        .history-table td { padding: 10px 12px; border-bottom: 1px solid #f3f4f6; color: var(--text); }
+        .history-table tr:hover td { background: var(--row-hover); }
+        .sev-pill {
+            font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 10px;
+        }
+        .sev-pill.critical { background: #fee2e2; color: #991b1b; }
+        .sev-pill.warning  { background: #fef3c7; color: #92400e; }
+        .sev-pill.info     { background: var(--pink-light); color: var(--pink-dark); }
+
+        /* ── Modals ────────────────────────────────────────────────────────────── */
+        .modal-overlay {
+            display: none; position: fixed; inset: 0; background: rgba(0,0,0,.4);
+            z-index: 1000; align-items: center; justify-content: center;
+        }
+        .modal-overlay.open { display: flex; }
+        .modal-box {
+            background: #fff; border-radius: 12px; width: 560px; max-width: 95vw;
+            max-height: 90vh; overflow-y: auto;
+            box-shadow: 0 20px 60px rgba(0,0,0,.2);
+        }
+        .modal-header {
+            padding: 18px 20px 14px; border-bottom: 1px solid var(--card-border);
+            display: flex; align-items: center; justify-content: space-between;
+        }
+        .modal-header h3 { font-size: 15px; font-weight: 700; color: var(--text); }
+        .modal-close { background: none; border: none; font-size: 18px; color: var(--muted); cursor: pointer; }
+        .modal-body { padding: 20px; }
+        .modal-footer {
+            padding: 14px 20px; border-top: 1px solid var(--card-border);
+            display: flex; justify-content: flex-end; gap: 8px;
+        }
+        .form-group { margin-bottom: 16px; }
+        .form-group label { display: block; font-size: 12px; font-weight: 600; color: #374151; margin-bottom: 5px; }
+        .form-group input, .form-group select, .form-group textarea {
+            width: 100%; padding: 8px 12px; border: 1px solid #e5e7eb; border-radius: 6px;
+            font-size: 13px; color: var(--text); background: #fff; box-sizing: border-box;
+        }
+        .form-group input:focus, .form-group select:focus, .form-group textarea:focus {
+            outline: 2px solid #93c5fd; border-color: var(--navy);
+        }
+        .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+        .form-hint { font-size: 11px; color: var(--muted); margin-top: 4px; }
+        .dynamic-fields { border: 1px solid #e5e7eb; border-radius: 6px; padding: 14px; margin-top: 8px; }
+
+        /* ── Loading spinner ───────────────────────────────────────────────────── */
+        .loading-row { text-align: center; padding: 32px; color: var(--muted); font-size: 13px; }
+        .loading-row i { animation: spin 1s linear infinite; margin-right: 8px; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        /* ── Help button in header ─────────────────────────────────────────────── */
+        .btn-help {
+            display: inline-flex; align-items: center; gap: 6px;
+            padding: 7px 14px; background: var(--navy-light); color: var(--navy);
+            border: 1px solid #bfdbfe; border-radius: 6px; font-size: 13px; font-weight: 600;
+            cursor: pointer; transition: background .12s;
+        }
+        .btn-help:hover { background: #dbeafe; }
+
+        /* ── Docs panel overlay ────────────────────────────────────────────────── */
+        .docs-overlay {
+            display: none; position: fixed; inset: 0;
+            background: rgba(15,23,42,.35); z-index: 1100;
+        }
+        .docs-overlay.open { display: block; }
+        .docs-panel {
+            position: fixed; top: 0; right: -720px; width: 720px; height: 100%;
+            background: #fff; box-shadow: -4px 0 32px rgba(0,0,0,.14);
+            display: flex; flex-direction: column; transition: right .25s cubic-bezier(.4,0,.2,1);
+            z-index: 1101;
+        }
+        .docs-panel.open { right: 0; }
+
+        /* panel header */
+        .docs-panel-header {
+            display: flex; align-items: center; gap: 12px;
+            padding: 16px 20px; background: var(--navy); color: #fff; flex-shrink: 0;
+        }
+        .docs-panel-header h2 { font-size: 15px; font-weight: 700; flex: 1; }
+        .docs-panel-header p  { font-size: 12px; color: #93c5fd; margin-top: 1px; }
+        .docs-close {
+            background: rgba(255,255,255,.15); border: none; color: #fff;
+            width: 30px; height: 30px; border-radius: 6px; font-size: 16px;
+            cursor: pointer; display: flex; align-items: center; justify-content: center;
+            flex-shrink: 0;
+        }
+        .docs-close:hover { background: rgba(255,255,255,.25); }
+
+        /* two-column body */
+        .docs-body { display: flex; flex: 1; overflow: hidden; }
+
+        /* TOC sidebar */
+        .docs-toc {
+            width: 210px; flex-shrink: 0; border-right: 1px solid #e5e7eb;
+            overflow-y: auto; padding: 12px 0; background: #f9fafb;
+        }
+        .toc-section-label {
+            padding: 8px 14px 4px; font-size: 10px; font-weight: 700;
+            text-transform: uppercase; letter-spacing: .07em; color: var(--muted);
+        }
+        .toc-item {
+            display: block; padding: 6px 16px; font-size: 12px; color: #374151;
+            cursor: pointer; border-left: 3px solid transparent;
+            transition: all .1s; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+        }
+        .toc-item:hover { background: var(--navy-light); color: var(--navy); }
+        .toc-item.active { background: var(--navy-light); color: var(--navy); border-left-color: var(--navy); font-weight: 600; }
+        .toc-item.sub { padding-left: 26px; font-size: 12px; color: #6b7280; }
+        .toc-item.sub.active { color: var(--navy); }
+
+        /* content area */
+        .docs-content {
+            flex: 1; overflow-y: auto; padding: 28px 32px 48px;
+        }
+        .doc-section-block { display: none; }
+        .doc-section-block.active { display: block; }
+
+        .doc-section-block h3 {
+            font-size: 17px; font-weight: 700; color: var(--navy);
+            padding-bottom: 10px; border-bottom: 2px solid var(--navy-light);
+            margin-bottom: 20px; display: flex; align-items: center; gap: 10px;
+        }
+        .doc-section-block h3 .section-icon {
+            width: 32px; height: 32px; background: var(--navy); color: #fff;
+            border-radius: 8px; display: inline-flex; align-items: center; justify-content: center;
+            font-size: 14px; flex-shrink: 0;
+        }
+        .doc-subsection { margin-bottom: 32px; }
+        .doc-subsection h4 {
+            font-size: 13px; font-weight: 700; color: var(--navy);
+            margin: 0 0 12px; padding: 8px 12px;
+            background: var(--navy-light); border-radius: 6px;
+            border-left: 3px solid var(--navy);
+        }
+        .doc-subsection p { font-size: 13px; color: #374151; line-height: 1.65; margin: 0 0 10px; }
+        .doc-subsection h4 + p { margin-top: 0; }
+
+        /* tables */
+        .doc-table { width: 100%; border-collapse: collapse; font-size: 12px; margin: 10px 0 14px; }
+        .doc-table th {
+            text-align: left; padding: 7px 10px; background: var(--navy); color: #fff;
+            font-size: 11px; font-weight: 700;
+        }
+        .doc-table th:first-child { border-radius: 4px 0 0 0; }
+        .doc-table th:last-child  { border-radius: 0 4px 0 0; }
+        .doc-table td { padding: 7px 10px; border-bottom: 1px solid #f0f4ff; color: #374151; }
+        .doc-table tr:last-child td { border-bottom: none; }
+        .doc-table tr:nth-child(even) td { background: #f8faff; }
+        .doc-table code { font-size: 11px; background: #e0e7ff; color: var(--navy); padding: 1px 5px; border-radius: 3px; }
+
+        /* code blocks */
+        .doc-section-block pre, .doc-subsection pre {
+            background: #0f172a; color: #e2e8f0; border-radius: 8px;
+            padding: 16px; font-size: 12px; line-height: 1.6; overflow-x: auto;
+            margin: 8px 0 14px; font-family: 'Consolas','Monaco',monospace;
+        }
+        .doc-section-block code:not(pre code) {
+            background: #e0e7ff; color: var(--navy); padding: 1px 5px;
+            border-radius: 3px; font-size: 12px;
+        }
+
+        /* example boxes */
+        .doc-example {
+            border: 1px solid #bfdbfe; border-radius: 8px;
+            margin: 10px 0 14px; overflow: hidden;
+        }
+        .doc-example-label {
+            padding: 6px 12px; background: var(--navy-light); color: var(--navy);
+            font-size: 11px; font-weight: 600;
+        }
+        .doc-example pre { margin: 0; border-radius: 0; }
+
+        /* flow steps */
+        .doc-flow { display: flex; flex-direction: column; gap: 8px; margin: 10px 0 14px; }
+        .flow-step {
+            display: flex; align-items: flex-start; gap: 10px;
+            padding: 8px 12px; background: #f8faff; border-radius: 6px;
+            border-left: 3px solid var(--navy); font-size: 13px; color: #374151;
+        }
+        .flow-num {
+            min-width: 22px; height: 22px; background: var(--navy); color: #fff;
+            border-radius: 50%; font-size: 11px; font-weight: 700;
+            display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+        }
+        .flow-num.state-open { background: #dc2626; border-radius: 50%; }
+        .flow-num.state-ack  { background: #f59e0b; border-radius: 50%; }
+        .flow-num.state-res  { background: #16a34a; border-radius: 50%; }
+
+        /* tip / warning callouts */
+        .doc-tip {
+            background: #f0fdf4; border-left: 4px solid #16a34a; border-radius: 0 6px 6px 0;
+            padding: 10px 14px; font-size: 12px; color: #166534; margin: 10px 0 14px;
+        }
+        .doc-warning {
+            background: #fef9c3; border-left: 4px solid #ca8a04; border-radius: 0 6px 6px 0;
+            padding: 10px 14px; font-size: 12px; color: #713f12; margin: 10px 0 14px;
+        }
+
+        /* FAQ */
+        .faq-item { border: 1px solid #e5e7eb; border-radius: 8px; margin-bottom: 10px; overflow: hidden; }
+        .faq-q {
+            padding: 12px 14px; background: var(--navy-light); color: var(--navy);
+            font-size: 13px; font-weight: 600; cursor: pointer;
+        }
+        .faq-a {
+            padding: 12px 14px; font-size: 13px; color: #374151; line-height: 1.65;
+            border-top: 1px solid #e5e7eb;
+        }
+
+        /* HTTP method badges */
+        .http-get  { background: #dbeafe; color: #1d4ed8; padding: 1px 6px; border-radius: 3px; font-size: 10px; font-weight: 700; }
+        .http-post { background: #dcfce7; color: #166534; padding: 1px 6px; border-radius: 3px; font-size: 10px; font-weight: 700; }
+        .http-put  { background: #fef3c7; color: #92400e; padding: 1px 6px; border-radius: 3px; font-size: 10px; font-weight: 700; }
+        .http-del  { background: #fee2e2; color: #991b1b; padding: 1px 6px; border-radius: 3px; font-size: 10px; font-weight: 700; }
+
+        /* pink accent strip at panel top */
+        .docs-panel-accent { height: 3px; background: linear-gradient(90deg, var(--pink) 0%, var(--navy) 100%); flex-shrink: 0; }
+    </style>
+</head>
+<body>
+<div class="dashboard-container">
+    <nav class="sidebar" id="sidebar"></nav>
+
+    <div class="main-content">
+        <!-- Page header -->
+        <div class="page-header">
+            <div>
+                <h1><i class="fas fa-pencil"></i>Alert Management</h1>
+                <p>Configure rules, channels, and silences for integration monitoring alerts</p>
+            </div>
+            <div class="header-actions">
+                <span class="auto-badge">LIVE</span>
+                <span class="last-updated" id="lastUpdated"></span>
+                <button class="btn-help" onclick="openDocsPanel()">
+                    <i class="fas fa-pencil"></i> Help &amp; Docs
+                </button>
+            </div>
+        </div>
+
+        <!-- Two-column layout -->
+        <div class="alerts-layout">
+            <!-- Left nav -->
+            <div class="alerts-leftnav">
+                <div class="leftnav-section">Alerts</div>
+                <a class="leftnav-tab active" data-tab="active-alerts" onclick="activateTab('active-alerts')">
+                    <i class="fas fa-pencil"></i> Active
+                    <span class="leftnav-badge" id="activeCountBadge" style="display:none"></span>
+                </a>
+                <a class="leftnav-tab" data-tab="rules" onclick="activateTab('rules')">
+                    <i class="fas fa-pencil"></i> Rules
+                </a>
+                <a class="leftnav-tab" data-tab="channels" onclick="activateTab('channels')">
+                    <i class="fas fa-pencil"></i> Channels
+                </a>
+                <a class="leftnav-tab" data-tab="silences" onclick="activateTab('silences')">
+                    <i class="fas fa-pencil"></i> Silences
+                </a>
+                <a class="leftnav-tab" data-tab="history" onclick="activateTab('history')">
+                    <i class="fas fa-pencil"></i> History
+                </a>
+            </div>
+
+            <!-- Content area -->
+            <div class="alerts-content">
+
+                <!-- ── Tab: Active Alerts ──────────────────────────────────── -->
+                <div id="tab-active-alerts" class="tab-section active">
+                    <div class="section-header">
+                        <h2>Active Alerts</h2>
+                        <div style="display:flex;gap:8px">
+                            <button class="btn-ghost" onclick="loadActiveAlerts()"><i class="fas fa-pencil"></i> Refresh</button>
+                            <button class="btn-primary" onclick="acknowledgeAll()"><i class="fas fa-pencil"></i> Ack All</button>
+                        </div>
+                    </div>
+
+                    <div class="severity-chips">
+                        <div class="sev-chip all active" onclick="filterBySeverity('')">All <span id="chipAll">—</span></div>
+                        <div class="sev-chip critical" onclick="filterBySeverity('critical')"><i class="fas fa-pencil"></i> Critical <span id="chipCritical">0</span></div>
+                        <div class="sev-chip warning"  onclick="filterBySeverity('warning')"><i class="fas fa-pencil"></i> Warning <span id="chipWarning">0</span></div>
+                        <div class="sev-chip info"     onclick="filterBySeverity('info')"><i class="fas fa-pencil"></i> Info <span id="chipInfo">0</span></div>
+                    </div>
+
+                    <div class="filter-bar">
+                        <select id="filterInterface" onchange="renderAlerts()">
+                            <option value="">All interfaces</option>
+                        </select>
+                        <select id="filterType" onchange="renderAlerts()">
+                            <option value="">All types</option>
+                            <option value="ERROR_RATE">Error Rate</option>
+                            <option value="PROCESSING_TIME">Slow Processing</option>
+                            <option value="DLQ_DEPTH">DLQ Depth</option>
+                            <option value="INTERFACE_INACTIVE">Interface Inactive</option>
+                            <option value="CONNECTOR_FAILURE">Connector Failure</option>
+                            <option value="THROUGHPUT_LOW">Throughput Low</option>
+                            <option value="VALIDATION_FAILURE">Validation Failure</option>
+                        </select>
+                    </div>
+
+                    <div id="alertList" class="alert-list">
+                        <div class="loading-row"><i class="fas fa-pencil"></i> Loading alerts…</div>
+                    </div>
+                </div>
+
+                <!-- ── Tab: Rules ──────────────────────────────────────────── -->
+                <div id="tab-rules" class="tab-section">
+                    <div class="section-header">
+                        <h2>Alert Rules</h2>
+                        <button class="btn-primary" onclick="openRuleModal()"><i class="fas fa-pencil"></i> New Rule</button>
+                    </div>
+                    <p style="font-size:13px;color:var(--muted);margin-bottom:16px">
+                        Global rules apply to all interfaces. Per-interface rules override global thresholds for that interface.
+                    </p>
+                    <div class="rules-section-label">Global Rules</div>
+                    <div id="globalRulesList" class="rules-grid">
+                        <div class="loading-row"><i class="fas fa-pencil"></i> Loading…</div>
+                    </div>
+                    <div class="rules-section-label" style="margin-top:24px">Per-Interface Rules</div>
+                    <div id="interfaceRulesList" class="rules-grid">
+                        <div class="loading-row"></div>
+                    </div>
+                </div>
+
+                <!-- ── Tab: Channels ───────────────────────────────────────── -->
+                <div id="tab-channels" class="tab-section">
+                    <div class="section-header">
+                        <h2>Notification Channels</h2>
+                        <button class="btn-primary" onclick="openChannelModal()"><i class="fas fa-pencil"></i> New Channel</button>
+                    </div>
+                    <p style="font-size:13px;color:var(--muted);margin-bottom:16px">
+                        Channels are notification destinations. Assign channels to rules to receive alerts via email, webhook, or Slack.
+                    </p>
+                    <div id="channelsList" class="channels-grid">
+                        <div class="loading-row"><i class="fas fa-pencil"></i> Loading…</div>
+                    </div>
+                </div>
+
+                <!-- ── Tab: Silences ───────────────────────────────────────── -->
+                <div id="tab-silences" class="tab-section">
+                    <div class="section-header">
+                        <h2>Silences</h2>
+                        <button class="btn-primary" onclick="openSilenceModal()"><i class="fas fa-pencil"></i> New Silence</button>
+                    </div>
+                    <p style="font-size:13px;color:var(--muted);margin-bottom:16px">
+                        Silences suppress alert firing during maintenance windows. Active silences show in green.
+                    </p>
+                    <div id="silencesList" class="silences-list">
+                        <div class="loading-row"><i class="fas fa-pencil"></i> Loading…</div>
+                    </div>
+                </div>
+
+                <!-- ── Tab: History ────────────────────────────────────────── -->
+                <div id="tab-history" class="tab-section">
+                    <div class="section-header">
+                        <h2>Alert History</h2>
+                        <div style="display:flex;gap:8px">
+                            <button class="btn-ghost" onclick="exportHistoryCSV()"><i class="fas fa-pencil"></i> Export CSV</button>
+                            <button class="btn-ghost" onclick="loadHistory()"><i class="fas fa-pencil"></i> Refresh</button>
+                        </div>
+                    </div>
+                    <div class="filter-bar" style="margin-bottom:14px">
+                        <select id="histSeverityFilter" onchange="renderHistory()">
+                            <option value="">All severities</option>
+                            <option value="critical">Critical</option>
+                            <option value="warning">Warning</option>
+                            <option value="info">Info</option>
+                        </select>
+                        <select id="histTypeFilter" onchange="renderHistory()">
+                            <option value="">All types</option>
+                            <option value="ERROR_RATE">Error Rate</option>
+                            <option value="PROCESSING_TIME">Slow Processing</option>
+                            <option value="DLQ_DEPTH">DLQ Depth</option>
+                            <option value="INTERFACE_INACTIVE">Interface Inactive</option>
+                            <option value="CONNECTOR_FAILURE">Connector Failure</option>
+                            <option value="VALIDATION_FAILURE">Validation Failure</option>
+                            <option value="THROUGHPUT_LOW">Low Throughput</option>
+                        </select>
+                    </div>
+                    <div style="overflow-x:auto">
+                        <table class="history-table">
+                            <thead>
+                                <tr>
+                                    <th>Severity</th>
+                                    <th>Type</th>
+                                    <th>Interface</th>
+                                    <th>Message</th>
+                                    <th>Fired</th>
+                                    <th>Resolved</th>
+                                    <th>Duration</th>
+                                    <th>Status</th>
+                                </tr>
+                            </thead>
+                            <tbody id="historyBody">
+                                <tr><td colspan="8" class="loading-row"><i class="fas fa-pencil"></i> Loading…</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ── Modal: New / Edit Rule ──────────────────────────────────────────────── -->
+<div class="modal-overlay" id="ruleModal">
+    <div class="modal-box">
+        <div class="modal-header">
+            <h3 id="ruleModalTitle">New Alert Rule</h3>
+            <button class="modal-close" onclick="closeModal('ruleModal')">×</button>
+        </div>
+        <div class="modal-body">
+            <input type="hidden" id="ruleId">
+            <div class="form-group">
+                <label>Name *</label>
+                <input type="text" id="ruleName" placeholder="e.g. Epic ADT High Error Rate">
+            </div>
+            <div class="form-group">
+                <label>Description</label>
+                <input type="text" id="ruleDescription" placeholder="Optional description">
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label>Rule Type *</label>
+                    <select id="ruleType">
+                        <option value="ERROR_RATE">Error Rate (%)</option>
+                        <option value="PROCESSING_TIME">Processing Time (ms)</option>
+                        <option value="DLQ_DEPTH">DLQ Depth (count)</option>
+                        <option value="INTERFACE_INACTIVE">Interface Inactive</option>
+                        <option value="CONNECTOR_FAILURE">Connector Failure</option>
+                        <option value="THROUGHPUT_LOW">Throughput Low</option>
+                        <option value="VALIDATION_FAILURE">Validation Failures</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Condition</label>
+                    <select id="ruleCondition">
+                        <option value="gt">Greater than (&gt;)</option>
+                        <option value="gte">Greater than or equal (≥)</option>
+                        <option value="lt">Less than (&lt;)</option>
+                        <option value="lte">Less than or equal (≤)</option>
+                    </select>
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label>Warning Threshold</label>
+                    <input type="number" id="ruleThresholdWarn" placeholder="e.g. 5" step="any">
+                    <div class="form-hint">Leave blank to disable warning level</div>
+                </div>
+                <div class="form-group">
+                    <label>Critical Threshold</label>
+                    <input type="number" id="ruleThresholdCrit" placeholder="e.g. 10" step="any">
+                    <div class="form-hint">Leave blank to disable critical level</div>
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label>Evaluation Window (minutes)</label>
+                    <input type="number" id="ruleWindowMins" value="60" min="1">
+                </div>
+                <div class="form-group">
+                    <label>Cooldown (minutes)</label>
+                    <input type="number" id="ruleCooldownMins" value="60" min="1">
+                    <div class="form-hint">Suppress re-fire for this long after first alert</div>
+                </div>
+            </div>
+            <div class="form-group">
+                <label>Interface (leave blank for global rule)</label>
+                <select id="ruleInterfaceId">
+                    <option value="">— Global rule (all interfaces) —</option>
+                </select>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button class="btn-ghost" onclick="closeModal('ruleModal')">Cancel</button>
+            <button class="btn-primary" onclick="saveRule()">Save Rule</button>
+        </div>
+    </div>
+</div>
+
+<!-- ── Modal: New / Edit Channel ───────────────────────────────────────────── -->
+<div class="modal-overlay" id="channelModal">
+    <div class="modal-box">
+        <div class="modal-header">
+            <h3 id="channelModalTitle">New Notification Channel</h3>
+            <button class="modal-close" onclick="closeModal('channelModal')">×</button>
+        </div>
+        <div class="modal-body">
+            <input type="hidden" id="channelId">
+            <div class="form-group">
+                <label>Channel Name *</label>
+                <input type="text" id="channelName" placeholder="e.g. Ops Team Email">
+            </div>
+            <div class="form-group">
+                <label>Type *</label>
+                <select id="channelType" onchange="renderChannelFields()">
+                    <option value="email">Email (SMTP)</option>
+                    <option value="webhook">Webhook (HTTP)</option>
+                    <option value="slack">Slack</option>
+                </select>
+            </div>
+            <div id="channelDynamicFields" class="dynamic-fields"></div>
+        </div>
+        <div class="modal-footer">
+            <button class="btn-ghost" onclick="closeModal('channelModal')">Cancel</button>
+            <button class="btn-primary" onclick="saveChannel()">Save Channel</button>
+        </div>
+    </div>
+</div>
+
+<!-- ── Modal: New Silence ───────────────────────────────────────────────────── -->
+<div class="modal-overlay" id="silenceModal">
+    <div class="modal-box">
+        <div class="modal-header">
+            <h3>New Silence / Maintenance Window</h3>
+            <button class="modal-close" onclick="closeModal('silenceModal')">×</button>
+        </div>
+        <div class="modal-body">
+            <div class="form-group">
+                <label>Name *</label>
+                <input type="text" id="silenceName" placeholder="e.g. Weekend Maintenance">
+            </div>
+            <div class="form-group">
+                <label>Reason</label>
+                <input type="text" id="silenceReason" placeholder="Optional reason / ticket number">
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label>Starts At *</label>
+                    <input type="datetime-local" id="silenceStartsAt">
+                </div>
+                <div class="form-group">
+                    <label>Ends At *</label>
+                    <input type="datetime-local" id="silenceEndsAt">
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label>Interface (blank = all)</label>
+                    <select id="silenceInterfaceId">
+                        <option value="">All interfaces</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Rule (blank = all rules)</label>
+                    <select id="silenceRuleId">
+                        <option value="">All rules</option>
+                    </select>
+                </div>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button class="btn-ghost" onclick="closeModal('silenceModal')">Cancel</button>
+            <button class="btn-primary" onclick="saveSilence()">Create Silence</button>
+        </div>
+    </div>
+</div>
+
+<!-- ── Modal: Assign Channels to Rule ──────────────────────────────────────── -->
+<div class="modal-overlay" id="assignChannelsModal">
+    <div class="modal-box">
+        <div class="modal-header">
+            <h3 id="assignChannelsTitle">Assign Channels</h3>
+            <button class="modal-close" onclick="closeModal('assignChannelsModal')">×</button>
+        </div>
+        <div class="modal-body">
+            <p style="font-size:13px;color:var(--muted);margin-bottom:14px">Select channels to notify when this rule fires. You can filter by severity.</p>
+            <div id="assignChannelsList"></div>
+        </div>
+        <div class="modal-footer">
+            <button class="btn-ghost" onclick="closeModal('assignChannelsModal')">Cancel</button>
+            <button class="btn-primary" onclick="saveChannelAssignments()">Save</button>
+        </div>
+    </div>
+</div>
+
+<!-- ── Docs Panel ────────────────────────────────────────────────────────────── -->
+<div class="docs-overlay" id="docsOverlay" onclick="closeDocsPanel(event)"></div>
+<div class="docs-panel" id="docsPanel">
+    <div class="docs-panel-accent"></div>
+    <div class="docs-panel-header">
+        <div style="flex:1">
+            <h2><i class="fas fa-pencil" style="margin-right:8px"></i>Alert Management — Help &amp; Documentation</h2>
+            <p>Configuration guides, API reference, and real-world examples</p>
+        </div>
+        <button class="docs-close" onclick="closeDocsPanel()" title="Close">×</button>
+    </div>
+    <div class="docs-body">
+        <!-- TOC -->
+        <nav class="docs-toc" id="docsToc"></nav>
+        <!-- Content -->
+        <div class="docs-content" id="docsContent"></div>
+    </div>
+</div>
+
+<script src="js/components/sidebar-nav.js"></script>
+<script src="js/alert-docs.js"></script>
+<script src="js/alerts.js"></script>
+<script>
+// ── Docs panel renderer ───────────────────────────────────────────────────────
+(function () {
+    'use strict';
+
+    let _currentSub = null;
+
+    function buildToc() {
+        const toc = document.getElementById('docsToc');
+        if (!toc || !window.ALERT_DOCS) return;
+        let html = '';
+        ALERT_DOCS.sections.forEach(sec => {
+            html += `<div class="toc-section-label">${sec.title}</div>`;
+            sec.subsections.forEach(sub => {
+                html += `<a class="toc-item sub" data-id="${sub.id}" onclick="docShowSection('${sub.id}')">${sub.title}</a>`;
+            });
+        });
+        toc.innerHTML = html;
+    }
+
+    function buildContent() {
+        const el = document.getElementById('docsContent');
+        if (!el || !window.ALERT_DOCS) return;
+        let html = '';
+        ALERT_DOCS.sections.forEach(sec => {
+            sec.subsections.forEach(sub => {
+                html += `
+                    <div class="doc-section-block" id="doc-block-${sub.id}">
+                        <div class="doc-subsection">
+                            <h4>${sub.title}</h4>
+                            ${sub.body}
+                        </div>
+                    </div>`;
+            });
+        });
+        el.innerHTML = html;
+    }
+
+    window.docShowSection = function (id) {
+        _currentSub = id;
+        // Content blocks
+        document.querySelectorAll('.doc-section-block').forEach(b => b.classList.remove('active'));
+        const block = document.getElementById('doc-block-' + id);
+        if (block) { block.classList.add('active'); document.getElementById('docsContent').scrollTop = 0; }
+        // TOC highlight
+        document.querySelectorAll('.toc-item').forEach(a => a.classList.remove('active'));
+        const tocItem = document.querySelector(`.toc-item[data-id="${id}"]`);
+        if (tocItem) tocItem.classList.add('active');
+    };
+
+    window.openDocsPanel = function (startId) {
+        document.getElementById('docsOverlay').classList.add('open');
+        document.getElementById('docsPanel').classList.add('open');
+        const target = startId || _currentSub || ALERT_DOCS.sections[0]?.subsections[0]?.id;
+        if (target) docShowSection(target);
+    };
+
+    window.closeDocsPanel = function (e) {
+        if (e && e.target !== document.getElementById('docsOverlay')) return;
+        document.getElementById('docsOverlay').classList.remove('open');
+        document.getElementById('docsPanel').classList.remove('open');
+    };
+
+    // Keyboard close
+    document.addEventListener('keydown', e => { if (e.key === 'Escape') closeDocsPanel(); });
+
+    // Init — scripts are at bottom of body so DOM is ready
+    buildToc();
+    buildContent();
+})();
+</script>
+    <script src="/js/ai-assistant.js"></script>
+</body>
+</html>

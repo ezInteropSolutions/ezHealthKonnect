@@ -114,6 +114,38 @@ func (c *HL7FHIRTransformationController) TransformHL7ToFHIR(ctx *gin.Context) {
 		return
 	}
 
+	// ── FHIR Validation Policy enforcement ───────────────────────────────────
+	if len(response.ValidationFailures) > 0 && request.InterfaceID != "" && c.db != nil {
+		policy := c.lookupValidationPolicy(transformCtx, request.InterfaceID)
+		switch policy {
+		case "reject":
+			ctx.JSON(http.StatusUnprocessableEntity, gin.H{
+				"success":            false,
+				"requestId":          request.RequestID,
+				"error":              "Message rejected: required FHIR fields are missing",
+				"validationFailures": response.ValidationFailures,
+			})
+			return
+		case "queue_review":
+			if qErr := c.enqueueForReview(transformCtx, &request, response); qErr != nil {
+				fmt.Printf("⚠️  Failed to enqueue message for review: %v\n", qErr)
+			}
+			ctx.JSON(http.StatusAccepted, gin.H{
+				"success":            true,
+				"held_for_review":    true,
+				"requestId":          request.RequestID,
+				"message":            "Message held for manual review due to missing required FHIR fields",
+				"validationFailures": response.ValidationFailures,
+			})
+			return
+		case "warn":
+			// Add OperationOutcome to bundle — continue to deliver below
+			c.attachOperationOutcome(response)
+		// "proceed" (default): fall through unchanged
+		}
+	}
+	// ─────────────────────────────────────────────────────────────────────────
+
 	// Return response
 	httpStatus := http.StatusOK
 	if !response.Success {
@@ -604,6 +636,98 @@ func (c *HL7FHIRTransformationController) GetTransformationLogs(ctx *gin.Context
 // =====================================
 // HELPER METHODS
 // =====================================
+
+// lookupValidationPolicy fetches fhir_validation_policy for the given interface.
+// Returns "proceed" on any error so the transform is never silently blocked.
+func (c *HL7FHIRTransformationController) lookupValidationPolicy(ctx context.Context, interfaceID string) string {
+	var policy sql.NullString
+	err := c.db.QueryRowContext(ctx,
+		`SELECT fhir_validation_policy FROM interfaces WHERE id = $1`, interfaceID,
+	).Scan(&policy)
+	if err != nil || !policy.Valid || policy.String == "" {
+		return "proceed"
+	}
+	return policy.String
+}
+
+// enqueueForReview inserts a row into fhir_validation_queue so an operator can
+// resolve the missing fields before the message is delivered.
+func (c *HL7FHIRTransformationController) enqueueForReview(
+	ctx context.Context,
+	req *services.TransformRequest,
+	resp *services.TransformResponse,
+) error {
+	failuresJSON, _ := json.Marshal(resp.ValidationFailures)
+	partialFHIRJSON, _ := json.Marshal(resp.FHIRResources)
+
+	var rawHL7 *string
+	if raw, ok := req.ParsedHL7Data["raw"].(string); ok && raw != "" {
+		rawHL7 = &raw
+	}
+	var msgID *string
+	if mid, ok := req.ParsedHL7Data["messageId"].(string); ok && mid != "" {
+		msgID = &mid
+	}
+	msgType := resp.MessageType
+	if msgType == "" {
+		msgType = req.MessageType
+	}
+
+	_, err := c.db.ExecContext(ctx, `
+		INSERT INTO fhir_validation_queue
+			(interface_id, message_id, message_type, raw_hl7, partial_fhir, validation_failures, status)
+		VALUES ($1, $2, $3, $4, $5, $6, 'pending_review')`,
+		req.InterfaceID,
+		msgID,
+		nullableString(msgType),
+		rawHL7,
+		string(partialFHIRJSON),
+		string(failuresJSON),
+	)
+	return err
+}
+
+// attachOperationOutcome appends an OperationOutcome FHIR resource to the
+// response bundle describing every validation failure.  Used for policy=warn.
+func (c *HL7FHIRTransformationController) attachOperationOutcome(resp *services.TransformResponse) {
+	issues := make([]map[string]interface{}, 0, len(resp.ValidationFailures))
+	for _, vf := range resp.ValidationFailures {
+		issues = append(issues, map[string]interface{}{
+			"severity":    "warning",
+			"code":        "required",
+			"diagnostics": fmt.Sprintf("Missing required field %s (HL7 source: %s)", vf.Field, vf.HL7Path),
+			"details": map[string]interface{}{
+				"coding": []map[string]interface{}{{
+					"system":  "https://ezhealthkonnect.io/fhir/validation-codes",
+					"code":    vf.MissingCode,
+					"display": vf.Field,
+				}},
+			},
+		})
+	}
+	oo := map[string]interface{}{
+		"resourceType": "OperationOutcome",
+		"id":           fmt.Sprintf("validation-warn-%d", time.Now().UnixNano()),
+		"issue":        issues,
+	}
+	resp.FHIRResources = append(resp.FHIRResources, oo)
+	if resp.Bundle != nil {
+		if entries, ok := resp.Bundle["entry"].([]interface{}); ok {
+			resp.Bundle["entry"] = append(entries, map[string]interface{}{
+				"resource": oo,
+				"search":   map[string]interface{}{"mode": "outcome"},
+			})
+		}
+	}
+}
+
+// nullableString converts an empty string to nil for SQL nullable columns.
+func nullableString(s string) interface{} {
+	if s == "" {
+		return nil
+	}
+	return s
+}
 
 func (c *HL7FHIRTransformationController) hasErrorSeverity(issues []map[string]interface{}) bool {
 	for _, issue := range issues {

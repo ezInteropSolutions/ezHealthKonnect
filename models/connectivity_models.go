@@ -33,6 +33,8 @@ type ConnectivityType struct {
 	Priority            int             `json:"priority" db:"priority"`
 	Version             string          `json:"version" db:"version"`
 	DocumentationURL    string          `json:"documentation_url" db:"documentation_url"`
+	UICategory          string          `json:"ui_category" db:"ui_category"`
+	UISortOrder         int             `json:"ui_sort_order" db:"ui_sort_order"`
 	CreatedAt           time.Time       `json:"created_at" db:"created_at"`
 	UpdatedAt           time.Time       `json:"updated_at" db:"updated_at"`
 }

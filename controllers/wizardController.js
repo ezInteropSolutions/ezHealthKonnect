@@ -317,6 +317,10 @@ class WizardController {
                 }
             });
 
+            // Re-ingest interface into AI knowledge base (fire-and-forget, non-blocking)
+            axios.post(`${GO_BACKEND_URL}/api/ai/ingest/interface/${result.interfaceId}`)
+                .catch(err => console.warn('[AI] Interface KB ingestion failed (non-fatal):', err.message));
+
             res.json({
                 success: true,
                 data: {

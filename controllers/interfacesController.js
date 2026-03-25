@@ -80,6 +80,7 @@ class InterfacesController {
                     i.debug_logging,
                     i.log_retention_days,
                     i.retain_error_logs_forever,
+                    i.fhir_validation_policy,
                     i.total_processed,
                     i.successful_processed,
                     i.failed_processed,
@@ -129,6 +130,10 @@ class InterfacesController {
                 debug_logging: item.debug_logging || false,
                 log_retention_days: item.log_retention_days || 30,
                 retain_error_logs_forever: item.retain_error_logs_forever !== false,
+
+                // FHIR Validation Policy (V66)
+                fhir_validation_policy: item.fhir_validation_policy || 'proceed',
+                fhirValidationPolicy: item.fhir_validation_policy || 'proceed',
 
                 statistics: {
                     totalProcessed: item.total_processed || 0,
@@ -216,11 +221,11 @@ class InterfacesController {
                 console.log(`   Deployment Delay: ${finalDeploymentDelay}s`);
             }
 
-            // Validation
-            if (!name || !sourceType || !targetType) {
+            // Validation — sourceType/targetType optional when creating from template (configured later)
+            if (!name) {
                 return res.status(400).json({
                     success: false,
-                    error: 'Missing required fields: name, sourceType, targetType'
+                    error: 'Missing required field: name'
                 });
             }
 
@@ -381,6 +386,9 @@ class InterfacesController {
                     i.message_type, i.processing_rules, i.transformation_mapping,
                     i.status, i.total_processed, i.successful_processed, i.failed_processed,
                     i.last_processed_at, i.created_at, i.updated_at, i.version,
+                    i.fhir_validation_policy,
+                    i.log_level, i.debug_logging, i.log_retention_days, i.retain_error_logs_forever,
+                    i.deployment_mode, i.auto_start, i.deployment_delay_seconds,
                     u.email as created_by_email
                 FROM interfaces i
                 LEFT JOIN users u ON i.created_by = u.id
@@ -416,6 +424,22 @@ class InterfacesController {
                 processingRules: this.parseJsonField(item.processing_rules),
                 transformationMapping: this.parseJsonField(item.transformation_mapping),
                 status: item.status,
+
+                // FHIR Validation Policy (V66)
+                fhir_validation_policy: item.fhir_validation_policy || 'proceed',
+                fhirValidationPolicy: item.fhir_validation_policy || 'proceed',
+
+                // Deployment settings
+                deployment_mode: item.deployment_mode || 'manual',
+                auto_start: item.auto_start || false,
+                deployment_delay_seconds: item.deployment_delay_seconds || 0,
+
+                // Logging settings
+                log_level: item.log_level || 'debug',
+                debug_logging: item.debug_logging || false,
+                log_retention_days: item.log_retention_days || 30,
+                retain_error_logs_forever: item.retain_error_logs_forever !== false,
+
                 statistics: {
                     totalProcessed: item.total_processed || 0,
                     successful: item.successful_processed || 0,
@@ -865,7 +889,10 @@ class InterfacesController {
                 debug_logging,
                 log_level,
                 log_retention_days,
-                retain_error_logs_forever
+                retain_error_logs_forever,
+                // FHIR Validation Policy (V66)
+                fhirValidationPolicy,
+                fhir_validation_policy
             } = req.body;
 
             console.log(`🔍 Updating interface ${interfaceId} for user: ${userEmail}`);
@@ -945,6 +972,12 @@ class InterfacesController {
             replacements.log_retention_days = parseInt(log_retention_days) || 30;
             replacements.retain_error_logs_forever = retain_error_logs_forever !== false && retain_error_logs_forever !== 'false';
 
+            // FHIR Validation Policy (V66) — accept both camelCase and snake_case
+            const validPolicies = ['proceed', 'warn', 'reject', 'queue_review'];
+            // snake_case takes precedence over camelCase alias (explicit API field wins)
+            const rawPolicy = fhir_validation_policy || fhirValidationPolicy || 'proceed';
+            replacements.fhir_validation_policy = validPolicies.includes(rawPolicy) ? rawPolicy : 'proceed';
+
             console.log('📊 OOB Update - JSONB fields prepared:', {
                 sourceConnectivity: replacements.sourceConnectivity?.substring(0, 150),
                 targetConnectivity: replacements.targetConnectivity?.substring(0, 150)
@@ -974,6 +1007,7 @@ class InterfacesController {
                     debug_logging = :debug_logging,
                     log_retention_days = :log_retention_days,
                     retain_error_logs_forever = :retain_error_logs_forever,
+                    fhir_validation_policy = :fhir_validation_policy,
                     updated_by = :userId,
                     updated_at = CURRENT_TIMESTAMP
                 WHERE id = :interfaceId

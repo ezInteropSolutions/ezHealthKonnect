@@ -4,7 +4,11 @@
 
 const express = require('express');
 const router = express.Router();
-const { requireAuth } = require('../middleware/auth');
+const { requireAuth, requireRole } = require('../middleware/auth');
+
+// RBAC: pipelines are read by admin+operator+viewer; written by admin+operator
+const canRead  = requireRole('admin', 'operator', 'viewer');
+const canWrite = requireRole('admin', 'operator');
 const pipelineController = require('../controllers/pipelineController');
 
 // Debug: Verify all controller functions
@@ -25,81 +29,81 @@ requiredFunctions.forEach(fn => {
 // PIPELINE MANAGEMENT ROUTES
 // ============================================================================
 
-// Save pipeline (create or update)
-router.post('/pipelines', requireAuth, pipelineController.savePipeline);
+// Save pipeline (create or update)                      — operator+
+router.post('/pipelines', requireAuth, canWrite, pipelineController.savePipeline);
 
-// Load pipeline by ID
-router.get('/pipelines/:id', requireAuth, pipelineController.loadPipeline);
+// Load pipeline by ID                                   — viewer+
+router.get('/pipelines/:id', requireAuth, canRead, pipelineController.loadPipeline);
 
-// Load pipeline by interface and message type
+// Load pipeline by interface and message type           — viewer+
 router.get('/pipelines/interface/:interfaceId/:messageType',
-    requireAuth,
+    requireAuth, canRead,
     pipelineController.loadPipelineByInterface
 );
 
-// List all pipelines for an interface
+// List all pipelines for an interface                   — viewer+
 router.get('/pipelines/interface/:interfaceId',
-    requireAuth,
+    requireAuth, canRead,
     pipelineController.listPipelines
 );
 
-// Delete pipeline
-router.delete('/pipelines/:id', requireAuth, pipelineController.deletePipeline);
+// Delete pipeline                                       — operator+
+router.delete('/pipelines/:id', requireAuth, canWrite, pipelineController.deletePipeline);
 
-// Clone pipeline
-router.post('/pipelines/:id/clone', requireAuth, pipelineController.clonePipeline);
+// Clone pipeline                                        — operator+
+router.post('/pipelines/:id/clone', requireAuth, canWrite, pipelineController.clonePipeline);
 
 // ============================================================================
 // PIPELINE EXECUTION ROUTES
 // ============================================================================
 
-// Test pipeline with sample data
-router.post('/pipelines/test', requireAuth, pipelineController.testPipeline);
+// Test pipeline with sample data                        — operator+
+router.post('/pipelines/test', requireAuth, canWrite, pipelineController.testPipeline);
 
-// Execute pipeline (production)
-router.post('/pipelines/execute', requireAuth, pipelineController.executePipeline);
+// Execute pipeline (production)                         — operator+
+router.post('/pipelines/execute', requireAuth, canWrite, pipelineController.executePipeline);
 
-// Get pipeline execution statistics
-router.get('/pipelines/:id/stats', requireAuth, pipelineController.getPipelineStats);
+// Get pipeline execution statistics                     — viewer+
+router.get('/pipelines/:id/stats', requireAuth, canRead, pipelineController.getPipelineStats);
 
 // ============================================================================
 // TEMPLATE LIBRARY ROUTES
 // ============================================================================
 
-// List all templates
-router.get('/templates', requireAuth, pipelineController.listTemplates);
+// List all templates                                    — viewer+
+router.get('/templates', requireAuth, canRead, pipelineController.listTemplates);
 
-// Get template by ID
-router.get('/templates/:id', requireAuth, pipelineController.getTemplate);
+// Get template by ID                                    — viewer+
+router.get('/templates/:id', requireAuth, canRead, pipelineController.getTemplate);
 
-// Create custom template
-router.post('/templates', requireAuth, pipelineController.createTemplate);
+// Create custom template                                — operator+
+router.post('/templates', requireAuth, canWrite, pipelineController.createTemplate);
 
 // ============================================================================
 // STEP EXECUTION ROUTES (for UI testing individual steps)
 // ============================================================================
 
-// Execute single validation step
+// Execute single validation step                        — operator+
 router.post('/processing/execute/validation',
-    requireAuth,
+    requireAuth, canWrite,
     pipelineController.executeValidationStep
 );
 
-// Execute single enrichment step
+// Execute single enrichment step                        — operator+
 router.post('/processing/execute/enrichment',
-    requireAuth,
+    requireAuth, canWrite,
     pipelineController.executeEnrichmentStep
 );
 
-// Execute single mapping step
+// Execute single mapping step                           — operator+
 router.post('/processing/execute/mapping',
-    requireAuth,
+    requireAuth, canWrite,
     pipelineController.executeMappingStep
 );
 
-// Execute custom JavaScript step
+// Execute custom JavaScript step                        — operator+
 router.post('/processing/execute/custom',
-    requireAuth,
+    requireAuth, canWrite,
     pipelineController.executeCustomStep
 );
 
@@ -107,9 +111,9 @@ router.post('/processing/execute/custom',
 // HL7-FHIR MAPPING TEMPLATES
 // ============================================================================
 
-// Get standard HL7-FHIR template mappings by message type
+// Get standard HL7-FHIR template mappings by message type — viewer+
 router.get('/hl7-fhir-templates/:messageType',
-    requireAuth,
+    requireAuth, canRead,
     pipelineController.getStandardTemplateMappings
 );
 

@@ -2,10 +2,11 @@
  * PayloadBuilderBuilder — step UI for the Payload Builder executor.
  * Constructs the final outbound wire payload from pipeline data.
  *
- * Three modes exposed as tabs:
- *   Simple       (pass_through) — source picker + format selector
- *   Template     (template)     — {{ variable }} substitution in a template string
+ * Four modes exposed as tabs:
+ *   Simple       (pass_through)  — source picker + format selector
+ *   Template     (template)      — {{ variable }} substitution in a template string
  *   Field Builder (field_builder) — add/remove field mapping rows
+ *   FHIR Bundle  (fhir_bundle)   — assemble a FHIR Bundle from pipeline resources
  *
  * Registered with StepBuilderRegistry as 'payload.builder' and 'payload_builder'.
  */
@@ -69,6 +70,22 @@ class PayloadBuilderBuilder {
             step.config.field_mappings = mappings;
         }
 
+        if (mode === 'fhir_bundle') {
+            const fb = step.config.fhirBundle || {};
+            fb.bundleType     = container.querySelector('#pb-fb-bundle-type')?.value || 'collection';
+            fb.bundleId       = container.querySelector('#pb-fb-bundle-id')?.value?.trim() || '';
+            fb.includeRequest = container.querySelector('#pb-fb-include-request')?.checked ?? false;
+
+            const pathRows = container.querySelectorAll('.pb-rp-row');
+            const paths = [];
+            pathRows.forEach(row => {
+                const v = row.querySelector('.pb-rp-input')?.value?.trim();
+                if (v) paths.push(v);
+            });
+            fb.resourcePaths = paths;
+            step.config.fhirBundle = fb;
+        }
+
         console.log('[PayloadBuilderBuilder] ✅ config collected:', step.config);
     }
 
@@ -101,6 +118,7 @@ class PayloadBuilderBuilder {
     ${tabBtn('pass_through', 'Simple',        mode === 'pass_through')}
     ${tabBtn('template',     'Template',      mode === 'template')}
     ${tabBtn('field_builder','Field Builder', mode === 'field_builder')}
+    ${tabBtn('fhir_bundle',  'FHIR Bundle',  mode === 'fhir_bundle')}
   </div>
 
   <input type="hidden" id="pb-mode" value="${esc(mode)}">
@@ -196,6 +214,72 @@ class PayloadBuilderBuilder {
     </div>
   </div>
 
+  <!-- ── FHIR BUNDLE TAB ── -->
+  <div id="pb-tab-fhir_bundle" class="pb-tab-pane" style="display:${mode === 'fhir_bundle' ? 'block' : 'none'}">
+    <div style="background:#e8f5e9;border:1px solid #a5d6a7;border-radius:6px;padding:10px;margin-bottom:12px;font-size:12px;color:#1b5e20;">
+      Assemble a FHIR R4 Bundle from pipeline variables. Resources are resolved at runtime
+      from the paths you specify below (e.g. <code style="background:#f1f8e9;padding:1px 4px;border-radius:3px;">steps.transform.step_output.fhirBundle</code>).
+      The Bundle is written to the <code style="background:#f1f8e9;padding:1px 4px;border-radius:3px;">payload</code> variable.
+    </div>
+
+    <!-- Bundle Type -->
+    <div class="form-group">
+      <label class="form-label">Bundle Type</label>
+      <select id="pb-fb-bundle-type" class="form-control">
+        <option value="collection"  ${(cfg.fhirBundle?.bundleType || 'collection') === 'collection'  ? 'selected' : ''}>collection — read-only set of resources</option>
+        <option value="transaction" ${cfg.fhirBundle?.bundleType === 'transaction' ? 'selected' : ''}>transaction — atomic FHIR transaction (entry.request auto-added)</option>
+        <option value="batch"       ${cfg.fhirBundle?.bundleType === 'batch'       ? 'selected' : ''}>batch — independent operations (entry.request auto-added)</option>
+        <option value="document"    ${cfg.fhirBundle?.bundleType === 'document'    ? 'selected' : ''}>document — clinical document with Composition as first entry</option>
+      </select>
+      <div class="field-help">Determines the FHIR Bundle.type and required entry structure.</div>
+    </div>
+
+    <!-- Resource Paths -->
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+      <label class="form-label" style="margin:0;">Resource Paths</label>
+      <button id="pb-add-resource-path" class="btn btn-sm"
+        style="background:#2e7d32;color:#fff;padding:3px 10px;font-size:11px;border:none;border-radius:4px;cursor:pointer;">
+        + Add Path
+      </button>
+    </div>
+    <div class="field-help" style="margin-bottom:6px;">
+      Each path is resolved from pipeline variables. May contain a single FHIR resource or an array of resources.
+      Examples: <code>steps.transform.step_output.fhirBundle</code>, <code>fhirBundle</code>, <code>steps.enrich.step_output.patient</code>
+    </div>
+    <div id="pb-resource-paths-list">
+      ${this._renderResourcePathRows(cfg.fhirBundle?.resourcePaths || [])}
+    </div>
+
+    <!-- Bundle ID (optional) -->
+    <div class="form-group" style="margin-top:12px;">
+      <label class="form-label">Bundle ID <span style="font-weight:400;color:#888;">(optional)</span></label>
+      <input type="text" id="pb-fb-bundle-id" class="form-control"
+        placeholder="Auto-generated UUID if blank"
+        value="${esc(cfg.fhirBundle?.bundleId || '')}">
+      <div class="field-help">If set, used as the Bundle.id. Leave blank for a random UUID.</div>
+    </div>
+
+    <!-- Include Request entries -->
+    <div class="form-group">
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;">
+        <input type="checkbox" id="pb-fb-include-request"
+          ${cfg.fhirBundle?.includeRequest ? 'checked' : ''}>
+        <span>Include <code>entry.request</code> <span style="font-weight:400;color:#555;">(auto-enabled for transaction/batch)</span></span>
+      </label>
+      <div class="field-help" style="margin-left:22px;">
+        Adds <code>{"method":"POST","url":"ResourceType"}</code> or <code>{"method":"PUT","url":"ResourceType/id"}</code>
+        to each Bundle entry. Required for transaction/batch Bundles.
+      </div>
+    </div>
+
+    <!-- Live preview hint -->
+    <div style="background:#f5f5f5;border:1px solid #ddd;border-radius:4px;padding:10px;font-size:11px;color:#444;margin-top:4px;">
+      <strong>Output variable:</strong> <code>payload</code>
+      &nbsp;|&nbsp; <strong>Content-Type:</strong> <code>application/fhir+json</code>
+      &nbsp;|&nbsp; Wire directly to an <em>HTTP FHIR Sender</em> outbound connector.
+    </div>
+  </div>
+
 </div>`;
 
         return section.outerHTML;
@@ -230,6 +314,25 @@ class PayloadBuilderBuilder {
     style="background:none;border:none;color:#e53935;cursor:pointer;padding:0;font-size:16px;line-height:1;"
     title="Remove row">&times;</button>
 </div>`;
+    }
+
+    _renderResourcePathRows(paths) {
+        const esc = s => (s || '').toString()
+            .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+        if (!paths || paths.length === 0) {
+            paths = [''];
+        }
+        return paths.map((p, i) => `
+<div class="pb-rp-row" data-index="${i}"
+  style="display:flex;gap:4px;margin-bottom:4px;align-items:center;">
+  <input type="text" class="form-control form-control-sm pb-rp-input"
+    placeholder="e.g. steps.transform.step_output.fhirBundle"
+    value="${esc(p)}" style="flex:1;">
+  <button class="pb-rp-remove"
+    style="background:none;border:none;color:#e53935;cursor:pointer;padding:0 4px;font-size:16px;line-height:1;"
+    title="Remove path">&times;</button>
+</div>`).join('');
     }
 
     // ── Private: event wiring ────────────────────────────────────────────────
@@ -290,6 +393,47 @@ class PayloadBuilderBuilder {
         // Wire existing rows
         list && list.querySelectorAll('.pb-mapping-row').forEach(row => this._wireRowEvents(row));
 
+        // ── FHIR Bundle tab events ────────────────────────────────────────────
+
+        // Bundle type → auto-check includeRequest for transaction/batch
+        const bundleTypeSelect   = root.querySelector('#pb-fb-bundle-type');
+        const includeRequestChk  = root.querySelector('#pb-fb-include-request');
+        if (bundleTypeSelect && includeRequestChk) {
+            const syncIncludeRequest = () => {
+                const bt = bundleTypeSelect.value;
+                if (bt === 'transaction' || bt === 'batch') {
+                    includeRequestChk.checked  = true;
+                    includeRequestChk.disabled = true;
+                    includeRequestChk.title    = 'Required for transaction/batch bundles';
+                } else {
+                    includeRequestChk.disabled = false;
+                    includeRequestChk.title    = '';
+                }
+            };
+            bundleTypeSelect.addEventListener('change', syncIncludeRequest);
+            syncIncludeRequest(); // apply on initial render
+        }
+
+        // Add resource path row
+        const addPathBtn  = root.querySelector('#pb-add-resource-path');
+        const pathsList   = root.querySelector('#pb-resource-paths-list');
+        if (addPathBtn && pathsList) {
+            addPathBtn.addEventListener('click', () => {
+                const count = pathsList.querySelectorAll('.pb-rp-row').length;
+                const tmp = document.createElement('div');
+                tmp.innerHTML = this._renderResourcePathRows(['']);
+                const newRow = tmp.firstElementChild;
+                newRow.dataset.index = count;
+                pathsList.appendChild(newRow);
+                this._wireResourcePathRowEvents(newRow);
+                newRow.querySelector('.pb-rp-input')?.focus();
+            });
+        }
+
+        // Wire existing resource path rows
+        pathsList && pathsList.querySelectorAll('.pb-rp-row')
+            .forEach(row => this._wireResourcePathRowEvents(row));
+
         // Load variables into template tab hint
         this._loadTemplateVars(root);
     }
@@ -304,6 +448,25 @@ class PayloadBuilderBuilder {
                 valInput.placeholder = typeSelect.value === 'literal'
                     ? 'Enter value'
                     : 'e.g. PID.5.1 or steps.enrich.mrn';
+            });
+        }
+    }
+
+    _wireResourcePathRowEvents(row) {
+        if (!row) return;
+        const removeBtn = row.querySelector('.pb-rp-remove');
+        if (removeBtn) {
+            removeBtn.addEventListener('click', () => {
+                const list = row.closest('#pb-resource-paths-list');
+                row.remove();
+                // Always keep at least one blank row
+                if (list && list.querySelectorAll('.pb-rp-row').length === 0) {
+                    const tmp = document.createElement('div');
+                    tmp.innerHTML = this._renderResourcePathRows(['']);
+                    const newRow = tmp.firstElementChild;
+                    list.appendChild(newRow);
+                    this._wireResourcePathRowEvents(newRow);
+                }
             });
         }
     }

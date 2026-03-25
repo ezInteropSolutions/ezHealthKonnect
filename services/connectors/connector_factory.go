@@ -89,14 +89,18 @@ func (f *DefaultConnectorFactory) RegisterOutbound(typeName string, constructor 
 func (f *DefaultConnectorFactory) registerBuiltInConnectors() {
 	// Network Connectors
 	f.RegisterInbound("tcp_mllp_inbound", NewTCPMLLPInboundConnector)
-	f.RegisterInbound("tcp_mllp", NewTCPMLLPInboundConnector)            // Alias for V45 migration compatibility
+	f.RegisterInbound("tcp_mllp", NewTCPMLLPInboundConnector)              // Alias for V45 migration compatibility
 	f.RegisterOutbound("tcp_mllp_outbound", NewTCPMLLPOutboundConnector)
-	f.RegisterInbound("http_rest_inbound", NewHTTPFHIRInboundConnector) // HTTP FHIR receiver
-	f.RegisterInbound("http_rest", NewHTTPFHIRInboundConnector)          // Alias for V45 migration compatibility
-	f.RegisterInbound("http", NewHTTPFHIRInboundConnector)               // Alias for http connectivity
-	f.RegisterOutbound("http_outbound", NewHTTPOutboundConnector)        // HTTP delivery (full implementation)
-	f.RegisterOutbound("http", NewHTTPOutboundConnector)                 // Alias for http connectivity
-	f.RegisterOutbound("http_rest", NewHTTPOutboundConnector)            // Alias for destination type compatibility
+
+	// HTTP — generic outbound and FHIR-aware inbound/outbound
+	f.RegisterInbound("http_fhir_inbound", NewHTTPFHIRInboundConnector)    // FHIR-aware HTTP receiver (Phase A canonical name)
+	f.RegisterInbound("http_rest_inbound", NewHTTPFHIRInboundConnector)    // Alias for V45 migration compatibility
+	f.RegisterInbound("http_rest", NewHTTPFHIRInboundConnector)            // Alias for V45 migration compatibility
+	f.RegisterInbound("http", NewHTTPFHIRInboundConnector)                 // Alias for http connectivity
+	f.RegisterOutbound("http_outbound", NewHTTPOutboundConnector)          // Generic HTTP delivery (non-FHIR)
+	f.RegisterOutbound("http", NewHTTPOutboundConnector)                   // Alias for http connectivity
+	f.RegisterOutbound("http_rest", NewHTTPOutboundConnector)              // Alias for destination type compatibility
+	f.RegisterOutbound("http_fhir_outbound", NewHTTPFHIROutboundConnector) // FHIR-aware delivery (Phase A canonical name)
 
 	// File System Connectors
 	f.RegisterInbound("file_listener", NewFileListenerConnector)
@@ -181,6 +185,15 @@ func (f *DefaultConnectorFactory) registerBuiltInConnectors() {
 	// File Transfer Connectors - FTP
 	f.RegisterInbound("ftp_inbound", NewFTPInboundConnector)
 	f.RegisterOutbound("ftp_outbound", NewFTPOutboundConnector)
+
+
+	// EDI X12 (payer/clearinghouse)
+	f.RegisterInbound("edi_x12_inbound", NewEDIX12InboundConnector)
+	f.RegisterOutbound("edi_x12_outbound", NewEDIX12OutboundConnector)
+
+	// Direct Messaging (DirectTrust SMTP+SMIME)
+	f.RegisterInbound("direct_messaging_inbound", NewDirectMessagingInboundConnector)
+	f.RegisterOutbound("direct_messaging_outbound", NewDirectMessagingOutboundConnector)
 }
 
 // -----------------------------------------------------------------------------

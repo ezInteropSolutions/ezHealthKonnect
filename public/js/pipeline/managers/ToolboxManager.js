@@ -70,6 +70,23 @@ class ToolboxManager {
     getBuiltInTemplates() {
         return [
             new StepTemplate({
+                id: 'validate-fhir',
+                name: 'FHIR Validation',
+                type: 'fhir_validation',
+                description: 'Validate FHIR resources and bundles against R4/R5 structure, terminology bindings, and constraints',
+                layer: 'core',
+                icon: this.getIconForType('fhir_validation'),
+                isSystem: true,
+                defaultConfig: {
+                    validation_level: 'standard',
+                    fhir_version: 'R4',
+                    profile: 'base',
+                    required_resources: [],
+                    validate_references: true,
+                    fail_on_error: false
+                }
+            }),
+            new StepTemplate({
                 id: 'validate-fields',
                 name: 'Field Validation',
                 type: 'field_validation',
@@ -170,21 +187,6 @@ class ToolboxManager {
                 defaultConfig: {
                     fhir_version: 'R4',
                     use_template: true
-                }
-            }),
-            new StepTemplate({
-                id: 'validate-fhir',
-                name: 'FHIR Validation',
-                type: 'fhir_validation',
-                description: 'Validate FHIR bundle against R4 specification',
-                layer: 'core',
-                icon: this.getIconForType('fhir_validation'),
-                isSystem: true,
-                defaultConfig: {
-                    validation_level: 'standard',
-                    required_resources: [],
-                    validate_references: true,
-                    validate_required_fields: true
                 }
             }),
             new StepTemplate({

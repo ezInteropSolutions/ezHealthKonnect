@@ -30,16 +30,21 @@ var globalSchemaLoader *SchemaLoader
 func InitSchemaLoader(schemaDirectory string) {
 	var finalSchemaDir string
 
-	// Priority: Environment variable first
-	envSchemaDir := os.Getenv("EZHEALTHKONNECT_SCHEMA_DIR")
-	if envSchemaDir != "" {
-		finalSchemaDir = envSchemaDir
-	} else if _, err := os.Stat(CONTAINER_SCHEMA_PATH); err == nil {
-		finalSchemaDir = CONTAINER_SCHEMA_PATH
-	} else if schemaDirectory != "" {
+	// Priority: use the computed schemaDirectory parameter first (caller already
+	// resolves env vars and appends the "hl7" subdirectory via cfg.GetSchemaDirectory).
+	// Only fall back to env var / container defaults when no explicit path is given.
+	if schemaDirectory != "" {
 		finalSchemaDir = schemaDirectory
 	} else {
-		finalSchemaDir = "./schemas"
+		envSchemaDir := os.Getenv("EZHEALTHKONNECT_SCHEMA_DIR")
+		if envSchemaDir != "" {
+			// Env var points to the base schemas dir; HL7 schemas live one level deeper.
+			finalSchemaDir = filepath.Join(envSchemaDir, "hl7")
+		} else if _, err := os.Stat(filepath.Join(CONTAINER_SCHEMA_PATH, "hl7")); err == nil {
+			finalSchemaDir = filepath.Join(CONTAINER_SCHEMA_PATH, "hl7")
+		} else {
+			finalSchemaDir = "./schemas/hl7"
+		}
 	}
 
 	// Ensure directory exists

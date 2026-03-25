@@ -60,7 +60,12 @@
                             <span class="nav-icon"><i class="far fa-envelope"></i></span>
                             <span class="nav-label">Messages</span>
                         </a>
-                        <a href="#templates" class="nav-item">
+                        <a href="review-queue.html" class="nav-item">
+                            <span class="nav-icon"><i class="far fa-circle-exclamation"></i></span>
+                            <span class="nav-label">Review Queue</span>
+                            <span class="nav-badge" id="rqNavBadge" style="display:none"></span>
+                        </a>
+                        <a href="dashboard.html#templates" class="nav-item">
                             <span class="nav-icon"><i class="far fa-file-lines"></i></span>
                             <span class="nav-label">Templates</span>
                         </a>
@@ -73,18 +78,13 @@
                         <i class="fas fa-chevron-down nav-section-chevron"></i>
                     </div>
                     <div class="nav-items">
-                        <a href="#monitoring" class="nav-item">
+                        <a href="monitoring.html" class="nav-item">
                             <span class="nav-icon"><i class="far fa-chart-bar"></i></span>
                             <span class="nav-label">Monitoring</span>
                         </a>
-                        <a href="#reports" class="nav-item">
+                        <a href="reports.html" class="nav-item">
                             <span class="nav-icon"><i class="fas fa-chart-line"></i></span>
                             <span class="nav-label">Reports</span>
-                        </a>
-                        <a href="#alerts" class="nav-item">
-                            <span class="nav-icon"><i class="far fa-bell"></i></span>
-                            <span class="nav-label">Alerts</span>
-                            <span class="nav-badge">3</span>
                         </a>
                     </div>
                 </div>
@@ -95,34 +95,9 @@
                         <i class="fas fa-chevron-down nav-section-chevron"></i>
                     </div>
                     <div class="nav-items">
-                        <a href="#validation" class="nav-item">
-                            <span class="nav-icon"><i class="far fa-circle-check"></i></span>
-                            <span class="nav-label">Validation</span>
-                        </a>
-                        <a href="pipeline-test.html" class="nav-item">
-                            <span class="nav-icon"><i class="fas fa-vial"></i></span>
-                            <span class="nav-label">Testing</span>
-                        </a>
-                        <a href="#mapping" class="nav-item">
-                            <span class="nav-icon"><i class="fas fa-sitemap"></i></span>
-                            <span class="nav-label">Mapping</span>
-                        </a>
-                    </div>
-                </div>
-
-                <div class="nav-section">
-                    <div class="section-header">
-                        <span class="section-title">Settings</span>
-                        <i class="fas fa-chevron-down nav-section-chevron"></i>
-                    </div>
-                    <div class="nav-items">
-                        <a href="#configuration" class="nav-item">
-                            <span class="nav-icon"><i class="far fa-gear"></i></span>
-                            <span class="nav-label">Configuration</span>
-                        </a>
-                        <a href="#audit" class="nav-item">
-                            <span class="nav-icon"><i class="far fa-clipboard"></i></span>
-                            <span class="nav-label">Audit</span>
+                        <a href="hl7-reader.html" class="nav-item">
+                            <span class="nav-icon"><i class="fas fa-stethoscope"></i></span>
+                            <span class="nav-label">HL7 Reader</span>
                         </a>
                     </div>
                 </div>
@@ -207,7 +182,7 @@
 
     <!-- NEW: Component loaders -->
     <script src="js/components/InterfaceConfigComponents.js?v=6"></script>
-    <script src="js/components/sidebar-nav.js"></script>
+    <script src="js/components/sidebar-nav.js?v=3"></script>
     <script src="js/components/header-component.js?v=2"></script>
     <script src="js/components/table-component.js?v=6"></script>
     <script src="js/components/modal-components.js?v=4"></script>
@@ -233,5 +208,6 @@
     <script src="/js/step5-summary-fix.js"></script>
     <script src="/js/wizard-modal-close-fix.js"></script>
 
+    <script src="/js/ai-assistant.js"></script>
 </body>
 </html>

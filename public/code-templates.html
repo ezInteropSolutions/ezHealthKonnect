@@ -1,0 +1,391 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Code Templates – ezHealthKonnect</title>
+    <link rel="stylesheet" href="css/dashboard.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        :root {
+            --pink:        #db2777;
+            --pink-dark:   #9d174d;
+            --pink-light:  #fce7f3;
+            --navy:        #1e3a8a;
+            --navy-light:  #eff6ff;
+            --white:       #ffffff;
+            --page-bg:     #ffffff;
+            --card-border: #e5e7eb;
+            --text:        #1a202c;
+            --muted:       #6b7280;
+        }
+        body { background: var(--page-bg); }
+        .main-content { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+
+        /* ── Page header ─────────────────────────────────────────────────── */
+        .page-header {
+            padding: 20px 28px 16px;
+            background: var(--white);
+            border-bottom: 1px solid var(--card-border);
+            display: flex; align-items: center; justify-content: space-between;
+            flex-shrink: 0;
+        }
+        .page-header h1 { font-size: 18px; font-weight: 700; color: var(--text); margin: 0; }
+        .page-header h1 i { color: var(--navy); margin-right: 8px; }
+        .header-actions { display: flex; align-items: center; gap: 10px; }
+
+        /* ── Layout ──────────────────────────────────────────────────────── */
+        .ct-layout { flex: 1; display: flex; overflow: hidden; }
+
+        /* ── Left filter panel ───────────────────────────────────────────── */
+        .ct-sidebar {
+            width: 180px; flex-shrink: 0;
+            border-right: 1px solid var(--card-border);
+            background: #fafafa; padding: 16px 0;
+            overflow-y: auto;
+        }
+        .ct-sidebar-section {
+            padding: 0 12px 8px;
+            font-size: 10px; font-weight: 700; color: var(--muted);
+            text-transform: uppercase; letter-spacing: .08em;
+        }
+        .ct-filter {
+            display: flex; align-items: center; gap: 9px;
+            padding: 9px 16px; font-size: 13px; color: #374151;
+            cursor: pointer; user-select: none;
+            border-left: 3px solid transparent; transition: all .12s;
+        }
+        .ct-filter:hover { background: #f3f4f6; }
+        .ct-filter.active { border-left-color: var(--navy); background: var(--navy-light); color: var(--navy); font-weight: 600; }
+        .ct-filter i { width: 16px; text-align: center; }
+        .ct-filter .ct-count {
+            margin-left: auto; font-size: 11px; background: #e5e7eb;
+            padding: 1px 7px; border-radius: 10px; color: #6b7280;
+        }
+        .ct-filter.active .ct-count { background: #bfdbfe; color: var(--navy); }
+
+        /* ── Main area ───────────────────────────────────────────────────── */
+        .ct-main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+
+        /* ── Toolbar ─────────────────────────────────────────────────────── */
+        .ct-toolbar {
+            padding: 14px 20px; background: var(--white);
+            border-bottom: 1px solid var(--card-border);
+            display: flex; align-items: center; gap: 10px; flex-shrink: 0;
+        }
+        .ct-search {
+            flex: 1; max-width: 320px;
+            border: 1px solid #d1d5db; border-radius: 6px;
+            padding: 7px 12px 7px 32px; font-size: 13px;
+            background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%239ca3af' stroke-width='1.5' d='M9 3a6 6 0 1 1 0 12A6 6 0 0 1 9 3zm5 5 3 3'/%3E%3C/svg%3E") no-repeat 10px center / 16px;
+            outline: none;
+        }
+        .ct-search:focus { border-color: var(--navy); box-shadow: 0 0 0 3px rgba(30,58,138,.08); }
+        .btn { padding: 7px 16px; border-radius: 6px; font-size: 13px; font-weight: 600; cursor: pointer; border: none; display: inline-flex; align-items: center; gap: 6px; transition: opacity .12s; }
+        .btn:hover { opacity: .88; }
+        .btn-primary { background: var(--navy); color: var(--white); }
+        .btn-ghost   { background: transparent; border: 1px solid #d1d5db; color: #374151; }
+        .btn-danger  { background: #fee2e2; color: #b91c1c; border: 1px solid #fca5a5; }
+
+        /* ── Grid ────────────────────────────────────────────────────────── */
+        .ct-grid-area { flex: 1; overflow-y: auto; padding: 20px; }
+        .ct-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 16px; }
+
+        /* ── Card ────────────────────────────────────────────────────────── */
+        .ct-card {
+            background: var(--white); border: 1px solid var(--card-border);
+            border-radius: 10px; padding: 16px;
+            display: flex; flex-direction: column; gap: 10px;
+            transition: box-shadow .15s;
+        }
+        .ct-card:hover { box-shadow: 0 4px 12px rgba(0,0,0,.07); }
+        .ct-card-header { display: flex; align-items: flex-start; gap: 10px; }
+        .ct-card-icon {
+            width: 36px; height: 36px; border-radius: 8px;
+            background: var(--navy-light); color: var(--navy);
+            display: flex; align-items: center; justify-content: center;
+            font-size: 16px; flex-shrink: 0;
+        }
+        .ct-card-title { font-size: 14px; font-weight: 700; color: var(--text); font-family: monospace; }
+        .ct-card-meta { display: flex; align-items: center; gap: 6px; margin-top: 2px; flex-wrap: wrap; }
+        .ct-badge {
+            font-size: 10px; font-weight: 600; padding: 2px 8px; border-radius: 10px;
+            text-transform: uppercase; letter-spacing: .04em;
+        }
+        .ct-badge-cat  { background: #f3f4f6; color: #374151; }
+        .ct-badge-glob { background: #dbeafe; color: #1e40af; }
+        .ct-badge-iface{ background: #fef3c7; color: #92400e; }
+        .ct-badge-sys  { background: #dcfce7; color: #15803d; }
+        .ct-badge-off  { background: #fee2e2; color: #991b1b; }
+        .ct-description { font-size: 12px; color: var(--muted); line-height: 1.5; }
+        .ct-sigs { display: flex; flex-wrap: wrap; gap: 5px; }
+        .ct-sig {
+            font-size: 11px; font-family: monospace; padding: 3px 8px;
+            background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 4px;
+            color: #334155;
+        }
+        .ct-card-footer { display: flex; align-items: center; gap: 8px; margin-top: 4px; padding-top: 10px; border-top: 1px solid #f3f4f6; }
+        .ct-card-footer .spacer { flex: 1; }
+        .ct-usage { font-size: 11px; color: var(--muted); }
+
+        /* ── Empty state ─────────────────────────────────────────────────── */
+        .ct-empty { text-align: center; padding: 60px 20px; color: var(--muted); }
+        .ct-empty i { font-size: 48px; color: #d1d5db; margin-bottom: 12px; display: block; }
+        .ct-empty p { font-size: 14px; }
+
+        /* ── Modal ───────────────────────────────────────────────────────── */
+        .modal-overlay {
+            display: none; position: fixed; inset: 0; background: rgba(0,0,0,.5);
+            z-index: 1000; align-items: center; justify-content: center;
+        }
+        .modal-overlay.open { display: flex; }
+        .modal {
+            background: var(--white); border-radius: 12px; width: 700px; max-width: 95vw;
+            max-height: 90vh; display: flex; flex-direction: column;
+            box-shadow: 0 20px 60px rgba(0,0,0,.2);
+        }
+        .modal-header {
+            padding: 20px 24px 16px; border-bottom: 1px solid var(--card-border);
+            display: flex; align-items: center; justify-content: space-between; flex-shrink: 0;
+        }
+        .modal-header h2 { font-size: 16px; font-weight: 700; color: var(--text); margin: 0; }
+        .modal-close { background: none; border: none; cursor: pointer; font-size: 18px; color: var(--muted); padding: 4px; }
+        .modal-body { flex: 1; overflow-y: auto; padding: 20px 24px; display: flex; flex-direction: column; gap: 16px; }
+        .modal-footer {
+            padding: 16px 24px; border-top: 1px solid var(--card-border);
+            display: flex; justify-content: flex-end; gap: 10px; flex-shrink: 0;
+        }
+        .form-group { display: flex; flex-direction: column; gap: 6px; }
+        .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+        label { font-size: 12px; font-weight: 600; color: #374151; }
+        .form-hint { font-size: 11px; color: var(--muted); margin-top: 2px; }
+        input[type=text], select, textarea {
+            border: 1px solid #d1d5db; border-radius: 6px; padding: 8px 10px;
+            font-size: 13px; outline: none; width: 100%; box-sizing: border-box;
+        }
+        input[type=text]:focus, select:focus, textarea:focus {
+            border-color: var(--navy); box-shadow: 0 0 0 3px rgba(30,58,138,.08);
+        }
+        .code-editor {
+            font-family: 'Courier New', monospace; font-size: 12px; line-height: 1.6;
+            background: #0f172a; color: #e2e8f0; border: 1px solid #334155;
+            border-radius: 6px; padding: 12px; resize: vertical; min-height: 200px;
+        }
+        .sig-input-area { display: flex; flex-direction: column; gap: 6px; }
+        .sig-tags { display: flex; flex-wrap: wrap; gap: 5px; min-height: 28px; }
+        .sig-tag {
+            display: flex; align-items: center; gap: 5px;
+            font-size: 11px; font-family: monospace; padding: 3px 8px;
+            background: var(--navy-light); border: 1px solid #bfdbfe; border-radius: 4px; color: var(--navy);
+        }
+        .sig-tag button { background: none; border: none; cursor: pointer; color: var(--navy); font-size: 12px; padding: 0; line-height: 1; }
+        .sig-input-row { display: flex; gap: 6px; }
+        .sig-input-row input { flex: 1; }
+        .scope-radios { display: flex; gap: 14px; }
+        .scope-radio { display: flex; align-items: center; gap: 6px; font-size: 13px; cursor: pointer; }
+        .scope-radio input { width: auto; }
+
+        /* ── Interface multi-select ───────────────────────────────────────── */
+        .iface-selector { display: none; }
+        .iface-selector.visible { display: block; }
+        .iface-chips { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 6px; }
+        .iface-chip {
+            font-size: 11px; padding: 3px 8px; background: #fef3c7;
+            border: 1px solid #fbbf24; border-radius: 4px; color: #92400e;
+            display: flex; align-items: center; gap: 4px;
+        }
+        .iface-chip button { background: none; border: none; cursor: pointer; color: #92400e; font-size: 11px; padding: 0; }
+
+        /* ── Toast ───────────────────────────────────────────────────────── */
+        .toast {
+            position: fixed; bottom: 24px; right: 24px; z-index: 9999;
+            background: #1f2937; color: #fff; padding: 12px 18px;
+            border-radius: 8px; font-size: 13px; font-weight: 500;
+            box-shadow: 0 4px 16px rgba(0,0,0,.2); display: none;
+        }
+        .toast.show { display: block; animation: slideUp .2s ease; }
+        .toast.error { background: #b91c1c; }
+        @keyframes slideUp { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+    </style>
+</head>
+<body>
+<div class="app-container">
+    <!-- Sidebar nav -->
+    <div id="sidebar-nav"></div>
+
+    <!-- Main -->
+    <div class="main-content">
+        <!-- Page header -->
+        <div class="page-header">
+            <h1><i class="fas fa-code"></i> Code Templates</h1>
+            <div class="header-actions">
+                <button class="btn btn-ghost" onclick="invalidateCache()" title="Flush in-process cache and reload from DB">
+                    <i class="fas fa-sync-alt"></i> Flush Cache
+                </button>
+                <button class="btn btn-primary" onclick="openModal(null)">
+                    <i class="fas fa-plus"></i> New Template
+                </button>
+            </div>
+        </div>
+
+        <!-- Two-column layout -->
+        <div class="ct-layout">
+            <!-- Filter sidebar -->
+            <div class="ct-sidebar">
+                <div class="ct-sidebar-section">Category</div>
+                <div class="ct-filter active" data-cat="" onclick="setCategory(this, '')">
+                    <i class="fas fa-layer-group"></i> All
+                    <span class="ct-count" id="count-all">–</span>
+                </div>
+                <div class="ct-filter" data-cat="hl7" onclick="setCategory(this, 'hl7')">
+                    <i class="fas fa-hospital-alt"></i> HL7
+                    <span class="ct-count" id="count-hl7">–</span>
+                </div>
+                <div class="ct-filter" data-cat="fhir" onclick="setCategory(this, 'fhir')">
+                    <i class="fas fa-fire"></i> FHIR
+                    <span class="ct-count" id="count-fhir">–</span>
+                </div>
+                <div class="ct-filter" data-cat="date_time" onclick="setCategory(this, 'date_time')">
+                    <i class="fas fa-calendar-alt"></i> Date/Time
+                    <span class="ct-count" id="count-date_time">–</span>
+                </div>
+                <div class="ct-filter" data-cat="string" onclick="setCategory(this, 'string')">
+                    <i class="fas fa-font"></i> String
+                    <span class="ct-count" id="count-string">–</span>
+                </div>
+                <div class="ct-filter" data-cat="validation" onclick="setCategory(this, 'validation')">
+                    <i class="fas fa-check-circle"></i> Validation
+                    <span class="ct-count" id="count-validation">–</span>
+                </div>
+                <div class="ct-filter" data-cat="general" onclick="setCategory(this, 'general')">
+                    <i class="fas fa-cube"></i> General
+                    <span class="ct-count" id="count-general">–</span>
+                </div>
+                <div style="border-top:1px solid #e5e7eb; margin: 10px 0;"></div>
+                <div class="ct-sidebar-section">Scope</div>
+                <div class="ct-filter" data-scope="global" onclick="toggleScope(this, 'global')">
+                    <i class="fas fa-globe"></i> Global only
+                </div>
+                <div class="ct-filter" data-scope="interface" onclick="toggleScope(this, 'interface')">
+                    <i class="fas fa-link"></i> Interface-scoped
+                </div>
+            </div>
+
+            <!-- Main content area -->
+            <div class="ct-main">
+                <!-- Toolbar -->
+                <div class="ct-toolbar">
+                    <input type="text" class="ct-search" id="searchInput" placeholder="Search by name or function…" oninput="renderGrid()">
+                    <span style="font-size:12px;color:#6b7280;margin-left:4px;" id="result-count"></span>
+                </div>
+
+                <!-- Card grid -->
+                <div class="ct-grid-area">
+                    <div class="ct-grid" id="ct-grid"></div>
+                    <div class="ct-empty" id="ct-empty" style="display:none">
+                        <i class="fas fa-code"></i>
+                        <p>No code templates found.<br>Click <strong>+ New Template</strong> to create one.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Create / Edit Modal -->
+<div class="modal-overlay" id="modal">
+    <div class="modal">
+        <div class="modal-header">
+            <h2 id="modal-title">New Code Template</h2>
+            <button class="modal-close" onclick="closeModal()"><i class="fas fa-times"></i></button>
+        </div>
+        <div class="modal-body">
+            <input type="hidden" id="edit-id">
+
+            <div class="form-row">
+                <div class="form-group">
+                    <label>Name <span style="color:#b91c1c">*</span></label>
+                    <input type="text" id="f-name" placeholder="hl7_date_utils" required>
+                    <span class="form-hint">Lowercase, underscores. Used in preamble header comments.</span>
+                </div>
+                <div class="form-group">
+                    <label>Category</label>
+                    <select id="f-category">
+                        <option value="general">General</option>
+                        <option value="hl7">HL7</option>
+                        <option value="fhir">FHIR</option>
+                        <option value="date_time">Date / Time</option>
+                        <option value="string">String</option>
+                        <option value="validation">Validation</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label>Description</label>
+                <input type="text" id="f-description" placeholder="Short description of what this library provides">
+            </div>
+
+            <div class="form-group">
+                <label>Scope</label>
+                <div class="scope-radios">
+                    <label class="scope-radio">
+                        <input type="radio" name="scope" value="global" checked onchange="onScopeChange()"> Global
+                        <span style="font-size:11px;color:#6b7280;margin-left:4px;">— callable from any pipeline script step</span>
+                    </label>
+                    <label class="scope-radio">
+                        <input type="radio" name="scope" value="interface" onchange="onScopeChange()"> Interface-specific
+                        <span style="font-size:11px;color:#6b7280;margin-left:4px;">— linked to selected interfaces only</span>
+                    </label>
+                </div>
+            </div>
+
+            <div class="iface-selector" id="iface-selector">
+                <label>Link to Interfaces</label>
+                <select id="f-interfaces" onchange="addIfaceChip(this)">
+                    <option value="">— select an interface to add —</option>
+                </select>
+                <div class="iface-chips" id="iface-chips"></div>
+            </div>
+
+            <div class="form-group">
+                <label>JavaScript Code <span style="color:#b91c1c">*</span></label>
+                <textarea class="code-editor" id="f-code" rows="12"
+                    placeholder="// Write your reusable JavaScript functions here…"></textarea>
+            </div>
+
+            <div class="form-group">
+                <label>Function Signatures</label>
+                <div class="sig-input-area">
+                    <div class="sig-tags" id="sig-tags"></div>
+                    <div class="sig-input-row">
+                        <input type="text" id="sig-input" placeholder="myHelper(value)" onkeydown="onSigKey(event)">
+                        <button class="btn btn-ghost" type="button" onclick="addSig()"><i class="fas fa-plus"></i> Add</button>
+                    </div>
+                    <span class="form-hint">Type a function signature and press Enter or Add. Displayed in the script step "Available Functions" panel.</span>
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+                    <input type="checkbox" id="f-active" checked style="width:auto">
+                    Active (inject into script steps)
+                </label>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
+            <button class="btn btn-primary" onclick="saveTemplate()">
+                <i class="fas fa-save"></i> Save Template
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- Toast -->
+<div class="toast" id="toast"></div>
+
+<script src="js/components/sidebar-nav.js"></script>
+<script src="js/code-templates.js"></script>
+</body>
+</html>

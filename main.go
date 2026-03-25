@@ -1,11 +1,13 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"ezhealthkonnect/config"
 	"ezhealthkonnect/controllers"
 	"ezhealthkonnect/fhir"
+	"ezhealthkonnect/fhir/r4"
 	"ezhealthkonnect/hl7"
 	"ezhealthkonnect/models"
 	"ezhealthkonnect/processing"
@@ -13,6 +15,7 @@ import (
 	"ezhealthkonnect/services/backpressure"
 	"ezhealthkonnect/services/storage"
 	"ezhealthkonnect/services/dbpool"
+	"ezhealthkonnect/services/ai"
 	"ezhealthkonnect/services/executors/enrichment"
 	"ezhealthkonnect/services/logger"
 	appmetrics "ezhealthkonnect/services/metrics"
@@ -40,6 +43,9 @@ var postgresTransformationService *services.PostgresTransformationService
 
 // Global Processing Engine
 var processingEngine *processing.ProcessingEngine
+
+// Global Code Template Service (wired into script executor via processingEngine)
+var codeTemplateSvc *services.CodeTemplateService
 
 // Global Object Storage Service
 var objectStorageService *storage.ObjectStorageService
@@ -160,6 +166,9 @@ func main() {
 				fhirSchemaDir := cfg.GetFHIRSchemaDirectory()
 				log.Printf("🔧 Initializing FHIR schema system from: %s", fhirSchemaDir)
 				fhir.InitFHIRSchemaLoader(fhirSchemaDir)
+				if err := r4.InitRegistry(fhirSchemaDir); err != nil {
+					log.Printf("⚠️  [r4] Registry init warning: %v", err)
+				}
 			}
 
 			// Initialize Processing Engine
@@ -169,6 +178,12 @@ func main() {
 			} else {
 				log.Printf("✅ Processing Engine initialized and started")
 			}
+
+			// CODE TEMPLATES: wire the service into the pipeline executor
+			codeTemplateSvc = services.NewCodeTemplateService(db)
+			services.SeedSystemTemplates(db)
+			processingEngine.SetCodeTemplateService(codeTemplateSvc)
+			log.Printf("📦 Code Template Service initialized (6 OOB libraries)")
 		} else {
 			log.Printf("❌ FATAL: Database connection failed after %d retries - transformation pipeline will not be available", maxRetries)
 		}
@@ -224,6 +239,9 @@ func main() {
 		log.Printf("🔧 Initializing FHIR schema system from: %s", fhirSchemaDir)
 
 		fhir.InitFHIRSchemaLoader(fhirSchemaDir)
+		if err := r4.InitRegistry(fhirSchemaDir); err != nil {
+			log.Printf("⚠️  [r4] Registry init warning: %v", err)
+		}
 
 		// Verify FHIR schema loader initialization - ENHANCED
 		fhirLoader := fhir.GetFHIRSchemaLoader()
@@ -431,7 +449,7 @@ func main() {
 		}
 
 		// SYSTEM ROUTES
-		systemCtrl := controllers.NewSystemController(cfg)
+		systemCtrl := controllers.NewSystemController(cfg, db)
 		systemGroup := api.Group("/system")
 		{
 			systemGroup.GET("/health", systemCtrl.HealthCheck)
@@ -450,11 +468,16 @@ func main() {
 				log.Printf("✅ DLQ Controller initialized")
 			}
 
-			// Admin settings (object storage, etc.)
+			// Admin settings (storage, SMTP, security, HL7/FHIR, queue, connectors, alerts, performance)
 			if db != nil {
+				// Initialise the package-level AppSettingsCache so all services can call
+				// services.GetAppSettings().GetXxx() without needing explicit DI.
+				services.InitAppSettings(db)
+				log.Printf("✅ AppSettingsCache initialized")
+
 				settingsCtrl := controllers.NewSettingsController(db, credStore)
 				settingsCtrl.RegisterRoutes(systemGroup.Group("/settings"))
-				log.Printf("✅ Settings Controller initialized")
+				log.Printf("✅ Settings Controller initialized (8 sections)")
 			}
 		}
 
@@ -475,6 +498,15 @@ func main() {
 			schemaFHIRCtrl := controllers.NewSchemaFHIRTransformController(db, cfg)
 			schemaFHIRGroup := fhirGroup.Group("/schema") // Move to /api/fhir/schema/
 			schemaFHIRCtrl.RegisterRoutes(schemaFHIRGroup)
+
+			// ADDED: FHIR Validation Review Queue
+			vqCtrl := controllers.NewFHIRValidationQueueController(db)
+			vqGroup := fhirGroup.Group("/validation-queue")
+			vqCtrl.RegisterRoutes(vqGroup)
+
+			// ADDED: Ad-hoc FHIR Validator tool (fhir-validator.html)
+			fhirValidatorCtrl := controllers.NewFHIRValidatorController()
+			fhirValidatorCtrl.RegisterRoutes(fhirGroup)
 
 			// ADDED: Transformation Pipeline Test Routes
 			transformTestCtrl := controllers.NewTransformationTestController(db, credStore)
@@ -1259,6 +1291,68 @@ func main() {
 				})
 			})
 		}
+	}
+
+	// ANALYTICS + ALERT RULE CONTROLLERS
+	// AlertRuleService is injected into AnalyticsService so checkAndWriteAlerts
+	// uses dynamic DB-driven rules instead of hardcoded thresholds.
+	if db != nil {
+		analyticsCtrl := controllers.NewAnalyticsController(db)
+		analyticsCtrl.RegisterRoutes(api.Group("/analytics"))
+		log.Printf("✅ Analytics Controller initialized")
+
+		alertRuleCtrl := controllers.NewAlertRuleController(db)
+		alertRuleCtrl.RegisterRoutes(api.Group("/alerts"))
+		analyticsCtrl.InjectAlertRuleService(alertRuleCtrl.Service())
+		log.Printf("✅ Alert Rule Controller initialized")
+	}
+
+	// ── LOCAL AI SERVICE ─────────────────────────────────────────────────────
+	// All inference runs on-premise via Ollama — no PHI leaves the network.
+	// Routes are always registered; DB-backed features (RAG, memory) degrade
+	// gracefully to no-op when db is nil so basic Ollama chat still works.
+	{
+		aiSvc := ai.NewAIService(db) // db may be nil — all sub-services guard against it
+		schemaDir := cfg.GetSchemaDirectory()
+		aiCtrl := controllers.NewAIController(aiSvc, schemaDir)
+		aiCtrl.RegisterRoutes(api.Group("/ai"))
+
+		log.Printf("✅ AI Service initialized (chat: %s, embed: %s, db: %v)",
+			aiSvc.OllamaClient().ChatModel, aiSvc.OllamaClient().EmbedModel, db != nil)
+
+		if db != nil {
+			// Background ingestion: static schemas + operational data (interfaces, pipelines, errors).
+			// Non-blocking — takes several minutes on first run.
+			aiSvc.BackgroundIngestAll(schemaDir)
+
+			// Telemetry: fire install ping once on first run (non-blocking, non-fatal).
+			// Sends: install UUID, version, OS, admin email, timezone — never PHI.
+			edition := os.Getenv("EHK_EDITION") // "community" | "enterprise" — set in docker-compose
+			telSvc := services.NewTelemetryService(db, "1.0.0", edition)
+			aiCtrl.SetTelemetry(telSvc)
+			go telSvc.SendInstallPingIfNew(context.Background())
+		}
+	}
+
+	// CODE TEMPLATE CONTROLLER
+	if db != nil && codeTemplateSvc != nil {
+		ctCtrl := controllers.NewCodeTemplateController(codeTemplateSvc)
+		ctCtrl.RegisterRoutes(api.Group("/code-templates"))
+		log.Printf("✅ Code Template Controller initialized")
+	}
+
+	// GIT INTEGRATION CONTROLLER
+	if db != nil {
+		gitCtrl := controllers.NewGitController(db, credStore)
+		gitCtrl.RegisterRoutes(api.Group("/git"))
+		log.Printf("✅ Git Integration Controller initialized")
+	}
+
+	// MIRTH MIGRATION CONTROLLER
+	if db != nil {
+		mirthCtrl := controllers.NewMirthMigrationController(db)
+		mirthCtrl.RegisterRoutes(api.Group("/migration"))
+		log.Printf("✅ Mirth Migration Controller initialized")
 	}
 
 	// Setup additional HTTP handlers for wizard API

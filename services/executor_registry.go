@@ -60,6 +60,16 @@ func NewExecutorRegistry(db *sql.DB, credStore *CredentialStore) *ExecutorRegist
 	return registry
 }
 
+// SetCodeTemplateService wires a CodeTemplateService into the script enrichment executor
+// so that function libraries are injected into every script step's goja VM.
+// Call this after NewExecutorRegistry and after the CodeTemplateService is ready.
+func (er *ExecutorRegistry) SetCodeTemplateService(svc *CodeTemplateService) {
+	scriptExec := enrichment.NewScriptEnrichmentExecutorWithTemplates(svc)
+	er.executors["enrichment.script"] = scriptExec
+	er.executors["pre.enrichment.script"] = scriptExec
+	log.Printf("📦 [CodeTemplates] Script executor upgraded with code template injection")
+}
+
 // autoRegisterExecutors registers all built-in executors (OOB pattern)
 func (er *ExecutorRegistry) autoRegisterExecutors() {
 	// Essential OOB executor

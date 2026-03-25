@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Password Reset Required - ezHealthKonnect</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #1e3a8a 0%, #6366f1 100%);
+            min-height: 100vh;
+            display: flex; align-items: center; justify-content: center;
+            padding: 20px;
+        }
+        .card {
+            background: #fff; border-radius: 16px; width: 440px; max-width: 100%;
+            padding: 36px 32px; box-shadow: 0 20px 60px rgba(0,0,0,.25);
+        }
+        .logo { text-align: center; margin-bottom: 24px; }
+        .logo h2 { font-size: 1.4rem; color: #1e3a8a; font-weight: 700; }
+        .logo h2 span { color: #f9a8d4; }
+        .logo p { color: #64748b; font-size: 0.85rem; margin-top: 4px; }
+
+        .notice {
+            display: flex; gap: 10px; align-items: flex-start;
+            background: #fffbeb; border: 1px solid #fde68a; border-left: 3px solid #f59e0b;
+            border-radius: 8px; padding: 12px 14px;
+            font-size: 0.83rem; color: #92400e; margin-bottom: 24px; line-height: 1.5;
+        }
+        .notice i { color: #f59e0b; margin-top: 2px; flex-shrink: 0; }
+
+        h3 { font-size: 1.05rem; color: #1a202c; margin-bottom: 4px; }
+        .sub { color: #64748b; font-size: 0.85rem; margin-bottom: 20px; }
+
+        .field { display: flex; flex-direction: column; gap: 5px; margin-bottom: 16px; }
+        .field label { font-size: 0.78rem; font-weight: 600; color: #374151; text-transform: uppercase; letter-spacing: .04em; }
+        .field input {
+            padding: 10px 12px; border: 1px solid #e2e8f0; border-radius: 8px;
+            font-size: 0.9rem; outline: none; transition: border-color .2s;
+        }
+        .field input:focus { border-color: #1e3a8a; }
+
+        .pw-strength { margin-top: 4px; font-size: 0.75rem; display: flex; align-items: center; gap: 8px; min-height: 18px; }
+        .pw-bar { flex: 1; height: 4px; background: #e2e8f0; border-radius: 4px; overflow: hidden; }
+        .pw-fill { height: 100%; border-radius: 4px; transition: width .3s; }
+        .pw-fill--1, .pw-fill--2 { background: #dc2626; }
+        .pw-fill--3 { background: #d97706; }
+        .pw-fill--4 { background: #16a34a; }
+        .pw-fill--5 { background: #0284c7; }
+
+        .requirements { background: #f8fafc; border-radius: 8px; padding: 10px 14px; margin-bottom: 16px; }
+        .requirements p { font-size: 0.78rem; font-weight: 600; color: #374151; margin-bottom: 6px; }
+        .req-item { font-size: 0.78rem; color: #6b7280; display: flex; align-items: center; gap: 6px; margin-bottom: 3px; }
+        .req-item i { width: 12px; }
+        .req-item.met { color: #16a34a; }
+        .req-item.met i::before { content: '\f00c'; } /* fa-check */
+
+        .btn {
+            width: 100%; padding: 12px; background: linear-gradient(135deg, #1e3a8a, #6366f1);
+            color: #fff; border: none; border-radius: 8px; font-size: 0.95rem;
+            font-weight: 600; cursor: pointer; margin-top: 4px; transition: opacity .2s;
+        }
+        .btn:hover { opacity: .9; }
+        .btn:disabled { opacity: .6; cursor: not-allowed; }
+
+        .alert { padding: 10px 14px; border-radius: 8px; margin-bottom: 14px; font-size: 0.875rem; }
+        .alert-error   { background: #fef2f2; color: #dc2626; border: 1px solid #fecaca; }
+        .alert-success { background: #f0fdf4; color: #15803d; border: 1px solid #bbf7d0; }
+
+        .success-view { text-align: center; }
+        .success-view i { font-size: 3rem; color: #16a34a; margin-bottom: 12px; display: block; }
+        .success-view p { color: #374151; margin-bottom: 16px; font-size: 0.9rem; }
+        .login-link {
+            display: inline-block; padding: 10px 24px;
+            background: #1e3a8a; color: #fff; border-radius: 8px;
+            text-decoration: none; font-weight: 600; font-size: 0.9rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <div class="logo">
+            <h2>ez<span>Health</span>Konnect</h2>
+            <p>Healthcare Integration Platform</p>
+        </div>
+
+        <div id="form-view">
+            <div class="notice">
+                <i class="fas fa-triangle-exclamation"></i>
+                <span>An administrator has required you to set a new password before you can access the platform.</span>
+            </div>
+
+            <h3>Set a New Password</h3>
+            <p class="sub">Choose a strong password you haven't used before.</p>
+
+            <div id="alert-area"></div>
+
+            <form id="reset-form">
+                <div class="field">
+                    <label>New Password <small style="text-transform:none;font-weight:400">(min 8 characters)</small></label>
+                    <input type="password" id="password" required minlength="8"
+                           placeholder="Choose a strong password" autocomplete="new-password">
+                    <div class="pw-strength" id="pw-strength"></div>
+                </div>
+                <div class="field">
+                    <label>Confirm New Password</label>
+                    <input type="password" id="confirmPassword" required
+                           placeholder="Repeat your password" autocomplete="new-password">
+                </div>
+
+                <div class="requirements">
+                    <p>Password must include:</p>
+                    <div class="req-item" id="req-length"><i class="fas fa-circle"></i> At least 8 characters</div>
+                    <div class="req-item" id="req-upper"><i class="fas fa-circle"></i> One uppercase letter</div>
+                    <div class="req-item" id="req-number"><i class="fas fa-circle"></i> One number</div>
+                    <div class="req-item" id="req-special"><i class="fas fa-circle"></i> One special character</div>
+                </div>
+
+                <button type="submit" class="btn" id="submit-btn">
+                    <i class="fas fa-lock"></i> Set New Password
+                </button>
+            </form>
+        </div>
+
+        <div id="success-view" class="success-view" style="display:none">
+            <i class="fas fa-circle-check"></i>
+            <p>Your password has been updated. You can now log in with your new credentials.</p>
+            <a href="/" class="login-link"><i class="fas fa-right-to-bracket"></i> Go to Login</a>
+        </div>
+    </div>
+
+    <script>
+    (function () {
+        'use strict';
+
+        // userId is passed via query param from the login page
+        const params  = new URLSearchParams(window.location.search);
+        const userId  = params.get('userId');
+
+        if (!userId) {
+            window.location.href = '/';
+            return;
+        }
+
+        function showAlert(msg, type = 'error') {
+            const area = document.getElementById('alert-area');
+            if (!area) return;
+            area.innerHTML = `<div class="alert alert-${type}">${msg.replace(/</g, '&lt;')}</div>`;
+        }
+
+        // Password strength meter
+        function pwStrength(pw) {
+            if (!pw) return { score: 0, label: '' };
+            let score = 0;
+            if (pw.length >= 8)  score++;
+            if (pw.length >= 12) score++;
+            if (/[A-Z]/.test(pw)) score++;
+            if (/[0-9]/.test(pw)) score++;
+            if (/[^A-Za-z0-9]/.test(pw)) score++;
+            const labels = ['', 'Very Weak', 'Weak', 'Fair', 'Strong', 'Very Strong'];
+            return { score, label: labels[score] || '' };
+        }
+
+        // Live requirement checklist
+        function updateRequirements(pw) {
+            const checks = {
+                'req-length':  pw.length >= 8,
+                'req-upper':   /[A-Z]/.test(pw),
+                'req-number':  /[0-9]/.test(pw),
+                'req-special': /[^A-Za-z0-9]/.test(pw)
+            };
+            for (const [id, met] of Object.entries(checks)) {
+                const el = document.getElementById(id);
+                if (el) el.classList.toggle('met', met);
+            }
+        }
+
+        const pwInput  = document.getElementById('password');
+        const pwBar    = document.getElementById('pw-strength');
+        pwInput.addEventListener('input', () => {
+            const { score, label } = pwStrength(pwInput.value);
+            pwBar.innerHTML = pwInput.value
+                ? `<div class="pw-bar"><div class="pw-fill pw-fill--${score}" style="width:${score*20}%"></div></div><span>${label}</span>`
+                : '';
+            updateRequirements(pwInput.value);
+        });
+
+        document.getElementById('reset-form').addEventListener('submit', async e => {
+            e.preventDefault();
+            const password = pwInput.value;
+            const confirm  = document.getElementById('confirmPassword').value;
+
+            if (password.length < 8)     { showAlert('Password must be at least 8 characters'); return; }
+            if (password !== confirm)     { showAlert('Passwords do not match'); return; }
+
+            const btn = document.getElementById('submit-btn');
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Saving…';
+
+            try {
+                const r = await fetch('/api/auth/reset-password', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ userId, password })
+                });
+                const data = await r.json().catch(() => ({}));
+                if (!r.ok) throw new Error(data.message || 'Reset failed');
+
+                document.getElementById('form-view').style.display   = 'none';
+                document.getElementById('success-view').style.display = 'block';
+            } catch (err) {
+                showAlert(err.message);
+                btn.disabled = false;
+                btn.innerHTML = '<i class="fas fa-lock"></i> Set New Password';
+            }
+        });
+    })();
+    </script>
+</body>
+</html>

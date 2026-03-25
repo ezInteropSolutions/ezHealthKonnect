@@ -251,6 +251,20 @@
                                         </div>
                                     </div>
                                 </div>
+
+                                <!-- FHIR Validation Policy Section -->
+                                <div class="form-group" style="margin-top: 16px;">
+                                    <label class="form-label" for="fhirValidationPolicy" style="font-weight:600;color:#374151;font-size:13px;margin-bottom:4px;display:block;">
+                                        FHIR Validation Policy
+                                    </label>
+                                    <select id="fhirValidationPolicy" name="fhirValidationPolicy"
+                                            style="width:100%;padding:7px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;color:#1f2937;background:#fff;cursor:pointer;">
+                                        <option value="proceed">Proceed — omit missing field and continue (default)</option>
+                                        <option value="warn">Warn — deliver with OperationOutcome warning in bundle</option>
+                                        <option value="reject">Reject — fail message, route to dead-letter queue</option>
+                                        <option value="queue_review">Queue for Review — hold for manual operator correction</option>
+                                    </select>
+                                </div>
                             </div>
 
                             <!-- Tab 2: Source Configuration -->
@@ -441,6 +455,11 @@
             console.warn('⚠️ editDeploymentSettingsContainer not found in DOM');
         }
 
+        // FHIR Validation Policy — set saved value on the select (default: 'proceed')
+        const policy = interfaceData.fhir_validation_policy || interfaceData.fhirValidationPolicy || 'proceed';
+        const policySelect = document.getElementById('fhirValidationPolicy');
+        if (policySelect) policySelect.value = policy;
+
         // Attach event listeners
         attachEditModalListeners();
     };
@@ -536,6 +555,8 @@
                 updateEditTargetConfigPanel({ targetConnectivity: e.target.value });
             });
         }
+
+        // FHIR Validation Policy — no extra listener needed; select handles state natively
 
         console.log('✅ Edit modal listeners attached');
     }

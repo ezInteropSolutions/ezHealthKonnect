@@ -18,12 +18,32 @@ import (
 // Executes custom JavaScript code to enrich message data
 // Implements Strategy Pattern - concrete strategy for script-based enrichment
 
-type ScriptEnrichmentExecutor struct {
-	*executors.BaseExecutor
+// CodeTemplatePreambleLoader is the minimal interface the executor needs from
+// CodeTemplateService. Using an interface keeps this package free of a direct
+// import of the services package (which imports this package), avoiding a cycle.
+type CodeTemplatePreambleLoader interface {
+	LoadForExecution(interfaceID string) ([]*models.CodeTemplateForExecution, error)
+	BuildPreamble(templates []*models.CodeTemplateForExecution) string
 }
 
-// NewScriptEnrichmentExecutor creates a new script enrichment executor
+type ScriptEnrichmentExecutor struct {
+	*executors.BaseExecutor
+	codeTemplates CodeTemplatePreambleLoader // nil = no injection (backward compat)
+}
+
+// NewScriptEnrichmentExecutor creates a script enrichment executor without code template support.
 func NewScriptEnrichmentExecutor() *ScriptEnrichmentExecutor {
+	return newScriptExecutor(nil)
+}
+
+// NewScriptEnrichmentExecutorWithTemplates creates a script enrichment executor that
+// automatically injects code template function libraries into the goja VM before
+// executing the user's script.
+func NewScriptEnrichmentExecutorWithTemplates(loader CodeTemplatePreambleLoader) *ScriptEnrichmentExecutor {
+	return newScriptExecutor(loader)
+}
+
+func newScriptExecutor(loader CodeTemplatePreambleLoader) *ScriptEnrichmentExecutor {
 	metadata := models.ExecutorMetadata{
 		Name:        "Script Enrichment",
 		Description: "Enriches messages using custom JavaScript code (age calculation, business rules, etc.)",
@@ -31,11 +51,10 @@ func NewScriptEnrichmentExecutor() *ScriptEnrichmentExecutor {
 		Author:      "ezHealthKonnect",
 		Category:    "enrichment",
 	}
-
 	base := executors.NewBaseExecutor("enrichment.script", metadata)
-
 	return &ScriptEnrichmentExecutor{
-		BaseExecutor: base,
+		BaseExecutor:  base,
+		codeTemplates: loader,
 	}
 }
 
@@ -244,8 +263,22 @@ func (e *ScriptEnrichmentExecutor) executeScript(
 		// Add utility functions with access to input data
 		e.addUtilityFunctions(vm, inputData)
 
-		// Wrap script in a function to allow return statements
-		wrappedScript := fmt.Sprintf("(function() { %s })()", config.Script)
+		// Build code template preamble (injected at module scope so its functions
+		// are callable from inside the IIFE that wraps the user's script).
+		preamble := ""
+		if e.codeTemplates != nil {
+			interfaceID, _ := inputData["_interfaceId"].(string)
+			if tpls, err := e.codeTemplates.LoadForExecution(interfaceID); err != nil {
+				log.Printf("   ⚠️  [Script] Code template load failed: %v (continuing without)", err)
+			} else if len(tpls) > 0 {
+				preamble = e.codeTemplates.BuildPreamble(tpls)
+				log.Printf("   📦 [Script] Injected %d code template(s) for interface '%s'", len(tpls), interfaceID)
+			}
+		}
+
+		// Wrap user script in IIFE to allow return statements.
+		// Preamble is placed outside the IIFE so its functions are module-scoped.
+		wrappedScript := preamble + fmt.Sprintf("(function() {\n%s\n})()", config.Script)
 
 		// Compile and run script
 		script, err := goja.Compile("enrichment_script", wrappedScript, false)

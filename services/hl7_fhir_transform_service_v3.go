@@ -148,11 +148,18 @@ func (s *HL7FHIRTransformServiceV3) Transform(
 	}
 	log.Printf("🔍 Available HL7 segments: %v", segmentNames)
 
+	// Load referencing_mode for contained-resource assembly (V64)
+	referencingMode, err := s.loadReferencingModeForTemplate(ctx, messageType)
+	if err != nil {
+		log.Printf("⚠️ Could not load referencing_mode for %s: %v (proceeding without contained assembly)", messageType, err)
+	}
+
 	// Transform each resource type using atomic mappings
 	transformStartTime := time.Now()
 	var allResources []map[string]interface{}
 	var allWarnings []string
 	var allErrors []string
+	var allValidationFailures []ValidationFailure
 	stats := MappingStatistics{}
 
 	for _, resourceType := range resourceTypes {
@@ -186,6 +193,14 @@ func (s *HL7FHIRTransformServiceV3) Transform(
 
 		// Track successfully mapped fields
 		stats.TotalFieldsMapped += mappedCount
+
+		// Enforce validation policies declared in the OOB template (V64).
+		// We need the raw mapping objects to read the "onMissing" field.
+		// Re-use the template data already parsed in loadFromV9OOBTemplates;
+		// here we fetch the raw array from the template_config for this resource.
+		rawMappingsForPolicy := s.fetchRawMappingsForPolicy(ctx, messageType, resourceType)
+		failures := s.enforceValidationPolicies(resourceType, enhancedSegments, rawMappingsForPolicy)
+		allValidationFailures = append(allValidationFailures, failures...)
 	}
 
 	// Populate response
@@ -195,11 +210,18 @@ func (s *HL7FHIRTransformServiceV3) Transform(
 		stats,
 		allWarnings,
 		allErrors,
+		allValidationFailures,
 		transformStartTime,
 		startTime,
 		request.CreateBundle,
 		fieldMappings,
 	)
+
+	// Assemble contained resources according to referencing_mode (V64).
+	// This mutates response.Bundle in place after it has been created.
+	if referencingMode != nil && response.Bundle != nil {
+		response.Bundle = s.assembleContainedResources(response.Bundle, referencingMode)
+	}
 
 	log.Printf("✅ Atomic mapping transformation completed: %s (%d resources, %s)",
 		response.RequestID, len(allResources), response.Performance.TotalTime)
@@ -2398,6 +2420,7 @@ func (s *HL7FHIRTransformServiceV3) populateTransformResponse(
 	resources []map[string]interface{},
 	stats MappingStatistics,
 	warnings, errors []string,
+	validationFailures []ValidationFailure,
 	transformStartTime, startTime time.Time,
 	createBundle bool,
 	fieldMappings []FieldMapping,
@@ -2406,6 +2429,9 @@ func (s *HL7FHIRTransformServiceV3) populateTransformResponse(
 	response.MappingStats = stats
 	response.Warnings = append(response.Warnings, warnings...)
 	response.Errors = append(response.Errors, errors...)
+	if len(validationFailures) > 0 {
+		response.ValidationFailures = append(response.ValidationFailures, validationFailures...)
+	}
 	response.Performance.TransformTime = time.Since(transformStartTime).String()
 
 	// Convert field mappings to atomic mappings for frontend
@@ -3070,6 +3096,354 @@ func stripArrayIndices(path string) string {
 		}
 	}
 	return b.String()
+}
+
+// =====================================
+// CONTAINED RESOURCE ASSEMBLER (V64)
+// =====================================
+
+// assembleContainedResources reads referencingMode from the template config and
+// for each resource type whose mode is "contained":
+//  1. Removes it from the Bundle entries slice.
+//  2. Rewrites its id to "#<originalId>".
+//  3. Appends it to the appropriate parent resource's "contained" array.
+//  4. Updates any "ResourceType/<id>" reference strings inside the parent to "#<id>".
+//
+// Parent mappings used by this method:
+//   Practitioner → Encounter
+//   Location     → Encounter
+//   Specimen     → DiagnosticReport (fallback: Observation)
+//
+// The method returns the mutated bundle unchanged if referencingMode is nil or empty.
+func (s *HL7FHIRTransformServiceV3) assembleContainedResources(
+	bundle map[string]interface{},
+	referencingMode map[string]string,
+) map[string]interface{} {
+	if bundle == nil || len(referencingMode) == 0 {
+		return bundle
+	}
+
+	entriesRaw, ok := bundle["entry"]
+	if !ok {
+		return bundle
+	}
+	entries, ok := entriesRaw.([]map[string]interface{})
+	if !ok {
+		// Try []interface{} (JSON-decoded path)
+		rawSlice, ok2 := entriesRaw.([]interface{})
+		if !ok2 {
+			return bundle
+		}
+		entries = make([]map[string]interface{}, 0, len(rawSlice))
+		for _, e := range rawSlice {
+			if em, ok := e.(map[string]interface{}); ok {
+				entries = append(entries, em)
+			}
+		}
+	}
+
+	// parentFor maps resource types to their parent resource type
+	parentFor := map[string]string{
+		"Practitioner": "Encounter",
+		"Location":     "Encounter",
+		"Specimen":     "DiagnosticReport",
+	}
+	// Fallback for Specimen when DiagnosticReport absent
+	specimenFallback := "Observation"
+
+	// Build a lookup: resourceType → *entry map (pointer into slice for mutation)
+	type entryRef struct {
+		entry    map[string]interface{}
+		resource map[string]interface{}
+		index    int
+	}
+	byType := map[string][]entryRef{}
+	for i, entry := range entries {
+		res, _ := entry["resource"].(map[string]interface{})
+		if res == nil {
+			continue
+		}
+		rt, _ := res["resourceType"].(string)
+		if rt == "" {
+			continue
+		}
+		byType[rt] = append(byType[rt], entryRef{entry: entry, resource: res, index: i})
+	}
+
+	// Track which entry indices are consumed as contained resources
+	consumedIndices := map[int]bool{}
+
+	for resourceType, mode := range referencingMode {
+		if mode != "contained" {
+			continue
+		}
+		refs, exists := byType[resourceType]
+		if !exists {
+			continue
+		}
+
+		// Determine parent type
+		parentType, hasPT := parentFor[resourceType]
+		if !hasPT {
+			log.Printf("assembleContainedResources: no parent defined for %s, skipping", resourceType)
+			continue
+		}
+
+		parentRefs, parentExists := byType[parentType]
+		if !parentExists || len(parentRefs) == 0 {
+			// Try fallback for Specimen
+			if resourceType == "Specimen" {
+				parentRefs, parentExists = byType[specimenFallback]
+				if !parentExists || len(parentRefs) == 0 {
+					log.Printf("assembleContainedResources: no parent (%s or %s) for %s", parentType, specimenFallback, resourceType)
+					continue
+				}
+			} else {
+				log.Printf("assembleContainedResources: parent %s not in bundle for %s", parentType, resourceType)
+				continue
+			}
+		}
+
+		// Use first matching parent
+		parent := parentRefs[0].resource
+
+		// Ensure parent.contained array exists
+		containedRaw, _ := parent["contained"]
+		var containedArr []interface{}
+		if containedRaw != nil {
+			if ca, ok := containedRaw.([]interface{}); ok {
+				containedArr = ca
+			}
+		}
+
+		for _, ref := range refs {
+			res := ref.resource
+			originalID, _ := res["id"].(string)
+			if originalID == "" {
+				originalID = resourceType
+			}
+
+			// Rewrite id to "#<originalId>"
+			containedID := "#" + originalID
+			res["id"] = containedID
+
+			// Build a reference string rewrite map for the parent
+			oldRef := resourceType + "/" + originalID
+			newRef := containedID
+
+			// Update all string values in the parent that reference the old fullUrl or id
+			s.rewriteReferencesInResource(parent, oldRef, newRef)
+			// Also rewrite urn:uuid: references that may exist
+			if entry, ok := byType[resourceType]; ok && len(entry) > 0 {
+				if fullURL, ok2 := entry[0].entry["fullUrl"].(string); ok2 {
+					s.rewriteReferencesInResource(parent, fullURL, newRef)
+				}
+			}
+
+			// Add to contained
+			containedArr = append(containedArr, res)
+
+			// Mark entry index as consumed
+			consumedIndices[ref.index] = true
+		}
+
+		parent["contained"] = containedArr
+	}
+
+	// Rebuild entries without consumed entries
+	if len(consumedIndices) == 0 {
+		return bundle
+	}
+	newEntries := make([]map[string]interface{}, 0, len(entries)-len(consumedIndices))
+	for i, entry := range entries {
+		if !consumedIndices[i] {
+			newEntries = append(newEntries, entry)
+		}
+	}
+	bundle["entry"] = newEntries
+	log.Printf("assembleContainedResources: embedded %d resource(s) as contained", len(consumedIndices))
+	return bundle
+}
+
+// rewriteReferencesInResource walks all string values in a resource map and
+// replaces occurrences of oldRef with newRef in "reference" fields.
+func (s *HL7FHIRTransformServiceV3) rewriteReferencesInResource(
+	obj map[string]interface{},
+	oldRef, newRef string,
+) {
+	for key, val := range obj {
+		switch v := val.(type) {
+		case string:
+			if key == "reference" && v == oldRef {
+				obj[key] = newRef
+			}
+		case map[string]interface{}:
+			s.rewriteReferencesInResource(v, oldRef, newRef)
+		case []interface{}:
+			for _, item := range v {
+				if m, ok := item.(map[string]interface{}); ok {
+					s.rewriteReferencesInResource(m, oldRef, newRef)
+				}
+			}
+		}
+	}
+}
+
+// =====================================
+// VALIDATION POLICY ENFORCER (V64)
+// =====================================
+
+// enforceValidationPolicies checks every required mapping that produced no HL7
+// value and reads the "onMissing" field from the raw mapping JSON (as stored in
+// the OOB template).  It returns a slice of ValidationFailure objects.
+//
+// The mapping entry JSON format supported:
+//   {"hl7Path":"PID.3.1","fhirPath":"Patient.identifier[0].value",
+//    "required":true,"onMissing":"queue_review","missingCode":"MISSING_MRN"}
+//
+// onMissing semantics enforced here:
+//   "queue_review" → failure with severity "queue_review"  (caller holds message)
+//   "reject"       → failure with severity "reject"        (caller NACKs/422s)
+//   "warn"         → failure with severity "warn"          (caller adds OperationOutcome)
+//   "default"      → not a failure, value was substituted (caller skipped here)
+//   "proceed"/""   → not recorded (default, no-op)
+//
+// The caller in Transform() aggregates these across all resources and stores
+// them in response.ValidationFailures.
+func (s *HL7FHIRTransformServiceV3) enforceValidationPolicies(
+	resourceType string,
+	enhancedSegments map[string]interface{},
+	rawMappings []interface{},
+) []ValidationFailure {
+	var failures []ValidationFailure
+
+	for _, rawMapping := range rawMappings {
+		mapping, ok := rawMapping.(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		// Only care about required fields
+		required, _ := mapping["required"].(bool)
+		if !required {
+			continue
+		}
+
+		hl7Path, _ := mapping["hl7Path"].(string)
+		fhirPath, _ := mapping["fhirPath"].(string)
+		onMissing, _ := mapping["onMissing"].(string)
+		missingCode, _ := mapping["missingCode"].(string)
+
+		// Skip if onMissing is proceed/empty/default — no failure to record
+		if onMissing == "" || onMissing == "proceed" || onMissing == "default" {
+			continue
+		}
+
+		// Parse the HL7 path to check whether a value actually exists
+		segmentName, hl7Field, hl7Component := s.parseHL7Path(hl7Path)
+		fm := FieldMapping{
+			SegmentName:  segmentName,
+			HL7Field:     hl7Field,
+			HL7Component: hl7Component,
+		}
+		value, found := s.extractHL7ValueAtomic(enhancedSegments, fm)
+		if found && value != "" {
+			// Value present — policy not triggered
+			continue
+		}
+
+		// Value absent — record failure
+		if missingCode == "" {
+			// Derive a code from the FHIR path when not explicit
+			missingCode = "MISSING_" + strings.ToUpper(
+				strings.NewReplacer(".", "_", "[", "", "]", "").Replace(fhirPath),
+			)
+		}
+
+		log.Printf("ValidationPolicyEnforcer: %s %s missing HL7 value at %s (onMissing=%s)",
+			resourceType, fhirPath, hl7Path, onMissing)
+
+		failures = append(failures, ValidationFailure{
+			Field:       fhirPath,
+			HL7Path:     hl7Path,
+			MissingCode: missingCode,
+			Severity:    onMissing, // "queue_review" | "warn" | "reject"
+		})
+	}
+
+	return failures
+}
+
+// fetchRawMappingsForPolicy fetches the raw mapping objects (as []interface{}) for a
+// specific resource type directly from the hl7_fhir_templates table so that
+// enforceValidationPolicies can read per-mapping "onMissing" fields.
+// Returns an empty slice on any error or absent template so the caller is always safe
+// to iterate.
+func (s *HL7FHIRTransformServiceV3) fetchRawMappingsForPolicy(
+	ctx context.Context,
+	messageType, resourceType string,
+) []interface{} {
+	if s.db == nil {
+		return nil
+	}
+
+	query := `
+		SELECT COALESCE(
+			template_config->'resources'->$2->'mappings',
+			'[]'::jsonb
+		)::text
+		FROM hl7_fhir_templates
+		WHERE message_type = $1 AND is_default = true
+		ORDER BY created_at DESC
+		LIMIT 1
+	`
+	var raw string
+	err := s.db.QueryRowContext(ctx, query, messageType, resourceType).Scan(&raw)
+	if err != nil {
+		return nil
+	}
+
+	var result []interface{}
+	if err := json.Unmarshal([]byte(raw), &result); err != nil {
+		log.Printf("fetchRawMappingsForPolicy: JSON parse error for %s/%s: %v", messageType, resourceType, err)
+		return nil
+	}
+	return result
+}
+
+// loadReferencingModeForTemplate loads the referencing_mode JSONB column for the
+// template that matches the given message type.  Returns nil (no error) when the
+// template or column is absent so callers can treat nil as "use bundle_entry for all".
+func (s *HL7FHIRTransformServiceV3) loadReferencingModeForTemplate(
+	ctx context.Context,
+	messageType string,
+) (map[string]string, error) {
+	if s.db == nil {
+		return nil, nil
+	}
+
+	query := `
+		SELECT COALESCE(referencing_mode, '{}'::jsonb)::text
+		FROM hl7_fhir_templates
+		WHERE message_type = $1 AND is_default = true
+		ORDER BY created_at DESC
+		LIMIT 1
+	`
+	var raw string
+	err := s.db.QueryRowContext(ctx, query, messageType).Scan(&raw)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("loadReferencingModeForTemplate: %w", err)
+	}
+
+	var mode map[string]string
+	if err := json.Unmarshal([]byte(raw), &mode); err != nil {
+		log.Printf("loadReferencingModeForTemplate: failed to parse referencing_mode JSON: %v", err)
+		return nil, nil
+	}
+	return mode, nil
 }
 
 // =====================================

@@ -712,6 +712,33 @@ class WizardController extends EventTarget {
     }
 
     /**
+     * Load a sample HL7 message into the textarea
+     */
+    loadSampleHL7(messageType) {
+        try {
+            this.model.useSampleHL7Message(messageType);
+            const sampleMessage = this.model.data.hl7Message;
+
+            // Populate the textarea directly
+            const textarea = document.getElementById('hl7Message') ||
+                             document.querySelector('.hl7-textarea');
+            if (textarea) {
+                textarea.value = sampleMessage;
+                textarea.dispatchEvent(new Event('input'));
+            }
+
+            // Also update model data so the parse button picks it up
+            this.model.data.hl7Message = sampleMessage;
+            console.log('✅ Sample HL7 loaded:', messageType);
+
+            // Auto-parse so results show immediately
+            this.parseHL7Message(sampleMessage, false);
+        } catch (err) {
+            console.error('❌ loadSampleHL7 error:', err);
+        }
+    }
+
+    /**
      * Parse HL7 message
      */
     async parseHL7Message(hl7Content, escapeHandling) {
