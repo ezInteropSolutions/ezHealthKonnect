@@ -158,6 +158,22 @@ class PipelineAPIService {
     }
 
     /**
+     * Load first pipeline for an interface regardless of message type (fallback)
+     */
+    async loadFirstPipelineForInterface(interfaceId) {
+        const response = await this.request('GET', `/pipelines/interface/${interfaceId}`);
+        const pipelines = response.pipelines || response.data || [];
+        if (pipelines.length > 0) {
+            // Use message-type-specific endpoint to get actual steps (list endpoint omits them)
+            const msgType = pipelines[0].message_type;
+            if (msgType) {
+                return await this.loadPipelineByInterface(interfaceId, msgType);
+            }
+        }
+        return null;
+    }
+
+    /**
      * Delete pipeline
      */
     async deletePipeline(pipelineId) {

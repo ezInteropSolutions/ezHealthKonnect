@@ -45,6 +45,11 @@
                             <span class="nav-icon"><i class="far fa-envelope"></i></span>
                             <span class="nav-label">Messages</span>
                         </a>
+                        <a href="review-queue.html" class="nav-item">
+                            <span class="nav-icon"><i class="far fa-circle-exclamation"></i></span>
+                            <span class="nav-label">Review Queue</span>
+                            <span class="nav-badge" id="rqNavBadge" style="display:none"></span>
+                        </a>
                         <a href="#templates" class="nav-item">
                             <span class="nav-icon"><i class="far fa-file-lines"></i></span>
                             <span class="nav-label">Templates</span>
@@ -58,13 +63,26 @@
                         <i class="fas fa-chevron-down nav-section-chevron"></i>
                     </div>
                     <div class="nav-items">
-                        <a href="#monitoring" class="nav-item">
+                        <a href="monitoring.html" class="nav-item">
                             <span class="nav-icon"><i class="far fa-chart-bar"></i></span>
                             <span class="nav-label">Monitoring</span>
                         </a>
-                        <a href="#reports" class="nav-item">
+                        <a href="reports.html" class="nav-item">
                             <span class="nav-icon"><i class="fas fa-chart-line"></i></span>
                             <span class="nav-label">Reports</span>
+                        </a>
+                    </div>
+                </div>
+
+                <div class="nav-section">
+                    <div class="section-header">
+                        <span class="section-title">Tools</span>
+                        <i class="fas fa-chevron-down nav-section-chevron"></i>
+                    </div>
+                    <div class="nav-items">
+                        <a href="hl7-reader.html" class="nav-item">
+                            <span class="nav-icon"><i class="fas fa-stethoscope"></i></span>
+                            <span class="nav-label">HL7 Reader</span>
                         </a>
                     </div>
                 </div>
@@ -121,7 +139,7 @@
                         <span class="stat-label">Messages</span>
                     </div>
                     <div class="stat-item success">
-                        <span class="stat-value">99.9%</span>
+                        <span class="stat-value" id="uptimeStat">—</span>
                         <span class="stat-label">Uptime</span>
                     </div>
                 </div>
@@ -154,7 +172,7 @@
                                 <span class="tile-count" id="templateCount">—</span>
                             </div>
                         </a>
-                        <a href="#monitoring" class="action-tile">
+                        <a href="monitoring.html" class="action-tile">
                             <span class="tile-icon"><i class="far fa-chart-bar"></i></span>
                             <div class="tile-content">
                                 <span class="tile-title">Monitor</span>
@@ -175,11 +193,21 @@
                                 <span class="status-value success" id="dbStatus">Connected</span>
                             </div>
                         </div>
-                        <div class="status-item">
+                        <div class="status-item status-item--dual">
                             <span class="status-icon"><i class="fas fa-layer-group"></i></span>
                             <div class="status-info">
                                 <span class="status-label">Queue</span>
-                                <span class="status-value success" id="queueStatus">Ready</span>
+                                <div class="status-dual">
+                                    <div class="status-dual-metric">
+                                        <span class="status-dual-value" id="queueDepth">—</span>
+                                        <span class="status-dual-label">processing</span>
+                                    </div>
+                                    <div class="status-dual-sep"></div>
+                                    <div class="status-dual-metric" id="dlqMetric">
+                                        <span class="status-dual-value" id="dlqCount">—</span>
+                                        <span class="status-dual-label">failed (DLQ)</span>
+                                    </div>
+                                </div>
                             </div>
                         </div>
                         <div class="status-item">
@@ -223,33 +251,11 @@
                 <!-- Recent Activity -->
                 <div class="dashboard-card">
                     <h3 class="card-title">Recent Activity</h3>
-                    <div class="activity-list">
-                        <div class="activity-item">
-                            <span class="activity-dot success"></span>
-                            <div class="activity-content">
-                                <span class="activity-text">System started successfully</span>
-                                <span class="activity-time">Just now</span>
-                            </div>
-                        </div>
+                    <div class="activity-list" id="activityList">
                         <div class="activity-item">
                             <span class="activity-dot"></span>
                             <div class="activity-content">
-                                <span class="activity-text">Ready to configure interfaces</span>
-                                <span class="activity-time">Ready</span>
-                            </div>
-                        </div>
-                        <div class="activity-item">
-                            <span class="activity-dot"></span>
-                            <div class="activity-content">
-                                <span class="activity-text">AI assistant initialized</span>
-                                <span class="activity-time">System</span>
-                            </div>
-                        </div>
-                        <div class="activity-item">
-                            <span class="activity-dot"></span>
-                            <div class="activity-content">
-                                <span class="activity-text">Database connection established</span>
-                                <span class="activity-time">System</span>
+                                <span class="activity-text" style="color:#aaa">Loading…</span>
                             </div>
                         </div>
                     </div>
@@ -259,7 +265,9 @@
     </div>
 
     <!-- External JavaScript -->
-    <script src="js/components/sidebar-nav.js"></script>
-    <script src="js/dashboard.js"></script>
+    <script src="/js/services/AuthService.js"></script>
+    <script src="js/components/sidebar-nav.js?v=3"></script>
+    <script src="js/dashboard.js?v=3"></script>
+    <script src="/js/ai-assistant.js"></script>
 </body>
 </html>

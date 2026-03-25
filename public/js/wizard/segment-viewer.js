@@ -29,6 +29,10 @@ class SegmentViewer {
             return;
         }
 
+        // Store for refreshView() and toggleAllSegments() — no hardcoded IDs needed
+        this.containerId = containerId;
+        this.lastApiResponse = apiResponse;
+
         const data = apiResponse.data;
         const segments = this.getSegmentsFromGroups(data);
         const validationErrors = data.validationErrors || [];
@@ -1000,10 +1004,11 @@ renderCompactHeader(validationErrors, messageType, segments, data) {
     toggleAllSegments() {
         console.log('🔍 Toggle all segments clicked');
         
-        // Get segments that exist in the current data
+        // Get segments that exist in the current data — use local cache first
         const existingSegments = [];
-        if (this.wizard.parsedHL7Data?.data?.enhancedSegments) {
-            const availableSegments = Object.keys(this.wizard.parsedHL7Data.data.enhancedSegments);
+        const apiResponse = this.lastApiResponse || this.wizard.parsedHL7Data;
+        if (apiResponse?.data?.enhancedSegments) {
+            const availableSegments = Object.keys(apiResponse.data.enhancedSegments);
             // Take first 3 segments as "important" dynamically
             existingSegments.push(...availableSegments.slice(0, 3));
         }
@@ -1111,13 +1116,15 @@ renderCompactHeader(validationErrors, messageType, segments, data) {
      */
     refreshView() {
         console.log('🔄 Refreshing segment viewer, mode:', this.viewMode);
-        if (this.wizard.parsedHL7Data) {
-            const container = document.getElementById('parsedDataReview');
+        const apiResponse = this.lastApiResponse || this.wizard.parsedHL7Data;
+        const containerId = this.containerId || 'parsedDataReview';
+        if (apiResponse) {
+            const container = document.getElementById(containerId);
             if (container) {
-                this.renderSegmentList(this.wizard.parsedHL7Data, 'parsedDataReview');
+                this.renderSegmentList(apiResponse, containerId);
                 console.log('✅ View refreshed successfully');
             } else {
-                console.warn('⚠️ Container not found for refresh');
+                console.warn('⚠️ Container not found for refresh:', containerId);
             }
         } else {
             console.warn('⚠️ No parsed data available for refresh');
@@ -1128,9 +1135,10 @@ renderCompactHeader(validationErrors, messageType, segments, data) {
      * ✅ DYNAMIC: Get segments in message order based on actual data
      */
     getSegmentsInMessageOrder(segments) {
-        // ✅ Use segment order from API if available
-        if (this.wizard.parsedHL7Data?.data?.segmentOrder) {
-            const apiOrder = this.wizard.parsedHL7Data.data.segmentOrder;
+        // ✅ Use segment order from API if available — prefer local cache
+        const apiResponse = this.lastApiResponse || this.wizard.parsedHL7Data;
+        if (apiResponse?.data?.segmentOrder) {
+            const apiOrder = apiResponse.data.segmentOrder;
             const segmentEntries = [];
             
             // First, add segments in API-specified order

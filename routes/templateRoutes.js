@@ -4,7 +4,11 @@
 const express = require('express');
 const router = express.Router();
 const templateController = require('../controllers/templateController');
-const { isAuthenticated } = require('../middleware/auth');
+const { requireAuth, requireRole } = require('../middleware/auth');
+
+// RBAC: writes are operator+
+const canRead  = requireRole('admin', 'operator', 'viewer');
+const canWrite = requireRole('admin', 'operator');
 
 // List all templates (public access for viewing system templates)
 router.get('/', templateController.listTemplates);
@@ -12,19 +16,19 @@ router.get('/', templateController.listTemplates);
 // Get single template
 router.get('/:id', templateController.getTemplate);
 
-// Create template from existing step (requires auth)
-router.post('/from-step', isAuthenticated, templateController.createTemplateFromStep);
+// Create template from existing step                     — operator+
+router.post('/from-step', requireAuth, canWrite, templateController.createTemplateFromStep);
 
-// Create template directly (requires auth)
-router.post('/', isAuthenticated, templateController.createTemplate);
+// Create template directly                               — operator+
+router.post('/', requireAuth, canWrite, templateController.createTemplate);
 
-// Update template (requires auth + ownership)
-router.put('/:id', isAuthenticated, templateController.updateTemplate);
+// Update template                                        — operator+
+router.put('/:id', requireAuth, canWrite, templateController.updateTemplate);
 
-// Delete template (requires auth + ownership)
-router.delete('/:id', isAuthenticated, templateController.deleteTemplate);
+// Delete template                                        — operator+
+router.delete('/:id', requireAuth, canWrite, templateController.deleteTemplate);
 
-// Apply template to pipeline (requires auth)
-router.post('/:id/apply', isAuthenticated, templateController.applyTemplate);
+// Apply template to pipeline                             — operator+
+router.post('/:id/apply', requireAuth, canWrite, templateController.applyTemplate);
 
 module.exports = router;

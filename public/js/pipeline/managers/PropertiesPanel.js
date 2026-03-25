@@ -20,6 +20,18 @@ class PropertiesPanel {
         this.currentStep = step;
         this.isPreviewMode = isPreview;
 
+        // Keep the AI context bar accurate as the user moves between steps.
+        if (window.AIAssistant && step.id) {
+            const pipeline = this.builder?.pipeline || {};
+            window.AIAssistant.setContext({
+                step_id:      step.id,
+                pipeline_id:  pipeline.id        || '',
+                interface_id: pipeline.interfaceId|| '',
+                message_type: pipeline.messageType|| '',
+                page:         'pipeline-builder'
+            });
+        }
+
         // Kick off async loads for the path picker so data is ready by the time
         // the user clicks a field input (both are fire-and-forget):
         // 1. Backend-declared step variables via GetOutputVariables()
@@ -36,6 +48,7 @@ class PropertiesPanel {
         const variablesTabContent = document.getElementById('variablesTabContent');
         const jsonTabContent = document.getElementById('jsonTabContent');
         const docsTabContent = document.getElementById('docsTabContent');
+        const aiTabContent = document.getElementById('aiTabContent');
 
         if (!modal || !formTabContent || !variablesTabContent || !jsonTabContent || !docsTabContent) {
             console.error('Step properties modal or tab containers not found');
@@ -75,6 +88,12 @@ class PropertiesPanel {
         docsTabContent.innerHTML = '';
         const docsUI = this.createDocumentation(step);
         docsTabContent.appendChild(docsUI);
+
+        // Populate AI Tab
+        if (aiTabContent) {
+            aiTabContent.innerHTML = '';
+            this.setupAITab(step, aiTabContent, isPreview);
+        }
 
         // Setup tab switching
         this.setupTabSwitching(modal);
@@ -157,6 +176,85 @@ class PropertiesPanel {
                 </div>
             `;
         }
+
+        // For script steps, append a "Code Template Functions" accordion
+        const scriptStepTypes = ['enrichment.script', 'pre.enrichment.script'];
+        if (scriptStepTypes.includes(step.stepType)) {
+            this.appendCodeTemplateFunctionsPanel(container, step);
+        }
+    }
+
+    /**
+     * Appends an "Available Functions (Code Templates)" accordion to the Variables tab.
+     * Shows functions injected into the goja VM for the current interface's script steps.
+     */
+    appendCodeTemplateFunctionsPanel(container, step) {
+        const interfaceId = this.builder?.pipeline?.interfaceId || '';
+        const url = interfaceId
+            ? `/api/code-templates/for-interface/${interfaceId}`
+            : '/api/code-templates?scope=global&is_active=true';
+
+        const accordion = document.createElement('div');
+        accordion.style.cssText = 'border-top:1px solid #e5e7eb;margin-top:16px;';
+        accordion.innerHTML = `
+            <div style="padding:10px 16px;display:flex;align-items:center;gap:8px;cursor:pointer;user-select:none;background:#f8fafc;"
+                 onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'?'':'none';this.querySelector('.ct-toggle').textContent=this.nextElementSibling.style.display===''?'▾':'▸'">
+                <i class="fas fa-code" style="color:#1e3a8a;font-size:13px;"></i>
+                <span style="font-size:12px;font-weight:700;color:#1e3a8a;">Available Functions <span style="font-weight:400;color:#6b7280;">(from Code Templates)</span></span>
+                <span class="ct-toggle" style="margin-left:auto;color:#6b7280;font-size:11px;">▾</span>
+            </div>
+            <div class="ct-fn-body" style="padding:12px 16px;background:#fff;"></div>`;
+        container.appendChild(accordion);
+
+        const body = accordion.querySelector('.ct-fn-body');
+        body.innerHTML = '<span style="font-size:12px;color:#9ca3af;">Loading…</span>';
+
+        fetch(url)
+            .then(r => r.json())
+            .then(json => {
+                const templates = json.data || [];
+                if (templates.length === 0) {
+                    body.innerHTML = '<span style="font-size:12px;color:#9ca3af;">No code templates active for this interface.</span>';
+                    return;
+                }
+                body.innerHTML = '';
+                templates.forEach(t => {
+                    const sigs = t.function_signatures || [];
+                    if (sigs.length === 0) return;
+                    const group = document.createElement('div');
+                    group.style.cssText = 'margin-bottom:10px;';
+                    group.innerHTML = `<div style="font-size:11px;font-weight:700;color:#374151;margin-bottom:5px;font-family:monospace;">${t.name}</div>`;
+                    sigs.forEach(sig => {
+                        const chip = document.createElement('div');
+                        chip.style.cssText = 'display:inline-flex;align-items:center;gap:4px;font-size:11px;font-family:monospace;padding:3px 8px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:4px;color:#334155;cursor:pointer;margin:2px 3px 2px 0;';
+                        chip.title = 'Click to insert at cursor';
+                        chip.textContent = sig;
+                        chip.addEventListener('click', () => {
+                            const fnName = sig.split('(')[0];
+                            this._insertFunctionAtCursor(fnName + '(');
+                        });
+                        group.appendChild(chip);
+                    });
+                    body.appendChild(group);
+                });
+            })
+            .catch(() => {
+                body.innerHTML = '<span style="font-size:12px;color:#ef4444;">Could not load code templates.</span>';
+            });
+    }
+
+    /**
+     * Inserts text at the cursor position in the script textarea.
+     */
+    _insertFunctionAtCursor(text) {
+        const textarea = document.querySelector('#scriptEnrichmentEditorContainer textarea, [id*="script"] textarea, textarea[id*="Script"]');
+        if (!textarea) return;
+        textarea.focus();
+        const start = textarea.selectionStart;
+        const end   = textarea.selectionEnd;
+        textarea.value = textarea.value.slice(0, start) + text + textarea.value.slice(end);
+        textarea.selectionStart = textarea.selectionEnd = start + text.length;
+        textarea.dispatchEvent(new Event('input'));
     }
 
     /**
@@ -3097,12 +3195,13 @@ class PropertiesPanel {
     createFHIRValidationUI(step) {
         if (!step.config) step.config = {};
 
-        // Read current config with defaults matching backend (fhir_validation_executor.go line 56-60)
+        // Read current config — defaults match fhir_validation_executor.go
         const validationLevel = (step.config.validation_level || 'standard').toLowerCase();
+        const fhirVersion     = step.config.fhir_version || 'R4';
+        const profile         = step.config.profile || 'base';
         const requiredResources = step.config.required_resources || [];
         const validateReferences = step.config.validate_references !== false;
-        const validateRequiredFields = step.config.validate_required_fields !== false;
-        const failOnError = step.config.fail_on_error === true;
+        const failOnError        = step.config.fail_on_error === true;
 
         // 14 resource types with hardcoded required field checks in the backend (line 304-319)
         const commonResources = [
@@ -3123,9 +3222,9 @@ class PropertiesPanel {
         ];
 
         const levelDescriptions = {
-            basic: 'Checks only that each resource has a valid <code>resourceType</code> and <code>id</code> field. Fastest execution.',
-            standard: 'Basic checks + required field validation per resource type (14 types) + internal bundle reference checking. Recommended for most pipelines.',
-            strict: 'Standard checks + full R4 JSON schema validation using FHIR specification schemas (146 resource types). Most thorough but slower.'
+            basic:    'Checks only that each resource has a known FHIR <code>resourceType</code>. Fastest — use for format-only pipelines.',
+            standard: 'Basic + required-field cardinality from compiled R4 profiles (146 resource types) + internal bundle reference resolution. Recommended for most pipelines.',
+            strict:   'Standard + terminology binding validation (required &amp; extensible ValueSets) + R4 constraint predicates (obs-6, bun-1, pat-1, …). Most thorough.'
         };
 
         // Build resource checkboxes
@@ -3169,15 +3268,22 @@ class PropertiesPanel {
                 </div>
             </div>
 
-            <!-- Validate Required Fields -->
-            <div class="form-group" id="fhirValidateRequiredFieldsGroup" style="opacity: ${toggleOpacity};">
-                <label class="fhir-toggle-label">
-                    <input type="checkbox" id="fhirValidateRequiredFields" ${validateRequiredFields ? 'checked' : ''}>
-                    <span>Validate Required Fields</span>
-                </label>
-                <small class="form-text text-muted" style="display: block; margin-top: 4px;">
-                    Check that FHIR-spec-required fields are present per resource type (e.g., Encounter must have <code>status</code> and <code>class</code>). Applies at Standard and Strict levels.
-                </small>
+            <!-- FHIR Version + Profile (two-column row) -->
+            <div class="form-group" style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+                <div>
+                    <label>FHIR Version</label>
+                    <select id="fhirVersionSelect" class="form-control">
+                        <option value="R4" ${fhirVersion === 'R4' ? 'selected' : ''}>R4 (default)</option>
+                        <option value="R5" ${fhirVersion === 'R5' ? 'selected' : ''}>R5</option>
+                    </select>
+                </div>
+                <div>
+                    <label>Validation Profile</label>
+                    <select id="fhirProfileSelect" class="form-control">
+                        <option value="base"    ${profile === 'base'     ? 'selected' : ''}>Base R4</option>
+                        <option value="us-core" ${profile === 'us-core'  ? 'selected' : ''}>US Core</option>
+                    </select>
+                </div>
             </div>
 
             <!-- Validate References -->
@@ -3234,9 +3340,9 @@ class PropertiesPanel {
                 </div>
                 <div style="font-size: 0.82rem; line-height: 1.5;">
                     <strong>Input:</strong> Auto-detects FHIR data from <code>fhirBundle</code> or <code>fhirResource</code> keys. Works with both full Bundles and standalone resources.<br><br>
-                    <strong>Basic:</strong> Only checks <code>resourceType</code> and <code>id</code> exist.<br>
-                    <strong>Standard:</strong> Basic + required field checks (14 resource types) + reference validation.<br>
-                    <strong>Strict:</strong> Standard + full R4 JSON schema validation (146 resource schemas).
+                    <strong>Basic:</strong> Only checks <code>resourceType</code> is a known FHIR type. Fastest.<br>
+                    <strong>Standard:</strong> Basic + required-field cardinality from compiled R4 profiles (146 resource types) + internal Bundle reference resolution.<br>
+                    <strong>Strict:</strong> Standard + terminology binding validation (required &amp; extensible ValueSets) + R4 constraint predicates (obs-6, bun-1, pat-1, …). Most thorough.
                 </div>
             </div>
         `;
@@ -4898,10 +5004,16 @@ class PropertiesPanel {
                 step.config.validate_references = refsCheckbox.checked;
             }
 
-            // Validate required fields toggle
-            const reqFieldsCheckbox = form.querySelector('#fhirValidateRequiredFields');
-            if (reqFieldsCheckbox) {
-                step.config.validate_required_fields = reqFieldsCheckbox.checked;
+            // FHIR version selector
+            const versionSelect = form.querySelector('#fhirVersionSelect');
+            if (versionSelect) {
+                step.config.fhir_version = versionSelect.value;
+            }
+
+            // Profile selector
+            const profileSelect = form.querySelector('#fhirProfileSelect');
+            if (profileSelect) {
+                step.config.profile = profileSelect.value;
             }
 
             // Required resources: grid checkboxes + custom chips
@@ -4922,9 +5034,6 @@ class PropertiesPanel {
             if (failOnErrorCheckbox) {
                 step.config.fail_on_error = failOnErrorCheckbox.checked;
             }
-
-            // Remove dead fhir_version key from old config
-            delete step.config.fhir_version;
 
             console.log('[PropertiesPanel] ✅ Saved FHIR Validation config:', step.config);
         }
@@ -8985,6 +9094,200 @@ return {
             example: { config: 'Custom configuration' },
             parameters: []
         };
+    }
+
+    // ─── AI Tab ────────────────────────────────────────────────────────────────
+
+    /**
+     * Renders the AI assistant tab inside the step properties modal.
+     * Provides: Explain this step, Generate script (script steps only), Ask a question.
+     */
+    setupAITab(step, container, isPreview) {
+        const isScriptStep = ['enrichment.script', 'pre.enrichment.script'].includes(step.stepType);
+        const pipeline = this.builder?.pipeline || {};
+        const ctx = {
+            step_id:      step.id      || '',
+            pipeline_id:  pipeline.id  || '',
+            interface_id: pipeline.interfaceId || '',
+            message_type: pipeline.messageType || '',
+            page:         'pipeline-builder'
+        };
+
+        const esc = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+
+        container.innerHTML = `
+<div style="display:flex;flex-direction:column;gap:16px;padding:4px 0;">
+
+  <!-- Explain this step -->
+  <div style="border:1px solid #e2e8f0;border-radius:10px;overflow:hidden;">
+    <div style="background:#f8fafc;padding:10px 14px;display:flex;align-items:center;gap:8px;border-bottom:1px solid #e2e8f0;">
+      <span style="font-size:15px;">💡</span>
+      <strong style="font-size:13px;color:#1e3a8a;">Explain this step</strong>
+      ${isPreview ? '' : `<button id="ai-tab-explain-btn" style="margin-left:auto;background:linear-gradient(135deg,#f472b6,#1e3a8a);color:#fff;border:none;padding:5px 14px;border-radius:20px;cursor:pointer;font-size:12px;">Explain</button>`}
+    </div>
+    <div id="ai-tab-explain-out" style="padding:12px 14px;font-size:13px;color:#4b5563;min-height:40px;line-height:1.6;">
+      ${isPreview ? '<em style="color:#9ca3af;">Save the step first to explain it.</em>' : '<em style="color:#9ca3af;">Click Explain to get a plain-English description of this step.</em>'}
+    </div>
+  </div>
+
+  ${isScriptStep && !isPreview ? `
+  <!-- Generate script -->
+  <div style="border:1px solid #e2e8f0;border-radius:10px;overflow:hidden;">
+    <div style="background:#f8fafc;padding:10px 14px;display:flex;align-items:center;gap:8px;border-bottom:1px solid #e2e8f0;">
+      <span style="font-size:15px;">⚙️</span>
+      <strong style="font-size:13px;color:#1e3a8a;">Generate script</strong>
+    </div>
+    <div style="padding:12px 14px;">
+      <textarea id="ai-tab-script-desc" placeholder="Describe what the script should do…&#10;e.g. Extract patient name from PID.5.1 and PID.5.2, combine as 'Last, First', add to output.patientName"
+        style="width:100%;height:80px;border:1px solid #e2e8f0;border-radius:8px;padding:9px 12px;font-size:12.5px;font-family:inherit;resize:vertical;outline:none;color:#1a202c;box-sizing:border-box;"></textarea>
+      <div style="display:flex;gap:8px;margin-top:8px;">
+        <button id="ai-tab-gen-btn" style="background:linear-gradient(135deg,#f472b6,#1e3a8a);color:#fff;border:none;padding:7px 18px;border-radius:20px;cursor:pointer;font-size:12px;">Generate</button>
+        <button id="ai-tab-insert-btn" style="display:none;background:#1e3a8a;color:#fff;border:none;padding:7px 18px;border-radius:20px;cursor:pointer;font-size:12px;">Insert into editor</button>
+      </div>
+      <div id="ai-tab-gen-preview" style="display:none;margin-top:10px;background:#0f172a;border-radius:8px;padding:12px 14px;font-size:12px;font-family:'Fira Code',Consolas,monospace;color:#e2e8f0;white-space:pre-wrap;max-height:300px;overflow-y:auto;"></div>
+    </div>
+  </div>
+  ` : ''}
+
+  <!-- Ask a question -->
+  <div style="border:1px solid #e2e8f0;border-radius:10px;overflow:hidden;">
+    <div style="background:#f8fafc;padding:10px 14px;display:flex;align-items:center;gap:8px;border-bottom:1px solid #e2e8f0;">
+      <span style="font-size:15px;">✏️</span>
+      <strong style="font-size:13px;color:#1e3a8a;">Ask ezCompanion about this step</strong>
+    </div>
+    <div style="padding:12px 14px;">
+      <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px;">
+        <button class="ai-tab-quick" data-q="What data does this step output?" style="background:#f0f4ff;border:1px solid #c7d2fe;color:#3730a3;padding:4px 11px;border-radius:16px;cursor:pointer;font-size:11.5px;">What does it output?</button>
+        <button class="ai-tab-quick" data-q="What could cause this step to fail?" style="background:#fff0f5;border:1px solid #fbcfe8;color:#9d174d;padding:4px 11px;border-radius:16px;cursor:pointer;font-size:11.5px;">Why might it fail?</button>
+        <button class="ai-tab-quick" data-q="How do I configure this step correctly?" style="background:#f0fdf4;border:1px solid #bbf7d0;color:#166534;padding:4px 11px;border-radius:16px;cursor:pointer;font-size:11.5px;">How to configure?</button>
+      </div>
+      <button id="ai-tab-open-companion" style="width:100%;background:#f8fafc;border:1px dashed #c7d2fe;color:#1e3a8a;padding:9px;border-radius:8px;cursor:pointer;font-size:12.5px;font-weight:500;">
+        Open ezCompanion with this step in context →
+      </button>
+    </div>
+  </div>
+
+</div>`;
+
+        // Wire: Explain button
+        const explainBtn = container.querySelector('#ai-tab-explain-btn');
+        const explainOut = container.querySelector('#ai-tab-explain-out');
+        if (explainBtn && step.id) {
+            explainBtn.addEventListener('click', async () => {
+                explainBtn.disabled = true;
+                explainBtn.textContent = '…';
+                explainOut.innerHTML = '<em style="color:#9ca3af;">Thinking…</em>';
+                let full = '';
+                try {
+                    await window.AIAssistant.explainStep(step.id, (_tok, text) => {
+                        full = text;
+                        explainOut.innerHTML = full
+                            .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+                            .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+                            .replace(/`([^`]+)`/g, '<code style="background:#f1f5f9;padding:1px 4px;border-radius:3px;font-size:11px">$1</code>')
+                            .replace(/\n/g, '<br>');
+                    });
+                } catch (e) {
+                    explainOut.innerHTML = `<span style="color:#dc2626;">⚠️ ${esc(e.message)}</span>`;
+                } finally {
+                    explainBtn.disabled = false;
+                    explainBtn.textContent = 'Explain';
+                }
+            });
+        }
+
+        // Wire: Generate script
+        if (isScriptStep && !isPreview) {
+            const genBtn     = container.querySelector('#ai-tab-gen-btn');
+            const insertBtn  = container.querySelector('#ai-tab-insert-btn');
+            const descArea   = container.querySelector('#ai-tab-script-desc');
+            const preview    = container.querySelector('#ai-tab-gen-preview');
+            let   lastScript = '';
+
+            genBtn.addEventListener('click', async () => {
+                const desc = descArea.value.trim();
+                if (!desc) { descArea.focus(); return; }
+
+                genBtn.disabled = true;
+                genBtn.textContent = 'Generating…';
+                insertBtn.style.display = 'none';
+                preview.style.display = 'block';
+                preview.textContent = '';
+                lastScript = '';
+
+                try {
+                    await window.AIAssistant.generateScript({
+                        description:   desc,
+                        stepId:        step.id,
+                        pipelineId:    ctx.pipeline_id,
+                        interfaceId:   ctx.interface_id,
+                        messageType:   ctx.message_type,
+                        stepType:      step.stepType,
+                        currentScript: step.config?.script || ''
+                    }, (_tok, full) => {
+                        lastScript = full;
+                        // Strip outer ```javascript fences for display in dark pre block
+                        preview.textContent = full
+                            .replace(/^```(?:javascript)?\n?/, '')
+                            .replace(/\n?```$/, '');
+                    });
+                    insertBtn.style.display = '';
+                } catch (e) {
+                    preview.textContent = '⚠️ ' + e.message;
+                } finally {
+                    genBtn.disabled = false;
+                    genBtn.textContent = 'Generate';
+                }
+            });
+
+            insertBtn.addEventListener('click', () => {
+                if (!lastScript) return;
+                // Strip markdown fences — editors expect raw JS
+                const raw = lastScript
+                    .replace(/^```(?:javascript)?\n?/, '')
+                    .replace(/\n?```$/, '')
+                    .trim();
+
+                // Try ScriptEnrichmentEditor instance first, then textarea fallback
+                const editorInst = window.scriptEnrichmentEditorInstance ||
+                    (window.activeScriptEditor);
+                if (editorInst && typeof editorInst.setValue === 'function') {
+                    editorInst.setValue(raw);
+                } else {
+                    const ta = document.querySelector(
+                        '#scriptEnrichmentEditorContainer textarea, textarea[id*="script"]'
+                    );
+                    if (ta) {
+                        ta.value = raw;
+                        ta.dispatchEvent(new Event('input', { bubbles: true }));
+                    }
+                }
+
+                // Also store in step config so it survives without saving
+                if (!step.config) step.config = {};
+                step.config.script = raw;
+
+                insertBtn.textContent = '✓ Inserted';
+                setTimeout(() => { insertBtn.textContent = 'Insert into editor'; }, 2000);
+            });
+        }
+
+        // Wire: quick-ask chips
+        container.querySelectorAll('.ai-tab-quick').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const q = `[Step: ${esc(step.stepName || step.stepType)}] ${btn.dataset.q}`;
+                if (window.AIAssistant) window.AIAssistant.openWithContext(ctx, q);
+            });
+        });
+
+        // Wire: open companion button
+        const openBtn = container.querySelector('#ai-tab-open-companion');
+        if (openBtn) {
+            openBtn.addEventListener('click', () => {
+                if (window.AIAssistant) window.AIAssistant.openWithContext(ctx,
+                    `I'm looking at the "${step.stepName || step.stepType}" step (type: ${step.stepType}). How does it work?`);
+            });
+        }
     }
 }
 

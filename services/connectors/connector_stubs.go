@@ -663,3 +663,100 @@ func NewFTPOutboundConnector() OutboundConnector {
 	}
 	return NewBaseOutboundConnector(metadata, true)
 }
+
+// -----------------------------------------------------------------------------
+// EMR / Healthcare Protocol Connectors (stubs — Phase 4 implementation)
+// -----------------------------------------------------------------------------
+
+// NewFHIRR4InboundConnector is retained for any code that references the constructor
+// directly, but the factory now maps "fhir_r4_inbound" → NewHTTPFHIRInboundConnector.
+// This stub is kept so it can be used as a pull-mode FHIR poller in a future sprint.
+func NewFHIRR4InboundConnector() InboundConnector {
+	// Pull-mode FHIR polling (querying a FHIR server on a schedule) is not yet
+	// implemented. The factory maps fhir_r4_inbound to the push-mode HTTP FHIR
+	// Receiver instead. When pull-mode polling is built, update the factory entry.
+	panic("NewFHIRR4InboundConnector: pull-mode FHIR polling not yet implemented — " +
+		"use 'http_fhir_inbound' for push mode or 'fhir_r4_inbound' (routed to http_fhir_inbound via factory)")
+}
+
+// NewFHIRR4OutboundConnector is retained for any code that references the constructor
+// directly, but the factory now maps "fhir_r4_outbound" → NewHTTPFHIROutboundConnector.
+func NewFHIRR4OutboundConnector() OutboundConnector {
+	panic("NewFHIRR4OutboundConnector: use 'http_fhir_outbound' or 'fhir_r4_outbound' — " +
+		"both are routed to the full HTTPFHIROutboundConnector via factory")
+}
+
+// NewEDIX12InboundConnector creates an EDI X12 inbound connector (stub)
+func NewEDIX12InboundConnector() InboundConnector {
+	metadata := ConnectorMetadata{
+		TypeName:           "edi_x12_inbound",
+		DisplayName:        "EDI X12 Inbound",
+		Version:            "0.9.0",
+		Category:           "inbound",
+		Mode:               "pull",
+		ImplementationLang: "go",
+		Capabilities: map[string]bool{
+			"supports_cron":    true,
+			"supports_sftp":    true,
+			"supports_http":    true,
+			"supports_as2":     true,
+			"supports_999_ack": true,
+		},
+	}
+	return NewBaseInboundConnector(metadata)
+}
+
+// NewEDIX12OutboundConnector creates an EDI X12 outbound connector (stub)
+func NewEDIX12OutboundConnector() OutboundConnector {
+	metadata := ConnectorMetadata{
+		TypeName:           "edi_x12_outbound",
+		DisplayName:        "EDI X12 Outbound",
+		Version:            "0.9.0",
+		Category:           "outbound",
+		Mode:               "push",
+		ImplementationLang: "go",
+		Capabilities: map[string]bool{
+			"supports_batch": true,
+			"supports_sftp":  true,
+			"supports_http":  true,
+			"supports_as2":   true,
+		},
+	}
+	return NewBaseOutboundConnector(metadata, true)
+}
+
+// NewDirectMessagingInboundConnector creates a DirectTrust SMTP+SMIME inbound connector (stub)
+func NewDirectMessagingInboundConnector() InboundConnector {
+	metadata := ConnectorMetadata{
+		TypeName:           "direct_messaging_inbound",
+		DisplayName:        "Direct Messaging Inbound",
+		Version:            "0.9.0",
+		Category:           "inbound",
+		Mode:               "pull",
+		ImplementationLang: "go",
+		Capabilities: map[string]bool{
+			"supports_cron":  true,
+			"supports_smime": true,
+			"supports_cda":   true,
+		},
+	}
+	return NewBaseInboundConnector(metadata)
+}
+
+// NewDirectMessagingOutboundConnector creates a DirectTrust SMTP+SMIME outbound connector (stub)
+func NewDirectMessagingOutboundConnector() OutboundConnector {
+	metadata := ConnectorMetadata{
+		TypeName:           "direct_messaging_outbound",
+		DisplayName:        "Direct Messaging Outbound",
+		Version:            "0.9.0",
+		Category:           "outbound",
+		Mode:               "push",
+		ImplementationLang: "go",
+		Capabilities: map[string]bool{
+			"supports_batch": false,
+			"supports_smime": true,
+			"supports_cda":   true,
+		},
+	}
+	return NewBaseOutboundConnector(metadata, false)
+}

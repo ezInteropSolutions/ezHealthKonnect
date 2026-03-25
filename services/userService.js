@@ -82,6 +82,9 @@ class UserService {
                     name: pgUser.getFullName(),
                     role: pgUser.role,
                     status: pgUser.status,
+                    lockedUntil: pgUser.locked_until,
+                    loginAttempts: pgUser.login_attempts,
+                    forcePasswordReset: pgUser.force_password_reset,
                     lastLogin: pgUser.last_login_at,
                     createdAt: pgUser.created_at,
                     source: 'postgresql'

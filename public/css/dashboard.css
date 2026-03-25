@@ -273,6 +273,20 @@ body {
     white-space: nowrap;
 }
 
+.nav-badge {
+    margin-left: auto;
+    padding: 1px 6px;
+    border-radius: 8px;
+    font-size: 10px;
+    font-weight: 700;
+    background: #dc2626;
+    color: white;
+    min-width: 18px;
+    text-align: center;
+    line-height: 16px;
+    flex-shrink: 0;
+}
+
 /* User Profile */
 .user-profile {
     padding: 16px;
@@ -598,6 +612,51 @@ body {
     color: #166534;
 }
 
+/* Dual-metric layout for Queue status card */
+.status-item--dual .status-info {
+    flex-direction: column;
+}
+
+.status-dual {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 2px;
+}
+
+.status-dual-metric {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+
+.status-dual-value {
+    font-size: 14px;
+    font-weight: 600;
+    color: #1a202c;
+    line-height: 1.2;
+}
+
+.status-dual-label {
+    font-size: 10px;
+    color: #94a3b8;
+    font-weight: 500;
+}
+
+.status-dual-sep {
+    width: 1px;
+    height: 24px;
+    background: #e2e8f0;
+}
+
+.status-dual-metric--alert .status-dual-value {
+    color: #dc2626;
+}
+
+.status-dual-metric--alert .status-dual-label {
+    color: #dc2626;
+}
+
 /* Activity List */
 .activity-list {
     display: flex;
@@ -667,7 +726,6 @@ body {
 }
 
 /* Admin Styles */
-.admin-section,
 .admin-card {
     display: none;
 }

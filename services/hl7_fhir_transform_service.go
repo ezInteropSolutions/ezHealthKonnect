@@ -38,18 +38,24 @@ type TransformRequest struct {
 }
 
 type TransformResponse struct {
-	Success          bool                     `json:"success"`
-	RequestID        string                   `json:"requestId"`
-	MessageType      string                   `json:"messageType"`
-	FHIRResources    []map[string]interface{} `json:"fhirResources"`
-	AtomicMappings   []AtomicMapping          `json:"atomicMappings"`
-	Bundle           map[string]interface{}   `json:"bundle,omitempty"`
-	ResourceCounts   map[string]int           `json:"resourceCounts"`
-	MappingStats     MappingStatistics        `json:"mappingStats"`
-	Warnings         []string                 `json:"warnings"`
-	Errors           []string                 `json:"errors"`
-	Performance      PerformanceMetrics       `json:"performance"`
-	ValidationIssues []ValidationIssue        `json:"validationIssues,omitempty"`
+	Success            bool                     `json:"success"`
+	RequestID          string                   `json:"requestId"`
+	MessageType        string                   `json:"messageType"`
+	FHIRResources      []map[string]interface{} `json:"fhirResources"`
+	AtomicMappings     []AtomicMapping          `json:"atomicMappings"`
+	Bundle             map[string]interface{}   `json:"bundle,omitempty"`
+	ResourceCounts     map[string]int           `json:"resourceCounts"`
+	MappingStats       MappingStatistics        `json:"mappingStats"`
+	Warnings           []string                 `json:"warnings"`
+	Errors             []string                 `json:"errors"`
+	Performance        PerformanceMetrics       `json:"performance"`
+	ValidationIssues   []ValidationIssue        `json:"validationIssues,omitempty"`
+	// ValidationFailures collects required-field misses annotated with the
+	// onMissing policy from the template.  Populated by ValidationPolicyEnforcer
+	// during createResourceFromAtomicMappings.  When any entry has
+	// Severity == "queue_review" the caller should NOT deliver the message but
+	// instead insert a row into fhir_validation_queue.
+	ValidationFailures []ValidationFailure      `json:"validationFailures,omitempty"`
 }
 
 type MappingStatistics struct {
@@ -75,6 +81,19 @@ type ValidationIssue struct {
 	Message      string `json:"message"`
 	ResourceType string `json:"resourceType,omitempty"`
 	Path         string `json:"path,omitempty"`
+}
+
+// ValidationFailure records a single missing-required-field event together
+// with the onMissing policy that was configured for it in the OOB template.
+// Field     - FHIR element path, e.g. "Patient.identifier[0].value"
+// HL7Path   - source HL7 path, e.g. "PID.3.1"
+// MissingCode - machine-readable code, e.g. "MISSING_MRN"
+// Severity  - mirrors the onMissing policy: "queue_review", "warn", "reject", "default"
+type ValidationFailure struct {
+	Field       string `json:"field"`
+	HL7Path     string `json:"hl7Path"`
+	MissingCode string `json:"missingCode"`
+	Severity    string `json:"severity"`
 }
 
 // =====================================

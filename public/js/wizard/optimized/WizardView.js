@@ -1507,6 +1507,10 @@ class WizardView extends EventTarget {
                                     </div>
                                 </div>
                                 <div style="display: flex; gap: 12px;">
+                                    <button style="padding: 8px 16px; border: 2px solid #f472b6; border-radius: 6px; font-size: 13px; font-weight: 500; cursor: pointer; display: flex; align-items: center; gap: 6px; background: white; color: #be185d; transition: all 0.2s ease;"
+                                            id="btn-ai-suggest-mappings" onclick="window.aiSuggestMappings()">
+                                        ✏️ AI Suggest
+                                    </button>
                                     <button style="padding: 8px 16px; border: 2px solid #6366f1; border-radius: 6px; font-size: 13px; font-weight: 500; cursor: pointer; display: flex; align-items: center; gap: 6px; background: white; color: #6366f1; transition: all 0.2s ease;"
                                             id="btn-view-fhir-json" onclick="window.viewRawFHIRJSON()">
                                         📄 View FHIR JSON
@@ -4871,8 +4875,8 @@ PV1|1|I|ICU^101^1|||DOC123^Smith^Jane|||EMERGENCY|||
         // Sample HL7 buttons
         const sampleButtons = container.querySelectorAll('.sample-btn');
         sampleButtons.forEach(btn => {
-            btn.addEventListener('click', (e) => {
-                const messageType = e.target.getAttribute('data-message-type');
+            btn.addEventListener('click', () => {
+                const messageType = btn.getAttribute('data-message-type');
                 this.dispatchEvent(new CustomEvent('sampleHL7Requested', {
                     detail: { messageType }
                 }));
@@ -5003,8 +5007,8 @@ PV1|1|I|ICU^101^1|||DOC123^Smith^Jane|||EMERGENCY|||
         // Sample HL7 buttons
         const sampleButtons = container.querySelectorAll('.sample-btn');
         sampleButtons.forEach(btn => {
-            btn.addEventListener('click', (e) => {
-                const messageType = e.target.getAttribute('data-message-type');
+            btn.addEventListener('click', () => {
+                const messageType = btn.getAttribute('data-message-type');
                 this.dispatchEvent(new CustomEvent('sampleHL7Requested', {
                     detail: { messageType }
                 }));
@@ -7617,6 +7621,155 @@ if (!document.getElementById('table-modal-styles')) {
     style.textContent = tableModalCSS;
     document.head.appendChild(style);
 }
+
+// ── AI Suggest Mappings ──────────────────────────────────────────────────────
+window.aiSuggestMappings = async function() {
+    if (!window.AIAssistant) {
+        alert('AI assistant not loaded on this page.');
+        return;
+    }
+
+    // Get the HL7 sample from the wizard model (step 1)
+    const wzCtrl = window.wizardControllerInstance;
+    const hl7Sample = wzCtrl?.model?.data?.hl7Message || '';
+    const msgType   = wzCtrl?.model?.data?.detectedMessageType || wzCtrl?.model?.data?.messageType || '';
+
+    if (!hl7Sample) {
+        alert('No HL7 sample message found. Please complete Step 1 first.');
+        return;
+    }
+
+    // Show the suggestion panel (inject if not present)
+    let panel = document.getElementById('ai-mapping-suggestion-panel');
+    if (!panel) {
+        panel = document.createElement('div');
+        panel.id = 'ai-mapping-suggestion-panel';
+        panel.style.cssText = 'position:fixed;top:0;right:0;width:480px;height:100vh;background:#fff;border-left:1px solid #e2e8f0;box-shadow:-4px 0 24px rgba(30,58,138,0.12);z-index:9999;display:flex;flex-direction:column;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;';
+        panel.innerHTML = `
+<div style="background:linear-gradient(135deg,#f472b6,#1e3a8a);padding:14px 18px;display:flex;align-items:center;justify-content:space-between;color:#fff;flex-shrink:0;">
+  <div>
+    <div style="font-weight:700;font-size:15px;">✏️ AI Mapping Suggestions</div>
+    <div style="font-size:11px;opacity:0.85;margin-top:2px;" id="ai-ms-subtitle">Analysing ${msgType || 'HL7'} → FHIR R4…</div>
+  </div>
+  <button onclick="document.getElementById('ai-mapping-suggestion-panel').remove()" style="background:rgba(255,255,255,0.15);border:none;color:#fff;font-size:18px;cursor:pointer;padding:4px 8px;border-radius:6px;">✕</button>
+</div>
+<div id="ai-ms-status" style="padding:10px 16px;font-size:12px;color:#6b7280;border-bottom:1px solid #f0f0f0;flex-shrink:0;">Fetching AI suggestions…</div>
+<div id="ai-ms-table" style="flex:1;overflow-y:auto;padding:12px 16px;"></div>
+<div id="ai-ms-footer" style="padding:12px 16px;border-top:1px solid #e2e8f0;flex-shrink:0;display:none;">
+  <button id="ai-ms-apply-btn" style="width:100%;background:linear-gradient(135deg,#f472b6,#1e3a8a);color:#fff;border:none;padding:10px;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;">Apply accepted mappings</button>
+</div>`;
+        document.body.appendChild(panel);
+    } else {
+        panel.style.display = 'flex';
+    }
+
+    const statusEl = document.getElementById('ai-ms-status');
+    const tableEl  = document.getElementById('ai-ms-table');
+    const footerEl = document.getElementById('ai-ms-footer');
+    const applyBtn = document.getElementById('ai-ms-apply-btn');
+
+    statusEl.textContent = 'Fetching AI suggestions…';
+    tableEl.innerHTML    = '<div style="text-align:center;padding:40px;color:#94a3b8;">Analysing HL7 message…</div>';
+
+    let suggestions = [];
+    try {
+        const result = await window.AIAssistant.suggestMappings(hl7Sample, 'fhir_r4');
+        suggestions  = result?.data?.suggestions || [];
+
+        if (suggestions.length === 0) {
+            tableEl.innerHTML = '<div style="text-align:center;padding:40px;color:#94a3b8;">No suggestions returned. Try a longer HL7 sample.</div>';
+            statusEl.textContent = 'No suggestions found.';
+            return;
+        }
+
+        statusEl.textContent = `${suggestions.length} suggestions — accept or reject each one:`;
+
+        // Render suggestion table
+        tableEl.innerHTML = suggestions.map((s, i) => {
+            const conf    = Math.round((s.confidence || 0) * 100);
+            const confCol = conf >= 80 ? '#16a34a' : conf >= 50 ? '#d97706' : '#dc2626';
+            return `
+<div class="ai-ms-row" data-idx="${i}" style="border:1px solid #e2e8f0;border-radius:8px;padding:12px;margin-bottom:8px;background:#fafafa;">
+  <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
+    <div style="flex:1;min-width:0;">
+      <div style="font-size:12px;font-weight:600;color:#1e3a8a;margin-bottom:3px;">${s.source_field} → ${s.target_field}</div>
+      <div style="font-size:11px;color:#6b7280;line-height:1.4;">${s.reasoning || ''}</div>
+    </div>
+    <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px;flex-shrink:0;">
+      <span style="font-size:11px;font-weight:600;color:${confCol};">${conf}% conf.</span>
+      <div style="display:flex;gap:5px;">
+        <button class="ai-ms-accept" data-idx="${i}" style="background:#dcfce7;color:#166534;border:1px solid #bbf7d0;padding:3px 10px;border-radius:12px;cursor:pointer;font-size:11px;font-weight:600;">✓ Accept</button>
+        <button class="ai-ms-reject" data-idx="${i}" style="background:#fef2f2;color:#991b1b;border:1px solid #fecaca;padding:3px 10px;border-radius:12px;cursor:pointer;font-size:11px;font-weight:600;">✕ Reject</button>
+      </div>
+    </div>
+  </div>
+</div>`;
+        }).join('');
+
+        footerEl.style.display = '';
+
+        // Wire accept/reject buttons
+        tableEl.querySelectorAll('.ai-ms-accept').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const row = tableEl.querySelector(`.ai-ms-row[data-idx="${btn.dataset.idx}"]`);
+                row.style.background = '#f0fdf4';
+                row.style.borderColor = '#86efac';
+                btn.textContent = '✓ Accepted';
+                btn.style.background = '#16a34a';
+                btn.style.color = '#fff';
+                btn.disabled = true;
+                row.querySelector('.ai-ms-reject').disabled = true;
+                suggestions[+btn.dataset.idx]._accepted = true;
+            });
+        });
+        tableEl.querySelectorAll('.ai-ms-reject').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const row = tableEl.querySelector(`.ai-ms-row[data-idx="${btn.dataset.idx}"]`);
+                row.style.opacity = '0.4';
+                row.style.background = '#fef2f2';
+                btn.textContent = '✕ Rejected';
+                btn.disabled = true;
+                row.querySelector('.ai-ms-accept').disabled = true;
+                suggestions[+btn.dataset.idx]._rejected = true;
+                // Send feedback to improve future suggestions
+                if (window.AIAssistant && wzCtrl?.model?.data?.interfaceId) {
+                    window.AIAssistant.feedbackMapping(
+                        wzCtrl.model.data.interfaceId,
+                        suggestions[+btn.dataset.idx].source_field,
+                        suggestions[+btn.dataset.idx].target_field,
+                        false, 'rejected by user in wizard'
+                    );
+                }
+            });
+        });
+
+        // Apply accepted → send to ezCompanion for chat follow-up
+        applyBtn.addEventListener('click', () => {
+            const accepted = suggestions.filter(s => s._accepted);
+            if (accepted.length === 0) { alert('Accept at least one suggestion first.'); return; }
+
+            // Send accepted mappings as feedback to the KB
+            accepted.forEach(s => {
+                if (window.AIAssistant && wzCtrl?.model?.data?.interfaceId) {
+                    window.AIAssistant.feedbackMapping(
+                        wzCtrl.model.data.interfaceId,
+                        s.source_field, s.target_field, true, s.reasoning || ''
+                    );
+                }
+            });
+
+            applyBtn.textContent = `✓ ${accepted.length} mapping(s) saved to knowledge base`;
+            applyBtn.style.background = '#16a34a';
+            setTimeout(() => {
+                panel.remove();
+            }, 2000);
+        });
+
+    } catch (err) {
+        tableEl.innerHTML = `<div style="text-align:center;padding:40px;color:#dc2626;">⚠️ ${err.message}</div>`;
+        statusEl.textContent = 'Error fetching suggestions.';
+    }
+};
 
 // Global functions for Step 4 FHIR Mapping functionality
 window.saveFHIRMappingConfiguration = function() {

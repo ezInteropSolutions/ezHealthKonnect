@@ -1,0 +1,731 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Monitoring – ezHealthKonnect</title>
+    <link rel="stylesheet" href="css/dashboard.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        /* ── Design tokens (pink brand palette) ──────────────────────────────── */
+        :root {
+            --pink:        #db2777;
+            --pink-dark:   #9d174d;
+            --pink-light:  #fce7f3;
+            --pink-mid:    #f9a8d4;
+            --navy:        #1e3a8a;
+            --navy-light:  #eff6ff;
+            --white:       #ffffff;
+            --page-bg:     #ffffff;
+            --card-border: #f0e4ef;
+            --row-hover:   #f9fafb;
+            --text:        #1a202c;
+            --muted:       #6b7280;
+        }
+
+        /* ── Layout ──────────────────────────────────────────────────────────── */
+        body { background: var(--page-bg); }
+        .main-content {
+            flex: 1; display: flex; flex-direction: column; overflow: hidden;
+            background: var(--page-bg);
+        }
+
+        /* ── Page header ─────────────────────────────────────────────────────── */
+        .page-header {
+            padding: 20px 28px 16px;
+            background: var(--white);
+            border-bottom: 1px solid var(--card-border);
+            display: flex; align-items: center; justify-content: space-between;
+            flex-shrink: 0;
+        }
+        .page-header h1 { font-size: 18px; font-weight: 700; color: var(--text); }
+        .page-header h1 i { color: var(--pink); margin-right: 8px; }
+        .page-header p  { font-size: 13px; color: var(--muted); margin-top: 2px; }
+        .header-actions { display: flex; align-items: center; gap: 10px; }
+
+        .refresh-btn {
+            display: flex; align-items: center; gap: 6px;
+            padding: 7px 16px; border-radius: 20px;
+            background: var(--pink-light); color: var(--pink); border: none;
+            font-size: 13px; font-weight: 600; cursor: pointer; transition: background .15s;
+        }
+        .refresh-btn:hover { background: #f9d4e9; }
+        .auto-badge {
+            font-size: 11px; padding: 3px 10px; border-radius: 10px;
+            background: #dcfce7; color: #166534; font-weight: 600; letter-spacing: .03em;
+        }
+        .last-updated { font-size: 12px; color: #a0aec0; }
+
+        /* ── Help banner ─────────────────────────────────────────────────────── */
+        .help-banner {
+            margin: 16px 28px 0;
+            background: #ffffff;
+            border: 1px solid #e8eaf0;
+            border-left: 3px solid var(--pink-mid);
+            border-radius: 8px;
+            padding: 11px 16px;
+            display: flex; align-items: flex-start; gap: 12px;
+        }
+        .help-banner i { color: var(--pink-mid); margin-top: 2px; flex-shrink: 0; }
+        .help-banner-text { font-size: 12px; color: #4b5563; line-height: 1.6; }
+        .help-banner-text strong { color: #374151; }
+        .help-dismiss {
+            margin-left: auto; background: none; border: none;
+            color: #9ca3af; cursor: pointer; font-size: 14px; flex-shrink: 0;
+        }
+
+        /* ── Scrollable body ─────────────────────────────────────────────────── */
+        .monitoring-body {
+            flex: 1; overflow-y: auto; padding: 20px 28px 32px;
+            display: flex; flex-direction: column; gap: 20px;
+        }
+
+        /* ── KPI row ─────────────────────────────────────────────────────────── */
+        .kpi-row {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 14px;
+        }
+        .kpi-card {
+            background: var(--white);
+            border: 1px solid var(--card-border);
+            border-radius: 12px; padding: 18px;
+            display: flex; flex-direction: column; gap: 10px;
+            position: relative;
+        }
+        .kpi-header { display: flex; align-items: center; justify-content: space-between; }
+        .kpi-label {
+            font-size: 11px; font-weight: 700; color: var(--muted);
+            text-transform: uppercase; letter-spacing: .05em;
+        }
+        .kpi-icon-wrap { display: flex; align-items: center; gap: 6px; }
+        .kpi-icon {
+            width: 26px; height: 26px; border-radius: 6px;
+            display: flex; align-items: center; justify-content: center; font-size: 13px;
+            background: transparent;
+        }
+        .kpi-icon.pink   { color: var(--pink-mid); }
+        .kpi-icon.rose   { color: #fca5a5; }
+        .kpi-icon.green  { color: #86efac; }
+        .kpi-icon.amber  { color: #fcd34d; }
+
+        /* Tooltip trigger */
+        .info-trigger {
+            width: 16px; height: 16px; border-radius: 50%;
+            background: #f1f5f9; color: #94a3b8;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 10px; cursor: help; position: relative;
+        }
+        .info-trigger:hover .tooltip-box { display: block; }
+        .tooltip-box {
+            display: none; position: absolute; right: 0; top: 22px;
+            width: 240px; background: #1a202c; color: #fff;
+            font-size: 11px; line-height: 1.5; padding: 10px 12px;
+            border-radius: 8px; z-index: 100; font-weight: 400;
+            text-align: left; box-shadow: 0 4px 16px rgba(0,0,0,.25);
+        }
+        .tooltip-box::before {
+            content: ''; position: absolute; top: -5px; right: 12px;
+            border-left: 5px solid transparent; border-right: 5px solid transparent;
+            border-bottom: 5px solid #1a202c;
+        }
+
+        .kpi-value { font-size: 30px; font-weight: 800; color: var(--text); line-height: 1; }
+        .kpi-sub   { font-size: 11px; color: var(--muted); }
+        .kpi-sparkline { height: 30px; }
+        svg.sparkline   { width: 100%; height: 30px; }
+
+        /* ── Section heading ─────────────────────────────────────────────────── */
+        .section-bar {
+            display: flex; align-items: center; justify-content: space-between;
+            margin-bottom: 10px;
+        }
+        .section-bar h2 { font-size: 13px; font-weight: 700; color: var(--text); }
+        .section-bar a  { font-size: 12px; color: var(--pink); text-decoration: none; }
+        .section-bar a:hover { color: var(--pink-dark); text-decoration: underline; }
+
+        /* ── Alerts ──────────────────────────────────────────────────────────── */
+        .alerts-panel {
+            background: var(--white); border: 1px solid var(--card-border); border-radius: 12px; overflow: hidden;
+        }
+        .alerts-top {
+            padding: 14px 18px; border-bottom: 1px solid #f0f0f0;
+            display: flex; align-items: center; justify-content: space-between;
+        }
+        .alerts-top h3 { font-size: 13px; font-weight: 700; color: var(--text); }
+        .badge-row      { display: flex; gap: 6px; }
+        .badge { font-size: 11px; font-weight: 700; padding: 2px 9px; border-radius: 10px; }
+        .badge-critical { background: #fee2e2; color: #dc2626; }
+        .badge-warning  { background: #fef3c7; color: #d97706; }
+        .badge-info     { background: var(--pink-light); color: var(--pink); }
+
+        .alerts-empty { padding: 28px; text-align: center; color: #a0aec0; font-size: 13px; }
+        .alert-row {
+            display: flex; align-items: center; padding: 11px 18px;
+            border-bottom: 1px solid #f3f4f6; gap: 12px; transition: background .1s;
+        }
+        .alert-row:last-child { border-bottom: none; }
+        .alert-row:hover { background: var(--row-hover); }
+        .sev-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+        .sev-critical { background: #ef4444; }
+        .sev-warning  { background: #f59e0b; }
+        .sev-info     { background: var(--pink); }
+        .alert-title { font-size: 13px; color: var(--text); font-weight: 500; }
+        .alert-meta  { font-size: 11px; color: #a0aec0; margin-top: 2px; }
+        .ack-btn {
+            margin-left: auto; padding: 4px 11px; border-radius: 6px;
+            background: var(--pink-light); color: var(--pink); border: none;
+            font-size: 11px; font-weight: 600; cursor: pointer; flex-shrink: 0;
+        }
+        .ack-btn:hover { background: #fad4e8; }
+
+        /* ── Two-column ──────────────────────────────────────────────────────── */
+        .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+
+        /* ── Feed / Connector panels ─────────────────────────────────────────── */
+        .card-panel {
+            background: var(--white); border: 1px solid var(--card-border); border-radius: 12px; overflow: hidden;
+        }
+        .card-top {
+            padding: 13px 18px; border-bottom: 1px solid #f0f0f0;
+            display: flex; align-items: center; justify-content: space-between;
+        }
+        .card-top h3 { font-size: 13px; font-weight: 700; color: var(--text); }
+        .card-meta { font-size: 11px; color: var(--muted); }
+
+        /* ── Data table ──────────────────────────────────────────────────────── */
+        .data-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+        .data-table th {
+            padding: 8px 14px; text-align: left; font-size: 10px; font-weight: 700;
+            color: var(--muted); text-transform: uppercase; letter-spacing: .04em;
+            background: #f8f9fa; border-bottom: 1px solid var(--card-border);
+        }
+        .data-table td {
+            padding: 10px 14px; border-bottom: 1px solid #f3f4f6; color: #374151;
+        }
+        .data-table tr:last-child td { border-bottom: none; }
+        .data-table tr:hover td { background: var(--row-hover); }
+
+        /* ── Status pills ────────────────────────────────────────────────────── */
+        .pill { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 10px; font-weight: 700; }
+        .pill-green  { background: #dcfce7; color: #15803d; }
+        .pill-red    { background: #fee2e2; color: #b91c1c; }
+        .pill-yellow { background: #fef9c3; color: #854d0e; }
+        .pill-pink   { background: var(--pink-light); color: var(--pink-dark); }
+        .pill-gray   { background: #f1f5f9; color: #64748b; }
+        .pill-blue   { background: #dbeafe; color: #1e40af; }
+
+        /* ── Interface health cards ───────────────────────────────────────────── */
+        .health-grid {
+            background: var(--white); border: 1px solid var(--card-border); border-radius: 12px;
+        }
+        .health-grid-inner {
+            display: grid; grid-template-columns: repeat(auto-fill, minmax(215px, 1fr));
+            gap: 12px; padding: 14px;
+        }
+        .h-card {
+            border: 1px solid var(--card-border); border-radius: 10px; padding: 14px;
+            transition: border-color .15s, box-shadow .15s;
+            display: block; text-decoration: none; color: inherit; cursor: pointer;
+        }
+        .h-card:hover { border-color: var(--pink-mid); box-shadow: 0 2px 8px rgba(219,39,119,.08); text-decoration: none; }
+        .h-card-name { font-size: 13px; font-weight: 600; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .h-card-conn { font-size: 10px; color: var(--muted); margin: 3px 0 8px; }
+        .h-card-row  { display: flex; gap: 16px; margin-bottom: 8px; }
+        .h-stat-val  { font-size: 16px; font-weight: 700; color: var(--text); }
+        .h-stat-lbl  { font-size: 9px; font-weight: 700; text-transform: uppercase; color: var(--muted); }
+
+        /* ── Empty / loading ─────────────────────────────────────────────────── */
+        .empty { padding: 48px 24px; text-align: center; color: #a0aec0; }
+        .empty i { font-size: 30px; margin-bottom: 10px; display: block; }
+        .empty p { font-size: 13px; }
+    </style>
+</head>
+<body>
+<div class="dashboard-container">
+
+<!-- ── Sidebar ─────────────────────────────────────────────────────────────── -->
+<nav class="sidebar" id="sidebar">
+    <button class="sidebar-toggle" id="sidebarToggle"><span class="toggle-icon">‹</span></button>
+    <div class="logo-container">
+        <img src="/assets/logos/ezHealthKonnect.jpeg" alt="ezHealthKonnect" class="logo-image">
+        <div class="logo-text">
+            <h3 class="brand-name">ez<span class="brand-accent">Health</span>Konnect</h3>
+            <p class="brand-tagline">Healthcare Integration</p>
+        </div>
+    </div>
+    <div class="nav-menu">
+        <div class="nav-section">
+            <div class="section-header"><span class="section-title">Main</span><i class="fas fa-chevron-down nav-section-chevron"></i></div>
+            <div class="nav-items">
+                <a href="dashboard.html" class="nav-item"><span class="nav-icon"><i class="far fa-house"></i></span><span class="nav-label">Dashboard</span></a>
+                <a href="interfaces.html" class="nav-item"><span class="nav-icon"><i class="fas fa-plug"></i></span><span class="nav-label">Interfaces</span></a>
+                <a href="messages.html" class="nav-item"><span class="nav-icon"><i class="far fa-envelope"></i></span><span class="nav-label">Messages</span></a>
+                <a href="review-queue.html" class="nav-item"><span class="nav-icon"><i class="far fa-circle-exclamation"></i></span><span class="nav-label">Review Queue</span></a>
+                <a href="dashboard.html#templates" class="nav-item"><span class="nav-icon"><i class="far fa-file-lines"></i></span><span class="nav-label">Templates</span></a>
+            </div>
+        </div>
+        <div class="nav-section">
+            <div class="section-header"><span class="section-title">Analytics</span><i class="fas fa-chevron-down nav-section-chevron"></i></div>
+            <div class="nav-items">
+                <a href="monitoring.html" class="nav-item active"><span class="nav-icon"><i class="far fa-chart-bar"></i></span><span class="nav-label">Monitoring</span></a>
+                <a href="reports.html" class="nav-item"><span class="nav-icon"><i class="fas fa-chart-line"></i></span><span class="nav-label">Reports</span></a>
+            </div>
+        </div>
+        <div class="nav-section">
+            <div class="section-header"><span class="section-title">Tools</span><i class="fas fa-chevron-down nav-section-chevron"></i></div>
+            <div class="nav-items">
+                <a href="hl7-reader.html" class="nav-item"><span class="nav-icon"><i class="fas fa-stethoscope"></i></span><span class="nav-label">HL7 Reader</span></a>
+            </div>
+        </div>
+        <div class="nav-section admin-section" id="adminSection" style="display:none">
+            <div class="section-header"><span class="section-title">Admin</span><i class="fas fa-chevron-down nav-section-chevron"></i></div>
+            <div class="nav-items">
+                <a href="user-management.html" class="nav-item"><span class="nav-icon"><i class="fas fa-users"></i></span><span class="nav-label">Users</span></a>
+                <a href="settings.html" class="nav-item"><span class="nav-icon"><i class="fas fa-sliders"></i></span><span class="nav-label">Settings</span></a>
+            </div>
+        </div>
+    </div>
+    <div class="user-profile">
+        <div class="user-info">
+            <div class="user-avatar" id="userAvatar">S</div>
+            <div class="user-details">
+                <span class="user-name" id="userName">System User</span>
+                <span class="user-role" id="userRole">ADMIN</span>
+            </div>
+        </div>
+        <button class="logout-btn" id="logoutBtn" title="Logout"><i class="fas fa-right-from-bracket"></i></button>
+    </div>
+</nav>
+
+<!-- ── Main content ────────────────────────────────────────────────────────── -->
+<div class="main-content">
+
+    <div class="page-header">
+        <div>
+            <h1><i class="fas fa-heart-pulse"></i>Real-Time Monitoring</h1>
+            <p>Live system health across all interfaces, connectors, and pipelines — refreshed every 30 seconds</p>
+        </div>
+        <div class="header-actions">
+            <span class="auto-badge">LIVE · 30s</span>
+            <span class="last-updated" id="lastUpdated">—</span>
+            <button class="refresh-btn" id="refreshBtn"><i class="fas fa-rotate-right"></i> Refresh Now</button>
+        </div>
+    </div>
+
+    <!-- Help banner -->
+    <div class="help-banner" id="helpBanner">
+        <i class="fas fa-circle-info fa-sm"></i>
+        <div class="help-banner-text">
+            <strong>How to read this dashboard:</strong>
+            The <strong>KPI row</strong> shows today's totals and 7-hour sparkline trends — hover the <strong>ⓘ</strong> icon on each card for a full explanation.
+            The <strong>Alerts</strong> panel shows threshold violations that need attention; click <em>Ack</em> to dismiss.
+            <strong>Interface Health</strong> cards give per-system message counts and error rates — click any card to open its message viewer.
+        </div>
+        <button class="help-dismiss" id="dismissHelp" title="Dismiss"><i class="fas fa-xmark"></i></button>
+    </div>
+
+    <div class="monitoring-body">
+
+        <!-- KPI row -->
+        <div class="kpi-row">
+            <!-- Messages today -->
+            <div class="kpi-card">
+                <div class="kpi-header">
+                    <span class="kpi-label">Messages Today</span>
+                    <div class="kpi-icon-wrap">
+                        <div class="info-trigger">ⓘ
+                            <div class="tooltip-box">
+                                Total HL7/FHIR messages received across ALL interfaces since midnight (local server time).
+                                A sudden drop may indicate a connector going offline or upstream system downtime.
+                                Compare against yesterday's baseline in the <a href="reports.html" style="color:#f9a8d4">Reports</a> page.
+                            </div>
+                        </div>
+                        <span class="kpi-icon pink"><i class="far fa-envelope"></i></span>
+                    </div>
+                </div>
+                <div class="kpi-value" id="kpiMessages">—</div>
+                <div class="kpi-sub" id="kpiMessagesSub">messages since midnight</div>
+                <div class="kpi-sparkline"><svg class="sparkline" id="spkMessages"></svg></div>
+            </div>
+
+            <!-- Error rate -->
+            <div class="kpi-card">
+                <div class="kpi-header">
+                    <span class="kpi-label">Error Rate (24h)</span>
+                    <div class="kpi-icon-wrap">
+                        <div class="info-trigger">ⓘ
+                            <div class="tooltip-box">
+                                Percentage of pipeline executions that ended in a <em>failed</em> state over the past 24 hours.
+                                <strong>Alert threshold: &gt; 5%.</strong>
+                                Investigate the Step Error Breakdown report to identify which pipeline steps are failing most.
+                            </div>
+                        </div>
+                        <span class="kpi-icon rose"><i class="far fa-circle-xmark"></i></span>
+                    </div>
+                </div>
+                <div class="kpi-value" id="kpiErrorRate">—</div>
+                <div class="kpi-sub">of pipeline executions failed</div>
+                <div class="kpi-sparkline"><svg class="sparkline" id="spkErrors"></svg></div>
+            </div>
+
+            <!-- Avg processing -->
+            <div class="kpi-card">
+                <div class="kpi-header">
+                    <span class="kpi-label">Avg Processing Time</span>
+                    <div class="kpi-icon-wrap">
+                        <div class="info-trigger">ⓘ
+                            <div class="tooltip-box">
+                                Average end-to-end pipeline execution time (ms) for <em>completed</em> runs in the last hour.
+                                Elevated values suggest enrichment steps, API calls, or DB queries are slowing the pipeline.
+                                Check the Processing Time Distribution report for p95 / p99 percentiles.
+                            </div>
+                        </div>
+                        <span class="kpi-icon green"><i class="far fa-clock"></i></span>
+                    </div>
+                </div>
+                <div class="kpi-value" id="kpiAvgMs">—</div>
+                <div class="kpi-sub" id="kpiIfacesSub">— / — interfaces active</div>
+            </div>
+
+            <!-- DLQ depth -->
+            <div class="kpi-card">
+                <div class="kpi-header">
+                    <span class="kpi-label">DLQ Depth</span>
+                    <div class="kpi-icon-wrap">
+                        <div class="info-trigger">ⓘ
+                            <div class="tooltip-box">
+                                Number of messages currently stuck in the Dead Letter Queue — messages that exhausted all retry attempts.
+                                <strong>These require manual review.</strong>
+                                Use the DLQ Analysis report or navigate to <em>System → DLQ</em> to retry or discard them.
+                            </div>
+                        </div>
+                        <span class="kpi-icon amber"><i class="far fa-circle-exclamation"></i></span>
+                    </div>
+                </div>
+                <div class="kpi-value" id="kpiDLQ">—</div>
+                <div id="alertChips" class="kpi-sub"></div>
+            </div>
+        </div>
+
+        <!-- Alerts -->
+        <div>
+            <div class="section-bar">
+                <h2>Active Alerts <span id="alertCountLabel" style="font-weight:400;color:var(--muted)"></span></h2>
+                <a href="javascript:void(0)" id="ackAllBtn">Acknowledge all visible</a>
+            </div>
+            <div class="alerts-panel">
+                <div class="alerts-top">
+                    <h3>Threshold Violations</h3>
+                    <div class="badge-row" id="alertBadges"></div>
+                </div>
+                <div id="alertsList">
+                    <div class="alerts-empty"><i class="fas fa-check-circle" style="color:#16a34a;font-size:18px;margin-bottom:6px;display:block"></i>All clear — no active alerts</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Live feed + Connector health -->
+        <div class="two-col">
+            <div>
+                <div class="section-bar">
+                    <h2>Live Message Feed</h2>
+                    <span id="feedCount" style="font-size:12px;color:var(--muted)"></span>
+                </div>
+                <div class="card-panel">
+                    <div class="card-top">
+                        <h3>Most recent messages (across all interfaces)</h3>
+                        <span class="card-meta" id="feedAge">—</span>
+                    </div>
+                    <table class="data-table">
+                        <thead>
+                            <tr><th>Time</th><th>Interface</th><th>Type</th><th>Status</th><th>ms</th></tr>
+                        </thead>
+                        <tbody id="feedBody"><tr><td colspan="5" class="empty"><i class="fas fa-spinner fa-spin"></i></td></tr></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div>
+                <div class="section-bar">
+                    <h2>Connector Health</h2>
+                </div>
+                <div class="card-panel">
+                    <div class="card-top">
+                        <h3>Needs attention</h3>
+                        <div class="info-trigger" style="position:relative">ⓘ
+                            <div class="tooltip-box" style="right:0">
+                                Shows active interfaces whose connector last ended in an error,
+                                or that have never run. Healthy connectors are not shown.
+                                Fix the underlying issue, then re-activate from the Interfaces page.
+                            </div>
+                        </div>
+                    </div>
+                    <table class="data-table">
+                        <thead>
+                            <tr><th>Interface</th><th>Connector</th><th>Status</th><th>Last Run</th><th>Msgs</th></tr>
+                        </thead>
+                        <tbody id="connBody"><tr><td colspan="5" class="empty"><i class="fas fa-spinner fa-spin"></i></td></tr></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- Interface health cards -->
+        <div>
+            <div class="section-bar">
+                <h2>Interface Health</h2>
+                <a href="interfaces.html">Manage interfaces →</a>
+            </div>
+            <div class="health-grid">
+                <div class="health-grid-inner" id="healthGrid">
+                    <div class="empty" style="grid-column:1/-1"><i class="fas fa-spinner fa-spin"></i><p>Loading...</p></div>
+                </div>
+            </div>
+        </div>
+
+    </div><!-- /monitoring-body -->
+</div><!-- /main-content -->
+</div><!-- /dashboard-container -->
+
+<script src="/js/services/AuthService.js"></script>
+<script src="js/components/sidebar-nav.js?v=3"></script>
+<script>
+/* ── Config ────────────────────────────────────────────────────────────────── */
+const API = '/api/analytics';
+let refreshTimer;
+
+/* ── Boot ──────────────────────────────────────────────────────────────────── */
+document.addEventListener('DOMContentLoaded', async () => {
+    const ok = await window.AuthService.initialize();
+    if (!ok) return;
+    loadAll();
+    scheduleRefresh();
+
+    document.getElementById('refreshBtn').addEventListener('click', () => {
+        clearTimeout(refreshTimer);
+        loadAll();
+        scheduleRefresh();
+    });
+    document.getElementById('ackAllBtn').addEventListener('click', ackAll);
+    document.getElementById('dismissHelp').addEventListener('click', () => {
+        document.getElementById('helpBanner').style.display = 'none';
+        localStorage.setItem('mon_help_dismissed', '1');
+    });
+    if (localStorage.getItem('mon_help_dismissed')) {
+        document.getElementById('helpBanner').style.display = 'none';
+    }
+});
+
+function scheduleRefresh() {
+    refreshTimer = setTimeout(() => { loadAll(); scheduleRefresh(); }, 30000);
+}
+
+/* ── Load all ──────────────────────────────────────────────────────────────── */
+async function loadAll() {
+    document.getElementById('lastUpdated').textContent = 'Refreshing…';
+    await Promise.all([loadSummary(), loadFeed(), loadConnectors(), loadInterfaceHealth()]);
+    document.getElementById('lastUpdated').textContent = 'Updated ' + new Date().toLocaleTimeString();
+}
+
+async function fetchJSON(url) {
+    const r = await fetch(url, { credentials: 'include' });
+    if (!r.ok) throw new Error(r.statusText);
+    return r.json();
+}
+
+/* ── Summary / KPIs ────────────────────────────────────────────────────────── */
+async function loadSummary() {
+    try {
+        const { data } = await fetchJSON(`${API}/monitoring/summary`);
+        const kpis = data.kpis || {};
+        const trends = data.kpi_trends || {};
+        const sev = data.alert_count_by_severity || {};
+
+        document.getElementById('kpiMessages').textContent = fmt(kpis.messages_today);
+        document.getElementById('kpiErrorRate').textContent = (kpis.error_rate_24h || 0).toFixed(1) + '%';
+        document.getElementById('kpiAvgMs').textContent = (kpis.avg_processing_time_ms || 0).toFixed(0) + 'ms';
+        document.getElementById('kpiIfacesSub').textContent = `${kpis.active_interfaces || 0} / ${kpis.total_interfaces || 0} interfaces active`;
+        document.getElementById('kpiDLQ').textContent = fmt(kpis.dlq_depth);
+
+        // Colour error rate red if > 5%
+        const errEl = document.getElementById('kpiErrorRate');
+        errEl.style.color = kpis.error_rate_24h > 5 ? '#e11d48' : '#1a202c';
+
+        // DLQ red if > 0
+        const dlqEl = document.getElementById('kpiDLQ');
+        dlqEl.style.color = kpis.dlq_depth > 0 ? '#d97706' : '#1a202c';
+
+        // Alert chips
+        const chips = document.getElementById('alertChips');
+        chips.innerHTML = '';
+        if (sev.critical) chips.innerHTML += `<span class="badge badge-critical">${sev.critical} critical</span> `;
+        if (sev.warning)  chips.innerHTML += `<span class="badge badge-warning">${sev.warning} warning</span> `;
+        if (sev.info)     chips.innerHTML += `<span class="badge badge-info">${sev.info} info</span>`;
+        if (!sev.critical && !sev.warning && !sev.info) chips.textContent = 'No active alerts';
+
+        drawSparkline('spkMessages', trends.messages_today_sparkline || [], getComputedStyle(document.documentElement).getPropertyValue('--pink').trim() || '#db2777');
+        drawSparkline('spkErrors', trends.error_rate_sparkline || [], '#e11d48');
+
+        loadAlerts(sev);
+    } catch (e) { console.error('summary', e); }
+}
+
+async function loadAlerts(sev = {}) {
+    try {
+        const { data: alerts } = await fetchJSON(`${API}/monitoring/alerts`);
+
+        // Badge row
+        const badges = document.getElementById('alertBadges');
+        badges.innerHTML = '';
+        if (sev.critical) badges.innerHTML += `<span class="badge badge-critical">${sev.critical} Critical</span>`;
+        if (sev.warning)  badges.innerHTML += `<span class="badge badge-warning">${sev.warning} Warning</span>`;
+        if (sev.info)     badges.innerHTML += `<span class="badge badge-info">${sev.info} Info</span>`;
+
+        document.getElementById('alertCountLabel').textContent = alerts?.length ? `(${alerts.length})` : '';
+
+        const list = document.getElementById('alertsList');
+        if (!alerts?.length) {
+            list.innerHTML = `<div class="alerts-empty"><i class="fas fa-check-circle" style="color:#16a34a;font-size:18px;margin-bottom:6px;display:block"></i>All clear — no active alerts</div>`;
+            return;
+        }
+        list.innerHTML = alerts.map(a => `
+            <div class="alert-row" id="al-${a.id}">
+                <span class="sev-dot sev-${a.severity}"></span>
+                <div style="flex:1">
+                    <div class="alert-title">${esc(a.message)}</div>
+                    <div class="alert-meta">${esc(a.interface_name)} · ${a.alert_type} · ${elapsed(a.elapsed_seconds)}</div>
+                </div>
+                <button class="ack-btn" onclick="ackAlert('${a.id}')">Ack</button>
+            </div>`).join('');
+    } catch (e) { console.error('alerts', e); }
+}
+
+/* ── Live feed ─────────────────────────────────────────────────────────────── */
+async function loadFeed() {
+    try {
+        const { data: msgs } = await fetchJSON(`${API}/monitoring/live-messages?limit=50`);
+        const tb = document.getElementById('feedBody');
+        document.getElementById('feedCount').textContent = msgs?.length ? `${msgs.length} messages` : '';
+        if (!msgs?.length) { tb.innerHTML = `<tr><td colspan="5"><div class="empty"><i class="fas fa-inbox"></i><p>No messages yet</p></div></td></tr>`; return; }
+        tb.innerHTML = msgs.map(m => `<tr>
+            <td style="white-space:nowrap;color:var(--muted)">${timeAgo(m.received_at)}</td>
+            <td>${esc(m.interface_name)}</td>
+            <td><code style="font-size:10px;background:#fdf7fb;padding:1px 5px;border-radius:4px">${esc(m.message_type||'—')}</code></td>
+            <td>${pill(m.status)}</td>
+            <td style="color:var(--muted)">${m.processing_time_ms ?? '—'}</td>
+        </tr>`).join('');
+        document.getElementById('feedAge').textContent = msgs.length + ' messages';
+    } catch (e) {
+        document.getElementById('feedBody').innerHTML = `<tr><td colspan="5" style="text-align:center;padding:20px;color:#e11d48">${esc(e.message)}</td></tr>`;
+    }
+}
+
+/* ── Connector health ──────────────────────────────────────────────────────── */
+async function loadConnectors() {
+    try {
+        const { data: rows } = await fetchJSON(`${API}/monitoring/connector-health`);
+        const tb = document.getElementById('connBody');
+        if (!rows?.length) { tb.innerHTML = `<tr><td colspan="5"><div class="empty"><i class="fas fa-check-circle" style="color:#16a34a;font-size:18px;margin-bottom:6px;display:block"></i><p>All connectors healthy</p></div></td></tr>`; return; }
+        tb.innerHTML = rows.map(r => `<tr>
+            <td>${esc(r.interface_name)}</td>
+            <td><code style="font-size:10px;background:#fdf7fb;padding:1px 5px;border-radius:4px">${esc(r.connector_type)}</code></td>
+            <td>${pill(r.last_run_status || r.status)}</td>
+            <td style="color:var(--muted);white-space:nowrap">${r.last_run_at ? timeAgo(r.last_run_at) : '—'}</td>
+            <td>${r.messages_last_run}</td>
+        </tr>`).join('');
+    } catch (e) {
+        document.getElementById('connBody').innerHTML = `<tr><td colspan="5" style="text-align:center;padding:20px;color:#e11d48">${esc(e.message)}</td></tr>`;
+    }
+}
+
+/* ── Interface health cards ────────────────────────────────────────────────── */
+async function loadInterfaceHealth() {
+    try {
+        const { data: cards } = await fetchJSON(`${API}/monitoring/interface-health`);
+        const grid = document.getElementById('healthGrid');
+        if (!cards?.length) { grid.innerHTML = `<div class="empty" style="grid-column:1/-1"><i class="fas fa-plug"></i><p>No interfaces found</p></div>`; return; }
+        grid.innerHTML = cards.map(c => `
+            <a class="h-card" href="messages.html?interfaceId=${esc(c.interface_id)}" title="View messages for ${esc(c.interface_name)}">
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:3px">
+                    <span class="h-card-name" title="${esc(c.interface_name)}">${esc(c.interface_name)}</span>
+                    ${pill(c.status)}
+                </div>
+                <div class="h-card-conn">${esc(c.connector_type)}</div>
+                <div class="h-card-row">
+                    <div><div class="h-stat-val">${fmt(c.messages_today)}</div><div class="h-stat-lbl">Today</div></div>
+                    <div><div class="h-stat-val" style="color:${c.error_rate_today>5?'#e11d48':'#16a34a'}">${(c.error_rate_today||0).toFixed(1)}%</div><div class="h-stat-lbl">Errors</div></div>
+                </div>
+                <svg id="hc-${c.interface_id.replace(/-/g,'')}" width="100%" height="22"></svg>
+            </a>`).join('');
+        cards.forEach(c => drawSparkline('hc-' + c.interface_id.replace(/-/g,''), c.sparkline_data || [], '#db2777', 22));
+    } catch (e) {
+        document.getElementById('healthGrid').innerHTML = `<div class="empty" style="grid-column:1/-1"><i class="fas fa-exclamation-triangle"></i><p>${esc(e.message)}</p></div>`;
+    }
+}
+
+/* ── Acknowledge ───────────────────────────────────────────────────────────── */
+async function ackAlert(id) {
+    try {
+        await fetch(`${API}/monitoring/alerts/${id}/acknowledge`, {
+            method: 'POST', credentials: 'include',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ acknowledged_by: 'ui-user' }),
+        });
+        document.getElementById(`al-${id}`)?.remove();
+    } catch (e) { console.error(e); }
+}
+
+async function ackAll() {
+    for (const btn of document.querySelectorAll('.ack-btn')) {
+        const id = btn.closest('[id^="al-"]')?.id?.replace('al-', '');
+        if (id) await ackAlert(id);
+    }
+}
+
+/* ── Sparkline ─────────────────────────────────────────────────────────────── */
+function drawSparkline(id, data, color, h = 30) {
+    const svg = document.getElementById(id);
+    if (!svg || !data?.length) return;
+    const w = svg.clientWidth || svg.parentElement?.clientWidth || 180;
+    const max = Math.max(...data, 1);
+    const pts = data.map((v, i) => {
+        const x = (i / Math.max(data.length - 1, 1)) * w;
+        const y = h - (v / max) * (h - 4) - 2;
+        return `${x},${y}`;
+    });
+    svg.innerHTML = `<polyline points="${pts.join(' ')}" fill="none" stroke="${color}" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/>`;
+}
+
+/* ── Utilities ─────────────────────────────────────────────────────────────── */
+const fmt = n => n == null ? '—' : Number(n).toLocaleString();
+const esc = s => { const d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; };
+
+function pill(status) {
+    if (!status) return '<span class="pill pill-gray">—</span>';
+    const s = status.toLowerCase();
+    if (['active','completed','processed','success'].includes(s)) return `<span class="pill pill-green">${esc(status)}</span>`;
+    if (['failed','error'].includes(s)) return `<span class="pill pill-red">${esc(status)}</span>`;
+    if (['inactive','paused'].includes(s)) return `<span class="pill pill-yellow">${esc(status)}</span>`;
+    if (['queued','pending','no_runs'].includes(s)) return `<span class="pill pill-pink">${esc(status)}</span>`;
+    return `<span class="pill pill-gray">${esc(status)}</span>`;
+}
+
+function timeAgo(iso) {
+    if (!iso) return '—';
+    const d = Math.floor((Date.now() - new Date(iso)) / 1000);
+    if (d < 60) return d + 's ago';
+    if (d < 3600) return Math.floor(d/60) + 'm ago';
+    if (d < 86400) return Math.floor(d/3600) + 'h ago';
+    return new Date(iso).toLocaleDateString();
+}
+function elapsed(s) {
+    if (s < 60) return s + 's ago';
+    if (s < 3600) return Math.floor(s/60) + 'm ago';
+    return Math.floor(s/3600) + 'h ago';
+}
+
+</script>
+    <script src="/js/ai-assistant.js"></script>
+</body>
+</html>

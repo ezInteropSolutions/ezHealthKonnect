@@ -13,7 +13,7 @@ require('dotenv').config();
 // DEBUGGING: Check environment and ports
 const FRONTEND_PORT = process.env.PORT || 3000;
 const GO_BACKEND_PORT = process.env.API_PORT || 8080;
-const GO_BACKEND_URL = `http://localhost:${GO_BACKEND_PORT}`;
+const GO_BACKEND_URL = `http://127.0.0.1:${GO_BACKEND_PORT}`;
 
 console.log('Proxy configuration:');
 console.log(`Frontend Port: ${FRONTEND_PORT}`);
@@ -155,6 +155,14 @@ const forwardToGo = async (req, res) => {
                 'User-Agent': req.get('User-Agent') || 'Node.js Proxy'
             }
         };
+
+        // Forward authenticated user identity to Go backend.
+        // req.user is set by JWT verifyToken; req.session.user by session-based requireAuth.
+        if (req.user && req.user.id) {
+            options.headers['X-User-ID'] = String(req.user.id);
+        } else if (req.session && req.session.user && req.session.user.id) {
+            options.headers['X-User-ID'] = String(req.session.user.id);
+        }
         
         // Add body for POST/PUT/PATCH requests
         if (['POST', 'PUT', 'PATCH'].includes(req.method) && req.body) {
@@ -166,16 +174,28 @@ const forwardToGo = async (req, res) => {
         
         console.log(`Response: ${response.status} ${response.statusText}`);
         
+        const contentType = response.headers.get('content-type') || '';
+
+        // Stream SSE responses directly — do not buffer them
+        if (contentType.includes('text/event-stream')) {
+            res.status(response.status);
+            res.set('Content-Type', 'text/event-stream');
+            res.set('Cache-Control', 'no-cache');
+            res.set('X-Accel-Buffering', 'no');
+            res.set('Connection', 'keep-alive');
+            response.body.pipe(res);
+            response.body.on('end', () => res.end());
+            return; // pipe handles the rest
+        }
+
         // Get response data
         let data;
-        const contentType = response.headers.get('content-type');
-        
-        if (contentType && contentType.includes('application/json')) {
+        if (contentType.includes('application/json')) {
             data = await response.json();
         } else {
             data = await response.text();
         }
-        
+
         // Copy important response headers
         const headersToForward = ['content-type', 'cache-control', 'expires', 'last-modified'];
         headersToForward.forEach(header => {
@@ -184,7 +204,7 @@ const forwardToGo = async (req, res) => {
                 res.set(header, value);
             }
         });
-        
+
         // Send response with correct status
         res.status(response.status);
         if (typeof data === 'string') {
@@ -192,7 +212,7 @@ const forwardToGo = async (req, res) => {
         } else {
             res.json(data);
         }
-        
+
         console.log(`PROXY SUCCESS: ${response.status} for ${req.originalUrl}`);
         
     } catch (error) {
@@ -214,6 +234,9 @@ app.use('/api/system', forwardToGo);
 app.use('/api/processing', forwardToGo);  // NEW: Processing engine routes
 app.use('/api/mllp', forwardToGo);        // NEW: MLLP connectivity routes
 app.use('/api/connectivity', forwardToGo); // Connector types + interface connectivity
+app.use('/api/ai', forwardToGo);           // Local AI assistant (Ollama/RAG — no PHI leaves network)
+app.use('/api/code-templates', forwardToGo); // Code Template Libraries (JS function injection into script steps)
+// /api/git is registered below (after session middleware, with requireAuth)
 app.post('/api/pipeline/reference-variables', forwardToGo);  // Exact match - avoid intercepting /api/pipelines/*
 
 // Database query testing routes - use explicit route matching
@@ -229,6 +252,9 @@ console.log('✅ File parser routes registered (preview + templates + browse)');
 console.log('Simple proxy configured successfully');
 
 // Session configuration
+// SESSION_TIMEOUT_MINUTES can be set by server.js after reading system_settings at startup.
+// Default: 1440 minutes (24 h).  Admin can change via Settings → Security.
+const _sessionTimeoutMinutes = parseInt(process.env.SESSION_TIMEOUT_MINUTES || '1440', 10);
 const sessionConfig = {
     secret: process.env.SESSION_SECRET || 'your-session-secret',
     resave: false,
@@ -237,12 +263,21 @@ const sessionConfig = {
     cookie: {
         secure: process.env.NODE_ENV === 'production',
         httpOnly: true,
-        maxAge: 24 * 60 * 60 * 1000,
-        sameSite: 'lax' // Changed from 'strict' to 'lax' for better compatibility
+        maxAge: _sessionTimeoutMinutes * 60 * 1000,
+        sameSite: 'lax'
     }
 };
 
 app.use(session(sessionConfig));
+
+// Analytics + Alerts + Git + Migration routes — require session auth before forwarding to Go
+const { requireAuth: _analyticsAuth } = require('./middleware/auth');
+app.use('/api/analytics', _analyticsAuth, forwardToGo);
+app.use('/api/alerts',    _analyticsAuth, forwardToGo);
+// Override the early /api/git registration with an auth-protected version (session is now initialized)
+app.use('/api/git',       _analyticsAuth, forwardToGo);
+// Mirth Connect migration — auth required
+app.use('/api/migration', _analyticsAuth, forwardToGo);
 
 // Add request ID for audit logging
 app.use((req, res, next) => {
@@ -280,8 +315,21 @@ console.log('🔄 Mounting /api/auth...');
 app.use('/api/auth', authRoutes);
 console.log('🔄 Mounting /api/users...');
 app.use('/api/users', userRoutes);
+console.log('🔄 Mounting /api/audit-logs...');
+const auditLogRoutes = require('./controllers/auditController');
+app.use('/api/audit-logs', auditLogRoutes);
+console.log('✅ Audit log routes mounted');
 console.log('🔄 Mounting /api/interfaces...');
 app.use('/api/interfaces', interfacesRoutes);
+console.log('🔄 Mounting /api/interface-templates...');
+const interfaceTemplateRoutes = require('./routes/interfaceTemplateRoutes');
+app.use('/api/interface-templates', interfaceTemplateRoutes);
+// Save-as-template endpoints live under /api/interfaces/:id/...
+const ifaceTemplateCtrl = require('./controllers/interfaceTemplateController');
+const { requireAuth: _isAuth } = require('./middleware/auth');
+app.post('/api/interfaces/:interfaceId/save-as-template', _isAuth, ifaceTemplateCtrl.saveInterfaceAsTemplate);
+app.post('/api/interfaces/:interfaceId/template-preview', ifaceTemplateCtrl.previewSanitization);
+console.log('✅ Interface template routes mounted');
 console.log('🔄 Mounting /api/wizard...');
 app.use('/api/wizard', wizardRoutes);
 // Forward object-storage endpoints to Go BEFORE local message routes
@@ -380,6 +428,30 @@ app.get('/api/user-info', (req, res) => {
     } catch (error) {
         console.error('❌ Error in /api/user-info:', error);
         res.status(500).json({ message: 'Internal server error', error: error.message });
+    }
+});
+
+// DASHBOARD: Recent activity from audit_logs
+app.get('/api/dashboard/recent-activity', async (req, res) => {
+    if (!req.session || !req.session.user) return res.status(401).json({ success: false });
+    try {
+        const { sequelize } = require('./config/database');
+        const { QueryTypes } = require('sequelize');
+        const rows = await sequelize.query(`
+            SELECT
+                al.action,
+                al.entity_type,
+                al.result,
+                al.created_at,
+                u.name AS user_name
+            FROM audit_logs al
+            LEFT JOIN users u ON u.id = al.user_id
+            ORDER BY al.created_at DESC
+            LIMIT 8
+        `, { type: QueryTypes.SELECT });
+        res.json({ success: true, activity: rows });
+    } catch (e) {
+        res.json({ success: false, error: e.message });
     }
 });
 

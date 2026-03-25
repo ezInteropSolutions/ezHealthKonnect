@@ -1,0 +1,900 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Reports – ezHealthKonnect</title>
+    <link rel="stylesheet" href="css/dashboard.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        /* ── Design tokens ───────────────────────────────────────────────────── */
+        :root {
+            --pink:       #db2777;
+            --pink-dark:  #9d174d;
+            --pink-light: #fce7f3;
+            --pink-mid:   #f9a8d4;
+            --navy:       #1e3a8a;
+            --white:      #ffffff;
+            --page-bg:    #ffffff;
+            --border:     #e8eaf0;
+            --row-hover:  #f9fafb;
+            --text:       #1a202c;
+            --muted:      #6b7280;
+        }
+        body { background: var(--page-bg); }
+
+        /* ── Layout ──────────────────────────────────────────────────────────── */
+        .main-content { flex:1; display:flex; flex-direction:column; overflow:hidden; background:var(--page-bg); }
+        .page-header {
+            padding:20px 28px 16px; background:var(--white);
+            border-bottom:1px solid var(--border);
+            display:flex; align-items:center; justify-content:space-between; flex-shrink:0;
+        }
+        .page-header h1 { font-size:18px; font-weight:700; color:var(--navy); }
+        .page-header h1 i { color:var(--navy); margin-right:8px; }
+        .page-header p   { font-size:13px; color:var(--muted); margin-top:2px; }
+
+        /* ── Tabs ────────────────────────────────────────────────────────────── */
+        .tabs-bar {
+            display:flex; gap:2px; padding:0 28px;
+            background:var(--white); border-bottom:1px solid var(--border); flex-shrink:0;
+        }
+        .tab-btn {
+            padding:12px 20px; font-size:13px; font-weight:500; color:var(--muted);
+            background:none; border:none; border-bottom:2px solid transparent; cursor:pointer; transition:all .15s;
+        }
+        .tab-btn.active { color:var(--pink); border-bottom-color:var(--pink); font-weight:700; }
+        .tab-btn:hover:not(.active) { color:var(--text); }
+
+        .reports-body { flex:1; overflow-y:auto; padding:22px 28px 40px; }
+        .tab-pane { display:none; }
+        .tab-pane.active { display:block; }
+
+        /* ── Help box (collapsible) ───────────────────────────────────────────── */
+        .help-box {
+            background:#ffffff;
+            border:1px solid #e8eaf0; border-left:3px solid var(--pink-mid); border-radius:8px;
+            margin-bottom:20px; overflow:hidden;
+        }
+        .help-box-toggle {
+            width:100%; display:flex; align-items:center; justify-content:space-between;
+            padding:11px 16px; background:none; border:none; cursor:pointer;
+            font-size:13px; font-weight:600; color:#374151; text-align:left;
+        }
+        .help-box-toggle i { transition:transform .2s; color:var(--pink-mid); }
+        .help-box-toggle.open i { transform:rotate(180deg); }
+        .help-box-body { padding:0 16px 14px; font-size:12px; color:#4b5563; line-height:1.7; display:none; }
+        .help-box-body.open { display:block; }
+        .help-box-body h4 { font-size:12px; font-weight:700; color:#374151; margin:10px 0 4px; }
+        .help-box-body ul { padding-left:18px; }
+        .help-box-body li { margin-bottom:4px; }
+        .help-box-body code { background:#f3f4f6; color:#374151; padding:1px 5px; border-radius:4px; font-size:11px; }
+
+        /* ── Gallery ─────────────────────────────────────────────────────────── */
+        .cat-label {
+            font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.05em;
+            color:var(--muted); margin:22px 0 10px;
+        }
+        .cat-label:first-child { margin-top:0; }
+        .report-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(270px,1fr)); gap:14px; margin-bottom:4px; }
+
+        .report-card {
+            background:var(--white); border:1px solid var(--border); border-radius:12px; padding:16px;
+            display:flex; flex-direction:column; gap:8px;
+            cursor:pointer; transition:border-color .15s, box-shadow .15s;
+        }
+        .report-card:hover { border-color:#cbd5e1; box-shadow:0 3px 10px rgba(0,0,0,.07); }
+        .rc-head  { display:flex; align-items:flex-start; justify-content:space-between; gap:8px; }
+        .rc-title { font-size:13px; font-weight:700; color:var(--text); }
+        .rc-viz   { font-size:20px; flex-shrink:0; }
+        .rc-desc  { font-size:12px; color:var(--muted); line-height:1.55; }
+
+        /* Value-add box inside card */
+        .rc-value {
+            background:#f8fafc; border-radius:8px; padding:8px 10px;
+            font-size:11px; color:#4b5563; line-height:1.5;
+            border-left:2px solid var(--pink-mid);
+        }
+        .rc-value strong { color:#1e293b; }
+
+        .rc-foot { display:flex; align-items:center; gap:6px; margin-top:2px; }
+        .tag { font-size:10px; font-weight:700; padding:2px 8px; border-radius:8px; background:#f1f5f9; color:#475569; }
+        .tag-sys { background:#f0fdf4; color:#15803d; }
+        .run-btn {
+            margin-left:auto; padding:5px 14px; border-radius:20px;
+            background:#3b82f6; color:#fff; border:none; font-size:12px; font-weight:600; cursor:pointer;
+        }
+        .run-btn:hover { background:#2563eb; }
+        .del-btn {
+            padding:5px 10px; border-radius:8px; background:#fff0f0; color:#e11d48;
+            border:none; font-size:12px; cursor:pointer;
+        }
+        .del-btn:hover { background:#fee2e2; }
+
+        /* ── Builder layout ──────────────────────────────────────────────────── */
+        .builder-layout { display:grid; grid-template-columns:300px 1fr; gap:18px; align-items:start; }
+
+        .bld-panel { background:var(--white); border:1px solid var(--border); border-radius:12px; overflow:hidden; }
+        .bld-head  { padding:14px 18px; border-bottom:1px solid #f0f0f0; font-size:13px; font-weight:700; color:var(--navy); }
+        .bld-form  { padding:16px 18px; display:flex; flex-direction:column; gap:13px; }
+
+        .fg { display:flex; flex-direction:column; gap:4px; }
+        .fg label { font-size:11px; font-weight:700; color:#4a5568; text-transform:uppercase; letter-spacing:.03em; }
+        .fg-hint  { font-size:10px; color:var(--muted); line-height:1.4; }
+        .fg select, .fg input {
+            padding:8px 10px; border:1px solid var(--border); border-radius:7px;
+            font-size:13px; color:var(--text); background:var(--white); outline:none;
+        }
+        .fg select:focus, .fg input:focus { border-color:#94a3b8; box-shadow:0 0 0 2px rgba(148,163,184,.15); }
+
+        .time-shortcuts { display:flex; flex-wrap:wrap; gap:5px; }
+        .tshort {
+            padding:4px 10px; border-radius:10px; border:1px solid var(--border);
+            font-size:11px; font-weight:600; color:var(--muted); background:var(--white); cursor:pointer; transition:all .1s;
+        }
+        .tshort.active { background:#eff6ff; color:#1d4ed8; border-color:#93c5fd; }
+        .tshort:hover:not(.active) { border-color:#94a3b8; color:var(--text); }
+
+        .metric-grid { display:grid; grid-template-columns:1fr 1fr; gap:5px; }
+        .mc { display:flex; align-items:center; gap:5px; font-size:11px; color:var(--text); cursor:pointer; }
+        .mc input { width:14px; height:14px; accent-color:#3b82f6; cursor:pointer; }
+
+        .btn-primary {
+            padding:10px; background:#2563eb; color:#fff; border:none; border-radius:8px;
+            font-size:13px; font-weight:700; cursor:pointer; transition:background .15s;
+        }
+        .btn-primary:hover { background:#1d4ed8; }
+        .btn-primary:disabled { background:#d1d5db; cursor:not-allowed; }
+        .btn-outline {
+            padding:10px; background:var(--white); color:#374151;
+            border:1.5px solid #d1d5db; border-radius:8px; font-size:13px; font-weight:700; cursor:pointer;
+        }
+        .btn-outline:hover { background:#f9fafb; }
+
+        /* ── Results panel ───────────────────────────────────────────────────── */
+        .res-panel { background:var(--white); border:1px solid var(--border); border-radius:12px; overflow:hidden; }
+        .res-head  {
+            padding:14px 18px; border-bottom:1px solid #f0f0f0;
+            display:flex; align-items:center; justify-content:space-between;
+        }
+        .res-head h3 { font-size:13px; font-weight:700; color:var(--navy); }
+        .res-meta    { font-size:11px; color:var(--muted); }
+        .res-body    { overflow-x:auto; }
+
+        /* Bar chart */
+        .chart-wrap  { padding:18px; min-height:180px; display:flex; align-items:flex-end; gap:5px; }
+        .bar-col     { display:flex; flex-direction:column; align-items:center; gap:3px; flex:1; min-width:36px; }
+        .bar         { background:#3b82f6; border-radius:4px 4px 0 0; width:100%; min-height:2px; transition:height .3s; }
+        .bar-val     { font-size:10px; color:var(--text); font-weight:700; }
+        .bar-lbl     { font-size:9px; color:var(--muted); text-align:center; word-break:break-all; line-height:1.2; }
+
+        /* Metric cards */
+        .mc-grid  { display:grid; grid-template-columns:repeat(auto-fill,minmax(160px,1fr)); gap:12px; padding:16px; }
+        .mc-card  { border:1px solid var(--border); border-radius:10px; padding:14px; text-align:center; }
+        .mc-val   { font-size:24px; font-weight:800; color:var(--text); }
+        .mc-lbl   { font-size:10px; color:var(--muted); font-weight:700; text-transform:uppercase; margin-top:4px; }
+
+        /* Data table */
+        .data-table { width:100%; border-collapse:collapse; font-size:12px; }
+        .data-table th {
+            padding:8px 14px; text-align:left; font-size:10px; font-weight:700;
+            color:var(--muted); text-transform:uppercase; letter-spacing:.04em;
+            background:#f8f9fa; border-bottom:1px solid var(--border);
+        }
+        .data-table td { padding:10px 14px; border-bottom:1px solid #f3f4f6; color:#374151; }
+        .data-table tr:last-child td { border-bottom:none; }
+        .data-table tr:hover td { background:var(--row-hover); }
+
+        /* Empty / spinner */
+        .empty { padding:52px 24px; text-align:center; color:#a0aec0; }
+        .empty i { font-size:32px; margin-bottom:10px; display:block; }
+        .empty p { font-size:13px; }
+        .spin-row { display:flex; align-items:center; justify-content:center; gap:10px; padding:52px; color:#a0aec0; font-size:13px; }
+
+        /* Export button */
+        .export-btn {
+            margin-left:auto; padding:5px 12px; border-radius:6px;
+            background:#fff; border:1px solid #d1d5db; color:#374151;
+            font-size:11px; font-weight:600; cursor:pointer; display:flex; align-items:center; gap:5px;
+            transition:background .12s;
+        }
+        .export-btn:hover { background:#f9fafb; border-color:#94a3b8; }
+
+        /* Toast */
+        #toast { position:fixed; bottom:24px; right:24px; background:#1a202c; color:#fff; padding:10px 18px; border-radius:10px; font-size:13px; z-index:9999; opacity:0; transition:opacity .2s; pointer-events:none; }
+        #toast.show { opacity:1; }
+        #toast.err  { background:#dc2626; }
+    </style>
+</head>
+<body>
+<div class="dashboard-container">
+
+<!-- ── Sidebar ─────────────────────────────────────────────────────────────── -->
+<nav class="sidebar" id="sidebar">
+    <button class="sidebar-toggle" id="sidebarToggle"><span class="toggle-icon">‹</span></button>
+    <div class="logo-container">
+        <img src="/assets/logos/ezHealthKonnect.jpeg" alt="ezHealthKonnect" class="logo-image">
+        <div class="logo-text">
+            <h3 class="brand-name">ez<span class="brand-accent">Health</span>Konnect</h3>
+            <p class="brand-tagline">Healthcare Integration</p>
+        </div>
+    </div>
+    <div class="nav-menu">
+        <div class="nav-section">
+            <div class="section-header"><span class="section-title">Main</span><i class="fas fa-chevron-down nav-section-chevron"></i></div>
+            <div class="nav-items">
+                <a href="dashboard.html" class="nav-item"><span class="nav-icon"><i class="far fa-house"></i></span><span class="nav-label">Dashboard</span></a>
+                <a href="interfaces.html" class="nav-item"><span class="nav-icon"><i class="fas fa-plug"></i></span><span class="nav-label">Interfaces</span></a>
+                <a href="messages.html" class="nav-item"><span class="nav-icon"><i class="far fa-envelope"></i></span><span class="nav-label">Messages</span></a>
+                <a href="review-queue.html" class="nav-item"><span class="nav-icon"><i class="far fa-circle-exclamation"></i></span><span class="nav-label">Review Queue</span></a>
+                <a href="dashboard.html#templates" class="nav-item"><span class="nav-icon"><i class="far fa-file-lines"></i></span><span class="nav-label">Templates</span></a>
+            </div>
+        </div>
+        <div class="nav-section">
+            <div class="section-header"><span class="section-title">Analytics</span><i class="fas fa-chevron-down nav-section-chevron"></i></div>
+            <div class="nav-items">
+                <a href="monitoring.html" class="nav-item"><span class="nav-icon"><i class="far fa-chart-bar"></i></span><span class="nav-label">Monitoring</span></a>
+                <a href="reports.html" class="nav-item active"><span class="nav-icon"><i class="fas fa-chart-line"></i></span><span class="nav-label">Reports</span></a>
+            </div>
+        </div>
+        <div class="nav-section">
+            <div class="section-header"><span class="section-title">Tools</span><i class="fas fa-chevron-down nav-section-chevron"></i></div>
+            <div class="nav-items">
+                <a href="hl7-reader.html" class="nav-item"><span class="nav-icon"><i class="fas fa-stethoscope"></i></span><span class="nav-label">HL7 Reader</span></a>
+            </div>
+        </div>
+        <div class="nav-section admin-section" id="adminSection" style="display:none">
+            <div class="section-header"><span class="section-title">Admin</span><i class="fas fa-chevron-down nav-section-chevron"></i></div>
+            <div class="nav-items">
+                <a href="user-management.html" class="nav-item"><span class="nav-icon"><i class="fas fa-users"></i></span><span class="nav-label">Users</span></a>
+                <a href="settings.html" class="nav-item"><span class="nav-icon"><i class="fas fa-sliders"></i></span><span class="nav-label">Settings</span></a>
+            </div>
+        </div>
+    </div>
+    <div class="user-profile">
+        <div class="user-info">
+            <div class="user-avatar" id="userAvatar">S</div>
+            <div class="user-details">
+                <span class="user-name" id="userName">System User</span>
+                <span class="user-role" id="userRole">ADMIN</span>
+            </div>
+        </div>
+        <button class="logout-btn" id="logoutBtn" title="Logout"><i class="fas fa-right-from-bracket"></i></button>
+    </div>
+</nav>
+
+<!-- ── Main ───────────────────────────────────────────────────────────────── -->
+<div class="main-content">
+
+    <div class="page-header">
+        <div>
+            <h1><i class="far fa-pen-to-square"></i>Reports</h1>
+            <p>12 built-in reports for operations, compliance, and performance — plus a self-service ad-hoc builder</p>
+        </div>
+    </div>
+
+    <div class="tabs-bar">
+        <button class="tab-btn active" data-tab="gallery"><i class="far fa-pen-to-square"></i> Report Gallery</button>
+        <button class="tab-btn" data-tab="builder"><i class="far fa-pen-to-square"></i> Ad-hoc Builder</button>
+        <button class="tab-btn" data-tab="saved"><i class="far fa-pen-to-square"></i> My Saved Reports</button>
+    </div>
+
+    <div class="reports-body">
+
+        <!-- ── GALLERY TAB ─────────────────────────────────────────────────── -->
+        <div class="tab-pane active" id="tab-gallery">
+
+            <!-- Gallery help -->
+            <div class="help-box">
+                <button class="help-box-toggle open" id="galleryHelpToggle">
+                    <span><i class="far fa-circle-info" style="margin-right:7px;color:var(--pink)"></i>How to use the Report Gallery</span>
+                    <i class="fas fa-chevron-up"></i>
+                </button>
+                <div class="help-box-body open" id="galleryHelpBody">
+                    <p>The gallery contains <strong>12 system reports</strong> designed by the ezHealthKonnect team. They are read-only and always available.</p>
+                    <h4>Workflow</h4>
+                    <ul>
+                        <li>Find a report relevant to your question and click <strong>Run</strong> — results open instantly in the Ad-hoc Builder tab.</li>
+                        <li>Each card shows the report's <em>purpose</em> and a <em>pink value box</em> explaining what insight it gives you and when to use it.</li>
+                        <li>Want to tweak the time range or dimension? After running, switch to the <strong>Ad-hoc Builder</strong> tab and adjust filters, then click <strong>Run Report</strong>.</li>
+                        <li>Happy with a custom configuration? Click <strong>Save Report</strong> to persist it under <em>My Saved Reports</em>.</li>
+                    </ul>
+                    <h4>Report categories</h4>
+                    <ul>
+                        <li><strong>Message Flow</strong> — volume, status, and type distribution of HL7 messages</li>
+                        <li><strong>Pipeline Performance</strong> — execution times, error rates, and bottleneck steps</li>
+                        <li><strong>HIPAA &amp; Compliance</strong> — PHI access audit and data masking coverage</li>
+                        <li><strong>Connector Activity</strong> — inbound/outbound connector run history</li>
+                        <li><strong>Dead Letter Queue</strong> — failed messages that need manual review</li>
+                        <li><strong>User Activity</strong> — login events, config changes, and risk actions</li>
+                    </ul>
+                </div>
+            </div>
+
+            <div id="galleryContent">
+                <div class="spin-row"><i class="fas fa-spinner fa-spin"></i> Loading reports…</div>
+            </div>
+        </div>
+
+        <!-- ── BUILDER TAB ─────────────────────────────────────────────────── -->
+        <div class="tab-pane" id="tab-builder">
+
+            <!-- Builder help (collapsible) -->
+            <div class="help-box" style="margin-bottom:20px">
+                <button class="help-box-toggle" id="builderHelpToggle">
+                    <span><i class="far fa-circle-info" style="margin-right:7px;color:var(--pink)"></i>Builder guide — click to expand</span>
+                    <i class="fas fa-chevron-down"></i>
+                </button>
+                <div class="help-box-body" id="builderHelpBody">
+                    <h4>Step 1 — Choose a Data Source</h4>
+                    <ul>
+                        <li><code>Message Flow</code> — queries all interface message tables. Best for: volume trends, status breakdowns, message type distribution.</li>
+                        <li><code>Pipeline Performance</code> — queries <code>transformation_executions</code> and <code>step_executions</code>. Best for: identifying slow steps, success rates, p95 latency.</li>
+                        <li><code>HIPAA Audit</code> — queries <code>pipeline_step_audit</code>. Best for: compliance reports, PHI field access, masking coverage.</li>
+                        <li><code>Connector Activity</code> — queries <code>connectivity_execution_log</code>. Best for: connector reliability, messages retrieved per run.</li>
+                        <li><code>DLQ Analysis</code> — queries <code>dead_letter_queue</code>. Best for: finding recurring failure patterns and unresolved messages.</li>
+                        <li><code>User Activity</code> — queries <code>audit_logs</code>. Best for: security audits, change history, high-risk action tracking.</li>
+                    </ul>
+                    <h4>Step 2 — Dimension (Group By)</h4>
+                    <ul>
+                        <li><code>day / hour / week</code> — time-bucketed trends. Use for line or bar charts showing volume over time.</li>
+                        <li><code>interface</code> — one row per integration interface. Great for comparing interfaces side-by-side.</li>
+                        <li><code>message_type</code> — splits by HL7 event type (ADT^A01, ORU^R01 …). Shows your message mix.</li>
+                        <li><code>status</code> — groups by processed / failed / queued. Use with pie/donut for status distribution.</li>
+                        <li><code>step_type</code> — Pipeline Performance only. Ranks steps by failure count or duration.</li>
+                    </ul>
+                    <h4>Step 3 — Metrics</h4>
+                    <p>Select the columns you want in the result. All metrics are pre-checked based on your data source. Uncheck any you don't need.</p>
+                    <h4>Step 4 — Time Range</h4>
+                    <p>Preset shortcuts: <code>24h</code> (last 24 hours), <code>7d</code> (7 days), <code>30d</code> (30 days), <code>90d</code> (quarter). All ranges are relative to now.</p>
+                    <h4>Step 5 — Visualization</h4>
+                    <ul>
+                        <li><code>Bar Chart</code> — best for comparing values across categories (interfaces, step types).</li>
+                        <li><code>Line Chart</code> — same rendering as bar, ideal for time-series (day/hour dimensions).</li>
+                        <li><code>Pie / Donut</code> — best for proportional breakdowns (status, message type mix).</li>
+                        <li><code>Table</code> — raw tabular output. Ideal for audit exports and drill-down.</li>
+                        <li><code>Metric Cards</code> — highlights scalar KPIs from the first result row. Best for executive summaries.</li>
+                    </ul>
+                    <h4>Result Limit</h4>
+                    <p>Controls the maximum rows returned. Keep low (100–500) for UI responsiveness. Maximum allowed is 10,000 rows.</p>
+                </div>
+            </div>
+
+            <div class="builder-layout">
+                <!-- Config panel -->
+                <div class="bld-panel">
+                    <div class="bld-head"><i class="far fa-pen-to-square" style="margin-right:7px;color:var(--pink)"></i>Configure Report</div>
+                    <div class="bld-form">
+                        <div class="fg">
+                            <label>Data Source</label>
+                            <select id="bldDS">
+                                <option value="message_flow">Message Flow</option>
+                                <option value="pipeline_performance">Pipeline Performance</option>
+                                <option value="hipaa_audit">HIPAA Audit</option>
+                                <option value="connector_activity">Connector Activity</option>
+                                <option value="dlq_analysis">DLQ Analysis</option>
+                                <option value="user_activity">User Activity</option>
+                            </select>
+                            <span class="fg-hint" id="dsHint">Queries message volume and status across all interface tables.</span>
+                        </div>
+                        <div class="fg">
+                            <label>Interface <span style="font-weight:400;color:var(--muted)">(optional)</span></label>
+                            <select id="bldInterface">
+                                <option value="">All Interfaces</option>
+                            </select>
+                            <span class="fg-hint">Filter results to a single interface, or leave as All.</span>
+                        </div>
+                        <div class="fg">
+                            <label>Dimension (Group By)</label>
+                            <select id="bldDim">
+                                <option value="day">Day</option>
+                                <option value="hour">Hour</option>
+                                <option value="week">Week</option>
+                                <option value="interface_id">Interface</option>
+                                <option value="message_type">Message Type</option>
+                                <option value="status">Status</option>
+                                <option value="step_type">Step Type</option>
+                                <option value="bucket">Time Bucket</option>
+                            </select>
+                            <span class="fg-hint">The column used to group / aggregate result rows.</span>
+                        </div>
+                        <div class="fg">
+                            <label>Metrics</label>
+                            <div class="metric-grid" id="metricGrid"><!-- JS --></div>
+                            <span class="fg-hint">Select the numeric columns to include in results.</span>
+                        </div>
+                        <div class="fg">
+                            <label>Time Range</label>
+                            <div class="time-shortcuts">
+                                <button class="tshort active" data-r="last_24h">24h</button>
+                                <button class="tshort" data-r="last_7d">7 days</button>
+                                <button class="tshort" data-r="last_30d">30 days</button>
+                                <button class="tshort" data-r="last_90d">90 days</button>
+                            </div>
+                            <span class="fg-hint">All ranges are relative to the current server time.</span>
+                        </div>
+                        <div class="fg">
+                            <label>Visualization</label>
+                            <select id="bldViz">
+                                <option value="bar">📊 Bar Chart</option>
+                                <option value="line">📈 Line Chart</option>
+                                <option value="pie">🥧 Pie / Donut</option>
+                                <option value="table">📋 Table</option>
+                                <option value="metric_cards">🔢 Metric Cards</option>
+                            </select>
+                            <span class="fg-hint">Determines how result data is rendered. Table always shown below chart.</span>
+                        </div>
+                        <div class="fg">
+                            <label>Result Limit</label>
+                            <input type="number" id="bldLimit" value="100" min="1" max="10000">
+                            <span class="fg-hint">Max rows returned. Keep ≤ 500 for fast UI rendering.</span>
+                        </div>
+                        <button class="btn-primary" id="runBtn"><i class="far fa-play"></i> Run Report</button>
+                        <button class="btn-outline" id="saveBtn"><i class="far fa-floppy-disk"></i> Save Report</button>
+                    </div>
+                </div>
+
+                <!-- Results -->
+                <div id="resultsPanel" class="res-panel">
+                    <div class="empty">
+                        <i class="far fa-pen-to-square" style="color:var(--pink-mid)"></i>
+                        <p>Configure the report on the left and click <strong>Run Report</strong> to see results here.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ── SAVED TAB ───────────────────────────────────────────────────── -->
+        <div class="tab-pane" id="tab-saved">
+            <div id="savedContent">
+                <div class="spin-row"><i class="fas fa-spinner fa-spin"></i> Loading…</div>
+            </div>
+        </div>
+
+    </div><!-- /reports-body -->
+</div><!-- /main-content -->
+</div><!-- /dashboard-container -->
+
+<div id="toast"></div>
+
+<script src="/js/services/AuthService.js"></script>
+<script src="js/components/sidebar-nav.js?v=3"></script>
+<script>
+/* ── Metadata ──────────────────────────────────────────────────────────────── */
+const API = '/api/analytics';
+
+const DS_HINTS = {
+    message_flow:        'Queries message volume and status across all interface message tables.',
+    pipeline_performance:'Queries transformation_executions and step_executions for timing and error data.',
+    hipaa_audit:         'Queries pipeline_step_audit for PHI field access and masking coverage.',
+    connector_activity:  'Queries connectivity_execution_log for connector run history and performance.',
+    dlq_analysis:        'Queries dead_letter_queue for unresolved failed messages and retry patterns.',
+    user_activity:       'Queries audit_logs for login events, configuration changes, and high-risk actions.',
+};
+
+const METRICS = {
+    message_flow:        ['total_messages','processed_count','failed_count','error_rate_pct','avg_processing_time_ms'],
+    pipeline_performance:['total_executions','success_rate_pct','avg_duration_ms','p95_duration_ms','p99_duration_ms','failure_count'],
+    hipaa_audit:         ['phi_fields_touched','masked_fields','step_name','step_type','interface_id'],
+    connector_activity:  ['execution_count','success_rate_pct','avg_duration_ms','messages_retrieved'],
+    dlq_analysis:        ['dlq_count','avg_retry_count','resolution_rate_pct'],
+    user_activity:       ['action_count','risk_level','user_id','ip_address'],
+};
+
+const VIZ_ICON = { bar:'📊', line:'📈', pie:'🥧', table:'📋', metric_cards:'🔢' };
+
+const CAT_LABELS = {
+    message_flow:'Message Flow', pipeline_performance:'Pipeline Performance',
+    hipaa_audit:'HIPAA & Compliance', connector_activity:'Connector Activity',
+    dlq_analysis:'Dead Letter Queue', user_activity:'User Activity', custom:'Custom',
+};
+
+/* Value-add copy for each OOB report (by slug) */
+const REPORT_VALUE = {
+    'oob-interface-throughput-trends': {
+        value: 'Shows daily message volume per interface over 7 days. <strong>When to use:</strong> Spot traffic drops (connector down?) or surges (batch job fired?). Share with operations teams during go-live or capacity planning.',
+    },
+    'oob-message-status-distribution': {
+        value: 'Pie breakdown of processed / failed / queued messages in the last 24h. <strong>When to use:</strong> Quick health-check — if failed slice is growing, investigate pipeline errors immediately.',
+    },
+    'oob-message-type-mix': {
+        value: 'Shows what proportion of your traffic is ADT, ORU, ORM, etc. <strong>When to use:</strong> Onboarding new message types, verifying routing rules, or auditing unexpected message types.',
+    },
+    'oob-pipeline-execution-summary': {
+        value: 'Pipeline run counts, success rates, and avg duration per interface. <strong>When to use:</strong> Weekly SLA review — confirm all interfaces are meeting processing-time targets.',
+    },
+    'oob-step-error-breakdown': {
+        value: 'Ranks pipeline steps by failure count with sample error messages. <strong>When to use:</strong> Root-cause analysis after an error spike. Immediately shows which step to fix first.',
+    },
+    'oob-processing-time-distribution': {
+        value: 'Histogram + p50/p95/p99 percentiles. <strong>When to use:</strong> Performance engineering — if p99 >> p50, a small % of messages are much slower (enrichment API timeouts, DB lock contention).',
+    },
+    'oob-phi-access-audit': {
+        value: 'Lists which PHI fields were accessed in which steps. <strong>When to use:</strong> HIPAA compliance audits, OCR breach investigations, or internal security reviews. Export table as evidence.',
+    },
+    'oob-data-masking-coverage': {
+        value: 'Masking rate % and unmasked field count per interface. <strong>When to use:</strong> Verify masking policies are applied before data leaves the system. Flag any interface with masking_rate < 100%.',
+    },
+    'oob-connector-activity-log': {
+        value: 'Full connector run log with success rate, avg duration, and messages retrieved. <strong>When to use:</strong> Troubleshooting a connector that is running but not picking up messages — compare messages_retrieved across runs.',
+    },
+    'oob-dlq-analysis': {
+        value: 'DLQ depth by error type with resolution rate. <strong>When to use:</strong> Monday morning review — if dlq_count is growing, messages need manual retry or discard. Shows which error_type dominates.',
+    },
+    'user_activity': {  // Note: this OOB uses category as slug fallback
+        value: 'Login events, configuration changes, and high-risk actions by user. <strong>When to use:</strong> Security audits, change-management reviews, or investigating unauthorised configuration modifications.',
+    },
+    'oob-executive-summary': {
+        value: 'All-up KPIs in metric-card format: total messages, error rate, avg processing time, active interfaces, DLQ depth. <strong>When to use:</strong> Weekly stakeholder email, executive dashboard, or status page.',
+    },
+};
+
+/* ── OOB fallback data (renders gallery even when API is unavailable) ──────── */
+const OOB_REPORTS = [
+    { id:'oob-1',  slug:'oob-interface-throughput-trends',  name:'Interface Throughput Trends',  category:'message_flow',         visualization:'bar',          description:'Daily message volume per interface over the last 7 days.' },
+    { id:'oob-2',  slug:'oob-message-status-distribution',  name:'Message Status Distribution',  category:'message_flow',         visualization:'pie',          description:'Breakdown of processed / failed / queued messages in the last 24 h.' },
+    { id:'oob-3',  slug:'oob-message-type-mix',             name:'Message Type Mix',             category:'message_flow',         visualization:'bar',          description:'Proportion of ADT, ORU, ORM and other message types in your traffic.' },
+    { id:'oob-4',  slug:'oob-pipeline-execution-summary',   name:'Pipeline Execution Summary',   category:'pipeline_performance', visualization:'table',        description:'Pipeline run counts, success rates and avg duration per interface.' },
+    { id:'oob-5',  slug:'oob-step-error-breakdown',         name:'Step Error Breakdown',         category:'pipeline_performance', visualization:'table',        description:'Ranks pipeline steps by failure count with sample error messages.' },
+    { id:'oob-6',  slug:'oob-processing-time-distribution', name:'Processing Time Distribution', category:'pipeline_performance', visualization:'bar',          description:'Histogram + p50 / p95 / p99 percentiles for end-to-end pipeline time.' },
+    { id:'oob-7',  slug:'oob-phi-access-audit',             name:'PHI Access Audit',             category:'hipaa_audit',          visualization:'table',        description:'Lists which PHI fields were accessed in which pipeline steps.' },
+    { id:'oob-8',  slug:'oob-data-masking-coverage',        name:'Data Masking Coverage',        category:'hipaa_audit',          visualization:'metric_cards', description:'Masking rate % and unmasked field count per interface.' },
+    { id:'oob-9',  slug:'oob-connector-activity-log',       name:'Connector Activity Log',       category:'connector_activity',   visualization:'table',        description:'Full connector run log with success rate, avg duration and messages retrieved.' },
+    { id:'oob-10', slug:'oob-dlq-analysis',                 name:'DLQ Analysis',                 category:'dlq_analysis',         visualization:'bar',          description:'DLQ depth by error type with resolution rate.' },
+    { id:'oob-11', slug:'oob-user-activity',                name:'User Activity Log',            category:'user_activity',        visualization:'table',        description:'Login events, configuration changes and high-risk actions by user.' },
+    { id:'oob-12', slug:'oob-executive-summary',            name:'Executive Summary',            category:'all',                  visualization:'metric_cards', description:'All-up KPIs: total messages, error rate, avg processing time, active interfaces, DLQ depth.' },
+].map(r => ({ ...r, is_system: true, run_count: 0 }));
+
+let allReports = [];
+let selectedRange = 'last_24h';
+
+/* ── Boot ──────────────────────────────────────────────────────────────────── */
+document.addEventListener('DOMContentLoaded', async () => {
+    const ok = await window.AuthService.initialize();
+    if (!ok) return;
+    initTabs();
+    initBuilder();
+    initHelpToggles();
+    loadGallery();
+});
+
+/* ── Tabs ──────────────────────────────────────────────────────────────────── */
+function initTabs() {
+    document.querySelectorAll('.tab-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+            document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
+            btn.classList.add('active');
+            document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
+            if (btn.dataset.tab === 'saved') loadSaved();
+            if (btn.dataset.tab === 'builder') loadInterfaceOptions();
+        });
+    });
+}
+
+/* ── Help toggles ──────────────────────────────────────────────────────────── */
+function initHelpToggles() {
+    [['galleryHelpToggle', 'galleryHelpBody'], ['builderHelpToggle', 'builderHelpBody']].forEach(([tId, bId]) => {
+        const t = document.getElementById(tId), b = document.getElementById(bId);
+        if (!t || !b) return;
+        t.addEventListener('click', () => {
+            const open = b.classList.toggle('open');
+            t.classList.toggle('open', open);
+        });
+    });
+}
+
+/* ── Gallery ───────────────────────────────────────────────────────────────── */
+async function loadGallery() {
+    // Always render OOB cards immediately from hardcoded data
+    allReports = OOB_REPORTS.slice();
+    renderGallery(allReports);
+
+    // Then try to enrich with live API data (run counts, last_run_at, real IDs)
+    try {
+        const { data } = await fetchJSON(`${API}/reports`);
+        if (data?.length) {
+            // Merge: preserve OOB cards but update run_count from API
+            const apiMap = {};
+            data.forEach(r => { apiMap[r.slug] = r; });
+            allReports = allReports.map(r => apiMap[r.slug] ? { ...r, ...apiMap[r.slug] } : r);
+            // Append any user-saved reports
+            data.filter(r => !r.is_system).forEach(r => allReports.push(r));
+            renderGallery(allReports.filter(r => r.is_system));
+        }
+    } catch (_) { /* API unavailable — hardcoded cards already showing */ }
+}
+
+function renderGallery(reports) {
+    if (!reports?.length) {
+        document.getElementById('galleryContent').innerHTML =
+            `<div class="empty"><i class="far fa-pen-to-square" style="color:var(--pink-mid)"></i><p>No system reports found. Ensure V72 migration has been applied.</p></div>`;
+        return;
+    }
+    const grouped = {};
+    reports.forEach(r => { (grouped[r.category] = grouped[r.category] || []).push(r); });
+    let html = '';
+    for (const [cat, items] of Object.entries(grouped)) {
+        html += `<div class="cat-label">${esc(CAT_LABELS[cat] || cat)}</div><div class="report-grid">`;
+        items.forEach(r => {
+            const vd = REPORT_VALUE[r.slug] || REPORT_VALUE[r.category] || { value: 'Click <strong>Run</strong> to execute this report.' };
+            html += `
+            <div class="report-card">
+                <div class="rc-head">
+                    <span class="rc-title">${esc(r.name)}</span>
+                    <span class="rc-viz" title="${esc(r.visualization)}">${VIZ_ICON[r.visualization] || '📋'}</span>
+                </div>
+                <div class="rc-desc">${esc(r.description)}</div>
+                <div class="rc-value"><i class="far fa-lightbulb" style="margin-right:4px;color:var(--pink)"></i>${vd.value}</div>
+                <div class="rc-foot">
+                    <span class="tag tag-sys">System</span>
+                    <span class="tag">${esc(r.category)}</span>
+                    ${r.run_count ? `<span style="font-size:10px;color:var(--muted)">${r.run_count} runs</span>` : ''}
+                    <button class="run-btn" onclick="runOOB('${r.id}')">Run →</button>
+                </div>
+            </div>`;
+        });
+        html += '</div>';
+    }
+    document.getElementById('galleryContent').innerHTML = html;
+}
+
+/* ── Run OOB report ─────────────────────────────────────────────────────────── */
+async function runOOB(id) {
+    const r = allReports.find(x => x.id === id);
+    if (!r) { toast('Report not found', true); return; }
+
+    // Switch to builder tab
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
+    document.querySelector('[data-tab="builder"]').classList.add('active');
+    document.getElementById('tab-builder').classList.add('active');
+
+    // Pre-fill builder (OOB reports store datasource in category or data_source)
+    const ds = r.data_source || r.category;
+    if (ds && ds !== 'all') document.getElementById('bldDS').value = ds;
+    if (r.dimensions) document.getElementById('bldDim').value = r.dimensions;
+    if (r.visualization) document.getElementById('bldViz').value = r.visualization;
+    updateDSHint();
+    updateMetrics();
+
+    if (r.metrics?.length) {
+        document.querySelectorAll('#metricGrid input[type=checkbox]').forEach(cb => {
+            cb.checked = r.metrics.includes(cb.value);
+        });
+    }
+    await runBuilder();
+}
+
+/* ── Builder ───────────────────────────────────────────────────────────────── */
+function initBuilder() {
+    document.getElementById('bldDS').addEventListener('change', () => { updateDSHint(); updateMetrics(); });
+    document.querySelectorAll('.tshort').forEach(b => b.addEventListener('click', () => {
+        document.querySelectorAll('.tshort').forEach(x => x.classList.remove('active'));
+        b.classList.add('active');
+        selectedRange = b.dataset.r;
+    }));
+    document.getElementById('runBtn').addEventListener('click', runBuilder);
+    document.getElementById('saveBtn').addEventListener('click', saveBuilder);
+    updateMetrics();
+}
+
+function updateDSHint() {
+    const ds = document.getElementById('bldDS').value;
+    document.getElementById('dsHint').textContent = DS_HINTS[ds] || '';
+}
+
+function updateMetrics() {
+    const ds = document.getElementById('bldDS').value;
+    const metrics = METRICS[ds] || [];
+    document.getElementById('metricGrid').innerHTML = metrics.map(m => `
+        <label class="mc"><input type="checkbox" value="${m}" checked><span>${m.replace(/_/g,' ')}</span></label>`).join('');
+}
+
+function getConfig() {
+    const checked = [...document.querySelectorAll('#metricGrid input:checked')].map(c => c.value);
+    return {
+        data_source:   document.getElementById('bldDS').value,
+        dimensions:    document.getElementById('bldDim').value,
+        metrics:       checked.length ? checked : ['total_messages'],
+        filters:       { time_range: selectedRange, interface_id: document.getElementById('bldInterface')?.value || undefined },
+        visualization: document.getElementById('bldViz').value,
+        viz_options:   {},
+        limit:         parseInt(document.getElementById('bldLimit').value) || 100,
+    };
+}
+
+async function runBuilder() {
+    const btn = document.getElementById('runBtn');
+    btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Running…';
+    const panel = document.getElementById('resultsPanel');
+    panel.innerHTML = `<div class="spin-row"><i class="fas fa-spinner fa-spin"></i> Executing query…</div>`;
+    try {
+        const cfg = getConfig();
+        const resp = await fetch(`${API}/reports/execute`, {
+            method: 'POST', credentials: 'include',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(cfg),
+        });
+        if (resp.status === 401) { window.location.href = '/login.html'; return; }
+        const { data, error } = await resp.json();
+        if (!resp.ok || error) throw new Error(error || resp.statusText);
+        renderResults(panel, data, cfg);
+    } catch (e) {
+        panel.innerHTML = `<div class="empty"><i class="far fa-triangle-exclamation"></i><p>${esc(e.message)}</p></div>`;
+    } finally {
+        btn.disabled = false; btn.innerHTML = '<i class="far fa-play"></i> Run Report';
+    }
+}
+
+async function saveBuilder() {
+    const name = prompt('Name for this saved report:');
+    if (!name?.trim()) return;
+    const cfg = getConfig();
+    try {
+        const resp = await fetch(`${API}/reports`, {
+            method: 'POST', credentials: 'include',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name: name.trim(), ...cfg, category: cfg.data_source }),
+        });
+        if (resp.status === 401) { window.location.href = '/login.html'; return; }
+        if (!resp.ok) throw new Error((await resp.json()).error || resp.statusText);
+        toast('Report saved! View it in My Saved Reports.');
+    } catch (e) { toast(e.message, true); }
+}
+
+/* ── Saved reports ─────────────────────────────────────────────────────────── */
+async function loadSaved() {
+    const cont = document.getElementById('savedContent');
+    cont.innerHTML = `<div class="spin-row"><i class="fas fa-spinner fa-spin"></i> Loading…</div>`;
+    try {
+        const { data } = await fetchJSON(`${API}/reports`);
+        const mine = (data || []).filter(r => !r.is_system);
+        if (!mine.length) {
+            cont.innerHTML = `<div class="empty"><i class="far fa-floppy-disk" style="color:var(--pink-mid)"></i><p>No saved reports yet.<br>Build one in the <strong>Ad-hoc Builder</strong> and click <strong>Save Report</strong>.</p></div>`;
+            return;
+        }
+        let html = '<div class="report-grid">';
+        mine.forEach(r => {
+            html += `
+            <div class="report-card">
+                <div class="rc-head"><span class="rc-title">${esc(r.name)}</span><span class="rc-viz">${VIZ_ICON[r.visualization]||'📋'}</span></div>
+                <div class="rc-desc">${esc(r.description || r.data_source)}</div>
+                <div class="rc-foot">
+                    <span class="tag">${esc(r.category)}</span>
+                    <button class="run-btn" onclick="runOOB('${r.id}')">Run →</button>
+                    <button class="del-btn" onclick="deleteReport('${r.id}')"><i class="far fa-trash-can"></i></button>
+                </div>
+            </div>`;
+        });
+        html += '</div>';
+        cont.innerHTML = html;
+    } catch (e) {
+        cont.innerHTML = `<div class="empty"><i class="far fa-triangle-exclamation"></i><p>${esc(e.message)}</p></div>`;
+    }
+}
+
+async function deleteReport(id) {
+    if (!confirm('Delete this report?')) return;
+    try {
+        const r = await fetch(`${API}/reports/${id}`, { method: 'DELETE', credentials: 'include' });
+        if (r.status === 401) { window.location.href = '/login.html'; return; }
+        if (!r.ok) throw new Error((await r.json()).error || r.statusText);
+        toast('Report deleted');
+        loadSaved();
+    } catch (e) { toast(e.message, true); }
+}
+
+/* ── Render results ────────────────────────────────────────────────────────── */
+function renderResults(panel, result, cfg) {
+    const meta = `${result.total_rows} rows · ${result.query_time_ms}ms${result.cache_hit ? ' · cached' : ''}`;
+    let body = '';
+    if (cfg.visualization === 'metric_cards') body = renderMetricCards(result);
+    else if (['bar','line'].includes(cfg.visualization)) body = renderBar(result) + renderTable(result);
+    else body = renderTable(result);
+
+    panel.innerHTML = `
+        <div class="res-head">
+            <h3>Results — ${esc(cfg.data_source)}</h3>
+            <span class="res-meta">${meta}</span>
+            <button class="export-btn" onclick="exportCSV()" title="Export as CSV"><i class="far fa-file-arrow-down"></i> Export CSV</button>
+        </div>
+        <div class="res-body">${body}</div>`;
+    // Store result for export
+    panel._lastResult = result;
+}
+
+function renderTable(result) {
+    if (!result.rows?.length) return `<div class="empty"><i class="far fa-inbox"></i><p>No data for this query and time range.</p></div>`;
+    const cols = result.columns || Object.keys(result.rows[0]);
+    return `<table class="data-table">
+        <thead><tr>${cols.map(c => `<th>${esc(c)}</th>`).join('')}</tr></thead>
+        <tbody>${result.rows.map(row => `<tr>${cols.map(c => `<td>${fmt(row[c])}</td>`).join('')}</tr>`).join('')}</tbody>
+    </table>`;
+}
+
+function renderBar(result) {
+    if (!result.rows?.length) return '';
+    const rows = result.rows.slice(0, 20);
+    const cols = result.columns || Object.keys(result.rows[0]);
+    const labelCol = cols[0];
+    const valCol = cols.find(c => c !== labelCol && !isNaN(parseFloat(result.rows[0]?.[c]))) || cols[1];
+    const maxV = Math.max(...rows.map(r => parseFloat(r[valCol]) || 0), 1);
+    const bars = rows.map(r => {
+        const v = parseFloat(r[valCol]) || 0;
+        const pct = Math.max((v / maxV) * 140, 2);
+        return `<div class="bar-col"><span class="bar-val">${fmt(r[valCol])}</span><div class="bar" style="height:${pct}px"></div><span class="bar-lbl">${esc(String(r[labelCol]||''))}</span></div>`;
+    }).join('');
+    return `<div class="chart-wrap">${bars}</div>`;
+}
+
+function renderMetricCards(result) {
+    if (!result.rows?.length) return `<div class="empty"><i class="far fa-gauge"></i><p>No data</p></div>`;
+    const row = result.rows[0];
+    const cols = result.columns || Object.keys(row);
+    return `<div class="mc-grid">${cols.map(c => `<div class="mc-card"><div class="mc-val">${fmt(row[c])}</div><div class="mc-lbl">${esc(c.replace(/_/g,' '))}</div></div>`).join('')}</div>`;
+}
+
+/* ── Export CSV ─────────────────────────────────────────────────────────────── */
+function exportCSV() {
+    const panel = document.getElementById('resultsPanel');
+    const result = panel?._lastResult;
+    if (!result?.rows?.length) { toast('No data to export', true); return; }
+    const cols = result.columns || Object.keys(result.rows[0]);
+    const rows = [cols.join(','), ...result.rows.map(r =>
+        cols.map(c => { const v = r[c] ?? ''; return `"${String(v).replace(/"/g, '""')}"`; }).join(',')
+    )];
+    const blob = new Blob([rows.join('\r\n')], { type: 'text/csv' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `report-${Date.now()}.csv`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+}
+
+/* ── Load interfaces for filter ─────────────────────────────────────────────── */
+async function loadInterfaceOptions() {
+    const sel = document.getElementById('bldInterface');
+    if (!sel || sel.options.length > 1) return; // already loaded
+    try {
+        const data = await fetch('/api/interfaces', { credentials: 'include' }).then(r => r.json());
+        const list = Array.isArray(data) ? data : (data.data || data.interfaces || []);
+        list.filter(i => i.is_active !== false && !i.deleted_at)
+            .sort((a, b) => (a.name || '').localeCompare(b.name || ''))
+            .forEach(i => {
+                const opt = document.createElement('option');
+                opt.value = i.id;
+                opt.textContent = i.name;
+                sel.appendChild(opt);
+            });
+    } catch {}
+}
+
+/* ── Utilities ─────────────────────────────────────────────────────────────── */
+async function fetchJSON(url) {
+    const r = await fetch(url, { credentials: 'include' });
+    if (r.status === 401) { window.location.href = '/login.html'; return; }
+    if (!r.ok) {
+        let msg = r.statusText;
+        try { const b = await r.json(); msg = b.error || b.message || msg; } catch {}
+        throw new Error(msg);
+    }
+    return r.json();
+}
+function fmt(v) {
+    if (v == null) return '—';
+    const n = Number(v);
+    if (!isNaN(n) && String(v).trim() !== '') return Number.isInteger(n) ? n.toLocaleString() : n.toFixed(2);
+    return String(v);
+}
+const esc = s => { const d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; };
+function toast(msg, err = false) {
+    const t = document.getElementById('toast');
+    t.textContent = msg; t.className = err ? 'show err' : 'show';
+    setTimeout(() => t.classList.remove('show'), 3200);
+}
+
+</script>
+    <script src="/js/ai-assistant.js"></script>
+</body>
+</html>

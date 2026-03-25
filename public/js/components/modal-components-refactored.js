@@ -162,6 +162,25 @@
                                 </div>
                             </div>
 
+                            <!-- FHIR Validation Policy Section -->
+                            <div class="config-section">
+                                <h4 class="section-title" style="display:flex;align-items:center;gap:8px;">
+                                    <i class="far fa-shield-check" style="color:#6b7280;font-size:14px;"></i>
+                                    FHIR Validation Policy
+                                </h4>
+                                <p style="font-size:12px;color:#64748b;margin-bottom:12px;">
+                                    What should happen when a required FHIR field has no value in the source message?
+                                </p>
+
+                                <select id="fhirValidationPolicy" name="fhirValidationPolicy"
+                                        style="width:100%;padding:7px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;color:#1f2937;background:#fff;cursor:pointer;">
+                                    <option value="proceed">Proceed — omit missing field and continue (default)</option>
+                                    <option value="warn">Warn — deliver with OperationOutcome warning in bundle</option>
+                                    <option value="reject">Reject — fail message, route to dead-letter queue</option>
+                                    <option value="queue_review">Queue for Review — hold for manual operator correction</option>
+                                </select>
+                            </div>
+
                         </form>
                     </div>
                     <div class="modal-footer">
@@ -171,6 +190,8 @@
                 </div>
             </div>
         `;
+
+        // FHIR Validation Policy select — no extra listener needed
     }
 
     function loadDetailsModal() {
@@ -255,6 +276,11 @@
         document.getElementById('editTargetType').value = interfaceData.targetType || 'fhir';
         document.getElementById('editTargetEndpoint').value = interfaceData.targetEndpoint ||
                                                                interfaceData.targetConfig?.endpoint || '';
+
+        // FHIR Validation Policy
+        const policy = interfaceData.fhir_validation_policy || interfaceData.fhirValidationPolicy || 'proceed';
+        const policySelect = document.getElementById('fhirValidationPolicy');
+        if (policySelect) policySelect.value = policy;
 
         // Attach event listeners
         attachEditModalListeners();

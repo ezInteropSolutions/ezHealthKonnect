@@ -50,6 +50,12 @@ func (tps *TransformationPipelineService) SetObjectStorage(svc *storage.ObjectSt
 	tps.objectStorage = svc
 }
 
+// SetCodeTemplateService wires a CodeTemplateService into the script enrichment executor
+// so that named JS function libraries are injected into every script step's goja VM.
+func (tps *TransformationPipelineService) SetCodeTemplateService(svc *CodeTemplateService) {
+	tps.executorRegistry.SetCodeTemplateService(svc)
+}
+
 // RegisterExecutor registers a transformation executor
 func (tps *TransformationPipelineService) RegisterExecutor(executor TransformationExecutor) {
 	tps.executors[executor.GetSupportedType()] = executor

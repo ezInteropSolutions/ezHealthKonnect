@@ -3,12 +3,17 @@
 
 const express = require('express');
 const router = express.Router();
+const { requireAuth, requireRole } = require('../middleware/auth');
+
+// RBAC: reads are viewer+; deploy/stop are operator+
+const canRead  = requireRole('admin', 'operator', 'viewer');
+const canWrite = requireRole('admin', 'operator');
 
 /**
  * POST /api/deployment/deploy/:interfaceId
  * Manually deploy (activate) an interface
  */
-router.post('/deploy/:interfaceId', async (req, res) => {
+router.post('/deploy/:interfaceId', requireAuth, canWrite, async (req, res) => {
     try {
         if (!global.deploymentService) {
             return res.status(503).json({
@@ -47,7 +52,7 @@ router.post('/deploy/:interfaceId', async (req, res) => {
  * POST /api/deployment/stop/:interfaceId
  * Stop (deactivate) an interface
  */
-router.post('/stop/:interfaceId', async (req, res) => {
+router.post('/stop/:interfaceId', requireAuth, canWrite, async (req, res) => {
     try {
         if (!global.deploymentService) {
             return res.status(503).json({
@@ -86,7 +91,7 @@ router.post('/stop/:interfaceId', async (req, res) => {
  * GET /api/deployment/status
  * Get deployment status for all interfaces
  */
-router.get('/status', async (req, res) => {
+router.get('/status', requireAuth, canRead, async (req, res) => {
     try {
         if (!global.deploymentService) {
             return res.status(503).json({
@@ -115,7 +120,7 @@ router.get('/status', async (req, res) => {
  * GET /api/deployment/status/:interfaceId
  * Get deployment status for specific interface
  */
-router.get('/status/:interfaceId', async (req, res) => {
+router.get('/status/:interfaceId', requireAuth, canRead, async (req, res) => {
     try {
         const database = require('../config/database');
         const { interfaceId } = req.params;

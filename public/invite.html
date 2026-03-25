@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Accept Invitation - ezHealthKonnect</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #1e3a8a 0%, #6366f1 100%);
+            min-height: 100vh;
+            display: flex; align-items: center; justify-content: center;
+            padding: 20px;
+        }
+        .invite-card {
+            background: #fff; border-radius: 16px; width: 440px; max-width: 100%;
+            padding: 36px 32px; box-shadow: 0 20px 60px rgba(0,0,0,.25);
+        }
+        .invite-logo {
+            text-align: center; margin-bottom: 24px;
+        }
+        .invite-logo h2 {
+            font-size: 1.4rem; color: #1e3a8a; font-weight: 700;
+        }
+        .invite-logo span { color: #f8bbd9; }
+        .invite-logo p { color: #64748b; font-size: 0.85rem; margin-top: 4px; }
+        h3 { font-size: 1.1rem; color: #1a202c; margin-bottom: 4px; }
+        .invite-desc { color: #64748b; font-size: 0.875rem; margin-bottom: 24px; }
+
+        .field { display: flex; flex-direction: column; gap: 5px; margin-bottom: 16px; }
+        .field label { font-size: 0.78rem; font-weight: 600; color: #374151; text-transform: uppercase; letter-spacing: .04em; }
+        .field input {
+            padding: 10px 12px; border: 1px solid #e2e8f0; border-radius: 8px;
+            font-size: 0.9rem; outline: none; transition: border-color .2s;
+        }
+        .field input:focus { border-color: #1e3a8a; }
+        .field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+
+        .pw-strength { margin-top: 4px; font-size: 0.75rem; display: flex; align-items: center; gap: 8px; }
+        .pw-bar { flex: 1; height: 4px; background: #e2e8f0; border-radius: 4px; overflow: hidden; }
+        .pw-fill { height: 100%; border-radius: 4px; transition: width .3s; }
+        .pw-fill--1, .pw-fill--2 { background: #dc2626; }
+        .pw-fill--3 { background: #d97706; }
+        .pw-fill--4 { background: #16a34a; }
+        .pw-fill--5 { background: #0284c7; }
+
+        .btn-submit {
+            width: 100%; padding: 12px; background: linear-gradient(135deg, #1e3a8a, #6366f1);
+            color: #fff; border: none; border-radius: 8px; font-size: 0.95rem;
+            font-weight: 600; cursor: pointer; margin-top: 8px; transition: opacity .2s;
+        }
+        .btn-submit:hover { opacity: .9; }
+        .btn-submit:disabled { opacity: .6; cursor: not-allowed; }
+
+        .alert { padding: 10px 14px; border-radius: 8px; margin-bottom: 14px; font-size: 0.875rem; }
+        .alert-error { background: #fef2f2; color: #dc2626; border: 1px solid #fecaca; }
+        .alert-success { background: #f0fdf4; color: #15803d; border: 1px solid #bbf7d0; }
+
+        .invite-expired {
+            text-align: center; padding: 16px;
+            color: #dc2626; background: #fef2f2; border-radius: 8px;
+            border: 1px solid #fecaca;
+        }
+        .invite-expired i { font-size: 2rem; margin-bottom: 8px; display: block; }
+
+        .success-view { text-align: center; }
+        .success-view i { font-size: 3rem; color: #16a34a; margin-bottom: 12px; display: block; }
+        .success-view p { color: #374151; margin-bottom: 16px; }
+        .login-link {
+            display: inline-block; padding: 10px 24px;
+            background: #1e3a8a; color: #fff; border-radius: 8px; text-decoration: none;
+            font-weight: 600; font-size: 0.9rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="invite-card">
+        <div class="invite-logo">
+            <h2>ez<span>Health</span>Konnect</h2>
+            <p>Healthcare Integration Platform</p>
+        </div>
+
+        <div id="loading-view">
+            <p style="text-align:center;color:#64748b"><i class="fas fa-spinner fa-spin"></i> Validating invitation…</p>
+        </div>
+
+        <div id="expired-view" style="display:none">
+            <div class="invite-expired">
+                <i class="fas fa-link-slash"></i>
+                <strong>Invitation Expired or Invalid</strong>
+                <p style="margin-top:6px;font-size:0.875rem">This link may have expired (valid for 48 hours) or has already been used. Contact your administrator for a new invitation.</p>
+            </div>
+        </div>
+
+        <div id="form-view" style="display:none">
+            <h3>Set Up Your Account</h3>
+            <p class="invite-desc">Complete your profile to activate your account.</p>
+            <div id="alert-area"></div>
+            <form id="invite-form">
+                <div class="field-row">
+                    <div class="field">
+                        <label>First Name *</label>
+                        <input type="text" id="firstName" name="firstName" required placeholder="First name">
+                    </div>
+                    <div class="field">
+                        <label>Last Name</label>
+                        <input type="text" id="lastName" name="lastName" placeholder="Last name">
+                    </div>
+                </div>
+                <div class="field">
+                    <label>Password * <small style="text-transform:none;font-weight:400">(min 8 characters)</small></label>
+                    <input type="password" id="password" name="password" required minlength="8" placeholder="Choose a strong password" autocomplete="new-password">
+                    <div class="pw-strength" id="pw-strength"></div>
+                </div>
+                <div class="field">
+                    <label>Confirm Password *</label>
+                    <input type="password" id="confirmPassword" name="confirmPassword" required placeholder="Repeat your password" autocomplete="new-password">
+                </div>
+                <button type="submit" class="btn-submit" id="submit-btn">
+                    <i class="fas fa-check"></i> Activate Account
+                </button>
+            </form>
+        </div>
+
+        <div id="success-view" style="display:none" class="success-view">
+            <i class="fas fa-circle-check"></i>
+            <p>Your account has been activated successfully. You can now log in.</p>
+            <a href="/" class="login-link"><i class="fas fa-right-to-bracket"></i> Go to Login</a>
+        </div>
+    </div>
+
+    <script src="js/invite.js"></script>
+</body>
+</html>

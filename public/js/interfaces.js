@@ -12,6 +12,9 @@ let totalPages = 1;
 let sortColumn = 'name';
 let sortDirection = 'asc';
 
+// Review queue counts per interface (loaded alongside interface data)
+let reviewQueueCounts = {};   // { [interfaceId]: number }
+
 // Auto-refresh state
 let autoRefreshInterval = null;
 let autoRefreshEnabled = true;
@@ -722,6 +725,9 @@ async function loadInterfaces() {
             filteredInterfaces = [...interfaces];
             console.log('✅ Interfaces loaded:', interfaces.length);
 
+            // Load review queue counts in background — non-blocking
+            loadReviewQueueCounts();
+
             populateMessageTypeFilter();
             updateSummaryCards();
             calculatePagination();
@@ -863,6 +869,25 @@ async function refreshInterfaces() {
             refreshBtn.disabled = false;
         }
     }
+}
+
+// Load pending review queue counts per interface (non-blocking)
+async function loadReviewQueueCounts() {
+    try {
+        const res = await fetch('/api/fhir/validation-queue?status=pending_review&limit=500', {
+            credentials: 'include'
+        });
+        if (!res.ok) return;
+        const body = await res.json();
+        const items = Array.isArray(body) ? body : (body.data || []);
+        const counts = {};
+        items.forEach(it => {
+            counts[it.interface_id] = (counts[it.interface_id] || 0) + 1;
+        });
+        reviewQueueCounts = counts;
+        // Re-render table to show badges (only if any counts changed)
+        if (Object.keys(counts).length > 0) renderInterfacesTable();
+    } catch { /* non-critical */ }
 }
 
 // Update summary cards
@@ -1119,8 +1144,20 @@ function getMiniActionButtons(interface) {
     const runtimeTitle  = showPause ? 'Pause Processing' : 'Start Processing';
     const runtimeColor  = showPause ? 'act-btn-amber' : 'act-btn-green';
 
+    const pendingReview = reviewQueueCounts[interface.id] || 0;
+    const reviewBadge = pendingReview > 0
+        ? `<a href="review-queue.html?interfaceId=${interface.id}" onclick="event.stopPropagation()"
+              class="act-btn act-btn-amber" title="${pendingReview} message${pendingReview > 1 ? 's' : ''} need FHIR review"
+              style="position:relative;text-decoration:none;">
+               <i class="far fa-triangle-exclamation"></i>
+               <span style="position:absolute;top:-4px;right:-4px;background:#dc2626;color:white;border-radius:50%;font-size:9px;font-weight:700;width:14px;height:14px;display:flex;align-items:center;justify-content:center;line-height:1;">${pendingReview > 9 ? '9+' : pendingReview}</span>
+           </a>`
+        : '';
+
     return `
         <div style="display:flex;gap:4px;align-items:center;justify-content:flex-end;">
+            ${reviewBadge}
+
             <button class="act-btn ${runtimeColor}" title="${runtimeTitle}"
                     onclick="event.stopPropagation(); ${runtimeAction}"
                     id="runtime-btn-${interface.id}">
@@ -1155,10 +1192,16 @@ function getMiniActionButtons(interface) {
                     <div class="dropdown-item-minimal" onclick="event.stopPropagation(); showInterfaceDetails('${interface.id}'); closeActionsMenu('${interface.id}')">
                         <i class="far fa-file-alt"></i><span>Details</span>
                     </div>
+                    <div class="dropdown-item-minimal" onclick="event.stopPropagation(); window.location.href='review-queue.html?interfaceId=${interface.id}'; closeActionsMenu('${interface.id}')">
+                        <i class="far fa-circle-exclamation"></i><span>Review Queue${pendingReview > 0 ? ` (${pendingReview})` : ''}</span>
+                    </div>
                     ${interface.status === 'error' ? `
                     <div class="dropdown-item-minimal" onclick="event.stopPropagation(); resetInterface('${interface.id}'); closeActionsMenu('${interface.id}')">
                         <i class="fas fa-sync"></i><span>Reset</span>
                     </div>` : ''}
+                    <div class="dropdown-item-minimal" onclick="event.stopPropagation(); openSaveAsTemplateModal('${interface.id}', '${interface.name?.replace(/'/g, "\\'")}'); closeActionsMenu('${interface.id}')">
+                        <i class="far fa-bookmark"></i><span>Save as Template</span>
+                    </div>
                     <div class="dropdown-divider-minimal"></div>
                     ${canDelete ? `
                     <div class="dropdown-item-minimal danger" onclick="event.stopPropagation(); confirmDeleteInterface('${interface.id}', '${interface.name?.replace(/'/g, "\\'")}'); closeActionsMenu('${interface.id}')">
@@ -1957,12 +2000,7 @@ window.forceCloseEditModal = function() {
 };
 
 function showInterfaceDetails(interfaceId) {
-    const interface = interfaces.find(i => i.id === interfaceId);
-    if (!interface) return;
-    
-    document.getElementById('detailsTitle').textContent = interface.name;
-    document.getElementById('detailsContent').innerHTML = createDetailsContent(interface);
-    document.getElementById('detailsModal').classList.add('show');
+    window.location.href = `interface-detail.html?interfaceId=${interfaceId}`;
 }
 
 function closeDetailsModal() {
@@ -2397,6 +2435,13 @@ async function handleEditInterface(event) {
     } else {
         console.log('⚠️ Using basic form data collection');
         interfaceData = collectInterfaceFormData();
+    }
+
+    // Always collect FHIR validation policy (not managed by config manager)
+    const policySelect = document.getElementById('fhirValidationPolicy');
+    if (policySelect && policySelect.value) {
+        interfaceData.fhirValidationPolicy = policySelect.value;
+        interfaceData.fhir_validation_policy = policySelect.value;
     }
 
     console.log('🔄 Submitting interface update:', interfaceData);
@@ -3528,3 +3573,178 @@ window.addEventListener('beforeunload', function() {
         clearInterval(runtimeMonitoringInterval);
     }
 });
+
+// ── Save as Template ────────────────────────────────────────────────────────
+
+function openSaveAsTemplateModal(interfaceId, interfaceName) {
+    // Remove any existing modal
+    const existing = document.getElementById('saveAsTemplateModal');
+    if (existing) existing.remove();
+
+    const modal = document.createElement('div');
+    modal.id = 'saveAsTemplateModal';
+    modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:2000;display:flex;align-items:center;justify-content:center';
+    modal.innerHTML = `
+        <style>
+            #satModal { background:#fff;border-radius:12px;width:480px;max-width:95vw;max-height:90vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,0.25);font-family:inherit; }
+            #satModal h3 { margin:0 0 4px;font-size:1.05rem;color:#1a1a2e; }
+            #satModal .sat-sub { font-size:0.8rem;color:#888;margin-bottom:16px; }
+            #satModal .sat-field { margin-bottom:14px; }
+            #satModal label { display:block;font-size:0.8rem;font-weight:600;color:#444;margin-bottom:4px; }
+            #satModal input, #satModal select, #satModal textarea { width:100%;padding:8px 10px;border:1px solid #ddd;border-radius:6px;font-size:0.88rem;box-sizing:border-box;font-family:inherit; }
+            #satModal input:focus, #satModal select:focus, #satModal textarea:focus { outline:none;border-color:#667eea;box-shadow:0 0 0 2px rgba(102,126,234,0.15); }
+            #satModal .sat-info-box { background:#f0f4ff;border:1px solid #c7d2fe;border-radius:8px;padding:12px;font-size:0.8rem;color:#444;margin-bottom:16px; }
+            #satModal .sat-info-box ul { margin:6px 0 0 16px;padding:0; }
+            #satModal .sat-info-box li { margin:2px 0; }
+            #satModal .sat-footer { display:flex;gap:10px;justify-content:flex-end;padding-top:4px; }
+            #satModal .sat-btn { padding:8px 18px;border-radius:7px;font-size:0.88rem;font-weight:600;cursor:pointer;border:none; }
+            #satModal .sat-btn.cancel { background:#f0f2f5;color:#444; }
+            #satModal .sat-btn.cancel:hover { background:#e2e6ea; }
+            #satModal .sat-btn.save { background:#667eea;color:#fff; }
+            #satModal .sat-btn.save:hover { background:#5a72d8; }
+            #satModal .sat-btn:disabled { opacity:0.6;cursor:not-allowed; }
+        </style>
+        <div id="satModal">
+            <div style="padding:20px 24px 16px;border-bottom:1px solid #eee;display:flex;justify-content:space-between;align-items:center">
+                <div>
+                    <h3>💾 Save as Template</h3>
+                    <div class="sat-sub">From: <strong>${_escHtmlSat(interfaceName)}</strong></div>
+                </div>
+                <button onclick="document.getElementById('saveAsTemplateModal').remove()" style="background:none;border:none;font-size:1.3rem;cursor:pointer;color:#888;line-height:1">×</button>
+            </div>
+            <div style="padding:20px 24px">
+                <div class="sat-info-box">
+                    ℹ️ Sensitive connection details will be cleared before saving. Your team will need to fill in:
+                    <ul>
+                        <li>Host / IP addresses &amp; endpoint URLs</li>
+                        <li>Usernames, passwords &amp; API keys</li>
+                        <li>Database names &amp; connection strings</li>
+                    </ul>
+                    All pipeline steps and connector types are preserved.
+                </div>
+                <div class="sat-field">
+                    <label>Template Name *</label>
+                    <input id="satName" value="${_escHtmlSat(interfaceName)}" placeholder="e.g. Epic ADT Feed">
+                </div>
+                <div class="sat-field">
+                    <label>Category</label>
+                    <select id="satCategory">
+                        <option value="custom">Custom</option>
+                        <option value="hl7v2">HL7 v2</option>
+                        <option value="fhir">FHIR</option>
+                        <option value="emr">EMR / EHR</option>
+                        <option value="payer">Payers</option>
+                        <option value="specialty">Specialty</option>
+                    </select>
+                </div>
+                <div class="sat-field">
+                    <label>Description</label>
+                    <textarea id="satDescription" rows="3" placeholder="Describe what this integration does…"></textarea>
+                </div>
+                <div class="sat-field">
+                    <label>Tags <span style="font-weight:400;color:#aaa">(comma-separated)</span></label>
+                    <input id="satTags" placeholder="e.g. epic, adt, fhir, hl7v2">
+                </div>
+                <div class="sat-field">
+                    <label>Visibility</label>
+                    <select id="satVisibility">
+                        <option value="true">Team (visible to all users)</option>
+                        <option value="false">Private (only me)</option>
+                    </select>
+                </div>
+                <div class="sat-footer">
+                    <button class="sat-btn cancel" onclick="document.getElementById('saveAsTemplateModal').remove()">Cancel</button>
+                    <button class="sat-btn save" id="satSaveBtn" onclick="submitSaveAsTemplate('${interfaceId}')">Save Template</button>
+                </div>
+            </div>
+        </div>`;
+
+    document.body.appendChild(modal);
+    modal.addEventListener('click', e => { if (e.target === modal) modal.remove(); });
+    document.getElementById('satName').focus();
+}
+
+function _escHtmlSat(str) {
+    return String(str || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+async function submitSaveAsTemplate(interfaceId) {
+    const name = document.getElementById('satName')?.value?.trim();
+    if (!name) {
+        document.getElementById('satName').style.borderColor = '#dc2626';
+        document.getElementById('satName').focus();
+        return;
+    }
+
+    const btn = document.getElementById('satSaveBtn');
+    btn.disabled = true;
+    btn.textContent = 'Saving…';
+
+    try {
+        const category = document.getElementById('satCategory').value;
+        const description = document.getElementById('satDescription').value.trim();
+        const tagsRaw = document.getElementById('satTags').value;
+        const tags = tagsRaw.split(',').map(t => t.trim()).filter(Boolean);
+        const is_public = document.getElementById('satVisibility').value === 'true';
+
+        const res = await fetch(`/api/interfaces/${interfaceId}/save-as-template`, {
+            method: 'POST',
+            credentials: 'include',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name, description, category, tags, is_public }),
+        });
+
+        const data = await res.json();
+        if (!data.success) throw new Error(data.error || 'Save failed');
+
+        document.getElementById('saveAsTemplateModal').remove();
+        showSuccess(`Template "${name}" saved successfully.`);
+    } catch (err) {
+        btn.disabled = false;
+        btn.textContent = 'Save Template';
+        showError('Could not save template: ' + err.message);
+    }
+}
+
+// Handle ?fromTemplate=<id> query param — pre-select template when creating interface
+(function handleFromTemplateParam() {
+    const params = new URLSearchParams(window.location.search);
+    const templateId = params.get('fromTemplate');
+    if (!templateId) return;
+
+    // Wait for the page to fully load then open create modal with template pre-fill
+    window.addEventListener('load', async () => {
+        try {
+            const res = await fetch(`/api/interface-templates/${templateId}`, { credentials: 'include' });
+            const data = await res.json();
+            if (!data.success) return;
+
+            const t = data.template;
+            // Open create modal if it exists
+            const createModal = document.getElementById('createModal') || document.getElementById('addInterfaceModal');
+            if (createModal) {
+                // Pre-fill name
+                const nameField = document.getElementById('interfaceName') || document.getElementById('createInterfaceName');
+                if (nameField) nameField.value = `${t.name} (copy)`;
+
+                // Pre-fill message type
+                if (t.message_type) {
+                    const mtField = document.getElementById('messageType') || document.getElementById('createMessageType');
+                    if (mtField) mtField.value = t.message_type;
+                }
+
+                // Show modal
+                createModal.classList.add('show');
+                createModal.style.display = 'flex';
+
+                // Store template id on modal for later use by wizard/pipeline
+                createModal.dataset.fromTemplate = templateId;
+                createModal.dataset.templateName = t.name;
+
+                showSuccess(`Creating interface from template: "${t.name}". Fill in your connection details.`);
+            }
+        } catch (_) {
+            // Silently ignore — template param is optional
+        }
+    });
+}());

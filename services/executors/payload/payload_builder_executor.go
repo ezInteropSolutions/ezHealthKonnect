@@ -1,10 +1,11 @@
 // services/executors/payload/payload_builder_executor.go
 // Payload Builder — constructs the final outbound wire payload from pipeline data.
 //
-// Three modes:
+// Modes:
 //   pass_through  — resolves a single source path and serializes it
 //   template      — {{ variable }} substitution in a JSON/HL7 template string
 //   field_builder — builds an object from a list of target→source mappings
+//   fhir_bundle   — wraps one or more FHIR resources into a FHIR Bundle
 //
 // Output step_output:
 //   payload       string  — the wire-format string to send
@@ -28,6 +29,25 @@ import (
 	outboundformat "ezhealthkonnect/services/executors/format"
 )
 
+// fhirBundleConfig holds config specific to the fhir_bundle mode.
+type fhirBundleConfig struct {
+	// BundleType controls the FHIR Bundle.type field.
+	// Supported: "collection" (default) | "transaction" | "batch" | "document"
+	BundleType string `json:"bundleType"`
+
+	// ResourcePaths is an ordered list of pipeline variable paths.
+	// Each path must resolve to a map[string]interface{} FHIR resource.
+	// Example: ["fhir.patient", "fhir.encounter", "fhir.observation"]
+	ResourcePaths []string `json:"resourcePaths"`
+
+	// BundleID is an optional Bundle.id value. If empty one is auto-generated.
+	BundleID string `json:"bundleId"`
+
+	// IncludeRequest adds a Bundle.entry.request block (required for transaction bundles).
+	// When true the connector builds a minimal request using the resource's resourceType + id.
+	IncludeRequest bool `json:"includeRequest"`
+}
+
 // PayloadBuilderExecutor constructs final wire payloads from pipeline data.
 type PayloadBuilderExecutor struct {
 	*executors.BaseExecutor
@@ -48,12 +68,13 @@ func NewPayloadBuilderExecutor() *PayloadBuilderExecutor {
 
 // payloadBuilderConfig is the config stored in transformation_steps.config.
 type payloadBuilderConfig struct {
-	Mode          string         `json:"mode"`           // pass_through | template | field_builder
-	SourcePath    string         `json:"source_path"`    // pass_through: pipeline variable path
-	OutputFormat  string         `json:"output_format"`  // fhir_r4 | hl7v2 | json | csv
-	ContentType   string         `json:"content_type"`   // MIME type override
-	Template      string         `json:"template"`       // template mode: the template string
-	FieldMappings []fieldMapping `json:"field_mappings"` // field_builder mode
+	Mode          string           `json:"mode"`           // pass_through | template | field_builder | fhir_bundle
+	SourcePath    string           `json:"source_path"`    // pass_through: pipeline variable path
+	OutputFormat  string           `json:"output_format"`  // fhir_r4 | hl7v2 | json | csv
+	ContentType   string           `json:"content_type"`   // MIME type override
+	Template      string           `json:"template"`       // template mode: the template string
+	FieldMappings []fieldMapping   `json:"field_mappings"` // field_builder mode
+	FHIRBundle    fhirBundleConfig `json:"fhirBundle"`     // fhir_bundle mode
 }
 
 type fieldMapping struct {
@@ -98,6 +119,8 @@ func (e *PayloadBuilderExecutor) Execute(
 		payload, contentType, err = e.buildTemplate(inputData, cfg)
 	case "field_builder":
 		payload, contentType, err = e.buildFromFieldMappings(inputData, cfg)
+	case "fhir_bundle":
+		payload, contentType, err = e.buildFHIRBundle(inputData, cfg)
 	default:
 		payload, contentType, err = e.buildPassThrough(inputData, cfg)
 	}
@@ -282,6 +305,135 @@ func setNestedValue(obj map[string]interface{}, path string, val interface{}) {
 		obj[key] = sub
 	}
 	setNestedValue(sub, parts[1], val)
+}
+
+// ── FHIR Bundle builder ───────────────────────────────────────────────────────
+// Wraps one or more resolved pipeline resources into a FHIR Bundle.
+//
+// Supported bundle types:
+//   collection   — no entry.request blocks (default, read-only grouping)
+//   transaction  — each entry gets entry.request {method, url} for atomic processing
+//   batch        — like transaction but non-atomic
+//   document     — document Bundle (first entry should be a Composition resource)
+
+func (e *PayloadBuilderExecutor) buildFHIRBundle(
+	inputData map[string]interface{},
+	cfg payloadBuilderConfig,
+) (string, string, error) {
+	bc := cfg.FHIRBundle
+
+	bundleType := bc.BundleType
+	if bundleType == "" {
+		bundleType = "collection"
+	}
+
+	// Validate bundle type
+	validTypes := map[string]bool{
+		"collection": true, "transaction": true, "batch": true, "document": true,
+	}
+	if !validTypes[bundleType] {
+		return "", "application/fhir+json",
+			fmt.Errorf("fhir_bundle: unsupported bundleType %q — use collection|transaction|batch|document", bundleType)
+	}
+
+	// transaction and batch always need request blocks
+	includeRequest := bc.IncludeRequest || bundleType == "transaction" || bundleType == "batch"
+
+	// Resolve resources from pipeline paths
+	var entries []interface{}
+	for _, path := range bc.ResourcePaths {
+		raw := executors.GetFieldValue(inputData, path)
+		if raw == nil {
+			// Try inside message envelope
+			if msg, ok := inputData["message"].(map[string]interface{}); ok {
+				raw = executors.GetFieldValue(msg, path)
+			}
+		}
+		if raw == nil {
+			log.Printf("  ⚠️  [PayloadBuilder/fhir_bundle] path %q resolved to nil — skipping", path)
+			continue
+		}
+
+		resource, ok := raw.(map[string]interface{})
+		if !ok {
+			// If it's a JSON string, unmarshal it
+			if s, ok := raw.(string); ok {
+				var m map[string]interface{}
+				if err := json.Unmarshal([]byte(s), &m); err != nil {
+					log.Printf("  ⚠️  [PayloadBuilder/fhir_bundle] path %q is string but not valid JSON: %v", path, err)
+					continue
+				}
+				resource = m
+			} else {
+				log.Printf("  ⚠️  [PayloadBuilder/fhir_bundle] path %q is not a FHIR resource map — skipping", path)
+				continue
+			}
+		}
+
+		entry := map[string]interface{}{
+			"resource": resource,
+		}
+
+		if includeRequest {
+			entry["request"] = buildBundleEntryRequest(bundleType, resource)
+		}
+
+		entries = append(entries, entry)
+	}
+
+	if len(entries) == 0 {
+		return "", "application/fhir+json",
+			fmt.Errorf("fhir_bundle: no resources resolved from resourcePaths %v", bc.ResourcePaths)
+	}
+
+	// Build Bundle.id
+	bundleID := bc.BundleID
+	if bundleID == "" {
+		bundleID = fmt.Sprintf("bundle-%d", time.Now().UnixNano())
+	}
+
+	bundle := map[string]interface{}{
+		"resourceType": "Bundle",
+		"id":           bundleID,
+		"type":         bundleType,
+		"timestamp":    time.Now().UTC().Format(time.RFC3339),
+		"total":        len(entries),
+		"entry":        entries,
+	}
+
+	body, err := json.Marshal(bundle)
+	if err != nil {
+		return "", "application/fhir+json", fmt.Errorf("fhir_bundle: marshal failed: %w", err)
+	}
+
+	log.Printf("  📦 [PayloadBuilder/fhir_bundle] type=%s entries=%d id=%s", bundleType, len(entries), bundleID)
+	return string(body), "application/fhir+json", nil
+}
+
+// buildBundleEntryRequest creates the entry.request block for transaction/batch Bundles.
+// FHIR REST semantics: resource with id → PUT, without id → POST.
+func buildBundleEntryRequest(bundleType string, resource map[string]interface{}) map[string]interface{} {
+	resourceType, _ := resource["resourceType"].(string)
+	resourceID, _ := resource["id"].(string)
+
+	method := "POST"
+	url := resourceType
+	if resourceID != "" {
+		method = "PUT"
+		url = resourceType + "/" + resourceID
+	}
+
+	req := map[string]interface{}{
+		"method": method,
+		"url":    url,
+	}
+
+	// For batch bundles include ifNoneExist for conditional creates when no ID is set
+	if bundleType == "batch" && resourceID == "" && resourceType != "" {
+		req["ifNoneExist"] = "identifier=" + resourceType
+	}
+
+	return req
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────

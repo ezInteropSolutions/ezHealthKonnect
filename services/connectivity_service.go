@@ -34,11 +34,14 @@ func NewConnectivityService(db *sql.DB, credStore *CredentialStore) *Connectivit
 // ListConnectivityTypes retrieves all connectivity types
 func (cs *ConnectivityService) ListConnectivityTypes(filter *models.ConnectivityTypeFilter) ([]*models.ConnectivityType, error) {
 	query := `
-		SELECT id, type_name, category, display_name, description, icon,
+		SELECT id, type_name, category, display_name,
+		       COALESCE(description, '') AS description, COALESCE(icon, '') AS icon,
 		       mode, supports_cron, requires_auth, is_bidirectional,
-		       implementation_class, config_schema, default_config,
+		       COALESCE(implementation_class, '') AS implementation_class,
+		       config_schema, default_config,
 		       wizard_template, parameter_groups, validation_rules,
-		       is_active, is_beta, priority, version, documentation_url,
+		       is_active, is_beta, priority, COALESCE(version, '') AS version, documentation_url,
+		       COALESCE(ui_category, '') AS ui_category, COALESCE(ui_sort_order, 100) AS ui_sort_order,
 		       created_at, updated_at
 		FROM connectivity_types
 		WHERE 1=1
@@ -101,6 +104,7 @@ func (cs *ConnectivityService) ListConnectivityTypes(filter *models.Connectivity
 			&ct.ImplementationClass, &ct.ConfigSchema, &defaultConfig,
 			&wizardTemplate, &parameterGroups, &validationRules,
 			&ct.IsActive, &ct.IsBeta, &ct.Priority, &ct.Version, &documentationURL,
+			&ct.UICategory, &ct.UISortOrder,
 			&ct.CreatedAt, &ct.UpdatedAt,
 		)
 		if err != nil {
@@ -138,11 +142,14 @@ func (cs *ConnectivityService) GetConnectivityTypeByID(id string) (*models.Conne
 	var documentationURL sql.NullString
 
 	query := `
-		SELECT id, type_name, category, display_name, description, icon,
+		SELECT id, type_name, category, display_name,
+		       COALESCE(description, '') AS description, COALESCE(icon, '') AS icon,
 		       mode, supports_cron, requires_auth, is_bidirectional,
-		       implementation_class, config_schema, default_config,
+		       COALESCE(implementation_class, '') AS implementation_class,
+		       config_schema, default_config,
 		       wizard_template, parameter_groups, validation_rules,
-		       is_active, is_beta, priority, version, documentation_url,
+		       is_active, is_beta, priority, COALESCE(version, '') AS version, documentation_url,
+		       COALESCE(ui_category, '') AS ui_category, COALESCE(ui_sort_order, 100) AS ui_sort_order,
 		       created_at, updated_at
 		FROM connectivity_types
 		WHERE id = $1
@@ -154,6 +161,7 @@ func (cs *ConnectivityService) GetConnectivityTypeByID(id string) (*models.Conne
 		&ct.ImplementationClass, &ct.ConfigSchema, &defaultConfig,
 		&wizardTemplate, &parameterGroups, &validationRules,
 		&ct.IsActive, &ct.IsBeta, &ct.Priority, &ct.Version, &documentationURL,
+		&ct.UICategory, &ct.UISortOrder,
 		&ct.CreatedAt, &ct.UpdatedAt,
 	)
 
@@ -191,11 +199,14 @@ func (cs *ConnectivityService) GetConnectivityTypeByName(typeName string) (*mode
 	var documentationURL sql.NullString
 
 	query := `
-		SELECT id, type_name, category, display_name, description, icon,
+		SELECT id, type_name, category, display_name,
+		       COALESCE(description, '') AS description, COALESCE(icon, '') AS icon,
 		       mode, supports_cron, requires_auth, is_bidirectional,
-		       implementation_class, config_schema, default_config,
+		       COALESCE(implementation_class, '') AS implementation_class,
+		       config_schema, default_config,
 		       wizard_template, parameter_groups, validation_rules,
-		       is_active, is_beta, priority, version, documentation_url,
+		       is_active, is_beta, priority, COALESCE(version, '') AS version, documentation_url,
+		       COALESCE(ui_category, '') AS ui_category, COALESCE(ui_sort_order, 100) AS ui_sort_order,
 		       created_at, updated_at
 		FROM connectivity_types
 		WHERE type_name = $1
@@ -207,6 +218,7 @@ func (cs *ConnectivityService) GetConnectivityTypeByName(typeName string) (*mode
 		&ct.ImplementationClass, &ct.ConfigSchema, &defaultConfig,
 		&wizardTemplate, &parameterGroups, &validationRules,
 		&ct.IsActive, &ct.IsBeta, &ct.Priority, &ct.Version, &documentationURL,
+		&ct.UICategory, &ct.UISortOrder,
 		&ct.CreatedAt, &ct.UpdatedAt,
 	)
 

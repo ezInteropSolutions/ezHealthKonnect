@@ -3,8 +3,13 @@
 
 const express = require('express');
 const MessageController = require('../controllers/MessageController');
+const { requireRole } = require('../middleware/auth');
 
 const router = express.Router();
+
+// RBAC: messages are visible to operator+viewer; send/delete require operator+
+const canRead  = requireRole('admin', 'operator', 'viewer');
+const canWrite = requireRole('admin', 'operator');
 
 // Session authentication middleware
 const sessionAuth = (req, res, next) => {
@@ -28,62 +33,34 @@ router.get('/test', (req, res) => {
 });
 
 // INTERFACE-SPECIFIC MESSAGE ROUTES (Performance Optimized)
-// Get messages for a specific interface only
-router.get('/interface/:interfaceId', sessionAuth, (req, res) => MessageController.getInterfaceMessages(req, res));
-
-// Interface-specific message statistics
-router.get('/interface/:interfaceId/stats', sessionAuth, (req, res) => MessageController.getInterfaceStats(req, res));
+router.get('/interface/:interfaceId',       sessionAuth, canRead,  (req, res) => MessageController.getInterfaceMessages(req, res));
+router.get('/interface/:interfaceId/stats', sessionAuth, canRead,  (req, res) => MessageController.getInterfaceStats(req, res));
 
 // GLOBAL ENDPOINTS REMOVED - Use interface-specific endpoints only
-// Redirect global requests to interface selection
-router.get('/', sessionAuth, (req, res) => {
-    res.status(400).json({
-        success: false,
-        error: 'Global message viewing disabled. Please specify an interface.',
-        message: 'Use /interface/:interfaceId endpoint for performance',
-        redirect: '/interfaces.html'
-    });
+router.get('/', sessionAuth, canRead, (req, res) => {
+    res.status(400).json({ success: false, error: 'Global message viewing disabled. Please specify an interface.', redirect: '/interfaces.html' });
+});
+router.get('/stats', sessionAuth, canRead, (req, res) => {
+    res.status(400).json({ success: false, error: 'Global stats disabled. Use /interface/:interfaceId/stats' });
 });
 
-router.get('/stats', sessionAuth, (req, res) => {
-    res.status(400).json({
-        success: false,
-        error: 'Global stats disabled. Please use interface-specific stats.',
-        message: 'Use /interface/:interfaceId/stats endpoint for performance'
-    });
-});
+// Message detail reads                                   — viewer+
+router.get('/:messageId',         sessionAuth, canRead,  (req, res) => MessageController.getMessageDetail(req, res));
+router.get('/:messageId/lineage', sessionAuth, canRead,  (req, res) => MessageController.getDataLineage(req, res));
+router.get('/:messageId/errors',  sessionAuth, canRead,  (req, res) => MessageController.getMessageErrors(req, res));
+router.get('/:messageId/logs',    sessionAuth, canRead,  (req, res) => MessageController.getMessageLogs(req, res));
 
-// Get detailed message by ID
-router.get('/:messageId', sessionAuth, (req, res) => MessageController.getMessageDetail(req, res));
+// Message flow status                                    — viewer+
+router.get('/flow/:sourceInterfaceId/:targetInterfaceId/status', sessionAuth, canRead, (req, res) => MessageController.getFlowStatus(req, res));
 
-// Get data lineage for a message (input → transformation → output → delivery)
-router.get('/:messageId/lineage', sessionAuth, (req, res) => MessageController.getDataLineage(req, res));
+// Write operations                                       — operator+
+router.post('/send/:interfaceId',   sessionAuth, canWrite, (req, res) => MessageController.sendMessage(req, res));
+router.post('/flow/hl7-to-fhir',   sessionAuth, canWrite, (req, res) => MessageController.sendHL7ToFHIR(req, res));
+router.post('/:messageId/reprocess', sessionAuth, canWrite, (req, res) => MessageController.reprocessMessage(req, res));
+router.delete('/:messageId',        sessionAuth, canWrite, (req, res) => MessageController.deleteMessage(req, res));
 
-// Get errors and warnings for a message (V23 - Error Handling Enhancement)
-router.get('/:messageId/errors', sessionAuth, (req, res) => MessageController.getMessageErrors(req, res));
-
-// Get processing logs for a message (V33 - Interface-Level Logging)
-router.get('/:messageId/logs', sessionAuth, (req, res) => MessageController.getMessageLogs(req, res));
-
-// Send test message to interface
-router.post('/send/:interfaceId', sessionAuth, (req, res) => MessageController.sendMessage(req, res));
-
-// HL7 TO FHIR MESSAGE FLOW ROUTES (NEW)
-// Send HL7 message from source interface to FHIR target interface
-router.post('/flow/hl7-to-fhir', sessionAuth, (req, res) => MessageController.sendHL7ToFHIR(req, res));
-
-// FHIR RECEIVER ENDPOINT (NEW)
-// Receive FHIR messages and store them in interface-specific table
-router.post('/fhir/Patient', (req, res) => MessageController.receiveFHIRMessage(req, res));
+// FHIR RECEIVER — unauthenticated (system-to-system endpoint)
+router.post('/fhir/Patient',       (req, res) => MessageController.receiveFHIRMessage(req, res));
 router.post('/fhir/:resourceType', (req, res) => MessageController.receiveFHIRMessage(req, res));
-
-// Get message flow status between interfaces
-router.get('/flow/:sourceInterfaceId/:targetInterfaceId/status', sessionAuth, (req, res) => MessageController.getFlowStatus(req, res));
-
-// Reprocess failed message
-router.post('/:messageId/reprocess', sessionAuth, (req, res) => MessageController.reprocessMessage(req, res));
-
-// Delete message
-router.delete('/:messageId', sessionAuth, (req, res) => MessageController.deleteMessage(req, res));
 
 module.exports = router;

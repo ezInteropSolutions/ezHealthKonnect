@@ -111,8 +111,10 @@ class PipelineBuilder {
                     const interfaceResponse = await fetch(`/api/interfaces/${this.interfaceId}`);
                     if (interfaceResponse.ok) {
                         const interfaceData = await interfaceResponse.json();
+                        // API returns { success: true, interface: { messageType: ... } } — unwrap
+                        const ifaceObj = interfaceData.interface || interfaceData;
                         // Use message_type from interface, default to ADT^A01 if not set or invalid
-                        const dbMessageType = interfaceData.message_type || interfaceData.messageType;
+                        const dbMessageType = ifaceObj.message_type || ifaceObj.messageType;
                         this.messageType = (dbMessageType && dbMessageType !== 'hl7v2')
                             ? dbMessageType
                             : 'ADT^A01';
@@ -128,6 +130,17 @@ class PipelineBuilder {
                     this.interfaceId,
                     this.messageType
                 );
+
+                // Fallback: if not found by message type, pick the first pipeline for this interface
+                // (handles cases where interface.message_type is NULL but pipeline was saved with a specific type)
+                if (!this.pipeline) {
+                    const fallback = await window.pipelineAPI.loadFirstPipelineForInterface(this.interfaceId);
+                    if (fallback) {
+                        this.pipeline = fallback;
+                        this.messageType = fallback.messageType || this.messageType;
+                        console.log(`✅ Pipeline found via fallback lookup (message_type: ${this.messageType})`);
+                    }
+                }
 
                 if (!this.pipeline) {
                     // Create new pipeline
@@ -1213,9 +1226,10 @@ class PipelineBuilder {
                 // Invalidate test output cache — pipeline changed, re-test needed for runtime paths
                 window.pipelineLastTestOutput = null;
 
-                // Update pipeline ID if new
-                if (result.data?.id) {
-                    this.pipeline.id = result.data.id;
+                // Update pipeline ID with the actual DB id (handles ON CONFLICT returning original id)
+                const returnedId = result.pipeline?.id || result.data?.id;
+                if (returnedId) {
+                    this.pipeline.id = returnedId;
                 }
             }
 

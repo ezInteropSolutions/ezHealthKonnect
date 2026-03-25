@@ -223,6 +223,14 @@ func (pe *ProcessingEngine) Stop() error {
 	return nil
 }
 
+// SetCodeTemplateService wires a CodeTemplateService into the transformation pipeline
+// so that code template function libraries are injected into script step goja VMs.
+func (pe *ProcessingEngine) SetCodeTemplateService(svc *services.CodeTemplateService) {
+	if pe.transformationService != nil {
+		pe.transformationService.SetCodeTemplateService(svc)
+	}
+}
+
 // IsRunning returns whether the engine is running
 func (pe *ProcessingEngine) IsRunning() bool {
 	pe.mutex.RLock()

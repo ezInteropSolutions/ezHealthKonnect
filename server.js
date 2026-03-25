@@ -1,25 +1,38 @@
 // server.js - Node.js Frontend Server (UI, Auth, API Routing)
 // All TCP/MLLP listeners and message processing handled by Go backend
-const app = require('./app');
+require('dotenv').config();
 const { PORT = 3000 } = process.env;
 
 async function startServer() {
     try {
         console.log('🚀 Starting ezHealthKonnect Enterprise Server...');
         console.log('🗄️  Mode: PostgreSQL Only (Production Ready)');
-        
+
         // Verify PostgreSQL connection before starting server
         try {
             const database = require('./config/database');
             const connected = await database.connect();
-            
+
             if (!connected || !database.isConnected) {
                 throw new Error('PostgreSQL connection required for production mode');
             }
-            
+
             await database.sync();
             console.log('✅ PostgreSQL database verified and ready');
             console.log('ℹ️  All TCP/MLLP listeners managed by Go backend (port 8080)');
+
+            // Load session timeout from system_settings BEFORE requiring app.js
+            // so the express-session maxAge is set correctly at startup.
+            try {
+                const settingsService = require('./services/settingsService');
+                const sec = await settingsService.getSecuritySettings();
+                if (sec && sec.session_timeout_minutes) {
+                    process.env.SESSION_TIMEOUT_MINUTES = String(sec.session_timeout_minutes);
+                    console.log(`🔐 Session timeout: ${sec.session_timeout_minutes} min (from system_settings)`);
+                }
+            } catch (settingsErr) {
+                console.warn('⚠️  Could not load security settings for session timeout:', settingsErr.message);
+            }
 
         } catch (dbError) {
             console.error('❌ Database initialization failed:', dbError.message);
@@ -32,6 +45,9 @@ async function startServer() {
             process.exit(1);
         }
         
+        // Load Express app AFTER env vars are set (session timeout, etc.)
+        const app = require('./app');
+
         // Start Express server
         const server = app.listen(PORT, async () => {
             console.log(`\n🏥 ezHealthKonnect Enterprise Server`);

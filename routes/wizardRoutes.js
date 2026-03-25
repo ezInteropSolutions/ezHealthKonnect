@@ -5,8 +5,13 @@ const express = require('express');
 const router = express.Router();
 const wizardController = require('../controllers/wizardController');
 const WizardMappingController = require('../controllers/WizardMappingController'); // Fixed path
+const { requireRole } = require('../middleware/auth');
 
 const wizardMappingController = new WizardMappingController();
+
+// RBAC: reads are viewer+; writes are operator+
+const canRead  = requireRole('admin', 'operator', 'viewer');
+const canWrite = requireRole('admin', 'operator');
 
 /**
  * Authentication middleware
@@ -18,7 +23,7 @@ const requireAuth = (req, res, next) => {
             error: 'Authentication required'
         });
     }
-    
+
     // Set user info for controller access
     req.user = {
         id: req.session.user.id,
@@ -26,7 +31,7 @@ const requireAuth = (req, res, next) => {
         name: req.session.user.name,
         role: req.session.user.role
     };
-    
+
     next();
 };
 
@@ -34,16 +39,16 @@ const requireAuth = (req, res, next) => {
 // EXISTING WIZARD ROUTES
 // ====================================
 
-// Interface configuration routes
-router.post('/save-config', requireAuth, wizardController.saveConfiguration);
-router.post('/activate-interface', requireAuth, wizardController.activateInterface);
-router.post('/complete', requireAuth, wizardController.completeWizard);
+// Interface configuration routes                         — operator+
+router.post('/save-config',        requireAuth, canWrite, wizardController.saveConfiguration);
+router.post('/activate-interface', requireAuth, canWrite, wizardController.activateInterface);
+router.post('/complete',           requireAuth, canWrite, wizardController.completeWizard);
 
 // Interface management routes
-router.get('/interfaces', requireAuth, wizardController.listInterfaces);
-router.get('/interfaces/:id', requireAuth, wizardController.getInterface);
-router.get('/interfaces/:id/stats', requireAuth, wizardController.getInterfaceStats);
-router.delete('/interfaces/:id', requireAuth, wizardController.deleteInterface);
+router.get('/interfaces',            requireAuth, canRead,  wizardController.listInterfaces);
+router.get('/interfaces/:id',        requireAuth, canRead,  wizardController.getInterface);
+router.get('/interfaces/:id/stats',  requireAuth, canRead,  wizardController.getInterfaceStats);
+router.delete('/interfaces/:id',     requireAuth, canWrite, wizardController.deleteInterface);
 
 // ====================================
 // PROCESSING ENGINE ROUTES
@@ -53,7 +58,7 @@ router.delete('/interfaces/:id', requireAuth, wizardController.deleteInterface);
  * Start processing engine
  * POST /api/wizard/engine/start
  */
-router.post('/engine/start', requireAuth, async (req, res) => {
+router.post('/engine/start', requireAuth, canWrite, async (req, res) => {
     try {
         const ProcessingEngineService = require('../services/ProcessingEngineService');
         const processingEngine = new ProcessingEngineService();
@@ -78,7 +83,7 @@ router.post('/engine/start', requireAuth, async (req, res) => {
  * Activate specific interface for processing
  * POST /api/wizard/interfaces/:id/activate
  */
-router.post('/interfaces/:id/activate', requireAuth, async (req, res) => {
+router.post('/interfaces/:id/activate', requireAuth, canWrite, async (req, res) => {
     try {
         const { id: interfaceId } = req.params;
 
@@ -105,7 +110,7 @@ router.post('/interfaces/:id/activate', requireAuth, async (req, res) => {
  * Deactivate specific interface
  * POST /api/wizard/interfaces/:id/deactivate
  */
-router.post('/interfaces/:id/deactivate', requireAuth, async (req, res) => {
+router.post('/interfaces/:id/deactivate', requireAuth, canWrite, async (req, res) => {
     try {
         const { id: interfaceId } = req.params;
         const { reason } = req.body;
@@ -133,7 +138,7 @@ router.post('/interfaces/:id/deactivate', requireAuth, async (req, res) => {
  * Get processing engine status and statistics
  * GET /api/wizard/engine/status
  */
-router.get('/engine/status', requireAuth, async (req, res) => {
+router.get('/engine/status', requireAuth, canRead, async (req, res) => {
     try {
         const ProcessingEngineService = require('../services/ProcessingEngineService');
         const processingEngine = new ProcessingEngineService();
@@ -175,7 +180,7 @@ router.get('/engine/status', requireAuth, async (req, res) => {
  * Get message lineage for tracking
  * GET /api/wizard/lineage/:messageId
  */
-router.get('/lineage/:messageId', requireAuth, async (req, res) => {
+router.get('/lineage/:messageId', requireAuth, canRead, async (req, res) => {
     try {
         const { messageId } = req.params;
 
@@ -204,18 +209,18 @@ router.get('/lineage/:messageId', requireAuth, async (req, res) => {
     }
 });
 
-// Interface validation routes
-router.post('/check-duplicate', requireAuth, wizardController.checkDuplicateName);
+// Interface validation routes                            — operator+
+router.post('/check-duplicate',    requireAuth, canWrite, wizardController.checkDuplicateName);
 
 // ====================================
 // OPTIMIZED WIZARD ROUTES
 // ====================================
 
-// Get mapping templates for optimized wizard
-router.get('/mapping-templates', requireAuth, wizardController.getMappingTemplates);
+// Get mapping templates for optimized wizard             — viewer+
+router.get('/mapping-templates',   requireAuth, canRead,  wizardController.getMappingTemplates);
 
-// Validate final configuration before interface creation
-router.post('/validate-final-config', requireAuth, wizardController.validateFinalConfig);
+// Validate final configuration before interface creation — operator+
+router.post('/validate-final-config', requireAuth, canWrite, wizardController.validateFinalConfig);
 
 // ====================================
 // NEW HL7-FHIR MAPPING ROUTES
@@ -225,8 +230,8 @@ router.post('/validate-final-config', requireAuth, wizardController.validateFina
  * Save wizard-generated HL7-FHIR mapping configuration
  * POST /api/wizard/save-mapping-config
  */
-router.post('/save-mapping-config', 
-    requireAuth,
+router.post('/save-mapping-config',                      // operator+
+    requireAuth, canWrite,
     wizardMappingController.saveMappingConfiguration.bind(wizardMappingController)
 );
 
@@ -269,7 +274,7 @@ router.get('/runtime-mapping/:interfaceId/:messageType', async (req, res) => {
  * Get all mappings for an interface
  * GET /api/wizard/interface-mappings/:interfaceId
  */
-router.get('/interface-mappings/:interfaceId', requireAuth, async (req, res) => {
+router.get('/interface-mappings/:interfaceId', requireAuth, canRead, async (req, res) => {
     try {
         const { interfaceId } = req.params;
 
@@ -299,8 +304,8 @@ router.get('/interface-mappings/:interfaceId', requireAuth, async (req, res) => 
  * Get available FHIR templates by message type
  * GET /api/wizard/templates/:messageType
  */
-router.get('/templates/:messageType', 
-    requireAuth,
+router.get('/templates/:messageType',                     // viewer+
+    requireAuth, canRead,
     wizardMappingController.getTemplatesByMessageType.bind(wizardMappingController)
 );
 
@@ -308,8 +313,8 @@ router.get('/templates/:messageType',
  * Validate mapping configuration before saving
  * POST /api/wizard/validate-config
  */
-router.post('/validate-config', 
-    requireAuth,
+router.post('/validate-config',                           // operator+
+    requireAuth, canWrite,
     wizardMappingController.validateConfiguration.bind(wizardMappingController)
 );
 

@@ -1,7 +1,10 @@
 package controllers
 
 import (
+	"database/sql"
+	"fmt"
 	"net/http"
+	"runtime"
 	"time"
 
 	"ezhealthkonnect/config"
@@ -12,23 +15,46 @@ import (
 // SystemController handles system-level operations
 type SystemController struct {
 	config *config.Config
+	db     *sql.DB
 }
 
 // NewSystemController creates a new system controller
-func NewSystemController(cfg *config.Config) *SystemController {
+func NewSystemController(cfg *config.Config, db *sql.DB) *SystemController {
 	return &SystemController{
 		config: cfg,
+		db:     db,
 	}
 }
 
-// HealthCheck returns the health status of the API
+// HealthCheck returns the health status of the API, including a real DB ping.
 func (ctrl *SystemController) HealthCheck(c *gin.Context) {
+	dbStatus := "connected"
+	dbLatencyMs := int64(0)
+	if ctrl.db != nil {
+		start := time.Now()
+		if err := ctrl.db.PingContext(c.Request.Context()); err != nil {
+			dbStatus = "error"
+		}
+		dbLatencyMs = time.Since(start).Milliseconds()
+	} else {
+		dbStatus = "unavailable"
+	}
+
+	status := "healthy"
+	if dbStatus != "connected" {
+		status = "degraded"
+	}
+
 	c.JSON(http.StatusOK, gin.H{
-		"status":      "healthy",
+		"status":      status,
 		"service":     "ezHealthKonnect-Go-API",
 		"version":     "1.0.0",
 		"timestamp":   time.Now().Format(time.RFC3339),
 		"environment": ctrl.config.Environment,
+		"database": gin.H{
+			"status":     dbStatus,
+			"latency_ms": dbLatencyMs,
+		},
 		"features": gin.H{
 			"postgresql_enabled":   ctrl.config.EnablePostgreSQL,
 			"hipaa_compliance":     ctrl.config.HIPAAComplianceMode,
@@ -92,35 +118,27 @@ func (ctrl *SystemController) GetInfo(c *gin.Context) {
 	})
 }
 
-// GetMetrics returns system performance metrics
+// GetMetrics returns system performance metrics (memory from runtime, others static).
 func (ctrl *SystemController) GetMetrics(c *gin.Context) {
-	// TODO: Implement actual metrics collection
+	var ms runtime.MemStats
+	runtime.ReadMemStats(&ms)
+
+	allocMB := ms.Alloc / 1024 / 1024
+	sysMB := ms.Sys / 1024 / 1024
+	memPct := 0
+	if sysMB > 0 {
+		memPct = int(allocMB * 100 / sysMB)
+	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"metrics": gin.H{
-			"requests": gin.H{
-				"total":      15432,
-				"lastHour":   234,
-				"lastMinute": 4,
-				"errorRate":  "0.3%",
-			},
-			"parsing": gin.H{
-				"messagesProcessed": 12547,
-				"averageTime":       "12ms",
-				"dictionaryHitRate": "87%",
-				"enhancedParsing":   "78%",
-			},
-			"interfaces": gin.H{
-				"total":   3,
-				"running": 2,
-				"paused":  1,
-				"stopped": 0,
-			},
 			"system": gin.H{
-				"uptime":      "72h 15m",
-				"memoryUsage": "256MB",
-				"cpuUsage":    "12%",
-				"diskUsage":   "2.1GB",
+				"memory_alloc_mb":  allocMB,
+				"memory_sys_mb":    sysMB,
+				"memory_pct":       memPct,
+				"memory_display":   fmt.Sprintf("%dMB / %dMB (%d%%)", allocMB, sysMB, memPct),
+				"goroutines":       runtime.NumGoroutine(),
 			},
 		},
 		"timestamp": time.Now().Format(time.RFC3339),

@@ -774,28 +774,68 @@ class ConnectorConfigBuilder extends BaseStepConfigBuilder {
             const types = response.data || response || [];
             this.connectorTypes = types;
 
-            // Type name aliases: DB may store 'tcp_mllp' while step config stores 'tcp_mllp_inbound'
+            // Type name aliases: DB may store a legacy name while step config stores the
+            // canonical Phase A name, or vice-versa. Both directions listed.
             const TYPE_ALIASES = {
-                'tcp_mllp_inbound': 'tcp_mllp',   'tcp_mllp': 'tcp_mllp_inbound',
-                'http_rest_inbound': 'http_rest',  'http_rest': 'http_rest_inbound'
+                // MLLP
+                'tcp_mllp_inbound':  'tcp_mllp',
+                'tcp_mllp':          'tcp_mllp_inbound',
+                // HTTP generic legacy
+                'http_rest_inbound': 'http_rest',
+                'http_rest':         'http_rest_inbound',
+                // FHIR HTTP — canonical names only (fhir_r4_* removed in V79)
+                'http_fhir_inbound':  'http_rest_inbound',
             };
             const storedType = this.config.connectorType || '';
 
-            // Build dropdown options
+            // Build grouped dropdown options using ui_category if available
+            const UI_CATEGORY_ORDER = [
+                'EMR / EHR', 'Healthcare Protocols', 'Healthcare Network',
+                'Payers & Revenue Cycle', 'Databases', 'NoSQL Databases',
+                'Data Warehouses', 'Message Queues', 'Cloud Storage',
+                'File Transfer', 'Other',
+            ];
+
             typeSelect.innerHTML = '<option value="">-- Select Connector Type --</option>';
             let matchedTypeName = '';
-            types.forEach(ct => {
-                const option = document.createElement('option');
-                option.value = ct.type_name;
-                option.textContent = `${ct.icon || ''} ${ct.display_name}`;
-                if (ct.is_beta) option.textContent += ' (Beta)';
-                const isMatch = ct.type_name === storedType || ct.type_name === TYPE_ALIASES[storedType];
-                if (isMatch) {
-                    option.selected = true;
-                    matchedTypeName = ct.type_name;
-                }
-                typeSelect.appendChild(option);
-            });
+
+            // Group types by ui_category (fall back to flat list if no ui_category)
+            const hasCategories = types.some(ct => ct.ui_category);
+            if (hasCategories) {
+                const grouped = {};
+                types.forEach(ct => {
+                    const cat = ct.ui_category || 'Other';
+                    if (!grouped[cat]) grouped[cat] = [];
+                    grouped[cat].push(ct);
+                });
+                // Render in defined order, then any remaining categories
+                const catOrder = [...UI_CATEGORY_ORDER, ...Object.keys(grouped).filter(c => !UI_CATEGORY_ORDER.includes(c))];
+                catOrder.forEach(cat => {
+                    const items = grouped[cat];
+                    if (!items || items.length === 0) return;
+                    const optgroup = document.createElement('optgroup');
+                    optgroup.label = cat;
+                    items.forEach(ct => {
+                        const option = document.createElement('option');
+                        option.value = ct.type_name;
+                        option.textContent = `${ct.icon || ''} ${ct.display_name}${ct.is_beta ? ' (Beta)' : ''}`;
+                        const isMatch = ct.type_name === storedType || ct.type_name === TYPE_ALIASES[storedType];
+                        if (isMatch) { option.selected = true; matchedTypeName = ct.type_name; }
+                        optgroup.appendChild(option);
+                    });
+                    typeSelect.appendChild(optgroup);
+                });
+            } else {
+                // Flat fallback (no ui_category column yet)
+                types.forEach(ct => {
+                    const option = document.createElement('option');
+                    option.value = ct.type_name;
+                    option.textContent = `${ct.icon || ''} ${ct.display_name}${ct.is_beta ? ' (Beta)' : ''}`;
+                    const isMatch = ct.type_name === storedType || ct.type_name === TYPE_ALIASES[storedType];
+                    if (isMatch) { option.selected = true; matchedTypeName = ct.type_name; }
+                    typeSelect.appendChild(option);
+                });
+            }
 
             // If we have a pre-selected connector type, load its config
             if (storedType) {
@@ -847,10 +887,14 @@ class ConnectorConfigBuilder extends BaseStepConfigBuilder {
         // Find the selected type data — try exact match first, then aliases
         // (DB stores 'tcp_mllp' but wizard may write 'tcp_mllp_inbound'; engine accepts both)
         const TYPE_ALIASES = {
-            'tcp_mllp_inbound': 'tcp_mllp',
-            'tcp_mllp': 'tcp_mllp_inbound',
+            // MLLP
+            'tcp_mllp_inbound':  'tcp_mllp',
+            'tcp_mllp':          'tcp_mllp_inbound',
+            // HTTP generic legacy
             'http_rest_inbound': 'http_rest',
-            'http_rest': 'http_rest_inbound'
+            'http_rest':         'http_rest_inbound',
+            // FHIR HTTP — canonical names only (fhir_r4_* removed in V79)
+            'http_fhir_inbound':  'http_rest_inbound',
         };
         this.selectedType = this.connectorTypes.find(ct => ct.type_name === typeName)
             || this.connectorTypes.find(ct => ct.type_name === TYPE_ALIASES[typeName]);
@@ -883,7 +927,12 @@ class ConnectorConfigBuilder extends BaseStepConfigBuilder {
     /** Returns a sensible default payload source path for the given outbound connector type. */
     _getSmartContentFieldDefault(connectorType) {
         const name = (connectorType || '').toLowerCase();
+        // MLLP / raw TCP — send the original HL7 wire string
         if (name.includes('mllp') || name.includes('tcp')) return 'raw';
+        // FHIR-aware HTTP sender — default to 'payload' (output of a payload.builder step)
+        // Fall back to 'fhirBundle' if no payload.builder step precedes this one.
+        if (name.includes('fhir_outbound') || name === 'fhir_r4_outbound') return 'payload';
+        // Generic HTTP — could be FHIR or arbitrary JSON; default to fhirBundle for healthcare flows
         if (name.includes('http')) return 'fhirBundle';
         // File, MQ, cloud storage, DB — send the whole message object
         return 'message';
@@ -1183,6 +1232,19 @@ class ConnectorConfigBuilder extends BaseStepConfigBuilder {
             }
         }
 
+        // FHIR connectors: dynamic auth + smart pickers + URL preview
+        const isFHIR = typeName.includes('fhir');
+        if (isFHIR) {
+            this._applyFHIRAuthDynamics(container, existingConfig);
+            if (this.direction === 'outbound') {
+                this._enhanceFHIRResourceTypeField(container, existingConfig);
+                this._enhanceFHIROperationField(container, existingConfig);
+                this._addFHIREndpointPreview(container, existingConfig);
+            } else {
+                this._addFHIRInboundRoutingHint(container);
+            }
+        }
+
         // OAuth2 only for HTTP connectors when authentication_type is 'oauth2'
         if (isHTTP && typeof OAuth2ConfigBuilder !== 'undefined') {
             const authSection = this.createElement('div', {
@@ -1391,6 +1453,414 @@ class ConnectorConfigBuilder extends BaseStepConfigBuilder {
     // ========================================
     // UTILITY METHODS
     // ========================================
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // FHIR-specific field enhancers
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /**
+     * Wires dynamic show/hide of credential fields for FHIR connectors.
+     * Handles the camelCase schema (authType: none|basic|bearer|smart|api_key)
+     * used by http_fhir_outbound, http_fhir_inbound, fhir_r4_outbound, fhir_r4_inbound.
+     * Also upgrades bare enum option text to user-friendly labels.
+     */
+    _applyFHIRAuthDynamics(container, existingConfig) {
+        const authSelect = container.querySelector('.connector-config-field[data-field="authType"]');
+        if (!authSelect) return;
+
+        // Upgrade enum option labels
+        const LABELS = {
+            'none':    'No Authentication',
+            'basic':   'Basic Auth (Username / Password)',
+            'bearer':  'Bearer Token',
+            'smart':   'SMART on FHIR (Bearer token + token endpoint)',
+            'api_key': 'API Key',
+        };
+        authSelect.querySelectorAll('option').forEach(opt => {
+            if (LABELS[opt.value]) opt.textContent = LABELS[opt.value];
+        });
+
+        const showField = (fieldName, visible) => {
+            const el = container.querySelector(`.connector-config-field[data-field="${fieldName}"]`)
+                                ?.closest('.form-group');
+            if (el) el.style.display = visible ? '' : 'none';
+        };
+
+        const applyVisibility = (type) => {
+            showField('username',     type === 'basic');
+            showField('password',     type === 'basic');
+            showField('bearerToken',  type === 'bearer' || type === 'smart');
+            showField('apiKey',       type === 'api_key');
+            showField('apiKeyHeader', type === 'api_key');
+        };
+
+        const currentAuth = authSelect.value || existingConfig.authType || 'none';
+        applyVisibility(currentAuth);
+        authSelect.addEventListener('change', () => applyVisibility(authSelect.value));
+    }
+
+    /**
+     * Replaces the bare `resourceType` text input on FHIR outbound connectors
+     * with a smart combo widget:
+     *   - Dropdown: "Auto-detect" (blank) + 40+ FHIR R4 resource types + "Custom…"
+     *   - Custom text input appears when "Custom…" is selected (developer escape hatch)
+     * A hidden input with data-field="resourceType" stays as the real form value so
+     * getConfig() picks it up without any override.
+     */
+    _enhanceFHIRResourceTypeField(container, existingConfig) {
+        const input = container.querySelector('.connector-config-field[data-field="resourceType"]');
+        if (!input || input.tagName === 'SELECT') return;
+
+        const FHIR_R4_TYPES = [
+            // Administrative
+            'Patient', 'Practitioner', 'PractitionerRole', 'Organization', 'Location',
+            'HealthcareService', 'RelatedPerson', 'Person', 'Group',
+            // Clinical
+            'Encounter', 'EpisodeOfCare', 'Condition', 'Observation', 'DiagnosticReport',
+            'Procedure', 'FamilyMemberHistory', 'ClinicalImpression', 'DetectedIssue',
+            // Medications
+            'Medication', 'MedicationRequest', 'MedicationAdministration',
+            'MedicationDispense', 'MedicationStatement',
+            // Allergies & Immunizations
+            'AllergyIntolerance', 'Immunization', 'ImmunizationRecommendation',
+            // Care planning
+            'CarePlan', 'CareTeam', 'Goal', 'ServiceRequest', 'ReferralRequest',
+            // Documents & communications
+            'DocumentReference', 'Composition', 'Communication', 'Flag', 'Task',
+            // Orders & referrals
+            'Appointment', 'AppointmentResponse', 'Schedule', 'Slot',
+            // Diagnostics & imaging
+            'ImagingStudy', 'Media', 'BodyStructure', 'Specimen',
+            // Financial
+            'Claim', 'ClaimResponse', 'ExplanationOfBenefit', 'Coverage',
+            'CoverageEligibilityRequest', 'CoverageEligibilityResponse',
+            // Infrastructure
+            'Bundle', 'List', 'MessageHeader', 'Parameters',
+        ];
+
+        const currentVal = input.value || existingConfig.resourceType || '';
+        const isCustom   = currentVal !== '' && !FHIR_R4_TYPES.includes(currentVal);
+
+        // Hidden real-field input — getConfig reads this
+        const hidden = document.createElement('input');
+        hidden.type = 'hidden';
+        hidden.className = 'connector-config-field';
+        hidden.dataset.field = 'resourceType';
+        hidden.value = currentVal;
+
+        // Detach original from getConfig
+        input.removeAttribute('data-field');
+        input.classList.remove('connector-config-field');
+
+        // Build dropdown
+        const sel = document.createElement('select');
+        sel.className = 'form-control form-control-sm';
+
+        const mkOpt = (val, text, selected) => {
+            const o = document.createElement('option');
+            o.value = val;
+            o.textContent = text;
+            if (selected) o.selected = true;
+            return o;
+        };
+
+        sel.appendChild(mkOpt('', '✦  Auto-detect from message body (recommended)', currentVal === ''));
+        FHIR_R4_TYPES.forEach(rt =>
+            sel.appendChild(mkOpt(rt, rt, !isCustom && rt === currentVal))
+        );
+        sel.appendChild(mkOpt('_custom_', '✎  Custom resource type…', isCustom));
+
+        // Developer custom input
+        const customInput = document.createElement('input');
+        customInput.type = 'text';
+        customInput.className = 'form-control form-control-sm';
+        customInput.placeholder = 'Enter any FHIR resource type, e.g. MolecularSequence';
+        customInput.value = isCustom ? currentVal : '';
+        customInput.style.cssText = `display:${isCustom ? '' : 'none'};margin-top:4px;`;
+
+        const updateHidden = () => {
+            hidden.value = sel.value === '_custom_' ? customInput.value.trim() : sel.value;
+            this.onChange();
+        };
+
+        sel.addEventListener('change', () => {
+            customInput.style.display = sel.value === '_custom_' ? '' : 'none';
+            if (sel.value === '_custom_') customInput.focus();
+            updateHidden();
+        });
+        customInput.addEventListener('input', updateHidden);
+
+        // Help text
+        const help = document.createElement('small');
+        help.className = 'form-text text-muted';
+        help.innerHTML =
+            '<strong>Auto-detect</strong>: reads <code>resourceType</code> from the FHIR message body — ' +
+            'correct for HL7&rarr;FHIR pipelines. Select a specific type to override the URL ' +
+            '(e.g. force all messages to <code>POST /Patient</code>).';
+
+        // Swap input → select + custom input + hidden + help
+        const formGroup = input.closest('.form-group');
+        if (formGroup) {
+            input.replaceWith(sel);
+            sel.after(customInput);
+            customInput.after(hidden);
+            formGroup.appendChild(help);
+        }
+    }
+
+    /**
+     * Replaces the bare `operation` text input with a smart combo widget.
+     * Groups common FHIR operations by level (server / type / instance) so
+     * no-code users can pick the right operation, while developers can type any custom one.
+     */
+    _enhanceFHIROperationField(container, existingConfig) {
+        const input = container.querySelector('.connector-config-field[data-field="operation"]');
+        if (!input || input.tagName === 'SELECT') return;
+
+        // Grouped FHIR operations: [value, label, level-hint]
+        const FHIR_OPS = [
+            // group: Server-level
+            { group: 'Server-level operations', ops: [
+                { v: '$process-message', l: '$process-message — process a FHIR message Bundle' },
+                { v: '$export',          l: '$export — bulk data export (SMART on FHIR)' },
+                { v: '$convert',         l: '$convert — format conversion' },
+            ]},
+            // group: Type-level (no id needed)
+            { group: 'Type-level operations (no Resource ID)', ops: [
+                { v: '$validate',   l: '$validate — validate a resource against profiles' },
+                { v: '$match',      l: '$match — patient matching (MPI)' },
+                { v: '$everything', l: '$everything — return all related resources (type)' },
+                { v: '$expand',     l: '$expand — expand a ValueSet' },
+                { v: '$lookup',     l: '$lookup — terminology lookup' },
+                { v: '$translate',  l: '$translate — concept translation' },
+                { v: '$apply',      l: '$apply — apply a PlanDefinition' },
+                { v: '$evaluate',   l: '$evaluate — evaluate a Measure' },
+            ]},
+            // group: Instance-level (requires Resource ID)
+            { group: 'Instance-level operations (Resource ID required)', ops: [
+                { v: '$everything',    l: '$everything — all info for this resource instance' },
+                { v: '$validate',      l: '$validate — validate this specific resource' },
+                { v: '$meta',          l: '$meta — read metadata tags for this resource' },
+                { v: '$meta-add',      l: '$meta-add — add metadata tags' },
+                { v: '$meta-delete',   l: '$meta-delete — delete metadata tags' },
+                { v: '$document',      l: '$document — generate a document (Composition)' },
+            ]},
+        ];
+
+        const currentVal = input.value || existingConfig.operation || '';
+        const allOpValues = FHIR_OPS.flatMap(g => g.ops.map(o => o.v));
+        // Deduplicate ($everything and $validate appear in multiple groups)
+        const knownValues = [...new Set(allOpValues)];
+        const isCustom    = currentVal !== '' && !knownValues.includes(currentVal);
+
+        // Hidden real field
+        const hidden = document.createElement('input');
+        hidden.type = 'hidden';
+        hidden.className = 'connector-config-field';
+        hidden.dataset.field = 'operation';
+        hidden.value = currentVal;
+
+        input.removeAttribute('data-field');
+        input.classList.remove('connector-config-field');
+
+        // Build select
+        const sel = document.createElement('select');
+        sel.className = 'form-control form-control-sm';
+        sel.id = 'fhir-operation-select';
+
+        const mkOpt = (v, t, sel) => { const o = document.createElement('option'); o.value = v; o.textContent = t; if (sel) o.selected = true; return o; };
+        sel.appendChild(mkOpt('', '— No operation (standard CRUD)', currentVal === ''));
+
+        FHIR_OPS.forEach(group => {
+            const og = document.createElement('optgroup');
+            og.label = group.group;
+            // deduplicate within group display
+            const seen = new Set();
+            group.ops.forEach(op => {
+                if (seen.has(op.v)) return;
+                seen.add(op.v);
+                og.appendChild(mkOpt(op.v, op.l, !isCustom && op.v === currentVal));
+            });
+            sel.appendChild(og);
+        });
+        sel.appendChild(mkOpt('_custom_', '✎  Custom operation…', isCustom));
+
+        // Custom input
+        const customInput = document.createElement('input');
+        customInput.type = 'text';
+        customInput.className = 'form-control form-control-sm';
+        customInput.placeholder = 'e.g. $myCustomOp  ($ prefix optional)';
+        customInput.value = isCustom ? currentVal : '';
+        customInput.style.cssText = `display:${isCustom ? '' : 'none'};margin-top:4px;`;
+
+        const updateHidden = () => {
+            hidden.value = sel.value === '_custom_' ? customInput.value.trim() : sel.value;
+            this.onChange();
+        };
+        sel.addEventListener('change', () => {
+            customInput.style.display = sel.value === '_custom_' ? '' : 'none';
+            if (sel.value === '_custom_') customInput.focus();
+            updateHidden();
+        });
+        customInput.addEventListener('input', updateHidden);
+
+        // Help
+        const help = document.createElement('small');
+        help.className = 'form-text text-muted';
+        help.innerHTML = 'Appended to the URL as <code>/<b>$operation</b></code>. Level (server / type / instance) is determined by Resource Type and Resource ID settings above.';
+
+        const formGroup = input.closest('.form-group');
+        if (formGroup) {
+            input.replaceWith(sel);
+            sel.after(customInput);
+            customInput.after(hidden);
+            formGroup.appendChild(help);
+        }
+    }
+
+    /**
+     * Adds a live endpoint URL preview panel below the resource routing fields
+     * on FHIR outbound connectors.  Updates in real-time as baseUrl, resourceType,
+     * resourceId, and bundleType change — exactly mirroring fhir_utils.BuildFHIRURL.
+     */
+    _addFHIREndpointPreview(container, existingConfig) {
+        // Find the Basic group body to append the preview after the last basic field
+        const basicGroup = container.querySelector('.connector-config-group');
+        if (!basicGroup) return;
+
+        const preview = document.createElement('div');
+        preview.id = 'fhir-endpoint-preview';
+        preview.style.cssText = `
+            background:#f0f7ff;border:1px solid #b3d1f7;border-radius:6px;
+            padding:10px 12px;margin-top:12px;font-size:12px;
+        `;
+
+        const title = document.createElement('div');
+        title.style.cssText = 'color:#1a5276;font-weight:600;margin-bottom:4px;';
+        title.textContent = 'Resolved Endpoint';
+        preview.appendChild(title);
+
+        const urlLine = document.createElement('div');
+        urlLine.style.cssText = 'font-family:monospace;color:#1a73e8;word-break:break-all;';
+        preview.appendChild(urlLine);
+
+        const helpLine = document.createElement('div');
+        helpLine.style.cssText = 'color:#555;margin-top:4px;font-size:11px;';
+        preview.appendChild(helpLine);
+
+        basicGroup.appendChild(preview);
+
+        // ── JS mirror of fhir_utils.BuildFHIRURL ───────────────────────────
+        // Keep in sync with Go implementation in fhir_utils.go.
+        const buildFHIRURL = (baseUrl, resourceType, resourceId, bundleType, operation, queryParams, method) => {
+            baseUrl = (baseUrl || '').replace(/\/+$/, '');
+            // Normalise operation
+            let op = (operation || '').trim();
+            if (op && !op.startsWith('$')) op = '$' + op;
+            method = (method || 'POST').toUpperCase();
+            let url, note;
+
+            if (!resourceType && !op) {
+                // Auto-detect: runtime reads resourceType from message body
+                const rt = '<resourceType>';
+                url  = baseUrl ? `${baseUrl}/${rt}` : rt;
+                note = 'resourceType auto-detected from message body at runtime — URL shown is illustrative';
+            } else if (!resourceType && op) {
+                url  = `${baseUrl}/${op}`;
+                note = `Server-level FHIR operation`;
+            } else if (resourceType === 'Bundle') {
+                if (bundleType === 'transaction') { url = `${baseUrl}/$transaction`; note = 'FHIR transaction bundle — atomic'; }
+                else if (bundleType === 'batch')  { url = `${baseUrl}/$batch`;       note = 'FHIR batch bundle — independent ops'; }
+                else                              { url = baseUrl;                    note = 'FHIR collection/document bundle'; }
+            } else {
+                url = `${baseUrl}/${resourceType}`;
+                if (resourceId) {
+                    url += `/${resourceId}`;
+                    if (!op) { method = 'PUT'; note = `Update ${resourceType}/${resourceId}`; }
+                }
+                if (op) {
+                    url += `/${op}`;
+                    if (resourceId) note = `Instance-level operation on ${resourceType}/${resourceId}`;
+                    else            note = `Type-level operation on ${resourceType}`;
+                } else if (!note) {
+                    note = resourceId ? `Update ${resourceType}` : `Create ${resourceType}`;
+                }
+            }
+
+            // Append query string
+            const qs = (queryParams || '').trim();
+            if (qs) url += (qs.startsWith('?') ? qs : '?' + qs);
+
+            // configMethod wins
+            if (method !== 'POST' && method !== 'PUT') note = (note || '') + ` (method override: ${method})`;
+
+            return { url, method, note: note || '' };
+        };
+
+        const refresh = () => {
+            const baseUrl = container.querySelector('.connector-config-field[data-field="baseUrl"]')?.value?.trim()
+                         || container.querySelector('.connector-config-field[data-field="url"]')?.value?.trim()
+                         || container.querySelector('.connector-config-field[data-field="endpoint"]')?.value?.trim()
+                         || '';
+            const rtSelect     = container.querySelector('#fhir-resource-type-select');
+            const rtHidden     = container.querySelector('.connector-config-field[data-field="resourceType"]');
+            const resourceType = rtSelect
+                ? (rtSelect.value === '_custom_' ? (rtHidden?.value || '') : rtSelect.value)
+                : (rtHidden?.value || '');
+            const resourceId   = container.querySelector('.connector-config-field[data-field="resourceId"]')?.value?.trim()  || '';
+            const bundleType   = container.querySelector('.connector-config-field[data-field="bundleType"]')?.value          || '';
+            const operation    = container.querySelector('.connector-config-field[data-field="operation"]')?.value?.trim()   || '';
+            const queryParams  = container.querySelector('.connector-config-field[data-field="queryParams"]')?.value?.trim() || '';
+            const method       = container.querySelector('.connector-config-field[data-field="method"]')?.value              || 'POST';
+
+            const { url, method: verb, note } = buildFHIRURL(baseUrl, resourceType, resourceId, bundleType, operation, queryParams, method);
+
+            const isRuntime = !resourceType && !operation;
+            urlLine.style.color = isRuntime ? '#666' : '#1a73e8';
+            urlLine.style.fontStyle = isRuntime ? 'italic' : 'normal';
+            urlLine.innerHTML = `<strong style="color:${isRuntime ? '#555' : '#0d47a1'}">${verb}</strong>  ${this.escapeHtml(url)}`;
+            helpLine.textContent = note;
+        };
+
+        // Wire to all relevant fields
+        ['baseUrl', 'url', 'endpoint', 'resourceId', 'bundleType', 'operation', 'queryParams', 'method'].forEach(field => {
+            container.querySelectorAll(`.connector-config-field[data-field="${field}"]`).forEach(el => {
+                el.addEventListener('input',  refresh);
+                el.addEventListener('change', refresh);
+            });
+        });
+        // Resource type + operation selects added asynchronously — wire after a tick
+        setTimeout(() => {
+            container.querySelector('#fhir-resource-type-select')?.addEventListener('change', refresh);
+            container.querySelector('#fhir-operation-select')?.addEventListener('change', refresh);
+            refresh();
+        }, 50);
+    }
+
+    /**
+     * Adds a routing hint panel to FHIR inbound connectors explaining that the
+     * connector accepts ALL FHIR resource types and routing per resource type
+     * is done in the pipeline using Switch/Case or If-Then-Else steps.
+     */
+    _addFHIRInboundRoutingHint(container) {
+        const basicGroup = container.querySelector('.connector-config-group');
+        if (!basicGroup) return;
+
+        const hint = document.createElement('div');
+        hint.style.cssText = `
+            background:#e8f5e9;border:1px solid #a5d6a7;border-radius:6px;
+            padding:10px 12px;margin-top:12px;font-size:12px;color:#1b5e20;
+        `;
+        hint.innerHTML = `
+            <strong>Accepts all FHIR resource types</strong><br>
+            This connector receives any valid FHIR resource or Bundle on the configured base path.
+            To route different resource types differently (e.g. handle <code>Patient</code> and
+            <code>Observation</code> through separate pipeline branches), add a
+            <strong>Switch / Case</strong> step after this connector that conditions on
+            <code>messageType</code> (e.g. <code>FHIR:Patient</code>, <code>FHIR:Bundle:transaction</code>).
+        `;
+        basicGroup.appendChild(hint);
+    }
 
     onChange() {
         const event = new CustomEvent('connectorConfigChanged', {
