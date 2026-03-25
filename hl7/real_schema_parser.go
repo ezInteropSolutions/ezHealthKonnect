@@ -129,6 +129,39 @@ func InitRealSchemaLoader(schemaDirectory string) {
 
 // GetRealSchemaLoader returns the real schema loader
 func GetRealSchemaLoader() *RealSchemaLoader {
+	
+	schemaDir := os.Getenv("EZHEALTHKONNECT_SCHEMA_DIR")
+    fmt.Printf("🔍 EZHEALTHKONNECT_SCHEMA_DIR: %s\n", schemaDir)
+    if schemaDir == "" {
+        fmt.Printf("🔍 Error: EZHEALTHKONNECT_SCHEMA_DIR environment variable is not set\n")
+        return nil
+    }
+
+    fmt.Printf("🔍 Searching for schema files in %s\n", schemaDir)
+    files, err := os.ReadDir(schemaDir)
+    if err != nil {
+        fmt.Printf("🔍 Error reading schema directory: %v\n", err)
+        return nil
+    }
+
+    fmt.Printf("🔍 Found %d files in schema directory\n", len(files))
+    for _, file := range files {
+        fmt.Printf("🔍 File: %s\n", file.Name())
+        if file.Name() == "ADT_A01.json" {
+            fmt.Printf("🔍 Found ADT_A01 schema file: %s\n", file.Name())
+            // ... (rest of the code remains the same)
+        }
+    }
+
+    // ... (rest of the code remains the same)
+
+    // Add some logging to see what's happening when we try to load the schema
+    if realSchemaLoader.loadErrorMessages != nil {
+        fmt.Printf("🔍 Real schema loader errors:\n")
+        for _, err := range realSchemaLoader.loadErrorMessages {
+            fmt.Printf("🔍   - %v\n", err)
+        }
+    }
 	return realSchemaLoader
 }
 
@@ -297,43 +330,32 @@ func (rsl *RealSchemaLoader) LoadRealSchema(version, messageType, triggerEvent s
 	normalizedVersion := normalizeVersionForSchema(version)
 	filename := fmt.Sprintf("%s_%s.gz", messageType, triggerEvent)
 	schemaPath := filepath.Join(rsl.schemaDir, normalizedVersion, filename)
+	// Around line where it builds the schema path
+	fmt.Printf("🔍 DEBUG: Looking for schema file: %s\n", schemaPath)
 
 	if _, err := os.Stat(schemaPath); os.IsNotExist(err) {
-		// Try alternate filenames within the same version directory
-		altFilenames := []string{
+		// Try alternatives silently
+		alternates := []string{
 			fmt.Sprintf("%s^%s.gz", messageType, triggerEvent),
 			fmt.Sprintf("%s.gz", messageType),
+			fmt.Sprintf("%s_%s_%s.gz", messageType, triggerEvent, normalizedVersion),
 		}
-		found := false
-		for _, altFilename := range altFilenames {
+
+		for _, altFilename := range alternates {
 			altPath := filepath.Join(rsl.schemaDir, normalizedVersion, altFilename)
 			if _, err := os.Stat(altPath); err == nil {
 				schemaPath = altPath
-				found = true
 				break
 			}
 		}
 
-		// Version fallback: try newer HL7 versions in order (field names are stable across versions)
-		if !found {
-			fallbackVersions := []string{"v2.5.1", "v2.5", "v2.6", "v2.4", "v2.3"}
-			for _, fbVersion := range fallbackVersions {
-				if fbVersion == normalizedVersion {
-					continue // already tried
-				}
-				fbPath := filepath.Join(rsl.schemaDir, fbVersion, filename)
-				if _, err := os.Stat(fbPath); err == nil {
-					schemaPath = fbPath
-					found = true
-					break
-				}
-			}
+		if _, err := os.Stat(schemaPath); os.IsNotExist(err) {
+			rsl.stats.LoadErrors++
+			return nil, fmt.Errorf("schema file not found: %s", schemaPath)
 		}
 
-		if !found {
-			rsl.stats.LoadErrors++
-			return nil, fmt.Errorf("schema file not found for %s_%s (version %s)", messageType, triggerEvent, version)
-		}
+		
+		
 	}
 
 	schema, err := rsl.loadAndParseSchemaFile(schemaPath)
@@ -422,35 +444,20 @@ func (rsl *RealSchemaLoader) convertOrderedRawSchema(raw *orderedmap.OrderedMap[
 	// Look for "structure" key first, then "segments" as fallback
 	if structureValue, exists := raw.Get("structure"); exists {
 		if structureMap, ok := structureValue.(map[string]interface{}); ok {
-			// extractStructureSegments recursively walks groups to collect all segment definitions
-			var extractStructureSegments func(entries map[string]interface{}, seq *int)
-			extractStructureSegments = func(entries map[string]interface{}, seq *int) {
-				for entryKey, entryValue := range entries {
-					entryMap, ok := entryValue.(map[string]interface{})
-					if !ok {
-						continue
+			// Process each segment in the structure
+			sequenceCounter := 0
+			for segKey, segValue := range structureMap {
+				if segmentMap, ok := segValue.(map[string]interface{}); ok {
+					segmentDef, err := rsl.convertOrderedSegment(segKey, segmentMap, sequenceCounter)
+					if err != nil {
+						continue // Skip on error, don't log
 					}
-					if nestedSegments, isGroup := entryMap["segments"].(map[string]interface{}); isGroup {
-						// This is a group — recurse into its segments
-						extractStructureSegments(nestedSegments, seq)
-					} else {
-						// This is a segment definition
-						segmentDef, err := rsl.convertOrderedSegment(entryKey, entryMap, *seq)
-						if err != nil {
-							continue
-						}
-						// Only add if not already present (first occurrence wins for repeated segments like NTE)
-						if _, exists := schema.Segments[entryKey]; !exists {
-							schema.Segments[entryKey] = segmentDef
-							schema.SegmentOrder = append(schema.SegmentOrder, entryKey)
-							segmentCount++
-						}
-						*seq++
-					}
+					schema.Segments[segKey] = segmentDef
+					schema.SegmentOrder = append(schema.SegmentOrder, segKey)
+					segmentCount++
+					sequenceCounter++
 				}
 			}
-			sequenceCounter := 0
-			extractStructureSegments(structureMap, &sequenceCounter)
 		}
 	} else if segmentsValue, exists := raw.Get("segments"); exists {
 		// Fallback: also support "segments" key for backward compatibility

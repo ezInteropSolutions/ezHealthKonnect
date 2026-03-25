@@ -10,9 +10,7 @@ package services
 
 import (
 	"context"
-	"crypto/rand"
 	"database/sql"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -102,7 +100,7 @@ func (s *HL7FHIRTransformServiceV3) Transform(
 
 	log.Printf("📋 Loaded %d atomic field mappings for message type %s", len(fieldMappings), messageType)
 
-	// Enrich mappings with HL7/FHIR data types from schemas for auto-translation
+	// Enrich mappings with HL7 and FHIR data types from schemas for auto-translation
 	fieldMappings = s.enrichMappingsWithDataTypes(fieldMappings, messageType)
 
 	// DEBUG: Log sample mappings to see what we have
@@ -118,22 +116,6 @@ func (s *HL7FHIRTransformServiceV3) Transform(
 	resourceTypes := s.extractResourceTypes(fieldMappings)
 	log.Printf("🎯 Will create resources: %v", resourceTypes)
 
-	// Filter to user-selected resources if specified
-	if len(request.SelectedResources) > 0 {
-		selected := make(map[string]bool, len(request.SelectedResources))
-		for _, r := range request.SelectedResources {
-			selected[r] = true
-		}
-		filtered := resourceTypes[:0]
-		for _, r := range resourceTypes {
-			if selected[r] {
-				filtered = append(filtered, r)
-			}
-		}
-		log.Printf("🎯 Filtered to selected resources: %v", filtered)
-		resourceTypes = filtered
-	}
-
 	// Extract HL7 segments once for all resources
 	enhancedSegments := s.extractEnhancedSegments(request.ParsedHL7Data)
 	if enhancedSegments == nil {
@@ -148,18 +130,11 @@ func (s *HL7FHIRTransformServiceV3) Transform(
 	}
 	log.Printf("🔍 Available HL7 segments: %v", segmentNames)
 
-	// Load referencing_mode for contained-resource assembly (V64)
-	referencingMode, err := s.loadReferencingModeForTemplate(ctx, messageType)
-	if err != nil {
-		log.Printf("⚠️ Could not load referencing_mode for %s: %v (proceeding without contained assembly)", messageType, err)
-	}
-
 	// Transform each resource type using atomic mappings
 	transformStartTime := time.Now()
 	var allResources []map[string]interface{}
 	var allWarnings []string
 	var allErrors []string
-	var allValidationFailures []ValidationFailure
 	stats := MappingStatistics{}
 
 	for _, resourceType := range resourceTypes {
@@ -193,14 +168,6 @@ func (s *HL7FHIRTransformServiceV3) Transform(
 
 		// Track successfully mapped fields
 		stats.TotalFieldsMapped += mappedCount
-
-		// Enforce validation policies declared in the OOB template (V64).
-		// We need the raw mapping objects to read the "onMissing" field.
-		// Re-use the template data already parsed in loadFromV9OOBTemplates;
-		// here we fetch the raw array from the template_config for this resource.
-		rawMappingsForPolicy := s.fetchRawMappingsForPolicy(ctx, messageType, resourceType)
-		failures := s.enforceValidationPolicies(resourceType, enhancedSegments, rawMappingsForPolicy)
-		allValidationFailures = append(allValidationFailures, failures...)
 	}
 
 	// Populate response
@@ -210,18 +177,11 @@ func (s *HL7FHIRTransformServiceV3) Transform(
 		stats,
 		allWarnings,
 		allErrors,
-		allValidationFailures,
 		transformStartTime,
 		startTime,
 		request.CreateBundle,
 		fieldMappings,
 	)
-
-	// Assemble contained resources according to referencing_mode (V64).
-	// This mutates response.Bundle in place after it has been created.
-	if referencingMode != nil && response.Bundle != nil {
-		response.Bundle = s.assembleContainedResources(response.Bundle, referencingMode)
-	}
 
 	log.Printf("✅ Atomic mapping transformation completed: %s (%d resources, %s)",
 		response.RequestID, len(allResources), response.Performance.TotalTime)
@@ -699,9 +659,7 @@ func (s *HL7FHIRTransformServiceV3) transformValueAtomic(
 		return s.transformXADToAddress(hl7Value, mapping.TransformationRules), nil
 	case "email_to_contactpoint":
 		return s.transformEmailToContactPoint(hl7Value, mapping.TransformationRules), nil
-	case "ts_to_datetime", "ts_to_date",
-		"hl7_timestamp_to_fhir_date", "hl7_timestamp_to_fhir_datetime", "hl7_timestamp_to_fhir_instant",
-		"timestamp_to_date", "timestamp_to_datetime", "datetime_to_date", "date_to_fhir":
+	case "ts_to_datetime", "ts_to_date":
 		return s.transformTSToDate(hl7Value), nil
 	case "ce_to_codeableconcept":
 		return s.transformCEToCodeableConcept(hl7Value, mapping.TransformationRules), nil
@@ -713,91 +671,15 @@ func (s *HL7FHIRTransformServiceV3) transformValueAtomic(
 		return s.transformMSH9ToCoding(hl7Value), nil
 	case "control_id_to_reference":
 		return s.transformControlIdToReference(hl7Value), nil
-	// OOB template transform aliases — component values already extracted by extractHL7ValueAtomic;
-	// these are passthrough string operations at the component level.
-	case "string_direct", "name_component", "address_component",
-		"telecom_value", "location_mapping", "observation_value":
-		return hl7Value, nil
-	// HD Assigning Authority → FHIR system URI
-	// Input may be "EPIC", "2.16.840.1.113883.3.1", or "EPIC^Epic Systems^ISO"
-	case "identifier_system_mapping", "hd_to_uri", "assigning_authority_to_uri":
-		if uri := hl7type.MapAssigningAuthorityToURI(hl7Value); uri != "" {
-			return uri, nil
-		}
-		return hl7Value, nil
-	// coding_system_mapping: try valueMap first (caller provides overrides), then
-	// fall through to ResolveSystemURI for LOINC/SNOMED/etc. system names.
-	case "coding_system_mapping":
-		if vm, ok := mapping.TransformationRules["valueMap"].(map[string]interface{}); ok {
-			if mapped, ok := vm[hl7Value].(string); ok && mapped != "" {
-				return mapped, nil
-			}
-		}
-		if uri := hl7type.ResolveSystemURI(hl7Value); uri != "" {
-			return uri, nil
-		}
-		return hl7Value, nil
-	// hd_namespace: extract the namespaceID (first component) from an HD field.
-	// Used when only the human-readable name is wanted, not a full URI.
-	case "hd_namespace":
-		if idx := strings.Index(hl7Value, "^"); idx >= 0 {
-			return strings.TrimSpace(hl7Value[:idx]), nil
-		}
-		return hl7Value, nil
-	// boolean_yn_mapping: "Y"/"N" → Go bool true/false.
-	case "boolean_yn_mapping":
-		switch strings.ToUpper(strings.TrimSpace(hl7Value)) {
-		case "Y", "YES", "TRUE", "1":
-			return true, nil
-		default:
-			return false, nil
-		}
-	// numeric_mapping: convert string to float64; returns string on parse failure.
-	case "numeric_mapping":
-		var f float64
-		if _, err := fmt.Sscanf(hl7Value, "%f", &f); err == nil {
-			// Return integer if no fractional part (cleaner JSON)
-			if f == float64(int64(f)) {
-				return int64(f), nil
-			}
-			return f, nil
-		}
-		return hl7Value, nil
-	// OOB template gender codes
-	case "hl7_table_0001_gender", "table_0001_gender", "gender_code":
-		return s.transformGender(hl7Value), nil
-	// Generic valueMap-based code lookup — handles any OOB table mapping that ships
-	// a valueMap in the template JSON (e.g. patient class, telecom use/system, address type,
-	// allergy category/severity, observation/diagnostic status, discharge disposition, etc.)
-	case "telecom_use_mapping", "telecom_system_mapping",
-		"address_use_mapping", "identifier_type_mapping",
-		"hl7_table_0004_patient_class", "patient_class_mapping",
-		"name_use_mapping", "marital_status_mapping",
-		"allergy_category_mapping", "allergy_severity_mapping",
-		"observation_status_mapping", "diagnostic_status_mapping",
-		"interpretation_mapping", "discharge_disposition_mapping",
-		"order_control_to_intent", "order_status_mapping", "priority_mapping",
-		"medication_status_mapping", "immunization_status_mapping",
-		"appointment_status_mapping", "appointment_type_mapping",
-		"insured_relationship_mapping", "coverage_status_mapping",
-		"insurance_type_mapping", "diagnosis_type_mapping",
-		"document_status_mapping", "document_content_type",
-		"procedure_status_mapping", "admission_type_mapping",
-		"service_type_mapping", "processing_type_mapping":
-		if vm, ok := mapping.TransformationRules["valueMap"].(map[string]interface{}); ok {
-			if mapped, ok := vm[hl7Value].(string); ok && mapped != "" {
-				return mapped, nil
-			}
-		}
-		return hl7Value, nil
 	case "":
+		// Auto-translate using HL7 and FHIR data types when available
 		if mapping.HL7DataType != "" || mapping.FHIRDataType != "" {
 			result := hl7type.AutoTranslate(hl7Value, mapping.HL7DataType, mapping.FHIRDataType, mapping.TransformationRules)
 			if len(result.Warnings) > 0 {
 				log.Printf("⚠️ AutoTranslate warnings for %s.%s: %v", mapping.SegmentName, mapping.HL7Field, result.Warnings)
 			}
 			if result.Value != nil {
-				log.Printf("✅ AutoTranslate %s.%s (hl7=%s, fhir=%s): %q → %v",
+				log.Printf("🔍 AutoTranslate %s.%s (hl7=%s,fhir=%s): %q → %v",
 					mapping.SegmentName, mapping.HL7Field, mapping.HL7DataType, mapping.FHIRDataType, hl7Value, result.Value)
 				return result.Value, nil
 			}
@@ -805,29 +687,6 @@ func (s *HL7FHIRTransformServiceV3) transformValueAtomic(
 		log.Printf("🔍 No transformation specified, using raw value")
 		return hl7Value, nil
 	default:
-		// Unrecognized transform name — try valueMap lookup first, then AutoTranslate,
-		// then fall back to raw value.
-		// (skip AutoTranslate for component-level extractions where HL7Component is set,
-		// to avoid composite-type parsers receiving already-extracted string components)
-		if vm, ok := mapping.TransformationRules["valueMap"].(map[string]interface{}); ok {
-			if mapped, ok := vm[hl7Value].(string); ok && mapped != "" {
-				log.Printf("✅ ValueMap fallback %s.%s (transform=%s): %q → %q",
-					mapping.SegmentName, mapping.HL7Field, mapping.DataTypeTransform, hl7Value, mapped)
-				return mapped, nil
-			}
-		}
-		if mapping.HL7Component == "" && (mapping.HL7DataType != "" || mapping.FHIRDataType != "") {
-			result := hl7type.AutoTranslate(hl7Value, mapping.HL7DataType, mapping.FHIRDataType, mapping.TransformationRules)
-			if len(result.Warnings) > 0 {
-				log.Printf("⚠️ AutoTranslate warnings for %s.%s: %v", mapping.SegmentName, mapping.HL7Field, result.Warnings)
-			}
-			if result.Value != nil {
-				log.Printf("✅ AutoTranslate fallback %s.%s (transform=%s, hl7=%s, fhir=%s): %q → %v",
-					mapping.SegmentName, mapping.HL7Field, mapping.DataTypeTransform,
-					mapping.HL7DataType, mapping.FHIRDataType, hl7Value, result.Value)
-				return result.Value, nil
-			}
-		}
 		log.Printf("⚠️ Unknown transformation '%s', using raw value", mapping.DataTypeTransform)
 		return hl7Value, nil
 	}
@@ -1121,12 +980,6 @@ func (s *HL7FHIRTransformServiceV3) setFieldWithArrayIndices(
 	// Use regex to split by dots while preserving array indices
 	parts := strings.Split(fieldPath, ".")
 
-	// Strip resource type prefix if present (e.g., "Observation.code.coding[0].code" -> "code.coding[0].code")
-	if len(parts) > 1 && parts[0] == schema.ResourceType {
-		parts = parts[1:]
-		fieldPath = strings.Join(parts, ".")
-	}
-
 	current := resource
 	for i := 0; i < len(parts); i++ {
 		part := parts[i]
@@ -1215,11 +1068,6 @@ func (s *HL7FHIRTransformServiceV3) setDeeplyNestedField(
 ) error {
 	if len(parts) == 0 {
 		return fmt.Errorf("empty field path")
-	}
-
-	// Strip resource type prefix if present (e.g., ["Observation","code","coding[0]","code"] -> ["code","coding[0]","code"])
-	if len(parts) > 1 && parts[0] == schema.ResourceType {
-		parts = parts[1:]
 	}
 
 	// Navigate/create the nested structure
@@ -1721,16 +1569,11 @@ func (s *HL7FHIRTransformServiceV3) getFieldMappings(ctx context.Context, messag
 
 	if len(legacyMappings) > 0 {
 		log.Printf("📊 V3 Service: Found %d legacy field mappings for message type %s", len(legacyMappings), messageType)
-		return legacyMappings, nil
+	} else {
+		log.Printf("⚠️ V3 Service: No mappings found in either V9 or V5 schemas for message type %s", messageType)
 	}
 
-	// Final fallback: use built-in OOB defaults so the step always produces a bundle
-	log.Printf("⚠️ V3 Service: No DB mappings found for %s in any schema — falling back to built-in OOB defaults", messageType)
-	defaults := s.getDefaultMappingsForTesting(messageType)
-	if len(defaults) > 0 {
-		log.Printf("✅ V3 Service: Using %d built-in OOB default mappings for %s", len(defaults), messageType)
-	}
-	return defaults, nil
+	return legacyMappings, nil
 }
 
 // loadInterfaceSpecificMappings loads mappings from the transformation_mapping field in interfaces table
@@ -2056,31 +1899,21 @@ func (s *HL7FHIRTransformServiceV3) convertV9TemplateToFieldMappings(templateDat
 			transformFunc, _ := mapping["transform"].(string)
 			required, _ := mapping["required"].(bool)
 			confidence, _ := mapping["confidence"].(float64)
-			hl7DataType, _ := mapping["hl7DataType"].(string)
-			fhirDataType, _ := mapping["fhirDataType"].(string)
-			valueMap, _ := mapping["valueMap"].(map[string]interface{})
-
-			transformationRules := map[string]interface{}{
-				"confidence":     confidence,
-				"sourceTemplate": "V9_OOB",
-				"transform":      transformFunc,
-			}
-			if len(valueMap) > 0 {
-				transformationRules["valueMap"] = valueMap
-			}
 
 			// Create FieldMapping struct
 			fieldMapping := FieldMapping{
-				SegmentName:         segmentName,
-				HL7Field:            hl7Field,
-				HL7Component:        hl7Component,
-				FHIRResourceType:    resourceType,
-				FHIRElementPath:     fhirPath,
-				DataTypeTransform:   transformFunc,
-				IsRequired:          required,
-				HL7DataType:         hl7DataType,
-				FHIRDataType:        fhirDataType,
-				TransformationRules: transformationRules,
+				SegmentName:       segmentName,
+				HL7Field:         hl7Field,
+				HL7Component:     hl7Component,
+				FHIRResourceType: resourceType,
+				FHIRElementPath:  fhirPath,
+				DataTypeTransform: transformFunc,
+				IsRequired:       required,
+				TransformationRules: map[string]interface{}{
+					"confidence":     confidence,
+					"sourceTemplate": "V9_OOB",
+					"transform":      transformFunc,
+				},
 			}
 
 			mappings = append(mappings, fieldMapping)
@@ -2420,7 +2253,6 @@ func (s *HL7FHIRTransformServiceV3) populateTransformResponse(
 	resources []map[string]interface{},
 	stats MappingStatistics,
 	warnings, errors []string,
-	validationFailures []ValidationFailure,
 	transformStartTime, startTime time.Time,
 	createBundle bool,
 	fieldMappings []FieldMapping,
@@ -2429,9 +2261,6 @@ func (s *HL7FHIRTransformServiceV3) populateTransformResponse(
 	response.MappingStats = stats
 	response.Warnings = append(response.Warnings, warnings...)
 	response.Errors = append(response.Errors, errors...)
-	if len(validationFailures) > 0 {
-		response.ValidationFailures = append(response.ValidationFailures, validationFailures...)
-	}
 	response.Performance.TransformTime = time.Since(transformStartTime).String()
 
 	// Convert field mappings to atomic mappings for frontend
@@ -2458,83 +2287,17 @@ func (s *HL7FHIRTransformServiceV3) populateTransformResponse(
 	response.Performance.ResourcesCreated = len(resources)
 }
 
-// generateUUID generates a random UUID v4 string.
-func generateUUID() string {
-	b := make([]byte, 16)
-	if _, err := rand.Read(b); err != nil {
-		return fmt.Sprintf("%d", time.Now().UnixNano())
-	}
-	b[6] = (b[6] & 0x0f) | 0x40
-	b[8] = (b[8] & 0x3f) | 0x80
-	return hex.EncodeToString(b[:4]) + "-" +
-		hex.EncodeToString(b[4:6]) + "-" +
-		hex.EncodeToString(b[6:8]) + "-" +
-		hex.EncodeToString(b[8:10]) + "-" +
-		hex.EncodeToString(b[10:])
-}
-
 func (s *HL7FHIRTransformServiceV3) createBundle(resources []map[string]interface{}, requestID, messageType string) map[string]interface{} {
-	// Step 1: Assign IDs and build fullUrl index so cross-resource refs can be wired.
-	resourceIDs := make(map[string]string) // resourceType → fullUrl
-	for _, resource := range resources {
-		rt, _ := resource["resourceType"].(string)
-		id, _ := resource["id"].(string)
-		if id == "" {
-			id = generateUUID()
-			resource["id"] = id
-		}
-		fullURL := fmt.Sprintf("urn:uuid:%s", id)
-		if rt != "" {
-			resourceIDs[rt] = fullURL
-		}
-	}
-
-	// Step 2: Wire cross-resource references.
-	// Encounter.subject → Patient, Encounter.participant.individual → Practitioner, etc.
-	crossRefs := map[string]map[string]string{
-		"Encounter": {
-			"subject": "Patient",
-		},
-		"DiagnosticReport": {
-			"subject": "Patient",
-		},
-		"Observation": {
-			"subject": "Patient",
-		},
-	}
-	for _, resource := range resources {
-		rt, _ := resource["resourceType"].(string)
-		refs, ok := crossRefs[rt]
-		if !ok {
-			continue
-		}
-		for refField, targetType := range refs {
-			if targetURL, exists := resourceIDs[targetType]; exists {
-				// Only set if not already present
-				if _, alreadySet := resource[refField]; !alreadySet {
-					resource[refField] = map[string]interface{}{
-						"reference": targetURL,
-					}
-				}
-			}
-		}
-	}
-
-	// Step 3: Wire Encounter.status default if missing (R4 required field).
-	for _, resource := range resources {
-		if rt, _ := resource["resourceType"].(string); rt == "Encounter" {
-			if _, hasStatus := resource["status"]; !hasStatus {
-				resource["status"] = "finished"
-			}
-		}
-	}
-
-	// Step 4: Build bundle entries.
 	entries := make([]map[string]interface{}, len(resources))
+
 	for i, resource := range resources {
-		id, _ := resource["id"].(string)
+		resourceID := ""
+		if id, exists := resource["id"].(string); exists {
+			resourceID = id
+		}
+
 		entries[i] = map[string]interface{}{
-			"fullUrl":  fmt.Sprintf("urn:uuid:%s", id),
+			"fullUrl":  fmt.Sprintf("urn:uuid:%s", resourceID),
 			"resource": resource,
 		}
 	}
@@ -2546,6 +2309,76 @@ func (s *HL7FHIRTransformServiceV3) createBundle(resources []map[string]interfac
 		"timestamp":    time.Now().Format(time.RFC3339),
 		"entry":        entries,
 	}
+}
+
+// =====================================
+// DATA TYPE ENRICHMENT
+// =====================================
+
+// enrichMappingsWithDataTypes populates HL7DataType and FHIRDataType on each mapping
+// by querying the HL7 real schema loader and the FHIR schema loader.
+// This is a best-effort operation: any lookup failure is silently skipped so that
+// the rest of the transformation continues normally.
+func (s *HL7FHIRTransformServiceV3) enrichMappingsWithDataTypes(mappings []FieldMapping, messageType string) []FieldMapping {
+	hl7Loader := hl7.GetRealSchemaLoader()
+
+	enriched := make([]FieldMapping, len(mappings))
+	copy(enriched, mappings)
+
+	for i := range enriched {
+		m := &enriched[i]
+
+		// ── HL7 data type lookup ──────────────────────────────────────────────────
+		if m.HL7DataType == "" && hl7Loader != nil && m.SegmentName != "" && m.HL7Field != "" {
+			dt := hl7Loader.GetFieldDataType(messageType, m.SegmentName, m.HL7Field)
+			if dt != "" {
+				m.HL7DataType = dt
+			}
+		}
+
+		// ── FHIR data type lookup ─────────────────────────────────────────────────
+		if m.FHIRDataType == "" && s.fhirLoader != nil && m.FHIRResourceType != "" && m.FHIRElementPath != "" {
+			schema, err := s.fhirLoader.LoadFHIRSchema(m.FHIRResourceType, "base", "R4")
+			if err == nil && schema != nil {
+				// Build the element path key as stored in schema.Elements, e.g. "Patient.birthDate"
+				elementKey := m.FHIRResourceType + "." + m.FHIRElementPath
+				// Strip array indices for schema lookup: name[0].given → name.given
+				cleanKey := stripArrayIndices(elementKey)
+				if elem, ok := schema.Elements[cleanKey]; ok && elem != nil {
+					m.FHIRDataType = elem.DataType
+				}
+				// Try without resource prefix if not found
+				if m.FHIRDataType == "" {
+					cleanPath := stripArrayIndices(m.FHIRElementPath)
+					if elem, ok := schema.Elements[cleanPath]; ok && elem != nil {
+						m.FHIRDataType = elem.DataType
+					}
+				}
+			}
+		}
+	}
+
+	return enriched
+}
+
+// stripArrayIndices removes array index notation from FHIR paths for schema lookup.
+// e.g. "name[0].given[1]" → "name.given"
+func stripArrayIndices(path string) string {
+	var b strings.Builder
+	inBracket := false
+	for _, r := range path {
+		switch r {
+		case '[':
+			inBracket = true
+		case ']':
+			inBracket = false
+		default:
+			if !inBracket {
+				b.WriteRune(r)
+			}
+		}
+	}
+	return b.String()
 }
 
 // =====================================
@@ -2808,14 +2641,20 @@ func (s *HL7FHIRTransformServiceV3) transformEmailToContactPoint(email string, r
 }
 
 func (s *HL7FHIRTransformServiceV3) transformTSToDate(ts string) string {
-	// Delegate to hl7type package for full precision handling (timezone, fractional seconds, etc.)
-	result, _ := hl7type.ParseTS(ts, "dateTime")
+	// Delegate to hl7type package for full TS precision handling
+	result, warnings := hl7type.ParseTS(ts, "dateTime")
+	if len(warnings) > 0 {
+		log.Printf("⚠️ transformTSToDate warnings: %v", warnings)
+	}
 	if result != "" {
 		return result
 	}
-	// Fallback: basic date extraction
+	// Fallback: basic extraction
 	if len(ts) >= 8 {
-		return fmt.Sprintf("%s-%s-%s", ts[0:4], ts[4:6], ts[6:8])
+		year := ts[0:4]
+		month := ts[4:6]
+		day := ts[6:8]
+		return fmt.Sprintf("%s-%s-%s", year, month, day)
 	}
 	return ts
 }
@@ -3031,419 +2870,6 @@ func (s *HL7FHIRTransformServiceV3) getDefaultMappingsForTesting(messageType str
 
 	log.Printf("✅ V3 Service: Returning %d default test mappings for %s", len(defaultMappings), messageType)
 	return defaultMappings
-}
-
-// =====================================
-// DATA TYPE ENRICHMENT & AUTO-TRANSLATION
-// =====================================
-
-// enrichMappingsWithDataTypes populates HL7DataType and FHIRDataType on each mapping
-// by querying the HL7 real schema loader and the FHIR schema loader.
-// Best-effort: any lookup failure is silently skipped.
-func (s *HL7FHIRTransformServiceV3) enrichMappingsWithDataTypes(mappings []FieldMapping, messageType string) []FieldMapping {
-	hl7Loader := hl7.GetRealSchemaLoader()
-
-	enriched := make([]FieldMapping, len(mappings))
-	copy(enriched, mappings)
-
-	for i := range enriched {
-		m := &enriched[i]
-
-		// ── HL7 data type lookup ──────────────────────────────────────────────
-		if m.HL7DataType == "" && hl7Loader != nil && m.SegmentName != "" && m.HL7Field != "" {
-			if dt := hl7Loader.GetFieldDataType(messageType, m.SegmentName, m.HL7Field); dt != "" {
-				m.HL7DataType = dt
-			}
-		}
-
-		// ── FHIR data type lookup ─────────────────────────────────────────────
-		if m.FHIRDataType == "" && s.fhirLoader != nil && m.FHIRResourceType != "" && m.FHIRElementPath != "" {
-			if schema, err := s.fhirLoader.LoadFHIRSchema(m.FHIRResourceType, "base", "R4"); err == nil && schema != nil {
-				// Strip array indices for schema lookup: name[0].given → name.given
-				cleanPath := stripArrayIndices(m.FHIRElementPath)
-				elementKey := m.FHIRResourceType + "." + cleanPath
-				if elem, ok := schema.Elements[elementKey]; ok && elem != nil {
-					m.FHIRDataType = elem.DataType
-				}
-				// Try without resource prefix if not found
-				if m.FHIRDataType == "" {
-					if elem, ok := schema.Elements[cleanPath]; ok && elem != nil {
-						m.FHIRDataType = elem.DataType
-					}
-				}
-			}
-		}
-	}
-
-	return enriched
-}
-
-// stripArrayIndices removes array index notation from FHIR paths for schema lookup.
-// e.g. "name[0].given[1]" → "name.given"
-func stripArrayIndices(path string) string {
-	var b strings.Builder
-	inBracket := false
-	for _, r := range path {
-		switch r {
-		case '[':
-			inBracket = true
-		case ']':
-			inBracket = false
-		default:
-			if !inBracket {
-				b.WriteRune(r)
-			}
-		}
-	}
-	return b.String()
-}
-
-// =====================================
-// CONTAINED RESOURCE ASSEMBLER (V64)
-// =====================================
-
-// assembleContainedResources reads referencingMode from the template config and
-// for each resource type whose mode is "contained":
-//  1. Removes it from the Bundle entries slice.
-//  2. Rewrites its id to "#<originalId>".
-//  3. Appends it to the appropriate parent resource's "contained" array.
-//  4. Updates any "ResourceType/<id>" reference strings inside the parent to "#<id>".
-//
-// Parent mappings used by this method:
-//   Practitioner → Encounter
-//   Location     → Encounter
-//   Specimen     → DiagnosticReport (fallback: Observation)
-//
-// The method returns the mutated bundle unchanged if referencingMode is nil or empty.
-func (s *HL7FHIRTransformServiceV3) assembleContainedResources(
-	bundle map[string]interface{},
-	referencingMode map[string]string,
-) map[string]interface{} {
-	if bundle == nil || len(referencingMode) == 0 {
-		return bundle
-	}
-
-	entriesRaw, ok := bundle["entry"]
-	if !ok {
-		return bundle
-	}
-	entries, ok := entriesRaw.([]map[string]interface{})
-	if !ok {
-		// Try []interface{} (JSON-decoded path)
-		rawSlice, ok2 := entriesRaw.([]interface{})
-		if !ok2 {
-			return bundle
-		}
-		entries = make([]map[string]interface{}, 0, len(rawSlice))
-		for _, e := range rawSlice {
-			if em, ok := e.(map[string]interface{}); ok {
-				entries = append(entries, em)
-			}
-		}
-	}
-
-	// parentFor maps resource types to their parent resource type
-	parentFor := map[string]string{
-		"Practitioner": "Encounter",
-		"Location":     "Encounter",
-		"Specimen":     "DiagnosticReport",
-	}
-	// Fallback for Specimen when DiagnosticReport absent
-	specimenFallback := "Observation"
-
-	// Build a lookup: resourceType → *entry map (pointer into slice for mutation)
-	type entryRef struct {
-		entry    map[string]interface{}
-		resource map[string]interface{}
-		index    int
-	}
-	byType := map[string][]entryRef{}
-	for i, entry := range entries {
-		res, _ := entry["resource"].(map[string]interface{})
-		if res == nil {
-			continue
-		}
-		rt, _ := res["resourceType"].(string)
-		if rt == "" {
-			continue
-		}
-		byType[rt] = append(byType[rt], entryRef{entry: entry, resource: res, index: i})
-	}
-
-	// Track which entry indices are consumed as contained resources
-	consumedIndices := map[int]bool{}
-
-	for resourceType, mode := range referencingMode {
-		if mode != "contained" {
-			continue
-		}
-		refs, exists := byType[resourceType]
-		if !exists {
-			continue
-		}
-
-		// Determine parent type
-		parentType, hasPT := parentFor[resourceType]
-		if !hasPT {
-			log.Printf("assembleContainedResources: no parent defined for %s, skipping", resourceType)
-			continue
-		}
-
-		parentRefs, parentExists := byType[parentType]
-		if !parentExists || len(parentRefs) == 0 {
-			// Try fallback for Specimen
-			if resourceType == "Specimen" {
-				parentRefs, parentExists = byType[specimenFallback]
-				if !parentExists || len(parentRefs) == 0 {
-					log.Printf("assembleContainedResources: no parent (%s or %s) for %s", parentType, specimenFallback, resourceType)
-					continue
-				}
-			} else {
-				log.Printf("assembleContainedResources: parent %s not in bundle for %s", parentType, resourceType)
-				continue
-			}
-		}
-
-		// Use first matching parent
-		parent := parentRefs[0].resource
-
-		// Ensure parent.contained array exists
-		containedRaw, _ := parent["contained"]
-		var containedArr []interface{}
-		if containedRaw != nil {
-			if ca, ok := containedRaw.([]interface{}); ok {
-				containedArr = ca
-			}
-		}
-
-		for _, ref := range refs {
-			res := ref.resource
-			originalID, _ := res["id"].(string)
-			if originalID == "" {
-				originalID = resourceType
-			}
-
-			// Rewrite id to "#<originalId>"
-			containedID := "#" + originalID
-			res["id"] = containedID
-
-			// Build a reference string rewrite map for the parent
-			oldRef := resourceType + "/" + originalID
-			newRef := containedID
-
-			// Update all string values in the parent that reference the old fullUrl or id
-			s.rewriteReferencesInResource(parent, oldRef, newRef)
-			// Also rewrite urn:uuid: references that may exist
-			if entry, ok := byType[resourceType]; ok && len(entry) > 0 {
-				if fullURL, ok2 := entry[0].entry["fullUrl"].(string); ok2 {
-					s.rewriteReferencesInResource(parent, fullURL, newRef)
-				}
-			}
-
-			// Add to contained
-			containedArr = append(containedArr, res)
-
-			// Mark entry index as consumed
-			consumedIndices[ref.index] = true
-		}
-
-		parent["contained"] = containedArr
-	}
-
-	// Rebuild entries without consumed entries
-	if len(consumedIndices) == 0 {
-		return bundle
-	}
-	newEntries := make([]map[string]interface{}, 0, len(entries)-len(consumedIndices))
-	for i, entry := range entries {
-		if !consumedIndices[i] {
-			newEntries = append(newEntries, entry)
-		}
-	}
-	bundle["entry"] = newEntries
-	log.Printf("assembleContainedResources: embedded %d resource(s) as contained", len(consumedIndices))
-	return bundle
-}
-
-// rewriteReferencesInResource walks all string values in a resource map and
-// replaces occurrences of oldRef with newRef in "reference" fields.
-func (s *HL7FHIRTransformServiceV3) rewriteReferencesInResource(
-	obj map[string]interface{},
-	oldRef, newRef string,
-) {
-	for key, val := range obj {
-		switch v := val.(type) {
-		case string:
-			if key == "reference" && v == oldRef {
-				obj[key] = newRef
-			}
-		case map[string]interface{}:
-			s.rewriteReferencesInResource(v, oldRef, newRef)
-		case []interface{}:
-			for _, item := range v {
-				if m, ok := item.(map[string]interface{}); ok {
-					s.rewriteReferencesInResource(m, oldRef, newRef)
-				}
-			}
-		}
-	}
-}
-
-// =====================================
-// VALIDATION POLICY ENFORCER (V64)
-// =====================================
-
-// enforceValidationPolicies checks every required mapping that produced no HL7
-// value and reads the "onMissing" field from the raw mapping JSON (as stored in
-// the OOB template).  It returns a slice of ValidationFailure objects.
-//
-// The mapping entry JSON format supported:
-//   {"hl7Path":"PID.3.1","fhirPath":"Patient.identifier[0].value",
-//    "required":true,"onMissing":"queue_review","missingCode":"MISSING_MRN"}
-//
-// onMissing semantics enforced here:
-//   "queue_review" → failure with severity "queue_review"  (caller holds message)
-//   "reject"       → failure with severity "reject"        (caller NACKs/422s)
-//   "warn"         → failure with severity "warn"          (caller adds OperationOutcome)
-//   "default"      → not a failure, value was substituted (caller skipped here)
-//   "proceed"/""   → not recorded (default, no-op)
-//
-// The caller in Transform() aggregates these across all resources and stores
-// them in response.ValidationFailures.
-func (s *HL7FHIRTransformServiceV3) enforceValidationPolicies(
-	resourceType string,
-	enhancedSegments map[string]interface{},
-	rawMappings []interface{},
-) []ValidationFailure {
-	var failures []ValidationFailure
-
-	for _, rawMapping := range rawMappings {
-		mapping, ok := rawMapping.(map[string]interface{})
-		if !ok {
-			continue
-		}
-
-		// Only care about required fields
-		required, _ := mapping["required"].(bool)
-		if !required {
-			continue
-		}
-
-		hl7Path, _ := mapping["hl7Path"].(string)
-		fhirPath, _ := mapping["fhirPath"].(string)
-		onMissing, _ := mapping["onMissing"].(string)
-		missingCode, _ := mapping["missingCode"].(string)
-
-		// Skip if onMissing is proceed/empty/default — no failure to record
-		if onMissing == "" || onMissing == "proceed" || onMissing == "default" {
-			continue
-		}
-
-		// Parse the HL7 path to check whether a value actually exists
-		segmentName, hl7Field, hl7Component := s.parseHL7Path(hl7Path)
-		fm := FieldMapping{
-			SegmentName:  segmentName,
-			HL7Field:     hl7Field,
-			HL7Component: hl7Component,
-		}
-		value, found := s.extractHL7ValueAtomic(enhancedSegments, fm)
-		if found && value != "" {
-			// Value present — policy not triggered
-			continue
-		}
-
-		// Value absent — record failure
-		if missingCode == "" {
-			// Derive a code from the FHIR path when not explicit
-			missingCode = "MISSING_" + strings.ToUpper(
-				strings.NewReplacer(".", "_", "[", "", "]", "").Replace(fhirPath),
-			)
-		}
-
-		log.Printf("ValidationPolicyEnforcer: %s %s missing HL7 value at %s (onMissing=%s)",
-			resourceType, fhirPath, hl7Path, onMissing)
-
-		failures = append(failures, ValidationFailure{
-			Field:       fhirPath,
-			HL7Path:     hl7Path,
-			MissingCode: missingCode,
-			Severity:    onMissing, // "queue_review" | "warn" | "reject"
-		})
-	}
-
-	return failures
-}
-
-// fetchRawMappingsForPolicy fetches the raw mapping objects (as []interface{}) for a
-// specific resource type directly from the hl7_fhir_templates table so that
-// enforceValidationPolicies can read per-mapping "onMissing" fields.
-// Returns an empty slice on any error or absent template so the caller is always safe
-// to iterate.
-func (s *HL7FHIRTransformServiceV3) fetchRawMappingsForPolicy(
-	ctx context.Context,
-	messageType, resourceType string,
-) []interface{} {
-	if s.db == nil {
-		return nil
-	}
-
-	query := `
-		SELECT COALESCE(
-			template_config->'resources'->$2->'mappings',
-			'[]'::jsonb
-		)::text
-		FROM hl7_fhir_templates
-		WHERE message_type = $1 AND is_default = true
-		ORDER BY created_at DESC
-		LIMIT 1
-	`
-	var raw string
-	err := s.db.QueryRowContext(ctx, query, messageType, resourceType).Scan(&raw)
-	if err != nil {
-		return nil
-	}
-
-	var result []interface{}
-	if err := json.Unmarshal([]byte(raw), &result); err != nil {
-		log.Printf("fetchRawMappingsForPolicy: JSON parse error for %s/%s: %v", messageType, resourceType, err)
-		return nil
-	}
-	return result
-}
-
-// loadReferencingModeForTemplate loads the referencing_mode JSONB column for the
-// template that matches the given message type.  Returns nil (no error) when the
-// template or column is absent so callers can treat nil as "use bundle_entry for all".
-func (s *HL7FHIRTransformServiceV3) loadReferencingModeForTemplate(
-	ctx context.Context,
-	messageType string,
-) (map[string]string, error) {
-	if s.db == nil {
-		return nil, nil
-	}
-
-	query := `
-		SELECT COALESCE(referencing_mode, '{}'::jsonb)::text
-		FROM hl7_fhir_templates
-		WHERE message_type = $1 AND is_default = true
-		ORDER BY created_at DESC
-		LIMIT 1
-	`
-	var raw string
-	err := s.db.QueryRowContext(ctx, query, messageType).Scan(&raw)
-	if err != nil {
-		if err == sql.ErrNoRows {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("loadReferencingModeForTemplate: %w", err)
-	}
-
-	var mode map[string]string
-	if err := json.Unmarshal([]byte(raw), &mode); err != nil {
-		log.Printf("loadReferencingModeForTemplate: failed to parse referencing_mode JSON: %v", err)
-		return nil, nil
-	}
-	return mode, nil
 }
 
 // =====================================
