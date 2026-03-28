@@ -381,6 +381,13 @@
                     <span class="nav-icon"><i class="fas fa-robot"></i></span>
                     AI Assistant
                 </div>
+
+                <hr class="settings-nav-divider">
+
+                <div class="settings-nav-item" data-section="schemas" onclick="switchSection('schemas')">
+                    <span class="nav-icon"><i class="fas fa-database"></i></span>
+                    Schema Packages
+                </div>
             </aside>
 
             <!-- ── Settings Panel ────────────────────────────────────────── -->
@@ -1310,6 +1317,257 @@
                         <span class="status-msg" id="aiSaveStatus"></span>
                     </div>
                 </div><!-- /section-ai -->
+
+                <!-- ══════════════════════════════════════════════════════════
+                     SCHEMA PACKAGES
+                ══════════════════════════════════════════════════════════ -->
+                <div class="settings-section" id="section-schemas">
+                    <div class="section-title-row">
+                        <i class="fas fa-database" style="font-size:20px;color:#1e3a8a"></i>
+                        <h2>Schema Packages</h2>
+                    </div>
+                    <p class="section-subtitle">
+                        Download and manage HL7 and FHIR schema definitions. Only install what your interfaces actually need — each pack is independent. Schemas are downloaded from the ezInterop Solutions schema registry and stored locally.
+                    </p>
+
+                    <style>
+                        .schema-pkg-grid { display: grid; gap: 12px; margin-top: 16px; }
+                        .schema-pkg-card {
+                            border: 1px solid #e2e8f0; border-radius: 8px;
+                            padding: 16px; background: #fff;
+                            display: flex; align-items: flex-start; gap: 14px;
+                        }
+                        .schema-pkg-card.installed { border-color: #86efac; background: #f0fdf4; }
+                        .schema-pkg-card.downloading { border-color: #93c5fd; background: #eff6ff; }
+                        .schema-pkg-icon {
+                            width: 38px; height: 38px; border-radius: 8px;
+                            display: flex; align-items: center; justify-content: center;
+                            font-size: 17px; flex-shrink: 0;
+                        }
+                        .schema-pkg-icon.fhir { background: #dbeafe; color: #1d4ed8; }
+                        .schema-pkg-icon.hl7  { background: #fef3c7; color: #d97706; }
+                        .schema-pkg-icon.cda  { background: #f3e8ff; color: #7c3aed; }
+                        .schema-pkg-icon.xds  { background: #ecfdf5; color: #059669; }
+                        .schema-pkg-body { flex: 1; min-width: 0; }
+                        .schema-pkg-name { font-weight: 600; font-size: 14px; color: #1e293b; }
+                        .schema-pkg-desc { font-size: 12px; color: #64748b; margin-top: 2px; line-height: 1.4; }
+                        .schema-pkg-meta { display: flex; gap: 12px; margin-top: 6px; font-size: 11px; color: #94a3b8; }
+                        .schema-pkg-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+                        .btn-install {
+                            background: #1e3a8a; color: #fff; border: none;
+                            border-radius: 6px; padding: 6px 14px; font-size: 12px;
+                            cursor: pointer; white-space: nowrap;
+                        }
+                        .btn-install:hover { background: #1e40af; }
+                        .btn-install:disabled { background: #94a3b8; cursor: not-allowed; }
+                        .btn-remove {
+                            background: none; color: #ef4444; border: 1px solid #fca5a5;
+                            border-radius: 6px; padding: 6px 12px; font-size: 12px; cursor: pointer;
+                        }
+                        .btn-remove:hover { background: #fff1f2; }
+                        .badge-installed {
+                            background: #dcfce7; color: #16a34a;
+                            border-radius: 12px; padding: 2px 10px; font-size: 11px; font-weight: 600;
+                        }
+                        .schema-progress-bar {
+                            height: 4px; border-radius: 2px; background: #e2e8f0;
+                            margin-top: 8px; overflow: hidden;
+                        }
+                        .schema-progress-fill {
+                            height: 100%; background: #3b82f6;
+                            transition: width 0.4s ease;
+                        }
+                        .schema-filter-row {
+                            display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap;
+                        }
+                        .schema-filter-btn {
+                            padding: 5px 14px; border-radius: 20px; font-size: 12px;
+                            border: 1px solid #e2e8f0; background: #fff; cursor: pointer; color: #374151;
+                        }
+                        .schema-filter-btn.active {
+                            background: #1e3a8a; color: #fff; border-color: #1e3a8a;
+                        }
+                        #schemaLoadError { color: #ef4444; font-size: 13px; margin-top: 8px; display: none; }
+                        #schemaLoadingSpinner { color: #64748b; font-size: 13px; margin-top: 8px; }
+                    </style>
+
+                    <!-- Filter bar -->
+                    <div class="schema-filter-row" id="schemaFilterRow" style="display:none">
+                        <button class="schema-filter-btn active" onclick="filterSchemas('all')">All</button>
+                        <button class="schema-filter-btn" onclick="filterSchemas('fhir')">FHIR</button>
+                        <button class="schema-filter-btn" onclick="filterSchemas('hl7')">HL7 v2</button>
+                        <button class="schema-filter-btn" onclick="filterSchemas('cda')">CDA / CCD</button>
+                        <button class="schema-filter-btn" onclick="filterSchemas('xds')">IHE XDS</button>
+                        <button class="schema-filter-btn" onclick="filterSchemas('installed')" id="filterInstalledBtn">Installed</button>
+                    </div>
+
+                    <div id="schemaLoadingSpinner"><i class="fas fa-spinner fa-spin"></i> Loading schema catalog...</div>
+                    <div id="schemaLoadError"></div>
+                    <div class="schema-pkg-grid" id="schemaPkgGrid"></div>
+                </div><!-- /section-schemas -->
+
+                <script>
+                (function() {
+                    let _catalog = [];
+                    let _activeFilter = 'all';
+                    let _pollTimers = {};
+
+                    // Load catalog when section is first shown
+                    const origSwitch = window.switchSection;
+                    window.switchSection = function(section) {
+                        if (typeof origSwitch === 'function') origSwitch(section);
+                        if (section === 'schemas' && _catalog.length === 0) loadSchemaCatalog();
+                    };
+
+                    window.loadSchemaCatalog = function() {
+                        const spinner = document.getElementById('schemaLoadingSpinner');
+                        const errEl   = document.getElementById('schemaLoadError');
+                        const filterRow = document.getElementById('schemaFilterRow');
+                        spinner.style.display = 'block';
+                        errEl.style.display = 'none';
+
+                        fetch('/api/system/schemas/catalog')
+                            .then(r => r.json())
+                            .then(res => {
+                                spinner.style.display = 'none';
+                                if (!res.success) throw new Error(res.error || 'Failed to load catalog');
+                                _catalog = res.data || [];
+                                filterRow.style.display = 'flex';
+                                renderSchemas(_catalog);
+                            })
+                            .catch(err => {
+                                spinner.style.display = 'none';
+                                errEl.textContent = 'Could not load schema catalog: ' + err.message;
+                                errEl.style.display = 'block';
+                            });
+                    };
+
+                    window.filterSchemas = function(filter) {
+                        _activeFilter = filter;
+                        document.querySelectorAll('.schema-filter-btn').forEach(b => {
+                            b.classList.toggle('active', b.textContent.toLowerCase() === filter || (filter === 'all' && b.textContent === 'All'));
+                        });
+                        renderSchemas(_catalog);
+                    };
+
+                    function renderSchemas(catalog) {
+                        const grid = document.getElementById('schemaPkgGrid');
+                        const filtered = catalog.filter(p => {
+                            if (_activeFilter === 'all') return true;
+                            if (_activeFilter === 'installed') return p.status === 'installed';
+                            return p.type === _activeFilter;
+                        });
+
+                        if (filtered.length === 0) {
+                            grid.innerHTML = '<p style="color:#64748b;font-size:13px">No packages match the selected filter.</p>';
+                            return;
+                        }
+
+                        grid.innerHTML = filtered.map(pkg => {
+                            const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+                            const sizeMB = pkg.size_bytes ? (pkg.size_bytes / 1048576).toFixed(0) + ' MB' : '—';
+                            const isInstalled = pkg.status === 'installed';
+                            const isDownloading = pkg.status === 'downloading';
+                            const cardClass = isInstalled ? 'installed' : isDownloading ? 'downloading' : '';
+                            const iconMeta  = {
+                                fhir: { cls: 'fhir', icon: 'fa-hospital'      },
+                                hl7:  { cls: 'hl7',  icon: 'fa-file-medical'  },
+                                cda:  { cls: 'cda',  icon: 'fa-file-code'     },
+                                xds:  { cls: 'xds',  icon: 'fa-share-nodes'   },
+                            };
+                            const { cls: iconClass, icon: iconName } = iconMeta[pkg.type] || iconMeta.hl7;
+
+                            const installedSize = pkg.installed_size
+                                ? ' · ' + (pkg.installed_size / 1048576).toFixed(1) + ' MB on disk'
+                                : '';
+
+                            const actions = isInstalled
+                                ? `<span class="badge-installed"><i class="fas fa-check"></i> Installed</span>
+                                   <button class="btn-remove" onclick="removeSchemaPackage('${esc(pkg.id)}')">Remove</button>`
+                                : isDownloading
+                                ? `<button class="btn-install" disabled><i class="fas fa-spinner fa-spin"></i> Installing…</button>`
+                                : `<button class="btn-install" onclick="installSchemaPackage('${esc(pkg.id)}')">
+                                       <i class="fas fa-download"></i> Install (~${sizeMB})
+                                   </button>`;
+
+                            const progressBar = isDownloading
+                                ? `<div class="schema-progress-bar" id="prog-bar-${esc(pkg.id)}">
+                                       <div class="schema-progress-fill" id="prog-fill-${esc(pkg.id)}" style="width:0%"></div>
+                                   </div>`
+                                : '';
+
+                            return `<div class="schema-pkg-card ${cardClass}" id="pkg-card-${esc(pkg.id)}">
+                                <div class="schema-pkg-icon ${iconClass}"><i class="fas ${iconName}"></i></div>
+                                <div class="schema-pkg-body">
+                                    <div class="schema-pkg-name">${esc(pkg.name)}</div>
+                                    <div class="schema-pkg-desc">${esc(pkg.description)}</div>
+                                    <div class="schema-pkg-meta">
+                                        <span>v${esc(pkg.version)}</span>
+                                        <span>${esc(pkg.file_count)} files</span>
+                                        <span>${sizeMB} download${installedSize}</span>
+                                    </div>
+                                    ${progressBar}
+                                </div>
+                                <div class="schema-pkg-actions">${actions}</div>
+                            </div>`;
+                        }).join('');
+                    }
+
+                    window.installSchemaPackage = function(packageId) {
+                        fetch('/api/system/schemas/install', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ package_id: packageId })
+                        })
+                        .then(r => r.json())
+                        .then(res => {
+                            if (!res.success) { alert('Install failed: ' + res.error); return; }
+                            // Mark as downloading locally and start polling
+                            const pkg = _catalog.find(p => p.id === packageId);
+                            if (pkg) pkg.status = 'downloading';
+                            renderSchemas(_catalog);
+                            pollProgress(packageId);
+                        })
+                        .catch(err => alert('Install error: ' + err.message));
+                    };
+
+                    window.removeSchemaPackage = function(packageId) {
+                        if (!confirm('Remove this schema package? Any pipelines using these schemas will need a replacement pack installed.')) return;
+                        fetch('/api/system/schemas/' + encodeURIComponent(packageId), { method: 'DELETE' })
+                        .then(r => r.json())
+                        .then(res => {
+                            if (!res.success) { alert('Remove failed: ' + res.error); return; }
+                            const pkg = _catalog.find(p => p.id === packageId);
+                            if (pkg) { pkg.status = 'not_installed'; pkg.installed_size = 0; }
+                            renderSchemas(_catalog);
+                        })
+                        .catch(err => alert('Remove error: ' + err.message));
+                    };
+
+                    function pollProgress(packageId) {
+                        if (_pollTimers[packageId]) return;
+                        _pollTimers[packageId] = setInterval(() => {
+                            fetch('/api/system/schemas/progress/' + encodeURIComponent(packageId))
+                                .then(r => r.json())
+                                .then(res => {
+                                    if (!res.success) return;
+                                    const prog = res.data;
+                                    const fill = document.getElementById('prog-fill-' + packageId);
+                                    if (fill) fill.style.width = prog.percent.toFixed(0) + '%';
+
+                                    if (prog.status === 'done' || prog.status === 'error') {
+                                        clearInterval(_pollTimers[packageId]);
+                                        delete _pollTimers[packageId];
+                                        // Refresh catalog to get updated status
+                                        _catalog = [];
+                                        loadSchemaCatalog();
+                                    }
+                                })
+                                .catch(() => {});
+                        }, 800);
+                    }
+                })();
+                </script>
 
             </div><!-- /settings-panel -->
         </div><!-- /settings-layout -->

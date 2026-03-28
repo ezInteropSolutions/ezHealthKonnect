@@ -16,6 +16,7 @@ import (
 	"ezhealthkonnect/services/storage"
 	"ezhealthkonnect/services/dbpool"
 	"ezhealthkonnect/services/ai"
+	"ezhealthkonnect/services/schema"
 	"ezhealthkonnect/services/executors/enrichment"
 	"ezhealthkonnect/services/logger"
 	appmetrics "ezhealthkonnect/services/metrics"
@@ -455,6 +456,19 @@ func main() {
 			systemGroup.GET("/health", systemCtrl.HealthCheck)
 			systemGroup.GET("/info", systemCtrl.GetInfo)
 			systemGroup.GET("/metrics", systemCtrl.GetMetrics)
+
+			// SCHEMA PACKAGE MANAGEMENT
+			schemaManager := schema.NewSchemaPackageManager(cfg.GetSchemaDirectory())
+			schemaCtrl := controllers.NewSchemaController(schemaManager)
+			schemaGroup := systemGroup.Group("/schemas")
+			{
+				schemaGroup.GET("/catalog", schemaCtrl.GetCatalog)
+				schemaGroup.GET("/installed", schemaCtrl.GetInstalled)
+				schemaGroup.POST("/install", schemaCtrl.InstallPackage)
+				schemaGroup.GET("/progress/:id", schemaCtrl.GetProgress)
+				schemaGroup.DELETE("/:id", schemaCtrl.RemovePackage)
+			}
+			log.Printf("✅ Schema Package Manager initialized (root=%s)", cfg.GetSchemaDirectory())
 			// P9 backpressure metrics — queue depth per interface
 			systemGroup.GET("/queue-depths", func(c *gin.Context) {
 				depths := backpressure.Get().QueueDepths()
