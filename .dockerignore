@@ -1,0 +1,52 @@
+# Secrets — must never enter the image
+.env
+.env.*
+*.env
+
+# Git
+.git
+.gitignore
+.github
+
+# Dev tooling
+node_modules
+.npm
+.yarn
+
+# Test artifacts
+tests/
+test-results/
+*.test.js
+*.spec.js
+
+# Large data directories — mounted as volumes at runtime
+schemas/
+logs/
+uploads/
+
+# Installer (not part of the app image)
+installer/
+dist/
+
+# Docs and non-runtime files
+*.md
+docs/
+architecture/
+connectivity/
+*.txt
+*.log
+*.docx
+*.png
+*.jpg
+
+# OS and editor
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/
+
+# Build artifacts
+build.log
+*.tar.gz
+*.zip

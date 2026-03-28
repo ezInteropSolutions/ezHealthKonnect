@@ -1420,7 +1420,7 @@ class InterfaceConfigComponents {
                 <label for="${prefix}CredentialsJson" class="form-label required">Service Account JSON Key</label>
                 <textarea id="${prefix}CredentialsJson" class="form-control" rows="4"
                           name="${direction}CredentialsJson"
-                          placeholder='{"type": "service_account", "project_id": "...", ...}'>${config.credentials_json || config.credentialsJson || ''}</textarea>
+                          placeholder='Paste your GCP service account JSON key file here'>${config.credentials_json || config.credentialsJson || ''}</textarea>
                 <div class="form-hint">Paste the entire JSON key file content</div>
             </div>
         `;

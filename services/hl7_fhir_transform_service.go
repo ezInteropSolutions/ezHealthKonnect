@@ -152,9 +152,9 @@ func NewHL7FHIRTransformService(database *sql.DB) *HL7FHIRTransformService {
 		schemaReady: false,
 	}
 
-	// Load FHIR schemas from .gz files - REQUIRED
+	// Load FHIR schemas from .gz files — optional at startup (schemas downloaded later)
 	if err := service.loadFHIRSchemasFromGZ(); err != nil {
-		log.Fatalf("❌ FATAL: Failed to load FHIR schemas: %v", err)
+		log.Printf("⚠️  FHIR schemas not available: %v (FHIR transform will be unavailable until schemas are installed)", err)
 	}
 
 	return service

@@ -298,15 +298,12 @@ services:
     
     command: >
       sh -c "
-        echo 'Compiling Go...' &&
-        go build -o go-api main.go &&
-        echo 'Go build complete' &&
         (while true; do
           ./go-api;
           echo 'go-api exited (code $?), restarting in 3s...';
           sleep 3;
         done) &
-        sleep 5 &&
+        sleep 3 &&
         node server.js
       "
     restart: unless-stopped

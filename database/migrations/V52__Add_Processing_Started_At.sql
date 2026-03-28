@@ -27,6 +27,3 @@ $$;
 -- Also update getMessageTableSchema standard so new tables include the column.
 -- (InterfaceTableManager reads the schema at runtime — no SQL needed here,
 --  the Go code adds the column to the CREATE TABLE template.)
-
-COMMENT ON COLUMN messages_intf_085d4474_bc07_449f_9676_dcebf726292c.processing_started_at
-    IS 'Timestamp when pipeline execution began. NULL = not yet picked up by worker.';

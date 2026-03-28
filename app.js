@@ -321,6 +321,9 @@ try {
 }
 const messageRoutes = require('./routes/messageRoutes');
 
+// Health-check endpoint — always 200, bypasses auth/setup middleware
+app.get('/health', (req, res) => res.json({ ok: true }));
+
 // Mount essential routes first (before problematic ones)
 console.log('🔄 Mounting /api/auth...');
 app.use('/api/auth', authRoutes);
