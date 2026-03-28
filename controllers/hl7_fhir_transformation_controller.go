@@ -115,7 +115,7 @@ func (c *HL7FHIRTransformationController) TransformHL7ToFHIR(ctx *gin.Context) {
 	}
 
 	// ── FHIR Validation Policy enforcement ───────────────────────────────────
-	if len(response.ValidationFailures) > 0 && request.InterfaceID != "" && c.db != nil {
+	if len(response.ValidationIssues) > 0 && request.InterfaceID != "" && c.db != nil {
 		policy := c.lookupValidationPolicy(transformCtx, request.InterfaceID)
 		switch policy {
 		case "reject":
@@ -123,7 +123,7 @@ func (c *HL7FHIRTransformationController) TransformHL7ToFHIR(ctx *gin.Context) {
 				"success":            false,
 				"requestId":          request.RequestID,
 				"error":              "Message rejected: required FHIR fields are missing",
-				"validationFailures": response.ValidationFailures,
+				"validationFailures": response.ValidationIssues,
 			})
 			return
 		case "queue_review":
@@ -135,7 +135,7 @@ func (c *HL7FHIRTransformationController) TransformHL7ToFHIR(ctx *gin.Context) {
 				"held_for_review":    true,
 				"requestId":          request.RequestID,
 				"message":            "Message held for manual review due to missing required FHIR fields",
-				"validationFailures": response.ValidationFailures,
+				"validationFailures": response.ValidationIssues,
 			})
 			return
 		case "warn":
@@ -657,7 +657,7 @@ func (c *HL7FHIRTransformationController) enqueueForReview(
 	req *services.TransformRequest,
 	resp *services.TransformResponse,
 ) error {
-	failuresJSON, _ := json.Marshal(resp.ValidationFailures)
+	failuresJSON, _ := json.Marshal(resp.ValidationIssues)
 	partialFHIRJSON, _ := json.Marshal(resp.FHIRResources)
 
 	var rawHL7 *string
@@ -690,17 +690,17 @@ func (c *HL7FHIRTransformationController) enqueueForReview(
 // attachOperationOutcome appends an OperationOutcome FHIR resource to the
 // response bundle describing every validation failure.  Used for policy=warn.
 func (c *HL7FHIRTransformationController) attachOperationOutcome(resp *services.TransformResponse) {
-	issues := make([]map[string]interface{}, 0, len(resp.ValidationFailures))
-	for _, vf := range resp.ValidationFailures {
+	issues := make([]map[string]interface{}, 0, len(resp.ValidationIssues))
+	for _, vf := range resp.ValidationIssues {
 		issues = append(issues, map[string]interface{}{
-			"severity":    "warning",
-			"code":        "required",
-			"diagnostics": fmt.Sprintf("Missing required field %s (HL7 source: %s)", vf.Field, vf.HL7Path),
+			"severity":    vf.Severity,
+			"code":        vf.Code,
+			"diagnostics": fmt.Sprintf("%s (path: %s)", vf.Message, vf.Path),
 			"details": map[string]interface{}{
 				"coding": []map[string]interface{}{{
 					"system":  "https://ezhealthkonnect.io/fhir/validation-codes",
-					"code":    vf.MissingCode,
-					"display": vf.Field,
+					"code":    vf.Code,
+					"display": vf.Path,
 				}},
 			},
 		})

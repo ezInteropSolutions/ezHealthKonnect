@@ -224,39 +224,47 @@ class UserService {
     }
 
     async createDefaultAdmin() {
-        console.log('🔧 Creating default admin user...');
-        
         try {
-            const adminEmail = 'admin@ezhealthkonnect.com';
-            const adminPassword = 'admin123';
-            
-            // Check if admin already exists
-            const existingAdmin = await this.database.models.User.findByEmail(adminEmail);
-            if (existingAdmin) {
-                console.log('✅ Default admin already exists');
+            // If the first-run setup wizard has already been completed, the real admin
+            // account exists under the user's own email.  Do NOT recreate the placeholder.
+            const settingsService = require('./settingsService');
+            const setupComplete = await settingsService.getSetting('setup_complete', false);
+            if (setupComplete === true) {
+                console.log('✅ Setup already complete — skipping default admin creation');
                 return;
             }
-            
+
+            console.log('🔧 Creating placeholder admin for first-run setup wizard...');
+
+            const adminEmail = 'admin@ezhealthkonnect.com';
+
+            // Check if placeholder already exists
+            const existingAdmin = await this.database.models.User.findByEmail(adminEmail);
+            if (existingAdmin) {
+                console.log('✅ Placeholder admin already exists');
+                return;
+            }
+
+            const adminPassword = 'admin123';
             const hashedPassword = await bcrypt.hash(adminPassword, 12);
-            console.log('🔐 Password hashed for default admin');
-            
+
             const adminUser = await this.database.models.User.create({
-                email: adminEmail,
-                password_hash: hashedPassword,
-                first_name: 'System',
-                last_name: 'Administrator',
-                role: 'admin',
-                status: 'active',
-                email_verified: true,
-                created_by: null,
+                email:              adminEmail,
+                password_hash:      hashedPassword,
+                first_name:         'System',
+                last_name:          'Administrator',
+                role:               'admin',
+                status:             'active',
+                email_verified:     true,
+                created_by:         null,
                 data_consent_given: true,
-                data_consent_date: new Date()
+                data_consent_date:  new Date()
             });
-            
-            console.log(`✅ Default admin created in PostgreSQL with ID: ${adminUser.id}`);
-            
+
+            console.log(`✅ Placeholder admin created (ID: ${adminUser.id}) — will be replaced during first-run setup`);
+
         } catch (error) {
-            console.error('❌ Error creating default admin:', error);
+            console.error('❌ Error creating placeholder admin:', error);
             throw error;
         }
     }

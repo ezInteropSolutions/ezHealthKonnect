@@ -270,6 +270,17 @@ const sessionConfig = {
 
 app.use(session(sessionConfig));
 
+// ── First-run setup ──────────────────────────────────────────────────────────
+// Mount the public /api/setup/* endpoints BEFORE the setup-check middleware so
+// the wizard itself can always reach them.
+const setupController = require('./controllers/setupController');
+app.use('/api/setup', setupController);
+
+// Gate all other routes until setup is complete (no-op for existing installs).
+const setupCheckMiddleware = require('./middleware/setupCheck');
+app.use(setupCheckMiddleware);
+// ─────────────────────────────────────────────────────────────────────────────
+
 // Analytics + Alerts + Git + Migration routes — require session auth before forwarding to Go
 const { requireAuth: _analyticsAuth } = require('./middleware/auth');
 app.use('/api/analytics', _analyticsAuth, forwardToGo);
