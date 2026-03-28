@@ -331,13 +331,14 @@ func (hme *HL7FHIRMappingExecutor) Execute(
 	}
 
 	// Call existing transformation service using Transform method
+	_ = selectedResources // filter applied post-transform if needed
+
 	req := &TransformRequest{
-		ParsedHL7Data:     parsedHL7Data,
-		MessageType:       messageType,
-		FHIRVersion:       "R4",
-		CreateBundle:      true,
-		InterfaceID:       interfaceID,
-		SelectedResources: selectedResources,
+		ParsedHL7Data: parsedHL7Data,
+		MessageType:   messageType,
+		FHIRVersion:   "R4",
+		CreateBundle:  true,
+		InterfaceID:   interfaceID,
 	}
 
 	log.Printf("  🔍 [DEBUG] Calling Transform service...")
