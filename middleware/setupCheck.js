@@ -40,6 +40,8 @@ function invalidateSetupCache() {
 // Paths that must always be reachable before setup
 const BYPASS_PREFIXES = [
     '/api/setup',
+    '/api/auth/session',   // session endpoint — accessible before setup
+    '/health',             // health-check endpoint — always responds 200
     '/setup.html'
 ];
 

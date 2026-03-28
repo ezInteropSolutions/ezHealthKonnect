@@ -8427,7 +8427,7 @@ return {
                         { name: 'archive_prefix', type: 'string', default: '—', notes: 'Prefix in the archive bucket.' },
                         { name: 'max_objects_per_poll', type: 'integer', default: '100', notes: 'Max objects per cron run.' }
                     ],
-                    example: { connectorType: 'gcs_inbound', config: { bucket_name: 'ehr-hl7-bucket', credentials_json: '{ "type": "service_account", ... }', prefix: 'inbound/', file_pattern: '*.hl7', after_processing: 'move', archive_bucket: 'ehr-hl7-archive', max_objects_per_poll: 100 } }
+                    example: { connectorType: 'gcs_inbound', config: { bucket_name: 'ehr-hl7-bucket', credentials_json: '<paste GCP service account JSON here>', prefix: 'inbound/', file_pattern: '*.hl7', after_processing: 'move', archive_bucket: 'ehr-hl7-archive', max_objects_per_poll: 100 } }
                 }
             ],
             parameters: [

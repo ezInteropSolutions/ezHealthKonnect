@@ -1,0 +1,15 @@
+# docker-compose.validate.yml
+# Overlay used only by validate-image.ps1.
+# Overrides ports to avoid conflicts with a running production stack,
+# and removes HL7/FHIR listener ports that are not needed for smoke testing.
+services:
+  app:
+    ports:
+      - "13000:3000"
+      - "18080:8080"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 60s

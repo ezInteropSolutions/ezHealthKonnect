@@ -97,31 +97,37 @@ if (-not (Test-Path $InstallDir)) {
     OK "Install directory: $InstallDir"
 }
 
-$scriptDir = $PSScriptRoot
-if ($scriptDir -ne $InstallDir) {
-    Info "Copying application files to $InstallDir ..."
-    $filesToCopy = @(
-        "Dockerfile", "docker-compose.prod.yml",
-        "package.json", "package-lock.json", "go.mod", "go.sum",
-        "app.js", "server.js", "main.go"
-    )
-    $dirsToCopy = @(
-        "controllers", "services", "middleware", "routes", "config",
-        "models", "processing", "utils", "public", "database"
-        # schemas/ is intentionally excluded - downloaded on demand via Schema Package Manager
-    )
-    foreach ($f in $filesToCopy) {
-        $src = Join-Path $scriptDir $f
-        if (Test-Path $src) { Copy-Item $src $InstallDir -Force }
+# Source directory: where the Dockerfile and source code live.
+# - If REPO_URL is set, clone/pull from git into InstallDir.
+# - Otherwise assume the installer was distributed as a zip and is
+#   running from inside the extracted source folder (PSScriptRoot).
+$sourceDir = $PSScriptRoot
+
+if ($env:REPO_URL) {
+    # Git-based install (set REPO_URL env var before running)
+    if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
+        Fail "git is required for a repo-based install. Install Git from https://git-scm.com"
     }
-    foreach ($d in $dirsToCopy) {
-        $src = Join-Path $scriptDir $d
-        if (Test-Path $src) { Copy-Item $src (Join-Path $InstallDir $d) -Recurse -Force }
+    if (Test-Path (Join-Path $InstallDir ".git")) {
+        Info "Updating existing repo in $InstallDir ..."
+        git -C $InstallDir pull
+    } else {
+        Info "Cloning $env:REPO_URL into $InstallDir ..."
+        git clone $env:REPO_URL $InstallDir
     }
+    $sourceDir = $InstallDir
+} elseif ($sourceDir -ne $InstallDir) {
+    Info "Copying source files to $InstallDir ..."
+    # Exclude large/unnecessary directories from the copy
+    $exclude = @(".git", "node_modules", "schemas", "tests", "test-results",
+                 "logs", "uploads", "*.tar.gz", "*.zip")
+    $robocopyArgs = @($sourceDir, $InstallDir, "/E", "/XD") + $exclude
+    & robocopy @robocopyArgs | Out-Null
     OK "Files copied."
+    $sourceDir = $InstallDir
 }
 
-Set-Location $InstallDir
+Set-Location $sourceDir
 
 # Step 3: Configuration
 Header "Step 3 of 4 - Configuration"
@@ -136,14 +142,23 @@ if ((Test-Path $envFile) -and -not $Reconfigure) {
     Write-Host "  Press Enter to accept the default shown in [brackets]." -ForegroundColor Gray
     Write-Host ""
 
-    $appPortRaw = Read-Host "  Web UI port [3000]"
-    $appPort = if ([string]::IsNullOrWhiteSpace($appPortRaw)) { "3000" } else { $appPortRaw.Trim() }
+    function Read-Port($label, $default) {
+        $raw = Read-Host "  $label [$default]"
+        return if ([string]::IsNullOrWhiteSpace($raw)) { $default } else { $raw.Trim() }
+    }
+
+    Write-Host "  -- Ports -----------------------------------------------" -ForegroundColor DarkGray
+    $appPort      = Read-Port "Web UI port"           "3000"
+    $apiPort      = Read-Port "Go API port"           "8080"
+    $dbHostPort   = Read-Port "PostgreSQL port"       "5432"
+    $minioApiPort = Read-Port "MinIO API port"        "9000"
+    $minioConPort = Read-Port "MinIO console port"    "9001"
 
     Write-Host ""
+    Write-Host "  -- Passwords -------------------------------------------" -ForegroundColor DarkGray
     Write-Host "  Choose a strong database password:" -ForegroundColor White
     $dbPassword = Prompt-Secret "Database password"
 
-    Write-Host ""
     Write-Host "  Choose a storage password (MinIO - for message archiving):" -ForegroundColor White
     $minioPassword = Prompt-Secret "Storage password"
 
@@ -157,17 +172,17 @@ if ((Test-Path $envFile) -and -not $Reconfigure) {
 
 APP_IMAGE=ezhealthkonnect/app:latest
 APP_PORT=$appPort
-API_PORT=8080
+API_PORT=$apiPort
 
 DB_USER=ezhealth_user
 DB_PASSWORD=$dbPassword
-DB_PORT=5432
+DB_HOST_PORT=$dbHostPort
 DB_SSL=false
 
 MINIO_USER=ezhealth_user
 MINIO_PASSWORD=$minioPassword
-MINIO_API_PORT=9000
-MINIO_CONSOLE_PORT=9001
+MINIO_API_PORT=$minioApiPort
+MINIO_CONSOLE_PORT=$minioConPort
 
 SESSION_SECRET=$sessionSecret
 JWT_SECRET=$jwtSecret
@@ -189,7 +204,7 @@ Info "Building application image (this takes 3-6 minutes on first run)..."
 Write-Host ""
 
 $ErrorActionPreference = 'Continue'
-docker build -t ezhealthkonnect/app:latest $InstallDir
+docker build -t ezhealthkonnect/app:latest $sourceDir
 $buildExit = $LASTEXITCODE
 $ErrorActionPreference = 'Stop'
 if ($buildExit -ne 0) { Fail "Image build failed. Check the output above." }
@@ -201,7 +216,8 @@ Write-Host ""
 
 $composeArgs = @(
     "compose",
-    "-f", (Join-Path $InstallDir "docker-compose.prod.yml"),
+    "-f", (Join-Path $sourceDir "docker-compose.prod.yml"),
+    "-f", (Join-Path $sourceDir "docker-compose.listeners.yml"),
     "--env-file", $envFile
 )
 if ($WithAI) { $composeArgs += @("--profile", "ai") }
@@ -242,9 +258,79 @@ if ($WithAI) {
     } | Out-Null
 }
 
-Write-Host "  To stop:    docker compose -f docker-compose.prod.yml down" -ForegroundColor DarkGray
-Write-Host "  To restart: docker compose -f docker-compose.prod.yml up -d" -ForegroundColor DarkGray
-Write-Host "  Logs:       docker compose -f docker-compose.prod.yml logs -f app" -ForegroundColor DarkGray
+# Register as a Windows Service (visible in services.msc) using NSSM
+$svcName     = "ezHealthKonnect"
+$nssmDir     = Join-Path $sourceDir "tools"
+$nssmExe     = Join-Path $nssmDir "nssm.exe"
+$composeFile = Join-Path $sourceDir "docker-compose.prod.yml"
+
+$existingSvc = Get-Service -Name $svcName -ErrorAction SilentlyContinue
+if ($existingSvc) {
+    OK "Windows service '$svcName' already registered."
+} else {
+    Write-Host ""
+    $registerSvc = Read-Host "  Register as a Windows service (services.msc)? [Y/n]"
+    if ($registerSvc -ne 'n' -and $registerSvc -ne 'N') {
+        try {
+            # Download NSSM if not already present
+            if (-not (Test-Path $nssmExe)) {
+                New-Item -ItemType Directory -Path $nssmDir -Force | Out-Null
+                Info "Downloading NSSM service manager..."
+                $nssmZip = Join-Path $nssmDir "nssm.zip"
+                Invoke-WebRequest -Uri "https://nssm.cc/release/nssm-2.24.zip" `
+                    -OutFile $nssmZip -UseBasicParsing
+                Expand-Archive -Path $nssmZip -DestinationPath $nssmDir -Force
+                # nssm extracts into nssm-2.24\win64\nssm.exe
+                $extracted = Get-ChildItem "$nssmDir\nssm-*\win64\nssm.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+                if ($extracted) {
+                    Copy-Item $extracted.FullName $nssmExe -Force
+                }
+                Remove-Item $nssmZip -Force -ErrorAction SilentlyContinue
+                OK "NSSM downloaded."
+            }
+
+            $dockerExe = (Get-Command docker).Source
+
+            # Install service: runs "docker compose up" in foreground so
+            # Windows can start/stop it properly via services.msc
+            $listenersFile = Join-Path $sourceDir "docker-compose.listeners.yml"
+            & $nssmExe install $svcName $dockerExe `
+                "compose -f `"$composeFile`" -f `"$listenersFile`" --env-file `"$envFile`" up" | Out-Null
+
+            # Service settings
+            & $nssmExe set $svcName DisplayName  "ezHealthKonnect"          | Out-Null
+            & $nssmExe set $svcName Description  "ezHealthKonnect Healthcare Integration Platform" | Out-Null
+            & $nssmExe set $svcName Start        SERVICE_AUTO_START         | Out-Null
+            & $nssmExe set $svcName AppStopMethodConsole 10000              | Out-Null
+            & $nssmExe set $svcName AppStopMethodWindow  5000               | Out-Null
+            & $nssmExe set $svcName AppStopMethodThreads 5000               | Out-Null
+
+            # Depend on Docker so we start after it
+            & $nssmExe set $svcName DependOnService "com.docker.service"    | Out-Null
+
+            # Stdout/stderr logs
+            $logDir = Join-Path $sourceDir "logs"
+            New-Item -ItemType Directory -Path $logDir -Force | Out-Null
+            & $nssmExe set $svcName AppStdout (Join-Path $logDir "service.log") | Out-Null
+            & $nssmExe set $svcName AppStderr (Join-Path $logDir "service.log") | Out-Null
+            & $nssmExe set $svcName AppRotateFiles 1                        | Out-Null
+
+            Start-Service $svcName -ErrorAction SilentlyContinue
+            OK "Service '$svcName' registered and set to auto-start."
+            OK "Manage it from services.msc or: Start-Service $svcName"
+        } catch {
+            Warn "Could not register service: $_"
+            Warn "Re-run as Administrator, or start manually:"
+            Warn "  docker compose -f `"$composeFile`" up -d"
+        }
+    }
+}
+
+Write-Host ""
+Write-Host "  To stop:      Stop-Service $svcName" -ForegroundColor DarkGray
+Write-Host "  To start:     Start-Service $svcName" -ForegroundColor DarkGray
+Write-Host "  Logs:         $sourceDir\logs\service.log" -ForegroundColor DarkGray
+Write-Host "  Uninstall:    & `"$nssmExe`" remove $svcName confirm" -ForegroundColor DarkGray
 Write-Host ""
 
 Start-Sleep 5

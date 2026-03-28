@@ -1,0 +1,213 @@
+name: Build, Validate and Publish Docker Image
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ezinteropsolutions/ezhealthkonnect
+  # Local tag used during validation before pushing
+  LOCAL_TAG: ezhealthkonnect-ci:${{ github.run_id }}
+
+jobs:
+  # ── Job 1: Lint ────────────────────────────────────────────────────────────
+  lint:
+    name: Lint Dockerfile
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Lint Dockerfile with Hadolint
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: Dockerfile
+          # Ignore: DL3008 (pin apt versions) - we use Alpine not apt
+          # Ignore: DL3018 (pin apk versions) - acceptable for internal builds
+          ignore: DL3008,DL3018
+
+  # ── Job 2: Build → Scan → Smoke Test → Push ───────────────────────────────
+  build-validate-push:
+    name: Build, Scan and Push
+    runs-on: ubuntu-latest
+    needs: lint
+    permissions:
+      contents: read
+      packages: write
+      security-events: write   # for uploading Trivy SARIF results
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # ── Build (load locally first — do NOT push yet) ──────────────────────
+      - name: Build image (local only)
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: false
+          load: true
+          tags: ${{ env.LOCAL_TAG }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # ── Layer inspection: no secrets baked in ────────────────────────────
+      - name: Check for secrets in image layers
+        run: |
+          echo "=== Checking image history for suspicious patterns ==="
+          docker history --no-trunc ${{ env.LOCAL_TAG }} | grep -iE \
+            'password|secret|token|key|credential|api_key' \
+            && echo "WARNING: Potential secret found in image history" && exit 1 \
+            || echo "OK: No secrets detected in image history"
+
+          echo ""
+          echo "=== Verifying .env is NOT baked into image ==="
+          docker run --rm ${{ env.LOCAL_TAG }} sh -c \
+            'test -f /app/.env && echo "FAIL: .env found in image" && exit 1 || echo "OK: No .env in image"'
+
+          echo ""
+          echo "=== Verifying node_modules owner binaries are absent ==="
+          docker run --rm ${{ env.LOCAL_TAG }} sh -c \
+            'test -d /app/.git && echo "FAIL: .git found in image" && exit 1 || echo "OK: No .git in image"'
+
+      # ── CVE scan with Trivy ───────────────────────────────────────────────
+      - name: Scan image for vulnerabilities (Trivy)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: ${{ env.LOCAL_TAG }}
+          format: sarif
+          output: trivy-results.sarif
+          severity: CRITICAL,HIGH
+          # Exit 1 on CRITICAL vulnerabilities
+          exit-code: '1'
+          ignore-unfixed: true   # only flag CVEs that have a fix available
+
+      - name: Upload Trivy SARIF to GitHub Security tab
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-results.sarif
+        continue-on-error: true  # don't fail the job if SARIF upload fails
+
+      # ── Smoke test: container starts and binaries run ─────────────────────
+      - name: Smoke test — binaries present and executable
+        run: |
+          echo "=== Checking go-api binary ==="
+          docker run --rm ${{ env.LOCAL_TAG }} sh -c \
+            'test -x /app/go-api && echo "OK: go-api binary is present and executable"'
+
+          echo "=== Checking Node.js ==="
+          docker run --rm ${{ env.LOCAL_TAG }} node --version
+
+          echo "=== Checking curl (health check tool) ==="
+          docker run --rm ${{ env.LOCAL_TAG }} curl --version | head -1
+
+      # ── Smoke test: full stack starts healthy ─────────────────────────────
+      - name: Smoke test — full stack health check
+        run: |
+          # Write a minimal .env so compose can start
+          cat > /tmp/test.env <<'EOF'
+          APP_IMAGE=ezhealthkonnect-ci:${{ github.run_id }}
+          APP_PORT=3000
+          API_PORT=8080
+          DB_USER=ezhealth_user
+          DB_PASSWORD=TestPassword123!
+          DB_HOST_PORT=5432
+          DB_SSL=false
+          MINIO_USER=ezhealth_user
+          MINIO_PASSWORD=TestPassword123!
+          MINIO_API_PORT=9000
+          MINIO_CONSOLE_PORT=9001
+          SESSION_SECRET=ci-session-secret-not-for-production-use
+          JWT_SECRET=ci-jwt-secret-not-for-production-use
+          OLLAMA_PORT=11434
+          OLLAMA_CHAT_MODEL=llama3.2:3b
+          OLLAMA_EMBED_MODEL=nomic-embed-text
+          EOF
+
+          echo "=== Starting stack ==="
+          docker compose -f docker-compose.prod.yml --env-file /tmp/test.env up -d
+
+          echo "=== Waiting for health checks (up to 90s) ==="
+          timeout 90 bash -c '
+            until docker inspect ezhk-app --format "{{.State.Health.Status}}" 2>/dev/null | grep -q healthy; do
+              echo "  Waiting... ($(docker inspect ezhk-app --format "{{.State.Health.Status}}" 2>/dev/null || echo starting))"
+              sleep 5
+            done
+          ' || {
+            echo "TIMEOUT: Container did not become healthy in 90s"
+            echo "=== App logs ==="
+            docker compose -f docker-compose.prod.yml logs app --tail=50
+            exit 1
+          }
+
+          echo "=== Testing HTTP response ==="
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:3000/api/auth/session)
+          echo "  /api/auth/session → HTTP $STATUS"
+          if [ "$STATUS" != "200" ] && [ "$STATUS" != "401" ]; then
+            echo "FAIL: Unexpected status $STATUS"
+            docker compose -f docker-compose.prod.yml logs app --tail=30
+            exit 1
+          fi
+          echo "OK: Application is responding correctly"
+
+      - name: Dump logs on failure
+        if: failure()
+        run: |
+          docker compose -f docker-compose.prod.yml logs --tail=100 || true
+
+      - name: Tear down test stack
+        if: always()
+        run: |
+          docker compose -f docker-compose.prod.yml down -v --remove-orphans || true
+
+      # ── Push — only after ALL checks pass ────────────────────────────────
+      - name: Log in to GitHub Container Registry
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract image metadata
+        if: github.event_name != 'pull_request'
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,prefix=sha-,format=short
+
+      - name: Push validated image to registry
+        if: github.event_name != 'pull_request'
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          platforms: linux/amd64,linux/arm64
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # ── Image report ──────────────────────────────────────────────────────
+      - name: Print image size report
+        if: always()
+        run: |
+          echo "=== Image size ==="
+          docker images ${{ env.LOCAL_TAG }} --format "Size: {{.Size}}"
+          echo ""
+          echo "=== Layer breakdown (top 10 largest) ==="
+          docker history ${{ env.LOCAL_TAG }} --format "{{.Size}}\t{{.CreatedBy}}" \
+            | sort -rh | head -10
