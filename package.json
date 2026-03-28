@@ -20,10 +20,8 @@
     "interoperability"
   ],
   "author": "ezHealthKonnect Team",
-  "license": "ISC",
+  "license": "UNLICENSED",
   "dependencies": {
-    "@anthropic-ai/claude-agent-sdk": "^0.1.11",
-    "@redoxengine/redox-hl7-v2": "^1.0.1",
     "axios": "^1.10.0",
     "bcryptjs": "^2.4.3",
     "bull": "^4.16.5",

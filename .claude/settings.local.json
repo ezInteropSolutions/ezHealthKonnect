@@ -415,7 +415,8 @@
       "WebSearch",
       "WebFetch(domain:api.github.com)",
       "Bash(/tmp/fetch_urls.txt:*)",
-      "Read(//tmp/**)"
+      "Read(//tmp/**)",
+      "Bash(npm uninstall:*)"
     ],
     "deny": [],
     "ask": []

@@ -7,7 +7,7 @@
     "profile": "base",
     "description": "All 146 base FHIR R4 resource definitions. Required for any HL7 to FHIR transformation.",
     "size_bytes": 1048576,
-    "download_url": "https://github.com/ezinteropsolutions/ezhealthkonnect-schemas/releases/download/v1.0.0/fhir-r4-base.zip",
+    "download_url": "https://github.com/ezInteropSolutions/ezhealthkonnect-schemas/releases/download/v1.0.0/fhir-r4-base.zip",
     "install_path": "fhir/R4/resources",
     "file_count": 146
   },
@@ -19,7 +19,7 @@
     "profile": "us-core",
     "description": "US Core Implementation Guide profiles. Required for ONC-compliant US deployments.",
     "size_bytes": 204800,
-    "download_url": "https://github.com/ezinteropsolutions/ezhealthkonnect-schemas/releases/download/v1.0.0/fhir-r4-us-core.zip",
+    "download_url": "https://github.com/ezInteropSolutions/ezhealthkonnect-schemas/releases/download/v1.0.0/fhir-r4-us-core.zip",
     "install_path": "fhir/R4/profiles/us-core",
     "file_count": 26
   },
@@ -31,7 +31,7 @@
     "profile": "v2.2",
     "description": "HL7 v2.1 and v2.2 definitions for very old legacy systems. Most modern deployments do not need this.",
     "size_bytes": 3145728,
-    "download_url": "https://github.com/ezinteropsolutions/ezhealthkonnect-schemas/releases/download/v1.0.0/hl7-v2-legacy.zip",
+    "download_url": "https://github.com/ezInteropSolutions/ezhealthkonnect-schemas/releases/download/v1.0.0/hl7-v2-legacy.zip",
     "install_path": "hl7/v2.1",
     "file_count": 120
   },
@@ -43,7 +43,7 @@
     "profile": "v2.3.1",
     "description": "HL7 v2.3 and v2.3.1 segment and field definitions. Common in older hospital systems still in production.",
     "size_bytes": 145752064,
-    "download_url": "https://github.com/ezinteropsolutions/ezhealthkonnect-schemas/releases/download/v1.0.0/hl7-v2-23.zip",
+    "download_url": "https://github.com/ezInteropSolutions/ezhealthkonnect-schemas/releases/download/v1.0.0/hl7-v2-23.zip",
     "install_path": "hl7/v2.3",
     "file_count": 552
   },
@@ -55,7 +55,7 @@
     "profile": "v2.4",
     "description": "HL7 v2.4 segment and field definitions.",
     "size_bytes": 96468992,
-    "download_url": "https://github.com/ezinteropsolutions/ezhealthkonnect-schemas/releases/download/v1.0.0/hl7-v2-24.zip",
+    "download_url": "https://github.com/ezInteropSolutions/ezhealthkonnect-schemas/releases/download/v1.0.0/hl7-v2-24.zip",
     "install_path": "hl7/v2.4",
     "file_count": 326
   },
@@ -67,7 +67,7 @@
     "profile": "v2.5.1",
     "description": "HL7 v2.5 and v2.5.1 definitions. The most widely deployed HL7 version — install this first.",
     "size_bytes": 267386880,
-    "download_url": "https://github.com/ezinteropsolutions/ezhealthkonnect-schemas/releases/download/v1.0.0/hl7-v2-25.zip",
+    "download_url": "https://github.com/ezInteropSolutions/ezhealthkonnect-schemas/releases/download/v1.0.0/hl7-v2-25.zip",
     "install_path": "hl7/v2.5",
     "file_count": 706
   },
@@ -79,7 +79,7 @@
     "profile": "v2.6",
     "description": "HL7 v2.6 segment and field definitions.",
     "size_bytes": 168820736,
-    "download_url": "https://github.com/ezinteropsolutions/ezhealthkonnect-schemas/releases/download/v1.0.0/hl7-v2-26.zip",
+    "download_url": "https://github.com/ezInteropSolutions/ezhealthkonnect-schemas/releases/download/v1.0.0/hl7-v2-26.zip",
     "install_path": "hl7/v2.6",
     "file_count": 399
   },
@@ -91,7 +91,7 @@
     "profile": "v2.7.1",
     "description": "HL7 v2.7 and v2.7.1 definitions. Required for modern EHR integrations.",
     "size_bytes": 545259520,
-    "download_url": "https://github.com/ezinteropsolutions/ezhealthkonnect-schemas/releases/download/v1.0.0/hl7-v2-27.zip",
+    "download_url": "https://github.com/ezInteropSolutions/ezhealthkonnect-schemas/releases/download/v1.0.0/hl7-v2-27.zip",
     "install_path": "hl7/v2.7",
     "file_count": 712
   },
@@ -103,7 +103,7 @@
     "profile": "v2.8",
     "description": "HL7 v2.8 — the latest HL7 v2 specification.",
     "size_bytes": 314572800,
-    "download_url": "https://github.com/ezinteropsolutions/ezhealthkonnect-schemas/releases/download/v1.0.0/hl7-v2-28.zip",
+    "download_url": "https://github.com/ezInteropSolutions/ezhealthkonnect-schemas/releases/download/v1.0.0/hl7-v2-28.zip",
     "install_path": "hl7/v2.8",
     "file_count": 362
   }
