@@ -11,7 +11,7 @@ import (
 	"path/filepath"
 )
 
-func registerService(installDir, composeFile, envFile string) error {
+func registerService(installDir, composeFile, listenersFile, envFile string) error {
 	nssmDir := filepath.Join(installDir, "tools")
 	nssmExe := filepath.Join(nssmDir, "nssm.exe")
 
@@ -29,7 +29,7 @@ func registerService(installDir, composeFile, envFile string) error {
 	}
 
 	const svcName = "ezHealthKonnect"
-	svcArgs := fmt.Sprintf(`compose -f "%s" --env-file "%s" up`, composeFile, envFile)
+	svcArgs := fmt.Sprintf(`compose -f "%s" -f "%s" --env-file "%s" up`, composeFile, listenersFile, envFile)
 
 	nssm := func(args ...string) {
 		out, err := exec.Command(nssmExe, args...).CombinedOutput()

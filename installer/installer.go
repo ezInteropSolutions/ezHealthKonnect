@@ -17,6 +17,9 @@ import (
 //go:embed assets/docker-compose.prod.yml
 var embeddedComposeYML []byte
 
+//go:embed assets/docker-compose.listeners.yml
+var embeddedListenersYML []byte
+
 func runInstallation(cfg *Config) {
 	defer func() {
 		appURL := fmt.Sprintf("http://localhost:%s", cfg.AppPort)
@@ -36,14 +39,19 @@ func runInstallation(cfg *Config) {
 	}
 	emit("ok", "Directory ready: "+cfg.InstallDir)
 
-	// Step 2: Write embedded docker-compose.prod.yml
+	// Step 2: Write embedded compose files
 	emitStep(2, "Writing compose configuration")
 	composeDest := filepath.Join(cfg.InstallDir, "docker-compose.prod.yml")
 	if err := os.WriteFile(composeDest, embeddedComposeYML, 0644); err != nil {
 		emit("error", "Failed to write docker-compose.prod.yml: "+err.Error())
 		return
 	}
-	emit("ok", "Compose file written to "+composeDest)
+	listenersDest := filepath.Join(cfg.InstallDir, "docker-compose.listeners.yml")
+	if err := os.WriteFile(listenersDest, embeddedListenersYML, 0644); err != nil {
+		emit("error", "Failed to write docker-compose.listeners.yml: "+err.Error())
+		return
+	}
+	emit("ok", "Compose files written to "+cfg.InstallDir)
 
 	// Step 3: Write .env
 	emitStep(3, "Writing configuration")
@@ -66,7 +74,7 @@ func runInstallation(cfg *Config) {
 
 	// Step 5: Start services
 	emitStep(5, "Starting services")
-	if err := runDockerCompose(composeDest, envPath, cfg.WithAI); err != nil {
+	if err := runDockerCompose(composeDest, listenersDest, envPath, cfg.WithAI); err != nil {
 		emit("error", "Failed to start services: "+err.Error())
 		return
 	}
@@ -75,7 +83,7 @@ func runInstallation(cfg *Config) {
 	// Step 6: Register OS service
 	if cfg.RegisterSvc {
 		emitStep(6, "Registering system service")
-		if err := registerService(cfg.InstallDir, composeDest, envPath); err != nil {
+		if err := registerService(cfg.InstallDir, composeDest, listenersDest, envPath); err != nil {
 			emit("warn", "Service registration failed: "+err.Error())
 			emit("warn", "The application is running — you can register the service later.")
 		} else {
@@ -86,7 +94,7 @@ func runInstallation(cfg *Config) {
 	// Step 7: Wait for app
 	emitStep(7, "Waiting for application to become ready")
 	appURL := fmt.Sprintf("http://localhost:%s", cfg.AppPort)
-	waitForReady(appURL+"/api/auth/session", 120*time.Second)
+	waitForReady(appURL+"/health", 120*time.Second)
 
 	emit("info", "")
 	emit("info", "╔══════════════════════════════════════════════╗")
@@ -100,8 +108,8 @@ func runDockerPull() error {
 	return streamCmd(exec.Command("docker", "pull", "ghcr.io/ezinteropsolutions/ezhealthkonnect:latest"))
 }
 
-func runDockerCompose(composeFile, envFile string, withAI bool) error {
-	args := []string{"compose", "-f", composeFile, "--env-file", envFile}
+func runDockerCompose(composeFile, listenersFile, envFile string, withAI bool) error {
+	args := []string{"compose", "-f", composeFile, "-f", listenersFile, "--env-file", envFile}
 	if withAI {
 		args = append(args, "--profile", "ai")
 	}
@@ -183,7 +191,7 @@ func waitForReady(url string, timeout time.Duration) {
 		resp, err := client.Get(url)
 		if err == nil {
 			resp.Body.Close()
-			if resp.StatusCode == 200 || resp.StatusCode == 401 {
+			if resp.StatusCode == 200 {
 				emit("ok", "Application is ready")
 				return
 			}

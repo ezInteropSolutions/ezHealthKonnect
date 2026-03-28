@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 )
 
-func registerService(installDir, composeFile, envFile string) error {
+func registerService(installDir, composeFile, listenersFile, envFile string) error {
 	dockerBin, err := exec.LookPath("docker")
 	if err != nil {
 		return fmt.Errorf("docker not found in PATH: %w", err)
@@ -28,9 +28,9 @@ Wants=network-online.target
 [Service]
 Type=simple
 WorkingDirectory=%s
-ExecStart=%s compose -f %s --env-file %s up
-ExecStop=%s compose -f %s down
-ExecReload=%s compose -f %s --env-file %s up -d --remove-orphans
+ExecStart=%s compose -f %s -f %s --env-file %s up
+ExecStop=%s compose -f %s -f %s down
+ExecReload=%s compose -f %s -f %s --env-file %s up -d --remove-orphans
 Restart=on-failure
 RestartSec=10
 StandardOutput=append:%s
@@ -40,9 +40,9 @@ StandardError=append:%s
 WantedBy=multi-user.target
 `,
 		installDir,
-		dockerBin, composeFile, envFile,
-		dockerBin, composeFile,
-		dockerBin, composeFile, envFile,
+		dockerBin, composeFile, listenersFile, envFile,
+		dockerBin, composeFile, listenersFile,
+		dockerBin, composeFile, listenersFile, envFile,
 		logFile, logFile,
 	)
 
