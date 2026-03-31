@@ -354,11 +354,9 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           VERSION="${{ steps.ver.outputs.value }}"
-          RELEASE_ID=$(gh api repos/${{ github.repository }}/releases/tags/${VERSION} \
-            --jq '.id' 2>/dev/null || echo "")
-          if [ -n "$RELEASE_ID" ] && [ "$RELEASE_ID" != "null" ]; then
-            echo "Deleting existing release id=${RELEASE_ID} for tag ${VERSION}"
-            gh api -X DELETE repos/${{ github.repository }}/releases/${RELEASE_ID}
+          if gh release view "${VERSION}" &>/dev/null; then
+            echo "Deleting existing release for ${VERSION}"
+            gh release delete "${VERSION}" --yes
           else
             echo "No existing release for ${VERSION} — creating fresh"
           fi
