@@ -33,7 +33,10 @@ WORKDIR /app
 
 # Node.js app
 COPY --from=nodebuilder /app/node_modules ./node_modules
-COPY package*.json    ./
+# Only copy package.json (not package-lock.json) — the lockfile is build
+# infrastructure only; it is not needed at runtime and confuses Trivy into
+# reporting false-positive CVEs from nested dependency declarations.
+COPY package.json     ./
 COPY app.js           ./
 COPY server.js        ./
 COPY controllers/     ./controllers/
