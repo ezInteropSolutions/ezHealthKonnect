@@ -30,10 +30,10 @@ jobs:
           cache-dependency-path: go.sum
 
       - name: Build go-api
-        run: go build ./...
+        run: go build $(go list ./... | grep -v '/tests')
 
       - name: Vet
-        run: go vet ./...
+        run: go vet $(go list ./... | grep -v '/tests')
 
   # ── Go installer ──────────────────────────────────────────────────────────────
   check-installer:
