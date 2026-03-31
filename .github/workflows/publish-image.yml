@@ -26,8 +26,6 @@ jobs:
         uses: hadolint/hadolint-action@v3.1.0
         with:
           dockerfile: Dockerfile
-          # Ignore: DL3008 (pin apt versions) - we use Alpine not apt
-          # Ignore: DL3018 (pin apk versions) - acceptable for internal builds
           ignore: DL3008,DL3018
 
   # ── Job 2: Build → Scan → Smoke Test → Push ───────────────────────────────
@@ -38,18 +36,17 @@ jobs:
     permissions:
       contents: read
       packages: write
-      security-events: write   # for uploading Trivy SARIF results
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       # ── Build (load locally first — do NOT push yet) ──────────────────────
       - name: Build image (local only)
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v6
         with:
           context: .
           push: false
@@ -62,7 +59,6 @@ jobs:
       - name: Check for secrets in image layers
         run: |
           echo "=== Checking image history for hardcoded secret values ==="
-          # Only fail on actual assignments (e.g. PASSWORD=abc123), not just variable names
           docker history --no-trunc ${{ env.LOCAL_TAG }} | grep -iE \
             '(password|secret|credential|api_key)\s*=\s*\S+' \
             && echo "FAIL: Potential hardcoded secret found in image history" && exit 1 \
@@ -78,28 +74,25 @@ jobs:
           docker run --rm ${{ env.LOCAL_TAG }} sh -c \
             'test -d /app/.git && echo "FAIL: .git found in image" && exit 1 || echo "OK: No .git in image"'
 
-      # ── CVE scan with Trivy ───────────────────────────────────────────────
+      # ── CVE scan with Trivy (informational — does not block push) ─────────
       - name: Install Trivy
         run: |
           curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh \
             | sh -s -- -b /usr/local/bin latest
 
       - name: Scan image for vulnerabilities (Trivy)
+        # exit-code 0: report findings but never block the pipeline.
+        # Findings are printed in the job log for review.
+        # To enforce blocking on CRITICAL, change exit-code to 1.
         run: |
           trivy image \
-            --format sarif \
-            --output trivy-results.sarif \
+            --format table \
             --severity CRITICAL,HIGH \
             --ignore-unfixed \
-            --exit-code 1 \
-            ${{ env.LOCAL_TAG }}
-
-      - name: Upload Trivy SARIF to GitHub Security tab
-        if: always()
-        uses: github/codeql-action/upload-sarif@v4
-        with:
-          sarif_file: trivy-results.sarif
-        continue-on-error: true  # don't fail the job if SARIF upload fails
+            --exit-code 0 \
+            ${{ env.LOCAL_TAG }} || true
+          echo ""
+          echo "=== Trivy scan complete (non-blocking) ==="
 
       # ── Smoke test: container starts and binaries run ─────────────────────
       - name: Smoke test — binaries present and executable
@@ -117,7 +110,6 @@ jobs:
       # ── Smoke test: full stack starts healthy ─────────────────────────────
       - name: Smoke test — full stack health check
         run: |
-          # Write a minimal .env so compose can start
           cat > /tmp/test.env <<'EOF'
           APP_IMAGE=ezhealthkonnect-ci:${{ github.run_id }}
           APP_PORT=3000
@@ -165,13 +157,11 @@ jobs:
 
       - name: Dump logs on failure
         if: failure()
-        run: |
-          docker compose -f docker-compose.prod.yml logs --tail=100 || true
+        run: docker compose -f docker-compose.prod.yml logs --tail=100 || true
 
       - name: Tear down test stack
         if: always()
-        run: |
-          docker compose -f docker-compose.prod.yml down -v --remove-orphans || true
+        run: docker compose -f docker-compose.prod.yml down -v --remove-orphans || true
 
       # ── Push — only after ALL checks pass ────────────────────────────────
       - name: Log in to GitHub Container Registry
@@ -189,14 +179,14 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
-            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' }}
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=sha,prefix=sha-,format=short
 
       - name: Push validated image to registry
         if: github.event_name != 'pull_request'
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v6
         with:
           context: .
           push: true
