@@ -81,18 +81,26 @@ jobs:
             | sh -s -- -b /usr/local/bin latest
 
       - name: Scan image for vulnerabilities (Trivy)
-        # exit-code 0: report findings but never block the pipeline.
-        # Findings are printed in the job log for review.
-        # To enforce blocking on CRITICAL, change exit-code to 1.
+        # Blocks on CRITICAL/HIGH CVEs that have a fix available.
+        # CVEs with no upstream fix are suppressed via .trivyignore (reviewed monthly).
+        # To see ALL findings including suppressed, check the table output above.
         run: |
+          echo "=== Full findings (including suppressed) ==="
           trivy image \
             --format table \
             --severity CRITICAL,HIGH \
             --ignore-unfixed \
-            --exit-code 0 \
             ${{ env.LOCAL_TAG }} || true
+
           echo ""
-          echo "=== Trivy scan complete (non-blocking) ==="
+          echo "=== Enforced scan (blocks on fixable CVEs not in .trivyignore) ==="
+          trivy image \
+            --format table \
+            --severity CRITICAL,HIGH \
+            --ignore-unfixed \
+            --ignorefile .trivyignore \
+            --exit-code 1 \
+            ${{ env.LOCAL_TAG }}
 
       # ── Smoke test: container starts and binaries run ─────────────────────
       - name: Smoke test — binaries present and executable
