@@ -568,11 +568,13 @@ class WizardModel extends EventTarget {
             sourceType: this.data.sourceType,
             sourceConnectivity: this.data.sourceConnectivity,
             sourceConfig: this.data.sourceConfig,
+            sourceConnectorConfig: this.data.sourceConnectorConfig || null,
 
             // Target configuration
             targetType: this.data.targetType || 'fhir',
             targetConnectivity: this.data.targetConnectivity || 'http',
             targetConfig: this.data.targetConfig || {},
+            targetConnectorConfig: this.data.targetConnectorConfig || null,
 
             // Message type and mappings
             messageType: messageType,
