@@ -71,18 +71,30 @@ type DownloadProgress struct {
 
 // SchemaPackageManager manages schema packs: catalog, install, remove.
 type SchemaPackageManager struct {
-	schemaRoot string // absolute path to schemas/ directory
-	mu         sync.RWMutex
-	progress   map[string]*DownloadProgress // keyed by package ID
-	httpClient *http.Client
+	schemaRoot   string // absolute path to schemas/ directory
+	distPath     string // optional local path containing pre-built *.zip files (dev mode)
+	mu           sync.RWMutex
+	progress     map[string]*DownloadProgress // keyed by package ID
+	httpClient   *http.Client
+
+	// Catalog cache — avoids re-reading disk + remote on every request
+	cachedCatalog    []*SchemaPackage
+	cacheExpiry      time.Time
+	cacheDirSizes    map[string]int64 // package ID → installed size in bytes (lazy, cached)
 }
 
 // NewSchemaPackageManager creates a manager rooted at schemaRoot.
-func NewSchemaPackageManager(schemaRoot string) *SchemaPackageManager {
+// distPath (optional) points to a local directory with pre-built <id>.zip files;
+// when set, installs read from disk instead of downloading from GitHub.
+const catalogCacheTTL = 60 * time.Second
+
+func NewSchemaPackageManager(schemaRoot, distPath string) *SchemaPackageManager {
 	return &SchemaPackageManager{
-		schemaRoot: schemaRoot,
-		progress:   make(map[string]*DownloadProgress),
-		httpClient: &http.Client{Timeout: 0}, // no timeout — large downloads
+		schemaRoot:    schemaRoot,
+		distPath:      distPath,
+		progress:      make(map[string]*DownloadProgress),
+		cacheDirSizes: make(map[string]int64),
+		httpClient:    &http.Client{Timeout: 0}, // no timeout — large downloads
 	}
 }
 
@@ -90,14 +102,75 @@ func NewSchemaPackageManager(schemaRoot string) *SchemaPackageManager {
 // Catalog
 // ----------------------------------------------------------------------------
 
-// GetCatalog fetches the remote catalog and merges install status from disk.
+// GetCatalog fetches the catalog and merges install status from disk.
+// Priority: local catalog.json (distPath) → remote GitHub Pages → built-in fallback.
+// Results are cached for catalogCacheTTL to avoid repeated disk/network I/O.
 func (m *SchemaPackageManager) GetCatalog() ([]*SchemaPackage, error) {
-	packages, err := m.fetchRemoteCatalog()
-	if err != nil {
-		// Fall back to built-in catalog if network is unavailable
-		packages = builtinCatalog()
+	m.mu.RLock()
+	if m.cachedCatalog != nil && time.Now().Before(m.cacheExpiry) {
+		// Return a copy of the cached catalog with fresh install status
+		// (install status is cheap — just os.Stat, no dirSize walk)
+		cached := cloneCatalog(m.cachedCatalog)
+		m.mu.RUnlock()
+		m.mergeInstallStatus(cached, false)
+		return cached, nil
 	}
-	m.mergeInstallStatus(packages)
+	m.mu.RUnlock()
+
+	// Cache miss — fetch from source
+	packages, err := m.fetchLocalCatalog()
+	if err != nil {
+		packages, err = m.fetchRemoteCatalog()
+		if err != nil {
+			packages = builtinCatalog()
+		}
+	}
+
+	// Merge status including expensive dirSize (first load only)
+	m.mergeInstallStatus(packages, true)
+
+	m.mu.Lock()
+	m.cachedCatalog = packages
+	m.cacheExpiry = time.Now().Add(catalogCacheTTL)
+	m.mu.Unlock()
+
+	return cloneCatalog(packages), nil
+}
+
+// InvalidateCatalogCache forces the next GetCatalog call to re-fetch from source.
+// Called after Install or Remove to reflect the new state immediately.
+func (m *SchemaPackageManager) InvalidateCatalogCache() {
+	m.mu.Lock()
+	m.cachedCatalog = nil
+	m.cacheExpiry = time.Time{}
+	m.mu.Unlock()
+}
+
+// cloneCatalog returns a shallow copy of each package so callers can mutate
+// Status/InstalledSize without affecting the cached originals.
+func cloneCatalog(src []*SchemaPackage) []*SchemaPackage {
+	out := make([]*SchemaPackage, len(src))
+	for i, p := range src {
+		cp := *p
+		out[i] = &cp
+	}
+	return out
+}
+
+// fetchLocalCatalog reads catalog.json from the distPath directory (dev mode).
+func (m *SchemaPackageManager) fetchLocalCatalog() ([]*SchemaPackage, error) {
+	if m.distPath == "" {
+		return nil, fmt.Errorf("no local dist path configured")
+	}
+	catalogPath := filepath.Join(m.distPath, "catalog.json")
+	data, err := os.ReadFile(catalogPath)
+	if err != nil {
+		return nil, fmt.Errorf("local catalog not found at %s: %w", catalogPath, err)
+	}
+	var packages []*SchemaPackage
+	if err := json.Unmarshal(data, &packages); err != nil {
+		return nil, fmt.Errorf("local catalog parse: %w", err)
+	}
 	return packages, nil
 }
 
@@ -136,25 +209,45 @@ func (m *SchemaPackageManager) fetchRemoteCatalog() ([]*SchemaPackage, error) {
 }
 
 // mergeInstallStatus checks disk for each package and updates Status/InstalledAt.
-func (m *SchemaPackageManager) mergeInstallStatus(packages []*SchemaPackage) {
+// computeSize=true runs the expensive filepath.Walk and caches the result.
+// computeSize=false uses the cached value (or 0 if not yet computed).
+func (m *SchemaPackageManager) mergeInstallStatus(packages []*SchemaPackage, computeSize bool) {
 	m.mu.RLock()
-	defer m.mu.RUnlock()
+	progressSnapshot := make(map[string]*DownloadProgress, len(m.progress))
+	for k, v := range m.progress {
+		cp := *v
+		progressSnapshot[k] = &cp
+	}
+	sizeCache := make(map[string]int64, len(m.cacheDirSizes))
+	for k, v := range m.cacheDirSizes {
+		sizeCache[k] = v
+	}
+	m.mu.RUnlock()
 
 	for _, p := range packages {
-		// A package is considered installed when its install_path directory exists and is non-empty
 		dir := filepath.Join(m.schemaRoot, filepath.FromSlash(p.InstallPath))
-		if info, err := os.Stat(dir); err == nil && info.IsDir() {
+		info, err := os.Stat(dir)
+		if err == nil && info.IsDir() {
 			entries, _ := os.ReadDir(dir)
 			if len(entries) > 0 {
 				p.Status = StatusInstalled
 				modTime := info.ModTime()
 				p.InstalledAt = &modTime
-				p.InstalledSize = dirSize(dir)
+
+				if computeSize {
+					sz := dirSize(dir)
+					m.mu.Lock()
+					m.cacheDirSizes[p.ID] = sz
+					m.mu.Unlock()
+					p.InstalledSize = sz
+				} else {
+					p.InstalledSize = sizeCache[p.ID]
+				}
 				continue
 			}
 		}
 		// Check if currently downloading
-		if prog, ok := m.progress[p.ID]; ok && prog.Status == "downloading" {
+		if prog, ok := progressSnapshot[p.ID]; ok && prog.Status == "downloading" {
 			p.Status = StatusDownloading
 		} else {
 			p.Status = StatusNotInstalled
@@ -192,39 +285,63 @@ func (m *SchemaPackageManager) installAsync(pkg *SchemaPackage) {
 			p.ErrorMsg = err.Error()
 		})
 	}
+	// Invalidate catalog cache so next GetCatalog reflects installed state
+	m.InvalidateCatalogCache()
 }
 
 func (m *SchemaPackageManager) doInstall(pkg *SchemaPackage) error {
-	// Download zip into memory (schema packs are typically 5–50 MB compressed)
-	resp, err := m.httpClient.Get(pkg.DownloadURL)
-	if err != nil {
-		return fmt.Errorf("download %q: %w", pkg.ID, err)
-	}
-	defer resp.Body.Close()
+	var zipData []byte
 
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("download %q: HTTP %d", pkg.ID, resp.StatusCode)
-	}
-
-	total := resp.ContentLength
-	m.setProgress(pkg.ID, func(p *DownloadProgress) {
-		p.BytesTotal = total
-	})
-
-	buf := &bytes.Buffer{}
-	counter := &progressReader{
-		reader: resp.Body,
-		onRead: func(n int64) {
+	// Prefer local dist file (dev mode) — skip network entirely
+	// Check root first, then dist/ subdirectory (schema repo layout)
+	if m.distPath != "" {
+		localZip := filepath.Join(m.distPath, pkg.ID+".zip")
+		if _, err := os.Stat(localZip); os.IsNotExist(err) {
+			localZip = filepath.Join(m.distPath, "dist", pkg.ID+".zip")
+		}
+		if data, err := os.ReadFile(localZip); err == nil {
+			zipData = data
 			m.setProgress(pkg.ID, func(p *DownloadProgress) {
-				p.BytesDone += n
-				if p.BytesTotal > 0 {
-					p.Percent = float64(p.BytesDone) / float64(p.BytesTotal) * 100
-				}
+				p.BytesTotal = int64(len(data))
+				p.BytesDone  = int64(len(data))
+				p.Percent    = 100
 			})
-		},
+		}
 	}
-	if _, err := io.Copy(buf, counter); err != nil {
-		return fmt.Errorf("download %q: read body: %w", pkg.ID, err)
+
+	// Fall back to remote download when local file not available
+	if zipData == nil {
+		resp, err := m.httpClient.Get(pkg.DownloadURL)
+		if err != nil {
+			return fmt.Errorf("download %q: %w", pkg.ID, err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			return fmt.Errorf("download %q: HTTP %d", pkg.ID, resp.StatusCode)
+		}
+
+		total := resp.ContentLength
+		m.setProgress(pkg.ID, func(p *DownloadProgress) {
+			p.BytesTotal = total
+		})
+
+		buf := &bytes.Buffer{}
+		counter := &progressReader{
+			reader: resp.Body,
+			onRead: func(n int64) {
+				m.setProgress(pkg.ID, func(p *DownloadProgress) {
+					p.BytesDone += n
+					if p.BytesTotal > 0 {
+						p.Percent = float64(p.BytesDone) / float64(p.BytesTotal) * 100
+					}
+				})
+			},
+		}
+		if _, err := io.Copy(buf, counter); err != nil {
+			return fmt.Errorf("download %q: read body: %w", pkg.ID, err)
+		}
+		zipData = buf.Bytes()
 	}
 
 	// Switch to extracting phase
@@ -238,7 +355,7 @@ func (m *SchemaPackageManager) doInstall(pkg *SchemaPackage) error {
 	if err := os.MkdirAll(destDir, 0755); err != nil {
 		return fmt.Errorf("install %q: create dir: %w", pkg.ID, err)
 	}
-	if err := extractZip(buf.Bytes(), destDir); err != nil {
+	if err := extractZip(zipData, destDir); err != nil {
 		return fmt.Errorf("install %q: extract: %w", pkg.ID, err)
 	}
 
@@ -258,6 +375,11 @@ func (m *SchemaPackageManager) Remove(pkg *SchemaPackage) error {
 	if err := os.RemoveAll(dir); err != nil {
 		return fmt.Errorf("remove schema %q: %w", pkg.ID, err)
 	}
+	// Clear cached dir size for this package and invalidate catalog cache
+	m.mu.Lock()
+	delete(m.cacheDirSizes, pkg.ID)
+	m.mu.Unlock()
+	m.InvalidateCatalogCache()
 	return nil
 }
 

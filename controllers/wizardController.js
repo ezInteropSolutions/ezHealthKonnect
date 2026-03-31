@@ -73,7 +73,7 @@ class WizardController {
         const mappings = {
             'hl7v2': { format: 'hl7', connectivity: 'tcp' },
             'hl7': { format: 'hl7', connectivity: 'tcp' },
-            'fhir': { format: 'fhir', connectivity: 'http' },  // FHIR receiver
+            'fhir': { format: 'fhir', connectivity: 'fhir' },  // FHIR receiver
             'file': { format: 'flatfile', connectivity: 'file' },
             'http': { format: 'hl7', connectivity: 'http' },
             'database': { format: 'database', connectivity: 'database' },
@@ -1053,7 +1053,14 @@ class WizardController {
             // Build interface data from optimized format
             const interfaceData = {
                 name: wizardData.name,
-                description: wizardData.description || `HL7 to FHIR interface for ${wizardData.name}`,
+                description: wizardData.description || (() => {
+                    const flowLabels = {
+                        fhir_receiver: `FHIR Receiver interface for ${wizardData.name}`,
+                        sink_only: `Message sink interface for ${wizardData.name}`,
+                        hl7_to_fhir: `HL7 to FHIR interface for ${wizardData.name}`,
+                    };
+                    return flowLabels[wizardData.transformationFlow] || `Interface for ${wizardData.name}`;
+                })(),
                 sourceType: wizardData.sourceType || 'hl7v2',
                 sourceConnectivity: wizardData.sourceConnectivity || 'tcp',
                 sourceConfig: wizardData.sourceConfig || {},
@@ -1076,6 +1083,7 @@ class WizardController {
             const existingInterfaceId = wizardData.interfaceId || wizardData.interface_id || null;
 
             let interfaceId;
+            let createdInterface = null;
             if (existingInterfaceId) {
                 // ── UPDATE path: re-running wizard for an existing interface ──────────────
                 console.log('🔄 Updating existing interface:', existingInterfaceId);
@@ -1109,7 +1117,7 @@ class WizardController {
                     mappingsCount: wizardData.mappings?.length || 0
                 });
                 const result = await interfaceService.createInterface(interfaceData, userId);
-                const createdInterface = result.interface || result;
+                createdInterface = result.interface || result;
                 interfaceId = result.interfaceId || createdInterface.id;
                 console.log('✅ Interface created successfully:', interfaceId);
             }
@@ -1140,12 +1148,16 @@ class WizardController {
             try {
                 console.log('📦 Creating transformation pipeline with connector steps...');
                 const connectivityInfo = {
-                    sourceConnectivity: interfaceData.sourceConnectivity,
+                    // Prefer the full connector type name from the builder (e.g. 'http_fhir_inbound')
+                    // so SOURCE_TYPE_MAP can select the correct typeName without relying on the
+                    // lossy legacy string ('http' covers both http_rest and http_fhir_inbound).
+                    sourceConnectivity: interfaceData.sourceConnectorConfig?.connectorType || interfaceData.sourceConnectivity,
                     sourceConfig: interfaceData.sourceConfig,
-                    targetConnectivity: interfaceData.targetConnectivity,
+                    targetConnectivity: interfaceData.targetConnectorConfig?.connectorType || interfaceData.targetConnectivity,
                     targetConfig: interfaceData.targetConfig,
                     sourceType: interfaceData.sourceType,   // e.g. 'hl7v2', 'fhir', 'csv'
-                    targetType: interfaceData.targetType    // e.g. 'fhir', 'hl7v2', 'database'
+                    targetType: interfaceData.targetType,   // e.g. 'fhir', 'hl7v2', 'database'
+                    transformationFlow: wizardData.transformationFlow  // e.g. 'hl7_to_fhir', 'fhir_receiver', 'sink_only'
                 };
 
                 const pipelineResult = await this.pipelineService.createPipelineForInterface(
@@ -1205,10 +1217,10 @@ class WizardController {
                 interfaceId: interfaceId,
                 interface: {
                     id: interfaceId,
-                    name: createdInterface.name || wizardData.name,
-                    description: createdInterface.description || wizardData.description,
-                    messageType: createdInterface.message_type || wizardData.messageType,
-                    status: createdInterface.status || wizardData.status,
+                    name: createdInterface?.name || wizardData.name,
+                    description: createdInterface?.description || wizardData.description,
+                    messageType: createdInterface?.message_type || wizardData.messageType,
+                    status: createdInterface?.status || wizardData.status,
                     mappingsCount: wizardData.mappings?.length || 0
                 }
             });

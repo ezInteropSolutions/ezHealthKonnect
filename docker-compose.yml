@@ -232,6 +232,8 @@ services:
       # ✅ FIXED: Schema paths that match the volume mounts
       EZHEALTHKONNECT_SCHEMA_DIR: /app/schemas
       FHIR_SCHEMA_DIR: /app/schemas/fhir
+      # Local schema dist path for offline/dev install (points to sibling repo)
+      SCHEMA_DIST_PATH: /app/schema-dist
 
       # Object Storage (MinIO — S3-compatible)
       OBJECT_STORAGE_DRIVER: s3
@@ -269,7 +271,8 @@ services:
       - ./processing:/app/processing      # Go processing engine code
       # ✅ CRITICAL: These were missing in your broken config
       - ./hl7:/app/hl7                    # Go HL7 parsing code
-      - ./schemas:/app/schemas:ro         # HL7 and FHIR schema files
+      - ./schemas:/app/schemas             # HL7 and FHIR schema files (writable for package installs)
+      - ../ezhealthkonnect-schemas:/app/schema-dist:ro  # Pre-built schema zips for offline install
       # Mount app.js so host changes are reflected without rebuilding the image
       - ./app.js:/app/app.js
       - ./server.js:/app/server.js

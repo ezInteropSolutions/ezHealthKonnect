@@ -4,9 +4,16 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>System Settings - ezHealthKonnect</title>
+    <!-- Preconnect so the CDN TLS handshake starts in parallel with HTML parse -->
+    <link rel="preconnect" href="https://cdnjs.cloudflare.com" crossorigin>
     <link rel="stylesheet" href="css/dashboard.css">
     <link rel="stylesheet" href="css/user-management.css">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Font Awesome: non-render-blocking async load -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"
+          media="print" onload="this.media='all'">
+    <noscript>
+        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    </noscript>
     <style>
         /* ── Enterprise Settings Layout ───────────────────────────────────── */
         .settings-layout {
@@ -245,6 +252,173 @@
             min-width: 56px; text-align: right;
             font-size: 13px; font-weight: 600; color: #1e3a8a;
         }
+
+        /* ── Schema Packages ───────────────────────────────────────────────── */
+        .schema-pkg-grid { display: grid; gap: 12px; margin-top: 16px; }
+        .schema-pkg-card {
+            border: 1px solid #e2e8f0; border-radius: 8px;
+            padding: 16px; background: #fff;
+            display: flex; align-items: flex-start; gap: 14px;
+            position: relative;
+        }
+        .schema-pkg-card.installed { border-color: #86efac; background: #f0fdf4; }
+        .schema-pkg-card.downloading { border-color: #93c5fd; background: #eff6ff; }
+        .schema-pkg-card.selected {
+            border-color: #1e3a8a !important; background: #eff6ff !important;
+            box-shadow: 0 0 0 2px rgba(30,58,138,0.12);
+        }
+        .schema-pkg-icon {
+            width: 38px; height: 38px; border-radius: 8px;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 17px; flex-shrink: 0; margin-left: 22px;
+        }
+        .schema-pkg-icon.fhir { background: #dbeafe; color: #1d4ed8; }
+        .schema-pkg-icon.hl7  { background: #fef3c7; color: #d97706; }
+        .schema-pkg-icon.cda  { background: #f3e8ff; color: #7c3aed; }
+        .schema-pkg-icon.xds  { background: #ecfdf5; color: #059669; }
+        .schema-pkg-body { flex: 1; min-width: 0; }
+        .schema-pkg-name { font-weight: 600; font-size: 14px; color: #1e293b; }
+        .schema-pkg-desc { font-size: 12px; color: #64748b; margin-top: 2px; line-height: 1.4; }
+        .schema-pkg-meta { display: flex; gap: 12px; margin-top: 6px; font-size: 11px; color: #94a3b8; }
+        .schema-pkg-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+        .schema-pkg-cb-wrap { position: absolute; top: 12px; left: 12px; }
+        .schema-pkg-cb { width: 16px; height: 16px; cursor: pointer; accent-color: #1e3a8a; }
+        .btn-install {
+            background: #1e3a8a; color: #fff; border: none;
+            border-radius: 6px; padding: 6px 14px; font-size: 12px;
+            cursor: pointer; white-space: nowrap;
+        }
+        .btn-install:hover { background: #1e40af; }
+        .btn-install:disabled { background: #94a3b8; cursor: not-allowed; }
+        .btn-remove {
+            background: none; color: #ef4444; border: 1px solid #fca5a5;
+            border-radius: 6px; padding: 6px 12px; font-size: 12px; cursor: pointer;
+        }
+        .btn-remove:hover { background: #fff1f2; }
+        .badge-installed {
+            background: #dcfce7; color: #16a34a;
+            border-radius: 12px; padding: 2px 10px; font-size: 11px; font-weight: 600;
+        }
+        .schema-progress-bar { height: 4px; border-radius: 2px; background: #e2e8f0; margin-top: 8px; overflow: hidden; }
+        .schema-progress-fill { height: 100%; background: #3b82f6; transition: width 0.4s ease; }
+        .schema-filter-row { display: flex; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; align-items: center; }
+        .schema-filter-btn {
+            padding: 5px 14px; border-radius: 20px; font-size: 12px;
+            border: 1px solid #e2e8f0; background: #fff; cursor: pointer; color: #374151;
+        }
+        .schema-filter-btn.active { background: #1e3a8a; color: #fff; border-color: #1e3a8a; }
+        .schema-toolbar { display: none; align-items: center; gap: 10px; margin-bottom: 10px; flex-wrap: wrap; }
+        .schema-toolbar.visible { display: flex; }
+        .schema-search-wrap { position: relative; flex: 1; min-width: 180px; max-width: 320px; }
+        .schema-search-wrap i {
+            position: absolute; left: 10px; top: 50%; transform: translateY(-50%);
+            font-size: 12px; color: #94a3b8; pointer-events: none;
+        }
+        .schema-search-input {
+            width: 100%; padding: 7px 10px 7px 30px;
+            border: 1px solid #d1d5db; border-radius: 8px;
+            font-size: 13px; color: #1a202c; background: #fff; box-sizing: border-box;
+        }
+        .schema-search-input:focus { outline: none; border-color: #1e3a8a; box-shadow: 0 0 0 2px rgba(30,58,138,0.08); }
+        .schema-select-row { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: #374151; white-space: nowrap; }
+        .schema-select-all-cb { width: 15px; height: 15px; cursor: pointer; accent-color: #1e3a8a; }
+        .schema-bulk-bar {
+            display: none; align-items: center; gap: 10px;
+            background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 8px;
+            padding: 8px 14px; margin-bottom: 12px; flex-wrap: wrap;
+        }
+        .schema-bulk-bar.visible { display: flex; }
+        .schema-bulk-count { font-size: 13px; font-weight: 600; color: #1e40af; flex: 1; }
+        .btn-bulk-install { background: #1e3a8a; color: #fff; border: none; border-radius: 6px; padding: 6px 14px; font-size: 12px; cursor: pointer; }
+        .btn-bulk-install:hover { background: #1e40af; }
+        .btn-bulk-remove { background: none; color: #ef4444; border: 1px solid #fca5a5; border-radius: 6px; padding: 6px 12px; font-size: 12px; cursor: pointer; }
+        .btn-bulk-remove:hover { background: #fff1f2; }
+        .btn-bulk-clear { background: none; color: #64748b; border: none; font-size: 12px; cursor: pointer; padding: 4px 8px; }
+        .btn-bulk-clear:hover { color: #1e3a8a; }
+        #schemaLoadError { color: #ef4444; font-size: 13px; margin-top: 8px; display: none; }
+        #schemaLoadingSpinner { color: #64748b; font-size: 13px; margin-top: 8px; }
+
+        /* ── In-page Documentation Callout ────────────────────────────────── */
+        .doc-callout {
+            background: #eff6ff;
+            border: 1px solid #bfdbfe;
+            border-left: 4px solid #1e3a8a;
+            border-radius: 8px;
+            margin-bottom: 22px;
+            overflow: hidden;
+        }
+
+        .doc-callout-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 11px 16px;
+            cursor: pointer;
+            user-select: none;
+            gap: 10px;
+        }
+
+        .doc-callout-header:hover { background: #dbeafe; }
+
+        .doc-callout-header-left {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 13px;
+            font-weight: 600;
+            color: #1e40af;
+        }
+
+        .doc-callout-header-left i { font-size: 14px; color: #1e3a8a; }
+
+        .doc-callout-chevron {
+            font-size: 11px;
+            color: #60a5fa;
+            transition: transform 0.2s;
+        }
+
+        .doc-callout.open .doc-callout-chevron { transform: rotate(180deg); }
+
+        .doc-callout-body {
+            display: none;
+            padding: 0 16px 14px;
+        }
+
+        .doc-callout.open .doc-callout-body { display: block; }
+
+        .doc-callout-body p {
+            margin: 8px 0 4px;
+            font-size: 12.5px;
+            color: #1e3a8a;
+            line-height: 1.6;
+        }
+
+        .doc-callout-body ul {
+            margin: 4px 0 8px 0;
+            padding-left: 20px;
+        }
+
+        .doc-callout-body ul li {
+            font-size: 12.5px;
+            color: #1e40af;
+            line-height: 1.7;
+        }
+
+        .doc-callout-body ul li strong { color: #1e3a8a; }
+
+        .doc-callout-body .doc-tip {
+            display: flex;
+            align-items: flex-start;
+            gap: 8px;
+            background: #dbeafe;
+            border-radius: 5px;
+            padding: 8px 10px;
+            margin-top: 8px;
+            font-size: 12px;
+            color: #1e40af;
+        }
+
+        .doc-callout-body .doc-tip i { font-size: 12px; margin-top: 1px; flex-shrink: 0; color: #2563eb; }
     </style>
 </head>
 <body>
@@ -404,6 +578,23 @@
                     </div>
                     <p class="section-subtitle">Configure the outbound mail server used by alert notifications. These settings become the system-wide fallback — individual alert channels can override them.</p>
 
+                    <div class="doc-callout">
+                        <div class="doc-callout-header" onclick="toggleDocCallout(this)">
+                            <span class="doc-callout-header-left"><i class="fas fa-book-open"></i> How Email / SMTP works</span>
+                            <i class="fas fa-chevron-down doc-callout-chevron"></i>
+                        </div>
+                        <div class="doc-callout-body">
+                            <p>ezHealthKonnect uses SMTP to send alert notification emails (threshold breaches, interface errors, system events). Configure your mail server here once and all alert channels will use it automatically.</p>
+                            <ul>
+                                <li><strong>SMTP Host / Port</strong> — your mail server address. Common: <code>smtp.gmail.com:587</code>, <code>smtp.office365.com:587</code>, or your on-premises relay.</li>
+                                <li><strong>TLS / STARTTLS</strong> — enable for ports 587 (STARTTLS) or 465 (SSL). Disable only for internal relays on port 25.</li>
+                                <li><strong>From Address</strong> — the envelope sender; use a monitored mailbox so bounce-backs are visible.</li>
+                                <li><strong>Test Email</strong> — sends a live test message immediately; does not save settings first.</li>
+                            </ul>
+                            <div class="doc-tip"><i class="fas fa-lightbulb"></i> <span>Save before testing. Credentials are encrypted with AES-256-GCM before storage — they are never returned in plain text after saving.</span></div>
+                        </div>
+                    </div>
+
                     <div class="settings-card">
                         <div class="settings-card-header">
                             <i class="fas fa-server" style="color:#1e3a8a"></i>
@@ -499,6 +690,23 @@
                     </div>
                     <p class="section-subtitle">Authentication policies, session lifetimes, and account lockout rules. JWT expiry and login lockout apply on the <strong>next login</strong>. Session timeout applies after a Node.js restart.</p>
 
+                    <div class="doc-callout">
+                        <div class="doc-callout-header" onclick="toggleDocCallout(this)">
+                            <span class="doc-callout-header-left"><i class="fas fa-book-open"></i> How Security &amp; Access works</span>
+                            <i class="fas fa-chevron-down doc-callout-chevron"></i>
+                        </div>
+                        <div class="doc-callout-body">
+                            <p>These settings control how long users stay logged in and how the system reacts to repeated failed login attempts.</p>
+                            <ul>
+                                <li><strong>JWT Expiry</strong> — API tokens expire after this many hours. Short values (1–4 h) are recommended for HIPAA environments. Changes affect tokens issued <em>after</em> saving.</li>
+                                <li><strong>Session Timeout</strong> — browser sessions expire after this many minutes of inactivity. Takes effect after the Node.js process restarts (or the next user login).</li>
+                                <li><strong>Max Login Attempts</strong> — after this many consecutive failures the account is locked for the lockout duration. Set to 0 to disable lockout.</li>
+                                <li><strong>Lockout Duration</strong> — minutes an account stays locked. Admins can manually unlock via User Management.</li>
+                            </ul>
+                            <div class="doc-tip"><i class="fas fa-shield-halved"></i> <span>HIPAA Security Rule (§164.312) requires automatic log-off. A session timeout of 15–30 minutes is typical for clinical workstations.</span></div>
+                        </div>
+                    </div>
+
                     <div class="settings-card">
                         <div class="settings-card-header">
                             <i class="fas fa-clock" style="color:#1e3a8a"></i>
@@ -562,6 +770,23 @@
                         <h2>HL7 / FHIR Processing</h2>
                     </div>
                     <p class="section-subtitle">Default message processing parameters. Applied when a message or interface does not specify its own version or validation policy. Changes are picked up within 5 minutes (settings cache TTL).</p>
+
+                    <div class="doc-callout">
+                        <div class="doc-callout-header" onclick="toggleDocCallout(this)">
+                            <span class="doc-callout-header-left"><i class="fas fa-book-open"></i> How HL7 / FHIR Processing works</span>
+                            <i class="fas fa-chevron-down doc-callout-chevron"></i>
+                        </div>
+                        <div class="doc-callout-body">
+                            <p>These are <strong>system-wide defaults</strong>. Every interface and pipeline step can override them individually — these values only apply when no interface-level setting exists.</p>
+                            <ul>
+                                <li><strong>Default HL7 Version</strong> — used by the parser when the MSH-12 field is missing or unrecognised. Most modern EHRs send v2.5.1; older systems may send v2.3 or v2.4.</li>
+                                <li><strong>Validation Level</strong> — <em>None</em>: accept anything; <em>Basic</em>: check required segments; <em>Strict</em>: enforce full HL7 spec (may reject malformed ADTs from legacy systems).</li>
+                                <li><strong>Default FHIR Version</strong> — R4 is the current standard. STU3 is still used by some older Epic/Cerner endpoints.</li>
+                                <li><strong>Strict FHIR Validation</strong> — when enabled, outbound FHIR bundles are validated against the official FHIR JSON Schema before delivery.</li>
+                            </ul>
+                            <div class="doc-tip"><i class="fas fa-circle-info"></i> <span>Schema Packages (see <strong>Schema Packages</strong> tab) provide richer segment descriptions and field-level validation. Without them, the parser falls back to built-in minimal definitions.</span></div>
+                        </div>
+                    </div>
 
                     <div class="settings-card">
                         <div class="settings-card-header">
@@ -660,6 +885,23 @@
                     </div>
                     <p class="section-subtitle">Controls queue capacity, message retention, and processing concurrency. Read by the processing engine via the AppSettingsCache (5-min TTL).</p>
 
+                    <div class="doc-callout">
+                        <div class="doc-callout-header" onclick="toggleDocCallout(this)">
+                            <span class="doc-callout-header-left"><i class="fas fa-book-open"></i> How Message Queue works</span>
+                            <i class="fas fa-chevron-down doc-callout-chevron"></i>
+                        </div>
+                        <div class="doc-callout-body">
+                            <p>The in-memory processing queue buffers incoming messages between inbound connectors and the transformation pipeline. These settings prevent memory exhaustion and data loss during traffic spikes.</p>
+                            <ul>
+                                <li><strong>Queue Size</strong> — maximum messages held in memory. When full, the TCP/MLLP ACK mode determines whether to NACK or block the sender.</li>
+                                <li><strong>Max Workers</strong> — parallel goroutines processing messages simultaneously. Higher values improve throughput on multi-core hosts but increase DB connection pressure.</li>
+                                <li><strong>Message Retention</strong> — how many days processed messages are kept in interface tables before automatic cleanup. Shorter = lower DB disk usage.</li>
+                                <li><strong>Retry Delay / Max Retries</strong> — applies to built-in step-level retry; individual pipeline steps can override these per step.</li>
+                            </ul>
+                            <div class="doc-tip"><i class="fas fa-circle-info"></i> <span>Settings are cached for 5 minutes. Changes take effect on the next cache refresh — no restart required.</span></div>
+                        </div>
+                    </div>
+
                     <div class="settings-card">
                         <div class="settings-card-header">
                             <i class="fas fa-database" style="color:#1e3a8a"></i>
@@ -737,6 +979,23 @@
                     </div>
                     <p class="section-subtitle">Global fallback values applied when a connector instance has no per-connector timeout override. Read from <code>services.GetAppSettings().GetConnectorDefaultSettings()</code> at connector initialization.</p>
 
+                    <div class="doc-callout">
+                        <div class="doc-callout-header" onclick="toggleDocCallout(this)">
+                            <span class="doc-callout-header-left"><i class="fas fa-book-open"></i> How Connector Defaults work</span>
+                            <i class="fas fa-chevron-down doc-callout-chevron"></i>
+                        </div>
+                        <div class="doc-callout-body">
+                            <p>These values are the <strong>last-resort fallback</strong> for all 32 connector types. Each connector can override them in its own configuration panel under Interfaces → Edit → Connectors.</p>
+                            <ul>
+                                <li><strong>Connect Timeout</strong> — seconds to wait while establishing a connection (TCP handshake, DB connect, etc.). Increase for slow WAN links.</li>
+                                <li><strong>Read Timeout</strong> — seconds to wait for the first byte of a response after connecting. Relevant for HTTP REST and database query connectors.</li>
+                                <li><strong>Write Timeout</strong> — seconds allowed to send a full message. Critical for large FHIR bundles over slow links.</li>
+                                <li><strong>Max Connections</strong> — cap on concurrent outbound connections per connector instance. Protects downstream systems from being overwhelmed.</li>
+                            </ul>
+                            <div class="doc-tip"><i class="fas fa-circle-info"></i> <span>Changes apply at the next connector initialization — new connectors started after saving will pick up the new defaults immediately.</span></div>
+                        </div>
+                    </div>
+
                     <div class="settings-card">
                         <div class="settings-card-header">
                             <i class="fas fa-stopwatch" style="color:#1e3a8a"></i>
@@ -809,6 +1068,23 @@
                         <h2>Alert Defaults</h2>
                     </div>
                     <p class="section-subtitle">Default thresholds and retention policies. These values pre-fill the <strong>New Alert Rule</strong> form — each rule can still be customised individually after creation.</p>
+
+                    <div class="doc-callout">
+                        <div class="doc-callout-header" onclick="toggleDocCallout(this)">
+                            <span class="doc-callout-header-left"><i class="fas fa-book-open"></i> How Alert Defaults work</span>
+                            <i class="fas fa-chevron-down doc-callout-chevron"></i>
+                        </div>
+                        <div class="doc-callout-body">
+                            <p>These defaults only matter when you create a <strong>new alert rule</strong> — existing rules are unaffected. Think of them as a template for your typical thresholds.</p>
+                            <ul>
+                                <li><strong>Error Rate Threshold (%)</strong> — percentage of messages that must fail within the evaluation window before an alert fires. Lower = more sensitive.</li>
+                                <li><strong>Evaluation Window (min)</strong> — rolling time window for rate calculations. A 5-min window catches spikes; a 60-min window smooths out brief outages.</li>
+                                <li><strong>Alert Cooldown (min)</strong> — minimum time between repeated notifications for the same rule. Prevents alert fatigue during sustained outages.</li>
+                                <li><strong>Alert Retention (days)</strong> — how long fired alert records are kept in the audit table before cleanup.</li>
+                            </ul>
+                            <div class="doc-tip"><i class="fas fa-bell"></i> <span>Alert notifications are delivered via the SMTP server configured in <strong>Email / SMTP</strong>. Make sure that section is configured before enabling alert rules.</span></div>
+                        </div>
+                    </div>
 
                     <div class="settings-card">
                         <div class="settings-card-header">
@@ -886,6 +1162,23 @@
                     </div>
                     <p class="section-subtitle">Go backend tuning parameters. Log level is applied <strong>immediately</strong>. DB pool changes require a Go backend restart.</p>
 
+                    <div class="doc-callout">
+                        <div class="doc-callout-header" onclick="toggleDocCallout(this)">
+                            <span class="doc-callout-header-left"><i class="fas fa-book-open"></i> How Performance tuning works</span>
+                            <i class="fas fa-chevron-down doc-callout-chevron"></i>
+                        </div>
+                        <div class="doc-callout-body">
+                            <p>These settings tune the Go processing engine. Incorrect values can starve the database or flood logs — start conservatively and increase based on monitoring data.</p>
+                            <ul>
+                                <li><strong>Log Level</strong> — <em>error</em> (quiet), <em>warn</em>, <em>info</em> (recommended for production), <em>debug</em> (verbose — logs every segment parse). Applied immediately.</li>
+                                <li><strong>DB Pool Min/Max</strong> — PostgreSQL connection pool size. Max should not exceed your Postgres <code>max_connections</code> setting (default 100). Requires Go backend restart.</li>
+                                <li><strong>Goroutine Limit</strong> — maximum concurrent pipeline executions. Higher values improve throughput but increase memory pressure under load.</li>
+                                <li><strong>Metrics Interval</strong> — how often the Go backend samples internal counters (queue depth, goroutines, memory). Affects Monitoring page refresh granularity.</li>
+                            </ul>
+                            <div class="doc-tip"><i class="fas fa-gauge-high"></i> <span>In Docker, the Go backend restarts automatically (the compose command has a <code>while true; do ./go-api; done</code> restart loop). Pool changes take effect within ~5 seconds.</span></div>
+                        </div>
+                    </div>
+
                     <div class="settings-card">
                         <div class="settings-card-header">
                             <i class="fas fa-file-lines" style="color:#1e3a8a"></i>
@@ -946,6 +1239,23 @@
                         <h2>Object Storage</h2>
                     </div>
                     <p class="section-subtitle">Configure where raw messages, parsed content, and processing logs are stored. Changes apply immediately without a restart.</p>
+
+                    <div class="doc-callout">
+                        <div class="doc-callout-header" onclick="toggleDocCallout(this)">
+                            <span class="doc-callout-header-left"><i class="fas fa-book-open"></i> How Object Storage works</span>
+                            <i class="fas fa-chevron-down doc-callout-chevron"></i>
+                        </div>
+                        <div class="doc-callout-body">
+                            <p>Raw HL7 messages, parsed JSON content, and large processing logs are stored in object storage (not in PostgreSQL) to keep the database lean and support unlimited retention.</p>
+                            <ul>
+                                <li><strong>Local driver</strong> — files written to <code>/app/storage</code> inside the container. Simplest for development; data is lost if the volume is removed.</li>
+                                <li><strong>S3 / MinIO driver</strong> — recommended for production. The bundled MinIO container (<code>http://minio:9000</code>) is S3-compatible. Use your cloud bucket for production deployments.</li>
+                                <li><strong>Bucket</strong> — the bucket must already exist. ezHealthKonnect will not auto-create it; run <code>mc mb local/ezhealthkonnect</code> on first MinIO setup.</li>
+                                <li><strong>Path-style endpoint</strong> — leave enabled for MinIO and self-hosted S3. Disable for AWS S3 (uses virtual-hosted URLs).</li>
+                            </ul>
+                            <div class="doc-tip"><i class="fas fa-hard-drive"></i> <span>Switching drivers mid-production does not migrate existing data. Archive existing messages first, then switch the driver and restart.</span></div>
+                        </div>
+                    </div>
 
                     <div class="settings-card">
                         <div class="settings-card-header">
@@ -1055,6 +1365,23 @@
                     </div>
                     <p class="section-subtitle">Version-control your interface and pipeline configurations. Connect a GitHub, GitLab, Bitbucket, or self-hosted Git repository — then commit changes directly from the pipeline builder.</p>
 
+                    <div class="doc-callout">
+                        <div class="doc-callout-header" onclick="toggleDocCallout(this)">
+                            <span class="doc-callout-header-left"><i class="fas fa-book-open"></i> How Git Integration works</span>
+                            <i class="fas fa-chevron-down doc-callout-chevron"></i>
+                        </div>
+                        <div class="doc-callout-body">
+                            <p>When Git is connected, every Save action in the Pipeline Builder can optionally commit the interface bundle to your repository. This gives you a full change history, PR-based review workflow, and disaster recovery.</p>
+                            <ul>
+                                <li><strong>Bundle format</strong> — each interface is serialised as <code>interfaces/{slug}/bundle.json</code> containing the pipeline steps, connector configs, and metadata.</li>
+                                <li><strong>Personal Access Token</strong> — create a repo-scoped token in GitHub/GitLab. Only <em>repo</em> (read+write) scope is needed. Stored encrypted with AES-256-GCM.</li>
+                                <li><strong>Branch</strong> — target branch for auto-commits. Using a dedicated branch (e.g., <code>ehk-configs</code>) keeps interface changes separate from application code.</li>
+                                <li><strong>Auto-commit</strong> — when enabled, every Pipeline Builder save triggers a commit. Disable to only commit manually via the builder's "Commit to Git" button.</li>
+                            </ul>
+                            <div class="doc-tip"><i class="fab fa-git-alt"></i> <span>The repo does not need to be dedicated to ezHealthKonnect — you can use a monorepo alongside your application code as long as the token has push access.</span></div>
+                        </div>
+                    </div>
+
                     <!-- Repository list -->
                     <div class="settings-card">
                         <div class="settings-card-header">
@@ -1141,6 +1468,23 @@
                         <h2>AI Assistant (ezCompanion)</h2>
                     </div>
                     <p class="section-subtitle">On-premise AI for script generation, mapping suggestions, and message trace analysis. All inference runs locally via Ollama — <strong>no PHI leaves the network</strong>.</p>
+
+                    <div class="doc-callout">
+                        <div class="doc-callout-header" onclick="toggleDocCallout(this)">
+                            <span class="doc-callout-header-left"><i class="fas fa-book-open"></i> How the AI Assistant works</span>
+                            <i class="fas fa-chevron-down doc-callout-chevron"></i>
+                        </div>
+                        <div class="doc-callout-body">
+                            <p><strong>ezCompanion</strong> is powered by Ollama, a local LLM inference server. All model calls stay inside your Docker network — messages and PHI are never sent to external AI APIs.</p>
+                            <ul>
+                                <li><strong>Chat Model</strong> — used for script generation, natural language queries, and pipeline suggestions. <code>llama3.2:3b</code> is the default (fast on CPU-only). Switch to <code>llama3.2:8b</code> for higher quality on GPU hosts.</li>
+                                <li><strong>Embedding Model</strong> — used for semantic search over your message archive and HL7 dictionary. <code>nomic-embed-text</code> is the recommended default.</li>
+                                <li><strong>Ollama Host</strong> — the URL of the Ollama inference server. In Docker Compose this is <code>http://ollama:11434</code>. Change if using a remote GPU server.</li>
+                                <li><strong>Context Window</strong> — maximum tokens sent to the model per request. Larger windows allow richer analysis but use more memory. 4096 is safe for most systems.</li>
+                            </ul>
+                            <div class="doc-tip"><i class="fas fa-robot"></i> <span>Models are downloaded automatically by <code>ollama-init</code> on first startup. Subsequent starts use the cached models from the <code>ollama_data</code> Docker volume — no internet required.</span></div>
+                        </div>
+                    </div>
 
                     <!-- Enable/Disable -->
                     <div class="settings-card">
@@ -1330,68 +1674,39 @@
                         Download and manage HL7 and FHIR schema definitions. Only install what your interfaces actually need — each pack is independent. Schemas are downloaded from the ezInterop Solutions schema registry and stored locally.
                     </p>
 
-                    <style>
-                        .schema-pkg-grid { display: grid; gap: 12px; margin-top: 16px; }
-                        .schema-pkg-card {
-                            border: 1px solid #e2e8f0; border-radius: 8px;
-                            padding: 16px; background: #fff;
-                            display: flex; align-items: flex-start; gap: 14px;
-                        }
-                        .schema-pkg-card.installed { border-color: #86efac; background: #f0fdf4; }
-                        .schema-pkg-card.downloading { border-color: #93c5fd; background: #eff6ff; }
-                        .schema-pkg-icon {
-                            width: 38px; height: 38px; border-radius: 8px;
-                            display: flex; align-items: center; justify-content: center;
-                            font-size: 17px; flex-shrink: 0;
-                        }
-                        .schema-pkg-icon.fhir { background: #dbeafe; color: #1d4ed8; }
-                        .schema-pkg-icon.hl7  { background: #fef3c7; color: #d97706; }
-                        .schema-pkg-icon.cda  { background: #f3e8ff; color: #7c3aed; }
-                        .schema-pkg-icon.xds  { background: #ecfdf5; color: #059669; }
-                        .schema-pkg-body { flex: 1; min-width: 0; }
-                        .schema-pkg-name { font-weight: 600; font-size: 14px; color: #1e293b; }
-                        .schema-pkg-desc { font-size: 12px; color: #64748b; margin-top: 2px; line-height: 1.4; }
-                        .schema-pkg-meta { display: flex; gap: 12px; margin-top: 6px; font-size: 11px; color: #94a3b8; }
-                        .schema-pkg-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
-                        .btn-install {
-                            background: #1e3a8a; color: #fff; border: none;
-                            border-radius: 6px; padding: 6px 14px; font-size: 12px;
-                            cursor: pointer; white-space: nowrap;
-                        }
-                        .btn-install:hover { background: #1e40af; }
-                        .btn-install:disabled { background: #94a3b8; cursor: not-allowed; }
-                        .btn-remove {
-                            background: none; color: #ef4444; border: 1px solid #fca5a5;
-                            border-radius: 6px; padding: 6px 12px; font-size: 12px; cursor: pointer;
-                        }
-                        .btn-remove:hover { background: #fff1f2; }
-                        .badge-installed {
-                            background: #dcfce7; color: #16a34a;
-                            border-radius: 12px; padding: 2px 10px; font-size: 11px; font-weight: 600;
-                        }
-                        .schema-progress-bar {
-                            height: 4px; border-radius: 2px; background: #e2e8f0;
-                            margin-top: 8px; overflow: hidden;
-                        }
-                        .schema-progress-fill {
-                            height: 100%; background: #3b82f6;
-                            transition: width 0.4s ease;
-                        }
-                        .schema-filter-row {
-                            display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap;
-                        }
-                        .schema-filter-btn {
-                            padding: 5px 14px; border-radius: 20px; font-size: 12px;
-                            border: 1px solid #e2e8f0; background: #fff; cursor: pointer; color: #374151;
-                        }
-                        .schema-filter-btn.active {
-                            background: #1e3a8a; color: #fff; border-color: #1e3a8a;
-                        }
-                        #schemaLoadError { color: #ef4444; font-size: 13px; margin-top: 8px; display: none; }
-                        #schemaLoadingSpinner { color: #64748b; font-size: 13px; margin-top: 8px; }
-                    </style>
+                    <div class="doc-callout open">
+                        <div class="doc-callout-header" onclick="toggleDocCallout(this)">
+                            <span class="doc-callout-header-left"><i class="fas fa-book-open"></i> How Schema Packages work</span>
+                            <i class="fas fa-chevron-down doc-callout-chevron"></i>
+                        </div>
+                        <div class="doc-callout-body">
+                            <p>Schema packages provide rich segment descriptions, field-level validation rules, and FHIR profile definitions used by the HL7 parser and FHIR transformation engine. Without them the system falls back to minimal built-in definitions.</p>
+                            <ul>
+                                <li><strong>HL7 packages</strong> (v2.3 – v2.9) — enable human-readable field names, data type validation, and the segment dictionary used in the HL7 Reader and pipeline condition builder.</li>
+                                <li><strong>FHIR packages</strong> (R4, STU3, R5) — provide resource profiles, value set bindings, and JSON Schema validation for outbound FHIR bundles. Required for Strict FHIR Validation.</li>
+                                <li><strong>Install source</strong> — packages are looked up first in the local <code>schema-dist/</code> folder (offline/dev mode), then from the GitHub Releases registry. Internet access is only needed when the local copy is absent.</li>
+                                <li><strong>Storage</strong> — installed packages are extracted to <code>/app/schemas/</code> inside the container (the <code>./schemas</code> volume mount). They persist across restarts.</li>
+                            </ul>
+                            <div class="doc-tip"><i class="fas fa-circle-info"></i> <span>For air-gapped installations, copy the <code>ezhealthkonnect-schemas</code> repo to the host alongside the main project — the app will find and use local zips automatically without internet access.</span></div>
+                        </div>
+                    </div>
 
-                    <!-- Filter bar -->
+                    <!-- Toolbar: search + select-all -->
+                    <div class="schema-toolbar" id="schemaToolbar">
+                        <div class="schema-search-wrap">
+                            <i class="fas fa-magnifying-glass"></i>
+                            <input class="schema-search-input" id="schemaSearchInput"
+                                   type="text" placeholder="Search packages…"
+                                   oninput="onSchemaSearch(this.value)">
+                        </div>
+                        <div class="schema-select-row">
+                            <input type="checkbox" class="schema-select-all-cb" id="schemaSelectAll"
+                                   onchange="onSelectAll(this.checked)" title="Select all visible">
+                            <label for="schemaSelectAll" style="cursor:pointer">Select all</label>
+                        </div>
+                    </div>
+
+                    <!-- Filter pills -->
                     <div class="schema-filter-row" id="schemaFilterRow" style="display:none">
                         <button class="schema-filter-btn active" onclick="filterSchemas('all')">All</button>
                         <button class="schema-filter-btn" onclick="filterSchemas('fhir')">FHIR</button>
@@ -1401,6 +1716,20 @@
                         <button class="schema-filter-btn" onclick="filterSchemas('installed')" id="filterInstalledBtn">Installed</button>
                     </div>
 
+                    <!-- Bulk action bar (visible when ≥1 selected) -->
+                    <div class="schema-bulk-bar" id="schemaBulkBar">
+                        <span class="schema-bulk-count" id="schemaBulkCount">0 selected</span>
+                        <button class="btn-bulk-install" onclick="installSelectedPackages()">
+                            <i class="fas fa-download"></i> Install Selected
+                        </button>
+                        <button class="btn-bulk-remove" onclick="removeSelectedPackages()">
+                            <i class="fas fa-trash-can"></i> Remove Selected
+                        </button>
+                        <button class="btn-bulk-clear" onclick="clearSelection()">
+                            <i class="fas fa-xmark"></i> Clear
+                        </button>
+                    </div>
+
                     <div id="schemaLoadingSpinner"><i class="fas fa-spinner fa-spin"></i> Loading schema catalog...</div>
                     <div id="schemaLoadError"></div>
                     <div class="schema-pkg-grid" id="schemaPkgGrid"></div>
@@ -1408,10 +1737,15 @@
 
                 <script>
                 (function() {
-                    let _catalog = [];
+                    let _catalog      = [];
                     let _activeFilter = 'all';
-                    let _pollTimers = {};
+                    let _searchQuery  = '';
+                    let _selected     = new Set();   // set of pkg.id strings
+                    let _pollTimers   = {};
 
+                    const escH = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+                    // ── Catalog load ────────────────────────────────────────────
                     // Load catalog when section is first shown
                     const origSwitch = window.switchSection;
                     window.switchSection = function(section) {
@@ -1420,11 +1754,12 @@
                     };
 
                     window.loadSchemaCatalog = function() {
-                        const spinner = document.getElementById('schemaLoadingSpinner');
-                        const errEl   = document.getElementById('schemaLoadError');
+                        const spinner   = document.getElementById('schemaLoadingSpinner');
+                        const errEl     = document.getElementById('schemaLoadError');
                         const filterRow = document.getElementById('schemaFilterRow');
+                        const toolbar   = document.getElementById('schemaToolbar');
                         spinner.style.display = 'block';
-                        errEl.style.display = 'none';
+                        errEl.style.display   = 'none';
 
                         fetch('/api/system/schemas/catalog')
                             .then(r => r.json())
@@ -1433,7 +1768,8 @@
                                 if (!res.success) throw new Error(res.error || 'Failed to load catalog');
                                 _catalog = res.data || [];
                                 filterRow.style.display = 'flex';
-                                renderSchemas(_catalog);
+                                toolbar.classList.add('visible');
+                                renderSchemas();
                             })
                             .catch(err => {
                                 spinner.style.display = 'none';
@@ -1442,39 +1778,138 @@
                             });
                     };
 
+                    // ── Filter pills ────────────────────────────────────────────
                     window.filterSchemas = function(filter) {
                         _activeFilter = filter;
                         document.querySelectorAll('.schema-filter-btn').forEach(b => {
                             b.classList.toggle('active', b.textContent.toLowerCase() === filter || (filter === 'all' && b.textContent === 'All'));
                         });
-                        renderSchemas(_catalog);
+                        renderSchemas();
                     };
 
-                    function renderSchemas(catalog) {
-                        const grid = document.getElementById('schemaPkgGrid');
-                        const filtered = catalog.filter(p => {
-                            if (_activeFilter === 'all') return true;
-                            if (_activeFilter === 'installed') return p.status === 'installed';
-                            return p.type === _activeFilter;
+                    // ── Search input ────────────────────────────────────────────
+                    window.onSchemaSearch = function(query) {
+                        _searchQuery = query.toLowerCase().trim();
+                        renderSchemas();
+                    };
+
+                    // ── Select-all checkbox ─────────────────────────────────────
+                    window.onSelectAll = function(checked) {
+                        const visible = getFilteredCatalog();
+                        if (checked) {
+                            visible.forEach(p => _selected.add(p.id));
+                        } else {
+                            visible.forEach(p => _selected.delete(p.id));
+                        }
+                        renderSchemas();
+                        syncBulkBar();
+                    };
+
+                    window.onPackageCheck = function(id, checked) {
+                        if (checked) _selected.add(id);
+                        else         _selected.delete(id);
+                        syncBulkBar();
+                        syncSelectAllCheckbox();
+                    };
+
+                    // ── Bulk actions ────────────────────────────────────────────
+                    window.clearSelection = function() {
+                        _selected.clear();
+                        renderSchemas();
+                        syncBulkBar();
+                    };
+
+                    window.installSelectedPackages = function() {
+                        const toInstall = [..._selected].filter(id => {
+                            const p = _catalog.find(p => p.id === id);
+                            return p && p.status !== 'installed' && p.status !== 'downloading';
                         });
+                        if (toInstall.length === 0) { alert('All selected packages are already installed.'); return; }
+                        toInstall.forEach(id => window.installSchemaPackage(id, true));
+                        _selected.clear();
+                        syncBulkBar();
+                    };
+
+                    window.removeSelectedPackages = function() {
+                        const toRemove = [..._selected].filter(id => {
+                            const p = _catalog.find(p => p.id === id);
+                            return p && p.status === 'installed';
+                        });
+                        if (toRemove.length === 0) { alert('None of the selected packages are installed.'); return; }
+                        if (!confirm(`Remove ${toRemove.length} installed package(s)? Pipelines using these schemas will need a replacement.`)) return;
+                        toRemove.forEach(id => window.removeSchemaPackage(id, true));
+                        _selected.clear();
+                        syncBulkBar();
+                    };
+
+                    function syncBulkBar() {
+                        const bar   = document.getElementById('schemaBulkBar');
+                        const count = document.getElementById('schemaBulkCount');
+                        if (_selected.size > 0) {
+                            bar.classList.add('visible');
+                            count.textContent = _selected.size + ' package' + (_selected.size > 1 ? 's' : '') + ' selected';
+                        } else {
+                            bar.classList.remove('visible');
+                        }
+                    }
+
+                    function syncSelectAllCheckbox() {
+                        const cb      = document.getElementById('schemaSelectAll');
+                        if (!cb) return;
+                        const visible = getFilteredCatalog();
+                        cb.indeterminate = false;
+                        if (visible.length === 0) { cb.checked = false; return; }
+                        const allSelected  = visible.every(p => _selected.has(p.id));
+                        const someSelected = visible.some(p => _selected.has(p.id));
+                        cb.checked       = allSelected;
+                        cb.indeterminate = someSelected && !allSelected;
+                    }
+
+                    // ── Core: filter + search ───────────────────────────────────
+                    function getFilteredCatalog() {
+                        return _catalog.filter(p => {
+                            const typeOk =
+                                _activeFilter === 'all' ? true :
+                                _activeFilter === 'installed' ? p.status === 'installed' :
+                                p.type === _activeFilter;
+                            const searchOk = !_searchQuery ||
+                                (p.name        || '').toLowerCase().includes(_searchQuery) ||
+                                (p.description || '').toLowerCase().includes(_searchQuery) ||
+                                (p.version     || '').toLowerCase().includes(_searchQuery) ||
+                                (p.type        || '').toLowerCase().includes(_searchQuery);
+                            return typeOk && searchOk;
+                        });
+                    }
+
+                    // ── Render ──────────────────────────────────────────────────
+                    function renderSchemas() {
+                        const grid     = document.getElementById('schemaPkgGrid');
+                        const filtered = getFilteredCatalog();
 
                         if (filtered.length === 0) {
-                            grid.innerHTML = '<p style="color:#64748b;font-size:13px">No packages match the selected filter.</p>';
+                            grid.innerHTML = '<p style="color:#64748b;font-size:13px">No packages match the current filter or search.</p>';
+                            syncSelectAllCheckbox();
                             return;
                         }
 
+                        const iconMeta = {
+                            fhir: { cls: 'fhir', icon: 'fa-hospital'     },
+                            hl7:  { cls: 'hl7',  icon: 'fa-file-medical' },
+                            cda:  { cls: 'cda',  icon: 'fa-file-code'    },
+                            xds:  { cls: 'xds',  icon: 'fa-share-nodes'  },
+                        };
+
                         grid.innerHTML = filtered.map(pkg => {
-                            const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-                            const sizeMB = pkg.size_bytes ? (pkg.size_bytes / 1048576).toFixed(0) + ' MB' : '—';
-                            const isInstalled = pkg.status === 'installed';
+                            const sizeMB        = pkg.size_bytes ? (pkg.size_bytes / 1048576).toFixed(0) + ' MB' : '—';
+                            const isInstalled   = pkg.status === 'installed';
                             const isDownloading = pkg.status === 'downloading';
-                            const cardClass = isInstalled ? 'installed' : isDownloading ? 'downloading' : '';
-                            const iconMeta  = {
-                                fhir: { cls: 'fhir', icon: 'fa-hospital'      },
-                                hl7:  { cls: 'hl7',  icon: 'fa-file-medical'  },
-                                cda:  { cls: 'cda',  icon: 'fa-file-code'     },
-                                xds:  { cls: 'xds',  icon: 'fa-share-nodes'   },
-                            };
+                            const isSelected    = _selected.has(pkg.id);
+                            const cardClass     = [
+                                isSelected    ? 'selected'    : '',
+                                isInstalled   ? 'installed'   : '',
+                                isDownloading ? 'downloading' : '',
+                            ].filter(Boolean).join(' ');
+
                             const { cls: iconClass, icon: iconName } = iconMeta[pkg.type] || iconMeta.hl7;
 
                             const installedSize = pkg.installed_size
@@ -1483,27 +1918,33 @@
 
                             const actions = isInstalled
                                 ? `<span class="badge-installed"><i class="fas fa-check"></i> Installed</span>
-                                   <button class="btn-remove" onclick="removeSchemaPackage('${esc(pkg.id)}')">Remove</button>`
+                                   <button class="btn-remove" onclick="removeSchemaPackage('${escH(pkg.id)}')">Remove</button>`
                                 : isDownloading
                                 ? `<button class="btn-install" disabled><i class="fas fa-spinner fa-spin"></i> Installing…</button>`
-                                : `<button class="btn-install" onclick="installSchemaPackage('${esc(pkg.id)}')">
+                                : `<button class="btn-install" onclick="installSchemaPackage('${escH(pkg.id)}')">
                                        <i class="fas fa-download"></i> Install (~${sizeMB})
                                    </button>`;
 
                             const progressBar = isDownloading
-                                ? `<div class="schema-progress-bar" id="prog-bar-${esc(pkg.id)}">
-                                       <div class="schema-progress-fill" id="prog-fill-${esc(pkg.id)}" style="width:0%"></div>
+                                ? `<div class="schema-progress-bar" id="prog-bar-${escH(pkg.id)}">
+                                       <div class="schema-progress-fill" id="prog-fill-${escH(pkg.id)}" style="width:0%"></div>
                                    </div>`
                                 : '';
 
-                            return `<div class="schema-pkg-card ${cardClass}" id="pkg-card-${esc(pkg.id)}">
+                            return `<div class="schema-pkg-card ${cardClass}" id="pkg-card-${escH(pkg.id)}">
+                                <div class="schema-pkg-cb-wrap">
+                                    <input type="checkbox" class="schema-pkg-cb"
+                                           id="cb-pkg-${escH(pkg.id)}"
+                                           ${isSelected ? 'checked' : ''}
+                                           onchange="onPackageCheck('${escH(pkg.id)}', this.checked)">
+                                </div>
                                 <div class="schema-pkg-icon ${iconClass}"><i class="fas ${iconName}"></i></div>
                                 <div class="schema-pkg-body">
-                                    <div class="schema-pkg-name">${esc(pkg.name)}</div>
-                                    <div class="schema-pkg-desc">${esc(pkg.description)}</div>
+                                    <div class="schema-pkg-name">${escH(pkg.name)}</div>
+                                    <div class="schema-pkg-desc">${escH(pkg.description)}</div>
                                     <div class="schema-pkg-meta">
-                                        <span>v${esc(pkg.version)}</span>
-                                        <span>${esc(pkg.file_count)} files</span>
+                                        <span>v${escH(pkg.version)}</span>
+                                        <span>${escH(pkg.file_count)} files</span>
                                         <span>${sizeMB} download${installedSize}</span>
                                     </div>
                                     ${progressBar}
@@ -1511,9 +1952,12 @@
                                 <div class="schema-pkg-actions">${actions}</div>
                             </div>`;
                         }).join('');
+
+                        syncSelectAllCheckbox();
                     }
 
-                    window.installSchemaPackage = function(packageId) {
+                    // ── Single-package actions ──────────────────────────────────
+                    window.installSchemaPackage = function(packageId, silent) {
                         fetch('/api/system/schemas/install', {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
@@ -1521,27 +1965,26 @@
                         })
                         .then(r => r.json())
                         .then(res => {
-                            if (!res.success) { alert('Install failed: ' + res.error); return; }
-                            // Mark as downloading locally and start polling
+                            if (!res.success) { if (!silent) alert('Install failed: ' + res.error); return; }
                             const pkg = _catalog.find(p => p.id === packageId);
                             if (pkg) pkg.status = 'downloading';
-                            renderSchemas(_catalog);
+                            renderSchemas();
                             pollProgress(packageId);
                         })
-                        .catch(err => alert('Install error: ' + err.message));
+                        .catch(err => { if (!silent) alert('Install error: ' + err.message); });
                     };
 
-                    window.removeSchemaPackage = function(packageId) {
-                        if (!confirm('Remove this schema package? Any pipelines using these schemas will need a replacement pack installed.')) return;
+                    window.removeSchemaPackage = function(packageId, silent) {
+                        if (!silent && !confirm('Remove this schema package? Any pipelines using these schemas will need a replacement pack installed.')) return;
                         fetch('/api/system/schemas/' + encodeURIComponent(packageId), { method: 'DELETE' })
                         .then(r => r.json())
                         .then(res => {
-                            if (!res.success) { alert('Remove failed: ' + res.error); return; }
+                            if (!res.success) { if (!silent) alert('Remove failed: ' + res.error); return; }
                             const pkg = _catalog.find(p => p.id === packageId);
                             if (pkg) { pkg.status = 'not_installed'; pkg.installed_size = 0; }
-                            renderSchemas(_catalog);
+                            renderSchemas();
                         })
-                        .catch(err => alert('Remove error: ' + err.message));
+                        .catch(err => { if (!silent) alert('Remove error: ' + err.message); });
                     };
 
                     function pollProgress(packageId) {
@@ -1554,11 +1997,9 @@
                                     const prog = res.data;
                                     const fill = document.getElementById('prog-fill-' + packageId);
                                     if (fill) fill.style.width = prog.percent.toFixed(0) + '%';
-
                                     if (prog.status === 'done' || prog.status === 'error') {
                                         clearInterval(_pollTimers[packageId]);
                                         delete _pollTimers[packageId];
-                                        // Refresh catalog to get updated status
                                         _catalog = [];
                                         loadSchemaCatalog();
                                     }
@@ -1574,8 +2015,8 @@
     </main>
 </div>
 
-<script src="/js/services/AuthService.js"></script>
-<script src="js/components/sidebar-nav.js?v=3"></script>
+<script src="/js/services/AuthService.js" defer></script>
+<script src="js/components/sidebar-nav.js?v=3" defer></script>
 <script>
 'use strict';
 
@@ -1624,7 +2065,7 @@ function updateTime() {
 }
 
 // ─── Section switching ────────────────────────────────────────────────────────
-const SECTIONS = ['smtp','security','hl7fhir','queue','connectors','alerts','performance','storage','git','ai'];
+const SECTIONS = ['smtp','security','hl7fhir','queue','connectors','alerts','performance','storage','git','ai','schemas'];
 
 function switchSection(name) {
     SECTIONS.forEach(s => {
@@ -1633,6 +2074,10 @@ function switchSection(name) {
     document.querySelectorAll('.settings-nav-item').forEach(el => {
         el.classList.toggle('active', el.dataset.section === name);
     });
+    // Schema packages: lazy-load catalog on first visit
+    if (name === 'schemas' && typeof window.loadSchemaCatalog === 'function') {
+        window.loadSchemaCatalog();
+    }
     // Lazy-load on first visit
     if (!_loaded[name]) {
         _loaded[name] = true;
@@ -1654,7 +2099,13 @@ async function loadSection(name) {
         case 'storage':    return loadStorageSettings();
         case 'git':        return loadGitSection();
         case 'ai':         return loadAISettings();
+        case 'schemas':    return loadSchemaCatalog();
     }
+}
+
+// ─── Doc callout toggle ────────────────────────────────────────────────────────
+function toggleDocCallout(el) {
+    el.closest('.doc-callout').classList.toggle('open');
 }
 
 // ─── Generic API helpers ──────────────────────────────────────────────────────
@@ -2537,11 +2988,20 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (!ok) return;
     updateTime();
     setInterval(updateTime, 30000);
-    // Load the first visible section (SMTP)
-    _loaded['smtp'] = true;
-    loadSMTP();
+
+    // Honour URL hash (e.g. settings.html#section-schemas → open schemas)
+    const hash = location.hash.replace('#section-', '').replace('#', '');
+    const initialSection = SECTIONS.includes(hash) ? hash : 'smtp';
+
+    if (initialSection !== 'smtp') {
+        switchSection(initialSection);
+    } else {
+        // Load the first visible section (SMTP)
+        _loaded['smtp'] = true;
+        loadSMTP();
+    }
 });
 </script>
-    <script src="/js/ai-assistant.js"></script>
+    <script src="/js/ai-assistant.js" defer></script>
 </body>
 </html>

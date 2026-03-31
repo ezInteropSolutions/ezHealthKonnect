@@ -368,7 +368,7 @@
     flex-direction: column;
     align-items: center;
     text-align: center;
-    padding: 40px 0 48px;
+    padding: 40px 0 32px;
   }
   .welcome-hero .brand { font-size: 36px; font-weight: 800; color: var(--cyan); letter-spacing: -1px; margin-bottom: 8px; }
   .welcome-hero .tagline { font-size: 15px; color: var(--muted); margin-bottom: 36px; }
@@ -390,6 +390,49 @@
   .feature-card .icon { font-size: 24px; margin-bottom: 8px; }
   .feature-card strong { display: block; font-size: 13px; margin-bottom: 3px; }
   .feature-card span { font-size: 12px; color: var(--muted); }
+
+  /* ── Edition picker ───────────────────────────────────────────────────────── */
+  .edition-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    max-width: 560px;
+    width: 100%;
+    margin-top: 8px;
+  }
+  .edition-card {
+    background: var(--bg);
+    border: 2px solid var(--border);
+    border-radius: 12px;
+    padding: 22px 20px;
+    cursor: pointer;
+    text-align: left;
+    transition: border-color 0.2s, background 0.2s;
+    position: relative;
+  }
+  .edition-card:hover { border-color: var(--cyan-dim); }
+  .edition-card.selected {
+    border-color: var(--cyan);
+    background: rgba(34,211,238,0.05);
+  }
+  .edition-card .ed-icon  { font-size: 28px; margin-bottom: 10px; }
+  .edition-card .ed-title { font-size: 15px; font-weight: 700; margin-bottom: 5px; }
+  .edition-card .ed-desc  { font-size: 12px; color: var(--muted); line-height: 1.5; }
+  .edition-card .ed-badge {
+    position: absolute; top: 12px; right: 12px;
+    font-size: 10px; font-weight: 600;
+    padding: 2px 8px; border-radius: 10px;
+    background: rgba(34,211,238,0.15); color: var(--cyan);
+    text-transform: uppercase; letter-spacing: 0.05em;
+  }
+  .edition-card .ed-reqs {
+    margin-top: 12px;
+    padding-top: 10px;
+    border-top: 1px solid var(--border);
+    font-size: 11px;
+    color: var(--muted);
+  }
+  .edition-card .ed-reqs span { display: block; padding: 2px 0; }
 </style>
 </head>
 <body>
@@ -432,25 +475,38 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // State
 // ─────────────────────────────────────────────────────────────────────────────
-let currentStep = 0;
-let checksOK    = false;
-let cfg         = {};
-let appURL      = '';
-let installOK   = false;
+let currentStep  = 0;
+let checksOK     = false;
+let cfg          = {};
+let appURL       = '';
+let installOK    = false;
+let installMode  = 'docker'; // 'docker' | 'standalone'
 
-const steps = [
-  { title: 'Welcome to ezHealthKonnect',  desc: 'Healthcare HL7↔FHIR Integration Platform — Docker Edition' },
-  { title: 'Checking Prerequisites',       desc: 'Verifying that Docker is installed and running' },
-  { title: 'Configuration',               desc: 'Choose ports, install location, and passwords' },
-  { title: 'Installing',                  desc: 'Building and starting ezHealthKonnect — please wait' },
-  { title: 'Installation Complete',       desc: 'ezHealthKonnect is running on your machine' },
-];
+function stepDescs() {
+  if (installMode === 'standalone') {
+    return [
+      { title: 'Welcome to ezHealthKonnect',  desc: 'Healthcare HL7↔FHIR Integration Platform' },
+      { title: 'Checking Prerequisites',       desc: 'Verifying OS, disk space, and port availability' },
+      { title: 'Configuration',               desc: 'Choose ports, install location, and passwords' },
+      { title: 'Installing',                  desc: 'Installing dependencies and starting services — please wait' },
+      { title: 'Installation Complete',       desc: 'ezHealthKonnect is running on your machine' },
+    ];
+  }
+  return [
+    { title: 'Welcome to ezHealthKonnect',  desc: 'Healthcare HL7↔FHIR Integration Platform — Docker Edition' },
+    { title: 'Checking Prerequisites',       desc: 'Verifying that Docker is installed and running' },
+    { title: 'Configuration',               desc: 'Choose ports, install location, and passwords' },
+    { title: 'Installing',                  desc: 'Building and starting ezHealthKonnect — please wait' },
+    { title: 'Installation Complete',       desc: 'ezHealthKonnect is running on your machine' },
+  ];
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Navigation
 // ─────────────────────────────────────────────────────────────────────────────
 function setStep(n) {
   currentStep = n;
+  const steps = stepDescs();
   document.querySelectorAll('.step-item').forEach((el, i) => {
     el.classList.toggle('active', i === n);
     el.classList.toggle('done',   i < n);
@@ -500,35 +556,72 @@ function renderWelcome() {
   <div class="welcome-hero">
     <div class="brand">ezHealthKonnect</div>
     <div class="tagline">AI-powered HL7 ↔ FHIR Healthcare Integration Platform</div>
-    <div class="feature-grid">
-      <div class="feature-card"><div class="icon">🏥</div><strong>HL7 v2 Processing</strong><span>Parse, transform, and route HL7 messages via TCP/MLLP</span></div>
-      <div class="feature-card"><div class="icon">🔄</div><strong>FHIR R4 Engine</strong><span>Convert HL7 to FHIR bundles with schema validation</span></div>
-      <div class="feature-card"><div class="icon">⚡</div><strong>Visual Pipeline Builder</strong><span>Drag-and-drop transformation workflow designer</span></div>
-      <div class="feature-card"><div class="icon">🤖</div><strong>AI Companion</strong><span>Ollama-powered assistant for mapping suggestions</span></div>
-      <div class="feature-card"><div class="icon">🔒</div><strong>HIPAA Compliance</strong><span>Audit logging, access control, and PHI protection</span></div>
-      <div class="feature-card"><div class="icon">🐳</div><strong>Docker Edition</strong><span>Runs on any machine with Docker Desktop installed</span></div>
+
+    <div style="font-size:13px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:14px;width:100%;max-width:560px;text-align:left;">
+      Choose your edition
+    </div>
+
+    <div class="edition-grid">
+      <div class="edition-card ${installMode==='docker'?'selected':''}"
+           id="edDocker" onclick="selectEdition('docker')">
+        <div class="ed-badge">Recommended</div>
+        <div class="ed-icon">🐳</div>
+        <div class="ed-title">Docker Edition</div>
+        <div class="ed-desc">All services run in Docker containers. Simplest setup — isolated, portable, easy to upgrade.</div>
+        <div class="ed-reqs">
+          <span>✔ Docker Desktop (auto-installable)</span>
+          <span>✔ Windows, macOS, Linux</span>
+        </div>
+      </div>
+      <div class="edition-card ${installMode==='standalone'?'selected':''}"
+           id="edStandalone" onclick="selectEdition('standalone')">
+        <div class="ed-icon">⚙️</div>
+        <div class="ed-title">Standalone Edition</div>
+        <div class="ed-desc">Installs natively — PostgreSQL, Node.js, and Go API as system services. No Docker required.</div>
+        <div class="ed-reqs">
+          <span>✔ Windows 10/11 (winget)</span>
+          <span>✔ Linux → use install.sh</span>
+        </div>
+      </div>
     </div>
   </div>
-  <div class="callout callout-info">
+
+  <div class="callout callout-info" id="editionHint">
     <span>ℹ️</span>
-    <span>This installer will check prerequisites, collect your configuration, build the application image, and start all services. The build step takes 3–6 minutes on first run.</span>
+    <span id="editionHintText">${editionHintText()}</span>
   </div>`;
+}
+
+function editionHintText() {
+  if (installMode === 'standalone') {
+    return 'Standalone: PostgreSQL and Node.js will be installed automatically via winget. No Docker needed.';
+  }
+  return 'Docker Edition: prerequisites are checked next. Docker Desktop will be offered for auto-install if missing.';
+}
+
+function selectEdition(mode) {
+  installMode = mode;
+  document.getElementById('edDocker').classList.toggle('selected', mode === 'docker');
+  document.getElementById('edStandalone').classList.toggle('selected', mode === 'standalone');
+  document.getElementById('editionHintText').textContent = editionHintText();
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Screen: Prerequisites
 // ─────────────────────────────────────────────────────────────────────────────
 function renderChecks() {
+  const label = installMode === 'standalone' ? 'system requirements' : 'Docker';
   return `
   <div id="checkRows">
-    <div class="check-row"><div class="spinner"></div><div class="check-name">Checking Docker…</div></div>
+    <div class="check-row"><div class="spinner"></div><div class="check-name">Checking ${label}…</div></div>
   </div>
-  <div class="callout callout-warn" id="dockerHint" style="display:none">
+  <div class="callout callout-warn" id="checksHint" style="display:none">
     <span>⚠️</span>
-    <span>Docker is not running. <strong>Install or start Docker Desktop</strong> then click <em>Retry</em>.</span>
+    <span id="checksHintText"></span>
   </div>
-  <div style="margin-top:16px" id="retryWrap" style="display:none">
+  <div style="margin-top:16px">
     <button class="btn btn-ghost" onclick="runChecks()">↻ Retry</button>
+    ${installMode === 'docker' ? `<button class="btn btn-ghost" style="margin-left:8px" onclick="installDockerFlow()">Install Docker →</button>` : ''}
   </div>`;
 }
 
@@ -537,7 +630,8 @@ async function runChecks() {
     `<div class="check-row"><div class="spinner"></div><div class="check-name">Checking prerequisites…</div></div>`;
   document.getElementById('btnNext').disabled = true;
 
-  const res   = await fetch('/api/checks');
+  const endpoint = installMode === 'standalone' ? '/api/checks-standalone' : '/api/checks';
+  const res   = await fetch(endpoint);
   const items = await res.json();
 
   let allOK = true;
@@ -547,39 +641,59 @@ async function runChecks() {
       <div class="check-icon">${c.ok ? '✅' : '❌'}</div>
       <div class="check-name">${esc(c.name)}</div>
       ${c.ok
-        ? `<div class="check-version">v${esc(c.version)}</div>`
+        ? `<div class="check-version">${esc(c.version || '')}</div>`
         : `<div class="check-error">${esc(c.error)}</div>`}
     </div>`;
   }).join('');
 
   document.getElementById('checkRows').innerHTML = html;
 
-  const hint = document.getElementById('dockerHint');
-  if (hint) hint.style.display = allOK ? 'none' : 'flex';
+  const hint = document.getElementById('checksHint');
+  if (hint) {
+    hint.style.display = allOK ? 'none' : 'flex';
+    if (!allOK) {
+      document.getElementById('checksHintText').textContent = installMode === 'standalone'
+        ? 'Some requirements are not met. Review the items above and fix them, then retry.'
+        : 'Docker is not running. Install or start Docker Desktop then click Retry.';
+    }
+  }
 
   checksOK = allOK;
   updateNav();
+}
 
-  if (!document.getElementById('retryWrap')) return;
-  document.getElementById('retryWrap').style.display = allOK ? 'none' : 'block';
+// Install Docker via the Go backend (opens a sub-SSE stream for progress).
+async function installDockerFlow() {
+  const btn = document.querySelector('[onclick="installDockerFlow()"]');
+  if (btn) { btn.disabled = true; btn.textContent = 'Installing Docker…'; }
+
+  await fetch('/api/install-docker', { method: 'POST' });
+
+  const es = new EventSource('/api/docker-progress');
+  es.onmessage = (e) => {
+    const msg = JSON.parse(e.data);
+    if (msg.level === 'done') { es.close(); runChecks(); return; }
+    appendLog(msg.level, msg.msg);
+  };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Screen: Configuration
 // ─────────────────────────────────────────────────────────────────────────────
 function renderConfig() {
+  const isStandalone = installMode === 'standalone';
   return `
   <div class="section-title">Install Location</div>
   <div class="form-group">
     <label>Install Directory</label>
-    <input type="text" id="installDir" placeholder="e.g. C:\\ezHealthKonnect">
+    <input type="text" id="installDir" placeholder="${isStandalone ? 'e.g. C:\\ezHealthKonnect' : 'e.g. C:\\ezHealthKonnect'}">
     <div class="hint">All application files, logs, and uploads will be stored here.</div>
   </div>
 
   <div class="section-title">Network Ports</div>
   <div class="callout callout-info" style="margin-bottom:16px">
     <span>ℹ️</span>
-    <span>Change any port if it conflicts with other software on this machine. Press Enter to accept the default.</span>
+    <span>Change any port if it conflicts with other software on this machine.</span>
   </div>
   <div class="form-row-3">
     <div class="form-group">
@@ -595,6 +709,8 @@ function renderConfig() {
       <input type="text" id="dbPort" placeholder="5432">
     </div>
   </div>
+
+  ${!isStandalone ? `
   <div class="form-row">
     <div class="form-group">
       <label>MinIO API Port</label>
@@ -604,9 +720,20 @@ function renderConfig() {
       <label>MinIO Console Port</label>
       <input type="text" id="minioConPort" placeholder="9001">
     </div>
-  </div>
+  </div>` : ''}
 
-  <div class="section-title">Passwords</div>
+  <div class="section-title">Database</div>
+  ${isStandalone ? `
+  <div class="form-row">
+    <div class="form-group">
+      <label>Database Name</label>
+      <input type="text" id="dbName" placeholder="ezhealthkonnect">
+    </div>
+    <div class="form-group">
+      <label>Database User</label>
+      <input type="text" id="dbUser" placeholder="ezhealth_user">
+    </div>
+  </div>` : ''}
   <div class="form-row">
     <div class="form-group">
       <label>Database Password</label>
@@ -614,12 +741,13 @@ function renderConfig() {
       <div class="strength-bar" id="dbStr"><div class="strength-seg"></div><div class="strength-seg"></div><div class="strength-seg"></div><div class="strength-seg"></div></div>
       <div class="hint">Used for the PostgreSQL database. Store this securely.</div>
     </div>
+    ${!isStandalone ? `
     <div class="form-group">
       <label>Storage Password</label>
       <input type="password" id="minioPassword" placeholder="Strong password" oninput="strengthMeter('minioPassword','minStr')">
       <div class="strength-bar" id="minStr"><div class="strength-seg"></div><div class="strength-seg"></div><div class="strength-seg"></div><div class="strength-seg"></div></div>
       <div class="hint">Used for MinIO object storage (message archives).</div>
-    </div>
+    </div>` : ''}
   </div>
 
   <div class="section-title">Options</div>
@@ -649,10 +777,19 @@ async function loadDefaults() {
   set('dbPort',       d.dbPort);
   set('minioApiPort', d.minioApiPort);
   set('minioConPort', d.minioConPort);
+  // Standalone defaults
+  const dbNameEl = document.getElementById('dbName');
+  if (dbNameEl) dbNameEl.value = 'ezhealthkonnect';
+  const dbUserEl = document.getElementById('dbUser');
+  if (dbUserEl) dbUserEl.value = 'ezhealth_user';
 }
 
 function validateConfig() {
-  const required = ['installDir','appPort','apiPort','dbPort','minioApiPort','minioConPort','dbPassword','minioPassword'];
+  const isStandalone = installMode === 'standalone';
+  const required = isStandalone
+    ? ['installDir','appPort','apiPort','dbPort','dbPassword']
+    : ['installDir','appPort','apiPort','dbPort','minioApiPort','minioConPort','dbPassword','minioPassword'];
+
   for (const id of required) {
     const el = document.getElementById(id);
     if (!el || !el.value.trim()) {
@@ -662,17 +799,26 @@ function validateConfig() {
     }
     el.style.borderColor = '';
   }
+
+  const g = id => { const el = document.getElementById(id); return el ? el.value.trim() : ''; };
+
   cfg = {
-    installDir:    document.getElementById('installDir').value.trim(),
-    appPort:       document.getElementById('appPort').value.trim(),
-    apiPort:       document.getElementById('apiPort').value.trim(),
-    dbPort:        document.getElementById('dbPort').value.trim(),
-    minioApiPort:  document.getElementById('minioApiPort').value.trim(),
-    minioConPort:  document.getElementById('minioConPort').value.trim(),
-    dbPassword:    document.getElementById('dbPassword').value,
-    minioPassword: document.getElementById('minioPassword').value,
-    withAI:        document.getElementById('chkAI').checked,
+    mode:            installMode,
+    installDir:      g('installDir'),
+    appPort:         g('appPort'),
+    apiPort:         g('apiPort'),
+    dbPort:          g('dbPort'),
+    dbPassword:      document.getElementById('dbPassword').value,
+    withAI:          document.getElementById('chkAI').checked,
     registerService: document.getElementById('chkSvc').checked,
+    version:         'latest',
+    // Docker only
+    minioApiPort:    g('minioApiPort'),
+    minioConPort:    g('minioConPort'),
+    minioPassword:   g('minioPassword') || '',
+    // Standalone only
+    dbUser:          g('dbUser') || 'ezhealth_user',
+    dbName:          g('dbName') || 'ezhealthkonnect',
   };
   return true;
 }
@@ -766,11 +912,26 @@ function advanceProgress(target) {
 // Screen: Done
 // ─────────────────────────────────────────────────────────────────────────────
 function renderDone() {
+  const isStandalone = cfg.mode === 'standalone';
+  const items = isStandalone ? [
+    '✅ PostgreSQL installed and database created',
+    '✅ Node.js and Go API installed as native services',
+    '✅ Database migrations applied',
+    cfg.registerService ? '✅ Windows services registered (auto-start on boot)' : '',
+    cfg.withAI ? '⏳ AI models downloading in background (~2.3 GB)' : '',
+  ] : [
+    '✅ Docker image pulled and all containers started',
+    '✅ PostgreSQL database initialised and migrated',
+    '✅ MinIO object storage ready',
+    cfg.registerService ? '✅ System service registered (auto-start on boot)' : '',
+    cfg.withAI ? '⏳ AI models downloading in background (~2.3 GB)' : '',
+  ];
+
   return `
   <div class="success-card">
     <div class="success-icon">🎉</div>
     <h2>Installation Complete!</h2>
-    <p>ezHealthKonnect is running. Open the platform in your browser and follow the setup wizard to create your administrator account.</p>
+    <p>ezHealthKonnect is running. Open the platform in your browser and log in with the default credentials.</p>
 
     <div class="url-card">
       <label>Platform URL</label>
@@ -778,12 +939,12 @@ function renderDone() {
     </div>
 
     <ul class="steps-list">
-      <li>✅ Docker image built and all services started</li>
-      <li>✅ PostgreSQL database initialised and migrated</li>
-      <li>✅ MinIO object storage ready</li>
-      ${cfg.registerService ? '<li>✅ System service registered (auto-start on boot)</li>' : ''}
-      ${cfg.withAI ? '<li>⏳ AI models downloading in background (~2.3 GB)</li>' : ''}
+      ${items.filter(Boolean).map(t => `<li>${t}</li>`).join('')}
     </ul>
+
+    <p style="margin-top:20px;font-size:12px;color:var(--yellow)">
+      Default login: admin@ezhealthkonnect.com / admin123 — change this immediately.
+    </p>
   </div>`;
 }
 

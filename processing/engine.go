@@ -517,6 +517,18 @@ func (pe *ProcessingEngine) DeactivateInterface(interfaceID string) error {
 		return fmt.Errorf("failed to deactivate interface: %v", err)
 	}
 
+	// Stop and remove all connectors for this interface.
+	// Keys are either "interfaceID" (legacy) or "interfaceID:stepID" (pipeline-driven).
+	for key, connector := range pe.activeConnectors {
+		if key == interfaceID || strings.HasPrefix(key, interfaceID+":") {
+			if stopErr := connector.Stop(); stopErr != nil {
+				log.Printf("⚠️  Error stopping connector for interface %s (key %s): %v", interfaceID, key, stopErr)
+			}
+			delete(pe.activeConnectors, key)
+			delete(pe.messageChan, key)
+		}
+	}
+
 	// Remove from active tracking
 	delete(pe.activeInterfaces, interfaceID)
 

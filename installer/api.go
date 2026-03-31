@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"os/exec"
 	"runtime"
@@ -18,16 +19,25 @@ type CheckResult struct {
 }
 
 type Config struct {
-	InstallDir    string `json:"installDir"`
-	AppPort       string `json:"appPort"`
-	APIPort       string `json:"apiPort"`
-	DBPort        string `json:"dbPort"`
+	// Common — both editions
+	Mode        string `json:"mode"`           // "docker" | "standalone"
+	InstallDir  string `json:"installDir"`
+	AppPort     string `json:"appPort"`
+	APIPort     string `json:"apiPort"`
+	DBPort      string `json:"dbPort"`
+	DBPassword  string `json:"dbPassword"`
+	WithAI      bool   `json:"withAI"`
+	RegisterSvc bool   `json:"registerService"`
+	Version     string `json:"version"`        // release tag or "latest"
+
+	// Docker Edition only
 	MinioAPIPort  string `json:"minioApiPort"`
 	MinioConPort  string `json:"minioConPort"`
-	DBPassword    string `json:"dbPassword"`
 	MinioPassword string `json:"minioPassword"`
-	WithAI        bool   `json:"withAI"`
-	RegisterSvc   bool   `json:"registerService"`
+
+	// Standalone Edition only
+	DBUser string `json:"dbUser"`
+	DBName string `json:"dbName"`
 }
 
 var (
@@ -39,6 +49,7 @@ var (
 func registerHandlers(mux *http.ServeMux) {
 	mux.HandleFunc("/api/defaults", handleDefaults)
 	mux.HandleFunc("/api/checks", handleChecks)
+	mux.HandleFunc("/api/checks-standalone", handleChecksStandalone)
 	mux.HandleFunc("/api/install-docker", handleInstallDocker)
 	mux.HandleFunc("/api/docker-progress", handleDockerProgress)
 	mux.HandleFunc("/api/install", handleInstall)
@@ -63,6 +74,119 @@ func defaultInstallDir() string {
 		return `C:\ezHealthKonnect`
 	}
 	return "/opt/ezhealthkonnect"
+}
+
+// handleChecksStandalone runs prerequisite checks for Standalone Edition.
+// Docker is NOT required; we check OS, disk space, and port availability.
+func handleChecksStandalone(w http.ResponseWriter, _ *http.Request) {
+	checks := []CheckResult{}
+
+	// OS version
+	osCheck := checkOS()
+	checks = append(checks, osCheck)
+
+	// Disk space (need ~2 GB free in default install dir parent)
+	checks = append(checks, checkDiskSpace())
+
+	// Ports
+	for _, port := range []string{"3000", "8080", "5432"} {
+		checks = append(checks, checkPortFree(port))
+	}
+
+	// winget (Windows only — needed to install PostgreSQL + Node.js)
+	if runtime.GOOS == "windows" {
+		checks = append(checks, checkWinget())
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(checks) //nolint:errcheck
+}
+
+func checkOS() CheckResult {
+	switch runtime.GOOS {
+	case "windows":
+		out, err := exec.Command("cmd", "/c", "ver").Output()
+		if err == nil {
+			return CheckResult{Name: "Windows", OK: true, Version: strings.TrimSpace(string(out))}
+		}
+		return CheckResult{Name: "Windows", OK: true, Version: "unknown"}
+	case "linux":
+		out, err := exec.Command("uname", "-r").Output()
+		if err == nil {
+			return CheckResult{Name: "Linux Kernel", OK: true, Version: strings.TrimSpace(string(out))}
+		}
+		return CheckResult{Name: "Linux", OK: true}
+	default:
+		return CheckResult{Name: runtime.GOOS, OK: false,
+			Error: "Standalone Edition supports Windows and Linux only"}
+	}
+}
+
+func checkDiskSpace() CheckResult {
+	var path string
+	if runtime.GOOS == "windows" {
+		path = `C:\`
+	} else {
+		path = "/opt"
+	}
+	// Use df on Linux, WMIC on Windows
+	var availMB int64
+	if runtime.GOOS == "windows" {
+		out, err := exec.Command("powershell", "-NoProfile", "-Command",
+			fmt.Sprintf(`(Get-PSDrive -Name C).Free / 1MB`)).Output()
+		if err == nil {
+			fmt.Sscanf(strings.TrimSpace(string(out)), "%d", &availMB)
+		}
+	} else {
+		_ = path
+		out, err := exec.Command("df", "-m", "/opt").Output()
+		if err != nil {
+			out, err = exec.Command("df", "-m", "/").Output()
+		}
+		if err == nil {
+			lines := strings.Split(string(out), "\n")
+			if len(lines) >= 2 {
+				fields := strings.Fields(lines[1])
+				if len(fields) >= 4 {
+					fmt.Sscanf(fields[3], "%d", &availMB)
+				}
+			}
+		}
+	}
+
+	if availMB < 2048 {
+		return CheckResult{Name: "Disk Space",
+			OK:    availMB > 512, // warn but don't hard-block if >512 MB
+			Error: fmt.Sprintf("%d MB available (2048 MB recommended)", availMB),
+		}
+	}
+	return CheckResult{Name: "Disk Space", OK: true,
+		Version: fmt.Sprintf("%d MB available", availMB)}
+}
+
+func checkPortFree(port string) CheckResult {
+	name := fmt.Sprintf("Port %s", port)
+	ln, err := tryListen(port)
+	if err != nil {
+		return CheckResult{Name: name, OK: false,
+			Error: fmt.Sprintf("Port %s is in use — change it in Configuration", port)}
+	}
+	ln.Close()
+	return CheckResult{Name: name, OK: true, Version: "available"}
+}
+
+func tryListen(port string) (net.Listener, error) {
+	return net.Listen("tcp", "127.0.0.1:"+port)
+}
+
+func checkWinget() CheckResult {
+	out, err := exec.Command("winget", "--version").Output()
+	if err != nil {
+		return CheckResult{Name: "winget (App Installer)", OK: false,
+			Error: "Not found — update Windows or install App Installer from the Microsoft Store"}
+	}
+	return CheckResult{Name: "winget (App Installer)", OK: true,
+		Version: strings.TrimSpace(string(out))}
 }
 
 func handleChecks(w http.ResponseWriter, _ *http.Request) {

@@ -2679,6 +2679,17 @@ textarea.form-control {
     box-shadow: 0 6px 24px rgba(30, 58, 138, 0.6);
 }
 
+/* Disabled primary button must override the blue primary style */
+.wizard-floating-nav .wizard-nav-btn.primary:disabled {
+    background: var(--wizard-gray-400);
+    color: var(--wizard-gray-600);
+    border-color: var(--wizard-gray-500);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+    opacity: 0.6;
+    cursor: not-allowed;
+    text-shadow: none;
+}
+
 /* Control Buttons in Floating Nav */
 .wizard-floating-nav .wizard-control-btn {
     background: var(--wizard-white);

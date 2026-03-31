@@ -56,6 +56,14 @@ func WithTestMode(ctx context.Context) context.Context {
 	return context.WithValue(ctx, ContextKeyTestMode, true)
 }
 
+// PipelineConnection represents a directed edge between two steps in the flowchart.
+// Stored as JSONB in transformation_pipelines.connections (V42 migration).
+type PipelineConnection struct {
+	From string `json:"from"`
+	To   string `json:"to"`
+	Type string `json:"type,omitempty"` // "default", "true", "false", case value — informational only
+}
+
 // TransformationPipeline represents a transformation pipeline for an interface/message type
 type TransformationPipeline struct {
 	ID             string                 `json:"id" db:"id"`
@@ -65,6 +73,7 @@ type TransformationPipeline struct {
 	Enabled        bool                   `json:"enabled" db:"enabled"`
 	Version        int                    `json:"version" db:"version"`
 	PipelineConfig map[string]interface{} `json:"pipeline_config,omitempty" db:"pipeline_config"`
+	Connections    []PipelineConnection   `json:"connections,omitempty"` // Flowchart edges (from V42)
 	CreatedAt      time.Time              `json:"created_at" db:"created_at"`
 	UpdatedAt      time.Time              `json:"updated_at" db:"updated_at"`
 	Steps          []TransformationStep   `json:"steps,omitempty"`

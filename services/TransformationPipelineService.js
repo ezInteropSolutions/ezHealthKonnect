@@ -198,9 +198,21 @@ class TransformationPipelineService {
 
         // ── Flow-specific transform steps ─────────────────────────────────────
         const flow = `${sourceType}→${targetType}`;
-        console.log(`⚙️ Building transform steps for flow: ${flow}`);
+        const transformationFlow = connectivityInfo?.transformationFlow;
+        console.log(`⚙️ Building transform steps for flow: ${flow} (transformationFlow: ${transformationFlow})`);
 
-        if (sourceType === 'hl7v2' && targetType === 'fhir') {
+        // Only add HL7→FHIR transform when the wizard explicitly selected that flow.
+        // fhir_receiver, sink_only, and passthrough flows must NOT get a transform step.
+        // Safety net: if sourceConnectivity is a FHIR inbound connector, never add HL7→FHIR.
+        const srcConn = connectivityInfo?.sourceConnectivity || '';
+        const isFHIRInboundConnector = srcConn.includes('fhir') || srcConn === 'http_rest_inbound';
+        const isHL7toFHIR = sourceType === 'hl7v2' && targetType === 'fhir'
+            && !isFHIRInboundConnector
+            && transformationFlow !== 'fhir_receiver'
+            && transformationFlow !== 'sink_only'
+            && transformationFlow !== 'passthrough';
+
+        if (isHL7toFHIR) {
             // HL7 v2 → FHIR R4
             const stepConfig = {
                 fhir_version: 'R4',
@@ -245,10 +257,19 @@ class TransformationPipelineService {
      */
     async addConnectorStep(sequelize, t, pipelineId, direction, connectivityType, wizardConfig = {}) {
         const SOURCE_TYPE_MAP = {
-            'tcp':      { typeName: 'tcp_mllp',          name: 'TCP/MLLP Inbound' },   // matches connectivity_types.type_name in DB
+            // Legacy short names (from _connectorTypeToLegacy)
+            'tcp':      { typeName: 'tcp_mllp',          name: 'TCP/MLLP Inbound' },
             'http':     { typeName: 'http_rest',          name: 'HTTP REST Inbound' },
+            'fhir':     { typeName: 'http_fhir_inbound',  name: 'HTTP FHIR Receiver' },
             'file':     { typeName: 'file_listener',      name: 'File Listener' },
-            'database': { typeName: 'postgresql_inbound', name: 'Database Inbound' }
+            'database': { typeName: 'postgresql_inbound', name: 'Database Inbound' },
+            // Full type names (when wizard passes the connector type directly)
+            'http_fhir_inbound':  { typeName: 'http_fhir_inbound',  name: 'HTTP FHIR Receiver' },
+            'http_rest_inbound':  { typeName: 'http_rest_inbound',  name: 'HTTP REST Inbound' },
+            'http_rest':          { typeName: 'http_rest',          name: 'HTTP REST Inbound' },
+            'tcp_mllp_inbound':   { typeName: 'tcp_mllp_inbound',  name: 'TCP/MLLP Inbound' },
+            'tcp_mllp':           { typeName: 'tcp_mllp',          name: 'TCP/MLLP Inbound' },
+            'file_listener':      { typeName: 'file_listener',     name: 'File Listener' },
         };
 
         const TARGET_TYPE_MAP = {

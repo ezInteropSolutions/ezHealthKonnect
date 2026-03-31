@@ -25,6 +25,9 @@ class WizardModel extends EventTarget {
             name: '',
             description: '',
 
+            // Step 1 continued: Transformation Flow (OOB default)
+            transformationFlow: 'hl7_to_fhir', // OOB: Most common HL7→FHIR scenario
+
             // Step 2: Source Configuration (OOB defaults)
             sourceType: 'hl7v2',           // OOB: Most common
             sourceConnectivity: 'tcp',      // OOB: Standard HL7 transport
@@ -291,9 +294,18 @@ class WizardModel extends EventTarget {
             this.validation.errors.name = 'Interface name cannot exceed 100 characters';
         }
 
+        if (!this.data.transformationFlow) {
+            this.validation.errors.transformationFlow = 'Please select a processing flow';
+        }
+
         // OOB: Auto-generate description if empty
         if (!this.data.description && this.data.name) {
-            this.data.description = `HL7 to FHIR interface for ${this.data.name}`;
+            const flowLabels = {
+                fhir_receiver: `FHIR Receiver interface for ${this.data.name}`,
+                sink_only: `Message sink interface for ${this.data.name}`,
+                hl7_to_fhir: `HL7 to FHIR interface for ${this.data.name}`,
+            };
+            this.data.description = flowLabels[this.data.transformationFlow] || `Interface for ${this.data.name}`;
             this.validation.warnings.description = 'Auto-generated description (OOB)';
         }
     }
@@ -306,12 +318,14 @@ class WizardModel extends EventTarget {
             this.validation.errors.sourceType = 'Source type is required';
         }
 
-        if (!this.data.sourceConnectivity) {
+        // sourceConnectivity is set from ConnectorConfigBuilder via _connectorTypeToLegacy()
+        // or directly from the legacy dropdown; either a sourceConnectorConfig or sourceConnectivity is required
+        if (!this.data.sourceConnectivity && !this.data.sourceConnectorConfig?.connectorType) {
             this.validation.errors.sourceConnectivity = 'Source connectivity is required';
         }
 
-        // Validate source config based on type
-        if (this.data.sourceConnectivity === 'tcp') {
+        // Validate source config based on type (legacy path only; ConnectorConfigBuilder validates its own fields)
+        if (!this.data.sourceConnectorConfig && this.data.sourceConnectivity === 'tcp') {
             if (!this.data.sourceConfig.host) {
                 this.validation.errors.sourceHost = 'Host is required for TCP connectivity';
             }
@@ -581,6 +595,9 @@ class WizardModel extends EventTarget {
             auto_start: this.data.auto_start || false,
             deployment_mode: this.data.deployment_mode || 'manual',
             deployment_delay_seconds: this.data.deployment_delay_seconds || 0,
+
+            // Processing flow — drives which transform steps the pipeline service creates
+            transformationFlow: this.data.transformationFlow || 'hl7_to_fhir',
 
             // Additional metadata
             templateUsed: this.data.mappingTemplate,

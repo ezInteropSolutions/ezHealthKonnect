@@ -458,7 +458,7 @@ func main() {
 			systemGroup.GET("/metrics", systemCtrl.GetMetrics)
 
 			// SCHEMA PACKAGE MANAGEMENT
-			schemaManager := schema.NewSchemaPackageManager(cfg.GetSchemaDirectory())
+			schemaManager := schema.NewSchemaPackageManager(cfg.GetSchemaDirectory(), cfg.GetSchemaDistPath())
 			schemaCtrl := controllers.NewSchemaController(schemaManager)
 			schemaGroup := systemGroup.Group("/schemas")
 			{
@@ -1275,14 +1275,6 @@ func main() {
 		// Transformation Routes
 		transformGroup := api.Group("/transform")
 		{
-			transformGroup.POST("/hl7-to-fhir", func(c *gin.Context) {
-				c.JSON(http.StatusOK, gin.H{
-					"success": true,
-					"message": "HL7 to FHIR transformation endpoint (to be implemented)",
-					"note":    "This will use both HL7 and FHIR schema systems for transformation",
-				})
-			})
-
 			transformGroup.GET("/status", func(c *gin.Context) {
 				hl7Ready := false
 				fhirReady := false
