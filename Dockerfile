@@ -1,15 +1,15 @@
 # Stage 1: Compile Go binary
-FROM golang:1.24-alpine AS gobuilder
+FROM golang:1.25-alpine AS gobuilder
 
 RUN apk upgrade --no-cache && apk add --no-cache git
 
 WORKDIR /app
 
 COPY go.mod go.sum ./
-RUN go mod download
+RUN go mod download && go mod verify
 
 COPY . .
-RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o go-api main.go
+RUN go mod tidy && CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o go-api main.go
 
 # Stage 2: Install Node.js production dependencies
 FROM node:22-alpine AS nodebuilder
