@@ -52,8 +52,7 @@ jobs:
           push: false
           load: true
           tags: ${{ env.LOCAL_TAG }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          no-cache: true
 
       # ── Layer inspection: no secrets baked in ────────────────────────────
       - name: Check for secrets in image layers
