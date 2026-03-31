@@ -27,7 +27,12 @@ RUN npm ci --omit=dev && \
 # Stage 3: Runtime image
 FROM node:22-alpine
 
-RUN apk upgrade --no-cache && apk add --no-cache curl
+RUN apk upgrade --no-cache && apk add --no-cache curl && \
+    # node:22-alpine ships with npm 10.9.x which bundles picomatch 4.0.3
+    # (CVE-2026-33671). npm cannot self-upgrade on Alpine. Since our container
+    # never invokes npm at runtime, removing the bundled copy is safe and fixes
+    # the vulnerability at the image level rather than suppressing the scan.
+    rm -rf /usr/local/lib/node_modules/npm/node_modules/picomatch
 
 WORKDIR /app
 
