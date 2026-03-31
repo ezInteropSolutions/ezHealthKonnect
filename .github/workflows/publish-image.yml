@@ -78,16 +78,20 @@ jobs:
             'test -d /app/.git && echo "FAIL: .git found in image" && exit 1 || echo "OK: No .git in image"'
 
       # ── CVE scan with Trivy ───────────────────────────────────────────────
+      - name: Install Trivy
+        run: |
+          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh \
+            | sh -s -- -b /usr/local/bin latest
+
       - name: Scan image for vulnerabilities (Trivy)
-        uses: aquasecurity/trivy-action@0.20.0
-        with:
-          image-ref: ${{ env.LOCAL_TAG }}
-          format: sarif
-          output: trivy-results.sarif
-          severity: CRITICAL,HIGH
-          # Exit 1 on CRITICAL vulnerabilities
-          exit-code: '1'
-          ignore-unfixed: true   # only flag CVEs that have a fix available
+        run: |
+          trivy image \
+            --format sarif \
+            --output trivy-results.sarif \
+            --severity CRITICAL,HIGH \
+            --ignore-unfixed \
+            --exit-code 1 \
+            ${{ env.LOCAL_TAG }}
 
       - name: Upload Trivy SARIF to GitHub Security tab
         if: always()
