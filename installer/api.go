@@ -445,6 +445,21 @@ func emitDocker(level, message string) {
 	fmt.Printf("[DOCKER-%s] %s\n", strings.ToUpper(level), message)
 }
 
+// emitInstallFailed signals the UI that installation failed — do NOT advance to success screen.
+func emitInstallFailed() {
+	payload := `{"level":"failed","msg":"Installation failed — see errors above."}`
+	mu.Lock()
+	for _, ch := range subs {
+		select {
+		case ch <- payload:
+		default:
+		}
+		close(ch)
+	}
+	subs = nil
+	mu.Unlock()
+}
+
 func emitDockerDone() {
 	payload := `{"level":"done","msg":""}`
 	mu.Lock()

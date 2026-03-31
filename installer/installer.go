@@ -30,9 +30,13 @@ func runInstallation(cfg *Config) {
 }
 
 func runDockerInstallation(cfg *Config) {
+	success := false
 	defer func() {
-		appURL := fmt.Sprintf("http://localhost:%s", cfg.AppPort)
-		emitDoneSignal(appURL)
+		if success {
+			emitDoneSignal(fmt.Sprintf("http://localhost:%s", cfg.AppPort))
+		} else {
+			emitInstallFailed()
+		}
 	}()
 
 	emit("info", "╔══════════════════════════════════════════════╗")
@@ -111,6 +115,7 @@ func runDockerInstallation(cfg *Config) {
 	emit("info", "╚══════════════════════════════════════════════╝")
 	emit("info", "")
 	emit("ok", "Platform URL: "+appURL)
+	success = true
 }
 
 func runDockerPull() error {

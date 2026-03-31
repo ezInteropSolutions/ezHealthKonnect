@@ -21,9 +21,7 @@ func runStandaloneUninstall(cfg *Config) {
 }
 
 func runStandaloneInstallation(cfg *Config) {
-	defer func() {
-		emitDoneSignal(fmt.Sprintf("http://localhost:%s", cfg.AppPort))
-	}()
+	defer func() { emitInstallFailed() }() // Linux standalone is not a real install — always shows info
 
 	emit("warn", "Linux Standalone Edition uses the shell script installer.")
 	emit("info", "")

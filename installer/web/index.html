@@ -469,7 +469,10 @@
   </ul>
 
   <div class="sidebar-footer">
-    ezInterop Solutions<br>
+    <a href="https://www.ezInterOpSolutions.com" target="_blank"
+       style="color:rgba(255,255,255,0.35);text-decoration:none;"
+       onmouseover="this.style.color='rgba(248,187,217,0.7)'"
+       onmouseout="this.style.color='rgba(255,255,255,0.35)'">ezInterOp Solutions</a><br>
     &copy; 2025–2026
   </div>
 </aside>
@@ -888,6 +891,24 @@ async function startInstall() {
       installOK = true;
       advanceProgress(100, 'Complete!');
       setTimeout(() => setStep(4), 900);
+      return;
+    }
+    if (msg.level === 'failed') {
+      es.close();
+      advanceProgress(100, 'Failed');
+      document.getElementById('progressBar').style.background = 'var(--red)';
+      document.getElementById('progressPct').style.color = 'var(--red)';
+      document.getElementById('progressStep').textContent = '❌ Installation failed — see log above';
+      appendLog('error', '');
+      appendLog('error', '─────────────────────────────────────');
+      appendLog('error', '  Installation failed. Review the log above for details.');
+      appendLog('error', '  Fix the issue and run the installer again.');
+      appendLog('error', '─────────────────────────────────────');
+      // Show a retry button
+      const retryDiv = document.createElement('div');
+      retryDiv.style = 'margin-top:16px';
+      retryDiv.innerHTML = `<button class="btn btn-ghost" onclick="setStep(2)">← Back to Configuration</button>`;
+      document.getElementById('content').appendChild(retryDiv);
       return;
     }
     appendLog(msg.level, msg.msg);

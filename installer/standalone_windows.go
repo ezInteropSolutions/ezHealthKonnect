@@ -22,9 +22,15 @@ const (
 
 // runStandaloneInstallation is the Windows native (no-Docker) install path.
 func runStandaloneInstallation(cfg *Config) {
+	success := false
 	defer func() {
-		appURL := fmt.Sprintf("http://localhost:%s", cfg.AppPort)
-		emitDoneSignal(appURL)
+		if success {
+			appURL := fmt.Sprintf("http://localhost:%s", cfg.AppPort)
+			emitDoneSignal(appURL)
+		} else {
+			// Signal done without a URL so the UI shows the log, not the success screen
+			emitInstallFailed()
+		}
 	}()
 
 	emit("info", "╔══════════════════════════════════════════════╗")
@@ -132,6 +138,7 @@ func runStandaloneInstallation(cfg *Config) {
 	emit("ok", "Platform URL: "+appURL)
 	emit("info", "Default login: admin@ezhealthkonnect.com / admin123")
 	emit("warn", "Change the default password immediately after first login.")
+	success = true
 }
 
 // ── PostgreSQL ─────────────────────────────────────────────────────────────
@@ -187,15 +194,44 @@ func findPsql() string {
 }
 
 func wingetInstall(pkg string) error {
-	out, err := exec.Command("winget", "install", "--id", pkg,
-		"--silent", "--accept-package-agreements", "--accept-source-agreements",
-		"--scope", "machine").CombinedOutput()
+	return wingetInstallWithFlags(pkg, false)
+}
+
+func wingetInstallWithFlags(pkg string, ignoreHash bool) error {
+	args := []string{
+		"install", "--id", pkg,
+		"--silent",
+		"--accept-package-agreements",
+		"--accept-source-agreements",
+		"--scope", "machine",
+	}
+	if ignoreHash {
+		args = append(args, "--ignore-security-hash")
+	}
+	cmd := exec.Command("winget", args...)
+	out, err := cmd.CombinedOutput()
+	outStr := string(out)
+
+	// Stream output to the UI log
+	for _, line := range strings.Split(outStr, "\n") {
+		line = strings.TrimRight(line, "\r")
+		if strings.TrimSpace(line) != "" {
+			emit("info", "  winget: "+line)
+		}
+	}
+
 	if err != nil {
-		// "already installed" is not an error
-		if strings.Contains(string(out), "already installed") {
+		// Already installed is not an error
+		if strings.Contains(outStr, "already installed") || strings.Contains(outStr, "No applicable upgrade") {
+			emit("info", pkg+" is already installed")
 			return nil
 		}
-		return fmt.Errorf("%w: %s", err, strings.TrimSpace(string(out)))
+		// Hash mismatch (0x8a15000f) — retry with --ignore-security-hash
+		if !ignoreHash && (strings.Contains(outStr, "0x8a15000f") || strings.Contains(outStr, "hash")) {
+			emit("warn", "Hash mismatch from winget — retrying with --ignore-security-hash")
+			return wingetInstallWithFlags(pkg, true)
+		}
+		return fmt.Errorf("winget exited with error: %s", strings.TrimSpace(outStr))
 	}
 	return nil
 }
