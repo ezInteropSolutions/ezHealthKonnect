@@ -318,6 +318,21 @@ jobs:
           | \`SHA256SUMS.txt\` | File checksums |
           NOTES
 
+      # Delete existing release for this tag if one exists (handles re-runs and re-tags)
+      - name: Delete existing release if present
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION="${{ steps.ver.outputs.value }}"
+          RELEASE_ID=$(gh api repos/${{ github.repository }}/releases/tags/${VERSION} \
+            --jq '.id' 2>/dev/null || echo "")
+          if [ -n "$RELEASE_ID" ] && [ "$RELEASE_ID" != "null" ]; then
+            echo "Deleting existing release id=${RELEASE_ID} for tag ${VERSION}"
+            gh api -X DELETE repos/${{ github.repository }}/releases/${RELEASE_ID}
+          else
+            echo "No existing release for ${VERSION} — creating fresh"
+          fi
+
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
