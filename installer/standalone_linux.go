@@ -8,6 +8,18 @@ import "fmt"
 // The Go installer (browser wizard) is the Docker Edition for all platforms.
 // The Linux Standalone Edition is install.sh — a purpose-built shell script
 // that is better suited to headless/server environments.
+func runStandaloneUninstall(cfg *Config) {
+	defer func() { emitDoneSignal("") }()
+	emit("info", "To uninstall on Linux, run:")
+	emit("info", "")
+	emit("info", "  sudo systemctl stop ezhealthkonnect ezhealthkonnect-api")
+	emit("info", "  sudo systemctl disable ezhealthkonnect ezhealthkonnect-api")
+	emit("info", "  sudo rm /etc/systemd/system/ezhealthkonnect*.service")
+	emit("info", "  sudo rm -rf /opt/ezhealthkonnect")
+	emit("info", "  sudo userdel ezhealth")
+	emit("ok", "Instructions shown — run these commands on your server.")
+}
+
 func runStandaloneInstallation(cfg *Config) {
 	defer func() {
 		emitDoneSignal(fmt.Sprintf("http://localhost:%s", cfg.AppPort))
