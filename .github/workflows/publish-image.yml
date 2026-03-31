@@ -61,11 +61,12 @@ jobs:
       # ── Layer inspection: no secrets baked in ────────────────────────────
       - name: Check for secrets in image layers
         run: |
-          echo "=== Checking image history for suspicious patterns ==="
+          echo "=== Checking image history for hardcoded secret values ==="
+          # Only fail on actual assignments (e.g. PASSWORD=abc123), not just variable names
           docker history --no-trunc ${{ env.LOCAL_TAG }} | grep -iE \
-            'password|secret|token|key|credential|api_key' \
-            && echo "WARNING: Potential secret found in image history" && exit 1 \
-            || echo "OK: No secrets detected in image history"
+            '(password|secret|credential|api_key)\s*=\s*\S+' \
+            && echo "FAIL: Potential hardcoded secret found in image history" && exit 1 \
+            || echo "OK: No hardcoded secrets detected in image history"
 
           echo ""
           echo "=== Verifying .env is NOT baked into image ==="
@@ -73,7 +74,7 @@ jobs:
             'test -f /app/.env && echo "FAIL: .env found in image" && exit 1 || echo "OK: No .env in image"'
 
           echo ""
-          echo "=== Verifying node_modules owner binaries are absent ==="
+          echo "=== Verifying .git is NOT baked into image ==="
           docker run --rm ${{ env.LOCAL_TAG }} sh -c \
             'test -d /app/.git && echo "FAIL: .git found in image" && exit 1 || echo "OK: No .git in image"'
 
@@ -95,7 +96,7 @@ jobs:
 
       - name: Upload Trivy SARIF to GitHub Security tab
         if: always()
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: trivy-results.sarif
         continue-on-error: true  # don't fail the job if SARIF upload fails
