@@ -246,7 +246,7 @@ jobs:
           mkdir -p dist
           cd installer
           go build \
-            -ldflags "-s -w -X main.version=${{ steps.ver.outputs.value }}" \
+            -ldflags "-s -w -H windowsgui -X main.version=${{ steps.ver.outputs.value }}" \
             -o ../dist/ezhealthkonnect-installer.exe \
             .
 
