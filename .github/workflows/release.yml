@@ -16,8 +16,38 @@ env:
   NODE_VERSION: '20'
 
 jobs:
+  # ── Job 0: Pre-flight checks ──────────────────────────────────────────────────
+  preflight:
+    name: Pre-flight checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+          cache-dependency-path: go.sum
+
+      - name: Go build check
+        run: go build $(go list ./... | grep -v '/tests')
+
+      - name: Go vet
+        run: go vet $(go list ./... | grep -v '/tests')
+
+      - name: Node.js install check
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: npm install
+        run: npm ci --prefer-offline
+
   # ── Job 1: Build go-api binaries ─────────────────────────────────────────────
   build-go-api:
+    needs: preflight
     name: Build go-api binaries
     runs-on: ubuntu-latest
     strategy:
