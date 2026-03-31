@@ -84,19 +84,11 @@ jobs:
         # CVEs with no upstream fix are suppressed via .trivyignore (reviewed monthly).
         # To see ALL findings including suppressed, check the table output above.
         run: |
-          # /usr/local/lib/node_modules/npm is npm's own internal tooling bundled
-          # in the node:22-alpine base image. Our application never invokes npm
-          # at runtime (we run `node server.js` and `./go-api`). npm 10.9.x
-          # bundles picomatch 4.0.3 internally and cannot self-upgrade on Alpine.
-          # Skipping this path is correct: it is the package manager, not our app.
-          SKIP="--skip-dirs /usr/local/lib/node_modules/npm"
-
           echo "=== Full findings (including suppressed) ==="
           trivy image \
             --format table \
             --severity CRITICAL,HIGH \
             --ignore-unfixed \
-            $SKIP \
             ${{ env.LOCAL_TAG }} || true
 
           echo ""
@@ -107,7 +99,6 @@ jobs:
             --ignore-unfixed \
             --ignorefile .trivyignore \
             --exit-code 1 \
-            $SKIP \
             ${{ env.LOCAL_TAG }}
 
       # ── Smoke test: container starts and binaries run ─────────────────────
