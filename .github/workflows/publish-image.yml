@@ -136,19 +136,22 @@ jobs:
           OLLAMA_EMBED_MODEL=nomic-embed-text
           EOF
 
-          echo "=== Starting stack ==="
-          docker compose -f docker-compose.prod.yml --env-file /tmp/test.env up -d
+          DC="docker compose -f docker-compose.prod.yml --env-file /tmp/test.env -p ezhk-ci"
 
-          echo "=== Waiting for health checks (up to 90s) ==="
-          timeout 90 bash -c '
-            until docker inspect ezhk-app --format "{{.State.Health.Status}}" 2>/dev/null | grep -q healthy; do
-              echo "  Waiting... ($(docker inspect ezhk-app --format "{{.State.Health.Status}}" 2>/dev/null || echo starting))"
+          echo "=== Starting stack ==="
+          $DC up -d
+
+          echo "=== Waiting for app to become healthy (up to 120s) ==="
+          timeout 120 bash -c '
+            DC="docker compose -f docker-compose.prod.yml --env-file /tmp/test.env -p ezhk-ci"
+            until $DC ps app | grep -q "(healthy)"; do
+              echo "  Waiting... ($($DC ps app --format "{{.Health}}" 2>/dev/null || echo starting))"
               sleep 5
             done
           ' || {
-            echo "TIMEOUT: Container did not become healthy in 90s"
+            echo "TIMEOUT: App did not become healthy in 120s"
             echo "=== App logs ==="
-            docker compose -f docker-compose.prod.yml logs app --tail=50
+            $DC logs app --tail=50
             exit 1
           }
 
@@ -157,18 +160,18 @@ jobs:
           echo "  /api/auth/session → HTTP $STATUS"
           if [ "$STATUS" != "200" ] && [ "$STATUS" != "401" ]; then
             echo "FAIL: Unexpected status $STATUS"
-            docker compose -f docker-compose.prod.yml logs app --tail=30
+            $DC logs app --tail=30
             exit 1
           fi
           echo "OK: Application is responding correctly"
 
       - name: Dump logs on failure
         if: failure()
-        run: docker compose -f docker-compose.prod.yml logs --tail=100 || true
+        run: docker compose -f docker-compose.prod.yml --env-file /tmp/test.env -p ezhk-ci logs --tail=100 || true
 
       - name: Tear down test stack
         if: always()
-        run: docker compose -f docker-compose.prod.yml down -v --remove-orphans || true
+        run: docker compose -f docker-compose.prod.yml --env-file /tmp/test.env -p ezhk-ci down -v --remove-orphans || true
 
       # ── Push — only after ALL checks pass ────────────────────────────────
       - name: Log in to GitHub Container Registry
