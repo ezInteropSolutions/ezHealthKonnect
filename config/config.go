@@ -23,6 +23,7 @@ type Config struct {
 
 	// ezHealthKonnect Schema System
 	SchemaDirectory   string
+	SchemaDistPath    string // local path to pre-built schema zips (dev mode)
 	EnableSchemaCache bool
 	SchemaCacheSize   int
 	SchemaSource      string // "filesystem" or "legacy_http"
@@ -77,6 +78,7 @@ func Load() *Config {
 
 		// ezHealthKonnect Schema System
 		SchemaDirectory:   getEnv("EZHEALTHKONNECT_SCHEMA_DIR", "./schemas"),
+		SchemaDistPath:    getEnv("SCHEMA_DIST_PATH", ""),
 		EnableSchemaCache: getBoolEnv("ENABLE_SCHEMA_CACHE", true),
 		SchemaCacheSize:   getIntEnv("SCHEMA_CACHE_SIZE", 50),
 		SchemaSource:      getEnv("SCHEMA_SOURCE", "filesystem"), // "filesystem" or "legacy_http"
@@ -173,6 +175,12 @@ func (c *Config) UseLegacyDictionary() bool {
 // GetSchemaDirectory returns the directory path for ezHealthKonnect schemas
 func (c *Config) GetSchemaDirectory() string {
 	return c.SchemaDirectory
+}
+
+// GetSchemaDistPath returns the optional local path containing pre-built schema zip files.
+// When non-empty the SchemaPackageManager will install from local files instead of downloading.
+func (c *Config) GetSchemaDistPath() string {
+	return c.SchemaDistPath
 }
 
 // GetFHIRSchemaDirectory returns the FHIR schema directory path

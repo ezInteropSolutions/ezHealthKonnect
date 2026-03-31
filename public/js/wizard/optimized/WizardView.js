@@ -113,7 +113,7 @@ class WizardView extends EventTarget {
                                         <div class="logo-pulse"></div>
                                     </div>
                                     <div class="wizard-title-creative">
-                                        <h2>HL7-FHIR</h2>
+                                        <h2>Integration</h2>
                                         <span class="subtitle">Interface Wizard</span>
                                     </div>
                                 </div>
@@ -195,9 +195,9 @@ class WizardView extends EventTarget {
     getCreativeStepsIndicator() {
         const steps = [
             { number: 1, title: 'Configuration', icon: '⚙️', description: 'Interface settings' },
-            { number: 2, title: 'HL7 Parsing', icon: '🔍', description: 'Message analysis' },
-            { number: 3, title: 'FHIR Transform', icon: '🔄', description: 'HL7 to FHIR conversion' },
-            { number: 4, title: 'Target Config', icon: '🎯', description: 'FHIR endpoint setup' }
+            { number: 2, title: 'Source Setup', icon: '🔍', description: 'Message analysis' },
+            { number: 3, title: 'Processing', icon: '🔄', description: 'Transform & mapping' },
+            { number: 4, title: 'Target Config', icon: '🎯', description: 'Endpoint setup' }
         ];
 
         return steps.map((step, index) => `
@@ -372,19 +372,8 @@ class WizardView extends EventTarget {
                                     <option value="file" ${data.sourceType === 'file' ? 'selected' : ''}>File-based</option>
                                 </select>
                             </div>
-                            <div class="form-group">
-                                <label for="sourceConnectivity" class="form-label required">Connectivity</label>
-                                <select id="sourceConnectivity" class="form-control" required>
-                                    <option value="tcp" ${data.sourceConnectivity === 'tcp' ? 'selected' : ''}>TCP/MLLP (Standard)</option>
-                                    <option value="http" ${data.sourceConnectivity === 'http' ? 'selected' : ''}>HTTP/REST</option>
-                                    <option value="file" ${data.sourceConnectivity === 'file' ? 'selected' : ''}>File Input</option>
-                                    <option value="database" ${data.sourceConnectivity === 'database' ? 'selected' : ''}>Database</option>
-                                </select>
-                            </div>
                         </div>
-                        <div id="sourceConfigPanel" class="config-panel">
-                            ${this.getSourceConfigPanel(data.sourceConnectivity, data.sourceConfig, data.sourceType)}
-                        </div>
+                        <div id="wizardInboundConnectorContainer" class="wizard-embedded-connector"></div>
                     </div>
 
                     <!-- Transformation Flow Section -->
@@ -901,7 +890,7 @@ class WizardView extends EventTarget {
                                 <div style="flex: 1;">
                                     <h4 style="margin: 0 0 12px 0; color: #1976d2; font-size: 18px; font-weight: 600;">Sink Mode - Storage Only</h4>
                                     <p style="margin: 0 0 16px 0; color: #424242; font-size: 14px; line-height: 1.6;">
-                                        Messages are received and stored in your database (<strong>PostgreSQL + MongoDB</strong>) but <strong>NOT routed</strong> to any external system.
+                                        Messages are received and stored in your database (<strong>PostgreSQL</strong>) but <strong>NOT routed</strong> to any external system.
                                     </p>
                                     <div style="background: white; padding: 16px; border-radius: 8px; border-left: 4px solid #4caf50;">
                                         <strong style="color: #2e7d32; display: block; margin-bottom: 8px;">✅ Perfect for:</strong>
@@ -1484,8 +1473,8 @@ class WizardView extends EventTarget {
         return `
             <div class="wizard-step-content" data-step="3">
                 <div class="wizard-step-header">
-                    <h3>🔄 HL7 to FHIR Mapping Configuration</h3>
-                    <p>Review and customize field mappings between HL7 segments and FHIR resources</p>
+                    <h3>🔄 ${data.transformationFlow === 'fhir_receiver' ? 'Processing Configuration' : 'HL7 to FHIR Mapping Configuration'}</h3>
+                    <p>${data.transformationFlow === 'fhir_receiver' ? 'Configure processing options for received messages' : 'Review and customize field mappings between HL7 segments and FHIR resources'}</p>
                 </div>
 
                 <div class="wizard-form">
@@ -2367,8 +2356,8 @@ class WizardView extends EventTarget {
         return `
             <div class="wizard-step-content" data-step="5">
                 <div class="wizard-step-header">
-                    <h3>HL7 to FHIR Mapping</h3>
-                    <p>Configure how HL7 messages are transformed to FHIR resources</p>
+                    <h3>${data.transformationFlow === 'fhir_receiver' ? 'Message Mapping' : 'HL7 to FHIR Mapping'}</h3>
+                    <p>${data.transformationFlow === 'fhir_receiver' ? 'Configure how received messages are processed and stored' : 'Configure how HL7 messages are transformed to FHIR resources'}</p>
                 </div>
 
                 <div class="wizard-form">
@@ -4108,7 +4097,7 @@ class WizardView extends EventTarget {
                         <div class="empty-state">
                             <span class="empty-icon">📋</span>
                             <p>No mappings defined yet</p>
-                            <p class="text-muted">Add mappings to transform HL7 to FHIR</p>
+                            <p class="text-muted">Add mappings to configure message transformation</p>
                         </div>
                     </td>
                 </tr>
@@ -4556,6 +4545,69 @@ PV1|1|I|ICU^101^1|||DOC123^Smith^Jane|||EMERGENCY|||
     }
 
     /**
+     * Mount ConnectorConfigBuilder (inbound) inside wizard step 1.
+     * Replaces the old hardcoded sourceConnectivity dropdown + sourceConfigPanel.
+     */
+    mountInboundConnectorBuilder(container) {
+        const builderEl = container.querySelector('#wizardInboundConnectorContainer');
+        if (!builderEl) return;
+
+        if (typeof ConnectorConfigBuilder === 'undefined') {
+            console.warn('[WizardView] ConnectorConfigBuilder not loaded — falling back to legacy connectivity UI');
+            return;
+        }
+
+        try {
+            // Destroy any previous instance
+            if (this.inboundBuilder) {
+                try { this.inboundBuilder.destroy(); } catch (_) {}
+                this.inboundBuilder = null;
+            }
+
+            const existingConfig = this.controller?.model?.data?.sourceConnectorConfig || {};
+            this.inboundBuilder = new ConnectorConfigBuilder(builderEl, existingConfig, 'inbound');
+            this.inboundBuilder.init();
+
+            // Propagate connector type changes into wizard model for summary/validation
+            builderEl.addEventListener('change', () => {
+                if (!this.inboundBuilder) return;
+                try {
+                    const connectorCfg = this.inboundBuilder.getConfig();
+                    const connType = connectorCfg.connectorType || '';
+                    this.dispatchEvent(new CustomEvent('fieldChange', {
+                        detail: {
+                            field: 'sourceConnectorConfig',
+                            value: { ...connectorCfg }
+                        }
+                    }));
+                    // Keep legacy sourceConnectivity string in sync for validation / summary
+                    this.dispatchEvent(new CustomEvent('fieldChange', {
+                        detail: { field: 'sourceConnectivity', value: this._connectorTypeToLegacy(connType) }
+                    }));
+                } catch (err) {
+                    console.warn('[WizardView] ConnectorConfigBuilder change handler error:', err);
+                }
+            });
+        } catch (err) {
+            console.error('[WizardView] Failed to mount ConnectorConfigBuilder:', err);
+            this.inboundBuilder = null;
+        }
+    }
+
+    /** Map a full connector type name (e.g. 'tcp_mllp_inbound') to a legacy shorthand */
+    _connectorTypeToLegacy(typeName) {
+        if (!typeName) return '';
+        if (typeName.includes('mllp') || typeName.includes('tcp')) return 'tcp';
+        if (typeName.includes('http') || typeName.includes('fhir') || typeName.includes('rest')) return 'http';
+        if (typeName.includes('file') || typeName.includes('sftp') || typeName.includes('ftp')) return 'file';
+        if (typeName.includes('database') || typeName.includes('postgresql') ||
+            typeName.includes('mysql') || typeName.includes('mongo') ||
+            typeName.includes('redis') || typeName.includes('oracle')) return 'database';
+        if (typeName.includes('kafka') || typeName.includes('rabbitmq') || typeName.includes('mq')) return 'mq';
+        return typeName;
+    }
+
+    /**
      * Setup Step 1 event listeners
      */
     setupStep1Listeners(container) {
@@ -4628,38 +4680,9 @@ PV1|1|I|ICU^101^1|||DOC123^Smith^Jane|||EMERGENCY|||
             });
         }
 
-        // Source Connectivity selector - re-render panel when changed
-        const sourceConnectivitySelect = container.querySelector('#sourceConnectivity');
-        if (sourceConnectivitySelect) {
-            sourceConnectivitySelect.addEventListener('change', (e) => {
-                console.log('🔄 Source connectivity changed:', e.target.value);
-                this.updateSourceConfigPanel(container);
-
-                this.dispatchEvent(new CustomEvent('fieldChange', {
-                    detail: { field: 'sourceConnectivity', value: e.target.value }
-                }));
-            });
-            console.log('✅ Source connectivity selector listener attached');
-        }
-
-        // HTTP Authentication Type selector - update auth details panel dynamically
-        const httpAuthTypeSelect = container.querySelector('#httpAuthType');
-        if (httpAuthTypeSelect) {
-            httpAuthTypeSelect.addEventListener('change', (e) => {
-                const authType = e.target.value;
-                console.log('🔐 HTTP auth type changed:', authType);
-
-                const authDetailsPanel = container.querySelector('#httpAuthDetails');
-                if (authDetailsPanel) {
-                    authDetailsPanel.innerHTML = this.getHttpAuthDetailsPanel(authType, {});
-                }
-
-                this.dispatchEvent(new CustomEvent('fieldChange', {
-                    detail: { field: 'httpAuthType', value: authType }
-                }));
-            });
-            console.log('✅ HTTP auth type selector listener attached');
-        }
+        // Mount ConnectorConfigBuilder for source (inbound) connectivity
+        // This replaces the old hardcoded sourceConnectivity dropdown + sourceConfigPanel
+        this.mountInboundConnectorBuilder(container);
 
         // Transformation Flow selector
         const transformationFlowSelect = container.querySelector('#transformationFlow');
@@ -5465,6 +5488,21 @@ PV1|1|I|ICU^101^1|||DOC123^Smith^Jane|||EMERGENCY|||
         const targetType = this.container.querySelector('#targetType')?.value;
         if (targetType) data.targetType = targetType;
 
+        // Collect inbound connector config from ConnectorConfigBuilder if available
+        if (this.inboundBuilder) {
+            try {
+                const connectorCfg = this.inboundBuilder.getConfig();
+                data.sourceConnectorConfig = { ...connectorCfg };
+                data.sourceConnectivity = this._connectorTypeToLegacy(connectorCfg.connectorType || '');
+                // Merge low-level host/port into sourceConfig for backward compat
+                if (connectorCfg.config) {
+                    data.sourceConfig = { ...data.sourceConfig, ...connectorCfg.config };
+                }
+            } catch (err) {
+                console.warn('[WizardView] Error collecting connector config:', err);
+            }
+        }
+
         console.log('📝 Synced form values via InterfaceConfigComponents:', data);
 
         // Update model data (dispatch event for async handling)
@@ -5494,22 +5532,34 @@ PV1|1|I|ICU^101^1|||DOC123^Smith^Jane|||EMERGENCY|||
 
         // Source Configuration
         const sourceType = this.container.querySelector('#sourceType')?.value;
-        const sourcePort = this.container.querySelector('#sourcePort')?.value;
-        const sourceHost = this.container.querySelector('#sourceHost')?.value;
         const transformationFlow = this.container.querySelector('#transformationFlow')?.value;
 
         if (sourceType !== undefined) data.sourceType = sourceType;
-        if (sourceConnectivity !== undefined) data.sourceConnectivity = sourceConnectivity;
         if (transformationFlow !== undefined) data.transformationFlow = transformationFlow;
 
-        if (sourcePort || sourceHost) {
-            data.sourceConfig = data.sourceConfig || {};
-            if (sourcePort) data.sourceConfig.port = parseInt(sourcePort);
-            if (sourceHost) data.sourceConfig.host = sourceHost;
+        // Use ConnectorConfigBuilder output when available
+        if (this.inboundBuilder) {
+            this.inboundBuilder.collectConfig();
+            data.sourceConnectorConfig = { ...this.inboundBuilder.config };
+            const ct = this.inboundBuilder.config.connectorType || '';
+            data.sourceConnectivity = this._connectorTypeToLegacy(ct);
+            if (this.inboundBuilder.config.config) {
+                data.sourceConfig = { ...this.inboundBuilder.config.config };
+            }
+        } else {
+            // Legacy fallback
+            const sourcePort = this.container.querySelector('#sourcePort')?.value;
+            const sourceHost = this.container.querySelector('#sourceHost')?.value;
+            if (sourceConnectivity !== undefined) data.sourceConnectivity = sourceConnectivity;
+            if (sourcePort || sourceHost) {
+                data.sourceConfig = data.sourceConfig || {};
+                if (sourcePort) data.sourceConfig.port = parseInt(sourcePort);
+                if (sourceHost) data.sourceConfig.host = sourceHost;
+            }
         }
 
-        // Database Connectivity
-        if (sourceConnectivity === 'database') {
+        // Database Connectivity (legacy path only, ConnectorConfigBuilder handles this natively)
+        if (!this.inboundBuilder && sourceConnectivity === 'database') {
             data.sourceConfig = data.sourceConfig || {};
             const fields = ['sourceDbType:db_type', 'sourceHost:host', 'sourcePort:port', 'sourceDatabase:database',
                            'sourceUsername:username', 'sourcePassword:password', 'sourceSslMode:ssl_mode',
@@ -5598,13 +5648,13 @@ PV1|1|I|ICU^101^1|||DOC123^Smith^Jane|||EMERGENCY|||
         const nameInput = this.container.querySelector('#interfaceName');
         const name = nameInput?.value?.trim();
 
-        // Check basic requirements
         const hasValidName = name && name.length >= 3;
-
-        // Check for duplicate (if we've already checked this name)
         const noDuplicate = !this.isDuplicateName;
 
-        return hasValidName && noDuplicate;
+        const flowSelect = this.container.querySelector('#transformationFlow');
+        const hasFlow = !!(flowSelect?.value);
+
+        return hasValidName && noDuplicate && hasFlow;
     }
 
     /**

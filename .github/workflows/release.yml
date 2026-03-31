@@ -1,0 +1,308 @@
+name: Release — Build and Publish Installers
+
+# Triggered when a version tag is pushed: git tag v1.0.0 && git push --tags
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version tag (e.g. v1.0.0)'
+        required: true
+        default: 'v0.0.0-test'
+
+env:
+  GO_VERSION: '1.21'
+  NODE_VERSION: '20'
+
+jobs:
+  # ── Job 1: Build go-api binaries ─────────────────────────────────────────────
+  build-go-api:
+    name: Build go-api binaries
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+            output: go-api
+          - goos: linux
+            goarch: arm64
+            output: go-api-arm64
+          - goos: windows
+            goarch: amd64
+            output: go-api.exe
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Build go-api (${{ matrix.goos }}/${{ matrix.goarch }})
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: '0'
+        run: |
+          go build \
+            -ldflags "-s -w -X main.version=${{ github.ref_name || inputs.version }}" \
+            -o dist/${{ matrix.output }} \
+            .
+
+      - name: Upload go-api artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: go-api-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: dist/${{ matrix.output }}
+          retention-days: 1
+
+  # ── Job 2: Package app bundles ────────────────────────────────────────────────
+  build-app-bundles:
+    name: Package app bundles
+    runs-on: ubuntu-latest
+    needs: build-go-api
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Download go-api (Linux amd64)
+        uses: actions/download-artifact@v4
+        with:
+          name: go-api-linux-amd64
+          path: dist-go/linux-amd64/
+
+      - name: Download go-api (Linux arm64)
+        uses: actions/download-artifact@v4
+        with:
+          name: go-api-linux-arm64
+          path: dist-go/linux-arm64/
+
+      - name: Download go-api (Windows)
+        uses: actions/download-artifact@v4
+        with:
+          name: go-api-windows-amd64
+          path: dist-go/windows-amd64/
+
+      - name: Make go-api binaries executable
+        run: |
+          chmod +x dist-go/linux-amd64/go-api
+          chmod +x dist-go/linux-arm64/go-api-arm64
+
+      # ── Identify app source files to bundle ──────────────────────────────────
+      # Exclude: node_modules, .env, logs/, .git/, installer/, test files,
+      #          architecture docs, *.md (keep only essential ones)
+      - name: Package Linux amd64 bundle
+        run: |
+          VERSION="${{ github.ref_name || inputs.version }}"
+          BUNDLE_DIR="ezhealthkonnect-${VERSION}"
+          mkdir -p "${BUNDLE_DIR}"
+
+          # Copy app source
+          rsync -a \
+            --exclude='node_modules' \
+            --exclude='.git' \
+            --exclude='.env*' \
+            --exclude='logs/' \
+            --exclude='installer/' \
+            --exclude='architecture/' \
+            --exclude='docs/' \
+            --exclude='connectivity/' \
+            --exclude='tests/' \
+            --exclude='*.test.js' \
+            --exclude='go-api' \
+            --exclude='go-api-linux' \
+            --exclude='go-api.exe' \
+            --exclude='.github/' \
+            --exclude='dist/' \
+            --exclude='dist-go/' \
+            . "${BUNDLE_DIR}/"
+
+          # Include go-api binary
+          cp dist-go/linux-amd64/go-api "${BUNDLE_DIR}/go-api"
+          chmod +x "${BUNDLE_DIR}/go-api"
+
+          # Package
+          tar -czf "ezhealthkonnect-linux-amd64.tar.gz" "${BUNDLE_DIR}/"
+          echo "Linux amd64 bundle: $(du -sh ezhealthkonnect-linux-amd64.tar.gz | cut -f1)"
+
+      - name: Package Linux arm64 bundle
+        run: |
+          VERSION="${{ github.ref_name || inputs.version }}"
+          BUNDLE_DIR="ezhealthkonnect-${VERSION}"
+
+          # Swap go-api binary for arm64
+          cp dist-go/linux-arm64/go-api-arm64 "${BUNDLE_DIR}/go-api"
+          chmod +x "${BUNDLE_DIR}/go-api"
+
+          tar -czf "ezhealthkonnect-linux-arm64.tar.gz" "${BUNDLE_DIR}/"
+          echo "Linux arm64 bundle: $(du -sh ezhealthkonnect-linux-arm64.tar.gz | cut -f1)"
+
+      - name: Package Windows bundle
+        run: |
+          VERSION="${{ github.ref_name || inputs.version }}"
+          BUNDLE_DIR="ezhealthkonnect-${VERSION}"
+
+          # Swap go-api binary for Windows
+          cp dist-go/windows-amd64/go-api.exe "${BUNDLE_DIR}/go-api.exe"
+          rm -f "${BUNDLE_DIR}/go-api"  # remove linux binary
+
+          zip -r "ezhealthkonnect-windows-amd64.zip" "${BUNDLE_DIR}/" -q
+          echo "Windows bundle: $(du -sh ezhealthkonnect-windows-amd64.zip | cut -f1)"
+
+      - name: Upload app bundles
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-bundles
+          path: |
+            ezhealthkonnect-linux-amd64.tar.gz
+            ezhealthkonnect-linux-arm64.tar.gz
+            ezhealthkonnect-windows-amd64.zip
+          retention-days: 1
+
+  # ── Job 3: Build installer binaries ──────────────────────────────────────────
+  build-installers:
+    name: Build installer binaries
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: installer/go.sum
+
+      - name: Build Windows installer (.exe)
+        env:
+          GOOS: windows
+          GOARCH: amd64
+          CGO_ENABLED: '0'
+        run: |
+          cd installer
+          go build \
+            -ldflags "-s -w -X main.version=${{ github.ref_name || inputs.version }}" \
+            -o ../dist/ezhealthkonnect-installer.exe \
+            .
+
+      - name: Build Linux installer
+        env:
+          GOOS: linux
+          GOARCH: amd64
+          CGO_ENABLED: '0'
+        run: |
+          cd installer
+          go build \
+            -ldflags "-s -w -X main.version=${{ github.ref_name || inputs.version }}" \
+            -o ../dist/ezhealthkonnect-installer-linux \
+            .
+          chmod +x ../dist/ezhealthkonnect-installer-linux
+
+      - name: Copy install.sh
+        run: cp installer/install.sh dist/install.sh
+
+      - name: Upload installer artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: installers
+          path: dist/
+          retention-days: 1
+
+  # ── Job 4: Create GitHub Release ─────────────────────────────────────────────
+  release:
+    name: Publish GitHub Release
+    runs-on: ubuntu-latest
+    needs: [build-app-bundles, build-installers]
+    permissions:
+      contents: write   # needed to create releases
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets/
+
+      - name: List release assets
+        run: find release-assets/ -type f | sort
+
+      - name: Create checksums
+        working-directory: release-assets
+        run: |
+          find . -type f \( \
+            -name "*.exe" -o \
+            -name "*.tar.gz" -o \
+            -name "*.zip" -o \
+            -name "install.sh" -o \
+            -name "*-linux" \
+          \) | sort | xargs sha256sum > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: Generate release notes
+        id: notes
+        run: |
+          VERSION="${{ github.ref_name || inputs.version }}"
+          cat > release-notes.md << 'NOTES'
+          ## Installation
+
+          ### Linux — Standalone (no Docker)
+          ```bash
+          curl -fsSL https://github.com/ezinteropsolutions/ezhealthkonnect/releases/latest/download/install.sh | sudo bash
+          ```
+          Or with options:
+          ```bash
+          sudo bash install.sh --port 3000 --db-password yourpassword
+          ```
+
+          ### Windows — Setup Wizard
+          1. Download `ezhealthkonnect-installer.exe`
+          2. Run it (no admin required to launch — admin is requested only when registering the service)
+          3. Choose **Docker Edition** or **Standalone Edition** in the wizard
+
+          ### Linux — Docker Edition
+          1. Download `ezhealthkonnect-installer-linux`
+          2. Run: `chmod +x ezhealthkonnect-installer-linux && ./ezhealthkonnect-installer-linux`
+          3. A browser window will open (or navigate to the URL printed in terminal)
+
+          ---
+
+          ## Release Assets
+
+          | File | Description |
+          |------|-------------|
+          | `ezhealthkonnect-installer.exe` | Windows setup wizard (Docker + Standalone) |
+          | `ezhealthkonnect-installer-linux` | Linux Docker Edition wizard |
+          | `install.sh` | Linux Standalone one-liner script |
+          | `ezhealthkonnect-linux-amd64.tar.gz` | App bundle for Linux standalone install |
+          | `ezhealthkonnect-linux-arm64.tar.gz` | App bundle for Linux ARM64 (e.g. Raspberry Pi, AWS Graviton) |
+          | `ezhealthkonnect-windows-amd64.zip` | App bundle for Windows standalone install |
+          | `SHA256SUMS.txt` | SHA-256 checksums for all files |
+
+          NOTES
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "ezHealthKonnect ${{ github.ref_name || inputs.version }}"
+          body_path: release-notes.md
+          draft: false
+          prerelease: ${{ contains(github.ref_name, '-beta') || contains(github.ref_name, '-rc') || contains(github.ref_name, '-alpha') }}
+          files: |
+            release-assets/installers/ezhealthkonnect-installer.exe
+            release-assets/installers/ezhealthkonnect-installer-linux
+            release-assets/installers/install.sh
+            release-assets/app-bundles/ezhealthkonnect-linux-amd64.tar.gz
+            release-assets/app-bundles/ezhealthkonnect-linux-arm64.tar.gz
+            release-assets/app-bundles/ezhealthkonnect-windows-amd64.zip
+            release-assets/SHA256SUMS.txt

@@ -131,7 +131,9 @@ class ConnectorConfigBuilder extends BaseStepConfigBuilder {
 
         // Direction-specific fields in Connection panel (inbound only - timeout)
         // Outbound payload source / content-type moved to dedicated Payload tab
-        if (this.direction === 'inbound') {
+        // FHIR connectors skip this — they expose requestTimeoutSeconds in their own Advanced section
+        const isFHIRConnector = (this.config.connectorType || '').includes('fhir');
+        if (this.direction === 'inbound' && !isFHIRConnector) {
             const extraFields = this.createElement('div', { class: 'connector-extra-fields' });
             extraFields.innerHTML = `
                 <div class="form-group">
@@ -757,6 +759,232 @@ class ConnectorConfigBuilder extends BaseStepConfigBuilder {
             .connector-quickpick-btn i {
                 font-size: 11px;
             }
+
+            /* ── FHIR No-Code UX ────────────────────────────────────────────── */
+
+            .fhir-schema-notice {
+                display: flex;
+                align-items: center;
+                gap: 10px;
+                padding: 10px 14px;
+                background: linear-gradient(135deg, #eff6ff 0%, #f0f9ff 100%);
+                border: 1px solid #bfdbfe;
+                border-left: 3px solid #1d4ed8;
+                border-radius: 7px;
+                margin-bottom: 14px;
+                font-size: 12px;
+            }
+            .fhir-schema-notice-icon { color: #1d4ed8; font-size: 15px; flex-shrink: 0; }
+            .fhir-schema-notice-body { flex: 1; color: #1e3a8a; line-height: 1.5; }
+            .fhir-schema-notice-body strong { color: #1e3a8a; }
+            .fhir-schema-notice-body a { color: #1d4ed8; font-weight: 600; text-decoration: none; margin-left: 6px; }
+            .fhir-schema-notice-body a:hover { text-decoration: underline; }
+            .fhir-schema-notice-dismiss {
+                background: none; border: none; color: #94a3b8;
+                cursor: pointer; font-size: 12px; padding: 2px; line-height: 1; flex-shrink: 0;
+            }
+            .fhir-schema-notice-dismiss:hover { color: #475569; }
+
+            /* Section cards */
+            .fhir-section {
+                border: 1px solid #e2e8f0;
+                border-radius: 10px;
+                margin-bottom: 10px;
+                overflow: hidden;
+            }
+            .fhir-section-header {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                padding: 11px 14px;
+                background: linear-gradient(90deg, #f8fafc 0%, #f1f5f9 100%);
+                cursor: pointer;
+                user-select: none;
+                border-bottom: 1px solid #e2e8f0;
+                transition: background 0.15s;
+            }
+            .fhir-section-header:hover { background: linear-gradient(90deg, #f1f5f9 0%, #e8edf5 100%); }
+            .fhir-section.collapsed .fhir-section-header { border-bottom-color: transparent; }
+            .fhir-section-header-left { display: flex; align-items: center; gap: 8px; }
+            .fhir-section-header-right { display: flex; align-items: center; gap: 8px; }
+            .fhir-section-icon { color: #1e3a8a; font-size: 12px; width: 15px; text-align: center; }
+            .fhir-section-title { font-weight: 600; font-size: 13px; color: #1e293b; }
+            .fhir-section-summary { font-size: 11px; color: #64748b; font-weight: 500; }
+            .fhir-section-chevron { color: #94a3b8; font-size: 11px; transition: transform 0.2s; }
+            .fhir-section.collapsed .fhir-section-chevron { transform: rotate(-90deg); }
+            .fhir-section-body { padding: 14px; }
+            .fhir-section.collapsed .fhir-section-body { display: none; }
+
+            /* Field helpers */
+            .fhir-field-label { font-weight: 600; font-size: 12px; color: #374151; margin-bottom: 5px; display: block; }
+            .fhir-required { color: #ef4444; }
+            .fhir-hint { font-size: 11px; color: #94a3b8; margin-top: 3px; display: block; line-height: 1.4; }
+            .fhir-field-row { display: flex; gap: 10px; }
+            .fhir-field-row .fhir-field { flex: 1; min-width: 0; }
+
+            /* Intent cards — inbound "what will senders do?" */
+            .fhir-intent-grid {
+                display: grid;
+                grid-template-columns: repeat(3, 1fr);
+                gap: 8px;
+                margin-top: 6px;
+            }
+            .fhir-intent-card {
+                border: 2px solid #e2e8f0;
+                border-radius: 8px;
+                padding: 11px 8px;
+                cursor: pointer;
+                transition: border-color 0.15s, background 0.15s, box-shadow 0.15s;
+                background: #fff;
+                display: block;
+            }
+            .fhir-intent-card input[type="radio"] { display: none; }
+            .fhir-intent-card:hover { border-color: #93c5fd; background: #f0f7ff; }
+            .fhir-intent-card.selected {
+                border-color: #1e3a8a;
+                background: linear-gradient(135deg, #eff6ff 0%, #f0f4ff 100%);
+                box-shadow: 0 0 0 1px #1e3a8a;
+            }
+            .fhir-intent-card.selected .fhir-intent-body i { color: #1e3a8a; }
+            .fhir-intent-body { display: flex; flex-direction: column; align-items: center; gap: 5px; text-align: center; }
+            .fhir-intent-body i { font-size: 18px; color: #94a3b8; transition: color 0.15s; }
+            .fhir-intent-title { font-size: 12px; font-weight: 600; color: #1e293b; }
+            .fhir-intent-sub { font-size: 10px; color: #94a3b8; line-height: 1.3; }
+
+            /* Bundle mode toggle */
+            .fhir-bundle-toggle { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
+            .fhir-bundle-option {
+                border: 2px solid #e2e8f0;
+                border-radius: 8px;
+                padding: 10px 12px;
+                cursor: pointer;
+                transition: border-color 0.15s, background 0.15s;
+                background: #fff;
+                display: block;
+            }
+            .fhir-bundle-option input[type="radio"] { display: none; }
+            .fhir-bundle-option:hover { border-color: #93c5fd; background: #f0f7ff; }
+            .fhir-bundle-option.selected {
+                border-color: #1e3a8a;
+                background: linear-gradient(135deg, #eff6ff 0%, #f0f4ff 100%);
+            }
+            .fhir-bundle-body { display: flex; align-items: center; gap: 10px; }
+            .fhir-bundle-body > i { font-size: 16px; color: #94a3b8; width: 18px; text-align: center; flex-shrink: 0; }
+            .fhir-bundle-option.selected .fhir-bundle-body > i { color: #1e3a8a; }
+            .fhir-bundle-title { font-size: 12px; font-weight: 600; color: #1e293b; }
+            .fhir-bundle-sub { font-size: 11px; color: #64748b; line-height: 1.3; margin-top: 2px; }
+
+            /* Routing info callout */
+            .fhir-routing-info {
+                display: flex;
+                align-items: flex-start;
+                gap: 8px;
+                padding: 10px 12px;
+                background: #f0fdf4;
+                border: 1px solid #bbf7d0;
+                border-radius: 6px;
+                margin-top: 14px;
+                font-size: 12px;
+                color: #166534;
+                line-height: 1.5;
+            }
+            .fhir-routing-info i { color: #16a34a; font-size: 13px; flex-shrink: 0; margin-top: 1px; }
+            .fhir-routing-info code {
+                background: #dcfce7; color: #14532d;
+                padding: 1px 4px; border-radius: 3px; font-size: 11px;
+            }
+
+            /* Auth credential fields */
+            .fhir-auth-cred { margin-top: 4px; }
+
+            /* Outbound send-mode cards */
+            .fhir-send-mode-grid { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
+            .fhir-send-card {
+                border: 2px solid #e2e8f0;
+                border-radius: 8px;
+                padding: 10px 12px;
+                cursor: pointer;
+                transition: border-color 0.15s, background 0.15s, box-shadow 0.15s;
+                background: #fff;
+                display: block;
+            }
+            .fhir-send-card input[type="radio"] { display: none; }
+            .fhir-send-card:hover { border-color: #93c5fd; background: #f0f7ff; }
+            .fhir-send-card.selected {
+                border-color: #1e3a8a;
+                background: linear-gradient(135deg, #eff6ff 0%, #f0f4ff 100%);
+                box-shadow: 0 0 0 1px #1e3a8a;
+            }
+            .fhir-send-card-body { display: flex; align-items: center; gap: 12px; }
+            .fhir-send-card-icon {
+                width: 34px; height: 34px;
+                background: #dbeafe; border-radius: 7px;
+                display: flex; align-items: center; justify-content: center;
+                color: #1d4ed8; font-size: 14px; flex-shrink: 0;
+                transition: background 0.15s, color 0.15s;
+            }
+            .fhir-send-card.selected .fhir-send-card-icon {
+                background: linear-gradient(135deg, #1e3a8a 0%, #1d4ed8 100%);
+                color: #fff;
+            }
+            .fhir-send-card-title { font-size: 13px; font-weight: 600; color: #1e293b; }
+            .fhir-send-card-sub { font-size: 11px; color: #64748b; margin-top: 1px; line-height: 1.3; }
+
+            /* URL preview — dark terminal-style card */
+            .fhir-url-preview-card {
+                display: flex;
+                align-items: center;
+                gap: 10px;
+                padding: 11px 14px;
+                background: #0f172a;
+                border-radius: 8px;
+                font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+                font-size: 12px;
+                border: 1px solid #1e293b;
+            }
+            .fhir-url-preview-verb {
+                font-weight: 700;
+                font-size: 10px;
+                padding: 3px 7px;
+                border-radius: 4px;
+                flex-shrink: 0;
+                letter-spacing: 0.5px;
+            }
+            .fhir-verb-post   { background: #1d4ed8; color: #fff; }
+            .fhir-verb-put    { background: #b45309; color: #fff; }
+            .fhir-verb-get    { background: #047857; color: #fff; }
+            .fhir-verb-delete { background: #b91c1c; color: #fff; }
+            .fhir-url-preview-url { flex: 1; color: #7dd3fc; word-break: break-all; min-width: 0; }
+            .fhir-url-copy-btn {
+                background: none; border: none; color: #334155; cursor: pointer;
+                font-size: 13px; padding: 2px; flex-shrink: 0; transition: color 0.15s;
+            }
+            .fhir-url-copy-btn:hover { color: #cbd5e1; }
+            .fhir-url-preview-note { font-size: 11px; color: #64748b; margin-top: 5px; font-style: italic; }
+
+            /* Operations list */
+            .fhir-ops-list { display: flex; flex-direction: column; gap: 4px; }
+            .fhir-ops-item {
+                display: flex;
+                align-items: center;
+                gap: 10px;
+                padding: 8px 10px;
+                border: 1px solid #e2e8f0;
+                border-radius: 7px;
+                cursor: pointer;
+                transition: border-color 0.15s, background 0.15s;
+                background: #fff;
+            }
+            .fhir-ops-item input[type="radio"] { display: none; }
+            .fhir-ops-item:hover { border-color: #93c5fd; background: #f0f7ff; }
+            .fhir-ops-item:has(input:checked) {
+                border-color: #1e3a8a;
+                background: linear-gradient(135deg, #eff6ff 0%, #f0f4ff 100%);
+            }
+            .fhir-ops-icon { color: #94a3b8; font-size: 12px; width: 15px; text-align: center; flex-shrink: 0; }
+            .fhir-ops-item:has(input:checked) .fhir-ops-icon { color: #1e3a8a; }
+            .fhir-ops-title { font-size: 12px; font-weight: 600; color: #1e293b; }
+            .fhir-ops-sub { font-size: 11px; color: #64748b; line-height: 1.3; margin-top: 1px; }
         `;
         document.head.appendChild(style);
     }
@@ -783,8 +1011,6 @@ class ConnectorConfigBuilder extends BaseStepConfigBuilder {
                 // HTTP generic legacy
                 'http_rest_inbound': 'http_rest',
                 'http_rest':         'http_rest_inbound',
-                // FHIR HTTP — canonical names only (fhir_r4_* removed in V79)
-                'http_fhir_inbound':  'http_rest_inbound',
             };
             const storedType = this.config.connectorType || '';
 
@@ -893,8 +1119,6 @@ class ConnectorConfigBuilder extends BaseStepConfigBuilder {
             // HTTP generic legacy
             'http_rest_inbound': 'http_rest',
             'http_rest':         'http_rest_inbound',
-            // FHIR HTTP — canonical names only (fhir_r4_* removed in V79)
-            'http_fhir_inbound':  'http_rest_inbound',
         };
         this.selectedType = this.connectorTypes.find(ct => ct.type_name === typeName)
             || this.connectorTypes.find(ct => ct.type_name === TYPE_ALIASES[typeName]);
@@ -944,6 +1168,12 @@ class ConnectorConfigBuilder extends BaseStepConfigBuilder {
 
     renderDynamicConfig(container) {
         container.innerHTML = '';
+
+        // FHIR connectors get a dedicated no-code UX — skip generic schema rendering
+        if ((this.selectedType?.type_name || '').includes('fhir')) {
+            this._renderFHIRConnectorUI(container);
+            return;
+        }
 
         if (!this.configSchema || !this.configSchema.properties) {
             container.innerHTML = '<div class="connector-no-config">No configuration required for this connector</div>';
@@ -1232,18 +1462,9 @@ class ConnectorConfigBuilder extends BaseStepConfigBuilder {
             }
         }
 
-        // FHIR connectors: dynamic auth + smart pickers + URL preview
+        // FHIR connectors: fully handled by _renderFHIRConnectorUI (via renderDynamicConfig)
         const isFHIR = typeName.includes('fhir');
-        if (isFHIR) {
-            this._applyFHIRAuthDynamics(container, existingConfig);
-            if (this.direction === 'outbound') {
-                this._enhanceFHIRResourceTypeField(container, existingConfig);
-                this._enhanceFHIROperationField(container, existingConfig);
-                this._addFHIREndpointPreview(container, existingConfig);
-            } else {
-                this._addFHIRInboundRoutingHint(container);
-            }
-        }
+        if (isFHIR) return;
 
         // OAuth2 only for HTTP connectors when authentication_type is 'oauth2'
         if (isHTTP && typeof OAuth2ConfigBuilder !== 'undefined') {
@@ -1325,6 +1546,24 @@ class ConnectorConfigBuilder extends BaseStepConfigBuilder {
                     ? this.embeddedBuilders.headers.getHeaders()
                     : {};
             config.headers = headerConfig;
+        }
+
+        // Collect FHIR inbound TLS config (uses custom IDs, not connector-config-field)
+        const tlsEnabledEl = this.container.querySelector('#fhirTLSEnabled');
+        if (tlsEnabledEl) {
+            const tls = { enabled: tlsEnabledEl.checked };
+            const certEl = this.container.querySelector('#fhirTLSCert');
+            const keyEl  = this.container.querySelector('#fhirTLSKey');
+            if (certEl?.value.trim()) tls.certFile = certEl.value.trim();
+            if (keyEl?.value.trim())  tls.keyFile  = keyEl.value.trim();
+            config.tls = tls;
+        }
+
+        // Collect FHIR inbound IP allowlist (one entry per line)
+        const ipEl = this.container.querySelector('#fhirAllowedIPs');
+        if (ipEl) {
+            const ips = ipEl.value.trim().split(/\s+/).filter(Boolean);
+            config.allowedIPs = ips;
         }
 
         // Collect ACK config from acknowledgment tab (inbound MLLP only)
@@ -1860,6 +2099,832 @@ class ConnectorConfigBuilder extends BaseStepConfigBuilder {
             <code>messageType</code> (e.g. <code>FHIR:Patient</code>, <code>FHIR:Bundle:transaction</code>).
         `;
         basicGroup.appendChild(hint);
+    }
+
+    // =========================================================================
+    // FHIR CONNECTOR — NO-CODE UX
+    // =========================================================================
+
+    _renderFHIRConnectorUI(container) {
+        if (this.direction === 'inbound') {
+            this._buildFHIRInboundUI(container);
+        } else {
+            this._buildFHIROutboundUI(container);
+        }
+    }
+
+    /** Dismissible blue notice nudging users to install schema packages. */
+    _buildFHIRSchemaBanner() {
+        if (sessionStorage.getItem('fhir-schema-notice-dismissed')) return null;
+        const banner = document.createElement('div');
+        banner.className = 'fhir-schema-notice';
+        banner.innerHTML = `
+            <i class="fas fa-cube fhir-schema-notice-icon"></i>
+            <div class="fhir-schema-notice-body">
+                <strong>Schema packages</strong> power FHIR validation and rich field mapping.
+                <a href="/settings.html#section-schemas" target="_blank">
+                    Install schemas <i class="fas fa-external-link-alt" style="font-size:10px"></i>
+                </a>
+            </div>
+            <button type="button" class="fhir-schema-notice-dismiss" title="Dismiss">
+                <i class="fas fa-times"></i>
+            </button>
+        `;
+        banner.querySelector('.fhir-schema-notice-dismiss').addEventListener('click', () => {
+            banner.style.display = 'none';
+            sessionStorage.setItem('fhir-schema-notice-dismissed', '1');
+        });
+        return banner;
+    }
+
+    /**
+     * Creates a collapsible section card used throughout the FHIR no-code UX.
+     * Returns a .fhir-section element with .fhir-section-body already wired for toggle.
+     */
+    _makeFHIRSection(title, iconClass, expanded) {
+        const section = document.createElement('div');
+        section.className = `fhir-section${expanded ? '' : ' collapsed'}`;
+        section.innerHTML = `
+            <div class="fhir-section-header">
+                <div class="fhir-section-header-left">
+                    <i class="${iconClass} fhir-section-icon"></i>
+                    <span class="fhir-section-title">${title}</span>
+                </div>
+                <div class="fhir-section-header-right">
+                    <span class="fhir-section-summary"></span>
+                    <i class="fas fa-chevron-down fhir-section-chevron"></i>
+                </div>
+            </div>
+            <div class="fhir-section-body"></div>
+        `;
+        section.querySelector('.fhir-section-header').addEventListener('click', () => {
+            section.classList.toggle('collapsed');
+        });
+        return section;
+    }
+
+    // ── FHIR version loader ───────────────────────────────────────────────────
+    // Fetches installed FHIR versions from /api/schemas/fhir/versions and
+    // populates the given <select>. Falls back to the current value only.
+    // Add a new FHIR version schema dir → it automatically appears here.
+
+    _loadFHIRVersions(selectEl, currentValue) {
+        if (!selectEl) return;
+
+        const VERSION_LABELS = { R4: 'R4', R5: 'R5', R6: 'R6', STU3: 'STU3', STU2: 'STU2' };
+
+        fetch('/api/schemas/fhir/versions')
+            .then(r => r.ok ? r.json() : Promise.reject(r.status))
+            .then(data => {
+                const versions = data.versions || [];
+                if (!versions.length) return; // keep existing fallback option
+
+                selectEl.innerHTML = '';
+                versions.forEach(v => {
+                    const opt = document.createElement('option');
+                    opt.value = v.value;
+                    opt.textContent = VERSION_LABELS[v.value] || v.value;
+                    if (v.value === currentValue) opt.selected = true;
+                    selectEl.appendChild(opt);
+                });
+
+                // If saved value isn't in the list, default to first available
+                if (!selectEl.value) selectEl.options[0].selected = true;
+
+                selectEl.addEventListener('change', () => this.onChange());
+            })
+            .catch(() => {
+                // API unavailable — keep the single fallback option already rendered
+            });
+    }
+
+    // ── FHIR INBOUND ─────────────────────────────────────────────────────────
+
+    _buildFHIRInboundUI(container) {
+        const cfg = this.config.config || {};
+        const esc = s => this.escapeHtml(String(s ?? ''));
+
+        container.innerHTML = '';
+        const banner = this._buildFHIRSchemaBanner();
+        if (banner) container.appendChild(banner);
+
+        // ── Endpoint Setup ────────────────────────────────────────────────
+        const endSec = this._makeFHIRSection('Endpoint Setup', 'fas fa-server', true);
+        const endBody = endSec.querySelector('.fhir-section-body');
+
+        endBody.innerHTML = `
+            <div class="fhir-field-row">
+                <div class="fhir-field">
+                    <label class="fhir-field-label">Listen Port <span class="fhir-required">*</span></label>
+                    <input type="number" class="form-control form-control-sm connector-config-field"
+                           data-field="port" data-field-type="number"
+                           value="${esc(cfg.port || 2576)}" min="1" max="65535" placeholder="2576">
+                    <small class="fhir-hint">Port this FHIR endpoint listens on</small>
+                </div>
+                <div class="fhir-field">
+                    <label class="fhir-field-label">FHIR Version</label>
+                    <select class="form-control form-control-sm connector-config-field" data-field="fhirVersion" id="fhirVersionSelect">
+                        <option value="${esc(cfg.fhirVersion || 'R4')}" selected>${esc(cfg.fhirVersion || 'R4')}</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="fhir-field" style="margin-top:14px">
+                <label class="fhir-field-label">Which operations should this endpoint accept?</label>
+                <div class="fhir-intent-grid" id="fhirInboundIntentGrid">
+                    <label class="fhir-intent-card" data-methods='["POST","PUT","DELETE"]'>
+                        <input type="radio" name="fhir-inbound-intent" value="write">
+                        <div class="fhir-intent-body">
+                            <i class="fas fa-inbox"></i>
+                            <div class="fhir-intent-title">Receive writes</div>
+                            <div class="fhir-intent-sub">POST · PUT · DELETE</div>
+                        </div>
+                    </label>
+                    <label class="fhir-intent-card" data-methods='["GET"]'>
+                        <input type="radio" name="fhir-inbound-intent" value="read">
+                        <div class="fhir-intent-body">
+                            <i class="fas fa-search"></i>
+                            <div class="fhir-intent-title">Serve queries</div>
+                            <div class="fhir-intent-sub">GET · search</div>
+                        </div>
+                    </label>
+                    <label class="fhir-intent-card" data-methods='["GET","POST","PUT","PATCH","DELETE"]'>
+                        <input type="radio" name="fhir-inbound-intent" value="full">
+                        <div class="fhir-intent-body">
+                            <i class="fas fa-layer-group"></i>
+                            <div class="fhir-intent-title">Full FHIR API</div>
+                            <div class="fhir-intent-sub">All methods</div>
+                        </div>
+                    </label>
+                </div>
+                <input type="hidden" class="connector-config-field" data-field="allowedMethods"
+                       data-field-type="array" id="fhirAllowedMethodsHidden">
+            </div>
+
+            <div class="fhir-field" style="margin-top:14px">
+                <label class="fhir-field-label">When you receive a FHIR Bundle</label>
+                <div class="fhir-bundle-toggle">
+                    <label class="fhir-bundle-option">
+                        <input type="radio" name="fhir-bundle-mode" value="bundle_as_unit">
+                        <div class="fhir-bundle-body">
+                            <i class="fas fa-box"></i>
+                            <div>
+                                <div class="fhir-bundle-title">One message</div>
+                                <div class="fhir-bundle-sub">Process the whole Bundle together — best for transactions</div>
+                            </div>
+                        </div>
+                    </label>
+                    <label class="fhir-bundle-option">
+                        <input type="radio" name="fhir-bundle-mode" value="bundle_unwrap">
+                        <div class="fhir-bundle-body">
+                            <i class="fas fa-boxes"></i>
+                            <div>
+                                <div class="fhir-bundle-title">Split into resources</div>
+                                <div class="fhir-bundle-sub">Each Bundle entry becomes its own message — best for batch ingestion</div>
+                            </div>
+                        </div>
+                    </label>
+                </div>
+                <input type="hidden" class="connector-config-field" data-field="bundleMode" id="fhirBundleModeHidden">
+            </div>
+
+            <div class="fhir-routing-info">
+                <i class="fas fa-route"></i>
+                <div>
+                    <strong>Accepts all FHIR resource types.</strong>
+                    Use a <em>Switch / Case</em> step after this connector to branch by resource type
+                    (<code>FHIR:Patient</code>, <code>FHIR:Bundle:transaction</code>, …)
+                </div>
+            </div>
+        `;
+
+        container.appendChild(endSec);
+
+        // Populate FHIR version select dynamically from installed schemas
+        this._loadFHIRVersions(endBody.querySelector('#fhirVersionSelect'), cfg.fhirVersion || 'R4');
+
+        // Wire intent grid
+        const intentGrid    = endBody.querySelector('#fhirInboundIntentGrid');
+        const methodsHidden = endBody.querySelector('#fhirAllowedMethodsHidden');
+        const currMethods   = Array.isArray(cfg.allowedMethods) ? cfg.allowedMethods : ['GET','POST','PUT','PATCH','DELETE'];
+
+        const intentFromMethods = (m) => {
+            const s = new Set(m);
+            if (s.has('GET') && s.has('POST') && s.size >= 4) return 'full';
+            if (s.has('GET') && !s.has('POST')) return 'read';
+            return 'write';
+        };
+        const activeIntent = intentFromMethods(currMethods);
+        methodsHidden.value = currMethods.join(', ');
+
+        intentGrid.querySelectorAll('.fhir-intent-card').forEach(card => {
+            const radio = card.querySelector('input[type="radio"]');
+            if (radio.value === activeIntent) { radio.checked = true; card.classList.add('selected'); }
+            card.addEventListener('click', () => {
+                intentGrid.querySelectorAll('.fhir-intent-card').forEach(c => c.classList.remove('selected'));
+                card.classList.add('selected');
+                methodsHidden.value = JSON.parse(card.dataset.methods || '[]').join(', ');
+                this.onChange();
+            });
+        });
+
+        // Wire bundle mode
+        const bundleHidden = endBody.querySelector('#fhirBundleModeHidden');
+        const currBundle   = cfg.bundleMode || 'bundle_as_unit';
+        bundleHidden.value = currBundle;
+        endBody.querySelectorAll('input[name="fhir-bundle-mode"]').forEach(radio => {
+            if (radio.value === currBundle) { radio.checked = true; radio.closest('.fhir-bundle-option').classList.add('selected'); }
+            radio.addEventListener('change', () => {
+                endBody.querySelectorAll('.fhir-bundle-option').forEach(o => o.classList.remove('selected'));
+                radio.closest('.fhir-bundle-option').classList.add('selected');
+                bundleHidden.value = radio.value;
+                this.onChange();
+            });
+        });
+
+        endBody.querySelectorAll('.connector-config-field').forEach(el => {
+            el.addEventListener('input', () => this.onChange());
+            el.addEventListener('change', () => this.onChange());
+        });
+
+        // ── Security ──────────────────────────────────────────────────────
+        const secSec  = this._makeFHIRSection('Security', 'fas fa-shield-alt', false);
+        const secBody = secSec.querySelector('.fhir-section-body');
+        const authType = cfg.authType || 'none';
+
+        secBody.innerHTML = `
+            <div class="fhir-field">
+                <label class="fhir-field-label">Who can call this endpoint?</label>
+                <select class="form-control form-control-sm connector-config-field"
+                        data-field="authType" id="fhirInboundAuthSelect">
+                    <option value="none"    ${authType === 'none'    ? 'selected' : ''}>Anyone — no authentication</option>
+                    <option value="basic"   ${authType === 'basic'   ? 'selected' : ''}>Username &amp; Password</option>
+                    <option value="bearer"  ${authType === 'bearer'  ? 'selected' : ''}>Bearer Token</option>
+                    <option value="api_key" ${authType === 'api_key' ? 'selected' : ''}>API Key</option>
+                </select>
+            </div>
+            <div id="fhirInboundAuthCreds" style="margin-top:10px">
+                <div class="fhir-auth-cred" data-auth="basic">
+                    <label class="fhir-field-label" style="margin-top:8px">Username</label>
+                    <input type="text" class="form-control form-control-sm connector-config-field"
+                           data-field="username" value="${esc(cfg.username || '')}">
+                </div>
+                <div class="fhir-auth-cred" data-auth="basic">
+                    <label class="fhir-field-label" style="margin-top:8px">Password</label>
+                    <input type="password" class="form-control form-control-sm connector-config-field"
+                           data-field="password" value="${esc(cfg.password || '')}">
+                </div>
+                <div class="fhir-auth-cred" data-auth="bearer">
+                    <label class="fhir-field-label" style="margin-top:8px">Bearer Token</label>
+                    <input type="password" class="form-control form-control-sm connector-config-field"
+                           data-field="bearerToken" value="${esc(cfg.bearerToken || '')}">
+                </div>
+                <div class="fhir-auth-cred" data-auth="api_key">
+                    <label class="fhir-field-label" style="margin-top:8px">API Key</label>
+                    <input type="password" class="form-control form-control-sm connector-config-field"
+                           data-field="apiKey" value="${esc(cfg.apiKey || '')}">
+                </div>
+                <div class="fhir-auth-cred" data-auth="api_key">
+                    <label class="fhir-field-label" style="margin-top:8px">API Key Header</label>
+                    <input type="text" class="form-control form-control-sm connector-config-field"
+                           data-field="apiKeyHeader" value="${esc(cfg.apiKeyHeader || 'X-API-Key')}">
+                </div>
+            </div>
+        `;
+
+        const AUTH_LABELS = { none: 'None', basic: 'Username / Password', bearer: 'Bearer token', api_key: 'API key' };
+        const applyInboundAuth = (type) => {
+            secSec.querySelector('.fhir-section-summary').textContent = AUTH_LABELS[type] || type;
+            secBody.querySelectorAll('.fhir-auth-cred').forEach(el => {
+                el.style.display = el.dataset.auth === type ? '' : 'none';
+            });
+        };
+        applyInboundAuth(authType);
+        secBody.querySelector('#fhirInboundAuthSelect').addEventListener('change', e => { applyInboundAuth(e.target.value); this.onChange(); });
+        secBody.querySelectorAll('.connector-config-field').forEach(el => {
+            el.addEventListener('input', () => this.onChange());
+            el.addEventListener('change', () => this.onChange());
+        });
+        container.appendChild(secSec);
+
+        // ── Advanced ──────────────────────────────────────────────────────
+        const advSec  = this._makeFHIRSection('Advanced', 'fas fa-sliders-h', false);
+        const advBody = advSec.querySelector('.fhir-section-body');
+
+        advBody.innerHTML = `
+            <div class="fhir-field-row">
+                <div class="fhir-field">
+                    <label class="fhir-field-label">Base Path</label>
+                    <input type="text" class="form-control form-control-sm connector-config-field"
+                           data-field="basePath" value="${esc(cfg.basePath || '/fhir/r4')}" placeholder="/fhir/r4">
+                    <small class="fhir-hint">URL prefix for all resources on this connector</small>
+                </div>
+                <div class="fhir-field">
+                    <label class="fhir-field-label">Max Body Size (MB)</label>
+                    <input type="number" class="form-control form-control-sm connector-config-field"
+                           data-field="maxBodySizeMB" data-field-type="number"
+                           value="${esc(cfg.maxBodySizeMB || 10)}" min="1" max="500">
+                </div>
+            </div>
+            <div class="fhir-field-row" style="margin-top:10px">
+                <div class="fhir-field">
+                    <label class="fhir-field-label">Request Timeout (seconds)</label>
+                    <input type="number" class="form-control form-control-sm connector-config-field"
+                           data-field="requestTimeoutSeconds" data-field-type="number"
+                           value="${esc(cfg.requestTimeoutSeconds || 30)}" min="1" max="300">
+                </div>
+                <div class="fhir-field" style="display:flex;align-items:flex-end;padding-bottom:2px">
+                    <label style="display:flex;align-items:center;gap:7px;cursor:pointer;margin:0">
+                        <input type="checkbox" class="connector-config-field" data-field="enableCORS"
+                               data-field-type="boolean" ${cfg.enableCORS !== false ? 'checked' : ''}>
+                        <span class="fhir-field-label" style="margin:0">Enable CORS</span>
+                    </label>
+                    <small class="fhir-hint" style="display:block;margin-top:2px">Allow browser-based FHIR clients</small>
+                </div>
+            </div>
+        `;
+
+        advBody.querySelectorAll('.connector-config-field').forEach(el => {
+            el.addEventListener('input', () => this.onChange());
+            el.addEventListener('change', () => this.onChange());
+        });
+        container.appendChild(advSec);
+
+        // ── TLS / HTTPS ───────────────────────────────────────────────────
+        const tlsCfg   = cfg.tls || {};
+        const tlsSec   = this._makeFHIRSection('TLS / HTTPS', 'fas fa-lock', false);
+        const tlsBody  = tlsSec.querySelector('.fhir-section-body');
+        const tlsEnabled = tlsCfg.enabled === true;
+
+        tlsBody.innerHTML = `
+            <div class="fhir-field" style="margin-bottom:10px">
+                <label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin:0">
+                    <input type="checkbox" id="fhirTLSEnabled" ${tlsEnabled ? 'checked' : ''}>
+                    <span class="fhir-field-label" style="margin:0">Enable HTTPS (TLS)</span>
+                </label>
+                <small class="fhir-hint">Recommended for production. Requires a signed certificate.</small>
+            </div>
+            <div id="fhirTLSFields" style="${tlsEnabled ? '' : 'display:none'}">
+                <div class="fhir-field-row">
+                    <div class="fhir-field">
+                        <label class="fhir-field-label">Certificate File <span class="fhir-required">*</span></label>
+                        <input type="text" class="form-control form-control-sm" id="fhirTLSCert"
+                               value="${esc(tlsCfg.certFile || '')}" placeholder="/etc/ssl/certs/server.crt">
+                        <small class="fhir-hint">Absolute path to PEM certificate file</small>
+                    </div>
+                    <div class="fhir-field">
+                        <label class="fhir-field-label">Key File <span class="fhir-required">*</span></label>
+                        <input type="text" class="form-control form-control-sm" id="fhirTLSKey"
+                               value="${esc(tlsCfg.keyFile || '')}" placeholder="/etc/ssl/private/server.key">
+                        <small class="fhir-hint">Absolute path to PEM private key file</small>
+                    </div>
+                </div>
+            </div>
+        `;
+
+        tlsBody.querySelector('#fhirTLSEnabled').addEventListener('change', e => {
+            tlsBody.querySelector('#fhirTLSFields').style.display = e.target.checked ? '' : 'none';
+            tlsSec.querySelector('.fhir-section-summary').textContent = e.target.checked ? 'HTTPS enabled' : 'HTTP only';
+            this.onChange();
+        });
+        tlsBody.querySelectorAll('input').forEach(el => el.addEventListener('input', () => this.onChange()));
+        tlsSec.querySelector('.fhir-section-summary').textContent = tlsEnabled ? 'HTTPS enabled' : 'HTTP only';
+        container.appendChild(tlsSec);
+
+        // ── IP Allowlist ──────────────────────────────────────────────────
+        const allowedIPs = Array.isArray(cfg.allowedIPs) ? cfg.allowedIPs.join('\n') : '';
+        const ipSec      = this._makeFHIRSection('IP Allowlist', 'fas fa-shield-alt', false);
+        const ipBody     = ipSec.querySelector('.fhir-section-body');
+
+        ipBody.innerHTML = `
+            <div class="fhir-field">
+                <label class="fhir-field-label">Allowed IPs / CIDRs</label>
+                <textarea class="form-control form-control-sm" id="fhirAllowedIPs"
+                          rows="4" placeholder="Leave empty to allow all&#10;192.168.1.0/24&#10;10.0.0.5"
+                          style="font-family:monospace;font-size:12px">${esc(allowedIPs)}</textarea>
+                <small class="fhir-hint">One IP or CIDR per line. Empty = accept from anywhere.</small>
+            </div>
+        `;
+
+        ipBody.querySelector('#fhirAllowedIPs').addEventListener('input', () => {
+            const count = ipBody.querySelector('#fhirAllowedIPs').value.trim().split(/\s+/).filter(Boolean).length;
+            ipSec.querySelector('.fhir-section-summary').textContent = count ? `${count} rule${count > 1 ? 's' : ''}` : 'Open';
+            this.onChange();
+        });
+        ipSec.querySelector('.fhir-section-summary').textContent = allowedIPs.trim() ?
+            `${allowedIPs.trim().split(/\s+/).filter(Boolean).length} rule(s)` : 'Open';
+        container.appendChild(ipSec);
+    }
+
+    // ── FHIR OUTBOUND ────────────────────────────────────────────────────────
+
+    _buildFHIROutboundUI(container) {
+        const cfg = this.config.config || {};
+        const esc = s => this.escapeHtml(String(s ?? ''));
+
+        container.innerHTML = '';
+        const banner = this._buildFHIRSchemaBanner();
+        if (banner) container.appendChild(banner);
+
+        const FHIR_R4_TYPES = [
+            'AllergyIntolerance','Appointment','Bundle','CarePlan','CareTeam',
+            'Claim','ClaimResponse','Communication','Composition','Condition',
+            'Coverage','DiagnosticReport','DocumentReference','Encounter',
+            'EpisodeOfCare','ExplanationOfBenefit','Flag','Goal','Group',
+            'HealthcareService','ImagingStudy','Immunization','List','Location',
+            'Medication','MedicationAdministration','MedicationDispense',
+            'MedicationRequest','MessageHeader','Observation','Organization',
+            'Parameters','Patient','Practitioner','PractitionerRole','Procedure',
+            'RelatedPerson','Schedule','ServiceRequest','Slot','Specimen','Task',
+        ];
+
+        const currSendMode = cfg.resourceType === 'Bundle' && cfg.bundleType === 'transaction' ? 'transaction'
+            : cfg.resourceType === 'Bundle' && cfg.bundleType === 'batch' ? 'batch'
+            : (cfg.resourceType && cfg.resourceType !== 'Bundle') ? 'specific'
+            : 'auto';
+
+        // ── Destination ───────────────────────────────────────────────────
+        const destSec  = this._makeFHIRSection('Destination', 'fas fa-location-arrow', true);
+        const destBody = destSec.querySelector('.fhir-section-body');
+
+        destBody.innerHTML = `
+            <div class="fhir-field">
+                <label class="fhir-field-label">FHIR Server URL <span class="fhir-required">*</span></label>
+                <input type="text" class="form-control form-control-sm connector-config-field"
+                       data-field="baseUrl" value="${esc(cfg.baseUrl || '')}"
+                       placeholder="https://fhir.yourserver.com/fhir/R4"
+                       autocomplete="off" spellcheck="false">
+                <div style="display:flex;align-items:center;gap:8px;margin-top:6px">
+                    <select class="form-control form-control-sm connector-config-field"
+                            data-field="fhirVersion" style="max-width:150px" id="fhirOutboundVersionSelect">
+                        <option value="${esc(cfg.fhirVersion || 'R4')}" selected>${esc(cfg.fhirVersion || 'R4')}</option>
+                    </select>
+                    <small class="fhir-hint">Sent in Accept &amp; Content-Type headers</small>
+                </div>
+            </div>
+
+            <div class="fhir-field" style="margin-top:14px">
+                <label class="fhir-field-label">What are you sending?</label>
+                <div class="fhir-send-mode-grid" id="fhirSendModeGrid">
+                    <label class="fhir-send-card" data-mode="auto">
+                        <input type="radio" name="fhir-send-mode" value="auto">
+                        <div class="fhir-send-card-body">
+                            <div class="fhir-send-card-icon"><i class="fas fa-magic"></i></div>
+                            <div>
+                                <div class="fhir-send-card-title">Auto-detect</div>
+                                <div class="fhir-send-card-sub">Reads resourceType from message body — ideal for HL7→FHIR pipelines</div>
+                            </div>
+                        </div>
+                    </label>
+                    <label class="fhir-send-card" data-mode="specific">
+                        <input type="radio" name="fhir-send-mode" value="specific">
+                        <div class="fhir-send-card-body">
+                            <div class="fhir-send-card-icon"><i class="fas fa-bullseye"></i></div>
+                            <div>
+                                <div class="fhir-send-card-title">Specific resource type</div>
+                                <div class="fhir-send-card-sub">Always route to one resource endpoint</div>
+                            </div>
+                        </div>
+                    </label>
+                    <label class="fhir-send-card" data-mode="transaction">
+                        <input type="radio" name="fhir-send-mode" value="transaction">
+                        <div class="fhir-send-card-body">
+                            <div class="fhir-send-card-icon"><i class="fas fa-layer-group"></i></div>
+                            <div>
+                                <div class="fhir-send-card-title">Transaction bundle</div>
+                                <div class="fhir-send-card-sub">Atomic — all-or-nothing commit</div>
+                            </div>
+                        </div>
+                    </label>
+                    <label class="fhir-send-card" data-mode="batch">
+                        <input type="radio" name="fhir-send-mode" value="batch">
+                        <div class="fhir-send-card-body">
+                            <div class="fhir-send-card-icon"><i class="fas fa-stream"></i></div>
+                            <div>
+                                <div class="fhir-send-card-title">Batch bundle</div>
+                                <div class="fhir-send-card-sub">Independent requests — partial success allowed</div>
+                            </div>
+                        </div>
+                    </label>
+                </div>
+            </div>
+
+            <div id="fhirSpecificResourceRow" style="display:none;margin-top:10px">
+                <label class="fhir-field-label">Resource Type</label>
+                <select class="form-control form-control-sm" id="fhirOutboundResourceTypeSelect">
+                    <option value="">— Select resource type —</option>
+                    ${FHIR_R4_TYPES.map(t => `<option value="${t}" ${cfg.resourceType === t ? 'selected' : ''}>${t}</option>`).join('')}
+                    <option value="_custom_">✎  Other (type manually)…</option>
+                </select>
+                <input type="text" class="form-control form-control-sm" id="fhirResourceTypeCustomInput"
+                       placeholder="e.g. MolecularSequence" style="display:none;margin-top:4px">
+            </div>
+
+            <input type="hidden" class="connector-config-field" data-field="resourceType" id="fhirResourceTypeHidden" value="${esc(cfg.resourceType || '')}">
+            <input type="hidden" class="connector-config-field" data-field="bundleType"   id="fhirBundleTypeHidden"   value="${esc(cfg.bundleType || '')}">
+            <input type="hidden" class="connector-config-field" data-field="method"       id="fhirMethodHidden"       value="${esc(cfg.method || 'POST')}">
+
+            <div class="fhir-url-preview-card" id="fhirOutboundUrlPreview" style="margin-top:16px">
+                <div class="fhir-url-preview-verb fhir-verb-post" id="fhirUrlVerb">POST</div>
+                <div class="fhir-url-preview-url" id="fhirUrlText" style="font-style:italic;opacity:0.6">/{baseUrl}/&lt;resourceType&gt;</div>
+                <button type="button" class="fhir-url-copy-btn" id="fhirUrlCopy" title="Copy URL">
+                    <i class="fas fa-copy"></i>
+                </button>
+            </div>
+            <div class="fhir-url-preview-note" id="fhirUrlNote">resourceType auto-detected from message body at runtime</div>
+        `;
+
+        container.appendChild(destSec);
+
+        // Populate FHIR version select dynamically from installed schemas
+        this._loadFHIRVersions(destBody.querySelector('#fhirOutboundVersionSelect'), cfg.fhirVersion || 'R4');
+
+        // Wire send-mode cards
+        const sendModeGrid    = destBody.querySelector('#fhirSendModeGrid');
+        const rtHidden        = destBody.querySelector('#fhirResourceTypeHidden');
+        const btHidden        = destBody.querySelector('#fhirBundleTypeHidden');
+        const methodHidden    = destBody.querySelector('#fhirMethodHidden');
+        const specificRow     = destBody.querySelector('#fhirSpecificResourceRow');
+        const rtSelect        = destBody.querySelector('#fhirOutboundResourceTypeSelect');
+        const rtCustom        = destBody.querySelector('#fhirResourceTypeCustomInput');
+
+        const applyMode = (mode) => {
+            sendModeGrid.querySelectorAll('.fhir-send-card').forEach(c => {
+                c.classList.toggle('selected', c.dataset.mode === mode);
+                const r = c.querySelector('input[type="radio"]');
+                if (r) r.checked = c.dataset.mode === mode;
+            });
+            specificRow.style.display = mode === 'specific' ? '' : 'none';
+            if (mode === 'auto')        { rtHidden.value = '';        btHidden.value = '';             methodHidden.value = 'POST'; }
+            else if (mode === 'specific'){ rtHidden.value = rtSelect.value === '_custom_' ? rtCustom.value.trim() : (rtSelect.value || ''); btHidden.value = ''; methodHidden.value = 'POST'; }
+            else if (mode === 'transaction') { rtHidden.value = 'Bundle'; btHidden.value = 'transaction'; methodHidden.value = 'POST'; }
+            else if (mode === 'batch')   { rtHidden.value = 'Bundle'; btHidden.value = 'batch';        methodHidden.value = 'POST'; }
+            this._refreshFHIROutboundPreview(container);
+            this.onChange();
+        };
+
+        sendModeGrid.querySelectorAll('.fhir-send-card').forEach(card => {
+            card.addEventListener('click', () => applyMode(card.dataset.mode));
+        });
+
+        rtSelect.addEventListener('change', () => {
+            rtCustom.style.display = rtSelect.value === '_custom_' ? '' : 'none';
+            if (rtSelect.value !== '_custom_') rtHidden.value = rtSelect.value;
+            this._refreshFHIROutboundPreview(container);
+            this.onChange();
+        });
+        rtCustom.addEventListener('input', () => {
+            rtHidden.value = rtCustom.value.trim();
+            this._refreshFHIROutboundPreview(container);
+            this.onChange();
+        });
+
+        destBody.querySelector('#fhirUrlCopy').addEventListener('click', () => {
+            const url = destBody.querySelector('#fhirUrlText')?.textContent || '';
+            navigator.clipboard?.writeText(url).catch(() => {});
+        });
+
+        destBody.querySelectorAll('.connector-config-field').forEach(el => {
+            el.addEventListener('input', () => { this._refreshFHIROutboundPreview(container); this.onChange(); });
+            el.addEventListener('change', () => { this._refreshFHIROutboundPreview(container); this.onChange(); });
+        });
+
+        applyMode(currSendMode);
+
+        // ── Authentication ────────────────────────────────────────────────
+        const authSec  = this._makeFHIRSection('Authentication', 'fas fa-lock', false);
+        const authBody = authSec.querySelector('.fhir-section-body');
+        const authType = cfg.authType || 'none';
+
+        authBody.innerHTML = `
+            <div class="fhir-field">
+                <label class="fhir-field-label">Authentication method</label>
+                <select class="form-control form-control-sm connector-config-field"
+                        data-field="authType" id="fhirOutboundAuthSelect">
+                    <option value="none"    ${authType === 'none'    ? 'selected' : ''}>No authentication</option>
+                    <option value="basic"   ${authType === 'basic'   ? 'selected' : ''}>Username &amp; Password</option>
+                    <option value="bearer"  ${authType === 'bearer'  ? 'selected' : ''}>Bearer Token</option>
+                    <option value="smart"   ${authType === 'smart'   ? 'selected' : ''}>SMART on FHIR</option>
+                    <option value="api_key" ${authType === 'api_key' ? 'selected' : ''}>API Key</option>
+                </select>
+                <small class="fhir-hint" id="fhirAuthHint"></small>
+            </div>
+            <div id="fhirOutboundAuthCreds" style="margin-top:10px">
+                <div class="fhir-auth-cred" data-auth="basic">
+                    <label class="fhir-field-label">Username</label>
+                    <input type="text" class="form-control form-control-sm connector-config-field"
+                           data-field="username" value="${esc(cfg.username || '')}">
+                </div>
+                <div class="fhir-auth-cred" data-auth="basic">
+                    <label class="fhir-field-label" style="margin-top:8px">Password</label>
+                    <input type="password" class="form-control form-control-sm connector-config-field"
+                           data-field="password" value="${esc(cfg.password || '')}">
+                </div>
+                <div class="fhir-auth-cred" data-auth="bearer smart">
+                    <label class="fhir-field-label" style="margin-top:8px">Bearer Token</label>
+                    <input type="password" class="form-control form-control-sm connector-config-field"
+                           data-field="bearerToken" value="${esc(cfg.bearerToken || '')}">
+                </div>
+                <div class="fhir-auth-cred" data-auth="smart" style="margin-top:4px">
+                    <small class="fhir-hint" style="color:#1d4ed8">
+                        SMART on FHIR — OAuth2 for Epic, Cerner, and Azure FHIR certified systems
+                    </small>
+                </div>
+                <div class="fhir-auth-cred" data-auth="api_key">
+                    <label class="fhir-field-label" style="margin-top:8px">API Key</label>
+                    <input type="password" class="form-control form-control-sm connector-config-field"
+                           data-field="apiKey" value="${esc(cfg.apiKey || '')}">
+                </div>
+                <div class="fhir-auth-cred" data-auth="api_key">
+                    <label class="fhir-field-label" style="margin-top:8px">Header name</label>
+                    <input type="text" class="form-control form-control-sm connector-config-field"
+                           data-field="apiKeyHeader" value="${esc(cfg.apiKeyHeader || 'X-API-Key')}">
+                </div>
+            </div>
+        `;
+
+        const AUTH_HINTS = {
+            none: '', basic: '',
+            bearer: 'Sent as: Authorization: Bearer {token}',
+            smart:  'Obtain a token from your system\'s OAuth2 token endpoint, paste it as the Bearer Token above',
+            api_key: 'Sent as a custom HTTP header (default: X-API-Key)',
+        };
+        const AUTH_LABELS_OUT = { none: 'None', basic: 'Basic auth', bearer: 'Bearer token', smart: 'SMART on FHIR', api_key: 'API key' };
+        const applyOutboundAuth = (type) => {
+            authSec.querySelector('.fhir-section-summary').textContent = AUTH_LABELS_OUT[type] || type;
+            authBody.querySelector('#fhirAuthHint').textContent = AUTH_HINTS[type] || '';
+            authBody.querySelectorAll('.fhir-auth-cred').forEach(el => {
+                const auths = (el.dataset.auth || '').split(' ');
+                el.style.display = auths.includes(type) ? '' : 'none';
+            });
+        };
+        applyOutboundAuth(authType);
+        authBody.querySelector('#fhirOutboundAuthSelect').addEventListener('change', e => { applyOutboundAuth(e.target.value); this.onChange(); });
+        authBody.querySelectorAll('.connector-config-field').forEach(el => {
+            el.addEventListener('input', () => this.onChange());
+            el.addEventListener('change', () => this.onChange());
+        });
+        container.appendChild(authSec);
+
+        // ── Operations ────────────────────────────────────────────────────
+        const opsSec  = this._makeFHIRSection('Operations', 'fas fa-bolt', false);
+        const opsBody = opsSec.querySelector('.fhir-section-body');
+        const currOp  = cfg.operation || '';
+
+        const FHIR_OPS = [
+            { v: '',               l: 'Standard CRUD',    sub: 'POST / PUT / GET / DELETE on resources',             icon: 'fa-exchange-alt' },
+            { v: '$validate',      l: 'Validate',          sub: 'Validate a resource against profiles ($validate)',   icon: 'fa-check-circle' },
+            { v: '$process-message', l: 'Process message', sub: 'Send a FHIR Message Bundle ($process-message)',      icon: 'fa-envelope' },
+            { v: '$everything',    l: 'Everything',        sub: 'Fetch all related data for a resource ($everything)',icon: 'fa-globe' },
+            { v: '$match',         l: 'Patient match',     sub: 'Match patients across systems ($match)',             icon: 'fa-user-check' },
+            { v: '$export',        l: 'Bulk export',       sub: 'SMART bulk data export ($export)',                   icon: 'fa-download' },
+            { v: '_custom_',       l: 'Custom operation',  sub: 'Type any $operation manually',                      icon: 'fa-code' },
+        ];
+
+        const knownOps   = FHIR_OPS.map(o => o.v).filter(v => v !== '_custom_');
+        const isCustomOp = currOp !== '' && !knownOps.includes(currOp);
+        const activeOpV  = isCustomOp ? '_custom_' : currOp;
+
+        opsBody.innerHTML = `
+            <div class="fhir-ops-list" id="fhirOpsList">
+                ${FHIR_OPS.map(op => `
+                    <label class="fhir-ops-item" data-op="${esc(op.v)}">
+                        <input type="radio" name="fhir-operation" value="${esc(op.v)}"
+                               ${activeOpV === op.v ? 'checked' : ''}>
+                        <i class="fas ${op.icon} fhir-ops-icon"></i>
+                        <div>
+                            <div class="fhir-ops-title">${esc(op.l)}</div>
+                            <div class="fhir-ops-sub">${esc(op.sub)}</div>
+                        </div>
+                    </label>
+                `).join('')}
+            </div>
+            <div id="fhirCustomOpRow" style="display:${isCustomOp ? '' : 'none'};margin-top:8px">
+                <input type="text" class="form-control form-control-sm" id="fhirCustomOpInput"
+                       placeholder="e.g. $myCustomOp" value="${esc(isCustomOp ? currOp : '')}">
+            </div>
+            <input type="hidden" class="connector-config-field" data-field="operation"
+                   id="fhirOperationHidden" value="${esc(currOp)}">
+            <div style="margin-top:12px">
+                <label class="fhir-field-label">
+                    Resource ID
+                    <small style="font-weight:400;color:#94a3b8"> — optional, for instance-level operations</small>
+                </label>
+                <input type="text" class="form-control form-control-sm connector-config-field"
+                       data-field="resourceId" value="${esc(cfg.resourceId || '')}"
+                       placeholder="Leave empty for create / type-level operations">
+            </div>
+        `;
+
+        const opHidden      = opsBody.querySelector('#fhirOperationHidden');
+        const customOpRow   = opsBody.querySelector('#fhirCustomOpRow');
+        const customOpInput = opsBody.querySelector('#fhirCustomOpInput');
+
+        opsBody.querySelectorAll('input[name="fhir-operation"]').forEach(radio => {
+            radio.addEventListener('change', () => {
+                customOpRow.style.display = radio.value === '_custom_' ? '' : 'none';
+                opHidden.value = radio.value === '_custom_' ? customOpInput.value.trim() : radio.value;
+                this._refreshFHIROutboundPreview(container);
+                this.onChange();
+            });
+        });
+        customOpInput.addEventListener('input', () => {
+            opHidden.value = customOpInput.value.trim();
+            this._refreshFHIROutboundPreview(container);
+            this.onChange();
+        });
+        opsBody.querySelector('.connector-config-field[data-field="resourceId"]').addEventListener('input', () => {
+            this._refreshFHIROutboundPreview(container);
+            this.onChange();
+        });
+        container.appendChild(opsSec);
+
+        // ── Reliability ───────────────────────────────────────────────────
+        const relSec  = this._makeFHIRSection('Reliability', 'fas fa-sync-alt', false);
+        const relBody = relSec.querySelector('.fhir-section-body');
+
+        relBody.innerHTML = `
+            <div class="fhir-field-row">
+                <div class="fhir-field">
+                    <label class="fhir-field-label">Retry attempts</label>
+                    <input type="number" class="form-control form-control-sm connector-config-field"
+                           data-field="retryAttempts" data-field-type="number"
+                           value="${esc(cfg.retryAttempts ?? 3)}" min="0" max="10">
+                    <small class="fhir-hint">0 = no retry</small>
+                </div>
+                <div class="fhir-field">
+                    <label class="fhir-field-label">Retry delay (s)</label>
+                    <input type="number" class="form-control form-control-sm connector-config-field"
+                           data-field="retryDelay" data-field-type="number"
+                           value="${esc(cfg.retryDelay ?? 1)}" min="0">
+                </div>
+                <div class="fhir-field">
+                    <label class="fhir-field-label">Timeout (s)</label>
+                    <input type="number" class="form-control form-control-sm connector-config-field"
+                           data-field="timeout" data-field-type="number"
+                           value="${esc(cfg.timeout || 30)}" min="1" max="300">
+                </div>
+            </div>
+            <div class="fhir-field" style="margin-top:10px">
+                <label class="fhir-field-label">Extra query parameters</label>
+                <input type="text" class="form-control form-control-sm connector-config-field"
+                       data-field="queryParams" value="${esc(cfg.queryParams || '')}"
+                       placeholder="_format=json&amp;_pretty=true">
+                <small class="fhir-hint">Appended to every request URL</small>
+            </div>
+        `;
+
+        relBody.querySelectorAll('.connector-config-field').forEach(el => {
+            el.addEventListener('input', () => { this._refreshFHIROutboundPreview(container); this.onChange(); });
+            el.addEventListener('change', () => { this._refreshFHIROutboundPreview(container); this.onChange(); });
+        });
+        container.appendChild(relSec);
+
+        this._refreshFHIROutboundPreview(container);
+    }
+
+    /** Mirrors fhir_utils.BuildFHIRURL — keep in sync with Go implementation. */
+    _refreshFHIROutboundPreview(container) {
+        const verbEl = container.querySelector('#fhirUrlVerb');
+        const urlEl  = container.querySelector('#fhirUrlText');
+        const noteEl = container.querySelector('#fhirUrlNote');
+        if (!verbEl || !urlEl) return;
+
+        const baseUrl      = (container.querySelector('.connector-config-field[data-field="baseUrl"]')?.value || '').replace(/\/+$/, '');
+        const resourceType = container.querySelector('#fhirResourceTypeHidden')?.value || container.querySelector('.connector-config-field[data-field="resourceType"]')?.value || '';
+        const bundleType   = container.querySelector('#fhirBundleTypeHidden')?.value   || container.querySelector('.connector-config-field[data-field="bundleType"]')?.value   || '';
+        const resourceId   = (container.querySelector('.connector-config-field[data-field="resourceId"]')?.value || '').trim();
+        const operation    = (container.querySelector('#fhirOperationHidden')?.value   || container.querySelector('.connector-config-field[data-field="operation"]')?.value   || '').trim();
+
+        let op = operation;
+        if (op && !op.startsWith('$')) op = '$' + op;
+
+        let url, verb = 'POST', note = '';
+
+        if (!resourceType) {
+            const base = baseUrl || '/{baseUrl}';
+            url  = `${base}/<resourceType>`;
+            note = 'resourceType auto-detected from message body at runtime';
+        } else if (resourceType === 'Bundle' && bundleType === 'transaction') {
+            url  = baseUrl || '/';
+            note = 'FHIR transaction bundle — atomic, all-or-nothing commit';
+        } else if (resourceType === 'Bundle' && bundleType === 'batch') {
+            url  = baseUrl || '/';
+            note = 'FHIR batch bundle — independent requests, partial success allowed';
+        } else {
+            url = `${baseUrl}/${resourceType}`;
+            if (resourceId) { url += `/${resourceId}`; verb = op ? 'POST' : 'PUT'; }
+            if (op)         { url += `/${op}`; note = resourceId ? `Instance-level: ${op}` : `Type-level: ${op}`; }
+            else            { note = resourceId ? `Update ${resourceType}` : `Create ${resourceType}`; }
+        }
+
+        const isRuntime = !resourceType;
+        verbEl.textContent  = verb;
+        verbEl.className    = `fhir-url-preview-verb fhir-verb-${verb.toLowerCase()}`;
+        urlEl.textContent   = url;
+        urlEl.style.opacity   = isRuntime ? '0.55' : '1';
+        urlEl.style.fontStyle = isRuntime ? 'italic' : 'normal';
+        if (noteEl) noteEl.textContent = note;
     }
 
     onChange() {

@@ -20,7 +20,16 @@ var embeddedComposeYML []byte
 //go:embed assets/docker-compose.listeners.yml
 var embeddedListenersYML []byte
 
+// runInstallation dispatches to the Docker or Standalone path based on cfg.Mode.
 func runInstallation(cfg *Config) {
+	if cfg.Mode == "standalone" {
+		runStandaloneInstallation(cfg)
+		return
+	}
+	runDockerInstallation(cfg)
+}
+
+func runDockerInstallation(cfg *Config) {
 	defer func() {
 		appURL := fmt.Sprintf("http://localhost:%s", cfg.AppPort)
 		emitDoneSignal(appURL)

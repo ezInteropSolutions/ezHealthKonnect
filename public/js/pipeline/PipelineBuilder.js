@@ -105,24 +105,27 @@ class PipelineBuilder {
                 this.interfaceId = this.pipeline.interfaceId;
                 this.messageType = this.pipeline.messageType;
             } else if (this.interfaceId) {
-                // Load interface to get message type if not provided
-                if (!this.messageType || this.messageType === 'hl7v2') {
-                    console.log('📡 Loading interface to get message type...');
-                    const interfaceResponse = await fetch(`/api/interfaces/${this.interfaceId}`);
-                    if (interfaceResponse.ok) {
-                        const interfaceData = await interfaceResponse.json();
-                        // API returns { success: true, interface: { messageType: ... } } — unwrap
-                        const ifaceObj = interfaceData.interface || interfaceData;
-                        // Use message_type from interface, default to ADT^A01 if not set or invalid
+                // Always fetch interface data to get name + resolve message type
+                console.log('📡 Loading interface data...');
+                const interfaceResponse = await fetch(`/api/interfaces/${this.interfaceId}`);
+                if (interfaceResponse.ok) {
+                    const interfaceData = await interfaceResponse.json();
+                    // wizard route returns { success, data: {...} }
+                    // interfaces route returns { success, interface: {...} }
+                    const ifaceObj = interfaceData.data || interfaceData.interface || interfaceData;
+                    // Store name for header
+                    this.interfaceName = ifaceObj.name || ifaceObj.interface_name || null;
+                    // Resolve message type only if not already set from URL params
+                    if (!this.messageType || this.messageType === 'hl7v2') {
                         const dbMessageType = ifaceObj.message_type || ifaceObj.messageType;
                         this.messageType = (dbMessageType && dbMessageType !== 'hl7v2')
                             ? dbMessageType
                             : 'ADT^A01';
-                        console.log(`✅ Message type resolved: ${this.messageType}`);
-                    } else {
-                        console.warn('⚠️ Failed to load interface, defaulting to ADT^A01');
-                        this.messageType = 'ADT^A01';
                     }
+                    console.log(`✅ Interface loaded: "${this.interfaceName}", messageType: ${this.messageType}`);
+                } else {
+                    console.warn('⚠️ Failed to load interface, defaulting to ADT^A01');
+                    this.messageType = this.messageType || 'ADT^A01';
                 }
 
                 // Try to load existing pipeline for interface/message type
@@ -198,11 +201,11 @@ class PipelineBuilder {
         const infoEl = document.getElementById('interfaceInfo');
 
         if (titleEl && this.pipeline) {
-            titleEl.textContent = this.pipeline.name;
+            titleEl.textContent = this.interfaceName || this.pipeline.name;
         }
 
         if (infoEl && this.messageType) {
-            infoEl.textContent = `${this.messageType}`;
+            infoEl.textContent = this.messageType;
             infoEl.style.display = 'inline-block';
         }
     }

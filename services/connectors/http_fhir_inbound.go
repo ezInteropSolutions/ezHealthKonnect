@@ -88,6 +88,14 @@ type HTTPFHIRInboundConnector struct {
 	requestTimeout time.Duration
 	messageChan    chan<- *models.InboundMessage
 	mu             sync.RWMutex
+
+	// TLS
+	tlsEnabled  bool
+	tlsCertFile string
+	tlsKeyFile  string
+
+	// IP allowlist (nil = allow all)
+	allowedIPs []string
 }
 
 // NewHTTPFHIRInboundConnector creates a new HTTP FHIR inbound connector.
@@ -193,8 +201,34 @@ func (h *HTTPFHIRInboundConnector) Initialize(config []byte) error {
 		h.requestTimeout = time.Duration(v) * time.Second
 	}
 
-	log.Printf("✅ HTTP FHIR Inbound initialized: port=%d path=%s version=%s bundleMode=%s auth=%s cors=%v timeout=%v",
-		h.port, h.basePath, h.fhirVersion, h.bundleMode, h.authType, h.enableCORS, h.requestTimeout)
+	// TLS
+	if tls, ok := cfg["tls"].(map[string]interface{}); ok {
+		if enabled, ok := tls["enabled"].(bool); ok {
+			h.tlsEnabled = enabled
+		}
+		if cert, ok := tls["certFile"].(string); ok && cert != "" {
+			h.tlsCertFile = cert
+		}
+		if key, ok := tls["keyFile"].(string); ok && key != "" {
+			h.tlsKeyFile = key
+		}
+		if h.tlsEnabled && (h.tlsCertFile == "" || h.tlsKeyFile == "") {
+			return fmt.Errorf("TLS enabled but certFile and/or keyFile not specified")
+		}
+	}
+
+	// IP allowlist
+	if raw, ok := cfg["allowedIPs"].([]interface{}); ok && len(raw) > 0 {
+		h.allowedIPs = make([]string, 0, len(raw))
+		for _, v := range raw {
+			if s, ok := v.(string); ok && s != "" {
+				h.allowedIPs = append(h.allowedIPs, strings.TrimSpace(s))
+			}
+		}
+	}
+
+	log.Printf("✅ HTTP FHIR Inbound initialized: port=%d path=%s version=%s bundleMode=%s auth=%s cors=%v timeout=%v tls=%v allowedIPs=%d",
+		h.port, h.basePath, h.fhirVersion, h.bundleMode, h.authType, h.enableCORS, h.requestTimeout, h.tlsEnabled, len(h.allowedIPs))
 	return nil
 }
 
@@ -225,16 +259,26 @@ func (h *HTTPFHIRInboundConnector) Start(ctx context.Context, messageChan chan<-
 
 	h.server = &http.Server{
 		Addr:         fmt.Sprintf(":%d", h.port),
-		Handler:      h.loggingMiddleware(h.corsMiddleware(h.authMiddleware(mux))),
+		Handler:      h.ipAllowlistMiddleware(h.loggingMiddleware(h.corsMiddleware(h.authMiddleware(mux)))),
 		ReadTimeout:  h.requestTimeout,
 		WriteTimeout: h.requestTimeout,
 		IdleTimeout:  60 * time.Second,
 	}
 
 	go func() {
-		log.Printf("🌐 HTTP FHIR Inbound: listening on :%d (path=%s, %s, mode=%s)",
-			h.port, h.basePath, h.fhirVersion, h.bundleMode)
-		if err := h.server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		scheme := "HTTP"
+		if h.tlsEnabled {
+			scheme = "HTTPS"
+		}
+		log.Printf("🌐 HTTP FHIR Inbound: listening on :%d (path=%s, %s, mode=%s, %s)",
+			h.port, h.basePath, h.fhirVersion, h.bundleMode, scheme)
+		var err error
+		if h.tlsEnabled {
+			err = h.server.ListenAndServeTLS(h.tlsCertFile, h.tlsKeyFile)
+		} else {
+			err = h.server.ListenAndServe()
+		}
+		if err != nil && err != http.ErrServerClosed {
 			log.Printf("❌ HTTP FHIR Inbound: server error: %v", err)
 		}
 	}()
@@ -716,6 +760,39 @@ func (h *HTTPFHIRInboundConnector) validateBearerToken(r *http.Request) bool {
 
 func (h *HTTPFHIRInboundConnector) validateAPIKey(r *http.Request) bool {
 	return subtle.ConstantTimeCompare([]byte(r.Header.Get(h.apiKeyHeader)), []byte(h.apiKey)) == 1
+}
+
+// ─────────────────────────────────────────────────────────────
+// IP allowlist middleware
+// ─────────────────────────────────────────────────────────────
+
+// ipAllowlistMiddleware rejects requests not originating from an allowed IP.
+// If h.allowedIPs is empty, all IPs are allowed.
+func (h *HTTPFHIRInboundConnector) ipAllowlistMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if len(h.allowedIPs) == 0 {
+			next.ServeHTTP(w, r)
+			return
+		}
+		remoteIP := r.RemoteAddr
+		if host, _, err := net.SplitHostPort(remoteIP); err == nil {
+			remoteIP = host
+		}
+		for _, allowed := range h.allowedIPs {
+			if remoteIP == allowed {
+				next.ServeHTTP(w, r)
+				return
+			}
+			// CIDR check
+			if _, ipNet, err := net.ParseCIDR(allowed); err == nil {
+				if ipNet.Contains(net.ParseIP(remoteIP)) {
+					next.ServeHTTP(w, r)
+					return
+				}
+			}
+		}
+		http.Error(w, `{"resourceType":"OperationOutcome","issue":[{"severity":"fatal","code":"forbidden","diagnostics":"IP not in allowlist"}]}`, http.StatusForbidden)
+	})
 }
 
 // ─────────────────────────────────────────────────────────────

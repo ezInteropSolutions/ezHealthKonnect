@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -122,6 +123,15 @@ func (e *LoopExecutor) Execute(
 	breakOnError := getBoolValue(step.Config, "breakOnError", false)
 	continueOnEmpty := getBoolValue(step.Config, "continueOnEmpty", true) // Default true
 
+	// Parallel iteration opt-in — disabled by default, must be explicitly enabled.
+	// Only applies to foreach loops. See DAG_PARALLEL_EXECUTION_DESIGN.md for
+	// the safety constraints the user must understand before enabling this.
+	parallelIterations := getBoolValue(step.Config, "parallelIterations", false)
+	maxConcurrency := getIntValue(step.Config, "maxConcurrency")
+	if maxConcurrency <= 0 {
+		maxConcurrency = 5 // safe default when parallel is enabled
+	}
+
 	childStepIds := getStringArrayValue(step.Config, "childStepIds")
 
 	log.Printf("🔄 [Loop] Type=%s, Collection=%s, ChildSteps=%d, MaxIterations=%d",
@@ -155,8 +165,13 @@ func (e *LoopExecutor) Execute(
 
 	switch loopType {
 	case "foreach":
-		iterationCount, err = e.executeForEach(ctx, step, inputData, outputData, &loopResults, &loopErrors,
-			itemVariable, indexVariable, maxIterations, breakOnError, continueOnEmpty, childStepIds)
+		if parallelIterations {
+			iterationCount, err = e.executeForEachParallel(ctx, step, inputData, outputData, &loopResults, &loopErrors,
+				itemVariable, indexVariable, maxIterations, maxConcurrency, breakOnError, continueOnEmpty, childStepIds)
+		} else {
+			iterationCount, err = e.executeForEach(ctx, step, inputData, outputData, &loopResults, &loopErrors,
+				itemVariable, indexVariable, maxIterations, breakOnError, continueOnEmpty, childStepIds)
+		}
 
 	case "for":
 		iterations := getIntValue(step.Config, "iterations")
@@ -300,6 +315,123 @@ func (e *LoopExecutor) executeForEach(
 	}
 
 	return iterationCount, nil
+}
+
+// executeForEachParallel executes a For Each loop with parallel iterations.
+//
+// Safety contract (enforced by the opt-in UI checkbox):
+//   - Each iteration works on its own snapshot of inputData (read-only copy).
+//   - Iterations write only to their own result slot — no shared-state writes.
+//   - Shared variables (accumulators, state machines) must use sequential mode.
+//
+// maxConcurrency caps the number of goroutines running simultaneously.
+// On error: all running iterations are allowed to finish (no fail-fast), then
+// errors are aggregated. breakOnError is honoured across the iteration batch.
+func (e *LoopExecutor) executeForEachParallel(
+	ctx context.Context,
+	step *models.TransformationStep,
+	inputData, outputData map[string]interface{},
+	loopResults *[]map[string]interface{},
+	loopErrors *[]string,
+	itemVariable, indexVariable string,
+	maxIterations, maxConcurrency int,
+	breakOnError, continueOnEmpty bool,
+	childStepIds []string,
+) (int, error) {
+	collectionPath := getStringValue(step.Config, "collection")
+	if collectionPath == "" {
+		return 0, fmt.Errorf("collection field path is required for For Each loop")
+	}
+
+	collection := e.getCollectionFromPath(inputData, collectionPath)
+	if collection == nil || len(collection) == 0 {
+		if continueOnEmpty {
+			log.Printf("⚠️  [Loop:ForEach:Parallel] Collection '%s' is empty/nil, continuing", collectionPath)
+			return 0, nil
+		}
+		return 0, fmt.Errorf("collection at path '%s' is empty or not found", collectionPath)
+	}
+
+	collectionLen := len(collection)
+	if collectionLen > maxIterations {
+		collectionLen = maxIterations
+	}
+
+	log.Printf("🔄 [Loop:ForEach:Parallel] %d items, concurrency=%d", collectionLen, maxConcurrency)
+
+	// Snapshot of inputData — each goroutine gets its own copy, never the live map.
+	// This prevents one iteration from seeing another iteration's mutations.
+	makeSnapshot := func(i int, item interface{}) map[string]interface{} {
+		snap := make(map[string]interface{}, len(inputData)+6)
+		for k, v := range inputData {
+			snap[k] = v
+		}
+		snap[itemVariable] = item
+		snap[indexVariable] = i
+		snap["iteration"] = i + 1
+		snap["isFirst"] = i == 0
+		snap["isLast"] = i == collectionLen-1
+		snap["length"] = collectionLen
+		return snap
+	}
+
+	type iterResult struct {
+		index   int
+		result  map[string]interface{}
+		err     error
+	}
+
+	results := make([]iterResult, collectionLen)
+	sem := make(chan struct{}, maxConcurrency)
+	var wg sync.WaitGroup
+
+	for i, item := range collection[:collectionLen] {
+		if ctx.Err() != nil {
+			break
+		}
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(idx int, it interface{}) {
+			defer wg.Done()
+			defer func() { <-sem }()
+
+			snap := makeSnapshot(idx, it)
+			loopCtx := map[string]interface{}{
+				itemVariable:  it,
+				indexVariable: idx,
+				"iteration":   idx + 1,
+				"isFirst":     idx == 0,
+				"isLast":      idx == collectionLen-1,
+				"length":      collectionLen,
+			}
+			res, err := e.executeChildSteps(ctx, step, snap, loopCtx, childStepIds)
+			results[idx] = iterResult{index: idx, result: res, err: err}
+		}(i, item)
+	}
+	wg.Wait()
+
+	// Aggregate results in order
+	iterationCount := 0
+	var firstFatalErr error
+	for _, r := range results {
+		if r.err != nil {
+			errMsg := fmt.Sprintf("Iteration %d failed: %v", r.index+1, r.err)
+			*loopErrors = append(*loopErrors, errMsg)
+			log.Printf("   ❌ [Parallel] %s", errMsg)
+			if breakOnError && firstFatalErr == nil {
+				firstFatalErr = fmt.Errorf("loop stopped at iteration %d: %v", r.index+1, r.err)
+			}
+		}
+		*loopResults = append(*loopResults, map[string]interface{}{
+			"index":   r.index,
+			"result":  r.result,
+			"success": r.err == nil,
+		})
+		iterationCount++
+	}
+
+	log.Printf("✅ [Loop:ForEach:Parallel] Completed %d iterations", iterationCount)
+	return iterationCount, firstFatalErr
 }
 
 // executeFor executes a For loop with a fixed number of iterations

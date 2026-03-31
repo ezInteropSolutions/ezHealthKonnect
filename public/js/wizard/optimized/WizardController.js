@@ -393,8 +393,8 @@ class WizardController extends EventTarget {
     updateModelData(data) {
         console.log('📊 Updating model data:', data);
 
-        // Don't overwrite existing name/description with empty values
-        // This prevents losing data when syncing from steps that don't have these fields
+        // Don't overwrite existing values with empty/undefined — steps that don't
+        // render certain fields will return undefined, which must not clobber the model.
         if (data.name === '' && this.model.data.name) {
             console.log('⚠️ Skipping empty name update, keeping existing:', this.model.data.name);
             delete data.name;
@@ -402,6 +402,9 @@ class WizardController extends EventTarget {
         if (data.description === '' && this.model.data.description) {
             console.log('⚠️ Skipping empty description update, keeping existing:', this.model.data.description);
             delete data.description;
+        }
+        if (data.transformationFlow == null && this.model.data.transformationFlow) {
+            delete data.transformationFlow;
         }
 
         // Update the model's data
@@ -1088,7 +1091,12 @@ PV1|1|I|ICU^101^1|||DOC123^Smith^Jane|||EMERGENCY|||`
             clearTimeout(timeoutId);
 
             if (!response.ok) {
-                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                let errorMsg = `HTTP ${response.status}: ${response.statusText}`;
+                try {
+                    const errBody = await response.json();
+                    if (errBody?.error) errorMsg = errBody.error;
+                } catch (_) {}
+                throw new Error(errorMsg);
             }
 
             const data = await response.json();

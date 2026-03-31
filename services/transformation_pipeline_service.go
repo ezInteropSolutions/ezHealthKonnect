@@ -71,6 +71,7 @@ func (tps *TransformationPipelineService) GetPipeline(ctx context.Context, inter
 	query := `
 		SELECT id, interface_id, message_type, pipeline_name, enabled, version,
 		       COALESCE(pipeline_config, '{}') AS pipeline_config,
+		       COALESCE(connections, '[]') AS connections,
 		       created_at, updated_at
 		FROM transformation_pipelines
 		WHERE interface_id = $1 AND message_type = $2 AND enabled = true
@@ -79,6 +80,7 @@ func (tps *TransformationPipelineService) GetPipeline(ctx context.Context, inter
 
 	pipeline := &models.TransformationPipeline{}
 	var pipelineConfigJSON []byte
+	var connectionsJSON []byte
 	err := tps.db.QueryRowContext(ctx, query, interfaceID, messageType).Scan(
 		&pipeline.ID,
 		&pipeline.InterfaceID,
@@ -87,17 +89,22 @@ func (tps *TransformationPipelineService) GetPipeline(ctx context.Context, inter
 		&pipeline.Enabled,
 		&pipeline.Version,
 		&pipelineConfigJSON,
+		&connectionsJSON,
 		&pipeline.CreatedAt,
 		&pipeline.UpdatedAt,
 	)
 
-	if err == nil && len(pipelineConfigJSON) > 0 {
+	if err != nil {
+		return nil, fmt.Errorf("failed to get pipeline: %w", err)
+	}
+
+	if len(pipelineConfigJSON) > 0 {
 		pipeline.PipelineConfig = make(map[string]interface{})
 		json.Unmarshal(pipelineConfigJSON, &pipeline.PipelineConfig)
 	}
 
-	if err != nil {
-		return nil, fmt.Errorf("failed to get pipeline: %w", err)
+	if len(connectionsJSON) > 0 {
+		json.Unmarshal(connectionsJSON, &pipeline.Connections)
 	}
 
 	// Load steps
@@ -300,6 +307,42 @@ func (tps *TransformationPipelineService) executePipeline(
 
 	// Create child executor callback for loop steps
 	childExecutor := tps.createChildExecutorCallback(ctx, stepByID, execContext)
+
+	// Build DAG from pipeline connections and decide execution path
+	dag := BuildDAG(pipeline.Steps, pipeline.Connections)
+
+	if !dag.isLinear {
+		// ── PARALLEL PATH: use DAG scheduler ──────────────────────────────
+		logger.Info("executing pipeline via DAG scheduler", "steps", len(pipeline.Steps))
+		loopChildStepIDs := make(map[string]bool)
+		skipStepIDsDAG := make(map[string]bool)
+		// Pre-populate loop child IDs (same logic as sequential path)
+		for _, step := range pipeline.Steps {
+			if step.StepType == "control.loop" {
+				if childIDs, ok := step.Config["childStepIds"].([]interface{}); ok {
+					for _, cid := range childIDs {
+						if cidStr, ok := cid.(string); ok {
+							loopChildStepIDs[cidStr] = true
+						}
+					}
+				}
+				if childIDs, ok := step.Config["childStepIds"].([]string); ok {
+					for _, cidStr := range childIDs {
+						loopChildStepIDs[cidStr] = true
+					}
+				}
+			}
+		}
+		err := tps.executeDAG(ctx, dag, pipeline, execContext, result,
+			loopChildStepIDs, skipStepIDsDAG, stepByID, childExecutor)
+		if err != nil {
+			return result, err
+		}
+		return result, nil
+	}
+
+	// ── SEQUENTIAL FAST PATH (linear pipeline — no change to existing logic) ──
+	logger.Info("executing pipeline sequentially", "steps", len(pipeline.Steps))
 
 	// Execute steps in order (ordered by sequence ASC)
 	// Support conditional routing via _routing.nextStep and _routing.skipSteps
