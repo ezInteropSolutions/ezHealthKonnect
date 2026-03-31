@@ -599,6 +599,37 @@ func registerWindowsServices(nssmPath, nodePath, goAPIBin string, cfg *Config) e
 
 func removeService(nssmPath, name string) {
 	// Stop + remove silently — ignore errors (may not exist)
-	exec.Command(nssmPath, "stop", name).Run()    //nolint:errcheck
+	exec.Command(nssmPath, "stop", name).Run()              //nolint:errcheck
 	exec.Command(nssmPath, "remove", name, "confirm").Run() //nolint:errcheck
+}
+
+// runStandaloneUninstall stops Windows services and removes the install directory.
+func runStandaloneUninstall(cfg *Config) {
+	const svcAPI = "ezHealthKonnect-API"
+	const svcApp = "ezHealthKonnect"
+
+	emit("info", "── Stopping and removing Windows services")
+	nssmPath := filepath.Join(cfg.InstallDir, "nssm.exe")
+	if _, err := os.Stat(nssmPath); err != nil {
+		// Try to find nssm in PATH
+		if p, err2 := exec.LookPath("nssm"); err2 == nil {
+			nssmPath = p
+		}
+	}
+	if nssmPath != "" {
+		removeService(nssmPath, svcAPI)
+		removeService(nssmPath, svcApp)
+		emit("ok", "Services removed")
+	} else {
+		emit("warn", "nssm not found — services may need to be removed manually via services.msc")
+	}
+
+	emit("info", "── Removing install directory: "+cfg.InstallDir)
+	if err := os.RemoveAll(cfg.InstallDir); err != nil {
+		emit("warn", "Could not fully remove "+cfg.InstallDir+": "+err.Error())
+	} else {
+		emit("ok", "Install directory removed")
+	}
+
+	emit("ok", "Uninstall complete — you may close this window")
 }

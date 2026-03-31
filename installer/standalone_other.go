@@ -4,6 +4,11 @@ package main
 
 import "fmt"
 
+func runStandaloneUninstall(cfg *Config) {
+	defer func() { emitDoneSignal("") }()
+	emit("error", "Standalone uninstall is not supported on this platform.")
+}
+
 // runStandaloneInstallation is not implemented for non-Windows, non-Linux platforms.
 func runStandaloneInstallation(cfg *Config) {
 	defer func() {

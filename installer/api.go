@@ -5,8 +5,11 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"sync"
 )
@@ -55,6 +58,83 @@ func registerHandlers(mux *http.ServeMux) {
 	mux.HandleFunc("/api/install", handleInstall)
 	mux.HandleFunc("/api/progress", handleProgress)
 	mux.HandleFunc("/api/done", handleDone)
+	mux.HandleFunc("/api/browse", handleBrowse)
+	mux.HandleFunc("/api/uninstall", handleUninstall)
+}
+
+// handleBrowse returns subdirectories of a given path for the folder picker.
+func handleBrowse(w http.ResponseWriter, r *http.Request) {
+	type DirEntry struct {
+		Name string `json:"name"`
+		Path string `json:"path"`
+	}
+	type BrowseResult struct {
+		Path   string     `json:"path"`
+		Parent string     `json:"parent,omitempty"`
+		Dirs   []DirEntry `json:"dirs"`
+	}
+
+	path := r.URL.Query().Get("path")
+	if path == "" {
+		if runtime.GOOS == "windows" {
+			path = `C:\`
+		} else {
+			path = "/"
+		}
+	}
+	path = filepath.Clean(path)
+
+	result := BrowseResult{Path: path}
+
+	// Compute parent
+	parent := filepath.Dir(path)
+	if parent != path { // not at filesystem root
+		result.Parent = parent
+	}
+
+	// List subdirectories only
+	entries, err := os.ReadDir(path)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(result) //nolint:errcheck
+		return
+	}
+
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		// Skip hidden and system dirs
+		if strings.HasPrefix(name, ".") || name == "$Recycle.Bin" || name == "System Volume Information" {
+			continue
+		}
+		result.Dirs = append(result.Dirs, DirEntry{
+			Name: name,
+			Path: filepath.Join(path, name),
+		})
+	}
+	sort.Slice(result.Dirs, func(i, j int) bool {
+		return strings.ToLower(result.Dirs[i].Name) < strings.ToLower(result.Dirs[j].Name)
+	})
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(result) //nolint:errcheck
+}
+
+// handleUninstall triggers removal of the installed application.
+func handleUninstall(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "POST only", http.StatusMethodNotAllowed)
+		return
+	}
+	var cfg Config
+	if err := json.NewDecoder(r.Body).Decode(&cfg); err != nil {
+		http.Error(w, "invalid JSON: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	go runUninstall(&cfg)
+	w.WriteHeader(http.StatusAccepted)
 }
 
 func handleDefaults(w http.ResponseWriter, _ *http.Request) {

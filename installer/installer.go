@@ -193,6 +193,38 @@ func emitStep(n int, label string) {
 	emit("info", fmt.Sprintf("── Step %d: %s", n, label))
 }
 
+// runUninstall stops services and removes the install directory.
+func runUninstall(cfg *Config) {
+	defer func() { emitDoneSignal("") }()
+
+	emit("info", "╔══════════════════════════════════════════════╗")
+	emit("info", "║   ezHealthKonnect — Uninstalling             ║")
+	emit("info", "╚══════════════════════════════════════════════╝")
+
+	if cfg.Mode == "standalone" {
+		runStandaloneUninstall(cfg)
+	} else {
+		runDockerUninstall(cfg)
+	}
+}
+
+func runDockerUninstall(cfg *Config) {
+	emit("info", "── Stopping Docker services")
+	composePath := filepath.Join(cfg.InstallDir, "docker-compose.prod.yml")
+	envPath     := filepath.Join(cfg.InstallDir, ".env")
+	_ = streamCmd(exec.Command("docker", "compose", "-f", composePath, "--env-file", envPath, "down", "-v", "--remove-orphans"))
+	emit("ok", "Docker services stopped")
+
+	emit("info", "── Removing install directory: "+cfg.InstallDir)
+	if err := os.RemoveAll(cfg.InstallDir); err != nil {
+		emit("warn", "Could not fully remove "+cfg.InstallDir+": "+err.Error())
+	} else {
+		emit("ok", "Install directory removed")
+	}
+
+	emit("ok", "Uninstall complete")
+}
+
 func waitForReady(url string, timeout time.Duration) {
 	deadline := time.Now().Add(timeout)
 	client := &http.Client{Timeout: 5 * time.Second}

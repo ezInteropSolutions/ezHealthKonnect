@@ -8,21 +8,30 @@
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
   :root {
-    --bg:        #0d1117;
-    --surface:   #161b22;
-    --border:    #30363d;
-    --cyan:      #22d3ee;
-    --cyan-dim:  #0e7490;
-    --green:     #22c55e;
-    --red:       #ef4444;
-    --yellow:    #f59e0b;
-    --text:      #e6edf3;
-    --muted:     #8b949e;
-    --sidebar-w: 240px;
+    /* Brand: Navy + Pink */
+    --navy:      #1e3a8a;
+    --navy-mid:  #1e40af;
+    --navy-light:#3b82f6;
+    --pink:      #f8bbd9;
+    --pink-acc:  #ec4899;
+
+    /* Surfaces */
+    --bg:        #0f172a;
+    --surface:   #1e293b;
+    --surface2:  #162044;
+    --border:    #334155;
+
+    /* Status */
+    --green:  #22c55e;
+    --red:    #ef4444;
+    --yellow: #f59e0b;
+    --text:   #e2e8f0;
+    --muted:  #94a3b8;
+
+    --sidebar-w: 250px;
   }
 
   html, body { height: 100%; }
-
   body {
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     background: var(--bg);
@@ -33,39 +42,47 @@
     line-height: 1.6;
   }
 
-  /* ── Sidebar ────────────────────────────────────────────────────────────── */
+  /* ── Sidebar ──────────────────────────────────────────────────────────────── */
   .sidebar {
     width: var(--sidebar-w);
-    background: var(--surface);
-    border-right: 1px solid var(--border);
+    background: linear-gradient(180deg, var(--navy) 0%, var(--surface2) 100%);
+    border-right: 1px solid rgba(248,187,217,0.15);
     display: flex;
     flex-direction: column;
-    padding: 32px 0;
+    padding: 0;
     flex-shrink: 0;
   }
 
-  .logo {
-    padding: 0 24px 32px;
-    border-bottom: 1px solid var(--border);
+  .logo-area {
+    padding: 28px 24px 24px;
+    border-bottom: 1px solid rgba(248,187,217,0.15);
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
   }
-  .logo-mark {
-    font-size: 22px;
-    font-weight: 700;
-    color: var(--cyan);
+  .logo-svg { width: 40px; height: 40px; }
+  .logo-name {
+    font-size: 17px;
+    font-weight: 800;
+    color: #fff;
     letter-spacing: -0.5px;
+    line-height: 1.1;
   }
+  .logo-name span { color: var(--pink); }
   .logo-sub {
-    font-size: 11px;
-    color: var(--muted);
+    font-size: 10px;
+    color: rgba(248,187,217,0.6);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
     margin-top: 2px;
   }
 
   .steps {
     list-style: none;
-    padding: 24px 0;
+    padding: 28px 0;
     flex: 1;
   }
-
   .step-item {
     display: flex;
     align-items: center;
@@ -74,76 +91,64 @@
     cursor: default;
     transition: background 0.15s;
   }
-
   .step-dot {
-    width: 28px;
-    height: 28px;
+    width: 28px; height: 28px;
     border-radius: 50%;
-    border: 2px solid var(--border);
-    background: var(--bg);
+    border: 2px solid rgba(255,255,255,0.2);
+    background: rgba(255,255,255,0.05);
     display: flex;
     align-items: center;
     justify-content: center;
     font-size: 12px;
     font-weight: 600;
-    color: var(--muted);
+    color: rgba(255,255,255,0.4);
     flex-shrink: 0;
     transition: all 0.2s;
   }
-
   .step-label {
     font-size: 13px;
-    color: var(--muted);
+    color: rgba(255,255,255,0.45);
     transition: color 0.2s;
   }
-
   .step-item.active .step-dot {
-    border-color: var(--cyan);
-    background: var(--cyan);
-    color: #000;
+    border-color: var(--pink);
+    background: var(--pink);
+    color: var(--navy);
   }
-  .step-item.active .step-label {
-    color: var(--text);
-    font-weight: 500;
-  }
+  .step-item.active .step-label { color: #fff; font-weight: 600; }
   .step-item.done .step-dot {
     border-color: var(--green);
     background: var(--green);
-    color: #000;
+    color: #fff;
   }
-  .step-item.done .step-label { color: var(--muted); }
+  .step-item.done .step-label { color: rgba(255,255,255,0.5); }
 
   .sidebar-footer {
-    padding: 24px;
-    border-top: 1px solid var(--border);
-    font-size: 11px;
-    color: var(--muted);
+    padding: 20px 24px;
+    border-top: 1px solid rgba(248,187,217,0.1);
+    font-size: 10px;
+    color: rgba(255,255,255,0.25);
+    line-height: 1.6;
   }
 
-  /* ── Main content ────────────────────────────────────────────────────────── */
-  .main {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-  }
+  /* ── Main ─────────────────────────────────────────────────────────────────── */
+  .main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
 
   .header {
-    padding: 24px 40px;
+    padding: 22px 40px;
     border-bottom: 1px solid var(--border);
     background: var(--surface);
+    display: flex;
+    align-items: center;
+    gap: 16px;
   }
-  .header h1 { font-size: 20px; font-weight: 600; }
-  .header p  { font-size: 13px; color: var(--muted); margin-top: 4px; }
+  .header-text h1 { font-size: 19px; font-weight: 700; }
+  .header-text p  { font-size: 13px; color: var(--muted); margin-top: 2px; }
 
-  .content {
-    flex: 1;
-    overflow-y: auto;
-    padding: 40px;
-  }
+  .content { flex: 1; overflow-y: auto; padding: 36px 40px; }
 
   .footer {
-    padding: 20px 40px;
+    padding: 18px 40px;
     border-top: 1px solid var(--border);
     background: var(--surface);
     display: flex;
@@ -151,50 +156,49 @@
     gap: 12px;
   }
 
-  /* ── Buttons ─────────────────────────────────────────────────────────────── */
+  /* ── Buttons ──────────────────────────────────────────────────────────────── */
   .btn {
-    padding: 9px 22px;
-    border-radius: 6px;
-    font-size: 14px;
-    font-weight: 500;
-    cursor: pointer;
-    border: 1px solid transparent;
-    transition: opacity 0.15s, background 0.15s;
-    text-decoration: none;
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
+    padding: 9px 22px; border-radius: 7px; font-size: 14px; font-weight: 600;
+    cursor: pointer; border: 1px solid transparent;
+    transition: opacity 0.15s, background 0.15s, transform 0.1s;
+    display: inline-flex; align-items: center; gap: 6px;
   }
-  .btn:disabled { opacity: 0.4; cursor: not-allowed; }
-  .btn-primary  { background: var(--cyan); color: #000; }
-  .btn-primary:hover:not(:disabled) { opacity: 0.85; }
+  .btn:disabled { opacity: 0.38; cursor: not-allowed; }
+  .btn:active:not(:disabled) { transform: scale(0.97); }
+
+  .btn-primary  { background: linear-gradient(135deg, var(--navy-mid), var(--navy-light)); color: #fff; }
+  .btn-primary:hover:not(:disabled) { opacity: 0.9; }
+  .btn-pink     { background: var(--pink-acc); color: #fff; }
+  .btn-pink:hover:not(:disabled) { opacity: 0.88; }
   .btn-ghost    { background: transparent; color: var(--text); border-color: var(--border); }
   .btn-ghost:hover:not(:disabled) { background: var(--border); }
-  .btn-success  { background: var(--green); color: #000; }
-  .btn-success:hover:not(:disabled) { opacity: 0.85; }
+  .btn-success  { background: var(--green); color: #fff; }
+  .btn-success:hover:not(:disabled) { opacity: 0.88; }
+  .btn-danger   { background: transparent; color: var(--red); border-color: var(--red); }
+  .btn-danger:hover:not(:disabled) { background: rgba(239,68,68,0.1); }
+  .btn-icon {
+    padding: 9px 12px; border-radius: 7px; border: 1px solid var(--border);
+    background: var(--bg); color: var(--text); cursor: pointer; font-size: 16px;
+    display: inline-flex; align-items: center;
+    transition: background 0.15s;
+  }
+  .btn-icon:hover { background: var(--border); }
 
-  /* ── Form controls ───────────────────────────────────────────────────────── */
-  .form-group { margin-bottom: 20px; }
+  /* ── Forms ────────────────────────────────────────────────────────────────── */
+  .form-group { margin-bottom: 18px; }
   .form-row   { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
   .form-row-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; }
 
   label {
-    display: block;
-    font-size: 12px;
-    font-weight: 500;
-    color: var(--muted);
-    margin-bottom: 6px;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
+    display: block; font-size: 11px; font-weight: 600; color: var(--muted);
+    margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.06em;
   }
 
-  input[type="text"],
-  input[type="password"],
-  input[type="number"] {
+  input[type="text"], input[type="password"], input[type="number"] {
     width: 100%;
     background: var(--bg);
     border: 1px solid var(--border);
-    border-radius: 6px;
+    border-radius: 7px;
     padding: 9px 12px;
     color: var(--text);
     font-size: 14px;
@@ -202,33 +206,29 @@
     transition: border-color 0.15s;
     outline: none;
   }
-  input:focus { border-color: var(--cyan); }
-
+  input:focus { border-color: var(--navy-light); }
   .hint { font-size: 11px; color: var(--muted); margin-top: 5px; }
 
-  /* ── Section headers ─────────────────────────────────────────────────────── */
+  /* Dir picker row */
+  .dir-row { display: flex; gap: 8px; }
+  .dir-row input { flex: 1; }
+
+  /* ── Section headers ──────────────────────────────────────────────────────── */
   .section-title {
-    font-size: 11px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
+    font-size: 11px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 0.08em;
     color: var(--muted);
     border-bottom: 1px solid var(--border);
     padding-bottom: 8px;
-    margin-bottom: 20px;
-    margin-top: 32px;
+    margin-bottom: 18px; margin-top: 28px;
   }
   .section-title:first-child { margin-top: 0; }
 
-  /* ── Prerequisite rows ───────────────────────────────────────────────────── */
+  /* ── Check rows ───────────────────────────────────────────────────────────── */
   .check-row {
-    display: flex;
-    align-items: center;
-    gap: 14px;
-    padding: 14px 16px;
-    border-radius: 8px;
-    background: var(--bg);
-    border: 1px solid var(--border);
+    display: flex; align-items: center; gap: 14px;
+    padding: 13px 16px; border-radius: 8px;
+    background: var(--bg); border: 1px solid var(--border);
     margin-bottom: 10px;
   }
   .check-icon { font-size: 20px; width: 24px; text-align: center; }
@@ -239,264 +239,305 @@
   .spinner {
     width: 20px; height: 20px;
     border: 2px solid var(--border);
-    border-top-color: var(--cyan);
+    border-top-color: var(--navy-light);
     border-radius: 50%;
     animation: spin 0.7s linear infinite;
   }
   @keyframes spin { to { transform: rotate(360deg); } }
 
-  /* ── Progress log ────────────────────────────────────────────────────────── */
+  /* ── Progress log ─────────────────────────────────────────────────────────── */
   .log {
-    background: #010409;
+    background: #060e1f;
     border: 1px solid var(--border);
     border-radius: 8px;
     padding: 16px;
-    font-family: "Cascadia Code", "Fira Code", Consolas, monospace;
+    font-family: "Cascadia Code","Fira Code",Consolas,monospace;
     font-size: 12.5px;
     line-height: 1.7;
-    height: 420px;
+    height: 400px;
     overflow-y: auto;
     white-space: pre-wrap;
     word-break: break-all;
   }
+  .log-line-info  { color: #94a3b8; }
+  .log-line-ok    { color: var(--green); }
+  .log-line-warn  { color: var(--yellow); }
+  .log-line-error { color: var(--red); }
 
-  .log-line-info   { color: #94a3b8; }
-  .log-line-ok     { color: var(--green); }
-  .log-line-warn   { color: var(--yellow); }
-  .log-line-error  { color: var(--red); }
-
-  /* ── Progress bar ────────────────────────────────────────────────────────── */
+  /* ── Progress bar ─────────────────────────────────────────────────────────── */
   .progress-wrap {
-    background: var(--border);
-    border-radius: 4px;
-    height: 4px;
-    margin-bottom: 20px;
-    overflow: hidden;
+    background: var(--border); border-radius: 4px; height: 6px;
+    margin-bottom: 18px; overflow: hidden;
   }
   .progress-bar {
     height: 100%;
-    background: var(--cyan);
+    background: linear-gradient(90deg, var(--navy-mid), var(--pink-acc));
     border-radius: 4px;
     transition: width 0.4s ease;
     width: 0%;
   }
-
-  /* ── Password strength ───────────────────────────────────────────────────── */
-  .strength-bar {
-    display: flex;
-    gap: 4px;
-    margin-top: 6px;
-  }
-  .strength-seg {
-    flex: 1;
-    height: 3px;
-    border-radius: 2px;
-    background: var(--border);
-    transition: background 0.2s;
+  .progress-label {
+    font-size: 12px; color: var(--muted); margin-bottom: 6px;
+    display: flex; justify-content: space-between;
   }
 
-  /* ── Checkboxes ──────────────────────────────────────────────────────────── */
+  /* ── Password strength ────────────────────────────────────────────────────── */
+  .strength-bar { display: flex; gap: 4px; margin-top: 6px; }
+  .strength-seg { flex: 1; height: 3px; border-radius: 2px; background: var(--border); transition: background 0.2s; }
+
+  /* ── Checkboxes ───────────────────────────────────────────────────────────── */
   .checkbox-row {
-    display: flex;
-    align-items: flex-start;
-    gap: 12px;
-    padding: 14px 16px;
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    cursor: pointer;
-    background: var(--bg);
-    margin-bottom: 10px;
+    display: flex; align-items: flex-start; gap: 12px;
+    padding: 13px 16px; border: 1px solid var(--border);
+    border-radius: 8px; cursor: pointer;
+    background: var(--bg); margin-bottom: 10px;
     transition: border-color 0.15s;
   }
-  .checkbox-row:hover { border-color: var(--cyan-dim); }
+  .checkbox-row:hover { border-color: var(--navy-light); }
   .checkbox-row input[type="checkbox"] {
-    width: 16px; height: 16px; margin-top: 2px; flex-shrink: 0; cursor: pointer;
-    accent-color: var(--cyan);
+    width: 16px; height: 16px; margin-top: 2px; flex-shrink: 0;
+    cursor: pointer; accent-color: var(--pink-acc);
   }
-  .checkbox-row .cb-text strong { display: block; font-weight: 500; }
+  .checkbox-row .cb-text strong { display: block; font-weight: 600; }
   .checkbox-row .cb-text span   { font-size: 12px; color: var(--muted); }
 
-  /* ── Success card ────────────────────────────────────────────────────────── */
-  .success-card {
-    text-align: center;
-    padding: 48px 0;
-  }
-  .success-icon { font-size: 64px; margin-bottom: 20px; }
-  .success-card h2 { font-size: 26px; font-weight: 700; margin-bottom: 8px; }
-  .success-card p  { color: var(--muted); max-width: 460px; margin: 0 auto 28px; }
-
-  .url-card {
-    background: var(--bg);
-    border: 1px solid var(--cyan-dim);
-    border-radius: 10px;
-    padding: 20px 28px;
-    max-width: 440px;
-    margin: 0 auto 32px;
-    text-align: left;
-  }
-  .url-card label { color: var(--muted); text-transform: uppercase; font-size: 11px; }
-  .url-card .url  { font-size: 18px; font-weight: 600; color: var(--cyan); margin-top: 4px; word-break: break-all; }
-
-  .steps-list {
-    text-align: left;
-    max-width: 440px;
-    margin: 0 auto;
-  }
-  .steps-list li {
-    padding: 8px 0;
-    border-bottom: 1px solid var(--border);
-    color: var(--muted);
-    font-size: 13px;
-  }
-  .steps-list li:last-child { border: none; }
-
-  /* ── Callout ─────────────────────────────────────────────────────────────── */
+  /* ── Callouts ─────────────────────────────────────────────────────────────── */
   .callout {
-    display: flex;
-    gap: 12px;
-    padding: 14px 16px;
-    border-radius: 8px;
-    font-size: 13px;
-    margin-bottom: 24px;
+    display: flex; gap: 12px; padding: 13px 16px;
+    border-radius: 8px; font-size: 13px; margin-bottom: 20px;
   }
-  .callout-info { background: rgba(34,211,238,0.07); border: 1px solid rgba(34,211,238,0.25); color: var(--cyan); }
-  .callout-warn { background: rgba(245,158,11,0.07); border: 1px solid rgba(245,158,11,0.25); color: var(--yellow); }
+  .callout-info { background: rgba(30,64,175,0.12); border: 1px solid rgba(59,130,246,0.3); color: #93c5fd; }
+  .callout-warn { background: rgba(245,158,11,0.08); border: 1px solid rgba(245,158,11,0.3); color: var(--yellow); }
+  .callout-pink { background: rgba(236,72,153,0.08); border: 1px solid rgba(236,72,153,0.25); color: var(--pink); }
 
-  /* ── Welcome screen ──────────────────────────────────────────────────────── */
+  /* ── Welcome / edition picker ─────────────────────────────────────────────── */
   .welcome-hero {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    text-align: center;
-    padding: 40px 0 32px;
+    display: flex; flex-direction: column;
+    align-items: center; text-align: center;
+    padding: 32px 0 24px;
   }
-  .welcome-hero .brand { font-size: 36px; font-weight: 800; color: var(--cyan); letter-spacing: -1px; margin-bottom: 8px; }
-  .welcome-hero .tagline { font-size: 15px; color: var(--muted); margin-bottom: 36px; }
+  .welcome-logo-big {
+    width: 64px; height: 64px; margin-bottom: 16px;
+  }
+  .welcome-hero .brand {
+    font-size: 30px; font-weight: 800;
+    background: linear-gradient(90deg, #fff 40%, var(--pink));
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    letter-spacing: -1px; margin-bottom: 6px;
+  }
+  .welcome-hero .tagline { font-size: 14px; color: var(--muted); margin-bottom: 32px; }
 
-  .feature-grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 14px;
-    max-width: 560px;
-    width: 100%;
-  }
-  .feature-card {
-    background: var(--bg);
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    padding: 18px;
-    text-align: left;
-  }
-  .feature-card .icon { font-size: 24px; margin-bottom: 8px; }
-  .feature-card strong { display: block; font-size: 13px; margin-bottom: 3px; }
-  .feature-card span { font-size: 12px; color: var(--muted); }
-
-  /* ── Edition picker ───────────────────────────────────────────────────────── */
-  .edition-grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 16px;
-    max-width: 560px;
-    width: 100%;
-    margin-top: 8px;
-  }
+  .edition-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; max-width: 560px; width: 100%; margin-top: 8px; }
   .edition-card {
-    background: var(--bg);
+    background: var(--surface);
     border: 2px solid var(--border);
-    border-radius: 12px;
-    padding: 22px 20px;
-    cursor: pointer;
-    text-align: left;
+    border-radius: 12px; padding: 22px 20px;
+    cursor: pointer; text-align: left;
     transition: border-color 0.2s, background 0.2s;
     position: relative;
   }
-  .edition-card:hover { border-color: var(--cyan-dim); }
-  .edition-card.selected {
-    border-color: var(--cyan);
-    background: rgba(34,211,238,0.05);
-  }
+  .edition-card:hover { border-color: var(--navy-light); }
+  .edition-card.selected { border-color: var(--pink-acc); background: rgba(236,72,153,0.06); }
   .edition-card .ed-icon  { font-size: 28px; margin-bottom: 10px; }
   .edition-card .ed-title { font-size: 15px; font-weight: 700; margin-bottom: 5px; }
   .edition-card .ed-desc  { font-size: 12px; color: var(--muted); line-height: 1.5; }
   .edition-card .ed-badge {
     position: absolute; top: 12px; right: 12px;
-    font-size: 10px; font-weight: 600;
+    font-size: 10px; font-weight: 700;
     padding: 2px 8px; border-radius: 10px;
-    background: rgba(34,211,238,0.15); color: var(--cyan);
+    background: rgba(236,72,153,0.18); color: var(--pink-acc);
     text-transform: uppercase; letter-spacing: 0.05em;
   }
   .edition-card .ed-reqs {
-    margin-top: 12px;
-    padding-top: 10px;
+    margin-top: 12px; padding-top: 10px;
     border-top: 1px solid var(--border);
-    font-size: 11px;
-    color: var(--muted);
+    font-size: 11px; color: var(--muted);
   }
   .edition-card .ed-reqs span { display: block; padding: 2px 0; }
+
+  /* ── Feature grid ─────────────────────────────────────────────────────────── */
+  .feature-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; max-width: 560px; width: 100%; margin-top: 24px; }
+  .feature-card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 10px; padding: 16px; text-align: left;
+  }
+  .feature-card .icon { font-size: 22px; margin-bottom: 8px; }
+  .feature-card strong { display: block; font-size: 13px; margin-bottom: 3px; }
+  .feature-card span { font-size: 12px; color: var(--muted); }
+
+  /* ── Success screen ───────────────────────────────────────────────────────── */
+  .success-card { text-align: center; padding: 40px 0; }
+  .success-icon { font-size: 60px; margin-bottom: 16px; }
+  .success-card h2 { font-size: 26px; font-weight: 800; margin-bottom: 8px; }
+  .success-card p  { color: var(--muted); max-width: 460px; margin: 0 auto 24px; }
+
+  .url-card {
+    background: var(--bg);
+    border: 1px solid rgba(59,130,246,0.35);
+    border-radius: 10px; padding: 18px 24px;
+    max-width: 420px; margin: 0 auto 28px; text-align: left;
+  }
+  .url-card label { color: var(--muted); text-transform: uppercase; font-size: 10px; letter-spacing: 0.06em; }
+  .url-card .url  { font-size: 17px; font-weight: 700; color: var(--navy-light); margin-top: 4px; word-break: break-all; }
+
+  .steps-list { text-align: left; max-width: 440px; margin: 0 auto; }
+  .steps-list li {
+    padding: 8px 0; border-bottom: 1px solid var(--border);
+    color: var(--muted); font-size: 13px;
+  }
+  .steps-list li:last-child { border: none; }
+
+  .done-actions { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; margin-top: 28px; }
+
+  /* ── File browser modal ───────────────────────────────────────────────────── */
+  .modal-backdrop {
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,0.7);
+    z-index: 100;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .modal {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    width: 520px; max-width: 95vw;
+    max-height: 80vh;
+    display: flex; flex-direction: column;
+    overflow: hidden;
+  }
+  .modal-header {
+    padding: 18px 20px;
+    border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .modal-header h3 { font-size: 15px; font-weight: 700; }
+  .modal-close { background: none; border: none; color: var(--muted); font-size: 20px; cursor: pointer; padding: 0 4px; }
+  .modal-close:hover { color: var(--text); }
+  .modal-path {
+    padding: 10px 16px;
+    background: var(--bg);
+    border-bottom: 1px solid var(--border);
+    font-size: 12px; font-family: monospace;
+    color: var(--navy-light);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .modal-body { flex: 1; overflow-y: auto; padding: 8px 0; min-height: 200px; }
+  .dir-entry {
+    display: flex; align-items: center; gap: 10px;
+    padding: 9px 18px; cursor: pointer;
+    transition: background 0.1s;
+    font-size: 13px;
+  }
+  .dir-entry:hover { background: var(--bg); }
+  .dir-entry.up { color: var(--muted); font-style: italic; }
+  .dir-entry-icon { font-size: 16px; width: 20px; }
+  .modal-footer {
+    padding: 14px 18px;
+    border-top: 1px solid var(--border);
+    display: flex; gap: 10px; justify-content: flex-end;
+    align-items: center;
+  }
+  .modal-footer .selected-path {
+    flex: 1; font-size: 12px; color: var(--muted);
+    font-family: monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
 </style>
 </head>
 <body>
 
-<!-- ── Sidebar ─────────────────────────────────────────────────────────────── -->
+<!-- ── Sidebar ──────────────────────────────────────────────────────────────── -->
 <aside class="sidebar">
-  <div class="logo">
-    <div class="logo-mark">ezHealthKonnect</div>
+  <div class="logo-area">
+    <svg class="logo-svg" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <rect width="40" height="40" rx="10" fill="#1e40af"/>
+      <path d="M8 20 Q14 10 20 20 Q26 30 32 20" stroke="#f8bbd9" stroke-width="2.5" fill="none" stroke-linecap="round"/>
+      <path d="M8 20 Q14 10 20 20 Q26 30 32 20" stroke="#ec4899" stroke-width="1" fill="none" stroke-linecap="round" stroke-dasharray="2 4" stroke-dashoffset="3"/>
+      <circle cx="20" cy="20" r="3" fill="#fff"/>
+      <circle cx="8"  cy="20" r="2" fill="#f8bbd9"/>
+      <circle cx="32" cy="20" r="2" fill="#f8bbd9"/>
+    </svg>
+    <div class="logo-name">ez<span>Health</span>Konnect</div>
     <div class="logo-sub">Setup Wizard</div>
   </div>
+
   <ul class="steps" id="stepList">
     <li class="step-item active" data-step="0"><div class="step-dot">1</div><span class="step-label">Welcome</span></li>
-    <li class="step-item"       data-step="1"><div class="step-dot">2</div><span class="step-label">Prerequisites</span></li>
-    <li class="step-item"       data-step="2"><div class="step-dot">3</div><span class="step-label">Configuration</span></li>
-    <li class="step-item"       data-step="3"><div class="step-dot">4</div><span class="step-label">Installing</span></li>
-    <li class="step-item"       data-step="4"><div class="step-dot">✓</div><span class="step-label">Complete</span></li>
+    <li class="step-item"        data-step="1"><div class="step-dot">2</div><span class="step-label">Prerequisites</span></li>
+    <li class="step-item"        data-step="2"><div class="step-dot">3</div><span class="step-label">Configuration</span></li>
+    <li class="step-item"        data-step="3"><div class="step-dot">4</div><span class="step-label">Installing</span></li>
+    <li class="step-item"        data-step="4"><div class="step-dot">✓</div><span class="step-label">Complete</span></li>
   </ul>
+
   <div class="sidebar-footer">
     ezInterop Solutions<br>
     &copy; 2025–2026
   </div>
 </aside>
 
-<!-- ── Main ───────────────────────────────────────────────────────────────── -->
+<!-- ── Main ────────────────────────────────────────────────────────────────── -->
 <main class="main">
   <div class="header">
-    <h1 id="pageTitle">Welcome to ezHealthKonnect</h1>
-    <p  id="pageDesc">Healthcare HL7↔FHIR Integration Platform — Docker Edition</p>
+    <div class="header-text">
+      <h1 id="pageTitle">Welcome to ezHealthKonnect</h1>
+      <p  id="pageDesc">Healthcare HL7 ↔ FHIR Integration Platform</p>
+    </div>
   </div>
 
-  <div class="content" id="content"><!-- screens injected here --></div>
+  <div class="content" id="content"></div>
 
   <div class="footer" id="footer">
-    <button class="btn btn-ghost" id="btnBack" style="display:none" onclick="goBack()">← Back</button>
-    <button class="btn btn-primary" id="btnNext" onclick="goNext()">Get Started →</button>
+    <button class="btn btn-ghost"    id="btnBack" style="display:none" onclick="goBack()">← Back</button>
+    <button class="btn btn-primary"  id="btnNext" onclick="goNext()">Get Started →</button>
   </div>
 </main>
+
+<!-- ── File browser modal ────────────────────────────────────────────────────── -->
+<div class="modal-backdrop" id="browseModal" style="display:none" onclick="closeBrowse(event)">
+  <div class="modal" onclick="event.stopPropagation()">
+    <div class="modal-header">
+      <h3>📁 Choose Install Directory</h3>
+      <button class="modal-close" onclick="closeBrowseModal()">✕</button>
+    </div>
+    <div class="modal-path" id="browsePath">/</div>
+    <div class="modal-body" id="browseBody"><div style="padding:24px;text-align:center;color:var(--muted)">Loading…</div></div>
+    <div class="modal-footer">
+      <span class="selected-path" id="browseSelected">—</span>
+      <button class="btn btn-ghost" onclick="closeBrowseModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="confirmBrowse()">Select This Folder</button>
+    </div>
+  </div>
+</div>
 
 <script>
 // ─────────────────────────────────────────────────────────────────────────────
 // State
 // ─────────────────────────────────────────────────────────────────────────────
-let currentStep  = 0;
-let checksOK     = false;
-let cfg          = {};
-let appURL       = '';
-let installOK    = false;
-let installMode  = 'docker'; // 'docker' | 'standalone'
+let currentStep = 0;
+let checksOK    = false;
+let cfg         = {};
+let appURL      = '';
+let installOK   = false;
+let installMode = 'docker'; // 'docker' | 'standalone'
+
+// File browser state
+let browseCurrentPath = '';
+let browseTargetInput = '';
 
 function stepDescs() {
   if (installMode === 'standalone') {
     return [
-      { title: 'Welcome to ezHealthKonnect',  desc: 'Healthcare HL7↔FHIR Integration Platform' },
+      { title: 'Welcome to ezHealthKonnect',  desc: 'Healthcare HL7 ↔ FHIR Integration Platform' },
       { title: 'Checking Prerequisites',       desc: 'Verifying OS, disk space, and port availability' },
       { title: 'Configuration',               desc: 'Choose ports, install location, and passwords' },
-      { title: 'Installing',                  desc: 'Installing dependencies and starting services — please wait' },
+      { title: 'Installing',                  desc: 'Installing dependencies and starting services' },
       { title: 'Installation Complete',       desc: 'ezHealthKonnect is running on your machine' },
     ];
   }
   return [
-    { title: 'Welcome to ezHealthKonnect',  desc: 'Healthcare HL7↔FHIR Integration Platform — Docker Edition' },
+    { title: 'Welcome to ezHealthKonnect',  desc: 'Healthcare HL7 ↔ FHIR Integration Platform — Docker Edition' },
     { title: 'Checking Prerequisites',       desc: 'Verifying that Docker is installed and running' },
     { title: 'Configuration',               desc: 'Choose ports, install location, and passwords' },
-    { title: 'Installing',                  desc: 'Building and starting ezHealthKonnect — please wait' },
+    { title: 'Installing',                  desc: 'Building and starting ezHealthKonnect' },
     { title: 'Installation Complete',       desc: 'ezHealthKonnect is running on your machine' },
   ];
 }
@@ -521,18 +562,17 @@ function updateNav() {
   const back = document.getElementById('btnBack');
   const next = document.getElementById('btnNext');
   back.style.display = (currentStep > 0 && currentStep < 3) ? 'inline-flex' : 'none';
-  if (currentStep === 0) { next.textContent = 'Get Started →'; next.className = 'btn btn-primary'; next.disabled = false; }
-  if (currentStep === 1) { next.textContent = 'Next →';        next.className = 'btn btn-primary'; next.disabled = !checksOK; }
-  if (currentStep === 2) { next.textContent = 'Install Now';   next.className = 'btn btn-primary'; next.disabled = false; }
+  if (currentStep === 0) { next.textContent = 'Get Started →'; next.className = 'btn btn-primary'; next.disabled = false; next.style.display = 'inline-flex'; }
+  if (currentStep === 1) { next.textContent = 'Next →';        next.className = 'btn btn-primary'; next.disabled = !checksOK; next.style.display = 'inline-flex'; }
+  if (currentStep === 2) { next.textContent = 'Install Now';   next.className = 'btn btn-pink';    next.disabled = false;    next.style.display = 'inline-flex'; }
   if (currentStep === 3) { next.style.display = 'none'; }
-  if (currentStep === 4) { next.style.display = 'inline-flex'; next.textContent = 'Open in Browser'; next.className = 'btn btn-success'; next.disabled = !installOK; }
+  if (currentStep === 4) { next.style.display = 'none'; } // Done screen has its own buttons
 }
 
 function goNext() {
-  if (currentStep === 0) { setStep(1); runChecks();  return; }
+  if (currentStep === 0) { setStep(1); runChecks(); return; }
   if (currentStep === 1) { setStep(2); loadDefaults(); return; }
   if (currentStep === 2) { if (validateConfig()) startInstall(); return; }
-  if (currentStep === 4) { window.open(appURL, '_blank'); return; }
 }
 
 function goBack() {
@@ -554,49 +594,61 @@ function renderStep(n) {
 function renderWelcome() {
   return `
   <div class="welcome-hero">
+    <svg class="welcome-logo-big" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <rect width="64" height="64" rx="16" fill="#1e40af"/>
+      <path d="M12 32 Q22 16 32 32 Q42 48 52 32" stroke="#f8bbd9" stroke-width="3.5" fill="none" stroke-linecap="round"/>
+      <path d="M12 32 Q22 16 32 32 Q42 48 52 32" stroke="#ec4899" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-dasharray="3 6" stroke-dashoffset="4"/>
+      <circle cx="32" cy="32" r="5" fill="#fff"/>
+      <circle cx="12" cy="32" r="3.5" fill="#f8bbd9"/>
+      <circle cx="52" cy="32" r="3.5" fill="#f8bbd9"/>
+    </svg>
     <div class="brand">ezHealthKonnect</div>
     <div class="tagline">AI-powered HL7 ↔ FHIR Healthcare Integration Platform</div>
 
-    <div style="font-size:13px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:14px;width:100%;max-width:560px;text-align:left;">
+    <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.1em;margin-bottom:12px;width:100%;max-width:560px;text-align:left;">
       Choose your edition
     </div>
 
     <div class="edition-grid">
-      <div class="edition-card ${installMode==='docker'?'selected':''}"
-           id="edDocker" onclick="selectEdition('docker')">
+      <div class="edition-card ${installMode==='docker'?'selected':''}" id="edDocker" onclick="selectEdition('docker')">
         <div class="ed-badge">Recommended</div>
         <div class="ed-icon">🐳</div>
         <div class="ed-title">Docker Edition</div>
-        <div class="ed-desc">All services run in Docker containers. Simplest setup — isolated, portable, easy to upgrade.</div>
+        <div class="ed-desc">All services run in containers. Simplest setup — isolated, portable, easy to upgrade.</div>
         <div class="ed-reqs">
           <span>✔ Docker Desktop (auto-installable)</span>
           <span>✔ Windows, macOS, Linux</span>
         </div>
       </div>
-      <div class="edition-card ${installMode==='standalone'?'selected':''}"
-           id="edStandalone" onclick="selectEdition('standalone')">
+      <div class="edition-card ${installMode==='standalone'?'selected':''}" id="edStandalone" onclick="selectEdition('standalone')">
         <div class="ed-icon">⚙️</div>
         <div class="ed-title">Standalone Edition</div>
-        <div class="ed-desc">Installs natively — PostgreSQL, Node.js, and Go API as system services. No Docker required.</div>
+        <div class="ed-desc">Native install — PostgreSQL + Node.js as system services. No Docker required.</div>
         <div class="ed-reqs">
           <span>✔ Windows 10/11 (winget)</span>
           <span>✔ Linux → use install.sh</span>
         </div>
       </div>
     </div>
+
+    <div class="feature-grid">
+      <div class="feature-card"><div class="icon">🔀</div><strong>HL7 v2 → FHIR R4</strong><span>Real-time message transformation</span></div>
+      <div class="feature-card"><div class="icon">🤖</div><strong>AI Mapping</strong><span>Ollama-powered field suggestions</span></div>
+      <div class="feature-card"><div class="icon">🔌</div><strong>32 Connectors</strong><span>TCP/MLLP, HTTP, S3, Kafka & more</span></div>
+      <div class="feature-card"><div class="icon">🔐</div><strong>HIPAA Ready</strong><span>Audit logs & encrypted secrets</span></div>
+    </div>
   </div>
 
-  <div class="callout callout-info" id="editionHint">
+  <div class="callout callout-info" id="editionHint" style="margin-top:24px">
     <span>ℹ️</span>
     <span id="editionHintText">${editionHintText()}</span>
   </div>`;
 }
 
 function editionHintText() {
-  if (installMode === 'standalone') {
-    return 'Standalone: PostgreSQL and Node.js will be installed automatically via winget. No Docker needed.';
-  }
-  return 'Docker Edition: prerequisites are checked next. Docker Desktop will be offered for auto-install if missing.';
+  return installMode === 'standalone'
+    ? 'Standalone: PostgreSQL and Node.js will be installed via winget. No Docker needed.'
+    : 'Docker Edition: prerequisites checked next. Docker Desktop will be offered if missing.';
 }
 
 function selectEdition(mode) {
@@ -610,18 +662,16 @@ function selectEdition(mode) {
 // Screen: Prerequisites
 // ─────────────────────────────────────────────────────────────────────────────
 function renderChecks() {
-  const label = installMode === 'standalone' ? 'system requirements' : 'Docker';
   return `
   <div id="checkRows">
-    <div class="check-row"><div class="spinner"></div><div class="check-name">Checking ${label}…</div></div>
+    <div class="check-row"><div class="spinner"></div><div class="check-name">Checking prerequisites…</div></div>
   </div>
   <div class="callout callout-warn" id="checksHint" style="display:none">
-    <span>⚠️</span>
-    <span id="checksHintText"></span>
+    <span>⚠️</span><span id="checksHintText"></span>
   </div>
-  <div style="margin-top:16px">
+  <div style="margin-top:16px;display:flex;gap:10px">
     <button class="btn btn-ghost" onclick="runChecks()">↻ Retry</button>
-    ${installMode === 'docker' ? `<button class="btn btn-ghost" style="margin-left:8px" onclick="installDockerFlow()">Install Docker →</button>` : ''}
+    ${installMode === 'docker' ? `<button class="btn btn-ghost" onclick="installDockerFlow()">Install Docker →</button>` : ''}
   </div>`;
 }
 
@@ -647,33 +697,25 @@ async function runChecks() {
   }).join('');
 
   document.getElementById('checkRows').innerHTML = html;
-
   const hint = document.getElementById('checksHint');
   if (hint) {
     hint.style.display = allOK ? 'none' : 'flex';
-    if (!allOK) {
-      document.getElementById('checksHintText').textContent = installMode === 'standalone'
-        ? 'Some requirements are not met. Review the items above and fix them, then retry.'
-        : 'Docker is not running. Install or start Docker Desktop then click Retry.';
-    }
+    if (!allOK) document.getElementById('checksHintText').textContent = installMode === 'standalone'
+      ? 'Some requirements are not met. Review the items above, fix them, then retry.'
+      : 'Docker is not running. Install or start Docker Desktop then click Retry.';
   }
-
   checksOK = allOK;
   updateNav();
 }
 
-// Install Docker via the Go backend (opens a sub-SSE stream for progress).
 async function installDockerFlow() {
   const btn = document.querySelector('[onclick="installDockerFlow()"]');
   if (btn) { btn.disabled = true; btn.textContent = 'Installing Docker…'; }
-
   await fetch('/api/install-docker', { method: 'POST' });
-
   const es = new EventSource('/api/docker-progress');
   es.onmessage = (e) => {
     const msg = JSON.parse(e.data);
     if (msg.level === 'done') { es.close(); runChecks(); return; }
-    appendLog(msg.level, msg.msg);
   };
 }
 
@@ -686,66 +728,53 @@ function renderConfig() {
   <div class="section-title">Install Location</div>
   <div class="form-group">
     <label>Install Directory</label>
-    <input type="text" id="installDir" placeholder="${isStandalone ? 'e.g. C:\\ezHealthKonnect' : 'e.g. C:\\ezHealthKonnect'}">
+    <div class="dir-row">
+      <input type="text" id="installDir" placeholder="${isStandalone ? 'e.g. C:\\ezHealthKonnect' : 'e.g. C:\\ezHealthKonnect'}">
+      <button class="btn-icon" title="Browse…" onclick="openBrowse('installDir')">📁</button>
+    </div>
     <div class="hint">All application files, logs, and uploads will be stored here.</div>
   </div>
 
   <div class="section-title">Network Ports</div>
-  <div class="callout callout-info" style="margin-bottom:16px">
-    <span>ℹ️</span>
-    <span>Change any port if it conflicts with other software on this machine.</span>
+  <div class="callout callout-info">
+    <span>ℹ️</span><span>Change any port if it conflicts with other software on this machine.</span>
   </div>
   <div class="form-row-3">
-    <div class="form-group">
-      <label>Web UI Port</label>
-      <input type="text" id="appPort" placeholder="3000">
-    </div>
-    <div class="form-group">
-      <label>Go API Port</label>
-      <input type="text" id="apiPort" placeholder="8080">
-    </div>
-    <div class="form-group">
-      <label>PostgreSQL Port</label>
-      <input type="text" id="dbPort" placeholder="5432">
-    </div>
+    <div class="form-group"><label>Web UI Port</label><input type="text" id="appPort" placeholder="3000"></div>
+    <div class="form-group"><label>Go API Port</label><input type="text" id="apiPort" placeholder="8080"></div>
+    <div class="form-group"><label>PostgreSQL Port</label><input type="text" id="dbPort" placeholder="5432"></div>
   </div>
 
   ${!isStandalone ? `
   <div class="form-row">
-    <div class="form-group">
-      <label>MinIO API Port</label>
-      <input type="text" id="minioApiPort" placeholder="9000">
-    </div>
-    <div class="form-group">
-      <label>MinIO Console Port</label>
-      <input type="text" id="minioConPort" placeholder="9001">
-    </div>
+    <div class="form-group"><label>MinIO API Port</label><input type="text" id="minioApiPort" placeholder="9000"></div>
+    <div class="form-group"><label>MinIO Console Port</label><input type="text" id="minioConPort" placeholder="9001"></div>
   </div>` : ''}
 
   <div class="section-title">Database</div>
   ${isStandalone ? `
   <div class="form-row">
-    <div class="form-group">
-      <label>Database Name</label>
-      <input type="text" id="dbName" placeholder="ezhealthkonnect">
-    </div>
-    <div class="form-group">
-      <label>Database User</label>
-      <input type="text" id="dbUser" placeholder="ezhealth_user">
-    </div>
+    <div class="form-group"><label>Database Name</label><input type="text" id="dbName" placeholder="ezhealthkonnect"></div>
+    <div class="form-group"><label>Database User</label><input type="text" id="dbUser" placeholder="ezhealth_user"></div>
   </div>` : ''}
   <div class="form-row">
     <div class="form-group">
       <label>Database Password</label>
       <input type="password" id="dbPassword" placeholder="Strong password" oninput="strengthMeter('dbPassword','dbStr')">
-      <div class="strength-bar" id="dbStr"><div class="strength-seg"></div><div class="strength-seg"></div><div class="strength-seg"></div><div class="strength-seg"></div></div>
-      <div class="hint">Used for the PostgreSQL database. Store this securely.</div>
+      <div class="strength-bar" id="dbStr">
+        <div class="strength-seg"></div><div class="strength-seg"></div>
+        <div class="strength-seg"></div><div class="strength-seg"></div>
+      </div>
+      <div class="hint">Keep this secret — used by PostgreSQL and stored in your .env file.</div>
     </div>
     ${!isStandalone ? `
     <div class="form-group">
       <label>Storage Password</label>
       <input type="password" id="minioPassword" placeholder="Strong password" oninput="strengthMeter('minioPassword','minStr')">
-      <div class="strength-bar" id="minStr"><div class="strength-seg"></div><div class="strength-seg"></div><div class="strength-seg"></div><div class="strength-seg"></div></div>
+      <div class="strength-bar" id="minStr">
+        <div class="strength-seg"></div><div class="strength-seg"></div>
+        <div class="strength-seg"></div><div class="strength-seg"></div>
+      </div>
       <div class="hint">Used for MinIO object storage (message archives).</div>
     </div>` : ''}
   </div>
@@ -755,14 +784,14 @@ function renderConfig() {
     <input type="checkbox" id="chkAI">
     <div class="cb-text">
       <strong>Enable AI Companion (Ollama)</strong>
-      <span>Pulls llama3.2:3b and nomic-embed-text models (~2.3 GB download). Enables AI-powered mapping suggestions.</span>
+      <span>Pulls llama3.2:3b and nomic-embed-text models (~2.3 GB). Enables AI mapping suggestions.</span>
     </div>
   </label>
   <label class="checkbox-row" for="chkSvc">
     <input type="checkbox" id="chkSvc" checked>
     <div class="cb-text">
       <strong>Register as a system service</strong>
-      <span>Auto-starts ezHealthKonnect when the machine boots (requires administrator / root privileges).</span>
+      <span>Auto-starts ezHealthKonnect when the machine boots (requires administrator / root).</span>
     </div>
   </label>`;
 }
@@ -777,7 +806,6 @@ async function loadDefaults() {
   set('dbPort',       d.dbPort);
   set('minioApiPort', d.minioApiPort);
   set('minioConPort', d.minioConPort);
-  // Standalone defaults
   const dbNameEl = document.getElementById('dbName');
   if (dbNameEl) dbNameEl.value = 'ezhealthkonnect';
   const dbUserEl = document.getElementById('dbUser');
@@ -793,15 +821,13 @@ function validateConfig() {
   for (const id of required) {
     const el = document.getElementById(id);
     if (!el || !el.value.trim()) {
-      el && el.focus();
-      el && (el.style.borderColor = 'var(--red)');
+      if (el) { el.focus(); el.style.borderColor = 'var(--red)'; }
       return false;
     }
     el.style.borderColor = '';
   }
 
   const g = id => { const el = document.getElementById(id); return el ? el.value.trim() : ''; };
-
   cfg = {
     mode:            installMode,
     installDir:      g('installDir'),
@@ -812,11 +838,9 @@ function validateConfig() {
     withAI:          document.getElementById('chkAI').checked,
     registerService: document.getElementById('chkSvc').checked,
     version:         'latest',
-    // Docker only
     minioApiPort:    g('minioApiPort'),
     minioConPort:    g('minioConPort'),
     minioPassword:   g('minioPassword') || '',
-    // Standalone only
     dbUser:          g('dbUser') || 'ezhealth_user',
     dbName:          g('dbName') || 'ezhealthkonnect',
   };
@@ -831,8 +855,8 @@ function strengthMeter(inputId, barId) {
   if (val.length >= 12) score++;
   if (/[A-Z]/.test(val) && /[a-z]/.test(val)) score++;
   if (/[0-9!@#$%^&*]/.test(val)) score++;
-  const colors = ['var(--red)', 'var(--yellow)', 'var(--yellow)', 'var(--green)'];
-  segs.forEach((s, i) => s.style.background = i < score ? colors[score - 1] : 'var(--border)');
+  const colors = ['var(--red)','var(--yellow)','var(--yellow)','var(--green)'];
+  segs.forEach((s, i) => s.style.background = i < score ? colors[score-1] : 'var(--border)');
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -840,6 +864,10 @@ function strengthMeter(inputId, barId) {
 // ─────────────────────────────────────────────────────────────────────────────
 function renderInstalling() {
   return `
+  <div class="progress-label">
+    <span id="progressStep">Starting installation…</span>
+    <span id="progressPct">0%</span>
+  </div>
   <div class="progress-wrap"><div class="progress-bar" id="progressBar"></div></div>
   <div class="log" id="log"></div>`;
 }
@@ -850,14 +878,7 @@ const MAX_LOG_LINES = 500;
 async function startInstall() {
   setStep(3);
 
-  // POST config to server
-  await fetch('/api/install', {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify(cfg),
-  });
-
-  // Subscribe to SSE progress stream
+  // Subscribe to SSE FIRST so we don't miss early messages
   const es = new EventSource('/api/progress');
   es.onmessage = (e) => {
     const msg = JSON.parse(e.data);
@@ -865,17 +886,24 @@ async function startInstall() {
       es.close();
       appURL    = msg.msg || `http://localhost:${cfg.appPort}`;
       installOK = true;
-      advanceProgress(100);
-      setTimeout(() => setStep(4), 800);
+      advanceProgress(100, 'Complete!');
+      setTimeout(() => setStep(4), 900);
       return;
     }
     appendLog(msg.level, msg.msg);
-    advanceProgress();
+    advanceProgress(null, msg.msg);
   };
   es.onerror = () => {
     appendLog('warn', 'Connection to installer lost — the installation may still be running.');
     es.close();
   };
+
+  // THEN post config to kick off the goroutine
+  await fetch('/api/install', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(cfg),
+  });
 }
 
 function appendLog(level, msg) {
@@ -883,7 +911,6 @@ function appendLog(level, msg) {
   if (!log) return;
   logLines++;
   if (logLines > MAX_LOG_LINES) {
-    // Remove oldest line
     const first = log.querySelector('div');
     if (first) first.remove();
   }
@@ -895,17 +922,20 @@ function appendLog(level, msg) {
 }
 
 let progressVal = 0;
-function advanceProgress(target) {
-  if (target !== undefined) {
+function advanceProgress(target, label) {
+  if (target !== undefined && target !== null) {
     progressVal = target;
   } else {
-    // Animate progress: slow ramp that never quite reaches 95% until done.
     const gap = 95 - progressVal;
-    progressVal += Math.max(0.3, gap * 0.04);
+    progressVal += Math.max(0.4, gap * 0.05);
     progressVal  = Math.min(94, progressVal);
   }
-  const bar = document.getElementById('progressBar');
-  if (bar) bar.style.width = progressVal + '%';
+  const bar  = document.getElementById('progressBar');
+  const pct  = document.getElementById('progressPct');
+  const step = document.getElementById('progressStep');
+  if (bar)  bar.style.width  = Math.round(progressVal) + '%';
+  if (pct)  pct.textContent  = Math.round(progressVal) + '%';
+  if (step && label) step.textContent = label;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -920,32 +950,143 @@ function renderDone() {
     cfg.registerService ? '✅ Windows services registered (auto-start on boot)' : '',
     cfg.withAI ? '⏳ AI models downloading in background (~2.3 GB)' : '',
   ] : [
-    '✅ Docker image pulled and all containers started',
+    '✅ Docker containers started',
     '✅ PostgreSQL database initialised and migrated',
     '✅ MinIO object storage ready',
     cfg.registerService ? '✅ System service registered (auto-start on boot)' : '',
     cfg.withAI ? '⏳ AI models downloading in background (~2.3 GB)' : '',
   ];
 
+  const url = esc(appURL || `http://localhost:${cfg.appPort}`);
   return `
   <div class="success-card">
     <div class="success-icon">🎉</div>
     <h2>Installation Complete!</h2>
-    <p>ezHealthKonnect is running. Open the platform in your browser and log in with the default credentials.</p>
+    <p>ezHealthKonnect is running. Open the platform and log in with the default credentials below.</p>
 
     <div class="url-card">
       <label>Platform URL</label>
-      <div class="url">${esc(appURL || `http://localhost:${cfg.appPort}`)}</div>
+      <div class="url">${url}</div>
     </div>
 
     <ul class="steps-list">
       ${items.filter(Boolean).map(t => `<li>${t}</li>`).join('')}
     </ul>
 
-    <p style="margin-top:20px;font-size:12px;color:var(--yellow)">
-      Default login: admin@ezhealthkonnect.com / admin123 — change this immediately.
+    <p style="margin-top:18px;font-size:12px;color:var(--yellow)">
+      ⚠️ Default login: admin@ezhealthkonnect.com / admin123 — change this immediately after first login.
     </p>
+
+    <div class="done-actions">
+      <button class="btn btn-success" onclick="window.open('${url}','_blank')">🚀 Open in Browser</button>
+      <button class="btn btn-ghost"   onclick="copyToClipboard('${url}')">📋 Copy URL</button>
+      <button class="btn btn-danger"  onclick="confirmUninstall()">🗑 Uninstall</button>
+    </div>
   </div>`;
+}
+
+function copyToClipboard(text) {
+  navigator.clipboard.writeText(text).then(() => alert('URL copied to clipboard.'));
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Uninstall
+// ─────────────────────────────────────────────────────────────────────────────
+async function confirmUninstall() {
+  const ok = confirm(
+    'Uninstall ezHealthKonnect?\n\n' +
+    '• All services will be stopped and removed\n' +
+    '• Application files in ' + (cfg.installDir || 'the install directory') + ' will be deleted\n' +
+    '• The database will be dropped\n\n' +
+    'This cannot be undone. Continue?'
+  );
+  if (!ok) return;
+
+  // Show a minimal progress view
+  document.getElementById('content').innerHTML = `
+    <div style="text-align:center;padding:60px 0">
+      <div class="spinner" style="margin:0 auto 20px;width:36px;height:36px;border-width:3px"></div>
+      <p style="color:var(--muted)">Uninstalling — please wait…</p>
+      <div class="log" id="log" style="margin-top:24px;height:260px;text-align:left"></div>
+    </div>`;
+  document.getElementById('footer').style.display = 'none';
+
+  // Subscribe SSE then trigger uninstall
+  const es = new EventSource('/api/progress');
+  es.onmessage = (e) => {
+    const msg = JSON.parse(e.data);
+    if (msg.level === 'done') {
+      es.close();
+      document.getElementById('content').innerHTML = `
+        <div class="success-card">
+          <div class="success-icon">🗑</div>
+          <h2>Uninstalled</h2>
+          <p style="color:var(--muted)">ezHealthKonnect has been removed from this machine.<br>You may close this window.</p>
+        </div>`;
+      return;
+    }
+    appendLog(msg.level, msg.msg);
+  };
+  es.onerror = () => es.close();
+
+  await fetch('/api/uninstall', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(cfg),
+  });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// File browser
+// ─────────────────────────────────────────────────────────────────────────────
+function openBrowse(inputId) {
+  browseTargetInput = inputId;
+  const current = document.getElementById(inputId).value.trim();
+  const start   = current || '/';
+  browseCurrentPath = start;
+  document.getElementById('browseModal').style.display = 'flex';
+  loadBrowse(start);
+}
+
+function closeBrowseModal() {
+  document.getElementById('browseModal').style.display = 'none';
+}
+
+function closeBrowse(e) {
+  if (e.target === document.getElementById('browseModal')) closeBrowseModal();
+}
+
+async function loadBrowse(path) {
+  document.getElementById('browsePath').textContent = path;
+  document.getElementById('browseSelected').textContent = path;
+  browseCurrentPath = path;
+  document.getElementById('browseBody').innerHTML =
+    `<div style="padding:24px;text-align:center;color:var(--muted)"><div class="spinner" style="margin:0 auto"></div></div>`;
+
+  const res  = await fetch('/api/browse?path=' + encodeURIComponent(path));
+  const data = await res.json();
+
+  let html = '';
+  if (data.parent) {
+    html += `<div class="dir-entry up" onclick="loadBrowse('${esc(data.parent)}')">
+      <span class="dir-entry-icon">⬆</span> .. (up)
+    </div>`;
+  }
+  if (data.dirs && data.dirs.length) {
+    html += data.dirs.map(d => `
+      <div class="dir-entry" onclick="loadBrowse('${esc(d.path)}')">
+        <span class="dir-entry-icon">📁</span>${esc(d.name)}
+      </div>`).join('');
+  } else if (!data.parent) {
+    html += `<div style="padding:20px;text-align:center;color:var(--muted);font-size:13px">No subdirectories</div>`;
+  }
+  document.getElementById('browseBody').innerHTML = html || `<div style="padding:20px;text-align:center;color:var(--muted);font-size:13px">Empty</div>`;
+}
+
+function confirmBrowse() {
+  const el = document.getElementById(browseTargetInput);
+  if (el) el.value = browseCurrentPath;
+  closeBrowseModal();
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
