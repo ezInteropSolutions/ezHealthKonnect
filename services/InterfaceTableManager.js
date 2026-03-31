@@ -144,7 +144,12 @@ class InterfaceTableManager {
             'max_retries': 'INTEGER DEFAULT 3',
             // Delivery
             'target_endpoint': 'VARCHAR(500)',
-            'last_delivery_attempt_at': 'TIMESTAMP WITH TIME ZONE'
+            'last_delivery_attempt_at': 'TIMESTAMP WITH TIME ZONE',
+            // Object storage URIs (V56)
+            'raw_content_uri': 'TEXT',
+            'parsed_content_uri': 'TEXT',
+            'transformed_content_uri': 'TEXT',
+            'log_uri': 'TEXT'
         };
 
         const alterStatements = [];
