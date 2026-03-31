@@ -106,7 +106,7 @@ func runStandaloneInstallation(cfg *Config) {
 	// ── Step 9: Register services ──────────────────────────────────────────
 	if cfg.RegisterSvc {
 		emitStep(9, "Registering Windows services")
-		nssmPath, err := downloadNSSM(cfg.InstallDir)
+		nssmPath, err := ensureNSSM(cfg.InstallDir)
 		if err != nil {
 			emit("warn", "NSSM download failed — skipping service registration: "+err.Error())
 		} else {
@@ -485,7 +485,7 @@ OLLAMA_EMBED_MODEL=nomic-embed-text
 
 // ── NSSM + Windows Services ────────────────────────────────────────────────
 
-func downloadNSSM(installDir string) (string, error) {
+func ensureNSSM(installDir string) (string, error) {
 	toolsDir := filepath.Join(installDir, "tools")
 	nssmExe := filepath.Join(toolsDir, "nssm.exe")
 
