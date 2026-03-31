@@ -19,7 +19,10 @@ RUN apk upgrade --no-cache
 WORKDIR /app
 
 COPY package*.json ./
-RUN npm ci --omit=dev
+RUN npm ci --omit=dev && \
+    node -e "const v=require('./node_modules/picomatch/package.json').version; \
+    if(v!=='4.0.4'){console.error('FAIL: picomatch '+v+' (need 4.0.4)');process.exit(1);} \
+    console.log('OK: picomatch '+v);"
 
 # Stage 3: Runtime image
 FROM node:22-alpine
