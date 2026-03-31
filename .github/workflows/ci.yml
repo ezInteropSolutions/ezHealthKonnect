@@ -29,6 +29,9 @@ jobs:
           cache: true
           cache-dependency-path: go.sum
 
+      - name: Tidy go.sum
+        run: go mod tidy
+
       - name: Build go-api
         run: go build $(go list ./... | grep -v '/tests')
 

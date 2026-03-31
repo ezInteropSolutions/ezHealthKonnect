@@ -30,6 +30,9 @@ jobs:
           cache: true
           cache-dependency-path: go.sum
 
+      - name: Tidy go.sum
+        run: go mod tidy
+
       - name: Go build check
         run: go build $(go list ./... | grep -v '/tests')
 
@@ -81,6 +84,9 @@ jobs:
           else
             echo "value=${{ github.ref_name }}" >> $GITHUB_OUTPUT
           fi
+
+      - name: Tidy go.sum
+        run: go mod tidy
 
       - name: Build go-api (${{ matrix.goos }}/${{ matrix.goarch }})
         env:
