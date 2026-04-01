@@ -226,9 +226,21 @@ func wingetInstallWithFlags(pkg string, ignoreHash bool) error {
 			emit("info", pkg+" is already installed")
 			return nil
 		}
-		// Hash mismatch (0x8a15000f) — retry with --ignore-security-hash
-		if !ignoreHash && (strings.Contains(outStr, "0x8a15000f") || strings.Contains(outStr, "hash")) {
-			emit("warn", "Hash mismatch from winget — retrying with --ignore-security-hash")
+		// Source data missing (0x8a15000f) — refresh winget sources and retry once
+		if !ignoreHash && strings.Contains(outStr, "0x8a15000f") {
+			emit("warn", "winget source error (0x8a15000f) — refreshing sources and retrying")
+			exec.Command("winget", "source", "update", "--accept-source-agreements").Run() //nolint:errcheck
+			return wingetInstallWithFlags(pkg, false)
+		}
+		// Hash mismatch — enable InstallerHashOverride then retry with --ignore-security-hash.
+		// The flag requires the setting to be enabled first; otherwise winget prints help and exits non-zero.
+		if !ignoreHash && (strings.Contains(outStr, "InstallerHashOverride") || strings.Contains(outStr, "hash mismatch") || strings.Contains(outStr, "installer hash")) {
+			emit("warn", "Hash mismatch — enabling InstallerHashOverride and retrying")
+			if settingsOut, settingsErr := exec.Command("winget", "settings", "--enable", "InstallerHashOverride").CombinedOutput(); settingsErr != nil {
+				emit("warn", "Could not enable InstallerHashOverride: "+strings.TrimSpace(string(settingsOut)))
+			} else {
+				emit("info", "InstallerHashOverride enabled")
+			}
 			return wingetInstallWithFlags(pkg, true)
 		}
 		return fmt.Errorf("winget exited with error: %s", strings.TrimSpace(outStr))
