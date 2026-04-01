@@ -143,6 +143,10 @@ func runStandaloneInstallation(cfg *Config) {
 
 // ── PostgreSQL ─────────────────────────────────────────────────────────────
 
+// postgresDirectURL is the official EDB silent installer for PostgreSQL 15.
+// Using a pinned URL avoids winget source index issues entirely.
+const postgresDirectURL = "https://get.enterprisedb.com/postgresql/postgresql-15.13-1-windows-x64.exe"
+
 func installPostgres() (string, error) {
 	// Already installed?
 	if p := findPsql(); p != "" {
@@ -150,19 +154,13 @@ func installPostgres() (string, error) {
 		return p, nil
 	}
 
-	emit("info", "Installing PostgreSQL 15 via winget...")
-	if err := wingetInstall("PostgreSQL.PostgreSQL.15"); err != nil {
-		// Try without version suffix
-		if err2 := wingetInstall("PostgreSQL.PostgreSQL"); err2 != nil {
-			return "", fmt.Errorf("winget install PostgreSQL: %w (also tried generic: %v)", err, err2)
-		}
+	if err := installPostgresDirect(); err != nil {
+		return "", fmt.Errorf("PostgreSQL install failed: %w", err)
 	}
 
-	// Give installer time to finish
 	emit("info", "Waiting for PostgreSQL service to start...")
 	time.Sleep(15 * time.Second)
 
-	// Start the service (winget install may not auto-start)
 	exec.Command("net", "start", "postgresql-x64-15").Run() //nolint:errcheck
 	exec.Command("net", "start", "postgresql").Run()        //nolint:errcheck
 
@@ -171,6 +169,37 @@ func installPostgres() (string, error) {
 		return "", fmt.Errorf("psql.exe not found after install — check PostgreSQL installation")
 	}
 	return p, nil
+}
+
+func installPostgresDirect() error {
+	tmp := filepath.Join(os.TempDir(), "postgresql-installer.exe")
+	emit("info", "Downloading PostgreSQL 15 installer (~200 MB)...")
+	if err := downloadFileProgress(postgresDirectURL, tmp); err != nil {
+		return fmt.Errorf("download failed: %w", err)
+	}
+	defer os.Remove(tmp)
+
+	emit("info", "Running PostgreSQL silent installer...")
+	// EDB installer flags: unattended mode, no shortcuts, no stack builder
+	cmd := exec.Command(tmp,
+		"--mode", "unattended",
+		"--unattendedmodeui", "none",
+		"--superpassword", "postgres",
+		"--serverport", "5432",
+		"--servicename", "postgresql-x64-15",
+		"--disable-components", "stackbuilder",
+	)
+	out, err := cmd.CombinedOutput()
+	for _, line := range strings.Split(string(out), "\n") {
+		line = strings.TrimRight(line, "\r")
+		if strings.TrimSpace(line) != "" {
+			emit("info", "  pg: "+line)
+		}
+	}
+	if err != nil {
+		return fmt.Errorf("installer exited: %w — %s", err, strings.TrimSpace(string(out)))
+	}
+	return nil
 }
 
 // findPsql searches known PostgreSQL install paths and PATH.
@@ -255,15 +284,17 @@ func wingetInstallWithFlags(pkg string, ignoreHash bool) error {
 
 // ── Node.js ────────────────────────────────────────────────────────────────
 
+// nodejs20DirectURL is the official Node.js 20 LTS MSI for Windows x64.
+const nodejs20DirectURL = "https://nodejs.org/dist/v20.19.0/node-v20.19.0-x64.msi"
+
 func installNodeJS() (string, error) {
 	if p := findNode(); p != "" {
 		emit("info", "Node.js already installed: "+p)
 		return p, nil
 	}
 
-	emit("info", "Installing Node.js 20 LTS via winget...")
-	if err := wingetInstall("OpenJS.NodeJS.LTS"); err != nil {
-		return "", fmt.Errorf("winget install Node.js: %w", err)
+	if err := installNodeJSDirect(); err != nil {
+		return "", fmt.Errorf("Node.js install failed: %w", err)
 	}
 
 	time.Sleep(5 * time.Second)
@@ -273,6 +304,31 @@ func installNodeJS() (string, error) {
 		return "", fmt.Errorf("node.exe not found after install")
 	}
 	return p, nil
+}
+
+func installNodeJSDirect() error {
+	tmp := filepath.Join(os.TempDir(), "nodejs-installer.msi")
+	emit("info", "Downloading Node.js 20 LTS MSI (~30 MB)...")
+	if err := downloadFileProgress(nodejs20DirectURL, tmp); err != nil {
+		return fmt.Errorf("download failed: %w", err)
+	}
+	defer os.Remove(tmp)
+
+	emit("info", "Running Node.js silent installer...")
+	cmd := exec.Command("msiexec", "/i", tmp, "/qn", "/norestart",
+		"ADDLOCAL=ALL",
+	)
+	out, err := cmd.CombinedOutput()
+	for _, line := range strings.Split(string(out), "\n") {
+		line = strings.TrimRight(line, "\r")
+		if strings.TrimSpace(line) != "" {
+			emit("info", "  node: "+line)
+		}
+	}
+	if err != nil {
+		return fmt.Errorf("msiexec exited: %w — %s", err, strings.TrimSpace(string(out)))
+	}
+	return nil
 }
 
 func findNode() string {
