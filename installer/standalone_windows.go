@@ -4,7 +4,6 @@ package main
 
 import (
 	"archive/zip"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -351,72 +350,29 @@ func findNode() string {
 
 // ── App bundle ─────────────────────────────────────────────────────────────
 
-func downloadAppBundle(installDir, version string) error {
-	var url string
-	if version == "" || version == "latest" {
-		// Resolve latest release tag first so we can give a useful error if
-		// no release has been published yet.
-		emit("info", "Resolving latest release version...")
-		tag, err := resolveLatestReleaseTag()
-		if err != nil {
-			return fmt.Errorf("could not find a published release — " +
-				"ensure the GitHub release workflow has completed and assets have been uploaded. " +
-				"Error: " + err.Error())
-		}
-		emit("info", "Latest release: "+tag)
-		url = releasesBase + "/download/" + tag + "/ezhealthkonnect-windows-amd64.zip"
-	} else {
-		url = releasesBase + "/download/" + version + "/ezhealthkonnect-windows-amd64.zip"
+func downloadAppBundle(installDir, cfgVersion string) error {
+	// Determine which tag to download.
+	// Priority: 1) explicit version from config UI  2) build-time version
+	// injected via -X main.version=...  3) error — never guess.
+	tag := cfgVersion
+	if tag == "" || tag == "latest" {
+		tag = version // build-time variable set by release workflow
+	}
+	if tag == "" || tag == "latest" {
+		return fmt.Errorf("no version available — this installer was not built by the release workflow. " +
+			"Download the official installer from https://github.com/ezinteropsolutions/ezhealthkonnect/releases")
 	}
 
-	emit("info", "Downloading bundle from "+url+" ...")
+	url := releasesBase + "/download/" + tag + "/ezhealthkonnect-windows-amd64.zip"
+	emit("info", "Downloading bundle "+tag+" from GitHub releases...")
 	tmp := filepath.Join(os.TempDir(), "ezhealthkonnect-bundle.zip")
 	if err := downloadFileProgress(url, tmp); err != nil {
-		return err
+		return fmt.Errorf("download failed (%s): %w", url, err)
 	}
 	defer os.Remove(tmp)
 
 	emit("info", "Extracting...")
 	return extractZip(tmp, installDir, true)
-}
-
-// resolveLatestReleaseTag queries the GitHub API to find the latest published
-// release tag that includes the Windows bundle asset.
-func resolveLatestReleaseTag() (string, error) {
-	apiURL := "https://api.github.com/repos/ezinteropsolutions/ezhealthkonnect/releases"
-	resp, err := http.Get(apiURL) //nolint:gosec
-	if err != nil {
-		return "", fmt.Errorf("GitHub API unreachable: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("GitHub API returned HTTP %d", resp.StatusCode)
-	}
-
-	var releases []struct {
-		TagName string `json:"tag_name"`
-		Draft   bool   `json:"draft"`
-		Assets  []struct {
-			Name string `json:"name"`
-		} `json:"assets"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&releases); err != nil {
-		return "", fmt.Errorf("could not parse GitHub API response: %w", err)
-	}
-
-	for _, r := range releases {
-		if r.Draft {
-			continue
-		}
-		for _, a := range r.Assets {
-			if a.Name == "ezhealthkonnect-windows-amd64.zip" {
-				return r.TagName, nil
-			}
-		}
-	}
-	return "", fmt.Errorf("no published release found with ezhealthkonnect-windows-amd64.zip — " +
-		"the release workflow may still be running. Check https://github.com/ezinteropsolutions/ezhealthkonnect/releases")
 }
 
 func downloadFileProgress(url, dest string) error {

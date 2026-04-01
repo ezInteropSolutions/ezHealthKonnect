@@ -15,6 +15,10 @@ import (
 //go:embed web
 var webFS embed.FS
 
+// version is injected at build time by the release workflow:
+// go build -ldflags "-X main.version=v1.2.3"
+var version string
+
 // done is closed when the user clicks Finish / Close in the wizard.
 var done = make(chan struct{})
 
