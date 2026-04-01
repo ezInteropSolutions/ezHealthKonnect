@@ -226,10 +226,15 @@ func wingetInstallWithFlags(pkg string, ignoreHash bool) error {
 			emit("info", pkg+" is already installed")
 			return nil
 		}
-		// Source data missing (0x8a15000f) — refresh winget sources and retry once
+		// Source data missing/corrupt (0x8a15000f) — the winget package index is
+		// broken. `source update` is not enough; we must reset and rebuild it.
 		if !ignoreHash && strings.Contains(outStr, "0x8a15000f") {
-			emit("warn", "winget source error (0x8a15000f) — refreshing sources and retrying")
-			exec.Command("winget", "source", "update", "--accept-source-agreements").Run() //nolint:errcheck
+			emit("warn", "winget source index corrupt (0x8a15000f) — resetting and rebuilding package index...")
+			exec.Command("winget", "source", "reset", "--force").Run()                                    //nolint:errcheck
+			exec.Command("winget", "source", "update", "--accept-source-agreements").Run()               //nolint:errcheck
+			// Small pause to let the index finish writing before the next search
+			time.Sleep(5 * time.Second)
+			emit("info", "winget sources reset — retrying install")
 			return wingetInstallWithFlags(pkg, false)
 		}
 		// Hash mismatch — enable InstallerHashOverride then retry with --ignore-security-hash.
