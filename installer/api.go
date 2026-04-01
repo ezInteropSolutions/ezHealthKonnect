@@ -19,6 +19,7 @@ type CheckResult struct {
 	OK      bool   `json:"ok"`
 	Version string `json:"version,omitempty"`
 	Error   string `json:"error,omitempty"`
+	Warning string `json:"warning,omitempty"` // non-blocking issue — user can resolve via config
 }
 
 type Config struct {
@@ -248,8 +249,10 @@ func checkPortFree(port string) CheckResult {
 	name := fmt.Sprintf("Port %s", port)
 	ln, err := tryListen(port)
 	if err != nil {
-		return CheckResult{Name: name, OK: false,
-			Error: fmt.Sprintf("Port %s is in use — change it in Configuration", port)}
+		// Port conflict is a warning, not a hard error — the user can change
+		// the port in the Configuration step before installation begins.
+		return CheckResult{Name: name, OK: true,
+			Warning: fmt.Sprintf("Port %s is in use — change it in the Configuration step below", port)}
 	}
 	ln.Close()
 	return CheckResult{Name: name, OK: true, Version: "available"}
