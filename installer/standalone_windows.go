@@ -15,7 +15,7 @@ import (
 )
 
 const (
-	releasesBase  = "https://github.com/ezinteropsolutions/ezhealthkonnect/releases"
+	releasesBase  = "https://github.com/ezInteropSolutions/ezHealthKonnect/releases"
 	nssmDownload  = "https://nssm.cc/release/nssm-2.24.zip"
 	nssmExeInZip  = "nssm-2.24/win64/nssm.exe"
 )
@@ -360,7 +360,7 @@ func downloadAppBundle(installDir, cfgVersion string) error {
 	}
 	if tag == "" || tag == "latest" {
 		return fmt.Errorf("no version available — this installer was not built by the release workflow. " +
-			"Download the official installer from https://github.com/ezinteropsolutions/ezhealthkonnect/releases")
+			"Download the official installer from https://github.com/ezInteropSolutions/ezHealthKonnect/releases")
 	}
 
 	url := releasesBase + "/download/" + tag + "/ezhealthkonnect-windows-amd64.zip"

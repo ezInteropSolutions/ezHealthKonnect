@@ -42,7 +42,7 @@ REGISTER_SVC=true
 LOCAL_BUNDLE=""
 VERSION=latest
 NON_INTERACTIVE=false
-RELEASES_BASE="https://github.com/ezinteropsolutions/ezhealthkonnect/releases"
+RELEASES_BASE="https://github.com/ezInteropSolutions/ezHealthKonnect/releases"
 
 # ── Arg parsing ───────────────────────────────────────────────────────────────
 while [[ $# -gt 0 ]]; do
