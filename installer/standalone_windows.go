@@ -4,6 +4,7 @@ package main
 
 import (
 	"archive/zip"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -350,17 +351,52 @@ func findNode() string {
 
 // ── App bundle ─────────────────────────────────────────────────────────────
 
+// resolveLatestTag calls the GitHub Releases API to find the current latest tag.
+func resolveLatestTag() (string, error) {
+	client := &http.Client{Timeout: 10 * time.Second}
+	req, err := http.NewRequest("GET",
+		"https://api.github.com/repos/ezInteropSolutions/ezHealthKonnect/releases/latest", nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("GitHub API returned HTTP %d", resp.StatusCode)
+	}
+	var result struct {
+		TagName string `json:"tag_name"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return "", err
+	}
+	if result.TagName == "" {
+		return "", fmt.Errorf("empty tag_name in GitHub API response")
+	}
+	return result.TagName, nil
+}
+
 func downloadAppBundle(installDir, cfgVersion string) error {
 	// Determine which tag to download.
 	// Priority: 1) explicit version from config UI  2) build-time version
-	// injected via -X main.version=...  3) error — never guess.
+	// injected via -X main.version=...  3) GitHub API latest release.
 	tag := cfgVersion
 	if tag == "" || tag == "latest" {
 		tag = version // build-time variable set by release workflow
 	}
 	if tag == "" || tag == "latest" {
-		return fmt.Errorf("no version available — this installer was not built by the release workflow. " +
-			"Download the official installer from https://github.com/ezInteropSolutions/ezHealthKonnect/releases")
+		emit("info", "Resolving latest release from GitHub...")
+		resolved, err := resolveLatestTag()
+		if err != nil {
+			return fmt.Errorf("could not resolve latest version from GitHub API: %w", err)
+		}
+		tag = resolved
+		emit("info", "Latest release: "+tag)
 	}
 
 	url := releasesBase + "/download/" + tag + "/ezhealthkonnect-windows-amd64.zip"
