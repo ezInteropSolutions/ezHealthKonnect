@@ -16,9 +16,9 @@ import (
 )
 
 const (
-	releasesBase  = "https://github.com/ezInteropSolutions/ezHealthKonnect/releases"
-	nssmDownload  = "https://nssm.cc/release/nssm-2.24.zip"
-	nssmExeInZip  = "nssm-2.24/win64/nssm.exe"
+	releasesBase = "https://github.com/ezInteropSolutions/ezHealthKonnect/releases"
+	// WinSW is a reliable GitHub-hosted service wrapper — single exe, no zip extraction needed.
+	winswDownload = "https://github.com/winsw/winsw/releases/download/v2.12.0/WinSW-x64.exe"
 )
 
 // runStandaloneInstallation is the Windows native (no-Docker) install path.
@@ -79,7 +79,9 @@ func runStandaloneInstallation(cfg *Config) {
 	// ── Step 5: npm install ────────────────────────────────────────────────
 	emitStep(5, "Installing Node.js dependencies")
 	npmPath := filepath.Join(filepath.Dir(nodePath), "npm.cmd")
-	if err := streamCmd(exec.Command(npmPath, "install", "--omit=dev", "--silent")); err != nil {
+	npmCmd := exec.Command(npmPath, "install", "--omit=dev", "--silent")
+	npmCmd.Dir = cfg.InstallDir
+	if err := streamCmd(npmCmd); err != nil {
 		emit("warn", "npm install had warnings: "+err.Error())
 	} else {
 		emit("ok", "Node.js dependencies installed")
@@ -113,12 +115,12 @@ func runStandaloneInstallation(cfg *Config) {
 	// ── Step 9: Register services ──────────────────────────────────────────
 	if cfg.RegisterSvc {
 		emitStep(9, "Registering Windows services")
-		nssmPath, err := ensureNSSM(cfg.InstallDir)
+		winswPath, err := ensureWinSW(cfg.InstallDir)
 		if err != nil {
-			emit("warn", "NSSM download failed — skipping service registration: "+err.Error())
+			emit("warn", "WinSW download failed — skipping service registration: "+err.Error())
 		} else {
 			goAPIBin := filepath.Join(cfg.InstallDir, "go-api.exe")
-			if err := registerWindowsServices(nssmPath, nodePath, goAPIBin, cfg); err != nil {
+			if err := registerWindowsServices(winswPath, nodePath, goAPIBin, cfg); err != nil {
 				emit("warn", "Service registration failed: "+err.Error())
 			} else {
 				emit("ok", "Windows services registered (auto-start on boot)")
@@ -382,7 +384,18 @@ func resolveLatestTag() (string, error) {
 }
 
 func downloadAppBundle(installDir, cfgVersion string) error {
-	// Determine which tag to download.
+	// Fast path: bundle was embedded at build time (built with -tags embedded).
+	if len(embeddedWindowsBundle) > 0 {
+		emit("info", "Extracting embedded bundle...")
+		tmp := filepath.Join(os.TempDir(), "ezhealthkonnect-bundle.zip")
+		if err := os.WriteFile(tmp, embeddedWindowsBundle, 0644); err != nil {
+			return fmt.Errorf("failed to write embedded bundle: %w", err)
+		}
+		defer os.Remove(tmp)
+		return extractZip(tmp, installDir, true)
+	}
+
+	// Slow path: download from GitHub releases.
 	// Priority: 1) explicit version from config UI  2) build-time version
 	// injected via -X main.version=...  3) GitHub API latest release.
 	tag := cfgVersion
@@ -469,7 +482,8 @@ func extractZip(src, dest string, stripRoot bool) error {
 	defer r.Close()
 
 	for _, f := range r.File {
-		name := f.Name
+		// Normalize backslashes (Compress-Archive on Windows uses \ instead of /)
+		name := strings.ReplaceAll(f.Name, "\\", "/")
 		if stripRoot {
 			// Remove first path component
 			idx := strings.Index(name, "/")
@@ -634,146 +648,106 @@ OLLAMA_EMBED_MODEL=nomic-embed-text
 	return os.WriteFile(path, []byte(content), 0600)
 }
 
-// ── NSSM + Windows Services ────────────────────────────────────────────────
+// ── WinSW + Windows Services ───────────────────────────────────────────────
+// WinSW wraps any executable as a Windows service using an XML config file.
+// Single exe download from GitHub — no zip extraction needed.
 
-func ensureNSSM(installDir string) (string, error) {
+func ensureWinSW(installDir string) (string, error) {
 	toolsDir := filepath.Join(installDir, "tools")
-	nssmExe := filepath.Join(toolsDir, "nssm.exe")
+	winswExe := filepath.Join(toolsDir, "winsw.exe")
 
-	// Already downloaded?
-	if _, err := os.Stat(nssmExe); err == nil {
-		return nssmExe, nil
+	if _, err := os.Stat(winswExe); err == nil {
+		return winswExe, nil
 	}
 
-	emit("info", "Downloading NSSM service manager...")
-	zipPath := filepath.Join(os.TempDir(), "nssm.zip")
-	if err := downloadFileProgress(nssmDownload, zipPath); err != nil {
-		return "", fmt.Errorf("download NSSM: %w", err)
+	emit("info", "Downloading WinSW service manager...")
+	if err := downloadFileProgress(winswDownload, winswExe); err != nil {
+		return "", fmt.Errorf("download WinSW: %w", err)
 	}
-	defer os.Remove(zipPath)
-
-	// Extract just the nssm.exe from the zip
-	r, err := zip.OpenReader(zipPath)
-	if err != nil {
-		return "", err
-	}
-	defer r.Close()
-
-	for _, f := range r.File {
-		if f.Name != nssmExeInZip {
-			continue
-		}
-		rc, err := f.Open()
-		if err != nil {
-			return "", err
-		}
-		out, err := os.Create(nssmExe)
-		if err != nil {
-			rc.Close()
-			return "", err
-		}
-		_, err = io.Copy(out, rc)
-		out.Close()
-		rc.Close()
-		if err != nil {
-			return "", err
-		}
-		emit("ok", "NSSM downloaded")
-		return nssmExe, nil
-	}
-	return "", fmt.Errorf("nssm.exe not found in zip (expected: %s)", nssmExeInZip)
+	emit("ok", "WinSW downloaded")
+	return winswExe, nil
 }
 
-func registerWindowsServices(nssmPath, nodePath, goAPIBin string, cfg *Config) error {
-	envFile := filepath.Join(cfg.InstallDir, ".env")
+func writeWinSWConfig(path, id, name, desc, exe, args, workDir, logFile string) error {
+	content := fmt.Sprintf(`<service>
+  <id>%s</id>
+  <name>%s</name>
+  <description>%s</description>
+  <executable>%s</executable>
+  <arguments>%s</arguments>
+  <workingdirectory>%s</workingdirectory>
+  <logpath>%s</logpath>
+  <log mode="roll-by-size"><sizeThreshold>10240</sizeThreshold><keepFiles>3</keepFiles></log>
+  <startmode>Automatic</startmode>
+  <onfailure action="restart" delay="10 sec"/>
+</service>`, id, name, desc, exe, args, workDir, logFile)
+	return os.WriteFile(path, []byte(content), 0644)
+}
 
-	// Helper: set env vars on the service via NSSM
-	setEnvVars := func(svcName string) {
-		exec.Command(nssmPath, "set", svcName, "AppEnvironmentExtra", //nolint:errcheck
-			"PORT="+cfg.AppPort,
-			"API_PORT="+cfg.APIPort,
-			"NODE_ENV=production",
-		).Run()
-		// Also point at the .env file via AppEnvFile if supported
-		_ = envFile
-	}
+func registerWindowsServices(winswPath, nodePath, goAPIBin string, cfg *Config) error {
+	logsDir := filepath.Join(cfg.InstallDir, "logs")
+	os.MkdirAll(logsDir, 0755) //nolint:errcheck
 
 	// ── Go API service ──────────────────────────────────────────────────────
 	svcAPI := "ezhealthkonnect-api"
-	removeService(nssmPath, svcAPI)
+	apiCfg := filepath.Join(cfg.InstallDir, "tools", svcAPI+".xml")
+	removeService(svcAPI)
 
-	if out, err := exec.Command(nssmPath, "install", svcAPI, goAPIBin).CombinedOutput(); err != nil {
-		return fmt.Errorf("nssm install go-api: %s: %w", out, err)
+	if err := writeWinSWConfig(apiCfg,
+		svcAPI, "ezHealthKonnect Go API", "ezHealthKonnect HL7/FHIR Go Backend",
+		goAPIBin, "",
+		cfg.InstallDir, logsDir,
+	); err != nil {
+		return fmt.Errorf("write api service config: %w", err)
 	}
-	exec.Command(nssmPath, "set", svcAPI, "AppDirectory", cfg.InstallDir).Run()          //nolint:errcheck
-	exec.Command(nssmPath, "set", svcAPI, "DisplayName", "ezHealthKonnect Go API").Run() //nolint:errcheck
-	exec.Command(nssmPath, "set", svcAPI, "Description",
-		"ezHealthKonnect HL7/FHIR Go Backend").Run() //nolint:errcheck
-	exec.Command(nssmPath, "set", svcAPI, "Start", "SERVICE_AUTO_START").Run() //nolint:errcheck
-	exec.Command(nssmPath, "set", svcAPI, "AppStdout",
-		filepath.Join(cfg.InstallDir, "logs", "api.log")).Run() //nolint:errcheck
-	exec.Command(nssmPath, "set", svcAPI, "AppStderr",
-		filepath.Join(cfg.InstallDir, "logs", "api.log")).Run() //nolint:errcheck
-	setEnvVars(svcAPI)
+	if out, err := exec.Command(winswPath, "install", apiCfg).CombinedOutput(); err != nil {
+		return fmt.Errorf("winsw install go-api: %s: %w", strings.TrimSpace(string(out)), err)
+	}
 
 	// ── Node.js frontend service ────────────────────────────────────────────
 	svcApp := "ezhealthkonnect"
-	removeService(nssmPath, svcApp)
-
 	serverJS := filepath.Join(cfg.InstallDir, "server.js")
-	if out, err := exec.Command(nssmPath, "install", svcApp, nodePath, serverJS).CombinedOutput(); err != nil {
-		return fmt.Errorf("nssm install node: %s: %w", out, err)
+	appCfg := filepath.Join(cfg.InstallDir, "tools", svcApp+".xml")
+	removeService(svcApp)
+
+	if err := writeWinSWConfig(appCfg,
+		svcApp, "ezHealthKonnect Web", "ezHealthKonnect Web Frontend",
+		nodePath, serverJS,
+		cfg.InstallDir, logsDir,
+	); err != nil {
+		return fmt.Errorf("write app service config: %w", err)
 	}
-	exec.Command(nssmPath, "set", svcApp, "AppDirectory", cfg.InstallDir).Run()            //nolint:errcheck
-	exec.Command(nssmPath, "set", svcApp, "DisplayName", "ezHealthKonnect Web").Run()      //nolint:errcheck
-	exec.Command(nssmPath, "set", svcApp, "Description", "ezHealthKonnect Web Frontend").Run() //nolint:errcheck
-	exec.Command(nssmPath, "set", svcApp, "Start", "SERVICE_AUTO_START").Run()             //nolint:errcheck
-	exec.Command(nssmPath, "set", svcApp, "DependOnService", svcAPI).Run()                 //nolint:errcheck
-	exec.Command(nssmPath, "set", svcApp, "AppStdout",
-		filepath.Join(cfg.InstallDir, "logs", "app.log")).Run() //nolint:errcheck
-	exec.Command(nssmPath, "set", svcApp, "AppStderr",
-		filepath.Join(cfg.InstallDir, "logs", "app.log")).Run() //nolint:errcheck
-	setEnvVars(svcApp)
+	if out, err := exec.Command(winswPath, "install", appCfg).CombinedOutput(); err != nil {
+		return fmt.Errorf("winsw install node: %s: %w", strings.TrimSpace(string(out)), err)
+	}
 
 	// Start services
 	emit("info", "Starting services...")
-	if out, err := exec.Command(nssmPath, "start", svcAPI).CombinedOutput(); err != nil {
+	if out, err := exec.Command(winswPath, "start", apiCfg).CombinedOutput(); err != nil {
 		emit("warn", fmt.Sprintf("Could not start %s: %s", svcAPI, strings.TrimSpace(string(out))))
 	}
 	time.Sleep(3 * time.Second)
-	if out, err := exec.Command(nssmPath, "start", svcApp).CombinedOutput(); err != nil {
+	if out, err := exec.Command(winswPath, "start", appCfg).CombinedOutput(); err != nil {
 		emit("warn", fmt.Sprintf("Could not start %s: %s", svcApp, strings.TrimSpace(string(out))))
 	}
 
 	return nil
 }
 
-func removeService(nssmPath, name string) {
-	// Stop + remove silently — ignore errors (may not exist)
-	exec.Command(nssmPath, "stop", name).Run()              //nolint:errcheck
-	exec.Command(nssmPath, "remove", name, "confirm").Run() //nolint:errcheck
+func removeService(name string) {
+	exec.Command("sc", "stop", name).Run()   //nolint:errcheck
+	exec.Command("sc", "delete", name).Run() //nolint:errcheck
 }
 
 // runStandaloneUninstall stops Windows services and removes the install directory.
 func runStandaloneUninstall(cfg *Config) {
-	const svcAPI = "ezHealthKonnect-API"
-	const svcApp = "ezHealthKonnect"
+	const svcAPI = "ezhealthkonnect-api"
+	const svcApp = "ezhealthkonnect"
 
 	emit("info", "── Stopping and removing Windows services")
-	nssmPath := filepath.Join(cfg.InstallDir, "nssm.exe")
-	if _, err := os.Stat(nssmPath); err != nil {
-		// Try to find nssm in PATH
-		if p, err2 := exec.LookPath("nssm"); err2 == nil {
-			nssmPath = p
-		}
-	}
-	if nssmPath != "" {
-		removeService(nssmPath, svcAPI)
-		removeService(nssmPath, svcApp)
-		emit("ok", "Services removed")
-	} else {
-		emit("warn", "nssm not found — services may need to be removed manually via services.msc")
-	}
+	removeService(svcAPI)
+	removeService(svcApp)
+	emit("ok", "Services removed")
 
 	emit("info", "── Removing install directory: "+cfg.InstallDir)
 	if err := os.RemoveAll(cfg.InstallDir); err != nil {

@@ -383,3 +383,18 @@ jobs:
             final/ezhealthkonnect-linux-arm64.tar.gz
             final/ezhealthkonnect-windows-amd64.zip
             final/SHA256SUMS.txt
+
+      - name: Delete intermediate artifacts
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          for artifact in go-api-linux-amd64 go-api-linux-arm64 go-api-windows-amd64 app-bundles installers; do
+            ID=$(gh api repos/${{ github.repository }}/actions/artifacts \
+              --jq ".artifacts[] | select(.name==\"${artifact}\" and .workflow_run.id==${{ github.run_id }}) | .id" \
+              2>/dev/null || true)
+            if [ -n "$ID" ]; then
+              gh api --method DELETE repos/${{ github.repository }}/actions/artifacts/$ID
+              echo "Deleted artifact: ${artifact} (id=${ID})"
+            fi
+          done
