@@ -45,13 +45,38 @@ $BUNDLE_ZIP = Join-Path $ASSETS 'bundle-windows.zip'
 if (Test-Path $TMP) { Remove-Item -Recurse -Force $TMP }
 New-Item -ItemType Directory -Path $TMP -Force | Out-Null
 
-$files = @('app.js','server.js','main.go','package.json','package-lock.json',
-           'go.mod','go.sum','Dockerfile','docker-compose.prod.yml',
-           'docker-compose.yml','COMMERCIAL_LICENSE.md')
-$dirs  = @('controllers','services','middleware','routes','config',
-           'models','processing','utils','public','fhir','hl7')
-# NOTE: connectivity/, architecture/, docs/ are excluded — docs only, not runtime code
-# Only ship migrations — not backups or init scripts
+# Runtime files needed by the application
+$files = @(
+    'app.js', 'server.js', 'main.go',
+    'package.json', 'package-lock.json',
+    'go.mod', 'go.sum',
+    'Dockerfile', 'docker-compose.prod.yml', 'docker-compose.yml',
+    'COMMERCIAL_LICENSE.md', 'THIRD-PARTY-NOTICES.txt'
+)
+# Runtime directories — no dev/test/build/docs dirs
+$dirs = @(
+    'controllers', 'services', 'middleware', 'routes', 'config',
+    'models', 'processing', 'utils', 'public',
+    'fhir', 'hl7',
+    'schemas', 'templates'
+)
+# Excluded (not in $dirs above):
+#   installer/       - build tooling only
+#   dist/            - build output
+#   tests/           - test files
+#   test-results/    - test output
+#   mapping_generator/ - dev tool
+#   scripts/         - dev/seed scripts
+#   migrations/      - separate from database/migrations (not used at runtime)
+#   tools/           - dev Python script
+#   node-api/        - standalone service, not imported
+#   cmd/             - build tooling
+#   logs/            - runtime-generated
+#   connectivity/    - docs only
+#   architecture/    - docs only
+#   .claude/ .vscode/ .claire/ - IDE tooling
+
+# Only ship database/migrations — not backups or init scripts
 $migDir = Join-Path $TMP 'database\migrations'
 New-Item -ItemType Directory -Path $migDir -Force | Out-Null
 Copy-Item (Join-Path $ROOT 'database\migrations\*') $migDir -Recurse -Force
