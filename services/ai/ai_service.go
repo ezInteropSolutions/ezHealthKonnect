@@ -19,7 +19,7 @@ const ezCompanionSystemPrompt = `You are ezCompanion — co-developer, healthcar
 
 ezHealthKonnect: Interfaces connect healthcare systems via 32+ connectors (TCP/MLLP, HTTP/REST, SFTP, S3, PostgreSQL, MySQL, MongoDB, Kafka, RabbitMQ, Redis). Transformation Pipelines (per interface + message type) chain steps: FHIR validation, field mapping, JavaScript script enrichment, conditional branching, data masking, format conversion, outbound delivery. The Wizard guides interface setup with HL7→FHIR mapping. Pipeline Builder is a drag-and-drop visual editor.
 
-Healthcare standards: HL7 v2 (ADT, ORU, ORM, MDM, SIU — segments MSH/PID/PV1/OBR/OBX/DG1), FHIR R4 (Patient, Encounter, Observation, Condition, Procedure, Bundle, Claim), X12 835/837/270/271, CCD/C-CDA R2.1, LOINC, SNOMED CT, ICD-10, RxNorm, CPT, NPI.
+Healthcare standards: HL7 v2 (ADT, ORU, ORM, MDM, SIU — segments MSH/PID/PV1/OBR/OBX/DG1), FHIR R4 (Patient, Encounter, Observation, Condition, Procedure, Bundle, Claim), X12 835/837/270/271, CCD/C-CDA R2.1, LOINC, SNOMED CT, ICD-10, RxNorm, CPT, NPI. Da Vinci PAS STU2 (CMS-0057-F): prior authorization via FHIR $submit operation; payer responds with ClaimResponse; X12 review action codes A1=AA (approved), A2=CP (partial approval), A3/A4=AD (denied), A6=PE (pended/pending review).
 
 Rules: Be direct and practical. For pipeline script steps use function named transform(input) returning the modified object. Never invent field codes. Say "I don't know" when uncertain.`
 
@@ -241,32 +241,41 @@ type MappingSuggestion struct {
 	TargetField string  `json:"target_field"`
 	Confidence  float64 `json:"confidence"`
 	Reasoning   string  `json:"reasoning"`
-	DataType    string  `json:"data_type,omitempty"`
+	DataType     string `json:"data_type,omitempty"`
+	// TransformKey is the exact key the Go transform engine uses in its switch
+	// statement (e.g. "ts_to_date", "gender_mapping", "cx_to_identifier").
+	// The frontend uses this when adding the mapping to atomicMappings so the
+	// engine actually executes the right transformation.
+	TransformKey string `json:"transform_key,omitempty"`
 }
 
 // SuggestMappings analyses a sample message and suggests field mappings.
+// For HL7v2→FHIR it uses a built-in static mapping table for instant results;
+// the LLM path is used only when no static mappings are available.
 func (s *AIService) SuggestMappings(ctx context.Context, sampleMessage, targetFormat string, reqCtx RequestContext) ([]MappingSuggestion, []RetrievedChunk, error) {
 	det, _ := s.DetectFormat(ctx, sampleMessage)
+
+	// Fast path: return well-known static mappings instantly (no LLM needed).
+	if static := staticHL7FHIRMappings(sampleMessage, det.Format, targetFormat); len(static) > 0 {
+		return static, nil, nil
+	}
+
+	// Slow path: ask the LLM (only for non-HL7 or unknown formats).
 	filters := dedup([]string{sourceTypeFromFormat(det.Format), sourceTypeFromFormat(targetFormat), "operational"})
 
-	// Build context prefix from current interface/pipeline if provided
 	ctxPrefix := ""
 	if s.ContextBld != nil && !reqCtx.IsEmpty() {
 		ctxPrefix = s.ContextBld.BuildSystemPromptPrefix(ctx, reqCtx)
 	}
 
-	question := fmt.Sprintf(
-		"Given this %s sample message, suggest specific field mappings to %s format.\n\nSample:\n%s",
-		det.Format, targetFormat, truncate(sampleMessage, 600))
-
+	question := fmt.Sprintf("%s→%s mappings. Sample:\n%s", det.Format, targetFormat, truncate(sampleMessage, 300))
 	systemPrompt := ctxPrefix + fmt.Sprintf(
-		`You are a healthcare integration mapping expert specialising in %s and %s.
-Analyse the sample and suggest field mappings. Consider any confirmed mappings shown in the context.
-Output ONLY a JSON array: [{"source_field":"","target_field":"","confidence":0.0,"reasoning":"","data_type":""}]
-data_type: string | date | code | decimal | boolean`,
+		`Healthcare integration expert. Map %s fields to %s.
+Output ONLY a compact JSON array, no prose: [{"source_field":"","target_field":"","confidence":0.9,"reasoning":"","data_type":"string"}]
+Return 3-5 mappings only. data_type: string|date|code|decimal|boolean.`,
 		det.Format, targetFormat)
 
-	answer, chunks, err := s.rag.Query(ctx, question, systemPrompt, 8, filters)
+	answer, chunks, err := s.rag.QueryCapped(ctx, question, systemPrompt, 3, 250, filters)
 	if err != nil {
 		return nil, chunks, err
 	}
@@ -287,6 +296,124 @@ data_type: string | date | code | decimal | boolean`,
 	}
 	return suggestions, chunks, nil
 }
+
+// staticHL7FHIRMappings returns well-known HL7v2→FHIR R4 field mappings instantly,
+// without calling the LLM. Returns nil when no static table is available for the
+// given format/target combination so the caller can fall back to the LLM.
+func staticHL7FHIRMappings(sampleMessage, detectedFormat, targetFormat string) []MappingSuggestion {
+	if detectedFormat != "hl7_v2" && detectedFormat != "hl7v2" {
+		return nil
+	}
+	if targetFormat != "fhir_r4" && targetFormat != "fhir" {
+		return nil
+	}
+
+	// Determine message type from MSH.9 (e.g. "ADT^A01", "ORU^R01").
+	msgType := extractHL7MsgType(sampleMessage)
+
+	// Core patient-demographics mappings present in every HL7v2 message with a PID.
+	// Each mapping includes TransformKey — the exact string the Go engine dispatches on
+	// in its switch statement inside transformValueAtomic(). Without this, transforms
+	// such as date conversion and gender code mapping silently pass through raw values.
+	pid := []MappingSuggestion{
+		// PID.3: full CX field — each ~ repetition is a separate identifier (MRN, SSN, etc.)
+		// TransformKey cx_to_identifier handles "12345^^^MRN" → Identifier{value,type,system}
+		{SourceField: "PID.3", TargetField: "Patient.identifier", Confidence: 0.97,
+			Reasoning:    "PID.3 Patient Identifier List (CX). Each ~ repetition becomes a Patient.identifier entry. cx_to_identifier extracts value/type/system from components.",
+			DataType:     "CX", TransformKey: "cx_to_identifier"},
+		// PID.5: full XPN name — xpn_to_humanname splits Family^Given^Middle^Suffix^Prefix
+		{SourceField: "PID.5", TargetField: "Patient.name[0]", Confidence: 0.97,
+			Reasoning:    "PID.5 Patient Name (XPN). xpn_to_humanname parses Family^Given^Middle components.",
+			DataType:     "XPN", TransformKey: "xpn_to_humanname"},
+		// PID.7: TS date — YYYYMMDD[HHMMSS] → YYYY-MM-DD. Without ts_to_date the raw value breaks FHIR validation.
+		{SourceField: "PID.7", TargetField: "Patient.birthDate", Confidence: 0.96,
+			Reasoning:    "PID.7 Date of Birth (TS). ts_to_date converts YYYYMMDD → YYYY-MM-DD required by FHIR.",
+			DataType:     "TS", TransformKey: "ts_to_date"},
+		// PID.8: IS gender — M/F/U/O → male/female/unknown/other. Without gender_mapping raw "M" is invalid FHIR.
+		{SourceField: "PID.8", TargetField: "Patient.gender", Confidence: 0.94,
+			Reasoning:    "PID.8 Administrative Sex (IS). gender_mapping converts M→male, F→female, U→unknown, O→other.",
+			DataType:     "IS", TransformKey: "gender_mapping"},
+		// PID.11: full XAD address — xad_to_address splits street^city^state^zip^country
+		{SourceField: "PID.11", TargetField: "Patient.address[0]", Confidence: 0.93,
+			Reasoning:    "PID.11 Patient Address (XAD). xad_to_address maps street/city/state/postal components.",
+			DataType:     "XAD", TransformKey: "xad_to_address"},
+		// PID.13: XTN phone — detects phone vs email, sets use=home
+		{SourceField: "PID.13", TargetField: "Patient.telecom[0]", Confidence: 0.91,
+			Reasoning:    "PID.13 Phone (XTN). xtn_to_contactpoint sets system=phone, use=home.",
+			DataType:     "XTN", TransformKey: "xtn_to_contactpoint"},
+		{SourceField: "PID.18", TargetField: "Patient.identifier[1].value", Confidence: 0.88,
+			Reasoning:    "PID.18 Patient Account Number → additional FHIR identifier (account type).",
+			DataType:     "CX", TransformKey: "account_to_identifier"},
+	}
+
+	switch {
+	case strings.HasPrefix(msgType, "ADT"):
+		adtExtra := []MappingSuggestion{
+			{SourceField: "EVN.2", TargetField: "Encounter.period.start", Confidence: 0.92,
+				Reasoning: "EVN.2 Recorded Date/Time (TS) → Encounter.period.start. ts_to_datetime converts HL7 timestamp.", DataType: "TS", TransformKey: "ts_to_datetime"},
+			{SourceField: "PV1.2", TargetField: "Encounter.class.code", Confidence: 0.90,
+				Reasoning: "PV1.2 Patient Class (I=inpatient, O=outpatient, E=emergency). Lookup maps to ActCode.", DataType: "IS", TransformKey: "patient_class_to_coding"},
+			{SourceField: "PV1.3", TargetField: "Encounter.location[0].location.display", Confidence: 0.88,
+				Reasoning: "PV1.3 Assigned Patient Location (PL) — room/bed/facility display.", DataType: "PL", TransformKey: ""},
+			{SourceField: "PV1.7", TargetField: "Encounter.participant[0].individual.display", Confidence: 0.85,
+				Reasoning: "PV1.7 Attending Doctor (XCN) — display name of attending.", DataType: "XCN", TransformKey: ""},
+			{SourceField: "PV1.44", TargetField: "Encounter.period.start", Confidence: 0.91,
+				Reasoning: "PV1.44 Admit Date/Time (TS). ts_to_datetime converts to ISO-8601.", DataType: "TS", TransformKey: "ts_to_datetime"},
+			{SourceField: "PV1.45", TargetField: "Encounter.period.end", Confidence: 0.91,
+				Reasoning: "PV1.45 Discharge Date/Time (TS). ts_to_datetime converts to ISO-8601.", DataType: "TS", TransformKey: "ts_to_datetime"},
+		}
+		return append(pid, adtExtra...)
+
+	case strings.HasPrefix(msgType, "ORU"):
+		// OBR → DiagnosticReport (the test order/panel — e.g. CBC, BMP)
+		// Each OBX → Observation (an individual result — Hgb, WBC, etc.)
+		// DiagnosticReport.result[] references all Observation resources.
+		// OBX.3 is a CWE field: components are code^display^system^altCode^altDisplay^altSystem.
+		// The first three map to Observation.code.coding[0]; alt codes go into coding[1].
+		oruExtra := []MappingSuggestion{
+			{SourceField: "OBR.3", TargetField: "DiagnosticReport.identifier[0].value", Confidence: 0.93,
+				Reasoning: "OBR.3 Filler Order Number → DiagnosticReport identifier.", DataType: "EI", TransformKey: ""},
+			{SourceField: "OBR.4", TargetField: "DiagnosticReport.code", Confidence: 0.95,
+				Reasoning: "OBR.4 Universal Service Identifier (CE/CWE). ce_to_codeableconcept maps code^display^system — e.g. 58410-2^CBC panel^LN.", DataType: "CE", TransformKey: "ce_to_codeableconcept"},
+			{SourceField: "OBR.7", TargetField: "DiagnosticReport.effectiveDateTime", Confidence: 0.91,
+				Reasoning: "OBR.7 Observation Date/Time (TS). ts_to_datetime converts to ISO-8601.", DataType: "TS", TransformKey: "ts_to_datetime"},
+			{SourceField: "OBR.25", TargetField: "DiagnosticReport.status", Confidence: 0.89,
+				Reasoning: "OBR.25 Result Status (F=final, P=preliminary, C=corrected) → DiagnosticReport.status.", DataType: "ID", TransformKey: "obr_status_to_dr_status"},
+			// OBX fields — applied per-OBX-segment (one Observation per OBX)
+			{SourceField: "OBX.3", TargetField: "Observation.code", Confidence: 0.95,
+				Reasoning: "OBX.3 Observation Identifier (CWE): code^display^system[^altCode^altDisplay^altSystem]. ce_to_codeableconcept populates coding[0] and coding[1] for alternate code. Maps to Observation.code.", DataType: "CWE", TransformKey: "ce_to_codeableconcept"},
+			{SourceField: "OBX.5", TargetField: "Observation.value[x]", Confidence: 0.88,
+				Reasoning: "OBX.5 Observation Value. Type determined by OBX.2 (NM→valueQuantity, ST→valueString, CE→valueCodeableConcept, etc.).", DataType: "varies", TransformKey: "obx_value_by_type"},
+			{SourceField: "OBX.6", TargetField: "Observation.valueQuantity.unit", Confidence: 0.88,
+				Reasoning: "OBX.6 Units (CE) → valueQuantity.unit and code.", DataType: "CE", TransformKey: "ce_to_codeableconcept"},
+			{SourceField: "OBX.7", TargetField: "Observation.referenceRange[0].text", Confidence: 0.85,
+				Reasoning: "OBX.7 Reference Range text (e.g. '3.5-5.5') → referenceRange[0].text.", DataType: "ST", TransformKey: ""},
+			{SourceField: "OBX.8", TargetField: "Observation.interpretation[0].coding[0].code", Confidence: 0.87,
+				Reasoning: "OBX.8 Abnormal Flags (N/L/H/A/C) → Observation.interpretation.", DataType: "IS", TransformKey: "abnormal_flag_to_interpretation"},
+			{SourceField: "OBX.11", TargetField: "Observation.status", Confidence: 0.92,
+				Reasoning: "OBX.11 Observation Result Status (F=final, P=preliminary, C=corrected) → Observation.status.", DataType: "ID", TransformKey: "obx_status_to_obs_status"},
+			{SourceField: "OBX.14", TargetField: "Observation.effectiveDateTime", Confidence: 0.90,
+				Reasoning: "OBX.14 Date/Time of Observation (TS). ts_to_datetime converts to ISO-8601.", DataType: "TS", TransformKey: "ts_to_datetime"},
+		}
+		return append(pid, oruExtra...)
+
+	case strings.HasPrefix(msgType, "ORM") || strings.HasPrefix(msgType, "OMG"):
+		ormExtra := []MappingSuggestion{
+			{SourceField: "ORC.1", TargetField: "ServiceRequest.status", Confidence: 0.90,
+				Reasoning: "ORC.1 Order Control (NW/CA/DC/...) → ServiceRequest.status via lookup.", DataType: "ID", TransformKey: "orc_status_to_sr_status"},
+			{SourceField: "ORC.3", TargetField: "ServiceRequest.identifier[0].value", Confidence: 0.92,
+				Reasoning: "ORC.3 Filler Order Number → ServiceRequest identifier.", DataType: "EI", TransformKey: ""},
+			{SourceField: "ORC.9", TargetField: "ServiceRequest.authoredOn", Confidence: 0.91,
+				Reasoning: "ORC.9 Date/Time of Transaction (TS). ts_to_datetime converts to ISO-8601.", DataType: "TS", TransformKey: "ts_to_datetime"},
+			{SourceField: "OBR.4", TargetField: "ServiceRequest.code", Confidence: 0.93,
+				Reasoning: "OBR.4 Universal Service ID (CE). ce_to_codeableconcept maps to ServiceRequest.code.", DataType: "CE", TransformKey: "ce_to_codeableconcept"},
+		}
+		return append(pid, ormExtra...)
+	}
+
+	return pid
+}
+
 
 // ─── Error Explanation ────────────────────────────────────────────────────────
 

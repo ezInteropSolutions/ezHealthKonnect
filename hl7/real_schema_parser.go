@@ -6,6 +6,7 @@ import (
 	"compress/gzip"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"sort"
@@ -127,41 +128,8 @@ func InitRealSchemaLoader(schemaDirectory string) {
 	}
 }
 
-// GetRealSchemaLoader returns the real schema loader
+// GetRealSchemaLoader returns the real schema loader (initialised by InitRealSchemaLoader)
 func GetRealSchemaLoader() *RealSchemaLoader {
-	
-	schemaDir := os.Getenv("EZHEALTHKONNECT_SCHEMA_DIR")
-    fmt.Printf("🔍 EZHEALTHKONNECT_SCHEMA_DIR: %s\n", schemaDir)
-    if schemaDir == "" {
-        fmt.Printf("🔍 Error: EZHEALTHKONNECT_SCHEMA_DIR environment variable is not set\n")
-        return nil
-    }
-
-    fmt.Printf("🔍 Searching for schema files in %s\n", schemaDir)
-    files, err := os.ReadDir(schemaDir)
-    if err != nil {
-        fmt.Printf("🔍 Error reading schema directory: %v\n", err)
-        return nil
-    }
-
-    fmt.Printf("🔍 Found %d files in schema directory\n", len(files))
-    for _, file := range files {
-        fmt.Printf("🔍 File: %s\n", file.Name())
-        if file.Name() == "ADT_A01.json" {
-            fmt.Printf("🔍 Found ADT_A01 schema file: %s\n", file.Name())
-            // ... (rest of the code remains the same)
-        }
-    }
-
-    // ... (rest of the code remains the same)
-
-    // Add some logging to see what's happening when we try to load the schema
-    if realSchemaLoader.loadErrorMessages != nil {
-        fmt.Printf("🔍 Real schema loader errors:\n")
-        for _, err := range realSchemaLoader.loadErrorMessages {
-            fmt.Printf("🔍   - %v\n", err)
-        }
-    }
 	return realSchemaLoader
 }
 
@@ -334,28 +302,75 @@ func (rsl *RealSchemaLoader) LoadRealSchema(version, messageType, triggerEvent s
 	fmt.Printf("🔍 DEBUG: Looking for schema file: %s\n", schemaPath)
 
 	if _, err := os.Stat(schemaPath); os.IsNotExist(err) {
-		// Try alternatives silently
+		found := false
+
+		// 1. Try filename variations within the same version
 		alternates := []string{
 			fmt.Sprintf("%s^%s.gz", messageType, triggerEvent),
 			fmt.Sprintf("%s.gz", messageType),
 			fmt.Sprintf("%s_%s_%s.gz", messageType, triggerEvent, normalizedVersion),
 		}
-
 		for _, altFilename := range alternates {
 			altPath := filepath.Join(rsl.schemaDir, normalizedVersion, altFilename)
 			if _, err := os.Stat(altPath); err == nil {
 				schemaPath = altPath
+				found = true
 				break
 			}
 		}
 
-		if _, err := os.Stat(schemaPath); os.IsNotExist(err) {
-			rsl.stats.LoadErrors++
-			return nil, fmt.Errorf("schema file not found: %s", schemaPath)
+		// 2. Fallback: same message type, base trigger event (R01/A01) in same version
+		//    Handles cases like ORU^R03 where only ORU_R01.gz exists for the version.
+		if !found {
+			baseTrigger := rsl.baseTriggerEvent(messageType, triggerEvent)
+			if baseTrigger != triggerEvent {
+				basePath := filepath.Join(rsl.schemaDir, normalizedVersion, fmt.Sprintf("%s_%s.gz", messageType, baseTrigger))
+				if _, err := os.Stat(basePath); err == nil {
+					log.Printf("⚠️  Schema %s_%s not found for %s — using %s_%s as fallback", messageType, triggerEvent, normalizedVersion, messageType, baseTrigger)
+					schemaPath = basePath
+					found = true
+				}
+			}
 		}
 
-		
-		
+		// 3. Fallback: same schema name across other HL7 versions (nearest first)
+		if !found {
+			orderedVersions := []string{"v2.5.1", "v2.5", "v2.6", "v2.7", "v2.7.1", "v2.8", "v2.4", "v2.3.1", "v2.3", "v2.2", "v2.1"}
+			for _, altVer := range orderedVersions {
+				if altVer == normalizedVersion {
+					continue
+				}
+				altPath := filepath.Join(rsl.schemaDir, altVer, filename)
+				if _, err := os.Stat(altPath); err == nil {
+					log.Printf("⚠️  Schema %s not found for %s — using %s version as fallback", filename, normalizedVersion, altVer)
+					schemaPath = altPath
+					found = true
+					break
+				}
+			}
+		}
+
+		// 4. Last resort: base trigger in any version
+		if !found {
+			baseTrigger := rsl.baseTriggerEvent(messageType, triggerEvent)
+			if baseTrigger != triggerEvent {
+				orderedVersions := []string{"v2.5.1", "v2.5", "v2.6", "v2.3.1", "v2.3", "v2.4", "v2.7", "v2.2", "v2.1"}
+				for _, altVer := range orderedVersions {
+					altPath := filepath.Join(rsl.schemaDir, altVer, fmt.Sprintf("%s_%s.gz", messageType, baseTrigger))
+					if _, err := os.Stat(altPath); err == nil {
+						log.Printf("⚠️  Schema %s_%s not found anywhere — using %s/%s_%s as fallback", messageType, triggerEvent, altVer, messageType, baseTrigger)
+						schemaPath = altPath
+						found = true
+						break
+					}
+				}
+			}
+		}
+
+		if !found {
+			rsl.stats.LoadErrors++
+			return nil, fmt.Errorf("schema file not found: %s", filepath.Join(rsl.schemaDir, normalizedVersion, filename))
+		}
 	}
 
 	schema, err := rsl.loadAndParseSchemaFile(schemaPath)
@@ -381,6 +396,33 @@ func normalizeVersionForSchema(version string) string {
 		return "v" + version
 	}
 	return version
+}
+
+// baseTriggerEvent returns a common fallback trigger event for a given message type.
+// Used when the exact trigger event schema file is not available.
+func (rsl *RealSchemaLoader) baseTriggerEvent(messageType, triggerEvent string) string {
+	bases := map[string]string{
+		"ORU": "R01",
+		"ADT": "A01",
+		"ORM": "O01",
+		"ORR": "O02",
+		"ACK": "A01",
+		"MFN": "M01",
+		"BAR": "P01",
+		"DFT": "P03",
+		"MDM": "T01",
+		"QRY": "A19",
+		"RQI": "I01",
+		"SIU": "S12",
+		"RAS": "O17",
+		"RDE": "O11",
+		"RGV": "O15",
+		"VXU": "V04",
+	}
+	if base, ok := bases[strings.ToUpper(messageType)]; ok {
+		return base
+	}
+	return triggerEvent // no known base — keep original
 }
 
 // loadAndParseSchemaFile loads and parses schema file
@@ -444,20 +486,10 @@ func (rsl *RealSchemaLoader) convertOrderedRawSchema(raw *orderedmap.OrderedMap[
 	// Look for "structure" key first, then "segments" as fallback
 	if structureValue, exists := raw.Get("structure"); exists {
 		if structureMap, ok := structureValue.(map[string]interface{}); ok {
-			// Process each segment in the structure
+			// Recursively extract all segments from the nested structure.
+			// HL7 schemas nest segments inside groups (e.g., PATIENT RESULT > PATIENT > segments > PID).
 			sequenceCounter := 0
-			for segKey, segValue := range structureMap {
-				if segmentMap, ok := segValue.(map[string]interface{}); ok {
-					segmentDef, err := rsl.convertOrderedSegment(segKey, segmentMap, sequenceCounter)
-					if err != nil {
-						continue // Skip on error, don't log
-					}
-					schema.Segments[segKey] = segmentDef
-					schema.SegmentOrder = append(schema.SegmentOrder, segKey)
-					segmentCount++
-					sequenceCounter++
-				}
-			}
+			rsl.extractSegmentsRecursive(structureMap, schema, &segmentCount, &sequenceCounter)
 		}
 	} else if segmentsValue, exists := raw.Get("segments"); exists {
 		// Fallback: also support "segments" key for backward compatibility
@@ -507,6 +539,42 @@ func (rsl *RealSchemaLoader) convertOrderedRawSchema(raw *orderedmap.OrderedMap[
 	}
 
 	return schema, nil
+}
+
+// extractSegmentsRecursive walks a nested structure map and adds any segment definitions it finds
+// to schema.Segments.  HL7 schemas nest real segments (which have a "fields" key) inside group
+// objects (which have a "segments" or nested-group key).  We detect a real segment by the
+// presence of a "fields" map; everything else is treated as a group to recurse into.
+func (rsl *RealSchemaLoader) extractSegmentsRecursive(structureMap map[string]interface{}, schema *RealHL7Schema, count *int, seq *int) {
+	for key, value := range structureMap {
+		nodeMap, ok := value.(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		// A real segment has a "fields" key; groups have "segments" or sub-group keys.
+		if _, hasFields := nodeMap["fields"]; hasFields {
+			// This is a real segment — only register it if not already present.
+			if _, alreadyAdded := schema.Segments[key]; !alreadyAdded {
+				segmentDef, err := rsl.convertOrderedSegment(key, nodeMap, *seq)
+				if err == nil {
+					schema.Segments[key] = segmentDef
+					schema.SegmentOrder = append(schema.SegmentOrder, key)
+					(*count)++
+					(*seq)++
+				}
+			}
+		} else {
+			// Could be a group with a "segments" sub-map, or a plain nested group.
+			if segmentsValue, hasSegs := nodeMap["segments"]; hasSegs {
+				if segmentsMap, ok := segmentsValue.(map[string]interface{}); ok {
+					rsl.extractSegmentsRecursive(segmentsMap, schema, count, seq)
+				}
+			}
+			// Also recurse into all map values (handles groups like PATIENT RESULT > PATIENT).
+			rsl.extractSegmentsRecursive(nodeMap, schema, count, seq)
+		}
+	}
 }
 
 // convertOrderedSegment converts segment definition
@@ -635,7 +703,22 @@ func (rsl *RealSchemaLoader) convertOrderedField(fieldKey string, raw map[string
 	if desc, ok := raw["description"].(string); ok && desc != "" && desc != "null" {
 		field.Description = desc
 	} else {
-		field.Description = fmt.Sprintf("%s field", field.Name)
+		// Schema description is null — fall back to the hardcoded standard descriptions
+		// then the field name as last resort.
+		parts := strings.SplitN(fieldKey, ".", 2)
+		if len(parts) == 2 {
+			if pos, err := strconv.Atoi(parts[1]); err == nil {
+				if stdDesc := getFieldDescription(parts[0], pos); !strings.HasSuffix(stdDesc, fmt.Sprintf(" field %d", pos)) {
+					field.Description = stdDesc
+				} else {
+					field.Description = field.Name
+				}
+			} else {
+				field.Description = field.Name
+			}
+		} else {
+			field.Description = field.Name
+		}
 	}
 	if tableId, ok := raw["tableId"].(string); ok && tableId != "" && tableId != "null" {
 		field.TableId = tableId

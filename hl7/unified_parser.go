@@ -259,6 +259,11 @@ func ParseHL7EnhancedWithOptions(rawMessage string, opts ParseOptions) *Enhanced
 	return result
 }
 
+// ApplyEscapeDecodingToResult is the exported form of applyEscapeDecoding.
+func ApplyEscapeDecodingToResult(result *EnhancedParsedMessage, encodingChars string) {
+	applyEscapeDecoding(result, encodingChars)
+}
+
 // applyEscapeDecoding walks all field/subfield values in an EnhancedParsedMessage
 // and replaces HL7 escape sequences with their literal characters.
 func applyEscapeDecoding(result *EnhancedParsedMessage, encodingChars string) {

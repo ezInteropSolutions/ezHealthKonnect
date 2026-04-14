@@ -65,7 +65,7 @@ function showMessage(message, type) {
     
     if (!messageDiv) {
         console.error('statusMessage element not found!');
-        alert(message); // Fallback to alert
+        AppDialogs.toast(message, type === 'error' ? 'error' : 'info'); // Fallback toast
         return;
     }
     

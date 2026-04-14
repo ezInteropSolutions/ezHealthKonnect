@@ -17,6 +17,7 @@ import (
 	payloadexecutor "ezhealthkonnect/services/executors/payload"
 	"ezhealthkonnect/services/executors/transform"
 	"ezhealthkonnect/services/executors/validation"
+	"ezhealthkonnect/services/hl7assembly"
 )
 
 // StepExecutor interface - all executors must implement this
@@ -97,6 +98,9 @@ func (er *ExecutorRegistry) autoRegisterExecutors() {
 	er.Register(enrichment.NewFieldMappingExecutor())        // field_mapping
 	er.Register(enrichment.NewFileParserExecutor(er.db, er.credStore.DecryptConfigBytes)) // file_parser
 
+	// HL7 structural assembly executors
+	er.Register(transform.NewHL7AssembleObservationsExecutor()) // hl7.assemble_observations
+
 	// Data transform executors
 	er.Register(transform.NewDataMaskingExecutor())          // data_masking
 	er.Register(transform.NewRemoveDuplicatesExecutor())     // remove_duplicates
@@ -132,6 +136,9 @@ func (er *ExecutorRegistry) autoRegisterExecutors() {
 	er.executors["post.normalizer"] = er.executors["normalizer"]
 	er.executors["pre.deidentify"] = er.executors["deidentify"]
 	er.executors["post.deidentify"] = er.executors["deidentify"]
+
+	// Da Vinci PAS envelope mapping step — guided UI, same field_mapping executor
+	er.executors["pas_envelope_mapping"] = er.executors["field_mapping"]
 
 	log.Println("  ✓ All executors registered with backward-compatible aliases")
 }
@@ -333,12 +340,45 @@ func (hme *HL7FHIRMappingExecutor) Execute(
 	// Call existing transformation service using Transform method
 	_ = selectedResources // filter applied post-transform if needed
 
+	// assembleObservations defaults to true; set to false in step config to disable entirely.
+	assembleInline := true
+	if v, ok := step.Config["assembleObservations"].(bool); ok {
+		assembleInline = v
+	}
+
+	// assemblyRules — per-rule on/off from UI checkboxes saved in step.config.assemblyRules
+	var assemblyRules hl7assembly.AssemblyRules
+	if rulesRaw, ok := step.Config["assemblyRules"].(map[string]interface{}); ok {
+		assemblyRules = hl7assembly.AssemblyRulesFromConfig(rulesRaw)
+	}
+
+	// embedded_mappings — wizard-saved field mappings stored directly in step config.
+	// These take priority over DB lookups and survive message-type variant mismatches
+	// (e.g. ORU^R03 arriving on an interface configured for ORU^R01).
+	var embeddedMappings []map[string]interface{}
+	if raw, ok := step.Config["embedded_mappings"]; ok {
+		switch v := raw.(type) {
+		case []map[string]interface{}:
+			embeddedMappings = v
+		case []interface{}:
+			for _, item := range v {
+				if m, ok2 := item.(map[string]interface{}); ok2 {
+					embeddedMappings = append(embeddedMappings, m)
+				}
+			}
+		}
+		log.Printf("  🔍 [DEBUG] Using %d embedded_mappings from step config", len(embeddedMappings))
+	}
+
 	req := &TransformRequest{
-		ParsedHL7Data: parsedHL7Data,
-		MessageType:   messageType,
-		FHIRVersion:   "R4",
-		CreateBundle:  true,
-		InterfaceID:   interfaceID,
+		ParsedHL7Data:    parsedHL7Data,
+		MessageType:      messageType,
+		FHIRVersion:      "R4",
+		CreateBundle:     true,
+		InterfaceID:      interfaceID,
+		SkipAssembly:     !assembleInline,
+		AssemblyRules:    assemblyRules,
+		EmbeddedMappings: embeddedMappings,
 	}
 
 	log.Printf("  🔍 [DEBUG] Calling Transform service...")
@@ -383,6 +423,9 @@ func (hme *HL7FHIRMappingExecutor) Execute(
 
 	// Keep transformed content for storage and downstream access
 	outputData["fhirBundle"] = resp.Bundle
+
+	// Expose individual resources for downstream steps (e.g. hl7.assemble_observations)
+	outputData["fhirResources"] = resp.FHIRResources
 
 	// Also store in the message so downstream steps (FHIR Validation, etc.) can access it
 	if msg, ok := outputData["message"].(map[string]interface{}); ok {

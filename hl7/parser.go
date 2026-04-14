@@ -621,6 +621,17 @@ func getFieldDescription(segmentName string, position int) string {
 			17: "Religion",
 			18: "Patient account number",
 			19: "Social security number",
+			20: "Driver's license number",
+			21: "Mother's identifier",
+			22: "Ethnic group",
+			23: "Birth place",
+			24: "Multiple birth indicator",
+			25: "Birth order",
+			26: "Citizenship",
+			27: "Veterans military status",
+			28: "Nationality",
+			29: "Patient death date and time",
+			30: "Patient death indicator",
 		},
 	}
 

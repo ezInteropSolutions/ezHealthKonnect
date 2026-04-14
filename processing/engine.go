@@ -145,6 +145,17 @@ func NewProcessingEngine(db *sql.DB, credStore *services.CredentialStore) *Proce
 	engine.messageQueue = NewMessageQueue(db, engine.transformationService)
 	logger.Info("message queue initialized (retry + startup recovery)")
 
+	// Reset stale runtime state: any interface marked status='active' in the DB is a leftover
+	// from a previous process run. The listeners are gone now, so correct the DB immediately
+	// so the UI shows "Stopped" instead of "Running" before the engine is explicitly started.
+	// interface_status ('active') is preserved as the user-intent column and used by
+	// restoreActiveInterfaces() when the engine is started.
+	if result, err := db.Exec(`UPDATE interfaces SET status = 'inactive' WHERE status = 'active'`); err != nil {
+		log.Printf("⚠️  Engine init: could not reset stale interface statuses: %v", err)
+	} else if n, _ := result.RowsAffected(); n > 0 {
+		log.Printf("🔄 Engine init: reset %d stale active interface(s) to inactive (listeners not running)", n)
+	}
+
 	return engine
 }
 
@@ -177,10 +188,12 @@ func (pe *ProcessingEngine) Start() error {
 	return nil
 }
 
-// restoreActiveInterfaces queries the DB for interfaces with status='active'
-// and re-activates them so listeners restart after an engine restart.
+// restoreActiveInterfaces queries the DB for interfaces with interface_status='active'
+// (user intent) and re-activates them. It uses interface_status, not status, because
+// NewProcessingEngine resets status='inactive' for all previously-running interfaces on
+// startup — interface_status is the durable intent column that survives restarts.
 func (pe *ProcessingEngine) restoreActiveInterfaces() {
-	rows, err := pe.db.Query(`SELECT id FROM interfaces WHERE status = 'active' AND is_active = TRUE`)
+	rows, err := pe.db.Query(`SELECT id FROM interfaces WHERE interface_status = 'active' AND is_active = TRUE`)
 	if err != nil {
 		log.Printf("⚠️  Auto-restore: failed to query active interfaces: %v", err)
 		return
@@ -769,13 +782,22 @@ func (pe *ProcessingEngine) findActiveInterfacesByPort(port int) []string {
 // for every interface that was halted due to a port conflict.
 // Called asynchronously — does NOT hold pe.mutex.
 func (pe *ProcessingEngine) persistPortConflictHalt(interfaceIDs []string, port int, reason string) {
+	errorStats, _ := json.Marshal(map[string]interface{}{
+		"reason":    reason,
+		"port":      port,
+		"timestamp": time.Now().UTC().Format(time.RFC3339),
+	})
+
 	for _, id := range interfaceIDs {
-		// Mark interface as error in both status columns.
+		// Mark interface as error and persist the reason so the UI can surface it.
 		if _, err := pe.db.Exec(`
 			UPDATE interfaces
-			SET status = 'error', interface_status = 'error', updated_at = NOW()
+			SET status = 'error',
+			    interface_status = 'error',
+			    processing_stats = jsonb_set(COALESCE(processing_stats, '{}'), '{error}', $2::jsonb, true),
+			    updated_at = NOW()
 			WHERE id = $1
-		`, id); err != nil {
+		`, id, string(errorStats)); err != nil {
 			log.Printf("⚠️  [PHI SAFETY] Failed to update status for interface %s: %v", id, err)
 		}
 

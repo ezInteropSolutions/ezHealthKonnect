@@ -179,6 +179,12 @@ type APIEnrichmentConfig struct {
 	QueryParams map[string]string      `json:"queryParams,omitempty"`
 	RequestBody map[string]interface{} `json:"requestBody,omitempty"`
 
+	// BodyRef is a dot-path into the pipeline's inputData (e.g.
+	// "steps.assemble_pas_bundle.step_output.pas_bundle") whose resolved value
+	// is used as the entire request body, replacing RequestBody entirely.
+	// Useful when the body is a complex object built by a prior script step.
+	BodyRef string `json:"bodyRef,omitempty"`
+
 	// Field mapping - which field from message to use in API call
 	// Example: "patientId" -> "PID.3" (use patient ID from HL7 message)
 	FieldMappings map[string]string `json:"fieldMappings,omitempty"`

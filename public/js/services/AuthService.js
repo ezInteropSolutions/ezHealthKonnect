@@ -259,7 +259,7 @@ class AuthService {
      * @returns {Promise<void>}
      */
     async logout() {
-        if (!confirm('Are you sure you want to logout?')) {
+        if (!await AppDialogs.confirm('Are you sure you want to logout?', { title: 'Logout', type: 'warning', confirmText: 'Logout' })) {
             return;
         }
 

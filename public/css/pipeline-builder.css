@@ -99,6 +99,7 @@ body {
     display: flex;
     align-items: center;
     gap: var(--spacing-md);
+    min-width: 0;
 }
 
 .header-left h1 {
@@ -107,6 +108,105 @@ body {
     color: var(--text-primary);
 }
 
+/* ── Breadcrumb ──────────────────────────────────────────── */
+.pipeline-breadcrumb {
+    display: flex;
+    align-items: center;
+    gap: 0;
+    font-size: 0.85rem;
+    min-width: 0;
+}
+
+.breadcrumb-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 200px;
+}
+
+.breadcrumb-sep {
+    color: #9ca3af;
+    font-size: 0.9rem;
+    padding: 0 0.3rem;
+    flex-shrink: 0;
+}
+
+.breadcrumb-link {
+    color: #6366f1;
+    text-decoration: none;
+    padding: 3px 6px;
+    border-radius: 4px;
+    transition: background 0.15s, color 0.15s;
+}
+
+.breadcrumb-link:hover {
+    background: #ede9fe;
+    color: #4338ca;
+    text-decoration: none;
+}
+
+.breadcrumb-interface {
+    font-weight: 600;
+    color: #374151;
+    max-width: 220px;
+}
+
+.breadcrumb-interface:hover {
+    background: #f3f4f6;
+    color: #111827;
+}
+
+.breadcrumb-current {
+    color: #9ca3af;
+    font-size: 0.82rem;
+    max-width: 180px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* ── Shortcut buttons ─────────────────────────────────────── */
+.btn-shortcut {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 5px 10px;
+    font-size: 0.78rem;
+    font-weight: 500;
+    color: #374151;
+    background: #f9fafb;
+    border: 1px solid #e5e7eb;
+    border-radius: 5px;
+    text-decoration: none;
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s, color 0.15s;
+    white-space: nowrap;
+}
+
+.btn-shortcut:hover {
+    background: #eff6ff;
+    border-color: #bfdbfe;
+    color: #1d4ed8;
+    text-decoration: none;
+}
+
+.btn-shortcut i {
+    font-size: 0.75rem;
+    opacity: 0.8;
+}
+
+/* Thin vertical rule between shortcut group and action buttons */
+.header-divider {
+    width: 1px;
+    height: 22px;
+    background: #e5e7eb;
+    align-self: center;
+    flex-shrink: 0;
+}
+
+/* Legacy — kept so nothing breaks if still referenced */
 .interface-badge {
     background: var(--bg-tertiary);
     padding: var(--spacing-xs) var(--spacing-md);
@@ -140,7 +240,9 @@ body {
 
 .header-right {
     display: flex;
-    gap: var(--spacing-md);
+    align-items: center;
+    gap: var(--spacing-sm);
+    flex-shrink: 0;
 }
 
 /* ============================================

@@ -25,8 +25,8 @@ console.log(`Node Environment: ${process.env.NODE_ENV || 'development'}`);
 //app.use(express.json());
 //app.use(express.urlencoded({ extended: true }));
 // Basic middleware FIRST - Updated for HL7-FHIR mapping payloads
-app.use(express.json({ limit: '2mb' }));
-app.use(express.urlencoded({ limit: '2mb', extended: true }));
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ limit: '10mb', extended: true }));
 // Monitor large requests for debugging
 app.use((req, res, next) => {
     if (req.headers['content-length']) {
@@ -255,13 +255,41 @@ console.log('Simple proxy configured successfully');
 // SESSION_TIMEOUT_MINUTES can be set by server.js after reading system_settings at startup.
 // Default: 1440 minutes (24 h).  Admin can change via Settings → Security.
 const _sessionTimeoutMinutes = parseInt(process.env.SESSION_TIMEOUT_MINUTES || '1440', 10);
+
+// Persist sessions to PostgreSQL so they survive service restarts and reboots.
+// Falls back to in-memory store if the pg pool fails (dev/test environments).
+let _sessionStore;
+try {
+    const PgSession = require('connect-pg-simple')(session);
+    const { Pool } = require('pg');
+    const _pgPool = new Pool({
+        host:     process.env.DB_HOST     || 'localhost',
+        port:     parseInt(process.env.DB_PORT || '5432', 10),
+        database: process.env.DB_NAME     || 'ezhealthkonnect',
+        user:     process.env.DB_USER     || 'ezhealth_user',
+        password: process.env.DB_PASSWORD || '',
+        ssl:      process.env.DB_SSL === 'true' ? { rejectUnauthorized: false } : false,
+        max: 3,
+    });
+    _sessionStore = new PgSession({
+        pool: _pgPool,
+        tableName: 'user_sessions',
+        createTableIfMissing: true,
+        pruneSessionInterval: 60 * 15,
+    });
+    console.log('✅ PostgreSQL session store initialised');
+} catch (err) {
+    console.warn('⚠️  PostgreSQL session store unavailable, using memory store:', err.message);
+}
+
 const sessionConfig = {
+    store: _sessionStore,
     secret: process.env.SESSION_SECRET || 'your-session-secret',
     resave: false,
     saveUninitialized: false,
     name: 'ezhealth.sid',
     cookie: {
-        secure: process.env.NODE_ENV === 'production',
+        secure: process.env.NODE_ENV === 'production' && process.env.SESSION_COOKIE_SECURE !== 'false',
         httpOnly: true,
         maxAge: _sessionTimeoutMinutes * 60 * 1000,
         sameSite: 'lax'

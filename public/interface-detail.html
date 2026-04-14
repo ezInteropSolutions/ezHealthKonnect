@@ -234,14 +234,14 @@
     <div class="main-content">
         <!-- Page header -->
         <div class="page-header">
-            <a class="back-btn" href="interfaces.html"><i class="fas fa-pencil"></i> Interfaces</a>
+            <a class="back-btn" href="interfaces.html"><i class="fas fa-arrow-left"></i> Interfaces</a>
             <div class="page-header-title">
                 <h1 id="interfaceName">Loading…</h1>
                 <p id="interfaceDesc"></p>
             </div>
             <span class="status-pill draft" id="statusPill" style="display:none"></span>
             <a class="btn-ghost" id="pipelineLink" href="#" style="font-size:13px;text-decoration:none;display:none">
-                <i class="fas fa-pencil"></i> Open Pipeline
+                <i class="fas fa-diagram-project"></i> Open Pipeline
             </a>
         </div>
 
@@ -251,19 +251,19 @@
             <div class="detail-leftnav">
                 <div class="leftnav-section">Interface</div>
                 <div class="leftnav-tab active" data-tab="overview" onclick="activateTab('overview')">
-                    <i class="fas fa-pencil"></i> Overview
+                    <i class="fas fa-gauge"></i> Overview
                 </div>
                 <div class="leftnav-tab" data-tab="pipeline" onclick="activateTab('pipeline')">
-                    <i class="fas fa-pencil"></i> Pipeline
+                    <i class="fas fa-diagram-project"></i> Pipeline
                 </div>
                 <div class="leftnav-tab" data-tab="messages" onclick="activateTab('messages')">
-                    <i class="fas fa-pencil"></i> Messages
+                    <i class="fas fa-envelope"></i> Messages
                 </div>
                 <div class="leftnav-tab" data-tab="alerts" onclick="activateTab('alerts')">
-                    <i class="fas fa-pencil"></i> Alerts
+                    <i class="fas fa-bell"></i> Alerts
                 </div>
                 <div class="leftnav-tab" data-tab="settings" onclick="activateTab('settings')">
-                    <i class="fas fa-pencil"></i> Settings
+                    <i class="fas fa-gear"></i> Settings
                 </div>
             </div>
 
@@ -274,10 +274,10 @@
                 <div id="tab-overview" class="tab-section active">
                     <div class="section-header">
                         <h2>Overview</h2>
-                        <button class="btn-ghost" onclick="loadOverview()"><i class="fas fa-pencil"></i> Refresh</button>
+                        <button class="btn-ghost" onclick="loadOverview()"><i class="fas fa-rotate"></i> Refresh</button>
                     </div>
                     <div class="kpi-grid" id="kpiGrid">
-                        <div class="loading-row" style="grid-column:1/-1"><i class="fas fa-pencil"></i> Loading metrics…</div>
+                        <div class="loading-row" style="grid-column:1/-1"><i class="fas fa-spinner fa-spin"></i> Loading metrics…</div>
                     </div>
                     <div class="section-label">Recent Messages</div>
                     <div style="overflow-x:auto">
@@ -292,7 +292,7 @@
                                 </tr>
                             </thead>
                             <tbody id="recentMessages">
-                                <tr><td colspan="5" class="loading-row"><i class="fas fa-pencil"></i></td></tr>
+                                <tr><td colspan="5" class="loading-row"><i class="fas fa-spinner fa-spin"></i></td></tr>
                             </tbody>
                         </table>
                     </div>
@@ -305,7 +305,7 @@
                         Open the visual pipeline builder to configure transformation steps, routing, and connectors for this interface.
                     </p>
                     <a id="openPipelineBtn" href="#" class="btn-primary" style="text-decoration:none">
-                        <i class="fas fa-pencil"></i> Open Pipeline Builder
+                        <i class="fas fa-diagram-project"></i> Open Pipeline Builder
                     </a>
                 </div>
 
@@ -316,7 +316,7 @@
                         Browse all messages received by this interface, inspect payloads, and view processing status.
                     </p>
                     <a id="openMessagesBtn" href="#" class="btn-primary" style="text-decoration:none">
-                        <i class="fas fa-pencil"></i> Open Message Viewer
+                        <i class="fas fa-envelope-open-text"></i> Open Message Viewer
                     </a>
                 </div>
 
@@ -326,28 +326,28 @@
                         <h2>Alerts</h2>
                         <div style="display:flex;gap:8px">
                             <button onclick="openAlertDocs()" style="display:inline-flex;align-items:center;gap:6px;padding:7px 13px;background:#eff6ff;color:#1e3a8a;border:1px solid #bfdbfe;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer">
-                                <i class="fas fa-pencil"></i> Help
+                                <i class="fas fa-circle-question"></i> Help
                             </button>
                             <a href="alerts.html" class="btn-ghost" style="text-decoration:none;font-size:13px">
-                                <i class="fas fa-pencil"></i> Manage All Rules
+                                <i class="fas fa-list-check"></i> Manage All Rules
                             </a>
                         </div>
                     </div>
 
                     <div class="section-label">Active Alerts for this Interface</div>
                     <div id="interfaceAlertList">
-                        <div class="loading-row"><i class="fas fa-pencil"></i></div>
+                        <div class="loading-row"><i class="fas fa-spinner fa-spin"></i></div>
                     </div>
 
                     <div class="section-label">Alert Rules</div>
                     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
                         <span style="font-size:12px;color:var(--muted)">Rules applying to this interface (including global rules)</span>
                         <button class="btn-primary" onclick="openNewRuleForInterface()" style="font-size:12px;padding:6px 12px">
-                            <i class="fas fa-pencil"></i> Add Rule
+                            <i class="fas fa-plus"></i> Add Rule
                         </button>
                     </div>
                     <div id="interfaceRuleList">
-                        <div class="loading-row"><i class="fas fa-pencil"></i></div>
+                        <div class="loading-row"><i class="fas fa-spinner fa-spin"></i></div>
                     </div>
                 </div>
 
@@ -379,7 +379,7 @@
                         <div style="display:flex;gap:10px;margin-top:20px;padding-top:16px;border-top:1px solid var(--card-border)">
                             <button class="btn-primary" onclick="saveSettings()">Save Changes</button>
                             <button class="btn-danger" onclick="confirmDelete()" style="margin-left:auto">
-                                <i class="fas fa-pencil"></i> Delete Interface
+                                <i class="fas fa-trash"></i> Delete Interface
                             </button>
                         </div>
                     </div>
@@ -395,7 +395,7 @@
     <div class="docs-panel-accent"></div>
     <div class="docs-panel-header">
         <div style="flex:1">
-            <h2><i class="fas fa-pencil" style="margin-right:8px"></i>Alert Management — Help &amp; Documentation</h2>
+            <h2><i class="fas fa-book" style="margin-right:8px"></i>Alert Management — Help &amp; Documentation</h2>
             <p>Configuration guides, API reference, and real-world examples</p>
         </div>
         <button class="docs-close" onclick="closeDocsPanel()" title="Close">×</button>

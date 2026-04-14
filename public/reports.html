@@ -268,15 +268,15 @@
 
     <div class="page-header">
         <div>
-            <h1><i class="far fa-pen-to-square"></i>Reports</h1>
+            <h1><i class="fas fa-chart-bar"></i>Reports</h1>
             <p>12 built-in reports for operations, compliance, and performance — plus a self-service ad-hoc builder</p>
         </div>
     </div>
 
     <div class="tabs-bar">
-        <button class="tab-btn active" data-tab="gallery"><i class="far fa-pen-to-square"></i> Report Gallery</button>
-        <button class="tab-btn" data-tab="builder"><i class="far fa-pen-to-square"></i> Ad-hoc Builder</button>
-        <button class="tab-btn" data-tab="saved"><i class="far fa-pen-to-square"></i> My Saved Reports</button>
+        <button class="tab-btn active" data-tab="gallery"><i class="fas fa-table-cells"></i> Report Gallery</button>
+        <button class="tab-btn" data-tab="builder"><i class="fas fa-sliders"></i> Ad-hoc Builder</button>
+        <button class="tab-btn" data-tab="saved"><i class="fas fa-bookmark"></i> My Saved Reports</button>
     </div>
 
     <div class="reports-body">
@@ -363,7 +363,7 @@
             <div class="builder-layout">
                 <!-- Config panel -->
                 <div class="bld-panel">
-                    <div class="bld-head"><i class="far fa-pen-to-square" style="margin-right:7px;color:var(--pink)"></i>Configure Report</div>
+                    <div class="bld-head"><i class="fas fa-sliders" style="margin-right:7px;color:var(--pink)"></i>Configure Report</div>
                     <div class="bld-form">
                         <div class="fg">
                             <label>Data Source</label>
@@ -437,7 +437,7 @@
                 <!-- Results -->
                 <div id="resultsPanel" class="res-panel">
                     <div class="empty">
-                        <i class="far fa-pen-to-square" style="color:var(--pink-mid)"></i>
+                        <i class="fas fa-chart-bar" style="color:var(--pink-mid)"></i>
                         <p>Configure the report on the left and click <strong>Run Report</strong> to see results here.</p>
                     </div>
                 </div>
@@ -457,7 +457,8 @@
 
 <div id="toast"></div>
 
-<script src="/js/services/AuthService.js"></script>
+<script src="/js/core/app-dialogs.js"></script>
+    <script src="/js/services/AuthService.js"></script>
 <script src="js/components/sidebar-nav.js?v=3"></script>
 <script>
 /* ── Metadata ──────────────────────────────────────────────────────────────── */
@@ -608,7 +609,7 @@ async function loadGallery() {
 function renderGallery(reports) {
     if (!reports?.length) {
         document.getElementById('galleryContent').innerHTML =
-            `<div class="empty"><i class="far fa-pen-to-square" style="color:var(--pink-mid)"></i><p>No system reports found. Ensure V72 migration has been applied.</p></div>`;
+            `<div class="empty"><i class="fas fa-chart-bar" style="color:var(--pink-mid)"></i><p>No system reports found. Ensure V72 migration has been applied.</p></div>`;
         return;
     }
     const grouped = {};

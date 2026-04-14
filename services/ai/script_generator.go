@@ -96,7 +96,28 @@ function getSubfield(segments, segName, fieldKey, subfieldKey) {
 - Use ` + "`input._metadata.priority = 'high'`" + ` to escalate a message.
 - Use ` + "`input._routing = { nextStep: 'step-id' }`" + ` for conditional routing.
 - Never use ` + "`fetch`" + `, ` + "`require`" + `, or ` + "`import`" + ` — the script runs in a sandboxed goja VM.
-- Prefer ` + "`const`" + ` / ` + "`let`" + ` over ` + "`var`" + `.`
+- Prefer ` + "`const`" + ` / ` + "`let`" + ` over ` + "`var`" + `.` +
+`
+
+## Da Vinci PAS Pipelines
+If the pipeline is a Da Vinci PAS prior authorization pipeline (check preceding steps for a
+user_mapping step), the input structure is different from HL7 pipelines:
+
+Fields come from the user_mapping step output — NOT from enhancedSegments:
+  input.steps["user_mapping"].step_output.patient_first_name
+  input.steps["user_mapping"].step_output.member_id
+  ... etc.
+
+Available fields: patient_first_name, patient_last_name, patient_dob, patient_gender,
+patient_id, member_id, payer_name, payer_id, provider_npi, provider_name, org_npi,
+org_name, service_code, service_description, icd10_code, icd10_description,
+service_start_date, units_requested, priority.
+
+Scripts that build FHIR resources must return the resource object:
+  return { resourceType: "Patient", id: um.patient_id, name: [...], ... };
+
+Decision codes in parse_response step output:
+  AA = approved, AD = denied, CP = partial approval, PE = pended (pending review).`
 
 // GenerateScriptStream generates a JS script and streams tokens to onToken.
 func (s *ScriptGeneratorService) GenerateScriptStream(

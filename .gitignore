@@ -38,6 +38,11 @@ go-api.exe
 go-api-linux
 go-api-arm64
 
+# ── Python ────────────────────────────────────────────────────────────────────
+*.pyc
+*.pyo
+__pycache__/
+
 # ── Installer build output ─────────────────────────────────────────────────────
 installer/dist/
 installer/ezhealthkonnect-installer

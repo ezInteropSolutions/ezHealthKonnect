@@ -185,52 +185,59 @@ class MessageController {
             await this.ensureDatabase();
 
             const { messageId } = req.params;
+            const { interfaceId } = req.query;
             const userId = req.session.user.id;
 
             console.log(`🔍 getMessageDetail: Looking for message ${messageId} for user ${userId}`);
 
-            // Find which interface table contains this message
             let messageResult = null;
             let interfaceName = null;
 
-            // Get all user's interfaces to search through their tables
-            const interfacesQuery = `
-                SELECT id, name FROM interfaces
-                WHERE user_id = :userId AND status IN ('active', 'configured')
-            `;
-
-            const interfaces = await this.database.sequelize.query(interfacesQuery, {
-                replacements: { userId },
-                type: this.database.sequelize.QueryTypes.SELECT
-            });
-
-            console.log(`🔍 Found ${interfaces.length} interfaces for user`);
-
-            // Search each interface table for the message
-            for (const iface of interfaces) {
-                const tableName = this.tableManager.getInterfaceTableName(iface.id);
-                console.log(`🔍 Searching table ${tableName} for message`);
-
-                try {
-                    // Search by both message_id and id to handle both cases
-                    const query = `
-                        SELECT * FROM ${tableName}
-                        WHERE message_id = :messageId OR id::text = :messageId
-                    `;
-
-                    const result = await this.database.sequelize.query(query, {
-                        replacements: { messageId },
-                        type: this.database.sequelize.QueryTypes.SELECT
-                    });
-
-                    if (result.length > 0) {
-                        messageResult = result;
-                        interfaceName = iface.name;
-                        break;
+            if (interfaceId) {
+                // Fast path: caller told us exactly which interface table to look in
+                const ifaceRows = await this.database.sequelize.query(
+                    `SELECT id, name FROM interfaces WHERE id = :interfaceId AND user_id = :userId AND is_active = true`,
+                    { replacements: { interfaceId, userId }, type: this.database.sequelize.QueryTypes.SELECT }
+                );
+                if (ifaceRows.length > 0) {
+                    const tableName = this.tableManager.getInterfaceTableName(interfaceId);
+                    try {
+                        const result = await this.database.sequelize.query(
+                            `SELECT * FROM ${tableName} WHERE message_id = :messageId OR id::text = :messageId`,
+                            { replacements: { messageId }, type: this.database.sequelize.QueryTypes.SELECT }
+                        );
+                        if (result.length > 0) {
+                            messageResult = result;
+                            interfaceName = ifaceRows[0].name;
+                        }
+                    } catch (tableError) {
+                        // Table doesn't exist yet; fall through to 404
                     }
-                } catch (tableError) {
-                    // Table might not exist, continue searching
-                    continue;
+                }
+            } else {
+                // Fallback: scan all user interfaces (no status filter — message could be in any table)
+                const interfaces = await this.database.sequelize.query(
+                    `SELECT id, name FROM interfaces WHERE user_id = :userId AND is_active = true`,
+                    { replacements: { userId }, type: this.database.sequelize.QueryTypes.SELECT }
+                );
+
+                console.log(`🔍 Found ${interfaces.length} interfaces for user`);
+
+                for (const iface of interfaces) {
+                    const tableName = this.tableManager.getInterfaceTableName(iface.id);
+                    try {
+                        const result = await this.database.sequelize.query(
+                            `SELECT * FROM ${tableName} WHERE message_id = :messageId OR id::text = :messageId`,
+                            { replacements: { messageId }, type: this.database.sequelize.QueryTypes.SELECT }
+                        );
+                        if (result.length > 0) {
+                            messageResult = result;
+                            interfaceName = iface.name;
+                            break;
+                        }
+                    } catch (tableError) {
+                        continue;
+                    }
                 }
             }
 

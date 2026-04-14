@@ -35,6 +35,11 @@ class PipelineBuilder {
         // Load or create pipeline
         await this.loadPipeline();
 
+        // Update header now that all async data (interface name, message type) is resolved.
+        // Must run here because flowchart mode calls renderFlowchart() not renderPipeline(),
+        // so updateHeaderInfo() inside renderPipeline() is never reached in the default view.
+        this.updateHeaderInfo();
+
         // Setup UI event listeners
         this.setupEventListeners();
 
@@ -49,8 +54,8 @@ class PipelineBuilder {
      */
     parseURLParams() {
         const params = new URLSearchParams(window.location.search);
-        this.interfaceId = params.get('interfaceId');
-        this.messageType = params.get('messageType');
+        this.interfaceId    = params.get('interfaceId');
+        this.messageType    = params.get('messageType');
         const pipelineId = params.get('pipelineId');
 
         if (pipelineId) {
@@ -104,6 +109,17 @@ class PipelineBuilder {
                 this.pipeline = await window.pipelineAPI.loadPipeline(this.pipelineId);
                 this.interfaceId = this.pipeline.interfaceId;
                 this.messageType = this.pipeline.messageType;
+                // Fetch interface name (not included in the pipeline payload)
+                if (this.interfaceId && !this.interfaceName) {
+                    try {
+                        const ifaceResp = await fetch(`/api/interfaces/${this.interfaceId}`);
+                        if (ifaceResp.ok) {
+                            const ifaceData = await ifaceResp.json();
+                            const ifaceObj  = ifaceData.data || ifaceData.interface || ifaceData;
+                            this.interfaceName = ifaceObj.name || ifaceObj.interface_name || null;
+                        }
+                    } catch (_) { /* non-critical — header will fall back to pipeline name */ }
+                }
             } else if (this.interfaceId) {
                 // Always fetch interface data to get name + resolve message type
                 console.log('📡 Loading interface data...');
@@ -197,16 +213,47 @@ class PipelineBuilder {
      * Update header info
      */
     updateHeaderInfo() {
-        const titleEl = document.getElementById('pipelineTitle');
-        const infoEl = document.getElementById('interfaceInfo');
+        // ── Breadcrumb ──────────────────────────────────────────────────────────
+        const nameEl    = document.getElementById('breadcrumbInterfaceName');
+        const ifaceLink = document.getElementById('breadcrumbInterface');
+        const msgEl     = document.getElementById('breadcrumbMsgType');
 
-        if (titleEl && this.pipeline) {
-            titleEl.textContent = this.interfaceName || this.pipeline.name;
+        const displayName = this.interfaceName || (this.pipeline && this.pipeline.name) || 'Interface';
+        if (nameEl)    nameEl.textContent  = displayName;
+        if (ifaceLink && this.interfaceId) {
+            ifaceLink.href  = `/interfaces.html?highlight=${encodeURIComponent(this.interfaceId)}`;
+            ifaceLink.title = `Back to interface: ${displayName}`;
+        }
+        if (msgEl) {
+            msgEl.textContent = this.messageType
+                ? `${this.messageType} Pipeline`
+                : 'Pipeline Builder';
         }
 
-        if (infoEl && this.messageType) {
-            infoEl.textContent = this.messageType;
-            infoEl.style.display = 'inline-block';
+        // Update page title too
+        document.title = displayName
+            ? `${displayName} — Pipeline Builder`
+            : 'Pipeline Builder';
+
+        // ── Shortcut links (context-aware) ─────────────────────────────────────
+        const msgShortcut = document.getElementById('shortcutMessages');
+        if (msgShortcut) {
+            if (this.interfaceId) {
+                msgShortcut.href    = `/messages.html?interfaceId=${encodeURIComponent(this.interfaceId)}`;
+                msgShortcut.title   = `View messages for: ${displayName}`;
+                msgShortcut.style.display = '';
+            } else {
+                msgShortcut.style.display = 'none';
+            }
+        }
+
+        // Legacy elements — keep backward-compat if anything else reads them
+        const titleEl = document.getElementById('pipelineTitle');
+        const infoEl  = document.getElementById('interfaceInfo');
+        if (titleEl && this.pipeline) titleEl.textContent = displayName;
+        if (infoEl  && this.messageType) {
+            infoEl.textContent    = this.messageType;
+            infoEl.style.display  = 'inline-block';
         }
     }
 
@@ -1716,7 +1763,7 @@ class PipelineBuilder {
      */
     openStepProperties(step) {
         if (this.propertiesPanel) {
-            this.propertiesPanel.openStepModal(step);
+            this.propertiesPanel.showStepProperties(step);
         }
     }
 }

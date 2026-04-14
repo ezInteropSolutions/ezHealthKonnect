@@ -8,6 +8,7 @@ import (
 	"database/sql"
 	"fmt"
 	"strings"
+	"time"
 )
 
 const defaultTopK = 6
@@ -108,7 +109,11 @@ func (r *RAGService) Retrieve(ctx context.Context, query string, topK int, filte
 // Query retrieves relevant context chunks and sends an augmented prompt to the LLM.
 // If retrieval fails it degrades gracefully and answers without context.
 func (r *RAGService) Query(ctx context.Context, question, systemPrompt string, topK int, filterSourceTypes []string) (string, []RetrievedChunk, error) {
-	chunks, _ := r.Retrieve(ctx, question, topK, filterSourceTypes) // non-fatal
+	// Use a short timeout for retrieval so a missing embed model (e.g. nomic-embed-text not
+	// installed in Ollama) fails fast instead of blocking until the parent context expires.
+	retrieveCtx, retrieveCancel := context.WithTimeout(ctx, 8*time.Second)
+	defer retrieveCancel()
+	chunks, _ := r.Retrieve(retrieveCtx, question, topK, filterSourceTypes) // non-fatal
 
 	llm := r.chat
 	if llm == nil {
@@ -122,9 +127,42 @@ func (r *RAGService) Query(ctx context.Context, question, systemPrompt string, t
 	return answer, chunks, nil
 }
 
+// QueryCapped is like Query but caps the LLM output at maxTokens to bound latency.
+// Falls back to Query if the underlying provider does not support GenerateCapped.
+func (r *RAGService) QueryCapped(ctx context.Context, question, systemPrompt string, topK, maxTokens int, filterSourceTypes []string) (string, []RetrievedChunk, error) {
+	retrieveCtx, retrieveCancel := context.WithTimeout(ctx, 8*time.Second)
+	defer retrieveCancel()
+	chunks, _ := r.Retrieve(retrieveCtx, question, topK, filterSourceTypes) // non-fatal
+
+	prompt := buildRAGPrompt(systemPrompt, question, chunks)
+
+	llm := r.chat
+	if llm == nil {
+		llm = r.ollama
+	}
+	// Use GenerateCapped when the provider supports it.
+	type capper interface {
+		GenerateCapped(ctx context.Context, prompt string, maxTokens int) (string, error)
+	}
+	if c, ok := llm.(capper); ok {
+		answer, err := c.GenerateCapped(ctx, prompt, maxTokens)
+		if err != nil {
+			return "", chunks, fmt.Errorf("llm generate: %w", err)
+		}
+		return answer, chunks, nil
+	}
+	answer, err := llm.Generate(ctx, prompt)
+	if err != nil {
+		return "", chunks, fmt.Errorf("llm generate: %w", err)
+	}
+	return answer, chunks, nil
+}
+
 // QueryStream retrieves context chunks then streams tokens to onToken as they arrive.
 func (r *RAGService) QueryStream(ctx context.Context, question, systemPrompt string, topK int, filterSourceTypes []string, onToken func(string) error) ([]RetrievedChunk, error) {
-	chunks, _ := r.Retrieve(ctx, question, topK, filterSourceTypes) // non-fatal
+	retrieveCtx, retrieveCancel := context.WithTimeout(ctx, 8*time.Second)
+	defer retrieveCancel()
+	chunks, _ := r.Retrieve(retrieveCtx, question, topK, filterSourceTypes) // non-fatal
 	llm2 := r.chat
 	if llm2 == nil {
 		llm2 = r.ollama

@@ -273,11 +273,28 @@ class TransformationPipelineService {
         };
 
         const TARGET_TYPE_MAP = {
-            'http':     { typeName: 'http_outbound',      name: 'HTTP Outbound' },
-            'fhir':     { typeName: 'http_outbound',      name: 'FHIR Outbound' },
-            'tcp':      { typeName: 'tcp_mllp_outbound',  name: 'TCP/MLLP Outbound' },
-            'file':     { typeName: 'file_writer',        name: 'File Writer' },
-            'database': { typeName: 'postgresql_outbound', name: 'Database Outbound' }
+            // Legacy short names
+            'http':     { typeName: 'http_outbound',        name: 'HTTP Outbound' },
+            'fhir':     { typeName: 'http_outbound',        name: 'FHIR Outbound' },
+            'tcp':      { typeName: 'tcp_mllp_outbound',    name: 'TCP/MLLP Outbound' },
+            'file':     { typeName: 'file_writer',          name: 'File Writer' },
+            'database': { typeName: 'postgresql_outbound',  name: 'Database Outbound' },
+            // Full type names (when wizard passes connectorType directly from ConnectorConfigBuilder)
+            'http_outbound':        { typeName: 'http_outbound',        name: 'HTTP Outbound' },
+            'http_fhir_outbound':   { typeName: 'http_fhir_outbound',   name: 'FHIR HTTP Outbound' },
+            'fhir_r4_outbound':     { typeName: 'fhir_r4_outbound',     name: 'FHIR R4 Outbound' },
+            'tcp_mllp_outbound':    { typeName: 'tcp_mllp_outbound',    name: 'TCP/MLLP Outbound' },
+            'file_writer':          { typeName: 'file_writer',          name: 'File Writer' },
+            'postgresql_outbound':  { typeName: 'postgresql_outbound',  name: 'PostgreSQL Outbound' },
+            'mysql_outbound':       { typeName: 'mysql_outbound',       name: 'MySQL Outbound' },
+            'mongodb_outbound':     { typeName: 'mongodb_outbound',     name: 'MongoDB Outbound' },
+            'sqlserver_outbound':   { typeName: 'sqlserver_outbound',   name: 'SQL Server Outbound' },
+            'kafka_outbound':       { typeName: 'kafka_outbound',       name: 'Kafka Outbound' },
+            'rabbitmq_outbound':    { typeName: 'rabbitmq_outbound',    name: 'RabbitMQ Outbound' },
+            'aws_s3_outbound':      { typeName: 'aws_s3_outbound',      name: 'AWS S3 Outbound' },
+            'azure_blob_outbound':  { typeName: 'azure_blob_outbound',  name: 'Azure Blob Outbound' },
+            'sftp_outbound':        { typeName: 'sftp_outbound',        name: 'SFTP Outbound' },
+            'ftp_outbound':         { typeName: 'ftp_outbound',         name: 'FTP Outbound' },
         };
 
         const typeMap  = direction === 'inbound' ? SOURCE_TYPE_MAP : TARGET_TYPE_MAP;

@@ -23,7 +23,7 @@ import (
 type HL7FHIRTransformationController struct {
 	db               *sql.DB
 	config           *config.Config
-	transformService *services.HL7FHIRTransformService
+	transformService *services.HL7FHIRTransformServiceV3
 }
 
 // =====================================
@@ -31,7 +31,7 @@ type HL7FHIRTransformationController struct {
 // =====================================
 
 func NewHL7FHIRTransformationController(database *sql.DB, cfg *config.Config) *HL7FHIRTransformationController {
-	transformService := services.NewHL7FHIRTransformService(database)
+	transformService := services.NewHL7FHIRTransformServiceV3(database)
 
 	return &HL7FHIRTransformationController{
 		db:               database,

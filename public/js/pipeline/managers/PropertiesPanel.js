@@ -1182,6 +1182,42 @@ class PropertiesPanel {
                 </div>
                 ` : ''}
 
+                ${docs.assemblyRulesDoc ? `
+                <div class="doc-section" style="margin-bottom: 1.5rem;">
+                    <h4 style="color: #2563eb; margin-bottom: 0.5rem;">
+                        <i class="fas fa-microscope"></i> Assembly Rules Reference
+                    </h4>
+                    <p style="color: #6b7280; font-size: 0.875rem; margin-bottom: 0.75rem;">
+                        Each rule can be toggled individually in the <strong>Assembly</strong> tab.
+                        All rules are on by default. Set a rule to off to skip that specific transform —
+                        useful when your interface provides that field differently or you handle it in a downstream Script step.
+                    </p>
+                    <table style="width: 100%; border-collapse: collapse; font-size: 0.85rem;">
+                        <thead>
+                            <tr style="background: #f3f4f6;">
+                                <th style="padding: 0.6rem 0.75rem; text-align: left; border: 1px solid #e5e7eb; white-space: nowrap;">Rule key</th>
+                                <th style="padding: 0.6rem 0.75rem; text-align: left; border: 1px solid #e5e7eb; white-space: nowrap;">HL7 source</th>
+                                <th style="padding: 0.6rem 0.75rem; text-align: left; border: 1px solid #e5e7eb; white-space: nowrap;">FHIR target</th>
+                                <th style="padding: 0.6rem 0.75rem; text-align: left; border: 1px solid #e5e7eb;">What it does</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${docs.assemblyRulesDoc.map((r, i) => {
+                                const isObs = r.key.startsWith('obs_');
+                                const bg = i % 2 === 0 ? '' : 'background:#fafafa;';
+                                const groupBorder = !isObs && docs.assemblyRulesDoc[i-1]?.key.startsWith('obs_') ? 'border-top: 2px solid #e5e7eb;' : '';
+                                return `<tr style="${bg}${groupBorder}">
+                                    <td style="padding: 0.55rem 0.75rem; border: 1px solid #e5e7eb; font-family: monospace; font-size: 0.78rem; color: #7c3aed; white-space: nowrap;">${r.key}</td>
+                                    <td style="padding: 0.55rem 0.75rem; border: 1px solid #e5e7eb; white-space: nowrap;"><code style="background:#dbeafe;padding:1px 5px;border-radius:3px;color:#1e3a8a;font-size:0.78rem;">${r.src}</code></td>
+                                    <td style="padding: 0.55rem 0.75rem; border: 1px solid #e5e7eb; white-space: nowrap;"><code style="background:#fce7f3;padding:1px 5px;border-radius:3px;color:#831843;font-size:0.78rem;">${r.fhir}</code></td>
+                                    <td style="padding: 0.55rem 0.75rem; border: 1px solid #e5e7eb; line-height: 1.5; color: #374151;">${r.desc}</td>
+                                </tr>`;
+                            }).join('')}
+                        </tbody>
+                    </table>
+                </div>
+                ` : ''}
+
                 ${docs.actions ? `
                 <div class="doc-section" style="margin-bottom: 1.5rem;">
                     <h4 style="color: #2563eb; margin-bottom: 0.5rem;">
@@ -1693,6 +1729,16 @@ class PropertiesPanel {
                     ">
                         <i class="fas fa-upload"></i> Upload
                     </button>
+                    <button class="config-tab" data-tab="assembly" style="
+                        padding: 0.5rem 1rem;
+                        border: none;
+                        background: none;
+                        cursor: pointer;
+                        color: #64748b;
+                        font-weight: 500;
+                    ">
+                        <i class="fas fa-microscope"></i> Assembly
+                    </button>
                 </div>
 
                 <!-- Tab 1: Visual Mapping -->
@@ -1831,12 +1877,376 @@ class PropertiesPanel {
                         </button>
                     </div>
                 </div>
+
+                <!-- Tab 5: Assembly -->
+                <div class="config-tab-content" data-tab-content="assembly" style="display: none;">
+                    ${this._renderAssemblyTab(step)}
+                </div>
             </div>
         `;
     }
 
     /**
-     * Render mapping table
+     * Render Assembly tab — shows every OOB structural transform as a toggleable rule row.
+     * Each rule key maps to a step.config.assemblyRules[key] boolean (default true).
+     */
+    _renderAssemblyTab(step) {
+        const rules = step.config?.assemblyRules || {};
+        const isEnabled = (key) => rules[key] !== false; // default ON
+
+        // Master toggle: if assembleObservations is explicitly false, whole group is off
+        const masterOn = step.config?.assembleObservations !== false;
+
+        const OBS_RULES = [
+            { key: 'obs_value_dispatch',  src: 'OBX.2 + OBX.5', fhir: 'value[x]',
+              label: 'Value type dispatch',
+              desc:  'Reads OBX.2 (data type) to decide which FHIR value field to populate from OBX.5.',
+              example: 'OBX.2=NM, OBX.5=4.2        → "valueQuantity": {"value": 4.2}\nOBX.2=CE, OBX.5=N^Normal   → "valueCodeableConcept": {"coding": [{"code": "N"}]}\nOBX.2=TX, OBX.5=Report text → "valueString": "Report text"\nOBX.2=TS, OBX.5=20231015   → "valueDateTime": "2023-10-15"' },
+
+            { key: 'obs_value_unit',      src: 'OBX.6',          fhir: 'valueQuantity.unit / system',
+              label: 'Unit & coding system',
+              desc:  'Attaches the unit to valueQuantity. Recognises UCUM as the standard coding system.',
+              example: 'OBX.6=mmol/L^^UCUM → unit: "mmol/L", system: "http://unitsofmeasure.org"\nOBX.6=mg/dL        → unit: "mg/dL"  (no system — not a UCUM-coded unit)' },
+
+            { key: 'obs_code',            src: 'OBX.3',          fhir: 'code',
+              label: 'Observation code',
+              desc:  'Builds a CodeableConcept from OBX.3. LOINC codes get the standard system URI; local/facility codes are preserved with display text.',
+              example: 'OBX.3=2823-3^Potassium^LN → system: "http://loinc.org", code: "2823-3", display: "Potassium"\nOBX.3=GLUC^Glucose^L      → system: "urn:facility:<slug>", code: "GLUC", display: "Glucose"' },
+
+            { key: 'obs_reference_range', src: 'OBX.7',          fhir: 'referenceRange[]',
+              label: 'Reference range',
+              desc:  'Parses the free-text range string into a structured FHIR referenceRange with typed low/high boundaries.',
+              example: 'OBX.7=3.5-5.0   → referenceRange: [{low: {value: 3.5}, high: {value: 5.0}, text: "3.5-5.0"}]\nOBX.7=<10.0     → referenceRange: [{high: {value: 10.0}, text: "<10.0"}]\nOBX.7=(blank)   → field omitted' },
+
+            { key: 'obs_interpretation',  src: 'OBX.8',          fhir: 'interpretation[]',
+              label: 'Interpretation flag',
+              desc:  'Maps the single-letter HL7 abnormal flag to a FHIR CodeableConcept with display text.',
+              example: 'OBX.8=H  → {"code": "H",  "display": "High"}\nOBX.8=L  → {"code": "L",  "display": "Low"}\nOBX.8=AA → {"code": "AA", "display": "Critical"}\nOBX.8=N  → {"code": "N",  "display": "Normal"}' },
+
+            { key: 'obs_status',          src: 'OBX.11',         fhir: 'status',
+              label: 'Observation status',
+              desc:  'Translates the HL7 result status code to the FHIR observation-status value set.',
+              example: 'OBX.11=F → "status": "final"\nOBX.11=P → "status": "preliminary"\nOBX.11=C → "status": "corrected"\nOBX.11=W → "status": "entered-in-error"' },
+
+            { key: 'obs_category',        src: '(fixed)',        fhir: 'category[]',
+              label: 'Laboratory category',
+              desc:  'Always adds the standard laboratory category so FHIR servers can index and filter Observations correctly.',
+              example: '(no HL7 input needed)\n→ "category": [{"coding": [{"code": "laboratory",\n    "system": "http://terminology.hl7.org/CodeSystem/observation-category",\n    "display": "Laboratory"}]}]' },
+
+            { key: 'obs_subject',         src: 'Patient.id',     fhir: 'subject.reference',
+              label: 'Subject reference',
+              desc:  'Links each Observation back to the Patient resource assembled from the PID segment.',
+              example: 'Patient assembled with id="patient-abc123"\n→ "subject": {"reference": "Patient/patient-abc123"}' },
+
+            { key: 'obs_effective',       src: 'OBX.14',         fhir: 'effectiveDateTime',
+              label: 'Observation date/time',
+              desc:  'Converts the HL7 compact timestamp in OBX.14 to an ISO 8601 datetime string.',
+              example: 'OBX.14=20231015143000+0500 → "effectiveDateTime": "2023-10-15T14:30:00+05:00"\nOBX.14=(blank)           → field omitted' },
+        ];
+
+        const DR_RULES = [
+            { key: 'dr_result_links',     src: 'Observation.id[]', fhir: 'result[]',
+              label: 'Result references',
+              desc:  'Populates DiagnosticReport.result[] with references to every Observation assembled from OBX segments in this message.',
+              example: '3 OBX segments assembled\n→ "result": [\n    {"reference": "urn:uuid:obs-1"},\n    {"reference": "urn:uuid:obs-2"},\n    {"reference": "urn:uuid:obs-3"}\n  ]' },
+
+            { key: 'dr_subject',          src: 'Patient.id',       fhir: 'subject.reference',
+              label: 'Subject reference',
+              desc:  'Links DiagnosticReport.subject to the Patient resource assembled from the PID segment.',
+              example: 'Patient id="patient-abc123"\n→ "subject": {"reference": "Patient/patient-abc123"}' },
+
+            { key: 'dr_code',             src: 'OBR.4',            fhir: 'code',
+              label: 'Report code',
+              desc:  'Builds a CodeableConcept from OBR.4, representing the ordered test or panel.',
+              example: 'OBR.4=58410-2^CBC panel^LN\n→ "code": {"coding": [{"code": "58410-2", "system": "http://loinc.org", "display": "CBC panel"}]}' },
+
+            { key: 'dr_status',           src: 'OBR.25',           fhir: 'status',
+              label: 'Report status',
+              desc:  'Translates the HL7 result status in OBR.25 to the FHIR diagnostic-report-status value set.',
+              example: 'OBR.25=F → "status": "final"\nOBR.25=P → "status": "preliminary"\nOBR.25=C → "status": "corrected"' },
+
+            { key: 'dr_effective',        src: 'OBR.7',            fhir: 'effectiveDateTime',
+              label: 'Observation date/time',
+              desc:  'Converts the specimen collection date/time from OBR.7 (HL7 TS) to ISO 8601.',
+              example: 'OBR.7=20231015143000 → "effectiveDateTime": "2023-10-15T14:30:00+00:00"' },
+
+            { key: 'dr_category',         src: '(fixed)',          fhir: 'category[]',
+              label: 'Laboratory category',
+              desc:  'Always adds the HL7 v2 LAB service category so FHIR servers can differentiate lab reports from imaging or other report types.',
+              example: '(no HL7 input needed)\n→ "category": [{"coding": [{"code": "LAB",\n    "system": "http://terminology.hl7.org/CodeSystem/v2-0074",\n    "display": "Laboratory"}]}]' },
+        ];
+
+        const esc = (s) => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+
+        // ── Text Report Merging card ──────────────────────────────────────────
+        const collapseOff    = rules.collapse_text_obx === false;
+        const collapseMode   = collapseOff ? 'never'
+                             : (rules.collapse_text_obx_services?.length > 0 ? 'by_service' : 'always');
+        const existingSvcs   = (rules.collapse_text_obx_services || []).filter(s => s.trim() !== '');
+
+        // Render existing service tags as chips
+        const svcChipsHtml = existingSvcs.map(s =>
+            `<span class="merge-svc-chip" data-code="${esc(s.toUpperCase())}"
+                style="display:inline-flex;align-items:center;gap:3px;background:#fef3c7;border:1px solid #fcd34d;
+                       border-radius:4px;padding:2px 7px;font-size:0.78rem;font-weight:600;color:#78350f;white-space:nowrap;">
+                <code style="background:none;font-size:0.78rem;">${esc(s.toUpperCase())}</code>
+                <button type="button" class="merge-svc-remove" data-code="${esc(s.toUpperCase())}"
+                    style="background:none;border:none;cursor:pointer;color:#b45309;font-size:0.85rem;padding:0;line-height:1;"
+                    title="Remove ${esc(s.toUpperCase())}">×</button>
+            </span>`
+        ).join('');
+
+        const mergeCard = `
+        <div style="border:1px solid #d97706;border-radius:8px;overflow:hidden;margin-bottom:1rem;">
+            <div style="padding:0.6rem 0.75rem;background:#fef9c3;border-bottom:1px solid #fde68a;display:flex;align-items:center;gap:0.5rem;">
+                <i class="fas fa-layer-group" style="color:#b45309;font-size:0.9rem;"></i>
+                <span style="font-weight:600;font-size:0.85rem;color:#78350f;">Text Report Merging (TX/FT OBX)</span>
+                <span style="font-size:0.75rem;color:#92400e;margin-left:0.25rem;">— collapse HL7 continuation lines into one FHIR Observation</span>
+            </div>
+            <div style="padding:0.9rem 1rem;">
+
+                <!-- What this does -->
+                <div style="background:#fffbeb;border-left:3px solid #f59e0b;border-radius:0 4px 4px 0;padding:0.6rem 0.75rem;margin-bottom:0.85rem;">
+                    <p style="font-size:0.8rem;color:#374151;margin:0;line-height:1.6;">
+                        Pathology and radiology systems send long free-text reports as <strong>many OBX rows</strong>
+                        with the <strong>same OBX.3 code</strong> — one line of text per segment (the HL7 continuation pattern).
+                        When merging is <strong>ON</strong>, all those lines are joined into a single
+                        <code style="background:#f3f4f6;padding:1px 4px;border-radius:3px;">Observation.valueString</code>
+                        — which is what FHIR consumers expect to receive.<br>
+                        When merging is <strong>OFF</strong>, each OBX becomes its own Observation — correct for
+                        Chemistry/Microbiology panels where every row is a distinct analyte result.
+                    </p>
+                </div>
+
+                <!-- Side-by-side examples -->
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.6rem;margin-bottom:0.9rem;">
+                    <div style="background:#f0fdf4;border:1px solid #86efac;border-radius:6px;padding:0.65rem 0.8rem;">
+                        <div style="font-size:0.78rem;font-weight:700;color:#15803d;margin-bottom:0.35rem;">
+                            ✅ Merge ON — Surgical Path Report
+                        </div>
+                        <pre style="margin:0;font-size:0.7rem;color:#166534;white-space:pre-wrap;line-height:1.5;background:none;">OBX|1|TX|50398^Surg Path||Diagnosis:
+OBX|2|TX|50398^Surg Path||Brain, 4th Ventricle
+OBX|3|TX|50398^Surg Path||Mild Gliosis</pre>
+                        <div style="margin-top:0.4rem;font-size:0.72rem;color:#166534;border-top:1px solid #bbf7d0;padding-top:0.4rem;">
+                            → <strong>1 Observation</strong><br>
+                            valueString = <em>"Diagnosis:\nBrain, 4th Ventricle\nMild Gliosis"</em>
+                        </div>
+                    </div>
+                    <div style="background:#fff7ed;border:1px solid #fdba74;border-radius:6px;padding:0.65rem 0.8rem;">
+                        <div style="font-size:0.78rem;font-weight:700;color:#c2410c;margin-bottom:0.35rem;">
+                            ❌ Merge OFF — Chemistry Panel
+                        </div>
+                        <pre style="margin:0;font-size:0.7rem;color:#9a3412;white-space:pre-wrap;line-height:1.5;background:none;">OBX|1|NM|2823-3^Potassium||4.2|mmol/L
+OBX|2|NM|2951-2^Sodium||138|mmol/L
+OBX|3|NM|2075-0^Chloride||102|mmol/L</pre>
+                        <div style="margin-top:0.4rem;font-size:0.72rem;color:#9a3412;border-top:1px solid #fed7aa;padding-top:0.4rem;">
+                            → <strong>3 Observations</strong> (one per analyte)<br>
+                            Each has its own code, value, and unit
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Mode selector -->
+                <div style="display:flex;gap:1.5rem;margin-bottom:0.8rem;flex-wrap:wrap;">
+                    ${['always','never','by_service'].map(m => {
+                        const labels = {
+                            always:     'Always merge (all TX/FT OBX)',
+                            never:      'Never merge (keep each OBX separate)',
+                            by_service: 'Merge only for specific services (OBR.24)'
+                        };
+                        return `<label style="display:flex;align-items:center;gap:0.4rem;cursor:pointer;font-size:0.83rem;color:#374151;">
+                            <input type="radio" name="collapse_text_obx_mode" value="${m}"
+                                ${collapseMode === m ? 'checked' : ''}
+                                ${!masterOn ? 'disabled' : ''}
+                                style="accent-color:#b45309;cursor:pointer;">
+                            ${labels[m]}
+                        </label>`;
+                    }).join('')}
+                </div>
+
+                <!-- Service tag input (shown only in by_service mode) -->
+                <div id="collapse-services-section"
+                     style="display:${collapseMode === 'by_service' ? 'block' : 'none'};
+                            background:#fffbeb;border:1px solid #fde68a;border-radius:6px;padding:0.75rem;">
+                    <p style="font-size:0.78rem;color:#78350f;margin:0 0 0.5rem;font-weight:600;">
+                        Merge only when OBR.24 (Diagnostic Service) matches one of these codes:
+                    </p>
+
+                    <!-- Tag chips + text input -->
+                    <div id="merge-svc-tags"
+                         style="display:flex;flex-wrap:wrap;align-items:center;gap:0.35rem;
+                                min-height:32px;background:#fff;border:1px solid #fcd34d;border-radius:5px;
+                                padding:4px 6px;cursor:text;">
+                        ${svcChipsHtml}
+                        <input id="merge-svc-input" type="text" placeholder="Type a code and press Enter (e.g. AP, RAD, SP…)"
+                            ${!masterOn ? 'disabled' : ''}
+                            style="border:none;outline:none;font-size:0.8rem;min-width:200px;flex:1;
+                                   background:transparent;color:#374151;padding:2px 0;">
+                    </div>
+
+                    <!-- Quick-add hint chips -->
+                    <div style="margin-top:0.45rem;font-size:0.74rem;color:#92400e;">
+                        Common codes — click to add:
+                        ${['AP','SP','RAD','NM','NMR','OTH','CH','MB','LAB'].map(c =>
+                            `<button type="button" class="merge-svc-hint" data-code="${c}"
+                                style="background:#fef3c7;border:1px solid #fcd34d;border-radius:3px;
+                                       padding:1px 6px;font-size:0.74rem;font-weight:600;color:#78350f;
+                                       cursor:pointer;margin:0 2px;">${c}</button>`
+                        ).join('')}
+                    </div>
+
+                    <p style="font-size:0.74rem;color:#6b7280;margin:0.5rem 0 0;">
+                        <strong>AP</strong> = Anatomic Pathology &nbsp;·&nbsp;
+                        <strong>SP</strong> = Surgical Pathology &nbsp;·&nbsp;
+                        <strong>RAD</strong> = Radiology &nbsp;·&nbsp;
+                        <strong>NM</strong> = Nuclear Medicine &nbsp;·&nbsp;
+                        <strong>CH</strong> = Chemistry &nbsp;·&nbsp;
+                        <strong>MB</strong> = Microbiology &nbsp;·&nbsp;
+                        <strong>LAB</strong> = General Lab<br>
+                        Any OBR.24 value not in this list keeps each OBX as a separate Observation.
+                        If OBR.24 is blank, merging is skipped.
+                    </p>
+                </div>
+
+            </div>
+        </div>`;
+
+        const ruleRow = (r) => {
+            const on = masterOn && isEnabled(r.key);
+            const exampleHtml = r.example ? `
+                <details style="margin-top:5px;">
+                    <summary style="font-size:0.72rem;color:#4f46e5;cursor:pointer;user-select:none;list-style:none;display:inline-flex;align-items:center;gap:3px;outline:none;">
+                        <span style="font-size:0.65rem;">▸</span> Example
+                    </summary>
+                    <pre style="margin:4px 0 0;font-size:0.7rem;line-height:1.55;color:#1e3a8a;
+                                background:#eff6ff;border:1px solid #bfdbfe;border-radius:4px;
+                                padding:5px 7px;white-space:pre-wrap;overflow-x:auto;">${esc(r.example)}</pre>
+                </details>` : '';
+            return `
+            <tr style="border-bottom: 1px solid #f1f5f9; ${!on ? 'opacity:0.45;' : ''}">
+                <td style="padding: 0.6rem 0.75rem; white-space: nowrap; vertical-align:top;">
+                    <code style="background:#dbeafe;padding:2px 6px;border-radius:3px;color:#1e3a8a;font-size:0.78rem;">${esc(r.src)}</code>
+                </td>
+                <td style="padding: 0.6rem 0.75rem; white-space: nowrap; vertical-align:top;">
+                    <code style="background:#fce7f3;padding:2px 6px;border-radius:3px;color:#831843;font-size:0.78rem;">${esc(r.fhir)}</code>
+                </td>
+                <td style="padding: 0.6rem 0.75rem; vertical-align:top;">
+                    <div style="font-size:0.82rem;font-weight:600;color:#1e293b;">${esc(r.label)}</div>
+                    <div style="font-size:0.75rem;color:#64748b;margin-top:2px;">${esc(r.desc)}</div>
+                    ${exampleHtml}
+                </td>
+                <td style="padding: 0.6rem 0.75rem; text-align: center; vertical-align:top;">
+                    <label style="cursor:pointer;display:inline-flex;align-items:center;" title="${on ? 'Disable this assembly rule' : 'Enable this assembly rule'}">
+                        <input type="checkbox" class="assembly-rule-toggle"
+                            data-rule-key="${esc(r.key)}"
+                            ${isEnabled(r.key) ? 'checked' : ''}
+                            ${!masterOn ? 'disabled' : ''}
+                            style="width:15px;height:15px;cursor:pointer;accent-color:#1e3a8a;">
+                    </label>
+                </td>
+            </tr>`;
+        };
+
+        return `
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.75rem;">
+                <div style="font-size:0.8rem;color:#64748b;">
+                    OOB certified rules — disable any that conflict with your interface data.
+                    Add a <strong>Script Enrichment</strong> step after this one to extend.
+                </div>
+                <label style="display:flex;align-items:center;gap:0.4rem;cursor:pointer;white-space:nowrap;">
+                    <input type="checkbox" name="config_assembleObservations" id="assemblyMasterToggle"
+                        ${masterOn ? 'checked' : ''}
+                        style="width:15px;height:15px;cursor:pointer;accent-color:#1e3a8a;">
+                    <span style="font-size:0.82rem;font-weight:600;color:#374151;">Assembly on</span>
+                </label>
+            </div>
+
+            ${mergeCard}
+
+            <!-- Observation rules -->
+            <div style="border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;margin-bottom:1rem;">
+                <div style="padding:0.6rem 0.75rem;background:#f8fafc;border-bottom:1px solid #e5e7eb;display:flex;align-items:center;gap:0.5rem;">
+                    <i class="fas fa-microscope" style="color:#7c3aed;font-size:0.9rem;"></i>
+                    <span style="font-weight:600;font-size:0.85rem;color:#1e293b;">Observation rules</span>
+                    <span style="font-size:0.75rem;color:#64748b;margin-left:0.25rem;">— one row per OBX segment</span>
+                </div>
+                <table style="width:100%;border-collapse:collapse;">
+                    <thead style="background:#fafafa;">
+                        <tr>
+                            <th style="padding:0.5rem 0.75rem;text-align:left;font-size:0.75rem;color:#64748b;border-bottom:1px solid #f1f5f9;white-space:nowrap;">HL7 Source</th>
+                            <th style="padding:0.5rem 0.75rem;text-align:left;font-size:0.75rem;color:#64748b;border-bottom:1px solid #f1f5f9;white-space:nowrap;">FHIR Target</th>
+                            <th style="padding:0.5rem 0.75rem;text-align:left;font-size:0.75rem;color:#64748b;border-bottom:1px solid #f1f5f9;">Transform</th>
+                            <th style="padding:0.5rem 0.75rem;text-align:center;font-size:0.75rem;color:#64748b;border-bottom:1px solid #f1f5f9;width:60px;">On</th>
+                        </tr>
+                    </thead>
+                    <tbody>${OBS_RULES.map(ruleRow).join('')}</tbody>
+                </table>
+            </div>
+
+            <!-- DiagnosticReport rules -->
+            <div style="border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;margin-bottom:0.75rem;">
+                <div style="padding:0.6rem 0.75rem;background:#f8fafc;border-bottom:1px solid #e5e7eb;display:flex;align-items:center;gap:0.5rem;">
+                    <i class="fas fa-file-medical-alt" style="color:#0284c7;font-size:0.9rem;"></i>
+                    <span style="font-weight:600;font-size:0.85rem;color:#1e293b;">DiagnosticReport rules</span>
+                    <span style="font-size:0.75rem;color:#64748b;margin-left:0.25rem;">— applied once per message</span>
+                </div>
+                <table style="width:100%;border-collapse:collapse;">
+                    <thead style="background:#fafafa;">
+                        <tr>
+                            <th style="padding:0.5rem 0.75rem;text-align:left;font-size:0.75rem;color:#64748b;border-bottom:1px solid #f1f5f9;white-space:nowrap;">HL7 Source</th>
+                            <th style="padding:0.5rem 0.75rem;text-align:left;font-size:0.75rem;color:#64748b;border-bottom:1px solid #f1f5f9;white-space:nowrap;">FHIR Target</th>
+                            <th style="padding:0.5rem 0.75rem;text-align:left;font-size:0.75rem;color:#64748b;border-bottom:1px solid #f1f5f9;">Transform</th>
+                            <th style="padding:0.5rem 0.75rem;text-align:center;font-size:0.75rem;color:#64748b;border-bottom:1px solid #f1f5f9;width:60px;">On</th>
+                        </tr>
+                    </thead>
+                    <tbody>${DR_RULES.map(ruleRow).join('')}</tbody>
+                </table>
+            </div>
+        `;
+    }
+
+    /**
+     * Extract FHIR resource type from a mapping's fhirPath.
+     * "Patient.name[0].family" → "Patient"
+     * "["enrichment"].data.x"  → "Enriched Data"
+     * "" / undefined           → "Other"
+     */
+    _mappingResourceType(mapping) {
+        const path = mapping.fhirPath || mapping.targetField || mapping.targetPath || '';
+        if (!path) return 'Other';
+        if (path.startsWith('[')) return 'Enriched Data';
+        const dot = path.indexOf('.');
+        const bracket = path.indexOf('[');
+        let end = path.length;
+        if (dot > 0) end = Math.min(end, dot);
+        if (bracket > 0) end = Math.min(end, bracket);
+        const rt = path.slice(0, end).trim();
+        return rt || 'Other';
+    }
+
+    // Icon + accent colour per resource type
+    _resourceTypeStyle(rt) {
+        const MAP = {
+            Patient:           { icon: 'fa-user',               color: '#1e3a8a', bg: '#dbeafe' },
+            Encounter:         { icon: 'fa-hospital',            color: '#065f46', bg: '#d1fae5' },
+            Observation:       { icon: 'fa-microscope',          color: '#6d28d9', bg: '#ede9fe' },
+            DiagnosticReport:  { icon: 'fa-file-medical-alt',    color: '#0369a1', bg: '#e0f2fe' },
+            Practitioner:      { icon: 'fa-user-md',             color: '#92400e', bg: '#fef3c7' },
+            Organization:      { icon: 'fa-building',            color: '#374151', bg: '#f3f4f6' },
+            MessageHeader:     { icon: 'fa-envelope',            color: '#7c3aed', bg: '#f5f3ff' },
+            Coverage:          { icon: 'fa-id-card',             color: '#0f766e', bg: '#ccfbf1' },
+            Condition:         { icon: 'fa-heartbeat',           color: '#b91c1c', bg: '#fee2e2' },
+            Procedure:         { icon: 'fa-stethoscope',         color: '#047857', bg: '#d1fae5' },
+            MedicationRequest: { icon: 'fa-pills',               color: '#7c2d12', bg: '#ffedd5' },
+            AllergyIntolerance:{ icon: 'fa-allergies',           color: '#92400e', bg: '#fef3c7' },
+            ServiceRequest:    { icon: 'fa-clipboard-list',      color: '#1d4ed8', bg: '#dbeafe' },
+            'Enriched Data':   { icon: 'fa-database',            color: '#059669', bg: '#d1fae5' },
+        };
+        return MAP[rt] || { icon: 'fa-cube', color: '#475569', bg: '#f1f5f9' };
+    }
+
+    /**
+     * Render mapping table grouped by FHIR resource type.
      */
     renderMappingTable(mappings) {
         if (!mappings || mappings.length === 0) {
@@ -1849,55 +2259,82 @@ class PropertiesPanel {
             `;
         }
 
-        return `
-            <table style="width: 100%; border-collapse: collapse; font-size: 0.875rem;">
-                <thead style="background: #f8fafc; position: sticky; top: 0;">
-                    <tr>
-                        <th style="padding: 0.75rem; text-align: left; border-bottom: 2px solid #e5e7eb; font-weight: 600;">HL7 Field</th>
-                        <th style="padding: 0.75rem; text-align: left; border-bottom: 2px solid #e5e7eb; font-weight: 600;">FHIR Path</th>
-                        <th style="padding: 0.75rem; text-align: left; border-bottom: 2px solid #e5e7eb; font-weight: 600;">Data Type</th>
-                        <th style="padding: 0.75rem; text-align: left; border-bottom: 2px solid #e5e7eb; font-weight: 600; width: 80px;">Actions</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    ${mappings.map((mapping, index) => `
-                        <tr class="mapping-row" data-index="${index}" style="border-bottom: 1px solid #f1f5f9; cursor: pointer; transition: all 0.2s ease;"
-                            onclick="window.propertiesPanel.editMapping(${index})"
-                            onmouseover="this.style.background='#f0f9ff'; this.style.transform='translateX(4px)'"
-                            onmouseout="this.style.background=''; this.style.transform='translateX(0)'">
-                            <td style="padding: 0.75rem;">
-                                <code style="background: #dbeafe; padding: 0.25rem 0.5rem; border-radius: 3px; color: #1e3a8a; font-weight: 500;">
-                                    ${mapping.hl7Field || mapping.sourceField || mapping.sourcePath || 'N/A'}
-                                </code>
-                            </td>
-                            <td style="padding: 0.75rem;">
-                                <code style="background: #fbcfe8; padding: 0.25rem 0.5rem; border-radius: 3px; color: #831843; font-weight: 500;">
-                                    ${mapping.fhirPath || mapping.targetField || mapping.targetPath || 'N/A'}
-                                </code>
-                            </td>
-                            <td style="padding: 0.75rem; color: #64748b;">
-                                ${mapping.dataType || mapping.hl7DataType || mapping.transformType || '-'}
-                            </td>
-                            <td style="padding: 0.75rem;">
-                                <button class="delete-mapping-btn" data-index="${index}" onclick="event.stopPropagation(); window.propertiesPanel.deleteMapping(${index})" style="
-                                    background: none;
-                                    border: none;
-                                    color: #dc2626;
-                                    cursor: pointer;
-                                    padding: 0.25rem 0.5rem;
-                                    transition: all 0.2s ease;
-                                "
-                                onmouseover="this.style.color='#991b1b'; this.style.transform='scale(1.1)'"
-                                onmouseout="this.style.color='#dc2626'; this.style.transform='scale(1)'"
-                                title="Delete">
-                                    <i class="fas fa-trash"></i>
-                                </button>
-                            </td>
-                        </tr>
-                    `).join('')}
-                </tbody>
-            </table>
-        `;
+        // Group mappings preserving original indices
+        const groups = new Map(); // resourceType → [{mapping, originalIndex}]
+        mappings.forEach((mapping, index) => {
+            const rt = this._mappingResourceType(mapping);
+            if (!groups.has(rt)) groups.set(rt, []);
+            groups.get(rt).push({ mapping, index });
+        });
+
+        const renderRow = ({ mapping, index }) => {
+            const fhirPath = mapping.fhirPath || mapping.targetField || mapping.targetPath || 'N/A';
+            const hl7Field = mapping.hl7Field || mapping.sourceField || mapping.sourcePath || 'N/A';
+            const dataType = mapping.dataType || mapping.hl7DataType || '-';
+            const transformType = mapping.transformType || mapping.dataTypeTransform || '';
+            return `
+                <tr class="mapping-row" data-index="${index}"
+                    style="border-bottom: 1px solid #f1f5f9; cursor: pointer; transition: background 0.15s;"
+                    onclick="window.propertiesPanel.editMapping(${index})"
+                    onmouseover="this.style.background='#f0f9ff'"
+                    onmouseout="this.style.background=''">
+                    <td style="padding: 0.6rem 0.75rem;">
+                        <code style="background: #dbeafe; padding: 2px 7px; border-radius: 3px; color: #1e3a8a; font-weight: 500; font-size: 0.82rem;">${hl7Field}</code>
+                    </td>
+                    <td style="padding: 0.6rem 0.75rem;">
+                        <code style="background: #fce7f3; padding: 2px 7px; border-radius: 3px; color: #831843; font-weight: 500; font-size: 0.82rem;">${fhirPath}</code>
+                    </td>
+                    <td style="padding: 0.6rem 0.75rem; color: #64748b; font-size: 0.82rem;">
+                        ${dataType}
+                        ${window._transformBadge ? window._transformBadge(transformType, index) : ''}
+                    </td>
+                    <td style="padding: 0.6rem 0.75rem; text-align: center;">
+                        <button class="delete-mapping-btn" data-index="${index}"
+                            onclick="event.stopPropagation(); window.propertiesPanel.deleteMapping(${index})"
+                            style="background:none;border:none;color:#dc2626;cursor:pointer;padding:3px 6px;"
+                            onmouseover="this.style.color='#991b1b'"
+                            onmouseout="this.style.color='#dc2626'"
+                            title="Delete mapping">
+                            <i class="fas fa-trash" style="font-size:0.8rem;"></i>
+                        </button>
+                    </td>
+                </tr>`;
+        };
+
+        const groupBlocks = [];
+        groups.forEach((rows, rt) => {
+            const style = this._resourceTypeStyle(rt);
+            groupBlocks.push(`
+                <div style="margin-bottom: 0.75rem; border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden;">
+                    <div style="display:flex; align-items:center; justify-content:space-between;
+                                padding: 0.55rem 0.75rem; background: ${style.bg};
+                                border-bottom: 1px solid #e5e7eb; cursor:pointer; user-select:none;"
+                         onclick="this.nextElementSibling.style.display = this.nextElementSibling.style.display==='none' ? '' : 'none';
+                                  this.querySelector('.grp-chevron').style.transform = this.nextElementSibling.style.display==='' ? 'rotate(0deg)' : 'rotate(-90deg)';">
+                        <span style="display:flex; align-items:center; gap:0.5rem;">
+                            <i class="fas ${style.icon}" style="color:${style.color}; font-size:0.85rem;"></i>
+                            <span style="font-weight:600; font-size:0.85rem; color:${style.color};">${rt}</span>
+                            <span style="font-size:0.75rem; color:#64748b; font-weight:400;">${rows.length} mapping${rows.length !== 1 ? 's' : ''}</span>
+                        </span>
+                        <i class="fas fa-chevron-down grp-chevron" style="font-size:0.75rem; color:${style.color}; transition:transform 0.2s;"></i>
+                    </div>
+                    <div>
+                        <table style="width:100%; border-collapse:collapse; font-size:0.875rem;">
+                            <thead style="background:#fafafa;">
+                                <tr>
+                                    <th style="padding:0.45rem 0.75rem; text-align:left; border-bottom:1px solid #f1f5f9; font-weight:600; font-size:0.78rem; color:#64748b;">HL7 Field</th>
+                                    <th style="padding:0.45rem 0.75rem; text-align:left; border-bottom:1px solid #f1f5f9; font-weight:600; font-size:0.78rem; color:#64748b;">FHIR Path</th>
+                                    <th style="padding:0.45rem 0.75rem; text-align:left; border-bottom:1px solid #f1f5f9; font-weight:600; font-size:0.78rem; color:#64748b;">Data Type</th>
+                                    <th style="padding:0.45rem 0.75rem; text-align:center; border-bottom:1px solid #f1f5f9; font-weight:600; font-size:0.78rem; color:#64748b; width:50px;"></th>
+                                </tr>
+                            </thead>
+                            <tbody>${rows.map(renderRow).join('')}</tbody>
+                        </table>
+                    </div>
+                </div>`);
+        });
+
+        return groupBlocks.join('');
     }
 
     /**
@@ -1999,6 +2436,139 @@ class PropertiesPanel {
                     targetContent.style.display = 'block';
                 }
             });
+        });
+
+        // === Assembly tab: master toggle dims/enables individual rule rows ===
+        const assemblyMaster = form.querySelector('#assemblyMasterToggle');
+        if (assemblyMaster) {
+            assemblyMaster.addEventListener('change', () => {
+                const ruleRows = form.querySelectorAll('tr[style*="border-bottom"]');
+                const toggles = form.querySelectorAll('.assembly-rule-toggle');
+                const on = assemblyMaster.checked;
+                toggles.forEach(t => { t.disabled = !on; });
+                // dim entire rows when master is off
+                form.querySelectorAll('.assembly-rule-toggle').forEach(t => {
+                    const row = t.closest('tr');
+                    if (row) row.style.opacity = on ? '1' : '0.45';
+                });
+            });
+        }
+
+        // === Assembly tab: individual rule toggles write to step.config.assemblyRules ===
+        form.querySelectorAll('.assembly-rule-toggle').forEach(toggle => {
+            toggle.addEventListener('change', () => {
+                step.config = step.config || {};
+                step.config.assemblyRules = step.config.assemblyRules || {};
+                step.config.assemblyRules[toggle.dataset.ruleKey] = toggle.checked;
+                const row = toggle.closest('tr');
+                if (row) row.style.opacity = toggle.checked ? '1' : '0.45';
+            });
+        });
+
+        // === Text Report Merging card ===
+        const getTagsFromDOM = () => {
+            return [...form.querySelectorAll('.merge-svc-chip')].map(el => el.dataset.code);
+        };
+
+        const saveMergeConfig = () => {
+            const modeEl = form.querySelector('input[name="collapse_text_obx_mode"]:checked');
+            if (!modeEl) return;
+            const mode = modeEl.value;
+            step.config = step.config || {};
+            step.config.assemblyRules = step.config.assemblyRules || {};
+            const ar = step.config.assemblyRules;
+            if (mode === 'never') {
+                ar.collapse_text_obx = false;
+                ar.collapse_text_obx_services = [];
+            } else if (mode === 'by_service') {
+                ar.collapse_text_obx = true;
+                ar.collapse_text_obx_services = getTagsFromDOM();
+            } else { // always
+                ar.collapse_text_obx = true;
+                ar.collapse_text_obx_services = [];
+            }
+        };
+
+        const addServiceTag = (code) => {
+            const cleaned = code.trim().toUpperCase();
+            if (!cleaned) return;
+            const tagsContainer = form.querySelector('#merge-svc-tags');
+            if (!tagsContainer) return;
+            // Dedup
+            if (form.querySelector(`.merge-svc-chip[data-code="${cleaned}"]`)) return;
+            const chip = document.createElement('span');
+            chip.className = 'merge-svc-chip';
+            chip.dataset.code = cleaned;
+            chip.style.cssText = 'display:inline-flex;align-items:center;gap:3px;background:#fef3c7;border:1px solid #fcd34d;border-radius:4px;padding:2px 7px;font-size:0.78rem;font-weight:600;color:#78350f;white-space:nowrap;';
+            chip.innerHTML = `<code style="background:none;font-size:0.78rem;">${cleaned}</code>
+                <button type="button" class="merge-svc-remove" data-code="${cleaned}"
+                    style="background:none;border:none;cursor:pointer;color:#b45309;font-size:0.85rem;padding:0;line-height:1;"
+                    title="Remove ${cleaned}">×</button>`;
+            // Insert chip before the text input
+            const input = tagsContainer.querySelector('#merge-svc-input');
+            tagsContainer.insertBefore(chip, input);
+            // Wire up its remove button
+            chip.querySelector('.merge-svc-remove').addEventListener('click', () => {
+                chip.remove();
+                saveMergeConfig();
+            });
+            saveMergeConfig();
+        };
+
+        // Mode radio buttons
+        form.querySelectorAll('input[name="collapse_text_obx_mode"]').forEach(radio => {
+            radio.addEventListener('change', () => {
+                const sec = form.querySelector('#collapse-services-section');
+                if (sec) sec.style.display = radio.value === 'by_service' ? 'block' : 'none';
+                saveMergeConfig();
+            });
+        });
+
+        // Remove buttons on pre-existing chips
+        form.querySelectorAll('.merge-svc-remove').forEach(btn => {
+            btn.addEventListener('click', () => {
+                btn.closest('.merge-svc-chip')?.remove();
+                saveMergeConfig();
+            });
+        });
+
+        // Tag text input — Enter or comma adds a chip
+        const svcInput = form.querySelector('#merge-svc-input');
+        if (svcInput) {
+            svcInput.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter' || e.key === ',') {
+                    e.preventDefault();
+                    const codes = svcInput.value.split(/[,\s]+/).filter(Boolean);
+                    codes.forEach(addServiceTag);
+                    svcInput.value = '';
+                } else if (e.key === 'Backspace' && svcInput.value === '') {
+                    // Remove last chip on backspace when input is empty
+                    const chips = form.querySelectorAll('.merge-svc-chip');
+                    if (chips.length > 0) {
+                        chips[chips.length - 1].remove();
+                        saveMergeConfig();
+                    }
+                }
+            });
+            svcInput.addEventListener('blur', () => {
+                const codes = svcInput.value.split(/[,\s]+/).filter(Boolean);
+                if (codes.length > 0) {
+                    codes.forEach(addServiceTag);
+                    svcInput.value = '';
+                }
+            });
+            // Make clicking anywhere in the tags container focus the input
+            const tagsContainer = form.querySelector('#merge-svc-tags');
+            if (tagsContainer) {
+                tagsContainer.addEventListener('click', (e) => {
+                    if (!e.target.closest('button')) svcInput.focus();
+                });
+            }
+        }
+
+        // Quick-add hint buttons
+        form.querySelectorAll('.merge-svc-hint').forEach(btn => {
+            btn.addEventListener('click', () => addServiceTag(btn.dataset.code));
         });
 
         // === Mapping Search ===
@@ -5111,6 +5681,15 @@ class PropertiesPanel {
                     parsedConfig.mappings = step.config.mappings;
                     console.log('[PropertiesPanel] ✅ Preserved mappings array:', step.config.mappings.length, 'items');
                 }
+                // CRITICAL: Preserve assemblyRules and assembleObservations — these are written
+                // by event listeners (radio buttons, checkboxes) directly to step.config and would
+                // be wiped out if the raw JSON textarea replaces the whole config object.
+                if (step.config && step.config.assemblyRules !== undefined) {
+                    parsedConfig.assemblyRules = step.config.assemblyRules;
+                }
+                if (step.config && step.config.assembleObservations !== undefined) {
+                    parsedConfig.assembleObservations = step.config.assembleObservations;
+                }
                 step.config = parsedConfig;
             } catch (error) {
                 throw new Error('Invalid JSON in configuration');
@@ -7453,82 +8032,94 @@ return {
             },
             // REMOVED: 'pre.enrichment.metadata' documentation - now merged with Field Mapping (core.transformation)
             'core.mapping': {
-                description: 'Transforms HL7 v2 messages to FHIR format using configured mapping rules. This is the core transformation step that converts healthcare data from legacy HL7 format to modern FHIR resources. You can use data from previous enrichment steps (database lookups, API calls, scripts) in your field mappings.',
+                description: 'Transforms HL7 v2 messages to FHIR R4 format in two passes:\n\n' +
+                    '1. Field mapping — each row in the Visual Mapping tab maps one HL7 field (e.g. PID.5) to one FHIR path (e.g. Patient.name[0].family). ' +
+                    'Enriched data from upstream steps can be referenced as source fields using the ["step_name"].enriched_data.field syntax.\n\n' +
+                    '2. Structural assembly (Assembly tab) — runs automatically after field mapping for message types that need it. ' +
+                    'For ORU^R01 this converts every OBX segment into a properly structured FHIR Observation (value type dispatch, ' +
+                    'structured referenceRange, interpretation flags, laboratory category) and links them all to DiagnosticReport.result[]. ' +
+                    'Each assembly rule can be individually disabled in the Assembly tab if your interface requires custom handling. ' +
+                    'To extend beyond what the OOB rules produce, add a Script Enrichment step after this one — it receives the fully assembled fhirResources array.',
                 useCases: [
-                    'Convert ADT^A01 (patient admission) to FHIR Patient + Encounter',
-                    'Transform ORU^R01 (lab results) to FHIR Observation + DiagnosticReport',
+                    'Convert ADT^A01 (patient admission) to FHIR Patient + Encounter + AllergyIntolerance',
+                    'Transform ORU^R01 (lab results) to FHIR Observation + DiagnosticReport with OBX value dispatch',
                     'Map ORM^O01 (order) to FHIR ServiceRequest',
                     'Convert DFT^P03 (billing) to FHIR Claim',
-                    'Enrich FHIR resources with data from previous enrichment steps',
-                    'Apply organization-specific mapping customizations with dynamic data'
+                    'Enrich FHIR resources with lookup data from a prior Database Enrichment step',
+                    'Disable specific assembly rules (e.g. referenceRange parsing) for non-standard interfaces',
+                    'Add a Script Enrichment step after this one to post-process or extend assembled FHIR resources'
                 ],
                 example: {
                     fhir_version: 'R4',
                     use_template: true,
+                    assembleObservations: true,
+                    assemblyRules: {
+                        obs_value_dispatch: true,
+                        obs_reference_range: true,
+                        obs_interpretation: true,
+                        dr_result_links: true
+                    },
                     mappings: [
                         {
-                            comment: 'Basic HL7 field mapping',
+                            comment: 'Patient family name from PID.5',
                             hl7Field: 'PID.5',
                             fhirPath: 'Patient.name[0].family',
                             dataType: 'string'
                         },
                         {
-                            comment: 'Use enriched data from database step',
+                            comment: 'Use enriched data from database lookup',
                             hl7Field: '["database_enrichment"].enriched_data.insuranceProvider',
                             fhirPath: 'Coverage.payor[0].display',
                             dataType: 'string'
-                        },
-                        {
-                            comment: 'Use enriched data from script step',
-                            hl7Field: '["Script_Enrichment"].enriched_data.riskScore',
-                            fhirPath: 'Observation.valueQuantity.value',
-                            dataType: 'decimal'
-                        },
-                        {
-                            comment: 'Use enriched data from API call',
-                            hl7Field: '["API_Enrichment"].enriched_data.externalPatientId',
-                            fhirPath: 'Patient.identifier[1].value',
-                            dataType: 'string'
                         }
-                    ],
-                    resource_mapping: {
-                        'Patient': 'PID segment + enriched data',
-                        'Encounter': 'PV1 segment',
-                        'Observation': 'OBX segments + calculated risk scores'
-                    }
+                    ]
                 },
                 parameters: [
-                    { name: 'fhir_version', type: 'string', required: true, description: 'Target FHIR version (R4, R5, STU3)' },
-                    { name: 'use_template', type: 'boolean', required: false, description: 'Use wizard-configured mappings (default: true)' },
-                    { name: 'mappings', type: 'array', required: false, description: 'Array of field mappings. Each mapping can reference HL7 fields or enriched data from previous steps using ["step_name"].enriched_data.fieldName format' }
+                    { name: 'fhir_version', type: 'string', required: true, description: 'Target FHIR version. Currently R4 is fully supported.' },
+                    { name: 'use_template', type: 'boolean', required: false, description: 'Use wizard-configured field mappings (default: true).' },
+                    { name: 'mappings', type: 'array', required: false, description: 'Array of field mappings. Each entry maps one HL7 field or enriched value to one FHIR path.' },
+                    { name: 'assembleObservations', type: 'boolean', required: false, description: 'Master switch for structural assembly. When false all assembly rules are skipped regardless of individual rule settings. Default: true.' },
+                    { name: 'assemblyRules', type: 'object', required: false, description: 'Per-rule on/off flags for structural assembly. All rules default to true when absent. Set a key to false to disable that specific transform. Keys: collapse_text_obx, obs_value_dispatch, obs_value_unit, obs_code, obs_reference_range, obs_interpretation, obs_status, obs_category, obs_subject, obs_effective, dr_result_links, dr_subject, dr_code, dr_status, dr_effective, dr_category.' }
+                ],
+                assemblyRulesDoc: [
+                    { key: 'collapse_text_obx',   src: 'OBX.3 + OBX.2', fhir: 'Observation.valueString', desc: '<strong>Merge mode</strong> — controlled in the "Text Report Merging" card at the top of the Assembly tab. When enabled, consecutive TX/FT OBX segments sharing the same OBX.3 code are joined into one Observation.valueString (the HL7 continuation-segment pattern). Example: a 50-line surgical pathology report sent as OBX|1|TX … OBX|50|TX all with OBX.3=4050097^Surg Path produces one Observation instead of 50. Disable (or restrict to specific services via <code>collapse_text_obx_services</code>) when your discrete lab results also happen to use the same OBX.3 across rows. <em>Examples where merging is correct: AP (Anatomic Pathology), RAD (Radiology), SP (Surgical Path). Examples where merging should be OFF or restricted: CH (Chemistry), MB (Microbiology) — each analyte has a distinct OBX.3.</em>' },
+                    { key: 'obs_value_dispatch',  src: 'OBX.2 + OBX.5', fhir: 'value[x]',              desc: 'Dispatches OBX value to the correct FHIR type: NM→valueQuantity (float), CE/CWE→valueCodeableConcept, ST/TX→valueString, TS→valueDateTime.' },
+                    { key: 'obs_value_unit',       src: 'OBX.6',         fhir: 'valueQuantity.unit',     desc: 'Populates unit + system on valueQuantity. Normalizes UCUM coding system to http://unitsofmeasure.org.' },
+                    { key: 'obs_code',             src: 'OBX.3',         fhir: 'Observation.code',       desc: 'Builds CodeableConcept from OBX.3. Normalizes LN → http://loinc.org, local codes are preserved with display text.' },
+                    { key: 'obs_reference_range',  src: 'OBX.7',         fhir: 'referenceRange[]',       desc: 'Parses "3.8-11.0" into structured {low:{value,unit}, high:{value,unit}, text}. Disable if your system uses non-numeric or multi-part ranges.' },
+                    { key: 'obs_interpretation',   src: 'OBX.8',         fhir: 'interpretation[]',       desc: 'Maps abnormal flags to FHIR interpretation codes: H→High, L→Low, A→Abnormal, AA→Critical, HH→Critical High, LL→Critical Low, N is ignored.' },
+                    { key: 'obs_status',           src: 'OBX.11',        fhir: 'Observation.status',     desc: 'Maps OBX status code to FHIR: F→final, P→preliminary, C→corrected, W→entered-in-error, X→cancelled.' },
+                    { key: 'obs_category',         src: '(fixed)',        fhir: 'Observation.category[]', desc: 'Adds the standard laboratory category coding (http://terminology.hl7.org/CodeSystem/observation-category | laboratory).' },
+                    { key: 'obs_subject',          src: 'Patient.id',    fhir: 'Observation.subject',    desc: 'Links Observation.subject → Patient/<id> using the Patient resource already in the output.' },
+                    { key: 'obs_effective',        src: 'OBX.14',        fhir: 'effectiveDateTime',      desc: 'Converts OBX.14 from HL7 TS format (20120410160227) to ISO 8601 (2012-04-10T16:02:27+00:00).' },
+                    { key: 'dr_result_links',      src: 'Observation ids', fhir: 'DiagnosticReport.result[]', desc: 'Populates DiagnosticReport.result[] with references to all assembled Observations.' },
+                    { key: 'dr_subject',           src: 'Patient.id',    fhir: 'DiagnosticReport.subject', desc: 'Links DiagnosticReport.subject → Patient/<id>.' },
+                    { key: 'dr_code',              src: 'OBR.4',         fhir: 'DiagnosticReport.code',  desc: 'Builds CodeableConcept from OBR.4 (ordered test / panel code). Required field in FHIR R4 DiagnosticReport.' },
+                    { key: 'dr_status',            src: 'OBR.25',        fhir: 'DiagnosticReport.status', desc: 'Maps OBR result status to FHIR: F→final, P→preliminary, C→corrected, X→cancelled.' },
+                    { key: 'dr_effective',         src: 'OBR.7',         fhir: 'effectiveDateTime',      desc: 'Converts OBR.7 observation date/time from HL7 TS to ISO 8601. Preferred over OBX.14 for the report-level timestamp.' },
+                    { key: 'dr_category',          src: '(fixed)',        fhir: 'DiagnosticReport.category[]', desc: 'Adds the standard LAB category coding (http://terminology.hl7.org/CodeSystem/v2-0074 | LAB).' }
                 ],
                 referenceVariables: {
                     title: 'Using Enriched Data in Field Mappings',
-                    description: 'You can reference data from previous enrichment steps in your field mappings. Click the "Variables" tab to see all available variables from previous steps.',
+                    description: 'Reference data from any upstream step using the ["step_name"].enriched_data.field syntax in the HL7 Source column.',
                     examples: [
                         {
-                            scenario: 'Database Enrichment Result',
-                            hl7Field: '["database_enrichment"].enriched_data.chronicConditions',
-                            fhirPath: 'Patient.extension[0].valueInteger',
-                            explanation: 'Maps the chronicConditions field from database enrichment to a FHIR Patient extension'
+                            scenario: 'Database lookup result',
+                            hl7Field: '["database_enrichment"].enriched_data.insuranceProvider',
+                            fhirPath: 'Coverage.payor[0].display',
+                            explanation: 'Maps the insuranceProvider field fetched from a database enrichment step into Coverage.payor'
                         },
                         {
-                            scenario: 'Script Calculation Result',
-                            hl7Field: '["Script_Enrichment"].enriched_data.riskLevel',
-                            fhirPath: 'RiskAssessment.prediction[0].qualitativeRisk.text',
-                            explanation: 'Uses calculated risk level from script enrichment in FHIR RiskAssessment resource'
+                            scenario: 'Script calculation',
+                            hl7Field: '["Script_Enrichment"].enriched_data.riskScore',
+                            fhirPath: 'Observation.valueQuantity.value',
+                            explanation: 'Uses a risk score calculated by a prior Script Enrichment step as the Observation value'
                         },
                         {
-                            scenario: 'API Response Data',
-                            hl7Field: '["API_Enrichment"].enriched_data.externalSystemId',
+                            scenario: 'API response field',
+                            hl7Field: '["API_Enrichment"].enriched_data.externalPatientId',
                             fhirPath: 'Patient.identifier[1].value',
-                            explanation: 'Adds external system ID from API call as additional patient identifier'
-                        },
-                        {
-                            scenario: 'Metadata Field',
-                            hl7Field: 'metadata.customField',
-                            fhirPath: 'MessageHeader.extension[0].valueString',
-                            explanation: 'Includes custom metadata field added in metadata enrichment step'
+                            explanation: 'Adds an external system ID retrieved from an API call as a second Patient identifier'
                         }
                     ]
                 }

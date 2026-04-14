@@ -44,6 +44,14 @@ func (ctrl *HL7Controller) ParseMessage(c *gin.Context) {
         return
     }
 
+    // ── Batch detection ──────────────────────────────────────────────────────
+    // When the input contains more than one MSH segment, split into individual
+    // messages, parse each, and return a batch response.
+    if hl7.CountMessages(req.RawMessage) > 1 {
+        ctrl.parseBatch(c, req)
+        return
+    }
+
     // Track parsing start time
     startTime := time.Now()
 
@@ -53,10 +61,26 @@ func (ctrl *HL7Controller) ParseMessage(c *gin.Context) {
             req.UseEnhanced, len(req.RawMessage))
     }
 
-    // Parse with options (escape handling, etc.)
-    result := hl7.ParseHL7EnhancedWithOptions(req.RawMessage, hl7.ParseOptions{
-        EscapeHandling: req.EscapeHandling,
-    })
+    // Parse with real schema when available (sets SchemaLoaded=true → "enhanced_schema"),
+    // otherwise fall back to the basic enhanced parser.
+    var result *hl7.EnhancedParsedMessage
+    if realLoader := hl7.GetRealSchemaLoader(); realLoader != nil {
+        result = hl7.ParseWithRealSchema(req.RawMessage)
+        if result == nil || !result.Success {
+            // Schema parse failed — fall back to basic enhanced parser
+            result = hl7.ParseHL7EnhancedWithOptions(req.RawMessage, hl7.ParseOptions{
+                EscapeHandling: req.EscapeHandling,
+            })
+        } else if req.EscapeHandling == "decode" {
+            // Apply escape decoding as post-processing step
+            encodingChars := hl7.ExtractEncodingChars(req.RawMessage)
+            hl7.ApplyEscapeDecodingToResult(result, encodingChars)
+        }
+    } else {
+        result = hl7.ParseHL7EnhancedWithOptions(req.RawMessage, hl7.ParseOptions{
+            EscapeHandling: req.EscapeHandling,
+        })
+    }
 
     // Debug logging for parsing flags
     if ctrl.config.VerboseLogging {
@@ -352,4 +376,90 @@ func (ctrl *HL7Controller) getMessageDescription(messageType string) string {
 		return desc
 	}
 	return "Unknown message type"
+}
+
+// parseBatch parses every individual message in a multi-MSH input and returns
+// a single ParseResponse with IsBatch=true and all results in BatchMessages.
+// Data is set to the first successfully parsed message for backward compatibility.
+func (ctrl *HL7Controller) parseBatch(c *gin.Context, req hl7.ParseRequest) {
+	rawMessages := hl7.SplitMessages(req.RawMessage)
+
+	var entries []hl7.BatchParseEntry
+	var firstResult *hl7.EnhancedParsedMessage
+	var firstMeta *hl7.ParseMeta
+
+	for i, raw := range rawMessages {
+		start := time.Now()
+
+		var result *hl7.EnhancedParsedMessage
+		if realLoader := hl7.GetRealSchemaLoader(); realLoader != nil {
+			result = hl7.ParseWithRealSchema(raw)
+			if result == nil || !result.Success {
+				result = hl7.ParseHL7EnhancedWithOptions(raw, hl7.ParseOptions{
+					EscapeHandling: req.EscapeHandling,
+				})
+			}
+		} else {
+			result = hl7.ParseHL7EnhancedWithOptions(raw, hl7.ParseOptions{
+				EscapeHandling: req.EscapeHandling,
+			})
+		}
+
+		elapsed := time.Since(start)
+
+		parseMethod := "basic"
+		if result != nil && result.SchemaLoaded {
+			parseMethod = "enhanced_schema"
+		} else if result != nil && result.DictionaryUsed {
+			parseMethod = "enhanced_dictionary"
+		}
+
+		meta := &hl7.ParseMeta{
+			ParsingTime:   elapsed,
+			ParserVersion: "1.0.0",
+			ParseMethod:   parseMethod,
+		}
+		if result != nil {
+			meta.DictionaryUsed = result.DictionaryUsed
+			meta.SchemaUsed = result.SchemaLoaded
+		}
+
+		entry := hl7.BatchParseEntry{
+			Index:      i,
+			RawMessage: raw,
+			Meta:       meta,
+		}
+
+		if result == nil || !result.Success {
+			entry.Success = false
+			if result != nil {
+				entry.Error = result.Error
+			} else {
+				entry.Error = "parser returned nil"
+			}
+		} else {
+			entry.Success = true
+			entry.Data = result
+			if firstResult == nil {
+				firstResult = result
+				firstMeta = meta
+			}
+		}
+
+		entries = append(entries, entry)
+	}
+
+	resp := hl7.ParseResponse{
+		Success:       firstResult != nil,
+		IsBatch:       true,
+		MessageCount:  len(entries),
+		BatchMessages: entries,
+		Data:          firstResult,
+		Meta:          firstMeta,
+	}
+	if firstResult == nil {
+		resp.Error = "all messages in batch failed to parse"
+	}
+
+	c.JSON(http.StatusOK, resp)
 }

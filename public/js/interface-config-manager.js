@@ -950,16 +950,17 @@ function testInterfaceConfiguration() {
         [];
 
     if (errors.length > 0) {
-        alert('Configuration errors:\n' + errors.join('\n'));
+        AppDialogs.toast('Configuration errors: ' + errors.join('; '), 'error');
         return;
     }
 
-    alert('🧪 Configuration test would be performed here:\n\n' +
-          `Interface: ${formData.name}\n` +
-          `Source: ${formData.sourceType} (${formData.sourceConnectivity})\n` +
-          `Target: ${formData.targetType} (${formData.targetConnectivity})\n` +
-          `Routing: ${formData.processingRules?.routingMode || 'direct'}\n\n` +
-          'In production, this would test connectivity and validate settings.');
+    AppDialogs.alert(
+        `<b>Interface:</b> ${formData.name}<br>` +
+        `<b>Source:</b> ${formData.sourceType} (${formData.sourceConnectivity})<br>` +
+        `<b>Target:</b> ${formData.targetType} (${formData.targetConnectivity})<br>` +
+        `<b>Routing:</b> ${formData.processingRules?.routingMode || 'direct'}<br><br>` +
+        'In production, this would test connectivity and validate settings.',
+        { title: '🧪 Configuration Test', type: 'info' });
 }
 
 // Initialize the configuration manager when DOM is ready

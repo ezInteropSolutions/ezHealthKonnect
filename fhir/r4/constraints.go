@@ -1,5 +1,29 @@
 package r4
 
+import (
+	"regexp"
+	"strings"
+)
+
+// fhirIDPattern matches the FHIR R4 id datatype: [A-Za-z0-9\-\.]{1,64}
+var fhirIDPattern = regexp.MustCompile(`^[A-Za-z0-9\-\.]{1,64}$`)
+
+// fhirDatePattern matches YYYY-MM-DD (and the two shorter forms YYYY-MM, YYYY)
+var fhirDatePattern = regexp.MustCompile(`^\d{4}(-\d{2}(-\d{2})?)?$`)
+
+// fhirDateTimePattern matches ISO 8601 dateTime with timezone offset or Z
+var fhirDateTimePattern = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?([+-]\d{2}:\d{2}|Z)$`)
+
+// isAbsoluteURI returns true when s starts with a valid scheme (e.g. urn:, http:, https:)
+func isAbsoluteURI(s string) bool {
+	if s == "" {
+		return false
+	}
+	return strings.HasPrefix(s, "urn:") ||
+		strings.HasPrefix(s, "http://") ||
+		strings.HasPrefix(s, "https://")
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // ConstraintRegistry — Go predicate functions for FHIR R4 invariants
 //
@@ -200,6 +224,66 @@ func buildConstraintRegistry() *ConstraintRegistry {
 				return true
 			},
 		),
+		// bdl-12: A message bundle must have a MessageHeader as its first entry.
+		// Source: https://hl7.org/fhir/R4/bundle.html#invs
+		constraint("bdl-12", "error",
+			"A message bundle must have a MessageHeader as the first entry",
+			func(res map[string]interface{}) bool {
+				t, _ := res["type"].(string)
+				if t != "message" {
+					return true // only applies to message bundles
+				}
+				entries, ok := toSlice(res["entry"])
+				if !ok || len(entries) == 0 {
+					return false // message bundle with no entries
+				}
+				first, ok := entries[0].(map[string]interface{})
+				if !ok {
+					return false
+				}
+				resource, ok := first["resource"].(map[string]interface{})
+				if !ok {
+					return false
+				}
+				rt, _ := resource["resourceType"].(string)
+				return rt == "MessageHeader"
+			},
+		),
+		// bdl-fullurl: each entry's fullUrl must be a valid absolute URI
+		constraint("bdl-fullurl", "error",
+			"Bundle entry fullUrl must be an absolute URI (e.g. urn:uuid:... or https://...)",
+			func(res map[string]interface{}) bool {
+				entries, ok := toSlice(res["entry"])
+				if !ok {
+					return true
+				}
+				for _, raw := range entries {
+					e, ok := raw.(map[string]interface{})
+					if !ok {
+						continue
+					}
+					fu, _ := e["fullUrl"].(string)
+					if fu == "" {
+						continue // absence checked separately (bdl-8 not implemented)
+					}
+					if !isAbsoluteURI(fu) {
+						return false
+					}
+				}
+				return true
+			},
+		),
+		// bdl-id: Bundle.id must conform to the FHIR id datatype [A-Za-z0-9\-\.]{1,64}
+		constraint("bdl-id", "error",
+			"Bundle.id must be 1–64 characters and contain only letters, digits, hyphens, or dots",
+			func(res map[string]interface{}) bool {
+				id, _ := res["id"].(string)
+				if id == "" {
+					return true // absence is a separate warning
+				}
+				return fhirIDPattern.MatchString(id)
+			},
+		),
 	)
 
 	// ── Patient ───────────────────────────────────────────────────────────────
@@ -223,6 +307,28 @@ func buildConstraintRegistry() *ConstraintRegistry {
 					}
 				}
 				return true
+			},
+		),
+		// pat-date: Patient.birthDate must be in FHIR date format (YYYY, YYYY-MM, or YYYY-MM-DD)
+		constraint("pat-date", "error",
+			"Patient.birthDate must be a valid FHIR date (YYYY, YYYY-MM, or YYYY-MM-DD)",
+			func(res map[string]interface{}) bool {
+				bd, _ := res["birthDate"].(string)
+				if bd == "" {
+					return true // absence checked by required-field layer
+				}
+				return fhirDatePattern.MatchString(bd)
+			},
+		),
+		// pat-gender: Patient.gender must be male | female | other | unknown
+		constraint("pat-gender", "error",
+			"Patient.gender must be one of: male, female, other, unknown",
+			func(res map[string]interface{}) bool {
+				g, _ := res["gender"].(string)
+				if g == "" {
+					return true // optional field
+				}
+				return g == "male" || g == "female" || g == "other" || g == "unknown"
 			},
 		),
 	)
@@ -318,6 +424,39 @@ func buildConstraintRegistry() *ConstraintRegistry {
 		),
 	)
 
+	// ── Observation ─ datetime format ────────────────────────────────────────
+
+	// obs-datetime and obs-status appended to existing Observation constraints
+	r.add("Observation",
+		// obs-datetime: effectiveDateTime must be valid ISO 8601 when present
+		constraint("obs-datetime", "error",
+			"Observation.effectiveDateTime must be a valid FHIR dateTime (ISO 8601 with timezone)",
+			func(res map[string]interface{}) bool {
+				edt, _ := res["effectiveDateTime"].(string)
+				if edt == "" {
+					return true
+				}
+				return fhirDateTimePattern.MatchString(edt)
+			},
+		),
+		// obs-status: Observation.status must be a known value
+		constraint("obs-status", "error",
+			"Observation.status must be one of: registered, preliminary, final, amended, corrected, cancelled, entered-in-error, unknown",
+			func(res map[string]interface{}) bool {
+				status, _ := res["status"].(string)
+				if status == "" {
+					return true // absence caught by required-field layer
+				}
+				valid := map[string]bool{
+					"registered": true, "preliminary": true, "final": true,
+					"amended": true, "corrected": true, "cancelled": true,
+					"entered-in-error": true, "unknown": true,
+				}
+				return valid[status]
+			},
+		),
+	)
+
 	// ── DiagnosticReport ──────────────────────────────────────────────────────
 
 	r.add("DiagnosticReport",
@@ -337,6 +476,44 @@ func buildConstraintRegistry() *ConstraintRegistry {
 				hasResult := rOk && len(results) > 0
 				hasForm := fOk && len(forms) > 0
 				return hasResult || hasForm
+			},
+		),
+		// drep-datetime: effectiveDateTime must be valid ISO 8601 when present
+		constraint("drep-datetime", "error",
+			"DiagnosticReport.effectiveDateTime must be a valid FHIR dateTime (ISO 8601 with timezone)",
+			func(res map[string]interface{}) bool {
+				edt, _ := res["effectiveDateTime"].(string)
+				if edt == "" {
+					return true
+				}
+				return fhirDateTimePattern.MatchString(edt)
+			},
+		),
+		// drep-issued: issued must be valid FHIR instant (ISO 8601 with timezone) when present
+		constraint("drep-issued", "error",
+			"DiagnosticReport.issued must be a valid FHIR instant (ISO 8601 with timezone)",
+			func(res map[string]interface{}) bool {
+				issued, _ := res["issued"].(string)
+				if issued == "" {
+					return true
+				}
+				return fhirDateTimePattern.MatchString(issued)
+			},
+		),
+		// drep-status: DiagnosticReport.status must be a known value
+		constraint("drep-status", "error",
+			"DiagnosticReport.status must be one of: registered, partial, preliminary, final, amended, corrected, appended, cancelled, entered-in-error, unknown",
+			func(res map[string]interface{}) bool {
+				status, _ := res["status"].(string)
+				if status == "" {
+					return true // absence caught by required-field layer
+				}
+				valid := map[string]bool{
+					"registered": true, "partial": true, "preliminary": true, "final": true,
+					"amended": true, "corrected": true, "appended": true,
+					"cancelled": true, "entered-in-error": true, "unknown": true,
+				}
+				return valid[status]
 			},
 		),
 	)

@@ -2503,7 +2503,7 @@ class ForEachLoopBuilder extends BaseStepConfigBuilder {
             window.pipelineBuilder.propertiesPanel.showStepProperties(step);
         } else {
             console.error('[ForEachLoopBuilder] PropertiesPanel not available');
-            alert('Unable to open step configuration. Please try clicking on the step in the flowchart.');
+            AppDialogs.toast('Unable to open step configuration. Please try clicking on the step in the flowchart.', 'warning');
         }
     }
 

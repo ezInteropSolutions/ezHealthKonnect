@@ -326,6 +326,46 @@ router.post('/validate-config',                           // operator+
  * Health check for mapping service
  * GET /api/wizard/mapping-health
  */
+// GET /api/wizard/message-guide/:messageType
+// Returns the user_guide markdown for the given HL7 message type from hl7_fhir_templates.
+// No auth required — the guide is informational, non-sensitive documentation.
+router.get('/message-guide/:messageType', async (req, res) => {
+    try {
+        const { Pool } = require('pg');
+        const pool = new Pool({
+            host:     process.env.DB_HOST     || 'localhost',
+            port:     parseInt(process.env.DB_PORT || '5432'),
+            database: process.env.DB_NAME     || 'ezhealthkonnect',
+            user:     process.env.DB_USER     || 'ezhealth_user',
+            password: process.env.DB_PASSWORD || '',
+            ssl:      process.env.DB_SSL === 'true' ? { rejectUnauthorized: false } : false,
+        });
+        const messageType = req.params.messageType;
+        const result = await pool.query(
+            `SELECT user_guide, template_description, fhir_resources
+               FROM hl7_fhir_templates
+              WHERE message_type = $1
+                AND is_system = true
+                AND is_default = true
+              LIMIT 1`,
+            [messageType]
+        );
+        await pool.end();
+        if (result.rows.length === 0 || !result.rows[0].user_guide) {
+            return res.json({ success: true, guide: null });
+        }
+        res.json({
+            success:      true,
+            guide:        result.rows[0].user_guide,
+            description:  result.rows[0].template_description,
+            fhirResources: result.rows[0].fhir_resources,
+        });
+    } catch (err) {
+        // Non-fatal — guide is optional
+        res.json({ success: true, guide: null });
+    }
+});
+
 router.get('/mapping-health', (req, res) => {
     try {
         // Basic health check

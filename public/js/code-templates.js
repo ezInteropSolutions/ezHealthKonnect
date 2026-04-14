@@ -325,7 +325,7 @@ async function saveTemplate() {
 // DELETE
 // ──────────────────────────────────────────────────────────────────────────────
 async function deleteTemplate(id, name) {
-    if (!confirm(`Delete code template "${name}"? This cannot be undone.`)) return;
+    if (!await AppDialogs.confirm(`Delete code template "<b>${name}</b>"? This cannot be undone.`, { title: 'Delete Template', type: 'danger', confirmText: 'Delete' })) return;
     try {
         const res = await fetch(`/api/code-templates/${id}`, { method: 'DELETE' });
         const json = await res.json();

@@ -122,12 +122,10 @@ function closeDetailsModal() {
 }
 
 // ✅ PRESERVED: User Management (called from HTML onclick)
-function logout() {
-    if (confirm('Are you sure you want to logout?')) {
-        // Call existing logout functionality
-        if (window.location) {
-            window.location.href = '/auth/logout';
-        }
+async function logout() {
+    const ok = await AppDialogs.confirm('Are you sure you want to logout?', { title: 'Logout', type: 'warning', confirmText: 'Logout' });
+    if (ok && window.location) {
+        window.location.href = '/auth/logout';
     }
 }
 

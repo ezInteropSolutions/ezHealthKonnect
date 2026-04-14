@@ -257,7 +257,7 @@ class InterfaceConfigComponents {
                 <div class="form-group">
                     <label for="${idPrefix}HttpAuthType" class="form-label required">
                         Authentication Type
-                        <a href="#" class="help-link" onclick="event.preventDefault(); alert('Secure your HTTP endpoint:\\n\\n• No Auth - Development only\\n• API Key - Simple token in header\\n• Basic Auth - Username/password (use HTTPS!)\\n• Bearer Token - OAuth or JWT tokens\\n• OAuth 2.0 - Industry standard (SMART on FHIR)\\n• mTLS - Certificate-based, highest security\\n\\nProduction: OAuth 2.0 or mTLS');" title="Click for help">ⓘ</a>
+                        <a href="#" class="help-link" onclick="event.preventDefault(); AppDialogs.alert('Secure your HTTP endpoint:<br><br>• <b>No Auth</b> — Development only<br>• <b>API Key</b> — Simple token in header<br>• <b>Basic Auth</b> — Username/password (use HTTPS!)<br>• <b>Bearer Token</b> — OAuth or JWT tokens<br>• <b>OAuth 2.0</b> — Industry standard (SMART on FHIR)<br>• <b>mTLS</b> — Certificate-based, highest security<br><br>Production: OAuth 2.0 or mTLS', { title: 'HTTP Authentication Help', type: 'info' });" title="Click for help">ⓘ</a>
                     </label>
                     <select id="${idPrefix}HttpAuthType" class="form-control http-auth-type-selector" name="authType">
                         <option value="none" ${!config.authType || config.authType === 'none' ? 'selected' : ''}>No Authentication (Development)</option>
@@ -496,7 +496,7 @@ class InterfaceConfigComponents {
                         <div class="form-group" style="flex: 2;">
                             <label for="${idPrefix}sourcePort" class="form-label required">
                                 Listen Port
-                                <a href="#" class="help-link" onclick="event.preventDefault(); alert('Port where ezHealthKonnect will LISTEN for incoming HTTP requests.\\n\\nReserved Ports (cannot use):\\n${reservedPortsStr}\\n\\nRecommended:\\n• 8082-8089 (HTTP receivers)\\n• 9000-9999 (additional services)\\n\\nExternal systems will POST/GET to:\\nhttp://your-server:[THIS PORT][CONTEXT PATH]');" title="Click for help">ⓘ</a>
+                                <a href="#" class="help-link" onclick="event.preventDefault(); AppDialogs.alert('Port where ezHealthKonnect will LISTEN for incoming HTTP requests.<br><br><b>Recommended:</b><br>• 8082-8089 (HTTP receivers)<br>• 9000-9999 (additional services)<br><br>External systems will POST/GET to:<br><code>http://your-server:[THIS PORT][CONTEXT PATH]</code>', { title: 'Listen Port Help', type: 'info' });" title="Click for help">ⓘ</a>
                             </label>
                             <input type="number" id="${idPrefix}sourcePort" class="form-control"
                                    value="${config.port || '8082'}"
@@ -529,7 +529,7 @@ class InterfaceConfigComponents {
                 <div class="form-group">
                     <label for="${idPrefix}httpContextPath" class="form-label required">
                         Context Path
-                        <a href="#" class="help-link" onclick="event.preventDefault(); alert('URL path where messages will be received.\\n\\nExamples:\\n• /api/receive - Simple path\\n• /hl7/inbound - HL7-specific\\n• /webhook/{id} - With parameters\\n• /integration/epic - Partner-specific\\n\\nExternal systems POST to: http://your-server:port[THIS PATH]');" title="Click for help">ⓘ</a>
+                        <a href="#" class="help-link" onclick="event.preventDefault(); AppDialogs.alert('URL path where messages will be received.<br><br><b>Examples:</b><br>• <code>/api/receive</code> — Simple path<br>• <code>/hl7/inbound</code> — HL7-specific<br>• <code>/webhook/{id}</code> — With parameters<br>• <code>/integration/epic</code> — Partner-specific<br><br>External systems POST to: <code>http://your-server:port[THIS PATH]</code>', { title: 'Context Path Help', type: 'info' });" title="Click for help">ⓘ</a>
                     </label>
                     <input type="text" id="${idPrefix}httpContextPath" class="form-control"
                            value="${config.contextPath || '/api/receive'}"
@@ -543,7 +543,7 @@ class InterfaceConfigComponents {
                 <div class="form-group">
                     <label class="form-label">
                         Allowed HTTP Methods
-                        <a href="#" class="help-link" onclick="event.preventDefault(); alert('Which HTTP methods to accept:\\n\\n• POST - Most common for sending data\\n• PUT - Update/replace operations\\n• GET - Query/retrieve operations\\n• PATCH - Partial updates\\n\\nRecommendation: Start with POST only');" title="Click for help">ⓘ</a>
+                        <a href="#" class="help-link" onclick="event.preventDefault(); AppDialogs.alert('Which HTTP methods to accept:<br><br>• <b>POST</b> — Most common for sending data<br>• <b>PUT</b> — Update/replace operations<br>• <b>GET</b> — Query/retrieve operations<br>• <b>PATCH</b> — Partial updates<br><br>Recommendation: Start with POST only', { title: 'HTTP Methods Help', type: 'info' });" title="Click for help">ⓘ</a>
                     </label>
                     <div class="checkbox-group">
                         <label class="checkbox-label">
@@ -649,7 +649,7 @@ class InterfaceConfigComponents {
                         <div class="form-group" style="flex: 2;">
                             <label for="${idPrefix}sourcePort" class="form-label required">
                                 Listen Port
-                                <a href="#" class="help-link" onclick="event.preventDefault(); alert('This is the port where ezHealthKonnect will LISTEN for incoming FHIR requests from external systems.\\n\\nRecommended Ports:\\n• 8082-8089 (FHIR receivers)\\n• 9000-9999 (additional services)\\n\\nPort will be validated for availability.');" title="Click for help">ⓘ</a>
+                                <a href="#" class="help-link" onclick="event.preventDefault(); AppDialogs.alert('Port where ezHealthKonnect will LISTEN for incoming FHIR requests from external systems.<br><br><b>Recommended Ports:</b><br>• 8082-8089 (FHIR receivers)<br>• 9000-9999 (additional services)<br><br>Port will be validated for availability.', { title: 'FHIR Listen Port Help', type: 'info' });" title="Click for help">ⓘ</a>
                             </label>
                             <input type="number" id="${idPrefix}sourcePort" class="form-control fhir-port-input"
                                    value="${config.port || '8082'}"
@@ -704,7 +704,7 @@ class InterfaceConfigComponents {
                 <div class="form-group">
                     <label class="form-label">
                         Supported REST Operations
-                        <a href="#" class="help-link" onclick="event.preventDefault(); alert('Choose which FHIR REST API operations to enable:\\n\\n• CREATE (POST) - Most common\\n• READ (GET) - Retrieve by ID\\n• UPDATE (PUT) - Replace entire resource\\n• PATCH - Partial updates\\n• DELETE - Remove resources\\n• SEARCH - Query with parameters\\n• BATCH/TRANSACTION - Multiple operations\\n\\nRecommendation: Start with CREATE only');" title="Click for help">ⓘ</a>
+                        <a href="#" class="help-link" onclick="event.preventDefault(); AppDialogs.alert('Choose which FHIR REST API operations to enable:<br><br>• <b>CREATE (POST)</b> — Most common<br>• <b>READ (GET)</b> — Retrieve by ID<br>• <b>UPDATE (PUT)</b> — Replace entire resource<br>• <b>PATCH</b> — Partial updates<br>• <b>DELETE</b> — Remove resources<br>• <b>SEARCH</b> — Query with parameters<br>• <b>BATCH/TRANSACTION</b> — Multiple operations<br><br>Recommendation: Start with CREATE only', { title: 'FHIR Operations Help', type: 'info' });" title="Click for help">ⓘ</a>
                     </label>
                     <div class="checkbox-group">
                         <label class="checkbox-label">

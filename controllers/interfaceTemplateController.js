@@ -95,6 +95,7 @@ exports.listTemplates = async (req, res) => {
                 author,
                 created_by_user_id::text,
                 usage_count,
+                (user_guide IS NOT NULL AND user_guide <> '') AS has_guide,
                 created_at,
                 updated_at
             FROM interface_templates
@@ -189,6 +190,7 @@ exports.getTemplate = async (req, res) => {
                 author,
                 created_by_user_id::text,
                 usage_count,
+                user_guide,
                 created_at,
                 updated_at
             FROM interface_templates

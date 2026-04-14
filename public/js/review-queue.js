@@ -528,7 +528,7 @@ async function rejectItem() {
     if (!rqActiveItem) return;
     const notes = document.getElementById('rqReviewNotes')?.value?.trim() || '';
 
-    if (!confirm(`Reject this message and move to DLQ?\n\nMessage: ${rqActiveItem.message_id || rqActiveItem.id}`)) return;
+    if (!await AppDialogs.confirm(`Reject this message and move to DLQ?<br><br>Message: <code>${rqActiveItem.message_id || rqActiveItem.id}</code>`, { title: 'Reject Message', type: 'danger', confirmText: 'Reject' })) return;
 
     try {
         const res = await fetch(`/api/fhir/validation-queue/${rqActiveItem.id}/reject`, {
@@ -553,7 +553,7 @@ async function rejectItem() {
 }
 
 async function quickReject(id) {
-    if (!confirm('Reject this message and move to DLQ?')) return;
+    if (!await AppDialogs.confirm('Reject this message and move to DLQ?', { title: 'Reject Message', type: 'danger', confirmText: 'Reject' })) return;
     try {
         const res = await fetch(`/api/fhir/validation-queue/${id}/reject`, {
             method: 'PUT',

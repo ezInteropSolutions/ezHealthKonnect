@@ -988,6 +988,109 @@ func main() {
 				c.JSON(http.StatusOK, response)
 			})
 
+			// POST /api/fhir/transform-batch
+			// Accepts raw HL7 text, splits on MSH boundaries, transforms each
+			// message independently, and returns an array of FHIR bundles.
+			fhirGroup.POST("/transform-batch", func(c *gin.Context) {
+				var body struct {
+					RawHL7         string `json:"rawHL7" binding:"required"`
+					CreateBundle   bool   `json:"createBundle"`
+					ValidationMode string `json:"validationMode"`
+					FHIRVersion    string `json:"fhirVersion"`
+				}
+				if err := c.ShouldBindJSON(&body); err != nil {
+					c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+					return
+				}
+
+				rawMessages := hl7.SplitMessages(body.RawHL7)
+				if len(rawMessages) == 0 {
+					c.JSON(http.StatusBadRequest, gin.H{"error": "no HL7 messages found in input"})
+					return
+				}
+
+				transformSvc := services.NewHL7FHIRTransformServiceV3(db)
+				type batchResult struct {
+					Index       int                       `json:"index"`
+					MessageType string                    `json:"messageType"`
+					Success     bool                      `json:"success"`
+					Bundle      map[string]interface{}    `json:"bundle,omitempty"`
+					Errors      []string                  `json:"errors,omitempty"`
+					Warnings    []string                  `json:"warnings,omitempty"`
+				}
+
+				results := make([]batchResult, 0, len(rawMessages))
+
+				for i, raw := range rawMessages {
+					var parsed *hl7.EnhancedParsedMessage
+					if realLoader := hl7.GetRealSchemaLoader(); realLoader != nil {
+						parsed = hl7.ParseWithRealSchema(raw)
+						if parsed == nil || !parsed.Success {
+							parsed = hl7.ParseHL7Enhanced(raw)
+						}
+					} else {
+						parsed = hl7.ParseHL7Enhanced(raw)
+					}
+
+					if parsed == nil || !parsed.Success {
+						results = append(results, batchResult{
+							Index:   i,
+							Success: false,
+							Errors:  []string{"parse failed: " + func() string {
+								if parsed != nil { return parsed.Error }
+								return "nil result"
+							}()},
+						})
+						continue
+					}
+
+					// Build parsedHL7Data map from the enhanced result
+					parsedMap := map[string]interface{}{
+						"segmentGroups": parsed.EnhancedSegments,
+						"segmentOrder":  parsed.SegmentOrder,
+						"messageType":   map[string]interface{}{
+							"name":  parsed.MessageType.Name,
+							"code":  parsed.MessageType.Code,
+							"event": parsed.MessageType.Event,
+						},
+						"version": parsed.Version,
+					}
+
+					req := &services.TransformRequest{
+						ParsedHL7Data:  parsedMap,
+						CreateBundle:   body.CreateBundle || true,
+						ValidationMode: body.ValidationMode,
+						FHIRVersion:    body.FHIRVersion,
+					}
+
+					resp, err := transformSvc.Transform(c.Request.Context(), req)
+					if err != nil {
+						results = append(results, batchResult{
+							Index:   i,
+							Success: false,
+							Errors:  []string{err.Error()},
+						})
+						continue
+					}
+
+					results = append(results, batchResult{
+						Index:       i,
+						MessageType: resp.MessageType,
+						Success:     resp.Success,
+						Bundle:      resp.Bundle,
+						Errors:      resp.Errors,
+						Warnings:    resp.Warnings,
+					})
+				}
+
+				log.Printf("📦 transform-batch: processed %d/%d messages", len(results), len(rawMessages))
+				c.JSON(http.StatusOK, gin.H{
+					"success":      true,
+					"messageCount": len(rawMessages),
+					"results":      results,
+				})
+			})
+
 			// DEBUG ENDPOINT - FIXED TO LOOK FOR .GZ FILES IN CORRECT PATHS
 			fhirGroup.GET("/debug-schema", func(c *gin.Context) {
 				debug := gin.H{}

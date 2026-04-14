@@ -3,7 +3,6 @@
 package main
 
 import (
-	"archive/zip"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -51,8 +50,17 @@ func runStandaloneInstallation(cfg *Config) {
 	emit("ok", "Directory ready: "+cfg.InstallDir)
 
 	// ── Step 2: PostgreSQL ─────────────────────────────────────────────────
-	emitStep(2, "Installing PostgreSQL 15")
-	psqlPath, err := installPostgres()
+	if cfg.DBHost == "" {
+		cfg.DBHost = "localhost"
+	}
+	isLocalDB := cfg.DBHost == "localhost" || cfg.DBHost == "127.0.0.1"
+
+	if isLocalDB {
+		emitStep(2, "Installing PostgreSQL 15")
+	} else {
+		emitStep(2, "Using existing PostgreSQL at "+cfg.DBHost)
+	}
+	psqlPath, err := installPostgresIfNeeded(isLocalDB)
 	if err != nil {
 		emit("error", "PostgreSQL install failed: "+err.Error())
 		return
@@ -89,7 +97,7 @@ func runStandaloneInstallation(cfg *Config) {
 
 	// ── Step 6: Database setup ─────────────────────────────────────────────
 	emitStep(6, "Setting up PostgreSQL database")
-	if err := setupDatabase(psqlPath, cfg); err != nil {
+	if err := setupDatabase(psqlPath, cfg, isLocalDB); err != nil {
 		emit("error", "Database setup failed: "+err.Error())
 		return
 	}
@@ -134,6 +142,11 @@ func runStandaloneInstallation(cfg *Config) {
 	waitForReady(appURL+"/health", 120*time.Second)
 
 	emit("info", "")
+	// ── Registry: Add/Remove Programs entry ───────────────────────────────────
+	if installerExe, err := os.Executable(); err == nil {
+		writeUninstallRegistry(cfg.InstallDir, cfg.AppPort, installerExe, version)
+	}
+
 	emit("info", "╔══════════════════════════════════════════════╗")
 	emit("ok",   "║   Installation Complete!                     ║")
 	emit("info", "╚══════════════════════════════════════════════╝")
@@ -149,6 +162,18 @@ func runStandaloneInstallation(cfg *Config) {
 // postgresDirectURL is the official EDB silent installer for PostgreSQL 15.
 // Using a pinned URL avoids winget source index issues entirely.
 const postgresDirectURL = "https://get.enterprisedb.com/postgresql/postgresql-15.13-1-windows-x64.exe"
+
+func installPostgresIfNeeded(isLocal bool) (string, error) {
+	if !isLocal {
+		// External/cloud DB — only need the psql client for running migrations.
+		if p := findPsql(); p != "" {
+			emit("info", "Using existing PostgreSQL client: "+p)
+			return p, nil
+		}
+		return "", fmt.Errorf("psql.exe not found — install PostgreSQL client tools or add psql.exe to PATH")
+	}
+	return installPostgres()
+}
 
 func installPostgres() (string, error) {
 	// Already installed?
@@ -474,66 +499,18 @@ func downloadFileProgress(url, dest string) error {
 	return nil
 }
 
-func extractZip(src, dest string, stripRoot bool) error {
-	r, err := zip.OpenReader(src)
-	if err != nil {
-		return err
-	}
-	defer r.Close()
-
-	for _, f := range r.File {
-		// Normalize backslashes (Compress-Archive on Windows uses \ instead of /)
-		name := strings.ReplaceAll(f.Name, "\\", "/")
-		if stripRoot {
-			// Remove first path component
-			idx := strings.Index(name, "/")
-			if idx < 0 {
-				continue
-			}
-			name = name[idx+1:]
-		}
-		if name == "" {
-			continue
-		}
-
-		target := filepath.Join(dest, filepath.FromSlash(name))
-
-		if f.FileInfo().IsDir() {
-			os.MkdirAll(target, f.Mode()) //nolint:errcheck
-			continue
-		}
-
-		os.MkdirAll(filepath.Dir(target), 0755) //nolint:errcheck
-
-		out, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, f.Mode())
-		if err != nil {
-			return err
-		}
-		rc, err := f.Open()
-		if err != nil {
-			out.Close()
-			return err
-		}
-		_, err = io.Copy(out, rc)
-		rc.Close()
-		out.Close()
-		if err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 // ── Database setup ─────────────────────────────────────────────────────────
 
-func setupDatabase(psqlPath string, cfg *Config) error {
+func setupDatabase(psqlPath string, cfg *Config, isLocal bool) error {
 	pgBin := filepath.Dir(psqlPath)
 	pgPass := pgAdminPassword()
 
 	runPsql := func(db, query string) error {
 		cmd := exec.Command(
 			filepath.Join(pgBin, "psql.exe"),
+			"-h", cfg.DBHost,
 			"-U", "postgres",
+			"-p", cfg.DBPort,
 			"-d", db,
 			"-c", query,
 			"-q",
@@ -543,6 +520,27 @@ func setupDatabase(psqlPath string, cfg *Config) error {
 		if err != nil && !strings.Contains(string(out), "already exists") {
 			return fmt.Errorf("psql: %s: %w", strings.TrimSpace(string(out)), err)
 		}
+		return nil
+	}
+
+	if !isLocal {
+		// External DB — user/database must already exist; only verify connectivity.
+		emit("info", "Skipping user/database creation (external PostgreSQL)")
+		verifyCmd := exec.Command(
+			filepath.Join(pgBin, "psql.exe"),
+			"-h", cfg.DBHost,
+			"-U", cfg.DBUser,
+			"-p", cfg.DBPort,
+			"-d", cfg.DBName,
+			"-c", "SELECT 1;",
+			"-q",
+		)
+		verifyCmd.Env = append(os.Environ(), "PGPASSWORD="+cfg.DBPassword)
+		if out, err := verifyCmd.CombinedOutput(); err != nil {
+			return fmt.Errorf("cannot connect to external database at %s:%s/%s: %s",
+				cfg.DBHost, cfg.DBPort, cfg.DBName, strings.TrimSpace(string(out)))
+		}
+		emit("ok", "Connected to external database")
 		return nil
 	}
 
@@ -587,7 +585,9 @@ func runMigrations(psqlPath string, cfg *Config) error {
 		sqlFile := filepath.Join(migDir, entry.Name())
 		cmd := exec.Command(
 			filepath.Join(pgBin, "psql.exe"),
+			"-h", cfg.DBHost,
 			"-U", cfg.DBUser,
+			"-p", cfg.DBPort,
 			"-d", cfg.DBName,
 			"-f", sqlFile,
 			"-q",
@@ -617,7 +617,7 @@ func writeStandaloneEnvFile(path string, cfg *Config) error {
 PORT=%s
 API_PORT=%s
 
-DB_HOST=localhost
+DB_HOST=%s
 DB_PORT=%s
 DB_NAME=%s
 DB_USER=%s
@@ -626,6 +626,8 @@ DB_SSL=false
 
 SESSION_SECRET=%s
 JWT_SECRET=%s
+# Standalone installs run over plain HTTP — disable secure-only cookie flag.
+SESSION_COOKIE_SECURE=false
 
 NODE_ENV=production
 LOG_LEVEL=info
@@ -640,7 +642,7 @@ OLLAMA_EMBED_MODEL=nomic-embed-text
 `,
 		time.Now().Format("2006-01-02 15:04"),
 		cfg.AppPort, cfg.APIPort,
-		cfg.DBPort, cfg.DBName, cfg.DBUser, cfg.DBPassword,
+		cfg.DBHost, cfg.DBPort, cfg.DBName, cfg.DBUser, cfg.DBPassword,
 		session, jwt,
 		cfg.InstallDir,
 		cfg.WithAI,
@@ -684,54 +686,117 @@ func writeWinSWConfig(path, id, name, desc, exe, args, workDir, logFile string) 
 	return os.WriteFile(path, []byte(content), 0644)
 }
 
+// installWinSWService copies the WinSW binary to tools/<id>.exe, writes the XML
+// config alongside it (WinSW v2 locates config by replacing .exe→.xml in its own path),
+// removes any previous instance of the service, then runs "<id>.exe install".
+// Returns the path to the service executable (used later to start/stop).
+func installWinSWService(winswPath, toolsDir, id, name, desc, exe, args, workDir, logsDir string) (string, error) {
+	svcExe := filepath.Join(toolsDir, id+".exe")
+	svcCfg := filepath.Join(toolsDir, id+".xml")
+
+	// Copy winsw.exe → <id>.exe so WinSW picks up <id>.xml automatically.
+	src, err := os.Open(winswPath)
+	if err != nil {
+		return "", fmt.Errorf("open winsw: %w", err)
+	}
+	dst, err := os.OpenFile(svcExe, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0755)
+	if err != nil {
+		src.Close()
+		return "", fmt.Errorf("create %s: %w", svcExe, err)
+	}
+	_, err = io.Copy(dst, src)
+	src.Close()
+	dst.Close()
+	if err != nil {
+		return "", fmt.Errorf("copy winsw to %s: %w", svcExe, err)
+	}
+
+	if err := writeWinSWConfig(svcCfg, id, name, desc, exe, args, workDir, logsDir); err != nil {
+		return "", fmt.Errorf("write config %s: %w", svcCfg, err)
+	}
+
+	removeService(id)
+
+	// WinSW v2: run "<id>.exe install" with no arguments — it finds <id>.xml itself.
+	if out, err := exec.Command(svcExe, "install").CombinedOutput(); err != nil {
+		return "", fmt.Errorf("winsw install %s: %s: %w", id, strings.TrimSpace(string(out)), err)
+	}
+	return svcExe, nil
+}
+
 func registerWindowsServices(winswPath, nodePath, goAPIBin string, cfg *Config) error {
+	toolsDir := filepath.Join(cfg.InstallDir, "tools")
 	logsDir := filepath.Join(cfg.InstallDir, "logs")
 	os.MkdirAll(logsDir, 0755) //nolint:errcheck
 
 	// ── Go API service ──────────────────────────────────────────────────────
-	svcAPI := "ezhealthkonnect-api"
-	apiCfg := filepath.Join(cfg.InstallDir, "tools", svcAPI+".xml")
-	removeService(svcAPI)
-
-	if err := writeWinSWConfig(apiCfg,
-		svcAPI, "ezHealthKonnect Go API", "ezHealthKonnect HL7/FHIR Go Backend",
+	apiExe, err := installWinSWService(winswPath, toolsDir,
+		"ezhealthkonnect-api",
+		"ezHealthKonnect Go API", "ezHealthKonnect HL7/FHIR Go Backend",
 		goAPIBin, "",
 		cfg.InstallDir, logsDir,
-	); err != nil {
-		return fmt.Errorf("write api service config: %w", err)
-	}
-	if out, err := exec.Command(winswPath, "install", apiCfg).CombinedOutput(); err != nil {
-		return fmt.Errorf("winsw install go-api: %s: %w", strings.TrimSpace(string(out)), err)
+	)
+	if err != nil {
+		return err
 	}
 
 	// ── Node.js frontend service ────────────────────────────────────────────
-	svcApp := "ezhealthkonnect"
 	serverJS := filepath.Join(cfg.InstallDir, "server.js")
-	appCfg := filepath.Join(cfg.InstallDir, "tools", svcApp+".xml")
-	removeService(svcApp)
-
-	if err := writeWinSWConfig(appCfg,
-		svcApp, "ezHealthKonnect Web", "ezHealthKonnect Web Frontend",
+	appExe, err := installWinSWService(winswPath, toolsDir,
+		"ezhealthkonnect",
+		"ezHealthKonnect Web", "ezHealthKonnect Web Frontend",
 		nodePath, serverJS,
 		cfg.InstallDir, logsDir,
-	); err != nil {
-		return fmt.Errorf("write app service config: %w", err)
-	}
-	if out, err := exec.Command(winswPath, "install", appCfg).CombinedOutput(); err != nil {
-		return fmt.Errorf("winsw install node: %s: %w", strings.TrimSpace(string(out)), err)
+	)
+	if err != nil {
+		return err
 	}
 
 	// Start services
 	emit("info", "Starting services...")
-	if out, err := exec.Command(winswPath, "start", apiCfg).CombinedOutput(); err != nil {
-		emit("warn", fmt.Sprintf("Could not start %s: %s", svcAPI, strings.TrimSpace(string(out))))
+	if out, err := exec.Command(apiExe, "start").CombinedOutput(); err != nil {
+		emit("warn", fmt.Sprintf("Could not start go-api: %s", strings.TrimSpace(string(out))))
 	}
 	time.Sleep(3 * time.Second)
-	if out, err := exec.Command(winswPath, "start", appCfg).CombinedOutput(); err != nil {
-		emit("warn", fmt.Sprintf("Could not start %s: %s", svcApp, strings.TrimSpace(string(out))))
+	if out, err := exec.Command(appExe, "start").CombinedOutput(); err != nil {
+		emit("warn", fmt.Sprintf("Could not start node: %s", strings.TrimSpace(string(out))))
 	}
 
 	return nil
+}
+
+// ── Windows Registry (Add/Remove Programs) ─────────────────────────────────
+
+const uninstallRegKey = `SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\ezHealthKonnect`
+
+// writeUninstallRegistry creates an entry in Add/Remove Programs so the user
+// can uninstall from the Windows Settings app or control panel.
+func writeUninstallRegistry(installDir, appPort, installerExe, ver string) {
+	uninstallCmd := fmt.Sprintf(`"%s" --uninstall`, installerExe)
+	pairs := [][2]string{
+		{"DisplayName", "ezHealthKonnect"},
+		{"DisplayVersion", ver},
+		{"Publisher", "ezInterOp Solutions"},
+		{"InstallLocation", installDir},
+		{"UninstallString", uninstallCmd},
+		{"QuietUninstallString", uninstallCmd},
+		{"DisplayIcon", filepath.Join(installDir, "go-api.exe")},
+		{"URLInfoAbout", "https://www.ezInterOpSolutions.com"},
+		{"Comments", "Healthcare HL7 to FHIR Integration Platform"},
+		{"NoModify", "1"},
+		{"NoRepair", "1"},
+	}
+	for _, p := range pairs {
+		t := "REG_SZ"
+		if p[0] == "NoModify" || p[0] == "NoRepair" {
+			t = "REG_DWORD"
+		}
+		exec.Command("reg", "add", `HKLM\`+uninstallRegKey, "/v", p[0], "/t", t, "/d", p[1], "/f").Run() //nolint:errcheck
+	}
+}
+
+func removeUninstallRegistry() {
+	exec.Command("reg", "delete", `HKLM\`+uninstallRegKey, "/f").Run() //nolint:errcheck
 }
 
 func removeService(name string) {
@@ -755,6 +820,10 @@ func runStandaloneUninstall(cfg *Config) {
 	} else {
 		emit("ok", "Install directory removed")
 	}
+
+	emit("info", "── Removing Add/Remove Programs entry")
+	removeUninstallRegistry()
+	emit("ok", "Registry entry removed")
 
 	emit("ok", "Uninstall complete — you may close this window")
 }

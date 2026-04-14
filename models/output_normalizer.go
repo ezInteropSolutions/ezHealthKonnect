@@ -273,24 +273,24 @@ func (n *OutputNormalizer) NormalizeStepOutput(output map[string]interface{}) ma
 	// Then flatten any other wrapper keys (mapped_fields, field_results, etc.)
 	unwrapped := n.flattenWrapperKeys(flattened)
 
-	// Extract user-controlled result data before key normalization.
-	// The "result" key holds the actual transformed output of normalizer/
-	// pivot/transpose/flatten/unflatten steps. Its column names are
-	// user-defined and must not be snake_cased by the output normalizer.
-	var resultVal interface{}
-	hasResult := false
-	if v, ok := unwrapped["result"]; ok {
-		resultVal = v
-		hasResult = true
-		delete(unwrapped, "result")
+	// Extract keys whose values must NOT have their internal keys snake_cased.
+	// - "result": user-controlled pivot/transform output (column names like "GLUC", ICD codes)
+	// - "fhirBundle": FHIR R4 resource tree — all keys MUST remain camelCase per the FHIR spec
+	//   (e.g. resourceType, birthDate, effectiveDateTime). Normalizing them breaks FHIR validators.
+	preserved := map[string]interface{}{}
+	for _, key := range []string{"result", "fhirBundle"} {
+		if v, ok := unwrapped[key]; ok {
+			preserved[key] = v
+			delete(unwrapped, key)
+		}
 	}
 
 	// Normalize all metadata keys (result_count, operation, duration_ms, etc.)
 	normalized := n.NormalizeMap(unwrapped)
 
-	// Restore the user-controlled result data without key normalization
-	if hasResult {
-		normalized["result"] = resultVal
+	// Restore preserved keys without key normalization
+	for key, val := range preserved {
+		normalized[key] = val
 	}
 
 	return normalized

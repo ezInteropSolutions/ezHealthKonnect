@@ -58,8 +58,10 @@ $dirs = @(
     'controllers', 'services', 'middleware', 'routes', 'config',
     'models', 'processing', 'utils', 'public',
     'fhir', 'hl7',
-    'schemas', 'templates'
+    'templates'
 )
+# NOTE: schemas/ excluded — 1.5 GB of FHIR JSON schemas, too large to embed.
+# App degrades gracefully: logs warning but runs without schema validation.
 # Excluded (not in $dirs above):
 #   installer/       - build tooling only
 #   dist/            - build output

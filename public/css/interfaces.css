@@ -521,6 +521,11 @@
     color: #ef4444;
 }
 
+.status-error-tip {
+    cursor: help;
+    border-bottom: 1px dashed #ef4444;
+}
+
 /* FIXED: Statistics - more readable */
 .stats-cell {
     font-size: 10px; /* Increased from 7px */

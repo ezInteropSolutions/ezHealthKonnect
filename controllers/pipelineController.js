@@ -346,8 +346,12 @@ exports.savePipeline = async (req, res) => {
             console.log('Mappings sample:', JSON.stringify(embeddedMappings).substring(0, 200));
         }
 
-        // Start transaction
-        await sequelize.query('BEGIN');
+        // Start transaction — use Sequelize managed transaction to guarantee
+        // proper connection acquisition, BEGIN/COMMIT/ROLLBACK, and pool release.
+        // Raw 'BEGIN'/'ROLLBACK' strings share the pool connection non-deterministically
+        // and leave connections in a broken state on error, causing "Validation error"
+        // on the next save attempt.
+        const t = await sequelize.transaction();
 
         try {
             // 1. Upsert pipeline metadata (including connections and pipeline_config)
@@ -381,7 +385,8 @@ exports.savePipeline = async (req, res) => {
                     JSON.stringify(connections),
                     JSON.stringify(pipelineConfig)
                 ],
-                type: QueryTypes.SELECT
+                type: QueryTypes.SELECT,
+                transaction: t
             });
 
             // CRITICAL: Use the ACTUAL database pipeline ID returned by the UPSERT.
@@ -399,13 +404,14 @@ exports.savePipeline = async (req, res) => {
                 WHERE step_id IN (
                     SELECT id FROM transformation_steps WHERE pipeline_id = $1
                 )
-            `, { bind: [actualPipelineId], type: QueryTypes.DELETE });
+            `, { bind: [actualPipelineId], type: QueryTypes.DELETE, transaction: t });
 
             await sequelize.query(`
                 DELETE FROM transformation_steps WHERE pipeline_id = $1
             `, {
                 bind: [actualPipelineId],
-                type: QueryTypes.DELETE
+                type: QueryTypes.DELETE,
+                transaction: t
             });
 
             console.log(`🗑️  Cleared old steps for pipeline ${actualPipelineId}`);
@@ -612,7 +618,8 @@ exports.savePipeline = async (req, res) => {
                         ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, NOW(), NOW())
                 `, {
                     bind: insertBinds,
-                    type: QueryTypes.INSERT
+                    type: QueryTypes.INSERT,
+                    transaction: t
                 });
 
                 stepsSaved++;
@@ -620,8 +627,8 @@ exports.savePipeline = async (req, res) => {
 
             console.log(`✅ Saved ${stepsSaved} steps to pipeline ${actualPipelineId}`);
 
-            // Commit transaction
-            await sequelize.query('COMMIT');
+            // Commit — Sequelize releases the connection back to the pool cleanly
+            await t.commit();
 
             // Re-ingest pipeline into AI knowledge base (fire-and-forget, non-blocking)
             axios.post(`${GO_BACKEND_URL}/api/ai/ingest/pipeline/${actualPipelineId}`)
@@ -636,8 +643,8 @@ exports.savePipeline = async (req, res) => {
             });
 
         } catch (error) {
-            // Rollback on error
-            await sequelize.query('ROLLBACK');
+            // Rollback — Sequelize releases the connection even if rollback itself errors
+            await t.rollback().catch(() => {});
             throw error;
         }
 

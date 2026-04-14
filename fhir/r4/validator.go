@@ -243,6 +243,15 @@ func (v *FHIRR4Validator) ValidateBundle(
 		}
 	}
 
+	// ── Reference-format check ────────────────────────────────────────────────
+	// When all entries use urn:uuid: fullUrls, internal references MUST also use
+	// urn:uuid: form.  "ResourceType/id" references resolve only against http(s)
+	// fullUrls.  This check surfaces the mismatch so it is visible in our
+	// internal validation output (the external FHIR validator flags it as errors).
+	if opts.ValidateRefs && opts.Level >= LevelStandard {
+		v.validateReferenceFormats(entries, &result)
+	}
+
 	// ── Tally ─────────────────────────────────────────────────────────────────
 	for _, iss := range result.BundleIssues {
 		if iss.Severity == "error" {
@@ -258,6 +267,74 @@ func (v *FHIRR4Validator) ValidateBundle(
 	result.Valid = result.ErrorCount == 0
 
 	return result
+}
+
+// validateReferenceFormats checks that internal references use the correct form
+// for the fullUrl scheme in use.  When an entry has a urn:uuid: fullUrl, any
+// reference to it from another resource MUST use that same urn:uuid: string —
+// not the short "ResourceType/id" form.
+func (v *FHIRR4Validator) validateReferenceFormats(entries []interface{}, result *BundleResult) {
+	// Build a map of ResourceType/id → fullUrl (for urn: entries only)
+	shortToFull := make(map[string]string)
+	for _, raw := range entries {
+		e, ok := raw.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		fu, _ := e["fullUrl"].(string)
+		if !strings.HasPrefix(fu, "urn:") {
+			continue // short-form references are valid against http(s) entries
+		}
+		res, ok := e["resource"].(map[string]interface{})
+		if !ok {
+			continue
+		}
+		rt, _ := res["resourceType"].(string)
+		id, _ := res["id"].(string)
+		if rt != "" && id != "" {
+			shortToFull[rt+"/"+id] = fu
+		}
+	}
+	if len(shortToFull) == 0 {
+		return
+	}
+	// Walk every resource's references looking for short-form refs that should be urn:
+	for i, raw := range entries {
+		e, ok := raw.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		res, ok := e["resource"].(map[string]interface{})
+		if !ok {
+			continue
+		}
+		rt, _ := res["resourceType"].(string)
+		path := fmt.Sprintf("Bundle.entry[%d].resource/*%s*/", i, rt)
+		collectRefFormatIssues(res, path, shortToFull, result)
+	}
+}
+
+// collectRefFormatIssues recursively finds "reference" fields that use
+// short "ResourceType/id" form when the target has a urn:uuid: fullUrl.
+func collectRefFormatIssues(node interface{}, path string, shortToFull map[string]string, result *BundleResult) {
+	switch v := node.(type) {
+	case map[string]interface{}:
+		if ref, ok := v["reference"].(string); ok {
+			if targetFull, found := shortToFull[ref]; found {
+				result.addBundleError(issue("error", "reference", "wrong-reference-form", path,
+					fmt.Sprintf("Reference '%s' uses ResourceType/id form but the target entry has a urn:uuid: fullUrl (%s). "+
+						"When fullUrl is urn:uuid:, the reference MUST also use urn:uuid: form.",
+						ref, targetFull)))
+			}
+		}
+		for k, child := range v {
+			collectRefFormatIssues(child, path+"."+k, shortToFull, result)
+		}
+	case []interface{}:
+		for i, item := range v {
+			collectRefFormatIssues(item, fmt.Sprintf("%s[%d]", path, i), shortToFull, result)
+		}
+	}
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -314,6 +391,64 @@ func (v *FHIRR4Validator) validateStructure(
 				fmt.Sprintf("%s: must-support element '%s' is not populated", rt, field)))
 		}
 	}
+
+	// Coding.system must be an absolute URI — walk all CodeableConcept/Coding fields.
+	// This catches local names like "Local", "HOSPITAL", "MR" that have no namespace.
+	v.validateCodingSystems(rt, resource, res)
+}
+
+// validateCodingSystems walks a resource looking for Coding objects whose system
+// field is present but is not an absolute URI (http://, https://, urn:).
+// A Coding without a system has undefined meaning and cannot be validated by
+// a terminology server — this is a common source of FHIR validator complaints.
+func (v *FHIRR4Validator) validateCodingSystems(rt string, resource map[string]interface{}, res *ResourceResult) {
+	walkCodingSystems(resource, rt, res)
+}
+
+func walkCodingSystems(node interface{}, path string, res *ResourceResult) {
+	switch val := node.(type) {
+	case map[string]interface{}:
+		// Detect a Coding object: has "code" or "display" alongside "system" (or missing "system")
+		_, hasCode := val["code"]
+		_, hasDisplay := val["display"]
+		_, hasSystem := val["system"]
+		isCoding := hasCode || hasDisplay
+		if isCoding {
+			sys, _ := val["system"].(string)
+			if sys == "" && hasCode {
+				res.addWarning(issue("warning", "structure", "coding-no-system", path,
+					fmt.Sprintf("%s: Coding has a code but no system — code meaning is undefined", path)))
+			} else if sys != "" && !isAbsoluteSystemURI(sys) {
+				res.addWarning(issue("warning", "structure", "coding-non-absolute-system", path,
+					fmt.Sprintf("%s: Coding.system '%s' is not an absolute URI — "+
+						"use a canonical system URL (e.g. http://loinc.org, http://snomed.info/sct)", path, sys)))
+			}
+			if hasSystem {
+				// Recurse into sub-fields but skip re-processing this Coding's own system/code
+				for k, child := range val {
+					if k == "system" || k == "code" || k == "display" || k == "version" || k == "userSelected" {
+						continue
+					}
+					walkCodingSystems(child, path+"."+k, res)
+				}
+				return
+			}
+		}
+		for k, child := range val {
+			walkCodingSystems(child, path+"."+k, res)
+		}
+	case []interface{}:
+		for i, item := range val {
+			walkCodingSystems(item, fmt.Sprintf("%s[%d]", path, i), res)
+		}
+	}
+}
+
+// isAbsoluteSystemURI returns true when a Coding.system value is a proper absolute URI.
+func isAbsoluteSystemURI(s string) bool {
+	return strings.HasPrefix(s, "http://") ||
+		strings.HasPrefix(s, "https://") ||
+		strings.HasPrefix(s, "urn:")
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -450,25 +585,49 @@ func walkRefs(
 	}
 }
 
-// collectReferenceTargets builds the set of fullUrls and "ResourceType/id"
-// strings present in a Bundle's entry array for internal-reference resolution.
+// referenceTarget records how a bundle entry can be reached by a reference.
+type referenceTarget struct {
+	fullUrl      string // urn:uuid:..., https://..., or relative
+	isURNUUID    bool   // true when fullUrl starts with "urn:uuid:"
+	resourceType string
+	id           string
+}
+
+// collectReferenceTargets builds a map of valid reference strings for each entry.
+//
+// FHIR resolution rule (https://hl7.org/fhir/bundle.html#references):
+// When an entry's fullUrl is a urn:uuid: URN, the ONLY valid way to reference
+// it from within the same Bundle is by that exact urn:uuid: string.
+// Using "ResourceType/id" only resolves correctly when the fullUrl is an
+// absolute http(s) URL whose path ends with "ResourceType/id".
+//
+// Our previous implementation added both fullUrl AND ResourceType/id — which
+// caused the validator to accept "Patient/patient-xyz" as resolved even when the
+// actual fullUrl was "urn:uuid:276ea0fe..." (the external FHIR validator rejects this).
 func collectReferenceTargets(entries []interface{}) map[string]bool {
-	targets := make(map[string]bool, len(entries))
+	targets := make(map[string]bool, len(entries)*2)
 	for _, raw := range entries {
 		e, ok := raw.(map[string]interface{})
 		if !ok {
 			continue
 		}
-		if fu, ok := e["fullUrl"].(string); ok && fu != "" {
-			targets[fu] = true
-		}
+		fu, _ := e["fullUrl"].(string)
 		res, ok := e["resource"].(map[string]interface{})
 		if !ok {
 			continue
 		}
 		rt, _ := res["resourceType"].(string)
 		id, _ := res["id"].(string)
-		if rt != "" && id != "" {
+
+		if fu != "" {
+			targets[fu] = true
+		}
+
+		// "ResourceType/id" is only a valid reference target when the fullUrl is an
+		// absolute HTTP URL that ends with that path segment (non-urn: bundles).
+		// When fullUrl is urn:uuid:, references MUST use the urn: form.
+		isURN := strings.HasPrefix(fu, "urn:")
+		if !isURN && rt != "" && id != "" {
 			targets[rt+"/"+id] = true
 		}
 	}

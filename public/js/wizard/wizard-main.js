@@ -831,7 +831,7 @@ debugStepVisibility() {
                 window.wizard.openModal();
             } catch (error) {
                 console.error('Failed to initialize wizard:', error);
-                alert('Error: Could not initialize the interface wizard. Please refresh the page and try again.');
+                AppDialogs.toast('Error: Could not initialize the interface wizard. Please refresh the page and try again.', 'error');
             }
         }
     };

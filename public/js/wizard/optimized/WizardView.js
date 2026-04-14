@@ -668,7 +668,7 @@ class WizardView extends EventTarget {
                 <div class="form-group">
                     <label class="form-label">
                         Supported REST Operations
-                        <a href="#" class="help-link" onclick="event.preventDefault(); alert('Choose which FHIR REST API operations to enable:\\n\\n• CREATE (POST) - Most common, create new resources\\n• READ (GET) - Retrieve resources by ID\\n• UPDATE (PUT) - Replace entire resource\\n• PATCH - Partial updates\\n• DELETE - Remove resources (use with caution)\\n• SEARCH - Query with parameters\\n• BATCH/TRANSACTION - Multiple operations in one request\\n\\nRecommendation: Start with CREATE only, add others as needed.');" title="Click for help">ⓘ</a>
+                        <a href="#" class="help-link" onclick="event.preventDefault(); AppDialogs.alert('Choose which FHIR REST API operations to enable:<br><br>• <b>CREATE (POST)</b> — Most common, create new resources<br>• <b>READ (GET)</b> — Retrieve resources by ID<br>• <b>UPDATE (PUT)</b> — Replace entire resource<br>• <b>PATCH</b> — Partial updates<br>• <b>DELETE</b> — Remove resources (use with caution)<br>• <b>SEARCH</b> — Query with parameters<br>• <b>BATCH/TRANSACTION</b> — Multiple operations in one request<br><br><i>Recommendation: Start with CREATE only, add others as needed.</i>', { title: 'FHIR Operations Help', type: 'info' });" title="Click for help">ⓘ</a>
                     </label>
                     <div class="checkbox-group">
                         <label class="checkbox-label">
@@ -909,45 +909,8 @@ class WizardView extends EventTarget {
                         <input type="hidden" id="targetConnectivity" value="sink">
                         <input type="hidden" id="targetType" value="${data.targetType || 'fhir'}">
                     ` : `
-                        <!-- Regular Flow: Show target configuration options -->
-                        <div class="form-row">
-                            <div class="form-group">
-                                <label for="targetType" class="form-label required">Target Format</label>
-                                <select id="targetType" class="form-control" required>
-                                    <option value="fhir" ${data.targetType === 'fhir' ? 'selected' : ''}>FHIR R4 (Recommended)</option>
-                                    <option value="fhir-stu3" ${data.targetType === 'fhir-stu3' ? 'selected' : ''}>FHIR STU3</option>
-                                    <option value="hl7v2" ${data.targetType === 'hl7v2' ? 'selected' : ''}>HL7 v2.x</option>
-                                    <option value="database" ${data.targetType === 'database' ? 'selected' : ''}>Database</option>
-                                    <option value="file" ${data.targetType === 'file' ? 'selected' : ''}>File Output</option>
-                                </select>
-                                <div class="form-hint">💡 OOB: FHIR R4 is the current standard</div>
-                            </div>
-
-                            <div class="form-group">
-                                <label for="targetConnectivity" class="form-label required">Connectivity</label>
-                                <select id="targetConnectivity" class="form-control" required>
-                                    <option value="http" ${data.targetConnectivity === 'http' ? 'selected' : ''}>HTTP/REST (Standard)</option>
-                                    <option value="tcp" ${data.targetConnectivity === 'tcp' ? 'selected' : ''}>TCP/MLLP</option>
-                                    <option value="file" ${data.targetConnectivity === 'file' ? 'selected' : ''}>File Output</option>
-                                    <option value="database" ${data.targetConnectivity === 'database' ? 'selected' : ''}>Database</option>
-                                </select>
-                                <div class="form-hint">💡 HTTP/REST is FHIR standard delivery</div>
-                            </div>
-                        </div>
-
-                        <!-- Dynamic configuration based on connectivity -->
-                        <div id="targetConfigPanel" class="config-panel">
-                            ${this.getTargetConfigPanel(data.targetConnectivity, {...(data.targetConfig || {}), transformationFlow: data.transformationFlow})}
-                        </div>
-
-                        <!-- FHIR Server Testing -->
-                        <div class="connection-test">
-                            <button type="button" class="btn btn-outline-primary" id="testTargetConnection">
-                                <span class="btn-icon">🎯</span>
-                                Test FHIR Server
-                            </button>
-                            <div class="connection-status" id="targetConnectionStatus"></div>
-                        </div>
+                        <!-- Outbound connector — same ConnectorConfigBuilder used by pipeline builder -->
+                        <div id="wizardOutboundConnectorContainer" class="wizard-embedded-connector"></div>
                     `}
                 </div>
             </div>
@@ -1533,10 +1496,21 @@ class WizardView extends EventTarget {
                                 <span style="font-size: 12px; color: #6b7280;">Filter:</span>
                                 <select id="resource-filter" style="padding: 4px 8px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 12px;">
                                     <option value="all">All Resources</option>
-                                    <option value="Patient">Patient</option>
-                                    <option value="Encounter">Encounter</option>
-                                    <option value="MessageHeader">MessageHeader</option>
-                                    <option value="Observation">Observation</option>
+                                    ${(() => {
+                                        // Build options from actual mappings when available, else from expected
+                                        const mappings = data?.fhirTransformResult?.atomicMappings || [];
+                                        let resourceNames = [...new Set(
+                                            mappings.map(m => {
+                                                const path = m.resourceType || m.targetPath || m.fhirPath || m.fhirField || '';
+                                                const match = path.match(/^([A-Z][A-Za-z]+)/);
+                                                return match ? match[1] : null;
+                                            }).filter(Boolean)
+                                        )];
+                                        if (resourceNames.length === 0) {
+                                            resourceNames = this.getExpectedResourcesForMessageType(data?.detectedMessageType || '').map(r => r.name);
+                                        }
+                                        return resourceNames.map(r => `<option value="${r}">${r}</option>`).join('');
+                                    })()}
                                 </select>
                             </div>
                         </div>
@@ -1671,7 +1645,22 @@ class WizardView extends EventTarget {
     renderFHIRMappingEditor(transformResult) {
         const mappings = transformResult.atomicMappings || [];
         const errors = transformResult.validationErrors || [];
-        const resources = ['Patient', 'Encounter', 'MessageHeader', 'Observation'];
+
+        // Derive resource list from actual mapping data so we never show empty groups
+        // or miss resources the backend generated (e.g. DiagnosticReport for ORU^R01).
+        const resourcesFromMappings = [...new Set(
+            mappings.map(m => {
+                const path = m.resourceType || m.targetPath || m.fhirPath || m.fhirField || '';
+                // Extract leading resource name from paths like "Patient.name[0].family"
+                const match = path.match(/^([A-Z][A-Za-z]+)/);
+                return match ? match[1] : null;
+            }).filter(Boolean)
+        )];
+        // Always include expected resources for the detected message type, then add any
+        // extra resources that actually appeared in the mappings.
+        const messageType = window.wizardController?.model?.data?.detectedMessageType || '';
+        const expectedNames = this.getExpectedResourcesForMessageType(messageType).map(r => r.name);
+        const resources = [...new Set([...expectedNames, ...resourcesFromMappings])];
 
         // Determine status based on mappings and errors
         const hasMappings = mappings.length > 0;
@@ -1862,9 +1851,10 @@ class WizardView extends EventTarget {
 
         if (resourceMappings.length === 0) {
             return `
-                <div style="border: 2px dashed #d1d5db; border-radius: 12px; padding: 16px; text-align: center; color: #6b7280;">
-                    <div style="font-size: 32px; margin-bottom: 8px;">👤</div>
-                    <div style="font-size: 14px; font-weight: 500;">No ${resourceType} mappings found</div>
+                <div style="border: 2px dashed #d1d5db; border-radius: 12px; padding: 16px; text-align: center; color: #6b7280;" id="resource-group-empty-${resourceType}">
+                    <div style="font-size: 32px; margin-bottom: 8px;">${this.getResourceIcon(resourceType)}</div>
+                    <div style="font-size: 14px; font-weight: 500;">No ${resourceType} mappings generated</div>
+                    <div style="font-size: 12px; color: #9ca3af; margin-top: 4px;">This resource may not be present in the HL7 message</div>
                     <button onclick="window.addResourceMapping('${resourceType}')"
                             style="margin-top: 8px; padding: 6px 12px; background: #1e3a8a; color: white; border: none; border-radius: 4px; font-size: 12px; cursor: pointer;">
                         ➕ Add Mapping
@@ -2012,8 +2002,13 @@ class WizardView extends EventTarget {
         const hasIssue = mapping.error || mapping.warning;
         const hl7Field = mapping.sourcePath || mapping.hl7Path || mapping.hl7Field || 'Unknown';
         const fhirField = mapping.targetPath || mapping.fhirPath || mapping.fhirField || 'Unknown';
-        const transformType = mapping.transformType || 'direct';
+        const transformType = mapping.transformType || mapping.transform || 'direct';
         const isRequired = mapping.isRequired ? '⭐' : '';
+        // Confidence badge — use stored value or infer from data_type
+        const conf = mapping.confidence != null ? mapping.confidence : 0.85;
+        const confPct = Math.round(conf * 100);
+        const confColor = confPct >= 90 ? '#16a34a' : confPct >= 75 ? '#d97706' : '#dc2626';
+        const confBadge = `<span style="font-size:10px;font-weight:700;color:${confColor};background:${confColor}15;padding:1px 5px;border-radius:9px;border:1px solid ${confColor}40;margin-left:4px;" title="Mapping confidence">${confPct}%</span>`;
 
         // Extract actual values from parsed HL7 data and FHIR resources
         const hl7Value = this.extractHL7Value(hl7Field);
@@ -2030,6 +2025,7 @@ class WizardView extends EventTarget {
                                onchange="window.updateMapping(${index}, 'hl7Field', this.value)"
                                style="flex: 1; padding: 4px 8px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 12px; font-family: monospace; background: #f9fafb;"
                                readonly>
+                        ${confBadge}
                         ${hasIssue ? '<span style="color: #dc2626; font-size: 12px;">⚠️</span>' : ''}
                     </div>
                     <div style="font-size: 11px; color: #6b7280; padding: 2px 4px; background: #f3f4f6; border-radius: 4px; font-family: monospace; max-width: 200px; overflow: hidden; text-overflow: ellipsis;">
@@ -2037,16 +2033,10 @@ class WizardView extends EventTarget {
                     </div>
                 </div>
 
-                <!-- Transformation Arrow & Options -->
-                <div style="display: flex; flex-direction: column; align-items: center; gap: 4px;">
+                <!-- Transformation Arrow & Type Badge -->
+                <div style="display: flex; flex-direction: column; align-items: center; gap: 4px; flex-shrink: 0;">
                     <div style="color: #6b7280; font-weight: bold; font-size: 14px;">→</div>
-                    <select onchange="window.updateMappingTransformation(${index}, this.value)"
-                            style="padding: 2px 4px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 10px; min-width: 80px;">
-                        <option value="direct" ${(mapping.transform || 'direct') === 'direct' ? 'selected' : ''}>Direct</option>
-                        <option value="lookup" ${(mapping.transform || '') === 'lookup' ? 'selected' : ''}>Lookup</option>
-                        <option value="format" ${(mapping.transform || '') === 'format' ? 'selected' : ''}>Format</option>
-                        <option value="custom" ${(mapping.transform || '') === 'custom' ? 'selected' : ''}>Custom</option>
-                    </select>
+                    ${window._transformBadge(transformType, index)}
                 </div>
 
                 <!-- FHIR Target -->
@@ -2091,9 +2081,11 @@ class WizardView extends EventTarget {
                 { name: 'MessageHeader', icon: '📨', color: '#fdf2f8', borderColor: '#fbcfe8', textColor: '#be185d' }
             ],
             'ORU^R01': [
-                { name: 'Patient', icon: '👤', color: '#f0fdf4', borderColor: '#bbf7d0', textColor: '#15803d' },
-                { name: 'Observation', icon: '🔬', color: '#fdf2f8', borderColor: '#fbcfe8', textColor: '#be185d' },
-                { name: 'DiagnosticReport', icon: '📊', color: '#eff6ff', borderColor: '#bfdbfe', textColor: '#1d4ed8' }
+                { name: 'MessageHeader',   icon: '📨', color: '#fdf4ff', borderColor: '#e9d5ff', textColor: '#7c3aed' },
+                { name: 'Patient',         icon: '👤', color: '#f0fdf4', borderColor: '#bbf7d0', textColor: '#15803d' },
+                { name: 'Encounter',       icon: '🏥', color: '#eff6ff', borderColor: '#bfdbfe', textColor: '#1d4ed8' },
+                { name: 'DiagnosticReport',icon: '📊', color: '#fff7ed', borderColor: '#fed7aa', textColor: '#c2410c' },
+                { name: 'Observation',     icon: '🔬', color: '#fdf2f8', borderColor: '#fbcfe8', textColor: '#be185d' }
             ]
         };
         return resourceMap[messageType] || [
@@ -4594,6 +4586,64 @@ PV1|1|I|ICU^101^1|||DOC123^Smith^Jane|||EMERGENCY|||
         }
     }
 
+    /**
+     * Mount ConnectorConfigBuilder (outbound) inside wizard step 4 (Target Config).
+     * Mirrors mountInboundConnectorBuilder — produces the same config as connector.outbound step.
+     */
+    mountOutboundConnectorBuilder(container) {
+        const builderEl = container.querySelector('#wizardOutboundConnectorContainer');
+        if (!builderEl) return;
+
+        if (typeof ConnectorConfigBuilder === 'undefined') {
+            console.warn('[WizardView] ConnectorConfigBuilder not loaded — cannot mount outbound builder');
+            return;
+        }
+
+        try {
+            if (this.outboundBuilder) {
+                try { this.outboundBuilder.destroy(); } catch (_) {}
+                this.outboundBuilder = null;
+            }
+
+            const existingConfig = { ...(this.controller?.model?.data?.targetConnectorConfig || {}) };
+
+            // Seed a default connector type so the builder has something selected
+            // even when the user never touched the Connection tab.
+            if (!existingConfig.connectorType) {
+                const legacyTarget = this.controller?.model?.data?.targetConnectivity || 'http';
+                const DEFAULT_OUTBOUND = {
+                    'http':     'http_outbound',
+                    'fhir':     'http_outbound',
+                    'tcp':      'tcp_mllp_outbound',
+                    'file':     'file_writer',
+                    'database': 'postgresql_outbound',
+                };
+                existingConfig.connectorType = DEFAULT_OUTBOUND[legacyTarget] || 'http_outbound';
+            }
+
+            this.outboundBuilder = new ConnectorConfigBuilder(builderEl, existingConfig, 'outbound');
+            this.outboundBuilder.init();
+
+            builderEl.addEventListener('change', () => {
+                if (!this.outboundBuilder) return;
+                try {
+                    const connectorCfg = this.outboundBuilder.getConfig();
+                    this.dispatchEvent(new CustomEvent('fieldChange', {
+                        detail: { field: 'targetConnectorConfig', value: { ...connectorCfg } }
+                    }));
+                    this.dispatchEvent(new CustomEvent('fieldChange', {
+                        detail: { field: 'targetConnectivity', value: this._connectorTypeToLegacy(connectorCfg.connectorType || '') }
+                    }));
+                } catch (err) {
+                    console.warn('[WizardView] Outbound ConnectorConfigBuilder change handler error:', err);
+                }
+            });
+        } catch (err) {
+            console.error('[WizardView] Failed to mount outbound ConnectorConfigBuilder:', err);
+            this.outboundBuilder = null;
+        }
+    }
+
     /** Map a full connector type name (e.g. 'tcp_mllp_inbound') to a legacy shorthand */
     _connectorTypeToLegacy(typeName) {
         if (!typeName) return '';
@@ -4934,7 +4984,7 @@ PV1|1|I|ICU^101^1|||DOC123^Smith^Jane|||EMERGENCY|||
                 e.target.classList.add('active');
 
                 // Implement view filtering
-                window.switchMappingView(view);
+                window.toggleMappingView(view);
             });
         });
 
@@ -4945,17 +4995,19 @@ PV1|1|I|ICU^101^1|||DOC123^Smith^Jane|||EMERGENCY|||
                 const filter = e.target.value;
                 console.log('🔍 Filtering resources:', filter);
 
-                const groups = container.querySelectorAll('[id^="resource-mappings-"]');
-                groups.forEach(group => {
+                // Cover both populated groups (resource-mappings-*) and empty placeholders (resource-group-empty-*)
+                const populated = container.querySelectorAll('[id^="resource-mappings-"]');
+                populated.forEach(group => {
                     const parent = group.closest('[style*="border: 2px"]');
                     if (parent) {
-                        if (filter === 'all') {
-                            parent.style.display = 'block';
-                        } else {
-                            const resourceType = group.id.replace('resource-mappings-', '');
-                            parent.style.display = resourceType === filter ? 'block' : 'none';
-                        }
+                        const resourceType = group.id.replace('resource-mappings-', '');
+                        parent.style.display = (filter === 'all' || resourceType === filter) ? 'block' : 'none';
                     }
+                });
+                const empty = container.querySelectorAll('[id^="resource-group-empty-"]');
+                empty.forEach(el => {
+                    const resourceType = el.id.replace('resource-group-empty-', '');
+                    el.style.display = (filter === 'all' || resourceType === filter) ? 'block' : 'none';
                 });
             });
         }
@@ -5041,15 +5093,10 @@ PV1|1|I|ICU^101^1|||DOC123^Smith^Jane|||EMERGENCY|||
         // Segment toggle functionality
         this.setupSegmentToggles(container);
 
-        // Setup target configuration listeners (delivery mode, authentication, resources)
-        this.setupTargetConfigListeners(container);
+        // Mount the outbound ConnectorConfigBuilder — same component as pipeline builder
+        this.mountOutboundConnectorBuilder(container);
 
-        // REUSABILITY: Use shared component event listeners for target config
-        // This handles HTTP auth type dropdown changes (Basic, Bearer, API Key)
-        // Note: 'target' prefix matches getHttpTargetConfig() which calls getHttpAuthConfig(config, idPrefix + 'target')
-        InterfaceConfigComponents.attachEventListeners(container, 'target');
-
-        console.log('✅ Step 4 target config listeners attached (wizard + shared)');
+        console.log('✅ Step 4 outbound connector builder mounted');
     }
 
     /**
@@ -5499,7 +5546,21 @@ PV1|1|I|ICU^101^1|||DOC123^Smith^Jane|||EMERGENCY|||
                     data.sourceConfig = { ...data.sourceConfig, ...connectorCfg.config };
                 }
             } catch (err) {
-                console.warn('[WizardView] Error collecting connector config:', err);
+                console.warn('[WizardView] Error collecting inbound connector config:', err);
+            }
+        }
+
+        // Collect outbound connector config from ConnectorConfigBuilder if available
+        if (this.outboundBuilder) {
+            try {
+                const connectorCfg = this.outboundBuilder.getConfig();
+                data.targetConnectorConfig = { ...connectorCfg };
+                data.targetConnectivity = this._connectorTypeToLegacy(connectorCfg.connectorType || '');
+                if (connectorCfg.config) {
+                    data.targetConfig = { ...data.targetConfig, ...connectorCfg.config };
+                }
+            } catch (err) {
+                console.warn('[WizardView] Error collecting outbound connector config:', err);
             }
         }
 
@@ -5546,7 +5607,17 @@ PV1|1|I|ICU^101^1|||DOC123^Smith^Jane|||EMERGENCY|||
             if (this.inboundBuilder.config.config) {
                 data.sourceConfig = { ...this.inboundBuilder.config.config };
             }
-        } else {
+        }
+        if (this.outboundBuilder) {
+            this.outboundBuilder.collectConfig();
+            data.targetConnectorConfig = { ...this.outboundBuilder.config };
+            const ct = this.outboundBuilder.config.connectorType || '';
+            data.targetConnectivity = this._connectorTypeToLegacy(ct);
+            if (this.outboundBuilder.config.config) {
+                data.targetConfig = { ...data.targetConfig, ...this.outboundBuilder.config.config };
+            }
+        }
+        if (!this.inboundBuilder) {
             // Legacy fallback
             const sourcePort = this.container.querySelector('#sourcePort')?.value;
             const sourceHost = this.container.querySelector('#sourceHost')?.value;
@@ -5848,23 +5919,23 @@ PV1|1|I|ICU^101^1|||DOC123^Smith^Jane|||EMERGENCY|||
      * Validate step 4: Target Configuration (Final Step)
      */
     validateStep4() {
-        // Step 4 is target configuration - validate target settings
-        const targetType = this.container.querySelector('#targetType')?.value;
-        const targetConnectivity = this.container.querySelector('#targetConnectivity')?.value;
+        // Sink-only flows have no outbound connector to configure — always valid
+        const sinkInput = this.container.querySelector('input[type="hidden"]#targetConnectivity');
+        if (sinkInput?.value === 'sink') return true;
 
-        // For HTTP connectivity, validate endpoint
-        if (targetConnectivity === 'http') {
-            const endpoint = this.container.querySelector('#targetEndpoint')?.value?.trim();
+        // Sync DOM → config then delegate to builder's schema-aware validate()
+        if (this.outboundBuilder) {
             try {
-                if (endpoint) new URL(endpoint);
-                return targetType && targetConnectivity && endpoint;
+                this.outboundBuilder.getConfig(); // syncs DOM fields into this.config
+                const result = this.outboundBuilder.validate();
+                return result.valid === true;
             } catch {
                 return false;
             }
         }
 
-        // For other connectivity types, just need type and connectivity
-        return targetType && targetConnectivity;
+        // Builder not yet mounted — allow proceed
+        return true;
     }
 
     /**
@@ -7674,18 +7745,15 @@ if (!document.getElementById('table-modal-styles')) {
 
 // ── AI Suggest Mappings ──────────────────────────────────────────────────────
 window.aiSuggestMappings = async function() {
-    if (!window.AIAssistant) {
-        alert('AI assistant not loaded on this page.');
-        return;
-    }
+    console.log('🤖 aiSuggestMappings called, AIAssistant:', window.AIAssistant);
 
     // Get the HL7 sample from the wizard model (step 1)
-    const wzCtrl = window.wizardControllerInstance;
+    const wzCtrl = window.wizardController;
     const hl7Sample = wzCtrl?.model?.data?.hl7Message || '';
     const msgType   = wzCtrl?.model?.data?.detectedMessageType || wzCtrl?.model?.data?.messageType || '';
 
     if (!hl7Sample) {
-        alert('No HL7 sample message found. Please complete Step 1 first.');
+        AppDialogs.toast('No HL7 sample message found. Please complete Step 1 first.', 'warning');
         return;
     }
 
@@ -7694,7 +7762,7 @@ window.aiSuggestMappings = async function() {
     if (!panel) {
         panel = document.createElement('div');
         panel.id = 'ai-mapping-suggestion-panel';
-        panel.style.cssText = 'position:fixed;top:0;right:0;width:480px;height:100vh;background:#fff;border-left:1px solid #e2e8f0;box-shadow:-4px 0 24px rgba(30,58,138,0.12);z-index:9999;display:flex;flex-direction:column;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;';
+        panel.style.cssText = 'position:fixed;top:0;right:0;width:480px;height:100vh;background:#fff;border-left:1px solid #e2e8f0;box-shadow:-4px 0 24px rgba(30,58,138,0.12);z-index:10010;display:flex;flex-direction:column;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;';
         panel.innerHTML = `
 <div style="background:linear-gradient(135deg,#f472b6,#1e3a8a);padding:14px 18px;display:flex;align-items:center;justify-content:space-between;color:#fff;flex-shrink:0;">
   <div>
@@ -7718,32 +7786,138 @@ window.aiSuggestMappings = async function() {
     const footerEl = document.getElementById('ai-ms-footer');
     const applyBtn = document.getElementById('ai-ms-apply-btn');
 
-    statusEl.textContent = 'Fetching AI suggestions…';
-    tableEl.innerHTML    = '<div style="text-align:center;padding:40px;color:#94a3b8;">Analysing HL7 message…</div>';
+    statusEl.textContent = 'Analysing HL7 message — this may take up to 2 minutes on CPU…';
+    tableEl.innerHTML    = '<div style="text-align:center;padding:40px;color:#94a3b8;line-height:1.8;">🤖 AI is generating mapping suggestions…<br><span style="font-size:11px;color:#cbd5e1;">Running on CPU — typically 30–90 seconds</span></div>';
+
+    // Helper: call the suggest-mappings API directly (works whether AIAssistant widget is loaded or not)
+    async function callSuggestMappingsAPI(message, targetFormat) {
+        if (window.AIAssistant) {
+            return window.AIAssistant.suggestMappings(message, targetFormat);
+        }
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 200000); // 200s client timeout
+        try {
+            const resp = await fetch('/api/ai/suggest-mappings', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                credentials: 'include',
+                signal: controller.signal,
+                body: JSON.stringify({ message, target_format: targetFormat })
+            });
+            clearTimeout(timer);
+            const text = await resp.text();
+            try { return JSON.parse(text); } catch {
+                throw new Error(resp.status === 404
+                    ? 'AI service endpoint not found — check that the Go backend has started.'
+                    : `AI service returned HTTP ${resp.status}. Make sure the Go backend is running.`);
+            }
+        } catch (e) {
+            clearTimeout(timer);
+            if (e.name === 'AbortError') throw new Error('AI request timed out after 200s — the model may be overloaded.');
+            throw e;
+        }
+    }
+
+    // ── Collect already-mapped HL7 source fields from the wizard model ──────────
+    function getExistingMappedSources() {
+        const existing = new Set();
+        try {
+            const data = window.wizardController?.getCurrentData?.() || {};
+            const atoms = data?.fhirTransformResult?.atomicMappings || data?.atomicMappings || [];
+            atoms.forEach(m => {
+                const src = m.sourcePath || m.hl7Path || m.hl7Field || '';
+                if (src) existing.add(src.trim());
+            });
+        } catch (_) {}
+        return existing;
+    }
+
+    // ── Transform key resolution ─────────────────────────────────────────────
+    // Prefer the suggestion's engine-native transform_key. Fall back to inferring
+    // from data_type only when transform_key is absent (e.g. LLM-generated suggestions).
+    function resolveTransformKey(suggestion) {
+        if (suggestion.transform_key) return suggestion.transform_key;
+        // Generic inference from data_type (legacy / LLM path)
+        if (suggestion.data_type === 'TS' || suggestion.data_type === 'date') return 'ts_to_date';
+        if (suggestion.data_type === 'IS' || suggestion.data_type === 'code') return 'gender_mapping';
+        return '';
+    }
+    // Wizard dropdown value (direct/lookup/format/custom) derived from engine key
+    function wizardTransformLabel(transformKey) {
+        if (!transformKey) return 'direct';
+        if (transformKey.includes('to_date') || transformKey.includes('to_datetime')) return 'format';
+        if (transformKey.includes('gender') || transformKey.includes('lookup') ||
+            transformKey.includes('status') || transformKey.includes('flag') ||
+            transformKey.includes('class')) return 'lookup';
+        if (transformKey.includes('to_humanname') || transformKey.includes('to_address') ||
+            transformKey.includes('to_identifier') || transformKey.includes('to_contactpoint') ||
+            transformKey.includes('to_codeableconcept')) return 'custom';
+        return 'direct';
+    }
+
+    // ── Determine FHIR resource type from target path ────────────────────────
+    function resourceTypeFromFHIR(fhirPath) {
+        const m = fhirPath.match(/^([A-Z][a-zA-Z]+)\./);
+        return m ? m[1] : 'Unknown';
+    }
 
     let suggestions = [];
     try {
-        const result = await window.AIAssistant.suggestMappings(hl7Sample, 'fhir_r4');
-        suggestions  = result?.data?.suggestions || [];
+        const result = await callSuggestMappingsAPI(hl7Sample, 'fhir_r4');
+        const allSuggestions = result?.data?.suggestions || [];
 
-        if (suggestions.length === 0) {
+        if (allSuggestions.length === 0) {
             tableEl.innerHTML = '<div style="text-align:center;padding:40px;color:#94a3b8;">No suggestions returned. Try a longer HL7 sample.</div>';
             statusEl.textContent = 'No suggestions found.';
             return;
         }
 
-        statusEl.textContent = `${suggestions.length} suggestions — accept or reject each one:`;
+        // Filter out already-mapped fields
+        const mapped = getExistingMappedSources();
+        suggestions = allSuggestions.filter(s => !mapped.has(s.source_field));
+        const alreadyMapped = allSuggestions.filter(s => mapped.has(s.source_field));
 
-        // Render suggestion table
-        tableEl.innerHTML = suggestions.map((s, i) => {
+        // Gap/status summary header
+        const gapCount = suggestions.length;
+        const okCount  = alreadyMapped.length;
+        const totalFields = allSuggestions.length;
+        const coverage = totalFields > 0 ? Math.round((okCount / totalFields) * 100) : 0;
+        const summaryHtml = `
+<div style="background:#f0f9ff;border:1px solid #bae6fd;border-radius:8px;padding:10px 12px;margin-bottom:10px;font-size:12px;">
+  <div style="font-weight:700;color:#0369a1;margin-bottom:6px;">📊 Mapping coverage: ${coverage}% (${okCount}/${totalFields} standard fields mapped)</div>
+  ${okCount > 0 ? `<div style="color:#16a34a;margin-bottom:3px;">✅ Already mapped (${okCount}): ${alreadyMapped.map(s=>`<span style="font-family:monospace;background:#dcfce7;padding:1px 4px;border-radius:3px;margin:1px;">${s.source_field}</span>`).join(' ')}</div>` : ''}
+  ${gapCount > 0 ? `<div style="color:#d97706;">⚠️ Gaps found (${gapCount}): ${suggestions.map(s=>`<span style="font-family:monospace;background:#fef9c3;padding:1px 4px;border-radius:3px;margin:1px;">${s.source_field}</span>`).join(' ')}</div>` : '<div style="color:#16a34a;">✅ All standard fields are mapped.</div>'}
+</div>`;
+
+        if (suggestions.length === 0) {
+            tableEl.innerHTML = summaryHtml + '<div style="text-align:center;padding:24px;color:#16a34a;font-weight:600;">✅ No gaps — all standard fields are already mapped!</div>';
+            statusEl.textContent = `Coverage: ${coverage}% — nothing missing.`;
+            footerEl.style.display = 'none';
+            return;
+        }
+
+        statusEl.textContent = `${gapCount} gap(s) found — accept mappings to add them:`;
+
+        // Render gap rows
+        tableEl.innerHTML = summaryHtml + suggestions.map((s, i) => {
             const conf    = Math.round((s.confidence || 0) * 100);
             const confCol = conf >= 80 ? '#16a34a' : conf >= 50 ? '#d97706' : '#dc2626';
+            const txKey   = resolveTransformKey(s);
+            const txType  = wizardTransformLabel(txKey);
+            const txLabel = txKey
+                ? `<span title="${txKey}">${txType === 'format' ? '📅' : txType === 'lookup' ? '🔄' : txType === 'custom' ? '⚙️' : '⇒'} ${txKey}</span>`
+                : '⇒ Direct';
             return `
 <div class="ai-ms-row" data-idx="${i}" style="border:1px solid #e2e8f0;border-radius:8px;padding:12px;margin-bottom:8px;background:#fafafa;">
   <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
     <div style="flex:1;min-width:0;">
-      <div style="font-size:12px;font-weight:600;color:#1e3a8a;margin-bottom:3px;">${s.source_field} → ${s.target_field}</div>
+      <div style="font-size:12px;font-weight:600;color:#1e3a8a;margin-bottom:3px;">
+        <span style="font-family:monospace;">${s.source_field}</span>
+        <span style="color:#6b7280;margin:0 4px;">→</span>
+        <span style="font-family:monospace;">${s.target_field}</span>
+      </div>
       <div style="font-size:11px;color:#6b7280;line-height:1.4;">${s.reasoning || ''}</div>
+      <div style="margin-top:4px;"><span style="font-size:10px;background:#f1f5f9;color:#475569;padding:1px 6px;border-radius:9px;">${txLabel}</span></div>
     </div>
     <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px;flex-shrink:0;">
       <span style="font-size:11px;font-weight:600;color:${confCol};">${conf}% conf.</span>
@@ -7781,7 +7955,6 @@ window.aiSuggestMappings = async function() {
                 btn.disabled = true;
                 row.querySelector('.ai-ms-accept').disabled = true;
                 suggestions[+btn.dataset.idx]._rejected = true;
-                // Send feedback to improve future suggestions
                 if (window.AIAssistant && wzCtrl?.model?.data?.interfaceId) {
                     window.AIAssistant.feedbackMapping(
                         wzCtrl.model.data.interfaceId,
@@ -7793,22 +7966,60 @@ window.aiSuggestMappings = async function() {
             });
         });
 
-        // Apply accepted → send to ezCompanion for chat follow-up
+        // Apply accepted → actually insert into atomicMappings and re-render the wizard step
         applyBtn.addEventListener('click', () => {
             const accepted = suggestions.filter(s => s._accepted);
-            if (accepted.length === 0) { alert('Accept at least one suggestion first.'); return; }
+            if (accepted.length === 0) { AppDialogs.toast('Accept at least one suggestion first.', 'warning'); return; }
 
-            // Send accepted mappings as feedback to the KB
+            const data = window.wizardController?.getCurrentData?.();
+            if (!data) { AppDialogs.toast('Wizard model not available.', 'error'); return; }
+
+            if (!data.fhirTransformResult) data.fhirTransformResult = {};
+            if (!data.fhirTransformResult.atomicMappings) data.fhirTransformResult.atomicMappings = [];
+
+            const atoms = data.fhirTransformResult.atomicMappings;
+            let added = 0;
             accepted.forEach(s => {
-                if (window.AIAssistant && wzCtrl?.model?.data?.interfaceId) {
-                    window.AIAssistant.feedbackMapping(
-                        wzCtrl.model.data.interfaceId,
-                        s.source_field, s.target_field, true, s.reasoning || ''
-                    );
+                const alreadyIn = atoms.some(m =>
+                    (m.sourcePath || m.hl7Path || m.hl7Field) === s.source_field);
+                if (!alreadyIn) {
+                    const txKey   = resolveTransformKey(s);
+                    const txLabel = wizardTransformLabel(txKey);
+                    atoms.push({
+                        sourcePath:       s.source_field,
+                        hl7Path:          s.source_field,
+                        targetPath:       s.target_field,
+                        fhirPath:         s.target_field,
+                        resourceType:     resourceTypeFromFHIR(s.target_field),
+                        // DataTypeTransform is what the Go engine dispatches on.
+                        // transform/transformType drive the wizard dropdown display.
+                        DataTypeTransform: txKey,
+                        transform:         txLabel,
+                        transformType:     txLabel,
+                        confidence:        s.confidence || 0.9,
+                        dataType:          s.data_type || '',
+                        isRequired:        false,
+                        source:            'ai_suggest',
+                    });
+                    added++;
+                    // Feedback to KB
+                    if (window.AIAssistant && wzCtrl?.model?.data?.interfaceId) {
+                        window.AIAssistant.feedbackMapping(
+                            wzCtrl.model.data.interfaceId,
+                            s.source_field, s.target_field, true, s.reasoning || ''
+                        );
+                    }
                 }
             });
 
-            applyBtn.textContent = `✓ ${accepted.length} mapping(s) saved to knowledge base`;
+            // Re-render wizard step to show new mappings
+            if (added > 0 && window.wizardView) {
+                const step = window.wizardController?.model?.currentStep;
+                window.wizardView.renderStep(step, data);
+                AppDialogs.toast(`✅ ${added} mapping(s) added to wizard.`, 'success');
+            }
+
+            applyBtn.textContent = `✓ ${added} mapping(s) added`;
             applyBtn.style.background = '#16a34a';
             setTimeout(() => {
                 panel.remove();
@@ -7816,8 +8027,18 @@ window.aiSuggestMappings = async function() {
         });
 
     } catch (err) {
-        tableEl.innerHTML = `<div style="text-align:center;padding:40px;color:#dc2626;">⚠️ ${err.message}</div>`;
-        statusEl.textContent = 'Error fetching suggestions.';
+        const isServiceDown = err.message.includes('not found') || err.message.includes('unexpected response') || err.message.includes('Failed to fetch');
+        tableEl.innerHTML = `
+            <div style="text-align:center;padding:40px;">
+                <div style="font-size:32px;margin-bottom:12px;">⚠️</div>
+                <div style="color:#dc2626;font-weight:600;margin-bottom:8px;">AI suggestion failed</div>
+                <div style="color:#6b7280;font-size:12px;line-height:1.5;">
+                    ${isServiceDown
+                        ? 'The ezCompanion AI service is not running.<br>Start the Go backend with Ollama configured to use AI suggestions.'
+                        : err.message.replace(/</g, '&lt;')}
+                </div>
+            </div>`;
+        statusEl.textContent = isServiceDown ? 'AI service unavailable.' : 'Error fetching suggestions.';
     }
 };
 
@@ -8012,9 +8233,9 @@ window.toggleMappingView = function(viewType) {
     let visibleCount = 0;
 
     switch (viewType) {
+        case 'grouped':
         case 'resource':
-        case 'list':
-            // Show grouped by resource (default view)
+            // Show grouped by resource (default view) — all groups visible
             resourceGroups.forEach(group => {
                 const parent = group.closest('[style*="border: 2px"]');
                 if (parent) {
@@ -8025,13 +8246,18 @@ window.toggleMappingView = function(viewType) {
             console.log('✅ Showing resource-grouped view');
             break;
 
+        case 'list':
         case 'all':
-            // Show all mappings in flat list
+            // Show ALL mapping rows regardless of resource — un-hide every group
+            resourceGroups.forEach(group => {
+                const parent = group.closest('[style*="border: 2px"]');
+                if (parent) parent.style.display = 'block';
+            });
             mappingRows.forEach(row => {
                 row.style.display = 'block';
                 visibleCount++;
             });
-            console.log('✅ Showing all mappings view');
+            console.log('✅ Showing all-mappings flat view');
             break;
 
         case 'validation':
@@ -8463,10 +8689,11 @@ window.editMappingDetails = function(index) {
     }
 };
 
-window.deleteMappingRow = function(index) {
+window.deleteMappingRow = async function(index) {
     console.log('🗑️ Deleting mapping row:', index);
 
-    if (confirm('Are you sure you want to delete this mapping?')) {
+    const ok = await AppDialogs.confirm('Are you sure you want to delete this mapping?', { type: 'danger', title: 'Delete Mapping', confirmText: 'Delete' });
+    if (ok) {
         if (window.wizardController) {
             const data = window.wizardController.getCurrentData();
             if (data.fhirTransformResult && data.fhirTransformResult.atomicMappings) {
@@ -8508,13 +8735,14 @@ window.generateFHIRMappings = async function() {
 
             try {
                 // Use the same transformation service as auto-transform
-                if (window.wizardFHIRTransform) {
+                const transformSvc = window.optimizedFHIRTransform || window.wizardFHIRTransform;
+                if (transformSvc) {
                     console.log('🔄 Using existing transformation service');
-                    await window.wizardFHIRTransform.startOptimizedFHIRTransformation();
+                    await transformSvc.startOptimizedFHIRTransformation();
                     console.log('✅ Transformation completed via service');
                 } else {
                     console.error('❌ Transformation service not available');
-                    alert('Transformation service not initialized. Please refresh the page.');
+                    AppDialogs.toast('Transformation service not initialized. Please refresh the page.', 'error');
                 }
 
                 if (button) {
@@ -8523,7 +8751,7 @@ window.generateFHIRMappings = async function() {
                 }
             } catch (error) {
                 console.error('❌ Error generating FHIR mappings:', error);
-                alert(`Failed to generate FHIR mappings: ${error.message}`);
+                AppDialogs.toast(`Failed to generate FHIR mappings: ${error.message}`, 'error');
 
                 if (button) {
                     button.textContent = '🎯 Auto-Generate Mappings';
@@ -8532,7 +8760,7 @@ window.generateFHIRMappings = async function() {
             }
         } else {
             console.warn('⚠️ No HL7 data available for transformation');
-            alert('Please complete Step 2 (HL7 Parsing) first before generating mappings');
+            AppDialogs.toast('Please complete Step 2 (HL7 Parsing) first before generating mappings.', 'warning');
         }
     }
 };
@@ -8604,102 +8832,305 @@ window.exportFHIRConfiguration = function() {
     }
 };
 
+// Renders the transform indicator between HL7 source and FHIR target.
+//   Direct  → gray "Direct" pill  (no transform, copy as-is)
+//   Anything else → colored pill with human-readable label + tooltip of raw key
+window._transformBadge = function(transformType, index) {
+    const isDirect = !transformType || transformType === 'direct';
+    if (isDirect) {
+        return `<span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:500;background:#f3f4f6;color:#9ca3af;border:1px solid #e5e7eb;white-space:nowrap;" title="No transform — value copied as-is">Direct</span>`;
+    }
+    const label = window._transformLabel(transformType);
+    return `<span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:600;background:#eff6ff;color:#2563eb;border:1px solid #bfdbfe;white-space:nowrap;cursor:help;max-width:110px;overflow:hidden;text-overflow:ellipsis;" title="Transform applied: ${transformType}">${label}</span>`;
+};
+
+// Returns the short human-readable label for a transform key.
+window._transformLabel = function(key) {
+    const MAP = {
+        'ce_to_codeableconcept':           'CE → Code',
+        'cwe_to_codeableconcept':          'CWE → Code',
+        'cx_to_identifier':                'CX → ID',
+        'xpn_to_humanname':                'XPN → Name',
+        'xad_to_address':                  'XAD → Address',
+        'xtn_to_contactpoint':             'XTN → Contact',
+        'phone_to_contactpoint':           'Phone → Contact',
+        'ts_to_datetime':                  'TS → DateTime',
+        'ts_to_date':                      'TS → Date',
+        'gender_mapping':                  'Gender',
+        'administrative_sex':              'Gender',
+        'msh9_trigger_event_to_coding':    'Event Coding',
+        'obr_status_to_dr_status':         'DR Status',
+        'obx_status_to_obs_status':        'Obs Status',
+        'abnormal_flag_to_interpretation': 'Abnormal Flag',
+        'obx_value_by_type':               'OBX Value',
+    };
+    return MAP[key] || key;
+};
+
+// Full catalog of transform functions supported by the Go engine.
+// Returns an HTML <option> string with the current value pre-selected.
+// Unknown values (custom DB entries) get a passthrough "Custom: <value>" option.
+window._hl7TransformOptions = function(current) {
+    const TRANSFORMS = [
+        // ── Copy ──────────────────────────────────────────────────────────────
+        { value: 'direct',                         label: 'Direct (copy)' },
+        // ── Coded / composite types ───────────────────────────────────────────
+        { value: 'ce_to_codeableconcept',          label: 'CE → CodeableConcept' },
+        { value: 'cwe_to_codeableconcept',         label: 'CWE → CodeableConcept' },
+        { value: 'cx_to_identifier',               label: 'CX → Identifier' },
+        { value: 'xpn_to_humanname',               label: 'XPN → HumanName' },
+        { value: 'xad_to_address',                 label: 'XAD → Address' },
+        { value: 'xtn_to_contactpoint',            label: 'XTN → ContactPoint' },
+        { value: 'phone_to_contactpoint',          label: 'Phone → ContactPoint' },
+        // ── Date / time ───────────────────────────────────────────────────────
+        { value: 'ts_to_datetime',                 label: 'TS → dateTime' },
+        { value: 'ts_to_date',                     label: 'TS → date' },
+        // ── Patient / admin ───────────────────────────────────────────────────
+        { value: 'gender_mapping',                 label: 'Gender (F/M/O → FHIR)' },
+        { value: 'administrative_sex',             label: 'Administrative sex' },
+        // ── Message header ────────────────────────────────────────────────────
+        { value: 'msh9_trigger_event_to_coding',   label: 'MSH-9 → event Coding' },
+        // ── ORU / lab ─────────────────────────────────────────────────────────
+        { value: 'obr_status_to_dr_status',        label: 'OBR status → DR status' },
+        { value: 'obx_status_to_obs_status',       label: 'OBX status → Obs status' },
+        { value: 'abnormal_flag_to_interpretation',label: 'Abnormal flag → Interpretation' },
+        { value: 'obx_value_by_type',              label: 'OBX value by OBX-2 type' },
+    ];
+
+    const known = TRANSFORMS.find(t => t.value === current);
+    let options = TRANSFORMS.map(t =>
+        `<option value="${t.value}"${t.value === current ? ' selected' : ''}>${t.label}</option>`
+    ).join('');
+
+    // If the current value isn't in the catalog, add it as a custom entry
+    if (!known && current && current !== 'direct') {
+        options = `<option value="${current}" selected>Custom: ${current}</option>` + options;
+    }
+
+    return options;
+};
+
 window.viewRawFHIRJSON = function() {
     console.log('📄 Viewing raw FHIR JSON...');
     const data = window.wizardController?.getCurrentData();
 
     if (!data?.fhirTransformResult) {
-        alert('No FHIR transformation result available. Please complete the transformation first.');
+        AppDialogs.toast('No FHIR transformation result available. Please complete the transformation first.', 'warning');
         return;
     }
-
-    const modal = document.createElement('div');
-    modal.style.cssText = 'position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.8); z-index: 10000; display: flex; align-items: center; justify-content: center; padding: 20px;';
 
     const resources = data.fhirTransformResult.fhirResources || [];
     const bundle = data.fhirTransformResult.bundle || null;
 
-    modal.innerHTML = `
-        <div style="background: white; border-radius: 12px; padding: 24px; max-width: 1200px; width: 100%; max-height: 90vh; display: flex; flex-direction: column;">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
-                <h3 style="margin: 0; color: #1e3a8a;">📄 FHIR Resources (Raw JSON)</h3>
-                <div style="display: flex; gap: 8px;">
-                    <button onclick="window.copyFHIRJSON()" style="padding: 8px 16px; background: #6366f1; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 13px;">
-                        📋 Copy All
-                    </button>
-                    <button onclick="window.downloadFHIRJSON()" style="padding: 8px 16px; background: #10b981; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 13px;">
-                        💾 Download
-                    </button>
-                    <button onclick="window.closeFHIRJSONViewer(this)" style="padding: 8px 16px; background: #f3f4f6; color: #374151; border: none; border-radius: 6px; cursor: pointer; font-size: 13px;">
-                        ✖ Close
-                    </button>
-                </div>
-            </div>
+    // ── Group resources by resourceType ─────────────────────────────────────
+    // Order: single-instance types first, then multi-instance (e.g. Observation last)
+    const groupMap = {};
+    resources.forEach((r, i) => {
+        const rt = r.resourceType || 'Resource';
+        if (!groupMap[rt]) groupMap[rt] = [];
+        groupMap[rt].push({ data: r, index: i });
+    });
+    if (bundle) groupMap['Bundle'] = [{ data: bundle, index: -1 }];
+    const groupKeys = Object.keys(groupMap).sort((a, b) => {
+        // Single-instance types sort before multi-instance
+        const aLen = groupMap[a].length, bLen = groupMap[b].length;
+        if (aLen !== bLen) return aLen - bLen;
+        return a.localeCompare(b);
+    });
 
-            <div style="border: 2px solid #e5e7eb; border-radius: 8px; overflow: hidden; flex: 1; display: flex; flex-direction: column;">
-                <!-- Tab Navigation -->
-                <div style="display: flex; background: #f9fafb; border-bottom: 2px solid #e5e7eb;">
-                    ${resources.map((r, i) => `
-                        <button class="fhir-tab" data-index="${i}" onclick="window.switchFHIRTab(${i})"
-                                style="padding: 12px 20px; border: none; background: ${i === 0 ? '#1e3a8a' : 'transparent'}; color: ${i === 0 ? 'white' : '#6b7280'}; cursor: pointer; font-weight: 500; font-size: 14px;">
-                            ${r.resourceType || 'Resource'} ${i + 1}
-                        </button>
-                    `).join('')}
-                    ${bundle ? `
-                        <button class="fhir-tab" data-index="bundle" onclick="window.switchFHIRTab('bundle')"
-                                style="padding: 12px 20px; border: none; background: transparent; color: #6b7280; cursor: pointer; font-weight: 500; font-size: 14px;">
-                            📦 Bundle
-                        </button>
-                    ` : ''}
-                </div>
+    // ── Modal scaffold ───────────────────────────────────────────────────────
+    const modal = document.createElement('div');
+    modal.id = 'fhir-json-modal';
+    modal.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.8);z-index:10000;display:flex;align-items:center;justify-content:center;padding:20px;';
 
-                <!-- JSON Content -->
-                <div style="flex: 1; overflow: auto; background: #1e1e1e; padding: 20px;">
-                    ${resources.map((r, i) => `
-                        <pre id="fhir-json-${i}" style="margin: 0; color: #d4d4d4; font-family: 'Courier New', monospace; font-size: 13px; line-height: 1.6; display: ${i === 0 ? 'block' : 'none'};">${window.syntaxHighlightJSON(r)}</pre>
-                    `).join('')}
-                    ${bundle ? `
-                        <pre id="fhir-json-bundle" style="margin: 0; color: #d4d4d4; font-family: 'Courier New', monospace; font-size: 13px; line-height: 1.6; display: none;">${window.syntaxHighlightJSON(bundle)}</pre>
-                    ` : ''}
-                </div>
-            </div>
+    const inner = document.createElement('div');
+    inner.style.cssText = 'background:#0f172a;border-radius:12px;width:100%;max-width:1300px;max-height:92vh;display:flex;flex-direction:column;gap:0;overflow:hidden;box-shadow:0 25px 50px rgba(0,0,0,0.6);';
+    modal.appendChild(inner);
 
-            <div style="margin-top: 16px; padding: 12px; background: #f0f9ff; border: 1px solid #bfdbfe; border-radius: 6px;">
-                <div style="font-size: 13px; color: #1e40af;">
-                    <strong>💡 Tip:</strong> This shows the actual FHIR resources generated from your HL7 message.
-                    ${resources.length} resource(s) created: ${resources.map(r => r.resourceType).join(', ')}
-                </div>
-            </div>
-        </div>
-    `;
+    // ── Header ───────────────────────────────────────────────────────────────
+    const header = document.createElement('div');
+    header.style.cssText = 'display:flex;justify-content:space-between;align-items:center;padding:14px 20px;background:#1e293b;border-bottom:1px solid #334155;flex-shrink:0;';
+    const title = document.createElement('span');
+    title.style.cssText = 'color:#e2e8f0;font-size:15px;font-weight:600;';
+    title.textContent = 'FHIR Resources — ' + resources.length + ' resource' + (resources.length !== 1 ? 's' : '');
+    header.appendChild(title);
+    const btnBar = document.createElement('div');
+    btnBar.style.cssText = 'display:flex;gap:8px;';
+    [
+        { label: 'Copy All', bg: '#6366f1', fn: 'window.copyFHIRJSON()' },
+        { label: 'Download', bg: '#10b981', fn: 'window.downloadFHIRJSON()' },
+        { label: '✕ Close',  bg: '#ef4444', fn: 'window.closeFHIRJSONViewer(this)' },
+    ].forEach(({ label, bg, fn }) => {
+        const b = document.createElement('button');
+        b.textContent = label;
+        b.setAttribute('onclick', fn);
+        b.style.cssText = `padding:6px 14px;background:${bg};color:white;border:none;border-radius:6px;cursor:pointer;font-size:12px;font-weight:500;`;
+        btnBar.appendChild(b);
+    });
+    header.appendChild(btnBar);
+    inner.appendChild(header);
+
+    // ── Type tabs (one per resourceType) ─────────────────────────────────────
+    const typeTabBar = document.createElement('div');
+    typeTabBar.style.cssText = 'display:flex;background:#1e293b;border-bottom:2px solid #334155;overflow-x:auto;flex-shrink:0;scrollbar-width:thin;';
+    groupKeys.forEach((rt, idx) => {
+        const count = groupMap[rt].length;
+        const btn = document.createElement('button');
+        btn.className = 'fhir-type-tab';
+        btn.dataset.rt = rt;
+        const badge = count > 1 ? ` <span style="background:#334155;border-radius:10px;padding:1px 7px;font-size:11px;">${count}</span>` : '';
+        btn.innerHTML = `<span style="font-size:13px;">${rt}</span>${badge}`;
+        const isFirst = idx === 0;
+        btn.style.cssText = `padding:10px 18px;border:none;border-bottom:3px solid ${isFirst?'#3b82f6':'transparent'};background:transparent;color:${isFirst?'#e2e8f0':'#94a3b8'};cursor:pointer;white-space:nowrap;flex-shrink:0;font-weight:${isFirst?'600':'400'};transition:all 0.15s;`;
+        btn.addEventListener('click', () => window._fhirSelectType(rt));
+        typeTabBar.appendChild(btn);
+    });
+    inner.appendChild(typeTabBar);
+
+    // ── Body: list pane + JSON pane ───────────────────────────────────────────
+    const body = document.createElement('div');
+    body.style.cssText = 'display:flex;flex:1;min-height:0;';
+    inner.appendChild(body);
+
+    // Left list pane
+    const listPane = document.createElement('div');
+    listPane.id = 'fhir-list-pane';
+    listPane.style.cssText = 'width:200px;flex-shrink:0;background:#1e293b;border-right:1px solid #334155;overflow-y:auto;';
+    body.appendChild(listPane);
+
+    // Right JSON pane
+    const jsonPane = document.createElement('div');
+    jsonPane.id = 'fhir-json-pane';
+    jsonPane.style.cssText = 'flex:1;overflow:auto;background:#1a1a2e;min-height:0;';
+    body.appendChild(jsonPane);
+
+    const pre = document.createElement('pre');
+    pre.id = 'fhir-json-pre';
+    pre.style.cssText = 'margin:0;padding:20px;font-family:\'Fira Code\',\'Courier New\',monospace;font-size:12.5px;line-height:1.65;color:#cdd6e0;min-height:100%;';
+    jsonPane.appendChild(pre);
 
     document.body.appendChild(modal);
+
+    // ── State ─────────────────────────────────────────────────────────────────
+    window._fhirGroupMap = groupMap;
+    window._fhirGroupKeys = groupKeys;
+    window._fhirCurrentType = groupKeys[0];
+    window._fhirCurrentIdx = 0;
+
+    // Select the first type to populate list + JSON
+    window._fhirSelectType(groupKeys[0]);
 };
 
-window.switchFHIRTab = function(index) {
-    // Hide all tabs
-    document.querySelectorAll('[id^="fhir-json-"]').forEach(el => {
-        el.style.display = 'none';
+// Apply syntax highlighting to a <pre> element that already has textContent set.
+// Works by reading the text, escaping HTML, then wrapping tokens in colored spans.
+window._applyJSONHighlight = function(pre) {
+    const text = pre.textContent;
+    // Escape for safe innerHTML insertion
+    let html = text
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+    // Colour tokens
+    html = html.replace(
+        /("(?:\\u[0-9a-fA-F]{4}|\\[^u]|[^\\"])*"(\s*:)?|\b(?:true|false|null)\b|-?\d+(?:\.\d*)?(?:[eE][+\-]?\d+)?)/g,
+        function(match) {
+            if (/^"/.test(match)) {
+                return /:$/.test(match)
+                    ? '<span style="color:#7dd3fc">' + match + '</span>'   // key — sky blue
+                    : '<span style="color:#a5d6a7">' + match + '</span>';  // string value — green
+            }
+            if (/true|false/.test(match)) return '<span style="color:#7986cb">' + match + '</span>';  // bool — indigo
+            if (/null/.test(match))       return '<span style="color:#ef9a9a">' + match + '</span>';  // null — red
+            return '<span style="color:#ffcc80">' + match + '</span>';                                 // number — amber
+        }
+    );
+    // Colour braces / brackets / commas
+    html = html.replace(/([{}\[\]])/g, '<span style="color:#b0bec5">$1</span>');
+    pre.style.color = '#cdd6e0';
+    pre.innerHTML = html;
+};
+
+// Select a resource-type group — updates type tab highlight and rebuilds the list pane.
+window._fhirSelectType = function(rt) {
+    window._fhirCurrentType = rt;
+    window._fhirCurrentIdx = 0;
+
+    // Update type tab styles
+    document.querySelectorAll('.fhir-type-tab').forEach(btn => {
+        const active = btn.dataset.rt === rt;
+        btn.style.borderBottomColor = active ? '#3b82f6' : 'transparent';
+        btn.style.color = active ? '#e2e8f0' : '#94a3b8';
+        btn.style.fontWeight = active ? '600' : '400';
     });
 
-    // Update tab styles
-    document.querySelectorAll('.fhir-tab').forEach(tab => {
-        tab.style.background = 'transparent';
-        tab.style.color = '#6b7280';
-    });
+    // Rebuild list pane
+    const listPane = document.getElementById('fhir-list-pane');
+    if (!listPane) return;
+    listPane.innerHTML = '';
+    const items = window._fhirGroupMap[rt] || [];
 
-    // Show selected tab
-    const tabId = index === 'bundle' ? 'fhir-json-bundle' : `fhir-json-${index}`;
-    const element = document.getElementById(tabId);
-    if (element) {
-        element.style.display = 'block';
+    if (items.length === 1) {
+        // Single item — skip list, just show JSON directly
+        listPane.style.display = 'none';
+    } else {
+        listPane.style.display = 'block';
+        items.forEach((item, i) => {
+            const row = document.createElement('button');
+            row.className = 'fhir-list-row';
+            row.dataset.idx = i;
+            // Label: use resource id if available, otherwise ordinal
+            const idLabel = item.data.id ? item.data.id : '#' + (i + 1);
+            row.style.cssText = `display:block;width:100%;text-align:left;padding:9px 14px;border:none;border-bottom:1px solid #334155;background:${i===0?'#1e3a5f':'transparent'};color:${i===0?'#93c5fd':'#94a3b8'};cursor:pointer;font-size:12px;font-family:inherit;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;`;
+            row.textContent = idLabel;
+            row.addEventListener('click', () => window._fhirSelectItem(i));
+            listPane.appendChild(row);
+        });
     }
 
-    // Highlight selected tab button
-    const button = document.querySelector(`[data-index="${index}"]`);
-    if (button) {
-        button.style.background = '#1e3a8a';
-        button.style.color = 'white';
+    // Show JSON for first item
+    window._fhirRenderJSON(items[0]?.data);
+};
+
+// Select a specific item within the current type group.
+window._fhirSelectItem = function(idx) {
+    window._fhirCurrentIdx = idx;
+    const items = window._fhirGroupMap[window._fhirCurrentType] || [];
+
+    // Update list row highlight
+    document.querySelectorAll('.fhir-list-row').forEach(row => {
+        const active = parseInt(row.dataset.idx) === idx;
+        row.style.background = active ? '#1e3a5f' : 'transparent';
+        row.style.color = active ? '#93c5fd' : '#94a3b8';
+    });
+
+    window._fhirRenderJSON(items[idx]?.data);
+};
+
+// Render a resource into the JSON pane with syntax highlighting.
+window._fhirRenderJSON = function(resource) {
+    const pre = document.getElementById('fhir-json-pre');
+    if (!pre) return;
+    pre.textContent = resource ? JSON.stringify(resource, null, 2) : '';
+    window._applyJSONHighlight(pre);
+};
+
+// Legacy compatibility — still used by any code that calls switchFHIRTab directly.
+window.switchFHIRTab = function(key) {
+    // key may be 'r0', 'r1', 'bundle' from old callers — map to new system
+    if (key === 'bundle') { window._fhirSelectType('Bundle'); return; }
+    const i = parseInt(key.replace('r', ''), 10);
+    if (!isNaN(i) && window._fhirGroupKeys) {
+        // Find which type contains global index i
+        let seen = 0;
+        for (const rt of window._fhirGroupKeys) {
+            const items = window._fhirGroupMap[rt];
+            if (i < seen + items.length) {
+                window._fhirSelectType(rt);
+                window._fhirSelectItem(i - seen);
+                return;
+            }
+            seen += items.length;
+        }
     }
 };
 
@@ -8708,7 +9139,7 @@ window.copyFHIRJSON = function() {
     if (data?.fhirTransformResult) {
         const json = JSON.stringify(data.fhirTransformResult.fhirResources, null, 2);
         navigator.clipboard.writeText(json).then(() => {
-            alert('✅ FHIR JSON copied to clipboard!');
+            AppDialogs.toast('FHIR JSON copied to clipboard!', 'success');
         });
     }
 };
@@ -8727,30 +9158,12 @@ window.downloadFHIRJSON = function() {
     }
 };
 
+// syntaxHighlightJSON kept for backward compatibility (other callers if any)
 window.syntaxHighlightJSON = function(obj) {
-    let json = JSON.stringify(obj, null, 2);
-
-    // Escape HTML
-    json = json.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-
-    // Syntax highlighting with colors
-    json = json.replace(/("(\\u[a-zA-Z0-9]{4}|\\[^u]|[^\\"])*"(\s*:)?|\b(true|false|null)\b|-?\d+(?:\.\d*)?(?:[eE][+\-]?\d+)?)/g, function (match) {
-        let cls = 'color: #ce9178;'; // string - orange
-        if (/^"/.test(match)) {
-            if (/:$/.test(match)) {
-                cls = 'color: #9cdcfe;'; // key - light blue
-            }
-        } else if (/true|false/.test(match)) {
-            cls = 'color: #569cd6;'; // boolean - blue
-        } else if (/null/.test(match)) {
-            cls = 'color: #569cd6;'; // null - blue
-        } else {
-            cls = 'color: #b5cea8;'; // number - light green
-        }
-        return '<span style="' + cls + '">' + match + '</span>';
-    });
-
-    return json;
+    const pre = document.createElement('pre');
+    pre.textContent = JSON.stringify(obj, null, 2);
+    window._applyJSONHighlight(pre);
+    return pre.innerHTML;
 };
 
 // Close FHIR JSON viewer modal

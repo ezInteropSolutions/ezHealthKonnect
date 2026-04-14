@@ -254,8 +254,7 @@ services:
       - "8080:8080"    # Go backend API
       # Interface ports - TCP MLLP range (HL7 receivers)
       - "2575:2575"    # Alternative HL7 TCP port
-      - "6610:6610"    # TCP MLLP port (HL7 interface)
-      - "6661-6670:6661-6670"    # TCP MLLP port range for HL7 interfaces
+      - "6610-6670:6610-6670"    # TCP MLLP port range for HL7 interfaces
       # Interface ports - HTTP range (FHIR/REST receivers)
       - "8081-8099:8081-8099"    # HTTP port range for FHIR/REST interfaces
     

@@ -52,9 +52,10 @@ func NewOllamaClient() *OllamaClient {
 // ─── Generate (text completion) ───────────────────────────────────────────────
 
 type generateRequest struct {
-	Model  string `json:"model"`
-	Prompt string `json:"prompt"`
-	Stream bool   `json:"stream"`
+	Model   string         `json:"model"`
+	Prompt  string         `json:"prompt"`
+	Stream  bool           `json:"stream"`
+	Options map[string]any `json:"options,omitempty"`
 }
 
 type generateResponse struct {
@@ -86,6 +87,31 @@ func (c *OllamaClient) Generate(ctx context.Context, prompt string) (string, err
 		return "", fmt.Errorf("ollama generate HTTP %d: %s", resp.StatusCode, string(b))
 	}
 
+	var result generateResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return "", fmt.Errorf("ollama generate decode: %w", err)
+	}
+	return result.Response, nil
+}
+
+// GenerateCapped sends a prompt with a hard token cap (num_predict) to bound latency.
+func (c *OllamaClient) GenerateCapped(ctx context.Context, prompt string, maxTokens int) (string, error) {
+	opts := map[string]any{"num_predict": maxTokens, "temperature": 0.1}
+	body, _ := json.Marshal(generateRequest{Model: c.ChatModel, Prompt: prompt, Stream: false, Options: opts})
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/api/generate", bytes.NewReader(body))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("ollama generate: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("ollama generate HTTP %d: %s", resp.StatusCode, string(b))
+	}
 	var result generateResponse
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return "", fmt.Errorf("ollama generate decode: %w", err)

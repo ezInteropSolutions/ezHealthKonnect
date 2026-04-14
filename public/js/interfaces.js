@@ -1049,6 +1049,30 @@ function getSourceFormatBadge(iface) {
     return `<span class="msg-type-badge">${label}</span>`;
 }
 
+function renderStatusBadge(iface) {
+    const status = iface.status || 'unknown';
+    if (status !== 'error') {
+        return `<span class="interface-status status-${status}">${status}</span>`;
+    }
+
+    const err = iface.processingStats && iface.processingStats.error;
+    if (!err) {
+        return `<span class="interface-status status-error">ERROR</span>`;
+    }
+
+    const esc = s => String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    const ts = err.timestamp ? new Date(err.timestamp).toLocaleString() : '';
+    const tip = [
+        err.reason ? esc(err.reason) : 'Unknown error',
+        err.port   ? `Port: ${err.port}` : '',
+        ts         ? `At: ${ts}` : ''
+    ].filter(Boolean).join('&#10;');
+
+    return `<span class="interface-status status-error status-error-tip" title="${tip}">
+        ERROR&nbsp;<i class="fas fa-circle-info" style="font-size:9px;opacity:0.8;"></i>
+    </span>`;
+}
+
 // Create ultra compact table row
 function createCompactTableRow(interface) {
     const lastUpdated = interface.lastUpdated
@@ -1079,7 +1103,7 @@ function createCompactTableRow(interface) {
                 </div>
             </td>
             <td>
-                <span class="interface-status status-${interface.status}">${interface.status}</span>
+                ${renderStatusBadge(interface)}
             </td>
             <td>
                 <div class="runtime-status-cell">
@@ -1877,7 +1901,7 @@ function showEditModal(interfaceId) {
             return;
         }
 
-        alert('Edit modal not available. Please refresh the page and try again.');
+        AppDialogs.toast('Edit modal not available. Please refresh the page and try again.', 'error');
         return;
     }
 
@@ -1892,7 +1916,7 @@ function showEditModal(interfaceId) {
             idField: !!editInterfaceId,
             nameField: !!editInterfaceName
         });
-        alert('Edit form not properly loaded. Please refresh the page and try again.');
+        AppDialogs.toast('Edit form not properly loaded. Please refresh the page and try again.', 'error');
         return;
     }
 
@@ -2422,7 +2446,7 @@ async function handleEditInterface(event) {
         // Validate configuration
         const errors = window.interfaceConfigManager.validateConfiguration(interfaceData);
         if (errors.length > 0) {
-            alert('Configuration errors:\n' + errors.join('\n'));
+            AppDialogs.toast('Configuration errors: ' + errors.join('; '), 'error');
             handleEditInterface.isProcessing = false; // Reset flag on validation error
 
             // Reset button state
@@ -2488,11 +2512,11 @@ async function handleEditInterface(event) {
             let errorMessage = 'Failed to update interface: ';
             errorMessage += error.error || error.message || `HTTP ${response.status}`;
 
-            alert(errorMessage);
+            AppDialogs.toast(errorMessage, 'error');
         }
     } catch (error) {
         console.error('❌ Network error updating interface:', error);
-        alert('Network error updating interface: ' + error.message);
+        AppDialogs.toast('Network error updating interface: ' + error.message, 'error');
     } finally {
         // Reset processing flag and button state
         handleEditInterface.isProcessing = false;
@@ -2972,10 +2996,11 @@ async function updateInterfaceRuntimeStatuses() {
                     if (status) {
                         updateInterfaceStatusDisplay(iface.id, status);
                     } else {
-                        // Interface not in response, mark as unknown
+                        // Interface not known to the engine runtime — it is not actually running
+                        // regardless of what the DB says (engine may have restarted and lost state).
                         const statusElement = document.getElementById(`runtime-${iface.id}`);
                         if (statusElement) {
-                            updateRuntimeStatusDisplay(statusElement, false, null, 'unknown');
+                            updateRuntimeStatusDisplay(statusElement, false, null, 'stopped');
                             updateActionButtonsVisibility(iface.id, false, false);
                         }
                     }
@@ -3066,8 +3091,10 @@ async function updateInterfaceRuntimeStatus(interfaceId) {
                 updateActionButtonsVisibility(interfaceId, false, false);
                 updateDeleteButtonState(interfaceId, true);
             } else {
-                // Default (unknown, error, etc.): Show Start only — delete is allowed
-                updateRuntimeStatusDisplay(statusElement, false, stats, null);
+                // Unknown/error status from runtime — treat as stopped.
+                // The interface is not confirmed running by the engine, so show stopped state
+                // regardless of what the DB says (stale 'active' after engine restart is common).
+                updateRuntimeStatusDisplay(statusElement, false, stats, 'stopped');
                 updateActionButtonsVisibility(interfaceId, false, false);
                 updateDeleteButtonState(interfaceId, true);
             }
@@ -3111,6 +3138,12 @@ function updateRuntimeStatusDisplay(element, isProcessing, stats, errorState = n
             case 'paused':
                 indicator.className = 'status-indicator paused';
                 text.textContent = 'Paused';
+                break;
+            case 'stopped':
+            case 'unknown':
+            default:
+                indicator.className = 'status-indicator stopped';
+                text.textContent = 'Stopped';
                 break;
         }
     } else if (isProcessing) {

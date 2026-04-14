@@ -211,7 +211,7 @@
     async function handleBulkAction(action) {
         if (!state.selected.size) return;
         const verb = { activate: 'activate', deactivate: 'deactivate', delete: 'permanently delete' }[action] || action;
-        if (!confirm(`${verb} ${state.selected.size} selected user(s)?`)) return;
+        if (!await AppDialogs.confirm(`${verb} ${state.selected.size} selected user(s)?`, { title: 'Bulk Action', type: 'warning', confirmText: 'Confirm' })) return;
         try {
             const r = await api('POST', '/api/users/bulk', { action, userIds: [...state.selected] });
             showAlert(r.message);
@@ -265,7 +265,7 @@
         const u = state.users.find(x => x.id === id);
         if (!u) return;
         const name = u.first_name ? `${u.first_name} ${u.last_name || ''}`.trim() : (u.name || u.email);
-        if (!confirm(`Delete user "${name}"? This cannot be undone.`)) return;
+        if (!await AppDialogs.confirm(`Delete user "<b>${name}</b>"? This cannot be undone.`, { title: 'Delete User', type: 'danger', confirmText: 'Delete' })) return;
         try {
             await api('DELETE', `/api/users/${id}`);
             showAlert('User deleted');
@@ -464,7 +464,7 @@
     }
 
     async function gdprRequest() {
-        if (!confirm('Flag this user for GDPR deletion? This will be logged and is irreversible.')) return;
+        if (!await AppDialogs.confirm('Flag this user for GDPR deletion? This will be logged and is irreversible.', { title: 'GDPR Deletion Request', type: 'danger', confirmText: 'Flag for Deletion' })) return;
         try {
             const r = await api('POST', `/api/users/${state.drawer.userId}/gdpr-request`);
             showAlert(r.message);

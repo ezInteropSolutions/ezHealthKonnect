@@ -10,6 +10,7 @@ import (
 	"ezhealthkonnect/services/logger"
 	"ezhealthkonnect/services/storage"
 	"fmt"
+	"log"
 	"time"
 
 	"github.com/google/uuid"
@@ -66,7 +67,11 @@ func (tps *TransformationPipelineService) GetExecutorRegistry() *ExecutorRegistr
 	return tps.executorRegistry
 }
 
-// GetPipeline retrieves a transformation pipeline for an interface/message type
+// GetPipeline retrieves a transformation pipeline for an interface/message type.
+// Fallback chain when exact match not found:
+//  1. Exact match (interface_id + message_type)
+//  2. Interface's own configured message_type (handles variant triggers like ORU^R03 vs ORU^R01)
+//  3. Any enabled pipeline for the interface
 func (tps *TransformationPipelineService) GetPipeline(ctx context.Context, interfaceID string, messageType string) (*models.TransformationPipeline, error) {
 	query := `
 		SELECT id, interface_id, message_type, pipeline_name, enabled, version,
@@ -93,6 +98,51 @@ func (tps *TransformationPipelineService) GetPipeline(ctx context.Context, inter
 		&pipeline.CreatedAt,
 		&pipeline.UpdatedAt,
 	)
+
+	if err == sql.ErrNoRows {
+		// Fallback 1: try the interface's own configured message_type
+		ifaceRow := tps.db.QueryRowContext(ctx,
+			`SELECT COALESCE(message_type,'') FROM interfaces WHERE id = $1`, interfaceID)
+		var ifaceMsgType string
+		if scanErr := ifaceRow.Scan(&ifaceMsgType); scanErr == nil && ifaceMsgType != "" && ifaceMsgType != messageType {
+			err2 := tps.db.QueryRowContext(ctx, query, interfaceID, ifaceMsgType).Scan(
+				&pipeline.ID, &pipeline.InterfaceID, &pipeline.MessageType, &pipeline.PipelineName,
+				&pipeline.Enabled, &pipeline.Version, &pipelineConfigJSON, &connectionsJSON,
+				&pipeline.CreatedAt, &pipeline.UpdatedAt,
+			)
+			if err2 == nil {
+				log.Printf("⚠️  [Pipeline] No pipeline for %s on %s — using interface's own pipeline (%s)",
+					messageType, interfaceID, ifaceMsgType)
+				err = nil
+			}
+		}
+	}
+
+	if err == sql.ErrNoRows {
+		// Fallback 2: any enabled pipeline for the interface
+		anyQuery := `
+			SELECT id, interface_id, message_type, pipeline_name, enabled, version,
+			       COALESCE(pipeline_config, '{}') AS pipeline_config,
+			       COALESCE(connections, '[]') AS connections,
+			       created_at, updated_at
+			FROM transformation_pipelines
+			WHERE interface_id = $1 AND enabled = true
+			ORDER BY updated_at DESC
+			LIMIT 1
+		`
+		err2 := tps.db.QueryRowContext(ctx, anyQuery, interfaceID).Scan(
+			&pipeline.ID, &pipeline.InterfaceID, &pipeline.MessageType, &pipeline.PipelineName,
+			&pipeline.Enabled, &pipeline.Version, &pipelineConfigJSON, &connectionsJSON,
+			&pipeline.CreatedAt, &pipeline.UpdatedAt,
+		)
+		if err2 == nil {
+			log.Printf("⚠️  [Pipeline] No pipeline for %s on %s — using most recent pipeline (%s)",
+				messageType, interfaceID, pipeline.MessageType)
+			err = nil
+		} else {
+			err = err2
+		}
+	}
 
 	if err != nil {
 		return nil, fmt.Errorf("failed to get pipeline: %w", err)

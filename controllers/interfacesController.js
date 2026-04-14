@@ -88,6 +88,7 @@ class InterfacesController {
                     i.created_at,
                     i.updated_at,
                     i.version,
+                    i.processing_stats,
                     u.email as created_by_email
                 FROM interfaces i
                 LEFT JOIN users u ON i.created_by = u.id
@@ -146,9 +147,10 @@ class InterfacesController {
                 lastUpdated: item.updated_at, // Frontend compatibility
                 lastActivity: item.last_processed_at, // Frontend compatibility
                 createdBy: item.created_by_email || 'Unknown',
-                version: item.version || 1
+                version: item.version || 1,
+                processingStats: this.parseJsonField(item.processing_stats)
             }));
-            
+
             return res.json({
                 success: true,
                 interfaces: transformedInterfaces,
@@ -693,8 +695,8 @@ class InterfacesController {
             const interfaceId = req.params.interfaceId;
 
             // New: Support request body parameters from delete modal
-            const deleteType = req.body?.deleteType || req.query.deleteType || req.query.mode || 'soft'; // soft or hard
-            const dataRetention = req.body?.dataRetention || req.query.dataRetention || 'keep_all'; // keep_all, keep_errors, delete_all
+            let deleteType = req.body?.deleteType || req.query.deleteType || req.query.mode || 'soft'; // soft or hard
+            let dataRetention = req.body?.dataRetention || req.query.dataRetention || 'keep_all'; // keep_all, keep_errors, delete_all
 
             // Legacy support: ?retainData=false maps to hard delete + delete_all
             const legacyRetainData = req.query.retainData;
@@ -777,7 +779,47 @@ class InterfacesController {
                 });
                 console.log(`✅ Interface soft-deleted (can be restored) - User: ${userEmail}, Interface: ${interfaceItem.name}`);
             } else {
-                // Hard delete: Permanently remove interface record
+                // Hard delete: cascade through all FK-dependent tables first, then delete interface.
+                // Order matters — delete children before parents.
+                const cascadeTables = [
+                    // Deepest dependents first
+                    'transformation_step_executions', // depends on transformation_executions
+                    'transformation_executions',
+                    'transformation_steps',           // depends on transformation_pipelines
+                    'transformation_pipelines',
+                    // Direct interface_id references (order among these doesn't matter)
+                    'alert_silences',
+                    'alert_rules',
+                    'connectivity_execution_log',
+                    'cross_db_integrity_log',
+                    'cross_db_integrity_stats',
+                    'delivery_audit_log',
+                    'hl7_fhir_mappings',
+                    'interface_connectivity',
+                    'interface_message_mappings',
+                    'interface_processing_metrics',
+                    'interface_table_metadata',
+                    'interface_table_performance_log',
+                    'message_audit_log',
+                    'message_processing_enhanced',
+                    'message_processing_queue',
+                    'mirth_migration_history',
+                    'output_table_metadata',
+                    'processing_jobs',
+                    'processing_queue_status',
+                    'sample_parsed_messages',
+                ];
+                for (const tbl of cascadeTables) {
+                    try {
+                        await this.database.sequelize.query(
+                            `DELETE FROM ${tbl} WHERE interface_id = :interfaceId`,
+                            { replacements: { interfaceId }, type: this.database.sequelize.QueryTypes.DELETE }
+                        );
+                    } catch (e) {
+                        // Table may not exist in all environments — skip silently
+                        console.log(`⚠️  Skipping cascade delete for ${tbl}: ${e.message}`);
+                    }
+                }
                 await this.database.sequelize.query(`
                     DELETE FROM interfaces WHERE id = :interfaceId
                 `, {

@@ -468,14 +468,14 @@
         <!-- Page header -->
         <div class="page-header">
             <div>
-                <h1><i class="fas fa-pencil"></i>Alert Management</h1>
+                <h1><i class="fas fa-bell"></i>Alert Management</h1>
                 <p>Configure rules, channels, and silences for integration monitoring alerts</p>
             </div>
             <div class="header-actions">
                 <span class="auto-badge">LIVE</span>
                 <span class="last-updated" id="lastUpdated"></span>
                 <button class="btn-help" onclick="openDocsPanel()">
-                    <i class="fas fa-pencil"></i> Help &amp; Docs
+                    <i class="fas fa-circle-question"></i> Help &amp; Docs
                 </button>
             </div>
         </div>
@@ -486,20 +486,20 @@
             <div class="alerts-leftnav">
                 <div class="leftnav-section">Alerts</div>
                 <a class="leftnav-tab active" data-tab="active-alerts" onclick="activateTab('active-alerts')">
-                    <i class="fas fa-pencil"></i> Active
+                    <i class="fas fa-bell"></i> Active
                     <span class="leftnav-badge" id="activeCountBadge" style="display:none"></span>
                 </a>
                 <a class="leftnav-tab" data-tab="rules" onclick="activateTab('rules')">
-                    <i class="fas fa-pencil"></i> Rules
+                    <i class="fas fa-list-check"></i> Rules
                 </a>
                 <a class="leftnav-tab" data-tab="channels" onclick="activateTab('channels')">
-                    <i class="fas fa-pencil"></i> Channels
+                    <i class="fas fa-satellite-dish"></i> Channels
                 </a>
                 <a class="leftnav-tab" data-tab="silences" onclick="activateTab('silences')">
-                    <i class="fas fa-pencil"></i> Silences
+                    <i class="fas fa-bell-slash"></i> Silences
                 </a>
                 <a class="leftnav-tab" data-tab="history" onclick="activateTab('history')">
-                    <i class="fas fa-pencil"></i> History
+                    <i class="fas fa-clock-rotate-left"></i> History
                 </a>
             </div>
 
@@ -511,16 +511,16 @@
                     <div class="section-header">
                         <h2>Active Alerts</h2>
                         <div style="display:flex;gap:8px">
-                            <button class="btn-ghost" onclick="loadActiveAlerts()"><i class="fas fa-pencil"></i> Refresh</button>
-                            <button class="btn-primary" onclick="acknowledgeAll()"><i class="fas fa-pencil"></i> Ack All</button>
+                            <button class="btn-ghost" onclick="loadActiveAlerts()"><i class="fas fa-rotate"></i> Refresh</button>
+                            <button class="btn-primary" onclick="acknowledgeAll()"><i class="fas fa-check-double"></i> Ack All</button>
                         </div>
                     </div>
 
                     <div class="severity-chips">
                         <div class="sev-chip all active" onclick="filterBySeverity('')">All <span id="chipAll">—</span></div>
-                        <div class="sev-chip critical" onclick="filterBySeverity('critical')"><i class="fas fa-pencil"></i> Critical <span id="chipCritical">0</span></div>
-                        <div class="sev-chip warning"  onclick="filterBySeverity('warning')"><i class="fas fa-pencil"></i> Warning <span id="chipWarning">0</span></div>
-                        <div class="sev-chip info"     onclick="filterBySeverity('info')"><i class="fas fa-pencil"></i> Info <span id="chipInfo">0</span></div>
+                        <div class="sev-chip critical" onclick="filterBySeverity('critical')"><i class="fas fa-circle-exclamation"></i> Critical <span id="chipCritical">0</span></div>
+                        <div class="sev-chip warning"  onclick="filterBySeverity('warning')"><i class="fas fa-triangle-exclamation"></i> Warning <span id="chipWarning">0</span></div>
+                        <div class="sev-chip info"     onclick="filterBySeverity('info')"><i class="fas fa-circle-info"></i> Info <span id="chipInfo">0</span></div>
                     </div>
 
                     <div class="filter-bar">
@@ -540,7 +540,7 @@
                     </div>
 
                     <div id="alertList" class="alert-list">
-                        <div class="loading-row"><i class="fas fa-pencil"></i> Loading alerts…</div>
+                        <div class="loading-row"><i class="fas fa-spinner fa-spin"></i> Loading alerts…</div>
                     </div>
                 </div>
 
@@ -548,14 +548,14 @@
                 <div id="tab-rules" class="tab-section">
                     <div class="section-header">
                         <h2>Alert Rules</h2>
-                        <button class="btn-primary" onclick="openRuleModal()"><i class="fas fa-pencil"></i> New Rule</button>
+                        <button class="btn-primary" onclick="openRuleModal()"><i class="fas fa-plus"></i> New Rule</button>
                     </div>
                     <p style="font-size:13px;color:var(--muted);margin-bottom:16px">
                         Global rules apply to all interfaces. Per-interface rules override global thresholds for that interface.
                     </p>
                     <div class="rules-section-label">Global Rules</div>
                     <div id="globalRulesList" class="rules-grid">
-                        <div class="loading-row"><i class="fas fa-pencil"></i> Loading…</div>
+                        <div class="loading-row"><i class="fas fa-spinner fa-spin"></i> Loading…</div>
                     </div>
                     <div class="rules-section-label" style="margin-top:24px">Per-Interface Rules</div>
                     <div id="interfaceRulesList" class="rules-grid">
@@ -567,13 +567,13 @@
                 <div id="tab-channels" class="tab-section">
                     <div class="section-header">
                         <h2>Notification Channels</h2>
-                        <button class="btn-primary" onclick="openChannelModal()"><i class="fas fa-pencil"></i> New Channel</button>
+                        <button class="btn-primary" onclick="openChannelModal()"><i class="fas fa-plus"></i> New Channel</button>
                     </div>
                     <p style="font-size:13px;color:var(--muted);margin-bottom:16px">
                         Channels are notification destinations. Assign channels to rules to receive alerts via email, webhook, or Slack.
                     </p>
                     <div id="channelsList" class="channels-grid">
-                        <div class="loading-row"><i class="fas fa-pencil"></i> Loading…</div>
+                        <div class="loading-row"><i class="fas fa-spinner fa-spin"></i> Loading…</div>
                     </div>
                 </div>
 
@@ -581,13 +581,13 @@
                 <div id="tab-silences" class="tab-section">
                     <div class="section-header">
                         <h2>Silences</h2>
-                        <button class="btn-primary" onclick="openSilenceModal()"><i class="fas fa-pencil"></i> New Silence</button>
+                        <button class="btn-primary" onclick="openSilenceModal()"><i class="fas fa-plus"></i> New Silence</button>
                     </div>
                     <p style="font-size:13px;color:var(--muted);margin-bottom:16px">
                         Silences suppress alert firing during maintenance windows. Active silences show in green.
                     </p>
                     <div id="silencesList" class="silences-list">
-                        <div class="loading-row"><i class="fas fa-pencil"></i> Loading…</div>
+                        <div class="loading-row"><i class="fas fa-spinner fa-spin"></i> Loading…</div>
                     </div>
                 </div>
 
@@ -596,8 +596,8 @@
                     <div class="section-header">
                         <h2>Alert History</h2>
                         <div style="display:flex;gap:8px">
-                            <button class="btn-ghost" onclick="exportHistoryCSV()"><i class="fas fa-pencil"></i> Export CSV</button>
-                            <button class="btn-ghost" onclick="loadHistory()"><i class="fas fa-pencil"></i> Refresh</button>
+                            <button class="btn-ghost" onclick="exportHistoryCSV()"><i class="fas fa-file-arrow-down"></i> Export CSV</button>
+                            <button class="btn-ghost" onclick="loadHistory()"><i class="fas fa-rotate"></i> Refresh</button>
                         </div>
                     </div>
                     <div class="filter-bar" style="margin-bottom:14px">
@@ -633,7 +633,7 @@
                                 </tr>
                             </thead>
                             <tbody id="historyBody">
-                                <tr><td colspan="8" class="loading-row"><i class="fas fa-pencil"></i> Loading…</td></tr>
+                                <tr><td colspan="8" class="loading-row"><i class="fas fa-spinner fa-spin"></i> Loading…</td></tr>
                             </tbody>
                         </table>
                     </div>
@@ -822,7 +822,7 @@
     <div class="docs-panel-accent"></div>
     <div class="docs-panel-header">
         <div style="flex:1">
-            <h2><i class="fas fa-pencil" style="margin-right:8px"></i>Alert Management — Help &amp; Documentation</h2>
+            <h2><i class="fas fa-book" style="margin-right:8px"></i>Alert Management — Help &amp; Documentation</h2>
             <p>Configuration guides, API reference, and real-world examples</p>
         </div>
         <button class="docs-close" onclick="closeDocsPanel()" title="Close">×</button>
@@ -835,6 +835,7 @@
     </div>
 </div>
 
+<script src="/js/core/app-dialogs.js"></script>
 <script src="js/components/sidebar-nav.js"></script>
 <script src="js/alert-docs.js"></script>
 <script src="js/alerts.js"></script>

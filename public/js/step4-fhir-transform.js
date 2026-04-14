@@ -489,13 +489,13 @@ window.viewFHIRJSON = function() {
 window.editFieldMappings = function() {
     console.log('🔧 Edit field mappings requested');
     // This could open an advanced mapping interface
-    alert('Advanced field mapping interface would open here');
+    AppDialogs.toast('Advanced field mapping interface coming soon.', 'info');
 };
 
 window.validateTransformation = function() {
     console.log('✅ Validate transformation requested');
     // This could run validation checks
-    alert('FHIR validation checks would run here');
+    AppDialogs.toast('FHIR validation checks coming soon.', 'info');
 };
 
 // Hook into wizard step changes

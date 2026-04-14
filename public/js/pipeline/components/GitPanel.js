@@ -388,7 +388,7 @@ class GitPanel {
     }
 
     async _newBranch() {
-        const name = prompt('New branch name:');
+        const name = await AppDialogs.prompt('New branch name:', { title: 'Create Branch', placeholder: 'feature/my-branch' });
         if (!name) return;
         try {
             const res = await fetch(`/api/git/${this.repoId}/branches`, {

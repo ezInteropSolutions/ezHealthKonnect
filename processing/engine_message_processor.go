@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"strconv"
 	"strings"
 	"time"
 
@@ -25,89 +26,150 @@ func (pe *ProcessingEngine) processMessages(interfaceID string, messageChan <-ch
 	log.Printf("📨 Message processor started for interface %s", interfaceID)
 
 	for msg := range messageChan {
-		startTime := time.Now()
-
-		log.Printf("📥 Processing message for interface %s: ID=%s, Size=%d bytes",
-			interfaceID, msg.MessageID, len(msg.Content))
-
-		// STEP 1: Store message in PostgreSQL interface table (with error capture)
-		err := pe.storeMessage(interfaceID, msg)
-		if err != nil {
-			log.Printf("❌ Failed to store message for interface %s: %v", interfaceID, err)
-
-			// Capture database error (V23 - Error Handling Enhancement)
-			if pe.errorService != nil {
-				errCtx := models.NewErrorContext(
-					models.StageDatabase,
-					models.SeverityError,
-					models.ErrorTypeDatabase,
-					"Failed to store message in PostgreSQL",
-					err.Error(),
-					"", // No stack trace for database errors
-					models.RecoveryMarkedFailed,
-				)
-				if captureErr := pe.errorService.CaptureError(interfaceID, msg.MessageID, errCtx); captureErr != nil {
-					log.Printf("⚠️  Failed to capture error: %v", captureErr)
+		// ── Format-agnostic batch detection ──────────────────────────────────
+		// Any connector (TCP/MLLP, file, HTTP, SFTP, Kafka, …) can deliver a
+		// payload that contains multiple independent messages.  splitBatchPayload
+		// handles HL7 v2 (multiple MSH), JSON arrays, and EDI X12 transaction
+		// sets.  Each part is processed as its own InboundMessage so it is
+		// stored, ACK'd, and transformed independently.
+		result := splitBatchPayload(msg.Content)
+		if len(result.Parts) > 1 {
+			log.Printf("📦 [batch] interface=%s: %d %s messages in payload %s — splitting",
+				interfaceID, len(result.Parts), result.Format, msg.MessageID)
+			for i, raw := range result.Parts {
+				clone := *msg
+				clone.Content = raw
+				clone.MessageSize = len(raw)
+				clone.MessageID = msg.MessageID + "-part" + strconv.Itoa(i+1)
+				// Re-extract the message type from the individual segment so
+				// downstream routing and transformation use the correct type.
+				// For HL7 v2 this reads MSH-9; for other formats the original
+				// MessageType from the connector header is preserved.
+				if result.Format == BatchFormatHL7v2 {
+					if mt := extractHL7MessageType(raw); mt != "" {
+						clone.MessageType = mt
+					}
 				}
+				pe.processSingleMessage(interfaceID, &clone)
 			}
-
-			pe.updateInterfaceError(interfaceID)
 			continue
 		}
 
-		processingTime := time.Since(startTime)
-		log.Printf("✅ Message stored in PostgreSQL for interface %s: ID=%s (took %v)",
-			interfaceID, msg.MessageID, processingTime)
-
-		// ACK-AFTER-STORE: Send AA to sender now that message is durable in PostgreSQL.
-		// This prevents the gap where the sender had ACK but PostgreSQL write never happened.
-		// NACK on store failure is already handled above (continue skips this).
-		pe.sendACKAfterStore(interfaceID, msg)
-
-		// Prometheus: count durably-stored messages
-		if metrics.MessagesReceived != nil {
-			metrics.MessagesReceived.WithLabelValues(interfaceID, msg.SourceType).Inc()
-		}
-
-		// STEP 2: Store in MongoDB + Parse to JSON — submit to bounded worker pool (P9 backpressure)
-		pool := backpressureRegistry().GetOrCreate(interfaceID)
-		msgCopy := msg // capture for closure
-		ifID := interfaceID
-		submitted := pool.Submit(func() {
-			pe.storeAndParseWithRecovery(ifID, msgCopy)
-		})
-		if !submitted {
-			// Queue full — send NACK via ValidationAwareConnector (e.g. MLLP NAK)
-			log.Printf("⚠️  [backpressure] queue full for interface %s (depth=%d/%d), dropping message %s",
-				interfaceID, pool.QueueDepth(), pool.MaxQueue(), msg.MessageID)
-			pe.validationMutex.RLock()
-			vc, hasVC := pe.validationConnectors[interfaceID]
-			pe.validationMutex.RUnlock()
-			if hasVC && vc.SupportsValidationFeedback() {
-				feedback := models.NewValidationFeedback(
-					msg.MessageID, interfaceID,
-					models.ValidationModeStrictReject,
-					"rejected",
-					[]models.FieldValidationError{
-						{Field: "_backpressure", Type: "QUEUE_FULL", Message: "Server busy — queue at capacity"},
-					},
-					0, "",
-				)
-				go func() {
-					ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-					defer cancel()
-					if err := vc.SendValidationResponse(ctx, feedback); err != nil {
-						log.Printf("⚠️  NACK send failed for interface %s: %v", interfaceID, err)
-					}
-				}()
-			}
-		}
-
-		// Update interface statistics
-		pe.updateInterfaceStats(interfaceID, processingTime)
+		pe.processSingleMessage(interfaceID, msg)
 	}
 
 	log.Printf("📪 Message processor stopped for interface %s", interfaceID)
+}
+
+// processSingleMessage runs the full store → ACK → async-parse pipeline for one
+// discrete HL7 (or other format) message.  Extracted from the processMessages
+// loop so the batch-split path and the single-message path share identical logic.
+func (pe *ProcessingEngine) processSingleMessage(interfaceID string, msg *models.InboundMessage) {
+	startTime := time.Now()
+
+	log.Printf("📥 Processing message for interface %s: ID=%s, Size=%d bytes",
+		interfaceID, msg.MessageID, len(msg.Content))
+
+	// STEP 1: Store message in PostgreSQL interface table (with error capture)
+	err := pe.storeMessage(interfaceID, msg)
+	if err != nil {
+		log.Printf("❌ Failed to store message for interface %s: %v", interfaceID, err)
+
+		// Capture database error (V23 - Error Handling Enhancement)
+		if pe.errorService != nil {
+			errCtx := models.NewErrorContext(
+				models.StageDatabase,
+				models.SeverityError,
+				models.ErrorTypeDatabase,
+				"Failed to store message in PostgreSQL",
+				err.Error(),
+				"", // No stack trace for database errors
+				models.RecoveryMarkedFailed,
+			)
+			if captureErr := pe.errorService.CaptureError(interfaceID, msg.MessageID, errCtx); captureErr != nil {
+				log.Printf("⚠️  Failed to capture error: %v", captureErr)
+			}
+		}
+
+		pe.updateInterfaceError(interfaceID)
+		return
+	}
+
+	processingTime := time.Since(startTime)
+	log.Printf("✅ Message stored in PostgreSQL for interface %s: ID=%s (took %v)",
+		interfaceID, msg.MessageID, processingTime)
+
+	// ACK-AFTER-STORE: Send AA to sender now that message is durable in PostgreSQL.
+	// This prevents the gap where the sender had ACK but PostgreSQL write never happened.
+	// NACK on store failure is already handled above (return skips this).
+	pe.sendACKAfterStore(interfaceID, msg)
+
+	// Prometheus: count durably-stored messages
+	if metrics.MessagesReceived != nil {
+		metrics.MessagesReceived.WithLabelValues(interfaceID, msg.SourceType).Inc()
+	}
+
+	// STEP 2: Store in MongoDB + Parse to JSON — submit to bounded worker pool (P9 backpressure)
+	pool := backpressureRegistry().GetOrCreate(interfaceID)
+	msgCopy := msg // capture for closure
+	ifID := interfaceID
+	submitted := pool.Submit(func() {
+		pe.storeAndParseWithRecovery(ifID, msgCopy)
+	})
+	if !submitted {
+		// Queue full — send NACK via ValidationAwareConnector (e.g. MLLP NAK)
+		log.Printf("⚠️  [backpressure] queue full for interface %s (depth=%d/%d), dropping message %s",
+			interfaceID, pool.QueueDepth(), pool.MaxQueue(), msg.MessageID)
+		pe.validationMutex.RLock()
+		vc, hasVC := pe.validationConnectors[interfaceID]
+		pe.validationMutex.RUnlock()
+		if hasVC && vc.SupportsValidationFeedback() {
+			feedback := models.NewValidationFeedback(
+				msg.MessageID, interfaceID,
+				models.ValidationModeStrictReject,
+				"rejected",
+				[]models.FieldValidationError{
+					{Field: "_backpressure", Type: "QUEUE_FULL", Message: "Server busy — queue at capacity"},
+				},
+				0, "",
+			)
+			go func() {
+				ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+				defer cancel()
+				if err := vc.SendValidationResponse(ctx, feedback); err != nil {
+					log.Printf("⚠️  NACK send failed for interface %s: %v", interfaceID, err)
+				}
+			}()
+		}
+	}
+
+	// Update interface statistics
+	pe.updateInterfaceStats(interfaceID, processingTime)
+}
+
+// extractHL7MessageType returns the MSH-9 value (e.g. "ADT^A01") from a raw HL7
+// message string.  Returns "" when the segment cannot be parsed.
+func extractHL7MessageType(raw string) string {
+	// Normalise line endings
+	norm := strings.ReplaceAll(raw, "\r\n", "\r")
+	norm = strings.ReplaceAll(norm, "\n", "\r")
+	for _, seg := range strings.Split(norm, "\r") {
+		seg = strings.TrimSpace(seg)
+		if !strings.HasPrefix(seg, "MSH") {
+			continue
+		}
+		if len(seg) < 4 {
+			return ""
+		}
+		fieldSep := string(seg[3])
+		fields := strings.Split(seg, fieldSep)
+		// MSH.9 is field index 8 (MSH.1=separator stored at [3], fields[1]=encoding chars)
+		if len(fields) > 8 {
+			return strings.TrimSpace(fields[8])
+		}
+		return ""
+	}
+	return ""
 }
 
 // storeMessage stores the raw message in PostgreSQL

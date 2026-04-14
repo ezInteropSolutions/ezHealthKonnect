@@ -174,7 +174,7 @@ function loadInterfaceAlerts() {
             var alerts = res.data || [];
             var el = document.getElementById('interfaceAlertList');
             if (!alerts.length) {
-                el.innerHTML = '<div class="empty-state"><i class="fas fa-pencil" style="color:#22c55e;font-size:28px"></i><p>No active alerts for this interface</p></div>';
+                el.innerHTML = '<div class="empty-state"><i class="fas fa-circle-check" style="color:#22c55e;font-size:28px"></i><p>No active alerts for this interface</p></div>';
                 return;
             }
             el.innerHTML = alerts.map(function(a) {
@@ -206,7 +206,7 @@ function loadInterfaceRules() {
             var rules = res.data || [];
             var el = document.getElementById('interfaceRuleList');
             if (!rules.length) {
-                el.innerHTML = '<div class="empty-state"><i class="fas fa-pencil"></i><p>No rules configured. Global rules apply by default.</p></div>';
+                el.innerHTML = '<div class="empty-state"><i class="fas fa-list-check"></i><p>No rules configured. Global rules apply by default.</p></div>';
                 return;
             }
             el.innerHTML = rules.map(function(r) {
@@ -278,8 +278,9 @@ function saveSettings() {
         .catch(function() { showToast('Network error', false); });
 }
 
-function confirmDelete() {
-    if (!confirm('Delete this interface and all its data? This cannot be undone.')) return;
+async function confirmDelete() {
+    const ok = await AppDialogs.confirm('Delete this interface and all its data?<br>This cannot be undone.', { title: 'Delete Interface', type: 'danger', confirmText: 'Delete' });
+    if (!ok) return;
     fetch('/api/interfaces/' + _interfaceId, { method: 'DELETE', credentials: 'include' })
         .then(function(r) { return r.json(); })
         .then(function(res) {

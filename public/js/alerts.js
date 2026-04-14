@@ -85,7 +85,7 @@ function renderAlerts() {
     if (!el) return;
 
     if (filtered.length === 0) {
-        el.innerHTML = '<div class="empty-state"><i class="fas fa-pencilcil" style="color:#22c55e"></i><h3>No active alerts</h3><p>All systems are operating within configured thresholds.</p></div>';
+        el.innerHTML = '<div class="empty-state"><i class="fas fa-circle-check" style="color:#22c55e"></i><h3>No active alerts</h3><p>All systems are operating within configured thresholds.</p></div>';
         return;
     }
 
@@ -96,8 +96,8 @@ function renderAlerts() {
             '<div class="alert-body">' +
                 '<div class="alert-title">' + esc(a.alert_type.replace(/_/g,' ')) + '</div>' +
                 '<div class="alert-meta">' +
-                    '<span><i class="fas fa-pencilcil"></i>' + esc(a.interface_name) + '</span>' +
-                    '<span><i class="fas fa-pencilcil"></i>' + elapsed + '</span>' +
+                    '<span><i class="fas fa-network-wired"></i>' + esc(a.interface_name) + '</span>' +
+                    '<span><i class="fas fa-clock"></i>' + elapsed + '</span>' +
                     '<span style="color:var(--muted);">' + esc(a.message) + '</span>' +
                 '</div>' +
             '</div>' +
@@ -150,8 +150,8 @@ function resolveAlert(id) {
         });
 }
 
-function acknowledgeAll() {
-    if (!confirm('Acknowledge all active alerts?')) return;
+async function acknowledgeAll() {
+    if (!await AppDialogs.confirm('Acknowledge all active alerts?', { title: 'Acknowledge All', type: 'warning', confirmText: 'Acknowledge' })) return;
     api('POST', '/fired/acknowledge-all', { acknowledged_by: getCurrentUser() })
         .then(function(r) {
             if (r.success) {
@@ -199,7 +199,7 @@ function renderRuleCards(rules) {
             '</div>' +
             '<div class="rule-actions">' +
                 '<span class="channel-count-chip" onclick="openAssignChannels(\'' + r.id + '\',\'' + esc(r.name) + '\')">' +
-                    '<i class="fas fa-pencilcil"></i> ' + (r.channel_count || 0) + '</span>' +
+                    '<i class="fas fa-satellite-dish"></i> ' + (r.channel_count || 0) + '</span>' +
                 '<label class="toggle-switch" title="' + (r.is_enabled ? 'Disable' : 'Enable') + '">' +
                     '<input type="checkbox" ' + (r.is_enabled ? 'checked' : '') + ' onchange="toggleRule(\'' + r.id + '\',this.checked)">' +
                     '<span class="toggle-slider"></span>' +
@@ -283,8 +283,8 @@ function toggleRule(id, enabled) {
         });
 }
 
-function deleteRule(id) {
-    if (!confirm('Delete this alert rule?')) return;
+async function deleteRule(id) {
+    if (!await AppDialogs.confirm('Delete this alert rule?', { title: 'Delete Rule', type: 'danger', confirmText: 'Delete' })) return;
     api('DELETE', '/rules/' + id).then(function(r) {
         if (r.success) { showToast('Rule deleted', true); loadRules(); }
         else { showToast(r.error, false); }
@@ -296,7 +296,7 @@ function openAssignChannels(ruleId, ruleName) {
     _assignRuleId = ruleId;
     document.getElementById('assignChannelsTitle').textContent = 'Channels for: ' + ruleName;
     var el = document.getElementById('assignChannelsList');
-    el.innerHTML = '<div class="loading-row"><i class="fas fa-pencilcil"></i></div>';
+    el.innerHTML = '<div class="loading-row"><i class="fas fa-spinner fa-spin"></i></div>';
     openModal('assignChannelsModal');
 
     Promise.all([
@@ -351,7 +351,7 @@ function renderChannels() {
     var el = document.getElementById('channelsList');
     if (!el) return;
     if (!_channels.length) {
-        el.innerHTML = '<div class="empty-state"><i class="fas fa-pencilcil"></i><h3>No channels configured</h3><p>Add an email, webhook, or Slack channel to start receiving notifications.</p></div>';
+        el.innerHTML = '<div class="empty-state"><i class="fas fa-satellite-dish"></i><h3>No channels configured</h3><p>Add an email, webhook, or Slack channel to start receiving notifications.</p></div>';
         return;
     }
     var iconMap = { email: 'fa-envelope', webhook: 'fa-globe', slack: 'fa-slack' };
@@ -370,7 +370,7 @@ function renderChannels() {
                 '<span class="test-badge ' + testClass + '">' + testLabel + '</span>' +
             '</div>' +
             '<div class="channel-footer">' +
-                '<button class="btn-sm" onclick="testChannel(\'' + ch.id + '\')"><i class="fas fa-pencilcil"></i> Test</button>' +
+                '<button class="btn-sm" onclick="testChannel(\'' + ch.id + '\')"><i class="fas fa-plug-circle-check"></i> Test</button>' +
                 '<button class="btn-sm" onclick="openChannelModal(\'' + ch.id + '\')">Edit</button>' +
                 '<button class="btn-sm" onclick="deleteChannel(\'' + ch.id + '\')" style="color:#dc2626">Delete</button>' +
             '</div>' +
@@ -476,8 +476,8 @@ function testChannel(id) {
     });
 }
 
-function deleteChannel(id) {
-    if (!confirm('Delete this channel?')) return;
+async function deleteChannel(id) {
+    if (!await AppDialogs.confirm('Delete this channel?', { title: 'Delete Channel', type: 'danger', confirmText: 'Delete' })) return;
     api('DELETE', '/channels/' + id).then(function(r) {
         if (r.success) { showToast('Channel deleted', true); loadChannels(); }
         else { showToast(r.error, false); }
@@ -496,7 +496,7 @@ function renderSilences() {
     var el = document.getElementById('silencesList');
     if (!el) return;
     if (!_silences.length) {
-        el.innerHTML = '<div class="empty-state"><i class="fas fa-pencilcil"></i><h3>No silences configured</h3><p>Create a silence to suppress alerts during maintenance windows.</p></div>';
+        el.innerHTML = '<div class="empty-state"><i class="fas fa-bell-slash"></i><h3>No silences configured</h3><p>Create a silence to suppress alerts during maintenance windows.</p></div>';
         return;
     }
     el.innerHTML = _silences.map(function(s) {
@@ -550,8 +550,8 @@ function saveSilence() {
     });
 }
 
-function deleteSilence(id) {
-    if (!confirm('Remove this silence?')) return;
+async function deleteSilence(id) {
+    if (!await AppDialogs.confirm('Remove this silence?', { title: 'Remove Silence', type: 'warning', confirmText: 'Remove' })) return;
     api('DELETE', '/silences/' + id).then(function(r) {
         if (r.success) { showToast('Silence removed', true); loadSilences(); }
         else { showToast(r.error, false); }

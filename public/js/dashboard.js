@@ -113,13 +113,14 @@ function showMessagesContent() {
 // ── Templates Gallery ──────────────────────────────────────────────────────
 
 const TEMPLATE_CATEGORY_META = {
-    all:       { label: 'All',          icon: '📋' },
-    emr:       { label: 'EMR / EHR',    icon: '🏥' },
-    hl7v2:     { label: 'HL7 v2',       icon: '🔀' },
-    fhir:      { label: 'FHIR',         icon: '🌐' },
-    payer:     { label: 'Payers',       icon: '💰' },
-    specialty: { label: 'Specialty',    icon: '🔬' },
-    custom:    { label: 'Mine',         icon: '⭐' },
+    all:        { label: 'All',          icon: '📋' },
+    emr:        { label: 'EMR / EHR',    icon: '🏥' },
+    hl7v2:      { label: 'HL7 v2',       icon: '🔀' },
+    fhir:       { label: 'FHIR',         icon: '🌐' },
+    payer:      { label: 'Payers',       icon: '💰' },
+    regulatory: { label: 'Regulatory',   icon: '⚖️' },
+    specialty:  { label: 'Specialty',    icon: '🔬' },
+    custom:     { label: 'Mine',         icon: '⭐' },
 };
 
 let _templatesState = { all: [], filtered: [], activeCategory: 'all', search: '' };
@@ -187,6 +188,10 @@ function showTemplatesContent() {
             .tg-empty-icon { font-size: 2.8rem; margin-bottom: 14px; }
             .tg-spinner { grid-column: 1/-1; text-align: center; padding: 80px; color: #bbb; font-size: 0.9rem; }
 
+            /* ── Guide button on card ── */
+            .tg-guide-btn { background: none; border: 1px solid #c8f0dc; border-radius: 6px; padding: 3px 8px; font-size: 0.72rem; color: #38a169; cursor: pointer; flex-shrink: 0; transition: all 0.12s; }
+            .tg-guide-btn:hover { background: #f0fff4; border-color: #38a169; }
+
             /* ── Preview modal ── */
             .tg-modal-overlay { position: fixed; inset: 0; background: rgba(15,20,40,0.45); z-index: 1000; display: flex; align-items: center; justify-content: center; }
             .tg-modal { background: #fff; border-radius: 14px; width: 540px; max-width: 96vw; max-height: 88vh; overflow-y: auto; box-shadow: 0 24px 64px rgba(0,0,0,0.22); }
@@ -212,6 +217,29 @@ function showTemplatesContent() {
             .tg-modal-btn.cancel:hover { background: #e2e6ea; }
             .tg-modal-btn.use { background: #667eea; color: #fff; }
             .tg-modal-btn.use:hover { background: #5a72d8; }
+
+            /* ── Modal tab bar ── */
+            .tg-tab-bar { display: flex; border-bottom: 1px solid #eee; padding: 0 24px; background: #fafbfc; }
+            .tg-tab-btn { background: none; border: none; border-bottom: 2px solid transparent; padding: 10px 16px; font-size: 0.83rem; font-weight: 500; color: #888; cursor: pointer; transition: color 0.13s, border-color 0.13s; margin-bottom: -1px; }
+            .tg-tab-btn:hover { color: #667eea; }
+            .tg-tab-btn.active { color: #667eea; border-bottom-color: #667eea; font-weight: 600; }
+
+            /* ── User guide panel ── */
+            .tg-guide-body { padding: 20px 24px; font-size: 0.86rem; line-height: 1.68; color: #333; }
+            .tg-guide-body h2 { font-size: 1rem; font-weight: 700; color: #1a1a2e; margin: 0 0 10px; }
+            .tg-guide-body h3 { font-size: 0.9rem; font-weight: 700; color: #2d3748; margin: 20px 0 8px; border-top: 1px solid #f0f2f5; padding-top: 16px; }
+            .tg-guide-body h4 { font-size: 0.83rem; font-weight: 600; color: #4a5568; margin: 14px 0 5px; }
+            .tg-guide-body p { margin: 0 0 10px; }
+            .tg-guide-body hr.tg-hr { border: none; border-top: 1px solid #eee; margin: 18px 0; }
+            .tg-guide-body ul.tg-guide-ul { margin: 0 0 10px 20px; padding: 0; }
+            .tg-guide-body ul.tg-guide-ul li { margin-bottom: 4px; }
+            .tg-guide-body pre.tg-code { background: #f4f5f7; border-radius: 6px; padding: 12px 14px; font-size: 0.78rem; overflow-x: auto; margin: 0 0 12px; line-height: 1.55; }
+            .tg-guide-body code.tg-icode { background: #f0f1f3; border-radius: 3px; padding: 1px 5px; font-size: 0.82em; color: #c0392b; font-family: monospace; }
+            .tg-table-wrap { overflow-x: auto; margin-bottom: 14px; }
+            .tg-guide-table { border-collapse: collapse; width: 100%; font-size: 0.81rem; }
+            .tg-guide-table th { background: #f7f8fc; font-weight: 600; color: #555; padding: 6px 10px; border: 1px solid #e8ecf0; text-align: left; white-space: nowrap; }
+            .tg-guide-table td { padding: 5px 10px; border: 1px solid #e8ecf0; vertical-align: top; }
+            .tg-guide-table td:first-child { font-family: monospace; font-size: 0.78rem; color: #c0392b; white-space: nowrap; }
         </style>
 
         <div class="tg-wrap">
@@ -264,7 +292,7 @@ function _renderCategoryTabs(categories) {
     const totals = { all: _templatesState.all.length };
     for (const c of categories) totals[c.category] = c.count;
 
-    const order = ['all', 'emr', 'hl7v2', 'fhir', 'payer', 'specialty', 'custom'];
+    const order = ['all', 'emr', 'hl7v2', 'fhir', 'payer', 'regulatory', 'specialty', 'custom'];
     const present = new Set(['all', ...(categories.map(c => c.category))]);
 
     tabs.innerHTML = order
@@ -338,7 +366,8 @@ function _renderTemplateCard(t) {
             <div class="tg-card-top">
                 <div class="tg-card-title-row">
                     <span class="tg-card-title">${t.icon || '📋'} ${_escHtml(t.name)}</span>
-                    <button class="tg-info-btn" onclick="event.stopPropagation();previewTemplate('${t.id}')">ℹ Details</button>
+                    <button class="tg-info-btn" onclick="event.stopPropagation();previewTemplate('${t.id}','details')">ℹ Details</button>
+                    ${t.has_guide ? `<button class="tg-guide-btn" onclick="event.stopPropagation();previewTemplate('${t.id}','guide')">📖 Guide</button>` : ''}
                 </div>
                 <p class="tg-card-desc">${_escHtml(t.description || '')}</p>
                 ${connFlow ? `<div class="tg-conn-flow">${connFlow}</div>` : ''}
@@ -405,7 +434,126 @@ function _formatConnType(type) {
     return type.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()).replace(' Inbound','').replace(' Outbound','');
 }
 
-async function previewTemplate(id) {
+// ── Inject user-provided connector values into sanitized pipeline steps ────────
+function _injectConnectorValues(groups, srcVals, tgtVals) {
+    const hasSrc = Object.keys(srcVals).length > 0;
+    const hasTgt = Object.keys(tgtVals).length > 0;
+    if (!hasSrc && !hasTgt) return groups;
+    return groups.map(g => ({
+        ...g,
+        steps: (g.steps || []).map(step => {
+            const sType = step.step_type || step.type || '';
+            if (sType === 'connector.inbound' && hasSrc) {
+                return { ...step, config: { ...step.config, config: { ...(step.config?.config || {}), ...srcVals } } };
+            }
+            if (sType === 'connector.outbound' && hasTgt) {
+                return { ...step, config: { ...step.config, config: { ...(step.config?.config || {}), ...tgtVals } } };
+            }
+            return step;
+        }),
+    }));
+}
+
+// ── Tab switcher for preview modal ────────────────────────────────────────────
+function _tgSwitchTab(modalId, tabId) {
+    const el = document.getElementById(modalId);
+    if (!el) return;
+    el.querySelectorAll('.tg-tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === tabId));
+    el.querySelectorAll('.tg-tab-panel').forEach(p => { p.style.display = p.dataset.panel === tabId ? '' : 'none'; });
+}
+
+// ── Minimal markdown → safe HTML renderer (for user_guide content) ─────────────
+function _mdToHtml(md) {
+    if (!md) return '';
+
+    // 1. Extract fenced code blocks
+    const codeBlocks = [];
+    let text = md.replace(/```[\s\S]*?```/g, m => {
+        const body = m.slice(3, -3).replace(/^\S*\n/, ''); // strip optional language tag
+        codeBlocks.push(_escHtml(body));
+        return '\x02CB' + (codeBlocks.length - 1) + '\x02';
+    });
+
+    // 2. Extract inline code
+    const inlineCodes = [];
+    text = text.replace(/`([^`\n]+)`/g, (_, c) => {
+        inlineCodes.push(_escHtml(c));
+        return '\x02IC' + (inlineCodes.length - 1) + '\x02';
+    });
+
+    // Restore inline code + bold in a string already passed through _escHtml
+    function inl(t) {
+        return t
+            .replace(/\x02IC(\d+)\x02/g, (_, n) => `<code class="tg-icode">${inlineCodes[+n]}</code>`)
+            .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+    }
+
+    const lines = text.split('\n');
+    const out = [];
+    let tableOpen = false, tableHeaderDone = false, listOpen = false;
+
+    const closeList  = () => { if (listOpen)  { out.push('</ul>');              listOpen = false; } };
+    const closeTable = () => { if (tableOpen) { out.push('</tbody></table></div>'); tableOpen = false; tableHeaderDone = false; } };
+
+    for (let i = 0; i < lines.length; i++) {
+        const raw = lines[i];
+
+        // Fenced code block placeholder
+        const cbm = raw.trim().match(/^\x02CB(\d+)\x02$/);
+        if (cbm) {
+            closeList(); closeTable();
+            out.push(`<pre class="tg-code"><code>${codeBlocks[+cbm[1]]}</code></pre>`);
+            continue;
+        }
+
+        // Headings
+        if (/^### /.test(raw)) { closeList(); closeTable(); out.push(`<h4>${inl(_escHtml(raw.slice(4)))}</h4>`); continue; }
+        if (/^## /.test(raw))  { closeList(); closeTable(); out.push(`<h3>${inl(_escHtml(raw.slice(3)))}</h3>`); continue; }
+        if (/^# /.test(raw))   { closeList(); closeTable(); out.push(`<h2>${inl(_escHtml(raw.slice(2)))}</h2>`); continue; }
+
+        // Horizontal rule
+        if (/^---+$/.test(raw.trim())) { closeList(); closeTable(); out.push('<hr class="tg-hr">'); continue; }
+
+        // Table row
+        if (raw.trim().startsWith('|')) {
+            closeList();
+            // Separator row (|---|---|)
+            if (/^\|[\s\-:|]+\|$/.test(raw.trim())) {
+                if (tableOpen && !tableHeaderDone) { out.push('</thead><tbody>'); tableHeaderDone = true; }
+                continue;
+            }
+            const cells = raw.trim().replace(/^\||\|$/g, '').split('|').map(c => c.trim());
+            if (!tableOpen) {
+                out.push('<div class="tg-table-wrap"><table class="tg-guide-table"><thead>');
+                tableOpen = true;
+            }
+            const tag = tableHeaderDone ? 'td' : 'th';
+            out.push('<tr>' + cells.map(c => `<${tag}>${inl(_escHtml(c))}</${tag}>`).join('') + '</tr>');
+            continue;
+        }
+
+        // List item
+        const listMatch = raw.match(/^[-*] (.*)/);
+        if (listMatch) {
+            closeTable();
+            if (!listOpen) { out.push('<ul class="tg-guide-ul">'); listOpen = true; }
+            out.push(`<li>${inl(_escHtml(listMatch[1]))}</li>`);
+            continue;
+        }
+
+        // Empty line
+        if (!raw.trim()) { closeList(); closeTable(); continue; }
+
+        // Paragraph
+        closeList(); closeTable();
+        out.push(`<p>${inl(_escHtml(raw))}</p>`);
+    }
+    closeList(); closeTable();
+    return out.join('\n');
+}
+
+async function previewTemplate(id, activeTab) {
+    activeTab = activeTab || 'details';
     try {
         const res = await fetch(`/api/interface-templates/${id}`, { credentials: 'include' });
         const data = await res.json();
@@ -433,6 +581,18 @@ async function previewTemplate(id) {
                 </div>`).join('')
             : '<p style="color:#888;font-size:0.82rem">This template requires no additional connection setup — all defaults are pre-filled.</p>';
 
+        const hasGuide = !!(t.user_guide && t.user_guide.trim());
+        const tabBar = hasGuide ? `
+            <div class="tg-tab-bar">
+                <button class="tg-tab-btn${activeTab === 'details' ? ' active' : ''}" data-tab="details"
+                    onclick="_tgSwitchTab('tgPreviewModal','details')">Details</button>
+                <button class="tg-tab-btn${activeTab === 'guide' ? ' active' : ''}" data-tab="guide"
+                    onclick="_tgSwitchTab('tgPreviewModal','guide')">📖 User Guide</button>
+            </div>` : '';
+
+        const detailsHidden = hasGuide && activeTab !== 'details' ? ' style="display:none"' : '';
+        const guideHidden   = !hasGuide || activeTab !== 'guide'  ? ' style="display:none"' : '';
+
         const modal = document.createElement('div');
         modal.className = 'tg-modal-overlay';
         modal.id = 'tgPreviewModal';
@@ -445,7 +605,8 @@ async function previewTemplate(id) {
                     </div>
                     <button class="tg-modal-close" onclick="document.getElementById('tgPreviewModal').remove()">×</button>
                 </div>
-                <div class="tg-modal-body">
+                ${tabBar}
+                <div class="tg-tab-panel tg-modal-body" data-panel="details"${detailsHidden}>
                     <p class="tg-modal-desc">${_escHtml(t.description || 'No description available.')}</p>
                     <div class="tg-modal-section">
                         <div class="tg-modal-section-title">Connectors</div>
@@ -460,6 +621,7 @@ async function previewTemplate(id) {
                         ${reqHtml}
                     </div>
                 </div>
+                ${hasGuide ? `<div class="tg-tab-panel tg-guide-body" data-panel="guide"${guideHidden}>${_mdToHtml(t.user_guide)}</div>` : ''}
                 <div class="tg-modal-footer">
                     <button class="tg-modal-btn cancel" onclick="document.getElementById('tgPreviewModal').remove()">Close</button>
                     <button class="tg-modal-btn use" onclick="document.getElementById('tgPreviewModal').remove(); useTemplate('${t.id}')">▶ Configure & Create</button>
@@ -469,12 +631,13 @@ async function previewTemplate(id) {
         document.body.appendChild(modal);
         modal.addEventListener('click', e => { if (e.target === modal) modal.remove(); });
     } catch (err) {
-        alert('Could not load template preview: ' + err.message);
+        AppDialogs.toast('Could not load template preview: ' + err.message, 'error');
     }
 }
 
 async function deleteTemplate(id, name) {
-    if (!confirm(`Delete template "${name}"?\n\nThis cannot be undone.`)) return;
+    const ok = await AppDialogs.confirm(`Delete template "<b>${name}</b>"?<br><br>This cannot be undone.`, { title: 'Delete Template', type: 'danger', confirmText: 'Delete' });
+    if (!ok) return;
     try {
         const res = await fetch(`/api/interface-templates/${id}`, {
             method: 'DELETE',
@@ -486,7 +649,7 @@ async function deleteTemplate(id, name) {
         _templatesState.all = _templatesState.all.filter(t => t.id !== id);
         filterTemplates();
     } catch (err) {
-        alert('Could not delete template: ' + err.message);
+        AppDialogs.toast('Could not delete template: ' + err.message, 'error');
     }
 }
 
@@ -501,7 +664,7 @@ async function useTemplate(id) {
         if (!data.success) throw new Error(data.error);
         t = data.template;
     } catch (err) {
-        alert('Could not load template: ' + err.message);
+        AppDialogs.toast('Could not load template: ' + err.message, 'error');
         return;
     }
 
@@ -513,7 +676,7 @@ async function useTemplate(id) {
           ).join('')
         : '<span style="color:#aaa;font-size:0.8rem">No steps recorded</span>';
 
-    // Suggested connectivity — informational only, user configures in interface editor
+    // Connector type badges — informational
     const connFlow = [
         t.source_connector_type ? `<span style="background:#e8f0fe;color:#3b5bdb;border-radius:5px;padding:3px 9px;font-size:0.75rem">📥 ${_escHtml(_formatConnType(t.source_connector_type))}</span>` : '',
         t.target_connector_type ? `<span style="color:#aaa;font-size:0.8rem">→</span><span style="background:#e8f0fe;color:#3b5bdb;border-radius:5px;padding:3px 9px;font-size:0.75rem">📤 ${_escHtml(_formatConnType(t.target_connector_type))}</span>` : '',
@@ -523,7 +686,7 @@ async function useTemplate(id) {
     overlay.id = 'tgConfigureModal';
     overlay.style.cssText = 'position:fixed;inset:0;background:rgba(15,20,40,0.45);z-index:1100;display:flex;align-items:center;justify-content:center';
     overlay.innerHTML = `
-        <div style="background:#fff;border-radius:14px;width:460px;max-width:96vw;box-shadow:0 24px 64px rgba(0,0,0,0.22)">
+        <div style="background:#fff;border-radius:14px;width:480px;max-width:96vw;max-height:92vh;overflow-y:auto;box-shadow:0 24px 64px rgba(0,0,0,0.22)">
             <div style="padding:20px 24px 14px;border-bottom:1px solid #eee;display:flex;justify-content:space-between;align-items:flex-start">
                 <div>
                     <div style="font-size:1.05rem;font-weight:700;color:#1a1a2e;margin-bottom:2px">${t.icon || '📋'} ${_escHtml(t.name)}</div>
@@ -545,10 +708,10 @@ async function useTemplate(id) {
                 </div>
 
                 ${connFlow ? `
-                <div style="padding:12px 14px;background:#f7f8ff;border-radius:8px;border:1px solid #e8ecf0;margin-bottom:18px">
-                    <div style="font-size:0.7rem;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#aaa;margin-bottom:8px">Suggested Connectivity</div>
-                    <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center">${connFlow}</div>
-                    <div style="font-size:0.71rem;color:#aaa;margin-top:8px">Configure your actual source &amp; destination in the interface editor after creation.</div>
+                <div style="padding:10px 14px;background:#f0f4ff;border-radius:8px;border:1px solid #c5cff9;margin-bottom:12px;font-size:0.79rem;color:#3b4a9e;line-height:1.55">
+                    <strong>📥 ${_escHtml(_formatConnType(t.source_connector_type || ''))}
+                    ${t.target_connector_type ? '→ 📤 ' + _escHtml(_formatConnType(t.target_connector_type)) : ''}</strong><br>
+                    After creation you'll be guided to configure these connectors using the full connector editor in Pipeline Builder.
                 </div>` : ''}
 
                 <div id="tcf_error" style="display:none;color:#c0392b;font-size:0.82rem;padding:8px 12px;background:#fef2f2;border-radius:6px;margin-bottom:4px"></div>
@@ -664,7 +827,6 @@ async function _submitConfigureTemplate(templateId) {
         }
 
         document.getElementById('tgConfigureModal')?.remove();
-        // Navigate directly to pipeline builder so user immediately sees the template pipeline
         window.location.href = `pipeline-builder.html?interfaceId=${encodeURIComponent(interfaceId)}`;
     } catch (err) {
         errEl.textContent = err.message;

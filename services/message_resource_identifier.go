@@ -178,6 +178,73 @@ func (s *MessageResourceIdentifierService) getBuiltInTemplate(messageType string
 			},
 			Source: "BUILTIN_HL7_WG",
 		},
+		"DFT^P03": {
+			MessageType:   "DFT^P03",
+			FHIRResources: []string{"Bundle", "MessageHeader", "Patient", "ChargeItem", "Procedure", "Condition"},
+			ResourceLogic: map[string]ResourceConfig{
+				"Bundle":        {From: "MSH", Required: true, Priority: 1},
+				"MessageHeader": {From: "MSH", Required: true, Priority: 1},
+				"Patient":       {From: "PID", Required: true, Priority: 2},
+				"ChargeItem":    {From: "FT1", Required: true, Multiple: true, Priority: 3},
+				"Procedure":     {From: "PR1", Condition: "procedures_present", Multiple: true, Priority: 4, References: []string{"Patient", "ChargeItem"}},
+				"Condition":     {From: "DG1", Condition: "diagnosis_present", Multiple: true, Priority: 5, References: []string{"Patient"}},
+			},
+			Source: "BUILTIN_HL7_WG",
+		},
+		// MFN — Master File Notification (multiple subtypes)
+		"MFN^M02": {
+			MessageType:   "MFN^M02",
+			FHIRResources: []string{"Bundle", "MessageHeader", "Practitioner"},
+			ResourceLogic: map[string]ResourceConfig{
+				"Bundle":        {From: "MSH", Required: true, Priority: 1},
+				"MessageHeader": {From: "MSH", Required: true, Priority: 1},
+				"Practitioner":  {From: "STF,PRA", Required: true, Priority: 2},
+			},
+			Source: "BUILTIN_HL7_WG",
+		},
+		"MFN^M05": {
+			MessageType:   "MFN^M05",
+			FHIRResources: []string{"Bundle", "MessageHeader", "Location"},
+			ResourceLogic: map[string]ResourceConfig{
+				"Bundle":        {From: "MSH", Required: true, Priority: 1},
+				"MessageHeader": {From: "MSH", Required: true, Priority: 1},
+				"Location":      {From: "LOC,LDP", Required: true, Priority: 2},
+			},
+			Source: "BUILTIN_HL7_WG",
+		},
+		"MFN^M04": {
+			MessageType:   "MFN^M04",
+			FHIRResources: []string{"Bundle", "MessageHeader", "ChargeItemDefinition"},
+			ResourceLogic: map[string]ResourceConfig{
+				"Bundle":                {From: "MSH", Required: true, Priority: 1},
+				"MessageHeader":         {From: "MSH", Required: true, Priority: 1},
+				"ChargeItemDefinition":  {From: "CDM", Required: true, Priority: 2},
+			},
+			Source: "BUILTIN_HL7_WG",
+		},
+		// MFN^M13 — generic/site-specific master file (e.g. employer via ZEM)
+		"MFN^M13": {
+			MessageType:   "MFN^M13",
+			FHIRResources: []string{"Bundle", "MessageHeader", "Organization"},
+			ResourceLogic: map[string]ResourceConfig{
+				"Bundle":        {From: "MSH", Required: true, Priority: 1},
+				"MessageHeader": {From: "MSH", Required: true, Priority: 1},
+				"Organization":  {From: "MFI,MFE,ZEM", Required: true, Priority: 2},
+			},
+			Source: "BUILTIN_HL7_WG",
+		},
+		"VXU^V04": {
+			MessageType:   "VXU^V04",
+			FHIRResources: []string{"Bundle", "MessageHeader", "Patient", "Immunization", "Observation"},
+			ResourceLogic: map[string]ResourceConfig{
+				"Bundle":        {From: "MSH", Required: true, Priority: 1},
+				"MessageHeader": {From: "MSH", Required: true, Priority: 1},
+				"Patient":       {From: "PID", Required: true, Priority: 2},
+				"Immunization":  {From: "RXA", Required: true, Multiple: true, Priority: 3, References: []string{"Patient"}},
+				"Observation":   {From: "OBX", Condition: "observations_present", Multiple: true, Priority: 4, References: []string{"Patient", "Immunization"}},
+			},
+			Source: "BUILTIN_HL7_WG",
+		},
 		"ORM^O01": {
 			MessageType:   "ORM^O01",
 			FHIRResources: []string{"Bundle", "MessageHeader", "Provenance", "Patient", "Encounter", "ServiceRequest", "Task", "MedicationRequest", "Condition", "Observation"},

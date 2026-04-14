@@ -765,12 +765,21 @@ class WizardController extends EventTarget {
             if (parseResult.success) {
                 console.log('✅ HL7 parsing successful:', parseResult);
 
+                // ── Batch detection ──────────────────────────────────────────
+                if (parseResult.isBatch && parseResult.messageCount > 1) {
+                    console.log(`📦 Batch detected: ${parseResult.messageCount} messages`);
+                    this._showBatchBanner(parseResult.messageCount, parseResult.batchMessages);
+                }
+
                 // The model already updates itself in parseHL7Message,
                 // so we just need to refresh the view
                 console.log('✅ Parsed HL7 data updated in model:', parseResult.data?.messageType);
 
                 // Show success notification
-                this.view.showNotification('HL7 message parsed successfully!', 'success');
+                const msgLabel = parseResult.isBatch
+                    ? `${parseResult.messageCount} HL7 messages detected and parsed`
+                    : 'HL7 message parsed successfully!';
+                this.view.showNotification(msgLabel, 'success');
 
                 // Re-render the step to show parsed data
                 await this.loadStep(2);
@@ -785,6 +794,53 @@ class WizardController extends EventTarget {
         } finally {
             this.view.hideLoading();
         }
+    }
+
+    // _showBatchBanner injects a persistent info banner into the Step 2 container
+    // listing all detected messages and their types.
+    _showBatchBanner(count, entries) {
+        // Remove any stale banner from a previous parse
+        document.querySelectorAll('.hl7-batch-banner').forEach(el => el.remove());
+
+        const rows = (entries || []).map((e, i) => {
+            const mt = e.data?.messageType?.name || e.data?.messageType?.code || '—';
+            const status = e.success
+                ? `<span style="color:#16a34a;">✓ OK</span>`
+                : `<span style="color:#dc2626;">✗ ${e.error || 'parse error'}</span>`;
+            return `<tr>
+                <td style="padding:3px 8px;border:1px solid #bbf7d0;">${i + 1}</td>
+                <td style="padding:3px 8px;border:1px solid #bbf7d0;font-family:monospace;">${mt}</td>
+                <td style="padding:3px 8px;border:1px solid #bbf7d0;">${status}</td>
+            </tr>`;
+        }).join('');
+
+        const banner = document.createElement('div');
+        banner.className = 'hl7-batch-banner';
+        banner.style.cssText = `
+            background:#f0fdf4; border:2px solid #86efac; border-radius:10px;
+            padding:14px 18px; margin-bottom:16px; font-size:13px;
+        `;
+        banner.innerHTML = `
+            <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
+                <span style="font-size:20px;">📦</span>
+                <div>
+                    <strong style="color:#15803d;font-size:14px;">${count} HL7 messages detected in this input</strong><br>
+                    <span style="color:#166534;">The wizard uses the <strong>first message</strong> for mapping configuration.
+                    To transform all messages use the <strong>Batch Transform</strong> feature.</span>
+                </div>
+            </div>
+            <table style="border-collapse:collapse;width:100%;">
+                <thead><tr style="background:#dcfce7;">
+                    <th style="padding:4px 8px;border:1px solid #bbf7d0;text-align:left;">#</th>
+                    <th style="padding:4px 8px;border:1px solid #bbf7d0;text-align:left;">Message Type</th>
+                    <th style="padding:4px 8px;border:1px solid #bbf7d0;text-align:left;">Status</th>
+                </tr></thead>
+                <tbody>${rows}</tbody>
+            </table>
+        `;
+
+        const step2 = document.getElementById('step2') || document.querySelector('.step-content');
+        if (step2) step2.insertBefore(banner, step2.firstChild);
     }
 
     /**

@@ -31,6 +31,26 @@ type ParseResponse struct {
 	Data    *EnhancedParsedMessage `json:"data,omitempty"`
 	Error   string                 `json:"error,omitempty"`
 	Meta    *ParseMeta             `json:"meta,omitempty"`
+
+	// Batch fields — populated when the input contained more than one MSH segment.
+	// IsBatch is true when multiple messages were detected.
+	// MessageCount is the total number of messages found (including the first).
+	// BatchMessages contains parse results for all messages in order.
+	// When IsBatch is true, Data still holds the first message for backward
+	// compatibility with callers that only inspect the single-message path.
+	IsBatch      bool               `json:"isBatch,omitempty"`
+	MessageCount int                `json:"messageCount,omitempty"`
+	BatchMessages []BatchParseEntry `json:"batchMessages,omitempty"`
+}
+
+// BatchParseEntry is one message's result within a batch parse response.
+type BatchParseEntry struct {
+	Index      int                    `json:"index"`
+	RawMessage string                 `json:"rawMessage"`
+	Success    bool                   `json:"success"`
+	Data       *EnhancedParsedMessage `json:"data,omitempty"`
+	Error      string                 `json:"error,omitempty"`
+	Meta       *ParseMeta             `json:"meta,omitempty"`
 }
 
 // ParseMeta contains metadata about the parsing process

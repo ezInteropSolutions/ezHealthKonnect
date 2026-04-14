@@ -53,7 +53,7 @@ class MessageManager {
             console.error('💥 Error stack:', error.stack);
             console.error('💥 Error message:', error.message);
             // Don't redirect, just log the error
-            alert('Error initializing messages page: ' + error.message);
+            AppDialogs.toast('Error initializing messages page: ' + error.message, 'error');
         }
     }
 
@@ -79,7 +79,7 @@ class MessageManager {
 
     redirectToInterfaceSelection() {
         // Show interface selection modal or redirect to interfaces page
-        alert('Please select an interface to view messages.\n\nFor better performance, each interface has its own message viewer.');
+        AppDialogs.toast('Please select an interface to view messages. Each interface has its own message viewer.', 'info');
         window.location.href = '/interfaces.html';
     }
 
@@ -673,7 +673,8 @@ class MessageManager {
         showMessageDetailModal();
 
         try {
-            const response = await fetch(`/api/messages/${messageId}`);
+            const ifaceParam = this.currentInterfaceId ? `?interfaceId=${this.currentInterfaceId}` : '';
+            const response = await fetch(`/api/messages/${messageId}${ifaceParam}`);
             if (response.ok) {
                 const data = await response.json();
                 this.renderMessageDetail(data.data);
@@ -1978,10 +1979,9 @@ class MessageManager {
         }
     }
 
-    confirmDeleteMessage(messageId) {
-        if (confirm('Are you sure you want to delete this message? This action cannot be undone.')) {
-            this.deleteMessage(messageId);
-        }
+    async confirmDeleteMessage(messageId) {
+        const ok = await AppDialogs.confirm('Are you sure you want to delete this message? This action cannot be undone.', { title: 'Delete Message', type: 'danger', confirmText: 'Delete' });
+        if (ok) this.deleteMessage(messageId);
     }
 
     async deleteMessage(messageId = null) {

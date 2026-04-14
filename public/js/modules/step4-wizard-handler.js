@@ -188,7 +188,7 @@ class FHIRMappingStepHandler extends BaseStepHandler {
             },
             updateStep4Interface: () => {},
             showResourceDetails: () => {
-                alert('Basic integration - resource details not available');
+                AppDialogs.toast('Basic integration — resource details not available.', 'info');
             }
         };
     }
@@ -528,7 +528,7 @@ class FHIRMappingStepHandler extends BaseStepHandler {
             `${index + 1}. ${resource}`
         ).join('\n');
         
-        alert(`Available FHIR Resources:\n\n${details}\n\nTotal: ${this.availableResources.length} resources\nMessage Type: ${this.getMessageTypeFromParsedData()}`);
+        AppDialogs.alert(`<b>Available FHIR Resources</b><br><br>${details.replace(/\n/g,'<br>')}<br><br>Total: ${this.availableResources.length} resources<br>Message Type: ${this.getMessageTypeFromParsedData()}`, { title: 'FHIR Resources', type: 'info' });
     }
 
     async generateAllMappings() {

@@ -14,6 +14,7 @@ import (
 	"encoding/json"
 	"ezhealthkonnect/fhir"
 	"ezhealthkonnect/hl7"
+	"ezhealthkonnect/services/hl7assembly"
 	"fmt"
 	"log"
 	"strconv"
@@ -34,6 +35,15 @@ type TransformRequest struct {
 	ValidationMode string                 `json:"validationMode,omitempty"`
 	InterfaceID    string                 `json:"interfaceId,omitempty"`
 	RequestID      string                 `json:"requestId,omitempty"`
+	// SkipAssembly suppresses the built-in ORU post-processing pass.
+	// Set by HL7FHIRMappingExecutor when running inside a pipeline that has an
+	// hl7.assemble_observations step — avoids doing the work twice.
+	SkipAssembly  bool                    `json:"skipAssembly,omitempty"`
+	// AssemblyRules selectively disables individual OOB assembly transforms.
+	AssemblyRules hl7assembly.AssemblyRules `json:"assemblyRules,omitempty"`
+	// EmbeddedMappings are wizard-saved field mappings stored directly in the
+	// pipeline step config. When present they take priority over DB lookups.
+	EmbeddedMappings []map[string]interface{} `json:"embeddedMappings,omitempty"`
 }
 
 type TransformResponse struct {

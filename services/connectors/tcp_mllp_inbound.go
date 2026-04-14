@@ -678,11 +678,16 @@ func (c *TCPMLLPInboundConnector) sendNACK(conn net.Conn, reason string) error {
 
 // Stop gracefully stops the listener
 func (c *TCPMLLPInboundConnector) Stop() error {
-	if !c.IsRunning() {
-		return nil
+	// Always close the listener/connections even when not in StateRunning.
+	// A connector can be in StateError (e.g. acceptConnections goroutine panicked)
+	// while its net.Listener is still bound to the OS port.  Bailing out early
+	// would leave the port occupied and cause false "address already in use" errors
+	// on the next activation attempt.
+	if c.IsRunning() {
+		log.Printf("🛑 TCP/MLLP Inbound: Stopping listener...")
+	} else {
+		log.Printf("🛑 TCP/MLLP Inbound: Releasing resources (connector not running — cleaning up stale socket)...")
 	}
-
-	log.Printf("🛑 TCP/MLLP Inbound: Stopping listener...")
 
 	// Close listener
 	if c.listener != nil {

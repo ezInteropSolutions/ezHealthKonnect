@@ -24,8 +24,21 @@
             <button id="backBtn" class="btn-icon" title="Back to Interfaces">
                 <i class="fas fa-arrow-left"></i>
             </button>
-            <h1 id="pipelineTitle">Pipeline Builder</h1>
-            <span id="interfaceInfo" class="interface-badge"></span>
+            <!-- Breadcrumb navigation -->
+            <nav id="pipelineBreadcrumb" class="pipeline-breadcrumb" aria-label="breadcrumb">
+                <a href="/interfaces.html" class="breadcrumb-item breadcrumb-link" title="All Interfaces">
+                    <i class="fas fa-plug"></i> Interfaces
+                </a>
+                <span class="breadcrumb-sep">›</span>
+                <a id="breadcrumbInterface" href="#" class="breadcrumb-item breadcrumb-link breadcrumb-interface" title="Go to this interface">
+                    <i class="fas fa-exchange-alt"></i>
+                    <span id="breadcrumbInterfaceName">Loading…</span>
+                </a>
+                <span class="breadcrumb-sep">›</span>
+                <span id="breadcrumbMsgType" class="breadcrumb-item breadcrumb-current">
+                    Pipeline Builder
+                </span>
+            </nav>
         </div>
         <div class="header-center">
             <div class="pipeline-status">
@@ -33,6 +46,17 @@
             </div>
         </div>
         <div class="header-right">
+            <!-- Contextual shortcuts -->
+            <a id="shortcutMessages" href="#" class="btn btn-shortcut" title="View messages for this interface">
+                <i class="fas fa-comments"></i> Messages
+            </a>
+            <a id="shortcutMonitoring" href="/monitoring.html" class="btn btn-shortcut" title="Monitoring &amp; alerts">
+                <i class="fas fa-chart-line"></i> Monitoring
+            </a>
+            <a href="/user-management.html" class="btn btn-shortcut" title="User management &amp; admin">
+                <i class="fas fa-users-cog"></i> Admin
+            </a>
+            <div class="header-divider"></div>
             <a id="gitBtn" href="git.html" class="btn btn-secondary" title="Git — version control your interfaces">
                 <i class="fab fa-git-alt"></i> Git
             </a>
@@ -288,6 +312,7 @@
     </div>
 
     <!-- Authentication Service (OOB) -->
+    <script src="/js/core/app-dialogs.js"></script>
     <script src="/js/services/AuthService.js"></script>
 
     <!-- JavaScript Dependencies -->
@@ -341,6 +366,7 @@
     <script src="/js/pipeline/components/ScriptEnrichmentEditor.js?v=2.5"></script>
     <!-- Step-specific Builder components (registered with StepBuilderRegistry) -->
     <script src="/js/pipeline/components/FileParserBuilder.js?v=1.0"></script>
+    <script src="/js/pipeline/components/PASEnvelopeBuilder.js?v=1.0"></script>
     <script src="/js/pipeline/components/RemoveDuplicatesBuilder.js?v=1.0"></script>
     <script src="/js/pipeline/components/DataMaskingBuilder.js?v=1.0"></script>
     <script src="/js/pipeline/components/NormalizerBuilder.js?v=1.0"></script>

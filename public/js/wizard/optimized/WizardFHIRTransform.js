@@ -66,6 +66,9 @@ class WizardFHIRTransform {
                     // Update the wizard view with results
                     this.showOptimizedTransformationResults(this.fhirResult);
 
+                    // Fetch and inject OOB guide for this message type (non-blocking)
+                    this.injectOOBGuide();
+
                     // Determine status based on validation errors but always show mappings
                     if (this.fhirResult.success) {
                         this.updateOptimizedConfigStatus('completed');
@@ -165,7 +168,21 @@ class WizardFHIRTransform {
 
                                 mappingContainer.innerHTML = newContent;
                                 console.log('✅ Mapping container innerHTML updated successfully');
-                                console.log('✅ New container preview:', mappingContainer.innerHTML.substring(0, 200));
+
+                                // Rebuild the resource filter dropdown options from the actual mappings
+                                const filterSelect = document.getElementById('resource-filter');
+                                if (filterSelect && currentData.fhirTransformResult?.atomicMappings?.length > 0) {
+                                    const mappings = currentData.fhirTransformResult.atomicMappings;
+                                    const resourceNames = [...new Set(
+                                        mappings.map(m => {
+                                            const path = m.resourceType || m.targetPath || m.fhirPath || m.fhirField || '';
+                                            const match = path.match(/^([A-Z][A-Za-z]+)/);
+                                            return match ? match[1] : null;
+                                        }).filter(Boolean)
+                                    )];
+                                    filterSelect.innerHTML = '<option value="all">All Resources</option>' +
+                                        resourceNames.map(r => `<option value="${r}">${r}</option>`).join('');
+                                }
 
                                 // Force browser repaint to ensure visual update
                                 void mappingContainer.offsetHeight;
@@ -461,6 +478,138 @@ class WizardFHIRTransform {
         const url = `${protocol}//${hostname}:8080`;
         return url;
     }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // OOB Guide panel
+    // ─────────────────────────────────────────────────────────────────────────
+
+    // injectOOBGuide fetches the user guide for the current message type and
+    // inserts a collapsible info panel above the transformation results.
+    async injectOOBGuide() {
+        try {
+            const messageType = window.wizardController?.model?.data?.messageType
+                             || window.wizardController?.model?.data?.detectedMessageType;
+            if (!messageType) return;
+
+            const resp = await fetch(`/api/wizard/message-guide/${encodeURIComponent(messageType)}`);
+            if (!resp.ok) return;
+            const data = await resp.json();
+            if (!data.guide) return;
+
+            const container = document.getElementById('fhir-transform-results');
+            if (!container) return;
+
+            // Don't duplicate if already present
+            if (container.querySelector('.oob-guide-panel')) return;
+
+            const panel = document.createElement('div');
+            panel.className = 'oob-guide-panel';
+            panel.style.cssText = `
+                background: #eff6ff; border: 1.5px solid #bfdbfe; border-radius: 10px;
+                margin-bottom: 20px; overflow: hidden; font-size: 14px;
+            `;
+            panel.innerHTML = `
+                <div class="oob-guide-header" style="
+                    display: flex; justify-content: space-between; align-items: center;
+                    padding: 12px 16px; cursor: pointer; user-select: none;
+                    background: #dbeafe; border-bottom: 1.5px solid #bfdbfe;
+                " onclick="this.parentElement.querySelector('.oob-guide-body').style.display =
+                    this.parentElement.querySelector('.oob-guide-body').style.display === 'none' ? 'block' : 'none';
+                    this.querySelector('.oob-guide-chevron').textContent =
+                    this.parentElement.querySelector('.oob-guide-body').style.display === 'none' ? '▶' : '▼';">
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <span style="font-size: 18px;">ℹ️</span>
+                        <div>
+                            <div style="font-weight: 600; color: #1e40af; font-size: 14px;">
+                                ${messageType} — Out-of-Box Mapping Guide
+                            </div>
+                            <div style="color: #3b82f6; font-size: 12px; margin-top: 2px;">
+                                This message type is fully supported without wizard configuration.
+                                Click to read what's mapped automatically and when to use the wizard.
+                            </div>
+                        </div>
+                    </div>
+                    <span class="oob-guide-chevron" style="color: #3b82f6; font-size: 16px; font-weight: bold;">▼</span>
+                </div>
+                <div class="oob-guide-body" style="padding: 20px; max-height: 500px; overflow-y: auto;">
+                    ${this._renderGuideMarkdown(data.guide)}
+                </div>
+            `;
+            container.insertBefore(panel, container.firstChild);
+        } catch (e) {
+            // Guide is informational — never block on failure
+            console.debug('OOB guide fetch skipped:', e.message);
+        }
+    }
+
+    // _renderGuideMarkdown converts the guide's markdown to safe HTML.
+    // Handles: ## headings, **bold**, | tables |, `code`, --- horizontal rules, bullet lists.
+    _renderGuideMarkdown(md) {
+        if (!md) return '';
+        const esc = s => s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+        let html = '';
+        const lines = md.split('\n');
+        let inTable = false, inList = false;
+
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i];
+
+            // Horizontal rule
+            if (/^---+$/.test(line.trim())) {
+                if (inTable) { html += '</tbody></table>'; inTable = false; }
+                if (inList)  { html += '</ul>'; inList = false; }
+                html += '<hr style="border:none;border-top:1px solid #bfdbfe;margin:12px 0;">';
+                continue;
+            }
+
+            // Headings
+            const h1 = line.match(/^#\s+(.*)/);
+            const h2 = line.match(/^##\s+(.*)/);
+            const h3 = line.match(/^###\s+(.*)/);
+            if (h1) { html += `<h3 style="margin:0 0 4px 0;color:#1e3a8a;font-size:16px;">${esc(h1[1])}</h3>`; continue; }
+            if (h2) { html += `<h4 style="margin:12px 0 6px 0;color:#1e40af;font-size:14px;font-weight:600;">${esc(h2[1])}</h4>`; continue; }
+            if (h3) { html += `<h5 style="margin:8px 0 4px 0;color:#1e40af;font-size:13px;font-weight:600;">${esc(h3[1])}</h5>`; continue; }
+
+            // Table rows  |col|col|
+            if (/^\|/.test(line)) {
+                if (!inTable) { html += '<table style="width:100%;border-collapse:collapse;font-size:13px;margin:8px 0;"><tbody>'; inTable = true; }
+                const cells = line.replace(/^\||\|$/g,'').split('|');
+                if (cells.every(c => /^[-: ]+$/.test(c))) continue; // separator row
+                const isHeader = i > 0 && /^\|/.test(lines[i-1]) && i+1 < lines.length && /^[|\s-:]+$/.test(lines[i+1]);
+                const tag = isHeader ? 'th' : 'td';
+                const rowStyle = isHeader ? 'background:#dbeafe;' : '';
+                html += `<tr style="${rowStyle}">${cells.map(c => `<${tag} style="padding:4px 8px;border:1px solid #bfdbfe;">${this._inlineFormat(c.trim())}</${tag}>`).join('')}</tr>`;
+                continue;
+            }
+            if (inTable) { html += '</tbody></table>'; inTable = false; }
+
+            // Bullet lists
+            const bullet = line.match(/^[-*]\s+(.*)/);
+            if (bullet) {
+                if (!inList) { html += '<ul style="margin:4px 0 4px 16px;padding:0;">'; inList = true; }
+                html += `<li style="margin:2px 0;">${this._inlineFormat(bullet[1])}</li>`;
+                continue;
+            }
+            if (inList) { html += '</ul>'; inList = false; }
+
+            // Blank line
+            if (line.trim() === '') { html += '<br>'; continue; }
+
+            // Normal paragraph
+            html += `<p style="margin:4px 0;">${this._inlineFormat(line)}</p>`;
+        }
+        if (inTable) html += '</tbody></table>';
+        if (inList)  html += '</ul>';
+        return html;
+    }
+
+    _inlineFormat(s) {
+        const esc = t => t.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+        return esc(s)
+            .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+            .replace(/`([^`]+)`/g, '<code style="background:#e0f2fe;padding:1px 4px;border-radius:3px;font-size:12px;">$1</code>')
+            .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" style="color:#2563eb;">$1</a>');
+    }
 }
 
 // Initialize global instance for optimized wizard
@@ -486,13 +635,13 @@ window.closeOptimizedFHIRModal = function() {
 window.editOptimizedFieldMappings = function() {
     console.log('🔧 Edit field mappings requested for optimized wizard');
     // This could open an advanced mapping interface
-    alert('Advanced field mapping interface would open here');
+    AppDialogs.toast('Advanced field mapping interface coming soon.', 'info');
 };
 
 window.validateOptimizedTransformation = function() {
     console.log('✅ Validate transformation requested for optimized wizard');
     // This could run validation checks
-    alert('FHIR validation checks would run here');
+    AppDialogs.toast('FHIR validation checks coming soon.', 'info');
 };
 
 console.log('📝 Optimized Wizard FHIR Transform module loaded');

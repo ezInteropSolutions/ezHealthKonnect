@@ -585,8 +585,14 @@ class WizardModel extends EventTarget {
             // Include FHIR transformation result for validation
             fhirTransformResult: this.data.fhirTransformResult,
 
-            // Include parsed HL7 data for enhanced segments
-            parsedHL7Data: this.data.parsedHL7Data,
+            // Include only structural metadata from parsed HL7 (not full dictionary schema)
+            // Full enhancedSegments blob can be 2–3 MB; server only uses messageType + segmentOrder
+            parsedHL7Data: this.data.parsedHL7Data ? {
+                messageType: this.data.parsedHL7Data.messageType,
+                segmentOrder: this.data.parsedHL7Data.segmentOrder,
+                version: this.data.parsedHL7Data.version,
+                dictionaryUsed: this.data.parsedHL7Data.dictionaryUsed
+            } : null,
 
             // Logging configuration (V33)
             debug_logging: this.data.debugLogging || this.data.debug_logging || false,

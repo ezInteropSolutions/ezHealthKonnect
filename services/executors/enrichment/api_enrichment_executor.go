@@ -70,9 +70,19 @@ func (e *APIEnrichmentExecutor) Execute(
 	// Build URL with field mappings
 	url := e.buildURL(config.Endpoint, config.FieldMappings, inputData)
 
-	// Build request body with field mappings
+	// Build request body — bodyRef takes priority over requestBody
 	var requestBody interface{}
-	if config.RequestBody != nil {
+	if config.BodyRef != "" {
+		// Resolve the full body from a previous step's output (e.g. a PAS bundle
+		// assembled by an enrichment.script step).
+		resolved := executors.GetNestedValue(inputData, config.BodyRef)
+		if resolved != nil {
+			requestBody = resolved
+			log.Printf("📦 [API Enrichment] Using bodyRef '%s' as request body", config.BodyRef)
+		} else {
+			log.Printf("⚠️  [API Enrichment] bodyRef '%s' resolved to nil — sending empty body", config.BodyRef)
+		}
+	} else if config.RequestBody != nil {
 		requestBody = e.replaceFieldMappings(config.RequestBody, config.FieldMappings, inputData)
 	}
 

@@ -137,7 +137,7 @@ func (c *AIController) SuggestMappings(ctx *gin.Context) {
 		ctx.JSON(http.StatusBadRequest, gin.H{"success": false, "error": err.Error()})
 		return
 	}
-	reqCtx, cancel := context.WithTimeout(ctx.Request.Context(), 120*time.Second)
+	reqCtx, cancel := context.WithTimeout(ctx.Request.Context(), 180*time.Second)
 	defer cancel()
 
 	suggestions, chunks, err := c.svc.SuggestMappings(reqCtx, req.Message, req.TargetFormat, req.Context)

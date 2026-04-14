@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 )
 
 type CheckResult struct {
@@ -28,6 +29,7 @@ type Config struct {
 	InstallDir  string `json:"installDir"`
 	AppPort     string `json:"appPort"`
 	APIPort     string `json:"apiPort"`
+	DBHost      string `json:"dbHost"`
 	DBPort      string `json:"dbPort"`
 	DBPassword  string `json:"dbPassword"`
 	WithAI      bool   `json:"withAI"`
@@ -61,6 +63,7 @@ func registerHandlers(mux *http.ServeMux) {
 	mux.HandleFunc("/api/done", handleDone)
 	mux.HandleFunc("/api/browse", handleBrowse)
 	mux.HandleFunc("/api/uninstall", handleUninstall)
+	mux.HandleFunc("/api/installed-state", handleInstalledState)
 }
 
 // handleBrowse returns subdirectories of a given path for the folder picker.
@@ -144,10 +147,23 @@ func handleDefaults(w http.ResponseWriter, _ *http.Request) {
 		"installDir":   defaultInstallDir(),
 		"appPort":      "3000",
 		"apiPort":      "8080",
-		"dbPort":       "5432",
+		"dbPort":       detectPostgresPort(),
 		"minioApiPort": "9000",
 		"minioConPort": "9001",
 	})
+}
+
+// detectPostgresPort probes the common PostgreSQL ports and returns the first
+// one that is actually listening, falling back to "5432".
+func detectPostgresPort() string {
+	for _, port := range []string{"5432", "5433", "5434"} {
+		conn, err := net.DialTimeout("tcp", "localhost:"+port, 500*time.Millisecond)
+		if err == nil {
+			conn.Close()
+			return port
+		}
+	}
+	return "5432"
 }
 
 func defaultInstallDir() string {
@@ -395,6 +411,67 @@ func handleProgress(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+}
+
+// InstalledState describes the current installation on this machine.
+type InstalledState struct {
+	Installed      bool   `json:"installed"`
+	InstallDir     string `json:"installDir,omitempty"`
+	Mode           string `json:"mode,omitempty"`
+	AppPort        string `json:"appPort,omitempty"`
+	Version        string `json:"version,omitempty"`
+	ServiceRunning bool   `json:"serviceRunning"`
+}
+
+func handleInstalledState(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(probeInstalledState()) //nolint:errcheck
+}
+
+// probeInstalledState checks whether ezHealthKonnect is installed on this machine
+// by looking for the .env file in the default install directory.
+func probeInstalledState() InstalledState {
+	dir := defaultInstallDir()
+	envPath := filepath.Join(dir, ".env")
+	info, err := os.Stat(envPath)
+	if err != nil || info.IsDir() {
+		return InstalledState{Installed: false}
+	}
+
+	state := InstalledState{
+		Installed:  true,
+		InstallDir: dir,
+		Mode:       "standalone",
+		AppPort:    "3000",
+		Version:    version,
+	}
+
+	// Parse key values from .env
+	data, err := os.ReadFile(envPath)
+	if err == nil {
+		for _, line := range strings.Split(string(data), "\n") {
+			line = strings.TrimSpace(line)
+			if strings.HasPrefix(line, "#") || !strings.Contains(line, "=") {
+				continue
+			}
+			parts := strings.SplitN(line, "=", 2)
+			key, val := strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1])
+			switch key {
+			case "PORT":
+				state.AppPort = val
+			}
+		}
+	}
+
+	// Check if Windows service is running
+	if runtime.GOOS == "windows" {
+		out, err := exec.Command("sc", "query", "ezhealthkonnect").Output()
+		if err == nil && strings.Contains(string(out), "RUNNING") {
+			state.ServiceRunning = true
+		}
+	}
+
+	return state
 }
 
 func handleDone(w http.ResponseWriter, _ *http.Request) {

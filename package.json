@@ -8,6 +8,8 @@
     "dictionary": "node services/hl7_dictionary_service.js",
     "dictionary:dev": "nodemon services/hl7_dictionary_service.js",
     "test:dictionary": "node test_dictionary.js",
+    "test:pas": "node tests/pas_template_test.js",
+    "test:pas:db": "PAS_TEST_DB=1 node tests/pas_template_test.js",
     "start:all": "concurrently \"npm run dictionary\" \"go run main.go\"",
     "dev:all": "concurrently \"npm run dictionary:dev\" \"go run main.go\""
   },
@@ -25,6 +27,7 @@
     "axios": "^1.10.0",
     "bcryptjs": "^2.4.3",
     "bull": "^4.16.5",
+    "connect-pg-simple": "^10.0.0",
     "cors": "^2.8.5",
     "dotenv": "^16.6.1",
     "express": "^4.21.2",
@@ -43,11 +46,11 @@
     "node-fetch": "^2.7.0",
     "p-limit": "^2.3.0",
     "pg": "^8.16.2",
+    "picomatch": "^4.0.4",
     "puppeteer": "^24.11.2",
     "redis": "^5.5.6",
     "sequelize": "^6.37.7",
-    "xml2js": "^0.6.2",
-    "picomatch": "^4.0.4"
+    "xml2js": "^0.6.2"
   },
   "devDependencies": {
     "@playwright/test": "^1.58.2",
