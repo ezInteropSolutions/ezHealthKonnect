@@ -15,6 +15,9 @@ let sortDirection = 'asc';
 // Review queue counts per interface (loaded alongside interface data)
 let reviewQueueCounts = {};   // { [interfaceId]: number }
 
+// Template update flags per interface (loaded alongside interface data)
+let mappingUpdates = {};      // { [interfaceId]: [{messageType, availableVersion}] }
+
 // Auto-refresh state
 let autoRefreshInterval = null;
 let autoRefreshEnabled = true;
@@ -725,8 +728,9 @@ async function loadInterfaces() {
             filteredInterfaces = [...interfaces];
             console.log('✅ Interfaces loaded:', interfaces.length);
 
-            // Load review queue counts in background — non-blocking
+            // Load review queue counts and mapping updates in background — non-blocking
             loadReviewQueueCounts();
+            loadMappingUpdates();
 
             populateMessageTypeFilter();
             updateSummaryCards();
@@ -887,6 +891,16 @@ async function loadReviewQueueCounts() {
         reviewQueueCounts = counts;
         // Re-render table to show badges (only if any counts changed)
         if (Object.keys(counts).length > 0) renderInterfacesTable();
+    } catch { /* non-critical */ }
+}
+
+async function loadMappingUpdates() {
+    try {
+        const res = await fetch('/api/fhir/mapping-updates', { credentials: 'include' });
+        if (!res.ok) return;
+        const body = await res.json();
+        mappingUpdates = body.updates || {};
+        if (Object.keys(mappingUpdates).length > 0) renderInterfacesTable();
     } catch { /* non-critical */ }
 }
 
@@ -1178,8 +1192,22 @@ function getMiniActionButtons(interface) {
            </a>`
         : '';
 
+    const pendingUpdates = mappingUpdates[interface.id] || [];
+    const updateVersions = [...new Set(pendingUpdates.map(u => u.availableVersion).filter(Boolean))].join(', ');
+    const updateTitle = pendingUpdates.length > 0
+        ? `Template update available (v${updateVersions}) for: ${pendingUpdates.map(u => u.messageType).join(', ')}`
+        : '';
+    const updateBadge = pendingUpdates.length > 0
+        ? `<button class="act-btn act-btn-indigo" title="${updateTitle}"
+                   onclick="event.stopPropagation(); openMappingUpdateModal('${interface.id}', '${interface.name?.replace(/'/g, "\\'")}')">
+               <i class="fas fa-arrow-up-from-bracket"></i>
+               <span style="position:absolute;top:-4px;right:-4px;background:#7c3aed;color:white;border-radius:50%;font-size:9px;font-weight:700;width:14px;height:14px;display:flex;align-items:center;justify-content:center;line-height:1;">${pendingUpdates.length}</span>
+           </button>`.replace('class="act-btn act-btn-indigo"', 'class="act-btn act-btn-indigo" style="position:relative;"')
+        : '';
+
     return `
         <div style="display:flex;gap:4px;align-items:center;justify-content:flex-end;">
+            ${updateBadge}
             ${reviewBadge}
 
             <button class="act-btn ${runtimeColor}" title="${runtimeTitle}"
@@ -3737,6 +3765,97 @@ async function submitSaveAsTemplate(interfaceId) {
         btn.textContent = 'Save Template';
         showError('Could not save template: ' + err.message);
     }
+}
+
+// ── Template Update Modal ──────────────────────────────────────────────────────
+function openMappingUpdateModal(interfaceId, interfaceName) {
+    const updates = mappingUpdates[interfaceId] || [];
+    if (updates.length === 0) return;
+
+    const esc = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    const rows = updates.map(u =>
+        `<tr>
+            <td style="padding:6px 8px;border-bottom:1px solid #e2e8f0;">${esc(u.messageType)}</td>
+            <td style="padding:6px 8px;border-bottom:1px solid #e2e8f0;color:#7c3aed;font-weight:600;">v${esc(u.availableVersion)}</td>
+            <td style="padding:6px 8px;border-bottom:1px solid #e2e8f0;">
+                <button onclick="applyMappingUpdate('${interfaceId}','${esc(u.messageType)}')"
+                        style="font-size:11px;padding:2px 8px;background:#7c3aed;color:white;border:none;border-radius:4px;cursor:pointer;">
+                    Reset to OOB
+                </button>
+                <button onclick="dismissMappingUpdate('${interfaceId}','${esc(u.messageType)}')"
+                        style="font-size:11px;padding:2px 8px;background:#64748b;color:white;border:none;border-radius:4px;cursor:pointer;margin-left:4px;">
+                    Keep Custom
+                </button>
+            </td>
+        </tr>`
+    ).join('');
+
+    const existing = document.getElementById('mappingUpdateModal');
+    if (existing) existing.remove();
+
+    const modal = document.createElement('div');
+    modal.id = 'mappingUpdateModal';
+    modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;display:flex;align-items:center;justify-content:center;';
+    modal.innerHTML = `
+        <div style="background:white;border-radius:8px;padding:24px;max-width:560px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.3);">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+                <h3 style="margin:0;font-size:15px;color:#1e293b;">
+                    <i class="fas fa-arrow-up-from-bracket" style="color:#7c3aed;margin-right:6px;"></i>
+                    Template Updates Available — ${esc(interfaceName)}
+                </h3>
+                <button onclick="document.getElementById('mappingUpdateModal').remove()"
+                        style="background:none;border:none;font-size:18px;cursor:pointer;color:#94a3b8;">✕</button>
+            </div>
+            <p style="font-size:12px;color:#64748b;margin-bottom:16px;">
+                The OOB template has been updated. Your custom overrides are preserved.
+                <strong>Reset to OOB</strong> removes your overrides and inherits the new template.
+                <strong>Keep Custom</strong> dismisses this notice without changing your mappings.
+            </p>
+            <table style="width:100%;border-collapse:collapse;font-size:13px;">
+                <thead>
+                    <tr style="background:#f8fafc;">
+                        <th style="padding:6px 8px;text-align:left;color:#475569;">Message Type</th>
+                        <th style="padding:6px 8px;text-align:left;color:#475569;">New Version</th>
+                        <th style="padding:6px 8px;text-align:left;color:#475569;">Action</th>
+                    </tr>
+                </thead>
+                <tbody>${rows}</tbody>
+            </table>
+        </div>`;
+    document.body.appendChild(modal);
+    modal.addEventListener('click', e => { if (e.target === modal) modal.remove(); });
+}
+
+async function applyMappingUpdate(interfaceId, messageType) {
+    // "Reset to OOB" — call the delta endpoint with empty atomicMappings so delta becomes null
+    // (pure OOB). This also clears the update notice server-side.
+    try {
+        const res = await fetch(`/api/fhir/interfaces/${interfaceId}/mapping-delta/${encodeURIComponent(messageType)}`, {
+            method: 'PUT',
+            credentials: 'include',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ atomicMappings: [] })
+        });
+        if (res.ok) {
+            delete mappingUpdates[interfaceId];
+            document.getElementById('mappingUpdateModal')?.remove();
+            renderInterfacesTable();
+        }
+    } catch (e) { console.error('applyMappingUpdate failed', e); }
+}
+
+async function dismissMappingUpdate(interfaceId, messageType) {
+    try {
+        await fetch(`/api/fhir/interfaces/${interfaceId}/mapping-update-notice/${encodeURIComponent(messageType)}`, {
+            method: 'DELETE',
+            credentials: 'include'
+        });
+        const updates = mappingUpdates[interfaceId] || [];
+        mappingUpdates[interfaceId] = updates.filter(u => u.messageType !== messageType);
+        if (mappingUpdates[interfaceId].length === 0) delete mappingUpdates[interfaceId];
+        document.getElementById('mappingUpdateModal')?.remove();
+        renderInterfacesTable();
+    } catch (e) { console.error('dismissMappingUpdate failed', e); }
 }
 
 // Handle ?fromTemplate=<id> query param — pre-select template when creating interface

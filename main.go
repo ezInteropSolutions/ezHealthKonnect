@@ -13,6 +13,7 @@ import (
 	"ezhealthkonnect/processing"
 	"ezhealthkonnect/services"
 	"ezhealthkonnect/services/backpressure"
+	svcmapping "ezhealthkonnect/services/mapping"
 	"ezhealthkonnect/services/storage"
 	"ezhealthkonnect/services/dbpool"
 	"ezhealthkonnect/services/ai"
@@ -529,6 +530,42 @@ func main() {
 			fhirGroup.POST("/pipeline/validate-script", transformTestCtrl.ValidateScript)    // Validate JavaScript script
 			fhirGroup.GET("/pipeline/:interfaceId/:messageType", transformTestCtrl.GetPipeline)
 
+			// ADDED: Delta/override model — interface-level sparse overrides on OOB templates
+			mappingDeltaSvc := services.NewHL7FHIRTransformServiceV3(db)
+			mappingDeltaCtrl := controllers.NewMappingDeltaController(db, mappingDeltaSvc)
+			mappingDeltaCtrl.RegisterRoutes(fhirGroup)
+
+			// OOB template rebuild — regenerates all standard templates from FHIR+HL7 specs
+			fhirGroup.POST("/templates/rebuild-oob", func(c *gin.Context) {
+				builder := svcmapping.NewOOBTemplateBuilder(db)
+				ctx := c.Request.Context()
+				results := builder.BuildAll(ctx)
+
+				var built, failed int
+				var details []gin.H
+				for _, r := range results {
+					if r.Err != nil {
+						failed++
+						details = append(details, gin.H{"messageType": r.MessageType, "status": "error", "error": r.Err.Error()})
+					} else {
+						built++
+						details = append(details, gin.H{
+							"messageType":    r.MessageType,
+							"status":         "ok",
+							"resources":      r.ResourcesBuilt,
+							"mappings":       r.MappingsBuilt,
+							"warnings":       r.Warnings,
+						})
+					}
+				}
+				c.JSON(200, gin.H{
+					"success": true,
+					"built":   built,
+					"failed":  failed,
+					"results": details,
+				})
+			})
+
 			// ADDED: Template Preview — resource list + confidence data for a message type
 			fhirGroup.GET("/template/preview", func(c *gin.Context) {
 				messageType := c.Query("messageType")
@@ -994,6 +1031,7 @@ func main() {
 			fhirGroup.POST("/transform-batch", func(c *gin.Context) {
 				var body struct {
 					RawHL7         string `json:"rawHL7" binding:"required"`
+					InterfaceID    string `json:"interfaceId"`
 					CreateBundle   bool   `json:"createBundle"`
 					ValidationMode string `json:"validationMode"`
 					FHIRVersion    string `json:"fhirVersion"`
@@ -1044,11 +1082,24 @@ func main() {
 						continue
 					}
 
-					// Build parsedHL7Data map from the enhanced result
+					// Build parsedHL7Data map from the enhanced result.
+					//
+					// "segmentGroups" — used by hl7assembly.ExtractSegmentGroup.
+					//   Must be map[string][]EnhancedSegment (slices per segment type).
+					//   parsed.EnhancedSegments is map[string]EnhancedSegment (one per type),
+					//   so we wrap each segment in a single-element slice.
+					//
+					// "enhancedSegments" — used by the V3 field-mapper (extractEnhancedSegments).
+					//   Accepts the original flat map[string]EnhancedSegment.
+					segmentGroups := make(map[string][]hl7.EnhancedSegment, len(parsed.EnhancedSegments))
+					for k, v := range parsed.EnhancedSegments {
+						segmentGroups[k] = []hl7.EnhancedSegment{v}
+					}
 					parsedMap := map[string]interface{}{
-						"segmentGroups": parsed.EnhancedSegments,
-						"segmentOrder":  parsed.SegmentOrder,
-						"messageType":   map[string]interface{}{
+						"segmentGroups":    segmentGroups,
+						"enhancedSegments": parsed.EnhancedSegments,
+						"segmentOrder":     parsed.SegmentOrder,
+						"messageType": map[string]interface{}{
 							"name":  parsed.MessageType.Name,
 							"code":  parsed.MessageType.Code,
 							"event": parsed.MessageType.Event,
@@ -1058,6 +1109,7 @@ func main() {
 
 					req := &services.TransformRequest{
 						ParsedHL7Data:  parsedMap,
+						InterfaceID:    body.InterfaceID,
 						CreateBundle:   body.CreateBundle || true,
 						ValidationMode: body.ValidationMode,
 						FHIRVersion:    body.FHIRVersion,
@@ -1263,6 +1315,11 @@ func main() {
 			}
 			log.Printf("✅ Connectivity Controller initialized (Multi-Connectivity Support)")
 		}
+
+		// ZSEGMENT CONTROLLER — enterprise Z-segment mapping configuration
+		zsegmentCtrl := controllers.NewZSegmentController(services.NewZSegmentService(db))
+		zsegmentCtrl.RegisterRoutes(api.Group("/zsegments"))
+		log.Printf("✅ ZSegment Controller initialized (enterprise Z-segment mapping)")
 
 		// MESSAGE CONTENT CONTROLLER — raw content and processing logs from object storage
 		msgContentCtrl := controllers.NewMessageContentController(db, objectStorageService)
@@ -1488,8 +1545,12 @@ func main() {
 		}
 	}()
 
-	log.Printf("Starting ezHealthKonnect server on :%s", port)
-	if err := router.Run(":" + port); err != nil {
+	// Explicitly bind to 0.0.0.0 (IPv4) so the Node.js proxy can reach us via
+	// 127.0.0.1.  Gin's router.Run(":port") creates a dual-stack socket on most
+	// systems, but on some Linux + Go 1.21+ configurations it binds IPv6-only.
+	// Using "0.0.0.0:port" forces an IPv4 socket that the proxy can always reach.
+	log.Printf("Starting ezHealthKonnect server on 0.0.0.0:%s", port)
+	if err := router.Run("0.0.0.0:" + port); err != nil {
 		log.Fatal("Failed to start server:", err)
 	}
 }

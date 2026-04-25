@@ -55,8 +55,53 @@ class WizardFHIRTransform {
                 this.fhirResult = await response.json();
                 console.log('📋 FHIR transformation response:', this.fhirResult);
 
-                // Check if the transformation generated mappings and resources (regardless of validation status)
-                if (this.fhirResult.atomicMappings && this.fhirResult.atomicMappings.length > 0) {
+                // Check if the transformation generated mappings and/or assembled resources.
+                // Assembly-driven types (MFN, DFT, MDM, VXU, ORU, SIU) may return fhirResources
+                // that are not covered by atomicMappings — always augment atomicMappings with
+                // synthesized rows for any resource type produced by the procedure assembly that
+                // is not already represented by field-level mappings.
+                const hasAtomicMappings = this.fhirResult.atomicMappings && this.fhirResult.atomicMappings.length > 0;
+                const hasFhirResources  = this.fhirResult.fhirResources  && this.fhirResult.fhirResources.length  > 0;
+
+                if (hasAtomicMappings || hasFhirResources) {
+                    if (hasFhirResources) {
+                        // Determine which resource types are already covered by field-level mappings.
+                        const coveredTypes = new Set(
+                            (this.fhirResult.atomicMappings || [])
+                                .map(m => m.resourceType || (m.fhirPath || m.fhirField || '').split('.')[0])
+                                .filter(Boolean)
+                        );
+
+                        // Synthesize display rows for assembled resources (Practitioner, Location,
+                        // Organization, Immunization, ChargeItem, DocumentReference, Observation …)
+                        // that have no field-level counterpart — e.g. MFN assembly produces
+                        // Practitioner from STF, but the profile only maps MSH→MessageHeader.
+                        const uncoveredResources = this.fhirResult.fhirResources
+                            .filter(r => r.resourceType && !coveredTypes.has(r.resourceType));
+
+                        if (uncoveredResources.length > 0) {
+                            console.log('🔧 Augmenting atomicMappings with synthesized rows for assembled resources:',
+                                [...new Set(uncoveredResources.map(r => r.resourceType))]);
+                            const synthesized = this._synthesizeMappingsFromResources(
+                                uncoveredResources,
+                                window.wizardController?.model?.data?.parsedHL7Data
+                            );
+                            this.fhirResult.atomicMappings = [
+                                ...(this.fhirResult.atomicMappings || []),
+                                ...synthesized,
+                            ];
+                            this.fhirResult._assemblyDriven = true;
+                        } else if (!hasAtomicMappings) {
+                            // Pure assembly result — synthesize everything.
+                            console.log('🔧 Assembly-driven result — synthesizing display mappings from fhirResources');
+                            this.fhirResult.atomicMappings = this._synthesizeMappingsFromResources(
+                                this.fhirResult.fhirResources,
+                                window.wizardController?.model?.data?.parsedHL7Data
+                            );
+                            this.fhirResult._assemblyDriven = true;
+                        }
+                    }
+
                     console.log('✅ FHIR transformation completed with atomic mappings:', this.fhirResult.atomicMappings.length);
                     console.log('📊 FHIR resources generated:', this.fhirResult.fhirResources?.length || 0);
 
@@ -87,10 +132,10 @@ class WizardFHIRTransform {
                         jsonButton.style.display = 'inline-flex';
                     }
                 } else {
-                    // Backend returned no mappings - this is a real failure
+                    // Backend returned neither atomicMappings nor fhirResources
                     const errorMsg = this.fhirResult.errors && this.fhirResult.errors.length > 0
                         ? this.fhirResult.errors.join(', ')
-                        : 'Transformation completed but no atomic mappings were generated';
+                        : 'Transformation completed but no resources or mappings were generated. Check the sample message is valid HL7.';
                     console.error('❌ FHIR transformation failed:', errorMsg);
                     this.showOptimizedError(`Transformation failed: ${errorMsg}`);
                     this.updateOptimizedConfigStatus('error');
@@ -336,6 +381,79 @@ class WizardFHIRTransform {
         if (enhancedInterface) {
             enhancedInterface.style.display = 'block';
         }
+    }
+
+    /**
+     * Synthesize display-only atomicMappings from assembled FHIR resources.
+     * Called when the Go assembly produced fhirResources but no DB field-level
+     * atomicMappings exist (MFN, DFT, MDM, VXU, SIU structural assembly).
+     * The returned mappings are for UI display only — they show the user what
+     * the assembly mapped.  They are not re-applied at runtime (the assembly
+     * handles that directly).
+     */
+    _synthesizeMappingsFromResources(fhirResources, parsedHL7Data) {
+        const mappings = [];
+
+        // HL7 segment → FHIR resource role hint (for display labels)
+        const segmentHints = {
+            Organization: ['STF', 'ZEM', 'MFE', 'MFI'],
+            Practitioner: ['STF', 'PRA', 'ZEM'],
+            Location:     ['LOC', 'LCH', 'LRL'],
+            ChargeItemDefinition: ['CDM', 'PRC'],
+            Appointment:  ['SCH', 'AIG', 'AIL', 'AIP'],
+            DocumentReference: ['TXA', 'OBX'],
+            Immunization: ['RXA', 'RXR', 'OBX'],
+            DiagnosticReport: ['OBR', 'OBX'],
+            Observation:  ['OBX'],
+            Patient:      ['PID', 'NK1'],
+            Encounter:    ['PV1', 'PV2'],
+            MessageHeader: ['MSH'],
+        };
+
+        // Build set of segment keys that are actually present in the parsed message
+        const presentSegments = new Set(
+            Object.keys(parsedHL7Data?.enhancedSegments || parsedHL7Data || {})
+        );
+
+        for (const resource of fhirResources) {
+            const rt = resource.resourceType;
+            if (!rt) continue;
+
+            const srcSegments = segmentHints[rt] || [rt.substring(0, 3).toUpperCase()];
+
+            // Walk one level of the resource and emit a mapping row per populated field
+            for (const [key, value] of Object.entries(resource)) {
+                if (key === 'resourceType' || key === 'meta' || key === 'text' || key === 'id') continue;
+                if (value === null || value === undefined) continue;
+
+                // Pick the first candidate segment that actually appears in the message;
+                // fall back to the first hint if none match (e.g. when parsedHL7Data absent)
+                const seg = srcSegments.find(s => presentSegments.has(s)) || srcSegments[0] || 'HL7';
+                const isArray = Array.isArray(value);
+                const displayVal = isArray
+                    ? (value.length > 0 ? JSON.stringify(value[0]).substring(0, 50) : '[]')
+                    : String(value).substring(0, 50);
+                const compositeHint = isArray
+                    ? (key === 'participant' ? 'forEach/condition' : key === 'identifier' ? 'firstOf' : 'composite')
+                    : null;
+
+                mappings.push({
+                    hl7Path:          isArray ? `${seg} (${compositeHint})` : `${seg} (field mapping)`,
+                    hl7Value:         '',
+                    fhirPath:         `${rt}.${key}`,
+                    fhirField:        `${rt}.${key}`,
+                    fhirValue:        displayVal,
+                    transformedValue: displayVal,
+                    resourceType:     rt,
+                    confidence:       0.75,
+                    _assembled:       true,
+                    _composite:       isArray,
+                    _compositeType:   compositeHint,
+                });
+            }
+        }
+
+        return mappings;
     }
 
     // Show error state in optimized wizard

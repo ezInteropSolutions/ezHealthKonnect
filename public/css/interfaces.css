@@ -1680,6 +1680,9 @@
 .act-btn-red:hover    { color: #dc2626; border-color: #fca5a5; background: #fef2f2; }
 .act-btn-blue:hover   { color: #2563eb; border-color: #93c5fd; background: #eff6ff; }
 .act-btn-slate:hover  { color: #475569; border-color: #cbd5e1; background: #f8fafc; }
+/* indigo — template update available */
+.act-btn-indigo       { color: #7c3aed; border-color: #c4b5fd; }
+.act-btn-indigo:hover { color: #6d28d9; border-color: #a78bfa; background: #f5f3ff; }
 
 /* Backwards-compat alias — keep any remaining .action-btn-outline working */
 .action-btn-outline {

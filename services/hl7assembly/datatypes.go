@@ -519,12 +519,24 @@ func BuildHumanNameFromXPN(xpn string, rules map[string]interface{}) map[string]
 // BuildAddressFromXAD converts an HL7 XAD (Extended Address) field to a
 // FHIR R4 Address map.
 //
-// XAD wire format:
+// XAD wire format (HL7 Table 0190 for XAD.7 address type):
 //
 //	StreetLine1 ^ StreetLine2 ^ City ^ State ^ Zip ^ Country ^ AddressType …
+//
+// XAD.7 address type codes are mapped to FHIR Address.use:
+//
+//	B / O  → "work"   (Firm/Business, Office)
+//	H / P  → "home"   (Home, Permanent)
+//	M      → "billing" (Mailing)
+//	C      → "temp"   (Current/temporary)
+//	absent → use omitted (caller may override via rules)
+//
+// Callers requiring a specific use (e.g. Organization must not use "home") should
+// pass rules = map[string]interface{}{"use": "work"} to enforce it regardless of
+// what XAD.7 carries.
 func BuildAddressFromXAD(xad string, rules map[string]interface{}) map[string]interface{} {
 	components := strings.Split(xad, "^")
-	address := map[string]interface{}{"use": "home"}
+	address := map[string]interface{}{}
 
 	var lines []string
 	if len(components) > 0 && components[0] != "" {
@@ -549,6 +561,22 @@ func BuildAddressFromXAD(xad string, rules map[string]interface{}) map[string]in
 		address["country"] = components[5]
 	}
 
+	// XAD.7 = address type (HL7 Table 0190) — decode into FHIR Address.use
+	if len(components) > 6 && components[6] != "" {
+		switch strings.ToUpper(strings.TrimSpace(components[6])) {
+		case "B", "O": // Firm/Business, Office
+			address["use"] = "work"
+		case "H", "P": // Home, Permanent
+			address["use"] = "home"
+		case "M": // Mailing
+			address["use"] = "billing"
+		case "C": // Current (temporary)
+			address["use"] = "temp"
+		// BA (Bad), BDL, BR, F, RH, N etc. — omit use; validator will accept absent use
+		}
+	}
+
+	// Caller override (e.g. Organization must enforce "work" to satisfy org-2 constraint)
 	if rules != nil {
 		if use, ok := rules["use"].(string); ok {
 			address["use"] = use

@@ -784,6 +784,14 @@ class WizardController extends EventTarget {
                 // Re-render the step to show parsed data
                 await this.loadStep(2);
 
+                // ── Z-segment banner ─────────────────────────────────────────
+                const zSegs = parseResult.detectedZSegments || this.model.data.detectedZSegments || [];
+                const zData = parseResult.detectedZSegmentData || this.model.data.detectedZSegmentData || [];
+                if (zSegs.length > 0) {
+                    console.log(`🔍 ${zSegs.length} Z-segment(s) detected — showing banner`);
+                    this._showZSegmentBanner(zSegs, zData);
+                }
+
             } else {
                 throw new Error(parseResult.error || 'HL7 parsing failed');
             }
@@ -841,6 +849,155 @@ class WizardController extends EventTarget {
 
         const step2 = document.getElementById('step2') || document.querySelector('.step-content');
         if (step2) step2.insertBefore(banner, step2.firstChild);
+    }
+
+    /**
+     * Show a Z-segment detection banner below the parsing results in Step 2.
+     * Lists each detected Z-segment, whether an OOB template is available,
+     * and informs the user that templates will be auto-applied on finish.
+     */
+    _showZSegmentBanner(detectedSegments, segmentData) {
+        // Remove any stale Z-seg banner from a previous parse
+        document.querySelectorAll('.zseg-wizard-banner').forEach(el => el.remove());
+
+        const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+        const rows = detectedSegments.map(segId => {
+            const detail = segmentData.find(d => d.segmentId === segId) || {};
+            const hasOOB = detail.hasOobTemplate || false;
+            const oobTmpl = (detail.suggestedTemplates || []).find(t => t.isSystem);
+            const badge = hasOOB
+                ? `<span style="background:#166534;color:#fff;padding:1px 7px;border-radius:10px;font-size:11px;">OOB Template</span>`
+                : `<span style="background:#6b7280;color:#fff;padding:1px 7px;border-radius:10px;font-size:11px;">Custom</span>`;
+            const note = hasOOB
+                ? `Will auto-apply <em>${esc(oobTmpl?.templateName || 'OOB template')}</em> → ${esc(oobTmpl?.targetFhirResource || '')}`
+                : `No OOB template — configure manually in Interface Settings after creation`;
+            return `<tr>
+                <td style="padding:4px 10px;border:1px solid #a5f3fc;font-family:monospace;font-weight:700;">
+                    ${esc(segId)}</td>
+                <td style="padding:4px 10px;border:1px solid #a5f3fc;">${badge}</td>
+                <td style="padding:4px 10px;border:1px solid #a5f3fc;font-size:12px;color:#164e63;">${note}</td>
+            </tr>`;
+        }).join('');
+
+        const oobCount = segmentData.filter(d => d.hasOobTemplate).length;
+        const autoNote = oobCount > 0
+            ? `<strong>${oobCount} OOB template${oobCount > 1 ? 's' : ''} will be applied automatically</strong> when you finish the wizard.`
+            : `No OOB templates available — configure Z-segments manually after the interface is created.`;
+
+        const banner = document.createElement('div');
+        banner.className = 'zseg-wizard-banner';
+        banner.style.cssText = `
+            background:#ecfeff; border:2px solid #67e8f9; border-radius:10px;
+            padding:14px 18px; margin-bottom:16px; font-size:13px;
+        `;
+        banner.innerHTML = `
+            <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
+                <span style="font-size:20px;">🔧</span>
+                <div>
+                    <strong style="color:#0e7490;font-size:14px;">
+                        ${detectedSegments.length} Z-segment${detectedSegments.length > 1 ? 's' : ''} detected</strong><br>
+                    <span style="color:#164e63;">${autoNote}</span>
+                </div>
+            </div>
+            <table style="border-collapse:collapse;width:100%;">
+                <thead><tr style="background:#cffafe;">
+                    <th style="padding:4px 10px;border:1px solid #a5f3fc;text-align:left;">Segment</th>
+                    <th style="padding:4px 10px;border:1px solid #a5f3fc;text-align:left;">Template</th>
+                    <th style="padding:4px 10px;border:1px solid #a5f3fc;text-align:left;">Action</th>
+                </tr></thead>
+                <tbody>${rows}</tbody>
+            </table>
+        `;
+
+        // Insert after parsingResults so it appears below the parsed segment table
+        const parsingResults = document.getElementById('parsingResults');
+        const step2 = document.getElementById('step2') || document.querySelector('.step-content');
+        if (parsingResults && parsingResults.parentNode) {
+            parsingResults.parentNode.insertBefore(banner, parsingResults.nextSibling);
+        } else if (step2) {
+            step2.appendChild(banner);
+        }
+    }
+
+    /**
+     * Auto-apply OOB Z-segment templates to the newly created interface.
+     * Called right after finishWizard() obtains the interfaceId.
+     * Returns an array of segment IDs that were successfully applied.
+     */
+    /**
+     * Save Z-segment configurations for the newly created interface.
+     * Uses the ZSegmentConfigPanel's getConfigs() result rather than blindly
+     * applying the OOB template — the user may have customized the field mappings
+     * or defined a mapping for an unknown segment.
+     *
+     * Each entry from getConfigs() is one of:
+     *   { mode: 'apply-template', segmentId, templateId }  — OOB accepted as-is
+     *   { mode: 'create-config',  segmentId, config }      — user-defined / customized
+     *   { mode: 'skip',           segmentId }              — user left unconfigured
+     *
+     * Returns an array of segment IDs that were successfully saved.
+     */
+    async _autoApplyZSegmentTemplates(interfaceId) {
+        // Prefer the panel's configs when available (Step 3 was rendered)
+        const panel = this._zSegmentConfigPanel;
+        const configs = panel ? panel.getConfigs() : this._buildFallbackConfigs();
+
+        if (configs.length === 0) return [];
+
+        const applied = [];
+        for (const entry of configs) {
+            if (entry.mode === 'skip') {
+                console.log(`⏭️ Z-segment ${entry.segmentId} skipped (not configured)`);
+                continue;
+            }
+
+            try {
+                let res, json;
+
+                if (entry.mode === 'apply-template') {
+                    res = await fetch(`/api/zsegments/interfaces/${interfaceId}/apply-template`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ templateId: entry.templateId, occurrenceIndex: 0 }),
+                    });
+                } else {
+                    // 'create-config' — user defined or customized
+                    res = await fetch(`/api/zsegments/interfaces/${interfaceId}`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(entry.config),
+                    });
+                }
+
+                json = await res.json();
+                if (json.success) {
+                    console.log(`✅ Z-segment ${entry.segmentId} saved (mode: ${entry.mode})`);
+                    applied.push(entry.segmentId);
+                } else {
+                    console.warn(`⚠️ Failed to save Z-segment ${entry.segmentId}:`, json.error);
+                }
+            } catch (err) {
+                console.warn(`⚠️ Error saving Z-segment ${entry.segmentId}:`, err.message);
+            }
+        }
+        return applied;
+    }
+
+    /**
+     * Fallback for when the wizard is completed without rendering Step 3
+     * (e.g. the user skipped directly to finish).  Falls back to the old
+     * behaviour of applying any available OOB template as-is.
+     */
+    _buildFallbackConfigs() {
+        return (this.model.data.detectedZSegmentData || [])
+            .filter(seg => seg.hasOobTemplate)
+            .map(seg => {
+                const oob = (seg.suggestedTemplates || []).find(t => t.isSystem);
+                return oob
+                    ? { mode: 'apply-template', segmentId: seg.segmentId, templateId: oob.id }
+                    : { mode: 'skip', segmentId: seg.segmentId };
+            });
     }
 
     /**
@@ -1009,6 +1166,14 @@ PV1|1|I|ICU^101^1|||DOC123^Smith^Jane|||EMERGENCY|||`
 
                 console.log('✅ Interface created successfully:', interfaceData);
 
+                // ── Auto-apply Z-segment OOB templates ───────────────────────
+                // If the sample message had Z-segments with OOB templates, apply
+                // them now that we have the interfaceId.
+                let appliedZSegments = [];
+                if (interfaceId) {
+                    appliedZSegments = await this._autoApplyZSegmentTemplates(interfaceId);
+                }
+
                 // Get the interface status to show appropriate message
                 const status = interfaceData.status || 'draft';
                 const messageType = interfaceData.message_type || payload.messageType || 'ADT^A01';
@@ -1022,13 +1187,26 @@ PV1|1|I|ICU^101^1|||DOC123^Smith^Jane|||EMERGENCY|||`
                     autoStart: payload.auto_start || false
                 });
 
+                // If Z-segment templates were applied, show a follow-up notification
+                if (appliedZSegments.length > 0) {
+                    setTimeout(() => {
+                        this.view.showNotification(
+                            `Z-segment mappings applied: ${appliedZSegments.join(', ')}. ` +
+                            `Edit them in Interface Settings → Z-Segments.`,
+                            'success',
+                            8000
+                        );
+                    }, 800);
+                }
+
                 // Emit completion event
                 if (interfaceId) {
                     this.dispatchEvent(new CustomEvent('wizardCompleted', {
                         detail: {
                             interfaceId: interfaceId,
                             name: payload.name,
-                            interface: interfaceData
+                            interface: interfaceData,
+                            appliedZSegments
                         }
                     }));
                 } else {

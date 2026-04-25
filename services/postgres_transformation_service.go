@@ -15,15 +15,16 @@ type PostgresTransformationService struct {
 
 // AtomicMapping represents a single field mapping from HL7 to FHIR
 type AtomicMapping struct {
-	ID               string `json:"id"`
-	SourcePath       string `json:"sourcePath"`
-	TargetPath       string `json:"targetPath"`
-	ResourceType     string `json:"resourceType"`       // FHIR Resource Type (e.g., "Patient", "Encounter")
-	FHIRResourceType string `json:"fhirResourceType"`   // Alias for compatibility
-	TransformType    string `json:"transformType"`
-	DefaultValue     string `json:"defaultValue,omitempty"`
-	ValidationRule   string `json:"validationRule,omitempty"`
-	IsRequired       bool   `json:"isRequired"`
+	ID               string  `json:"id"`
+	SourcePath       string  `json:"sourcePath"`
+	TargetPath       string  `json:"targetPath"`
+	ResourceType     string  `json:"resourceType"`
+	FHIRResourceType string  `json:"fhirResourceType"`
+	TransformType    string  `json:"transformType"`
+	DefaultValue     string  `json:"defaultValue,omitempty"`
+	ValidationRule   string  `json:"validationRule,omitempty"`
+	IsRequired       bool    `json:"isRequired"`
+	Confidence       float64 `json:"confidence"`
 }
 
 // TransformationConfig represents the complete transformation configuration

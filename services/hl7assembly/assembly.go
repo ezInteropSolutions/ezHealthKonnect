@@ -264,24 +264,57 @@ func normalizeUCUMUnit(unit string) string {
 // ExtractSegmentGroup returns all instances of segmentName from parsedHL7Data.
 // Handles both the typed Go path and the JSON-unmarshalled generic path.
 func ExtractSegmentGroup(parsedHL7Data map[string]interface{}, segmentName string) []hl7.EnhancedSegment {
-	rawGroups, exists := parsedHL7Data["segmentGroups"]
-	if !exists {
-		return nil
+	// Primary source: segmentGroups (runtime path from Go parser)
+	if rawGroups, exists := parsedHL7Data["segmentGroups"]; exists {
+		if typed, ok := rawGroups.(map[string][]hl7.EnhancedSegment); ok {
+			return typed[segmentName]
+		}
+		b, err := json.Marshal(rawGroups)
+		if err != nil {
+			log.Printf("⚠️ hl7assembly.ExtractSegmentGroup: marshal failed: %v", err)
+		} else {
+			var converted map[string][]hl7.EnhancedSegment
+			if err = json.Unmarshal(b, &converted); err == nil {
+				return converted[segmentName]
+			}
+		}
 	}
-	if typed, ok := rawGroups.(map[string][]hl7.EnhancedSegment); ok {
-		return typed[segmentName]
+
+	// Fallback: enhancedSegments (wizard / JSON API path — one segment per key)
+	if rawEnh, exists := parsedHL7Data["enhancedSegments"]; exists {
+		if typed, ok := rawEnh.(map[string]hl7.EnhancedSegment); ok {
+			if seg, found := typed[segmentName]; found {
+				return []hl7.EnhancedSegment{seg}
+			}
+			return nil
+		}
+		// JSON round-tripped: marshal → unmarshal into generic map
+		b, err := json.Marshal(rawEnh)
+		if err != nil {
+			log.Printf("⚠️ hl7assembly.ExtractSegmentGroup: enhancedSegments marshal failed: %v", err)
+			return nil
+		}
+		var enhMap map[string]hl7.EnhancedSegment
+		if err = json.Unmarshal(b, &enhMap); err == nil {
+			if seg, found := enhMap[segmentName]; found {
+				return []hl7.EnhancedSegment{seg}
+			}
+			return nil
+		}
+		// Last resort: generic map decode for key
+		var generic map[string]interface{}
+		if err2 := json.Unmarshal(b, &generic); err2 == nil {
+			if segRaw, found := generic[segmentName]; found {
+				segBytes, _ := json.Marshal(segRaw)
+				var seg hl7.EnhancedSegment
+				if json.Unmarshal(segBytes, &seg) == nil {
+					return []hl7.EnhancedSegment{seg}
+				}
+			}
+		}
 	}
-	b, err := json.Marshal(rawGroups)
-	if err != nil {
-		log.Printf("⚠️ hl7assembly.ExtractSegmentGroup: marshal failed: %v", err)
-		return nil
-	}
-	var converted map[string][]hl7.EnhancedSegment
-	if err = json.Unmarshal(b, &converted); err != nil {
-		log.Printf("⚠️ hl7assembly.ExtractSegmentGroup: unmarshal failed: %v", err)
-		return nil
-	}
-	return converted[segmentName]
+
+	return nil
 }
 
 // SegFieldValue returns the value of a named field (e.g. "OBX.3") from a segment.
@@ -289,6 +322,66 @@ func SegFieldValue(seg hl7.EnhancedSegment, key string) string {
 	for _, f := range seg.Fields {
 		if f.Key == key {
 			return f.Value
+		}
+	}
+	return ""
+}
+
+// SegFieldValueByName returns the value of the first field whose Name matches
+// semanticName (case-insensitive).  Falls back to SegFieldValue(seg, fallbackKey)
+// when no named match is found.
+//
+// Use this instead of SegFieldValue for version-agnostic field lookup:
+//
+//	SegFieldValueByName(seg, "Administered Code", "RXA.5")
+//
+// The semantic name comes from the HL7 schema embedded at parse time by
+// hl7.ParseWithRealSchema.  It is empty for Z-segments (no schema) and for
+// messages parsed without a schema loader — in those cases the fallbackKey is
+// always used, so existing behaviour is preserved.
+func SegFieldValueByName(seg hl7.EnhancedSegment, semanticName, fallbackKey string) string {
+	lower := strings.ToLower(strings.TrimSpace(semanticName))
+	for _, f := range seg.Fields {
+		if strings.ToLower(f.Name) == lower && f.Name != "" {
+			return f.Value
+		}
+	}
+	return SegFieldValue(seg, fallbackKey)
+}
+
+// SegSubfieldValueByName returns the value of a subfield (component) within
+// the field identified by semanticName (case-insensitive field name lookup).
+// subfieldName is matched against SubfieldInfo.Name.
+// fallbackFieldKey / fallbackSubfieldKey are the positional fallbacks (e.g.
+// "RXA.5", "RXA.5.1").
+func SegSubfieldValueByName(seg hl7.EnhancedSegment, semanticName, subfieldName, fallbackFieldKey, fallbackSubfieldKey string) string {
+	lower := strings.ToLower(strings.TrimSpace(semanticName))
+	subLower := strings.ToLower(strings.TrimSpace(subfieldName))
+	for _, f := range seg.Fields {
+		if strings.ToLower(f.Name) != lower || f.Name == "" {
+			continue
+		}
+		for _, sf := range f.Subfields {
+			if strings.ToLower(sf.Name) == subLower && sf.Name != "" {
+				return sf.Value
+			}
+		}
+		// Field found by name but subfield not found by name — fall back positionally
+		return SegSubfieldValue(seg, fallbackSubfieldKey)
+	}
+	// Field not found by name — full positional fallback
+	return SegSubfieldValue(seg, fallbackSubfieldKey)
+}
+
+// SegSubfieldValue returns the value of a subfield component (e.g. "PID.5.1")
+// by positional key.
+func SegSubfieldValue(seg hl7.EnhancedSegment, key string) string {
+	// key format: SEGMENT.FIELD.COMPONENT  e.g. "RXA.5.1"
+	for _, f := range seg.Fields {
+		for _, sf := range f.Subfields {
+			if sf.Key == key {
+				return sf.Value
+			}
 		}
 	}
 	return ""

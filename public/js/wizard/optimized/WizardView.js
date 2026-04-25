@@ -1520,6 +1520,11 @@ class WizardView extends EventTarget {
                             ${this.getFHIRMappingContent(data)}
                         </div>
 
+                        <!-- Z-Segment Configuration Panel -->
+                        <div id="zseg-config-panel-container">
+                            ${this.getZSegmentConfigPanelHTML(data)}
+                        </div>
+
                         <!-- Advanced Options Panel (Collapsible) -->
                         <div style="margin-top: 16px;">
                             <button id="toggle-advanced-options" style="width: 100%; padding: 12px; border: 2px solid #f3f4f6; border-radius: 8px; background: #fafafa; color: #374151; font-size: 14px; font-weight: 500; cursor: pointer; display: flex; justify-content: space-between; align-items: center;">
@@ -1612,6 +1617,34 @@ class WizardView extends EventTarget {
 
         console.log('⚠️ [DEBUG] No mappings found in any source, returning 0');
         return 0;
+    }
+
+    /**
+     * Render the Z-segment configuration panel HTML for Step 3.
+     * The panel is only shown when Z-segments were detected in the sample message.
+     * Instantiates ZSegmentConfigPanel, stores it on the controller for later
+     * access during the save flow, and returns the HTML string.
+     */
+    getZSegmentConfigPanelHTML(data) {
+        const segmentData = data.detectedZSegmentData || [];
+        if (segmentData.length === 0) return '';
+
+        if (typeof window.ZSegmentConfigPanel !== 'function') {
+            console.warn('ZSegmentConfigPanel class not loaded');
+            return '';
+        }
+
+        // Create the panel and hand it to the controller so it can call
+        // getConfigs() during the finish/save flow.
+        const panel = new window.ZSegmentConfigPanel(segmentData);
+        if (window.wizardController) {
+            window.wizardController._zSegmentConfigPanel = panel;
+        }
+
+        // Events are wired in a setTimeout so the DOM is ready
+        setTimeout(() => panel.attachEvents(), 0);
+
+        return panel.render();
     }
 
     /**
@@ -1746,6 +1779,11 @@ class WizardView extends EventTarget {
                                 <span>•</span>
                                 <span>Ready for deployment</span>
                             </div>
+                            ${transformResult._assemblyDriven ? `
+                            <div style="margin-top:8px;font-size:12px;background:#e0e7ff;color:#3730a3;border-radius:6px;padding:6px 10px;display:inline-block;">
+                                🔧 <strong>Structural Assembly</strong> — mappings are applied automatically by the HL7 assembly engine.
+                                Fields marked <em>structural</em> are hardcoded; add Z-segment mappings below for custom fields.
+                            </div>` : ''}
                         </div>
                         <div style="display: flex; gap: 8px;">
                             <button onclick="window.exportFHIRConfiguration()"
@@ -1768,22 +1806,39 @@ class WizardView extends EventTarget {
                         <p style="margin: 4px 0 0 0; font-size: 14px; opacity: 0.9;">${mappings.length} HL7 fields successfully mapped to FHIR elements</p>
                     </div>
                     <div style="max-height: 300px; overflow-y: auto;">
-                        ${mappings.slice(0, 12).map((mapping, index) => `
-                            <div style="padding: 12px 16px; border-bottom: 1px solid #f1f5f9; display: flex; justify-content: space-between; align-items: center;">
+                        ${mappings.slice(0, 15).map((mapping, index) => {
+                            const isComposite = mapping._composite;
+                            const isStructural = mapping._assembled && !isComposite;
+                            const rowBg    = isComposite  ? '#f0fdf4' : isStructural ? '#f8faff' : '';
+                            const leftBorder = isComposite ? 'border-left: 3px solid #16a34a;'
+                                             : isStructural ? 'border-left: 3px solid #6366f1;'
+                                             : '';
+                            const badge = isComposite
+                                ? `<span style="font-family:sans-serif;font-size:10px;background:#dcfce7;color:#166534;border-radius:4px;padding:1px 6px;margin-left:4px;border:1px solid #86efac;">composite</span>`
+                                : isStructural
+                                ? `<span style="font-family:sans-serif;font-size:10px;background:#e0e7ff;color:#3730a3;border-radius:4px;padding:1px 6px;margin-left:4px;border:1px solid #a5b4fc;">structural</span>`
+                                : '';
+                            const srcVal = (mapping.hl7Value || '');
+                            const tgtVal = (mapping.fhirValue || mapping.transformedValue || '');
+                            return `
+                            <div style="padding: 12px 16px; border-bottom: 1px solid #f1f5f9; display: flex; justify-content: space-between; align-items: center;
+                                        background:${rowBg}; ${leftBorder}">
                                 <div style="flex: 1; font-family: monospace;">
-                                    <div style="font-size: 13px; font-weight: 600; color: #1e293b;">${mapping.hl7Path || mapping.hl7Field}</div>
-                                    <div style="font-size: 11px; color: #64748b; margin-top: 2px;">"${(mapping.hl7Value || '').substring(0, 30)}${(mapping.hl7Value || '').length > 30 ? '...' : ''}"</div>
+                                    <div style="font-size: 13px; font-weight: 600; color: #1e293b;">${mapping.hl7Path || mapping.hl7Field}
+                                        ${badge}
+                                    </div>
+                                    ${srcVal ? `<div style="font-size: 11px; color: #64748b; margin-top: 2px;">"${srcVal.substring(0, 30)}${srcVal.length > 30 ? '...' : ''}"</div>` : ''}
                                 </div>
-                                <div style="margin: 0 16px; color: #6b7280; font-weight: bold;">→</div>
+                                <div style="margin: 0 16px; color: ${isComposite ? '#16a34a' : '#6b7280'}; font-weight: bold;">→</div>
                                 <div style="flex: 1; text-align: right; font-family: monospace;">
-                                    <div style="font-size: 13px; font-weight: 600; color: #1e40af;">${mapping.fhirPath || mapping.fhirField}</div>
-                                    <div style="font-size: 11px; color: #64748b; margin-top: 2px;">"${(mapping.fhirValue || mapping.transformedValue || '').substring(0, 30)}${(mapping.fhirValue || mapping.transformedValue || '').length > 30 ? '...' : ''}"</div>
+                                    <div style="font-size: 13px; font-weight: 600; color: ${isComposite ? '#166534' : '#1e40af'};">${mapping.fhirPath || mapping.fhirField}</div>
+                                    ${tgtVal ? `<div style="font-size: 11px; color: #64748b; margin-top: 2px;">"${tgtVal.substring(0, 40)}${tgtVal.length > 40 ? '...' : ''}"</div>` : ''}
                                 </div>
-                            </div>
-                        `).join('')}
-                        ${mappings.length > 12 ? `
+                            </div>`;
+                        }).join('')}
+                        ${mappings.length > 15 ? `
                             <div style="padding: 12px 16px; text-align: center; color: #6b7280; font-size: 12px; font-style: italic;">
-                                ... and ${mappings.length - 12} more mappings
+                                ... and ${mappings.length - 15} more mappings
                             </div>
                         ` : ''}
                     </div>
@@ -1863,23 +1918,57 @@ class WizardView extends EventTarget {
             `;
         }
 
+        // Compute avg confidence across all mappings in this resource group
+        const confValues = resourceMappings
+            .map(m => m.confidence != null ? m.confidence : null)
+            .filter(c => c !== null);
+        const hasConfidence = confValues.length > 0;
+        const avgConf = hasConfidence ? Math.round(confValues.reduce((a, b) => a + b, 0) / confValues.length * 100) : null;
+        const highConf  = confValues.filter(c => c >= 0.90).length;
+        const medConf   = confValues.filter(c => c >= 0.75 && c < 0.90).length;
+        const lowConf   = confValues.filter(c => c < 0.75).length;
+        const avgColor  = avgConf == null ? '#94a3b8' : avgConf >= 90 ? '#4ade80' : avgConf >= 75 ? '#fbbf24' : '#f87171';
+        const barWidth  = avgConf != null ? avgConf : 0;
+
+        const headerBg  = hasIssues ? '#fef2f2' : 'linear-gradient(135deg, #1e3a8a 0%, #1e40af 100%)';
+        const headerColor = hasIssues ? '#dc2626' : 'white';
+
         return `
             <div style="border: 2px solid ${hasIssues ? '#fecaca' : '#e0e7ff'}; border-radius: 12px; background: white; overflow: hidden;">
                 <!-- Resource Header -->
-                <div style="background: ${hasIssues ? '#fef2f2' : 'linear-gradient(135deg, #1e3a8a 0%, #1e40af 100%)'}; color: ${hasIssues ? '#dc2626' : 'white'}; padding: 12px 16px; display: flex; justify-content: space-between; align-items: center;">
-                    <div>
-                        <h5 style="margin: 0; font-size: 14px; font-weight: 600;">${this.getResourceIcon(resourceType)} ${resourceType} Resource</h5>
-                        <div style="font-size: 12px; opacity: 0.9; margin-top: 2px;">${resourceMappings.length} field mappings</div>
-                    </div>
-                    <div style="display: flex; gap: 8px;">
-                        <button onclick="window.addResourceMapping('${resourceType}')"
-                                style="padding: 4px 8px; background: rgba(255,255,255,0.2); color: inherit; border: 1px solid rgba(255,255,255,0.3); border-radius: 4px; font-size: 11px; cursor: pointer;">
-                            ➕ Add Field
-                        </button>
-                        <button onclick="window.toggleResourceGroup('${resourceType}')"
-                                style="padding: 4px 8px; background: rgba(255,255,255,0.2); color: inherit; border: 1px solid rgba(255,255,255,0.3); border-radius: 4px; font-size: 11px; cursor: pointer;">
-                            👁️ Toggle
-                        </button>
+                <div style="background: ${headerBg}; color: ${headerColor}; padding: 12px 16px;">
+                    <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+                        <div>
+                            <h5 style="margin: 0; font-size: 14px; font-weight: 600;">${this.getResourceIcon(resourceType)} ${resourceType} Resource</h5>
+                            <div style="font-size: 12px; opacity: 0.85; margin-top: 2px;">${resourceMappings.length} field mappings</div>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            ${hasConfidence ? `
+                            <!-- Confidence meter -->
+                            <div style="display:flex;flex-direction:column;align-items:flex-end;gap:3px;" title="Avg mapping confidence for ${resourceType}">
+                                <div style="display:flex;align-items:center;gap:6px;">
+                                    <span style="font-size:10px;opacity:0.85;">confidence</span>
+                                    <span style="font-size:13px;font-weight:700;color:${avgColor};">${avgConf}%</span>
+                                </div>
+                                <div style="width:90px;height:4px;background:rgba(255,255,255,0.25);border-radius:4px;overflow:hidden;">
+                                    <div style="width:${barWidth}%;height:100%;background:${avgColor};border-radius:4px;transition:width 0.3s;"></div>
+                                </div>
+                                <div style="display:flex;gap:4px;font-size:9px;opacity:0.85;">
+                                    ${highConf > 0  ? `<span style="color:#4ade80;">●${highConf} high</span>` : ''}
+                                    ${medConf  > 0  ? `<span style="color:#fbbf24;">●${medConf} med</span>`  : ''}
+                                    ${lowConf  > 0  ? `<span style="color:#f87171;">●${lowConf} low</span>`  : ''}
+                                </div>
+                            </div>
+                            ` : ''}
+                            <button onclick="window.addResourceMapping('${resourceType}')"
+                                    style="padding: 4px 8px; background: rgba(255,255,255,0.2); color: inherit; border: 1px solid rgba(255,255,255,0.3); border-radius: 4px; font-size: 11px; cursor: pointer;">
+                                ➕ Add Field
+                            </button>
+                            <button onclick="window.toggleResourceGroup('${resourceType}')"
+                                    style="padding: 4px 8px; background: rgba(255,255,255,0.2); color: inherit; border: 1px solid rgba(255,255,255,0.3); border-radius: 4px; font-size: 11px; cursor: pointer;">
+                                👁️ Toggle
+                            </button>
+                        </div>
                     </div>
                 </div>
 
@@ -2003,30 +2092,36 @@ class WizardView extends EventTarget {
         const hl7Field = mapping.sourcePath || mapping.hl7Path || mapping.hl7Field || 'Unknown';
         const fhirField = mapping.targetPath || mapping.fhirPath || mapping.fhirField || 'Unknown';
         const transformType = mapping.transformType || mapping.transform || 'direct';
-        const isRequired = mapping.isRequired ? '⭐' : '';
-        // Confidence badge — use stored value or infer from data_type
-        const conf = mapping.confidence != null ? mapping.confidence : 0.85;
-        const confPct = Math.round(conf * 100);
-        const confColor = confPct >= 90 ? '#16a34a' : confPct >= 75 ? '#d97706' : '#dc2626';
-        const confBadge = `<span style="font-size:10px;font-weight:700;color:${confColor};background:${confColor}15;padding:1px 5px;border-radius:9px;border:1px solid ${confColor}40;margin-left:4px;" title="Mapping confidence">${confPct}%</span>`;
+
+        // Confidence — only show when a real value is present (not the 0.85 default)
+        const hasConf = mapping.confidence != null;
+        const conf = hasConf ? mapping.confidence : null;
+        const confPct = conf != null ? Math.round(conf * 100) : null;
+        const confColor = confPct == null ? '#94a3b8' : confPct >= 90 ? '#16a34a' : confPct >= 75 ? '#d97706' : '#dc2626';
+        const confLabel = confPct != null
+            ? `<span class="confidence-badge"
+                     style="font-size:11px;font-weight:700;color:${confColor};background:${confColor}18;padding:2px 7px;border-radius:10px;border:1px solid ${confColor}50;white-space:nowrap;"
+                     title="Mapping confidence (spec-driven)">${confPct}% conf.</span>`
+            : '';
 
         // Extract actual values from parsed HL7 data and FHIR resources
-        const hl7Value = this.extractHL7Value(hl7Field);
-        const fhirValue = this.extractFHIRValue(fhirField, resourceType);
+        const _hl7Raw = this.extractHL7Value(hl7Field);
+        const _fhirRaw = this.extractFHIRValue(fhirField, resourceType);
+        const hl7Value  = (_hl7Raw  == null) ? '' : (typeof _hl7Raw  === 'string' ? _hl7Raw  : JSON.stringify(_hl7Raw));
+        const fhirValue = (_fhirRaw == null) ? '' : (typeof _fhirRaw === 'string' ? _fhirRaw : JSON.stringify(_fhirRaw));
 
         return `
-            <div style="padding: 12px 16px; border-bottom: 1px solid #f1f5f9; display: flex; align-items: center; gap: 16px; ${hasIssue ? 'background: #fef2f2;' : ''}"
+            <div style="padding: 10px 16px; border-bottom: 1px solid #f1f5f9; display: flex; align-items: center; gap: 12px; ${hasIssue ? 'background: #fef2f2;' : ''}"
                  data-mapping-index="${index}" data-resource="${resourceType}">
 
                 <!-- HL7 Source -->
                 <div style="flex: 1; min-width: 0;">
-                    <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
+                    <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 3px;">
                         <input type="text" value="${hl7Field}"
                                onchange="window.updateMapping(${index}, 'hl7Field', this.value)"
                                style="flex: 1; padding: 4px 8px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 12px; font-family: monospace; background: #f9fafb;"
                                readonly>
-                        ${confBadge}
-                        ${hasIssue ? '<span style="color: #dc2626; font-size: 12px;">⚠️</span>' : ''}
+                        ${hasIssue ? '<span style="color: #dc2626; font-size: 12px;" title="Validation issue">⚠️</span>' : ''}
                     </div>
                     <div style="font-size: 11px; color: #6b7280; padding: 2px 4px; background: #f3f4f6; border-radius: 4px; font-family: monospace; max-width: 200px; overflow: hidden; text-overflow: ellipsis;">
                         "${hl7Value.substring(0, 25)}${hl7Value.length > 25 ? '...' : ''}"
@@ -2041,7 +2136,7 @@ class WizardView extends EventTarget {
 
                 <!-- FHIR Target -->
                 <div style="flex: 1; min-width: 0;">
-                    <div style="margin-bottom: 4px;">
+                    <div style="margin-bottom: 3px;">
                         <select onchange="window.updateMapping(${index}, 'fhirField', this.value)"
                                 style="width: 100%; padding: 4px 8px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 12px; font-family: monospace;">
                             <option value="${fhirField}" selected>${fhirField}</option>
@@ -2055,16 +2150,19 @@ class WizardView extends EventTarget {
                     </div>
                 </div>
 
-                <!-- Actions -->
-                <div style="display: flex; gap: 4px;">
-                    <button onclick="window.editMappingDetails(${index})"
-                            style="padding: 4px 8px; background: #f3f4f6; color: #374151; border: 1px solid #d1d5db; border-radius: 4px; font-size: 11px; cursor: pointer;" title="Edit Details">
-                        ✏️
-                    </button>
-                    <button onclick="window.deleteMappingRow(${index})"
-                            style="padding: 4px 8px; background: #fef2f2; color: #dc2626; border: 1px solid #fecaca; border-radius: 4px; font-size: 11px; cursor: pointer;" title="Delete">
-                        🗑️
-                    </button>
+                <!-- Confidence + Actions -->
+                <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 5px; flex-shrink: 0;">
+                    ${confLabel}
+                    <div style="display: flex; gap: 4px;">
+                        <button onclick="window.editMappingDetails(${index})"
+                                style="padding: 3px 7px; background: #f3f4f6; color: #374151; border: 1px solid #d1d5db; border-radius: 4px; font-size: 11px; cursor: pointer;" title="Edit Details">
+                            ✏️
+                        </button>
+                        <button onclick="window.deleteMappingRow(${index})"
+                                style="padding: 3px 7px; background: #fef2f2; color: #dc2626; border: 1px solid #fecaca; border-radius: 4px; font-size: 11px; cursor: pointer;" title="Delete">
+                            🗑️
+                        </button>
+                    </div>
                 </div>
             </div>
         `;
@@ -2074,22 +2172,82 @@ class WizardView extends EventTarget {
      * Get expected FHIR resources for a message type
      */
     getExpectedResourcesForMessageType(messageType) {
+        // Strip variant suffix for matching (ADT^A08 → ADT, SIU^S12 → SIU, etc.)
+        const baseType = (messageType || '').split('^')[0].toUpperCase();
+
         const resourceMap = {
+            // ADT — all variants produce Patient + Encounter
             'ADT^A01': [
-                { name: 'Patient', icon: '👤', color: '#f0fdf4', borderColor: '#bbf7d0', textColor: '#15803d' },
-                { name: 'Encounter', icon: '🏥', color: '#eff6ff', borderColor: '#bfdbfe', textColor: '#1d4ed8' },
+                { name: 'Patient',       icon: '👤', color: '#f0fdf4', borderColor: '#bbf7d0', textColor: '#15803d' },
+                { name: 'Encounter',     icon: '🏥', color: '#eff6ff', borderColor: '#bfdbfe', textColor: '#1d4ed8' },
                 { name: 'MessageHeader', icon: '📨', color: '#fdf2f8', borderColor: '#fbcfe8', textColor: '#be185d' }
             ],
+            // ORU — result messages
             'ORU^R01': [
-                { name: 'MessageHeader',   icon: '📨', color: '#fdf4ff', borderColor: '#e9d5ff', textColor: '#7c3aed' },
-                { name: 'Patient',         icon: '👤', color: '#f0fdf4', borderColor: '#bbf7d0', textColor: '#15803d' },
-                { name: 'Encounter',       icon: '🏥', color: '#eff6ff', borderColor: '#bfdbfe', textColor: '#1d4ed8' },
-                { name: 'DiagnosticReport',icon: '📊', color: '#fff7ed', borderColor: '#fed7aa', textColor: '#c2410c' },
-                { name: 'Observation',     icon: '🔬', color: '#fdf2f8', borderColor: '#fbcfe8', textColor: '#be185d' }
-            ]
+                { name: 'MessageHeader',    icon: '📨', color: '#fdf4ff', borderColor: '#e9d5ff', textColor: '#7c3aed' },
+                { name: 'Patient',          icon: '👤', color: '#f0fdf4', borderColor: '#bbf7d0', textColor: '#15803d' },
+                { name: 'DiagnosticReport', icon: '📊', color: '#fff7ed', borderColor: '#fed7aa', textColor: '#c2410c' },
+                { name: 'Observation',      icon: '🔬', color: '#fdf2f8', borderColor: '#fbcfe8', textColor: '#be185d' }
+            ],
         };
-        return resourceMap[messageType] || [
-            { name: 'Patient', icon: '👤', color: '#f0fdf4', borderColor: '#bbf7d0', textColor: '#15803d' },
+
+        // Fallback by base message type (covers all variants)
+        const baseMap = {
+            'ADT': [
+                { name: 'Patient',       icon: '👤', color: '#f0fdf4', borderColor: '#bbf7d0', textColor: '#15803d' },
+                { name: 'Encounter',     icon: '🏥', color: '#eff6ff', borderColor: '#bfdbfe', textColor: '#1d4ed8' },
+                { name: 'MessageHeader', icon: '📨', color: '#fdf2f8', borderColor: '#fbcfe8', textColor: '#be185d' }
+            ],
+            'ORU': [
+                { name: 'Patient',          icon: '👤', color: '#f0fdf4', borderColor: '#bbf7d0', textColor: '#15803d' },
+                { name: 'DiagnosticReport', icon: '📊', color: '#fff7ed', borderColor: '#fed7aa', textColor: '#c2410c' },
+                { name: 'Observation',      icon: '🔬', color: '#fdf2f8', borderColor: '#fbcfe8', textColor: '#be185d' }
+            ],
+            'ORM': [
+                { name: 'Patient',        icon: '👤', color: '#f0fdf4', borderColor: '#bbf7d0', textColor: '#15803d' },
+                { name: 'ServiceRequest', icon: '📋', color: '#eff6ff', borderColor: '#bfdbfe', textColor: '#1d4ed8' }
+            ],
+            'OML': [
+                { name: 'Patient',          icon: '👤', color: '#f0fdf4', borderColor: '#bbf7d0', textColor: '#15803d' },
+                { name: 'ServiceRequest',   icon: '📋', color: '#eff6ff', borderColor: '#bfdbfe', textColor: '#1d4ed8' },
+                { name: 'DiagnosticReport', icon: '📊', color: '#fff7ed', borderColor: '#fed7aa', textColor: '#c2410c' }
+            ],
+            'MFN': [
+                { name: 'Organization',  icon: '🏢', color: '#f0fdf4', borderColor: '#bbf7d0', textColor: '#15803d' },
+                { name: 'Practitioner',  icon: '👨‍⚕️', color: '#eff6ff', borderColor: '#bfdbfe', textColor: '#1d4ed8' },
+                { name: 'Location',      icon: '📍', color: '#fff7ed', borderColor: '#fed7aa', textColor: '#c2410c' }
+            ],
+            'SIU': [
+                { name: 'Appointment', icon: '📅', color: '#f0fdf4', borderColor: '#bbf7d0', textColor: '#15803d' },
+                { name: 'Patient',     icon: '👤', color: '#eff6ff', borderColor: '#bfdbfe', textColor: '#1d4ed8' },
+                { name: 'Practitioner',icon: '👨‍⚕️', color: '#fff7ed', borderColor: '#fed7aa', textColor: '#c2410c' }
+            ],
+            'DFT': [
+                { name: 'ChargeItem', icon: '💰', color: '#f0fdf4', borderColor: '#bbf7d0', textColor: '#15803d' },
+                { name: 'Patient',    icon: '👤', color: '#eff6ff', borderColor: '#bfdbfe', textColor: '#1d4ed8' },
+                { name: 'Procedure',  icon: '⚕️',  color: '#fff7ed', borderColor: '#fed7aa', textColor: '#c2410c' }
+            ],
+            'MDM': [
+                { name: 'DocumentReference', icon: '📄', color: '#f0fdf4', borderColor: '#bbf7d0', textColor: '#15803d' },
+                { name: 'Patient',           icon: '👤', color: '#eff6ff', borderColor: '#bfdbfe', textColor: '#1d4ed8' }
+            ],
+            'VXU': [
+                { name: 'Immunization', icon: '💉', color: '#f0fdf4', borderColor: '#bbf7d0', textColor: '#15803d' },
+                { name: 'Patient',      icon: '👤', color: '#eff6ff', borderColor: '#bfdbfe', textColor: '#1d4ed8' }
+            ],
+            'BAR': [
+                { name: 'Account',   icon: '🏦', color: '#f0fdf4', borderColor: '#bbf7d0', textColor: '#15803d' },
+                { name: 'Patient',   icon: '👤', color: '#eff6ff', borderColor: '#bfdbfe', textColor: '#1d4ed8' },
+                { name: 'Encounter', icon: '🏥', color: '#fff7ed', borderColor: '#fed7aa', textColor: '#c2410c' }
+            ],
+            'RDS': [
+                { name: 'MedicationDispense', icon: '💊', color: '#f0fdf4', borderColor: '#bbf7d0', textColor: '#15803d' },
+                { name: 'Patient',            icon: '👤', color: '#eff6ff', borderColor: '#bfdbfe', textColor: '#1d4ed8' }
+            ],
+        };
+
+        return resourceMap[messageType] || baseMap[baseType] || [
+            { name: 'Patient',       icon: '👤', color: '#f0fdf4', borderColor: '#bbf7d0', textColor: '#15803d' },
             { name: 'MessageHeader', icon: '📨', color: '#fdf2f8', borderColor: '#fbcfe8', textColor: '#be185d' }
         ];
     }

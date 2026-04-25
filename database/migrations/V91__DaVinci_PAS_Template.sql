@@ -312,12 +312,12 @@ VALUES
                         "_zone": "pas_core",
                         "_hint": "Enter payer_fhir_base, payer_token_url, payer_client_id, payer_client_secret in the connection fields at template-use time.",
                         "method": "POST",
-                        "endpoint": "${_payer_fhir_base}/$submit",
+                        "endpoint": "$${_payer_fhir_base}/$submit",
                         "authType": "oauth2",
                         "oauth2GrantType": "client_credentials",
-                        "oauth2TokenUrl": "${_payer_token_url}",
-                        "oauth2ClientId": "${_payer_client_id}",
-                        "oauth2ClientSecret": "${_payer_client_secret}",
+                        "oauth2TokenUrl": "$${_payer_token_url}",
+                        "oauth2ClientId": "$${_payer_client_id}",
+                        "oauth2ClientSecret": "$${_payer_client_secret}",
                         "oauth2Scope": "system/Claim.write system/ClaimResponse.read",
                         "headers": {
                             "Content-Type": "application/fhir+json",
@@ -461,7 +461,7 @@ VALUES
             ]
         }
     ]
-}'',
+}',
 
     -- Message type: any (this template is format-agnostic for inbound)
     null,
@@ -497,4 +497,5 @@ VALUES
     ]',
 
     45, true, true, 'ezHealthKonnect', 0
-);
+)
+ON CONFLICT (slug) DO NOTHING;

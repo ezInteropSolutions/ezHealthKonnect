@@ -6,6 +6,7 @@ package connectors
 import (
 	"context"
 	"ezhealthkonnect/models"
+	"strconv"
 	"time"
 )
 
@@ -164,7 +165,8 @@ func (c *ConnectorConfig) GetString(key string) string {
 	return ""
 }
 
-// GetInt safely retrieves an int value from config
+// GetInt safely retrieves an int value from config.
+// Handles JSON number (float64), Go int, and quoted-string forms (e.g. "6612").
 func (c *ConnectorConfig) GetInt(key string) int {
 	if val, ok := c.Config[key]; ok {
 		switch v := val.(type) {
@@ -172,6 +174,10 @@ func (c *ConnectorConfig) GetInt(key string) int {
 			return v
 		case float64:
 			return int(v)
+		case string:
+			if n, err := strconv.Atoi(v); err == nil {
+				return n
+			}
 		}
 	}
 	return 0

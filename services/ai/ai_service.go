@@ -11,6 +11,8 @@ import (
 	"log"
 	"regexp"
 	"strings"
+
+	"ezhealthkonnect/services/mapping"
 )
 
 // ezCompanionSystemPrompt is the shared system persona for all chat endpoints.
@@ -297,9 +299,15 @@ Return 3-5 mappings only. data_type: string|date|code|decimal|boolean.`,
 	return suggestions, chunks, nil
 }
 
-// staticHL7FHIRMappings returns well-known HL7v2→FHIR R4 field mappings instantly,
-// without calling the LLM. Returns nil when no static table is available for the
-// given format/target combination so the caller can fall back to the LLM.
+// staticHL7FHIRMappings returns HL7v2→FHIR R4 field mapping suggestions for
+// the segments actually present in sampleMessage.
+//
+// Primary path: schema-driven generator (uses loaded HL7 + FHIR StructureDefinitions).
+// Fallback path: built-in static catalogue (used when schema loaders are not
+// initialised — e.g. during unit tests or cold start before schemas are loaded).
+//
+// Returns nil when the format/target combination is not HL7v2→FHIR so the
+// caller falls back to the LLM.
 func staticHL7FHIRMappings(sampleMessage, detectedFormat, targetFormat string) []MappingSuggestion {
 	if detectedFormat != "hl7_v2" && detectedFormat != "hl7v2" {
 		return nil
@@ -308,110 +316,360 @@ func staticHL7FHIRMappings(sampleMessage, detectedFormat, targetFormat string) [
 		return nil
 	}
 
-	// Determine message type from MSH.9 (e.g. "ADT^A01", "ORU^R01").
-	msgType := extractHL7MsgType(sampleMessage)
-
-	// Core patient-demographics mappings present in every HL7v2 message with a PID.
-	// Each mapping includes TransformKey — the exact string the Go engine dispatches on
-	// in its switch statement inside transformValueAtomic(). Without this, transforms
-	// such as date conversion and gender code mapping silently pass through raw values.
-	pid := []MappingSuggestion{
-		// PID.3: full CX field — each ~ repetition is a separate identifier (MRN, SSN, etc.)
-		// TransformKey cx_to_identifier handles "12345^^^MRN" → Identifier{value,type,system}
-		{SourceField: "PID.3", TargetField: "Patient.identifier", Confidence: 0.97,
-			Reasoning:    "PID.3 Patient Identifier List (CX). Each ~ repetition becomes a Patient.identifier entry. cx_to_identifier extracts value/type/system from components.",
-			DataType:     "CX", TransformKey: "cx_to_identifier"},
-		// PID.5: full XPN name — xpn_to_humanname splits Family^Given^Middle^Suffix^Prefix
-		{SourceField: "PID.5", TargetField: "Patient.name[0]", Confidence: 0.97,
-			Reasoning:    "PID.5 Patient Name (XPN). xpn_to_humanname parses Family^Given^Middle components.",
-			DataType:     "XPN", TransformKey: "xpn_to_humanname"},
-		// PID.7: TS date — YYYYMMDD[HHMMSS] → YYYY-MM-DD. Without ts_to_date the raw value breaks FHIR validation.
-		{SourceField: "PID.7", TargetField: "Patient.birthDate", Confidence: 0.96,
-			Reasoning:    "PID.7 Date of Birth (TS). ts_to_date converts YYYYMMDD → YYYY-MM-DD required by FHIR.",
-			DataType:     "TS", TransformKey: "ts_to_date"},
-		// PID.8: IS gender — M/F/U/O → male/female/unknown/other. Without gender_mapping raw "M" is invalid FHIR.
-		{SourceField: "PID.8", TargetField: "Patient.gender", Confidence: 0.94,
-			Reasoning:    "PID.8 Administrative Sex (IS). gender_mapping converts M→male, F→female, U→unknown, O→other.",
-			DataType:     "IS", TransformKey: "gender_mapping"},
-		// PID.11: full XAD address — xad_to_address splits street^city^state^zip^country
-		{SourceField: "PID.11", TargetField: "Patient.address[0]", Confidence: 0.93,
-			Reasoning:    "PID.11 Patient Address (XAD). xad_to_address maps street/city/state/postal components.",
-			DataType:     "XAD", TransformKey: "xad_to_address"},
-		// PID.13: XTN phone — detects phone vs email, sets use=home
-		{SourceField: "PID.13", TargetField: "Patient.telecom[0]", Confidence: 0.91,
-			Reasoning:    "PID.13 Phone (XTN). xtn_to_contactpoint sets system=phone, use=home.",
-			DataType:     "XTN", TransformKey: "xtn_to_contactpoint"},
-		{SourceField: "PID.18", TargetField: "Patient.identifier[1].value", Confidence: 0.88,
-			Reasoning:    "PID.18 Patient Account Number → additional FHIR identifier (account type).",
-			DataType:     "CX", TransformKey: "account_to_identifier"},
+	// ── Primary: schema-driven generator ────────────────────────────────
+	gen := mapping.NewGenerator()
+	hl7Version := extractHL7Version(sampleMessage)
+	if hl7Version == "" {
+		hl7Version = "2.5"
+	}
+	generatedMaps, _, err := gen.GenerateForPresentSegments(sampleMessage, hl7Version, mapping.FHIRVersionR4)
+	if err == nil && len(generatedMaps) > 0 {
+		suggestions := make([]MappingSuggestion, 0, len(generatedMaps))
+		for _, gm := range generatedMaps {
+			suggestions = append(suggestions, MappingSuggestion{
+				SourceField:  gm.HL7Path,
+				TargetField:  gm.FHIRPath,
+				Confidence:   gm.Confidence,
+				Reasoning:    gm.Notes,
+				DataType:     gm.HL7DataType,
+				TransformKey: gm.Transform,
+			})
+		}
+		return suggestions
 	}
 
-	switch {
-	case strings.HasPrefix(msgType, "ADT"):
-		adtExtra := []MappingSuggestion{
-			{SourceField: "EVN.2", TargetField: "Encounter.period.start", Confidence: 0.92,
-				Reasoning: "EVN.2 Recorded Date/Time (TS) → Encounter.period.start. ts_to_datetime converts HL7 timestamp.", DataType: "TS", TransformKey: "ts_to_datetime"},
-			{SourceField: "PV1.2", TargetField: "Encounter.class.code", Confidence: 0.90,
-				Reasoning: "PV1.2 Patient Class (I=inpatient, O=outpatient, E=emergency). Lookup maps to ActCode.", DataType: "IS", TransformKey: "patient_class_to_coding"},
+	// ── Fallback: static catalogue (schemas not loaded) ──────────────────
+	presentSegments := extractPresentSegments(sampleMessage)
+	if len(presentSegments) == 0 {
+		return nil
+	}
+
+	catalogue := map[string][]MappingSuggestion{
+		// ── MSH — Message Header (present in every HL7v2 message) ──────────────
+		"MSH": {
+			{SourceField: "MSH.3", TargetField: "MessageHeader.source.name", Confidence: 0.95,
+				Reasoning: "MSH.3 Sending Application (HD) → MessageHeader.source.name.", DataType: "HD", TransformKey: "string_direct"},
+			{SourceField: "MSH.5", TargetField: "MessageHeader.destination[0].name", Confidence: 0.90,
+				Reasoning: "MSH.5 Receiving Application (HD) → MessageHeader.destination[0].name.", DataType: "HD", TransformKey: "string_direct"},
+			{SourceField: "MSH.9", TargetField: "MessageHeader.eventCoding.code", Confidence: 0.99,
+				Reasoning: "MSH.9 Message Type (MSG) — event code e.g. A01, R01, M02.", DataType: "MSG", TransformKey: "string_direct"},
+			{SourceField: "MSH.10", TargetField: "MessageHeader.id", Confidence: 0.99,
+				Reasoning: "MSH.10 Message Control ID → MessageHeader.id.", DataType: "ST", TransformKey: "string_direct"},
+			{SourceField: "MSH.7", TargetField: "MessageHeader.meta.lastUpdated", Confidence: 0.92,
+				Reasoning: "MSH.7 Date/Time of Message (TS). ts_to_instant converts to ISO-8601 instant.", DataType: "TS", TransformKey: "ts_to_instant"},
+		},
+
+		// ── PID — Patient Identification ──────────────────────────────────────
+		"PID": {
+			{SourceField: "PID.3", TargetField: "Patient.identifier", Confidence: 0.97,
+				Reasoning: "PID.3 Patient Identifier List (CX). cx_to_identifier extracts value/type/system per repetition.", DataType: "CX", TransformKey: "cx_to_identifier"},
+			{SourceField: "PID.5", TargetField: "Patient.name[0]", Confidence: 0.97,
+				Reasoning: "PID.5 Patient Name (XPN). xpn_to_humanname parses Family^Given^Middle components.", DataType: "XPN", TransformKey: "xpn_to_humanname"},
+			{SourceField: "PID.7", TargetField: "Patient.birthDate", Confidence: 0.96,
+				Reasoning: "PID.7 Date of Birth (TS). ts_to_date converts YYYYMMDD → YYYY-MM-DD.", DataType: "TS", TransformKey: "ts_to_date"},
+			{SourceField: "PID.8", TargetField: "Patient.gender", Confidence: 0.94,
+				Reasoning: "PID.8 Administrative Sex (IS). gender_mapping: M→male, F→female, U→unknown, O→other.", DataType: "IS", TransformKey: "gender_mapping"},
+			{SourceField: "PID.11", TargetField: "Patient.address[0]", Confidence: 0.93,
+				Reasoning: "PID.11 Patient Address (XAD). xad_to_address maps street/city/state/postal.", DataType: "XAD", TransformKey: "xad_to_address"},
+			{SourceField: "PID.13", TargetField: "Patient.telecom[0]", Confidence: 0.91,
+				Reasoning: "PID.13 Home Phone (XTN). xtn_to_contactpoint: system=phone, use=home.", DataType: "XTN", TransformKey: "xtn_to_contactpoint"},
+			{SourceField: "PID.18", TargetField: "Patient.identifier[1].value", Confidence: 0.88,
+				Reasoning: "PID.18 Patient Account Number → additional FHIR identifier.", DataType: "CX", TransformKey: "account_to_identifier"},
+		},
+
+		// ── PV1 — Patient Visit ────────────────────────────────────────────────
+		"PV1": {
+			{SourceField: "PV1.2", TargetField: "Encounter.class.code", Confidence: 0.92,
+				Reasoning: "PV1.2 Patient Class (I/O/E/P). patient_class_to_coding maps to FHIR ActCode.", DataType: "IS", TransformKey: "patient_class_to_coding"},
 			{SourceField: "PV1.3", TargetField: "Encounter.location[0].location.display", Confidence: 0.88,
-				Reasoning: "PV1.3 Assigned Patient Location (PL) — room/bed/facility display.", DataType: "PL", TransformKey: ""},
+				Reasoning: "PV1.3 Assigned Patient Location (PL) — room/bed.", DataType: "PL", TransformKey: "string_direct"},
 			{SourceField: "PV1.7", TargetField: "Encounter.participant[0].individual.display", Confidence: 0.85,
-				Reasoning: "PV1.7 Attending Doctor (XCN) — display name of attending.", DataType: "XCN", TransformKey: ""},
+				Reasoning: "PV1.7 Attending Doctor (XCN) — display name.", DataType: "XCN", TransformKey: "string_direct"},
 			{SourceField: "PV1.44", TargetField: "Encounter.period.start", Confidence: 0.91,
-				Reasoning: "PV1.44 Admit Date/Time (TS). ts_to_datetime converts to ISO-8601.", DataType: "TS", TransformKey: "ts_to_datetime"},
+				Reasoning: "PV1.44 Admit Date/Time (TS). ts_to_datetime → ISO-8601.", DataType: "TS", TransformKey: "ts_to_datetime"},
 			{SourceField: "PV1.45", TargetField: "Encounter.period.end", Confidence: 0.91,
-				Reasoning: "PV1.45 Discharge Date/Time (TS). ts_to_datetime converts to ISO-8601.", DataType: "TS", TransformKey: "ts_to_datetime"},
-		}
-		return append(pid, adtExtra...)
+				Reasoning: "PV1.45 Discharge Date/Time (TS). ts_to_datetime → ISO-8601.", DataType: "TS", TransformKey: "ts_to_datetime"},
+		},
 
-	case strings.HasPrefix(msgType, "ORU"):
-		// OBR → DiagnosticReport (the test order/panel — e.g. CBC, BMP)
-		// Each OBX → Observation (an individual result — Hgb, WBC, etc.)
-		// DiagnosticReport.result[] references all Observation resources.
-		// OBX.3 is a CWE field: components are code^display^system^altCode^altDisplay^altSystem.
-		// The first three map to Observation.code.coding[0]; alt codes go into coding[1].
-		oruExtra := []MappingSuggestion{
+		// ── EVN — Event Type ───────────────────────────────────────────────────
+		"EVN": {
+			{SourceField: "EVN.2", TargetField: "Encounter.period.start", Confidence: 0.88,
+				Reasoning: "EVN.2 Recorded Date/Time (TS) → Encounter.period.start.", DataType: "TS", TransformKey: "ts_to_datetime"},
+		},
+
+		// ── OBR — Observation Request ──────────────────────────────────────────
+		"OBR": {
 			{SourceField: "OBR.3", TargetField: "DiagnosticReport.identifier[0].value", Confidence: 0.93,
-				Reasoning: "OBR.3 Filler Order Number → DiagnosticReport identifier.", DataType: "EI", TransformKey: ""},
+				Reasoning: "OBR.3 Filler Order Number → DiagnosticReport.identifier.", DataType: "EI", TransformKey: "string_direct"},
 			{SourceField: "OBR.4", TargetField: "DiagnosticReport.code", Confidence: 0.95,
-				Reasoning: "OBR.4 Universal Service Identifier (CE/CWE). ce_to_codeableconcept maps code^display^system — e.g. 58410-2^CBC panel^LN.", DataType: "CE", TransformKey: "ce_to_codeableconcept"},
+				Reasoning: "OBR.4 Universal Service Identifier (CE). ce_to_codeableconcept maps code^display^system.", DataType: "CE", TransformKey: "ce_to_codeableconcept"},
 			{SourceField: "OBR.7", TargetField: "DiagnosticReport.effectiveDateTime", Confidence: 0.91,
-				Reasoning: "OBR.7 Observation Date/Time (TS). ts_to_datetime converts to ISO-8601.", DataType: "TS", TransformKey: "ts_to_datetime"},
+				Reasoning: "OBR.7 Observation Date/Time (TS). ts_to_datetime → ISO-8601.", DataType: "TS", TransformKey: "ts_to_datetime"},
 			{SourceField: "OBR.25", TargetField: "DiagnosticReport.status", Confidence: 0.89,
-				Reasoning: "OBR.25 Result Status (F=final, P=preliminary, C=corrected) → DiagnosticReport.status.", DataType: "ID", TransformKey: "obr_status_to_dr_status"},
-			// OBX fields — applied per-OBX-segment (one Observation per OBX)
-			{SourceField: "OBX.3", TargetField: "Observation.code", Confidence: 0.95,
-				Reasoning: "OBX.3 Observation Identifier (CWE): code^display^system[^altCode^altDisplay^altSystem]. ce_to_codeableconcept populates coding[0] and coding[1] for alternate code. Maps to Observation.code.", DataType: "CWE", TransformKey: "ce_to_codeableconcept"},
-			{SourceField: "OBX.5", TargetField: "Observation.value[x]", Confidence: 0.88,
-				Reasoning: "OBX.5 Observation Value. Type determined by OBX.2 (NM→valueQuantity, ST→valueString, CE→valueCodeableConcept, etc.).", DataType: "varies", TransformKey: "obx_value_by_type"},
-			{SourceField: "OBX.6", TargetField: "Observation.valueQuantity.unit", Confidence: 0.88,
-				Reasoning: "OBX.6 Units (CE) → valueQuantity.unit and code.", DataType: "CE", TransformKey: "ce_to_codeableconcept"},
-			{SourceField: "OBX.7", TargetField: "Observation.referenceRange[0].text", Confidence: 0.85,
-				Reasoning: "OBX.7 Reference Range text (e.g. '3.5-5.5') → referenceRange[0].text.", DataType: "ST", TransformKey: ""},
-			{SourceField: "OBX.8", TargetField: "Observation.interpretation[0].coding[0].code", Confidence: 0.87,
-				Reasoning: "OBX.8 Abnormal Flags (N/L/H/A/C) → Observation.interpretation.", DataType: "IS", TransformKey: "abnormal_flag_to_interpretation"},
-			{SourceField: "OBX.11", TargetField: "Observation.status", Confidence: 0.92,
-				Reasoning: "OBX.11 Observation Result Status (F=final, P=preliminary, C=corrected) → Observation.status.", DataType: "ID", TransformKey: "obx_status_to_obs_status"},
-			{SourceField: "OBX.14", TargetField: "Observation.effectiveDateTime", Confidence: 0.90,
-				Reasoning: "OBX.14 Date/Time of Observation (TS). ts_to_datetime converts to ISO-8601.", DataType: "TS", TransformKey: "ts_to_datetime"},
-		}
-		return append(pid, oruExtra...)
+				Reasoning: "OBR.25 Result Status (F=final, P=preliminary, C=corrected). obr_status_to_dr_status.", DataType: "ID", TransformKey: "obr_status_to_dr_status"},
+		},
 
-	case strings.HasPrefix(msgType, "ORM") || strings.HasPrefix(msgType, "OMG"):
-		ormExtra := []MappingSuggestion{
+		// ── OBX — Observation/Result ──────────────────────────────────────────
+		"OBX": {
+			{SourceField: "OBX.3", TargetField: "Observation.code", Confidence: 0.95,
+				Reasoning: "OBX.3 Observation Identifier (CWE). ce_to_codeableconcept → Observation.code.", DataType: "CWE", TransformKey: "ce_to_codeableconcept"},
+			{SourceField: "OBX.5", TargetField: "Observation.value[x]", Confidence: 0.88,
+				Reasoning: "OBX.5 Observation Value. Type from OBX.2 (NM→valueQuantity, ST→valueString, CE→valueCodeableConcept).", DataType: "varies", TransformKey: "obx_value_by_type"},
+			{SourceField: "OBX.6", TargetField: "Observation.valueQuantity.unit", Confidence: 0.88,
+				Reasoning: "OBX.6 Units (CE) → valueQuantity.unit.", DataType: "CE", TransformKey: "ce_to_codeableconcept"},
+			{SourceField: "OBX.8", TargetField: "Observation.interpretation[0].coding[0].code", Confidence: 0.87,
+				Reasoning: "OBX.8 Abnormal Flags (N/L/H/A). abnormal_flag_to_interpretation.", DataType: "IS", TransformKey: "abnormal_flag_to_interpretation"},
+			{SourceField: "OBX.11", TargetField: "Observation.status", Confidence: 0.92,
+				Reasoning: "OBX.11 Result Status (F/P/C). obx_status_to_obs_status.", DataType: "ID", TransformKey: "obx_status_to_obs_status"},
+			{SourceField: "OBX.14", TargetField: "Observation.effectiveDateTime", Confidence: 0.90,
+				Reasoning: "OBX.14 Date/Time of Observation (TS). ts_to_datetime → ISO-8601.", DataType: "TS", TransformKey: "ts_to_datetime"},
+		},
+
+		// ── ORC — Common Order ────────────────────────────────────────────────
+		"ORC": {
 			{SourceField: "ORC.1", TargetField: "ServiceRequest.status", Confidence: 0.90,
-				Reasoning: "ORC.1 Order Control (NW/CA/DC/...) → ServiceRequest.status via lookup.", DataType: "ID", TransformKey: "orc_status_to_sr_status"},
+				Reasoning: "ORC.1 Order Control (NW/CA/DC). orc_status_to_sr_status.", DataType: "ID", TransformKey: "orc_status_to_sr_status"},
 			{SourceField: "ORC.3", TargetField: "ServiceRequest.identifier[0].value", Confidence: 0.92,
-				Reasoning: "ORC.3 Filler Order Number → ServiceRequest identifier.", DataType: "EI", TransformKey: ""},
+				Reasoning: "ORC.3 Filler Order Number → ServiceRequest identifier.", DataType: "EI", TransformKey: "string_direct"},
 			{SourceField: "ORC.9", TargetField: "ServiceRequest.authoredOn", Confidence: 0.91,
-				Reasoning: "ORC.9 Date/Time of Transaction (TS). ts_to_datetime converts to ISO-8601.", DataType: "TS", TransformKey: "ts_to_datetime"},
-			{SourceField: "OBR.4", TargetField: "ServiceRequest.code", Confidence: 0.93,
-				Reasoning: "OBR.4 Universal Service ID (CE). ce_to_codeableconcept maps to ServiceRequest.code.", DataType: "CE", TransformKey: "ce_to_codeableconcept"},
-		}
-		return append(pid, ormExtra...)
+				Reasoning: "ORC.9 Date/Time of Transaction (TS). ts_to_datetime → ISO-8601.", DataType: "TS", TransformKey: "ts_to_datetime"},
+		},
+
+		// ── AL1 — Allergy Information ─────────────────────────────────────────
+		"AL1": {
+			{SourceField: "AL1.2", TargetField: "AllergyIntolerance.category[0]", Confidence: 0.90,
+				Reasoning: "AL1.2 Allergen Type Code (DA=medication, FA=food, EA=environment). allergy_category_mapping.", DataType: "IS", TransformKey: "allergy_category_mapping"},
+			{SourceField: "AL1.3", TargetField: "AllergyIntolerance.code", Confidence: 0.95,
+				Reasoning: "AL1.3 Allergen Code/Description (CE). ce_to_codeableconcept.", DataType: "CE", TransformKey: "ce_to_codeableconcept"},
+			{SourceField: "AL1.4", TargetField: "AllergyIntolerance.reaction[0].severity", Confidence: 0.88,
+				Reasoning: "AL1.4 Allergy Severity (SV/MO/MI). allergy_severity_mapping.", DataType: "IS", TransformKey: "allergy_severity_mapping"},
+		},
+
+		// ── DG1 — Diagnosis ───────────────────────────────────────────────────
+		"DG1": {
+			{SourceField: "DG1.3", TargetField: "Condition.code", Confidence: 0.95,
+				Reasoning: "DG1.3 Diagnosis Code/Description (CE). ce_to_codeableconcept → Condition.code.", DataType: "CE", TransformKey: "ce_to_codeableconcept"},
+			{SourceField: "DG1.5", TargetField: "Condition.onsetDateTime", Confidence: 0.88,
+				Reasoning: "DG1.5 Diagnosis Date/Time (TS). ts_to_datetime → ISO-8601.", DataType: "TS", TransformKey: "ts_to_datetime"},
+			{SourceField: "DG1.6", TargetField: "Condition.category[0].coding[0].code", Confidence: 0.85,
+				Reasoning: "DG1.6 Diagnosis Type (A=admitting, F=final, W=working). diagnosis_type_mapping.", DataType: "IS", TransformKey: "diagnosis_type_mapping"},
+		},
+
+		// ── NK1 — Next of Kin ─────────────────────────────────────────────────
+		"NK1": {
+			{SourceField: "NK1.2", TargetField: "RelatedPerson.name[0]", Confidence: 0.93,
+				Reasoning: "NK1.2 Next of Kin Name (XPN). xpn_to_humanname.", DataType: "XPN", TransformKey: "xpn_to_humanname"},
+			{SourceField: "NK1.3", TargetField: "RelatedPerson.relationship[0].coding[0].code", Confidence: 0.90,
+				Reasoning: "NK1.3 Relationship (CE) — e.g. MTH=mother, SPO=spouse.", DataType: "CE", TransformKey: "ce_to_codeableconcept"},
+			{SourceField: "NK1.5", TargetField: "RelatedPerson.telecom[0]", Confidence: 0.85,
+				Reasoning: "NK1.5 Phone Number (XTN). xtn_to_contactpoint.", DataType: "XTN", TransformKey: "xtn_to_contactpoint"},
+		},
+
+		// ── IN1 — Insurance ───────────────────────────────────────────────────
+		"IN1": {
+			{SourceField: "IN1.2", TargetField: "Coverage.type.coding[0].code", Confidence: 0.88,
+				Reasoning: "IN1.2 Insurance Plan ID (CE) → Coverage.type.", DataType: "CE", TransformKey: "ce_to_codeableconcept"},
+			{SourceField: "IN1.3", TargetField: "Coverage.payor[0].identifier[0].value", Confidence: 0.90,
+				Reasoning: "IN1.3 Insurance Company ID (CX) → Coverage.payor identifier.", DataType: "CX", TransformKey: "string_direct"},
+			{SourceField: "IN1.4", TargetField: "Coverage.payor[0].display", Confidence: 0.88,
+				Reasoning: "IN1.4 Insurance Company Name → Coverage.payor display.", DataType: "ST", TransformKey: "string_direct"},
+			{SourceField: "IN1.36", TargetField: "Coverage.identifier[0].value", Confidence: 0.85,
+				Reasoning: "IN1.36 Policy Number → Coverage.identifier.", DataType: "ST", TransformKey: "string_direct"},
+		},
+
+		// ── MFI — Master File Identification ──────────────────────────────────
+		"MFI": {
+			{SourceField: "MFI.1", TargetField: "MessageHeader.meta.tag[0].code", Confidence: 0.85,
+				Reasoning: "MFI.1 Master File Identifier (CE) — identifies the type of master file being updated (STF=staff, LOC=location, CDM=charge).", DataType: "CE", TransformKey: "string_direct"},
+			{SourceField: "MFI.3", TargetField: "MessageHeader.meta.tag[1].code", Confidence: 0.80,
+				Reasoning: "MFI.3 File-Level Event Code (UPD=update, REP=replace, NE=not present).", DataType: "ID", TransformKey: "string_direct"},
+		},
+
+		// ── MFE — Master File Entry ───────────────────────────────────────────
+		"MFE": {
+			{SourceField: "MFE.1", TargetField: "meta.tag[0].code", Confidence: 0.88,
+				Reasoning: "MFE.1 Record-Level Event Code (MAD=add, MUP=update, MDL=delete, MDC=deactivate) — applied to each produced resource as meta.tag.", DataType: "ID", TransformKey: "string_direct"},
+			{SourceField: "MFE.2", TargetField: "meta.versionId", Confidence: 0.82,
+				Reasoning: "MFE.2 MFN Control ID → meta.versionId for change tracking.", DataType: "ST", TransformKey: "string_direct"},
+		},
+
+		// ── STF — Staff Identification (MFN^M02) ──────────────────────────────
+		"STF": {
+			{SourceField: "STF.1", TargetField: "Practitioner.identifier[0].value", Confidence: 0.95,
+				Reasoning: "STF.1 Primary Key Value (CE) — staff primary identifier.", DataType: "CE", TransformKey: "string_direct"},
+			{SourceField: "STF.3", TargetField: "Practitioner.name[0]", Confidence: 0.97,
+				Reasoning: "STF.3 Staff Name (XPN). xpn_to_humanname parses Family^Given^Middle.", DataType: "XPN", TransformKey: "xpn_to_humanname"},
+			{SourceField: "STF.4", TargetField: "Practitioner.qualification[0].code.text", Confidence: 0.85,
+				Reasoning: "STF.4 Staff Type (IS) — e.g. Nursing, Physician, Admin.", DataType: "IS", TransformKey: "string_direct"},
+			{SourceField: "STF.5", TargetField: "Practitioner.gender", Confidence: 0.92,
+				Reasoning: "STF.5 Administrative Sex (IS). gender_mapping: M→male, F→female.", DataType: "IS", TransformKey: "gender_mapping"},
+			{SourceField: "STF.6", TargetField: "Practitioner.birthDate", Confidence: 0.90,
+				Reasoning: "STF.6 Date of Birth (TS). ts_to_date → YYYY-MM-DD.", DataType: "TS", TransformKey: "ts_to_date"},
+			{SourceField: "STF.7", TargetField: "Practitioner.active", Confidence: 0.92,
+				Reasoning: "STF.7 Active/Inactive Flag (A=active, I=inactive). boolean_yn_mapping.", DataType: "ID", TransformKey: "boolean_yn_mapping"},
+			{SourceField: "STF.10", TargetField: "Practitioner.telecom[0]", Confidence: 0.88,
+				Reasoning: "STF.10 Phone (XTN). xtn_to_contactpoint: system=phone.", DataType: "XTN", TransformKey: "xtn_to_contactpoint"},
+		},
+
+		// ── PRA — Practitioner Detail (MFN^M02, complements STF) ─────────────
+		"PRA": {
+			{SourceField: "PRA.3", TargetField: "PractitionerRole.specialty[0].coding[0].code", Confidence: 0.90,
+				Reasoning: "PRA.3 Practitioner Category (IS) — specialty code.", DataType: "IS", TransformKey: "string_direct"},
+			{SourceField: "PRA.5", TargetField: "Practitioner.qualification[0].identifier[0].value", Confidence: 0.88,
+				Reasoning: "PRA.5 Specialty (SPD) — board certification or specialty credentials.", DataType: "SPD", TransformKey: "string_direct"},
+		},
+
+		// ── LOC — Patient Location (MFN^M05) ─────────────────────────────────
+		"LOC": {
+			{SourceField: "LOC.1", TargetField: "Location.identifier[0].value", Confidence: 0.95,
+				Reasoning: "LOC.1 Primary Key Value (PL) — location identifier.", DataType: "PL", TransformKey: "string_direct"},
+			{SourceField: "LOC.2", TargetField: "Location.name", Confidence: 0.95,
+				Reasoning: "LOC.2 Location Description (ST) → Location.name.", DataType: "ST", TransformKey: "string_direct"},
+			{SourceField: "LOC.3", TargetField: "Location.type[0].coding[0].code", Confidence: 0.85,
+				Reasoning: "LOC.3 Location Type (IS) — N=nursing unit, R=room, B=bed, etc.", DataType: "IS", TransformKey: "string_direct"},
+			{SourceField: "LOC.4", TargetField: "Location.address", Confidence: 0.85,
+				Reasoning: "LOC.4 Location Address (XAD). xad_to_address.", DataType: "XAD", TransformKey: "xad_to_address"},
+		},
+
+		// ── CDM — Charge Description Master (MFN^M04) ────────────────────────
+		"CDM": {
+			{SourceField: "CDM.1", TargetField: "ChargeItemDefinition.identifier[0].value", Confidence: 0.95,
+				Reasoning: "CDM.1 Primary Key Value (CWE) — charge code.", DataType: "CWE", TransformKey: "string_direct"},
+			{SourceField: "CDM.3", TargetField: "ChargeItemDefinition.title", Confidence: 0.92,
+				Reasoning: "CDM.3 Charge Description Short (ST) → title.", DataType: "ST", TransformKey: "string_direct"},
+			{SourceField: "CDM.4", TargetField: "ChargeItemDefinition.description", Confidence: 0.88,
+				Reasoning: "CDM.4 Charge Description Long (ST) → description.", DataType: "ST", TransformKey: "string_direct"},
+		},
+
+		// ── OM1 — General Observation Properties (MFN^M12) ───────────────────
+		"OM1": {
+			{SourceField: "OM1.2", TargetField: "ObservationDefinition.identifier[0].value", Confidence: 0.95,
+				Reasoning: "OM1.2 Producer's Service/Test/Observation ID (CWE) — test code.", DataType: "CWE", TransformKey: "string_direct"},
+			{SourceField: "OM1.7", TargetField: "ObservationDefinition.code", Confidence: 0.93,
+				Reasoning: "OM1.7 Observation ID (CWE). ce_to_codeableconcept → ObservationDefinition.code.", DataType: "CWE", TransformKey: "ce_to_codeableconcept"},
+			{SourceField: "OM1.11", TargetField: "ObservationDefinition.preferredReportName", Confidence: 0.88,
+				Reasoning: "OM1.11 Preferred Report Name (ST) → preferredReportName.", DataType: "ST", TransformKey: "string_direct"},
+		},
+
+		// ── SCH — Schedule Activity Information (SIU) ─────────────────────────
+		"SCH": {
+			{SourceField: "SCH.1", TargetField: "Appointment.identifier[0].value", Confidence: 0.93,
+				Reasoning: "SCH.1 Placer Appointment ID (EI) → Appointment.identifier.", DataType: "EI", TransformKey: "string_direct"},
+			{SourceField: "SCH.7", TargetField: "Appointment.appointmentType.coding[0].code", Confidence: 0.88,
+				Reasoning: "SCH.7 Appointment Type Reason (CE) → Appointment.appointmentType.", DataType: "CE", TransformKey: "ce_to_codeableconcept"},
+			{SourceField: "SCH.9", TargetField: "Appointment.description", Confidence: 0.85,
+				Reasoning: "SCH.9 Appointment Duration (NM) — used for scheduling context.", DataType: "NM", TransformKey: "string_direct"},
+			{SourceField: "SCH.11", TargetField: "Appointment.start", Confidence: 0.93,
+				Reasoning: "SCH.11 Appointment Timing Quantity (TQ) — start time. ts_to_datetime.", DataType: "TQ", TransformKey: "ts_to_datetime"},
+		},
+
+		// ── AIS — Appointment Information (SIU) ──────────────────────────────
+		"AIS": {
+			{SourceField: "AIS.3", TargetField: "Appointment.participant[0].actor.display", Confidence: 0.88,
+				Reasoning: "AIS.3 Universal Service Identifier (CE) — the booked service/resource.", DataType: "CE", TransformKey: "ce_to_codeableconcept"},
+			{SourceField: "AIS.4", TargetField: "Appointment.participant[0].period.start", Confidence: 0.85,
+				Reasoning: "AIS.4 Appointment Start Date/Time (TS). ts_to_datetime.", DataType: "TS", TransformKey: "ts_to_datetime"},
+		},
+
+		// ── TXA — Transcription Document Header (MDM) ────────────────────────
+		"TXA": {
+			{SourceField: "TXA.2", TargetField: "DocumentReference.type.coding[0].code", Confidence: 0.92,
+				Reasoning: "TXA.2 Document Type (IS) — e.g. DS=discharge summary, PN=progress note.", DataType: "IS", TransformKey: "string_direct"},
+			{SourceField: "TXA.4", TargetField: "DocumentReference.date", Confidence: 0.90,
+				Reasoning: "TXA.4 Activity Date/Time (TS). ts_to_datetime → DocumentReference.date.", DataType: "TS", TransformKey: "ts_to_datetime"},
+			{SourceField: "TXA.5", TargetField: "DocumentReference.author[0].display", Confidence: 0.88,
+				Reasoning: "TXA.5 Primary Activity Provider (XCN) — document author.", DataType: "XCN", TransformKey: "string_direct"},
+			{SourceField: "TXA.9", TargetField: "DocumentReference.identifier[0].value", Confidence: 0.90,
+				Reasoning: "TXA.9 Originator Code/Name (XCN) — document originator ID.", DataType: "XCN", TransformKey: "string_direct"},
+			{SourceField: "TXA.17", TargetField: "DocumentReference.status", Confidence: 0.88,
+				Reasoning: "TXA.17 Document Completion Status (AU/LA/OB/PA/UN/DI). document_status_mapping.", DataType: "ID", TransformKey: "document_status_mapping"},
+		},
+
+		// ── RXA — Pharmacy/Treatment Administration (VXU) ────────────────────
+		"RXA": {
+			{SourceField: "RXA.3", TargetField: "Immunization.occurrenceDateTime", Confidence: 0.95,
+				Reasoning: "RXA.3 Date/Time Start of Administration (TS). ts_to_datetime.", DataType: "TS", TransformKey: "ts_to_datetime"},
+			{SourceField: "RXA.5", TargetField: "Immunization.vaccineCode", Confidence: 0.95,
+				Reasoning: "RXA.5 Administered Code (CE) — CVX vaccine code. ce_to_codeableconcept.", DataType: "CE", TransformKey: "ce_to_codeableconcept"},
+			{SourceField: "RXA.6", TargetField: "Immunization.doseQuantity.value", Confidence: 0.88,
+				Reasoning: "RXA.6 Administered Amount (NM) → Immunization.doseQuantity.value.", DataType: "NM", TransformKey: "string_direct"},
+			{SourceField: "RXA.9", TargetField: "Immunization.reportOrigin.coding[0].code", Confidence: 0.85,
+				Reasoning: "RXA.9 Administration Notes (CE) — administered by/at. ce_to_codeableconcept.", DataType: "CE", TransformKey: "ce_to_codeableconcept"},
+			{SourceField: "RXA.20", TargetField: "Immunization.status", Confidence: 0.90,
+				Reasoning: "RXA.20 Completion Status (CP=complete, RE=refused, NA=not admin). immunization_status_mapping.", DataType: "ID", TransformKey: "immunization_status_mapping"},
+		},
+
+		// ── GT1 — Guarantor (financial guarantor demographics) ────────────────
+		"GT1": {
+			{SourceField: "GT1.3", TargetField: "RelatedPerson.name[0]", Confidence: 0.92,
+				Reasoning: "GT1.3 Guarantor Name (XPN). xpn_to_humanname.", DataType: "XPN", TransformKey: "xpn_to_humanname"},
+			{SourceField: "GT1.5", TargetField: "RelatedPerson.address[0]", Confidence: 0.88,
+				Reasoning: "GT1.5 Guarantor Address (XAD). xad_to_address.", DataType: "XAD", TransformKey: "xad_to_address"},
+			{SourceField: "GT1.8", TargetField: "RelatedPerson.birthDate", Confidence: 0.88,
+				Reasoning: "GT1.8 Guarantor Date of Birth (TS). ts_to_date.", DataType: "TS", TransformKey: "ts_to_date"},
+			{SourceField: "GT1.9", TargetField: "RelatedPerson.gender", Confidence: 0.88,
+				Reasoning: "GT1.9 Guarantor Administrative Sex (IS). gender_mapping.", DataType: "IS", TransformKey: "gender_mapping"},
+		},
+
+		// ── ROL — Role ────────────────────────────────────────────────────────
+		"ROL": {
+			{SourceField: "ROL.3", TargetField: "PractitionerRole.code[0].coding[0].code", Confidence: 0.88,
+				Reasoning: "ROL.3 Role-ROL (CE) — role code e.g. AD=admitting, AT=attending, CP=consulting.", DataType: "CE", TransformKey: "ce_to_codeableconcept"},
+			{SourceField: "ROL.4", TargetField: "PractitionerRole.practitioner.display", Confidence: 0.90,
+				Reasoning: "ROL.4 Role Person (XCN) — the practitioner in this role.", DataType: "XCN", TransformKey: "string_direct"},
+		},
+
+		// ── PR1 — Procedures ──────────────────────────────────────────────────
+		"PR1": {
+			{SourceField: "PR1.3", TargetField: "Procedure.code", Confidence: 0.93,
+				Reasoning: "PR1.3 Procedure Code (CE). ce_to_codeableconcept → Procedure.code.", DataType: "CE", TransformKey: "ce_to_codeableconcept"},
+			{SourceField: "PR1.5", TargetField: "Procedure.performedDateTime", Confidence: 0.90,
+				Reasoning: "PR1.5 Procedure Date/Time (TS). ts_to_datetime.", DataType: "TS", TransformKey: "ts_to_datetime"},
+		},
+
+		// ── FT1 — Financial Transaction ───────────────────────────────────────
+		"FT1": {
+			{SourceField: "FT1.6", TargetField: "ChargeItem.code", Confidence: 0.90,
+				Reasoning: "FT1.6 Transaction Code (CE). ce_to_codeableconcept → ChargeItem.code.", DataType: "CE", TransformKey: "ce_to_codeableconcept"},
+			{SourceField: "FT1.4", TargetField: "ChargeItem.occurrenceDateTime", Confidence: 0.88,
+				Reasoning: "FT1.4 Transaction Date (TS). ts_to_datetime.", DataType: "TS", TransformKey: "ts_to_datetime"},
+		},
 	}
 
-	return pid
+	// Build result from only the segments present in the message.
+	var result []MappingSuggestion
+	for seg, suggestions := range catalogue {
+		if presentSegments[seg] {
+			result = append(result, suggestions...)
+		}
+	}
+	return result
+}
+
+// extractPresentSegments returns a set of the unique HL7 segment names
+// (3-character codes) found in the message. Works regardless of whether
+// lines are delimited by \r, \r\n, or \n.
+func extractPresentSegments(msg string) map[string]bool {
+	present := make(map[string]bool)
+	// normalise all line endings to \n
+	normalised := strings.ReplaceAll(msg, "\r\n", "\n")
+	normalised = strings.ReplaceAll(normalised, "\r", "\n")
+	for _, line := range strings.Split(normalised, "\n") {
+		line = strings.TrimSpace(line)
+		if len(line) < 3 {
+			continue
+		}
+		// segment name is the first token before | (or the first 3 chars if no |)
+		seg := line
+		if idx := strings.Index(line, "|"); idx > 0 {
+			seg = line[:idx]
+		}
+		seg = strings.TrimSpace(seg)
+		if len(seg) >= 2 && len(seg) <= 4 {
+			present[seg] = true
+		}
+	}
+	return present
 }
 
 

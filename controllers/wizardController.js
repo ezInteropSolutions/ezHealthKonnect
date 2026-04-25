@@ -6,6 +6,7 @@
 const interfaceService = require('../services/interfaceService');
 const auditService = require('../services/auditService');
 const TransformationPipelineService = require('../services/TransformationPipelineService');
+const MessageTypeMappingService = require('../services/MessageTypeMappingService');
 const { v4: uuidv4 } = require('uuid');
 const axios = require('axios');
 
@@ -27,6 +28,8 @@ class WizardController {
 
         // CANONICAL FLOW: Use transformation pipeline service for mapping storage
         this.pipelineService = new TransformationPipelineService();
+        // Message-type-centric mapping storage (interface_message_mappings table)
+        this.mappingService = new MessageTypeMappingService();
     }
 
     /**
@@ -1124,25 +1127,63 @@ class WizardController {
                 console.log('✅ Interface created successfully:', interfaceId);
             }
 
-            // Store message-type-specific mappings if provided
+            // Store message-type-specific mappings via delta model (Go) + full config fallback (Node).
             if (wizardData.mappings && Array.isArray(wizardData.mappings) && wizardData.mappings.length > 0) {
+                const messageType = wizardData.messageType || 'ADT^A01';
+                console.log(`📋 Storing ${wizardData.mappings.length} mappings for message type ${messageType}`);
+
+                // Normalize to AtomicMapping format expected by the Go delta endpoint.
+                // Wizard sends {hl7Path, fhirPath, required, transformType} — we split
+                // fhirPath on the first dot to get fhirResourceType + targetPath.
+                const atomicMappings = wizardData.mappings.map(m => {
+                    const raw = m.fhirPath || m.targetPath || '';
+                    const dot = raw.indexOf('.');
+                    const fhirResourceType = dot > -1 ? raw.slice(0, dot) : raw;
+                    const targetPath = dot > -1 ? raw.slice(dot + 1) : '';
+                    return {
+                        sourcePath: m.hl7Path || m.sourcePath || '',
+                        targetPath,
+                        fhirResourceType,
+                        resourceType: fhirResourceType,
+                        transformType: m.transformType || m.transform || 'string_direct',
+                        isRequired: !!(m.required || m.isRequired),
+                        confidence: m.confidence || 0,
+                    };
+                }).filter(m => m.sourcePath && m.targetPath);
+
+                // Try the Go delta endpoint first — it computes a sparse diff against OOB
+                // and stores only changed/added/removed entries in mapping_overrides.
+                let deltaSaved = false;
                 try {
-                    console.log(`📋 Storing ${wizardData.mappings.length} mappings for message type ${wizardData.messageType}`);
+                    const goUrl = `${process.env.GO_BACKEND_URL || 'http://127.0.0.1:8080'}/api/fhir/interfaces/${interfaceId}/mapping-delta/${encodeURIComponent(messageType)}`;
+                    const deltaResp = await axios.put(goUrl, { atomicMappings }, { timeout: 10000 });
+                    if (deltaResp.data?.success) {
+                        const { overrideCount, isPureOOB } = deltaResp.data;
+                        console.log(`✅ Delta mapping saved: ${overrideCount} overrides (isPureOOB=${isPureOOB})`);
+                        deltaSaved = true;
+                    }
+                } catch (deltaErr) {
+                    // Expected when no OOB template exists for this messageType — fall through to full save.
+                    console.log(`ℹ️ Delta endpoint unavailable for ${messageType}, using full config save:`, deltaErr.message);
+                }
 
-                    await this.mappingService.storeInterfaceMessageMapping(
-                        interfaceId,
-                        wizardData.messageType || 'ADT^A01',
-                        wizardData.mappings,
-                        {
-                            templateUsed: wizardData.templateUsed,
-                            createdBy: userEmail,
-                            customTemplate: !wizardData.templateUsed // true if custom mappings
-                        }
-                    );
-
-                    console.log('✅ Message-type mappings stored successfully');
-                } catch (mappingError) {
-                    console.error('⚠️ Failed to store mappings (interface still created):', mappingError);
+                // Fallback: store full config in custom_mapping_config (backward compat).
+                if (!deltaSaved) {
+                    try {
+                        await this.mappingService.storeInterfaceMessageMapping(
+                            interfaceId,
+                            messageType,
+                            wizardData.mappings,
+                            {
+                                templateUsed: wizardData.templateUsed,
+                                createdBy: userEmail,
+                                customTemplate: !wizardData.templateUsed
+                            }
+                        );
+                        console.log('✅ Message-type mappings stored (full config fallback)');
+                    } catch (mappingError) {
+                        console.error('⚠️ Failed to store mappings (interface still created):', mappingError);
+                    }
                 }
             }
 

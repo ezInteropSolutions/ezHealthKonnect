@@ -35,15 +35,17 @@ import (
 // Note: Uses FieldMapping struct from hl7_fhir_transform_service.go
 
 type HL7FHIRTransformServiceV3 struct {
-	db          *sql.DB
-	fhirLoader  *fhir.FHIRSchemaLoader
-	schemaReady bool
+	db            *sql.DB
+	fhirLoader    *fhir.FHIRSchemaLoader
+	schemaReady   bool
+	zsegmentSvc   *ZSegmentService // loads MFNRuntimeConfig per interface
 }
 
 func NewHL7FHIRTransformServiceV3(database *sql.DB) *HL7FHIRTransformServiceV3 {
 	service := &HL7FHIRTransformServiceV3{
-		db:         database,
-		fhirLoader: nil, // Will be loaded on-demand during Transform()
+		db:           database,
+		fhirLoader:   nil, // Will be loaded on-demand during Transform()
+		zsegmentSvc:  NewZSegmentService(database),
 	}
 
 	// Note: FHIR schema loader availability is checked at Transform() time
@@ -95,8 +97,10 @@ func (s *HL7FHIRTransformServiceV3) Transform(
 	response.MessageType = messageType
 	log.Printf("✅ Using message type: %s", messageType)
 
-	// Get field mappings (pass request so embedded_mappings and interface_id are available)
-	fieldMappings, err := s.getFieldMappings(ctx, messageType, request.TargetProfile, request)
+	// Get field mappings (pass request so embedded_mappings and interface_id are available).
+	// contextLinks is non-nil for v1.1+ OOB templates that declare a "context" block;
+	// nil for v1.0 templates and custom/embedded mappings (existing wiring handles those).
+	fieldMappings, contextLinks, err := s.getFieldMappings(ctx, messageType, request.TargetProfile, request)
 	if err != nil {
 		response.Errors = append(response.Errors, fmt.Sprintf("Failed to get field mappings: %v", err))
 		return response, nil
@@ -174,120 +178,84 @@ func (s *HL7FHIRTransformServiceV3) Transform(
 		stats.TotalFieldsMapped += mappedCount
 	}
 
-	// Structural assembly: OBX → Observations, DR mandatory fields (status, subject),
-	// DR.result[] linking, ED attachment lifting.
-	// Runs for any message type that may carry OBR/OBX groups (ORU, ORM, OML, MDM, …).
-	// The assembly function is safe on all types: it returns early when no OBX segments
-	// are present but still ensures DiagnosticReport.status and .subject are set.
-	// When called via the pipeline (HL7FHIRMappingExecutor), this is a no-op because
-	// the hl7.assemble_observations step runs after this service at seq 110.
-	// ── MDM assembly: TXA → DocumentReference, OBX → attachment ────────────────
-	// Runs before the OBR-based ORU assembly so the two paths are mutually exclusive.
-	messageHasTXA := func() bool {
-		txa := hl7assembly.ExtractSegmentGroup(request.ParsedHL7Data, "TXA")
-		return len(txa) > 0
-	}
-	if !request.SkipAssembly && messageHasTXA() {
-		assembled, assemblyWarnings := hl7assembly.AssembleMDMDocument(request.ParsedHL7Data, allResources, request.AssemblyRules)
-		allResources = assembled
-		allWarnings = append(allWarnings, assemblyWarnings...)
-		// Clear errors for resource types rebuilt by MDM assembly
-		var filtered []string
-		for _, e := range allErrors {
-			if !strings.Contains(e, "Observation.") && !strings.Contains(e, "DocumentReference.") {
-				filtered = append(filtered, e)
-			}
-		}
-		allErrors = filtered
+	// ── Profile-driven composite + procedure assembly ───────────────────────
+	// All structural assembly (ORU observations, MDM documents, DFT charges,
+	// VXU immunizations, MFN master file resources) is now dispatched through
+	// the profile engine via named procedures declared in the v2.0 template
+	// stored in hl7_fhir_templates. Each message type's profile JSON contains:
+	//
+	//   "composites": [{ "procedure": "<name>", "params": {...} }]
+	//
+	// The procedure registry (services/hl7assembly/procedure_registry.go)
+	// bridges each named procedure to the typed Go assembly function.
+	//
+	// Migrations required before this path is active:
+	//   V97  — SIU^S12 / S13-S26
+	//   V98  — ORU^R01 (assembleObservationsFromOBX)
+	//   V99  — MDM^T01-T11 (buildDocumentReferenceFromTXA)
+	//   V100 — VXU^V04 (assembleVXUImmunizations)
+	//   V101 — DFT^P03 (assembleDFTCharges)
+	//   V102 — MFN^M02-M16 (assembleMFNResources)
+	profileComposites, profileValueSets := s.getProfileComposites(ctx, messageType)
+	if len(profileComposites) > 0 {
+		allResources = s.applyProfileComposites(allResources, request.ParsedHL7Data, profileComposites, profileValueSets)
+		log.Printf("✅ Profile composites applied: %d rules for %s", len(profileComposites), messageType)
 	}
 
-	// ── DFT assembly: FT1 → ChargeItem, PR1 → Procedure, DG1 → Condition ─────
-	messageHasFT1 := func() bool {
-		ft1 := hl7assembly.ExtractSegmentGroup(request.ParsedHL7Data, "FT1")
-		return len(ft1) > 0
-	}
-	if !request.SkipAssembly && messageHasFT1() {
-		assembled, assemblyWarnings := hl7assembly.AssembleDFTCharges(request.ParsedHL7Data, allResources, request.AssemblyRules)
-		allResources = assembled
-		allWarnings = append(allWarnings, assemblyWarnings...)
-		// Clear pre-assembly errors for resource types rebuilt by DFT assembly
-		var filtered []string
-		for _, e := range allErrors {
-			if !strings.Contains(e, "ChargeItem.") &&
-				!strings.Contains(e, "Procedure.") &&
-				!strings.Contains(e, "Condition.") {
-				filtered = append(filtered, e)
-			}
-		}
-		allErrors = filtered
-	}
-
-	// ── MFN assembly: MFI/MFE + payload segments → Organization/Practitioner/Location
-	messageHasMFI := func() bool {
-		mfi := hl7assembly.ExtractSegmentGroup(request.ParsedHL7Data, "MFI")
-		return len(mfi) > 0
-	}
-	if !request.SkipAssembly && messageHasMFI() {
-		assembled, assemblyWarnings := hl7assembly.AssembleMFNResources(request.ParsedHL7Data, allResources, request.AssemblyRules)
-		allResources = assembled
-		allWarnings = append(allWarnings, assemblyWarnings...)
-		var filtered []string
-		for _, e := range allErrors {
-			if !strings.Contains(e, "Organization.") &&
-				!strings.Contains(e, "Practitioner.") &&
-				!strings.Contains(e, "Location.") &&
-				!strings.Contains(e, "ChargeItemDefinition.") {
-				filtered = append(filtered, e)
-			}
-		}
-		allErrors = filtered
-	}
-
-	// ── VXU assembly: RXA → Immunization, RXR → route/site, OBX → protocol/VIS ─
-	messageHasRXA := func() bool {
-		rxa := hl7assembly.ExtractSegmentGroup(request.ParsedHL7Data, "RXA")
-		return len(rxa) > 0
-	}
-	if !request.SkipAssembly && messageHasRXA() {
-		assembled, assemblyWarnings := hl7assembly.AssembleVXUImmunizations(request.ParsedHL7Data, allResources, request.AssemblyRules)
-		allResources = assembled
-		allWarnings = append(allWarnings, assemblyWarnings...)
-		// Clear pre-assembly errors for resource types rebuilt by VXU assembly
-		var filtered []string
-		for _, e := range allErrors {
-			if !strings.Contains(e, "Immunization.") && !strings.Contains(e, "Observation.") {
-				filtered = append(filtered, e)
-			}
-		}
-		allErrors = filtered
-	}
-
-	// ── ORU/ORM/OML assembly: OBR/OBX → DiagnosticReport + Observations ──────
-	messageHasOBR := func() bool {
-		obr := hl7assembly.ExtractSegmentGroup(request.ParsedHL7Data, "OBR")
-		return len(obr) > 0
-	}
-	if !request.SkipAssembly && !messageHasTXA() && messageHasOBR() {
-		assembled, assemblyWarnings := hl7assembly.AssembleORUObservations(request.ParsedHL7Data, allResources, request.AssemblyRules)
-		allResources = assembled
-		allWarnings = append(allWarnings, assemblyWarnings...)
-		// Clear misleading pre-assembly validation errors for resource types we just rebuilt
-		var filtered []string
-		for _, e := range allErrors {
-			if !strings.Contains(e, "Observation.") && !strings.Contains(e, "DiagnosticReport.") {
-				filtered = append(filtered, e)
-			}
-		}
-		allErrors = filtered
-	}
+	// Wire cross-resource references declared in the template's contextLinks block
+	// (v1.1+ templates).  For v1.0 templates contextLinks is nil and this is a no-op;
+	// the existing hardcoded wiring in post-processing normalizers still handles those.
+	allResources = s.applyContextLinks(allResources, contextLinks)
 
 	// Post-mapping normalizers — run for all message types to fix common field gaps
 	// that mapping transforms may not handle (no DB rows, partial templates, etc.).
 	// IMPORTANT: narrative (text.div) is regenerated at the END of this block so it
 	// always reflects the fully-normalized field values, not pre-normalization raw HL7.
 	for _, r := range allResources {
+		// Strip null-valued fields first — explicit JSON nulls are invalid for most
+		// FHIR element types and result in validator errors.  Omitting the key is
+		// always correct when no value is available.
+		stripNullFields(r)
+
 		rt, _ := r["resourceType"].(string)
 		switch rt {
+		case "Practitioner":
+			// birthDate: HL7 TS (YYYYMMDD) → FHIR date (YYYY-MM-DD)
+			if bd, ok := r["birthDate"].(string); ok && len(bd) >= 8 && !strings.Contains(bd, "-") {
+				r["birthDate"] = s.transformTSToDate(bd)
+			}
+			// active: HL7 table 0183 (A/I) stored as string → FHIR boolean
+			if active, ok := r["active"].(string); ok {
+				switch strings.ToUpper(strings.TrimSpace(active)) {
+				case "A", "Y", "1", "TRUE", "ACTIVE":
+					r["active"] = true
+				case "I", "N", "0", "FALSE", "INACTIVE":
+					r["active"] = false
+				default:
+					// Unknown code — default to active (practitioner was looked up)
+					r["active"] = true
+				}
+			}
+			// identifier: flatten any identifier whose .value is a CodeableConcept object
+			// (CE type mapped via ce_to_codeableconcept instead of ce_code_only)
+			if ids, ok := r["identifier"].([]interface{}); ok {
+				for _, idRaw := range ids {
+					if id, ok2 := idRaw.(map[string]interface{}); ok2 {
+						if valMap, ok3 := id["value"].(map[string]interface{}); ok3 {
+							// Extract text or first coding.code as the flat identifier value
+							if txt, ok4 := valMap["text"].(string); ok4 && txt != "" {
+								id["value"] = txt
+							} else if codings, ok4 := valMap["coding"].([]interface{}); ok4 && len(codings) > 0 {
+								if cod, ok5 := codings[0].(map[string]interface{}); ok5 {
+									if code, ok6 := cod["code"].(string); ok6 && code != "" {
+										id["value"] = code
+									}
+								}
+							}
+						}
+					}
+				}
+			}
 		case "Patient":
 			// birthDate: HL7 TS (YYYYMMDD) → FHIR date (YYYY-MM-DD)
 			if bd, ok := r["birthDate"].(string); ok && len(bd) >= 8 && !strings.Contains(bd, "-") {
@@ -433,6 +401,67 @@ func (s *HL7FHIRTransformServiceV3) Transform(
 			}
 
 		case "MessageHeader":
+			// definition: must be a canonical URL — drop raw HL7 composite values.
+			if def, ok := r["definition"].(string); ok {
+				if !strings.HasPrefix(def, "http://") && !strings.HasPrefix(def, "https://") && !strings.HasPrefix(def, "urn:") {
+					delete(r, "definition")
+				}
+			}
+			// response: drop when code is nil/empty (mfi_response_level returns nil for NE).
+			// Also drop response.identifier when it is the HL7 encoding chars "^~\&".
+			if resp, ok := r["response"].(map[string]interface{}); ok {
+				code, _ := resp["code"].(string)
+				if code == "" {
+					delete(r, "response")
+				} else {
+					if id, ok2 := resp["identifier"].(string); ok2 {
+						if strings.HasPrefix(id, "^~") || id == "" {
+							delete(resp, "identifier")
+						}
+					}
+				}
+			}
+			// meta.tag: each tag.code must be a string — flatten CodeableConcept objects.
+			if meta, ok := r["meta"].(map[string]interface{}); ok {
+				if tags, ok2 := meta["tag"].([]interface{}); ok2 {
+					for _, tagRaw := range tags {
+						if tag, ok3 := tagRaw.(map[string]interface{}); ok3 {
+							if codeVal, ok4 := tag["code"].(map[string]interface{}); ok4 {
+								// Extract the code string from the nested object
+								codeStr := ""
+								if codings, ok5 := codeVal["coding"].([]interface{}); ok5 && len(codings) > 0 {
+									if cod, ok6 := codings[0].(map[string]interface{}); ok6 {
+										codeStr, _ = cod["code"].(string)
+									}
+								}
+								if txt, ok5 := codeVal["text"].(string); ok5 && txt != "" {
+									codeStr = txt
+								}
+								if codeStr != "" {
+									tag["code"] = codeStr
+								} else {
+									delete(tag, "code")
+								}
+							}
+						}
+					}
+				}
+			}
+			// ── Promote r["event"] → r["eventCoding"] ─────────────────────────────
+			// Some v2.0 templates use FHIR path "event.code" / "event.display" which
+			// the field mapper stores as r["event"]["code"]. FHIR R4 MessageHeader
+			// requires the choice type eventCoding (or eventUri) — "event" alone is
+			// not a valid top-level field and produces the "event[x] min=1, found=0"
+			// validation error.  Promote when eventCoding is absent.
+			if _, hasEC := r["eventCoding"]; !hasEC {
+				if evMap, ok := r["event"].(map[string]interface{}); ok {
+					if _, hasCode := evMap["code"]; hasCode {
+						r["eventCoding"] = evMap
+						delete(r, "event")
+					}
+				}
+			}
+
 			// eventCoding corrections:
 			// 1. Ensure system is always set (some transform paths omit it).
 			// 2. The V9 OOB template maps MSH.9.1 → code and MSH.9.2 → display which
@@ -469,10 +498,50 @@ func (s *HL7FHIRTransformServiceV3) Transform(
 					ec["system"] = "http://terminology.hl7.org/CodeSystem/v2-0003"
 				}
 			}
+
+			// ── Final fallback: synthesize eventCoding from MSH.9 ─────────────────
+			// If neither the template mapping nor the event promotion produced an
+			// eventCoding, build one directly from MSH.9 in the parsed HL7 data.
+			// This guards against templates that have no MSH.9 → event mapping at all
+			// (e.g. minimal custom templates) and ensures MessageHeader is always valid.
+			if _, stillMissing := r["eventCoding"]; stillMissing {
+				if mshSeg, ok := enhancedSegments["MSH"].(map[string]interface{}); ok {
+					msh9 := ""
+					if fields, ok2 := mshSeg["fields"].([]interface{}); ok2 {
+						for _, f := range fields {
+							if fm, ok3 := f.(map[string]interface{}); ok3 {
+								if k, _ := fm["key"].(string); k == "MSH.9" {
+									msh9, _ = fm["value"].(string)
+									break
+								}
+							}
+						}
+					}
+					if msh9 != "" {
+						parts := strings.SplitN(msh9, "^", 3)
+						triggerEvent := ""
+						if len(parts) > 1 && parts[1] != "" {
+							triggerEvent = parts[1]
+						} else {
+							triggerEvent = parts[0]
+						}
+						r["eventCoding"] = map[string]interface{}{
+							"system": "http://terminology.hl7.org/CodeSystem/v2-0003",
+							"code":   triggerEvent,
+						}
+					}
+				}
+			}
+
+			// Strip null-valued fields before any further MessageHeader work —
+			// some template mappings produce null when the source segment field
+			// is absent (e.g. destination when MSH.5 is empty).
+			stripNullFields(r)
+
 			// destination.endpoint is required (cardinality 1..1) by the FHIR R4 spec.
 			// The OOB mapping sets destination.name from MSH.5 but not endpoint.
 			// Inject a synthetic endpoint URI from available destination context.
-			if destRaw, ok := r["destination"]; ok {
+			if destRaw, ok := r["destination"]; ok && destRaw != nil {
 				// destination is a []interface{} of MessageHeader.destination objects
 				var dests []interface{}
 				switch dv := destRaw.(type) {
@@ -495,7 +564,11 @@ func (s *HL7FHIRTransformServiceV3) Transform(
 						}
 					}
 				}
-				r["destination"] = dests
+				if len(dests) > 0 {
+					r["destination"] = dests
+				} else {
+					delete(r, "destination")
+				}
 			}
 			// focus: MessageHeader must reference the primary clinical resource
 			// in the bundle so the validator can confirm every entry is reachable.
@@ -1521,6 +1594,45 @@ func (s *HL7FHIRTransformServiceV3) transformValueAtomic(
 		return tsToISODateTime(hl7Value), nil
 	case "ce_to_codeableconcept":
 		return s.transformCEToCodeableConcept(hl7Value, mapping.TransformationRules), nil
+	// ce_code_only: extract the code (first ^-component) as a plain string.
+	// Used when the FHIR target expects a simple string (e.g. meta.tag[x].code,
+	// identifier.value) and the HL7 source is a CE/CWE field.
+	case "ce_code_only":
+		parts := strings.SplitN(hl7Value, "^", 2)
+		code := strings.TrimSpace(parts[0])
+		if code == "" {
+			return nil, nil
+		}
+		return code, nil
+	// hl7_timestamp_to_fhir_date / _datetime — aliases for the canonical ts_to_date /
+	// ts_to_datetime keys.  type_registry.go emits these names; both must resolve.
+	case "hl7_timestamp_to_fhir_date":
+		return s.transformTSToDate(hl7Value), nil
+	case "hl7_timestamp_to_fhir_datetime":
+		return tsToISODateTime(hl7Value), nil
+	// hl7_active_flag: HL7 table 0183 (A/I) → FHIR boolean.
+	// Also accepts common truthy variants used by some senders.
+	case "hl7_active_flag":
+		switch strings.ToUpper(strings.TrimSpace(hl7Value)) {
+		case "A", "Y", "1", "TRUE", "ACTIVE":
+			return true, nil
+		default:
+			return false, nil
+		}
+	// mfi_response_level: HL7 table 0179 → FHIR MessageHeader.response.code.
+	// Valid FHIR ResponseType values: ok | transient-error | fatal-error.
+	case "mfi_response_level":
+		switch strings.ToUpper(strings.TrimSpace(hl7Value)) {
+		case "AL", "SU":
+			return "ok", nil
+		case "ER":
+			return "transient-error", nil
+		case "NE":
+			// NE = No Acknowledgement expected — response block should be omitted, not set.
+			return nil, nil
+		default:
+			return "ok", nil
+		}
 	case "ssn_to_identifier":
 		return s.transformSSNToIdentifier(hl7Value, mapping.TransformationRules), nil
 	case "account_to_identifier":
@@ -1553,6 +1665,26 @@ func (s *HL7FHIRTransformServiceV3) transformValueAtomic(
 		log.Printf("🔍 No transformation specified, using raw value")
 		return hl7Value, nil
 	default:
+		// Handle lookup:<valueSetName> transforms inlined from profile v2.0
+		if strings.HasPrefix(mapping.DataTypeTransform, "lookup:") {
+			vsName := strings.TrimPrefix(mapping.DataTypeTransform, "lookup:")
+			if vsRaw, ok := mapping.TransformationRules["valueSet"]; ok {
+				if vsMap, ok := vsRaw.(map[string]interface{}); ok {
+					key := strings.ToUpper(strings.TrimSpace(hl7Value))
+					if mapped, found := vsMap[key]; found {
+						return mapped, nil
+					}
+					// Fallback: try original case
+					if mapped, found := vsMap[hl7Value]; found {
+						return mapped, nil
+					}
+					log.Printf("⚠️ lookup:%s — key %q not found in value set, using raw value", vsName, hl7Value)
+				}
+			} else {
+				log.Printf("⚠️ lookup:%s — no valueSet found in TransformationRules", vsName)
+			}
+			return hl7Value, nil
+		}
 		log.Printf("⚠️ Unknown transformation '%s', using raw value", mapping.DataTypeTransform)
 		return hl7Value, nil
 	}
@@ -2351,7 +2483,7 @@ func (s *HL7FHIRTransformServiceV3) filterMappingsForResource(mappings []FieldMa
 // FIELD MAPPING & HL7 EXTRACTION (Reused from V1)
 // =====================================
 
-func (s *HL7FHIRTransformServiceV3) getFieldMappings(ctx context.Context, messageType, profile string, request ...*TransformRequest) ([]FieldMapping, error) {
+func (s *HL7FHIRTransformServiceV3) getFieldMappings(ctx context.Context, messageType, profile string, request ...*TransformRequest) ([]FieldMapping, *ContextLinks, error) {
 	// STEP 0: Use embedded_mappings from pipeline step config when present.
 	// These are wizard-saved mappings stored directly in the step — they survive
 	// message-type variant mismatches (e.g. ORU^R03 arriving on an ORU^R01 interface).
@@ -2359,40 +2491,80 @@ func (s *HL7FHIRTransformServiceV3) getFieldMappings(ctx context.Context, messag
 		mappings := s.extractFieldMappingsFromWizardArray(request[0].EmbeddedMappings)
 		if len(mappings) > 0 {
 			log.Printf("✅ V3 Service: Using %d embedded_mappings from pipeline step config for %s", len(mappings), messageType)
-			return mappings, nil
+			return mappings, nil, nil
 		}
 	}
 
 	if s.db == nil {
 		log.Printf("⚠️ V3 Service: Database not available, using default mappings for %s", messageType)
-		return s.getDefaultMappingsForTesting(messageType), nil
+		return s.getDefaultMappingsForTesting(messageType), nil, nil
 	}
 
 	log.Printf("🔍 V3 Service: Loading mappings for message type: %s", messageType)
 
-	// STEP 1: Try interface-specific mappings by exact message type match.
-	mappings, err := s.loadInterfaceSpecificMappings(ctx, messageType)
-	if err == nil && len(mappings) > 0 {
-		log.Printf("✅ V3 Service: Loaded %d mappings from interface-specific configuration for %s", len(mappings), messageType)
-		return mappings, nil
-	}
-
-	// STEP 1b: Try by interface_id when provided (handles variant trigger events like ORU^R03 on an ORU^R01 interface).
+	// STEP 1a: interface_message_mappings — wizard-saved custom overrides keyed by
+	// (interface_id, message_type).  Checked first when the request carries an
+	// interfaceID so that a user's wizard customisations always beat the OOB template.
+	// Only applies when uses_standard_template = false (custom config is present).
 	if len(request) > 0 && request[0] != nil && request[0].InterfaceID != "" {
-		mappings, err = s.loadInterfaceSpecificMappingsByID(ctx, request[0].InterfaceID)
+		mappings, err := s.loadFromInterfaceMessageMappings(ctx, request[0].InterfaceID, messageType)
 		if err == nil && len(mappings) > 0 {
-			log.Printf("✅ V3 Service: Loaded %d mappings by interface_id %s (message type variant fallback)", len(mappings), request[0].InterfaceID)
-			return mappings, nil
+			log.Printf("✅ V3 Service: Loaded %d custom mappings from interface_message_mappings for %s/%s",
+				len(mappings), request[0].InterfaceID, messageType)
+			return mappings, nil, nil
 		}
 	}
 
-	log.Printf("ℹ️ V3 Service: No interface-specific mappings found, trying V9 OOB templates...")
+	// STEP 1a+: Delta model — OOB template + sparse interface-level overrides.
+	// Applies when uses_standard_template = true AND mapping_overrides IS NOT NULL.
+	// Returns the OOB base merged with the stored delta (replace / add / remove ops).
+	if len(request) > 0 && request[0] != nil && request[0].InterfaceID != "" {
+		mappings, err := s.loadDeltaMappings(ctx, request[0].InterfaceID, messageType)
+		if err == nil && len(mappings) > 0 {
+			log.Printf("✅ V3 Service: Loaded %d merged delta mappings for %s/%s",
+				len(mappings), request[0].InterfaceID, messageType)
+			return mappings, nil, nil
+		}
+	}
 
-	// STEP 2: Try V9 hierarchical mapping resolution (global OOB templates)
-	mappings, err = s.loadFromV9OOBTemplates(ctx, messageType)
+	// STEP 1b: Interface-specific mappings from legacy interfaces.transformation_mapping column.
+	// These are deliberately-configured overrides and always win over OOB.
+	mappings, err := s.loadInterfaceSpecificMappings(ctx, messageType)
+	if err == nil && len(mappings) > 0 {
+		log.Printf("✅ V3 Service: Loaded %d mappings from interface-specific configuration for %s", len(mappings), messageType)
+		return mappings, nil, nil // custom mappings carry no contextLinks
+	}
+
+	// STEP 2: OOB templates — exact message_type match.
+	// Must be tried BEFORE the interface-id fallback so that a known type (e.g.
+	// MFN^M02) gets its correct OOB template rather than the wrong interface
+	// mapping stored for a structurally different sibling type (e.g. MFN^M13).
+	log.Printf("ℹ️ V3 Service: No interface-specific mapping for %s, trying OOB templates...", messageType)
+	mappings, cl, err := s.loadFromV9OOBTemplates(ctx, messageType)
 	if err == nil && len(mappings) > 0 {
 		log.Printf("✅ V3 Service: Loaded %d mappings from V9 OOB templates for %s", len(mappings), messageType)
-		return mappings, nil
+		return mappings, cl, nil
+	}
+
+	// STEP 3: Interface-id fallback — only for minor trigger-event variants where
+	// no OOB template exists and the incoming type shares the same message-code
+	// family as the configured interface (e.g. ORU^R03 on an ORU^R01 interface).
+	// Explicitly excluded: structurally heterogeneous families like MFN (each event
+	// has different payload segments) and ACK.
+	if len(request) > 0 && request[0] != nil && request[0].InterfaceID != "" {
+		configuredType := s.getInterfaceMessageType(ctx, request[0].InterfaceID)
+		if sameMessageFamily(messageType, configuredType) &&
+			!isStructurallyHeterogeneousFamily(messageType) {
+			mappings, err = s.loadInterfaceSpecificMappingsByID(ctx, request[0].InterfaceID)
+			if err == nil && len(mappings) > 0 {
+				log.Printf("✅ V3 Service: Loaded %d mappings by interface_id %s (minor variant fallback: %s → %s)",
+					len(mappings), request[0].InterfaceID, messageType, configuredType)
+				return mappings, nil, nil
+			}
+		} else {
+			log.Printf("ℹ️ V3 Service: Skipping interface-id fallback — %s and configured %s are in different families or heterogeneous family",
+				messageType, configuredType)
+		}
 	}
 
 	log.Printf("⚠️ V3 Service: V9 OOB templates not found, trying V5 legacy schema...")
@@ -2416,7 +2588,7 @@ func (s *HL7FHIRTransformServiceV3) getFieldMappings(ctx context.Context, messag
 
 	rows, err := s.db.QueryContext(ctx, query, messageType)
 	if err != nil {
-		return nil, fmt.Errorf("failed to query field mappings: %w", err)
+		return nil, nil, fmt.Errorf("failed to query field mappings: %w", err)
 	}
 	defer rows.Close()
 
@@ -2464,7 +2636,58 @@ func (s *HL7FHIRTransformServiceV3) getFieldMappings(ctx context.Context, messag
 		log.Printf("⚠️ V3 Service: No mappings found in either V9 or V5 schemas for message type %s", messageType)
 	}
 
-	return legacyMappings, nil
+	return legacyMappings, nil, nil
+}
+
+// loadFromInterfaceMessageMappings reads the custom_mapping_config stored by the wizard
+// into the interface_message_mappings table for a specific (interface_id, message_type)
+// pair.  Only returns mappings when uses_standard_template = false and a non-empty
+// custom_mapping_config is present — if the row says uses_standard_template = true the
+// caller should fall through to the OOB template path (Step 2).
+func (s *HL7FHIRTransformServiceV3) loadFromInterfaceMessageMappings(ctx context.Context, interfaceID, messageType string) ([]FieldMapping, error) {
+	query := `
+		SELECT custom_mapping_config
+		FROM interface_message_mappings
+		WHERE interface_id = $1
+		  AND message_type = $2
+		  AND uses_standard_template = false
+		  AND custom_mapping_config IS NOT NULL
+		LIMIT 1
+	`
+	var configBytes []byte
+	err := s.db.QueryRowContext(ctx, query, interfaceID, messageType).Scan(&configBytes)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, fmt.Errorf("no custom mapping in interface_message_mappings for %s/%s", interfaceID, messageType)
+		}
+		return nil, fmt.Errorf("interface_message_mappings query failed: %w", err)
+	}
+
+	// The wizard stores {messageType, atomicMappings: [...], ...}
+	var config map[string]interface{}
+	if err := json.Unmarshal(configBytes, &config); err != nil {
+		return nil, fmt.Errorf("failed to parse custom_mapping_config: %w", err)
+	}
+
+	// Extract atomicMappings array
+	atomicRaw, ok := config["atomicMappings"]
+	if !ok {
+		return nil, fmt.Errorf("no atomicMappings in custom_mapping_config")
+	}
+	atomicSlice, ok := atomicRaw.([]interface{})
+	if !ok || len(atomicSlice) == 0 {
+		return nil, fmt.Errorf("empty atomicMappings in custom_mapping_config")
+	}
+
+	// Convert to []map[string]interface{} for extractFieldMappingsFromWizardArray
+	var mappingArray []map[string]interface{}
+	for _, item := range atomicSlice {
+		if m, ok := item.(map[string]interface{}); ok {
+			mappingArray = append(mappingArray, m)
+		}
+	}
+
+	return s.extractFieldMappingsFromWizardArray(mappingArray), nil
 }
 
 // loadInterfaceSpecificMappingsByID loads mappings from a specific interface by its UUID.
@@ -2495,6 +2718,51 @@ func (s *HL7FHIRTransformServiceV3) loadInterfaceSpecificMappingsByID(ctx contex
 		}
 	}
 	return s.extractFieldMappingsFromWizardArray(mappingArray), nil
+}
+
+// getInterfaceMessageType returns the message_type configured for an interface.
+// Returns empty string if the interface is not found or has no message type.
+func (s *HL7FHIRTransformServiceV3) getInterfaceMessageType(ctx context.Context, interfaceID string) string {
+	var msgType string
+	err := s.db.QueryRowContext(ctx,
+		`SELECT COALESCE(message_type, '') FROM interfaces WHERE id = $1`, interfaceID,
+	).Scan(&msgType)
+	if err != nil {
+		return ""
+	}
+	return msgType
+}
+
+// sameMessageFamily reports whether two message types share the same HL7 message
+// code (the part before "^").  For example "ORU^R01" and "ORU^R03" are in the
+// same family; "MFN^M02" and "ADT^A01" are not.
+// An empty configuredType (interface has no stored message type) returns false.
+func sameMessageFamily(incoming, configured string) bool {
+	if incoming == "" || configured == "" {
+		return false
+	}
+	inFamily := strings.ToUpper(strings.SplitN(incoming, "^", 2)[0])
+	cfFamily := strings.ToUpper(strings.SplitN(configured, "^", 2)[0])
+	return inFamily == cfFamily
+}
+
+// isStructurallyHeterogeneousFamily reports whether a message family has
+// structurally different payload segments across its trigger events.  Such
+// families must NOT use the interface-id fallback because a mapping for one
+// event type would silently produce an incorrect (or empty) bundle for another.
+//
+// MFN: each M0x event targets a different master file with different segments
+//
+//	(M02=STF staff, M04=CDM charge, M05=LOC location, M13=Z-segments, etc.)
+//
+// ACK: acknowledgement — no payload segments, not a data message.
+func isStructurallyHeterogeneousFamily(messageType string) bool {
+	family := strings.ToUpper(strings.SplitN(messageType, "^", 2)[0])
+	switch family {
+	case "MFN", "ACK", "QBP", "RSP":
+		return true
+	}
+	return false
 }
 
 // loadInterfaceSpecificMappings loads mappings from the transformation_mapping field in interfaces table
@@ -2696,8 +2964,12 @@ func getIsRequired(mappingObj map[string]interface{}) bool {
 	return false
 }
 
-// loadFromV9OOBTemplates loads field mappings from our new V9 OOB template architecture
-func (s *HL7FHIRTransformServiceV3) loadFromV9OOBTemplates(ctx context.Context, messageType string) ([]FieldMapping, error) {
+// loadFromV9OOBTemplates loads field mappings (and optional context links) from
+// the V9 OOB template stored in hl7_fhir_templates for the given message type.
+// The second return value is non-nil only for v1.1+ templates that declare a
+// "context" block; callers receive nil for v1.0 templates and fall back to the
+// existing hardcoded context-wiring path.
+func (s *HL7FHIRTransformServiceV3) loadFromV9OOBTemplates(ctx context.Context, messageType string) ([]FieldMapping, *ContextLinks, error) {
 	log.Printf("🎯 V3 Service: Loading V9 OOB template for message type: %s", messageType)
 
 	// Query the actual hl7_fhir_templates table
@@ -2717,9 +2989,9 @@ func (s *HL7FHIRTransformServiceV3) loadFromV9OOBTemplates(ctx context.Context, 
 	if err != nil {
 		if err == sql.ErrNoRows {
 			log.Printf("ℹ️ V3 Service: No OOB template found for message type: %s", messageType)
-			return nil, fmt.Errorf("no OOB template found for message type: %s", messageType)
+			return nil, nil, fmt.Errorf("no OOB template found for message type: %s", messageType)
 		}
-		return nil, fmt.Errorf("failed to query OOB template: %w", err)
+		return nil, nil, fmt.Errorf("failed to query OOB template: %w", err)
 	}
 
 	log.Printf("📋 V3 Service: Found OOB template: %s (%s)", templateName, templateDescription)
@@ -2730,35 +3002,54 @@ func (s *HL7FHIRTransformServiceV3) loadFromV9OOBTemplates(ctx context.Context, 
 	if err := json.Unmarshal([]byte(templateConfig), &templateData); err != nil {
 		log.Printf("❌ V3 Service: Failed to parse template JSON: %v", err)
 		log.Printf("🔍 V3 Service: Template config sample (first 200 chars): %s", templateConfig[:min(200, len(templateConfig))])
-		return nil, fmt.Errorf("failed to parse V9 template config: %w", err)
+		return nil, nil, fmt.Errorf("failed to parse V9 template config: %w", err)
 	}
 
 	log.Printf("✅ V3 Service: Template JSON parsed successfully")
 	log.Printf("🔍 V3 Service: Template top-level keys: %v", getKeys(templateData))
 
+	// Extract context links (v1.1+ templates only; nil for v1.0)
+	cl := extractContextLinks(templateData)
+	if cl != nil {
+		log.Printf("🔗 V3 Service: Template v1.1 — extracted context links for %d roles, %d resources",
+			len(cl.RoleToSegment), len(cl.ResourceLinks))
+	}
+
 	// Convert V9 OOB template format to V3 FieldMapping format
 	mappings, err := s.convertV9TemplateToFieldMappings(templateData)
 	if err != nil {
 		log.Printf("❌ V3 Service: Failed to convert template: %v", err)
-		return nil, fmt.Errorf("failed to convert V9 template to field mappings: %w", err)
+		return nil, nil, fmt.Errorf("failed to convert V9 template to field mappings: %w", err)
 	}
 
 	log.Printf("✅ V3 Service: Converted V9 template to %d field mappings", len(mappings))
-	return mappings, nil
+	return mappings, cl, nil
 }
 
-// convertV9TemplateToFieldMappings converts our V9 OOB template format to V3 FieldMapping format
+// convertV9TemplateToFieldMappings converts our V9 OOB template format to V3 FieldMapping format.
+// Supports both v1.0 (plain mappings) and v2.0 (extended with composites + valueSets).
 func (s *HL7FHIRTransformServiceV3) convertV9TemplateToFieldMappings(templateData map[string]interface{}) ([]FieldMapping, error) {
 	var mappings []FieldMapping
 
-	// Extract resources from template - try both "resources" and "mappings" keys
+	// ── Extract valueSets from profile v2.0 (used for lookup: transforms) ────
+	// Shape: templateData["valueSets"] = { "siuFillerStatus": { "BOOKED": "booked", ... }, ... }
+	valueSets := map[string]map[string]interface{}{}
+	if vsRaw, ok := templateData["valueSets"]; ok {
+		if vsMap, ok := vsRaw.(map[string]interface{}); ok {
+			for vsName, vsEntriesRaw := range vsMap {
+				if vsEntries, ok := vsEntriesRaw.(map[string]interface{}); ok {
+					valueSets[vsName] = vsEntries
+				}
+			}
+		}
+		log.Printf("🔧 V3 Service: Loaded %d valueSets from profile", len(valueSets))
+	}
+
+	// ── Extract resources from template — try "resources" then "mappings" ────
 	var resourcesInterface interface{}
 	var ok bool
-
-	// Try "resources" key first (new format)
 	resourcesInterface, ok = templateData["resources"]
 	if !ok {
-		// Try "mappings" key (legacy format)
 		resourcesInterface, ok = templateData["mappings"]
 		if !ok {
 			return nil, fmt.Errorf("no resources or mappings found in V9 template")
@@ -2773,7 +3064,7 @@ func (s *HL7FHIRTransformServiceV3) convertV9TemplateToFieldMappings(templateDat
 		return nil, fmt.Errorf("invalid resources format in V9 template")
 	}
 
-	// Process each resource type (Patient, Observation, etc.)
+	// Process each resource type (Patient, Appointment, etc.)
 	for resourceType, resourceDataInterface := range resources {
 		resourceData, ok := resourceDataInterface.(map[string]interface{})
 		if !ok {
@@ -2794,47 +3085,64 @@ func (s *HL7FHIRTransformServiceV3) convertV9TemplateToFieldMappings(templateDat
 			continue
 		}
 
-		// Convert each mapping
+		// Convert each atomic field mapping
 		for _, mappingInterface := range resourceMappings {
 			mapping, ok := mappingInterface.(map[string]interface{})
 			if !ok {
 				continue
 			}
 
-			// Extract HL7 path (e.g., "PID.3.1")
 			hl7Path, ok := mapping["hl7Path"].(string)
 			if !ok {
 				continue
 			}
-
-			// Extract FHIR path (e.g., "Patient.identifier[0].value")
 			fhirPath, ok := mapping["fhirPath"].(string)
 			if !ok {
 				continue
 			}
 
-			// Parse HL7 path into segment and field components
 			segmentName, hl7Field, hl7Component := s.parseHL7Path(hl7Path)
 
-			// Extract additional mapping properties
 			transformFunc, _ := mapping["transform"].(string)
 			required, _ := mapping["required"].(bool)
 			confidence, _ := mapping["confidence"].(float64)
 
-			// Create FieldMapping struct
+			transformRules := map[string]interface{}{
+				"confidence":     confidence,
+				"sourceTemplate": "V9_OOB",
+				"transform":      transformFunc,
+			}
+
+			// Inline valueSet for lookup: transforms so the switch default can resolve it
+			if strings.HasPrefix(transformFunc, "lookup:") {
+				vsName := strings.TrimPrefix(transformFunc, "lookup:")
+				if vs, found := valueSets[vsName]; found {
+					transformRules["valueSet"] = vs
+				}
+				// fallbackTransform / fallbackField — used when SCH.25 is absent
+				if ft, _ := mapping["fallbackTransform"].(string); ft != "" {
+					transformRules["fallbackTransform"] = ft
+				}
+				if ff, _ := mapping["fallbackField"].(string); ff != "" {
+					transformRules["fallbackField"] = ff
+				}
+			}
+
+			// condition: only emit the mapping when the HL7 condition field is non-empty
+			if cond, _ := mapping["condition"].(string); cond != "" {
+				transformRules["condition"] = cond
+			}
+
 			fieldMapping := FieldMapping{
-				SegmentName:       segmentName,
-				HL7Field:         hl7Field,
-				HL7Component:     hl7Component,
-				FHIRResourceType: resourceType,
-				FHIRElementPath:  fhirPath,
-				DataTypeTransform: transformFunc,
-				IsRequired:       required,
-				TransformationRules: map[string]interface{}{
-					"confidence":     confidence,
-					"sourceTemplate": "V9_OOB",
-					"transform":      transformFunc,
-				},
+				SegmentName:         segmentName,
+				HL7Field:            hl7Field,
+				HL7Component:        hl7Component,
+				FHIRResourceType:    resourceType,
+				FHIRElementPath:     fhirPath,
+				DataTypeTransform:   transformFunc,
+				IsRequired:          required,
+				Confidence:          confidence,
+				TransformationRules: transformRules,
 			}
 
 			mappings = append(mappings, fieldMapping)
@@ -2843,6 +3151,186 @@ func (s *HL7FHIRTransformServiceV3) convertV9TemplateToFieldMappings(templateDat
 
 	log.Printf("🔄 V3 Service: Converted %d V9 mappings to FieldMapping format", len(mappings))
 	return mappings, nil
+}
+
+// =====================================
+// CONTEXT LINKS — template v1.1 support
+// =====================================
+
+// ContextLinks holds the v1.1 template context declarations.
+//
+// Template "context" block:
+//
+//	{ "patient": "PID", "encounter": "PV1", "order": "ORC" }
+//
+// Template per-resource "contextLinks":
+//
+//	"Encounter": { "contextLinks": { "subject": "patient" } }
+//	"AllergyIntolerance": { "contextLinks": { "patient": "patient", "encounter": "encounter" } }
+//
+// The engine resolves each role to the FHIR resource that was built from the
+// named segment, then writes a Reference into the declared FHIR field.
+// Templates that omit the "context" block (v1.0) return nil and the existing
+// hardcoded context-wiring path continues to handle those messages.
+type ContextLinks struct {
+	// RoleToSegment maps a context role name to the HL7 segment that is the
+	// authoritative source for that role (e.g. "patient" → "PID").
+	RoleToSegment map[string]string
+	// ResourceLinks maps each FHIR resource type to a (FHIR field → role name)
+	// map (e.g. "Encounter" → {"subject": "patient"}).
+	ResourceLinks map[string]map[string]string
+}
+
+// wellKnownSegmentToType maps common HL7 segment names to the FHIR resource
+// type that the mapping engine builds from that segment.  Used by applyContextLinks
+// to resolve a role's segment name to the correct resource type when looking up
+// the already-built resource ID.
+var wellKnownSegmentToType = map[string]string{
+	"PID": "Patient",
+	"PV1": "Encounter",
+	"ORC": "ServiceRequest",
+	"OBR": "DiagnosticReport",
+	"AL1": "AllergyIntolerance",
+	"DG1": "Condition",
+	"IN1": "Coverage",
+	"NK1": "RelatedPerson",
+	"OBX": "Observation",
+	"TXA": "DocumentReference",
+	"RXA": "Immunization",
+	"STF": "Practitioner",
+	"SCH": "Appointment",
+	"AIS": "AppointmentResponse",
+	"FT1": "ChargeItem",
+	"PR1": "Procedure",
+	"ROL": "PractitionerRole",
+	"GT1": "RelatedPerson",
+}
+
+// extractContextLinks parses the "context" and per-resource "contextLinks" blocks
+// from a parsed template JSON object.  Returns nil when the template is v1.0
+// (no "context" block present) — callers fall back to existing hardcoded wiring.
+func extractContextLinks(templateData map[string]interface{}) *ContextLinks {
+	contextRaw, hasContext := templateData["context"]
+	if !hasContext {
+		return nil // v1.0 template — existing hardcoded wiring applies
+	}
+	contextMap, ok := contextRaw.(map[string]interface{})
+	if !ok || len(contextMap) == 0 {
+		return nil
+	}
+
+	cl := &ContextLinks{
+		RoleToSegment: make(map[string]string),
+		ResourceLinks: make(map[string]map[string]string),
+	}
+
+	for role, segRaw := range contextMap {
+		if seg, ok := segRaw.(string); ok {
+			cl.RoleToSegment[role] = seg
+		}
+	}
+
+	if resourcesRaw, ok := templateData["resources"]; ok {
+		if resources, ok := resourcesRaw.(map[string]interface{}); ok {
+			for resourceType, resourceDataRaw := range resources {
+				resourceData, ok := resourceDataRaw.(map[string]interface{})
+				if !ok {
+					continue
+				}
+				linksRaw, ok := resourceData["contextLinks"]
+				if !ok {
+					continue
+				}
+				linksMap, ok := linksRaw.(map[string]interface{})
+				if !ok {
+					continue
+				}
+				links := make(map[string]string)
+				for field, roleRaw := range linksMap {
+					if role, ok := roleRaw.(string); ok {
+						links[field] = role
+					}
+				}
+				if len(links) > 0 {
+					cl.ResourceLinks[resourceType] = links
+				}
+			}
+		}
+	}
+
+	if len(cl.RoleToSegment) == 0 {
+		return nil
+	}
+	return cl
+}
+
+// applyContextLinks wires FHIR cross-resource references declared in the
+// template's contextLinks block.  It finds the ID of each context role's
+// resource in the already-built slice, then sets the declared FHIR fields to
+// "ResourceType/id" references.  Fields already populated by the mapping engine
+// are not overwritten.
+//
+// This is a no-op when cl is nil (v1.0 templates or templates with no links).
+func (s *HL7FHIRTransformServiceV3) applyContextLinks(resources []map[string]interface{}, cl *ContextLinks) []map[string]interface{} {
+	if cl == nil || len(cl.ResourceLinks) == 0 {
+		return resources
+	}
+
+	// Resolve each role to "ResourceType/id" using wellKnownSegmentToType
+	roleToRef := make(map[string]string)
+	for role, segment := range cl.RoleToSegment {
+		resourceType, ok := wellKnownSegmentToType[segment]
+		if !ok {
+			continue
+		}
+		for _, r := range resources {
+			rt, _ := r["resourceType"].(string)
+			if rt != resourceType {
+				continue
+			}
+			if id, ok := r["id"].(string); ok && id != "" {
+				roleToRef[role] = resourceType + "/" + id
+				break
+			}
+		}
+	}
+
+	if len(roleToRef) == 0 {
+		return resources
+	}
+
+	// Wire declared fields on each resource
+	for _, r := range resources {
+		rt, _ := r["resourceType"].(string)
+		links, ok := cl.ResourceLinks[rt]
+		if !ok {
+			continue
+		}
+		for fhirField, role := range links {
+			ref, ok := roleToRef[role]
+			if !ok {
+				continue
+			}
+			// Only set when the field is absent or empty — never overwrite engine output
+			switch existing := r[fhirField].(type) {
+			case nil:
+				r[fhirField] = map[string]interface{}{"reference": ref}
+				log.Printf("🔗 ContextLinks: %s.%s → %s (role: %s)", rt, fhirField, ref, role)
+			case string:
+				if existing == "" {
+					r[fhirField] = map[string]interface{}{"reference": ref}
+					log.Printf("🔗 ContextLinks: %s.%s → %s (role: %s)", rt, fhirField, ref, role)
+				}
+			case map[string]interface{}:
+				if len(existing) == 0 {
+					r[fhirField] = map[string]interface{}{"reference": ref}
+					log.Printf("🔗 ContextLinks: %s.%s → %s (role: %s)", rt, fhirField, ref, role)
+				}
+			}
+		}
+	}
+
+	return resources
 }
 
 // parseHL7Path parses HL7 path like "PID.3.1" into segment, field, and component
@@ -3156,17 +3644,27 @@ func (s *HL7FHIRTransformServiceV3) convertToAtomicMappings(fieldMappings []Fiel
 			ID:               fmt.Sprintf("%d", fieldMapping.ID),
 			SourcePath:       sourcePath,
 			TargetPath:       fieldMapping.FHIRElementPath,
-			ResourceType:     fieldMapping.FHIRResourceType,  // Include resource type for UI filtering
-			FHIRResourceType: fieldMapping.FHIRResourceType,  // Alias for compatibility
+			ResourceType:     fieldMapping.FHIRResourceType,
+			FHIRResourceType: fieldMapping.FHIRResourceType,
 			TransformType:    fieldMapping.DataTypeTransform,
-			DefaultValue:     "",                             // FieldMapping doesn't have default value
-			ValidationRule:   "",                             // FieldMapping doesn't have validation rule
 			IsRequired:       fieldMapping.IsRequired,
+			Confidence:       fieldMapping.Confidence,
 		}
 	}
 
 	log.Printf("✅ Converted %d FieldMappings to AtomicMappings for frontend", len(atomicMappings))
 	return atomicMappings
+}
+
+// GetFieldMappingsPublic is a public wrapper so external packages (e.g. the delta
+// controller) can call getFieldMappings without duplicating the resolution logic.
+func (s *HL7FHIRTransformServiceV3) GetFieldMappingsPublic(ctx context.Context, messageType, profile string, req *TransformRequest) ([]FieldMapping, *ContextLinks, error) {
+	return s.getFieldMappings(ctx, messageType, profile, req)
+}
+
+// ConvertToAtomicMappingsPublic is a public wrapper for the frontend-facing conversion.
+func (s *HL7FHIRTransformServiceV3) ConvertToAtomicMappingsPublic(fieldMappings []FieldMapping) []AtomicMapping {
+	return s.convertToAtomicMappings(fieldMappings)
 }
 
 func (s *HL7FHIRTransformServiceV3) populateTransformResponse(
@@ -3819,6 +4317,18 @@ func normalizeHL7System(system string) string {
 	case "LOCAL", "L", "99ZZZ":
 		return ""
 	default:
+		// Bare numeric strings (e.g. "1", "99") are HL7 table numbers, not absolute URIs.
+		// Treat as local and omit so the Coding is not rejected by FHIR validators.
+		allDigits := true
+		for _, c := range strings.TrimSpace(system) {
+			if c < '0' || c > '9' {
+				allDigits = false
+				break
+			}
+		}
+		if allDigits && len(strings.TrimSpace(system)) > 0 {
+			return ""
+		}
 		return system
 	}
 }
@@ -4662,3 +5172,746 @@ func (s *HL7FHIRTransformServiceV3) enrichResultsInterpreter(
 // =====================================
 // HELPER FUNCTIONS
 // =====================================
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PROFILE-DRIVEN COMPOSITE ENGINE
+//
+// Reads the v2.0 extended template_config from hl7_fhir_templates and
+// executes composite rules (condition, forEach, firstOf) to build FHIR
+// arrays (participants, identifiers, etc.) without any hardcoded assembly.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// AssemblyProcedureFunc is a named, parameterised assembly procedure that can be
+// referenced from a v2.0 profile composite using "procedure": "<name>".
+// It receives the full parsed HL7 data, the current resource slice, and any
+// JSON params from the profile.  Returns the updated resource slice + warnings.
+type AssemblyProcedureFunc func(
+	parsedHL7 map[string]interface{},
+	resources []map[string]interface{},
+	params map[string]interface{},
+) ([]map[string]interface{}, []string)
+
+// assemblyProcedureRegistry holds all named assembly procedures registered at
+// init() time from services/hl7assembly/procedure_registry.go.
+var assemblyProcedureRegistry = map[string]AssemblyProcedureFunc{}
+
+// RegisterAssemblyProcedure makes a named procedure available to the profile engine.
+// Called from init() in procedure_registry.go so registration is automatic.
+func RegisterAssemblyProcedure(name string, fn AssemblyProcedureFunc) {
+	assemblyProcedureRegistry[name] = fn
+}
+
+// ProfileComposite holds one rule parsed from a resource's "composites" array.
+type ProfileComposite struct {
+	FHIRResource    string                 // e.g. "Appointment"
+	FHIRPath        string                 // e.g. "participant"
+	CompositeType   string                 // "condition" | "forEach" | "firstOf" | "procedure"
+	ConditionField  string                 // for condition composites: HL7 field that must be non-empty
+	ForEachSeg      string                 // for forEach composites: segment name to iterate (e.g. "AIP")
+	FirstOfFields   []string               // for firstOf composites: ordered list of HL7 field paths
+	ValueTemplate   map[string]interface{} // value object with {{FIELD}} placeholders
+	TemplateArray   []interface{}          // for firstOf: array template
+	ProcedureName   string                 // for procedure composites: registered name
+	ProcedureParams map[string]interface{} // for procedure composites: JSON params passed to the func
+}
+
+// getProfileComposites loads composite rules + valueSets for a message type from
+// the v2.0 profile stored in hl7_fhir_templates.
+// Returns ([]ProfileComposite, valueSets map, error implicitly logged).
+func (s *HL7FHIRTransformServiceV3) getProfileComposites(
+	ctx context.Context,
+	messageType string,
+) ([]ProfileComposite, map[string]map[string]interface{}) {
+
+	query := `
+		SELECT template_config
+		FROM   hl7_fhir_templates
+		WHERE  message_type = $1
+		  AND  is_default   = true
+		  AND  profile_version = '2.0'
+		LIMIT 1`
+
+	var configJSON string
+	if err := s.db.QueryRowContext(ctx, query, messageType).Scan(&configJSON); err != nil {
+		if err != sql.ErrNoRows {
+			log.Printf("⚠️ ProfileComposites: DB error for %s: %v", messageType, err)
+		}
+		return nil, nil
+	}
+
+	var profile map[string]interface{}
+	if err := json.Unmarshal([]byte(configJSON), &profile); err != nil {
+		log.Printf("⚠️ ProfileComposites: invalid JSON for %s: %v", messageType, err)
+		return nil, nil
+	}
+
+	// ── Extract valueSets ──────────────────────────────────────────────────
+	valueSets := map[string]map[string]interface{}{}
+	if vsRaw, ok := profile["valueSets"]; ok {
+		if vsMap, ok := vsRaw.(map[string]interface{}); ok {
+			for k, v := range vsMap {
+				if entries, ok := v.(map[string]interface{}); ok {
+					valueSets[k] = entries
+				}
+			}
+		}
+	}
+
+	// ── Extract composites from each resource definition ──────────────────
+	var composites []ProfileComposite
+
+	mappingsRaw, _ := profile["mappings"].(map[string]interface{})
+	for resourceKey, resDef := range mappingsRaw {
+		resMap, ok := resDef.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		resourceType := resourceKey // e.g. "Appointment"
+		if rt, _ := resMap["resourceType"].(string); rt != "" {
+			resourceType = rt
+		}
+
+		compRaw, ok := resMap["composites"].([]interface{})
+		if !ok {
+			continue
+		}
+
+		for _, ci := range compRaw {
+			c, ok := ci.(map[string]interface{})
+			if !ok {
+				continue
+			}
+
+			pc := ProfileComposite{
+				FHIRResource:  resourceType,
+				FHIRPath:      getString(c, "fhir"),
+				ValueTemplate: getMap(c, "value"),
+			}
+
+			switch {
+			case c["condition"] != nil:
+				pc.CompositeType = "condition"
+				pc.ConditionField = getString(c, "condition")
+			case c["forEach"] != nil:
+				pc.CompositeType = "forEach"
+				pc.ForEachSeg = getString(c, "forEach")
+			case c["firstOf"] != nil:
+				pc.CompositeType = "firstOf"
+				if arr, ok := c["firstOf"].([]interface{}); ok {
+					for _, f := range arr {
+						if s, ok := f.(string); ok {
+							pc.FirstOfFields = append(pc.FirstOfFields, s)
+						}
+					}
+				}
+				if tmpl, ok := c["template"].([]interface{}); ok {
+					pc.TemplateArray = tmpl
+				}
+			case getString(c, "procedure") != "":
+				pc.CompositeType = "procedure"
+				pc.ProcedureName = getString(c, "procedure")
+				if p, ok := c["params"].(map[string]interface{}); ok {
+					pc.ProcedureParams = p
+				}
+			}
+
+			composites = append(composites, pc)
+		}
+	}
+
+	log.Printf("✅ ProfileComposites: loaded %d composites for %s", len(composites), messageType)
+	return composites, valueSets
+}
+
+// applyProfileComposites executes composite rules against the parsed HL7 data and
+// appends results to the already-field-mapped FHIR resources slice.
+// Each element in the slice is a FHIR resource map containing at minimum a "resourceType" key.
+func (s *HL7FHIRTransformServiceV3) applyProfileComposites(
+	resources []map[string]interface{},
+	parsedHL7 map[string]interface{},
+	composites []ProfileComposite,
+	valueSets map[string]map[string]interface{},
+) []map[string]interface{} {
+
+	for _, pc := range composites {
+		// Find or create the target FHIR resource in the slice
+		res, resources2 := s.getOrCreateProfileResource(resources, pc.FHIRResource)
+		resources = resources2
+		if res == nil {
+			continue
+		}
+
+		switch pc.CompositeType {
+		case "condition":
+			// Emit exactly one entry when the condition field is non-empty
+			condVal := s.resolveHL7FieldFromParsed(parsedHL7, pc.ConditionField)
+			if condVal == "" {
+				continue
+			}
+			entry := resolveTemplateMap(pc.ValueTemplate, nil, parsedHL7, condVal)
+			if !isEmptyResolved(entry) {
+				appendToFHIRArray(res, pc.FHIRPath, entry)
+			}
+
+		case "forEach":
+			// Emit one entry per occurrence of the named segment
+			segs := hl7assembly.ExtractSegmentGroup(parsedHL7, pc.ForEachSeg)
+			for _, seg := range segs {
+				segMap := segmentToMap(seg)
+				entry := resolveTemplateMap(pc.ValueTemplate, segMap, parsedHL7, "")
+				if !isEmptyResolved(entry) {
+					appendToFHIRArray(res, pc.FHIRPath, entry)
+				}
+			}
+
+		case "firstOf":
+			// Use the first non-empty HL7 field value
+			var chosen string
+			for _, field := range pc.FirstOfFields {
+				v := s.resolveHL7FieldFromParsed(parsedHL7, field)
+				if v != "" {
+					chosen = v
+					break
+				}
+			}
+			if chosen == "" {
+				continue
+			}
+			if len(pc.TemplateArray) > 0 {
+				// Expand array template with the chosen value
+				for _, ti := range pc.TemplateArray {
+					if tmpl, ok := ti.(map[string]interface{}); ok {
+						entry := resolveTemplateMap(tmpl, nil, parsedHL7, chosen)
+						if !isEmptyResolved(entry) {
+							appendToFHIRArray(res, pc.FHIRPath, entry)
+						}
+					}
+				}
+			} else {
+				appendToFHIRArray(res, pc.FHIRPath, chosen)
+			}
+
+		case "procedure":
+			// Dispatch to a named, registered Go assembly procedure.
+			// The procedure receives the full resource slice and may replace/add/remove
+			// resources (not just append to a single FHIR array).
+			fn, ok := assemblyProcedureRegistry[pc.ProcedureName]
+			if !ok {
+				log.Printf("⚠️ ProfileComposites: unknown procedure %q — register it in procedure_registry.go", pc.ProcedureName)
+				continue
+			}
+			var procWarnings []string
+			resources, procWarnings = fn(parsedHL7, resources, pc.ProcedureParams)
+			if len(procWarnings) > 0 {
+				log.Printf("⚠️ Procedure %s warnings: %v", pc.ProcedureName, procWarnings)
+			}
+			// After a procedure call the resource slice may have changed entirely;
+			// skip the res pointer update and re-enter the loop with the new slice.
+			continue
+		}
+	}
+
+	return resources
+}
+
+// getOrCreateProfileResource finds a FHIR resource in the slice by resourceType,
+// or creates a new skeleton resource and appends it to the slice.
+// Returns the resource pointer and the (possibly extended) slice.
+func (s *HL7FHIRTransformServiceV3) getOrCreateProfileResource(
+	resources []map[string]interface{},
+	resourceType string,
+) (map[string]interface{}, []map[string]interface{}) {
+	for _, r := range resources {
+		if rt, _ := r["resourceType"].(string); strings.EqualFold(rt, resourceType) {
+			return r, resources
+		}
+	}
+	// Not found — create a skeleton and append
+	r := map[string]interface{}{"resourceType": resourceType}
+	resources = append(resources, r)
+	return r, resources
+}
+
+// resolveHL7FieldFromParsed resolves an HL7 path like "PID.3" or "SCH.25"
+// against the parsed HL7 data map (supporting both segmentGroups and enhancedSegments).
+func (s *HL7FHIRTransformServiceV3) resolveHL7FieldFromParsed(
+	parsedHL7 map[string]interface{},
+	fieldPath string,
+) string {
+	if fieldPath == "" {
+		return ""
+	}
+	// Strip spaces
+	fieldPath = strings.TrimSpace(fieldPath)
+
+	parts := strings.SplitN(fieldPath, ".", 2)
+	if len(parts) < 2 {
+		return ""
+	}
+	segName := parts[0]
+	fieldPart := parts[1] // e.g. "3" or "3.1"
+
+	segs := hl7assembly.ExtractSegmentGroup(parsedHL7, segName)
+	if len(segs) == 0 {
+		return ""
+	}
+	seg := segs[0]
+
+	// Look up by key in seg.Fields
+	// Field key looks like "PID.3" or "SCH.25"
+	wantKey := segName + "." + fieldPart
+	for _, f := range seg.Fields {
+		if f.Key == wantKey {
+			return strings.TrimSpace(f.Value)
+		}
+	}
+	// Also try field index matching (1-based)
+	fieldIdx := 0
+	fmt.Sscanf(fieldPart, "%d", &fieldIdx)
+	if fieldIdx > 0 && fieldIdx <= len(seg.Fields) {
+		return strings.TrimSpace(seg.Fields[fieldIdx-1].Value)
+	}
+	return ""
+}
+
+// resolveTemplateMap deep-copies a template map replacing {{FIELD}} placeholders.
+// segFields: segment fields keyed by "SEG.N" (used for forEach composites).
+// parsedHL7: full parsed data (for cross-segment placeholders like {{PID.3}}).
+// condVal:   value passed for condition composites (replaces {{_value}}).
+func resolveTemplateMap(
+	tmpl map[string]interface{},
+	segFields map[string]string,
+	parsedHL7 map[string]interface{},
+	condVal string,
+) map[string]interface{} {
+	result := make(map[string]interface{}, len(tmpl))
+	for k, v := range tmpl {
+		result[k] = resolveTemplateValue(v, segFields, parsedHL7, condVal)
+	}
+	return result
+}
+
+func resolveTemplateValue(
+	v interface{},
+	segFields map[string]string,
+	parsedHL7 map[string]interface{},
+	condVal string,
+) interface{} {
+	switch tv := v.(type) {
+	case string:
+		return resolvePlaceholders(tv, segFields, parsedHL7, condVal)
+	case map[string]interface{}:
+		return resolveTemplateMap(tv, segFields, parsedHL7, condVal)
+	case []interface{}:
+		result := make([]interface{}, len(tv))
+		for i, item := range tv {
+			result[i] = resolveTemplateValue(item, segFields, parsedHL7, condVal)
+		}
+		return result
+	default:
+		return v
+	}
+}
+
+var rePlaceholder = regexp.MustCompile(`\{\{([^}]+)\}\}`)
+
+// resolvePlaceholders replaces {{FIELD}} tokens in a string template.
+// Lookup order: condVal (for {{_value}}), segFields (e.g. {{AIP.3}}), parsedHL7.
+func resolvePlaceholders(
+	s string,
+	segFields map[string]string,
+	parsedHL7 map[string]interface{},
+	condVal string,
+) string {
+	return rePlaceholder.ReplaceAllStringFunc(s, func(match string) string {
+		inner := match[2 : len(match)-2] // strip {{ }}
+		if inner == "_value" {
+			return condVal
+		}
+		// Check segment field map first (forEach context)
+		if segFields != nil {
+			if val, ok := segFields[inner]; ok {
+				return val
+			}
+		}
+		// Fall back to full parsed HL7 data (cross-segment)
+		if parsedHL7 != nil {
+			parts := strings.SplitN(inner, ".", 2)
+			if len(parts) == 2 {
+				segs := hl7assembly.ExtractSegmentGroup(parsedHL7, parts[0])
+				if len(segs) > 0 {
+					wantKey := inner
+					for _, f := range segs[0].Fields {
+						if f.Key == wantKey {
+							return strings.TrimSpace(f.Value)
+						}
+					}
+				}
+			}
+		}
+		return "" // placeholder not resolved → empty string
+	})
+}
+
+// segmentToMap converts an hl7.EnhancedSegment into a flat map[segKey]value
+// suitable for placeholder resolution (e.g. "AIP.3" → "12345").
+func segmentToMap(seg interface{}) map[string]string {
+	// Accept either typed or interface{}
+	b, err := json.Marshal(seg)
+	if err != nil {
+		return nil
+	}
+	var enhSeg struct {
+		Key    string `json:"key"`
+		Fields []struct {
+			Key   string `json:"key"`
+			Value string `json:"value"`
+		} `json:"fields"`
+	}
+	if err := json.Unmarshal(b, &enhSeg); err != nil {
+		return nil
+	}
+	m := make(map[string]string, len(enhSeg.Fields))
+	for _, f := range enhSeg.Fields {
+		m[f.Key] = f.Value
+	}
+	return m
+}
+
+// appendToFHIRArray appends value to the named FHIR array field on a resource.
+// Creates the array if it does not exist yet.
+func appendToFHIRArray(resource map[string]interface{}, path string, value interface{}) {
+	existing, _ := resource[path].([]interface{})
+	resource[path] = append(existing, value)
+}
+
+// isEmptyResolved returns true when a resolved template map is effectively empty
+// (all leaf values are empty strings after placeholder substitution).
+func isEmptyResolved(m map[string]interface{}) bool {
+	for _, v := range m {
+		switch tv := v.(type) {
+		case string:
+			if tv != "" {
+				return false
+			}
+		case map[string]interface{}:
+			if !isEmptyResolved(tv) {
+				return false
+			}
+		default:
+			if tv != nil {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// getString is a nil-safe helper to extract a string from a map.
+func getString(m map[string]interface{}, key string) string {
+	v, _ := m[key].(string)
+	return v
+}
+
+// getMap is a nil-safe helper to extract a map from a map.
+func getMap(m map[string]interface{}, key string) map[string]interface{} {
+	v, _ := m[key].(map[string]interface{})
+	return v
+}
+
+// stripNullFields removes top-level keys whose value is nil/null from a FHIR
+// resource map.  FHIR validators reject explicit null values for most element
+// types (destination, active, birthDate, etc.) — omitting the key is correct
+// when no value is available.
+func stripNullFields(resource map[string]interface{}) {
+	for k, v := range resource {
+		if v == nil {
+			delete(resource, k)
+		}
+	}
+}
+
+// ── Delta / Override Model ────────────────────────────────────────────────────
+// An interface can store a *sparse* set of overrides on top of its OOB template
+// rather than a full copy of every mapping.  This keeps the DB lean and makes it
+// trivial to pick up OOB improvements: just rerun the merge at query time.
+//
+// Delta JSON stored in interface_message_mappings.mapping_overrides:
+//
+//	{
+//	  "version": 1,
+//	  "base_template_id": "<uuid>",
+//	  "overrides": [
+//	    {"action":"replace","hl7Path":"PID.5.1","fhirPath":"Patient.name[0].family","transform":"XPN_family","isRequired":true,"confidence":0.95},
+//	    {"action":"add",    "hl7Path":"PID.29",  "fhirPath":"Patient.deceasedDateTime","transform":"TS_datetime"},
+//	    {"action":"remove", "hl7Path":"PID.10"}
+//	  ]
+//	}
+
+// MappingOverride is a single delta entry stored in interface_message_mappings.mapping_overrides.
+type MappingOverride struct {
+	Action     string  `json:"action"`               // "replace" | "add" | "remove"
+	HL7Path    string  `json:"hl7Path"`              // "PID.5.1" — segment.field[.component]
+	FHIRPath   string  `json:"fhirPath,omitempty"`   // full FHIR target path incl. resource type
+	Transform  string  `json:"transform,omitempty"`  // transform key
+	IsRequired bool    `json:"isRequired,omitempty"`
+	Confidence float64 `json:"confidence,omitempty"`
+}
+
+// MappingDelta is the envelope stored in mapping_overrides.
+type MappingDelta struct {
+	Version        int               `json:"version"`
+	BaseTemplateID string            `json:"base_template_id"`
+	BasedOnVersion string            `json:"based_on_version"` // profile_version of the OOB template at save time
+	Overrides      []MappingOverride `json:"overrides"`
+}
+
+// hl7PathKey returns the canonical lookup key for a FieldMapping: "SEG.field[.component]".
+func hl7PathKey(fm FieldMapping) string {
+	if fm.HL7Component != "" {
+		return fm.SegmentName + "." + fm.HL7Field + "." + fm.HL7Component
+	}
+	return fm.SegmentName + "." + fm.HL7Field
+}
+
+// mergeMappings applies delta overrides on top of the OOB base []FieldMapping and
+// returns the merged slice.  Base is never mutated.
+func mergeMappings(base []FieldMapping, delta *MappingDelta) []FieldMapping {
+	// Index base by HL7 path for O(1) lookup.
+	indexed := make(map[string]int, len(base)) // path → index in result
+	result := make([]FieldMapping, len(base))
+	copy(result, base)
+	for i, fm := range result {
+		indexed[hl7PathKey(fm)] = i
+	}
+
+	for _, ov := range delta.Overrides {
+		switch ov.Action {
+		case "replace":
+			if idx, ok := indexed[ov.HL7Path]; ok {
+				fm := result[idx]
+				if ov.FHIRPath != "" {
+					parts := strings.SplitN(ov.FHIRPath, ".", 2)
+					if len(parts) == 2 {
+						fm.FHIRResourceType = parts[0]
+						fm.FHIRElementPath = parts[1]
+					}
+				}
+				if ov.Transform != "" {
+					fm.DataTypeTransform = ov.Transform
+				}
+				if ov.Confidence > 0 {
+					fm.Confidence = ov.Confidence
+				}
+				fm.IsRequired = ov.IsRequired
+				result[idx] = fm
+			}
+
+		case "add":
+			if _, exists := indexed[ov.HL7Path]; !exists {
+				parts := strings.Split(ov.HL7Path, ".")
+				if len(parts) < 2 {
+					continue
+				}
+				seg, field := parts[0], parts[1]
+				comp := ""
+				if len(parts) > 2 {
+					comp = parts[2]
+				}
+				fhirResource, fhirElem := "", ov.FHIRPath
+				if fp := strings.SplitN(ov.FHIRPath, ".", 2); len(fp) == 2 {
+					fhirResource, fhirElem = fp[0], fp[1]
+				}
+				newFM := FieldMapping{
+					SegmentName:       seg,
+					HL7Field:          field,
+					HL7Component:      comp,
+					FHIRResourceType:  fhirResource,
+					FHIRElementPath:   fhirElem,
+					DataTypeTransform: ov.Transform,
+					IsRequired:        ov.IsRequired,
+					Confidence:        ov.Confidence,
+				}
+				indexed[ov.HL7Path] = len(result)
+				result = append(result, newFM)
+			}
+
+		case "remove":
+			if idx, ok := indexed[ov.HL7Path]; ok {
+				// Nil-out the entry; compact below.
+				result[idx] = FieldMapping{} // sentinel: SegmentName == ""
+				delete(indexed, ov.HL7Path)
+			}
+		}
+	}
+
+	// Compact: remove sentinel entries.
+	compact := result[:0]
+	for _, fm := range result {
+		if fm.SegmentName != "" {
+			compact = append(compact, fm)
+		}
+	}
+	return compact
+}
+
+// loadOOBTemplateByID loads the OOB template identified by its UUID primary key and
+// returns the parsed []FieldMapping plus the template's message_type.
+func (s *HL7FHIRTransformServiceV3) loadOOBTemplateByID(ctx context.Context, templateID string) ([]FieldMapping, string, error) {
+	query := `
+		SELECT template_config, message_type
+		FROM hl7_fhir_templates
+		WHERE id = $1
+		LIMIT 1
+	`
+	var templateConfig, messageType string
+	if err := s.db.QueryRowContext(ctx, query, templateID).Scan(&templateConfig, &messageType); err != nil {
+		return nil, "", fmt.Errorf("loadOOBTemplateByID(%s): %w", templateID, err)
+	}
+	var templateData map[string]interface{}
+	if err := json.Unmarshal([]byte(templateConfig), &templateData); err != nil {
+		return nil, "", fmt.Errorf("loadOOBTemplateByID parse(%s): %w", templateID, err)
+	}
+	mappings, err := s.convertV9TemplateToFieldMappings(templateData)
+	return mappings, messageType, err
+}
+
+// ComputeDelta compares an incoming wizard []AtomicMapping against the OOB template
+// mappings and returns the sparse MappingDelta (only changed/added/removed entries).
+// Returns nil delta (no overrides) when the wizard mappings are identical to OOB.
+func (s *HL7FHIRTransformServiceV3) ComputeDelta(
+	ctx context.Context,
+	messageType string,
+	incoming []AtomicMapping,
+) (*MappingDelta, string, error) {
+	// Load OOB template to get base, template ID, and current version.
+	query := `
+		SELECT id, template_config, COALESCE(profile_version, '1.0')
+		FROM hl7_fhir_templates
+		WHERE message_type = $1 AND is_default = true
+		ORDER BY created_at DESC
+		LIMIT 1
+	`
+	var templateID, templateConfig, profileVersion string
+	if err := s.db.QueryRowContext(ctx, query, messageType).Scan(&templateID, &templateConfig, &profileVersion); err != nil {
+		return nil, "", fmt.Errorf("ComputeDelta: no OOB template for %s: %w", messageType, err)
+	}
+	var templateData map[string]interface{}
+	if err := json.Unmarshal([]byte(templateConfig), &templateData); err != nil {
+		return nil, "", fmt.Errorf("ComputeDelta: parse template: %w", err)
+	}
+	baseMappings, err := s.convertV9TemplateToFieldMappings(templateData)
+	if err != nil {
+		return nil, "", fmt.Errorf("ComputeDelta: convert template: %w", err)
+	}
+
+	// Index OOB by hl7PathKey for fast lookup.
+	type oobEntry struct {
+		fm    FieldMapping
+		seen  bool
+	}
+	oobIndex := make(map[string]*oobEntry, len(baseMappings))
+	for _, fm := range baseMappings {
+		key := hl7PathKey(fm)
+		oobIndex[key] = &oobEntry{fm: fm}
+	}
+
+	var overrides []MappingOverride
+
+	for _, am := range incoming {
+		key := am.SourcePath // sourcePath is the HL7 path key
+		entry, inOOB := oobIndex[key]
+
+		if !inOOB {
+			// New mapping not in OOB → add
+			overrides = append(overrides, MappingOverride{
+				Action:     "add",
+				HL7Path:    key,
+				FHIRPath:   am.FHIRResourceType + "." + am.TargetPath,
+				Transform:  am.TransformType,
+				IsRequired: am.IsRequired,
+				Confidence: am.Confidence,
+			})
+			continue
+		}
+		entry.seen = true
+
+		// Check if anything meaningful changed.
+		oobFHIRPath := entry.fm.FHIRResourceType + "." + entry.fm.FHIRElementPath
+		incomingFHIRPath := am.FHIRResourceType + "." + am.TargetPath
+		changed := incomingFHIRPath != oobFHIRPath ||
+			am.TransformType != entry.fm.DataTypeTransform ||
+			am.IsRequired != entry.fm.IsRequired
+
+		if changed {
+			overrides = append(overrides, MappingOverride{
+				Action:     "replace",
+				HL7Path:    key,
+				FHIRPath:   incomingFHIRPath,
+				Transform:  am.TransformType,
+				IsRequired: am.IsRequired,
+				Confidence: am.Confidence,
+			})
+		}
+	}
+
+	// OOB entries the user removed (not present in incoming).
+	incomingPaths := make(map[string]struct{}, len(incoming))
+	for _, am := range incoming {
+		incomingPaths[am.SourcePath] = struct{}{}
+	}
+	for key, entry := range oobIndex {
+		_ = entry
+		if _, present := incomingPaths[key]; !present {
+			overrides = append(overrides, MappingOverride{
+				Action:  "remove",
+				HL7Path: key,
+			})
+		}
+	}
+
+	if len(overrides) == 0 {
+		return nil, templateID, nil // pure OOB — no delta needed
+	}
+	return &MappingDelta{
+		Version:        1,
+		BaseTemplateID: templateID,
+		BasedOnVersion: profileVersion,
+		Overrides:      overrides,
+	}, templateID, nil
+}
+
+// loadDeltaMappings loads the interface's stored OOB template + applies mapping_overrides.
+// Returns an error (causing fallthrough) when no delta row exists.
+func (s *HL7FHIRTransformServiceV3) loadDeltaMappings(ctx context.Context, interfaceID, messageType string) ([]FieldMapping, error) {
+	query := `
+		SELECT standard_template_id, mapping_overrides
+		FROM interface_message_mappings
+		WHERE interface_id = $1
+		  AND message_type = $2
+		  AND uses_standard_template = true
+		  AND mapping_overrides IS NOT NULL
+		LIMIT 1
+	`
+	var templateID string
+	var overridesBytes []byte
+	err := s.db.QueryRowContext(ctx, query, interfaceID, messageType).Scan(&templateID, &overridesBytes)
+	if err != nil {
+		return nil, fmt.Errorf("no delta row for %s/%s", interfaceID, messageType)
+	}
+
+	baseMappings, _, err := s.loadOOBTemplateByID(ctx, templateID)
+	if err != nil {
+		return nil, fmt.Errorf("loadDeltaMappings: load OOB base: %w", err)
+	}
+
+	var delta MappingDelta
+	if err := json.Unmarshal(overridesBytes, &delta); err != nil {
+		return nil, fmt.Errorf("loadDeltaMappings: parse overrides: %w", err)
+	}
+
+	merged := mergeMappings(baseMappings, &delta)
+	log.Printf("🔀 Delta merge: OOB %d + %d overrides → %d merged for %s/%s",
+		len(baseMappings), len(delta.Overrides), len(merged), interfaceID, messageType)
+	return merged, nil
+}

@@ -667,18 +667,44 @@ class WizardModel extends EventTarget {
             this.data.detectedMessageType = this.extractMessageType(result.data || result);
             this.data.lastModified = new Date().toISOString();
 
+            // ── Z-segment detection ──────────────────────────────────────────
+            // Run in parallel; failures are non-fatal (Z-segs are optional)
+            try {
+                const zDetectRes = await fetch('/api/zsegments/detect', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ rawMessage: hl7Content.trim() })
+                });
+                if (zDetectRes.ok) {
+                    const zJson = await zDetectRes.json();
+                    if (zJson.success) {
+                        this.data.detectedZSegments = zJson.detectedSegments || [];
+                        this.data.detectedZSegmentData = zJson.data || [];
+                        console.log(`🔍 Z-segment detection: ${this.data.detectedZSegments.length} found`, this.data.detectedZSegments);
+                    }
+                }
+            } catch (zErr) {
+                console.warn('⚠️ Z-segment detection failed (non-fatal):', zErr.message);
+                this.data.detectedZSegments = [];
+                this.data.detectedZSegmentData = [];
+            }
+
             // Emit parse completed event
             this.dispatchEvent(new CustomEvent('hl7Parsed', {
                 detail: {
                     parsedData: this.data.parsedHL7Data,
-                    messageType: this.data.detectedMessageType
+                    messageType: this.data.detectedMessageType,
+                    detectedZSegments: this.data.detectedZSegments || [],
+                    detectedZSegmentData: this.data.detectedZSegmentData || []
                 }
             }));
 
             return {
                 success: true,
                 data: this.data.parsedHL7Data,
-                messageType: this.data.detectedMessageType
+                messageType: this.data.detectedMessageType,
+                detectedZSegments: this.data.detectedZSegments || [],
+                detectedZSegmentData: this.data.detectedZSegmentData || []
             };
 
         } catch (error) {
