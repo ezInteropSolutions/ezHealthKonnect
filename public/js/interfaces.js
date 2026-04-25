@@ -3827,14 +3827,11 @@ function openMappingUpdateModal(interfaceId, interfaceName) {
 }
 
 async function applyMappingUpdate(interfaceId, messageType) {
-    // "Reset to OOB" — call the delta endpoint with empty atomicMappings so delta becomes null
-    // (pure OOB). This also clears the update notice server-side.
+    // "Reset to OOB" — DELETE the mapping delta to revert to pure OOB and clear the notice.
     try {
         const res = await fetch(`/api/fhir/interfaces/${interfaceId}/mapping-delta/${encodeURIComponent(messageType)}`, {
-            method: 'PUT',
-            credentials: 'include',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ atomicMappings: [] })
+            method: 'DELETE',
+            credentials: 'include'
         });
         if (res.ok) {
             delete mappingUpdates[interfaceId];

@@ -138,6 +138,57 @@ func (mc *MappingDeltaController) SaveMappingDelta(c *gin.Context) {
 	})
 }
 
+// ResetToOOB removes all overrides for an interface+messageType, reverting it to the
+// pure OOB template.  Also clears any pending update notice.
+func (mc *MappingDeltaController) ResetToOOB(c *gin.Context) {
+	interfaceID := c.Param("interfaceId")
+	messageType := c.Param("messageType")
+
+	if interfaceID == "" || messageType == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "interfaceId and messageType are required"})
+		return
+	}
+
+	ctx := c.Request.Context()
+
+	// Fetch the current default template id so we can keep the FK valid.
+	var templateID string
+	err := mc.db.QueryRowContext(ctx,
+		`SELECT id FROM hl7_fhir_templates WHERE message_type = $1 AND is_default = true LIMIT 1`,
+		messageType,
+	).Scan(&templateID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"success": false, "error": "no default template for " + messageType})
+		return
+	}
+
+	_, err = mc.db.ExecContext(ctx, `
+		INSERT INTO interface_message_mappings
+			(interface_id, message_type, uses_standard_template, standard_template_id,
+			 mapping_overrides, template_update_available, available_template_id, available_template_version)
+		VALUES ($1, $2, true, $3, NULL, false, NULL, NULL)
+		ON CONFLICT (interface_id, message_type) DO UPDATE SET
+			uses_standard_template    = true,
+			standard_template_id      = EXCLUDED.standard_template_id,
+			mapping_overrides         = NULL,
+			template_update_available = false,
+			available_template_id     = NULL,
+			available_template_version = NULL,
+			updated_at                = CURRENT_TIMESTAMP
+	`, interfaceID, messageType, templateID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success":     true,
+		"interfaceId": interfaceID,
+		"messageType": messageType,
+		"isPureOOB":   true,
+	})
+}
+
 // ListPendingMappingUpdates returns all interface mappings that have a template
 // update available, grouped by interface ID.
 // Response: { success, updates: { [interfaceId]: [{messageType, availableVersion}] } }
