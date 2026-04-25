@@ -33,6 +33,7 @@ func NewMappingDeltaController(db *sql.DB, svc *services.HL7FHIRTransformService
 //	GET    /api/fhir/mapping-updates                                          (all pending)
 func (mc *MappingDeltaController) RegisterRoutes(rg *gin.RouterGroup) {
 	rg.PUT("/interfaces/:interfaceId/mapping-delta/:messageType", mc.SaveMappingDelta)
+	rg.DELETE("/interfaces/:interfaceId/mapping-delta/:messageType", mc.ResetToOOB)
 	rg.GET("/interfaces/:interfaceId/effective-mapping/:messageType", mc.GetEffectiveMapping)
 	rg.DELETE("/interfaces/:interfaceId/mapping-update-notice/:messageType", mc.DismissUpdateNotice)
 	rg.GET("/mapping-updates", mc.ListPendingMappingUpdates)

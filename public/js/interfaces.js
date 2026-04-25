@@ -1198,11 +1198,11 @@ function getMiniActionButtons(interface) {
         ? `Template update available (v${updateVersions}) for: ${pendingUpdates.map(u => u.messageType).join(', ')}`
         : '';
     const updateBadge = pendingUpdates.length > 0
-        ? `<button class="act-btn act-btn-indigo" title="${updateTitle}"
+        ? `<button class="act-btn act-btn-indigo" style="position:relative;" title="${updateTitle}"
                    onclick="event.stopPropagation(); openMappingUpdateModal('${interface.id}', '${interface.name?.replace(/'/g, "\\'")}')">
                <i class="fas fa-arrow-up-from-bracket"></i>
                <span style="position:absolute;top:-4px;right:-4px;background:#7c3aed;color:white;border-radius:50%;font-size:9px;font-weight:700;width:14px;height:14px;display:flex;align-items:center;justify-content:center;line-height:1;">${pendingUpdates.length}</span>
-           </button>`.replace('class="act-btn act-btn-indigo"', 'class="act-btn act-btn-indigo" style="position:relative;"')
+           </button>`
         : '';
 
     return `
