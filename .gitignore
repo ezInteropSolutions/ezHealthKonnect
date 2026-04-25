@@ -37,6 +37,8 @@ go-api
 go-api.exe
 go-api-linux
 go-api-arm64
+go-api-new
+go-api-siu
 
 # ── Python ────────────────────────────────────────────────────────────────────
 *.pyc
