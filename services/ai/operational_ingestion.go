@@ -423,9 +423,249 @@ Status: RESOLVED`,
 	return err
 }
 
+// ─── IG Knowledge Ingestion ───────────────────────────────────────────────────
+
+// IngestIGMappings embeds HL7v2→FHIR IG data into the AI knowledge base:
+//   - ig_field_anchors       (field-level HL7→FHIR mappings, source_type "ig_anchors")
+//   - assembly_rules         (cross-resource wiring rules, source_type "ig_assemblyrules")
+//   - hl7_fhir_value_mappings (code translation tables, source_type "ig_valuesets")
+func (o *OperationalIngestionService) IngestIGMappings(ctx context.Context) []IngestionResult {
+	var results []IngestionResult
+	if r := o.ingestIGAnchors(ctx); r != nil {
+		results = append(results, *r)
+	}
+	if r := o.ingestAssemblyRules(ctx); r != nil {
+		results = append(results, *r)
+	}
+	if r := o.ingestValueMappings(ctx); r != nil {
+		results = append(results, *r)
+	}
+	return results
+}
+
+// ingestIGAnchors embeds ig_field_anchors grouped by segment into the AI KB.
+func (o *OperationalIngestionService) ingestIGAnchors(ctx context.Context) *IngestionResult {
+	result := &IngestionResult{SourceType: "ig_anchors"}
+	if o.db == nil {
+		return result
+	}
+
+	rows, err := o.db.QueryContext(ctx, `
+		SELECT segment, field_pos, fhir_resource, fhir_path, fhir_type, confidence, ig_source
+		FROM   ig_field_anchors
+		WHERE  is_active = true
+		ORDER  BY segment, field_pos
+	`)
+	if err != nil {
+		result.Errors = append(result.Errors, fmt.Sprintf("query ig_field_anchors: %v", err))
+		return result
+	}
+	defer rows.Close()
+
+	type anchorRow struct {
+		segment, fieldPos, fhirResource, fhirPath, fhirType, igSource string
+		confidence                                                      float64
+	}
+	bySegment := make(map[string][]anchorRow)
+	var segOrder []string
+
+	for rows.Next() {
+		var a anchorRow
+		var fhirType sql.NullString
+		if err := rows.Scan(&a.segment, &a.fieldPos, &a.fhirResource, &a.fhirPath, &fhirType, &a.confidence, &a.igSource); err != nil {
+			continue
+		}
+		a.fhirType = fhirType.String
+		if _, seen := bySegment[a.segment]; !seen {
+			segOrder = append(segOrder, a.segment)
+		}
+		bySegment[a.segment] = append(bySegment[a.segment], a)
+	}
+	if err := rows.Err(); err != nil {
+		result.Errors = append(result.Errors, fmt.Sprintf("rows error: %v", err))
+	}
+
+	for _, seg := range segOrder {
+		anchors := bySegment[seg]
+		result.FilesScanned++
+
+		var sb strings.Builder
+		sb.WriteString(fmt.Sprintf("HL7v2 to FHIR IG Field Anchors: %s Segment\n", seg))
+		sb.WriteString(fmt.Sprintf("Source: %s\n\n", anchors[0].igSource))
+		for _, a := range anchors {
+			typeHint := ""
+			if a.fhirType != "" {
+				typeHint = " (" + a.fhirType + ")"
+			}
+			sb.WriteString(fmt.Sprintf("  %s.%s → %s.%s%s [confidence %.2f]\n",
+				seg, a.fieldPos, a.fhirResource, a.fhirPath, typeHint, a.confidence))
+		}
+
+		ref := "ig_anchor:" + seg
+		_, _ = o.db.ExecContext(ctx,
+			`DELETE FROM ai_knowledge_chunks WHERE source_type = 'ig_anchors' AND source_ref = $1`, ref)
+
+		if _, err := o.embedding.IngestText(ctx, "ig_anchors", ref, "db:ig_field_anchors", sb.String(),
+			map[string]interface{}{
+				"entity_type": "ig_anchor",
+				"segment":     seg,
+			}); err != nil {
+			result.Errors = append(result.Errors, fmt.Sprintf("embed segment %s: %v", seg, err))
+		} else {
+			result.ChunksStored++
+		}
+	}
+
+	log.Printf("✅ AI KB — IG Anchors: %d segments, %d errors", result.FilesScanned, len(result.Errors))
+	return result
+}
+
+// ingestAssemblyRules embeds assembly_rules grouped by message_type into the AI KB.
+func (o *OperationalIngestionService) ingestAssemblyRules(ctx context.Context) *IngestionResult {
+	result := &IngestionResult{SourceType: "ig_assemblyrules"}
+	if o.db == nil {
+		return result
+	}
+
+	rows, err := o.db.QueryContext(ctx, `
+		SELECT message_type, rule_type, source_resource, target_resource, reference_path
+		FROM   assembly_rules
+		WHERE  is_active = true
+		ORDER  BY message_type, sequence
+	`)
+	if err != nil {
+		result.Errors = append(result.Errors, fmt.Sprintf("query assembly_rules: %v", err))
+		return result
+	}
+	defer rows.Close()
+
+	type ruleRow struct {
+		messageType, ruleType, sourceResource, targetResource, referencePath string
+	}
+	byMsgType := make(map[string][]ruleRow)
+	var msgOrder []string
+
+	for rows.Next() {
+		var r ruleRow
+		if err := rows.Scan(&r.messageType, &r.ruleType, &r.sourceResource, &r.targetResource, &r.referencePath); err != nil {
+			continue
+		}
+		if _, seen := byMsgType[r.messageType]; !seen {
+			msgOrder = append(msgOrder, r.messageType)
+		}
+		byMsgType[r.messageType] = append(byMsgType[r.messageType], r)
+	}
+	if err := rows.Err(); err != nil {
+		result.Errors = append(result.Errors, fmt.Sprintf("rows error: %v", err))
+	}
+
+	for _, msgType := range msgOrder {
+		rules := byMsgType[msgType]
+		result.FilesScanned++
+
+		var sb strings.Builder
+		sb.WriteString(fmt.Sprintf("FHIR Bundle Assembly Rules: %s\n\n", msgType))
+		for _, r := range rules {
+			sb.WriteString(fmt.Sprintf("  [%s] %s.%s → %s\n",
+				r.ruleType, r.sourceResource, r.referencePath, r.targetResource))
+		}
+
+		ref := "assembly_rules:" + msgType
+		_, _ = o.db.ExecContext(ctx,
+			`DELETE FROM ai_knowledge_chunks WHERE source_type = 'ig_assemblyrules' AND source_ref = $1`, ref)
+
+		if _, err := o.embedding.IngestText(ctx, "ig_assemblyrules", ref, "db:assembly_rules", sb.String(),
+			map[string]interface{}{
+				"entity_type":  "assembly_rules",
+				"message_type": msgType,
+			}); err != nil {
+			result.Errors = append(result.Errors, fmt.Sprintf("embed %s: %v", msgType, err))
+		} else {
+			result.ChunksStored++
+		}
+	}
+
+	log.Printf("✅ AI KB — Assembly Rules: %d message types, %d errors", result.FilesScanned, len(result.Errors))
+	return result
+}
+
+// ingestValueMappings embeds hl7_fhir_value_mappings grouped by hl7_table into the AI KB.
+func (o *OperationalIngestionService) ingestValueMappings(ctx context.Context) *IngestionResult {
+	result := &IngestionResult{SourceType: "ig_valuesets"}
+	if o.db == nil {
+		return result
+	}
+
+	rows, err := o.db.QueryContext(ctx, `
+		SELECT hl7_table, hl7_value, fhir_code, fhir_display, fhir_system, COALESCE(ig_source, 'v2-to-fhir-r4')
+		FROM   hl7_fhir_value_mappings
+		WHERE  is_active = true
+		ORDER  BY hl7_table, hl7_value
+	`)
+	if err != nil {
+		result.Errors = append(result.Errors, fmt.Sprintf("query hl7_fhir_value_mappings: %v", err))
+		return result
+	}
+	defer rows.Close()
+
+	type valueRow struct {
+		table, hl7Value, fhirCode, fhirDisplay, fhirSystem, igSource string
+	}
+	byTable := make(map[string][]valueRow)
+	var tableOrder []string
+
+	for rows.Next() {
+		var v valueRow
+		var fhirDisplay sql.NullString
+		if err := rows.Scan(&v.table, &v.hl7Value, &v.fhirCode, &fhirDisplay, &v.fhirSystem, &v.igSource); err != nil {
+			continue
+		}
+		v.fhirDisplay = fhirDisplay.String
+		if _, seen := byTable[v.table]; !seen {
+			tableOrder = append(tableOrder, v.table)
+		}
+		byTable[v.table] = append(byTable[v.table], v)
+	}
+	if err := rows.Err(); err != nil {
+		result.Errors = append(result.Errors, fmt.Sprintf("rows error: %v", err))
+	}
+
+	for _, table := range tableOrder {
+		values := byTable[table]
+		result.FilesScanned++
+
+		var sb strings.Builder
+		sb.WriteString(fmt.Sprintf("HL7 Table %s → FHIR Value Mappings\n", table))
+		sb.WriteString(fmt.Sprintf("Source: %s\n", values[0].igSource))
+		sb.WriteString(fmt.Sprintf("FHIR System: %s\n\n", values[0].fhirSystem))
+		for _, v := range values {
+			sb.WriteString(fmt.Sprintf("  HL7 \"%s\" → FHIR \"%s\" (%s)\n",
+				v.hl7Value, v.fhirCode, v.fhirDisplay))
+		}
+
+		ref := "hl7_valueset:" + table
+		_, _ = o.db.ExecContext(ctx,
+			`DELETE FROM ai_knowledge_chunks WHERE source_type = 'ig_valuesets' AND source_ref = $1`, ref)
+
+		if _, err := o.embedding.IngestText(ctx, "ig_valuesets", ref, "db:hl7_fhir_value_mappings", sb.String(),
+			map[string]interface{}{
+				"entity_type": "value_mapping",
+				"hl7_table":   table,
+				"fhir_system": values[0].fhirSystem,
+			}); err != nil {
+			result.Errors = append(result.Errors, fmt.Sprintf("embed table %s: %v", table, err))
+		} else {
+			result.ChunksStored++
+		}
+	}
+
+	log.Printf("✅ AI KB — HL7 Value Mappings: %d tables, %d errors", result.FilesScanned, len(result.Errors))
+	return result
+}
+
 // ─── Bulk rebuild ─────────────────────────────────────────────────────────────
 
-// IngestAll rebuilds all operational knowledge (interfaces + pipelines + errors).
+// IngestAll rebuilds all operational knowledge (interfaces + pipelines + errors + IG).
 func (o *OperationalIngestionService) IngestAll(ctx context.Context) []IngestionResult {
 	var results []IngestionResult
 
@@ -437,6 +677,9 @@ func (o *OperationalIngestionService) IngestAll(ctx context.Context) []Ingestion
 	}
 	if r := o.IngestErrorPatterns(ctx); r != nil {
 		results = append(results, *r)
+	}
+	for _, r := range o.IngestIGMappings(ctx) {
+		results = append(results, r)
 	}
 	return results
 }

@@ -13,7 +13,7 @@ import (
 
 // MessageParser interface - all parsers implement this
 type MessageParser interface {
-	Parse(rawContent string) (*models.ParserResult, error)
+	Parse(rawContent string) *models.ParserResult
 	GetSupportedFormat() models.MessageFormat
 	ValidateStructure(rawContent string) (*models.ValidationResult, error)
 }
@@ -58,6 +58,7 @@ func (pf *ParserFactory) GetParser(format models.MessageFormat) (MessageParser, 
 	}
 	return parser, nil
 }
+
 
 // GetAvailableParsers returns list of supported formats
 func (pf *ParserFactory) GetAvailableParsers() []models.MessageFormat {

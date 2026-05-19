@@ -793,20 +793,26 @@ class MessageManager {
         });
 
         if (transformation) {
+            const transformLabel = this._buildTransformLabel(
+                transformation.sourceFormat || input.interfaceSourceType,
+                transformation.targetFormat || input.interfaceTargetType
+            );
+            const steps_html = this._buildTransformStepsHtml(transformation.steps || []);
             steps.push({
                 id: 'lj-transform',
                 color: '#6366f1',
                 icon: 'M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15',
                 label: 'Transformation',
-                status: 'HL7 v2 → FHIR R4',
+                status: transformLabel,
                 statusOk: true,
                 time: transformation.parsedAt ? this.formatDateTime(transformation.parsedAt) : '—',
                 detail: `
                     <table class="table table-sm table-borderless mb-0" style="font-size:0.83rem;">
-                        <tr><th style="width:38%;color:#64748b;font-weight:500;">Format</th><td style="color:#1e293b;">HL7 v2 → FHIR R4</td></tr>
+                        <tr><th style="width:38%;color:#64748b;font-weight:500;">Format</th><td style="color:#1e293b;">${transformLabel}</td></tr>
                         <tr><th style="color:#64748b;font-weight:500;">Parse time</th><td style="color:#1e293b;"><strong>${transformation.parsingTimeMs || 0}ms</strong></td></tr>
                         <tr><th style="color:#64748b;font-weight:500;">Result</th><td><span class="badge bg-success">Success</span></td></tr>
-                    </table>`
+                    </table>
+                    ${steps_html}`
             });
         }
 
@@ -926,6 +932,58 @@ class MessageManager {
         const open = body.style.display === 'block';
         body.style.display = open ? 'none' : 'block';
         if (chevron) chevron.style.transform = open ? '' : 'rotate(180deg)';
+    }
+
+    _formatTypeName(type) {
+        if (!type) return null;
+        const t = type.toLowerCase();
+        if (['hl7v2', 'hl7', 'tcp', 'mllp'].includes(t)) return 'HL7 v2';
+        if (['fhir', 'fhir_rest', 'http_fhir'].includes(t)) return 'FHIR R4';
+        if (['json', 'http_json'].includes(t)) return 'JSON';
+        if (['xml', 'http_xml'].includes(t)) return 'XML';
+        if (['csv'].includes(t)) return 'CSV';
+        if (['database', 'postgresql'].includes(t)) return 'Database';
+        return type;
+    }
+
+    _buildTransformLabel(sourceFormat, targetFormat) {
+        const src = this._formatTypeName(sourceFormat);
+        const tgt = this._formatTypeName(targetFormat);
+        if (src && tgt) return `${src} → ${tgt}`;
+        if (src) return `${src} → ?`;
+        if (tgt) return `? → ${tgt}`;
+        return 'Transformation';
+    }
+
+    _buildTransformStepsHtml(steps) {
+        if (!steps || steps.length === 0) return '';
+        const rows = steps.map(s => {
+            const ok = s.success !== false && !s.error;
+            const badge = ok
+                ? `<span style="background:#dcfce7;color:#166534;padding:0.1rem 0.45rem;border-radius:3px;font-size:0.72rem;font-weight:600;">ok</span>`
+                : `<span style="background:#fee2e2;color:#991b1b;padding:0.1rem 0.45rem;border-radius:3px;font-size:0.72rem;font-weight:600;">failed</span>`;
+            const dur = s.duration_ms != null ? `${s.duration_ms}ms` : '—';
+            const errNote = s.error ? `<div style="color:#dc2626;font-size:0.75rem;margin-top:0.2rem;">${this.escapeHtml(s.error)}</div>` : '';
+            return `<tr>
+                <td style="padding:0.25rem 0.5rem;color:#374151;font-size:0.8rem;">${this.escapeHtml(s.step_name || s.step_type || '—')}</td>
+                <td style="padding:0.25rem 0.5rem;color:#6b7280;font-size:0.78rem;font-family:monospace;">${this.escapeHtml(s.step_type || '—')}</td>
+                <td style="padding:0.25rem 0.5rem;color:#6b7280;font-size:0.78rem;">${dur}</td>
+                <td style="padding:0.25rem 0.5rem;">${badge}${errNote}</td>
+            </tr>`;
+        }).join('');
+        return `
+            <div style="margin-top:0.75rem;">
+                <div style="font-size:0.7rem;font-weight:700;text-transform:uppercase;color:#94a3b8;margin-bottom:0.4rem;">Pipeline Steps</div>
+                <table style="width:100%;border-collapse:collapse;">
+                    <thead><tr style="border-bottom:1px solid #e5e7eb;">
+                        <th style="padding:0.25rem 0.5rem;text-align:left;font-size:0.72rem;color:#9ca3af;font-weight:500;">Step</th>
+                        <th style="padding:0.25rem 0.5rem;text-align:left;font-size:0.72rem;color:#9ca3af;font-weight:500;">Type</th>
+                        <th style="padding:0.25rem 0.5rem;text-align:left;font-size:0.72rem;color:#9ca3af;font-weight:500;">Duration</th>
+                        <th style="padding:0.25rem 0.5rem;text-align:left;font-size:0.72rem;color:#9ca3af;font-weight:500;">Status</th>
+                    </tr></thead>
+                    <tbody>${rows}</tbody>
+                </table>
+            </div>`;
     }
 
 

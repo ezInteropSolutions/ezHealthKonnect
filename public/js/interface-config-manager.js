@@ -403,11 +403,19 @@ class BasicInterfaceConfigManager {
         // This ensures Wizard and Edit modal use the same logic
         const configData = InterfaceConfigComponents.collectFormData(document, 'edit');
 
+        // Read connector step IDs stored by populateEditForm — these target transformation_steps directly
+        const stepIds = document.getElementById('editConnectorStepIds');
+        const inboundStepId = stepIds?.dataset.inboundStepId || null;
+        const outboundStepId = stepIds?.dataset.outboundStepId || null;
+
         const formData = {
             id: document.getElementById('editInterfaceId')?.value || '',
             name: document.getElementById('editInterfaceName')?.value || '',
             description: document.getElementById('editInterfaceDescription')?.value || '',
             status: document.getElementById('editStatus')?.value || 'inactive',
+            // Connector step IDs — server writes directly to transformation_steps rows
+            inboundStepId: inboundStepId || undefined,
+            outboundStepId: outboundStepId || undefined,
             // Use unified component data
             sourceType: configData.sourceType,
             sourceConnectivity: configData.sourceConnectivity,

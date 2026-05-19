@@ -59,6 +59,9 @@ class WizardModel extends EventTarget {
             mappingTemplate: 'adt_a01_basic', // OOB: Built-in template
             customMappings: [],            // User customizations
 
+            // Message family filter (null = accept all)
+            acceptedMessageFamilies: null,
+
             // Step 6: Summary and Completion
             status: 'draft',               // OOB: Start as draft
 
@@ -143,9 +146,11 @@ class WizardModel extends EventTarget {
                 return {
                     name: this.data.name,
                     description: this.data.description,
+                    transformationFlow: this.data.transformationFlow,
                     sourceType: this.data.sourceType,
                     sourceConnectivity: this.data.sourceConnectivity,
-                    sourceConfig: this.data.sourceConfig
+                    sourceConfig: this.data.sourceConfig,
+                    acceptedMessageFamilies: this.data.acceptedMessageFamilies
                 };
             case 2:
                 return {
@@ -164,8 +169,11 @@ class WizardModel extends EventTarget {
                     useSampleHL7: this.data.useSampleHL7,
                     parsedHL7Data: this.data.parsedHL7Data,
                     detectedMessageType: this.data.detectedMessageType,
+                    transformationFlow: this.data.transformationFlow,
                     // Include FHIR transformation result for mapping display
-                    fhirTransformResult: this.data.fhirTransformResult
+                    fhirTransformResult: this.data.fhirTransformResult,
+                    // Include family filter for message-type preview selector
+                    acceptedMessageFamilies: this.data.acceptedMessageFamilies
                 };
             case 4:
                 return {
@@ -606,6 +614,9 @@ class WizardModel extends EventTarget {
 
             // Processing flow — drives which transform steps the pipeline service creates
             transformationFlow: this.data.transformationFlow || 'hl7_to_fhir',
+
+            // Message family accept list (null = accept all)
+            acceptedMessageFamilies: this.data.acceptedMessageFamilies || null,
 
             // Additional metadata
             templateUsed: this.data.mappingTemplate,

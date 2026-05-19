@@ -269,7 +269,10 @@ class WizardController {
                 targetConnectivity: targetMapping.connectivity,
                 messageType: messageType,
                 status: 'active',
-                
+                acceptedMessageFamilies: Array.isArray(wizardData.acceptedMessageFamilies) && wizardData.acceptedMessageFamilies.length > 0
+                    ? wizardData.acceptedMessageFamilies
+                    : null,
+
                 // Clean, separated configs
                 sourceConfig: sourceConfig,
                 targetConfig: targetConfig,
@@ -370,6 +373,7 @@ class WizardController {
                 targetConnectivity: interfaceData.targetConnectivity,
                 messageType: interfaceData.messageType,
                 status: interfaceData.status,
+                acceptedMessageFamilies: interfaceData.acceptedMessageFamilies || null,
                 sourceConfig: interfaceData.sourceConfig,
                 targetConfig: interfaceData.targetConfig,
                 transformationMapping: null  // DEPRECATED - using pipeline architecture
@@ -1190,14 +1194,27 @@ class WizardController {
             // Create transformation pipeline with connector steps
             try {
                 console.log('📦 Creating transformation pipeline with connector steps...');
+                // When ConnectorConfigBuilder was used, its inner config (sourceConnectorConfig.config)
+                // holds the user-entered values (e.g. custom port).  The legacy flat sourceConfig has
+                // OOB defaults (port: 2575) and must not silently override what the user typed.
+                // Merge order: legacy flat < ConnectorConfigBuilder inner config (builder wins on conflicts).
+                const resolvedSourceConfig = {
+                    ...(interfaceData.sourceConfig || {}),
+                    ...(interfaceData.sourceConnectorConfig?.config || {})
+                };
+                const resolvedTargetConfig = {
+                    ...(interfaceData.targetConfig || {}),
+                    ...(interfaceData.targetConnectorConfig?.config || {})
+                };
+
                 const connectivityInfo = {
                     // Prefer the full connector type name from the builder (e.g. 'http_fhir_inbound')
                     // so SOURCE_TYPE_MAP can select the correct typeName without relying on the
                     // lossy legacy string ('http' covers both http_rest and http_fhir_inbound).
                     sourceConnectivity: interfaceData.sourceConnectorConfig?.connectorType || interfaceData.sourceConnectivity,
-                    sourceConfig: interfaceData.sourceConfig,
+                    sourceConfig: resolvedSourceConfig,
                     targetConnectivity: interfaceData.targetConnectorConfig?.connectorType || interfaceData.targetConnectivity,
-                    targetConfig: interfaceData.targetConfig,
+                    targetConfig: resolvedTargetConfig,
                     sourceType: interfaceData.sourceType,   // e.g. 'hl7v2', 'fhir', 'csv'
                     targetType: interfaceData.targetType,   // e.g. 'fhir', 'hl7v2', 'database'
                     transformationFlow: wizardData.transformationFlow  // e.g. 'hl7_to_fhir', 'fhir_receiver', 'sink_only'

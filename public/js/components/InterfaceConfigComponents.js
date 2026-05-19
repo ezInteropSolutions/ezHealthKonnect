@@ -2140,7 +2140,8 @@ class InterfaceConfigComponents {
         const config = {};
 
         // Get connectivity type to determine which fields to collect
-        const connectivityEl = container.querySelector(`#${idPrefix}sourceConnectivity`);
+        const connectivityEl = container.querySelector(`#${prefix}Connectivity`) ||
+                               container.querySelector(`#${idPrefix}sourceConnectivity`);
         const connectivity = connectivityEl?.value || 'tcp';
 
         console.log(`InterfaceConfigComponents.collectSourceConfig: prefix="${prefix}", connectivity="${connectivity}"`);
@@ -2149,9 +2150,11 @@ class InterfaceConfigComponents {
         const hostEl = container.querySelector(`#${prefix}Host`);
         const portEl = container.querySelector(`#${prefix}Port`);
 
-        // If fields don't exist in DOM (e.g., Step 2 after HL7 parsing), return existing config from wizard model
-        if (!hostEl && !portEl && window.wizardController?.model?.data?.sourceConfig) {
-            console.log(`⚠️ Source config fields not in DOM, preserving existing config from model`);
+        console.log(`[PORT DEBUG] Looking for #${prefix}Port — found: ${!!portEl}, value: ${portEl?.value}`);
+
+        // If fields don't exist in DOM AND we're in the wizard context (not edit modal), preserve from model
+        if (!hostEl && !portEl && !idPrefix && window.wizardController?.model?.data?.sourceConfig) {
+            console.log(`⚠️ Source config fields not in DOM (wizard context), preserving existing config from model`);
             return window.wizardController.model.data.sourceConfig;
         }
 

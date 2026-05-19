@@ -15,6 +15,7 @@ package mapping
 
 import (
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 
@@ -77,6 +78,9 @@ var segmentToResource = map[string]string{
 	"TXA": "DocumentReference",
 	"SCH": "Appointment",
 	"AIS": "Appointment",
+	"AIG": "Appointment", // General Resource → participant actor
+	"AIL": "Appointment", // Location Resource → participant actor
+	"AIP": "Appointment", // Personnel Resource → participant actor
 	"RXA": "Immunization",
 	"RXR": "Immunization",
 	"STF": "Practitioner",
@@ -95,10 +99,187 @@ var segmentToResource = map[string]string{
 	"ZPD": "Patient",
 }
 
+// ── Field Classification ────────────────────────────────────────────────────
+//
+// FieldCategory classifies the semantic role of an HL7 v2 field for FHIR
+// mapping purposes. Non-Mappable categories are skipped by GenerateSegment so
+// they never appear in generated templates.
+//
+// Classification is name-driven (field.Name from the HL7 schema), not
+// position-driven, so it works universally across message types and versions.
+// Position-based exceptions (OBX.2) are kept only where the name alone is
+// insufficient — and documented inline.
+type FieldCategory int
+
+const (
+	// FieldCategoryMappable is the default: the field should be included in
+	// the generated FHIR mapping.
+	FieldCategoryMappable FieldCategory = iota
+
+	// FieldCategorySetID covers "Set ID-*" fields (SI data type, sequential
+	// integer position). They identify which repetition of a segment group
+	// this is and have no FHIR counterpart.
+	FieldCategorySetID
+
+	// FieldCategoryActionCode covers "Segment Action Code" fields
+	// (A=add, D=delete, U=update). They are CRUD verbs, not content.
+	FieldCategoryActionCode
+
+	// FieldCategoryDispatchControl covers fields whose value is read at
+	// runtime to select a dispatch path rather than stored as content.
+	// OBX.2 "Value Type" is the canonical example: its value (NM, ST, CWE…)
+	// drives which FHIR value[x] variant OBX.5 maps to.
+	FieldCategoryDispatchControl
+
+	// FieldCategoryUnitModifier covers "*Units" qualifier fields. The unit
+	// string modifies a sibling numeric field (e.g. SCH.10 qualifies SCH.9
+	// duration). Emitting it as a standalone mapping creates false collisions
+	// with CodeableConcept targets like Appointment.appointmentType.
+	FieldCategoryUnitModifier
+
+	// FieldCategoryContactInfo covers scheduling contact / entered-by person
+	// fields in SCH, AIS, AIG, AIL, and AIP. These are XCN/XTN/XAD fields
+	// representing the person who requested or entered the appointment — not
+	// clinical content. Mapping them produces raw "id^family^given^" strings
+	// in FHIR Reference.display, which violates the no-caret rule.
+	FieldCategoryContactInfo
+
+	// FieldCategoryResourceStatus covers "Filler Status Code" / "Placer
+	// Status Code" in scheduling resource segments AIS/AIG/AIL/AIP. These
+	// carry per-resource accept/decline status (not the appointment status),
+	// and when mapped heuristically they overwrite Appointment.reasonCode
+	// with values like "Scheduled".
+	FieldCategoryResourceStatus
+
+	// FieldCategoryProtocolDelimiter covers MSH.1 "Field Separator" (always
+	// the literal "|" character) and MSH.2 "Encoding Characters" (always
+	// "^~\&"). These define the HL7 encoding syntax; they are not content
+	// and have no FHIR counterpart. Without this skip the heuristic maps
+	// them to artefact paths like MessageHeader.implicitRules.
+	FieldCategoryProtocolDelimiter
+)
+
+// classifyField returns the semantic category of an HL7 field given its
+// parent segment name, field number, and human-readable field name from the
+// schema. The caller should skip any field whose category is not
+// FieldCategoryMappable.
+func classifyField(segmentName, fieldNum, fieldName string) FieldCategory {
+	lower := strings.ToLower(fieldName)
+
+	if isSetIDField(lower) {
+		return FieldCategorySetID
+	}
+	if isActionCodeField(lower) {
+		return FieldCategoryActionCode
+	}
+	if isDispatchControlField(segmentName, lower) {
+		return FieldCategoryDispatchControl
+	}
+	if isUnitModifierField(lower) {
+		return FieldCategoryUnitModifier
+	}
+	if isSchedulingContactField(segmentName, lower) {
+		return FieldCategoryContactInfo
+	}
+	if isResourceStatusField(segmentName, lower) {
+		return FieldCategoryResourceStatus
+	}
+	if isProtocolDelimiterField(segmentName, lower) {
+		return FieldCategoryProtocolDelimiter
+	}
+	return FieldCategoryMappable
+}
+
+// isSetIDField returns true for "Set ID-*" fields (e.g. "Set ID - PID",
+// "Set ID – AIS"). These are sequential position integers with no FHIR meaning.
+func isSetIDField(lowerName string) bool {
+	return strings.HasPrefix(lowerName, "set id")
+}
+
+// isActionCodeField returns true for "Segment Action Code" fields.
+func isActionCodeField(lowerName string) bool {
+	return lowerName == "segment action code"
+}
+
+// isDispatchControlField returns true for fields whose value selects a
+// runtime dispatch path rather than carrying mappable content.
+// OBX.2 "Value Type" is the only current case; it is also position-guarded
+// because some older schema files use different names for this field.
+func isDispatchControlField(segmentName, lowerName string) bool {
+	if segmentName == "OBX" && (lowerName == "value type" || fieldNameIsOBX2Alias(lowerName)) {
+		return true
+	}
+	return false
+}
+
+// fieldNameIsOBX2Alias catches alternate names for OBX.2 seen in older schema
+// files ("observation value type", "obx-2 value type", etc.).
+func fieldNameIsOBX2Alias(lowerName string) bool {
+	return strings.Contains(lowerName, "value type")
+}
+
+// isUnitModifierField returns true for fields whose name ends with "units"
+// or "unit", indicating they qualify a sibling numeric field rather than
+// carrying standalone mappable content (e.g. "Appointment Duration Units",
+// "Duration Units", "Observation Units").
+func isUnitModifierField(lowerName string) bool {
+	return strings.HasSuffix(lowerName, " units") ||
+		strings.HasSuffix(lowerName, " unit") ||
+		strings.HasSuffix(lowerName, "units") // no leading space variant
+}
+
+// isSchedulingContactField returns true for contact-person, entered-by, and
+// requesting-person fields in scheduling segments. These XCN/XTN/XAD fields
+// represent administrative people, not clinical content. Mapping them
+// produces raw "id^family^given^" composite strings in FHIR output.
+func isSchedulingContactField(segmentName, lowerName string) bool {
+	switch segmentName {
+	case "SCH", "AIS", "AIG", "AIL", "AIP":
+	default:
+		return false
+	}
+	return strings.Contains(lowerName, "contact") ||
+		strings.Contains(lowerName, "entered by") ||
+		strings.Contains(lowerName, "requesting person") ||
+		strings.Contains(lowerName, "filler contact") ||
+		strings.Contains(lowerName, "placer contact")
+}
+
+// isResourceStatusField returns true for per-resource status fields in
+// scheduling resource segments (AIS/AIG/AIL/AIP). "Filler Status Code" and
+// "Placer Status Code" carry accept/decline/booked status at the resource
+// level; they are not the appointment status and should not overwrite it.
+// SCH.25 "Filler Status Code" is the appointment-level status and IS mappable
+// — so we restrict this classification to resource segments only.
+func isResourceStatusField(segmentName, lowerName string) bool {
+	switch segmentName {
+	case "AIS", "AIG", "AIL", "AIP":
+	default:
+		return false
+	}
+	return strings.Contains(lowerName, "filler status") ||
+		strings.Contains(lowerName, "placer status")
+}
+
+// isProtocolDelimiterField returns true for MSH.1 "Field Separator" and
+// MSH.2 "Encoding Characters". These fields define the HL7 wire encoding
+// and are never content — their literal values ("|" and "^~\&") must not
+// be mapped to FHIR elements.
+func isProtocolDelimiterField(segmentName, lowerName string) bool {
+	if segmentName != "MSH" {
+		return false
+	}
+	return lowerName == "field separator" || lowerName == "encoding characters"
+}
+
 // Generator orchestrates schema lookups to produce position maps.
 type Generator struct {
 	hl7Loader  *hl7.RealSchemaLoader
 	fhirLoader *fhir.FHIRSchemaLoader
+	// dbAnchors optionally overrides / extends the hardcoded anchor table.
+	// Loaded from ig_field_anchors by IGAnchorService; nil = use hardcoded only.
+	// Keyed "SEGMENT.FIELD" → []Candidate, same format as knownAnchorsR4.
+	dbAnchors map[string][]Candidate
 }
 
 // NewGenerator returns a Generator wired to the process-global schema loaders.
@@ -109,6 +290,29 @@ func NewGenerator() *Generator {
 		hl7Loader:  hl7.GetRealSchemaLoader(),
 		fhirLoader: fhir.GetFHIRSchemaLoader(),
 	}
+}
+
+// WithDBAnchors injects IG-sourced anchors from the database.
+// DB anchors take priority over the hardcoded knownAnchorsR4/R5 tables —
+// they carry confidence=1.0 and source="ig_db".
+func (g *Generator) WithDBAnchors(anchors map[string][]Candidate) *Generator {
+	g.dbAnchors = anchors
+	return g
+}
+
+// matchField resolves candidates for one field, checking DB anchors first.
+func (g *Generator) matchField(
+	segmentName, fieldKey, fieldName, hl7DataType, fhirResource string,
+	fhirSchema *fhir.FHIRSchema,
+	fhirVer FHIRVersion,
+) []Candidate {
+	key := strings.ToUpper(segmentName) + "." + fieldNumber(fieldKey)
+	if g.dbAnchors != nil {
+		if anchors, ok := g.dbAnchors[key]; ok && len(anchors) > 0 {
+			return anchors
+		}
+	}
+	return Match(segmentName, fieldKey, fieldName, hl7DataType, fhirResource, fhirSchema, fhirVer)
 }
 
 // GenerateSegment produces a position map for one segment → resource pairing.
@@ -162,13 +366,21 @@ func (g *Generator) GenerateSegment(
 			continue
 		}
 
-		candidates := Match(
+		// Skip fields that carry no mappable FHIR content: Set IDs, action codes,
+		// dispatch selectors, unit modifiers, scheduling contact persons, and
+		// per-resource status codes. See classifyField for the full taxonomy.
+		if classifyField(segmentName, fieldNumber(fieldKey), fieldDef.Name) != FieldCategoryMappable {
+			continue
+		}
+
+		candidates := g.matchField(
 			segmentName,
 			fieldKey,
 			fieldDef.Name,
 			fieldDef.DataType,
 			fhirResource,
 			fhirSchema,
+			fhirVer,
 		)
 		if len(candidates) == 0 {
 			continue
@@ -177,6 +389,12 @@ func (g *Generator) GenerateSegment(
 		best := candidates[0]
 		typeEntry := LookupForVersion(fieldDef.DataType, fhirVer)
 
+		// Anchors are verified spec-level; heuristic passes get a minimum floor.
+		minConf := 0.70
+		if best.Source == "anchor" {
+			minConf = 0.0 // anchors carry their own calibrated value
+		}
+
 		gm := GeneratedMapping{
 			HL7Path:      fieldKey,
 			FHIRPath:     best.FHIRPath,
@@ -184,7 +402,7 @@ func (g *Generator) GenerateSegment(
 			FHIRDataType: typeEntry.FHIRType,
 			Transform:    fhirAwareTransformKey(typeEntry.TransformKey, fieldDef.DataType, best.FHIRPath),
 			Required:     fieldDef.Usage == "R",
-			Confidence:   best.Confidence,
+			Confidence:   math.Max(best.Confidence, minConf),
 			Notes:        buildNotes(fieldDef.Name, fieldDef.DataType, typeEntry.Notes),
 		}
 
@@ -321,9 +539,10 @@ func (g *Generator) generateComponents(
 	}
 
 	var result []GeneratedMapping
+	anchorTable := anchorsForVersion(fhirVer)
 	for compKey, compDef := range fieldDef.Components {
 		subPath := fieldKey + "." + componentPosition(compKey)
-		anchor := knownAnchors[strings.ToUpper(subPath)]
+		anchor := anchorTable[strings.ToUpper(subPath)]
 		if len(anchor) == 0 {
 			continue // only emit component mappings we have anchors for
 		}
@@ -458,6 +677,8 @@ func buildNotes(fieldName, hl7DataType, typeNotes string) string {
 //  3. FHIR path ends in ".value" or ".id" + HL7 type is coded element (CE/CWE/CNE) → ce_code_only
 //  4. FHIR path contains "meta.tag" and ends in ".code" + HL7 type is CE → ce_code_only
 //  5. FHIR path is "response.code" → mfi_response_level
+//  8. XCN/XPN type + FHIR path ends in ".display" → xcn_to_reference
+//  9. CE/CWE/CNE/XCN/XPN type + FHIR path ends in ".actor.display" → xcn_to_reference
 //
 // Anything else falls through to the base key.
 func fhirAwareTransformKey(baseKey, hl7DataType, fhirPath string) string {
@@ -498,6 +719,36 @@ func fhirAwareTransformKey(baseKey, hl7DataType, fhirPath string) string {
 	// Rule 5: MessageHeader.response.code uses MFI response level mapping
 	if strings.HasSuffix(lowerPath, "response.code") {
 		return "mfi_response_level"
+	}
+
+	// Rule 6: Observation.value[x] — runtime dispatch by OBX.2 value type.
+	// The engine reads OBX.2 at message-processing time and injects it as
+	// "value_type" in TransformationRules before calling transformOBXValueByType.
+	if strings.HasSuffix(fhirPath, "value[x]") {
+		return "obx_value_by_type"
+	}
+
+	// Rule 7: Appointment.status — SCH.25 codes ("Scheduled","Arrived","Cancelled",…)
+	// are HL7 v2 scheduling vocabulary; FHIR requires "booked","arrived","cancelled",…
+	if strings.HasSuffix(fhirPath, "Appointment.status") || strings.HasSuffix(fhirPath, "appointment.status") {
+		return "siu_appointment_status"
+	}
+
+	// Rule 8: XCN/XPN composite mapped to any FHIR .display slot must always use
+	// xcn_to_reference so the name components are extracted correctly before storage.
+	// This guards against stale templates that were generated before this rule existed.
+	if (upperType == "XCN" || upperType == "XPN") && strings.HasSuffix(lowerPath, ".display") {
+		return "xcn_to_reference"
+	}
+
+	// Rule 9: CE/CWE/CNE/XCN/XPN fields mapped to .actor.display must produce a
+	// clean display string, not a CodeableConcept. xcn_to_reference handles both
+	// XCN-style (id^family^given) and CE-style (code^text) composites identically.
+	if strings.HasSuffix(lowerPath, ".actor.display") {
+		switch upperType {
+		case "CE", "CWE", "CNE", "XCN", "XPN":
+			return "xcn_to_reference"
+		}
 	}
 
 	return baseKey

@@ -12,34 +12,39 @@ import (
 	"ezhealthkonnect/hl7"
 	"ezhealthkonnect/models"
 	"ezhealthkonnect/services"
+	"ezhealthkonnect/services/parsers"
 
 	"github.com/gin-gonic/gin"
 )
 
 // PipelineTestController handles pipeline testing operations
 type PipelineTestController struct {
-	db                *sql.DB
-	transformService  *services.HL7FHIRTransformServiceV3
-	pipelineService   *services.TransformationPipelineService
+	db               *sql.DB
+	transformService *services.HL7FHIRTransformServiceV3
+	pipelineService  *services.TransformationPipelineService
+	parserRegistry   *parsers.ParserRegistry
 }
 
 // NewPipelineTestController creates a new pipeline test controller
 func NewPipelineTestController(db *sql.DB) *PipelineTestController {
 	transformService := services.NewHL7FHIRTransformServiceV3(db)
-	pipelineService := services.NewTransformationPipelineService(db, nil) // nil credStore: unused controller
+	pipelineService := services.NewTransformationPipelineService(db, nil)
 	return &PipelineTestController{
 		db:               db,
 		transformService: transformService,
 		pipelineService:  pipelineService,
+		parserRegistry:   parsers.NewParserRegistry(),
 	}
 }
 
 // TestPipelineRequest represents the request body for testing a pipeline
 type TestPipelineRequest struct {
-	PipelineID   string                 `json:"pipeline_id"`
-	Pipeline     map[string]interface{} `json:"pipeline"`
-	TestMessage  string                 `json:"test_message"`
-	InputData    map[string]interface{} `json:"input_data"`
+	PipelineID    string                 `json:"pipeline_id"`
+	Pipeline      map[string]interface{} `json:"pipeline"`
+	SampleMessage string                 `json:"sample_message"`
+	TestMessage   string                 `json:"test_message"`   // legacy alias
+	MessageFormat string                 `json:"message_format"` // "auto","hl7v2","fhir","json","xml","ccda","edi"
+	InputData     map[string]interface{} `json:"input_data"`
 }
 
 // TestPipelineResponse represents the response from testing a pipeline
@@ -54,13 +59,13 @@ type TestPipelineResponse struct {
 
 // StepExecutionResult represents the result of executing a single step
 type StepExecutionResult struct {
-	StepID       string                 `json:"step_id"`
-	StepName     string                 `json:"step_name"`
-	StepType     string                 `json:"step_type"`
-	Success      bool                   `json:"success"`
-	Output       map[string]interface{} `json:"output"`
-	Error        string                 `json:"error,omitempty"`
-	ExecutionMs  int64                  `json:"execution_ms"`
+	StepID      string                 `json:"step_id"`
+	StepName    string                 `json:"step_name"`
+	StepType    string                 `json:"step_type"`
+	Success     bool                   `json:"success"`
+	Output      map[string]interface{} `json:"output"`
+	Error       string                 `json:"error,omitempty"`
+	ExecutionMs int64                  `json:"execution_ms"`
 }
 
 // TestPipeline tests a pipeline with sample data
@@ -74,8 +79,14 @@ func (c *PipelineTestController) TestPipeline(ctx *gin.Context) {
 		return
 	}
 
-	log.Printf("🧪 Testing pipeline: pipeline_id=%s, test_message_length=%d",
-		req.PipelineID, len(req.TestMessage))
+	// Accept sample_message (frontend) or test_message (legacy)
+	rawMessage := req.SampleMessage
+	if rawMessage == "" {
+		rawMessage = req.TestMessage
+	}
+
+	log.Printf("🧪 Testing pipeline: pipeline_id=%s, message_length=%d, format=%s",
+		req.PipelineID, len(rawMessage), req.MessageFormat)
 
 	// Validate pipeline_id
 	if req.PipelineID == "" {
@@ -86,11 +97,11 @@ func (c *PipelineTestController) TestPipeline(ctx *gin.Context) {
 		return
 	}
 
-	// Validate test message
-	if req.TestMessage == "" {
+	// Validate message
+	if rawMessage == "" {
 		ctx.JSON(http.StatusBadRequest, gin.H{
 			"success": false,
-			"error":   "test_message is required",
+			"error":   "sample_message is required",
 		})
 		return
 	}
@@ -119,35 +130,63 @@ func (c *PipelineTestController) TestPipeline(ctx *gin.Context) {
 
 	log.Printf("🚀 Executing pipeline via TransformationPipelineService (supports routing)")
 
-	// Parse HL7 message into structured data (enhancedSegments) for pipeline steps
+	// Auto-detect or use specified format
+	detectedFormat := req.MessageFormat
+	if detectedFormat == "" || detectedFormat == "auto" {
+		fd := services.NewFormatDetector()
+		detection := fd.DetectFormat(rawMessage)
+		detectedFormat = string(detection.DetectedFormat)
+		log.Printf("🔍 [Test] Auto-detected format: %s (confidence: %.2f)", detectedFormat, detection.Confidence)
+	} else {
+		log.Printf("📋 [Test] Using specified format: %s", detectedFormat)
+	}
+
+	// All formats share the same root envelope approach:
+	//   - format-specific data is merged at the ROOT of inputData
+	//   - _format is set so enrichMessageEnvelope() builds _semantic_index / _sensitivity_map
+	//   - raw content is preserved under message.raw_content (not replaced)
 	inputData := map[string]interface{}{
+		"_format": detectedFormat,
 		"message": map[string]interface{}{
-			"raw_content": req.TestMessage,
+			"raw_content":     rawMessage,
+			"detected_format": detectedFormat,
 		},
 	}
 
-	// Try to parse the HL7 message to provide structured data to pipeline steps
-	parsedMsg := hl7.ParseWithRealSchema(req.TestMessage)
-	if parsedMsg != nil && parsedMsg.Success {
-		log.Printf("✅ [Test] HL7 message parsed successfully with real schema")
+	// Parse and enrich the message using the format-agnostic registry.
+	// ParsedJSON carries format-specific structures (enhancedSegments for HL7,
+	// raw resource fields for FHIR) so existing executors keep working.
+	// EnhancedFields provides the uniform schema-annotated view for new consumers.
+	parseResult := c.parserRegistry.Get(detectedFormat).Parse(rawMessage)
 
-		// Convert struct to map[string]interface{} via JSON round-trip
-		parsedJSON, jsonErr := json.Marshal(parsedMsg)
-		if jsonErr == nil {
-			var parsedMap map[string]interface{}
-			if json.Unmarshal(parsedJSON, &parsedMap) == nil {
-				// Merge parsed data into inputData for pipeline steps
-				for key, value := range parsedMap {
-					inputData[key] = value
-				}
-				log.Printf("✅ [Test] Merged parsed HL7 into inputData (keys: %v)", getMapKeys(parsedMap))
-			}
+	// Merge ParsedJSON at root (format-specific backward-compat data)
+	for k, v := range parseResult.ParsedJSON {
+		inputData[k] = v
+	}
+
+	// Add format-agnostic enriched fields
+	if len(parseResult.EnhancedFields) > 0 {
+		inputData["enhancedFields"] = parseResult.EnhancedFields
+		inputData["fieldOrder"] = parseResult.FieldOrder
+	}
+	if parseResult.TypeName != "" {
+		inputData["typeName"] = parseResult.TypeName
+		inputData["typeDescription"] = parseResult.TypeDescription
+	}
+
+	// XML-based formats: signal content type for downstream steps
+	if detectedFormat == "xml" || detectedFormat == "ccda" || detectedFormat == "hl7v3" {
+		if msgMap, ok := inputData["message"].(map[string]interface{}); ok {
+			msgMap["content_type"] = "text/xml"
 		}
+	}
+
+	if parseResult.Success {
+		log.Printf("✅ [Test] %s parsed: type=%s fields=%d schemaLoaded=%v",
+			detectedFormat, parseResult.Metadata.MessageType,
+			len(parseResult.EnhancedFields), parseResult.TypeName != "")
 	} else {
-		log.Printf("⚠️  [Test] HL7 message parsing failed - pipeline will use raw content only")
-		if parsedMsg != nil {
-			log.Printf("   Error: %s", parsedMsg.Error)
-		}
+		log.Printf("⚠️  [Test] %s parse error: %s — raw content preserved", detectedFormat, parseResult.Error)
 	}
 
 	// Execute pipeline with real service (supports routing)
@@ -186,10 +225,11 @@ func (c *PipelineTestController) TestPipeline(ctx *gin.Context) {
 
 	// Simplified response format: input, output, steps
 	response := gin.H{
-		"success": result.Status == "completed",
-		"input":   result.Input,   // Parsed HL7 message context
-		"output":  result.Output,  // Final transformed message context
-		"steps":   steps,          // Keyed by step name for easy lookup
+		"success":         result.Status == "completed",
+		"detected_format": detectedFormat,
+		"input":           result.Input,
+		"output":          result.Output,
+		"steps":           steps,
 	}
 
 	if result.Status == "failed" && len(result.Errors) > 0 {

@@ -503,17 +503,17 @@ func (tps *TransformationPipelineService) ExecutePipeline(
 		// Add step log to execution log
 		result.ExecutionLog = append(result.ExecutionLog, stepLog)
 
-		// For connector steps: append delivery details to the NDJSON processing log
-		// so they appear in the message detail Logs tab.
-		if tps.objectStorage != nil && strings.HasPrefix(step.StepType, "connector.") {
+		// Append a structured log entry for every pipeline step so the Logs tab
+		// shows exactly which step the message reached and whether it succeeded.
+		// connector.inbound is skipped (logged at receive time by the engine).
+		if tps.objectStorage != nil && step.StepType != "connector.inbound" {
 			ifaceIDForLog, _ := ctx.Value("interface_id").(string)
 			msgIDForLog, _ := ctx.Value("message_id").(string)
 			if ifaceIDForLog == "" {
 				ifaceIDForLog = pipeline.InterfaceID
 			}
 			if msgIDForLog != "" && ifaceIDForLog != "" {
-				level := "info"
-				msg := fmt.Sprintf("Connector delivery: %s", step.StepType)
+				stage, msg, level := pipelineStepLogEntry(step.StepType, step.StepName, stepErr)
 				fields := map[string]interface{}{
 					"step_name":   step.StepName,
 					"step_type":   step.StepType,
@@ -526,13 +526,11 @@ func (tps *TransformationPipelineService) ExecutePipeline(
 					}
 				}
 				if stepErr != nil {
-					level = "error"
-					msg = fmt.Sprintf("Connector delivery failed: %s — %v", step.StepType, stepErr)
 					fields["error"] = stepErr.Error()
 				}
 				entry := storage.LogEntry{
 					Level:   level,
-					Stage:   "delivery",
+					Stage:   stage,
 					Message: msg,
 					Fields:  fields,
 				}
@@ -1027,14 +1025,11 @@ func buildInputContext(inputData map[string]interface{}, receivedAt time.Time) *
 		MessageType: messageType,
 		Version:     version,
 		SizeBytes:   sizeBytes,
-		ReceivedAt:  receivedAt,
+		ReceivedAt:  &receivedAt,
 		// INCLUDE payload for test mode - this is the parsed input message
 		// In production, this would be a reference to MongoDB
-		Payload: inputData,
-		Metadata: map[string]interface{}{
-			"dictionary_used": inputData["dictionaryUsed"],
-			"schema_loaded":   inputData["schemaLoaded"],
-		},
+		Payload:  inputData,
+		Metadata: extractOutputMetadata(inputData, format),
 	}
 }
 
@@ -1053,7 +1048,33 @@ func buildOutputContext(outputData map[string]interface{}, transformedAt time.Ti
 		format = "fhir-r4"
 		messageType = "Bundle"
 		log.Printf("🎯 [Output Context] Found FHIR bundle - using as payload")
-	} else {
+	} else if msg, ok := outputData["message"].(map[string]interface{}); ok {
+		if rt, ok := msg["resourceType"].(string); ok && rt != "" {
+			// FHIR parser stores resource fields at root of execCtx.Message, which
+			// executeStepWithContext wraps as outputData["message"].
+			// Build a clean "parsed resource" payload: FHIR fields the user cares about
+			// plus schema annotations. Strip internal pipeline execution state.
+			clean := make(map[string]interface{}, len(msg))
+			for k, v := range msg {
+				// Drop internal pipeline state fields (all start with _)
+				if len(k) > 0 && k[0] == '_' {
+					continue
+				}
+				// Drop parser bookkeeping — redundant or not user-facing
+				switch k {
+				case "parsedAt", "raw", "fieldOrder", "typeName", "typeDescription":
+					continue
+				}
+				// Keep everything else: FHIR resource fields + enhancedFields + schemaLoaded
+				clean[k] = v
+			}
+			actualPayload = clean
+			format = "fhir-r4"
+			messageType = rt
+			log.Printf("🎯 [Output Context] Found FHIR resource at message.resourceType=%s", rt)
+		}
+	}
+	if actualPayload == nil {
 		// Priority 2: For non-FHIR outputs, extract ONLY the core message
 		// Exclude internal metadata and step-specific data
 		cleanPayload := make(map[string]interface{})
@@ -1113,7 +1134,7 @@ func buildOutputContext(outputData map[string]interface{}, transformedAt time.Ti
 		Format:        format,
 		MessageType:   messageType,
 		SizeBytes:     sizeBytes,
-		TransformedAt: transformedAt,
+		TransformedAt: &transformedAt,
 		Payload:       actualPayload, // Clean output - only the transformed message
 		Metadata:      extractOutputMetadata(outputData, format),
 	}
@@ -1186,24 +1207,32 @@ func extractVersion(data map[string]interface{}, format string) string {
 	return ""
 }
 
-// extractOutputMetadata extracts format-specific metadata from output
+// extractOutputMetadata extracts format-specific metadata from output.
+// For FHIR: data may be the raw step output map (with FHIR under "message") or
+// the cleaned FHIR payload directly — check both.
 func extractOutputMetadata(data map[string]interface{}, format string) map[string]interface{} {
 	metadata := make(map[string]interface{})
 
 	switch format {
 	case "fhir-r4":
-		// Extract FHIR Bundle metadata
-		if resourceType, ok := data["resourceType"].(string); ok && resourceType == "Bundle" {
+		// Resolve the FHIR source: prefer root if it has resourceType, else look under "message"
+		fhirSrc := data
+		if _, ok := fhirSrc["resourceType"]; !ok {
+			if msg, ok := data["message"].(map[string]interface{}); ok {
+				fhirSrc = msg
+			}
+		}
+
+		if resourceType, ok := fhirSrc["resourceType"].(string); ok {
 			metadata["resource_type"] = resourceType
 
-			if bundleType, ok := data["type"].(string); ok {
+			if bundleType, ok := fhirSrc["type"].(string); ok {
 				metadata["bundle_type"] = bundleType
 			}
 
-			if entry, ok := data["entry"].([]interface{}); ok {
+			if entry, ok := fhirSrc["entry"].([]interface{}); ok {
 				metadata["resource_count"] = len(entry)
 
-				// Extract resource types
 				resourceTypes := make([]string, 0)
 				for _, e := range entry {
 					if entryMap, ok := e.(map[string]interface{}); ok {
@@ -1529,5 +1558,42 @@ func checkEgressPHI(message map[string]interface{}) []string {
 		}
 	}
 	return violations
+}
+
+// pipelineStepLogEntry returns the (stage, message, level) triple for a pipeline step log entry.
+// Used to write a structured NDJSON log entry for every step so the Logs tab shows
+// the full step trace and highlights exactly where a message stopped.
+func pipelineStepLogEntry(stepType, stepName string, stepErr error) (stage, msg, level string) {
+	switch {
+	case strings.HasPrefix(stepType, "connector.outbound"):
+		stage = "delivery"
+		msg = fmt.Sprintf("Connector step: %s", stepName)
+	case stepType == "fhir_validation" || stepType == "post.validation":
+		stage = "validation"
+		msg = fmt.Sprintf("FHIR validation: %s", stepName)
+	case stepType == "hl7_fhir_transform" || stepType == "hl7_assemble_observations":
+		stage = "transformation"
+		msg = fmt.Sprintf("HL7→FHIR transform: %s", stepName)
+	case stepType == "field_mapping" || strings.HasPrefix(stepType, "mapping"):
+		stage = "transformation"
+		msg = fmt.Sprintf("Field mapping: %s", stepName)
+	case stepType == "enrichment" || strings.HasPrefix(stepType, "enrich"):
+		stage = "enrichment"
+		msg = fmt.Sprintf("Enrichment: %s", stepName)
+	case strings.HasPrefix(stepType, "pre.logic") || strings.HasPrefix(stepType, "control"):
+		stage = "step"
+		msg = fmt.Sprintf("Logic step: %s", stepName)
+	default:
+		stage = "step"
+		msg = fmt.Sprintf("Pipeline step: %s", stepName)
+	}
+
+	if stepErr != nil {
+		level = "error"
+		msg = fmt.Sprintf("%s failed: %v", stepName, stepErr)
+	} else {
+		level = "info"
+	}
+	return
 }
 

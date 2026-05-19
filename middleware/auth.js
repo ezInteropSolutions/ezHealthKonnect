@@ -9,10 +9,20 @@ function requireAuth(req, res, next) {
     next();
 }
 
-// Middleware to require admin role
+// Middleware to require admin role (includes super_admin)
 function requireAdmin(req, res, next) {
-    if (!req.session.user || req.session.user.role !== 'admin') {
+    const role = req.session.user && req.session.user.role;
+    if (!role || (role !== 'admin' && role !== 'super_admin')) {
         return res.status(403).json({ message: 'Admin access required' });
+    }
+    next();
+}
+
+// Middleware to require super_admin role — for vendor-only operations such as
+// rebuilding OOB templates.  Client admins with role 'admin' are denied.
+function requireSuperAdmin(req, res, next) {
+    if (!req.session.user || req.session.user.role !== 'super_admin') {
+        return res.status(403).json({ message: 'Super-admin access required' });
     }
     next();
 }
@@ -51,6 +61,7 @@ function verifyToken(req, res, next) {
 module.exports = {
     requireAuth,
     requireAdmin,
+    requireSuperAdmin,
     requireRole,
     verifyToken
 };

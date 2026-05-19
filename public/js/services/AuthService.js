@@ -151,12 +151,10 @@ class AuthService {
             userAvatarEl.textContent = firstName.charAt(0).toUpperCase();
         }
 
-        // Show admin section if admin role
-        if (user.role === 'admin') {
+        // Show admin section for admin and super_admin roles
+        if (user.role === 'admin' || user.role === 'super_admin') {
             const adminSection = document.getElementById('adminSection');
-            if (adminSection) {
-                adminSection.style.display = 'block';
-            }
+            if (adminSection) adminSection.style.display = 'block';
         }
     }
 

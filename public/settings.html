@@ -562,6 +562,7 @@
                     <span class="nav-icon"><i class="fas fa-database"></i></span>
                     Schema Packages
                 </div>
+
             </aside>
 
             <!-- ── Settings Panel ────────────────────────────────────────── -->
@@ -1734,6 +1735,7 @@
                     <div id="schemaLoadError"></div>
                     <div class="schema-pkg-grid" id="schemaPkgGrid"></div>
                 </div><!-- /section-schemas -->
+
 
                 <script>
                 (function() {
@@ -2988,6 +2990,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (!ok) return;
     updateTime();
     setInterval(updateTime, 30000);
+
 
     // Honour URL hash (e.g. settings.html#section-schemas → open schemas)
     const hash = location.hash.replace('#section-', '').replace('#', '');

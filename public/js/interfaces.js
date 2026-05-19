@@ -1047,7 +1047,7 @@ function getInitialStatusDisplay(interface) {
 // Source format label map — mirrors InterfaceConfigComponents.js sourceType values
 const SOURCE_FORMAT_LABELS = {
     'hl7v2': 'HL7 v2.x',
-    'fhir':  'FHIR R4',
+    'fhir':  'FHIR',
     'cda':   'CDA',
     'x12':   'X12',
     'json':  'JSON',
@@ -2494,6 +2494,16 @@ async function handleEditInterface(event) {
     if (policySelect && policySelect.value) {
         interfaceData.fhirValidationPolicy = policySelect.value;
         interfaceData.fhir_validation_policy = policySelect.value;
+    }
+
+    // Collect accepted message families from chip picker
+    const familiesInput = document.getElementById('editAcceptedMessageFamilies');
+    if (familiesInput) {
+        try {
+            interfaceData.acceptedMessageFamilies = familiesInput.value ? JSON.parse(familiesInput.value) : null;
+        } catch (e) {
+            interfaceData.acceptedMessageFamilies = null;
+        }
     }
 
     console.log('🔄 Submitting interface update:', interfaceData);

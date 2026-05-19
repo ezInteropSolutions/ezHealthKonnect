@@ -49,6 +49,11 @@ type ProcessingEngine struct {
 
 	// Durable message queue for retry and startup recovery (Phase 2 Durability)
 	messageQueue *MessageQueue
+
+	// Per-interface accepted message family filter (nil slice = accept all).
+	// Populated at interface activation; read on every inbound message.
+	familyFilter   map[string][]string
+	familyFilterMu sync.RWMutex
 }
 
 // InterfaceStatus tracks the status of an interface
@@ -80,7 +85,8 @@ func NewProcessingEngine(db *sql.DB, credStore *services.CredentialStore) *Proce
 		db:               db,
 		activeInterfaces: make(map[string]*InterfaceStatus),
 		activeConnectors: make(map[string]InputConnector),
-		messageChan:      make(map[string]chan *models.InboundMessage), // UNIFIED MODEL
+		messageChan:      make(map[string]chan *models.InboundMessage),
+		familyFilter:     make(map[string][]string),
 		stats: &EngineStats{
 			StartTime:             time.Now(),
 			LastActivity:          time.Now(),
@@ -145,15 +151,15 @@ func NewProcessingEngine(db *sql.DB, credStore *services.CredentialStore) *Proce
 	engine.messageQueue = NewMessageQueue(db, engine.transformationService)
 	logger.Info("message queue initialized (retry + startup recovery)")
 
-	// Reset stale runtime state: any interface marked status='active' in the DB is a leftover
-	// from a previous process run. The listeners are gone now, so correct the DB immediately
-	// so the UI shows "Stopped" instead of "Running" before the engine is explicitly started.
-	// interface_status ('active') is preserved as the user-intent column and used by
-	// restoreActiveInterfaces() when the engine is started.
-	if result, err := db.Exec(`UPDATE interfaces SET status = 'inactive' WHERE status = 'active'`); err != nil {
+	// Reset stale runtime statuses from the previous process run.
+	// 'active' is stale — listeners are gone. 'error' is stale — runtime errors such as
+	// port conflicts don't carry over; a clean start should retry those interfaces.
+	// interface_status (user intent) is intentionally left untouched so restoreActiveInterfaces
+	// can pick up the right set when the engine is started.
+	if result, err := db.Exec(`UPDATE interfaces SET status = 'inactive' WHERE status IN ('active', 'error')`); err != nil {
 		log.Printf("⚠️  Engine init: could not reset stale interface statuses: %v", err)
 	} else if n, _ := result.RowsAffected(); n > 0 {
-		log.Printf("🔄 Engine init: reset %d stale active interface(s) to inactive (listeners not running)", n)
+		log.Printf("🔄 Engine init: reset %d stale interface(s) to inactive (listeners not running)", n)
 	}
 
 	return engine
@@ -223,13 +229,28 @@ func (pe *ProcessingEngine) restoreActiveInterfaces() {
 	}
 }
 
-// Stop stops the processing engine
+// Stop stops the processing engine and all active connectors.
 func (pe *ProcessingEngine) Stop() error {
 	pe.mutex.Lock()
 	defer pe.mutex.Unlock()
 
 	if !pe.running {
 		return fmt.Errorf("engine is not running")
+	}
+
+	// Stop every active connector so TCP listeners release their ports immediately.
+	for key, connector := range pe.activeConnectors {
+		if stopErr := connector.Stop(); stopErr != nil {
+			log.Printf("⚠️  Error stopping connector %s during engine stop: %v", key, stopErr)
+		}
+	}
+	pe.activeConnectors = make(map[string]InputConnector)
+	pe.messageChan = make(map[string]chan *models.InboundMessage)
+	pe.activeInterfaces = make(map[string]*InterfaceStatus)
+
+	// Mark all interfaces that were running as inactive so the UI reflects reality.
+	if _, err := pe.db.Exec(`UPDATE interfaces SET status = 'inactive' WHERE status = 'active'`); err != nil {
+		log.Printf("⚠️  Failed to reset interface statuses on engine stop: %v", err)
 	}
 
 	pe.running = false
@@ -263,17 +284,34 @@ func (pe *ProcessingEngine) ActivateInterface(interfaceID string) error {
 		return fmt.Errorf("interface already active")
 	}
 
-	// Get interface name and transformation mapping (for status tracking + connection warming)
+	// Get interface name, transformation mapping, and message family filter.
 	var name string
 	var transformationMappingJSON sql.NullString
+	var familyFilterJSON sql.NullString
 	err := pe.db.QueryRow(`
-		SELECT name, transformation_mapping
+		SELECT name, transformation_mapping,
+		       accepted_message_families::text
 		FROM interfaces
 		WHERE id = $1
-	`, interfaceID).Scan(&name, &transformationMappingJSON)
+	`, interfaceID).Scan(&name, &transformationMappingJSON, &familyFilterJSON)
 	if err != nil {
 		return fmt.Errorf("interface not found: %v", err)
 	}
+
+	// Cache the family filter for this interface.
+	pe.familyFilterMu.Lock()
+	if familyFilterJSON.Valid && familyFilterJSON.String != "" && familyFilterJSON.String != "null" {
+		var families []string
+		if jsonErr := json.Unmarshal([]byte(familyFilterJSON.String), &families); jsonErr == nil && len(families) > 0 {
+			pe.familyFilter[interfaceID] = families
+			log.Printf("🔒 Interface %s: accepting message families %v", interfaceID, families)
+		} else {
+			delete(pe.familyFilter, interfaceID) // nil = accept all
+		}
+	} else {
+		delete(pe.familyFilter, interfaceID) // nil = accept all
+	}
+	pe.familyFilterMu.Unlock()
 
 	// ── PRIMARY PATH: pipeline-driven connector.inbound steps ──────────────────
 	// Query connector.inbound steps from the pipeline for this interface.
@@ -789,11 +827,12 @@ func (pe *ProcessingEngine) persistPortConflictHalt(interfaceIDs []string, port 
 	})
 
 	for _, id := range interfaceIDs {
-		// Mark interface as error and persist the reason so the UI can surface it.
+		// Mark the runtime status as error and store the reason for the UI.
+		// interface_status (user intent) is deliberately left unchanged so the interface
+		// can be auto-resumed on the next engine start once the port conflict is resolved.
 		if _, err := pe.db.Exec(`
 			UPDATE interfaces
 			SET status = 'error',
-			    interface_status = 'error',
 			    processing_stats = jsonb_set(COALESCE(processing_stats, '{}'), '{error}', $2::jsonb, true),
 			    updated_at = NOW()
 			WHERE id = $1

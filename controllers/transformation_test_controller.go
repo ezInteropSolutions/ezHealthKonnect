@@ -6,7 +6,7 @@ import (
 	"ezhealthkonnect/models"
 	"ezhealthkonnect/services"
 	"ezhealthkonnect/services/executors"
-	"ezhealthkonnect/hl7"
+	"ezhealthkonnect/services/parsers"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -21,6 +21,7 @@ type TransformationTestController struct {
 	db               *sql.DB
 	executorRegistry *services.ExecutorRegistry
 	pipelineService  *services.TransformationPipelineService
+	parserRegistry   *parsers.ParserRegistry
 }
 
 func NewTransformationTestController(db *sql.DB, credStore *services.CredentialStore) *TransformationTestController {
@@ -28,6 +29,7 @@ func NewTransformationTestController(db *sql.DB, credStore *services.CredentialS
 		db:               db,
 		executorRegistry: services.NewExecutorRegistry(db, credStore),
 		pipelineService:  services.NewTransformationPipelineService(db, credStore),
+		parserRegistry:   parsers.NewParserRegistry(),
 	}
 }
 
@@ -346,34 +348,38 @@ func (c *TransformationTestController) TestPipeline(ctx *gin.Context) {
 }
 
 func (c *TransformationTestController) parseTestMessage(message string) map[string]interface{} {
-	// TODO: Auto-detect message format (HL7, FHIR, CDA, EDI, CSV, etc.)
-	// For now, assume HL7 v2.x format
+	// Auto-detect format then delegate to the format-agnostic parser registry.
+	// HL7: parsedJSON carries enhancedSegments/segmentGroups for backward compat.
+	// FHIR: parsedJSON carries resourceType/entry/etc. at root.
+	// Other formats: passthrough with raw preserved.
+	fd := services.NewFormatDetector()
+	detection := fd.DetectFormat(message)
+	detectedFormat := string(detection.DetectedFormat)
+	log.Printf("🔍 [Test] Auto-detected format: %s (confidence: %.2f)", detectedFormat, detection.Confidence)
 
-	log.Printf("🔍 [Test] Parsing HL7 message with real parser...")
-	enhancedResult := hl7.ParseWithRealSchema(message)
+	parseResult := c.parserRegistry.Get(detectedFormat).Parse(message)
 
-	// CRITICAL: PRESERVE typed structures - DO NOT marshal/unmarshal to JSON
-	// Converting to JSON loses Go type information (map[string]hl7.EnhancedSegment becomes map[string]interface{})
-	// This breaks field lookups in validators and other executors
-	//
-	// This applies to ALL message formats:
-	// - HL7 v2.x: Keep enhancedSegments as map[string]hl7.EnhancedSegment
-	// - FHIR: Keep resource structures as typed FHIR models
-	// - CDA: Keep document structures as typed CDA models
-	// - EDI: Keep segment structures as typed EDI models
-	// - CSV: Keep parsed structures with appropriate types
-	result := map[string]interface{}{
-		"raw":              message,
-		"enhancedSegments": enhancedResult.EnhancedSegments, // Keep typed structure
-		"segmentGroups":    enhancedResult.SegmentGroups,    // ALL instances of each segment type (for loops over IN1, OBX, etc.)
-		"segmentOrder":     enhancedResult.SegmentOrder,     // Segment order including repeats
-		"messageType":      enhancedResult.MessageType,
-		"version":          enhancedResult.Version,
-		"dictionaryUsed":   enhancedResult.DictionaryUsed,
-		"schemaLoaded":     enhancedResult.SchemaLoaded,
+	result := parseResult.ParsedJSON
+	if result == nil {
+		result = map[string]interface{}{"raw": message}
 	}
 
-	log.Printf("✅ [Test] Parsed message type: %v", enhancedResult.MessageType)
+	// _format drives enrichMessageEnvelope (semantic index, sensitivity map).
+	result["_format"] = detectedFormat
+
+	// Format-agnostic enhanced fields for new consumers (schema-annotated view).
+	if len(parseResult.EnhancedFields) > 0 {
+		result["enhancedFields"] = parseResult.EnhancedFields
+		result["fieldOrder"] = parseResult.FieldOrder
+	}
+	if parseResult.TypeName != "" {
+		result["typeName"] = parseResult.TypeName
+		result["typeDescription"] = parseResult.TypeDescription
+	}
+
+	log.Printf("✅ [Test] Parsed %s message: type=%s fields=%d schemaLoaded=%v",
+		detectedFormat, parseResult.Metadata.MessageType,
+		len(parseResult.EnhancedFields), parseResult.TypeName != "")
 	return result
 }
 

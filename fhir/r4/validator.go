@@ -355,8 +355,27 @@ func (v *FHIRR4Validator) validateStructure(
 		if field == "" {
 			continue // nested path — skip (would need recursive descent)
 		}
-		val, exists := resource[field]
-		if !exists || val == nil {
+		satisfied := false
+		if val, exists := resource[field]; exists && val != nil {
+			satisfied = true
+		}
+		// FHIR choice types use the form "field[x]" in the schema but are
+		// stored in JSON as "fieldTypeName" (e.g. event[x] → eventCoding or
+		// eventUri). Scan for any key that starts with the base name followed
+		// by an uppercase letter — the FHIR naming convention for type variants.
+		if !satisfied && strings.HasSuffix(field, "[x]") {
+			base := strings.TrimSuffix(field, "[x]")
+			for k, v := range resource {
+				if len(k) > len(base) &&
+					strings.HasPrefix(k, base) &&
+					k[len(base)] >= 'A' && k[len(base)] <= 'Z' &&
+					v != nil {
+					satisfied = true
+					break
+				}
+			}
+		}
+		if !satisfied {
 			res.addError(issue("error", "structure", "required-field", path,
 				fmt.Sprintf("%s: required field '%s' is missing", rt, field)))
 		}

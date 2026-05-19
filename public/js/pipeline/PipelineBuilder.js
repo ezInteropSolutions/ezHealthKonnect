@@ -577,6 +577,8 @@ class PipelineBuilder {
         if (!messageInput || !resultsDiv || !resultsContent) return;
 
         const sampleMessage = messageInput.value.trim();
+        const formatSelect = document.getElementById('testMessageFormat');
+        const messageFormat = formatSelect ? formatSelect.value : 'auto';
 
         if (!sampleMessage) {
             this.dragDropManager.showNotification('Please enter a sample message', 'warning');
@@ -587,7 +589,7 @@ class PipelineBuilder {
             resultsContent.innerHTML = '<p style="text-align: center;"><i class="fas fa-spinner fa-spin"></i> Running test...</p>';
             resultsDiv.style.display = 'block';
 
-            const result = await window.pipelineAPI.testPipeline(this.pipeline, sampleMessage);
+            const result = await window.pipelineAPI.testPipeline(this.pipeline, sampleMessage, messageFormat);
 
             // Cache test output so IntelliSense can walk runtime step variables
             // without requiring a re-test when the properties panel opens.

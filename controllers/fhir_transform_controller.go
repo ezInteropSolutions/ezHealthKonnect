@@ -1364,9 +1364,21 @@ func (tc *FHIRTransformController) loadSchemasForResources(resources []map[strin
 
 // Create FHIR Bundle from resources
 func (tc *FHIRTransformController) createBundle(resources []map[string]interface{}, requestID string) map[string]interface{} {
-	entries := make([]map[string]interface{}, len(resources))
+	// bdl-12: MessageHeader must be the first entry in a message bundle.
+	sorted := make([]map[string]interface{}, 0, len(resources))
+	for _, r := range resources {
+		if rt, _ := r["resourceType"].(string); rt == "MessageHeader" {
+			sorted = append(sorted, r)
+		}
+	}
+	for _, r := range resources {
+		if rt, _ := r["resourceType"].(string); rt != "MessageHeader" {
+			sorted = append(sorted, r)
+		}
+	}
 
-	for i, resource := range resources {
+	entries := make([]map[string]interface{}, len(sorted))
+	for i, resource := range sorted {
 		entries[i] = map[string]interface{}{
 			"resource": resource,
 		}

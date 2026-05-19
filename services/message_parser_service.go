@@ -56,15 +56,15 @@ func (mps *MessageParserService) ParseToJSON(
 	}
 
 	// STEP 3: Parse to JSON
-	result, err := parser.Parse(rawContent)
-	if err != nil {
+	result := parser.Parse(rawContent)
+	if !result.Success {
 		// Update status as failed
 		mps.updateParsingStatus(ctx, interfaceID, messageID, &MessageStatusUpdate{
 			Status:        "parsing_failed",
 			ParsingStatus: "failed",
-			ParsingError:  err.Error(),
+			ParsingError:  result.Error,
 		})
-		return nil, fmt.Errorf("parsing failed: %w", err)
+		return nil, fmt.Errorf("parsing failed: %s", result.Error)
 	}
 
 	result.ParsingTime = time.Since(startTime)

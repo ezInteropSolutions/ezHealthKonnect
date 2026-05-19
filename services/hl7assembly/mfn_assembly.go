@@ -139,6 +139,14 @@ func AssembleMFNResources(
 		if rt == resourceType {
 			continue
 		}
+		// For STF/PRA assembly: wire any field-mapper PractitionerRole back to the
+		// assembled Practitioner so it is reachable from MessageHeader via backward
+		// reference traversal.  PractitionerRole.practitioner → Practitioner/id.
+		if resourceType == "Practitioner" && rt == "PractitionerRole" && resourceID != "" {
+			r["practitioner"] = map[string]interface{}{
+				"reference": "Practitioner/" + resourceID,
+			}
+		}
 		if rt == "MessageHeader" && resourceID != "" {
 			r["focus"] = []interface{}{
 				map[string]interface{}{"reference": resourceType + "/" + resourceID},

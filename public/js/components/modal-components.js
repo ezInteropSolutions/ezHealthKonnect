@@ -86,6 +86,15 @@
 
         // ✅ REFACTORED: Using shared InterfaceConfigComponents with tabs and maximize
         container.innerHTML = `
+            <style>
+                .family-chip {
+                    cursor: pointer; padding: 4px 10px; border-radius: 12px;
+                    border: 2px solid #e2e8f0; font-size: 0.78rem; font-weight: 600;
+                    color: #64748b; background: #f8fafc; transition: all 0.15s; user-select: none;
+                }
+                .family-chip:hover { border-color: #93c5fd; color: #1e3a8a; background: #eff6ff; }
+                .family-chip.selected { background: #0369a1; color: #fff; border-color: #0369a1; }
+            </style>
             <!-- Edit Interface Modal (Refactored with Tabs) -->
             <div class="modal-overlay" id="editModal">
                 <div class="modal-content large" id="editModalContent">
@@ -265,6 +274,47 @@
                                         <option value="queue_review">Queue for Review — hold for manual operator correction</option>
                                     </select>
                                 </div>
+
+                                <!-- Message Family Filter Section -->
+                                <div class="form-group" style="margin-top: 16px;">
+                                    <div style="background: linear-gradient(to right, #f0fdf4, #f0f9ff); border-left: 3px solid #34d399; padding: 14px; border-radius: 6px;">
+                                        <label style="font-weight: 600; color: #1e3a8a; font-size: 0.95rem; display: block; margin-bottom: 4px;">
+                                            &#128259; Message Family Filter
+                                        </label>
+                                        <p style="font-size: 0.82rem; color: #6b7280; margin: 0 0 12px;">
+                                            Restrict which HL7 message families this interface accepts. Unmatched messages receive a NACK (AR) before storage. Leave unrestricted to accept all.
+                                        </p>
+                                        <label style="display: flex; align-items: center; cursor: pointer; margin-bottom: 12px;">
+                                            <input type="checkbox" id="editFamilyFilterEnabled"
+                                                   onchange="toggleFamilyFilter(this.checked)"
+                                                   style="margin-right: 8px; width: 16px; height: 16px; cursor: pointer; accent-color: #0369a1;">
+                                            <span style="font-size: 0.9rem; color: #1e3a8a; font-weight: 500;">Restrict to specific message families</span>
+                                        </label>
+                                        <div id="editFamilyFilterPicker" style="display:none;">
+                                            <div style="font-size: 0.79rem; color: #64748b; margin-bottom: 10px;">
+                                                Click to select. MFN events must be chosen individually — each maps to a different FHIR resource structure.
+                                            </div>
+                                            <div style="display: flex; flex-wrap: wrap; gap: 6px;" id="editFamilyChips">
+                                                <span class="family-chip" data-family="ADT" onclick="toggleFamilyChip('ADT')" title="Admit/Discharge/Transfer">ADT</span>
+                                                <span class="family-chip" data-family="ORU" onclick="toggleFamilyChip('ORU')" title="Observation Results">ORU</span>
+                                                <span class="family-chip" data-family="ORM" onclick="toggleFamilyChip('ORM')" title="Order Entry">ORM</span>
+                                                <span class="family-chip" data-family="SIU" onclick="toggleFamilyChip('SIU')" title="Scheduling">SIU</span>
+                                                <span class="family-chip" data-family="MDM" onclick="toggleFamilyChip('MDM')" title="Medical Document Management">MDM</span>
+                                                <span class="family-chip" data-family="VXU" onclick="toggleFamilyChip('VXU')" title="Vaccination">VXU</span>
+                                                <span class="family-chip" data-family="RDE" onclick="toggleFamilyChip('RDE')" title="Pharmacy Orders">RDE</span>
+                                                <span class="family-chip" data-family="BAR" onclick="toggleFamilyChip('BAR')" title="Billing/Account">BAR</span>
+                                                <span class="family-chip" data-family="DFT" onclick="toggleFamilyChip('DFT')" title="Detailed Financial Transaction">DFT</span>
+                                                <span style="width:100%;font-size:0.75rem;color:#94a3b8;padding-top:4px;font-weight:500;">MFN — select individually (structurally different per event):</span>
+                                                <span class="family-chip" data-family="MFN^M02" onclick="toggleFamilyChip('MFN^M02')" title="Staff / Practitioner">MFN^M02 Staff</span>
+                                                <span class="family-chip" data-family="MFN^M04" onclick="toggleFamilyChip('MFN^M04')" title="Charge Description Master">MFN^M04 Charge</span>
+                                                <span class="family-chip" data-family="MFN^M05" onclick="toggleFamilyChip('MFN^M05')" title="Patient Location">MFN^M05 Location</span>
+                                                <span class="family-chip" data-family="MFN^M12" onclick="toggleFamilyChip('MFN^M12')" title="Observation Catalog">MFN^M12 Observation</span>
+                                                <span class="family-chip" data-family="MFN^M13" onclick="toggleFamilyChip('MFN^M13')" title="Generic Master File">MFN^M13 Generic</span>
+                                            </div>
+                                        </div>
+                                        <input type="hidden" id="editAcceptedMessageFamilies" value="">
+                                    </div>
+                                </div>
                             </div>
 
                             <!-- Tab 2: Source Configuration -->
@@ -358,20 +408,46 @@
         setLogLevel(effectiveLevel);
         document.getElementById('editLogRetention').value = interfaceData.log_retention_days || 30;
         document.getElementById('editRetainErrors').checked = interfaceData.retain_error_logs_forever !== false;
-        // Extract connectivity from V30 JSONB structure or fallback to string
-        // Handle both snake_case (from API) and camelCase (from frontend)
-        let sourceConnectivityValue = interfaceData.source_connectivity || interfaceData.sourceConnectivity;
-        let sourceConfigData = interfaceData.source_config || interfaceData.sourceConfig || {};
+        // ── Single source of truth: use connector step config from transformation_steps ──
+        // inboundStepConfig = { connectorType, config: { host, port, ... } }
+        // Fall back to source_connectivity for interfaces that pre-date the pipeline wizard.
+        let sourceConnectivityValue;
+        let sourceConfigData = {};
 
-        // Handle V30 migration: source_connectivity might be JSONB {type, config}
-        if (typeof sourceConnectivityValue === 'object' && sourceConnectivityValue !== null) {
-            console.log('🔄 Detected V30 JSONB connectivity structure:', sourceConnectivityValue);
-            const connectivityObj = sourceConnectivityValue;
-            sourceConnectivityValue = connectivityObj.type || 'tcp';
-            // Merge config from connectivity object - this is the actual config to use
-            sourceConfigData = { ...connectivityObj.config, ...sourceConfigData };
-            console.log('📋 Extracted source config from V30 structure:', sourceConfigData);
+        if (interfaceData.inboundStepConfig && interfaceData.inboundStepConfig.connectorType) {
+            const step = interfaceData.inboundStepConfig;
+            // Derive connectivity type from connectorType (tcp_mllp_inbound → tcp, http_rest_inbound → http)
+            sourceConnectivityValue = step.connectorType.replace('_inbound', '').replace('_mllp', '').replace('tcp', 'tcp');
+            if (step.connectorType.includes('mllp') || step.connectorType.includes('tcp')) sourceConnectivityValue = 'tcp';
+            else if (step.connectorType.includes('http')) sourceConnectivityValue = 'http';
+            else if (step.connectorType.includes('file')) sourceConnectivityValue = 'file';
+            else if (step.connectorType.includes('database') || step.connectorType.includes('postgresql') || step.connectorType.includes('mysql')) sourceConnectivityValue = 'database';
+            else if (step.connectorType.includes('sftp')) sourceConnectivityValue = 'sftp';
+            else if (step.connectorType.includes('rabbitmq')) sourceConnectivityValue = 'rabbitmq';
+            else if (step.connectorType.includes('kafka')) sourceConnectivityValue = 'kafka';
+            sourceConfigData = step.config || {};
+            console.log('✅ Source config from connector.inbound step (single source of truth):', sourceConfigData);
+        } else {
+            // Fallback: legacy source_connectivity column
+            sourceConnectivityValue = interfaceData.source_connectivity || interfaceData.sourceConnectivity;
+            sourceConfigData = interfaceData.source_config || interfaceData.sourceConfig || {};
+            if (typeof sourceConnectivityValue === 'object' && sourceConnectivityValue !== null) {
+                sourceConfigData = { ...sourceConnectivityValue.config, ...sourceConfigData };
+                sourceConnectivityValue = sourceConnectivityValue.type || 'tcp';
+            }
+            console.log('⚠️ Source config from legacy source_connectivity (no connector step found):', sourceConfigData);
         }
+
+        // Store step IDs in hidden fields so the save can write back to the right rows
+        let hiddenStepIds = document.getElementById('editConnectorStepIds');
+        if (!hiddenStepIds) {
+            hiddenStepIds = document.createElement('div');
+            hiddenStepIds.id = 'editConnectorStepIds';
+            hiddenStepIds.style.display = 'none';
+            document.getElementById('editInterfaceForm')?.appendChild(hiddenStepIds);
+        }
+        hiddenStepIds.dataset.inboundStepId = interfaceData.inboundStepId || '';
+        hiddenStepIds.dataset.outboundStepId = interfaceData.outboundStepId || '';
 
         // Source Type - use shared component
         // Handle both snake_case (from API) and camelCase
@@ -406,19 +482,30 @@
         });
         updateEditSourceConfigPanel(dataForSourcePanel);
 
-        // Extract target connectivity from V30 JSONB structure or fallback to string
-        // Handle both snake_case (from API) and camelCase (from frontend)
-        let targetConnectivityValue = interfaceData.target_connectivity || interfaceData.targetConnectivity || 'http';
-        let targetConfigData = interfaceData.target_config || interfaceData.targetConfig || {};
+        // ── Single source of truth: use outbound connector step config ──
+        let targetConnectivityValue;
+        let targetConfigData = {};
 
-        // Handle V30 migration: target_connectivity might be JSONB {type, config}
-        if (typeof targetConnectivityValue === 'object' && targetConnectivityValue !== null) {
-            console.log('🔄 Detected V30 JSONB target connectivity structure:', targetConnectivityValue);
-            const connectivityObj = targetConnectivityValue;
-            targetConnectivityValue = connectivityObj.type || 'http';
-            // Merge config from connectivity object - this is the actual config to use
-            targetConfigData = { ...connectivityObj.config, ...targetConfigData };
-            console.log('📋 Extracted target config from V30 structure:', targetConfigData);
+        if (interfaceData.outboundStepConfig && interfaceData.outboundStepConfig.connectorType) {
+            const step = interfaceData.outboundStepConfig;
+            if (step.connectorType.includes('http') || step.connectorType.includes('fhir')) targetConnectivityValue = 'http';
+            else if (step.connectorType.includes('mllp') || step.connectorType.includes('tcp')) targetConnectivityValue = 'tcp';
+            else if (step.connectorType.includes('file')) targetConnectivityValue = 'file';
+            else if (step.connectorType.includes('database') || step.connectorType.includes('postgresql')) targetConnectivityValue = 'database';
+            else if (step.connectorType.includes('kafka')) targetConnectivityValue = 'kafka';
+            else if (step.connectorType.includes('rabbitmq')) targetConnectivityValue = 'rabbitmq';
+            else targetConnectivityValue = 'http';
+            targetConfigData = step.config || {};
+            console.log('✅ Target config from connector.outbound step (single source of truth):', targetConfigData);
+        } else {
+            // Fallback: legacy target_connectivity column
+            targetConnectivityValue = interfaceData.target_connectivity || interfaceData.targetConnectivity || 'http';
+            targetConfigData = interfaceData.target_config || interfaceData.targetConfig || {};
+            if (typeof targetConnectivityValue === 'object' && targetConnectivityValue !== null) {
+                targetConfigData = { ...targetConnectivityValue.config, ...targetConfigData };
+                targetConnectivityValue = targetConnectivityValue.type || 'http';
+            }
+            console.log('⚠️ Target config from legacy target_connectivity (no connector step found):', targetConfigData);
         }
 
         // Target Connectivity - use shared component
@@ -459,6 +546,12 @@
         const policy = interfaceData.fhir_validation_policy || interfaceData.fhirValidationPolicy || 'proceed';
         const policySelect = document.getElementById('fhirValidationPolicy');
         if (policySelect) policySelect.value = policy;
+
+        // Message Family Filter
+        const families = interfaceData.accepted_message_families || interfaceData.acceptedMessageFamilies;
+        if (typeof window.setFamilyFilterValue === 'function') {
+            window.setFamilyFilterValue(families || null);
+        }
 
         // Attach event listeners
         attachEditModalListeners();
@@ -584,6 +677,45 @@
             if (tabContent) {
                 tabContent.classList.add('active');
             }
+        };
+
+        window.toggleFamilyFilter = function(enabled) {
+            const picker = document.getElementById('editFamilyFilterPicker');
+            const hiddenInput = document.getElementById('editAcceptedMessageFamilies');
+            if (picker) picker.style.display = enabled ? 'block' : 'none';
+            if (!enabled) {
+                if (hiddenInput) hiddenInput.value = '';
+                document.querySelectorAll('#editFamilyChips .family-chip').forEach(chip => chip.classList.remove('selected'));
+            }
+        };
+
+        window.toggleFamilyChip = function(family) {
+            const chip = document.querySelector(`#editFamilyChips [data-family="${family}"]`);
+            const hiddenInput = document.getElementById('editAcceptedMessageFamilies');
+            if (!chip || !hiddenInput) return;
+            chip.classList.toggle('selected');
+            let current = [];
+            try { current = hiddenInput.value ? JSON.parse(hiddenInput.value) : []; } catch (e) {}
+            const idx = current.indexOf(family);
+            if (idx >= 0) current.splice(idx, 1); else current.push(family);
+            hiddenInput.value = current.length > 0 ? JSON.stringify(current) : '';
+        };
+
+        window.setFamilyFilterValue = function(families) {
+            const toggle = document.getElementById('editFamilyFilterEnabled');
+            const hiddenInput = document.getElementById('editAcceptedMessageFamilies');
+            if (!Array.isArray(families) || families.length === 0) {
+                if (toggle) toggle.checked = false;
+                window.toggleFamilyFilter(false);
+                return;
+            }
+            if (toggle) toggle.checked = true;
+            window.toggleFamilyFilter(true);
+            if (hiddenInput) hiddenInput.value = JSON.stringify(families);
+            families.forEach(family => {
+                const chip = document.querySelector(`#editFamilyChips [data-family="${family}"]`);
+                if (chip) chip.classList.add('selected');
+            });
         };
 
         window.toggleEditModalMaximize = function() {

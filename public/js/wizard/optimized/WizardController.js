@@ -257,8 +257,25 @@ class WizardController extends EventTarget {
     async loadStepSpecificData(stepNumber) {
         switch (stepNumber) {
             case 3:
-                // Automatically start FHIR transformation when entering step 3
-                await this.autoStartFHIRTransformation();
+                // Lazy-load mappings for the first message type after DOM renders
+                setTimeout(() => {
+                    const families = this.model.data.acceptedMessageFamilies;
+                    const FAMILY_REPR = { ADT: 'ADT^A01', ORU: 'ORU^R01', ORM: 'ORM^O01', SIU: 'SIU^S12', MDM: 'MDM^T02', MFN: 'MFN^M02', VXU: 'VXU^V04', DFT: 'DFT^P03', BAR: 'BAR^P01', RDE: 'RDE^O11' };
+                    let initialType = this.model.data.detectedMessageType || 'ADT^A01';
+                    if (families && families.length > 0) {
+                        const first = families[0];
+                        initialType = first.includes('^') ? first : (FAMILY_REPR[first] || 'ADT^A01');
+                    }
+                    const firstBtn = document.querySelector(`.msg-type-preview-btn[data-msg-type="${initialType}"]`);
+                    window._previewMappingForType(initialType, firstBtn).then(() => {
+                        // Pre-parse remaining sample messages so subsequent pill clicks only need 1 network call
+                        window._preParseSamples();
+                        // Pre-warm full mapping cache for other common types
+                        const allCommon = ['ADT^A01', 'ORU^R01', 'ORM^O01', 'OML^O21', 'ADT^A03', 'SIU^S12', 'MDM^T02', 'MFN^M02', 'VXU^V04', 'DFT^P03', 'BAR^P01'];
+                        const others = allCommon.filter(t => t !== initialType);
+                        window._prewarmMappingCache(others);
+                    });
+                }, 150);
                 break;
             case 4:
                 // Ensure Step 4 has access to FHIR transformation result from Step 3
@@ -321,6 +338,27 @@ class WizardController extends EventTarget {
                     ...this.model.data.targetConfig,
                     [field.replace('target', '').toLowerCase()]: value
                 };
+            }
+
+            // Sync FHIR version from transformation flow selection
+            if (field === 'transformationFlow') {
+                const flowVersionMap = {
+                    'hl7_to_fhir':    'R4',
+                    'hl7_to_fhir_r5': 'R5',
+                    'ccd_to_fhir':    'R4'
+                };
+                if (flowVersionMap[value]) {
+                    updateData.targetConfig = {
+                        ...this.model.data.targetConfig,
+                        version: flowVersionMap[value]
+                    };
+                }
+            }
+
+            // When FHIR version changes, clear the mapping cache so stale
+            // R4 results aren't served for R5 (or vice-versa)
+            if (field === 'targetVersion' || field === 'transformationFlow') {
+                if (window._mappingPreviewCache) window._mappingPreviewCache.clear();
             }
 
             this.model.updateStepData(updateData);
@@ -1429,13 +1467,34 @@ PV1|1|I|ICU^101^1|||DOC123^Smith^Jane|||EMERGENCY|||`
     async autoStartFHIRTransformation() {
         console.log('🔄 Auto-starting FHIR transformation...');
 
-        // Check if we have parsed HL7 data
-        const parsedHL7Data = this.model.data.parsedHL7Data;
-        if (!parsedHL7Data) {
-            console.warn('⚠️ No parsed HL7 data available for transformation');
-            return;
+        // If no parsed HL7 data (user skipped Step 2), auto-load a representative sample
+        if (!this.model.data.parsedHL7Data) {
+            console.log('ℹ️ No parsed HL7 data — auto-loading sample for mapping preview...');
+
+            const families = this.model.data.acceptedMessageFamilies;
+            const FAMILY_REPR = { ADT: 'ADT^A01', ORU: 'ORU^R01', ORM: 'ORM^O01', SIU: 'SIU^S12', MDM: 'MDM^T02', MFN: 'MFN^M02', VXU: 'VXU^V04', DFT: 'DFT^P03', BAR: 'BAR^P01', RDE: 'RDE^O11' };
+            let sampleType = 'ADT^A01';
+            if (families && families.length > 0) {
+                const first = families[0];
+                sampleType = first.includes('^') ? first : (FAMILY_REPR[first] || 'ADT^A01');
+            }
+
+            await new Promise((resolve) => {
+                let resolved = false;
+                const done = () => { if (!resolved) { resolved = true; resolve(); } };
+                this.model.addEventListener('hl7Parsed', done, { once: true });
+                setTimeout(done, 5000); // safety timeout
+                this.loadSampleHL7(sampleType);
+            });
+
+            if (!this.model.data.parsedHL7Data) {
+                console.warn('⚠️ Auto-load sample failed — skipping FHIR transformation');
+                return;
+            }
+            console.log('✅ Sample loaded:', sampleType);
         }
 
+        const parsedHL7Data = this.model.data.parsedHL7Data;
         console.log('📊 Parsed HL7 data available:', parsedHL7Data);
 
         // Use the optimized FHIR transform service
@@ -1477,6 +1536,409 @@ PV1|1|I|ICU^101^1|||DOC123^Smith^Jane|||EMERGENCY|||`
 
 // Make available globally following our patterns
 window.WizardController = WizardController;
+
+/**
+ * Skip the HL7 parsing step (Step 2) without validation.
+ * Step 2 is optional; FHIR transform will auto-load a sample if needed.
+ */
+window._skipWizardHL7Step = function() {
+    const ctrl = window.wizardController;
+    if (!ctrl) return;
+    ctrl.model.currentStep = 3;
+    ctrl.loadStep(3);
+};
+
+// Per-session result cache keyed by "messageType:fhirVersion:preset"
+window._mappingPreviewCache = window._mappingPreviewCache || new Map();
+
+// Parse-only cache keyed by messageType — eliminates first network call on re-visits
+window._parsedSampleCache = window._parsedSampleCache || new Map();
+
+/** Refresh the coverage summary bar after a mapping preview loads. */
+function _updateCoverageBar(atomicMappings, validationErrors) {
+    const bar = document.getElementById('mapping-coverage-bar');
+    if (!bar) return;
+    const total  = atomicMappings.length;
+    const high   = atomicMappings.filter(m => m.confidence == null || m.confidence >= 0.90).length;
+    const med    = atomicMappings.filter(m => m.confidence != null && m.confidence >= 0.75 && m.confidence < 0.90).length;
+    const low    = atomicMappings.filter(m => m.confidence != null && m.confidence < 0.75).length;
+    const errors = (validationErrors || []).length;
+    bar.innerHTML = `
+        <span style="font-weight:600;">📊 ${total} fields mapped</span>
+        <span style="color:#d1d5db;">|</span>
+        ${high > 0 ? `<span style="color:#16a34a;">● ${high} high</span>` : ''}
+        ${med  > 0 ? `<span style="color:#d97706;">● ${med} medium</span>` : ''}
+        ${low  > 0 ? `<span style="color:#dc2626;">● ${low} low</span>` : ''}
+        <span style="color:#d1d5db;">|</span>
+        <span style="${errors > 0 ? 'color:#dc2626;font-weight:600;' : 'color:#16a34a;'}">
+            ${errors > 0 ? `⚠ ${errors} validation issue${errors > 1 ? 's' : ''}` : '✓ No validation issues'}
+        </span>`;
+}
+
+/** Repopulate the resource-filter dropdown from a set of atomic mappings. */
+function _updateResourceFilter(atomicMappings) {
+    const filterSelect = document.getElementById('resource-filter');
+    if (!filterSelect) return;
+    const names = [...new Set(
+        atomicMappings.map(m => {
+            const path = m.resourceType || m.targetPath || m.fhirPath || m.fhirField || '';
+            const match = path.match(/^([A-Z][A-Za-z]+)/);
+            return match ? match[1] : null;
+        }).filter(Boolean)
+    )];
+    filterSelect.innerHTML = '<option value="all">All Resources</option>'
+        + names.map(r => `<option value="${r}">${r}</option>`).join('');
+}
+// AbortController for the currently in-flight fetch pair
+window._mappingPreviewAbort = null;
+
+/**
+ * Skeleton shimmer HTML shown while fetch is in flight.
+ * Mirrors the visual weight of renderFHIRMappingEditor so the layout
+ * doesn't jump when the real content arrives.
+ */
+function _mappingSkeletonHTML(messageType) {
+    const rows = Array(8).fill(0).map(() => `
+        <div style="border:1px solid #e2e8f0;border-radius:8px;padding:12px;margin-bottom:8px;display:flex;gap:12px;align-items:center;">
+            <div class="skshimmer" style="width:110px;height:13px;border-radius:4px;flex-shrink:0;"></div>
+            <div class="skshimmer" style="width:20px;height:13px;border-radius:4px;flex-shrink:0;"></div>
+            <div class="skshimmer" style="width:170px;height:13px;border-radius:4px;"></div>
+            <div class="skshimmer" style="width:55px;height:20px;border-radius:4px;margin-left:auto;flex-shrink:0;"></div>
+        </div>`).join('');
+    return `
+        <style>
+            .skshimmer{background:linear-gradient(90deg,#f0f0f0 25%,#e0e0e0 50%,#f0f0f0 75%);background-size:200% 100%;animation:skwave 1.4s infinite linear;}
+            @keyframes skwave{0%{background-position:200% 0}100%{background-position:-200% 0}}
+        </style>
+        <div style="padding:16px;">
+            <div style="background:#f0fdf4;border:2px solid #bbf7d0;border-radius:12px;padding:14px 16px;margin-bottom:16px;display:flex;align-items:center;gap:12px;">
+                <div class="skshimmer" style="width:28px;height:28px;border-radius:50%;flex-shrink:0;"></div>
+                <div style="flex:1;">
+                    <div class="skshimmer" style="width:220px;height:15px;border-radius:4px;margin-bottom:6px;"></div>
+                    <div class="skshimmer" style="width:310px;height:12px;border-radius:4px;"></div>
+                </div>
+            </div>
+            <div style="display:flex;gap:8px;margin-bottom:14px;">
+                <div class="skshimmer" style="width:175px;height:32px;border-radius:8px;"></div>
+                <div class="skshimmer" style="width:110px;height:32px;border-radius:8px;"></div>
+                <div class="skshimmer" style="width:90px;height:32px;border-radius:8px;margin-left:auto;"></div>
+            </div>
+            ${rows}
+        </div>`;
+}
+
+/**
+ * Preview FHIR mappings for a specific HL7 message type without touching model state.
+ * Called from the message-type pill selector in Step 3 (getStep4Template).
+ */
+window._previewMappingForType = async function(messageType, btnEl) {
+    const ctrl = window.wizardController;
+    if (!ctrl) return;
+
+    const fhirVersion = ctrl.model.data.targetConfig?.version || 'R4';
+    const preset = ctrl.model.data.mappingOptions?.transformationPreset || 'standard';
+    const cacheKey = `${messageType}:${fhirVersion}:${preset}`;
+
+    // Highlight active pill
+    document.querySelectorAll('.msg-type-preview-btn').forEach(b => {
+        b.style.background = 'white';
+        b.style.color = '#6b7280';
+        b.style.borderColor = '#e5e7eb';
+    });
+    if (btnEl) {
+        btnEl.style.background = '#1e3a8a';
+        btnEl.style.color = 'white';
+        btnEl.style.borderColor = '#1e3a8a';
+    }
+
+    const mappingContainer = document.getElementById('fhir-mapping-container');
+
+    // --- Cache hit: render immediately, no network round-trip ---
+    if (window._mappingPreviewCache.has(cacheKey)) {
+        const cached = window._mappingPreviewCache.get(cacheKey);
+        if (mappingContainer && ctrl.view) {
+            const previewData = {
+                ...ctrl.model.getCurrentStepData(),
+                detectedMessageType: cached.effectiveType,
+                fhirTransformResult: cached.transformResult,
+                previewHL7Version: cached.hl7Version
+            };
+            mappingContainer.innerHTML = ctrl.view.getFHIRMappingContent(previewData);
+            const countEl = document.getElementById('mapping-count');
+            if (countEl) countEl.textContent = cached.transformResult.atomicMappings.length;
+            const typeEl = document.getElementById('fhir-message-type');
+            if (typeEl) typeEl.textContent = cached.effectiveType + (cached.effectiveType !== messageType ? ' (fallback)' : '');
+            const versionEl = document.getElementById('fhir-hl7-version');
+            if (versionEl) versionEl.textContent = 'HL7 v' + cached.hl7Version;
+            _updateResourceFilter(cached.transformResult.atomicMappings);
+            _updateCoverageBar(cached.transformResult.atomicMappings, cached.transformResult.validationErrors);
+        }
+        if (ctrl.model?.data) {
+            ctrl.model.data.fhirTransformResult = cached.transformResult;
+            ctrl.model.data.detectedMessageType = ctrl.model.data.detectedMessageType || cached.effectiveType;
+        }
+        ctrl.view?.validateCurrentStep?.();
+        return;
+    }
+
+    // --- Cache miss: show skeleton, cancel any in-flight request, start fetch ---
+    const loadingEl = document.getElementById('msg-type-preview-loading');
+    if (loadingEl) loadingEl.style.display = 'inline';
+    if (mappingContainer) {
+        mappingContainer.innerHTML = _mappingSkeletonHTML(messageType);
+    }
+
+    // Abort previous in-flight request pair
+    if (window._mappingPreviewAbort) {
+        window._mappingPreviewAbort.abort();
+    }
+    window._mappingPreviewAbort = new AbortController();
+    const { signal } = window._mappingPreviewAbort;
+
+    // Complete, validated sample HL7 messages per type (hoisted to window for pre-parse access)
+    if (!window._SAMPLE_HL7) window._SAMPLE_HL7 = {
+        'ADT^A01': [
+            'MSH|^~\\&|EPIC|HOSPITAL|FHIR|DEST|20230101120000||ADT^A01|MSG001|P|2.5',
+            'EVN|A01|20230101120000',
+            'PID|1||12345^^^MRN^MR||Doe^John^M||19800101|M|||123 Main St^^Anytown^ST^12345||555-1234|||||S||123-45-6789',
+            'PV1|1|I|ICU^101^1^HOSPITAL|||001234^Smith^Jane^A^^^MD|||SUR||||A|||001234^Smith^Jane^A^^^MD|INP|VN12345||||||||||||||||||HOSPITAL|||||20230101120000'
+        ].join('\n'),
+        'ADT^A03': [
+            'MSH|^~\\&|EPIC|HOSPITAL|FHIR|DEST|20230101120000||ADT^A03|MSG002|P|2.5',
+            'EVN|A03|20230101120000',
+            'PID|1||12345^^^MRN^MR||Doe^John^M||19800101|M|||123 Main St^^Anytown^ST^12345',
+            'PV1|1|I|ICU^101^1^HOSPITAL|||001234^Smith^Jane^A^^^MD|||SUR||||A|||001234^Smith^Jane^A^^^MD|INP|VN12345||||||||||||||||||HOSPITAL|||||20230101120000|20230105143000'
+        ].join('\n'),
+        'ORU^R01': [
+            'MSH|^~\\&|LAB|HOSPITAL|FHIR|DEST|20230101120000||ORU^R01|MSG003|P|2.5',
+            'PID|1||12345^^^MRN^MR||Doe^John^M||19800101|M|||123 Main St^^Anytown^ST^12345',
+            'OBR|1|ORD001|LAB001|85025^CBC with Differential^LN|||20230101110000|||||||||001234^Smith^Jane^^^MD|||||||||F',
+            'OBX|1|NM|6690-2^WBC^LN||7.5|10*3/uL|4.5-11.0|N|||F|||20230101120000',
+            'OBX|2|NM|789-8^RBC^LN||4.8|10*6/uL|4.2-5.4|N|||F|||20230101120000',
+            'OBX|3|NM|718-7^HGB^LN||14.5|g/dL|12.0-16.0|N|||F|||20230101120000'
+        ].join('\n'),
+        'ORM^O01': [
+            'MSH|^~\\&|ORDER|HOSPITAL|FHIR|DEST|20230101120000||ORM^O01|MSG004|P|2.5',
+            'PID|1||12345^^^MRN^MR||Doe^John^M||19800101|M|||123 Main St^^Anytown^ST^12345',
+            'ORC|NW|ORD001^ORDER||||||20230101120000|||001234^Smith^Jane^^^MD',
+            'OBR|1|ORD001^ORDER||85025^CBC with Differential^LN|||20230101120000|||||||||001234^Smith^Jane^^^MD'
+        ].join('\n'),
+        'SIU^S12': [
+            'MSH|^~\\&|SCH|HOSPITAL|FHIR|DEST|20230101120000||SIU^S12|MSG005|P|2.5',
+            'SCH|APT001||||||ROUTINE^Routine|60|min^^ISO+|^^^20230201090000^^R|||001234^Smith^Jane^^^MD|OFFICE^Office^L',
+            'PID|1||12345^^^MRN^MR||Doe^John^M||19800101|M|||123 Main St^^Anytown^ST^12345',
+            'AIG|1||001234^Smith^Jane^^^MD^||||20230201090000|60|min^^ISO+'
+        ].join('\n'),
+        'MDM^T02': [
+            'MSH|^~\\&|HIM|HOSPITAL|FHIR|DEST|20230101120000||MDM^T02|MSG006|P|2.5',
+            'EVN|T02|20230101120000',
+            'PID|1||12345^^^MRN^MR||Doe^John^M||19800101|M|||123 Main St^^Anytown^ST^12345',
+            'TXA|1|DS|TX|20230101120000|001234^Smith^Jane^^^MD||20230101120000||AP|||DOC001||001234^Smith^Jane^^^MD||AU',
+            'OBX|1|TX|34133-9^Summary of episode note^LN||Patient presented with acute chest pain and was admitted for observation. Discharged in stable condition after 48 hours.'
+        ].join('\n'),
+        'MFN^M02': [
+            'MSH|^~\\&|MFN|HOSPITAL|FHIR|DEST|20230101120000||MFN^M02|MSG007|P|2.5',
+            'MFI|STF^Staff Master File^HL7||UPD|||AL',
+            'MFE|MAD|20230101120000|20230101120000|STAFF001^Staff001^L',
+            'STF|STAFF001^Smith^Jane^A||Smith^Jane^A^MD|P|F|19700601|||MD^Physician^HL7|HOSPITAL^^^LOC|123-456-7890|||A'
+        ].join('\n'),
+        'VXU^V04': [
+            'MSH|^~\\&|EHR|CLINIC|FHIR|DEST|20230101120000||VXU^V04|MSG008|P|2.5',
+            'PID|1||12345^^^MRN^MR||Doe^John^M||19800101|M|||123 Main St^^Anytown^ST^12345',
+            'ORC|RE|IMM001||||||20230101120000|||001234^Smith^Jane^^^MD',
+            'RXA|0|1|20230101|20230101|141^Influenza, seasonal, injectable^CVX||1|mL^milliliter^UCUM|01^Historical^NIP001|||||||UNK^Unknown manufacturer^MVX||CP|A'
+        ].join('\n'),
+        'DFT^P03': [
+            'MSH|^~\\&|BILLING|HOSPITAL|FHIR|DEST|20230101120000||DFT^P03|MSG009|P|2.5',
+            'EVN|P03|20230101120000',
+            'PID|1||12345^^^MRN^MR||Doe^John^M||19800101|M|||123 Main St^^Anytown^ST^12345',
+            'PV1|1|I|ICU^101^1^HOSPITAL|||001234^Smith^Jane^^^MD|||SUR||||A',
+            'FT1|1|||20230101|20230101|CG|99213^Office visit, est, low complexity^CPT4||1|250.00||USD|||001234^Smith^Jane^^^MD'
+        ].join('\n'),
+        'BAR^P01': [
+            'MSH|^~\\&|ADMIT|HOSPITAL|FHIR|DEST|20230101120000||BAR^P01|MSG010|P|2.5',
+            'EVN|P01|20230101120000',
+            'PID|1||12345^^^MRN^MR||Doe^John^M||19800101|M|||123 Main St^^Anytown^ST^12345',
+            'PV1|1|I|ICU^101^1^HOSPITAL|||001234^Smith^Jane^^^MD|||SUR||||A|||001234^Smith^Jane^^^MD|INP|VN12345||||||||||||||||||HOSPITAL|||||20230101120000'
+        ].join('\n'),
+        'OML^O21': [
+            'MSH|^~\\&|LIS|HOSPITAL|FHIR|DEST|20230101120000||OML^O21|MSG011|P|2.5',
+            'PID|1||12345^^^MRN^MR||Doe^John^M||19800101|M|||123 Main St^^Anytown^ST^12345',
+            'ORC|NW|ORD001^ORDER||||||20230101120000|||001234^Smith^Jane^^^MD',
+            'OBR|1|ORD001^ORDER||85025^CBC with Differential^LN|||20230101120000|||||||||001234^Smith^Jane^^^MD',
+            'SPM|1|||BLDV^Blood venous^HL70487|||||||P||||||20230101120000|20230101120000'
+        ].join('\n'),
+    };
+    const SAMPLE_HL7 = window._SAMPLE_HL7;
+
+    const attemptParse = async (hl7Msg, cacheKey) => {
+        if (cacheKey && window._parsedSampleCache.has(cacheKey)) {
+            return window._parsedSampleCache.get(cacheKey);
+        }
+        const resp = await fetch('/api/hl7/parse', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ rawMessage: hl7Msg.trim(), useEnhanced: true, escapeHandling: 'passthrough' }),
+            signal
+        });
+        if (!resp.ok) throw new Error(`${resp.status}`);
+        const json = await resp.json();
+        const result = json.data || json;
+        if (cacheKey) window._parsedSampleCache.set(cacheKey, result);
+        return result;
+    };
+
+    try {
+        let hl7Message = SAMPLE_HL7[messageType];
+        let parsedHL7Data;
+        let effectiveType = messageType;
+
+        try {
+            parsedHL7Data = await attemptParse(hl7Message || SAMPLE_HL7['ADT^A01'], messageType);
+        } catch (parseErr) {
+            if (parseErr.name === 'AbortError') throw parseErr;
+            console.warn(`⚠️ Parse failed for ${messageType} (${parseErr.message}), falling back to ADT^A01`);
+            parsedHL7Data = await attemptParse(SAMPLE_HL7['ADT^A01'], 'ADT^A01');
+            effectiveType = 'ADT^A01';
+        }
+
+        const mappingOptions = ctrl.model.data.mappingOptions || {};
+        const transformResp = await fetch('/api/fhir/test-transform-v3', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                parsedHL7Data,
+                createBundle: true,
+                validationMode: mappingOptions.validationLevel || 'strict',
+                fhirVersion,
+                transformationPreset: mappingOptions.transformationPreset || 'standard',
+                missingFieldHandling: mappingOptions.missingFieldHandling || 'omit'
+            }),
+            signal
+        });
+        if (!transformResp.ok) throw new Error(`Transform failed: ${transformResp.status}`);
+        const transformJson = await transformResp.json();
+
+        const atomicMappings = transformJson.atomicMappings || transformJson.data?.atomicMappings || [];
+        const hl7Version = parsedHL7Data?.version || parsedHL7Data?.messageHeader?.version || '2.x';
+        const transformResult = { ...transformJson, atomicMappings };
+
+        // Store in cache so revisiting this pill is instant
+        window._mappingPreviewCache.set(cacheKey, { effectiveType, transformResult, hl7Version });
+
+        if (mappingContainer && ctrl.view) {
+            const previewData = {
+                ...ctrl.model.getCurrentStepData(),
+                detectedMessageType: effectiveType,
+                fhirTransformResult: transformResult,
+                previewHL7Version: hl7Version
+            };
+            mappingContainer.innerHTML = ctrl.view.getFHIRMappingContent(previewData);
+
+            const countEl = document.getElementById('mapping-count');
+            if (countEl) countEl.textContent = atomicMappings.length;
+            const typeEl = document.getElementById('fhir-message-type');
+            if (typeEl) typeEl.textContent = effectiveType + (effectiveType !== messageType ? ' (fallback)' : '');
+            const versionEl = document.getElementById('fhir-hl7-version');
+            if (versionEl) versionEl.textContent = 'HL7 v' + hl7Version;
+            _updateResourceFilter(atomicMappings);
+            _updateCoverageBar(atomicMappings, transformJson.validationErrors);
+        }
+
+        if (ctrl.model?.data) {
+            ctrl.model.data.fhirTransformResult = transformResult;
+            ctrl.model.data.detectedMessageType = ctrl.model.data.detectedMessageType || effectiveType;
+        }
+
+        // Re-enable Next once we have mapping results (covers the step-2-skip scenario)
+        ctrl.view?.validateCurrentStep?.();
+
+    } catch (err) {
+        if (err.name === 'AbortError') return; // Superseded by a newer pill click — silently discard
+        console.error('❌ _previewMappingForType error:', err);
+        if (mappingContainer) {
+            mappingContainer.innerHTML = `<div style="padding:40px;text-align:center;color:#dc2626;font-size:14px;">Failed to load ${messageType} mapping preview: ${err.message}</div>`;
+        }
+    } finally {
+        if (loadingEl) loadingEl.style.display = 'none';
+    }
+};
+
+/**
+ * Pre-parse all sample HL7 messages in parallel so the first pill click only needs
+ * one network call (transform) instead of two (parse + transform).
+ * Called as soon as Step 3 DOM is ready — runs entirely in the background.
+ */
+window._preParseSamples = function() {
+    const samples = window._SAMPLE_HL7;
+    if (!samples) return; // Not yet defined — will be populated on first pill click
+    const allTypes = Object.keys(samples);
+    allTypes.forEach(type => {
+        if (window._parsedSampleCache.has(type)) return;
+        // Fire-and-forget; no AbortSignal — background only, not user-triggered
+        fetch('/api/hl7/parse', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ rawMessage: samples[type].trim(), useEnhanced: true, escapeHandling: 'passthrough' })
+        }).then(r => r.ok ? r.json() : null)
+          .then(json => { if (json) window._parsedSampleCache.set(type, json.data || json); })
+          .catch(() => {});
+    });
+};
+
+/**
+ * Silently pre-warms the mapping cache for a list of message types.
+ * Called after the first pill loads so that subsequent pill clicks feel instant.
+ */
+window._prewarmMappingCache = function(types) {
+    const ctrl = window.wizardController;
+    if (!ctrl) return;
+    const fhirVersion = ctrl.model.data.targetConfig?.version || 'R4';
+    const preset = ctrl.model.data.mappingOptions?.transformationPreset || 'standard';
+    types.forEach((type, i) => {
+        const key = `${type}:${fhirVersion}:${preset}`;
+        if (!window._mappingPreviewCache.has(key)) {
+            // Stagger slightly so we don't hammer the server all at once
+            setTimeout(() => window._previewMappingForType(type, null), i * 400);
+        }
+    });
+};
+
+/** Persists a change from the Advanced Mapping Options panel into the model. */
+window._onAdvancedOptionChange = function(key, value) {
+    const ctrl = window.wizardController;
+    if (!ctrl) return;
+    ctrl.model.data.mappingOptions = { ...ctrl.model.data.mappingOptions, [key]: value };
+    // Changing transformationPreset affects mapping output — clear cache and re-run active pill
+    if (key === 'transformationPreset') {
+        if (window._mappingPreviewCache) window._mappingPreviewCache.clear();
+        const activeBtn = document.querySelector('.msg-type-preview-btn.active');
+        const activeType = activeBtn?.dataset?.msgType || ctrl.model.data.detectedMessageType || 'ADT^A01';
+        window._previewMappingForType(activeType, activeBtn);
+    }
+};
+
+/**
+ * Called when the user changes the FHIR version selector inline on the mapping step.
+ * Updates the model, clears stale cache entries, then re-runs the active pill.
+ */
+window._onMappingFHIRVersionChange = function(newVersion) {
+    const ctrl = window.wizardController;
+    if (!ctrl) return;
+
+    // Update model
+    ctrl.model.data.targetConfig = { ...ctrl.model.data.targetConfig, version: newVersion };
+
+    // Clear entire cache — all entries are for the old version
+    if (window._mappingPreviewCache) window._mappingPreviewCache.clear();
+
+    // Re-run the currently active pill
+    const activeBtn = document.querySelector('.msg-type-preview-btn[style*="background: rgb(30, 58, 138)"], .msg-type-preview-btn[style*="background:#1e3a8a"], .msg-type-preview-btn.active');
+    const activeType = activeBtn?.dataset?.msgType
+        || ctrl.model.data.detectedMessageType
+        || 'ADT^A01';
+    window._previewMappingForType(activeType, activeBtn);
+};
 
 // Auto-initialize if container exists (OOB behavior)
 document.addEventListener('DOMContentLoaded', () => {

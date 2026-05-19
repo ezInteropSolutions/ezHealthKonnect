@@ -414,7 +414,7 @@ func DemonstrateDelimiterParsing() {
 		"Rep1~Rep2~Rep3",                            // Multiple repetitions
 	}
 
-	fmt.Println("=== Enhanced HL7 Delimiter Parsing Demonstration ===\n")
+	fmt.Println("=== Enhanced HL7 Delimiter Parsing Demonstration ===")
 
 	for i, fieldValue := range testFields {
 		fmt.Printf("Test %d: \"%s\"\n", i+1, fieldValue)

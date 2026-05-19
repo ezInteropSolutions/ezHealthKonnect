@@ -385,13 +385,13 @@ class WizardView extends EventTarget {
                                 <option value="">Choose transformation flow...</option>
                                 <optgroup label="🔀 Transformation Flows (Auto-processing)">
                                     <option value="hl7_to_fhir" ${data.transformationFlow === 'hl7_to_fhir' ? 'selected' : ''}>
-                                        HL7 v2.x → FHIR R4 (Automatic Transformation)
+                                        HL7 v2.x → FHIR R4 (Recommended)
+                                    </option>
+                                    <option value="hl7_to_fhir_r5" ${data.transformationFlow === 'hl7_to_fhir_r5' ? 'selected' : ''}>
+                                        HL7 v2.x → FHIR R5 (Emerging Standard)
                                     </option>
                                     <option value="ccd_to_fhir" ${data.transformationFlow === 'ccd_to_fhir' ? 'selected' : ''}>
                                         CCD/C-CDA → FHIR R4 (Automatic Transformation)
-                                    </option>
-                                    <option value="hl7_to_fhir_stu3" ${data.transformationFlow === 'hl7_to_fhir_stu3' ? 'selected' : ''}>
-                                        HL7 v2.x → FHIR STU3 (Automatic Transformation)
                                     </option>
                                 </optgroup>
                                 <optgroup label="📦 Passthrough Flows (No transformation)">
@@ -415,6 +415,41 @@ class WizardView extends EventTarget {
                         <div id="flowDescription" class="alert alert-info" style="display: none; margin-top: 12px; padding: 12px; background: #e3f2fd; border: 1px solid #90caf9; border-radius: 6px;">
                             <strong id="flowDescTitle"></strong>
                             <p id="flowDescText" style="margin: 8px 0 0 0; font-size: 13px;"></p>
+                        </div>
+                    </div>
+
+                    <!-- Message Family Filter Section -->
+                    <div class="config-section" id="wizardFamilyFilterSection" style="display:${['hl7_to_fhir','hl7_to_fhir_r5'].includes(data.transformationFlow || 'hl7_to_fhir') ? 'block' : 'none'};">
+                        <h4 class="section-title">🔀 Message Family Filter</h4>
+                        <div style="background:linear-gradient(to right,#f0fdf4,#f0f9ff);border-left:3px solid #34d399;padding:14px;border-radius:6px;">
+                            <p style="font-size:0.82rem;color:#6b7280;margin:0 0 10px;">
+                                Restrict which HL7 message families this interface accepts. Leave unrestricted to accept all. Unmatched messages receive a NACK (AR).
+                            </p>
+                            <label style="display:flex;align-items:center;cursor:pointer;margin-bottom:12px;">
+                                <input type="checkbox" id="wizardFamilyFilterEnabled"
+                                       onchange="window._wizardToggleFamilyFilter(this.checked)"
+                                       style="margin-right:8px;width:16px;height:16px;cursor:pointer;accent-color:#0369a1;"
+                                       ${Array.isArray(data.acceptedMessageFamilies) && data.acceptedMessageFamilies.length > 0 ? 'checked' : ''}>
+                                <span style="font-size:0.9rem;color:#1e3a8a;font-weight:500;">Restrict to specific message families</span>
+                            </label>
+                            <div id="wizardFamilyFilterPicker" style="display:${Array.isArray(data.acceptedMessageFamilies) && data.acceptedMessageFamilies.length > 0 ? 'block' : 'none'};">
+                                <div style="font-size:0.79rem;color:#64748b;margin-bottom:10px;">Click to select. MFN events must be chosen individually.</div>
+                                <div style="display:flex;flex-wrap:wrap;gap:6px;" id="wizardFamilyChips">
+                                    ${['ADT','ORU','ORM','SIU','MDM','VXU','RDE','BAR','DFT'].map(f =>
+                                        `<span class="family-chip${Array.isArray(data.acceptedMessageFamilies) && data.acceptedMessageFamilies.includes(f) ? ' selected' : ''}"
+                                               data-family="${f}" onclick="window._wizardToggleFamilyChip('${f}')"
+                                               title="${{ADT:'Admit/Discharge/Transfer',ORU:'Observation Results',ORM:'Order Entry',SIU:'Scheduling',MDM:'Medical Document',VXU:'Vaccination',RDE:'Pharmacy',BAR:'Billing',DFT:'Financial'}[f]}">${f}</span>`
+                                    ).join('')}
+                                    <span style="width:100%;font-size:0.75rem;color:#94a3b8;padding-top:4px;font-weight:500;">MFN — select individually:</span>
+                                    ${['MFN^M02','MFN^M04','MFN^M05','MFN^M12','MFN^M13'].map(f => {
+                                        const label = {MFN_M02:'Staff',MFN_M04:'Charge',MFN_M05:'Location',MFN_M12:'Observation',MFN_M13:'Generic'}[f.replace('^','_')];
+                                        return `<span class="family-chip${Array.isArray(data.acceptedMessageFamilies) && data.acceptedMessageFamilies.includes(f) ? ' selected' : ''}"
+                                                      data-family="${f}" onclick="window._wizardToggleFamilyChip('${f}')">${f} ${label}</span>`;
+                                    }).join('')}
+                                </div>
+                            </div>
+                            <input type="hidden" id="wizardAcceptedMessageFamilies"
+                                   value="${Array.isArray(data.acceptedMessageFamilies) && data.acceptedMessageFamilies.length > 0 ? JSON.stringify(data.acceptedMessageFamilies).replace(/"/g,'&quot;') : ''}">
                         </div>
                     </div>
 
@@ -554,8 +589,30 @@ class WizardView extends EventTarget {
         return `
             <div class="wizard-step-content" data-step="2">
                 <div class="wizard-step-header">
-                    <h3>HL7 Message Parsing & Sample</h3>
-                    <p>Provide sample HL7 message for parsing and validation</p>
+                    <h3>HL7 Message Parsing & Sample <span style="font-size:14px;font-weight:400;color:#6b7280;vertical-align:middle;">(Optional)</span></h3>
+                    <p>Provide a sample HL7 message for a more accurate field mapping preview, or skip to use an auto-loaded default</p>
+                </div>
+
+                <!-- Optional step notice -->
+                <div style="background: linear-gradient(to right, #fffbeb, #fef9c3); border: 1px solid #fde68a; border-radius: 8px; padding: 14px 16px; margin-bottom: 16px;">
+                    <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:16px;">
+                        <div>
+                            <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
+                                <span style="font-size:16px;">💡</span>
+                                <strong style="font-size:13px;color:#92400e;">This step is optional — you can skip and proceed with auto-generated mappings</strong>
+                            </div>
+                            <ul style="margin:0;padding-left:20px;font-size:12px;color:#78350f;line-height:1.8;">
+                                <li><strong>Skip:</strong> Built-in sample messages are used to preview FHIR mappings. Fast and works for most standard interfaces.</li>
+                                <li><strong>Use your own sample:</strong> Paste a real HL7 message from your system to see mappings tailored to your exact segment structure, custom Z-segments, and field values.</li>
+                                <li><strong>HL7 version matters:</strong> If your system sends v2.3 or v2.4 messages (vs the default v2.5 samples), upload one to get accurate version-specific mappings.</li>
+                            </ul>
+                        </div>
+                        <button type="button"
+                                onclick="window._skipWizardHL7Step && window._skipWizardHL7Step()"
+                                style="flex-shrink:0;padding:7px 18px; border: 2px solid #f59e0b; border-radius:6px; background:white; color:#b45309; font-size:13px; font-weight:600; cursor:pointer; white-space:nowrap;">
+                            Skip →
+                        </button>
+                    </div>
                 </div>
 
                 <div class="wizard-form">
@@ -658,10 +715,9 @@ class WizardView extends EventTarget {
                     <label for="fhirVersion" class="form-label required">FHIR Version</label>
                     <select id="fhirVersion" class="form-control">
                         <option value="R4" ${!config.fhirVersion || config.fhirVersion === 'R4' ? 'selected' : ''}>FHIR R4 (Recommended)</option>
-                        <option value="STU3" ${config.fhirVersion === 'STU3' ? 'selected' : ''}>FHIR STU3</option>
-                        <option value="DSTU2" ${config.fhirVersion === 'DSTU2' ? 'selected' : ''}>FHIR DSTU2 (Legacy)</option>
+                        <option value="R5" ${config.fhirVersion === 'R5' ? 'selected' : ''}>FHIR R5 (Emerging Standard)</option>
                     </select>
-                    <div class="form-hint">Select the FHIR version your sender systems will use</div>
+                    <div class="form-hint">Select the FHIR version your destination system expects</div>
                 </div>
 
                 <!-- Supported Operations -->
@@ -937,8 +993,8 @@ class WizardView extends EventTarget {
         // Delivery mode is relevant for transformation flows that output FHIR
         const transformationFlowsWithDelivery = [
             'hl7_to_fhir',         // HL7 v2.x → FHIR R4
+            'hl7_to_fhir_r5',      // HL7 v2.x → FHIR R5
             'ccd_to_fhir',         // CCD/C-CDA → FHIR R4
-            'hl7_to_fhir_stu3',    // HL7 v2.x → FHIR STU3
             // Easy to add: 'x12_to_fhir', 'csv_to_fhir', etc.
         ];
 
@@ -984,9 +1040,8 @@ class WizardView extends EventTarget {
                             <div class="form-group">
                                 <label for="targetVersion" class="form-label">FHIR Version</label>
                                 <select id="targetVersion" class="form-control">
-                                    <option value="R4" ${config.version === 'R4' ? 'selected' : ''}>R4 (Recommended)</option>
-                                    <option value="STU3" ${config.version === 'STU3' ? 'selected' : ''}>STU3</option>
-                                    <option value="DSTU2" ${config.version === 'DSTU2' ? 'selected' : ''}>DSTU2</option>
+                                    <option value="R4" ${!config.version || config.version === 'R4' ? 'selected' : ''}>R4 (Recommended)</option>
+                                    <option value="R5" ${config.version === 'R5' ? 'selected' : ''}>R5 (Emerging Standard)</option>
                                 </select>
                             </div>
                             <div class="form-group">
@@ -1445,13 +1500,28 @@ class WizardView extends EventTarget {
                     <div class="fhir-mapping-interface">
                         <!-- Configuration Header -->
                         <div class="mapping-config-header" style="background: linear-gradient(135deg, #f8f9ff 0%, #fff 100%); border: 2px solid #f8bbd9; border-radius: 12px; padding: 16px 20px; margin-bottom: 16px;">
+                            ${(() => {
+                                const hl7Ver = data?.parsedHL7Data?.version || data?.parsedHL7Data?.messageHeader?.version || null;
+                                const isOldVer = hl7Ver && !['2.5', '2.5.1', '2.6', '2.7', '2.8'].includes(hl7Ver);
+                                return isOldVer ? `<div style="background:#fff7ed;border:1px solid #fed7aa;border-radius:6px;padding:8px 12px;margin-bottom:10px;font-size:12px;color:#92400e;display:flex;align-items:center;gap:8px;">
+                                    <span>⚠️</span>
+                                    <span>Your sample uses <strong>HL7 v${hl7Ver}</strong>. Standard FHIR R4 mappings are optimized for HL7 v2.5+. Some field positions may differ — review highlighted mappings carefully.</span>
+                                </div>` : '';
+                            })()}
                             <div style="display: flex; justify-content: space-between; align-items: center;">
                                 <div>
                                     <h4 style="margin: 0 0 6px 0; font-size: 16px; font-weight: 600; color: #1e3a8a;">🗺️ Field Mapping Configuration</h4>
                                     <div style="display: flex; align-items: center; gap: 8px; font-size: 12px; color: #6b7280;">
-                                        <span style="background: #e0e7ff; color: #1e3a8a; padding: 2px 8px; border-radius: 6px; font-weight: 500;" id="fhir-message-type">${data.detectedMessageType || data.parsedHL7Data?.messageType?.name || 'Loading...'}</span>
+                                        <span style="background: #e0e7ff; color: #1e3a8a; padding: 2px 8px; border-radius: 6px; font-weight: 500;" id="fhir-message-type">${data.detectedMessageType || data.parsedHL7Data?.messageType?.name || 'Select message type above'}</span>
                                         <span style="color: #d1d5db;">•</span>
-                                        <span style="background: #e0e7ff; color: #1e3a8a; padding: 2px 8px; border-radius: 6px; font-weight: 500;">FHIR R4</span>
+                                        <span style="background: #dcfce7; color: #166534; padding: 2px 8px; border-radius: 6px; font-weight: 500;" id="fhir-hl7-version">${data?.parsedHL7Data?.version ? 'HL7 v' + data.parsedHL7Data.version : 'HL7 v2.x'}</span>
+                                        <span style="color: #d1d5db;">→</span>
+                                        <select id="mapping-fhir-version-select"
+                                            onchange="window._onMappingFHIRVersionChange(this.value)"
+                                            style="background:#e0e7ff;color:#1e3a8a;border:1px solid #a5b4fc;border-radius:6px;font-weight:600;font-size:12px;padding:1px 6px;cursor:pointer;outline:none;">
+                                            <option value="R4"   ${(!data.targetConfig?.version || data.targetConfig?.version === 'R4')   ? 'selected' : ''}>FHIR R4</option>
+                                            <option value="R5"   ${data.targetConfig?.version === 'R5'   ? 'selected' : ''}>FHIR R5</option>
+                                        </select>
                                         <span style="color: #d1d5db;">•</span>
                                         <span style="padding: 2px 8px; border-radius: 6px; font-weight: 500; font-size: 11px; text-transform: uppercase;" id="mapping-count-badge">
                                             <span id="mapping-count">${this.getMappingCount(data)}</span> Mappings
@@ -1467,13 +1537,9 @@ class WizardView extends EventTarget {
                                             id="btn-view-fhir-json" onclick="window.viewRawFHIRJSON()">
                                         📄 View FHIR JSON
                                     </button>
-                                    <button style="padding: 8px 16px; border: 2px solid #10b981; border-radius: 6px; font-size: 13px; font-weight: 500; cursor: pointer; display: flex; align-items: center; gap: 6px; background: white; color: #10b981; transition: all 0.2s ease;"
-                                            id="btn-save-mappings" onclick="window.saveFHIRMappingConfiguration()">
-                                        💾 Save Configuration
-                                    </button>
                                     <button style="padding: 8px 16px; border: none; border-radius: 6px; font-size: 13px; font-weight: 500; cursor: pointer; display: flex; align-items: center; gap: 6px; background: #1e3a8a; color: white; transition: all 0.2s ease;"
-                                            id="btn-test-mappings" onclick="window.testFHIRMappings()">
-                                        🧪 Test Transform
+                                            id="btn-apply-mappings" onclick="window.applyAndContinue()">
+                                        ✓ Apply &amp; Continue
                                     </button>
                                 </div>
                             </div>
@@ -1515,6 +1581,56 @@ class WizardView extends EventTarget {
                             </div>
                         </div>
 
+                        <!-- Mapping Coverage Summary -->
+                        <div id="mapping-coverage-bar" style="display:flex; align-items:center; gap:16px; padding:10px 14px; background:#f0f9ff; border:1px solid #bae6fd; border-radius:8px; margin-bottom:10px; font-size:12px; color:#0369a1;">
+                            ${(() => {
+                                const mappings = data?.fhirTransformResult?.atomicMappings || [];
+                                if (mappings.length === 0) return `<span style="color:#6b7280;">Mapping preview will appear below — select a message type</span>`;
+                                const high = mappings.filter(m => m.confidence == null || m.confidence >= 0.90).length;
+                                const med  = mappings.filter(m => m.confidence != null && m.confidence >= 0.75 && m.confidence < 0.90).length;
+                                const low  = mappings.filter(m => m.confidence != null && m.confidence < 0.75).length;
+                                const errors = data?.fhirTransformResult?.validationErrors?.length || 0;
+                                return `
+                                    <span style="font-weight:600;">📊 ${mappings.length} fields mapped</span>
+                                    <span style="color:#d1d5db;">|</span>
+                                    ${high  > 0 ? `<span style="color:#16a34a;">●&nbsp;${high} high</span>`  : ''}
+                                    ${med   > 0 ? `<span style="color:#d97706;">●&nbsp;${med} medium</span>` : ''}
+                                    ${low   > 0 ? `<span style="color:#dc2626;">●&nbsp;${low} low</span>`   : ''}
+                                    <span style="color:#d1d5db;">|</span>
+                                    <span style="${errors > 0 ? 'color:#dc2626;font-weight:600;' : 'color:#16a34a;'}">
+                                        ${errors > 0 ? `⚠ ${errors} validation issue${errors > 1 ? 's' : ''}` : '✓ No validation issues'}
+                                    </span>`;
+                            })()}
+                        </div>
+
+                        <!-- Message Type Preview Selector -->
+                        ${(() => {
+                            const FAMILY_REPR = { ADT: 'ADT^A01', ORU: 'ORU^R01', ORM: 'ORM^O01', OML: 'OML^O21', SIU: 'SIU^S12', MDM: 'MDM^T02', MFN: 'MFN^M02', VXU: 'VXU^V04', DFT: 'DFT^P03', BAR: 'BAR^P01' };
+                            const families = data?.acceptedMessageFamilies;
+                            let previewTypes;
+                            if (families && families.length > 0) {
+                                previewTypes = families.map(f => f.includes('^') ? f : (FAMILY_REPR[f] || f));
+                            } else {
+                                previewTypes = Object.values(FAMILY_REPR);
+                            }
+                            const active = data?.detectedMessageType || previewTypes[0];
+                            if (previewTypes.length === 0) return '';
+                            const pills = previewTypes.map(t => {
+                                const isActive = t === active || t.split('^')[0] === active?.split('^')[0];
+                                return `<button class="msg-type-preview-btn${isActive ? ' active' : ''}"
+                                    data-msg-type="${t}"
+                                    onclick="window._previewMappingForType('${t}', this)"
+                                    style="padding:6px 14px; border: 2px solid ${isActive ? '#1e3a8a' : '#e5e7eb'}; border-radius:20px; font-size:12px; font-weight:500; cursor:pointer; background:${isActive ? '#1e3a8a' : 'white'}; color:${isActive ? 'white' : '#6b7280'}; transition: all 0.2s;">
+                                    ${t}
+                                </button>`;
+                            }).join('');
+                            return `<div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:12px; padding:10px 14px; background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px;">
+                                <span style="font-size:12px; color:#6b7280; white-space:nowrap; font-weight:500;">Preview mapping for:</span>
+                                ${pills}
+                                <span id="msg-type-preview-loading" style="display:none; font-size:12px; color:#6b7280; margin-left:4px;">⟳ Loading...</span>
+                            </div>`;
+                        })()}
+
                         <!-- Mapping Results Container -->
                         <div id="fhir-mapping-container" style="min-height: 400px; border: 2px solid #e2e8f0; border-radius: 12px; background: white;">
                             ${this.getFHIRMappingContent(data)}
@@ -1532,30 +1648,48 @@ class WizardView extends EventTarget {
                                 <span id="advanced-toggle-icon">▼</span>
                             </button>
                             <div id="advanced-options-panel" style="display: none; margin-top: 8px; border: 2px solid #f3f4f6; border-radius: 8px; background: white; padding: 16px;">
-                                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 16px;">
+                                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px;">
                                     <div>
-                                        <label style="display: block; font-size: 13px; font-weight: 500; color: #374151; margin-bottom: 4px;">Data Transformation Rules</label>
-                                        <select id="transformation-preset" style="width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 13px;">
-                                            <option value="standard">Standard HL7 → FHIR</option>
-                                            <option value="minimal">Minimal Required Fields</option>
-                                            <option value="comprehensive">Comprehensive Mapping</option>
-                                            <option value="custom">Custom Rules</option>
+                                        <label style="display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 500; color: #374151; margin-bottom: 4px;">
+                                            Data Transformation Rules
+                                            <span title="Controls which HL7 fields are mapped to FHIR.&#10;&#10;• Standard — maps all commonly used fields (recommended for most integrations)&#10;• Minimal — maps only the FHIR required fields; smaller output, faster processing&#10;• Comprehensive — maps every available field including optional ones; largest output&#10;• Custom — you control every field individually in the mapping editor below"
+                                                  style="cursor: help; color: #6b7280; font-size: 14px; line-height: 1;">ⓘ</span>
+                                        </label>
+                                        <select id="transformation-preset"
+                                                onchange="window._onAdvancedOptionChange('transformationPreset', this.value)"
+                                                style="width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 13px;">
+                                            <option value="standard"       ${(data.mappingOptions?.transformationPreset || 'standard') === 'standard'       ? 'selected' : ''}>Standard HL7 → FHIR</option>
+                                            <option value="minimal"        ${data.mappingOptions?.transformationPreset === 'minimal'        ? 'selected' : ''}>Minimal Required Fields</option>
+                                            <option value="comprehensive"  ${data.mappingOptions?.transformationPreset === 'comprehensive'  ? 'selected' : ''}>Comprehensive Mapping</option>
+                                            <option value="custom"         ${data.mappingOptions?.transformationPreset === 'custom'         ? 'selected' : ''}>Custom Rules</option>
                                         </select>
                                     </div>
                                     <div>
-                                        <label style="display: block; font-size: 13px; font-weight: 500; color: #374151; margin-bottom: 4px;">Validation Level</label>
-                                        <select id="validation-level" style="width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 13px;">
-                                            <option value="strict">Strict FHIR Compliance</option>
-                                            <option value="moderate">Moderate (Recommended)</option>
-                                            <option value="lenient">Lenient</option>
+                                        <label style="display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 500; color: #374151; margin-bottom: 4px;">
+                                            Validation Level
+                                            <span title="How strictly the generated FHIR output is checked.&#10;&#10;• Strict — every cardinality, data type and terminology binding must be correct; errors block delivery&#10;• Moderate — structural errors block delivery, terminology warnings are logged but allowed through (recommended)&#10;• Lenient — only critical structural errors are blocked; everything else is logged and passed through"
+                                                  style="cursor: help; color: #6b7280; font-size: 14px; line-height: 1;">ⓘ</span>
+                                        </label>
+                                        <select id="validation-level"
+                                                onchange="window._onAdvancedOptionChange('validationLevel', this.value)"
+                                                style="width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 13px;">
+                                            <option value="strict"   ${data.mappingOptions?.validationLevel === 'strict'   ? 'selected' : ''}>Strict FHIR Compliance</option>
+                                            <option value="moderate" ${(data.mappingOptions?.validationLevel || 'moderate') === 'moderate' ? 'selected' : ''}>Moderate (Recommended)</option>
+                                            <option value="lenient"  ${data.mappingOptions?.validationLevel === 'lenient'  ? 'selected' : ''}>Lenient</option>
                                         </select>
                                     </div>
                                     <div>
-                                        <label style="display: block; font-size: 13px; font-weight: 500; color: #374151; margin-bottom: 4px;">Missing Field Handling</label>
-                                        <select id="missing-field-handling" style="width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 13px;">
-                                            <option value="skip">Skip Missing Fields</option>
-                                            <option value="default">Use Default Values</option>
-                                            <option value="error">Report as Error</option>
+                                        <label style="display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 500; color: #374151; margin-bottom: 4px;">
+                                            Missing Field Handling
+                                            <span title="What happens when an HL7 field referenced in a mapping is empty or absent.&#10;&#10;• Skip — the FHIR field is simply omitted (safest; FHIR receivers must tolerate absent optional fields)&#10;• Use Default Values — a system default is substituted (e.g. 'UNK' for unknown); useful when the destination requires every field&#10;• Report as Error — the message is marked failed and routed to the error queue; use when missing data must never be silently dropped"
+                                                  style="cursor: help; color: #6b7280; font-size: 14px; line-height: 1;">ⓘ</span>
+                                        </label>
+                                        <select id="missing-field-handling"
+                                                onchange="window._onAdvancedOptionChange('missingFieldHandling', this.value)"
+                                                style="width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 13px;">
+                                            <option value="skip"    ${(data.mappingOptions?.missingFieldHandling || 'skip') === 'skip'    ? 'selected' : ''}>Skip Missing Fields</option>
+                                            <option value="default" ${data.mappingOptions?.missingFieldHandling === 'default' ? 'selected' : ''}>Use Default Values</option>
+                                            <option value="error"   ${data.mappingOptions?.missingFieldHandling === 'error'   ? 'selected' : ''}>Report as Error</option>
                                         </select>
                                     </div>
                                 </div>
@@ -1856,7 +1990,7 @@ class WizardView extends EventTarget {
                 <div style="font-size: 64px; margin-bottom: 24px; color: #1e3a8a;">🗺️</div>
                 <div style="font-size: 20px; font-weight: 600; margin-bottom: 12px; color: #1e3a8a;">Ready to Configure Mappings</div>
                 <div style="font-size: 16px; color: #6b7280; margin-bottom: 32px; max-width: 500px; margin-left: auto; margin-right: auto; line-height: 1.5;">
-                    ${data.detectedMessageType ? `Configure how HL7 ${data.detectedMessageType} fields map to FHIR R4 resources` : 'Parse an HL7 message first to configure field mappings'}
+                    ${data.detectedMessageType ? `Configure how HL7 ${data.detectedMessageType} fields map to FHIR ${data.targetConfig?.version || 'R4'} resources` : 'Parse an HL7 message first to configure field mappings'}
                 </div>
 
                 ${data.detectedMessageType ? `
@@ -1934,9 +2068,9 @@ class WizardView extends EventTarget {
         const headerColor = hasIssues ? '#dc2626' : 'white';
 
         return `
-            <div style="border: 2px solid ${hasIssues ? '#fecaca' : '#e0e7ff'}; border-radius: 12px; background: white; overflow: hidden;">
+            <div class="resource-group-card" data-resource="${resourceType}" style="border: 2px solid ${hasIssues ? '#fecaca' : '#e0e7ff'}; border-radius: 12px; background: white; overflow: hidden;">
                 <!-- Resource Header -->
-                <div style="background: ${headerBg}; color: ${headerColor}; padding: 12px 16px;">
+                <div class="resource-group-header" style="background: ${headerBg}; color: ${headerColor}; padding: 12px 16px;">
                     <div style="display: flex; justify-content: space-between; align-items: flex-start;">
                         <div>
                             <h5 style="margin: 0; font-size: 14px; font-weight: 600;">${this.getResourceIcon(resourceType)} ${resourceType} Resource</h5>
@@ -2093,8 +2227,8 @@ class WizardView extends EventTarget {
         const fhirField = mapping.targetPath || mapping.fhirPath || mapping.fhirField || 'Unknown';
         const transformType = mapping.transformType || mapping.transform || 'direct';
 
-        // Confidence — only show when a real value is present (not the 0.85 default)
-        const hasConf = mapping.confidence != null;
+        // Confidence — only show when a meaningful value is present (treat 0 as absent)
+        const hasConf = mapping.confidence != null && mapping.confidence > 0;
         const conf = hasConf ? mapping.confidence : null;
         const confPct = conf != null ? Math.round(conf * 100) : null;
         const confColor = confPct == null ? '#94a3b8' : confPct >= 90 ? '#16a34a' : confPct >= 75 ? '#d97706' : '#dc2626';
@@ -2111,7 +2245,7 @@ class WizardView extends EventTarget {
         const fhirValue = (_fhirRaw == null) ? '' : (typeof _fhirRaw === 'string' ? _fhirRaw : JSON.stringify(_fhirRaw));
 
         return `
-            <div style="padding: 10px 16px; border-bottom: 1px solid #f1f5f9; display: flex; align-items: center; gap: 12px; ${hasIssue ? 'background: #fef2f2;' : ''}"
+            <div class="fhir-mapping-row" style="padding: 10px 16px; border-bottom: 1px solid #f1f5f9; display: flex; align-items: center; gap: 12px; ${hasIssue ? 'background: #fef2f2;' : ''}"
                  data-mapping-index="${index}" data-resource="${resourceType}">
 
                 <!-- HL7 Source -->
@@ -2356,7 +2490,7 @@ class WizardView extends EventTarget {
                                 <span>•</span>
                                 <span><strong>${atomicMappings.length}</strong> field mappings applied</span>
                                 <span>•</span>
-                                <span>FHIR R4 compliant</span>
+                                <span>FHIR ${data.targetConfig?.version || 'R4'} compliant</span>
                             </div>
                         </div>
                         <div style="display: flex; gap: 8px;">
@@ -4910,13 +5044,13 @@ PV1|1|I|ICU^101^1|||DOC123^Smith^Jane|||EMERGENCY|||
                             title: '🔀 HL7 v2.x → FHIR R4 Transformation',
                             text: 'Automatically converts incoming HL7 v2.x messages to FHIR R4 resources and delivers them to your FHIR server. Supports ADT, ORU, ORM, and other message types.'
                         },
+                        'hl7_to_fhir_r5': {
+                            title: '🔀 HL7 v2.x → FHIR R5 Transformation',
+                            text: 'Automatically converts incoming HL7 v2.x messages to FHIR R5 resources. Use for systems adopting the latest FHIR standard — structural changes (e.g. Encounter.class, participant roles) apply.'
+                        },
                         'ccd_to_fhir': {
                             title: '🔀 CCD/C-CDA → FHIR R4 Transformation',
                             text: 'Automatically converts C-CDA (Consolidated Clinical Document Architecture) documents to FHIR R4 resources. Ideal for EHR interoperability.'
-                        },
-                        'hl7_to_fhir_stu3': {
-                            title: '🔀 HL7 v2.x → FHIR STU3 Transformation',
-                            text: 'Automatically converts HL7 v2.x messages to FHIR STU3 resources for systems that haven\'t upgraded to R4.'
                         },
                         'passthrough': {
                             title: '📦 Passthrough (No Transformation)',
@@ -4940,6 +5074,13 @@ PV1|1|I|ICU^101^1|||DOC123^Smith^Jane|||EMERGENCY|||
                     } else {
                         flowDescriptionDiv.style.display = 'none';
                     }
+                }
+
+                // Show/hide family filter based on whether flow is HL7→FHIR
+                const familyFilterSection = container.querySelector('#wizardFamilyFilterSection');
+                if (familyFilterSection) {
+                    const isHL7Flow = flow === 'hl7_to_fhir' || flow === 'hl7_to_fhir_r5';
+                    familyFilterSection.style.display = isHL7Flow ? 'block' : 'none';
                 }
 
                 // Re-render target config panel to show/hide delivery mode
@@ -5692,6 +5833,16 @@ PV1|1|I|ICU^101^1|||DOC123^Smith^Jane|||EMERGENCY|||
         // Get target type if available
         const targetType = this.container.querySelector('#targetType')?.value;
         if (targetType) data.targetType = targetType;
+
+        // Collect accepted message families from wizard chip picker
+        const familiesInput = this.container.querySelector('#wizardAcceptedMessageFamilies');
+        if (familiesInput) {
+            try {
+                data.acceptedMessageFamilies = familiesInput.value ? JSON.parse(familiesInput.value) : null;
+            } catch (e) {
+                data.acceptedMessageFamilies = null;
+            }
+        }
 
         // Collect inbound connector config from ConnectorConfigBuilder if available
         if (this.inboundBuilder) {
@@ -8058,7 +8209,7 @@ window.aiSuggestMappings = async function() {
 
         // Render gap rows
         tableEl.innerHTML = summaryHtml + suggestions.map((s, i) => {
-            const conf    = Math.round((s.confidence || 0) * 100);
+            const conf    = Math.round((s.confidence > 0 ? s.confidence : 0.7) * 100);
             const confCol = conf >= 80 ? '#16a34a' : conf >= 50 ? '#d97706' : '#dc2626';
             const txKey   = resolveTransformKey(s);
             const txType  = wizardTransformLabel(txKey);
@@ -8200,60 +8351,50 @@ window.aiSuggestMappings = async function() {
     }
 };
 
-// Global functions for Step 4 FHIR Mapping functionality
-window.saveFHIRMappingConfiguration = function() {
-    console.log('💾 Saving FHIR mapping configuration...');
+// Keep old name as alias so any surviving references don't 404
+window.saveFHIRMappingConfiguration = function() { window.applyAndContinue(); };
 
-    // Collect all mapping configurations from the UI
-    const mappingRows = document.querySelectorAll('.fhir-mapping-row');
+window.applyAndContinue = function() {
+    const ctrl = window.wizardController;
+    if (!ctrl) { showNotification('Wizard not initialised', 'error'); return; }
+
+    const btn = document.getElementById('btn-apply-mappings');
+    if (btn) { btn.disabled = true; btn.textContent = '⏳ Saving…'; }
+
+    // Collect any manual edits from visible mapping rows
     const customMappings = [];
-
-    mappingRows.forEach(row => {
-        const hl7Field = row.querySelector('.hl7-source-select')?.value;
-        const fhirField = row.querySelector('.fhir-target-select')?.value;
+    document.querySelectorAll('.fhir-mapping-row').forEach(row => {
+        const hl7Field = row.querySelector('.hl7-source-select')?.value
+                      || row.querySelector('input[type="text"]')?.value;
+        const fhirField = row.querySelector('.fhir-target-select')?.value
+                       || row.querySelectorAll('input[type="text"]')[1]?.value;
         const transformation = row.querySelector('.transformation-select')?.value || 'direct';
-        const confidence = parseFloat(row.querySelector('.confidence-badge')?.textContent) || 0.85;
-
         if (hl7Field && fhirField) {
             customMappings.push({
-                hl7Path: hl7Field,
-                fhirPath: fhirField,
-                transformation: transformation,
-                confidence: confidence,
-                enabled: !row.classList.contains('disabled')
+                hl7Path: hl7Field, fhirPath: fhirField,
+                transformation, enabled: !row.classList.contains('disabled')
             });
         }
     });
 
-    // Get current wizard data
-    const wizardData = window.wizardController?.getCurrentData() || {};
-
-    // Update wizard data with custom mappings
-    wizardData.fhirMappings = customMappings;
-    wizardData.mappingConfiguration = {
-        customMappings: customMappings,
-        validationLevel: document.querySelector('input[name="validationLevel"]:checked')?.value || 'strict',
-        transformationPreset: document.querySelector('select[name="transformationPreset"]')?.value || 'standard',
-        savedAt: new Date().toISOString()
+    // Merge into model (prefer transform-result mappings when no manual edits were made)
+    const existingMappings = ctrl.model.data.fhirTransformResult?.atomicMappings || [];
+    ctrl.model.data.customMappings = customMappings.length > 0 ? customMappings : existingMappings;
+    ctrl.model.data.mappingOptions  = {
+        ...(ctrl.model.data.mappingOptions || {}),
+        validationLevel:       document.getElementById('validation-level')?.value       || 'moderate',
+        transformationPreset:  document.getElementById('transformation-preset')?.value  || 'standard',
+        missingFieldHandling:  document.getElementById('missing-field-handling')?.value || 'skip',
+        appliedAt: new Date().toISOString()
     };
 
-    // Save to wizard controller
-    if (window.wizardController) {
-        window.wizardController.updateData(wizardData);
-        console.log('✅ Mapping configuration saved:', customMappings.length, 'mappings');
-
-        // Show success message
-        showNotification('Configuration saved successfully!', 'success');
-
-        // Move to next step if available
-        if (window.wizardController.canProceedToNextStep) {
-            setTimeout(() => {
-                window.wizardController.goToStep(4); // Step 5 (Summary)
-            }, 1500);
-        }
+    // Advance wizard — click the real Next button so all validation hooks run
+    const nextBtn = document.getElementById('wizardNext');
+    if (nextBtn && !nextBtn.disabled) {
+        nextBtn.click();
     } else {
-        console.error('❌ Wizard controller not available');
-        showNotification('Error: Could not save configuration', 'error');
+        showNotification('Complete required fields before continuing', 'warning');
+        if (btn) { btn.disabled = false; btn.innerHTML = '✓ Apply &amp; Continue'; }
     }
 };
 
@@ -8374,78 +8515,77 @@ window.updateMapping = function(rowId, field, value) {
 };
 
 window.toggleMappingView = function(viewType) {
-    console.log('👁️ Switching mapping view to:', viewType);
+    const groupsContainer = document.getElementById('resource-mapping-groups');
+    if (!groupsContainer) return;
 
-    // Update active button
-    document.querySelectorAll('.mapping-view-btn').forEach(btn => {
-        btn.classList.remove('active');
-        if (btn.textContent.toLowerCase().includes(viewType.toLowerCase())) {
-            btn.classList.add('active');
-        }
-    });
-
-    // Find all mapping containers (resource groups and individual rows)
-    const resourceGroups = document.querySelectorAll('[id^="resource-mappings-"]');
-    const mappingRows = document.querySelectorAll('[style*="border: 2px solid #e5e7eb"]'); // Individual mapping rows
-
-    let visibleCount = 0;
+    const cards    = groupsContainer.querySelectorAll('.resource-group-card');
+    const headers  = groupsContainer.querySelectorAll('.resource-group-header');
+    const rowLists = groupsContainer.querySelectorAll('[id^="resource-mappings-"]');
+    const allRows  = groupsContainer.querySelectorAll('.fhir-mapping-row');
 
     switch (viewType) {
         case 'grouped':
-        case 'resource':
-            // Show grouped by resource (default view) — all groups visible
-            resourceGroups.forEach(group => {
-                const parent = group.closest('[style*="border: 2px"]');
-                if (parent) {
-                    parent.style.display = 'block';
-                    visibleCount++;
-                }
-            });
-            console.log('✅ Showing resource-grouped view');
+        default:
+            // Resource cards with headers — default card layout
+            cards.forEach(c => { c.style.display = 'block'; c.style.marginBottom = ''; });
+            headers.forEach(h => { h.style.display = ''; });
+            rowLists.forEach(l => { l.style.maxHeight = '400px'; l.style.borderTop = ''; });
+            allRows.forEach(r => { r.style.display = ''; r.style.borderRadius = ''; r.style.borderLeft = ''; });
+            groupsContainer.style.gap = '16px';
             break;
 
         case 'list':
-        case 'all':
-            // Show ALL mapping rows regardless of resource — un-hide every group
-            resourceGroups.forEach(group => {
-                const parent = group.closest('[style*="border: 2px"]');
-                if (parent) parent.style.display = 'block';
-            });
-            mappingRows.forEach(row => {
-                row.style.display = 'block';
-                visibleCount++;
-            });
-            console.log('✅ Showing all-mappings flat view');
+            // Flat dense table — hide resource headers, remove card gaps, show all rows
+            cards.forEach(c => { c.style.marginBottom = '0'; c.style.borderRadius = '0'; c.style.border = 'none'; c.style.boxShadow = 'none'; });
+            headers.forEach(h => { h.style.display = 'none'; });
+            rowLists.forEach(l => { l.style.maxHeight = 'none'; l.style.borderTop = '1px solid #e5e7eb'; });
+            allRows.forEach(r => { r.style.display = ''; r.style.borderRadius = '0'; r.style.borderLeft = '4px solid #e0e7ff'; });
+            groupsContainer.style.gap = '0';
+            // Wrap in a single bordered container on first call
+            if (!groupsContainer.style.border) {
+                groupsContainer.style.border = '2px solid #e2e8f0';
+                groupsContainer.style.borderRadius = '8px';
+                groupsContainer.style.overflow = 'hidden';
+            }
             break;
 
-        case 'validation':
-        case 'issues':
-            // Show only mappings with issues
+        case 'validation': {
+            // Show only rows with low confidence or validation issues, hide the rest
+            cards.forEach(c => { c.style.display = 'block'; c.style.marginBottom = ''; });
+            headers.forEach(h => { h.style.display = ''; });
+            rowLists.forEach(l => { l.style.maxHeight = 'none'; });
+            groupsContainer.style.gap = '16px';
+
+            let issueCount = 0;
             const data = window.wizardController?.getCurrentData();
             const mappings = data?.fhirTransformResult?.atomicMappings || [];
 
-            // Look for mappings with validation issues
-            let issueCount = 0;
-            mappingRows.forEach((row, index) => {
-                const mapping = mappings[index];
-                const hasIssue = mapping?.validationIssues?.length > 0 ||
-                                mapping?.isRequired === false ||
-                                mapping?.confidence < 0.8;
-
-                row.style.display = hasIssue ? 'block' : 'none';
+            allRows.forEach((row, i) => {
+                const m = mappings[i];
+                const hasIssue = (m?.validationIssues?.length > 0) || (m?.confidence != null && m.confidence < 0.75);
+                row.style.display = hasIssue ? '' : 'none';
                 if (hasIssue) issueCount++;
             });
 
-            visibleCount = issueCount;
-            console.log(`✅ Showing ${issueCount} mappings with validation issues`);
+            // Hide cards where every row is hidden
+            cards.forEach(card => {
+                const visible = [...card.querySelectorAll('.fhir-mapping-row')].some(r => r.style.display !== 'none');
+                card.style.display = visible ? 'block' : 'none';
+            });
 
-            if (issueCount === 0) {
-                showNotification('No validation issues found - all mappings look good!', 'success');
-            }
+            document.getElementById('no-issues-msg')?.remove();
             break;
+        }
     }
 
-    console.log(`✅ View switched to ${viewType}, showing ${visibleCount} items`);
+    // Restore to grouped removes the flat-list wrapper styles
+    if (viewType === 'grouped') {
+        groupsContainer.style.border = '';
+        groupsContainer.style.borderRadius = '';
+        groupsContainer.style.overflow = '';
+        cards.forEach(c => { c.style.border = ''; c.style.borderRadius = '12px'; c.style.boxShadow = ''; });
+        document.getElementById('no-issues-msg')?.remove();
+    }
 };
 
 window.filterMappingsByResource = function(resourceType) {
@@ -9334,3 +9474,30 @@ window.closeFHIRJSONViewer = function(button) {
 };
 
 window.WizardView = WizardView;
+
+// ── Wizard Message Family Filter helpers ─────────────────────────────────────
+window._wizardToggleFamilyFilter = function(enabled) {
+    const picker = document.getElementById('wizardFamilyFilterPicker');
+    const hidden = document.getElementById('wizardAcceptedMessageFamilies');
+    if (picker) picker.style.display = enabled ? 'block' : 'none';
+    if (!enabled) {
+        if (hidden) hidden.value = '';
+        document.querySelectorAll('#wizardFamilyChips .family-chip').forEach(c => c.classList.remove('selected'));
+    }
+};
+
+window._wizardToggleFamilyChip = function(family) {
+    const chip = document.querySelector(`#wizardFamilyChips [data-family="${family}"]`);
+    const hidden = document.getElementById('wizardAcceptedMessageFamilies');
+    if (!chip || !hidden) return;
+    chip.classList.toggle('selected');
+    let current = [];
+    try { current = hidden.value ? JSON.parse(hidden.value) : []; } catch (e) {}
+    const idx = current.indexOf(family);
+    if (idx >= 0) current.splice(idx, 1); else current.push(family);
+    hidden.value = current.length > 0 ? JSON.stringify(current) : '';
+    // Keep the model in sync immediately
+    if (window.wizardController?.model?.data) {
+        window.wizardController.model.data.acceptedMessageFamilies = current.length > 0 ? current : null;
+    }
+};

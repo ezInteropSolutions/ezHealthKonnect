@@ -9,7 +9,7 @@ COPY go.mod go.sum ./
 RUN go mod download && go mod verify
 
 COPY . .
-RUN go mod tidy && CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o go-api main.go
+RUN go mod tidy && CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o go-api .
 
 # Stage 2: Install Node.js production dependencies
 FROM node:22-alpine AS nodebuilder

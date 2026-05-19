@@ -25,10 +25,13 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"runtime"
 	"sort"
 	"strings"
+	"sync"
+	"syscall"
 	"time"
 
 	"github.com/gin-contrib/cors"
@@ -186,6 +189,24 @@ func main() {
 			services.SeedSystemTemplates(db)
 			processingEngine.SetCodeTemplateService(codeTemplateSvc)
 			log.Printf("📦 Code Template Service initialized (6 OOB libraries)")
+
+			// Rebuild HL7→FHIR OOB templates for all IG-covered message types.
+			// Runs in the background so it never delays server startup.
+			// Triggered every boot so new IG seed data (e.g. V115 anchors) is
+			// immediately reflected in templates without a manual admin call.
+			go func() {
+				builder := svcmapping.NewOOBTemplateBuilder(db)
+				results := builder.BuildWithIGCoverage(context.Background())
+				built, failed := 0, 0
+				for _, r := range results {
+					if r.Err != nil {
+						failed++
+					} else {
+						built++
+					}
+				}
+				log.Printf("📋 OOB Templates (IG): %d built, %d skipped/failed", built, failed)
+			}()
 		} else {
 			log.Printf("❌ FATAL: Database connection failed after %d retries - transformation pipeline will not be available", maxRetries)
 		}
@@ -535,36 +556,137 @@ func main() {
 			mappingDeltaCtrl := controllers.NewMappingDeltaController(db, mappingDeltaSvc)
 			mappingDeltaCtrl.RegisterRoutes(fhirGroup)
 
-			// OOB template rebuild — regenerates all standard templates from FHIR+HL7 specs
-			fhirGroup.POST("/templates/rebuild-oob", func(c *gin.Context) {
-				builder := svcmapping.NewOOBTemplateBuilder(db)
-				ctx := c.Request.Context()
-				results := builder.BuildAll(ctx)
+			// ── OOB template rebuild ─────────────────────────────────────────────
+			// Rebuild endpoints are admin-only and run asynchronously.
+			// POST returns 202 immediately; GET /rebuild-status polls progress.
+			var oobRebuildMu sync.Mutex
+			type oobJobState struct {
+				Running      bool       `json:"running"`
+				Mode         string     `json:"mode"` // "full" | "ig" | "targeted"
+				MessageTypes []string   `json:"messageTypes,omitempty"`
+				StartedAt    time.Time  `json:"started_at"`
+				FinishedAt   *time.Time `json:"finished_at,omitempty"`
+				Built        int        `json:"built"`
+				Failed       int        `json:"failed"`
+				Results      []gin.H    `json:"results,omitempty"`
+				Error        string     `json:"error,omitempty"`
+			}
+			oobJob := &oobJobState{}
 
-				var built, failed int
-				var details []gin.H
-				for _, r := range results {
-					if r.Err != nil {
-						failed++
-						details = append(details, gin.H{"messageType": r.MessageType, "status": "error", "error": r.Err.Error()})
-					} else {
-						built++
-						details = append(details, gin.H{
-							"messageType":    r.MessageType,
-							"status":         "ok",
-							"resources":      r.ResourcesBuilt,
-							"mappings":       r.MappingsBuilt,
-							"warnings":       r.Warnings,
-						})
-					}
+			// startOOBRebuild launches an async rebuild. mode is "full", "ig", or
+			// "targeted". For "targeted", pass the message types to rebuild; the
+			// caller is responsible for populating oobJob.MessageTypes first.
+			startOOBRebuild := func(mode string, messageTypes []string) (accepted bool) {
+				oobRebuildMu.Lock()
+				defer oobRebuildMu.Unlock()
+				if oobJob.Running {
+					return false
 				}
-				c.JSON(200, gin.H{
-					"success": true,
-					"built":   built,
-					"failed":  failed,
-					"results": details,
+				oobJob.Running = true
+				oobJob.Mode = mode
+				oobJob.MessageTypes = messageTypes
+				oobJob.StartedAt = time.Now()
+				oobJob.FinishedAt = nil
+				oobJob.Built = 0
+				oobJob.Failed = 0
+				oobJob.Results = nil
+				oobJob.Error = ""
+				go func() {
+					builder := svcmapping.NewOOBTemplateBuilder(db)
+					ctx := context.Background()
+					var results []svcmapping.BuildResult
+					switch mode {
+					case "ig":
+						results = builder.BuildWithIGCoverage(ctx)
+					case "targeted":
+						results = builder.BuildForMessageTypes(ctx, messageTypes)
+					default:
+						results = builder.BuildAll(ctx)
+					}
+					now := time.Now()
+					oobRebuildMu.Lock()
+					defer oobRebuildMu.Unlock()
+					oobJob.Running = false
+					oobJob.FinishedAt = &now
+					for _, r := range results {
+						if r.Err != nil {
+							oobJob.Failed++
+							oobJob.Results = append(oobJob.Results, gin.H{
+								"messageType": r.MessageType, "status": "error", "error": r.Err.Error(),
+							})
+						} else {
+							oobJob.Built++
+							oobJob.Results = append(oobJob.Results, gin.H{
+								"messageType": r.MessageType, "status": "ok",
+								"resources": r.ResourcesBuilt, "mappings": r.MappingsBuilt, "warnings": r.Warnings,
+							})
+						}
+					}
+				}()
+				return true
+			}
+
+			adminTemplates := fhirGroup.Group("/templates", requireProxiedSuperAdmin())
+			{
+				// POST /api/fhir/templates/rebuild-oob — full rebuild (all message types)
+				adminTemplates.POST("/rebuild-oob", func(c *gin.Context) {
+					if !startOOBRebuild("full", nil) {
+						c.JSON(http.StatusConflict, gin.H{"success": false, "error": "rebuild already in progress"})
+						return
+					}
+					c.JSON(http.StatusAccepted, gin.H{
+						"success": true,
+						"message": "full OOB template rebuild started — poll /api/fhir/templates/rebuild-status for progress",
+					})
 				})
-			})
+
+				// POST /api/fhir/templates/rebuild-oob-ig — IG-covered message types only (faster)
+				adminTemplates.POST("/rebuild-oob-ig", func(c *gin.Context) {
+					if !startOOBRebuild("ig", nil) {
+						c.JSON(http.StatusConflict, gin.H{"success": false, "error": "rebuild already in progress"})
+						return
+					}
+					c.JSON(http.StatusAccepted, gin.H{
+						"success": true,
+						"message": "IG-covered OOB template rebuild started — poll /api/fhir/templates/rebuild-status for progress",
+					})
+				})
+
+				// POST /api/fhir/templates/rebuild-oob-targeted — rebuild only the
+				// message types listed in the request body. Much faster than a full
+				// rebuild when only a handful of templates need refreshing after an
+				// anchor or Rule change.
+				// Body: { "messageTypes": ["SIU^S12", "SIU^S13"] }
+				adminTemplates.POST("/rebuild-oob-targeted", func(c *gin.Context) {
+					var req struct {
+						MessageTypes []string `json:"messageTypes" binding:"required,min=1"`
+					}
+					if err := c.ShouldBindJSON(&req); err != nil {
+						c.JSON(http.StatusBadRequest, gin.H{
+							"success": false,
+							"error":   "body must be { \"messageTypes\": [\"SIU^S12\", ...] }",
+						})
+						return
+					}
+					if !startOOBRebuild("targeted", req.MessageTypes) {
+						c.JSON(http.StatusConflict, gin.H{"success": false, "error": "rebuild already in progress"})
+						return
+					}
+					c.JSON(http.StatusAccepted, gin.H{
+						"success":      true,
+						"messageTypes": req.MessageTypes,
+						"message":      "targeted OOB rebuild started — poll /api/fhir/templates/rebuild-status for progress",
+					})
+				})
+
+				// GET /api/fhir/templates/rebuild-status — poll rebuild progress
+				adminTemplates.GET("/rebuild-status", func(c *gin.Context) {
+					oobRebuildMu.Lock()
+					snapshot := *oobJob
+					oobRebuildMu.Unlock()
+					c.JSON(http.StatusOK, gin.H{"success": true, "job": snapshot})
+				})
+			}
 
 			// ADDED: Template Preview — resource list + confidence data for a message type
 			fhirGroup.GET("/template/preview", func(c *gin.Context) {
@@ -1263,6 +1385,7 @@ func main() {
 			interfaceGroup.POST("/:id/start", interfaceCtrl.StartInterface)
 			interfaceGroup.POST("/:id/stop", interfaceCtrl.StopInterface)
 			interfaceGroup.POST("/:id/pause", interfaceCtrl.PauseInterface)
+			interfaceGroup.POST("/:id/reload-filter", interfaceCtrl.ReloadFamilyFilter)
 		}
 
 		// WIZARD API CONTROLLER
@@ -1549,9 +1672,34 @@ func main() {
 	// 127.0.0.1.  Gin's router.Run(":port") creates a dual-stack socket on most
 	// systems, but on some Linux + Go 1.21+ configurations it binds IPv6-only.
 	// Using "0.0.0.0:port" forces an IPv4 socket that the proxy can always reach.
-	log.Printf("Starting ezHealthKonnect server on 0.0.0.0:%s", port)
-	if err := router.Run("0.0.0.0:" + port); err != nil {
-		log.Fatal("Failed to start server:", err)
+	srv := &http.Server{
+		Addr:    "0.0.0.0:" + port,
+		Handler: router,
+	}
+
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGTERM, syscall.SIGINT)
+
+	go func() {
+		log.Printf("Starting ezHealthKonnect server on 0.0.0.0:%s", port)
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatal("Failed to start server:", err)
+		}
+	}()
+
+	<-quit
+	log.Printf("Shutdown signal received — stopping connectors and shutting down...")
+
+	if processingEngine != nil {
+		if err := processingEngine.Stop(); err != nil {
+			log.Printf("⚠️  Engine stop: %v", err)
+		}
+	}
+
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer shutdownCancel()
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		log.Printf("⚠️  HTTP server forced shutdown: %v", err)
 	}
 }
 

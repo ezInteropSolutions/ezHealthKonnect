@@ -39,7 +39,8 @@ app.use((req, res, next) => {
 });
 // Disable caching for JavaScript and HTML files in development
 app.use((req, res, next) => {
-    if (req.url.endsWith('.js') || req.url.endsWith('.html') || req.url.endsWith('.css')) {
+    const urlPath = req.url.split('?')[0];
+    if (urlPath.endsWith('.js') || urlPath.endsWith('.html') || urlPath.endsWith('.css')) {
         res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
         res.setHeader('Pragma', 'no-cache');
         res.setHeader('Expires', '0');
@@ -156,12 +157,22 @@ const forwardToGo = async (req, res) => {
             }
         };
 
-        // Forward authenticated user identity to Go backend.
-        // req.user is set by JWT verifyToken; req.session.user by session-based requireAuth.
-        if (req.user && req.user.id) {
-            options.headers['X-User-ID'] = String(req.user.id);
+        // Internal proxy secret — tells Go this request has been auth-verified by Node.js.
+        // Go rejects admin endpoints that lack this header (prevents direct port-8080 calls).
+        const _proxySecret = process.env.INTERNAL_PROXY_SECRET || process.env.JWT_SECRET || '';
+        if (_proxySecret) {
+            options.headers['X-Internal-Proxy-Secret'] = _proxySecret;
+        }
+
+        // Forward authenticated user identity and role to Go backend.
+        // req.user is set by JWT verifyToken (claims: userId, role) or session-based requireAuth (id, role).
+        if (req.user) {
+            const uid = req.user.id || req.user.userId; // JWT uses 'userId'; session uses 'id'
+            if (uid) options.headers['X-User-ID'] = String(uid);
+            if (req.user.role) options.headers['X-User-Role'] = String(req.user.role);
         } else if (req.session && req.session.user && req.session.user.id) {
             options.headers['X-User-ID'] = String(req.session.user.id);
+            if (req.session.user.role) options.headers['X-User-Role'] = String(req.session.user.role);
         }
         
         // Add body for POST/PUT/PATCH requests
@@ -226,6 +237,31 @@ const forwardToGo = async (req, res) => {
         });
     }
 };
+
+// Admin-only fhir routes — must be registered BEFORE the catch-all /api/fhir proxy.
+// verifyToken accepts JWT Bearer from both browser and API callers.
+// requireAdminUser checks that the decoded user has role === 'admin'.
+const { verifyToken: _verifyToken } = require('./middleware/auth');
+const _requireAdminUser = (req, res, next) => {
+    const user = req.user || (req.session && req.session.user);
+    if (!user) return res.status(401).json({ success: false, message: 'Authentication required' });
+    const role = user.role;
+    if (role !== 'admin' && role !== 'super_admin') return res.status(403).json({ success: false, message: 'Admin role required' });
+    req.user = user;
+    next();
+};
+// OOB template rebuild is vendor-only (super_admin). Client admins (role='admin') are denied.
+const _requireSuperAdminUser = (req, res, next) => {
+    const user = req.user || (req.session && req.session.user);
+    if (!user) return res.status(401).json({ success: false, message: 'Authentication required' });
+    if (user.role !== 'super_admin') return res.status(403).json({ success: false, message: 'Super-admin role required' });
+    req.user = user;
+    next();
+};
+app.post('/api/fhir/templates/rebuild-oob',          _verifyToken, _requireSuperAdminUser, forwardToGo);
+app.post('/api/fhir/templates/rebuild-oob-ig',       _verifyToken, _requireSuperAdminUser, forwardToGo);
+app.post('/api/fhir/templates/rebuild-oob-targeted', _verifyToken, _requireSuperAdminUser, forwardToGo);
+app.get('/api/fhir/templates/rebuild-status',        _verifyToken, _requireSuperAdminUser, forwardToGo);
 
 // Apply explicit route handlers for Go backend routes
 app.use('/api/fhir', forwardToGo);

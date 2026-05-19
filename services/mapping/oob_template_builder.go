@@ -35,6 +35,11 @@ type OOBMessageDef struct {
 	// SegmentOverrides lets callers force a specific resource for a segment
 	// instead of using the default segmentToResource table.
 	SegmentOverrides map[string]string // segmentName → fhirResourceType
+	// ExcludeSegments lists segments that must be dropped before building
+	// the resource blocks. Use this when a segment's default resource mapping
+	// is semantically wrong for a particular message type (e.g. PV1→Encounter
+	// is wrong for SIU where PV1 carries visit context, not an Encounter).
+	ExcludeSegments []string
 }
 
 // TemplateResourceBlock is one entry in template_config.resources.
@@ -63,117 +68,133 @@ type BuildResult struct {
 
 // OOBTemplateBuilder generates and persists OOB templates.
 type OOBTemplateBuilder struct {
-	gen *Generator
-	db  *sql.DB
+	gen        *Generator
+	db         *sql.DB
+	igAnchors  *IGAnchorService
 }
 
 // NewOOBTemplateBuilder returns a builder wired to the global schema loaders
 // and the given database connection.
 func NewOOBTemplateBuilder(db *sql.DB) *OOBTemplateBuilder {
 	return &OOBTemplateBuilder{
-		gen: NewGenerator(),
-		db:  db,
+		gen:       NewGenerator(),
+		db:        db,
+		igAnchors: NewIGAnchorService(db),
 	}
 }
 
-// standardMessages is the authoritative catalogue of OOB message types.
-// Each entry drives one template in hl7_fhir_templates.
-var standardMessages = []OOBMessageDef{
+// hl7SupportedVersions lists every HL7 v2 version for which OOB templates are
+// generated. BuildOne gracefully skips a version when the schema package is
+// not installed, so adding a version here is always safe.
+var hl7SupportedVersions = []string{"2.3", "2.3.1", "2.4", "2.5", "2.5.1", "2.6", "2.7", "2.8"}
+
+// fhirSupportedVersions lists the FHIR specification versions to generate templates for.
+// R5 schema files exist alongside R4; both are built and stored as separate rows.
+var fhirSupportedVersions = []FHIRVersion{FHIRVersionR4, FHIRVersionR5}
+
+// baseCatalog lists every standard message type once (version-agnostic).
+// init() expands this into standardMessages by crossing with hl7SupportedVersions
+// and fhirSupportedVersions.
+var baseCatalog = []OOBMessageDef{
 	// ── ADT — Patient Administration ─────────────────────────────────────
-	{MessageType: "ADT^A01", HL7Version: "2.5", FHIRVersion: FHIRVersionR4,
-		Description: "Patient Admit/Visit Notification"},
-	{MessageType: "ADT^A02", HL7Version: "2.5", FHIRVersion: FHIRVersionR4,
-		Description: "Patient Transfer"},
-	{MessageType: "ADT^A03", HL7Version: "2.5", FHIRVersion: FHIRVersionR4,
-		Description: "Patient Discharge"},
-	{MessageType: "ADT^A04", HL7Version: "2.5", FHIRVersion: FHIRVersionR4,
-		Description: "Patient Registration"},
-	{MessageType: "ADT^A05", HL7Version: "2.5", FHIRVersion: FHIRVersionR4,
-		Description: "Patient Pre-Admit"},
-	{MessageType: "ADT^A06", HL7Version: "2.5", FHIRVersion: FHIRVersionR4,
-		Description: "Change Outpatient to Inpatient"},
-	{MessageType: "ADT^A07", HL7Version: "2.5", FHIRVersion: FHIRVersionR4,
-		Description: "Change Inpatient to Outpatient"},
-	{MessageType: "ADT^A08", HL7Version: "2.5", FHIRVersion: FHIRVersionR4,
-		Description: "Update Patient Information"},
-	{MessageType: "ADT^A11", HL7Version: "2.5", FHIRVersion: FHIRVersionR4,
-		Description: "Cancel Admit"},
-	{MessageType: "ADT^A12", HL7Version: "2.5", FHIRVersion: FHIRVersionR4,
-		Description: "Cancel Transfer"},
-	{MessageType: "ADT^A13", HL7Version: "2.5", FHIRVersion: FHIRVersionR4,
-		Description: "Cancel Discharge"},
-	{MessageType: "ADT^A17", HL7Version: "2.5", FHIRVersion: FHIRVersionR4,
-		Description: "Swap Patients"},
-	{MessageType: "ADT^A28", HL7Version: "2.5", FHIRVersion: FHIRVersionR4,
-		Description: "Add Person Information"},
-	{MessageType: "ADT^A31", HL7Version: "2.5", FHIRVersion: FHIRVersionR4,
-		Description: "Update Person Information"},
-	{MessageType: "ADT^A40", HL7Version: "2.5", FHIRVersion: FHIRVersionR4,
-		Description: "Merge Patient — Patient Identifier List"},
-	{MessageType: "ADT^A45", HL7Version: "2.5", FHIRVersion: FHIRVersionR4,
-		Description: "Move Visit Information — Visit Number"},
+	{MessageType: "ADT^A01", FHIRVersion: FHIRVersionR4, Description: "Patient Admit/Visit Notification"},
+	{MessageType: "ADT^A02", FHIRVersion: FHIRVersionR4, Description: "Patient Transfer"},
+	{MessageType: "ADT^A03", FHIRVersion: FHIRVersionR4, Description: "Patient Discharge"},
+	{MessageType: "ADT^A04", FHIRVersion: FHIRVersionR4, Description: "Patient Registration"},
+	{MessageType: "ADT^A05", FHIRVersion: FHIRVersionR4, Description: "Patient Pre-Admit"},
+	{MessageType: "ADT^A06", FHIRVersion: FHIRVersionR4, Description: "Change Outpatient to Inpatient"},
+	{MessageType: "ADT^A07", FHIRVersion: FHIRVersionR4, Description: "Change Inpatient to Outpatient"},
+	{MessageType: "ADT^A08", FHIRVersion: FHIRVersionR4, Description: "Update Patient Information"},
+	{MessageType: "ADT^A11", FHIRVersion: FHIRVersionR4, Description: "Cancel Admit"},
+	{MessageType: "ADT^A12", FHIRVersion: FHIRVersionR4, Description: "Cancel Transfer"},
+	{MessageType: "ADT^A13", FHIRVersion: FHIRVersionR4, Description: "Cancel Discharge"},
+	{MessageType: "ADT^A17", FHIRVersion: FHIRVersionR4, Description: "Swap Patients"},
+	{MessageType: "ADT^A28", FHIRVersion: FHIRVersionR4, Description: "Add Person Information"},
+	{MessageType: "ADT^A31", FHIRVersion: FHIRVersionR4, Description: "Update Person Information"},
+	{MessageType: "ADT^A40", FHIRVersion: FHIRVersionR4, Description: "Merge Patient — Patient Identifier List"},
+	{MessageType: "ADT^A45", FHIRVersion: FHIRVersionR4, Description: "Move Visit Information — Visit Number"},
 
 	// ── ORU — Observation Reporting ───────────────────────────────────────
-	{MessageType: "ORU^R01", HL7Version: "2.5", FHIRVersion: FHIRVersionR4,
-		Description: "Unsolicited Observation Message"},
-	{MessageType: "ORU^R30", HL7Version: "2.5", FHIRVersion: FHIRVersionR4,
-		Description: "Unsolicited Point-Of-Care Observation"},
+	{MessageType: "ORU^R01", FHIRVersion: FHIRVersionR4, Description: "Unsolicited Observation Message"},
+	{MessageType: "ORU^R30", FHIRVersion: FHIRVersionR4, Description: "Unsolicited Point-Of-Care Observation"},
 
 	// ── ORM / OML — Orders ───────────────────────────────────────────────
-	{MessageType: "ORM^O01", HL7Version: "2.5", FHIRVersion: FHIRVersionR4,
-		Description: "General Order Message"},
-	{MessageType: "OML^O21", HL7Version: "2.5", FHIRVersion: FHIRVersionR4,
-		Description: "Laboratory Order"},
-	{MessageType: "OMG^O19", HL7Version: "2.5", FHIRVersion: FHIRVersionR4,
-		Description: "General Clinical Order"},
+	{MessageType: "ORM^O01", FHIRVersion: FHIRVersionR4, Description: "General Order Message"},
+	{MessageType: "OML^O21", FHIRVersion: FHIRVersionR4, Description: "Laboratory Order"},
+	{MessageType: "OMG^O19", FHIRVersion: FHIRVersionR4, Description: "General Clinical Order"},
 
 	// ── MDM — Medical Document Management ────────────────────────────────
-	{MessageType: "MDM^T01", HL7Version: "2.5", FHIRVersion: FHIRVersionR4,
-		Description: "Original Document Notification"},
-	{MessageType: "MDM^T02", HL7Version: "2.5", FHIRVersion: FHIRVersionR4,
-		Description: "Original Document Notification and Content"},
-	{MessageType: "MDM^T11", HL7Version: "2.5", FHIRVersion: FHIRVersionR4,
-		Description: "Document Cancel Notification"},
+	{MessageType: "MDM^T01", FHIRVersion: FHIRVersionR4, Description: "Original Document Notification"},
+	{MessageType: "MDM^T02", FHIRVersion: FHIRVersionR4, Description: "Original Document Notification and Content"},
+	{MessageType: "MDM^T11", FHIRVersion: FHIRVersionR4, Description: "Document Cancel Notification"},
 
 	// ── SIU — Scheduling ──────────────────────────────────────────────────
-	{MessageType: "SIU^S12", HL7Version: "2.5", FHIRVersion: FHIRVersionR4,
-		Description: "Notification of New Appointment Booking"},
-	{MessageType: "SIU^S13", HL7Version: "2.5", FHIRVersion: FHIRVersionR4,
-		Description: "Notification of Appointment Rescheduling"},
-	{MessageType: "SIU^S14", HL7Version: "2.5", FHIRVersion: FHIRVersionR4,
-		Description: "Notification of Appointment Modification"},
-	{MessageType: "SIU^S15", HL7Version: "2.5", FHIRVersion: FHIRVersionR4,
-		Description: "Notification of Appointment Cancellation"},
-	{MessageType: "SIU^S17", HL7Version: "2.5", FHIRVersion: FHIRVersionR4,
-		Description: "Notification of Appointment Deletion"},
+	// PV1 is now included: it maps to Encounter which is correct — even a booking
+	// message may carry a pre-admit Encounter (FHIR status "planned"). When
+	// SCH.25 = COMPLETE/FULFILLED the Encounter represents the actual visit.
+	// V116 assembly rules wire Encounter.appointment → Appointment and
+	// Encounter.subject → Patient.
+	// RGS is still excluded: structural grouping segment with no FHIR target.
+	// TQ1 injected via SegmentOverrides (absent from global segmentToResource)
+	// so it maps to Appointment timing fields only for SIU messages.
+	// AIG/AIL/AIP map to Appointment and are merged into one block.
+	{MessageType: "SIU^S12", FHIRVersion: FHIRVersionR4, Description: "Notification of New Appointment Booking",
+		SegmentOverrides: map[string]string{"TQ1": "Appointment"},
+		ExcludeSegments:  []string{"RGS"}},
+	{MessageType: "SIU^S13", FHIRVersion: FHIRVersionR4, Description: "Notification of Appointment Rescheduling",
+		SegmentOverrides: map[string]string{"TQ1": "Appointment"},
+		ExcludeSegments:  []string{"RGS"}},
+	{MessageType: "SIU^S14", FHIRVersion: FHIRVersionR4, Description: "Notification of Appointment Modification",
+		SegmentOverrides: map[string]string{"TQ1": "Appointment"},
+		ExcludeSegments:  []string{"RGS"}},
+	{MessageType: "SIU^S15", FHIRVersion: FHIRVersionR4, Description: "Notification of Appointment Cancellation",
+		SegmentOverrides: map[string]string{"TQ1": "Appointment"},
+		ExcludeSegments:  []string{"RGS"}},
+	{MessageType: "SIU^S17", FHIRVersion: FHIRVersionR4, Description: "Notification of Appointment Deletion",
+		SegmentOverrides: map[string]string{"TQ1": "Appointment"},
+		ExcludeSegments:  []string{"RGS"}},
 
 	// ── VXU — Vaccination ─────────────────────────────────────────────────
-	{MessageType: "VXU^V04", HL7Version: "2.5", FHIRVersion: FHIRVersionR4,
-		Description: "Unsolicited Vaccination Record Update"},
+	{MessageType: "VXU^V04", FHIRVersion: FHIRVersionR4, Description: "Unsolicited Vaccination Record Update"},
 
 	// ── DFT — Detailed Financial Transaction ─────────────────────────────
-	{MessageType: "DFT^P03", HL7Version: "2.5", FHIRVersion: FHIRVersionR4,
-		Description: "Post Detail Financial Transaction"},
+	{MessageType: "DFT^P03", FHIRVersion: FHIRVersionR4, Description: "Post Detail Financial Transaction"},
 
 	// ── BAR — Billing Account Record ─────────────────────────────────────
-	{MessageType: "BAR^P01", HL7Version: "2.5", FHIRVersion: FHIRVersionR4,
-		Description: "Add Patient Account"},
-	{MessageType: "BAR^P02", HL7Version: "2.5", FHIRVersion: FHIRVersionR4,
-		Description: "Purge Patient Account"},
+	{MessageType: "BAR^P01", FHIRVersion: FHIRVersionR4, Description: "Add Patient Account"},
+	{MessageType: "BAR^P02", FHIRVersion: FHIRVersionR4, Description: "Purge Patient Account"},
 
 	// ── MFN — Master File Notification ───────────────────────────────────
-	{MessageType: "MFN^M02", HL7Version: "2.5", FHIRVersion: FHIRVersionR4,
-		Description: "Master File — Staff Practitioner",
+	{MessageType: "MFN^M02", FHIRVersion: FHIRVersionR4, Description: "Master File — Staff Practitioner",
 		SegmentOverrides: map[string]string{"STF": "Practitioner", "PRA": "PractitionerRole", "MFI": "MessageHeader", "MFE": "MessageHeader"}},
-	{MessageType: "MFN^M04", HL7Version: "2.5", FHIRVersion: FHIRVersionR4,
-		Description: "Master File — Charge Description",
+	{MessageType: "MFN^M04", FHIRVersion: FHIRVersionR4, Description: "Master File — Charge Description",
 		SegmentOverrides: map[string]string{"CDM": "ChargeItemDefinition", "MFI": "MessageHeader", "MFE": "MessageHeader"}},
-	{MessageType: "MFN^M05", HL7Version: "2.5", FHIRVersion: FHIRVersionR4,
-		Description: "Master File — Location",
+	{MessageType: "MFN^M05", FHIRVersion: FHIRVersionR4, Description: "Master File — Location",
 		SegmentOverrides: map[string]string{"LOC": "Location", "MFI": "MessageHeader", "MFE": "MessageHeader"}},
-	{MessageType: "MFN^M12", HL7Version: "2.5", FHIRVersion: FHIRVersionR4,
-		Description: "Master File — Lab Observation",
+	{MessageType: "MFN^M12", FHIRVersion: FHIRVersionR4, Description: "Master File — Lab Observation",
 		SegmentOverrides: map[string]string{"OM1": "ObservationDefinition", "MFI": "MessageHeader", "MFE": "MessageHeader"}},
+}
+
+// standardMessages is the expanded catalogue:
+//
+//	baseCatalog × hl7SupportedVersions × fhirSupportedVersions
+//
+// Populated by init(); BuildOne skips any combination whose schema is not installed.
+var standardMessages []OOBMessageDef
+
+func init() {
+	cap := len(baseCatalog) * len(hl7SupportedVersions) * len(fhirSupportedVersions)
+	standardMessages = make([]OOBMessageDef, 0, cap)
+	for _, base := range baseCatalog {
+		for _, hl7Ver := range hl7SupportedVersions {
+			for _, fhirVer := range fhirSupportedVersions {
+				entry := base
+				entry.HL7Version = hl7Ver
+				entry.FHIRVersion = fhirVer
+				standardMessages = append(standardMessages, entry)
+			}
+		}
+	}
 }
 
 // contextForMessage returns the context block for a template based on
@@ -219,6 +240,166 @@ func (b *OOBTemplateBuilder) BuildAll(ctx context.Context) []BuildResult {
 		log.Printf("[OOBBuilder] flagged %d custom interface mapping(s) as having a template update available", flagged)
 	}
 	return results
+}
+
+// msgTypeKeySegments maps a message type (or family prefix) to its characteristic
+// non-universal segments. A message type has "IG coverage" if at least one key
+// segment appears in ig_field_anchors. MSH/EVN are excluded — they're universal
+// and not meaningful filters.
+//
+// Exact message-type keys take precedence over family-prefix keys (used for
+// MFN subtypes that each cover different master segments).
+var msgTypeKeySegments = map[string][]string{
+	// Families matched by prefix (before "^")
+	"ADT": {"PID", "PV1", "DG1", "AL1"},
+	"ORU": {"OBX"},
+	"ORM": {"ORC"},
+	"OML": {"ORC"},
+	"OMG": {"ORC"},
+	"MDM": {"TXA"},
+	"SIU": {"SCH"},
+	"VXU": {"RXA"},
+	"DFT": {"FT1"},
+	"BAR": {"BPT"},
+	// MFN subtypes — each subtype has its own master segment
+	"MFN^M02": {"STF", "PRA"},
+	"MFN^M04": {"CDM"},
+	"MFN^M05": {"LOC"},
+	"MFN^M12": {"OM1"},
+}
+
+// BuildForMessageTypes generates OOB templates only for the given message types
+// (e.g. ["SIU^S12", "SIU^S13"]) across all HL7 and FHIR versions. This is much
+// faster than BuildAll when only a subset of templates need refreshing after an
+// anchor-table or Rule change. Pass a nil/empty slice to fall through to BuildAll.
+func (b *OOBTemplateBuilder) BuildForMessageTypes(ctx context.Context, messageTypes []string) []BuildResult {
+	if len(messageTypes) == 0 {
+		return b.BuildAll(ctx)
+	}
+	want := make(map[string]bool, len(messageTypes))
+	for _, mt := range messageTypes {
+		want[mt] = true
+	}
+	var results []BuildResult
+	for _, def := range standardMessages {
+		if !want[def.MessageType] {
+			continue
+		}
+		select {
+		case <-ctx.Done():
+			return results
+		default:
+		}
+		result := b.BuildOne(ctx, def)
+		results = append(results, result)
+		if result.Err != nil {
+			log.Printf("[OOBBuilder] %s: ERROR %v", def.MessageType, result.Err)
+		} else {
+			log.Printf("[OOBBuilder] %s: %d resources, %d mappings, %d warnings",
+				def.MessageType, result.ResourcesBuilt, result.MappingsBuilt, len(result.Warnings))
+		}
+	}
+	return results
+}
+
+// BuildWithIGCoverage generates OOB templates only for message types that have
+// meaningful IG anchor coverage in ig_field_anchors. Message types whose
+// characteristic segments are absent from the IG are skipped — we don't
+// degrade them with heuristic-only generation when the IG has nothing to add.
+//
+// Called via POST /api/fhir/templates/rebuild-oob-ig
+func (b *OOBTemplateBuilder) BuildWithIGCoverage(ctx context.Context) []BuildResult {
+	covered, err := b.coveredSegments(ctx)
+	if err != nil {
+		log.Printf("[OOBBuilder/IG] ig-coverage check failed: %v — aborting", err)
+		return nil
+	}
+	if len(covered) == 0 {
+		log.Printf("[OOBBuilder/IG] ig_field_anchors table is empty — nothing to rebuild")
+		return nil
+	}
+
+	log.Printf("[OOBBuilder/IG] IG-covered segments: %v", segmentSetKeys(covered))
+
+	var results []BuildResult
+	for _, def := range standardMessages {
+		select {
+		case <-ctx.Done():
+			return results
+		default:
+		}
+		if !b.hasIGCoverage(def.MessageType, covered) {
+			continue
+		}
+		result := b.BuildOne(ctx, def)
+		results = append(results, result)
+		if result.Err != nil {
+			log.Printf("[OOBBuilder/IG] %s hl7v%s fhir%s: ERROR %v",
+				def.MessageType, def.HL7Version, def.FHIRVersion, result.Err)
+		} else {
+			log.Printf("[OOBBuilder/IG] %s hl7v%s fhir%s: %d resources, %d mappings",
+				def.MessageType, def.HL7Version, def.FHIRVersion, result.ResourcesBuilt, result.MappingsBuilt)
+		}
+	}
+
+	flagged, err := b.flagOutdatedCustomMappings(ctx)
+	if err != nil {
+		log.Printf("[OOBBuilder] update-notification scan error: %v", err)
+	} else if flagged > 0 {
+		log.Printf("[OOBBuilder] flagged %d custom mapping(s) as having a template update available", flagged)
+	}
+	return results
+}
+
+// coveredSegments returns the set of segment names that have active rows in
+// ig_field_anchors — used to decide which message types to rebuild.
+func (b *OOBTemplateBuilder) coveredSegments(ctx context.Context) (map[string]bool, error) {
+	rows, err := b.db.QueryContext(ctx,
+		`SELECT DISTINCT UPPER(segment) FROM ig_field_anchors WHERE is_active = true`)
+	if err != nil {
+		return nil, fmt.Errorf("coveredSegments: %w", err)
+	}
+	defer rows.Close()
+	covered := make(map[string]bool)
+	for rows.Next() {
+		var seg string
+		if err := rows.Scan(&seg); err == nil {
+			covered[seg] = true
+		}
+	}
+	return covered, rows.Err()
+}
+
+// hasIGCoverage returns true when at least one of a message type's characteristic
+// segments is present in the covered set queried from ig_field_anchors.
+func (b *OOBTemplateBuilder) hasIGCoverage(messageType string, covered map[string]bool) bool {
+	// Exact match first (handles MFN^M02 vs MFN^M04 distinction)
+	if segs, ok := msgTypeKeySegments[messageType]; ok {
+		for _, s := range segs {
+			if covered[strings.ToUpper(s)] {
+				return true
+			}
+		}
+		return false
+	}
+	// Fall back to family prefix
+	family := strings.SplitN(messageType, "^", 2)[0]
+	if segs, ok := msgTypeKeySegments[family]; ok {
+		for _, s := range segs {
+			if covered[strings.ToUpper(s)] {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func segmentSetKeys(m map[string]bool) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
 }
 
 // flagOutdatedCustomMappings finds every custom interface_message_mappings row
@@ -289,6 +470,15 @@ func (b *OOBTemplateBuilder) flagOutdatedCustomMappings(ctx context.Context) (in
 func (b *OOBTemplateBuilder) BuildOne(ctx context.Context, def OOBMessageDef) BuildResult {
 	result := BuildResult{MessageType: def.MessageType}
 
+	// Load IG field anchors from DB and inject into the generator.
+	// DB anchors override the hardcoded tables in semantic_matcher.go —
+	// new IG mappings take effect without any Go code changes.
+	if dbAnchors, err := b.igAnchors.LoadForVersion(ctx, def.FHIRVersion); err != nil {
+		result.Warnings = append(result.Warnings, fmt.Sprintf("ig_anchor_service: %v (using hardcoded anchors)", err))
+	} else if dbAnchors != nil {
+		b.gen.WithDBAnchors(dbAnchors)
+	}
+
 	msgSchema, hl7Warnings, err := b.gen.GenerateMessage(def.HL7Version, def.MessageType, def.FHIRVersion)
 	if err != nil {
 		// Schema not found for this exact event — skip gracefully
@@ -297,17 +487,56 @@ func (b *OOBTemplateBuilder) BuildOne(ctx context.Context, def OOBMessageDef) Bu
 	}
 	result.Warnings = append(result.Warnings, hl7Warnings...)
 
-	// Apply segment overrides to the generated maps
+	// Drop excluded segments before any further processing.
+	// ExcludeSegments is used when a segment's default resource is semantically
+	// wrong for this message family (e.g. PV1→Encounter is wrong for SIU).
+	if len(def.ExcludeSegments) > 0 {
+		excludeSet := make(map[string]bool, len(def.ExcludeSegments))
+		for _, s := range def.ExcludeSegments {
+			excludeSet[s] = true
+		}
+		kept := msgSchema.Segments[:0]
+		for _, seg := range msgSchema.Segments {
+			if !excludeSet[seg.Segment] {
+				kept = append(kept, seg)
+			}
+		}
+		msgSchema.Segments = kept
+	}
+
+	// Apply segment overrides to the generated maps.
+	// Two passes:
+	//   Pass 1 — re-target segments that GenerateMessage already produced.
+	//   Pass 2 — inject segments listed in SegmentOverrides that GenerateMessage
+	//            skipped (absent from global segmentToResource). TQ1 in SIU is
+	//            the canonical example: it has no global default resource so it
+	//            was silently skipped; the override injects it as "Appointment".
 	if len(def.SegmentOverrides) > 0 {
+		// Pass 1: re-target existing segments
 		for i := range msgSchema.Segments {
 			if override, ok := def.SegmentOverrides[msgSchema.Segments[i].Segment]; ok {
 				msgSchema.Segments[i].Resource = override
-				// Re-run matcher with correct resource for better FHIR paths
 				corrected := b.regenerateWithResource(def, msgSchema.Segments[i].Segment, override)
 				if corrected != nil {
 					msgSchema.Segments[i] = *corrected
 				}
 			}
+		}
+
+		// Pass 2: inject override-only segments (not in segmentToResource globally)
+		existing := make(map[string]bool, len(msgSchema.Segments))
+		for _, s := range msgSchema.Segments {
+			existing[s.Segment] = true
+		}
+		for segName, resource := range def.SegmentOverrides {
+			if existing[segName] {
+				continue // already handled in pass 1
+			}
+			injected, err := b.gen.GenerateSegment(def.HL7Version, def.MessageType, segName, resource, def.FHIRVersion)
+			if err != nil || injected == nil || len(injected.Mappings) == 0 {
+				continue // schema doesn't know this segment for this message version — skip silently
+			}
+			msgSchema.Segments = append(msgSchema.Segments, *injected)
 		}
 	}
 
@@ -323,18 +552,32 @@ func (b *OOBTemplateBuilder) BuildOne(ctx context.Context, def OOBMessageDef) Bu
 		if len(seg.Mappings) == 0 {
 			continue
 		}
+		filtered := make([]GeneratedMapping, 0, len(seg.Mappings))
+		for _, m := range seg.Mappings {
+			lp := strings.ToLower(m.FHIRPath)
+			if !strings.Contains(lp, ".response.code") && !strings.Contains(lp, ".response.identifier") {
+				filtered = append(filtered, m)
+			}
+		}
+		if len(filtered) == 0 {
+			continue
+		}
 		resourceKey := seg.Resource
-		// De-duplicate resource keys (e.g. two segments → same resource → index suffix)
-		if _, exists := resources[resourceKey]; exists {
-			resourceKey = resourceKey + "_" + seg.Segment
+		if existing, exists := resources[resourceKey]; exists {
+			// Multiple segments produce the same FHIR resource (e.g. SCH+AIG+AIL+AIP
+			// all → Appointment, or PV1+PV2 → Encounter). Merge their mappings into
+			// one block so filterMappingsForResource finds them all under the right key.
+			existing.Mappings = append(existing.Mappings, filtered...)
+			resources[resourceKey] = existing
+		} else {
+			resources[resourceKey] = TemplateResourceBlock{
+				Segment:  seg.Segment,
+				Optional: seg.Optional,
+				Mappings: filtered,
+			}
+			result.ResourcesBuilt++
 		}
-		resources[resourceKey] = TemplateResourceBlock{
-			Segment:  seg.Segment,
-			Optional: seg.Optional,
-			Mappings: seg.Mappings,
-		}
-		result.ResourcesBuilt++
-		result.MappingsBuilt += len(seg.Mappings)
+		result.MappingsBuilt += len(filtered)
 	}
 
 	cfg := TemplateConfig{
@@ -354,9 +597,10 @@ func (b *OOBTemplateBuilder) BuildOne(ctx context.Context, def OOBMessageDef) Bu
 	fhirResources := uniqueResources(resources)
 	frJSON, _ := json.Marshal(fhirResources)
 
-	templateName := "OOB_" + strings.ReplaceAll(def.MessageType, "^", "_")
+	templateName := "OOB_" + strings.ReplaceAll(def.MessageType, "^", "_") +
+		"_v" + def.HL7Version + "_" + string(def.FHIRVersion)
 
-	err = b.upsertTemplate(ctx, def.MessageType, templateName, def.Description, string(cfgJSON), string(frJSON))
+	err = b.upsertTemplate(ctx, def.MessageType, def.HL7Version, string(def.FHIRVersion), templateName, def.Description, string(cfgJSON), string(frJSON))
 	if err != nil {
 		result.Err = fmt.Errorf("upsert template: %w", err)
 	}
@@ -365,6 +609,7 @@ func (b *OOBTemplateBuilder) BuildOne(ctx context.Context, def OOBMessageDef) Bu
 
 // regenerateWithResource re-runs GenerateSegment with a specific fhirResource
 // to get correctly-pathed mappings after an override.
+// DB anchors are already loaded into b.gen by BuildOne — no reload needed.
 func (b *OOBTemplateBuilder) regenerateWithResource(def OOBMessageDef, segment, fhirResource string) *SegmentMap {
 	seg, err := b.gen.GenerateSegment(def.HL7Version, def.MessageType, segment, fhirResource, def.FHIRVersion)
 	if err != nil {
@@ -374,14 +619,14 @@ func (b *OOBTemplateBuilder) regenerateWithResource(def OOBMessageDef, segment, 
 }
 
 func (b *OOBTemplateBuilder) upsertTemplate(ctx context.Context,
-	messageType, name, description, cfgJSON, frJSON string,
+	messageType, hl7Version, fhirVersion, name, description, cfgJSON, frJSON string,
 ) error {
 	_, err := b.db.ExecContext(ctx, `
 		INSERT INTO hl7_fhir_templates
-		    (message_type, template_name, template_description, profile_version,
-		     template_config, fhir_resources, is_default, is_system, updated_at)
-		VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, true, true, $7)
-		ON CONFLICT (message_type, hl7_version, is_default)
+		    (message_type, hl7_version, fhir_version, template_name, template_description,
+		     profile_version, template_config, fhir_resources, is_default, is_system, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb, true, true, $9)
+		ON CONFLICT (message_type, hl7_version, fhir_version, is_default)
 		DO UPDATE SET
 		    template_name        = EXCLUDED.template_name,
 		    template_description = EXCLUDED.template_description,
@@ -390,7 +635,7 @@ func (b *OOBTemplateBuilder) upsertTemplate(ctx context.Context,
 		    fhir_resources       = EXCLUDED.fhir_resources,
 		    is_system            = true,
 		    updated_at           = EXCLUDED.updated_at`,
-		messageType, name, description, TemplateVersion,
+		messageType, hl7Version, fhirVersion, name, description, TemplateVersion,
 		cfgJSON, frJSON, time.Now(),
 	)
 	return err

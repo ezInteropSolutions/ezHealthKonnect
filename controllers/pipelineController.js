@@ -321,11 +321,14 @@ exports.savePipeline = async (req, res) => {
         const pipelineId = pipelineData.id || uuidv4();
 
         // Load wizard mappings for this interface (to embed in HL7→FHIR steps)
-        // Try interface_message_mappings first (new V9+ architecture), fallback to transformation_mapping (legacy)
+        // Try interface_message_mappings first (new V9+ architecture), fallback to transformation_mapping (legacy).
+        // OOB interfaces (uses_standard_template = true) intentionally receive null embeddedMappings so
+        // the runtime always falls through to the live OOB template — stale snapshots must not be embedded.
         const wizardMappings = await sequelize.query(`
             SELECT
                 COALESCE(imm.custom_mapping_config, i.transformation_mapping) as mappings,
-                imm.message_type as mapping_message_type
+                imm.message_type as mapping_message_type,
+                imm.uses_standard_template
             FROM interfaces i
             LEFT JOIN interface_message_mappings imm
                 ON imm.interface_id = i.id AND imm.message_type = $2
@@ -335,12 +338,18 @@ exports.savePipeline = async (req, res) => {
             type: QueryTypes.SELECT
         });
 
-        const embeddedMappings = wizardMappings[0]?.mappings || null;
+        // Only embed custom mappings when the interface is explicitly non-OOB.
+        // uses_standard_template === false  → custom interface, embed wizard mappings
+        // uses_standard_template === true   → OOB, never embed stale snapshots
+        // uses_standard_template === null   → no record (never wizard-configured) → treat as OOB
+        const ust = wizardMappings[0]?.uses_standard_template;
+        const isOOBInterface = ust !== false && ust !== 'false';
+        const embeddedMappings = isOOBInterface ? null : (wizardMappings[0]?.mappings || null);
         console.log('\n📋 === LOADING WIZARD MAPPINGS FOR EMBEDDING ===');
         console.log('Interface ID:', interfaceId);
         console.log('Message Type:', messageType);
-        console.log('Query result:', wizardMappings);
-        console.log('Embedded mappings exist:', embeddedMappings ? 'YES' : 'NO');
+        console.log('Is OOB Interface:', isOOBInterface, '(uses_standard_template:', ust, ')');
+        console.log('Embedded mappings exist:', embeddedMappings ? 'YES' : 'NO (OOB — live template will be used)');
         if (embeddedMappings) {
             console.log('Mappings type:', typeof embeddedMappings);
             console.log('Mappings sample:', JSON.stringify(embeddedMappings).substring(0, 200));

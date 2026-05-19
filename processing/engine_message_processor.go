@@ -17,6 +17,7 @@ import (
 	"ezhealthkonnect/services"
 	"ezhealthkonnect/services/connectors"
 	"ezhealthkonnect/services/metrics"
+	"ezhealthkonnect/services/parsers"
 	"ezhealthkonnect/services/storage"
 )
 
@@ -69,6 +70,34 @@ func (pe *ProcessingEngine) processSingleMessage(interfaceID string, msg *models
 
 	log.Printf("📥 Processing message for interface %s: ID=%s, Size=%d bytes",
 		interfaceID, msg.MessageID, len(msg.Content))
+
+	// STEP 0: Message family filter — NACK and drop before storing if the
+	// message type is not in the interface's accepted_message_families list.
+	if !pe.isMessageFamilyAccepted(interfaceID, msg.MessageType) {
+		log.Printf("🚫 Interface %s rejected message %s: type %q not in accepted families",
+			interfaceID, msg.MessageID, msg.MessageType)
+		pe.validationMutex.RLock()
+		vc, hasVC := pe.validationConnectors[interfaceID]
+		pe.validationMutex.RUnlock()
+		if hasVC && vc.SupportsValidationFeedback() {
+			feedback := models.NewValidationFeedback(
+				msg.MessageID, interfaceID,
+				models.ValidationModeStrictReject,
+				"rejected",
+				[]models.FieldValidationError{
+					{Field: "MSH.9", Type: "UNSUPPORTED_MESSAGE_TYPE",
+						Message: fmt.Sprintf("Message type %q is not accepted by this interface", msg.MessageType)},
+				},
+				0, "",
+			)
+			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer cancel()
+			if err := vc.SendValidationResponse(ctx, feedback); err != nil {
+				log.Printf("⚠️  NACK send failed for interface %s: %v", interfaceID, err)
+			}
+		}
+		return
+	}
 
 	// STEP 1: Store message in PostgreSQL interface table (with error capture)
 	err := pe.storeMessage(interfaceID, msg)
@@ -382,27 +411,38 @@ func (pe *ProcessingEngine) storeAndParse(interfaceID string, msg *models.Inboun
 
 		// Update PostgreSQL parsing status
 		tableName := fmt.Sprintf("messages_intf_%s", strings.ReplaceAll(interfaceID, "-", "_"))
-		query := fmt.Sprintf(`UPDATE %s SET parsing_status = 'completed', parsed_at = $1,
-			status = 'processed', delivery_status = 'not_required',
-			processing_completed_at = $1 WHERE message_id = $2`, tableName)
-		result, err := pe.db.Exec(query, time.Now(), msg.MessageID)
-		if err != nil {
-			log.Printf("⚠️  Failed to update parsing status in PostgreSQL: %v", err)
-			if logger != nil {
-				logger.Error(services.LogCategoryParsing, "Failed to update parsing status in PostgreSQL", map[string]interface{}{
-					"error": err.Error(),
-				})
-			}
-		} else {
-			rowsAffected, _ := result.RowsAffected()
-			log.Printf("✅ Parsing status updated in PostgreSQL: %s (rows: %d)", msg.MessageID, rowsAffected)
-			if logger != nil {
-				logger.Info(services.LogCategoryParsing, "Parsing status saved to PostgreSQL", map[string]interface{}{
-					"table":         tableName,
-					"message_id":    msg.MessageID,
-					"status":        "completed",
-					"rows_affected": rowsAffected,
-				})
+		query := fmt.Sprintf(`UPDATE %s SET parsing_status = 'completed', parsed_at = $1
+			WHERE message_id = $2`, tableName)
+		_, dbErr := pe.db.Exec(query, time.Now(), msg.MessageID)
+		if dbErr != nil {
+			log.Printf("⚠️  Failed to update parsing status in PostgreSQL: %v", dbErr)
+		}
+
+		// Build a ParserResult so the transformation pipeline receives FHIR data at root
+		// with _format set — identical envelope contract to HL7 messages.
+		// Use FHIRParserService (same as the test pipeline) so enhancedFields are
+		// populated and the output payload matches what the test pipeline shows.
+		if pe.transformationService != nil {
+			fhirParser := parsers.NewFHIRParserService()
+			parseResult := fhirParser.Parse(msg.Content)
+			if parseResult.Success {
+				fhirParsedJSON := parseResult.ParsedJSON
+				fhirParsedJSON["_format"] = string(models.FormatFHIR)
+				if len(parseResult.EnhancedFields) > 0 {
+					fhirParsedJSON["enhancedFields"] = parseResult.EnhancedFields
+				}
+				fhirResult := &models.ParserResult{
+					Success:    true,
+					Format:     models.FormatFHIR,
+					ParsedJSON: fhirParsedJSON,
+					Metadata: models.ParserMetadata{
+						MessageType: messageType,
+						ParsedAt:    time.Now(),
+					},
+				}
+				go pe.executeTransformationPipelineWithLogger(ctx, interfaceID, msg.MessageID, messageType, fhirResult, logger)
+			} else {
+				log.Printf("⚠️  FHIR JSON parse failed for %s — skipping pipeline: %v", msg.MessageID, parseResult.Error)
 			}
 		}
 
@@ -693,6 +733,71 @@ func (pe *ProcessingEngine) storeTransformedMessage(
 			"steps": result.ExecutionLog,
 		}
 		log.Printf("📊 [STORAGE] Storing %d transformation steps in MongoDB", len(result.ExecutionLog))
+	}
+
+	// Build pipeline_result in the exact same format as the test pipeline API response
+	// so clicking a real message shows the same view as running the test pipeline.
+	{
+		normalizer := models.NewOutputNormalizer()
+		steps := make(map[string]interface{})
+		stepNameCounts := make(map[string]int)
+		for _, stepLog := range result.ExecutionLog {
+			stepMetadata := map[string]interface{}{
+				"duration_ms": stepLog.DurationMs,
+				"success":     stepLog.Success,
+			}
+			if stepLog.StepOutput != nil && stepLog.StepOutput.ExecutionDetails != nil {
+				for k, v := range stepLog.StepOutput.ExecutionDetails {
+					stepMetadata[k] = v
+				}
+			}
+			var stepOutput map[string]interface{}
+			if stepLog.StepOutput != nil && stepLog.StepOutput.OutputData != nil {
+				// JSON round-trip breaks any circular references before normalizing
+				if b, err := json.Marshal(stepLog.StepOutput.OutputData); err == nil {
+					var clean map[string]interface{}
+					if json.Unmarshal(b, &clean) == nil {
+						stepOutput = normalizer.NormalizeStepOutput(clean)
+					}
+				}
+			}
+			if stepOutput == nil {
+				stepOutput = map[string]interface{}{}
+			}
+			normalizedName := normalizer.NormalizeKey(stepLog.StepName)
+			stepNameCounts[normalizedName]++
+			stepKey := normalizedName
+			if stepNameCounts[normalizedName] > 1 {
+				stepKey = fmt.Sprintf("%s_%d", normalizedName, stepNameCounts[normalizedName])
+			}
+			steps[stepKey] = map[string]interface{}{
+				"step_output":   stepOutput,
+				"step_metadata": stepMetadata,
+			}
+		}
+		pipelineResult := map[string]interface{}{
+			"success": result.Status == "completed",
+			"status":  result.Status,
+			"steps":   steps,
+		}
+		if result.Input != nil {
+			pipelineResult["input"] = map[string]interface{}{
+				"format":       result.Input.Format,
+				"message_type": result.Input.MessageType,
+				"version":      result.Input.Version,
+				"size_bytes":   result.Input.SizeBytes,
+			}
+		}
+		if result.Output != nil {
+			pipelineResult["output"] = map[string]interface{}{
+				"format":       result.Output.Format,
+				"message_type": result.Output.MessageType,
+				"version":      result.Output.Version,
+				"size_bytes":   result.Output.SizeBytes,
+				"payload":      result.Output.Payload,
+			}
+		}
+		transformedDoc["pipeline_result"] = pipelineResult
 	}
 
 	// UNIVERSAL STORAGE DESIGN - Works for all message types
@@ -1090,3 +1195,74 @@ func (pe *ProcessingEngine) updateMessageStatus(interfaceID, messageID, status s
 		log.Printf("⚠️  Failed to update message status to '%s' for %s: %v", status, messageID, err)
 	}
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Message family filter
+// ─────────────────────────────────────────────────────────────────────────────
+
+// isMessageFamilyAccepted returns true when the message type is allowed by the
+// interface's accepted_message_families list, or when no filter is configured.
+// Non-HL7 message types (empty string) always pass through.
+func (pe *ProcessingEngine) isMessageFamilyAccepted(interfaceID, messageType string) bool {
+	pe.familyFilterMu.RLock()
+	families, hasFamilies := pe.familyFilter[interfaceID]
+	pe.familyFilterMu.RUnlock()
+
+	// No filter configured → accept all.
+	if !hasFamilies || len(families) == 0 {
+		return true
+	}
+	// Empty / non-HL7 message type → pass through (FHIR, JSON, etc.).
+	if messageType == "" {
+		return true
+	}
+
+	for _, f := range families {
+		if messageMatchesFamily(messageType, f) {
+			return true
+		}
+	}
+	return false
+}
+
+// messageMatchesFamily returns true when msgType belongs to the given family spec.
+//   - Family without ^ (e.g. "ADT")  → matches any ADT^Axx event.
+//   - Family with ^    (e.g. "MFN^M02") → exact match only (heterogeneous families).
+func messageMatchesFamily(msgType, family string) bool {
+	msgType = strings.ToUpper(strings.TrimSpace(msgType))
+	family = strings.ToUpper(strings.TrimSpace(family))
+	if strings.Contains(family, "^") {
+		return msgType == family
+	}
+	return msgType == family || strings.HasPrefix(msgType, family+"^")
+}
+
+// ReloadFamilyFilter re-reads accepted_message_families for an interface from the
+// database.  Called by the API layer after an interface config update so the
+// in-memory cache stays in sync without requiring a full engine restart.
+func (pe *ProcessingEngine) ReloadFamilyFilter(interfaceID string) {
+	var familyFilterJSON sql.NullString
+	err := pe.db.QueryRow(
+		`SELECT accepted_message_families::text FROM interfaces WHERE id = $1`,
+		interfaceID,
+	).Scan(&familyFilterJSON)
+	if err != nil {
+		log.Printf("⚠️  ReloadFamilyFilter: could not read interface %s: %v", interfaceID, err)
+		return
+	}
+
+	pe.familyFilterMu.Lock()
+	defer pe.familyFilterMu.Unlock()
+
+	if familyFilterJSON.Valid && familyFilterJSON.String != "" && familyFilterJSON.String != "null" {
+		var families []string
+		if jsonErr := json.Unmarshal([]byte(familyFilterJSON.String), &families); jsonErr == nil && len(families) > 0 {
+			pe.familyFilter[interfaceID] = families
+			log.Printf("🔄 ReloadFamilyFilter: interface %s now accepts %v", interfaceID, families)
+			return
+		}
+	}
+	delete(pe.familyFilter, interfaceID)
+	log.Printf("🔄 ReloadFamilyFilter: interface %s filter cleared (accept all)", interfaceID)
+}
+

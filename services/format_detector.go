@@ -120,12 +120,9 @@ func (fd *FormatDetector) isHL7v3(content string) bool {
 }
 
 func (fd *FormatDetector) isFHIR(content string) bool {
-	// Check for FHIR resourceType
-	return strings.Contains(content, "\"resourceType\"") &&
-		(strings.Contains(content, "\"Patient\"") ||
-			strings.Contains(content, "\"Bundle\"") ||
-			strings.Contains(content, "\"Observation\"") ||
-			strings.Contains(content, "\"Encounter\""))
+	// Any JSON with a "resourceType" key is FHIR — no resource-type whitelist needed.
+	// The whitelist approach missed legitimate resources (Practitioner, MessageHeader, etc.)
+	return strings.Contains(content, "\"resourceType\"") && fd.isJSON(content)
 }
 
 func (fd *FormatDetector) isCCDA(content string) bool {

@@ -138,9 +138,16 @@ func (mc *MessageContentController) GetTransformedContent(c *gin.Context) {
 		return
 	}
 
-	// Extract the payload: transformed_content → fhirBundle → payload keys → full doc
+	// Extract the payload.
+	// Priority 1: pipeline_result — matches the test pipeline response format exactly
+	// (includes input, output.payload, steps, status, success).
+	// Priority 2: transformed_content / fhirBundle / fallback keys (legacy path).
 	var content string
-	if raw, ok := data["transformed_content"].(string); ok && raw != "" {
+	if pr, ok := data["pipeline_result"].(map[string]interface{}); ok {
+		if b, err := json.MarshalIndent(pr, "", "  "); err == nil {
+			content = string(b)
+		}
+	} else if raw, ok := data["transformed_content"].(string); ok && raw != "" {
 		content = raw
 	} else if nested, ok := data["transformed_content"].(map[string]interface{}); ok {
 		if b, err := json.MarshalIndent(nested, "", "  "); err == nil {
@@ -172,14 +179,20 @@ func (mc *MessageContentController) GetTransformedContent(c *gin.Context) {
 		contentType = v
 	}
 
+	var pipelineSteps interface{}
+	if meta, ok := data["transformation_metadata"].(map[string]interface{}); ok {
+		pipelineSteps = meta["steps"]
+	}
+
 	c.JSON(http.StatusOK, gin.H{
-		"success":      true,
-		"messageId":    messageID,
-		"content":      content,
-		"content_type": contentType,
-		"size":         len(content),
-		"source":       "pipeline",
-		"driver":       mc.objStorage.DriverName(),
+		"success":        true,
+		"messageId":      messageID,
+		"content":        content,
+		"content_type":   contentType,
+		"size":           len(content),
+		"source":         "pipeline",
+		"driver":         mc.objStorage.DriverName(),
+		"pipeline_steps": pipelineSteps,
 	})
 }
 

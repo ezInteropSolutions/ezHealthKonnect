@@ -83,6 +83,28 @@ var Table0203 = map[string]string{
 	"BR":  "Birth registry number",
 }
 
+// V3ParticipationTypeSystem is the FHIR system URI for HL7 v3 ParticipationType codes.
+const V3ParticipationTypeSystem = "http://terminology.hl7.org/CodeSystem/v3-ParticipationType"
+
+// PV1ParticipantRole is the IG-defined encounter participant role for a PV1 doctor field.
+type PV1ParticipantRole struct {
+	Code    string // v3-ParticipationType code (e.g. "ATND")
+	Display string // canonical display name
+}
+
+// PV1ParticipantRoles maps PV1 doctor field keys to their HL7 V2-to-FHIR IG participant roles.
+// Source: HL7 V2-to-FHIR IG ADT_A01 PV1 segment map.
+// Order defines the sequence in which participants are added to Encounter.participant[].
+var PV1ParticipantRoles = []struct {
+	Field string
+	Role  PV1ParticipantRole
+}{
+	{"PV1.7",  PV1ParticipantRole{"ATND", "attender"}},   // Attending doctor
+	{"PV1.8",  PV1ParticipantRole{"REF",  "referrer"}},   // Referring doctor
+	{"PV1.9",  PV1ParticipantRole{"CON",  "consultant"}}, // Consulting doctor
+	{"PV1.17", PV1ParticipantRole{"ADM",  "admitter"}},   // Admitting doctor
+}
+
 // wellKnownExternalSystems is the set of canonical FHIR system URIs for
 // established external code systems (LOINC, SNOMED, CPT, etc.).
 // When a Coding uses one of these systems, the source display name from the HL7
@@ -367,7 +389,35 @@ func NormalizeIdentifierSystem(sys string) string {
 	if len(sys) > 0 && sys[0] >= '0' && sys[0] <= '9' {
 		return "urn:oid:" + sys
 	}
-	return sys
+	// Well-known namespace IDs that map to canonical FHIR system URIs
+	switch strings.ToUpper(sys) {
+	case "NPI":
+		return "http://hl7.org/fhir/sid/us-npi"
+	case "DEA":
+		return "http://terminology.hl7.org/NamingSystem/usdea"
+	case "SSN", "SS":
+		return "http://hl7.org/fhir/sid/us-ssn"
+	case "DLN", "DL":
+		return "http://terminology.hl7.org/NamingSystem/us-dl"
+	}
+	// Bare namespace IDs (e.g. "PROVIDER", "HOSPITAL") cannot be validated as
+	// absolute URIs. Convert to a local URN so the field stays present and valid.
+	// Single chars or purely-numeric strings are noise — drop them.
+	if len(sys) <= 1 {
+		return ""
+	}
+	allDigits := true
+	for _, c := range sys {
+		if c < '0' || c > '9' {
+			allDigits = false
+			break
+		}
+	}
+	if allDigits {
+		return ""
+	}
+	slug := strings.ToLower(strings.ReplaceAll(sys, " ", "-"))
+	return "urn:local:" + slug
 }
 
 // isOIDLike returns true when s looks like an ISO OID (digits and dots only,
@@ -422,24 +472,46 @@ func BuildIdentifierFromCX(cx string, rules map[string]interface{}) map[string]i
 		}
 	}
 
-	// CX.5 — Identifier Type Code (Table 0203) → identifier.type
+	// CX.5 — Identifier Type Code (Table 0203) → identifier.type.
+	// Always pass through the code — CX.5 is by definition a Table 0203 value, so
+	// the system is always v2-0203 even for codes not in our local lookup map.
+	// Known codes get display enrichment; unknown codes pass through with code only.
 	if len(components) > 4 && components[4] != "" {
 		typeCode := strings.ToUpper(strings.TrimSpace(components[4]))
+		coding := map[string]interface{}{
+			"system": HL7V2IdentifierTypeSystem,
+			"code":   typeCode,
+		}
 		typeDef := map[string]interface{}{
-			"coding": []interface{}{
-				map[string]interface{}{
-					"system": HL7V2IdentifierTypeSystem,
-					"code":   typeCode,
-				},
-			},
-			"text": typeCode,
+			"coding": []interface{}{coding},
+			"text":   typeCode,
 		}
 		if label, ok := Table0203[typeCode]; ok {
-			typeDef["text"] = label
-			coding := typeDef["coding"].([]interface{})[0].(map[string]interface{})
 			coding["display"] = label
+			typeDef["text"] = label
 		}
 		identifier["type"] = typeDef
+	}
+
+	// CX.2 fallback: some senders encode the identifier type in CX.2 (check digit)
+	// when CX.5 is absent (e.g. "12345^DEA" where DEA is a Table 0203 code).
+	if _, hasType := identifier["type"]; !hasType {
+		if len(components) > 1 && components[1] != "" {
+			typeCode := strings.ToUpper(strings.TrimSpace(components[1]))
+			if label, ok := Table0203[typeCode]; ok {
+				typeDef := map[string]interface{}{
+					"coding": []interface{}{
+						map[string]interface{}{
+							"system":  HL7V2IdentifierTypeSystem,
+							"code":    typeCode,
+							"display": label,
+						},
+					},
+					"text": label,
+				}
+				identifier["type"] = typeDef
+			}
+		}
 	}
 
 	if rules != nil {

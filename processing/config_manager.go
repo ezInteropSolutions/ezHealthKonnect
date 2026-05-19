@@ -45,14 +45,14 @@ func NewConfigurationManager(mongoURI string, databaseName string) (*Configurati
 	// Create indexes for performance
 	indexModels := []mongo.IndexModel{
 		{
-			Keys: bson.D{{"interface_id", 1}},
+			Keys: bson.D{{Key: "interface_id", Value: 1}},
 			Options: options.Index().SetUnique(true),
 		},
 		{
-			Keys: bson.D{{"status", 1}},
+			Keys: bson.D{{Key: "status", Value: 1}},
 		},
 		{
-			Keys: bson.D{{"created_at", -1}},
+			Keys: bson.D{{Key: "created_at", Value: -1}},
 		},
 	}
 
@@ -350,7 +350,7 @@ func (cm *ConfigurationManager) StartHotReload() error {
 
 	collection := cm.database.Collection("interface_configurations")
 	pipeline := mongo.Pipeline{
-		{{"$match", bson.D{{"operationType", bson.D{{"$in", bson.A{"insert", "update", "delete", "replace"}}}}}}},
+		{{Key: "$match", Value: bson.D{{Key: "operationType", Value: bson.D{{Key: "$in", Value: bson.A{"insert", "update", "delete", "replace"}}}}}}},
 	}
 
 	var err error

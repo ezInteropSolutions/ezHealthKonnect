@@ -190,12 +190,13 @@ class PipelineAPIService {
     /**
      * Test pipeline with sample message
      */
-    async testPipeline(visualPipeline, sampleMessage) {
+    async testPipeline(visualPipeline, sampleMessage, messageFormat = 'auto') {
         const pipelineData = visualPipeline.toJSON();
         return await this.request('POST', '/pipelines/test', {
             pipeline_id: pipelineData.id,
             pipeline: pipelineData,
-            sample_message: sampleMessage
+            sample_message: sampleMessage,
+            message_format: messageFormat
         });
     }
 

@@ -114,6 +114,23 @@ func (fve *FHIRValidationExecutor) executeBundleValidation(
 	inputData map[string]interface{},
 	startTime time.Time,
 ) (map[string]interface{}, error) {
+	// Log exactly which resource types are present in the received bundle.
+	entries, _ := bundle["entry"].([]interface{})
+	var receivedTypes []string
+	for _, e := range entries {
+		if em, ok := e.(map[string]interface{}); ok {
+			if res, ok := em["resource"].(map[string]interface{}); ok {
+				if rt, ok := res["resourceType"].(string); ok {
+					receivedTypes = append(receivedTypes, rt)
+				}
+			}
+		}
+	}
+	log.Printf("  🔍 [FHIR Validation] Received bundle: %d entries, resource types: %v", len(entries), receivedTypes)
+	if len(opts.RequiredTypes) > 0 {
+		log.Printf("  🔍 [FHIR Validation] Required types (from config): %v", opts.RequiredTypes)
+	}
+
 	result := validator.ValidateBundle(bundle, opts)
 
 	// Flatten all errors/warnings into the legacy string-slice format so that
@@ -151,6 +168,8 @@ func (fve *FHIRValidationExecutor) executeBundleValidation(
 			sum.Warnings = append(sum.Warnings, fmtIssue(w))
 			allWarnings = append(allWarnings, fmtIssue(w))
 		}
+		log.Printf("  🔍 [FHIR Validation] Resource %s/%s: valid=%v errors=%d warnings=%d",
+			rr.ResourceType, rr.ResourceID, rr.Valid, len(sum.Errors), len(sum.Warnings))
 		resourceResults = append(resourceResults, sum)
 		resourcesValidated[rr.ResourceType] = rr.Valid
 	}
@@ -318,6 +337,14 @@ func (fve *FHIRValidationExecutor) findFHIRData(inputData map[string]interface{}
 			searchLoc{"fhirBundle", msg},
 			searchLoc{"fhirResource", msg},
 		)
+		// FHIR parser places resource fields at the root of execCtx.Message, so
+		// inputData["message"]["resourceType"] IS the FHIR resource/bundle.
+		if rt, ok := msg["resourceType"].(string); ok && rt != "" {
+			isBundle := rt == "Bundle"
+			log.Printf("  🔍 Found FHIR data at 'message.resourceType' (resourceType: %s, mode: %s)",
+				rt, map[bool]string{true: "bundle", false: "resource"}[isBundle])
+			return msg, isBundle
+		}
 	}
 	if enriched, ok := inputData["enriched"].(map[string]interface{}); ok {
 		locations = append(locations,

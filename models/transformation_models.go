@@ -270,9 +270,9 @@ type MessageContext struct {
 	// Size tracking
 	SizeBytes int64 `json:"size_bytes"`
 
-	// Timestamps
-	ReceivedAt    time.Time `json:"received_at,omitempty"`
-	TransformedAt time.Time `json:"transformed_at,omitempty"`
+	// Timestamps — pointers so zero values are omitted from JSON output.
+	ReceivedAt    *time.Time `json:"received_at,omitempty"`
+	TransformedAt *time.Time `json:"transformed_at,omitempty"`
 
 	// Storage reference (MongoDB document ID or S3 key)
 	PayloadRef  string `json:"payload_ref,omitempty"`  // Reference to full payload in MongoDB

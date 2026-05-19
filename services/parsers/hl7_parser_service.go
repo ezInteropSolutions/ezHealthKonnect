@@ -1,11 +1,10 @@
 // services/parsers/hl7_parser_service.go
-// HL7 Parser Service - Adapter wrapping existing HL7 parser
-// Follows MVC pattern and reuses existing hl7.ParseWithRealSchema()
+// HL7 Parser Service - adapter wrapping hl7.ParseWithRealSchema.
+// Implements MessageParser so it slots into ParserRegistry alongside FHIR, CDA, etc.
 
 package parsers
 
 import (
-	"fmt"
 	"log"
 	"strings"
 	"time"
@@ -14,112 +13,143 @@ import (
 	"ezhealthkonnect/models"
 )
 
-// HL7ParserService wraps existing HL7 parser in standardized interface
-type HL7ParserService struct {
-	version string
-}
+// HL7ParserService wraps the existing HL7 parser and adapts its output to
+// models.ParserResult so the pipeline controller is format-agnostic.
+type HL7ParserService struct{}
 
-// NewHL7ParserService creates new HL7 parser service
-func NewHL7ParserService() *HL7ParserService {
-	return &HL7ParserService{
-		version: "1.0.0",
-	}
-}
+// NewHL7ParserService creates an HL7ParserService.
+func NewHL7ParserService() *HL7ParserService { return &HL7ParserService{} }
 
-// Parse converts HL7 message to standard JSON format
-// Reuses existing hl7.ParseWithRealSchema() - NO CODE DUPLICATION
-func (hp *HL7ParserService) Parse(rawContent string) (*models.ParserResult, error) {
+// Format implements MessageParser.
+func (hp *HL7ParserService) Format() string { return string(models.FormatHL7v2) }
+
+// Parse implements MessageParser.
+// ParsedJSON preserves the full enhanced HL7 structure (enhancedSegments,
+// segmentGroups, observationGroups) so existing executor code keeps working.
+// EnhancedFields provides the format-agnostic flat field map for new consumers.
+func (hp *HL7ParserService) Parse(rawContent string) *models.ParserResult {
 	startTime := time.Now()
 
-	// ✅ REUSE EXISTING PARSER - Call existing schema-based parser
-	enhancedResult := hl7.ParseWithRealSchema(rawContent)
-
-	if !enhancedResult.Success {
+	enhanced := hl7.ParseWithRealSchema(rawContent)
+	if !enhanced.Success {
 		return &models.ParserResult{
 			Success:     false,
 			Format:      models.FormatHL7v2,
-			Error:       enhancedResult.Error,
+			Error:       enhanced.Error,
 			ParsingTime: time.Since(startTime),
-		}, fmt.Errorf("HL7 parsing failed: %s", enhancedResult.Error)
+		}
 	}
 
-	// Convert to standard JSON structure (preserves FULL enhanced schema)
-	parsedJSON := convertToStandardJSON(enhancedResult)
+	log.Printf("🔍 HL7 Parser: type=%s version=%s segments=%d schemaLoaded=%v",
+		enhanced.MessageType.Name, enhanced.Version,
+		len(enhanced.SegmentOrder), enhanced.SchemaLoaded)
 
-	// Extract metadata
-	metadata := models.ParserMetadata{
-		ParserVersion:    hp.version,
-		DetectedVersion:  enhancedResult.Version,
-		MessageType:      enhancedResult.MessageType.Name,
-		MessageControlID: extractControlID(enhancedResult),
-		SegmentCount:     len(enhancedResult.SegmentOrder),
-		FieldCount:       countTotalFields(enhancedResult),
-		ParsedAt:         time.Now(),
-	}
-
-	// DEBUG: Log what messageType we extracted
-	log.Printf("🔍 HL7 Parser: MessageType struct=%+v, MessageType.Name='%s'", enhancedResult.MessageType, enhancedResult.MessageType.Name)
-
-	// Extract validation results
-	validationResult := models.ValidationResult{
-		IsValid:  enhancedResult.Success && len(enhancedResult.ValidationErrors) == 0,
-		Errors:   extractErrors(enhancedResult.ValidationErrors),
-		Warnings: extractWarnings(enhancedResult.ValidationErrors),
-	}
+	parsedJSON := buildHL7ParsedJSON(enhanced)
+	enhancedFields, fieldOrder := flattenHL7EnhancedFields(enhanced)
 
 	return &models.ParserResult{
-		Success:          true,
-		Format:           models.FormatHL7v2,
-		ParsedJSON:       parsedJSON,
-		Metadata:         metadata,
-		ValidationResult: validationResult,
-		ParsingTime:      time.Since(startTime),
-	}, nil
+		Success:    true,
+		Format:     models.FormatHL7v2,
+		ParsedJSON: parsedJSON,
+		Metadata: models.ParserMetadata{
+			DetectedVersion:  enhanced.Version,
+			MessageType:      enhanced.MessageType.Name,
+			MessageControlID: extractHL7ControlID(enhanced),
+			SegmentCount:     len(enhanced.SegmentOrder),
+			FieldCount:       len(enhancedFields),
+			ParsedAt:         time.Now(),
+		},
+		ValidationResult: models.ValidationResult{
+			IsValid:  enhanced.Success && len(enhanced.ValidationErrors) == 0,
+			Errors:   extractHL7Errors(enhanced.ValidationErrors),
+			Warnings: extractHL7Warnings(enhanced.ValidationErrors),
+		},
+		EnhancedFields:  enhancedFields,
+		FieldOrder:      fieldOrder,
+		TypeName:        enhanced.MessageType.Name,
+		TypeDescription: enhanced.MessageType.Description,
+		ParsingTime:     time.Since(startTime),
+	}
 }
 
-// convertToStandardJSON converts EnhancedParsedMessage to JSON
-// IMPORTANT: We store the FULL enhanced structure from hl7.ParseWithRealSchema()
-// This preserves all schema information, field metadata, validation results, etc.
-func convertToStandardJSON(enhanced *hl7.EnhancedParsedMessage) map[string]interface{} {
-	// Convert the entire EnhancedParsedMessage to JSON
-	// This preserves all the rich schema-based parsing data
-	result := make(map[string]interface{})
+// =====================================
+// HELPERS
+// =====================================
 
-	// Core message data
-	result["raw"] = enhanced.Raw
-	result["success"] = enhanced.Success
-	result["error"] = enhanced.Error
-	result["version"] = enhanced.Version
-	result["messageType"] = enhanced.MessageType
-
-	// Enhanced segments with full schema metadata
-	result["enhancedSegments"] = enhanced.EnhancedSegments
-	result["segmentGroups"] = enhanced.SegmentGroups           // ALL instances of each segment type (for loops over IN1, OBX, etc.)
-	result["observationGroups"] = enhanced.ObservationGroups  // OBR-OBX grouped relationships for nested loops
-	result["segmentOrder"] = enhanced.SegmentOrder
-
-	// Basic segments (if available)
+// buildHL7ParsedJSON builds the ParsedJSON map preserving the full enhanced
+// HL7 structure that existing executor code depends on.
+func buildHL7ParsedJSON(enhanced *hl7.EnhancedParsedMessage) map[string]interface{} {
+	result := map[string]interface{}{
+		"raw":              enhanced.Raw,
+		"success":          enhanced.Success,
+		"version":          enhanced.Version,
+		"messageType":      enhanced.MessageType,
+		"enhancedSegments": enhanced.EnhancedSegments,
+		"segmentGroups":    enhanced.SegmentGroups,
+		"observationGroups": enhanced.ObservationGroups,
+		"segmentOrder":     enhanced.SegmentOrder,
+		"parsedAt":         enhanced.ParsedAt,
+		"dictionaryUsed":   enhanced.DictionaryUsed,
+		"schemaLoaded":     enhanced.SchemaLoaded,
+		"_format":          "hl7v2",
+	}
 	if len(enhanced.BasicSegments) > 0 {
 		result["basicSegments"] = enhanced.BasicSegments
 	}
-
-	// Parsing metadata
-	result["parsedAt"] = enhanced.ParsedAt
-	result["dictionaryUsed"] = enhanced.DictionaryUsed
-	result["schemaLoaded"] = enhanced.SchemaLoaded
-
-	// Validation results
 	if len(enhanced.ValidationErrors) > 0 {
 		result["validationErrors"] = enhanced.ValidationErrors
 	}
-
 	return result
 }
 
-// extractControlID extracts message control ID from parsed message
-func extractControlID(enhanced *hl7.EnhancedParsedMessage) string {
+// flattenHL7EnhancedFields converts enhancedSegments into the format-agnostic
+// models.EnhancedField map keyed by "SEG.n" (e.g. "PID.5", "MSH.9").
+// Segment order from the message is preserved in fieldOrder.
+func flattenHL7EnhancedFields(enhanced *hl7.EnhancedParsedMessage) (map[string]*models.EnhancedField, []string) {
+	fields := make(map[string]*models.EnhancedField)
+	var order []string
+
+	for _, segName := range enhanced.SegmentOrder {
+		seg, ok := enhanced.EnhancedSegments[segName]
+		if !ok {
+			continue
+		}
+		for _, f := range seg.Fields {
+			field := &models.EnhancedField{
+				Path:        f.Key,
+				Value:       f.Value,
+				Name:        f.Name,
+				Description: f.Description,
+				DataType:    f.DataType,
+				Cardinality: f.Cardinality,
+				Required:    f.Optionality == "R",
+				HasValue:    f.HasValue,
+				SchemaFound: f.Name != "",
+			}
+			if len(f.Subfields) > 0 {
+				field.SubFields = make([]*models.EnhancedField, 0, len(f.Subfields))
+				for _, sf := range f.Subfields {
+					field.SubFields = append(field.SubFields, &models.EnhancedField{
+						Path:        sf.Key,
+						Value:       sf.Value,
+						Name:        sf.Name,
+						Description: sf.Description,
+						DataType:    sf.DataType,
+						Required:    sf.Usage == "R",
+						HasValue:    sf.HasValue,
+						SchemaFound: sf.Name != "",
+					})
+				}
+			}
+			fields[f.Key] = field
+			order = append(order, f.Key)
+		}
+	}
+	return fields, order
+}
+
+func extractHL7ControlID(enhanced *hl7.EnhancedParsedMessage) string {
 	if msh, exists := enhanced.EnhancedSegments["MSH"]; exists {
-		// Find MSH.10 field (Message Control ID)
 		for _, field := range msh.Fields {
 			if field.Position == 10 || field.Key == "MSH.10" {
 				return field.Value
@@ -129,75 +159,54 @@ func extractControlID(enhanced *hl7.EnhancedParsedMessage) string {
 	return ""
 }
 
-// countTotalFields counts all fields in all segments
-func countTotalFields(enhanced *hl7.EnhancedParsedMessage) int {
-	count := 0
-	for _, segment := range enhanced.EnhancedSegments {
-		count += len(segment.Fields)
-	}
-	return count
-}
-
-// extractWarnings extracts warning messages
-func extractWarnings(errors []hl7.ValidationError) []string {
-	warnings := []string{}
-	for _, err := range errors {
-		if err.Severity == "warning" {
-			warnings = append(warnings, err.Message)
+func extractHL7Warnings(errs []hl7.ValidationError) []string {
+	var out []string
+	for _, e := range errs {
+		if e.Severity == "warning" {
+			out = append(out, e.Message)
 		}
 	}
-	return warnings
+	return out
 }
 
-// extractErrors extracts error messages
-func extractErrors(errors []hl7.ValidationError) []string {
-	errorMessages := []string{}
-	for _, err := range errors {
-		if err.Severity == "error" || err.Severity == "" {
-			errorMessages = append(errorMessages, err.Message)
+func extractHL7Errors(errs []hl7.ValidationError) []string {
+	var out []string
+	for _, e := range errs {
+		if e.Severity == "error" || e.Severity == "" {
+			out = append(out, e.Message)
 		}
 	}
-	return errorMessages
+	return out
 }
 
-// GetSupportedVersions returns supported HL7 versions
+// =====================================
+// EXTRA METHODS (non-interface, kept for direct callers)
+// =====================================
+
 func (hp *HL7ParserService) GetSupportedVersions() []string {
 	return []string{"2.3", "2.3.1", "2.4", "2.5", "2.5.1", "2.6", "2.7", "2.8"}
 }
 
-// ValidateMessage performs basic HL7 v2 validation
 func (hp *HL7ParserService) ValidateMessage(rawContent string) (bool, []string) {
-	errors := []string{}
-
-	// Check for MSH segment
+	var errs []string
 	if !strings.HasPrefix(rawContent, "MSH|") &&
 		!strings.Contains(rawContent, "\rMSH|") &&
 		!strings.Contains(rawContent, "\nMSH|") {
-		errors = append(errors, "Missing MSH segment at start")
-		return false, errors
+		errs = append(errs, "Missing MSH segment at start")
+		return false, errs
 	}
-
-	// Basic length check
 	if len(rawContent) < 20 {
-		errors = append(errors, "Message too short to be valid HL7")
-		return false, errors
+		errs = append(errs, "Message too short to be valid HL7")
+		return false, errs
 	}
-
-	return len(errors) == 0, errors
+	return true, errs
 }
 
-// GetSupportedFormat returns the message format this parser supports
 func (hp *HL7ParserService) GetSupportedFormat() models.MessageFormat {
 	return models.FormatHL7v2
 }
 
-// ValidateStructure performs structural validation of the message
 func (hp *HL7ParserService) ValidateStructure(rawContent string) (*models.ValidationResult, error) {
-	isValid, errors := hp.ValidateMessage(rawContent)
-
-	return &models.ValidationResult{
-		IsValid:  isValid,
-		Errors:   errors,
-		Warnings: []string{},
-	}, nil
+	isValid, errs := hp.ValidateMessage(rawContent)
+	return &models.ValidationResult{IsValid: isValid, Errors: errs, Warnings: []string{}}, nil
 }

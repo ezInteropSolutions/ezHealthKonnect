@@ -81,6 +81,7 @@ class InterfacesController {
                     i.log_retention_days,
                     i.retain_error_logs_forever,
                     i.fhir_validation_policy,
+                    i.accepted_message_families,
                     i.total_processed,
                     i.successful_processed,
                     i.failed_processed,
@@ -117,6 +118,7 @@ class InterfacesController {
                 sourceConfig: this.parseJsonField(item.source_config),
                 targetConfig: this.parseJsonField(item.target_config),
                 messageType: item.message_type,
+                acceptedMessageFamilies: this.parseJsonField(item.accepted_message_families) || null,
                 processingRules: this.parseJsonField(item.processing_rules),
                 transformationMapping: this.parseJsonField(item.transformation_mapping),
                 status: item.status,
@@ -186,18 +188,18 @@ class InterfacesController {
                 name,
                 description,
                 sourceType,
-                sourceConnectivity,  // ✅ NEW: From request
+                sourceConnectivity,
                 targetType,
-                targetConnectivity,  // ✅ NEW: From request
+                targetConnectivity,
                 messageType,
+                acceptedMessageFamilies, // array e.g. ["ADT","ORU"] or null = accept all
                 sourceConfig,
                 targetConfig,
                 processingRules,
                 transformationMapping,
-                // ✅ NEW: Deployment configuration
-                deploymentMode,      // 'auto', 'manual', 'delayed'
-                autoStart,           // boolean
-                deploymentDelay      // seconds (for delayed mode)
+                deploymentMode,
+                autoStart,
+                deploymentDelay
             } = req.body;
 
             console.log(`🔍 Creating interface: ${name}`);
@@ -266,6 +268,9 @@ class InterfacesController {
                 autoStart: finalAutoStart,
                 deploymentDelay: finalDeploymentDelay
             });
+            replacements.acceptedMessageFamilies = Array.isArray(acceptedMessageFamilies) && acceptedMessageFamilies.length > 0
+                ? JSON.stringify(acceptedMessageFamilies)
+                : null;
 
             const newInterfaces = await this.database.sequelize.query(`
                 INSERT INTO interfaces (
@@ -276,6 +281,7 @@ class InterfacesController {
                     processing_rules, transformation_mapping,
                     deployment_mode, auto_start, deployment_delay_seconds,
                     deployment_status,
+                    accepted_message_families,
                     status, created_by, updated_by, created_at, updated_at, is_active
                 ) VALUES (
                     :userId, :name, :description,
@@ -285,6 +291,7 @@ class InterfacesController {
                     :processingRules::jsonb, :transformationMapping::jsonb,
                     :deploymentMode, :autoStart, :deploymentDelay,
                     'not_deployed',
+                    :acceptedMessageFamilies::jsonb,
                     'inactive', :userId, :userId, NOW(), NOW(), true
                 ) RETURNING *
             `, {
@@ -380,18 +387,40 @@ class InterfacesController {
             console.log(`🔍 Fetching interface ${interfaceId} for user: ${userEmail}`);
 
             const interfaceData = await this.database.sequelize.query(`
-                SELECT 
+                SELECT
                     i.id, i.user_id, i.name, i.description,
                     i.source_type, i.source_connectivity,
                     i.target_type, i.target_connectivity,
                     i.source_config, i.target_config,
-                    i.message_type, i.processing_rules, i.transformation_mapping,
+                    i.message_type, i.accepted_message_families,
+                    i.processing_rules, i.transformation_mapping,
                     i.status, i.total_processed, i.successful_processed, i.failed_processed,
                     i.last_processed_at, i.created_at, i.updated_at, i.version,
                     i.fhir_validation_policy,
                     i.log_level, i.debug_logging, i.log_retention_days, i.retain_error_logs_forever,
                     i.deployment_mode, i.auto_start, i.deployment_delay_seconds,
-                    u.email as created_by_email
+                    u.email as created_by_email,
+                    -- Fetch connector step configs directly from transformation_steps (single source of truth)
+                    (SELECT ts.config::text
+                     FROM transformation_steps ts
+                     JOIN transformation_pipelines tp ON tp.id = ts.pipeline_id
+                     WHERE tp.interface_id = i.id AND ts.step_type = 'connector.inbound'
+                     ORDER BY ts.sequence LIMIT 1) AS inbound_step_config,
+                    (SELECT ts.id::text
+                     FROM transformation_steps ts
+                     JOIN transformation_pipelines tp ON tp.id = ts.pipeline_id
+                     WHERE tp.interface_id = i.id AND ts.step_type = 'connector.inbound'
+                     ORDER BY ts.sequence LIMIT 1) AS inbound_step_id,
+                    (SELECT ts.config::text
+                     FROM transformation_steps ts
+                     JOIN transformation_pipelines tp ON tp.id = ts.pipeline_id
+                     WHERE tp.interface_id = i.id AND ts.step_type = 'connector.outbound'
+                     ORDER BY ts.sequence LIMIT 1) AS outbound_step_config,
+                    (SELECT ts.id::text
+                     FROM transformation_steps ts
+                     JOIN transformation_pipelines tp ON tp.id = ts.pipeline_id
+                     WHERE tp.interface_id = i.id AND ts.step_type = 'connector.outbound'
+                     ORDER BY ts.sequence LIMIT 1) AS outbound_step_id
                 FROM interfaces i
                 LEFT JOIN users u ON i.created_by = u.id
                 WHERE i.id = :interfaceId AND i.user_id = :userId AND i.is_active = true
@@ -414,15 +443,22 @@ class InterfacesController {
                 name: item.name,
                 description: item.description,
                 
-                // ✅ Include connectivity fields
+                // Connectivity metadata (display/fallback only — Go reads from connectorSteps below)
                 sourceType: item.source_type,
                 sourceConnectivity: item.source_connectivity,
                 targetType: item.target_type,
                 targetConnectivity: item.target_connectivity,
-                
                 sourceConfig: this.parseJsonField(item.source_config),
                 targetConfig: this.parseJsonField(item.target_config),
+
+                // Single source of truth: connector step configs from transformation_steps
+                // Edit modal Source/Target tabs read from and write to these, not source_connectivity
+                inboundStepId: item.inbound_step_id || null,
+                inboundStepConfig: this.parseJsonField(item.inbound_step_config),
+                outboundStepId: item.outbound_step_id || null,
+                outboundStepConfig: this.parseJsonField(item.outbound_step_config),
                 messageType: item.message_type,
+                acceptedMessageFamilies: this.parseJsonField(item.accepted_message_families) || null,
                 processingRules: this.parseJsonField(item.processing_rules),
                 transformationMapping: this.parseJsonField(item.transformation_mapping),
                 status: item.status,
@@ -918,10 +954,14 @@ class InterfacesController {
                 targetType,
                 targetConnectivity,
                 messageType,
+                acceptedMessageFamilies,
                 sourceConfig,
                 targetConfig,
                 processingRules,
                 transformationMapping,
+                // Connector step IDs — write directly to transformation_steps (single source of truth)
+                inboundStepId,
+                outboundStepId,
                 // Deployment settings (V32)
                 deployment_mode,
                 auto_start,
@@ -1025,9 +1065,11 @@ class InterfacesController {
                 targetConnectivity: replacements.targetConnectivity?.substring(0, 150)
             });
 
-            // Update interface with consistent JSONB casting for ALL JSONB columns
-            // V32: Added deployment settings columns
-            // V33: Added logging settings columns
+            // V111: accepted_message_families — null = accept all
+            replacements.acceptedMessageFamilies = Array.isArray(acceptedMessageFamilies) && acceptedMessageFamilies.length > 0
+                ? JSON.stringify(acceptedMessageFamilies)
+                : null;
+
             await this.database.sequelize.query(`
                 UPDATE interfaces SET
                     name = :name,
@@ -1050,6 +1092,7 @@ class InterfacesController {
                     log_retention_days = :log_retention_days,
                     retain_error_logs_forever = :retain_error_logs_forever,
                     fhir_validation_policy = :fhir_validation_policy,
+                    accepted_message_families = :acceptedMessageFamilies::jsonb,
                     updated_by = :userId,
                     updated_at = CURRENT_TIMESTAMP
                 WHERE id = :interfaceId
@@ -1057,6 +1100,85 @@ class InterfacesController {
                 replacements,
                 type: this.database.sequelize.QueryTypes.UPDATE
             });
+
+            // ── PRIMARY WRITE: update transformation_steps directly ──────────────────
+            // transformation_steps is the single source of truth for connector config.
+            // The Go engine reads ONLY from here. If the client sent step IDs, update
+            // the full config block. Fall back to a field-merge when no step ID is given
+            // (e.g. legacy save path that only sends sourceConfig).
+            if (sourceConfig && Object.keys(sourceConfig).length > 0) {
+                try {
+                    if (inboundStepId) {
+                        // Client sent the step ID — update that exact row
+                        await this.database.sequelize.query(`
+                            UPDATE transformation_steps
+                            SET    config = jsonb_set(config, '{config}', config->'config' || :patch::jsonb, true),
+                                   updated_at = CURRENT_TIMESTAMP
+                            WHERE  id = :stepId
+                        `, {
+                            replacements: { patch: JSON.stringify(sourceConfig), stepId: inboundStepId },
+                            type: this.database.sequelize.QueryTypes.UPDATE
+                        });
+                    } else {
+                        // No step ID — find by interface + step_type
+                        await this.database.sequelize.query(`
+                            UPDATE transformation_steps ts
+                            SET    config = jsonb_set(ts.config, '{config}', ts.config->'config' || :patch::jsonb, true),
+                                   updated_at = CURRENT_TIMESTAMP
+                            FROM   transformation_pipelines tp
+                            WHERE  tp.id = ts.pipeline_id
+                              AND  tp.interface_id = :interfaceId
+                              AND  ts.step_type = 'connector.inbound'
+                        `, {
+                            replacements: { patch: JSON.stringify(sourceConfig), interfaceId },
+                            type: this.database.sequelize.QueryTypes.UPDATE
+                        });
+                    }
+                    console.log(`✅ Updated connector.inbound config for interface ${interfaceId}: ${JSON.stringify(sourceConfig)}`);
+                } catch (err) {
+                    console.warn(`⚠️ Failed to update connector.inbound step: ${err.message}`);
+                }
+            }
+
+            if (targetConfig && Object.keys(targetConfig).length > 0) {
+                try {
+                    if (outboundStepId) {
+                        await this.database.sequelize.query(`
+                            UPDATE transformation_steps
+                            SET    config = jsonb_set(config, '{config}', config->'config' || :patch::jsonb, true),
+                                   updated_at = CURRENT_TIMESTAMP
+                            WHERE  id = :stepId
+                        `, {
+                            replacements: { patch: JSON.stringify(targetConfig), stepId: outboundStepId },
+                            type: this.database.sequelize.QueryTypes.UPDATE
+                        });
+                    } else {
+                        await this.database.sequelize.query(`
+                            UPDATE transformation_steps ts
+                            SET    config = jsonb_set(ts.config, '{config}', ts.config->'config' || :patch::jsonb, true),
+                                   updated_at = CURRENT_TIMESTAMP
+                            FROM   transformation_pipelines tp
+                            WHERE  tp.id = ts.pipeline_id
+                              AND  tp.interface_id = :interfaceId
+                              AND  ts.step_type = 'connector.outbound'
+                        `, {
+                            replacements: { patch: JSON.stringify(targetConfig), interfaceId },
+                            type: this.database.sequelize.QueryTypes.UPDATE
+                        });
+                    }
+                    console.log(`✅ Updated connector.outbound config for interface ${interfaceId}: ${JSON.stringify(targetConfig)}`);
+                } catch (err) {
+                    console.warn(`⚠️ Failed to update connector.outbound step: ${err.message}`);
+                }
+            }
+
+            // Tell the Go engine to reload the filter cache for this interface
+            // so the new accept list takes effect immediately without restart.
+            try {
+                const axios = require('axios');
+                const goBackendUrl = process.env.GO_BACKEND_URL || `http://localhost:${process.env.API_PORT || 8080}`;
+                await axios.post(`${goBackendUrl}/api/interfaces/${interfaceId}/reload-filter`, {}, { timeout: 3000 });
+            } catch (_) { /* non-fatal — filter reloads on next engine restart */ }
 
             console.log(`✅ Interface ${interfaceId} updated successfully`);
 

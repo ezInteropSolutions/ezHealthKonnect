@@ -36,7 +36,7 @@ class WizardFHIRTransform {
                 parsedHL7Data: parsedHL7Data,  // Direct use of parsed data (already extracted from result.data)
                 createBundle: true,
                 validationMode: 'strict',
-                fhirVersion: 'R4',
+                fhirVersion: window.wizardController?.model?.data?.targetConfig?.version || 'R4',
                 targetProfile: 'base'
             };
 
@@ -299,7 +299,7 @@ class WizardFHIRTransform {
                     <div style="width: 60px; height: 60px; border: 4px solid #e2e8f0; border-top: 4px solid #1e3a8a; border-radius: 50%; animation: spin 1s linear infinite;"></div>
                 </div>
                 <div style="font-size: 18px; font-weight: 600; margin-bottom: 12px; color: #1e3a8a;">Transforming to FHIR...</div>
-                <div style="font-size: 14px; color: #6b7280; margin-bottom: 24px;">Converting HL7 segments to FHIR R4 resources</div>
+                <div style="font-size: 14px; color: #6b7280; margin-bottom: 24px;">Converting HL7 segments to FHIR ${window.wizardController?.model?.data?.targetConfig?.version || 'R4'} resources</div>
                 <div style="background: #f8fafc; border-radius: 8px; padding: 16px; max-width: 400px; margin: 0 auto;">
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
                         <span style="font-size: 12px; color: #64748b;">Processing...</span>
@@ -354,7 +354,7 @@ class WizardFHIRTransform {
                         <span>•</span>
                         <span><strong>${atomicMappings.length}</strong> field mappings applied</span>
                         <span>•</span>
-                        <span>FHIR R4 compliant</span>
+                        <span>FHIR ${window.wizardController?.model?.data?.targetConfig?.version || 'R4'} compliant</span>
                     </div>
                 </div>
 

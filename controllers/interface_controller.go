@@ -313,6 +313,20 @@ func (ctrl *InterfaceController) PauseInterface(c *gin.Context) {
 	})
 }
 
+// ReloadFamilyFilter tells the processing engine to re-read
+// accepted_message_families for an interface from the database.
+// Called by the Node.js layer after an updateInterface save so the in-memory
+// filter cache reflects the new config without a full engine restart.
+func (ctrl *InterfaceController) ReloadFamilyFilter(c *gin.Context) {
+	id := c.Param("id")
+	if ctrl.engine == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"success": false, "error": "engine not ready"})
+		return
+	}
+	ctrl.engine.ReloadFamilyFilter(id)
+	c.JSON(http.StatusOK, gin.H{"success": true, "interfaceId": id})
+}
+
 // Helper methods
 func (ctrl *InterfaceController) generateInterfaceID() string {
 	return fmt.Sprintf("intf_%d", time.Now().Unix())

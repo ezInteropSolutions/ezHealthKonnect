@@ -294,8 +294,17 @@
             </div>
             <div class="modal-body">
                 <div class="form-group">
-                    <label>Sample Message (HL7)</label>
-                    <textarea id="testMessageInput" rows="10" placeholder="Paste HL7 message here..."></textarea>
+                    <label>Sample Message</label>
+                    <select id="testMessageFormat" style="width:100%;margin-bottom:0.5rem;padding:0.4rem 0.6rem;border:1px solid var(--border-color,#d1d5db);border-radius:0.375rem;background:var(--bg-primary,#fff);color:var(--text-primary,#111);font-size:0.875rem;">
+                        <option value="auto">Auto-detect format</option>
+                        <option value="hl7v2">HL7 v2</option>
+                        <option value="fhir">FHIR (JSON)</option>
+                        <option value="ccda">CCD / CCDA (XML)</option>
+                        <option value="json">JSON</option>
+                        <option value="xml">XML</option>
+                        <option value="edi">EDI / X12</option>
+                    </select>
+                    <textarea id="testMessageInput" rows="10" placeholder="Paste your message here..."></textarea>
                 </div>
                 <div class="test-results" id="testResults" style="display: none;">
                     <h4>Execution Results</h4>

@@ -1548,14 +1548,25 @@ class MessageController {
             // Step 2: Get the transformed message from object storage via Go API
             let transformedMessage = null;
             const goBackendUrl = process.env.GO_BACKEND_URL || `http://localhost:${process.env.API_PORT || 8080}`;
+            const storageParams = { interfaceId: inputMessage.interface_id };
             try {
                 const axios = require('axios');
-                const rawResp = await axios.get(
-                    `${goBackendUrl}/api/messages/${inputMessage.message_id}/raw`,
-                    { params: { interfaceId: inputMessage.interface_id }, timeout: 10000 }
-                );
-                if (rawResp.data && rawResp.data.success && rawResp.data.content) {
-                    transformedMessage = { raw_content: rawResp.data.content, transformation_status: 'completed' };
+                const [rawResp, transformedResp] = await Promise.allSettled([
+                    axios.get(`${goBackendUrl}/api/messages/${inputMessage.message_id}/raw`, { params: storageParams, timeout: 10000 }),
+                    axios.get(`${goBackendUrl}/api/messages/${inputMessage.message_id}/transformed`, { params: storageParams, timeout: 10000 })
+                ]);
+                const rawContent = rawResp.status === 'fulfilled' && rawResp.value.data?.success
+                    ? rawResp.value.data.content : null;
+                const transformedData = transformedResp.status === 'fulfilled' && transformedResp.value.data?.success
+                    ? transformedResp.value.data : null;
+                if (rawContent || transformedData) {
+                    transformedMessage = {
+                        raw_content: rawContent,
+                        transformation_status: 'completed',
+                        transformation_metadata: transformedData?.pipeline_steps
+                            ? { steps: transformedData.pipeline_steps }
+                            : null
+                    };
                 }
             } catch (err) {
                 console.log(`⚠️ Object storage not available for transformed content: ${err.message}`);
@@ -1702,13 +1713,24 @@ class MessageController {
                     rawContent: rawContent
                 },
 
-                // Transformation stage (skip for sink interfaces - they receive already-transformed data)
-                transformation: (inputMessage.parsed_at && inputMessage.interface_target_type !== 'sink') ? {
+                // Transformation stage
+                transformation: inputMessage.parsed_at ? {
                     parsedAt: inputMessage.parsed_at,
                     parsingStatus: inputMessage.parsing_status,
                     parsingTimeMs: inputMessage.parsing_time_ms,
                     transformedAt: inputMessage.processing_completed_at,
-                    processingTimeMs: inputMessage.processing_time_ms
+                    processingTimeMs: inputMessage.processing_time_ms,
+                    sourceFormat: (() => {
+                        // message_type (e.g. "FHIR:Bundle:message") is the most reliable
+                        // indicator of actual message format — use it first.
+                        const mt = (inputMessage.message_type || '').split(':')[0].toLowerCase();
+                        if (mt === 'fhir') return 'fhir';
+                        if (mt === 'hl7' || mt === 'hl7v2') return 'hl7v2';
+                        // Fall back to interface source_type column
+                        return inputMessage.interface_source_type || null;
+                    })(),
+                    targetFormat: inputMessage.interface_target_type || null,
+                    steps: transformationSteps || []
                 } : null,
 
                 // Output stage — prefer object storage, then legacy output table, then message row itself

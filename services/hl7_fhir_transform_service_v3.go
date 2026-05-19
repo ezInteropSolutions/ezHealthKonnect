@@ -19,6 +19,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -27,6 +28,9 @@ import (
 	"ezhealthkonnect/hl7" // For composite field parsing
 	"ezhealthkonnect/services/hl7assembly"
 	"ezhealthkonnect/services/hl7type"
+	"ezhealthkonnect/services/manifest"
+	"ezhealthkonnect/services/mappers"
+	segment_processors "ezhealthkonnect/services/segment_processors"
 )
 
 // =====================================
@@ -34,11 +38,33 @@ import (
 // =====================================
 // Note: Uses FieldMapping struct from hl7_fhir_transform_service.go
 
+// AssemblyRule is a single cross-resource wiring rule loaded from the
+// assembly_rules table.  The engine applies these after field-mapping so that
+// no Go file needs to change when a new message type is added.
+type AssemblyRule struct {
+	ID             string
+	MessageType    string
+	RuleType       string // "reference"|"focus"|"result"|"subject"|"performer"|"encounter"|"author"
+	SourceResource string
+	TargetResource string
+	ReferencePath  string
+	ConditionExpr  string
+	Sequence       int
+}
+
 type HL7FHIRTransformServiceV3 struct {
 	db            *sql.DB
 	fhirLoader    *fhir.FHIRSchemaLoader
 	schemaReady   bool
 	zsegmentSvc   *ZSegmentService // loads MFNRuntimeConfig per interface
+
+	// Assembly rules cache — loaded once from DB, invalidated on OOB rebuild.
+	assemblyRules   map[string][]AssemblyRule // messageType → sorted rules
+	assemblyRulesMu sync.RWMutex
+
+	// Valueset mapper — DB-driven HL7 table code → FHIR code lookup.
+	// Queries hl7_fhir_value_mappings (populated by V115 IG seed data).
+	valueMapper *mappers.ValueMapper
 }
 
 func NewHL7FHIRTransformServiceV3(database *sql.DB) *HL7FHIRTransformServiceV3 {
@@ -46,6 +72,7 @@ func NewHL7FHIRTransformServiceV3(database *sql.DB) *HL7FHIRTransformServiceV3 {
 		db:           database,
 		fhirLoader:   nil, // Will be loaded on-demand during Transform()
 		zsegmentSvc:  NewZSegmentService(database),
+		valueMapper:  mappers.NewValueMapper(database),
 	}
 
 	// Note: FHIR schema loader availability is checked at Transform() time
@@ -207,15 +234,25 @@ func (s *HL7FHIRTransformServiceV3) Transform(
 	// the existing hardcoded wiring in post-processing normalizers still handles those.
 	allResources = s.applyContextLinks(allResources, contextLinks)
 
+	// ── Stage: IG manifest filter ──────────────────────────────────────────────
+	// Remove resource types not permitted by the IG for this message type.
+	// Interface-level resource_policy overrides are loaded from
+	// interface_message_mappings.custom_mapping_config and applied here.
+	resourcePolicy := s.loadResourcePolicy(ctx, request.InterfaceID, messageType)
+	allResources, removedTypes := manifest.FilterResources(allResources, messageType, resourcePolicy)
+	if len(removedTypes) > 0 {
+		log.Printf("ℹ️  Manifest filter removed %v for %s (not in IG output set)", removedTypes, messageType)
+	}
+
 	// Post-mapping normalizers — run for all message types to fix common field gaps
 	// that mapping transforms may not handle (no DB rows, partial templates, etc.).
 	// IMPORTANT: narrative (text.div) is regenerated at the END of this block so it
 	// always reflects the fully-normalized field values, not pre-normalization raw HL7.
 	for _, r := range allResources {
-		// Strip null-valued fields first — explicit JSON nulls are invalid for most
-		// FHIR element types and result in validator errors.  Omitting the key is
-		// always correct when no value is available.
-		stripNullFields(r)
+		// Strip null-valued fields and empty arrays first — both are invalid in FHIR
+		// output and result in validator errors.  cleanFHIRResource is recursive so
+		// nested objects and slice entries are cleaned in one pass.
+		cleanFHIRResource(r)
 
 		rt, _ := r["resourceType"].(string)
 		switch rt {
@@ -235,6 +272,30 @@ func (s *HL7FHIRTransformServiceV3) Transform(
 					// Unknown code — default to active (practitioner was looked up)
 					r["active"] = true
 				}
+			}
+			// active: transformToBoolean defaults any unrecognised value to bool false
+			// (e.g. "M" from a gender code mispositioned in STF.7). Only keep false
+			// when MFE.1 explicitly requests deletion or deactivation.
+			if activeBool, ok := r["active"].(bool); ok && !activeBool {
+				mfeAction := s.mfeActionFromSegments(enhancedSegments)
+				if mfeAction != "MDL" && mfeAction != "MDC" {
+					r["active"] = true
+				}
+			}
+			// identifier: re-parse any value that is still a raw CX composite string
+			// (e.g. "999" stored correctly, or "999^DEA" where CX.2 is a type code).
+			// Also flatten any value that landed as an object from cx_to_identifier.
+			reparsePractitionerIdentifiers(r)
+
+		case "PractitionerRole":
+			// language: the OOB schema generator maps PRA.1 (a CE composite key
+			// like "999^12345^1^PROVIDER^1") to the DomainResource.language field
+			// because it is a code field and PRA.1 has no explicit anchor. Strip it
+			// when the value is clearly an HL7 composite (contains "^") — it is not
+			// a BCP-47 language tag and causes the FHIR validator to cascade-fail
+			// the entire resource (NarrativeStatus, displayLanguage errors).
+			if lang, ok := r["language"].(string); ok && strings.Contains(lang, "^") {
+				delete(r, "language")
 			}
 			// identifier: flatten any identifier whose .value is a CodeableConcept object
 			// (CE type mapped via ce_to_codeableconcept instead of ce_code_only)
@@ -256,6 +317,8 @@ func (s *HL7FHIRTransformServiceV3) Transform(
 					}
 				}
 			}
+			// Re-parse raw CX composite strings that survived as-is (e.g. "999^12345^1^PROVIDER^1")
+			reparsePractitionerIdentifiers(r)
 		case "Patient":
 			// birthDate: HL7 TS (YYYYMMDD) → FHIR date (YYYY-MM-DD)
 			if bd, ok := r["birthDate"].(string); ok && len(bd) >= 8 && !strings.Contains(bd, "-") {
@@ -280,6 +343,27 @@ func (s *HL7FHIRTransformServiceV3) Transform(
 			// 3. Enrich identifiers from raw PID segments for fields that lack a type subfield
 			//    in HL7 (e.g. PID.19 = SSN, PID.18 = Account Number).
 			s.enrichPatientIdentifiers(r, request.ParsedHL7Data)
+			// Flatten any identifier.value that is an object (cx_to_identifier stored a full
+			// Identifier map at a scalar leaf — same pattern as PractitionerRole above).
+			if ids, ok := r["identifier"].([]interface{}); ok {
+				for _, idRaw := range ids {
+					if id, ok2 := idRaw.(map[string]interface{}); ok2 {
+						if valMap, ok3 := id["value"].(map[string]interface{}); ok3 {
+							if txt, ok4 := valMap["text"].(string); ok4 && txt != "" {
+								id["value"] = txt
+							} else if v, ok4 := valMap["value"].(string); ok4 && v != "" {
+								id["value"] = v
+							} else if codings, ok4 := valMap["coding"].([]interface{}); ok4 && len(codings) > 0 {
+								if cod, ok5 := codings[0].(map[string]interface{}); ok5 {
+									if code, ok6 := cod["code"].(string); ok6 && code != "" {
+										id["value"] = code
+									}
+								}
+							}
+						}
+					}
+				}
+			}
 			// Strip empty identifier objects (empty PID fields produce {})
 			if ids, ok := r["identifier"].([]interface{}); ok {
 				var validIDs []interface{}
@@ -378,6 +462,245 @@ func (s *HL7FHIRTransformServiceV3) Transform(
 				}
 			}
 
+		case "Encounter":
+			// status: map HL7 ADT trigger event codes to FHIR encounter-status values.
+			// Primary: map whatever value the template wrote (e.g. MSH.9.2 mapped to status).
+			if st, ok := r["status"].(string); ok {
+				if mapped := mapEncounterStatus(st); mapped != "" {
+					r["status"] = mapped
+				}
+			}
+			// Fallback: template had no mapping for status — derive from the message type
+			// event code (e.g. "ADT^A01" → "A01" → "in-progress").  This is the IG-correct
+			// path for ADT/ORM/ORU messages where the status is implicit in the event.
+			if _, hasStatus := r["status"]; !hasStatus {
+				if idx := strings.Index(messageType, "^"); idx >= 0 {
+					if derived := mapEncounterStatus(messageType[idx+1:]); derived != "" {
+						r["status"] = derived
+					}
+				}
+			}
+			if _, hasStatus := r["status"]; !hasStatus {
+				r["status"] = "unknown"
+			}
+			// participant.type: inject v3-ParticipationType role discriminators from PV1.
+			// Type codes come from hl7assembly.PV1ParticipantRoles — no hardcoding here.
+			s.enrichEncounterParticipants(r, request.ParsedHL7Data)
+			// class: FHIR R4 required field (Coding with system).
+			// OOB template anchor writes PV1.2 → Encounter.class.code (scalar path),
+			// producing {"code": "O"} — a Coding without a system.  The template path
+			// and the raw-string path both need to reach normalizePatientClassToCoding
+			// so the ActCode system URI and display are always present.
+			if cls, ok := r["class"]; ok {
+				switch clsVal := cls.(type) {
+				case string:
+					if clsVal != "" {
+						r["class"] = normalizePatientClassToCoding(clsVal)
+					}
+				case map[string]interface{}:
+					// Template wrote {"code": "O"} via the .code scalar path — add system.
+					if code, hasCode := clsVal["code"].(string); hasCode && code != "" {
+						if _, hasSystem := clsVal["system"]; !hasSystem {
+							r["class"] = normalizePatientClassToCoding(code)
+						}
+					}
+				}
+			} else {
+				r["class"] = map[string]interface{}{
+					"system":  "http://terminology.hl7.org/CodeSystem/v3-ActCode",
+					"code":    "IMP",
+					"display": "inpatient encounter",
+				}
+			}
+
+		case "Coverage":
+			// status: required FHIR R4 field — default to "active" when not mapped.
+			if _, hasStatus := r["status"]; !hasStatus {
+				r["status"] = "active"
+			}
+			// Validate status against the fm-status value set (active|cancelled|draft|entered-in-error).
+			// HL7 billing codes (e.g. "P", "B", "N") that the heuristic may have placed here are
+			// not valid fm-status values — the IG has no v2 concept map for IN1 billing status to
+			// fm-status, so we default to "active".
+			if st, _ := r["status"].(string); st != "" {
+				switch st {
+				case "active", "cancelled", "draft", "entered-in-error":
+					// valid fm-status — keep as-is
+				default:
+					r["status"] = "active"
+				}
+			}
+			// type.coding[].code: ce_to_codeableconcept may have placed a CodeableConcept
+			// object at the scalar .code leaf — extract to string.
+			flattenCodingCodeObjects(r, "type")
+			// class[].type (1..1) and class[].value (1..1): both required in Coverage.class.
+			// JSON round-trip normalises typed Go slices ([]map[string]interface{}) to
+			// []interface{} so that the type assertion below always succeeds regardless of
+			// how the template engine constructed the slice.
+			if rawClass, exists := r["class"]; exists {
+				clsBytes, _ := json.Marshal(rawClass)
+				var classes []interface{}
+				if err := json.Unmarshal(clsBytes, &classes); err == nil {
+					for _, clsRaw := range classes {
+						if cls, ok2 := clsRaw.(map[string]interface{}); ok2 {
+							// Ensure value (1..1): promote name→value if value absent.
+							if _, hasValue := cls["value"]; !hasValue {
+								if name, _ := cls["name"].(string); name != "" {
+									cls["value"] = name
+								}
+							}
+							// Ensure type (1..1): default to "group" per IG IN1.8 → class[group].
+							if _, hasType := cls["type"]; !hasType {
+								cls["type"] = map[string]interface{}{
+									"coding": []interface{}{
+										map[string]interface{}{
+											"system":  "http://terminology.hl7.org/CodeSystem/coverage-class",
+											"code":    "group",
+											"display": "Group",
+										},
+									},
+								}
+							}
+						}
+					}
+					r["class"] = classes
+				}
+			}
+			// payor: must be []Reference — normalize each element.
+			if payors, ok := r["payor"].([]interface{}); ok {
+				var validPayors []interface{}
+				for _, p := range payors {
+					switch pv := p.(type) {
+					case map[string]interface{}:
+						// identifier must be an object, not an array
+						if idArr, ok2 := pv["identifier"].([]interface{}); ok2 && len(idArr) > 0 {
+							if idObj, ok3 := idArr[0].(map[string]interface{}); ok3 {
+								// Flatten nested identifier.value object
+								if valMap, ok4 := idObj["value"].(map[string]interface{}); ok4 {
+									if val, ok5 := valMap["value"].(string); ok5 && val != "" {
+										idObj["value"] = val
+									}
+								}
+								pv["identifier"] = idObj
+							}
+						}
+						validPayors = append(validPayors, pv)
+					case string:
+						// Raw string (e.g. group ID "GRP002") — wrap as Reference.display.
+						if pv != "" {
+							validPayors = append(validPayors, map[string]interface{}{"display": pv})
+						}
+					}
+				}
+				if len(validPayors) > 0 {
+					r["payor"] = validPayors
+				} else {
+					delete(r, "payor")
+				}
+			}
+			// relationship.coding[].system: add when absent (SELF etc. need subscriber-relationship system).
+			// JSON round-trip normalises the map type so the assertion always succeeds.
+			if rawRel, exists := r["relationship"]; exists {
+				relBytes, _ := json.Marshal(rawRel)
+				var rel map[string]interface{}
+				if err := json.Unmarshal(relBytes, &rel); err == nil {
+					if codings, ok2 := rel["coding"].([]interface{}); ok2 {
+						for _, cRaw := range codings {
+							if c, ok3 := cRaw.(map[string]interface{}); ok3 {
+								if sys, _ := c["system"].(string); sys == "" {
+									if code, _ := c["code"].(string); code != "" {
+										c["system"] = "http://terminology.hl7.org/CodeSystem/subscriber-relationship"
+										c["code"] = strings.ToLower(strings.TrimSpace(code))
+									}
+								}
+							}
+						}
+						rel["coding"] = codings
+					}
+					r["relationship"] = rel
+				}
+			}
+
+		case "Condition":
+			// category.coding[].system: HL7 diagnosis type → condition-category system.
+			if cats, ok := r["category"].([]interface{}); ok {
+				for _, catRaw := range cats {
+					if cat, ok2 := catRaw.(map[string]interface{}); ok2 {
+						if codings, ok3 := cat["coding"].([]interface{}); ok3 {
+							for _, cRaw := range codings {
+								if c, ok4 := cRaw.(map[string]interface{}); ok4 {
+									if sys, _ := c["system"].(string); sys == "" {
+										if code, _ := c["code"].(string); code != "" {
+											c["system"] = "http://terminology.hl7.org/CodeSystem/condition-category"
+											// Map HL7 DG1.6 diagnosis type codes to FHIR condition-category
+											switch strings.ToUpper(strings.TrimSpace(code)) {
+											case "A", "AD", "ADMITTING":
+												c["code"] = "encounter-diagnosis"
+												c["display"] = "Encounter Diagnosis"
+											case "F", "FINAL", "W", "WORKING":
+												c["code"] = "encounter-diagnosis"
+												c["display"] = "Encounter Diagnosis"
+											case "P", "PROBLEM", "CHRONIC":
+												c["code"] = "problem-list-item"
+												c["display"] = "Problem List Item"
+											default:
+												c["code"] = "encounter-diagnosis"
+												c["display"] = "Encounter Diagnosis"
+											}
+										}
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+
+		case "RelatedPerson":
+			// gender: HL7 Table 0001 (M/F/O/U) → FHIR AdministrativeGender.
+			// GT1.9 and NK1.15 are anchored to RelatedPerson.gender — the raw HL7 code
+			// must be normalized the same way as Patient.gender (PID.8).
+			if g, ok := r["gender"].(string); ok {
+				switch strings.ToUpper(strings.TrimSpace(g)) {
+				case "M":
+					r["gender"] = "male"
+				case "F":
+					r["gender"] = "female"
+				case "O":
+					r["gender"] = "other"
+				case "U", "UN", "UNKNOWN":
+					r["gender"] = "unknown"
+				}
+			}
+			// relationship.coding[].code: ce_to_codeableconcept may have placed a
+			// CodeableConcept object at the scalar .code leaf — extract to string.
+			if rels, ok := r["relationship"].([]interface{}); ok {
+				for _, relRaw := range rels {
+					if rel, ok2 := relRaw.(map[string]interface{}); ok2 {
+						if codings, ok3 := rel["coding"].([]interface{}); ok3 {
+							for _, cRaw := range codings {
+								if c, ok4 := cRaw.(map[string]interface{}); ok4 {
+									if codeMap, ok5 := c["code"].(map[string]interface{}); ok5 {
+										extracted := extractCodeFromCodeableConcept(codeMap)
+										if extracted != "" {
+											c["code"] = extracted
+										} else {
+											delete(c, "code")
+										}
+									}
+									// Add system when absent (v3-RoleCode for relatedperson relationships)
+									if sys, _ := c["system"].(string); sys == "" {
+										if code, _ := c["code"].(string); code != "" {
+											c["system"] = "http://terminology.hl7.org/CodeSystem/v3-RoleCode"
+										}
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+
 		case "DiagnosticReport":
 			// identifier type enrichment — OBR.2 = Placer, OBR.3 = Filler per HL7 v2 spec.
 			// The mapping engine populates values only; types are structurally known.
@@ -417,6 +740,40 @@ func (s *HL7FHIRTransformServiceV3) Transform(
 					if id, ok2 := resp["identifier"].(string); ok2 {
 						if strings.HasPrefix(id, "^~") || id == "" {
 							delete(resp, "identifier")
+						}
+					}
+				}
+			}
+			// meta.extension: Extension.url is required. Strip any extension that has no url
+			// (e.g. HL7 version stored as {valueString: "2.5"} without a url identifier).
+			if meta, ok := r["meta"].(map[string]interface{}); ok {
+				if exts, ok2 := meta["extension"].([]interface{}); ok2 {
+					var validExts []interface{}
+					for _, extRaw := range exts {
+						if ext, ok3 := extRaw.(map[string]interface{}); ok3 {
+							if url, _ := ext["url"].(string); url != "" {
+								validExts = append(validExts, extRaw)
+							}
+						}
+					}
+					if len(validExts) == 0 {
+						delete(meta, "extension")
+					} else {
+						meta["extension"] = validExts
+					}
+				}
+			}
+			// meta.security[].system: MSH.11 processing ID (P/T/D) maps to security[].code
+			// but HL7 v2-0103 values need the v2-0103 system URI to be valid.
+			if meta, ok := r["meta"].(map[string]interface{}); ok {
+				if secs, ok2 := meta["security"].([]interface{}); ok2 {
+					for _, secRaw := range secs {
+						if sec, ok3 := secRaw.(map[string]interface{}); ok3 {
+							if sys, _ := sec["system"].(string); sys == "" {
+								if code, _ := sec["code"].(string); code != "" {
+									sec["system"] = "http://terminology.hl7.org/CodeSystem/v2-0103"
+								}
+							}
 						}
 					}
 				}
@@ -504,7 +861,7 @@ func (s *HL7FHIRTransformServiceV3) Transform(
 			// eventCoding, build one directly from MSH.9 in the parsed HL7 data.
 			// This guards against templates that have no MSH.9 → event mapping at all
 			// (e.g. minimal custom templates) and ensures MessageHeader is always valid.
-			if _, stillMissing := r["eventCoding"]; stillMissing {
+			if _, hasEC := r["eventCoding"]; !hasEC {
 				if mshSeg, ok := enhancedSegments["MSH"].(map[string]interface{}); ok {
 					msh9 := ""
 					if fields, ok2 := mshSeg["fields"].([]interface{}); ok2 {
@@ -533,10 +890,9 @@ func (s *HL7FHIRTransformServiceV3) Transform(
 				}
 			}
 
-			// Strip null-valued fields before any further MessageHeader work —
-			// some template mappings produce null when the source segment field
-			// is absent (e.g. destination when MSH.5 is empty).
-			stripNullFields(r)
+			// Strip null-valued fields and empty arrays before any further MessageHeader
+			// work — template mappings produce null when a source segment field is absent.
+			cleanFHIRResource(r)
 
 			// destination.endpoint is required (cardinality 1..1) by the FHIR R4 spec.
 			// The OOB mapping sets destination.name from MSH.5 but not endpoint.
@@ -570,6 +926,87 @@ func (s *HL7FHIRTransformServiceV3) Transform(
 					delete(r, "destination")
 				}
 			}
+			// ── source.endpoint fallback ──────────────────────────────────────────
+			// source.endpoint is required (1..1) by FHIR R4. The template maps
+			// MSH.3→source.name and MSH.4→source.endpoint, but both may be stripped
+			// by stripNullFields when those MSH fields are empty. Synthesize from
+			// MSH context when absent or incomplete.
+			var mshSrcName, mshSrcEndpoint string
+			if mshSeg, ok2 := enhancedSegments["MSH"].(map[string]interface{}); ok2 {
+				if fields, ok3 := mshSeg["fields"].([]interface{}); ok3 {
+					for _, f := range fields {
+						if fm, ok4 := f.(map[string]interface{}); ok4 {
+							k, _ := fm["key"].(string)
+							v, _ := fm["value"].(string)
+							switch k {
+							case "MSH.3":
+								mshSrcName = v
+							case "MSH.4":
+								mshSrcEndpoint = v
+							}
+						}
+					}
+				}
+			}
+			srcEndpointURI := func(raw string) string {
+				if raw == "" {
+					return "urn:hl7:source:unknown"
+				}
+				return "urn:hl7:source:" + strings.ToLower(strings.ReplaceAll(strings.TrimSpace(raw), " ", "-"))
+			}
+			if src, ok2 := r["source"].(map[string]interface{}); ok2 {
+				if ep, _ := src["endpoint"].(string); ep == "" {
+					if mshSrcEndpoint != "" {
+						src["endpoint"] = srcEndpointURI(mshSrcEndpoint)
+					} else {
+						src["endpoint"] = srcEndpointURI(mshSrcName)
+					}
+				}
+			} else {
+				ep := srcEndpointURI(mshSrcEndpoint)
+				if mshSrcEndpoint == "" {
+					ep = srcEndpointURI(mshSrcName)
+				}
+				src := map[string]interface{}{"endpoint": ep}
+				if mshSrcName != "" {
+					src["name"] = mshSrcName
+				}
+				r["source"] = src
+			}
+			// implicitRules: MSH.1 "Field Separator" (always "|") is sometimes
+			// mapped here by misconfigured templates. "|" is never a valid
+			// canonical URI — remove unconditionally.
+			delete(r, "implicitRules")
+
+			// source.version: MSH.6 "Receiving Facility" is sometimes mapped
+			// here by the heuristic. A facility name is not a software version.
+			// Detect non-version strings and relocate to destination[0].endpoint
+			// (the correct FHIR path for MSH.6), replacing the synthesized URN
+			// that was injected when no real endpoint value was present.
+			if src, ok2 := r["source"].(map[string]interface{}); ok2 {
+				if ver, exists := src["version"]; exists {
+					if verStr, ok3 := ver.(string); ok3 && verStr != "" && !looksLikeSoftwareVersion(verStr) {
+						// Move to destination[0].endpoint
+						if dests, ok4 := r["destination"].([]interface{}); ok4 && len(dests) > 0 {
+							if dest0, ok5 := dests[0].(map[string]interface{}); ok5 {
+								dest0["endpoint"] = verStr
+							}
+						}
+						delete(src, "version")
+					}
+				}
+			}
+
+			// source.software: MSH.2 (encoding characters "^~\&") is sometimes
+			// mapped to source.software by misconfigured templates. Strip it —
+			// it is not a software name and fails FHIR string pattern validation.
+			if src, ok2 := r["source"].(map[string]interface{}); ok2 {
+				if sw, ok3 := src["software"].(string); ok3 {
+					if strings.HasPrefix(sw, "^~") || strings.HasPrefix(sw, "^~\\&") {
+						delete(src, "software")
+					}
+				}
+			}
 			// focus: MessageHeader must reference the primary clinical resource
 			// in the bundle so the validator can confirm every entry is reachable.
 			// We defer this to after all resources are collected — see below.
@@ -583,7 +1020,8 @@ func (s *HL7FHIRTransformServiceV3) Transform(
 	for _, r := range allResources {
 		rt, _ := r["resourceType"].(string)
 		switch rt {
-		case "Patient", "DiagnosticReport", "Observation", "Encounter", "MessageHeader":
+		case "Patient", "DiagnosticReport", "Observation", "Encounter", "MessageHeader",
+			"Practitioner", "PractitionerRole", "RelatedPerson", "Coverage":
 			if _, hasText := r["text"]; hasText {
 				narrative := s.generateNarrative(rt, r)
 				r["text"] = map[string]interface{}{
@@ -594,8 +1032,15 @@ func (s *HL7FHIRTransformServiceV3) Transform(
 		}
 	}
 
-	// Inject MessageHeader.focus — must point to the primary resource(s) in the bundle.
-	// For ORU: DiagnosticReport; for ADT: Patient; fallback: first non-MessageHeader resource.
+	// Inject MessageHeader.focus — must reference all primary context resources in the bundle
+	// so that every included resource is reachable by forward traversal from MessageHeader.
+	//
+	// Semantic path (v1.1+ templates): derive focus from the template's "context" block via
+	// contextLinks.RoleToSegment (e.g. "encounter"→"PV1") resolved through wellKnownSegmentToType
+	// to FHIR resource types.  This is format-agnostic — no per-message-type code needed.
+	//
+	// Legacy path (v1.0 templates, nil contextLinks): prefer DiagnosticReport then Patient.
+	// Last resort: first non-MessageHeader resource in the bundle.
 	for _, r := range allResources {
 		rt, _ := r["resourceType"].(string)
 		if rt != "MessageHeader" {
@@ -605,25 +1050,50 @@ func (s *HL7FHIRTransformServiceV3) Transform(
 			continue // already set by mapping
 		}
 		var focusRefs []interface{}
-		// Prefer DiagnosticReport (ORU) then Patient (ADT/all others)
-		for _, prio := range []string{"DiagnosticReport", "Patient"} {
+
+		if contextLinks != nil && len(contextLinks.RoleToSegment) > 0 {
+			// Semantic path: resolve each context role to its FHIR resource type, then
+			// collect every bundle resource whose type is context-primary.
+			primaryTypes := make(map[string]bool, len(contextLinks.RoleToSegment))
+			for _, segment := range contextLinks.RoleToSegment {
+				if fhirType, ok := wellKnownSegmentToType[segment]; ok {
+					primaryTypes[fhirType] = true
+				}
+			}
 			for _, candidate := range allResources {
 				crt, _ := candidate["resourceType"].(string)
-				if crt == prio {
+				if primaryTypes[crt] {
 					if id, ok := candidate["id"].(string); ok && id != "" {
 						focusRefs = append(focusRefs, map[string]interface{}{
 							"reference": crt + "/" + id,
 						})
 					}
+				}
+			}
+		}
+
+		if len(focusRefs) == 0 {
+			// Legacy fallback: prefer DiagnosticReport (ORU) then Patient (ADT/all others)
+			for _, prio := range []string{"DiagnosticReport", "Patient"} {
+				for _, candidate := range allResources {
+					crt, _ := candidate["resourceType"].(string)
+					if crt == prio {
+						if id, ok := candidate["id"].(string); ok && id != "" {
+							focusRefs = append(focusRefs, map[string]interface{}{
+								"reference": crt + "/" + id,
+							})
+						}
+						break
+					}
+				}
+				if len(focusRefs) > 0 {
 					break
 				}
 			}
-			if len(focusRefs) > 0 {
-				break
-			}
 		}
+
 		if len(focusRefs) == 0 {
-			// Fallback: first non-MessageHeader resource
+			// Last resort: first non-MessageHeader resource
 			for _, candidate := range allResources {
 				crt, _ := candidate["resourceType"].(string)
 				if crt != "MessageHeader" {
@@ -636,10 +1106,69 @@ func (s *HL7FHIRTransformServiceV3) Transform(
 				}
 			}
 		}
+
 		if len(focusRefs) > 0 {
 			r["focus"] = focusRefs
 		}
 	}
+
+	// Apply DB-driven cross-resource assembly rules (assembly_rules table, V114).
+	// Handles reference wiring, focus expansion, result collection, etc. for all
+	// message types without any per-message-type Go code changes.
+	allResources = s.applyAssemblyRules(ctx, messageType, allResources)
+
+	// Structural sanitization: remove empty sub-objects, coerce reference fields,
+	// and inject required FHIR cardinality defaults that can't be expressed in templates.
+	allResources = s.sanitizeFHIRResources(allResources)
+
+	// ── Stage: Segment processors ─────────────────────────────────────────────
+	// Runs AFTER all post-normalizers and sanitizeFHIRResources so that resources
+	// added here (e.g. prior Patient from MRGProcessor) are not touched by the
+	// PID/PV1 normalizer loops — those loops would otherwise copy surviving-patient
+	// demographics onto the prior Patient record.
+	//
+	// Processors receive a ResourceCoordinator rather than a raw slice.  They use
+	// Add / Get / Update / FindFirst and write "ResourceType/id" relative references;
+	// the bundle assembler's rewriteReferences() resolves them to urn:uuid: after
+	// UUID assignment — no processor ever needs to know a UUID in advance.
+	//
+	// ParsedHL7Data may carry enhancedSegments as map[string]hl7.EnhancedSegment
+	// (typed Go map from hl7_parser_service.go) rather than map[string]interface{}.
+	// We pass a shallow copy with enhancedSegments replaced by the already-converted
+	// map[string]interface{} from extractEnhancedSegments() above.
+	normalizedParsedData := make(map[string]interface{}, len(request.ParsedHL7Data))
+	for k, v := range request.ParsedHL7Data {
+		normalizedParsedData[k] = v
+	}
+	normalizedParsedData["enhancedSegments"] = enhancedSegments
+
+	coord := segment_processors.NewCoordinator(allResources)
+	procNames := manifest.SegmentProcessorNames(messageType)
+	if len(procNames) > 0 {
+		procCtx := &segment_processors.SegmentProcessorContext{
+			Coordinator:   coord,
+			ParsedHL7Data: normalizedParsedData,
+			MessageType:   messageType,
+			InterfaceID:   request.InterfaceID,
+		}
+		if warns := segment_processors.RunAll(procNames, procCtx); len(warns) > 0 {
+			allWarnings = append(allWarnings, warns...)
+		}
+	}
+	allResources = coord.All()
+
+	// ── Stage: Focus augmentation ─────────────────────────────────────────────
+	// Ensures MessageHeader.focus references every resource whose type appears in
+	// the manifest's FocusTypes list.  Runs after segment processors so that
+	// processor-added resources (e.g. the prior Patient from MRGProcessor) are
+	// included.  Duplicate-safe: existing references are not re-added.
+	// Uses "ResourceType/id" format — rewriteReferences() converts to urn:uuid:.
+	augmentMessageHeaderFocus(allResources, manifest.GetFocusTypes(messageType))
+
+	// Remove false-positive "Required field X missing" errors/warnings for fields
+	// that composites or post-processing have now populated in the final resources.
+	allErrors = filterResolvedRequiredFieldErrors(allErrors, allResources)
+	allWarnings = filterResolvedRequiredFieldWarnings(allWarnings, allResources)
 
 	// Populate response
 	s.populateTransformResponse(
@@ -813,6 +1342,843 @@ func (s *HL7FHIRTransformServiceV3) postProcessORU(
 	log.Printf("✅ ORU post-processing complete: %d Observations, DR result[] = %d refs",
 		len(obxList), len(resultRefs))
 	return resources, warnings, errors
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Assembly rule engine
+// ──────────────────────────────────────────────────────────────────────────────
+
+// loadAssemblyRulesForType returns the assembly rules for one message type,
+// using an in-memory cache keyed by messageType.  The cache is populated on
+// first access and can be invalidated by calling InvalidateAssemblyRuleCache.
+func (s *HL7FHIRTransformServiceV3) loadAssemblyRulesForType(ctx context.Context, messageType string) []AssemblyRule {
+	s.assemblyRulesMu.RLock()
+	if s.assemblyRules != nil {
+		rules := s.assemblyRules[messageType]
+		s.assemblyRulesMu.RUnlock()
+		return rules
+	}
+	s.assemblyRulesMu.RUnlock()
+
+	// Cache miss — load ALL rules from DB once.
+	s.assemblyRulesMu.Lock()
+	defer s.assemblyRulesMu.Unlock()
+	if s.assemblyRules != nil { // double-check after acquiring write lock
+		return s.assemblyRules[messageType]
+	}
+
+	all := make(map[string][]AssemblyRule)
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id, message_type, rule_type, source_resource, target_resource,
+		       reference_path, COALESCE(condition_expr,''), sequence
+		FROM   assembly_rules
+		WHERE  is_active = true
+		ORDER  BY message_type, sequence`)
+	if err != nil {
+		log.Printf("⚠️  assembly_rules query failed: %v — cross-resource wiring disabled", err)
+		s.assemblyRules = all // empty cache prevents repeated DB errors
+		return nil
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var r AssemblyRule
+		if err2 := rows.Scan(&r.ID, &r.MessageType, &r.RuleType,
+			&r.SourceResource, &r.TargetResource,
+			&r.ReferencePath, &r.ConditionExpr, &r.Sequence); err2 != nil {
+			log.Printf("⚠️  assembly_rules scan error: %v", err2)
+			continue
+		}
+		all[r.MessageType] = append(all[r.MessageType], r)
+	}
+	s.assemblyRules = all
+	log.Printf("📋 assembly_rules cache loaded: %d message types", len(all))
+	return all[messageType]
+}
+
+// InvalidateAssemblyRuleCache clears the in-memory cache so the next
+// transformation reloads from the database.  Call after migrating new rules.
+func (s *HL7FHIRTransformServiceV3) InvalidateAssemblyRuleCache() {
+	s.assemblyRulesMu.Lock()
+	s.assemblyRules = nil
+	s.assemblyRulesMu.Unlock()
+	log.Printf("🔄 assembly_rules cache invalidated")
+}
+
+// applyAssemblyRules executes every rule for messageType against the resource
+// slice and returns the updated slice.
+func (s *HL7FHIRTransformServiceV3) applyAssemblyRules(
+	ctx context.Context,
+	messageType string,
+	resources []map[string]interface{},
+) []map[string]interface{} {
+	rules := s.loadAssemblyRulesForType(ctx, messageType)
+	if len(rules) == 0 {
+		return resources
+	}
+	for _, rule := range rules {
+		resources = s.applyOneAssemblyRule(rule, resources)
+	}
+	log.Printf("✅ assembly_rules applied: %d rules for %s", len(rules), messageType)
+	return resources
+}
+
+// applyOneAssemblyRule applies a single assembly rule to the resource slice.
+func (s *HL7FHIRTransformServiceV3) applyOneAssemblyRule(
+	rule AssemblyRule,
+	resources []map[string]interface{},
+) []map[string]interface{} {
+	switch rule.RuleType {
+
+	case "reference", "subject", "encounter":
+		// Set source.referencePath = { reference: "TargetType/id" } when absent.
+		// FHIR paths with cardinality 0..* (e.g. Encounter.appointment, DiagnosticReport.basedOn)
+		// must be JSON arrays; wrap the reference object accordingly.
+		targetID := assemblyFindID(resources, rule.TargetResource)
+		if targetID == "" {
+			return resources
+		}
+		ref := map[string]interface{}{"reference": rule.TargetResource + "/" + targetID}
+		arrayPaths := map[string]bool{
+			"appointment": true,
+			"basedOn":     true,
+			"partOf":      true,
+			"reasonReference": true,
+		}
+		useArray := arrayPaths[rule.ReferencePath]
+		for _, r := range resources {
+			if rt, _ := r["resourceType"].(string); rt != rule.SourceResource {
+				continue
+			}
+			existing := r[rule.ReferencePath]
+			if existing != nil {
+				// "subject" rules must win over a heuristic display-only value
+				// (e.g. {"display": "Colfer, Eoin"} with no "reference" key).
+				// Other rule types skip when any value is already present.
+				if rule.RuleType != "subject" {
+					continue
+				}
+				if em, ok := existing.(map[string]interface{}); ok {
+					if _, hasRef := em["reference"]; hasRef {
+						continue // already correctly wired — leave it
+					}
+					// display-only: fall through and overwrite
+				} else {
+					continue // non-map value (raw string etc.) — leave it
+				}
+			}
+			if useArray {
+				r[rule.ReferencePath] = []interface{}{ref}
+			} else {
+				r[rule.ReferencePath] = ref
+			}
+		}
+
+	case "focus":
+		// Append { reference: "TargetType/id" } to source.focus[] when not present.
+		targetID := assemblyFindID(resources, rule.TargetResource)
+		if targetID == "" {
+			return resources
+		}
+		ref := map[string]interface{}{"reference": rule.TargetResource + "/" + targetID}
+		for _, r := range resources {
+			if rt, _ := r["resourceType"].(string); rt != rule.SourceResource {
+				continue
+			}
+			focus, _ := r[rule.ReferencePath].([]interface{})
+			if !assemblyRefPresent(focus, targetID) {
+				r[rule.ReferencePath] = append(focus, ref)
+			}
+		}
+
+	case "result":
+		// Collect ALL target resources and set source.referencePath = [refs…].
+		// Overwrites any existing value so the field-mapper's placeholder is replaced.
+		var refs []interface{}
+		for _, r := range resources {
+			if rt, _ := r["resourceType"].(string); rt != rule.TargetResource {
+				continue
+			}
+			if id, _ := r["id"].(string); id != "" {
+				refs = append(refs, map[string]interface{}{
+					"reference": rule.TargetResource + "/" + id,
+				})
+			}
+		}
+		if len(refs) == 0 {
+			return resources
+		}
+		for _, r := range resources {
+			if rt, _ := r["resourceType"].(string); rt == rule.SourceResource {
+				r[rule.ReferencePath] = refs
+			}
+		}
+
+	case "performer", "author":
+		// Set source.referencePath = [{ reference: "TargetType/id" }] when absent.
+		targetID := assemblyFindID(resources, rule.TargetResource)
+		if targetID == "" {
+			return resources
+		}
+		ref := map[string]interface{}{"reference": rule.TargetResource + "/" + targetID}
+		for _, r := range resources {
+			if rt, _ := r["resourceType"].(string); rt != rule.SourceResource {
+				continue
+			}
+			if _, exists := r[rule.ReferencePath]; !exists {
+				r[rule.ReferencePath] = []interface{}{ref}
+			}
+		}
+	}
+
+	return resources
+}
+
+// sanitizeFHIRResources applies post-assembly structural corrections that cannot
+// be expressed as template rules:
+//   - strips empty identifier/coding/annotation objects (FHIR constraint "Object must have some content")
+//   - suppresses raw HL7 strings in Reference-typed fields (partOf, subject, etc.)
+//   - removes Encounter.diagnosis entries missing a required condition reference
+//   - injects Appointment.participant.status = "needs-action" when absent (required field)
+//   - removes Patient.contact entries with no name/telecom/address/org (constraint pat-1)
+//   - sanitizes supportingInformation: raw strings → Reference{display:…}
+func (s *HL7FHIRTransformServiceV3) sanitizeFHIRResources(resources []map[string]interface{}) []map[string]interface{} {
+	for _, r := range resources {
+		rt, _ := r["resourceType"].(string)
+		switch rt {
+
+		case "Patient":
+			// Remove contact entries that violate the pat-1 constraint (must have name,
+			// telecom, address, or organization with real content). Also strips contacts
+			// whose only content is a single-character name.family — this happens when
+			// PID.8 (Administrative Sex, e.g. "M") is mis-mapped to contact.name by the
+			// heuristic matcher because it's an XPN-shaped field adjacent to PID.5.
+			// Contact may be []interface{} or []map[string]interface{} depending on
+			// which setter path created it — normalize before filtering.
+			var contactMaps []map[string]interface{}
+			switch cv := r["contact"].(type) {
+			case []interface{}:
+				for _, c := range cv {
+					if cm, ok := c.(map[string]interface{}); ok {
+						contactMaps = append(contactMaps, cm)
+					}
+				}
+			case []map[string]interface{}:
+				contactMaps = cv
+			}
+			if contactMaps != nil {
+				var cleaned []interface{}
+				for _, cm := range contactMaps {
+					// Check each of the pat-1 permitted content fields.
+					// "relationship" alone is NOT sufficient — pat-1 requires name, telecom,
+					// address, or organization to be present (relationship is contextual only).
+					hasContent := false
+					for _, key := range []string{"telecom", "address", "organization"} {
+						if v, exists := cm[key]; exists && v != nil {
+							hasContent = true
+							break
+						}
+					}
+					// Name requires at least one non-trivial component (family ≥ 2 chars or given).
+					if !hasContent {
+						if nameVal, nameExists := cm["name"]; nameExists && nameVal != nil {
+							if nm, isMap := nameVal.(map[string]interface{}); isMap {
+								if fam, ok := nm["family"].(string); ok && len([]rune(fam)) >= 2 {
+									hasContent = true
+								}
+								if given, ok := nm["given"].([]interface{}); ok && len(given) > 0 {
+									hasContent = true
+								}
+							}
+						}
+					}
+					if hasContent {
+						cleaned = append(cleaned, cm)
+					}
+				}
+				if len(cleaned) == 0 {
+					delete(r, "contact")
+				} else {
+					r["contact"] = cleaned
+				}
+			}
+
+			// Strip empty identifier objects; delete key entirely when all entries were empty.
+			if filtered := filterNonEmptySlice(r["identifier"]); filtered == nil {
+				delete(r, "identifier")
+			} else {
+				r["identifier"] = filtered
+			}
+
+		case "Encounter":
+			// Strip empty identifier objects; delete key entirely when all entries were empty.
+			if filtered := filterNonEmptySlice(r["identifier"]); filtered == nil {
+				delete(r, "identifier")
+			} else {
+				r["identifier"] = filtered
+			}
+
+			// Remove Encounter.diagnosis entries that are missing the required condition ref.
+			// Handle both []interface{} (setArrayField) and []map[string]interface{} (setNestedArrayField).
+			var diagMaps []map[string]interface{}
+			switch dv := r["diagnosis"].(type) {
+			case []interface{}:
+				for _, d := range dv {
+					if dm, ok := d.(map[string]interface{}); ok {
+						diagMaps = append(diagMaps, dm)
+					}
+				}
+			case []map[string]interface{}:
+				diagMaps = dv
+			}
+			if diagMaps != nil {
+				var kept []interface{}
+				for _, dm := range diagMaps {
+					if _, hasCondition := dm["condition"]; hasCondition {
+						kept = append(kept, dm)
+					}
+				}
+				if len(kept) == 0 {
+					delete(r, "diagnosis")
+				} else {
+					r["diagnosis"] = kept
+				}
+			}
+
+			// Suppress partOf when it was set to a raw HL7 string (must be Reference{}).
+			if pof, exists := r["partOf"]; exists {
+				if _, isStr := pof.(string); isStr {
+					delete(r, "partOf")
+				}
+			}
+
+			// Default Encounter.status to "unknown" when absent (required 1..1 in FHIR R4).
+			if _, hasStatus := r["status"]; !hasStatus {
+				r["status"] = "unknown"
+			}
+
+			// hospitalization sub-object: origin/destination must be Reference objects.
+			// Raw HL7 XCN strings land here when the type coercion layer was bypassed by
+			// an older template. Wrap them or remove them.
+			if hosp, ok := r["hospitalization"].(map[string]interface{}); ok {
+				for _, refField := range []string{"origin", "destination"} {
+					if v, exists := hosp[refField]; exists {
+						if s, isStr := v.(string); isStr {
+							if s != "" {
+								hosp[refField] = map[string]interface{}{"display": s}
+							} else {
+								delete(hosp, refField)
+							}
+						}
+					}
+				}
+			}
+
+			// Guard Encounter.appointment: must be array of References.
+			// Assembly rules wire it as []interface{}, but normalize raw strings.
+			if appt, exists := r["appointment"]; exists {
+				switch av := appt.(type) {
+				case map[string]interface{}:
+					// Already a Reference object — wrap in array.
+					r["appointment"] = []interface{}{av}
+				case string:
+					if av != "" {
+						r["appointment"] = []interface{}{map[string]interface{}{"display": av}}
+					} else {
+						delete(r, "appointment")
+					}
+				}
+			}
+
+			// Encounter.subject must be a Reference to the Patient resource
+			// (set by the assembly code as {"reference": "urn:uuid:..."}).
+			// If a heuristic mapping has placed a person display name here
+			// ({"display": "Colfer, Eoin"} with no "reference" key), remove it —
+			// the assembly code will set the correct patient reference afterwards.
+			if subj, ok := r["subject"].(map[string]interface{}); ok {
+				if _, hasRef := subj["reference"]; !hasRef {
+					delete(r, "subject")
+				}
+			}
+
+		case "Appointment":
+			// Inject participant.status = "needs-action" when missing (FHIR required, 1..1).
+			// Participant can be []interface{} (from setArrayField) or []map[string]interface{}
+			// (from setNestedArrayField) — normalize to []map[string]interface{} first.
+			var participantMaps []map[string]interface{}
+			switch pv := r["participant"].(type) {
+			case []interface{}:
+				for _, p := range pv {
+					if pm, ok := p.(map[string]interface{}); ok {
+						participantMaps = append(participantMaps, pm)
+					}
+				}
+			case []map[string]interface{}:
+				participantMaps = pv
+			}
+			if len(participantMaps) > 0 {
+				for _, pm := range participantMaps {
+					if _, hasStatus := pm["status"]; !hasStatus {
+						pm["status"] = "needs-action"
+					}
+					// Normalize participant.type: some template paths write a naked
+					// CodeableConcept map (not wrapped in an array). Convert to array
+					// so the cleanup loop below handles it uniformly.
+					if tm, ok := pm["type"].(map[string]interface{}); ok {
+						pm["type"] = []interface{}{tm}
+					}
+
+					// Clean participant.type: fix nested text maps, drop empty entries,
+					// and drop entries that carry a person name or identifier artifact
+					// instead of a coded role (e.g. "ATND").
+					if types, ok := pm["type"].([]interface{}); ok {
+						var actorDisplay string
+						if actor, ok2 := pm["actor"].(map[string]interface{}); ok2 {
+							actorDisplay, _ = actor["display"].(string)
+						}
+						var cleanedTypes []interface{}
+						for _, t := range types {
+							tm, ok := t.(map[string]interface{})
+							if !ok {
+								continue
+							}
+							// Unwrap nested text map (CodeableConcept landed in text field).
+							if textVal, exists := tm["text"]; exists {
+								if textMap, isMap := textVal.(map[string]interface{}); isMap {
+									if inner, ok := textMap["text"].(string); ok {
+										tm["text"] = inner
+									} else {
+										delete(tm, "text")
+									}
+								}
+							}
+							// Drop entries that are identifier artifacts or person names
+							// rather than coded role values (e.g. "ATND").
+							// transformCEToCodeableConcept builds coding as []map[string]interface{},
+							// not []interface{}, so we must handle both slice types.
+							var codingMaps []map[string]interface{}
+							switch cv := tm["coding"].(type) {
+							case []interface{}:
+								for _, ci := range cv {
+									if cm, ok2 := ci.(map[string]interface{}); ok2 {
+										codingMaps = append(codingMaps, cm)
+									}
+								}
+							case []map[string]interface{}:
+								codingMaps = cv
+							}
+							if len(codingMaps) > 0 {
+								// A coding whose every code is purely numeric is a
+								// mis-mapped appointment/resource identifier — remove.
+								allNumeric := true
+								for _, cm := range codingMaps {
+									code, _ := cm["code"].(string)
+									if code == "" {
+										allNumeric = false
+										break
+									}
+									for _, c := range code {
+										if c < '0' || c > '9' {
+											allNumeric = false
+											break
+										}
+									}
+									if !allNumeric {
+										break
+									}
+								}
+								if allNumeric {
+									continue // drop — numeric identifier artifact
+								}
+							} else {
+								// Text-only entries: drop when they look like person names.
+								if txt, ok := tm["text"].(string); ok && txt != "" {
+									if txt == actorDisplay ||
+										strings.Contains(txt, ", ") ||
+										strings.Contains(txt, "^") {
+										continue // drop — person name, not a role code
+									}
+								}
+							}
+							if len(tm) > 0 {
+								cleanedTypes = append(cleanedTypes, tm)
+							}
+						}
+						if len(cleanedTypes) == 0 {
+							delete(pm, "type")
+						} else {
+							pm["type"] = cleanedTypes
+						}
+					}
+
+					// Guard actor.display: must be a clean person/resource name string.
+					// CE/CWE transforms land a CodeableConcept map at actor["display"];
+					// XCN strings contain "^" separators. Both need normalisation.
+					// Some older templates map AI*.3 to .actor (not .actor.display),
+					// placing the CodeableConcept directly at pm["actor"] — handle that too.
+					if actor, ok := pm["actor"].(map[string]interface{}); ok {
+						var disp string
+						switch dv := actor["display"].(type) {
+						case string:
+							disp = dv
+						case map[string]interface{}:
+							// CodeableConcept at actor.display slot — extract text or coding.display
+							if txt, _ := dv["text"].(string); txt != "" {
+								disp = txt
+							} else if codings, _ := dv["coding"].([]interface{}); len(codings) > 0 {
+								if cm, _ := codings[0].(map[string]interface{}); cm != nil {
+									disp, _ = cm["display"].(string)
+								}
+							}
+							if disp != "" {
+								actor["display"] = disp
+							}
+						case nil:
+							// actor IS a CodeableConcept (mapped to .actor not .actor.display).
+							// Extract the name from the actor map's own text/coding fields.
+							if txt, _ := actor["text"].(string); txt != "" {
+								disp = txt
+							}
+							if disp == "" {
+								switch cv := actor["coding"].(type) {
+								case []interface{}:
+									if len(cv) > 0 {
+										if cm, _ := cv[0].(map[string]interface{}); cm != nil {
+											if d, _ := cm["display"].(string); d != "" {
+												disp = d
+											} else {
+												disp, _ = cm["code"].(string)
+											}
+										}
+									}
+								case []map[string]interface{}:
+									if len(cv) > 0 {
+										if d, _ := cv[0]["display"].(string); d != "" {
+											disp = d
+										} else {
+											disp, _ = cv[0]["code"].(string)
+										}
+									}
+								}
+							}
+							if disp != "" {
+								pm["actor"] = map[string]interface{}{"display": disp}
+								actor = pm["actor"].(map[string]interface{})
+							}
+						}
+						if disp == "" {
+							// Preserve reference-type actors (actor.reference is a valid FHIR
+							// actor without a display — e.g. Patient/42 from condition composite).
+							if ref, _ := actor["reference"].(string); ref != "" {
+								// keep actor as-is
+							} else {
+								delete(pm, "actor")
+							}
+						} else if strings.Contains(disp, "^") {
+							// XCN format: id^family^given^middle^... (0-indexed).
+							// Mirror the logic in formatXCNDisplayName exactly.
+							parts := strings.SplitN(disp, "^", 8)
+							get := func(i int) string {
+								if i < len(parts) {
+									return strings.TrimSpace(parts[i])
+								}
+								return ""
+							}
+							family, given := get(1), get(2)
+							switch {
+							case family != "" && given != "":
+								actor["display"] = family + ", " + given
+							case family != "":
+								actor["display"] = family
+							case given != "":
+								actor["display"] = given
+							case get(0) != "":
+								// ID-only XCN — use the ID rather than deleting the actor
+								actor["display"] = get(0)
+							default:
+								delete(pm, "actor")
+							}
+						}
+					} else if pm["actor"] != nil {
+						delete(pm, "actor")
+					}
+				}
+				// app-1: "Either the type or actor on the participant SHALL be specified."
+				// Remove participant entries with neither — a status-only entry is invalid.
+				var normalized []interface{}
+				for _, pm := range participantMaps {
+					_, hasType := pm["type"]
+					_, hasActor := pm["actor"]
+					if hasType || hasActor {
+						normalized = append(normalized, pm)
+					}
+				}
+				if len(normalized) == 0 {
+					// All entries lacked both type and actor. Synthesize a minimal valid
+					// participant from the first entry: inject a generic "PART" type code
+					// so app-1 is satisfied without fabricating a practitioner identity.
+					first := participantMaps[0]
+					first["type"] = []interface{}{
+						map[string]interface{}{
+							"coding": []map[string]interface{}{
+								{"system": "http://terminology.hl7.org/CodeSystem/v3-ParticipationType", "code": "PART"},
+							},
+						},
+					}
+					normalized = []interface{}{first}
+				}
+				r["participant"] = normalized
+			}
+
+			// Default Appointment.status to "booked" when absent (required 1..1).
+			// SCH.25 (Filler Status Code) may be absent in many real-world messages.
+			if _, hasStatus := r["status"]; !hasStatus {
+				r["status"] = "booked"
+			}
+
+			// app-4 constraint: cancelationReason is only valid when status is
+			// "cancelled" or "noshow". Remove it for any other status.
+			if status, _ := r["status"].(string); status != "cancelled" && status != "noshow" {
+				delete(r, "cancelationReason")
+			}
+
+			// Guard minutesDuration: must be a positive integer. Remove if it's a
+			// unit-code string like "m" or "min" that crept in from a collision.
+			if md, exists := r["minutesDuration"]; exists {
+				switch v := md.(type) {
+				case int:
+					if v <= 0 {
+						delete(r, "minutesDuration")
+					}
+				case float64:
+					if v <= 0 {
+						delete(r, "minutesDuration")
+					} else {
+						r["minutesDuration"] = int(v)
+					}
+				case string:
+					if n, err := strconv.Atoi(v); err == nil && n > 0 {
+						r["minutesDuration"] = n
+					} else {
+						delete(r, "minutesDuration")
+					}
+				}
+			}
+
+			// Guard priority: must be an unsignedInt. A unit-code string like "min" gets
+			// removed — the field is optional so absence is safer than an invalid value.
+			if pv, exists := r["priority"]; exists {
+				switch v := pv.(type) {
+				case int:
+					if v < 0 {
+						delete(r, "priority")
+					}
+				case float64:
+					if v < 0 {
+						delete(r, "priority")
+					} else {
+						r["priority"] = int(v)
+					}
+				case string:
+					if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+						r["priority"] = n
+					} else {
+						delete(r, "priority")
+					}
+				}
+			}
+
+			// Guard Appointment.start / Appointment.end: must be ISO dateTime strings.
+			// Raw HL7 name tokens or offset numbers land here from template collisions;
+			// remove them so the validator does not flag invalid dateTime format.
+			isISODateTime := func(s string) bool {
+				if len(s) < 4 {
+					return false
+				}
+				// Accept YYYYMMDD..., YYYY-MM-DD, YYYY-MM-DDThh:mm:ss...
+				for _, c := range s[:4] {
+					if c < '0' || c > '9' {
+						return false
+					}
+				}
+				return true
+			}
+			for _, dtField := range []string{"start", "end"} {
+				if v, exists := r[dtField]; exists {
+					if s, ok := v.(string); ok {
+						if !isISODateTime(s) {
+							delete(r, dtField)
+						}
+					}
+				}
+			}
+
+			// Sanitize reasonReference: raw HL7 name strings must be wrapped as
+			// Reference{display:…} objects; remove empty entries.
+			if rrs, ok := r["reasonReference"].([]interface{}); ok {
+				var fixedRR []interface{}
+				for _, item := range rrs {
+					switch v := item.(type) {
+					case string:
+						if v != "" {
+							fixedRR = append(fixedRR, map[string]interface{}{"display": v})
+						}
+					case map[string]interface{}:
+						if len(v) > 0 {
+							fixedRR = append(fixedRR, v)
+						}
+					}
+				}
+				if len(fixedRR) == 0 {
+					delete(r, "reasonReference")
+				} else {
+					r["reasonReference"] = fixedRR
+				}
+			}
+
+			// Convert supportingInformation string items to Reference{display:…}.
+			if si, ok := r["supportingInformation"].([]interface{}); ok {
+				var fixed []interface{}
+				for _, item := range si {
+					switch v := item.(type) {
+					case string:
+						if v != "" {
+							fixed = append(fixed, map[string]interface{}{"display": v})
+						}
+					case map[string]interface{}:
+						fixed = append(fixed, v)
+					}
+				}
+				if len(fixed) == 0 {
+					delete(r, "supportingInformation")
+				} else {
+					r["supportingInformation"] = fixed
+				}
+			}
+
+			// Guard reasonCode: coding.code must be a machine-readable token, not
+			// free text. When every code in an entry contains spaces, the value is
+			// a plain description — move it to text and clear coding.
+			if rcList, ok := r["reasonCode"].([]interface{}); ok {
+				for _, rc := range rcList {
+					rcMap, ok := rc.(map[string]interface{})
+					if !ok {
+						continue
+					}
+					var codings []interface{}
+					switch cv := rcMap["coding"].(type) {
+					case []interface{}:
+						codings = cv
+					case []map[string]interface{}:
+						for _, m := range cv {
+							codings = append(codings, m)
+						}
+					}
+					if len(codings) == 0 {
+						continue
+					}
+					// Check whether all codes look like free text (contain spaces)
+					allFreeText := true
+					for _, c := range codings {
+						cm, ok := c.(map[string]interface{})
+						if !ok {
+							allFreeText = false
+							break
+						}
+						code, _ := cm["code"].(string)
+						if !strings.Contains(code, " ") {
+							allFreeText = false
+							break
+						}
+					}
+					if allFreeText {
+						// Promote the first code string to text, drop coding
+						first, _ := codings[0].(map[string]interface{})
+						if first != nil {
+							if existing, _ := rcMap["text"].(string); existing == "" {
+								rcMap["text"], _ = first["code"].(string)
+							}
+						}
+						delete(rcMap, "coding")
+					}
+				}
+			}
+		}
+	}
+	return resources
+}
+
+// filterNonEmptySlice returns the slice with empty map entries removed.
+// Used to strip {} identifier/coding objects that fail "Object must have some content".
+func filterNonEmptySlice(raw interface{}) interface{} {
+	slice, ok := raw.([]interface{})
+	if !ok {
+		return raw
+	}
+	var out []interface{}
+	for _, item := range slice {
+		switch v := item.(type) {
+		case map[string]interface{}:
+			if len(v) > 0 {
+				out = append(out, v)
+			}
+		default:
+			out = append(out, item)
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// assemblyFindID returns the id of the first resource with the given type.
+func assemblyFindID(resources []map[string]interface{}, resourceType string) string {
+	for _, r := range resources {
+		if rt, _ := r["resourceType"].(string); rt == resourceType {
+			if id, _ := r["id"].(string); id != "" {
+				return id
+			}
+		}
+	}
+	return ""
+}
+
+// assemblyRefPresent reports whether a focus/result slice already contains a
+// reference to the given id (prevents duplicates when the template also wires focus).
+func assemblyRefPresent(refs []interface{}, targetID string) bool {
+	for _, f := range refs {
+		if fm, ok := f.(map[string]interface{}); ok {
+			if ref, _ := fm["reference"].(string); strings.Contains(ref, targetID) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// mfeActionFromSegments returns the MFE.1 action code (MAD/MUP/MDL/MDC) from
+// enhancedSegments, upper-cased and trimmed. Returns "" when no MFE segment is present.
+// Used to distinguish a genuine MDL/MDC deactivation from a false produced by
+// transformToBoolean's default-false behaviour on an unrecognised STF.7 value.
+func (s *HL7FHIRTransformServiceV3) mfeActionFromSegments(enhancedSegments map[string]interface{}) string {
+	mfeSeg, ok := enhancedSegments["MFE"].(map[string]interface{})
+	if !ok {
+		return ""
+	}
+	fields, ok := mfeSeg["fields"].([]interface{})
+	if !ok {
+		return ""
+	}
+	for _, f := range fields {
+		if fm, ok2 := f.(map[string]interface{}); ok2 {
+			if key, _ := fm["key"].(string); key == "MFE.1" {
+				if val, _ := fm["value"].(string); val != "" {
+					return strings.ToUpper(strings.TrimSpace(val))
+				}
+			}
+		}
+	}
+	return ""
 }
 
 // extractSegmentGroup retrieves all instances of a segment type from segmentGroups,
@@ -1030,6 +2396,36 @@ func (s *HL7FHIRTransformServiceV3) createResourceFromAtomicMappings(
 		log.Printf("🔄 Processing mapping %d/%d: %s.%s.%s → %s.%s",
 			i+1, len(mappings), mapping.SegmentName, mapping.HL7Field, mapping.HL7Component, resourceType, mapping.FHIRElementPath)
 
+		// OBX.2 is a value-type control field — its value is injected into
+		// OBX.5's TransformationRules at runtime; it has no direct FHIR target.
+		// Skip any OBX.2 row that may exist in legacy OOB templates.
+		if mapping.SegmentName == "OBX" && mapping.HL7Field == "2" {
+			continue
+		}
+
+		// Evaluate mapping condition (e.g. "SCH.11.4 empty") before extracting value.
+		// Conditions prevent fallback mappings from overwriting already-set fields.
+		if cond, hasCond := mapping.TransformationRules["condition"].(string); hasCond && cond != "" {
+			condParts := strings.Fields(cond)
+			if len(condParts) == 2 {
+				condSeg, condF, condC := s.parseHL7Path(condParts[0])
+				condMapping := FieldMapping{SegmentName: condSeg, HL7Field: condF, HL7Component: condC}
+				condVal, condFound := s.extractHL7ValueAtomic(enhancedSegments, condMapping)
+				var isCondMet bool
+				switch condParts[1] {
+				case "empty":
+					isCondMet = !condFound || condVal == ""
+				case "present":
+					isCondMet = condFound && condVal != ""
+				}
+				if !isCondMet {
+					log.Printf("⏭️  Skipping mapping %s.%s → %s (condition '%s' not met)",
+						mapping.SegmentName, mapping.HL7Field, mapping.FHIRElementPath, cond)
+					continue
+				}
+			}
+		}
+
 		// Extract HL7 value using atomic extraction
 		hl7Value, found := s.extractHL7ValueAtomic(enhancedSegments, mapping)
 		if !found {
@@ -1048,12 +2444,77 @@ func (s *HL7FHIRTransformServiceV3) createResourceFromAtomicMappings(
 
 		log.Printf("✅ Found HL7 value: %s.%s = '%s'", mapping.SegmentName, mapping.HL7Field, hl7Value)
 
+		// OBX.5 value[x]: inject OBX.2 (data-type indicator) and OBX.6 (units)
+		// into a fresh copy of TransformationRules so transformOBXValueByType can
+		// dispatch to valueQuantity / valueString / valueCodeableConcept.
+		if mapping.DataTypeTransform == "obx_value_by_type" {
+			rules := make(map[string]interface{}, len(mapping.TransformationRules)+2)
+			for k, v := range mapping.TransformationRules {
+				rules[k] = v
+			}
+			if obxType := s.extractHL7FieldDirect(enhancedSegments, mapping.SegmentName, mapping.SegmentName+".2"); obxType != "" {
+				rules["value_type"] = obxType
+			}
+			if obxUnit := s.extractHL7FieldDirect(enhancedSegments, mapping.SegmentName, mapping.SegmentName+".6"); obxUnit != "" {
+				rules["unit"] = obxUnit
+			}
+			mapping.TransformationRules = rules
+		}
+
 		// Transform value using atomic transformation
 		transformedValue, err := s.transformValueAtomic(hl7Value, mapping)
 		if err != nil {
 			warnings = append(warnings, fmt.Sprintf("Failed to transform %s.%s: %v",
 				mapping.SegmentName, mapping.HL7Field, err))
 			continue
+		}
+
+		// value[x] choice type: transformOBXValueByType returns {"valueXxx": ...}.
+		// Merge the map directly into the resource instead of using the path setter,
+		// which cannot resolve the polymorphic "[x]" path segment.
+		if strings.HasSuffix(mapping.FHIRElementPath, "value[x]") {
+			if valueMap, ok := transformedValue.(map[string]interface{}); ok {
+				for k, v := range valueMap {
+					resource[k] = v
+				}
+				mappedFieldCount++
+				log.Printf("✅ Successfully mapped %s.%s → %s (value[x] merge)",
+					mapping.SegmentName, mapping.HL7Field, mapping.FHIRElementPath)
+				continue
+			}
+		}
+
+		// Type coercion: the FHIR schema declares the target data type; use it to
+		// convert plain HL7 strings into the correct JSON structure automatically.
+		// This is the "straight map" principle — no template-level transform key
+		// is needed when the type system can infer the correct wrapping.
+		if strVal, ok := transformedValue.(string); ok && strVal != "" {
+			switch strings.ToLower(mapping.FHIRDataType) {
+			case "positiveint", "unsignedint", "integer":
+				if n, err2 := strconv.Atoi(strVal); err2 == nil {
+					transformedValue = n
+				}
+			case "codeableconcept":
+				// HL7 code string → { "coding": [{ "code": "..." }] }
+				// The template already does this for complex types via cx_to_identifier etc.,
+				// but simple IS/CE/CWE code fields need this automatic wrapping.
+				transformedValue = map[string]interface{}{
+					"coding": []interface{}{
+						map[string]interface{}{"code": strVal},
+					},
+				}
+			case "reference":
+				// HL7 name/id string → { "display": "..." }
+				// Only wrap when the FHIR path targets the Reference object itself
+				// (e.g. basedOn[0], reasonReference[0], slot[0]).
+				// When the path already ends in ".display" the target is a plain string
+				// leaf inside the Reference — wrapping would produce a doubly-nested
+				// object (actor.display = {"display": "..."}) which discards the value.
+				if !strings.HasSuffix(strings.ToLower(mapping.FHIRElementPath), ".display") {
+					transformedValue = map[string]interface{}{"display": strVal}
+				}
+				// else: leave strVal as a plain string — path points to the .display leaf
+			}
 		}
 
 		// Set in resource using atomic field setting
@@ -1106,14 +2567,32 @@ func (s *HL7FHIRTransformServiceV3) createResourceFromAtomicMappings(
 // NARRATIVE GENERATION
 // =====================================
 
-// generateNarrative creates human-readable XHTML narrative based on resource content
+// narrativeRowsBuilder appends resource-specific rows to a narrative table.
+// Method expressions are used so each builder is a plain function value stored
+// in the registry — adding a new resource type is a single registry entry + method.
+type narrativeRowsBuilder func(s *HL7FHIRTransformServiceV3, html *strings.Builder, resource map[string]interface{})
+
+// narrativeBuilderRegistry maps FHIR resourceType → its row-builder.
+// Register new resource types here; the engine picks them up automatically.
+var narrativeBuilderRegistry = map[string]narrativeRowsBuilder{
+	"Patient":          (*HL7FHIRTransformServiceV3).addPatientRows,
+	"Encounter":        (*HL7FHIRTransformServiceV3).addEncounterRows,
+	"MessageHeader":    (*HL7FHIRTransformServiceV3).addMessageHeaderRows,
+	"DiagnosticReport": (*HL7FHIRTransformServiceV3).addDiagnosticReportRows,
+	"Observation":      (*HL7FHIRTransformServiceV3).addObservationRows,
+	"RelatedPerson":    (*HL7FHIRTransformServiceV3).addRelatedPersonRows,
+	"Coverage":         (*HL7FHIRTransformServiceV3).addCoverageRows,
+}
+
+// generateNarrative creates a FHIR-spec compliant XHTML narrative (text.div).
+// The div wrapper and xmlns are required by the FHIR narrative spec.
 func (s *HL7FHIRTransformServiceV3) generateNarrative(resourceType string, resource map[string]interface{}) string {
-	// Generate comprehensive table-based narrative for any resource
 	html := s.generateResourceTable(resourceType, resource)
 	return fmt.Sprintf("<div xmlns=\"http://www.w3.org/1999/xhtml\">%s</div>", html)
 }
 
-// generateResourceTable creates an HTML table showing key resource properties
+// generateResourceTable renders an XHTML table of key resource fields.
+// Looks up a registered builder for the resourceType; falls back to generic scalar rendering.
 func (s *HL7FHIRTransformServiceV3) generateResourceTable(resourceType string, resource map[string]interface{}) string {
 	var html strings.Builder
 
@@ -1121,45 +2600,55 @@ func (s *HL7FHIRTransformServiceV3) generateResourceTable(resourceType string, r
 	html.WriteString(fmt.Sprintf("<thead><tr style=\"background:#f0f0f0;\"><th colspan=\"2\" style=\"padding:8px;text-align:left;\">%s</th></tr></thead>", resourceType))
 	html.WriteString("<tbody>")
 
-	// Add key-value rows for important fields
 	s.addTableRow(&html, "ID", fmt.Sprintf("%v", resource["id"]))
 
-	// Type-specific important fields
-	switch resourceType {
-	case "Patient":
-		s.addPatientRows(&html, resource)
-	case "Encounter":
-		s.addEncounterRows(&html, resource)
-	case "MessageHeader":
-		s.addMessageHeaderRows(&html, resource)
-	case "DiagnosticReport":
-		s.addDiagnosticReportRows(&html, resource)
-	case "Observation":
-		s.addObservationRows(&html, resource)
-	default:
-		// Generic handling — render scalars only; skip nested objects to avoid raw map output.
-		keys := make([]string, 0)
-		for key := range resource {
-			if key != "resourceType" && key != "id" && key != "text" {
-				keys = append(keys, key)
-			}
-		}
-		sort.Strings(keys)
-		for _, key := range keys {
-			val := resource[key]
-			switch v := val.(type) {
-			case string:
-				s.addTableRow(&html, key, v)
-			case bool:
-				s.addTableRow(&html, key, fmt.Sprintf("%v", v))
-			case float64:
-				s.addTableRow(&html, key, fmt.Sprintf("%g", v))
-			}
-		}
+	if builder, ok := narrativeBuilderRegistry[resourceType]; ok {
+		builder(s, &html, resource)
+	} else {
+		s.addGenericRows(&html, resource)
 	}
 
 	html.WriteString("</tbody></table>")
 	return html.String()
+}
+
+// extractFirstGiven returns the first given name from a name map's "given" field.
+// Handles both []interface{} (after JSON round-trip) and []string (direct engine output).
+func extractFirstGiven(name map[string]interface{}) string {
+	switch gv := name["given"].(type) {
+	case []interface{}:
+		if len(gv) > 0 {
+			s, _ := gv[0].(string)
+			return s
+		}
+	case []string:
+		if len(gv) > 0 {
+			return gv[0]
+		}
+	}
+	return ""
+}
+
+// addGenericRows renders all scalar fields alphabetically for resource types
+// that have no dedicated builder registered in narrativeBuilderRegistry.
+func (s *HL7FHIRTransformServiceV3) addGenericRows(html *strings.Builder, resource map[string]interface{}) {
+	keys := make([]string, 0, len(resource))
+	for key := range resource {
+		if key != "resourceType" && key != "id" && key != "text" {
+			keys = append(keys, key)
+		}
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		switch v := resource[key].(type) {
+		case string:
+			s.addTableRow(html, key, v)
+		case bool:
+			s.addTableRow(html, key, fmt.Sprintf("%v", v))
+		case float64:
+			s.addTableRow(html, key, fmt.Sprintf("%g", v))
+		}
+	}
 }
 
 func (s *HL7FHIRTransformServiceV3) addTableRow(buf *strings.Builder, label, value string) {
@@ -1181,10 +2670,7 @@ func (s *HL7FHIRTransformServiceV3) addPatientRows(html *strings.Builder, resour
 	if names, ok := resource["name"].([]interface{}); ok && len(names) > 0 {
 		if name, ok := names[0].(map[string]interface{}); ok {
 			family, _ := name["family"].(string)
-			var given string
-			if givenArr, ok := name["given"].([]interface{}); ok && len(givenArr) > 0 {
-				given, _ = givenArr[0].(string)
-			}
+			given := extractFirstGiven(name)
 			if family != "" || given != "" {
 				s.addTableRow(html, "Name", fmt.Sprintf("%s, %s", family, given))
 			}
@@ -1383,6 +2869,75 @@ func (s *HL7FHIRTransformServiceV3) addObservationRows(html *strings.Builder, re
 	}
 }
 
+func (s *HL7FHIRTransformServiceV3) addRelatedPersonRows(html *strings.Builder, resource map[string]interface{}) {
+	// Name
+	if names, ok := resource["name"].([]interface{}); ok && len(names) > 0 {
+		if name, ok := names[0].(map[string]interface{}); ok {
+			family, _ := name["family"].(string)
+			given := extractFirstGiven(name)
+			if family != "" || given != "" {
+				s.addTableRow(html, "Name", fmt.Sprintf("%s, %s", family, given))
+			}
+		}
+	}
+
+	// Gender
+	if gender, ok := resource["gender"].(string); ok {
+		s.addTableRow(html, "Gender", gender)
+	}
+
+	// Birth Date
+	if birthDate, ok := resource["birthDate"].(string); ok {
+		s.addTableRow(html, "Birth Date", birthDate)
+	}
+}
+
+func (s *HL7FHIRTransformServiceV3) addCoverageRows(html *strings.Builder, resource map[string]interface{}) {
+	// Status
+	if status, ok := resource["status"].(string); ok {
+		s.addTableRow(html, "Status", status)
+	}
+
+	// Subscriber ID
+	if sid, ok := resource["subscriberId"].(string); ok {
+		s.addTableRow(html, "Subscriber ID", sid)
+	}
+
+	// Class — show type code + value
+	if classes, ok := resource["class"].([]interface{}); ok && len(classes) > 0 {
+		if cls, ok := classes[0].(map[string]interface{}); ok {
+			value, _ := cls["value"].(string)
+			typeCode := ""
+			if t, ok2 := cls["type"].(map[string]interface{}); ok2 {
+				if codings, ok3 := t["coding"].([]interface{}); ok3 && len(codings) > 0 {
+					if c, ok4 := codings[0].(map[string]interface{}); ok4 {
+						typeCode, _ = c["code"].(string)
+					}
+				}
+			}
+			if value != "" {
+				label := "Class"
+				if typeCode != "" {
+					label = fmt.Sprintf("Class (%s)", typeCode)
+				}
+				s.addTableRow(html, label, value)
+			}
+		}
+	}
+
+	// Relationship
+	if rel, ok := resource["relationship"].(map[string]interface{}); ok {
+		if codings, ok2 := rel["coding"].([]interface{}); ok2 && len(codings) > 0 {
+			if c, ok3 := codings[0].(map[string]interface{}); ok3 {
+				code, _ := c["code"].(string)
+				if code != "" {
+					s.addTableRow(html, "Relationship", strings.ToUpper(code))
+				}
+			}
+		}
+	}
+}
+
 // =====================================
 // ATOMIC HL7 VALUE EXTRACTION
 // =====================================
@@ -1475,6 +3030,47 @@ func (s *HL7FHIRTransformServiceV3) extractHL7ValueAtomic(
 
 	log.Printf("🔍 Field %s not found in segment %s", expectedFieldKey, mapping.SegmentName)
 	return "", false
+}
+
+// extractHL7FieldDirect looks up a single field value from enhancedSegments without
+// a FieldMapping struct.  fieldKey must be the full qualified key, e.g. "OBX.2".
+// Used to inject sibling control fields (OBX.2, OBX.6) into transformation rules.
+func (s *HL7FHIRTransformServiceV3) extractHL7FieldDirect(
+	enhancedSegments map[string]interface{},
+	segName, fieldKey string,
+) string {
+	seg, ok := enhancedSegments[segName].(map[string]interface{})
+	if !ok {
+		return ""
+	}
+	fieldsRaw, ok := seg["fields"]
+	if !ok {
+		return ""
+	}
+	var fields []interface{}
+	if fs, ok := fieldsRaw.([]interface{}); ok {
+		fields = fs
+	} else {
+		v := reflect.ValueOf(fieldsRaw)
+		if v.Kind() == reflect.Slice {
+			fields = make([]interface{}, v.Len())
+			for i := 0; i < v.Len(); i++ {
+				fields[i] = v.Index(i).Interface()
+			}
+		}
+	}
+	for _, f := range fields {
+		fm, ok := f.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if k, ok := fm["key"].(string); ok && k == fieldKey {
+			if val, ok := fm["value"].(string); ok {
+				return val
+			}
+		}
+	}
+	return ""
 }
 
 func (s *HL7FHIRTransformServiceV3) extractComponentFromHL7Field(
@@ -1581,7 +3177,19 @@ func (s *HL7FHIRTransformServiceV3) transformValueAtomic(
 		if strings.Contains(hl7Value, "~") {
 			return s.transformCXToIdentifiers(hl7Value, mapping.TransformationRules), nil
 		}
-		return s.transformCXToIdentifier(hl7Value, mapping.TransformationRules), nil
+		idMap := s.transformCXToIdentifier(hl7Value, mapping.TransformationRules)
+		// When the FHIR path ends in a scalar sub-field (e.g. identifier[1].value),
+		// the caller expects a plain string — not a nested Identifier object.
+		// Extract the value string to avoid "must be simple value, not an Object" errors.
+		if strings.HasSuffix(mapping.FHIRElementPath, ".value") {
+			if v, ok := idMap["value"].(string); ok && v != "" {
+				return v, nil
+			}
+			if v, ok := idMap["text"].(string); ok && v != "" {
+				return v, nil
+			}
+		}
+		return idMap, nil
 	case "xpn_to_humanname":
 		return s.transformXPNToHumanName(hl7Value, mapping.TransformationRules), nil
 	case "xad_to_address":
@@ -1593,6 +3201,21 @@ func (s *HL7FHIRTransformServiceV3) transformValueAtomic(
 	case "ts_to_datetime":
 		return tsToISODateTime(hl7Value), nil
 	case "ce_to_codeableconcept":
+		// When the FHIR target is a scalar leaf (path ends in .code or .system),
+		// return just the code/system string instead of the full CodeableConcept
+		// object — placing an object at a scalar leaf causes "must be simple value" errors.
+		fhirPath := mapping.FHIRElementPath
+		if strings.HasSuffix(fhirPath, ".code") || strings.HasSuffix(fhirPath, ".system") {
+			parts := strings.SplitN(hl7Value, "^", 4)
+			if strings.HasSuffix(fhirPath, ".system") && len(parts) >= 3 && parts[2] != "" {
+				return strings.TrimSpace(parts[2]), nil
+			}
+			code := strings.TrimSpace(parts[0])
+			if code == "" {
+				return nil, nil
+			}
+			return code, nil
+		}
 		return s.transformCEToCodeableConcept(hl7Value, mapping.TransformationRules), nil
 	// ce_code_only: extract the code (first ^-component) as a plain string.
 	// Used when the FHIR target expects a simple string (e.g. meta.tag[x].code,
@@ -1608,8 +3231,10 @@ func (s *HL7FHIRTransformServiceV3) transformValueAtomic(
 	// ts_to_datetime keys.  type_registry.go emits these names; both must resolve.
 	case "hl7_timestamp_to_fhir_date":
 		return s.transformTSToDate(hl7Value), nil
-	case "hl7_timestamp_to_fhir_datetime":
+	case "hl7_timestamp_to_fhir_datetime", "hl7datetime", "datetime":
 		return tsToISODateTime(hl7Value), nil
+	case "hl7_timestamp_to_fhir_date_only", "hl7date":
+		return s.transformTSToDate(hl7Value), nil
 	// hl7_active_flag: HL7 table 0183 (A/I) → FHIR boolean.
 	// Also accepts common truthy variants used by some senders.
 	case "hl7_active_flag":
@@ -1649,6 +3274,17 @@ func (s *HL7FHIRTransformServiceV3) transformValueAtomic(
 		return s.transformAbnormalFlagToInterpretation(hl7Value), nil
 	case "obx_value_by_type":
 		return s.transformOBXValueByType(hl7Value, mapping.TransformationRules), nil
+	case "siu_appointment_status":
+		return s.transformSIUAppointmentStatus(hl7Value), nil
+	case "xcn_to_reference":
+		// XCN composite: id^family^given^middle^suffix^prefix^degree^^^...
+		// Build a plain display string from name components; never return raw "id^family^given"
+		// which violates the FHIR Reference.display spec.
+		display := formatXCNDisplayName(hl7Value)
+		if display == "" {
+			return nil, nil
+		}
+		return display, nil
 	case "":
 		// Auto-translate using HL7 and FHIR data types when available
 		if mapping.HL7DataType != "" || mapping.FHIRDataType != "" {
@@ -1685,6 +3321,32 @@ func (s *HL7FHIRTransformServiceV3) transformValueAtomic(
 			}
 			return hl7Value, nil
 		}
+		// hl7_table_XXXX_* transforms: extract table number and look up in
+		// hl7_fhir_value_mappings (V115 IG seed data).  DB is the authoritative
+		// source; inline valueMap from the template is the fallback.
+		if strings.HasPrefix(mapping.DataTypeTransform, "hl7_table_") {
+			parts := strings.SplitN(mapping.DataTypeTransform, "_", 4)
+			if len(parts) >= 3 && s.valueMapper != nil {
+				tableNum := parts[2]
+				if _, fhirCode, _, found := s.valueMapper.MapValue(tableNum, hl7Value); found {
+					return fhirCode, nil
+				}
+			}
+		}
+
+		// Inline valueMap from template JSON — fallback when DB has no entry.
+		if vmRaw, ok := mapping.TransformationRules["valueMap"]; ok {
+			if vmMap, ok := vmRaw.(map[string]interface{}); ok {
+				key := strings.ToUpper(strings.TrimSpace(hl7Value))
+				if mapped, found := vmMap[key]; found {
+					return mapped, nil
+				}
+				if mapped, found := vmMap[hl7Value]; found {
+					return mapped, nil
+				}
+			}
+		}
+
 		log.Printf("⚠️ Unknown transformation '%s', using raw value", mapping.DataTypeTransform)
 		return hl7Value, nil
 	}
@@ -1700,6 +3362,17 @@ func (s *HL7FHIRTransformServiceV3) setAtomicFieldInResource(
 	value interface{},
 	schema *fhir.FHIRSchema,
 ) error {
+
+	// Strip the "ResourceType." prefix that template fhirPaths carry
+	// (e.g. "Practitioner.name[0].family" → "name[0].family").
+	// setNestedFieldFromSchema handles this for simple 2-part paths, but
+	// setFieldWithArrayIndices does not — causing values to land under a
+	// spurious "Practitioner" key instead of directly on the resource.
+	if schema != nil && schema.ResourceType != "" {
+		if pfx := schema.ResourceType + "."; strings.HasPrefix(fieldPath, pfx) {
+			fieldPath = strings.TrimPrefix(fieldPath, pfx)
+		}
+	}
 
 	// Handle paths with array indices (e.g., "name[0].given[1]")
 	if strings.Contains(fieldPath, "[") {
@@ -1880,16 +3553,23 @@ func (s *HL7FHIRTransformServiceV3) setNestedFieldFromSchema(
 
 	// ✅ FIX: If parentField is the resource type itself, treat this as a direct field
 	if parentField == schema.ResourceType {
-		// This is a direct field like "Patient.birthDate" -> just set "birthDate"
+		// This is a direct field like "Patient.birthDate" or "PractitionerRole.code"
 		log.Printf("🔧 Direct resource field: %s.%s -> setting %s directly", parentField, childField, childField)
 
 		// Validate the child field exists in schema
 		childPath := fmt.Sprintf("%s.%s", schema.ResourceType, childField)
-		if _, exists := schema.Elements[childPath]; !exists {
+		elem, exists := schema.Elements[childPath]
+		if !exists {
 			log.Printf("❌ REJECTED: Field %s not found in %s schema", childPath, schema.ResourceType)
 			return fmt.Errorf("field %s not found in FHIR schema for %s", childField, schema.ResourceType)
 		}
 
+		// Enforce cardinality: 0..* / 1..* fields must be serialised as JSON arrays.
+		// Without this check the field mapper sets them as plain objects when the
+		// FHIR path carries no "[0]" index notation (e.g. PractitionerRole.code).
+		if strings.Contains(elem.Cardinality, "*") {
+			return s.setArrayField(resource, childField, value)
+		}
 		resource[childField] = value
 		return nil
 	}
@@ -2484,10 +4164,21 @@ func (s *HL7FHIRTransformServiceV3) filterMappingsForResource(mappings []FieldMa
 // =====================================
 
 func (s *HL7FHIRTransformServiceV3) getFieldMappings(ctx context.Context, messageType, profile string, request ...*TransformRequest) ([]FieldMapping, *ContextLinks, error) {
+	// Determine up-front whether this interface uses the live OOB template.
+	// OOB interfaces must always fall through to STEP 2 so that template updates
+	// are reflected immediately — stale snapshots (embedded_mappings,
+	// interfaces.transformation_mapping) must be bypassed for them.
+	isPureOOB := false
+	if len(request) > 0 && request[0] != nil && request[0].InterfaceID != "" && s.db != nil {
+		isPureOOB = s.isInterfacePureOOB(ctx, request[0].InterfaceID, messageType)
+		if isPureOOB {
+			log.Printf("ℹ️ V3 Service: Interface %s/%s is pure-OOB — skipping stale snapshots", request[0].InterfaceID, messageType)
+		}
+	}
+
 	// STEP 0: Use embedded_mappings from pipeline step config when present.
-	// These are wizard-saved mappings stored directly in the step — they survive
-	// message-type variant mismatches (e.g. ORU^R03 arriving on an ORU^R01 interface).
-	if len(request) > 0 && request[0] != nil && len(request[0].EmbeddedMappings) > 0 {
+	// Skipped for OOB interfaces — live OOB template must always win.
+	if !isPureOOB && len(request) > 0 && request[0] != nil && len(request[0].EmbeddedMappings) > 0 {
 		mappings := s.extractFieldMappingsFromWizardArray(request[0].EmbeddedMappings)
 		if len(mappings) > 0 {
 			log.Printf("✅ V3 Service: Using %d embedded_mappings from pipeline step config for %s", len(mappings), messageType)
@@ -2528,11 +4219,13 @@ func (s *HL7FHIRTransformServiceV3) getFieldMappings(ctx context.Context, messag
 	}
 
 	// STEP 1b: Interface-specific mappings from legacy interfaces.transformation_mapping column.
-	// These are deliberately-configured overrides and always win over OOB.
-	mappings, err := s.loadInterfaceSpecificMappings(ctx, messageType)
-	if err == nil && len(mappings) > 0 {
-		log.Printf("✅ V3 Service: Loaded %d mappings from interface-specific configuration for %s", len(mappings), messageType)
-		return mappings, nil, nil // custom mappings carry no contextLinks
+	// Skipped for OOB interfaces — live OOB template must always win over stale legacy snapshots.
+	if !isPureOOB {
+		mappings, err := s.loadInterfaceSpecificMappings(ctx, messageType)
+		if err == nil && len(mappings) > 0 {
+			log.Printf("✅ V3 Service: Loaded %d mappings from interface-specific configuration for %s", len(mappings), messageType)
+			return mappings, nil, nil // custom mappings carry no contextLinks
+		}
 	}
 
 	// STEP 2: OOB templates — exact message_type match.
@@ -2540,7 +4233,17 @@ func (s *HL7FHIRTransformServiceV3) getFieldMappings(ctx context.Context, messag
 	// MFN^M02) gets its correct OOB template rather than the wrong interface
 	// mapping stored for a structurally different sibling type (e.g. MFN^M13).
 	log.Printf("ℹ️ V3 Service: No interface-specific mapping for %s, trying OOB templates...", messageType)
-	mappings, cl, err := s.loadFromV9OOBTemplates(ctx, messageType)
+	hl7Version := "2.5"
+	if len(request) > 0 && request[0] != nil && request[0].ParsedHL7Data != nil {
+		if v, ok := request[0].ParsedHL7Data["version"].(string); ok && v != "" {
+			hl7Version = v
+		}
+	}
+	fhirVersion := "R4"
+	if len(request) > 0 && request[0] != nil && request[0].FHIRVersion != "" {
+		fhirVersion = request[0].FHIRVersion
+	}
+	mappings, cl, err := s.loadFromV9OOBTemplates(ctx, messageType, hl7Version, fhirVersion)
 	if err == nil && len(mappings) > 0 {
 		log.Printf("✅ V3 Service: Loaded %d mappings from V9 OOB templates for %s", len(mappings), messageType)
 		return mappings, cl, nil
@@ -2644,6 +4347,58 @@ func (s *HL7FHIRTransformServiceV3) getFieldMappings(ctx context.Context, messag
 // pair.  Only returns mappings when uses_standard_template = false and a non-empty
 // custom_mapping_config is present — if the row says uses_standard_template = true the
 // caller should fall through to the OOB template path (Step 2).
+// isInterfacePureOOB returns true when the interface+messageType record in
+// interface_message_mappings has uses_standard_template = true, or when no
+// record exists yet (interface has never been wizard-customised).
+// OOB interfaces must bypass stale embedded_mappings / transformation_mapping
+// snapshots so that live OOB template changes take effect immediately.
+func (s *HL7FHIRTransformServiceV3) isInterfacePureOOB(ctx context.Context, interfaceID, messageType string) bool {
+	var usesStandard bool
+	err := s.db.QueryRowContext(ctx, `
+		SELECT uses_standard_template
+		FROM interface_message_mappings
+		WHERE interface_id = $1 AND message_type = $2
+		LIMIT 1
+	`, interfaceID, messageType).Scan(&usesStandard)
+	if err == sql.ErrNoRows {
+		return true // no wizard customisation → treat as OOB
+	}
+	if err != nil {
+		return false // be conservative on error
+	}
+	return usesStandard
+}
+
+// loadResourcePolicy reads the "resource_policy" key from
+// interface_message_mappings.custom_mapping_config for the given interface and
+// message type.  Returns nil (no overrides) when the interface has no custom
+// config, no resource_policy key, or when the DB is unavailable.
+//
+// The policy map is keyed by FHIR resourceType with values "allow" or "suppress".
+func (s *HL7FHIRTransformServiceV3) loadResourcePolicy(ctx context.Context, interfaceID, messageType string) map[string]string {
+	if interfaceID == "" || s.db == nil {
+		return nil
+	}
+	query := `
+		SELECT custom_mapping_config
+		FROM interface_message_mappings
+		WHERE interface_id = $1 AND message_type = $2
+		  AND custom_mapping_config IS NOT NULL
+		LIMIT 1
+	`
+	var configBytes []byte
+	if err := s.db.QueryRowContext(ctx, query, interfaceID, messageType).Scan(&configBytes); err != nil {
+		return nil
+	}
+	var config struct {
+		ResourcePolicy map[string]string `json:"resource_policy"`
+	}
+	if err := json.Unmarshal(configBytes, &config); err != nil {
+		return nil
+	}
+	return config.ResourcePolicy
+}
+
 func (s *HL7FHIRTransformServiceV3) loadFromInterfaceMessageMappings(ctx context.Context, interfaceID, messageType string) ([]FieldMapping, error) {
 	query := `
 		SELECT custom_mapping_config
@@ -2969,15 +4724,19 @@ func getIsRequired(mappingObj map[string]interface{}) bool {
 // The second return value is non-nil only for v1.1+ templates that declare a
 // "context" block; callers receive nil for v1.0 templates and fall back to the
 // existing hardcoded context-wiring path.
-func (s *HL7FHIRTransformServiceV3) loadFromV9OOBTemplates(ctx context.Context, messageType string) ([]FieldMapping, *ContextLinks, error) {
-	log.Printf("🎯 V3 Service: Loading V9 OOB template for message type: %s", messageType)
+func (s *HL7FHIRTransformServiceV3) loadFromV9OOBTemplates(ctx context.Context, messageType, hl7Version, fhirVersion string) ([]FieldMapping, *ContextLinks, error) {
+	log.Printf("🎯 V3 Service: Loading V9 OOB template for message type: %s (HL7 v%s → FHIR %s)", messageType, hl7Version, fhirVersion)
 
-	// Query the actual hl7_fhir_templates table
+	// Prefer exact (hl7_version, fhir_version) match.
+	// Fall back first on fhir_version (same HL7 version, any FHIR), then fully generic.
 	query := `
 		SELECT template_config, template_description, template_name
 		FROM hl7_fhir_templates
 		WHERE message_type = $1 AND is_default = true
-		ORDER BY created_at DESC
+		ORDER BY
+		    CASE WHEN hl7_version = $2  THEN 0 ELSE 1 END +
+		    CASE WHEN fhir_version = $3 THEN 0 ELSE 2 END,
+		    created_at DESC
 		LIMIT 1
 	`
 
@@ -2985,7 +4744,7 @@ func (s *HL7FHIRTransformServiceV3) loadFromV9OOBTemplates(ctx context.Context, 
 	var templateDescription string
 	var templateName string
 
-	err := s.db.QueryRowContext(ctx, query, messageType).Scan(&templateConfig, &templateDescription, &templateName)
+	err := s.db.QueryRowContext(ctx, query, messageType, hl7Version, fhirVersion).Scan(&templateConfig, &templateDescription, &templateName)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			log.Printf("ℹ️ V3 Service: No OOB template found for message type: %s", messageType)
@@ -3111,6 +4870,12 @@ func (s *HL7FHIRTransformServiceV3) convertV9TemplateToFieldMappings(templateDat
 				"confidence":     confidence,
 				"sourceTemplate": "V9_OOB",
 				"transform":      transformFunc,
+			}
+
+			// Capture inline valueMap from the template mapping (e.g. {"M":"male","F":"female"}).
+			// Used as a fallback in transformValueAtomic when the DB has no entry for the code.
+			if vm, ok := mapping["valueMap"]; ok {
+				transformRules["valueMap"] = vm
 			}
 
 			// Inline valueSet for lookup: transforms so the switch default can resolve it
@@ -4110,6 +5875,182 @@ func (s *HL7FHIRTransformServiceV3) transformTSToDateTime(ts string) string {
 }
 
 // normalizeAddressUse maps HL7 v2 table 0190 address type codes to FHIR AddressUse.
+// mapEncounterStatus converts HL7 ADT trigger event codes to FHIR encounter-status values
+// per the HL7 V2-to-FHIR Implementation Guide (https://build.fhir.org/ig/HL7/v2-to-fhir/).
+func mapEncounterStatus(hl7Status string) string {
+	s := strings.ToUpper(strings.TrimSpace(hl7Status))
+	switch s {
+	// Admit / register / outpatient visit — encounter is active.
+	case "A01", // Admit/visit notification
+		"A02",  // Transfer
+		"A04",  // Register outpatient
+		"A06",  // Change outpatient → inpatient
+		"A07",  // Change inpatient → outpatient
+		"A08",  // Update patient information
+		"A09",  // Patient departing (tracking)
+		"A10",  // Patient arriving (tracking)
+		"A12",  // Cancel transfer (patient still admitted)
+		"A13",  // Cancel discharge (patient still admitted)
+		"A15",  // Pending transfer
+		"A16",  // Pending discharge
+		"A17",  // Swap patients
+		"A22",  // Patient returns from leave of absence
+		"A25",  // Cancel pending discharge
+		"A26",  // Cancel pending transfer
+		"A40",  // Merge patient information
+		"A41",  // Merge account information
+		"A45",  // Move visit information
+		"A47":  // Change patient identifier
+		return "in-progress"
+	// Discharge / end of visit.
+	case "A03":
+		return "finished"
+	// Pre-admit / pending admit — encounter not yet started.
+	case "A05", // Pre-admit
+		"A14": // Pending admit notification
+		return "planned"
+	// Patient on leave of absence — encounter begun but patient temporarily away.
+	case "A21":
+		return "onleave"
+	// Cancel events that undo the encounter entirely.
+	case "A11", // Cancel admit
+		"A27",  // Cancel pending admit
+		"A38":  // Cancel pre-admit
+		return "cancelled"
+	// Person/account administration events — not encounter-specific.
+	case "A28", // Add person information
+		"A31": // Update person information
+		return "unknown"
+	default:
+		validStatuses := map[string]bool{
+			"planned": true, "arrived": true, "triaged": true, "in-progress": true,
+			"onleave": true, "finished": true, "cancelled": true,
+			"entered-in-error": true, "unknown": true,
+		}
+		lower := strings.ToLower(hl7Status)
+		if validStatuses[lower] {
+			return lower
+		}
+		return "unknown"
+	}
+}
+
+// normalizePatientClassToCoding maps a PV1.2 patient class code string to a FHIR Coding object.
+func normalizePatientClassToCoding(code string) map[string]interface{} {
+	c := strings.ToUpper(strings.TrimSpace(code))
+	display := ""
+	fhirCode := c
+	switch c {
+	case "I", "IMP":
+		fhirCode = "IMP"
+		display = "inpatient encounter"
+	case "O", "AMB":
+		fhirCode = "AMB"
+		display = "ambulatory"
+	case "E", "EMER":
+		fhirCode = "EMER"
+		display = "emergency"
+	case "P", "PRENC":
+		fhirCode = "PRENC"
+		display = "pre-admission"
+	case "N", "NEWB":
+		fhirCode = "NEWB"
+		display = "newborn"
+	case "R", "SS":
+		fhirCode = "SS"
+		display = "short stay"
+	case "B":
+		fhirCode = "IMP"
+		display = "inpatient encounter"
+	case "C", "VHH":
+		fhirCode = "VHH"
+		display = "home health"
+	default:
+		fhirCode = "IMP"
+		display = "inpatient encounter"
+	}
+	coding := map[string]interface{}{
+		"system": "http://terminology.hl7.org/CodeSystem/v3-ActCode",
+		"code":   fhirCode,
+	}
+	if display != "" {
+		coding["display"] = display
+	}
+	return coding
+}
+
+// flattenCodingCodeObjects walks resource[field].coding[].code and replaces any
+// CodeableConcept object found there with the extracted code string.
+func flattenCodingCodeObjects(r map[string]interface{}, field string) {
+	if fieldVal, ok := r[field].(map[string]interface{}); ok {
+		if codings, ok2 := fieldVal["coding"].([]interface{}); ok2 {
+			for _, codRaw := range codings {
+				if cod, ok3 := codRaw.(map[string]interface{}); ok3 {
+					if codeMap, ok4 := cod["code"].(map[string]interface{}); ok4 {
+						if extracted := extractCodeFromCodeableConcept(codeMap); extracted != "" {
+							cod["code"] = extracted
+						} else {
+							delete(cod, "code")
+						}
+					}
+				}
+			}
+		}
+	}
+}
+
+// extractCodeFromCodeableConcept pulls a code string out of a nested CodeableConcept map.
+// Used when ce_to_codeableconcept was applied to a field whose FHIR path ends at a scalar .code leaf.
+func extractCodeFromCodeableConcept(m map[string]interface{}) string {
+	if codings, ok := m["coding"].([]interface{}); ok && len(codings) > 0 {
+		if cod, ok2 := codings[0].(map[string]interface{}); ok2 {
+			if code, ok3 := cod["code"].(string); ok3 && code != "" {
+				return code
+			}
+		}
+	}
+	if txt, ok := m["text"].(string); ok && txt != "" {
+		return txt
+	}
+	return ""
+}
+
+// reparsePractitionerIdentifiers fixes identifiers on Practitioner and PractitionerRole
+// resources that still hold raw CX composite strings (e.g. "999^12345^1^PROVIDER^1") in
+// their .value field. It re-parses each such value via BuildIdentifierFromCX so the
+// resulting identifier carries proper system, type, and a scalar value.
+func reparsePractitionerIdentifiers(r map[string]interface{}) {
+	ids, ok := r["identifier"].([]interface{})
+	if !ok {
+		return
+	}
+	for _, idRaw := range ids {
+		id, ok2 := idRaw.(map[string]interface{})
+		if !ok2 {
+			continue
+		}
+		valStr, ok3 := id["value"].(string)
+		if !ok3 || !strings.Contains(valStr, "^") {
+			continue
+		}
+		// Looks like an unparsed CX composite — re-parse it
+		parsed := hl7assembly.BuildIdentifierFromCX(valStr, nil)
+		if v, ok4 := parsed["value"].(string); ok4 && v != "" {
+			id["value"] = v
+		}
+		if sys, ok4 := parsed["system"].(string); ok4 && sys != "" {
+			if _, already := id["system"]; !already {
+				id["system"] = sys
+			}
+		}
+		if typ, ok4 := parsed["type"]; ok4 {
+			if _, already := id["type"]; !already {
+				id["type"] = typ
+			}
+		}
+	}
+}
+
 func normalizeAddressUse(raw string) string {
 	switch strings.ToUpper(strings.TrimSpace(raw)) {
 	case "H", "HOME":
@@ -4493,6 +6434,71 @@ func (s *HL7FHIRTransformServiceV3) transformAbnormalFlagToInterpretation(flag s
 	}
 }
 
+// transformSIUAppointmentStatus maps HL7 v2 SCH.25 scheduling status codes to FHIR R4
+// AppointmentStatus value set (http://hl7.org/fhir/ValueSet/appointmentstatus).
+// looksLikeSoftwareVersion returns true when s resembles a software/protocol
+// version string (e.g. "2.5", "1.0.0", "v2.3.1"). Used to distinguish a
+// real version from a facility name that ended up in source.version.
+func looksLikeSoftwareVersion(s string) bool {
+	hasDigit, hasDot := false, false
+	for _, c := range s {
+		if c >= '0' && c <= '9' {
+			hasDigit = true
+		}
+		if c == '.' {
+			hasDot = true
+		}
+	}
+	return hasDigit && hasDot
+}
+
+// formatXCNDisplayName extracts a human-readable "Family, Given" display string
+// from a raw XCN composite value (id^family^given^middle^suffix^prefix^degree…).
+// Returns "" when no name components are present so callers can skip the field.
+func formatXCNDisplayName(raw string) string {
+	parts := strings.SplitN(raw, "^", 8)
+	get := func(i int) string {
+		if i < len(parts) {
+			return strings.TrimSpace(parts[i])
+		}
+		return ""
+	}
+	family := get(1)
+	given := get(2)
+	switch {
+	case family != "" && given != "":
+		return family + ", " + given
+	case family != "":
+		return family
+	case given != "":
+		return given
+	default:
+		// Only an ID present (get(0)) — not useful as a display name
+		return ""
+	}
+}
+
+func (s *HL7FHIRTransformServiceV3) transformSIUAppointmentStatus(hl7Value string) string {
+	switch strings.ToUpper(strings.TrimSpace(hl7Value)) {
+	case "PENDING", "WAITLIST", "WAIT":
+		return "waitlist"
+	case "BOOKED", "SCHEDULED", "":
+		return "booked"
+	case "ARRIVED":
+		return "arrived"
+	case "FULFILLED", "COMPLETE", "COMPLETED":
+		return "fulfilled"
+	case "CANCELLED", "CANCELED":
+		return "cancelled"
+	case "NOSHOW", "NO-SHOW", "NS":
+		return "noshow"
+	case "CHECKED-IN", "CHECKED_IN":
+		return "checked-in"
+	default:
+		return "booked"
+	}
+}
+
 // transformOBXValueByType dispatches OBX.5 value based on OBX.2 value type from rules
 func (s *HL7FHIRTransformServiceV3) transformOBXValueByType(value string, rules map[string]interface{}) interface{} {
 	valueType := ""
@@ -4518,7 +6524,31 @@ func (s *HL7FHIRTransformServiceV3) transformOBXValueByType(value string, rules 
 		return map[string]interface{}{"valueString": value}
 	case "TS", "DT", "TM": // Timestamp → valueDateTime
 		return map[string]interface{}{"valueDateTime": s.transformTSToDate(value)}
-	case "SN": // Structured numeric (e.g. "^3.5" or ">5.0") → valueString fallback
+	case "SN": // Structured numeric: comparator^number^separator^number2 (HL7 v2)
+		// e.g. "^3.5", ">^10.5", "<^5.0" → valueQuantity with optional comparator
+		parts := strings.SplitN(value, "^", 4)
+		numStr := ""
+		comparator := ""
+		if len(parts) >= 2 {
+			comparator = strings.TrimSpace(parts[0])
+			numStr = strings.TrimSpace(parts[1])
+		} else if len(parts) == 1 {
+			numStr = strings.TrimSpace(parts[0])
+		}
+		if numStr != "" {
+			qty := map[string]interface{}{"value": numStr}
+			if comparator != "" {
+				qty["comparator"] = comparator
+			}
+			if rules != nil {
+				if unit, ok := rules["unit"].(string); ok && unit != "" {
+					qty["unit"] = unit
+					qty["system"] = "http://unitsofmeasure.org"
+					qty["code"] = unit
+				}
+			}
+			return map[string]interface{}{"valueQuantity": qty}
+		}
 		return map[string]interface{}{"valueString": value}
 	default:
 		// No OBX.2 known — return as string
@@ -4790,31 +6820,19 @@ func (s *HL7FHIRTransformServiceV3) enrichPatientIdentifiers(
 		}
 	}
 
-	// --- Step 2: inject typed identifiers from well-known PID fields ---
+	// --- Step 2: annotate identifiers from well-known PID fields using the CX wire format ---
+	// Type codes come from CX.5 in the HL7 message itself (Table 0203), not from hardcoded
+	// field-to-type mappings.  BuildIdentifierFromCX extracts CX.1 (value), CX.4 (system),
+	// and CX.5 (type) — if the sender included CX.5, we get the type for free; if not, no
+	// type is injected.  PID.19 (SSN) is handled separately because its system URI is
+	// canonical and well-known regardless of whether CX.5 is present.
 	pidList := s.extractSegmentGroup(parsedHL7Data, "PID")
 	if len(pidList) == 0 {
 		return
 	}
 	pid := pidList[0]
 
-	// Map of PID field key → identifier metadata.
-	// typeCode uses the FHIR R4 IdentifierType valueset (extensible binding).
-	// Codes NOT in http://hl7.org/fhir/ValueSet/identifier-type|4.0.1 (PI, AN) are left
-	// without a type to avoid extensible-binding warnings; the system URI or plain value
-	// is sufficient for those fields.
-	// SSN (PID.19) uses the canonical FHIR system URI — no type code needed, the system
-	// URI unambiguously identifies it.
-	implicitTypes := []struct {
-		pidKey   string
-		typeCode string // empty = omit type, just set value (and system if present)
-		system   string // FHIR identifier.system, empty = omit
-	}{
-		{"PID.19", "", "http://hl7.org/fhir/sid/us-ssn"}, // SSN — system URI identifies it
-		{"PID.18", "", ""},                                 // Account Number — no FHIR R4 IdentifierType equivalent
-		{"PID.2",  "", ""},                                 // Patient Internal ID — no FHIR R4 IdentifierType equivalent
-	}
-
-	// Build a set of existing values so we don't duplicate
+	// Build a set of existing values so we can annotate in-place without duplicating.
 	existingValues := map[string]bool{}
 	for _, idRaw := range ids {
 		if m, ok := idRaw.(map[string]interface{}); ok {
@@ -4824,59 +6842,61 @@ func (s *HL7FHIRTransformServiceV3) enrichPatientIdentifiers(
 		}
 	}
 
-	for _, imp := range implicitTypes {
-		val := segFieldValue(pid, imp.pidKey)
+	// CX-bearing PID fields: parse each as a CX composite so CX.5 drives the type.
+	for _, pidKey := range []string{"PID.3", "PID.18", "PID.2", "PID.4"} {
+		raw := segFieldValue(pid, pidKey)
+		if raw == "" {
+			continue
+		}
+		parsed := hl7assembly.BuildIdentifierFromCX(raw, nil)
+		val, _ := parsed["value"].(string)
 		if val == "" {
 			continue
 		}
-
-		// Build type object only when a code exists AND that code is in the FHIR R4
-		// IdentifierType valueset (extensible binding). For fields like SSN, AN, PI
-		// the system URI alone is sufficient identification.
-		var typeObj map[string]interface{}
-		if imp.typeCode != "" {
-			display, _ := table0203[imp.typeCode]
-			typeObj = map[string]interface{}{
-				"coding": []interface{}{
-					map[string]interface{}{
-						"system":  hl7v2IdentifierTypeSystem,
-						"code":    imp.typeCode,
-						"display": display,
-					},
-				},
-				"text": display,
-			}
-		}
+		typeObj, hasType := parsed["type"]
+		sysVal, _ := parsed["system"].(string)
 
 		if existingValues[val] {
-			// Mapping engine already inserted this value without a type/system.
-			// Annotate in-place rather than duplicate.
+			// Annotate the existing entry in-place.
 			for _, idRaw := range ids {
 				idMap, ok2 := idRaw.(map[string]interface{})
 				if !ok2 || idMap["value"] != val {
 					continue
 				}
-				if _, hasType := idMap["type"]; !hasType && typeObj != nil {
-					idMap["type"] = typeObj
+				if hasType {
+					if _, already := idMap["type"]; !already {
+						idMap["type"] = typeObj
+					}
 				}
-				if imp.system != "" {
-					if _, hasSys := idMap["system"]; !hasSys {
-						idMap["system"] = imp.system
+				if sysVal != "" {
+					if _, already := idMap["system"]; !already {
+						idMap["system"] = sysVal
 					}
 				}
 				break
 			}
 		} else {
-			// Not yet in the list — add a new entry.
-			newID := map[string]interface{}{"value": val}
-			if typeObj != nil {
-				newID["type"] = typeObj
-			}
-			if imp.system != "" {
-				newID["system"] = imp.system
-			}
-			ids = append(ids, newID)
+			// Not yet present — add as new entry.
+			ids = append(ids, parsed)
 			existingValues[val] = true
+		}
+	}
+
+	// PID.19 — SSN: system URI is canonical regardless of CX.5 presence.
+	if ssnVal := segFieldValue(pid, "PID.19"); ssnVal != "" {
+		const ssnSystem = "http://hl7.org/fhir/sid/us-ssn"
+		if existingValues[ssnVal] {
+			for _, idRaw := range ids {
+				if m, ok := idRaw.(map[string]interface{}); ok && m["value"] == ssnVal {
+					if _, hasSys := m["system"]; !hasSys {
+						m["system"] = ssnSystem
+					}
+					break
+				}
+			}
+		} else {
+			ids = append(ids, map[string]interface{}{"value": ssnVal, "system": ssnSystem})
+			existingValues[ssnVal] = true
 		}
 	}
 
@@ -4887,6 +6907,77 @@ func (s *HL7FHIRTransformServiceV3) enrichPatientIdentifiers(
 // hl7assembly.NormalizeIdentifierSystem.  All new code should call that function directly.
 func normalizeIdentifierSystem(sys string) string {
 	return hl7assembly.NormalizeIdentifierSystem(sys)
+}
+
+// enrichEncounterParticipants injects Encounter.participant.type role discriminators
+// per the HL7 V2-to-FHIR IG.  The PV1 field → v3-ParticipationType mapping is defined
+// once in hl7assembly.PV1ParticipantRoles and reused here — no hardcoding in this file.
+//
+// For each PV1 doctor field that contains a name:
+//   - if a participant with matching display already exists → annotate with type in-place
+//   - otherwise → add a new participant entry with type + individual.display
+func (s *HL7FHIRTransformServiceV3) enrichEncounterParticipants(
+	r map[string]interface{},
+	parsedHL7Data map[string]interface{},
+) {
+	pv1List := s.extractSegmentGroup(parsedHL7Data, "PV1")
+	if len(pv1List) == 0 {
+		return
+	}
+	pv1 := pv1List[0]
+
+	existing, _ := r["participant"].([]interface{})
+
+	// Build display → participant map for in-place annotation.
+	displayToIdx := map[string]int{}
+	for i, p := range existing {
+		if pm, ok := p.(map[string]interface{}); ok {
+			if ind, ok2 := pm["individual"].(map[string]interface{}); ok2 {
+				if disp, ok3 := ind["display"].(string); ok3 && disp != "" {
+					displayToIdx[disp] = i
+				}
+			}
+		}
+	}
+
+	for _, entry := range hl7assembly.PV1ParticipantRoles {
+		raw := segFieldValue(pv1, entry.Field)
+		if raw == "" {
+			continue
+		}
+		display := formatXCNDisplayName(raw)
+		if display == "" {
+			continue
+		}
+		typeCC := []interface{}{
+			map[string]interface{}{
+				"coding": []interface{}{
+					map[string]interface{}{
+						"system":  hl7assembly.V3ParticipationTypeSystem,
+						"code":    entry.Role.Code,
+						"display": entry.Role.Display,
+					},
+				},
+			},
+		}
+		if idx, found := displayToIdx[display]; found {
+			pm := existing[idx].(map[string]interface{})
+			if _, hasType := pm["type"]; !hasType {
+				pm["type"] = typeCC
+			}
+		} else {
+			newEntry := map[string]interface{}{
+				"type":       typeCC,
+				"individual": map[string]interface{}{"display": display},
+			}
+			existing = append(existing, newEntry)
+			displayToIdx[display] = len(existing) - 1
+		}
+	}
+
+	if len(existing) > 0 {
+		r["participant"] = existing
+	}
 }
 
 // enrichPatientTelecom builds / normalizes Patient.telecom from PID.13 (home phone),
@@ -5441,15 +7532,19 @@ func (s *HL7FHIRTransformServiceV3) resolveHL7FieldFromParsed(
 	if fieldPath == "" {
 		return ""
 	}
-	// Strip spaces
 	fieldPath = strings.TrimSpace(fieldPath)
 
-	parts := strings.SplitN(fieldPath, ".", 2)
+	// Split into at most 3 parts: segment, field, component
+	parts := strings.SplitN(fieldPath, ".", 3)
 	if len(parts) < 2 {
 		return ""
 	}
 	segName := parts[0]
-	fieldPart := parts[1] // e.g. "3" or "3.1"
+	fieldNum := parts[1]
+	componentNum := ""
+	if len(parts) == 3 {
+		componentNum = parts[2]
+	}
 
 	segs := hl7assembly.ExtractSegmentGroup(parsedHL7, segName)
 	if len(segs) == 0 {
@@ -5457,19 +7552,47 @@ func (s *HL7FHIRTransformServiceV3) resolveHL7FieldFromParsed(
 	}
 	seg := segs[0]
 
-	// Look up by key in seg.Fields
-	// Field key looks like "PID.3" or "SCH.25"
-	wantKey := segName + "." + fieldPart
+	wantFieldKey := segName + "." + fieldNum
 	for _, f := range seg.Fields {
-		if f.Key == wantKey {
-			return strings.TrimSpace(f.Value)
+		if f.Key == wantFieldKey {
+			if componentNum == "" {
+				return strings.TrimSpace(f.Value)
+			}
+			// 3-part path: find sub-component by key first
+			wantSubKey := wantFieldKey + "." + componentNum
+			for _, sf := range f.Subfields {
+				if sf.Key == wantSubKey {
+					return strings.TrimSpace(sf.Value)
+				}
+			}
+			// Fallback: split raw value by "^" and extract by position
+			compIdx := 0
+			fmt.Sscanf(componentNum, "%d", &compIdx)
+			if compIdx > 0 {
+				comps := strings.Split(f.Value, "^")
+				if compIdx <= len(comps) {
+					return strings.TrimSpace(comps[compIdx-1])
+				}
+			}
+			return ""
 		}
 	}
-	// Also try field index matching (1-based)
+	// Field index fallback (1-based)
 	fieldIdx := 0
-	fmt.Sscanf(fieldPart, "%d", &fieldIdx)
+	fmt.Sscanf(fieldNum, "%d", &fieldIdx)
 	if fieldIdx > 0 && fieldIdx <= len(seg.Fields) {
-		return strings.TrimSpace(seg.Fields[fieldIdx-1].Value)
+		f := seg.Fields[fieldIdx-1]
+		if componentNum == "" {
+			return strings.TrimSpace(f.Value)
+		}
+		compIdx := 0
+		fmt.Sscanf(componentNum, "%d", &compIdx)
+		if compIdx > 0 {
+			comps := strings.Split(f.Value, "^")
+			if compIdx <= len(comps) {
+				return strings.TrimSpace(comps[compIdx-1])
+			}
+		}
 	}
 	return ""
 }
@@ -5534,16 +7657,36 @@ func resolvePlaceholders(
 				return val
 			}
 		}
-		// Fall back to full parsed HL7 data (cross-segment)
+		// Fall back to full parsed HL7 data (cross-segment).
+		// Supports 2-part (SEG.F) and 3-part (SEG.F.C) paths.
 		if parsedHL7 != nil {
-			parts := strings.SplitN(inner, ".", 2)
-			if len(parts) == 2 {
+			parts := strings.SplitN(inner, ".", 3)
+			if len(parts) >= 2 {
 				segs := hl7assembly.ExtractSegmentGroup(parsedHL7, parts[0])
 				if len(segs) > 0 {
-					wantKey := inner
+					fieldKey := parts[0] + "." + parts[1]
 					for _, f := range segs[0].Fields {
-						if f.Key == wantKey {
-							return strings.TrimSpace(f.Value)
+						if f.Key == fieldKey {
+							if len(parts) == 2 {
+								return strings.TrimSpace(f.Value)
+							}
+							// 3-part: resolve component
+							subKey := fieldKey + "." + parts[2]
+							for _, sf := range f.Subfields {
+								if sf.Key == subKey {
+									return strings.TrimSpace(sf.Value)
+								}
+							}
+							// Fall back to splitting raw value by ^
+							compIdx := 0
+							fmt.Sscanf(parts[2], "%d", &compIdx)
+							if compIdx > 0 {
+								comps := strings.Split(f.Value, "^")
+								if compIdx <= len(comps) {
+									return strings.TrimSpace(comps[compIdx-1])
+								}
+							}
+							return ""
 						}
 					}
 				}
@@ -5607,6 +7750,144 @@ func isEmptyResolved(m map[string]interface{}) bool {
 	return true
 }
 
+// augmentMessageHeaderFocus ensures MessageHeader.focus references every resource
+// whose type is listed in focusTypes.  It is called after segment processors run
+// so that processor-added resources (e.g. the prior Patient from MRGProcessor)
+// are included.  Existing references are not duplicated.
+// References use "ResourceType/id" format; rewriteReferences() converts them to
+// urn:uuid: during bundle assembly.
+func augmentMessageHeaderFocus(resources []map[string]interface{}, focusTypes []string) {
+	if len(focusTypes) == 0 {
+		return
+	}
+
+	// Build a fast lookup for which types belong in focus.
+	wantedTypes := make(map[string]bool, len(focusTypes))
+	for _, ft := range focusTypes {
+		wantedTypes[ft] = true
+	}
+
+	// Find the MessageHeader.
+	var mh map[string]interface{}
+	for _, r := range resources {
+		if rt, _ := r["resourceType"].(string); rt == "MessageHeader" {
+			mh = r
+			break
+		}
+	}
+	if mh == nil {
+		return
+	}
+
+	// Build a set of references already present so we don't duplicate.
+	existing := make(map[string]bool)
+	var focus []interface{}
+	if f, ok := mh["focus"].([]interface{}); ok {
+		focus = f
+		for _, entry := range f {
+			if fm, ok := entry.(map[string]interface{}); ok {
+				if ref, _ := fm["reference"].(string); ref != "" {
+					existing[ref] = true
+				}
+			}
+		}
+	}
+
+	// Append a focus reference for every resource of a wanted type not yet present.
+	for _, r := range resources {
+		rt, _ := r["resourceType"].(string)
+		if !wantedTypes[rt] {
+			continue
+		}
+		id, _ := r["id"].(string)
+		if id == "" {
+			continue
+		}
+		ref := rt + "/" + id
+		if !existing[ref] {
+			focus = append(focus, map[string]interface{}{"reference": ref})
+			existing[ref] = true
+		}
+	}
+
+	mh["focus"] = focus
+}
+
+// filterResolvedRequiredFieldErrors removes "FHIR Validation: Required field X.Y missing"
+// errors from allErrors when field Y is now present in the corresponding resource.
+// This eliminates false positives that arise because validateResourceAgainstSchema runs
+// before profile composites and post-processing inject participant, status, etc.
+func filterResolvedRequiredFieldErrors(allErrors []string, resources []map[string]interface{}) []string {
+	// Build a quick lookup: resourceType → set of top-level keys present
+	presentFields := make(map[string]map[string]bool, len(resources))
+	for _, r := range resources {
+		rt, _ := r["resourceType"].(string)
+		if rt == "" {
+			continue
+		}
+		if presentFields[rt] == nil {
+			presentFields[rt] = make(map[string]bool)
+		}
+		for k := range r {
+			presentFields[rt][k] = true
+		}
+	}
+
+	var kept []string
+	for _, e := range allErrors {
+		const prefix = "FHIR Validation: Required field "
+		const suffix = " missing from resource"
+		if strings.HasPrefix(e, prefix) && strings.HasSuffix(e, suffix) {
+			// Extract "ResourceType.fieldName"
+			inner := e[len(prefix) : len(e)-len(suffix)]
+			if dotIdx := strings.Index(inner, "."); dotIdx != -1 {
+				rt := inner[:dotIdx]
+				field := inner[dotIdx+1:]
+				if fields, ok := presentFields[rt]; ok && fields[field] {
+					continue // field is now present — drop the error
+				}
+			}
+		}
+		kept = append(kept, e)
+	}
+	return kept
+}
+
+// filterResolvedRequiredFieldWarnings is the warnings counterpart of filterResolvedRequiredFieldErrors.
+func filterResolvedRequiredFieldWarnings(allWarnings []string, resources []map[string]interface{}) []string {
+	presentFields := make(map[string]map[string]bool, len(resources))
+	for _, r := range resources {
+		rt, _ := r["resourceType"].(string)
+		if rt == "" {
+			continue
+		}
+		if presentFields[rt] == nil {
+			presentFields[rt] = make(map[string]bool)
+		}
+		for k := range r {
+			presentFields[rt][k] = true
+		}
+	}
+
+	var kept []string
+	for _, w := range allWarnings {
+		const prefix = "Required field "
+		const suffix = " missing from FHIR resource"
+		if strings.HasPrefix(w, prefix) && strings.HasSuffix(w, suffix) {
+			inner := w[len(prefix) : len(w)-len(suffix)]
+			if dotIdx := strings.Index(inner, "."); dotIdx != -1 {
+				rt := inner[:dotIdx]
+				field := inner[dotIdx+1:]
+				if fields, ok := presentFields[rt]; ok && fields[field] {
+					continue
+				}
+			}
+		}
+		kept = append(kept, w)
+	}
+	return kept
+}
+
 // getString is a nil-safe helper to extract a string from a map.
 func getString(m map[string]interface{}, key string) string {
 	v, _ := m[key].(string)
@@ -5619,15 +7900,49 @@ func getMap(m map[string]interface{}, key string) map[string]interface{} {
 	return v
 }
 
-// stripNullFields removes top-level keys whose value is nil/null from a FHIR
-// resource map.  FHIR validators reject explicit null values for most element
-// types (destination, active, birthDate, etc.) — omitting the key is correct
-// when no value is available.
-func stripNullFields(resource map[string]interface{}) {
-	for k, v := range resource {
-		if v == nil {
-			delete(resource, k)
+// cleanFHIRResource recursively removes keys with nil values or empty
+// arrays/objects from any FHIR node.  Applied universally to every resource
+// before output so that no message type emits explicit JSON nulls (invalid for
+// most FHIR element types) or empty arrays ("the property should not be present
+// if it has no values" — FHIR R4 §1.3.0.1).
+//
+// Rules:
+//   - nil value          → key deleted
+//   - empty []interface{} → key deleted
+//   - map entry becomes empty after recursive cleaning → key deleted
+//   - slice entry becomes nil after recursive cleaning  → entry dropped
+func cleanFHIRResource(v interface{}) interface{} {
+	switch val := v.(type) {
+	case map[string]interface{}:
+		for k, mv := range val {
+			if cleaned := cleanFHIRResource(mv); cleaned == nil {
+				delete(val, k)
+			} else {
+				val[k] = cleaned
+			}
 		}
+		if len(val) == 0 {
+			return nil
+		}
+		return val
+	case []interface{}:
+		if len(val) == 0 {
+			return nil
+		}
+		var out []interface{}
+		for _, item := range val {
+			if cleaned := cleanFHIRResource(item); cleaned != nil {
+				out = append(out, cleaned)
+			}
+		}
+		if len(out) == 0 {
+			return nil
+		}
+		return out
+	case nil:
+		return nil
+	default:
+		return v
 	}
 }
 
