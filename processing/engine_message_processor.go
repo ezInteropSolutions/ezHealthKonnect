@@ -16,6 +16,7 @@ import (
 	"ezhealthkonnect/models"
 	"ezhealthkonnect/services"
 	"ezhealthkonnect/services/connectors"
+	"ezhealthkonnect/services/logger"
 	"ezhealthkonnect/services/metrics"
 	"ezhealthkonnect/services/parsers"
 	"ezhealthkonnect/services/storage"
@@ -24,6 +25,7 @@ import (
 // processMessages processes incoming messages from ANY connector channel (ALL 32 connectors)
 // UNIFIED MODEL: Uses models.InboundMessage for all connector types
 func (pe *ProcessingEngine) processMessages(interfaceID string, messageChan <-chan *models.InboundMessage) {
+	defer pe.inFlight.Done() // signal graceful shutdown when this goroutine exits
 	log.Printf("📨 Message processor started for interface %s", interfaceID)
 
 	for msg := range messageChan {
@@ -316,6 +318,7 @@ func (pe *ProcessingEngine) storeAndParse(interfaceID string, msg *models.Inboun
 	// Inject ProcessingEngine into context for validation feedback
 	ctx = context.WithValue(ctx, "processing_engine", pe)
 	ctx = context.WithValue(ctx, "message_id", msg.MessageID)
+	ctx = context.WithValue(ctx, "correlation_id", msg.CorrelationID)
 	ctx = context.WithValue(ctx, "interface_id", interfaceID)
 
 	// Get dynamic metadata from message
@@ -604,6 +607,10 @@ func (pe *ProcessingEngine) executeTransformationPipeline(
 	ctx = context.WithValue(ctx, "delivery_status_fn", models.DeliveryStatusFn(pe.updateDeliveryStatus))
 	ctx = context.WithValue(ctx, "message_id", messageID)
 	ctx = context.WithValue(ctx, "interface_id", interfaceID)
+	// Attach a per-message structured logger so all pipeline log lines carry msg_id + corr_id.
+	corrID, _ := ctx.Value("correlation_id").(string)
+	msgLog := logger.L.With("msg_id", messageID, "corr_id", corrID, "iface_id", interfaceID)
+	ctx = logger.WithContext(ctx, msgLog)
 	// Inject store-outbound callback so OutboundConnectorExecutor can persist the exact
 	// payload sent to each connector (full content, no truncation) in object storage.
 	if pe.objectStorage != nil {

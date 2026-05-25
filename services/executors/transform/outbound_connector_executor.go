@@ -12,13 +12,29 @@ import (
 	"time"
 )
 
-// OutboundConnectorExecutor bridges outbound connectors as pipeline steps
-// Supports all 16 outbound connector types (TCP/MLLP, HTTP, File, DB, MQ, Cloud)
+// DLQWriter is the narrow interface the executor uses to write to the dead-letter queue.
+// Satisfied by *connectors.DLQService; interface form aids testability.
+type DLQWriter interface {
+	WriteToDLQ(ctx context.Context, p connectors.WriteDLQParams) error
+}
+
+// OutboundConnectorExecutor bridges outbound connectors as pipeline steps.
+// Supports all 16 outbound connector types (TCP/MLLP, HTTP, File, DB, MQ, Cloud).
+// If dlqSvc is non-nil, delivery failures are written to the dead-letter queue.
 type OutboundConnectorExecutor struct {
 	*executors.BaseExecutor
+	dlqSvc DLQWriter
 }
 
 func NewOutboundConnectorExecutor() *OutboundConnectorExecutor {
+	return newOutboundConnectorExecutor(nil)
+}
+
+func NewOutboundConnectorExecutorWithDLQ(dlqSvc DLQWriter) *OutboundConnectorExecutor {
+	return newOutboundConnectorExecutor(dlqSvc)
+}
+
+func newOutboundConnectorExecutor(dlqSvc DLQWriter) *OutboundConnectorExecutor {
 	return &OutboundConnectorExecutor{
 		BaseExecutor: executors.NewBaseExecutor("connector.outbound", models.ExecutorMetadata{
 			Name:        "Outbound Connector",
@@ -27,6 +43,7 @@ func NewOutboundConnectorExecutor() *OutboundConnectorExecutor {
 			Author:      "ezHealthKonnect",
 			Category:    "Connectivity",
 		}),
+		dlqSvc: dlqSvc,
 	}
 }
 
@@ -169,12 +186,40 @@ func (e *OutboundConnectorExecutor) Execute(
 	durationMs := time.Since(startTime).Milliseconds()
 
 	if err != nil {
+		interfaceID, _ := ctx.Value("interface_id").(string)
+		messageID, _ := ctx.Value("message_id").(string)
+		pipelineID, _ := ctx.Value("pipeline_id").(string)
+		pipelineInput, _ := ctx.Value("pipeline_input").(map[string]interface{})
+
 		// Notify engine of delivery failure so it can update delivery_status in PostgreSQL
 		if fn := models.GetDeliveryStatusFn(ctx); fn != nil {
-			interfaceID, _ := ctx.Value("interface_id").(string)
-			messageID, _ := ctx.Value("message_id").(string)
 			fn(interfaceID, messageID, "failed", err.Error())
 		}
+
+		// Write to dead-letter queue for async redrive
+		if e.dlqSvc != nil {
+			dlqErr := e.dlqSvc.WriteToDLQ(ctx, connectors.WriteDLQParams{
+				MessageID:             messageID,
+				InterfaceID:           interfaceID,
+				PipelineID:            pipelineID,
+				FailedStepID:          step.ID,
+				StepName:              step.StepName,
+				ConnectorType:         config.ConnectorType,
+				Payload:               content,
+				ContentType:           resolvedContentType,
+				ErrorMessage:          err.Error(),
+				AttemptCount:          1,
+				RedriveMode:           "from_failed_step",
+				PipelineInputSnapshot: pipelineInput,
+				PipelineDataSnapshot:  inputData,
+			})
+			if dlqErr != nil {
+				log.Printf("  ⚠️  DLQ write failed (message not durably queued): %v", dlqErr)
+			} else {
+				log.Printf("  📥 Delivery failure written to DLQ: msg=%s step=%s", messageID, step.StepName)
+			}
+		}
+
 		variables := map[string]interface{}{
 			"success":        false,
 			"connector_type": config.ConnectorType,

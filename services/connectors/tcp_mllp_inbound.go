@@ -117,7 +117,15 @@ func (c *TCPMLLPInboundConnector) Initialize(config []byte) error {
 		c.port = 2575 // Default MLLP port
 	}
 
-	c.enableTLS = cfg.GetBool("enable_tls")
+	// TLS defaults to enabled. Operators must explicitly set enable_tls: false
+	// to opt out, which triggers a startup warning.
+	c.enableTLS = cfg.GetBoolDefault("enable_tls", true)
+	if !c.enableTLS {
+		log.Printf("⚠️  SECURITY WARNING: TLS is DISABLED on MLLP listener (port %d).", c.port)
+		log.Printf("⚠️  HL7 messages will be transmitted in plaintext. This is not acceptable for production.")
+		log.Printf("⚠️  Set enable_tls: true and provide certificate_file + key_file to enable TLS.")
+	}
+
 	c.maxConnections = cfg.GetInt("max_connections")
 	if c.maxConnections == 0 {
 		c.maxConnections = 100
@@ -218,10 +226,18 @@ func (c *TCPMLLPInboundConnector) Validate() error {
 			fmt.Errorf("invalid port: %d (must be 1-65535)", c.port), false)
 	}
 
-	// Validate TLS configuration
-	if c.enableTLS && len(c.tlsConfig.Certificates) == 0 {
+	// Validate TLS configuration: TLS is on by default. When enabled, cert and
+	// key files are required — self-signed certs are not provisioned automatically
+	// because they are not acceptable in production healthcare environments.
+	// Operators must obtain a cert from their CA (or use their EHR vendor's cert)
+	// and set certificate_file + key_file in the connector config.
+	if c.enableTLS && (c.tlsConfig == nil || len(c.tlsConfig.Certificates) == 0) {
 		return NewConnectorError(c.metadata.TypeName, "validate",
-			fmt.Errorf("TLS enabled but no certificates configured"), false)
+			fmt.Errorf(
+				"TLS is enabled but no certificate is configured. "+
+					"Set certificate_file and key_file in the connector config, "+
+					"or set enable_tls: false to disable TLS (not recommended for production)",
+			), false)
 	}
 
 	// Validate authentication

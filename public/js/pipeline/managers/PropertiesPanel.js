@@ -1942,6 +1942,11 @@ class PropertiesPanel {
               label: 'Observation date/time',
               desc:  'Converts the HL7 compact timestamp in OBX.14 to an ISO 8601 datetime string.',
               example: 'OBX.14=20231015143000+0500 → "effectiveDateTime": "2023-10-15T14:30:00+05:00"\nOBX.14=(blank)           → field omitted' },
+
+            { key: 'obs_nte_note',        src: 'NTE.3',           fhir: 'note[].text',
+              label: 'NTE comment → note',
+              desc:  'Clubs consecutive NTE segments following an OBX into Observation.note[0].text. Multiple NTE lines are joined with newlines; blank NTE lines become paragraph breaks. NTE after OBR (before the first OBX) goes to DiagnosticReport.note.',
+              example: 'OBX|2|NM|PT (INR)^INR||1.94|...\nNTE|1||Optimal INR range is 2.0–3.0.\nNTE|2||(blank)\nNTE|3||Studies show low-intensity warfarin...\n→ note: [{text: "Optimal INR range is 2.0–3.0.\\n\\nStudies show low-intensity warfarin..."}]' },
         ];
 
         const DR_RULES = [
@@ -2163,6 +2168,8 @@ OBX|3|NM|2075-0^Chloride||102|mmol/L</pre>
 
             ${mergeCard}
 
+            ${this._renderAttachmentEncodingCard(step, rules, masterOn, esc)}
+
             <!-- Observation rules -->
             <div style="border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;margin-bottom:1rem;">
                 <div style="padding:0.6rem 0.75rem;background:#f8fafc;border-bottom:1px solid #e5e7eb;display:flex;align-items:center;gap:0.5rem;">
@@ -2200,6 +2207,189 @@ OBX|3|NM|2075-0^Chloride||102|mmol/L</pre>
                         </tr>
                     </thead>
                     <tbody>${DR_RULES.map(ruleRow).join('')}</tbody>
+                </table>
+            </div>
+
+            ${this._renderOptionalSegmentBlocks(step, rules, esc)}
+        `;
+    }
+
+    /**
+     * Render the Attachment Encoding card — a single user-friendly switch that
+     * controls whether base64 data in OBX ED (Encapsulated Data) segments is
+     * validated before being placed in FHIR Attachment.data.
+     *
+     * Maps to assemblyRules.validate_base64 (default ON = validate).
+     */
+    _renderAttachmentEncodingCard(step, rules, masterOn, esc) {
+        // validate_base64 defaults ON (undefined → checked).  Only explicit false = off.
+        const validateOn = rules.validate_base64 !== false;
+
+        return `
+        <div style="border:1px solid #0891b2;border-radius:8px;overflow:hidden;margin-bottom:1rem;">
+            <div style="padding:0.6rem 0.75rem;background:#ecfeff;border-bottom:1px solid #a5f3fc;display:flex;align-items:center;gap:0.5rem;">
+                <i class="fas fa-paperclip" style="color:#0e7490;font-size:0.9rem;"></i>
+                <span style="font-weight:600;font-size:0.85rem;color:#164e63;">Attachment Encoding</span>
+                <span style="font-size:0.75rem;color:#0e7490;margin-left:0.25rem;">— PDF, image and binary files carried in OBX (ED type)</span>
+            </div>
+            <div style="padding:0.9rem 1rem;">
+
+                <div style="background:#f0fdff;border-left:3px solid #22d3ee;border-radius:0 4px 4px 0;padding:0.6rem 0.75rem;margin-bottom:0.85rem;">
+                    <p style="font-size:0.8rem;color:#374151;margin:0;line-height:1.6;">
+                        When an HL7 message carries a <strong>PDF, image, or other binary file</strong> inside an
+                        <code style="background:#f3f4f6;padding:1px 4px;border-radius:3px;">OBX</code> segment
+                        (data type&nbsp;<strong>ED</strong>), that file is encoded in
+                        <a href="https://en.wikipedia.org/wiki/Base64" target="_blank"
+                           style="color:#0e7490;">base64</a> and placed into
+                        <code style="background:#f3f4f6;padding:1px 4px;border-radius:3px;">Attachment.data</code>
+                        in the FHIR output.<br><br>
+                        <strong>Check encoding&nbsp;ON&nbsp;(recommended):</strong> the engine verifies the data can be
+                        decoded before writing it. If a sending system accidentally truncates or corrupts the file data,
+                        the attachment is flagged with a warning title instead of creating an invalid FHIR resource.<br><br>
+                        <strong>Check encoding&nbsp;OFF:</strong> the raw value is copied straight through — choose this
+                        only when you are certain the source system always sends clean base64 and you need to avoid
+                        any processing overhead.
+                    </p>
+                </div>
+
+                <!-- Side-by-side outcome preview -->
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.6rem;margin-bottom:0.9rem;">
+                    <div style="background:#f0fdf4;border:1px solid #86efac;border-radius:6px;padding:0.65rem 0.8rem;">
+                        <div style="font-size:0.78rem;font-weight:700;color:#15803d;margin-bottom:0.35rem;">
+                            ✅ Check ON — corrupt data detected
+                        </div>
+                        <pre style="margin:0;font-size:0.7rem;color:#166534;white-space:pre-wrap;line-height:1.5;background:none;">OBX|1|ED|PDF^Report||^PDF^Base64^[bad data]
+→ Attachment.title = "(data omitted — not valid base64)"
+→ FHIR validator: PASS  ✓</pre>
+                    </div>
+                    <div style="background:#fff7ed;border:1px solid #fdba74;border-radius:6px;padding:0.65rem 0.8rem;">
+                        <div style="font-size:0.78rem;font-weight:700;color:#c2410c;margin-bottom:0.35rem;">
+                            ❌ Check OFF — corrupt data passes through
+                        </div>
+                        <pre style="margin:0;font-size:0.7rem;color:#9a3412;white-space:pre-wrap;line-height:1.5;background:none;">OBX|1|ED|PDF^Report||^PDF^Base64^[bad data]
+→ Attachment.data = "[bad data]"
+→ FHIR validator: FAIL  ✗  (att-1)</pre>
+                    </div>
+                </div>
+
+                <!-- Toggle row -->
+                <div style="display:flex;align-items:center;justify-content:space-between;
+                            background:#f8fdfe;border:1px solid #a5f3fc;border-radius:6px;
+                            padding:0.65rem 0.9rem;">
+                    <div>
+                        <div style="font-size:0.83rem;font-weight:600;color:#164e63;">
+                            Check attachment encoding before writing to FHIR
+                        </div>
+                        <div style="font-size:0.76rem;color:#0e7490;margin-top:2px;">
+                            Recommended — prevents invalid base64 from reaching your FHIR server
+                        </div>
+                    </div>
+                    <label style="display:flex;align-items:center;gap:0.4rem;cursor:pointer;white-space:nowrap;margin-left:1rem;"
+                           title="${validateOn ? 'Disable encoding check (passthrough)' : 'Enable encoding check (recommended)'}">
+                        <input type="checkbox" class="assembly-rule-toggle"
+                            data-rule-key="validate_base64"
+                            ${validateOn ? 'checked' : ''}
+                            ${!masterOn ? 'disabled' : ''}
+                            style="width:15px;height:15px;cursor:pointer;accent-color:#0891b2;">
+                        <span data-validate-base64-label
+                              style="font-size:0.82rem;font-weight:600;color:#374151;">
+                            ${validateOn ? 'Check encoding' : 'Pass through (no check)'}
+                        </span>
+                    </label>
+                </div>
+
+            </div>
+        </div>`;
+    }
+
+    /**
+     * Render Optional Output Resources section of the Assembly tab.
+     * These are OFF by default — opposite of the OBS/DR rules above.
+     * Each toggle writes to step.config.assemblyRules["opt_*"] via the
+     * existing .assembly-rule-toggle event listener.
+     */
+    _renderOptionalSegmentBlocks(step, rules, esc) {
+        const messageType = this.builder?.pipeline?.messageType || step.config?.message_type || '';
+
+        // Registry of optional blocks. AppliesTo: event codes after "^".
+        const OPT_BLOCKS = [
+            {
+                key: 'opt_PV1_Encounter',
+                label: 'Encounter from PV1',
+                src: 'PV1',
+                fhir: 'Encounter',
+                desc: 'Assembles PV1 visit information (class, period, location, attending) into an Encounter resource. PV1 is present in ORU messages but Encounter is not produced by default.',
+                appliesTo: ['R01', 'T01', 'T02', 'T11'],
+            },
+            {
+                key: 'opt_SPM_Specimen',
+                label: 'Specimen from SPM',
+                src: 'SPM',
+                fhir: 'Specimen',
+                desc: 'Assembles SPM segment fields (type, collection date, body site) into a Specimen resource linked to DiagnosticReport.',
+                appliesTo: ['R01'],
+            },
+            {
+                key: 'opt_ORC_OrderingPractitioner',
+                label: 'Ordering Provider from ORC',
+                src: 'ORC.12',
+                fhir: 'Practitioner',
+                desc: 'Adds the ordering provider (ORC.12) as a Practitioner and links it to DiagnosticReport.basedOn.',
+                appliesTo: ['R01', 'O01', 'O19'],
+            },
+        ];
+
+        // Filter to blocks that apply to the current message type.
+        const eventCode = messageType.includes('^') ? messageType.split('^')[1] : messageType;
+        const applicable = OPT_BLOCKS.filter(b =>
+            b.appliesTo.length === 0 || b.appliesTo.includes(eventCode)
+        );
+
+        if (applicable.length === 0) return '';
+
+        const optRows = applicable.map(b => {
+            // Optional blocks default OFF: only checked when rules[key] === true explicitly.
+            const isOn = rules[b.key] === true;
+            return `<tr style="border-bottom:1px solid #f1f5f9;opacity:${isOn ? '1' : '0.6'}">
+                <td style="padding:0.6rem 0.75rem;white-space:nowrap;vertical-align:top;">
+                    <code style="background:#dbeafe;padding:2px 6px;border-radius:3px;color:#1e3a8a;font-size:0.78rem;">${esc(b.src)}</code>
+                </td>
+                <td style="padding:0.6rem 0.75rem;white-space:nowrap;vertical-align:top;">
+                    <code style="background:#fce7f3;padding:2px 6px;border-radius:3px;color:#831843;font-size:0.78rem;">${esc(b.fhir)}</code>
+                </td>
+                <td style="padding:0.6rem 0.75rem;vertical-align:top;">
+                    <div style="font-size:0.82rem;font-weight:600;color:#1e293b;">${esc(b.label)}</div>
+                    <div style="font-size:0.75rem;color:#64748b;margin-top:2px;">${esc(b.desc)}</div>
+                </td>
+                <td style="padding:0.6rem 0.75rem;text-align:center;vertical-align:top;">
+                    <label style="cursor:pointer;display:inline-flex;align-items:center;" title="${isOn ? 'Disable' : 'Enable'} this optional resource">
+                        <input type="checkbox" class="assembly-rule-toggle"
+                            data-rule-key="${esc(b.key)}"
+                            ${isOn ? 'checked' : ''}
+                            style="width:15px;height:15px;cursor:pointer;accent-color:#16a34a;">
+                    </label>
+                </td>
+            </tr>`;
+        }).join('');
+
+        return `
+            <!-- Optional output resources — OFF by default -->
+            <div style="border:1px solid #bbf7d0;border-radius:8px;overflow:hidden;margin-top:1rem;">
+                <div style="padding:0.6rem 0.75rem;background:#f0fdf4;border-bottom:1px solid #bbf7d0;display:flex;align-items:center;gap:0.5rem;">
+                    <i class="fas fa-plus-circle" style="color:#16a34a;font-size:0.9rem;"></i>
+                    <span style="font-weight:600;font-size:0.85rem;color:#14532d;">Optional Output Resources</span>
+                    <span style="font-size:0.75rem;color:#166534;margin-left:0.25rem;">— off by default, enable what your downstream system requires</span>
+                </div>
+                <table style="width:100%;border-collapse:collapse;">
+                    <thead style="background:#f0fdf4;">
+                        <tr>
+                            <th style="padding:0.5rem 0.75rem;text-align:left;font-size:0.75rem;color:#166534;border-bottom:1px solid #dcfce7;white-space:nowrap;">HL7 Source</th>
+                            <th style="padding:0.5rem 0.75rem;text-align:left;font-size:0.75rem;color:#166534;border-bottom:1px solid #dcfce7;white-space:nowrap;">FHIR Resource</th>
+                            <th style="padding:0.5rem 0.75rem;text-align:left;font-size:0.75rem;color:#166534;border-bottom:1px solid #dcfce7;">What it produces</th>
+                            <th style="padding:0.5rem 0.75rem;text-align:center;font-size:0.75rem;color:#166534;border-bottom:1px solid #dcfce7;width:60px;">On</th>
+                        </tr>
+                    </thead>
+                    <tbody>${optRows}</tbody>
                 </table>
             </div>
         `;
@@ -2462,6 +2652,11 @@ OBX|3|NM|2075-0^Chloride||102|mmol/L</pre>
                 step.config.assemblyRules[toggle.dataset.ruleKey] = toggle.checked;
                 const row = toggle.closest('tr');
                 if (row) row.style.opacity = toggle.checked ? '1' : '0.45';
+                // Update the validate_base64 label text
+                if (toggle.dataset.ruleKey === 'validate_base64') {
+                    const lbl = toggle.parentElement.querySelector('[data-validate-base64-label]');
+                    if (lbl) lbl.textContent = toggle.checked ? 'Check encoding' : 'Pass through (no check)';
+                }
             });
         });
 
@@ -8079,7 +8274,7 @@ return {
                     { name: 'use_template', type: 'boolean', required: false, description: 'Use wizard-configured field mappings (default: true).' },
                     { name: 'mappings', type: 'array', required: false, description: 'Array of field mappings. Each entry maps one HL7 field or enriched value to one FHIR path.' },
                     { name: 'assembleObservations', type: 'boolean', required: false, description: 'Master switch for structural assembly. When false all assembly rules are skipped regardless of individual rule settings. Default: true.' },
-                    { name: 'assemblyRules', type: 'object', required: false, description: 'Per-rule on/off flags for structural assembly. All rules default to true when absent. Set a key to false to disable that specific transform. Keys: collapse_text_obx, obs_value_dispatch, obs_value_unit, obs_code, obs_reference_range, obs_interpretation, obs_status, obs_category, obs_subject, obs_effective, dr_result_links, dr_subject, dr_code, dr_status, dr_effective, dr_category.' }
+                    { name: 'assemblyRules', type: 'object', required: false, description: 'Per-rule on/off flags for structural assembly. All rules default to true when absent. Set a key to false to disable that specific transform. Keys: collapse_text_obx, obs_value_dispatch, obs_value_unit, obs_code, obs_reference_range, obs_interpretation, obs_status, obs_category, obs_subject, obs_effective, obs_nte_note, dr_result_links, dr_subject, dr_code, dr_status, dr_effective, dr_category.' }
                 ],
                 assemblyRulesDoc: [
                     { key: 'collapse_text_obx',   src: 'OBX.3 + OBX.2', fhir: 'Observation.valueString', desc: '<strong>Merge mode</strong> — controlled in the "Text Report Merging" card at the top of the Assembly tab. When enabled, consecutive TX/FT OBX segments sharing the same OBX.3 code are joined into one Observation.valueString (the HL7 continuation-segment pattern). Example: a 50-line surgical pathology report sent as OBX|1|TX … OBX|50|TX all with OBX.3=4050097^Surg Path produces one Observation instead of 50. Disable (or restrict to specific services via <code>collapse_text_obx_services</code>) when your discrete lab results also happen to use the same OBX.3 across rows. <em>Examples where merging is correct: AP (Anatomic Pathology), RAD (Radiology), SP (Surgical Path). Examples where merging should be OFF or restricted: CH (Chemistry), MB (Microbiology) — each analyte has a distinct OBX.3.</em>' },
@@ -8092,6 +8287,7 @@ return {
                     { key: 'obs_category',         src: '(fixed)',        fhir: 'Observation.category[]', desc: 'Adds the standard laboratory category coding (http://terminology.hl7.org/CodeSystem/observation-category | laboratory).' },
                     { key: 'obs_subject',          src: 'Patient.id',    fhir: 'Observation.subject',    desc: 'Links Observation.subject → Patient/<id> using the Patient resource already in the output.' },
                     { key: 'obs_effective',        src: 'OBX.14',        fhir: 'effectiveDateTime',      desc: 'Converts OBX.14 from HL7 TS format (20120410160227) to ISO 8601 (2012-04-10T16:02:27+00:00).' },
+                    { key: 'obs_nte_note',         src: 'NTE.3',         fhir: 'note[].text',             desc: 'Clubs consecutive NTE segments following an OBX into Observation.note[0].text. Multiple NTE lines joined with newlines; blank lines become paragraph breaks. NTE after OBR (before first OBX) goes to DiagnosticReport.note.' },
                     { key: 'dr_result_links',      src: 'Observation ids', fhir: 'DiagnosticReport.result[]', desc: 'Populates DiagnosticReport.result[] with references to all assembled Observations.' },
                     { key: 'dr_subject',           src: 'Patient.id',    fhir: 'DiagnosticReport.subject', desc: 'Links DiagnosticReport.subject → Patient/<id>.' },
                     { key: 'dr_code',              src: 'OBR.4',         fhir: 'DiagnosticReport.code',  desc: 'Builds CodeableConcept from OBR.4 (ordered test / panel code). Required field in FHIR R4 DiagnosticReport.' },

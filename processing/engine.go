@@ -9,6 +9,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -25,6 +27,7 @@ import (
 // share the same singleton without circular init dependency.
 func backpressureRegistry() *backpressure.Registry { return backpressure.Get() }
 
+
 // ProcessingEngine provides basic interface engine functionality
 type ProcessingEngine struct {
 	db                   *sql.DB
@@ -34,6 +37,7 @@ type ProcessingEngine struct {
 	mutex               sync.RWMutex
 	stats               *EngineStats
 	running             bool
+	inFlight            sync.WaitGroup  // tracks processMessages goroutines for graceful shutdown
 	connectorFactory     ConnectorFactory                        // Factory for creating connectors (OOB pattern)
 	parserService        *services.MessageParserService   // JSON conversion service
 	objectStorage        *storage.ObjectStorageService    // Object storage (S3/MinIO/local)
@@ -230,30 +234,72 @@ func (pe *ProcessingEngine) restoreActiveInterfaces() {
 }
 
 // Stop stops the processing engine and all active connectors.
+// Stop shuts down the processing engine gracefully.
+//
+// Sequence:
+//  1. Stop all active connectors (no new messages can enter the channels).
+//  2. Close all message channels so processMessages goroutines exit their range loop.
+//  3. Wait for in-flight goroutines with a configurable timeout
+//     (PIPELINE_SHUTDOWN_TIMEOUT_SECONDS env var, default 30 s).
+//  4. Mark all interfaces inactive in the database.
 func (pe *ProcessingEngine) Stop() error {
 	pe.mutex.Lock()
-	defer pe.mutex.Unlock()
 
 	if !pe.running {
+		pe.mutex.Unlock()
 		return fmt.Errorf("engine is not running")
 	}
 
-	// Stop every active connector so TCP listeners release their ports immediately.
+	// Step 1: stop connectors — no new messages can be enqueued after this.
 	for key, connector := range pe.activeConnectors {
 		if stopErr := connector.Stop(); stopErr != nil {
 			log.Printf("⚠️  Error stopping connector %s during engine stop: %v", key, stopErr)
 		}
 	}
 	pe.activeConnectors = make(map[string]InputConnector)
+
+	// Step 2: close channels — signals processMessages goroutines to drain and exit.
+	for _, ch := range pe.messageChan {
+		close(ch)
+	}
 	pe.messageChan = make(map[string]chan *models.InboundMessage)
 	pe.activeInterfaces = make(map[string]*InterfaceStatus)
+	pe.running = false
+	pe.mutex.Unlock()
 
-	// Mark all interfaces that were running as inactive so the UI reflects reality.
-	if _, err := pe.db.Exec(`UPDATE interfaces SET status = 'inactive' WHERE status = 'active'`); err != nil {
-		log.Printf("⚠️  Failed to reset interface statuses on engine stop: %v", err)
+	// Step 3: wait for in-flight goroutines with a configurable timeout.
+	shutdownTimeout := 30 * time.Second
+	if s := os.Getenv("PIPELINE_SHUTDOWN_TIMEOUT_SECONDS"); s != "" {
+		if n, err := strconv.Atoi(s); err == nil && n > 0 {
+			shutdownTimeout = time.Duration(n) * time.Second
+		}
 	}
 
-	pe.running = false
+	done := make(chan struct{})
+	go func() {
+		pe.inFlight.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		log.Printf("✅ All in-flight messages completed — engine stopped cleanly")
+	case <-time.After(shutdownTimeout):
+		log.Printf("⚠️  Shutdown timeout (%s) reached — %d goroutine(s) may not have completed",
+			shutdownTimeout, func() int {
+				// Best-effort count — WaitGroup doesn't expose a counter publicly.
+				// Log the timeout so ops know messages may have been interrupted.
+				return -1
+			}())
+	}
+
+	// Step 4: reflect the stopped state in the database.
+	if pe.db != nil {
+		if _, err := pe.db.Exec(`UPDATE interfaces SET status = 'inactive' WHERE status = 'active'`); err != nil {
+			log.Printf("⚠️  Failed to reset interface statuses on engine stop: %v", err)
+		}
+	}
+
 	return nil
 }
 
@@ -263,6 +309,21 @@ func (pe *ProcessingEngine) SetCodeTemplateService(svc *services.CodeTemplateSer
 	if pe.transformationService != nil {
 		pe.transformationService.SetCodeTemplateService(svc)
 	}
+}
+
+// SetDLQService wires the DLQService into the outbound connector executor so that
+// delivery failures are durably recorded for async redrive.
+func (pe *ProcessingEngine) SetDLQService(dlqSvc *DLQService) {
+	if pe.transformationService != nil {
+		pe.transformationService.GetExecutorRegistry().SetDLQService(dlqSvc)
+	}
+}
+
+// GetPipelineRedriver returns the TransformationPipelineService as a PipelineRedriver
+// (connectors.PipelineRedriver, accessible without qualification due to the dot import).
+// Used by DLQService.StartPoller to redrive messages through the full pipeline path.
+func (pe *ProcessingEngine) GetPipelineRedriver() PipelineRedriver {
+	return pe.transformationService
 }
 
 // IsRunning returns whether the engine is running
@@ -415,6 +476,7 @@ func (pe *ProcessingEngine) ActivateInterface(interfaceID string) error {
 			key := interfaceID + ":" + step.stepID
 			pe.activeConnectors[key] = connector
 			pe.messageChan[key] = msgChan
+			pe.inFlight.Add(1)
 			go pe.processMessages(interfaceID, msgChan)
 
 			log.Printf("✅ Started %s connector for interface %s (step: '%s')", oobType, interfaceID, step.stepName)
@@ -515,6 +577,7 @@ func (pe *ProcessingEngine) ActivateInterface(interfaceID string) error {
 
 		pe.activeConnectors[interfaceID] = connector
 		pe.messageChan[interfaceID] = messageChan
+		pe.inFlight.Add(1)
 		go pe.processMessages(interfaceID, messageChan)
 	}
 

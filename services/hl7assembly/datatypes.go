@@ -385,8 +385,9 @@ func NormalizeIdentifierSystem(sys string) string {
 		}
 		return "" // unresolvable — omit rather than write invalid system
 	}
-	// Bare OID (starts with digit, contains dots)
-	if len(sys) > 0 && sys[0] >= '0' && sys[0] <= '9' {
+	// Bare OID — must start with a digit AND contain at least one dot (e.g. "2.16.840.1.113883")
+	// to avoid treating short numeric IDs like "1" or "001" as OIDs.
+	if len(sys) > 0 && sys[0] >= '0' && sys[0] <= '9' && strings.Contains(sys, ".") {
 		return "urn:oid:" + sys
 	}
 	// Well-known namespace IDs that map to canonical FHIR system URIs
@@ -458,11 +459,16 @@ func BuildIdentifierFromCX(cx string, rules map[string]interface{}) map[string]i
 		cx = cx[:idx]
 	}
 	components := strings.Split(cx, "^")
-	identifier := map[string]interface{}{"use": "usual"}
 
-	// CX.1 — the ID value itself
-	if len(components) > 0 && components[0] != "" {
-		identifier["value"] = components[0]
+	// CX.1 — the ID value itself; return nil when absent so callers don't
+	// place a skeleton {"use":"usual"} object as an identifier value.
+	if len(components) == 0 || components[0] == "" {
+		return nil
+	}
+
+	identifier := map[string]interface{}{
+		"use":   "usual",
+		"value": components[0],
 	}
 
 	// CX.4 — Assigning Authority HD → identifier.system
@@ -764,8 +770,20 @@ func BuildContactPointFromXTN(xtn string, rules map[string]interface{}) map[stri
 //
 //	SourceApplication ^ TypeOfData ^ DataSubtype ^ Encoding ^ Data
 //
-// FHIR R4 constraint att-1: contentType is required only when data is present.
-func BuildAttachmentFromED(ed string) map[string]interface{} {
+// FHIR R4 constraints:
+//   - att-1 (SHALL): contentType is required when data is present.
+//   - att-2 (SHOULD): when neither data nor url is present, contentType or
+//     language should be present.
+//
+// validateBase64 controls whether the data string is checked for valid base64
+// encoding before writing it to the Attachment (mirrors AssemblyRules.ValidateBase64
+// / ruleOn semantics — callers should pass ruleOn(rules.ValidateBase64)):
+//   - true  (default) — validate: omit data and substitute a descriptive
+//     title when the string cannot be decoded; contentType is still set from
+//     the ED type fields so att-2 is satisfied.
+//   - false — passthrough: copy data as-is; appropriate when the source is
+//     known to always send well-formed base64.
+func BuildAttachmentFromED(ed string, validateBase64 bool) map[string]interface{} {
 	parts := strings.Split(ed, "^")
 	att := map[string]interface{}{}
 
@@ -783,11 +801,19 @@ func BuildAttachmentFromED(ed string) map[string]interface{} {
 		data = strings.TrimSpace(strings.Join(parts[4:], "^"))
 	}
 
+	// contentType is always derived from the ED type fields (att-1 and att-2):
+	//   att-1: required when data is present (handled in the block below).
+	//   att-2: SHOULD be present even when data is omitted — satisfies the FHIR
+	//          validator warning "no data/url — should have contentType or language".
+	if mime := edToMIMEType(dataType, dataSubtype); mime != "" {
+		att["contentType"] = mime
+	}
+
 	if data != "" {
 		cleanData := strings.TrimSpace(data)
-		if isValidBase64Data(cleanData) {
+		dataOK := !validateBase64 || isValidBase64Data(cleanData)
+		if dataOK {
 			att["data"] = cleanData
-			att["contentType"] = edToMIMEType(dataType, dataSubtype)
 			// title from subtype / type
 			if dataSubtype != "" {
 				att["title"] = strings.ToUpper(dataSubtype) + " attachment"
@@ -799,9 +825,8 @@ func BuildAttachmentFromED(ed string) map[string]interface{} {
 				att["title"] = title + " [encoding:" + encoding + "]"
 			}
 		} else {
-			// Data present but not valid base64 — omit both data AND contentType.
-			// att-1 only requires contentType when data IS present; setting it
-			// without data triggers unnecessary BCP-13 fragment validation.
+			// Validation enabled and data is not valid base64 — omit data only.
+			// contentType is already set above so att-2 is satisfied.
 			att["title"] = "(data omitted — not valid base64)"
 		}
 	}
@@ -857,11 +882,36 @@ func BuildAttachmentFromRP(rp string) map[string]interface{} {
 // importing a separate utility.
 func ToISO(ts string) string {
 	ts = strings.TrimSpace(ts)
-	if plus := strings.IndexByte(ts, '+'); plus > 8 {
-		ts = ts[:plus]
-	} else if minus := strings.LastIndexByte(ts, '-'); minus > 8 {
-		ts = ts[:minus]
+	// Already ISO-formatted (YYYY-MM-DD...) — return as-is so repeated calls
+	// are safe (AssembleORUObservations and the normalizer may both call this).
+	if len(ts) >= 8 && ts[4] == '-' {
+		return ts
 	}
+
+	// Extract and reformat the UTC offset BEFORE stripping it from the digit string.
+	// HL7 format: +HHMM or -HHMM (e.g. -0400 → -04:00, +0530 → +05:30).
+	// Default to +00:00 only when the sender provided no explicit offset — callers
+	// that need true UTC conversion must do so externally.
+	offset := "+00:00"
+	if plus := strings.IndexByte(ts, '+'); plus > 8 {
+		raw := strings.TrimSpace(ts[plus+1:])
+		ts = ts[:plus]
+		if len(raw) == 4 {
+			offset = "+" + raw[0:2] + ":" + raw[2:4]
+		}
+	} else if minus := strings.LastIndexByte(ts, '-'); minus > 8 {
+		raw := strings.TrimSpace(ts[minus+1:])
+		ts = ts[:minus]
+		if len(raw) == 4 {
+			offset = "-" + raw[0:2] + ":" + raw[2:4]
+		}
+	}
+
+	// Strip fractional seconds (.SSSS) — not representable in FHIR dateTime.
+	if dot := strings.IndexByte(ts, '.'); dot >= 8 {
+		ts = ts[:dot]
+	}
+
 	if len(ts) < 8 {
 		return ts
 	}
@@ -872,9 +922,72 @@ func ToISO(ts string) string {
 		if len(ts) >= 14 {
 			sec = ts[12:14]
 		}
-		return year + "-" + month + "-" + day + "T" + hour + ":" + min + ":" + sec + "+00:00"
+		return year + "-" + month + "-" + day + "T" + hour + ":" + min + ":" + sec + offset
 	}
 	return year + "-" + month + "-" + day
+}
+
+// XCNDisplay builds a human-readable display string from an HL7 XCN composite (person).
+// XCN wire layout (Table 2.A.86): [0]=ID [1]=Family [2]=Given [3]=Middle
+//
+//	[4]=Suffix [5]=Prefix [6]=Degree …
+func XCNDisplay(raw string) string {
+	if raw == "" {
+		return ""
+	}
+	parts := strings.Split(raw, "^")
+	get := func(i int) string {
+		if i < len(parts) {
+			return strings.TrimSpace(parts[i])
+		}
+		return ""
+	}
+	prefix, given, family := get(5), get(2), get(1)
+	var tokens []string
+	for _, t := range []string{prefix, given, family} {
+		if t != "" {
+			tokens = append(tokens, t)
+		}
+	}
+	if len(tokens) > 0 {
+		return strings.Join(tokens, " ")
+	}
+	if id := get(0); id != "" {
+		return id
+	}
+	return raw
+}
+
+// XONCEDisplay builds a human-readable display string from an HL7 XON (v2.5+) or CE (v2.3)
+// composite used in organization-identity fields such as OBX.15 (Producer ID).
+//
+//   - XON (v2.5+): [0]=OrganizationName [1]=TypeCode …
+//   - CE  (v2.3):  [0]=Identifier(code) [1]=Text(name) [2]=CodingSystem …
+//
+// Heuristic: when [0] contains no spaces but [1] does, [1] is the human-readable
+// name (CE-style). Otherwise [0] is the name (XON-style).
+func XONCEDisplay(raw string) string {
+	if raw == "" {
+		return ""
+	}
+	parts := strings.Split(raw, "^")
+	get := func(i int) string {
+		if i < len(parts) {
+			return strings.TrimSpace(parts[i])
+		}
+		return ""
+	}
+	p0, p1 := get(0), get(1)
+	if p1 != "" && !strings.Contains(p0, " ") && strings.Contains(p1, " ") {
+		return p1 // CE-style: p0 is a code word, p1 is the display text
+	}
+	if p0 != "" {
+		return p0
+	}
+	if p1 != "" {
+		return p1
+	}
+	return raw
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -915,8 +1028,8 @@ func ORCStatusToDRStatus(orc1 string) string {
 		return "cancelled"
 	case "HD", "UD": // Hold / unable to fulfill
 		return "registered"
-	case "RE": // Observations to follow
-		return "partial"
+	case "RE": // Observations to follow — order accepted, results pending
+		return "unknown"
 	case "":
 		return "unknown"
 	default:
@@ -1039,6 +1152,21 @@ func edToMIMEType(dataType, subType string) string {
 		return "application/octet-stream"
 	case "multipart":
 		return "multipart/mixed"
+	// HL7 ED TypeOfData values that map directly to a MIME type
+	case "pdf":
+		return "application/pdf"
+	case "html", "htm":
+		return "text/html"
+	case "rtf":
+		return "application/rtf"
+	case "xml":
+		return "application/xml"
+	case "cda":
+		return "application/cda+xml"
+	case "dicom":
+		return "application/dicom"
+	case "zip":
+		return "application/zip"
 	}
 	return "application/octet-stream"
 }

@@ -95,7 +95,7 @@ func buildMergedTextObservation(
 	for len(lines) > 0 && strings.TrimSpace(lines[len(lines)-1]) == "" {
 		lines = lines[:len(lines)-1]
 	}
-	fullText := strings.Join(lines, "\n")
+	fullText := strings.TrimSpace(strings.Join(lines, "\n"))
 
 	if fullText != "" {
 		obs["valueString"] = fullText
@@ -574,6 +574,21 @@ func buildDRNarrative(dr map[string]interface{}, resultCount int) string {
 	return b.String()
 }
 
+// isAssemblyDocRef returns true when the DocumentReference ID was auto-generated
+// by AssembleORUObservations ("docref-1", "docref-2", …).  These are always
+// discarded and rebuilt on each assembly run so the function is idempotent.
+func isAssemblyDocRef(id string) bool {
+	if !strings.HasPrefix(id, "docref-") {
+		return false
+	}
+	for _, ch := range id[len("docref-"):] {
+		if ch < '0' || ch > '9' {
+			return false
+		}
+	}
+	return len(id) > len("docref-")
+}
+
 // escapeXML escapes the five predefined XML entities.
 func escapeXML(s string) string {
 	s = strings.ReplaceAll(s, "&", "&amp;")
@@ -608,7 +623,10 @@ func BuildObservationFromOBX(seg hl7.EnhancedSegment, patientRef string, rules A
 	abnFlag := SegFieldValue(seg, "OBX.8")
 	statusRaw := SegFieldValue(seg, "OBX.11")
 	obsDate := SegFieldValue(seg, "OBX.14")
-	performerRaw := SegFieldValue(seg, "OBX.16")
+	// OBX.16 = Responsible Observer (XCN — person); OBX.15 = Producer ID (XON/CE — org).
+	// Kept as separate reads so each gets the correct composite display function below.
+	obx16Raw := SegFieldValue(seg, "OBX.16")
+	obx15Raw := SegFieldValue(seg, "OBX.15")
 
 	facilityNS := rules.FacilityNamespace
 	tier3Used := false
@@ -656,8 +674,14 @@ func BuildObservationFromOBX(seg hl7.EnhancedSegment, patientRef string, rules A
 	if ruleOn(rules.ObsSubject) && patientRef != "" {
 		obs["subject"] = map[string]interface{}{"reference": patientRef}
 	}
-	if ruleOn(rules.ObsEffective) && obsDate != "" {
-		obs["effectiveDateTime"] = ToISO(obsDate)
+	if ruleOn(rules.ObsEffective) {
+		effDate := obsDate
+		if effDate == "" {
+			effDate = rules.OBRDateTime
+		}
+		if effDate != "" {
+			obs["effectiveDateTime"] = ToISO(effDate)
+		}
 	}
 
 	// value[x] — dispatched by OBX.2 type per HL7 v2.x Table 0125.
@@ -702,11 +726,11 @@ func BuildObservationFromOBX(seg hl7.EnhancedSegment, patientRef string, rules A
 		case "ST": // String
 			obs["valueString"] = valueRaw
 
-		case "TX": // Text data (multi-line)
-			obs["valueString"] = valueRaw
+		case "TX": // Text data (multi-line) — HL7 uses ~ as line separator in OBX.5 repetitions
+			obs["valueString"] = strings.ReplaceAll(valueRaw, "~", "\n")
 
-		case "FT": // Formatted text
-			obs["valueString"] = valueRaw
+		case "FT": // Formatted text — same repetition encoding as TX
+			obs["valueString"] = strings.ReplaceAll(valueRaw, "~", "\n")
 
 		// ── Date / Time ────────────────────────────────────────────────────────
 		case "DT": // Date (YYYYMMDD)
@@ -727,7 +751,9 @@ func BuildObservationFromOBX(seg hl7.EnhancedSegment, patientRef string, rules A
 
 		// ── Attachment / Binary ────────────────────────────────────────────────
 		case "ED": // Encapsulated Data — SourceApp^TypeOfData^DataSubtype^Encoding^Data
-			obs["valueAttachment"] = BuildAttachmentFromED(valueRaw)
+			// ValidateBase64 uses ruleOn semantics: nil / true = validate (default),
+			// explicit false = passthrough for sources known to send valid base64.
+			obs["valueAttachment"] = BuildAttachmentFromED(valueRaw, ruleOn(rules.ValidateBase64))
 
 		case "RP": // Reference Pointer — Pointer^ApplicationID^TypeOfData^DataSubtype (HL7 v2 2.A.65)
 			// RP is a URL/URI pointer to external data; the actual bytes live at the URL.
@@ -792,15 +818,10 @@ func BuildObservationFromOBX(seg hl7.EnhancedSegment, patientRef string, rules A
 		obs["interpretation"] = []interface{}{AbnormalFlagToInterpretation(abnFlag)}
 	}
 
-	if performerRaw != "" {
-		parts := strings.Split(performerRaw, "^")
-		display := performerRaw
-		if len(parts) >= 3 && parts[2] != "" {
-			display = parts[2] + " " + parts[1]
-		} else if len(parts) >= 2 && parts[1] != "" {
-			display = parts[1]
-		}
-		obs["performer"] = []interface{}{map[string]interface{}{"display": display}}
+	if obx16Raw != "" {
+		obs["performer"] = []interface{}{map[string]interface{}{"display": XCNDisplay(obx16Raw)}}
+	} else if obx15Raw != "" {
+		obs["performer"] = []interface{}{map[string]interface{}{"display": XONCEDisplay(obx15Raw)}}
 	}
 
 	// Narrative (dom-6 best-practice): generate after all fields are populated.
@@ -832,6 +853,7 @@ type AssemblyRules struct {
 	ObsCategory       *bool // (fixed)     → category[laboratory]
 	ObsSubject        *bool // Patient.id  → subject.reference
 	ObsEffective      *bool // OBX.14      → effectiveDateTime
+	ObsNTENote        *bool // NTE.3       → note[].text (multiple NTE lines joined)
 	ObsNarrative      *bool // generate XHTML narrative (dom-6 best practice)
 
 	// DiagnosticReport rules (once per message)
@@ -867,6 +889,38 @@ type AssemblyRules struct {
 	// When empty, AssembleORUObservations auto-derives it from MSH.4 (Sending Facility).
 	// Set to "-" to disable Tier-3 entirely (codes will have no system).
 	FacilityNamespace string
+
+	// OBRDateTime is the OBR.7 observation date/time string (HL7 TS format).
+	// Used as a fallback for Observation.effectiveDateTime when OBX.14 is empty.
+	// Populated automatically by AssembleORUObservations; callers do not need to set it.
+	OBRDateTime string
+
+	// ── Optional output resources ─────────────────────────────────────────────
+	// These are OFF by default (nil = disabled).  Users enable them per-interface
+	// via the Assembly tab toggle in the HL7→FHIR pipeline step config.
+	// Unlike the rules above (which default ON), these require explicit opt-in.
+	//
+	// OptPV1Encounter: assemble PV1 → Encounter for message types that don't
+	//   produce Encounter by default (ORU^R01, MDM^T01/T02/T11).
+	OptPV1Encounter *bool
+	// OptSPMSpecimen: assemble SPM → Specimen linked to DiagnosticReport.
+	OptSPMSpecimen *bool
+	// OptORCPractitioner: add ORC.12 ordering provider as Practitioner linked
+	//   to DiagnosticReport.basedOn.
+	OptORCPractitioner *bool
+
+	// ValidateBase64 controls whether OBX.5 ED attachment data is checked for
+	// valid base64 encoding before being written to FHIR Attachment.data.
+	// Uses ruleOn semantics (same as other rules):
+	//   nil / true  (default) — validate: omit data+contentType and set a
+	//                           descriptive title when decoding fails; produces
+	//                           valid FHIR regardless of source data quality.
+	//   false                 — passthrough: copy the raw data string as-is;
+	//                           appropriate when the source is known to always
+	//                           send well-formed base64 and validation overhead
+	//                           is undesirable.
+	// Configure per-interface in the composite params: "validateBase64": false
+	ValidateBase64 *bool
 }
 
 // ruleOn returns true when the pointer is nil (absent = default on) or points to true.
@@ -895,6 +949,7 @@ func AssemblyRulesFromConfig(raw map[string]interface{}) AssemblyRules {
 		ObsCategory:       get("obs_category"),
 		ObsSubject:        get("obs_subject"),
 		ObsEffective:      get("obs_effective"),
+		ObsNTENote:        get("obs_nte_note"),
 		ObsNarrative:      get("obs_narrative"),
 		DRResultLinks:     get("dr_result_links"),
 		DRSubject:         get("dr_subject"),
@@ -921,8 +976,17 @@ func AssemblyRulesFromConfig(raw map[string]interface{}) AssemblyRules {
 	if ns, ok := raw["facility_namespace"].(string); ok {
 		r.FacilityNamespace = ns
 	}
+	r.ValidateBase64 = get("validate_base64")
+	// Optional output resources — nil = disabled (opposite of rules above which nil = enabled).
+	r.OptPV1Encounter    = get("opt_PV1_Encounter")
+	r.OptSPMSpecimen     = get("opt_SPM_Specimen")
+	r.OptORCPractitioner = get("opt_ORC_OrderingPractitioner")
 	return r
 }
+
+// OptRuleOn returns true only when the pointer is non-nil and points to true.
+// Used for optional segment blocks that are OFF by default (nil = disabled).
+func OptRuleOn(p *bool) bool { return p != nil && *p }
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Main assembly entry point
@@ -972,6 +1036,8 @@ func AssembleORUObservations(
 	if len(obrList) > 0 {
 		obrDateTime = SegFieldValue(obrList[0], "OBR.7")
 	}
+	// Pass OBR.7 as fallback effectiveDateTime for each Observation (used when OBX.14 is empty).
+	rules.OBRDateTime = obrDateTime
 
 	// Separate: keep DR and Patient, discard placeholder Observations.
 	// This must happen before the OBX early-return so DR mandatory fields
@@ -992,6 +1058,14 @@ func AssembleORUObservations(
 			kept = append(kept, r)
 		case "Observation":
 			// discard — rebuilt from OBX loop below
+		case "DocumentReference":
+			// discard assembly-generated DocRefs (id pattern "docref-N") — they are
+			// rebuilt by the ED-lift pass below.  This keeps the function idempotent
+			// when called more than once (e.g. OBRProcessor followed by a profile
+			// composite), preventing duplicate DocumentReference entries in the bundle.
+			if id, _ := r["id"].(string); !isAssemblyDocRef(id) {
+				kept = append(kept, r) // keep user-supplied DocRefs with other IDs
+			}
 		default:
 			kept = append(kept, r)
 		}
@@ -1084,7 +1158,7 @@ func AssembleORUObservations(
 
 	// Attach OBR-level NTE notes to DiagnosticReport.note.
 	// Multiple NTE lines are one logical comment split by field-length limits → join into one Annotation.
-	if dr != nil && len(drNotes) > 0 {
+	if ruleOn(rules.ObsNTENote) && dr != nil && len(drNotes) > 0 {
 		if combined := joinNTELines(drNotes); combined != "" {
 			dr["note"] = []interface{}{map[string]interface{}{"text": combined}}
 		}
@@ -1108,9 +1182,11 @@ func AssembleORUObservations(
 
 		// Attach NTE notes from the first OBX in the group (positional index = grp.firstOBXIndex).
 		// Multiple NTE lines are one logical comment split by field-length limits → join into one Annotation.
-		if noteTexts, ok := obxNotes[grp.firstOBXIndex]; ok && len(noteTexts) > 0 {
-			if combined := joinNTELines(noteTexts); combined != "" {
-				obs["note"] = []interface{}{map[string]interface{}{"text": combined}}
+		if ruleOn(rules.ObsNTENote) {
+			if noteTexts, ok := obxNotes[grp.firstOBXIndex]; ok && len(noteTexts) > 0 {
+				if combined := joinNTELines(noteTexts); combined != "" {
+					obs["note"] = []interface{}{map[string]interface{}{"text": combined}}
+				}
 			}
 		}
 

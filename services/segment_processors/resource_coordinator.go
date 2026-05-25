@@ -118,6 +118,19 @@ func (c *ResourceCoordinator) All() []map[string]interface{} {
 	return c.resources
 }
 
+// ReplaceAll replaces the entire resource slice and rebuilds the index.
+// Use after a bulk assembly operation (e.g. AssembleORUObservations) that
+// returns a new slice rather than mutating individual resources in-place.
+func (c *ResourceCoordinator) ReplaceAll(resources []map[string]interface{}) {
+	c.resources = resources
+	c.index = make(map[string]int, len(resources))
+	for i, r := range resources {
+		if ref := LogicalRef(r); ref != "" {
+			c.index[ref] = i
+		}
+	}
+}
+
 // LogicalRef returns the "ResourceType/id" string for a resource.
 // Returns "" when either field is absent or empty.
 func LogicalRef(r map[string]interface{}) string {

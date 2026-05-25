@@ -12,18 +12,77 @@ import (
 	"database/sql"
 	"fmt"
 	"strings"
+	"sync"
 )
 
 // =====================================
 // VALUE MAPPER
 // =====================================
 
+type cachedEntry struct {
+	fhirSystem  string
+	fhirCode    string
+	fhirDisplay string
+}
+
 type ValueMapper struct {
-	db *sql.DB
+	db    *sql.DB
+	mu    sync.RWMutex
+	cache map[string]map[string]*cachedEntry // hl7Table → (UPPER(hl7Value) → entry)
 }
 
 func NewValueMapper(db *sql.DB) *ValueMapper {
-	return &ValueMapper{db: db}
+	return &ValueMapper{
+		db:    db,
+		cache: make(map[string]map[string]*cachedEntry),
+	}
+}
+
+// loadTable fetches all rows for an HL7 table and stores them in the cache.
+// Called on first access for that table; subsequent calls skip the DB round-trip.
+func (vm *ValueMapper) loadTable(hl7Table string) {
+	if vm.db == nil {
+		return
+	}
+
+	rows, err := vm.db.Query(`
+		SELECT hl7_value, fhir_system, fhir_code, fhir_display
+		FROM hl7_fhir_value_mappings
+		WHERE hl7_table = $1
+	`, hl7Table)
+	if err != nil {
+		// Leave table absent in cache so next call retries
+		return
+	}
+	defer rows.Close()
+
+	tableCache := make(map[string]*cachedEntry)
+	for rows.Next() {
+		var hl7Value, fhirSystem, fhirCode, fhirDisplay string
+		if err := rows.Scan(&hl7Value, &fhirSystem, &fhirCode, &fhirDisplay); err != nil {
+			continue
+		}
+		tableCache[strings.ToUpper(hl7Value)] = &cachedEntry{
+			fhirSystem:  fhirSystem,
+			fhirCode:    fhirCode,
+			fhirDisplay: fhirDisplay,
+		}
+	}
+	if rows.Err() != nil {
+		return
+	}
+
+	vm.mu.Lock()
+	vm.cache[hl7Table] = tableCache
+	vm.mu.Unlock()
+}
+
+// tableLoaded returns true when the table has already been fetched from the DB.
+func (vm *ValueMapper) tableLoaded(hl7Table string) bool {
+	vm.mu.RLock()
+	_, ok := vm.cache[hl7Table]
+	vm.mu.RUnlock()
+	return ok
 }
 
 // =====================================
@@ -35,19 +94,22 @@ func (vm *ValueMapper) MapValue(hl7Table, hl7Value string) (string, string, stri
 		return "", "", "", false
 	}
 
-	var fhirSystem, fhirCode, fhirDisplay string
-	err := vm.db.QueryRow(`
-		SELECT fhir_system, fhir_code, fhir_display 
-		FROM hl7_fhir_value_mappings 
-		WHERE hl7_table = $1 AND hl7_value = $2
-		LIMIT 1
-	`, hl7Table, strings.ToUpper(hl7Value)).Scan(&fhirSystem, &fhirCode, &fhirDisplay)
+	if !vm.tableLoaded(hl7Table) {
+		vm.loadTable(hl7Table)
+	}
 
-	if err != nil {
+	vm.mu.RLock()
+	tableCache, ok := vm.cache[hl7Table]
+	vm.mu.RUnlock()
+	if !ok {
 		return "", "", "", false
 	}
 
-	return fhirSystem, fhirCode, fhirDisplay, true
+	entry, found := tableCache[strings.ToUpper(hl7Value)]
+	if !found {
+		return "", "", "", false
+	}
+	return entry.fhirSystem, entry.fhirCode, entry.fhirDisplay, true
 }
 
 // =====================================
@@ -204,7 +266,7 @@ func (vm *ValueMapper) HasMapping(hl7Table, hl7Value string) bool {
 
 	var count int
 	err := vm.db.QueryRow(`
-		SELECT COUNT(*) FROM hl7_fhir_value_mappings 
+		SELECT COUNT(*) FROM hl7_fhir_value_mappings
 		WHERE hl7_table = $1 AND hl7_value = $2
 	`, hl7Table, strings.ToUpper(hl7Value)).Scan(&count)
 
@@ -219,8 +281,8 @@ func (vm *ValueMapper) GetAllMappingsForTable(hl7Table string) (map[string]strin
 	mappings := make(map[string]string)
 
 	rows, err := vm.db.Query(`
-		SELECT hl7_value, fhir_code 
-		FROM hl7_fhir_value_mappings 
+		SELECT hl7_value, fhir_code
+		FROM hl7_fhir_value_mappings
 		WHERE hl7_table = $1
 	`, hl7Table)
 	if err != nil {

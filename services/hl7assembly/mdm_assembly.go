@@ -147,7 +147,7 @@ func AssembleMDMDocument(
 			}
 		case "ED":
 			if edAtt == nil && value != "" {
-				edAtt = BuildAttachmentFromED(value)
+				edAtt = BuildAttachmentFromED(value, ruleOn(rules.ValidateBase64))
 			}
 		case "RP":
 			if rpAtt == nil && value != "" {
@@ -193,6 +193,22 @@ func AssembleMDMDocument(
 	// subject from Patient
 	if patientRef != "" {
 		docRef["subject"] = map[string]interface{}{"reference": patientRef}
+	}
+
+	// context.encounter — wire Encounter so it is reachable from MessageHeader
+	// through the DocumentReference link chain (validator requires all bundle
+	// entries to be reachable from MessageHeader forward/backward).
+	for _, r := range resources {
+		if r["resourceType"] == "Encounter" {
+			if encID, ok := r["id"].(string); ok && encID != "" {
+				docRef["context"] = map[string]interface{}{
+					"encounter": []interface{}{
+						map[string]interface{}{"reference": "Encounter/" + encID},
+					},
+				}
+			}
+			break
+		}
 	}
 
 	// author from TXA.9 (originator)
@@ -260,6 +276,10 @@ func AssembleMDMDocument(
 
 	// ── Rebuild resource list ─────────────────────────────────────────────────
 	// Drop:   Observation resources (incorrect for MDM — OBX is document content)
+	// Drop:   DocumentReference resources produced by the template mapper — their
+	//         field values are wrong (raw TXA composites placed into FHIR paths
+	//         without the correct status/content transforms). The assembled docRef
+	//         built above is the authoritative replacement.
 	// Update: MessageHeader.focus → DocumentReference (using ResourceType/id form
 	//         so the bundle builder's rewriteReferences() can resolve it to the
 	//         correct urn:uuid: fullUrl that gets assigned at bundle assembly time)
@@ -270,7 +290,10 @@ func AssembleMDMDocument(
 		rt, _ := r["resourceType"].(string)
 		switch rt {
 		case "Observation":
-			// Drop — MDM OBX should not produce standalone Observations
+			// Drop — MDM OBX carries document content, not clinical observations
+		case "DocumentReference":
+			// Drop — template mapper produced incorrect raw-field values; the
+			// assembled docRef below is the correct replacement
 		case "MessageHeader":
 			r["focus"] = []interface{}{
 				map[string]interface{}{"reference": "DocumentReference/" + docRefID},

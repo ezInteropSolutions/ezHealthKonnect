@@ -12,6 +12,7 @@ import (
 
 	"ezhealthkonnect/hl7"
 	"ezhealthkonnect/models"
+	"ezhealthkonnect/services/connectors"
 	"ezhealthkonnect/services/executors/control"
 	"ezhealthkonnect/services/executors/enrichment"
 	payloadexecutor "ezhealthkonnect/services/executors/payload"
@@ -71,6 +72,14 @@ func (er *ExecutorRegistry) SetCodeTemplateService(svc *CodeTemplateService) {
 	log.Printf("📦 [CodeTemplates] Script executor upgraded with code template injection")
 }
 
+// SetDLQService replaces the connector.outbound executor with a DLQ-aware version.
+// Call this after NewExecutorRegistry once the DLQService is ready.
+func (er *ExecutorRegistry) SetDLQService(dlqSvc *connectors.DLQService) {
+	outbound := transform.NewOutboundConnectorExecutorWithDLQ(dlqSvc)
+	er.executors["connector.outbound"] = outbound
+	log.Printf("📥 [DLQ] Outbound connector executor upgraded with DLQ support")
+}
+
 // autoRegisterExecutors registers all built-in executors (OOB pattern)
 func (er *ExecutorRegistry) autoRegisterExecutors() {
 	// Essential OOB executor
@@ -107,7 +116,7 @@ func (er *ExecutorRegistry) autoRegisterExecutors() {
 	er.Register(transform.NewNormalizerExecutor())           // normalizer
 	er.Register(transform.NewDeidentifyExecutor())           // deidentify (HIPAA P1)
 
-	// Connector bridge executors
+	// Connector bridge executors (DLQ service wired later via SetDLQService)
 	er.Register(transform.NewOutboundConnectorExecutor())    // connector.outbound
 	er.Register(transform.NewInboundConnectorExecutor())     // connector.inbound
 
@@ -230,14 +239,16 @@ func (er *ExecutorRegistry) ListExecutors() []string {
 
 // HL7FHIRMappingExecutor handles HL7 to FHIR transformation
 type HL7FHIRMappingExecutor struct {
-	db                *sql.DB
-	transformService  *HL7FHIRTransformServiceV3 // Reuse existing service
+	db               *sql.DB
+	transformService *HL7FHIRTransformServiceV3
+	scorer           *TransformationScorer
 }
 
 func NewHL7FHIRMappingExecutor(db *sql.DB) *HL7FHIRMappingExecutor {
 	return &HL7FHIRMappingExecutor{
 		db:               db,
 		transformService: NewHL7FHIRTransformServiceV3(db),
+		scorer:           NewTransformationScorer(db),
 	}
 }
 
@@ -386,6 +397,11 @@ func (hme *HL7FHIRMappingExecutor) Execute(
 	log.Printf("  🔍 [DEBUG] Transform returned - err: %v, resp: %v", err, resp != nil)
 	if err != nil {
 		return nil, fmt.Errorf("HL7→FHIR transformation failed: %w", err)
+	}
+
+	// Score the transformation asynchronously — zero impact on delivery latency.
+	if hme.scorer != nil {
+		go hme.scorer.ScoreAndPersist(messageID, interfaceID, messageType, resp)
 	}
 
 	// Debug: Check what we got from transformation

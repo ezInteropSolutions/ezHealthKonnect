@@ -27,14 +27,21 @@ import (
 // Its JSON tags match the field names used in hl7_fhir_templates.template_config
 // so callers can marshal directly into the database JSON.
 type GeneratedMapping struct {
-	HL7Path      string  `json:"hl7Path"`
-	FHIRPath     string  `json:"fhirPath"`
-	HL7DataType  string  `json:"hl7DataType"`
-	FHIRDataType string  `json:"fhirDataType"`
-	Transform    string  `json:"transform"`
-	Required     bool    `json:"required"`
-	Confidence   float64 `json:"confidence"`
-	Notes        string  `json:"notes,omitempty"`
+	HL7Path      string                 `json:"hl7Path"`
+	FHIRPath     string                 `json:"fhirPath"`
+	HL7DataType  string                 `json:"hl7DataType"`
+	FHIRDataType string                 `json:"fhirDataType"`
+	Transform    string                 `json:"transform"`
+	Required     bool                   `json:"required"`
+	Confidence   float64                `json:"confidence"`
+	// Source records where this mapping came from: "anchor" or "ig_db" means an
+	// IG ConceptMap-backed entry; "type_match" or "name_similarity" means a
+	// heuristic inference.  OOB templates accept only "anchor" and "ig_db".
+	// Wizard UI shows all sources with their confidence scores.
+	Source       string                 `json:"source,omitempty"`
+	Notes        string                 `json:"notes,omitempty"`
+	ValueMap     map[string]interface{} `json:"valueMap,omitempty"`
+	HL7Table     string                 `json:"hl7Table,omitempty"`
 }
 
 // SegmentMap is the generator output for one segment → resource pairing,
@@ -403,6 +410,7 @@ func (g *Generator) GenerateSegment(
 			Transform:    fhirAwareTransformKey(typeEntry.TransformKey, fieldDef.DataType, best.FHIRPath),
 			Required:     fieldDef.Usage == "R",
 			Confidence:   math.Max(best.Confidence, minConf),
+			Source:       best.Source,
 			Notes:        buildNotes(fieldDef.Name, fieldDef.DataType, typeEntry.Notes),
 		}
 
@@ -558,6 +566,7 @@ func (g *Generator) generateComponents(
 			Transform:    fhirAwareTransformKey(typeEntry.TransformKey, compDef.DataType, best.FHIRPath),
 			Required:     compDef.Usage == "R",
 			Confidence:   best.Confidence,
+			Source:       best.Source,
 			Notes:        compDef.Name,
 		})
 	}

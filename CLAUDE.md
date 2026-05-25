@@ -27,6 +27,39 @@ ezHealthKonnect is an AI-powered healthcare integration platform that transforms
 - **Interface-Specific Tables**: Dedicated message tables per interface for performance isolation
 - **STANDARDIZED SCHEMA ONLY**: All interface tables use identical schema - NO LEGACY COMPATIBILITY
 
+## 🚨 MANDATORY: INVESTIGATE BEFORE ANY CODE CHANGE 🚨
+
+Before writing, editing, deleting, or improving ANY code — for any reason, no matter how small:
+
+1. **Read every file that will be touched**
+2. **Read every file the changed code calls into or depends on**
+3. **State what you found** — what already exists, what is reusable, what the current behavior is
+4. **Only then propose or write code**
+
+This is non-negotiable. No exceptions for "small" changes, "obvious" fixes, or "quick" additions.
+If you skip this and the user catches it — stop immediately, investigate, then continue.
+
+**Why this rule exists:** Features were built (DLQ retry, SendWithRetry) without reading the
+outbound executor first. The result was a redundant retry layer that conflicted with the existing
+`ExecuteWithRetry()` in the pipeline service, and a redrive mechanism that bypassed the pipeline
+entirely. Reading first prevents building the wrong thing.
+
+## 🚨 MANDATORY: OOP/Enterprise-Grade Code Standards 🚨
+
+All code in this repository must be:
+
+- **Enterprise-grade**: production-ready, no prototypes, no placeholder implementations in shipped code
+- **OOP-compliant**: use interfaces, structs with methods, dependency injection — not procedural globals
+- **Reusable**: extract shared logic into services/utilities; no copy-paste between files
+- **Dependency-injected**: services receive dependencies via constructors, not globals or `init()`
+
+No exceptions. A "quick fix" that violates these standards is not acceptable.
+
+**Go**: Expose behavior through interfaces; accept interfaces, return structs; inject via constructor.
+**JavaScript**: Use classes with clear method boundaries; pass services as constructor arguments.
+
+---
+
 ## 🚨 CRITICAL ARCHITECTURAL PRINCIPLES 🚨
 
 ### Schema Standards (NEVER COMPROMISE)

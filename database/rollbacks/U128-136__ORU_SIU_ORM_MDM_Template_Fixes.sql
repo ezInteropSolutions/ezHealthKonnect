@@ -1,0 +1,30 @@
+-- ============================================================================
+-- Rollback: V128 through V136
+-- Scope: template data corrections (ORU, SIU, ORM, MDM mappings + HL7 table annotations)
+--
+-- ⚠️  DATA ROLLBACK — CANNOT BE AUTOMATED
+--
+-- V128–V136 performed UPDATE operations on the hl7_fhir_templates and
+-- interface_message_mappings tables.  The original JSONB values were not
+-- preserved in the migration (Flyway has no implicit undo for DML).
+--
+-- To roll back to the state before V128:
+--
+--   1. Restore from a PostgreSQL backup taken before V128 was applied.
+--      Flyway version: check flyway_schema_history WHERE version < '128'.
+--
+--   2. Or, if no backup is available, re-derive the correct template state
+--      by rolling back to the git commit that predates V128 and re-seeding:
+--
+--         git checkout <commit-before-v128>
+--         psql -c "DELETE FROM hl7_fhir_templates WHERE message_type IN ('ORU^R01','ORU^R03','SIU^S12','ORM^O01','MDM^T02')"
+--         # then restart the app — OOB template builder will re-seed from code
+--
+--   3. Delete the Flyway history rows for V128–V136 so they can re-run:
+--         DELETE FROM flyway_schema_history
+--         WHERE version IN ('128','129','130','131','132','133','134','135','136');
+--
+-- ============================================================================
+-- No automated SQL provided. Manual intervention required.
+-- See architecture/HL7_FHIR_PRODUCTION_PLAN.md for rollback guidance.
+-- ============================================================================

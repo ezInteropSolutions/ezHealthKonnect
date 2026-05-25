@@ -58,6 +58,12 @@ func NewObjectStorageService(driver ObjectStorageDriver, bucket string) (*Object
 // DriverName exposes the underlying driver name for diagnostics.
 func (s *ObjectStorageService) DriverName() string { return s.driver.DriverName() }
 
+// Ping delegates to the underlying driver's health check. Returns nil when
+// the storage backend is reachable and the bucket is accessible.
+func (s *ObjectStorageService) Ping(ctx context.Context) error {
+	return s.driver.Ping(ctx)
+}
+
 // ─── Key helpers ────────────────────────────────────────────────────────────
 
 func rawKey(interfaceID, messageID string) string {

@@ -47,4 +47,8 @@ type ObjectStorageDriver interface {
 
 	// DriverName returns a human-readable name for the driver (e.g. "s3", "local").
 	DriverName() string
+
+	// Ping checks that the storage backend is reachable and the bucket is accessible.
+	// Returns nil when healthy. Used by the /readyz probe.
+	Ping(ctx context.Context) error
 }

@@ -1,0 +1,29 @@
+{
+  "cookies": [
+    {
+      "name": "ezhealth.sid",
+      "value": "s%3AeQL0GfG0lurN5I6hr2tbfb6hVQJ7RVvN.sD6gpSd2nz%2ByFKnE4axKjssOQFMpB7AHBsu5IFMuBJM",
+      "domain": "localhost",
+      "path": "/",
+      "expires": 1779818136.610933,
+      "httpOnly": true,
+      "secure": false,
+      "sameSite": "Lax"
+    }
+  ],
+  "origins": [
+    {
+      "origin": "http://localhost:3000",
+      "localStorage": [
+        {
+          "name": "accessToken",
+          "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiIzMTg1MDk0Zi0yZTQyLTQ4N2ItOTQ0ZC0zNjE3YzlmNWZmYjQiLCJlbWFpbCI6ImFkbWluQGV6aGVhbHRoa29ubmVjdC5jb20iLCJyb2xlIjoiYWRtaW4iLCJpYXQiOjE3Nzk3MzE3MzYsImV4cCI6MTc3OTgxODEzNn0.PK8WsmVJVipSg8Dzd3epYqO80BuYW2VqAzeP6bHPUFc"
+        },
+        {
+          "name": "user",
+          "value": "{\"id\":\"3185094f-2e42-487b-944d-3617c9f5ffb4\",\"email\":\"admin@ezhealthkonnect.com\",\"name\":\"System Administrator\",\"role\":\"admin\"}"
+        }
+      ]
+    }
+  ]
+}

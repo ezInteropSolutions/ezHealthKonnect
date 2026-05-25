@@ -1032,6 +1032,25 @@
                                     </div>
                                 </div>
 
+                                <!-- Optional Segment Mappings -->
+                                <div id="opt-seg-panel" style="display:none;margin:12px 0;padding:14px 16px;background:#f8faff;border:1px solid #e0e7ff;border-radius:8px">
+                                    <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+                                        <span style="font-size:13px;font-weight:700;color:#1e3a8a">Optional Output Resources</span>
+                                        <span id="opt-seg-badge" style="display:none;font-size:10px;background:#1e3a8a;color:#fff;border-radius:99px;padding:1px 7px;font-weight:600"></span>
+                                    </div>
+                                    <p style="font-size:11px;color:#6b7280;margin:0 0 10px;line-height:1.5">
+                                        These segment→resource mappings are <strong>off by default</strong> per the HL7→FHIR IG.
+                                        Enable those your downstream system requires — they take effect on every transform for this interface.
+                                    </p>
+                                    <div id="opt-seg-blocks" style="display:flex;flex-direction:column;gap:8px"></div>
+                                    <div style="margin-top:10px">
+                                        <button id="opt-seg-save-btn" class="config-btn secondary" onclick="window.step4FHIR.saveOptionalSegments()" style="font-size:11px;padding:5px 14px">
+                                            Save Options
+                                        </button>
+                                        <span id="opt-seg-status" style="margin-left:8px;font-size:11px;color:#6b7280"></span>
+                                    </div>
+                                </div>
+
                                 <!-- Transformation Results Container -->
                                 <div id="fhir-transformation-results" class="fhir-transformation-results">
                                     <div class="transformation-placeholder">

@@ -23,6 +23,9 @@ class Step4FHIRTransform {
         // Update UI with message type
         this.updateMessageTypeDisplay();
 
+        // Load optional segment block toggles
+        this.loadOptionalSegments();
+
         // Set up event listeners
         this.setupEventListeners();
 
@@ -457,6 +460,112 @@ class Step4FHIRTransform {
         const config = statusConfig[status] || statusConfig.ready;
         statusElement.textContent = config.text;
         statusElement.className = `config-status ${config.class}`;
+    }
+
+    // ── Optional segment block panel ────────────────────────────────────────────
+
+    // Called from initializeStep4() — loads available blocks for the detected
+    // message type and renders the toggle panel.
+    loadOptionalSegments() {
+        const panel = document.getElementById('opt-seg-panel');
+        if (!panel) return;
+
+        const messageType = this.parsedHL7Data?.detectedMessageType || '';
+        if (!messageType) return;
+
+        const interfaceId = this._getInterfaceId();
+        const url = `/api/fhir/optional-segments?messageType=${encodeURIComponent(messageType)}` +
+                    (interfaceId ? `&interfaceId=${encodeURIComponent(interfaceId)}` : '');
+
+        fetch(url, { credentials: 'include' })
+            .then(r => r.json())
+            .then(res => {
+                const blocks = res.blocks || [];
+                if (blocks.length === 0) return; // nothing optional for this message type
+                panel.style.display = '';
+                this._renderOptSegBlocks(blocks);
+            })
+            .catch(() => {}); // panel stays hidden on error — non-fatal
+    }
+
+    _renderOptSegBlocks(blocks) {
+        const container = document.getElementById('opt-seg-blocks');
+        const badge = document.getElementById('opt-seg-badge');
+        if (!container) return;
+
+        const enabledCount = blocks.filter(b => b.enabled).length;
+        if (badge) {
+            badge.textContent = enabledCount > 0 ? `${enabledCount} enabled` : '';
+            badge.style.display = enabledCount > 0 ? '' : 'none';
+        }
+
+        container.innerHTML = blocks.map(b => `
+            <label style="display:flex;align-items:flex-start;gap:10px;padding:9px 12px;border:1px solid #e0e7ff;border-radius:6px;cursor:pointer;background:#fff">
+                <input type="checkbox" data-optkey="${this._esc(b.key)}" ${b.enabled ? 'checked' : ''}
+                    style="margin-top:2px;accent-color:#1e3a8a">
+                <span>
+                    <strong style="font-size:12px;color:#111827">${this._esc(b.displayName)}</strong>
+                    <br><span style="font-size:11px;color:#6b7280;line-height:1.5">${this._esc(b.description)}</span>
+                </span>
+            </label>
+        `).join('');
+    }
+
+    saveOptionalSegments() {
+        const btn = document.getElementById('opt-seg-save-btn');
+        const statusEl = document.getElementById('opt-seg-status');
+        const badge = document.getElementById('opt-seg-badge');
+
+        const messageType = this.parsedHL7Data?.detectedMessageType || '';
+        const interfaceId = this._getInterfaceId();
+        if (!messageType || !interfaceId) {
+            alert('Interface not yet saved — complete step 1 before saving mapping options.');
+            return;
+        }
+
+        const toggles = {};
+        document.querySelectorAll('[data-optkey]').forEach(el => {
+            toggles[el.dataset.optkey] = el.checked;
+        });
+
+        btn.disabled = true;
+        statusEl.textContent = 'Saving…';
+
+        fetch(`/api/fhir/optional-segments/${encodeURIComponent(interfaceId)}/${encodeURIComponent(messageType)}`, {
+            method: 'PATCH',
+            credentials: 'include',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(toggles),
+        })
+            .then(r => r.json())
+            .then(res => {
+                if (res.success) {
+                    statusEl.textContent = '✓ Saved';
+                    const enabledCount = Object.values(toggles).filter(Boolean).length;
+                    if (badge) {
+                        badge.textContent = enabledCount > 0 ? `${enabledCount} enabled` : '';
+                        badge.style.display = enabledCount > 0 ? '' : 'none';
+                    }
+                    setTimeout(() => { statusEl.textContent = ''; }, 3000);
+                } else {
+                    statusEl.textContent = res.error || 'Save failed';
+                }
+            })
+            .catch(() => { statusEl.textContent = 'Network error'; })
+            .finally(() => { btn.disabled = false; });
+    }
+
+    _getInterfaceId() {
+        // Check the common places the wizard stores the created interface ID.
+        return window.wizardController?.wizardData?.interfaceId ||
+               window.wizard?.data?.interfaceId ||
+               window.wizardView?.interfaceId ||
+               new URLSearchParams(location.search).get('interfaceId') ||
+               '';
+    }
+
+    _esc(s) {
+        return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
     }
 
     // Get API base URL

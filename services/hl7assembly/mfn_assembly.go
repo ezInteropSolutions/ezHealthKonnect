@@ -201,8 +201,8 @@ func buildOrganizationFromMFN(
 	typeDisplay := "Non-Healthcare Business or Corporation"
 	switch masterFileID {
 	case "EMP":
-		typeCode = "emp"
-		typeDisplay = "Employer"
+		typeCode = "bus" // "emp" is not in FHIR organization-type ValueSet; "bus" = Non-Healthcare Business
+		typeDisplay = "Non-Healthcare Business or Corporation"
 	case "INS":
 		typeCode = "ins"
 		typeDisplay = "Insurance Company"
@@ -291,27 +291,15 @@ func populateOrgFromZEM(org map[string]interface{}, zem hl7.EnhancedSegment, rul
 		}
 	}
 
-	// ZEM.4 — plan/coverage type → extension (informational)
-	if planType := SegFieldValue(zem, "ZEM.4"); planType != "" {
-		org["_planType"] = planType // stored as meta-extension; normaliser may surface it
-		// Also surface as a readable contact note
-		if existing, ok := org["contact"].([]interface{}); ok {
-			org["contact"] = append(existing, map[string]interface{}{
-				"purpose": map[string]interface{}{"text": "Coverage Type"},
-				"name":    map[string]interface{}{"text": planType},
-			})
-		} else {
-			org["contact"] = []interface{}{map[string]interface{}{
-				"purpose": map[string]interface{}{"text": "Coverage Type"},
-				"name":    map[string]interface{}{"text": planType},
-			}}
-		}
-	}
-
-	// ZEM.5 — phone number
+	// ZEM.5 — phone number; Organization.telecom.use must not be "home" (org-3 constraint)
 	if phone := SegFieldValue(zem, "ZEM.5"); phone != "" {
 		cp := BuildContactPointFromXTN(phone, nil)
 		if len(cp) > 0 {
+			if use, ok := cp["use"].(string); ok && use == "home" {
+				cp["use"] = "work"
+			} else if _, hasUse := cp["use"]; !hasUse {
+				cp["use"] = "work"
+			}
 			org["telecom"] = []interface{}{cp}
 		}
 	}

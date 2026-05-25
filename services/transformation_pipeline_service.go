@@ -248,14 +248,19 @@ func (tps *TransformationPipelineService) ExecuteTransformation(
 
 	startTime := time.Now()
 
+	// Enrich the context logger with this message's correlation fields so every
+	// structured log line emitted during pipeline execution carries msg_id.
+	sl := logger.FromContext(ctx).With("msg_id", messageID, "iface_id", interfaceID, "msg_type", messageType)
+	ctx = logger.WithContext(ctx, sl)
+
 	// Get pipeline
 	pipeline, err := tps.GetPipeline(ctx, interfaceID, messageType)
 	if err != nil {
-		logger.Error("GetPipeline failed", "interface", interfaceID, "message_type", messageType, "error", err)
+		sl.Error("GetPipeline failed", "error", err)
 		return nil, fmt.Errorf("failed to get pipeline: %w", err)
 	}
 
-	logger.Info("GetPipeline success", "steps", len(pipeline.Steps), "interface", interfaceID, "message_type", messageType)
+	sl.Info("GetPipeline success", "steps", len(pipeline.Steps))
 
 	// Inject runtime context into each step's config (OOB: auto-configure steps)
 	for i := range pipeline.Steps {
@@ -265,6 +270,9 @@ func (tps *TransformationPipelineService) ExecuteTransformation(
 		pipeline.Steps[i].Config["interface_id"] = interfaceID
 		pipeline.Steps[i].Config["message_type"] = messageType
 		pipeline.Steps[i].Config["message_id"] = messageID
+		if corrID, _ := ctx.Value("correlation_id").(string); corrID != "" {
+			pipeline.Steps[i].Config["correlation_id"] = corrID
+		}
 
 		logger.Debug("pipeline context injected", "seq", i, "step", pipeline.Steps[i].StepName, "interface", interfaceID, "message_type", messageType)
 	}
@@ -282,8 +290,13 @@ func (tps *TransformationPipelineService) ExecuteTransformation(
 	}
 
 	if err := tps.createExecutionRecord(ctx, execution); err != nil {
-		logger.Warn("failed to create execution record", "error", err)
+		sl.Warn("failed to create execution record", "error", err)
 	}
+
+	// Inject pipeline_input and pipeline_id into context so the outbound executor
+	// can capture the original input for DLQ from_start redrive.
+	ctx = context.WithValue(ctx, "pipeline_input", parsedJSON)
+	ctx = context.WithValue(ctx, "pipeline_id", pipeline.ID)
 
 	// Execute pipeline
 	result, err := tps.executePipeline(ctx, pipeline, parsedJSON)
@@ -305,10 +318,63 @@ func (tps *TransformationPipelineService) ExecuteTransformation(
 	}
 
 	if updateErr := tps.updateExecutionRecord(ctx, execution); updateErr != nil {
-		logger.Warn("failed to update execution record", "error", updateErr)
+		sl.Warn("failed to update execution record", "error", updateErr)
 	}
 
+	// HIPAA audit: record every PHI-touching pipeline execution.
+	// Non-blocking — failures are logged but never propagate.
+	go tps.writeTransformationAudit(ctx, messageID, interfaceID, messageType, pipeline.ID, execution.Status, execution.TotalTimeMs, err)
+
 	return result, err
+}
+
+// writeTransformationAudit inserts a HIPAA-compliance audit row into audit_logs
+// for every pipeline execution (success or failure). It runs in a goroutine so it
+// never blocks the pipeline. Errors are logged but not returned.
+func (tps *TransformationPipelineService) writeTransformationAudit(
+	ctx context.Context,
+	messageID, interfaceID, messageType, pipelineID, status string,
+	durationMs int64,
+	pipelineErr error,
+) {
+	if tps.db == nil {
+		return
+	}
+
+	corrID, _ := ctx.Value("correlation_id").(string)
+	result := "success"
+	if pipelineErr != nil {
+		result = "failure"
+	}
+
+	errMsg := ""
+	if pipelineErr != nil {
+		errMsg = pipelineErr.Error()
+	}
+
+	meta := map[string]interface{}{
+		"interface_id":  interfaceID,
+		"message_type":  messageType,
+		"pipeline_id":   pipelineID,
+		"correlation_id": corrID,
+		"duration_ms":   durationMs,
+	}
+	metaJSON, _ := json.Marshal(meta)
+
+	complianceFlags := `{"hipaa":true,"phi_processed":true,"action_type":"hl7_fhir_transform"}`
+
+	_, err := tps.db.ExecContext(context.Background(), `
+		INSERT INTO audit_logs
+		    (action, entity_type, entity_id, metadata, result, error_message,
+		     risk_level, compliance_flags, created_at)
+		VALUES
+		    ($1, 'message', $2, $3::jsonb, $4, $5, 'info', $6::jsonb, NOW())`,
+		"transformation.pipeline.executed", messageID,
+		metaJSON, result, errMsg, complianceFlags,
+	)
+	if err != nil {
+		logger.FromContext(ctx).Warn("HIPAA audit write failed", "msg_id", messageID, "error", err)
+	}
 }
 
 // executePipeline executes all steps in a pipeline using PipelineExecutionContext
@@ -317,6 +383,8 @@ func (tps *TransformationPipelineService) executePipeline(
 	pipeline *models.TransformationPipeline,
 	input map[string]interface{},
 ) (*models.TransformationResult, error) {
+
+	sl := logger.FromContext(ctx)
 
 	// Create execution context with step output tracking
 	execContext := &models.PipelineExecutionContext{
@@ -363,7 +431,7 @@ func (tps *TransformationPipelineService) executePipeline(
 
 	if !dag.isLinear {
 		// ── PARALLEL PATH: use DAG scheduler ──────────────────────────────
-		logger.Info("executing pipeline via DAG scheduler", "steps", len(pipeline.Steps))
+		sl.Info("executing pipeline via DAG scheduler", "steps", len(pipeline.Steps))
 		loopChildStepIDs := make(map[string]bool)
 		skipStepIDsDAG := make(map[string]bool)
 		// Pre-populate loop child IDs (same logic as sequential path)
@@ -392,7 +460,7 @@ func (tps *TransformationPipelineService) executePipeline(
 	}
 
 	// ── SEQUENTIAL FAST PATH (linear pipeline — no change to existing logic) ──
-	logger.Info("executing pipeline sequentially", "steps", len(pipeline.Steps))
+	sl.Info("executing pipeline sequentially", "steps", len(pipeline.Steps))
 
 	// Execute steps in order (ordered by sequence ASC)
 	// Support conditional routing via _routing.nextStep and _routing.skipSteps
@@ -522,7 +590,7 @@ func (tps *TransformationPipelineService) executePipeline(
 				logger.Debug("error rethrown", "step", step.StepName)
 			}
 		} else if stepErr != nil {
-			logger.Warn("step failed with no error handler", "step", step.StepName, "error", stepErr.Error())
+			sl.Warn("step failed with no error handler", "step", step.StepName, "error", stepErr.Error())
 		}
 
 		// Generate namespace for this step
@@ -648,7 +716,7 @@ func (tps *TransformationPipelineService) executePipeline(
 
 		if stepErr != nil {
 			stepLog.Error = stepErr.Error()
-			logger.Error("step failed", "step", step.StepName, "error", stepErr)
+			sl.Error("step failed", "step", step.StepName, "error", stepErr)
 
 			// Handle error based on strategy
 			if step.Required && step.OnErrorStrategy == "fail" {
@@ -657,12 +725,12 @@ func (tps *TransformationPipelineService) executePipeline(
 				result.TransformationLog = append(result.TransformationLog, stepLog)
 				return result, fmt.Errorf("pipeline failed at step %s: %w", step.StepName, stepErr)
 			} else if step.OnErrorStrategy == "skip" {
-				logger.Warn("skipping failed optional step", "step", step.StepName)
+				sl.Warn("skipping failed optional step", "step", step.StepName)
 				// Continue with previous message data
 			} else if step.OnErrorStrategy == "default" {
 				// Use default value from config (if provided)
 				// For now, continue with previous message data
-				logger.Warn("using default value for failed step", "step", step.StepName)
+				sl.Warn("using default value for failed step", "step", step.StepName)
 			}
 		} else if errorWasCaught {
 			// Error was caught by handler — continue pipeline with updated output
@@ -671,14 +739,14 @@ func (tps *TransformationPipelineService) executePipeline(
 				execContext.Message = outputData
 			}
 			result.OutputData = execContext.Message
-			logger.Info("step error caught", "step", step.StepName, "error", originalErr.Error(), "duration_ms", stepDuration.Milliseconds())
+			sl.Info("step error caught", "step", step.StepName, "error", originalErr.Error(), "duration_ms", stepDuration.Milliseconds())
 		} else {
 			// Step succeeded, update message data (executors still modify the map directly)
 			if outputData != nil {
 				execContext.Message = outputData
 			}
 			result.OutputData = execContext.Message
-			logger.Info("step completed", "step", step.StepName, "duration_ms", stepDuration.Milliseconds())
+			sl.Info("step completed", "step", step.StepName, "duration_ms", stepDuration.Milliseconds())
 
 			// Check for conditional routing directive from this step
 			// Supports both _routing.nextStep (jump to) and _routing.skipSteps (skip specific steps)
@@ -724,7 +792,7 @@ func (tps *TransformationPipelineService) executePipeline(
 	// Final output is the transformed message
 	result.OutputData = execContext.Message
 
-	logger.Info("pipeline completed", "total_ms", result.TotalTimeMs, "step_outputs", len(execContext.StepOutputs))
+	sl.Info("pipeline completed", "total_ms", result.TotalTimeMs, "step_outputs", len(execContext.StepOutputs))
 
 	return result, nil
 }
@@ -992,6 +1060,65 @@ func (tps *TransformationPipelineService) CreateStep(ctx context.Context, step *
 		step.UpdatedAt,
 	)
 
+	return err
+}
+
+// ExecuteTransformationFromInput satisfies the PipelineRedriver interface.
+// It is a thin wrapper around ExecuteTransformation used by DLQ redrive (from_start mode).
+// messageType may be empty — GetPipeline's fallback chain will find the right pipeline.
+func (tps *TransformationPipelineService) ExecuteTransformationFromInput(
+	ctx context.Context,
+	messageID, interfaceID, messageType string,
+	input map[string]interface{},
+) error {
+	_, err := tps.ExecuteTransformation(ctx, messageID, interfaceID, messageType, input)
+	return err
+}
+
+// ExecuteFromStep satisfies the PipelineRedriver interface.
+// It fetches the pipeline by ID, filters to steps from fromStepID onward (inclusive),
+// and executes the partial pipeline — used by DLQ redrive (from_failed_step mode).
+func (tps *TransformationPipelineService) ExecuteFromStep(
+	ctx context.Context,
+	pipelineID, fromStepID string,
+	data map[string]interface{},
+) error {
+	// Load the full pipeline (by ID rather than interface+messageType)
+	var pipeline models.TransformationPipeline
+	err := tps.db.QueryRowContext(ctx, `
+		SELECT id, interface_id, message_type, pipeline_name, enabled, version,
+		       COALESCE(pipeline_config, '{}') AS pipeline_config,
+		       COALESCE(connections, '[]') AS connections,
+		       created_at, updated_at
+		FROM transformation_pipelines WHERE id = $1`, pipelineID).
+		Scan(&pipeline.ID, &pipeline.InterfaceID, &pipeline.MessageType,
+			&pipeline.PipelineName, &pipeline.Enabled, &pipeline.Version,
+			&pipeline.PipelineConfig, &pipeline.Connections,
+			&pipeline.CreatedAt, &pipeline.UpdatedAt)
+	if err != nil {
+		return fmt.Errorf("ExecuteFromStep: load pipeline %s: %w", pipelineID, err)
+	}
+
+	steps, err := tps.GetPipelineSteps(ctx, pipelineID)
+	if err != nil {
+		return fmt.Errorf("ExecuteFromStep: load steps: %w", err)
+	}
+	pipeline.Steps = steps
+
+	// Find the start index
+	startIdx := -1
+	for i, s := range pipeline.Steps {
+		if s.ID == fromStepID {
+			startIdx = i
+			break
+		}
+	}
+	if startIdx < 0 {
+		return fmt.Errorf("ExecuteFromStep: step %s not found in pipeline %s", fromStepID, pipelineID)
+	}
+	pipeline.Steps = pipeline.Steps[startIdx:]
+
+	_, err = tps.executePipeline(ctx, &pipeline, data)
 	return err
 }
 

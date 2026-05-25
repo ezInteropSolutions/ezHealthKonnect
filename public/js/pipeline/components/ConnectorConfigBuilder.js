@@ -76,7 +76,7 @@ class ConnectorConfigBuilder extends BaseStepConfigBuilder {
         `);
         this.container.appendChild(header);
 
-        // Tab bar — inbound: Connection | Acknowledgment; outbound: Connection | Payload
+        // Tab bar — inbound: Connection | Acknowledgment; outbound: Connection | Payload | Recovery
         const tabBar = this.createElement('div', { class: 'connector-tab-bar', id: 'connectorTabBar' });
         if (this.direction === 'inbound') {
             tabBar.innerHTML = `
@@ -94,6 +94,9 @@ class ConnectorConfigBuilder extends BaseStepConfigBuilder {
                 </button>
                 <button class="connector-tab" data-tab="payload">
                     <i class="fas fa-file-export"></i> Payload
+                </button>
+                <button class="connector-tab" data-tab="recovery">
+                    <i class="fas fa-exclamation-triangle"></i> Recovery
                 </button>
             `;
         }
@@ -180,12 +183,151 @@ class ConnectorConfigBuilder extends BaseStepConfigBuilder {
             });
             payloadPanel.appendChild(this._buildPayloadPanel());
             panels.appendChild(payloadPanel);
+
+            // ── Recovery Queue panel (outbound only) ──
+            const recoveryPanel = this.createElement('div', {
+                class: 'connector-tab-panel',
+                id: 'connPanel-recovery',
+                'data-panel': 'recovery',
+                style: 'display:none'
+            });
+            recoveryPanel.appendChild(this._buildRecoveryPanel());
+            panels.appendChild(recoveryPanel);
         }
 
         this.container.appendChild(panels);
 
         // Load connector types from API
         this.loadConnectorTypes();
+    }
+
+    _buildRecoveryPanel() {
+        const panel = this.createElement('div', { class: 'recovery-config-panel' });
+        panel.innerHTML = `
+            <p style="font-size:12px;color:#6b7280;margin-bottom:14px;">
+                Configure how failed deliveries for this interface are retried.
+                These settings apply to all outbound connectors on this interface and
+                are saved immediately when you click <strong>Save Recovery Config</strong>.
+            </p>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+                <div class="form-group">
+                    <label style="font-size:12px;font-weight:600;">Max Attempts</label>
+                    <input type="number" class="form-control dlq-field" data-dlq-field="max_attempts"
+                           min="1" max="100" step="1" placeholder="10">
+                    <small class="form-text text-muted">Attempts before abandonment (default 10)</small>
+                </div>
+                <div class="form-group">
+                    <label style="font-size:12px;font-weight:600;">Initial Delay (s)</label>
+                    <input type="number" class="form-control dlq-field" data-dlq-field="initial_delay_s"
+                           min="0" step="1" placeholder="30">
+                    <small class="form-text text-muted">Wait before first retry (default 30 s)</small>
+                </div>
+                <div class="form-group">
+                    <label style="font-size:12px;font-weight:600;">Retry Delay (s)</label>
+                    <input type="number" class="form-control dlq-field" data-dlq-field="retry_delay_s"
+                           min="1" step="1" placeholder="60">
+                    <small class="form-text text-muted">Base delay between retries (default 60 s)</small>
+                </div>
+                <div class="form-group">
+                    <label style="font-size:12px;font-weight:600;">Backoff Multiplier</label>
+                    <input type="number" class="form-control dlq-field" data-dlq-field="backoff_multiplier"
+                           min="1" max="10" step="0.1" placeholder="2.0">
+                    <small class="form-text text-muted">Exponential factor per attempt (default 2.0)</small>
+                </div>
+                <div class="form-group" style="grid-column:1/-1;">
+                    <label style="font-size:12px;font-weight:600;">Payload Expires After (hours)</label>
+                    <input type="number" class="form-control dlq-field" data-dlq-field="expires_after_hours"
+                           min="0" step="1" placeholder="0">
+                    <small class="form-text text-muted">Hours until payload is purged. 0 = never.</small>
+                </div>
+            </div>
+            <div style="margin-top:14px;">
+                <button type="button" class="btn btn-sm btn-warning save-dlq-config-btn"
+                    style="font-size:12px;">
+                    <i class="fas fa-save"></i> Save Recovery Config
+                </button>
+                <span class="dlq-save-status" style="font-size:12px;margin-left:10px;"></span>
+            </div>
+        `;
+
+        // Pre-populate from interface DLQ config (loaded async)
+        this._loadAndPopulateDLQConfig(panel);
+
+        // Wire save button
+        setTimeout(() => {
+            const btn = panel.querySelector('.save-dlq-config-btn');
+            if (btn) btn.addEventListener('click', () => this._saveDLQConfig(panel));
+        }, 0);
+
+        return panel;
+    }
+
+    _getInterfaceId() {
+        const params = new URLSearchParams(window.location.search);
+        return params.get('interfaceId') || null;
+    }
+
+    async _loadAndPopulateDLQConfig(panel) {
+        const ifaceId = this._getInterfaceId();
+        if (!ifaceId) return;
+        try {
+            const token = localStorage.getItem('accessToken');
+            const headers = { 'Content-Type': 'application/json' };
+            if (token) headers['Authorization'] = 'Bearer ' + token;
+            const res = await fetch(`/api/interfaces/${ifaceId}`, { credentials: 'include', headers });
+            if (!res.ok) return;
+            const data = await res.json();
+            const dlq = (data.data || data.interface || data).dlq_config || {};
+            panel.querySelectorAll('.dlq-field').forEach(input => {
+                const key = input.dataset.dlqField;
+                if (key && dlq[key] != null) input.value = dlq[key];
+            });
+        } catch (_) { /* non-fatal */ }
+    }
+
+    async _saveDLQConfig(panel) {
+        const ifaceId = this._getInterfaceId();
+        if (!ifaceId) {
+            const status = panel.querySelector('.dlq-save-status');
+            if (status) { status.textContent = 'No interface ID in URL'; status.style.color = '#dc2626'; }
+            return;
+        }
+
+        const dlqConfig = {};
+        panel.querySelectorAll('.dlq-field').forEach(input => {
+            const key = input.dataset.dlqField;
+            const raw = input.value.trim();
+            if (!raw) return;
+            dlqConfig[key] = key === 'backoff_multiplier' ? parseFloat(raw) : parseInt(raw, 10);
+        });
+
+        const status = panel.querySelector('.dlq-save-status');
+        const btn    = panel.querySelector('.save-dlq-config-btn');
+        if (btn) btn.disabled = true;
+        if (status) { status.textContent = 'Saving…'; status.style.color = '#6b7280'; }
+
+        try {
+            const token = localStorage.getItem('accessToken');
+            const headers = { 'Content-Type': 'application/json' };
+            if (token) headers['Authorization'] = 'Bearer ' + token;
+            const res = await fetch(`/api/interfaces/${ifaceId}`, {
+                method: 'PUT',
+                credentials: 'include',
+                headers,
+                body: JSON.stringify({ dlq_config: dlqConfig }),
+            });
+            const json = await res.json();
+            if (json.success || json.id) {
+                if (status) { status.textContent = 'Saved'; status.style.color = '#16a34a'; }
+                setTimeout(() => { if (status) status.textContent = ''; }, 3000);
+            } else {
+                if (status) { status.textContent = json.error || 'Save failed'; status.style.color = '#dc2626'; }
+            }
+        } catch (err) {
+            if (status) { status.textContent = 'Network error'; status.style.color = '#dc2626'; }
+        } finally {
+            if (btn) btn.disabled = false;
+        }
     }
 
     _buildACKPanel() {

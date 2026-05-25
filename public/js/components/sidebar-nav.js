@@ -42,11 +42,21 @@
             ]
         },
         {
+            title: 'Operations',
+            sectionId: 'opsSection',
+            roles: ['engineer', 'admin', 'superadmin', 'super_admin'],
+            items: [
+                { label: 'Dead-Letter Q',  href: 'admin-dlq.html',           icon: 'fas fa-exclamation-triangle', badgeId: 'dlqBadge' }
+            ]
+        },
+        {
             title: 'Admin',
+            sectionId: 'adminSection',
             adminOnly: true,
             items: [
-                { label: 'Users',    href: 'user-management.html', icon: 'fas fa-users' },
-                { label: 'Settings', href: 'settings.html',        icon: 'fas fa-sliders' }
+                { label: 'Users',          href: 'user-management.html',     icon: 'fas fa-users' },
+                { label: 'Settings',       href: 'settings.html',            icon: 'fas fa-sliders' },
+                { label: 'Mapping Review', href: 'admin-mapping-review.html', icon: 'fas fa-flag',             badgeId: 'mappingReviewBadge' }
             ]
         }
     ];
@@ -63,16 +73,27 @@
         return getPageFile() === href.split('/').pop();
     }
 
-    // Returns true when the current page lives inside an admin-only section
+    // Returns true when the current page lives inside a restricted section
     function isAdminPage() {
         var current = getPageFile();
         for (var i = 0; i < NAV.length; i++) {
-            if (!NAV[i].adminOnly) continue;
+            if (!NAV[i].adminOnly && !NAV[i].roles) continue;
             for (var j = 0; j < NAV[i].items.length; j++) {
                 if (NAV[i].items[j].href.split('/').pop() === current) return true;
             }
         }
         return false;
+    }
+
+    // Returns the section a page belongs to (by sectionId), or null
+    function getSectionForPage() {
+        var current = getPageFile();
+        for (var i = 0; i < NAV.length; i++) {
+            for (var j = 0; j < NAV[i].items.length; j++) {
+                if (NAV[i].items[j].href.split('/').pop() === current) return NAV[i].sectionId || null;
+            }
+        }
+        return null;
     }
 
     // ── HTML builder ───────────────────────────────────────────────────────────
@@ -99,14 +120,13 @@
 
         // Nav menu
         h += '<div class="nav-menu">';
-        var onAdminPage = isAdminPage();
+        var currentSection = getSectionForPage();
         NAV.forEach(function (section) {
-            // Hide admin section by default — UNLESS we are currently on an admin page
-            // (in which case the section must be visible for the active link to show)
-            var adminAttr = section.adminOnly && !onAdminPage
-                ? ' id="adminSection" style="display:none"'
-                : (section.adminOnly ? ' id="adminSection"' : '');
-            h += '<div class="nav-section' + (section.adminOnly ? ' admin-section' : '') + '"' + adminAttr + '>';
+            var isRestricted = section.adminOnly || section.roles;
+            var idAttr   = section.sectionId ? ' id="' + section.sectionId + '"' : '';
+            // Hide restricted sections by default — show if we're on a page within this section
+            var hideAttr = isRestricted && currentSection !== section.sectionId ? ' style="display:none"' : '';
+            h += '<div class="nav-section' + (isRestricted ? ' admin-section' : '') + '"' + idAttr + hideAttr + '>';
             h += '<div class="section-header">' +
                  '<span class="section-title">' + esc(section.title) + '</span>' +
                  '<i class="fas fa-chevron-down nav-section-chevron"></i>' +
@@ -200,15 +220,28 @@
         if (roleEl)   roleEl.textContent   = role;
         if (avatarEl) avatarEl.textContent = name.charAt(0).toUpperCase();
 
-        // Show admin section for admin/superadmin users (may already be visible on admin pages)
-        if (ADMIN_ROLES.indexOf((user.role || '').toLowerCase()) !== -1) {
-            var sec = sidebar.querySelector('#adminSection');
-            if (sec) sec.style.display = '';
-        } else if (!isAdminPage()) {
-            // Non-admin user on a regular page: ensure admin section stays hidden
-            var sec2 = sidebar.querySelector('#adminSection');
-            if (sec2) sec2.style.display = 'none';
-        }
+        var role = (user.role || '').toLowerCase();
+        var activeSectionId = getSectionForPage();
+
+        // Show/hide each restricted section based on role
+        NAV.forEach(function (section) {
+            if (!section.sectionId) return;
+            var sec = sidebar.querySelector('#' + section.sectionId);
+            if (!sec) return;
+
+            var allowed = false;
+            if (section.adminOnly) {
+                allowed = ADMIN_ROLES.indexOf(role) !== -1;
+            } else if (section.roles) {
+                allowed = section.roles.indexOf(role) !== -1;
+            }
+
+            if (allowed) {
+                sec.style.display = '';
+            } else if (activeSectionId !== section.sectionId) {
+                sec.style.display = 'none';
+            }
+        });
     }
 
     function loadUser(sidebar) {
@@ -258,6 +291,44 @@
         setInterval(updateBadge, 60000);
     }
 
+    // ── Mapping review badge poller ───────────────────────────────────────────
+    // Lightweight check every 2 minutes; only runs for admins (non-admins get 403).
+    function startMappingReviewBadgePoller() {
+        function updateBadge() {
+            fetch('/api/fhir/quality/flagged?limit=1&offset=0', { credentials: 'include' })
+                .then(function (r) { return r.ok ? r.json() : null; })
+                .then(function (d) {
+                    var badge = document.getElementById('mappingReviewBadge');
+                    if (!badge || !d) return;
+                    var n = d.total || 0;
+                    badge.textContent   = n > 99 ? '99+' : n;
+                    badge.style.display = n > 0 ? '' : 'none';
+                })
+                .catch(function () {});
+        }
+        updateBadge();
+        setInterval(updateBadge, 120000);
+    }
+
+    // ── DLQ badge poller ─────────────────────────────────────────────────────
+    // Shows pending count on the Dead-Letter Q nav item. Runs every 2 minutes.
+    function startDLQBadgePoller() {
+        function updateBadge() {
+            fetch('/api/fhir/dlq/stats', { credentials: 'include' })
+                .then(function (r) { return r.ok ? r.json() : null; })
+                .then(function (d) {
+                    var badge = document.getElementById('dlqBadge');
+                    if (!badge || !d || !d.success) return;
+                    var n = (d.data && d.data.pending) || 0;
+                    badge.textContent   = n > 99 ? '99+' : n;
+                    badge.style.display = n > 0 ? '' : 'none';
+                })
+                .catch(function () {});
+        }
+        updateBadge();
+        setInterval(updateBadge, 120000);
+    }
+
     // ── Main init ─────────────────────────────────────────────────────────────
     function init() {
         var sidebar = document.getElementById('sidebar');
@@ -271,6 +342,8 @@
         initLogoutBtn(sidebar);
         loadUser(sidebar);
         startAlertBadgePoller();
+        startMappingReviewBadgePoller();
+        startDLQBadgePoller();
     }
 
     if (document.readyState === 'loading') {

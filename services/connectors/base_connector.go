@@ -270,6 +270,9 @@ func (bic *BaseInboundConnector) GetStopChannel() <-chan struct{} {
 // BaseOutboundConnector - Base implementation for outbound connectors
 // -----------------------------------------------------------------------------
 
+// BaseOutboundConnector provides common functionality for outbound connectors.
+// Retry is handled at the pipeline step level via ExecuteWithRetry in the pipeline service —
+// no connector-level retry layer here.
 type BaseOutboundConnector struct {
 	*BaseConnector
 	supportsBatch bool

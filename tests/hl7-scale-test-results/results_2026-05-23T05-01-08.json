@@ -1,0 +1,647 @@
+{
+  "summary": {
+    "sent": 41,
+    "acked": 41,
+    "retrieved": 41,
+    "passed": 41,
+    "failed": 0,
+    "level": "standard",
+    "inputInterfaceId": "df5c7bc7-5dbe-4c47-8298-a4729b26ebd4"
+  },
+  "results": [
+    {
+      "messageType": "ADT^A01",
+      "label": "Inpatient admit #1",
+      "ackCode": "AA",
+      "sendOK": true,
+      "messageId": "fhir_1779512445516554520",
+      "fhirValid": true,
+      "issues": [],
+      "resourceTypes": [
+        "MessageHeader",
+        "Condition",
+        "Encounter",
+        "Patient"
+      ],
+      "hl7": "MSH|^~\\&|EPIC|HOSP|EZHK|EZHK|20260523120000||ADT^A01^ADT_A01|ADTA010001|P|2.5\rEVN|A01|20260523120000\rPID|1||PAT001^^^HOSP^MR||SMITH^JOHN^Q|||M|||123 MAIN ST^^ANYTOWN^CA^90210\rPV1|1|I|WARD01^101^A^HOSP|||DR001^JONES^WILLIAM^^MD||MED|||ADM\rDG1|1|ICD10|J18.9|PNEUMONIA|20260523120000|A"
+    },
+    {
+      "messageType": "ADT^A01",
+      "label": "Inpatient admit #2",
+      "ackCode": "AA",
+      "sendOK": true,
+      "messageId": "fhir_1779512445723137945",
+      "fhirValid": true,
+      "issues": [],
+      "resourceTypes": [
+        "MessageHeader",
+        "Patient",
+        "Encounter",
+        "Condition"
+      ],
+      "hl7": "MSH|^~\\&|EPIC|HOSP|EZHK|EZHK|20260523120000||ADT^A01^ADT_A01|ADTA010002|P|2.5\rEVN|A01|20260523120000\rPID|1||PAT002^^^HOSP^MR||JOHNSON^MARY^A|||F|||456 OAK AVE^^SPRINGFIELD^IL^62701\rPV1|1|I|ICU^201^B^HOSP|||DR003^PATEL^ANIL^^MD||CARD|||ADM\rDG1|1|ICD10|J18.9|PNEUMONIA|20260523120000|A"
+    },
+    {
+      "messageType": "ADT^A01",
+      "label": "Inpatient admit #3",
+      "ackCode": "AA",
+      "sendOK": true,
+      "messageId": "fhir_1779512445922116720",
+      "fhirValid": true,
+      "issues": [],
+      "resourceTypes": [
+        "MessageHeader",
+        "Encounter",
+        "Patient",
+        "Condition"
+      ],
+      "hl7": "MSH|^~\\&|EPIC|HOSP|EZHK|EZHK|20260523120000||ADT^A01^ADT_A01|ADTA010003|P|2.5\rEVN|A01|20260523120000\rPID|1||PAT003^^^HOSP^MR||WILLIAMS^ROBERT|||M|||789 PINE RD^^CHICAGO^IL^60601\rPV1|1|E|ED^301^C^HOSP|||DR005^BROWN^JAMES^^MD||EMER|||ADM\rDG1|1|ICD10|J18.9|PNEUMONIA|20260523120000|A"
+    },
+    {
+      "messageType": "ADT^A01",
+      "label": "Inpatient admit #4",
+      "ackCode": "AA",
+      "sendOK": true,
+      "messageId": "fhir_1779512446121174179",
+      "fhirValid": true,
+      "issues": [],
+      "resourceTypes": [
+        "MessageHeader",
+        "Patient",
+        "Condition",
+        "Encounter"
+      ],
+      "hl7": "MSH|^~\\&|EPIC|HOSP|EZHK|EZHK|20260523120000||ADT^A01^ADT_A01|ADTA010004|P|2.5\rEVN|A01|20260523120000\rPID|1||PAT004^^^HOSP^MR||DAVIS^LINDA^K|||F|||321 ELM ST^^AURORA^CO^80010\rPV1|1|I|ONCO^401^A^HOSP|||DR006^GARCIA^MARIA^^MD||ONC|||ADM\rDG1|1|ICD10|J18.9|PNEUMONIA|20260523120000|A"
+    },
+    {
+      "messageType": "ADT^A01",
+      "label": "Inpatient admit #5",
+      "ackCode": "AA",
+      "sendOK": true,
+      "messageId": "fhir_1779512446310751707",
+      "fhirValid": true,
+      "issues": [],
+      "resourceTypes": [
+        "MessageHeader",
+        "Condition",
+        "Patient",
+        "Encounter"
+      ],
+      "hl7": "MSH|^~\\&|EPIC|HOSP|EZHK|EZHK|20260523120000||ADT^A01^ADT_A01|ADTA010005|P|2.5\rEVN|A01|20260523120000\rPID|1||PAT005^^^HOSP^MR||MARTINEZ^CARLOS|||M|||654 MAPLE DR^^DENVER^CO^80202\rPV1|1|O|OPD^501^D^HOSP|||DR007^WILSON^PAUL^^MD||SURG|||ADM\rDG1|1|ICD10|J18.9|PNEUMONIA|20260523120000|A"
+    },
+    {
+      "messageType": "ADT^A03",
+      "label": "Discharge #1",
+      "ackCode": "AA",
+      "sendOK": true,
+      "messageId": "fhir_1779512446501946163",
+      "fhirValid": true,
+      "issues": [],
+      "resourceTypes": [
+        "MessageHeader",
+        "Encounter",
+        "Patient"
+      ],
+      "hl7": "MSH|^~\\&|EPIC|HOSP|EZHK|EZHK|20260523120000||ADT^A03^ADT_A03|ADTA030001|P|2.5\rEVN|A03|20260523120000\rPID|1||DPAT001^^^HOSP^MR||DISCHARGE^PAT^1|||M\rPV1|1|I|WARD01^101^A^HOSP||||||||DIS"
+    },
+    {
+      "messageType": "ADT^A03",
+      "label": "Discharge #2",
+      "ackCode": "AA",
+      "sendOK": true,
+      "messageId": "fhir_1779512446710695764",
+      "fhirValid": true,
+      "issues": [],
+      "resourceTypes": [
+        "MessageHeader",
+        "Patient",
+        "Encounter"
+      ],
+      "hl7": "MSH|^~\\&|EPIC|HOSP|EZHK|EZHK|20260523120000||ADT^A03^ADT_A03|ADTA030002|P|2.5\rEVN|A03|20260523120000\rPID|1||DPAT002^^^HOSP^MR||DISCHARGE^PAT^2|||M\rPV1|1|I|WARD01^102^A^HOSP||||||||DIS"
+    },
+    {
+      "messageType": "ADT^A03",
+      "label": "Discharge #3",
+      "ackCode": "AA",
+      "sendOK": true,
+      "messageId": "fhir_1779512446897406937",
+      "fhirValid": true,
+      "issues": [],
+      "resourceTypes": [
+        "MessageHeader",
+        "Encounter",
+        "Patient"
+      ],
+      "hl7": "MSH|^~\\&|EPIC|HOSP|EZHK|EZHK|20260523120000||ADT^A03^ADT_A03|ADTA030003|P|2.5\rEVN|A03|20260523120000\rPID|1||DPAT003^^^HOSP^MR||DISCHARGE^PAT^3|||M\rPV1|1|I|WARD01^103^A^HOSP||||||||DIS"
+    },
+    {
+      "messageType": "ADT^A04",
+      "label": "Outpatient #1",
+      "ackCode": "AA",
+      "sendOK": true,
+      "messageId": "fhir_1779512447094701988",
+      "fhirValid": true,
+      "issues": [],
+      "resourceTypes": [
+        "MessageHeader",
+        "Encounter",
+        "Patient"
+      ],
+      "hl7": "MSH|^~\\&|CERNER|HOSP|EZHK|EZHK|20260523120000||ADT^A04^ADT_A01|ADTA040001|P|2.5\rEVN|A04|20260523120000\rPID|1||OPAT001^^^CLINIC^MR||OUTPT^JANE^1|||F|||100 HEALTH WAY^^BOSTON^MA^02101\rPV1|1|O|CLINIC^C01^A^CLINIC|||DR001^PROV^FIRST^^MD|||ALLERGY"
+    },
+    {
+      "messageType": "ADT^A04",
+      "label": "Outpatient #2",
+      "ackCode": "AA",
+      "sendOK": true,
+      "messageId": "fhir_1779512447288378384",
+      "fhirValid": true,
+      "issues": [],
+      "resourceTypes": [
+        "MessageHeader",
+        "Encounter",
+        "Patient"
+      ],
+      "hl7": "MSH|^~\\&|CERNER|HOSP|EZHK|EZHK|20260523120000||ADT^A04^ADT_A01|ADTA040002|P|2.5\rEVN|A04|20260523120000\rPID|1||OPAT002^^^CLINIC^MR||OUTPT^JANE^2|||F|||100 HEALTH WAY^^BOSTON^MA^02101\rPV1|1|O|CLINIC^C02^A^CLINIC|||DR002^PROV^FIRST^^MD|||ALLERGY"
+    },
+    {
+      "messageType": "ADT^A04",
+      "label": "Outpatient #3",
+      "ackCode": "AA",
+      "sendOK": true,
+      "messageId": "fhir_1779512447487099945",
+      "fhirValid": true,
+      "issues": [],
+      "resourceTypes": [
+        "MessageHeader",
+        "Patient",
+        "Encounter"
+      ],
+      "hl7": "MSH|^~\\&|CERNER|HOSP|EZHK|EZHK|20260523120000||ADT^A04^ADT_A01|ADTA040003|P|2.5\rEVN|A04|20260523120000\rPID|1||OPAT003^^^CLINIC^MR||OUTPT^JANE^3|||F|||100 HEALTH WAY^^BOSTON^MA^02101\rPV1|1|O|CLINIC^C03^A^CLINIC|||DR003^PROV^FIRST^^MD|||ALLERGY"
+    },
+    {
+      "messageType": "ADT^A08",
+      "label": "Update #1",
+      "ackCode": "AA",
+      "sendOK": true,
+      "messageId": "fhir_1779512447670615112",
+      "fhirValid": true,
+      "issues": [],
+      "resourceTypes": [
+        "MessageHeader",
+        "Patient",
+        "Encounter"
+      ],
+      "hl7": "MSH|^~\\&|EPIC|HOSP|EZHK|EZHK|20260523120000||ADT^A08^ADT_A01|ADTA080001|P|2.5\rEVN|A08|20260523120000\rPID|1||PAT001^^^HOSP^MR||UPDATED^NAME^1|||M|||NEW ADDR^^NEWTOWN^NY^10001\rPV1|1|I|WARD01^101^A^HOSP"
+    },
+    {
+      "messageType": "ADT^A08",
+      "label": "Update #2",
+      "ackCode": "AA",
+      "sendOK": true,
+      "messageId": "fhir_1779512447858807277",
+      "fhirValid": true,
+      "issues": [],
+      "resourceTypes": [
+        "MessageHeader",
+        "Encounter",
+        "Patient"
+      ],
+      "hl7": "MSH|^~\\&|EPIC|HOSP|EZHK|EZHK|20260523120000||ADT^A08^ADT_A01|ADTA080002|P|2.5\rEVN|A08|20260523120000\rPID|1||PAT002^^^HOSP^MR||UPDATED^NAME^2|||M|||NEW ADDR^^NEWTOWN^NY^10001\rPV1|1|I|WARD01^102^A^HOSP"
+    },
+    {
+      "messageType": "ADT^A28",
+      "label": "Add person #1",
+      "ackCode": "AA",
+      "sendOK": true,
+      "messageId": "fhir_1779512448046042851",
+      "fhirValid": true,
+      "issues": [],
+      "resourceTypes": [
+        "MessageHeader",
+        "Patient"
+      ],
+      "hl7": "MSH|^~\\&|EPIC|HOSP|EZHK|EZHK|20260523120000||ADT^A28^ADT_A05|ADTA280001|P|2.5\rEVN|A28|20260523120000\rPID|1||NEW001^^^HOSP^MR||NEWPERSON^TEST^1|||M|||500 REGISTER LN^^MIAMI^FL^33101"
+    },
+    {
+      "messageType": "ADT^A28",
+      "label": "Add person #2",
+      "ackCode": "AA",
+      "sendOK": true,
+      "messageId": "fhir_1779512448246747283",
+      "fhirValid": true,
+      "issues": [],
+      "resourceTypes": [
+        "MessageHeader",
+        "Patient"
+      ],
+      "hl7": "MSH|^~\\&|EPIC|HOSP|EZHK|EZHK|20260523120000||ADT^A28^ADT_A05|ADTA280002|P|2.5\rEVN|A28|20260523120000\rPID|1||NEW002^^^HOSP^MR||NEWPERSON^TEST^2|||M|||500 REGISTER LN^^MIAMI^FL^33101"
+    },
+    {
+      "messageType": "ADT^A39",
+      "label": "Merge patient",
+      "ackCode": "AA",
+      "sendOK": true,
+      "messageId": "fhir_1779512448426825799",
+      "fhirValid": true,
+      "issues": [],
+      "resourceTypes": [
+        "MessageHeader",
+        "Patient",
+        "Patient"
+      ],
+      "hl7": "MSH|^~\\&|EPIC|HOSP|EZHK|EZHK|20260523120000||ADT^A39^ADT_A39|ADTA390001|P|2.5\rEVN|A39|20260523120000\rPID|1||PAT010^^^HOSP^MR~PAT011^^^HOSP^MR||MERGED^PATIENT|||M\rMRG|PAT011^^^HOSP^MR||V010"
+    },
+    {
+      "messageType": "ORU^R01",
+      "label": "Lab result #1",
+      "ackCode": "AA",
+      "sendOK": true,
+      "messageId": "fhir_1779512448635707876",
+      "fhirValid": true,
+      "issues": [],
+      "resourceTypes": [
+        "MessageHeader",
+        "DiagnosticReport",
+        "Patient",
+        "Observation",
+        "Observation"
+      ],
+      "hl7": "MSH|^~\\&|LIS|HOSP|EZHK|EZHK|20260523120000||ORU^R01^ORU_R01|ORUR010001|P|2.5\rPID|1||LABPAT001^^^HOSP^MR||LABPT^TEST^1|||M\rPV1|1|I|LAB^L01^A^HOSP\rOBR|1|ORD001|LAB001|58410-2^CBC^LN|||20260523120000\rOBX|1|NM|718-7^HEMOGLOBIN^LN||13.5|g/dL|12.0-17.5||||F|||20260523120000\rOBX|2|NM|777-3^PLATELETS^LN||245|10*3/uL|150-400||||F|||20260523120000"
+    },
+    {
+      "messageType": "ORU^R01",
+      "label": "Lab result #2",
+      "ackCode": "AA",
+      "sendOK": true,
+      "messageId": "fhir_1779512448813535986",
+      "fhirValid": true,
+      "issues": [],
+      "resourceTypes": [
+        "MessageHeader",
+        "DiagnosticReport",
+        "Patient",
+        "Observation",
+        "Observation"
+      ],
+      "hl7": "MSH|^~\\&|LIS|HOSP|EZHK|EZHK|20260523120000||ORU^R01^ORU_R01|ORUR010002|P|2.5\rPID|1||LABPAT002^^^HOSP^MR||LABPT^TEST^2|||F\rPV1|1|I|LAB^L02^A^HOSP\rOBR|1|ORD002|LAB002|24323-8^METABOLIC^LN|||20260523120000\rOBX|1|NM|2345-7^GLUCOSE^LN||320|mg/dL|70-100|HH|||F|||20260523120000\rOBX|2|NM|2160-0^CREATININE^LN||1.8|mg/dL|0.6-1.2|H|||F|||20260523120000"
+    },
+    {
+      "messageType": "ORU^R01",
+      "label": "Lab result #3",
+      "ackCode": "AA",
+      "sendOK": true,
+      "messageId": "fhir_1779512449032386320",
+      "fhirValid": true,
+      "issues": [],
+      "resourceTypes": [
+        "MessageHeader",
+        "DiagnosticReport",
+        "Patient",
+        "Observation"
+      ],
+      "hl7": "MSH|^~\\&|LIS|HOSP|EZHK|EZHK|20260523120000||ORU^R01^ORU_R01|ORUR010003|P|2.5\rPID|1||LABPAT003^^^HOSP^MR||LABPT^TEST^3|||M\rPV1|1|I|LAB^L03^A^HOSP\rOBR|1|ORD003|LAB003|600-7^BLOOD CULTURE^LN|||20260523120000\rOBX|1|CWE|664-3^GRAM STAIN^LN||260373001^Detected^SCT||POSITIVE|||F|||20260523120000"
+    },
+    {
+      "messageType": "ORU^R01",
+      "label": "Lab result #4",
+      "ackCode": "AA",
+      "sendOK": true,
+      "messageId": "fhir_1779512449219305860",
+      "fhirValid": true,
+      "issues": [],
+      "resourceTypes": [
+        "MessageHeader",
+        "DiagnosticReport",
+        "Patient",
+        "Observation",
+        "Observation"
+      ],
+      "hl7": "MSH|^~\\&|LIS|HOSP|EZHK|EZHK|20260523120000||ORU^R01^ORU_R01|ORUR010004|P|2.5\rPID|1||LABPAT004^^^HOSP^MR||LABPT^TEST^4|||F\rPV1|1|I|LAB^L04^A^HOSP\rOBR|1|ORD004|LAB004|55230-3^THYROID^LN|||20260523120000\rOBX|1|NM|3016-3^TSH^LN||0.02|mIU/L|0.4-4.0|LL|||F|||20260523120000\rOBX|2|NM|3026-2^FREE T4^LN||2.8|ng/dL|0.8-1.8|H|||F|||20260523120000"
+    },
+    {
+      "messageType": "ORU^R01",
+      "label": "Lab result #5",
+      "ackCode": "AA",
+      "sendOK": true,
+      "messageId": "fhir_1779512449406310366",
+      "fhirValid": true,
+      "issues": [],
+      "resourceTypes": [
+        "MessageHeader",
+        "DiagnosticReport",
+        "Patient",
+        "Observation",
+        "Observation"
+      ],
+      "hl7": "MSH|^~\\&|LIS|HOSP|EZHK|EZHK|20260523120000||ORU^R01^ORU_R01|ORUR010005|P|2.5\rPID|1||LABPAT005^^^HOSP^MR||LABPT^TEST^5|||M\rPV1|1|I|LAB^L05^A^HOSP\rOBR|1|ORD005|LAB005|24357-6^URINALYSIS^LN|||20260523120000\rOBX|1|NM|2965-2^SP GRAVITY^LN||1.020||1.001-1.030||||F|||20260523120000\rOBX|2|CWE|25428-4^GLUCOSE UA^LN||Negative||||F|||20260523120000"
+    },
+    {
+      "messageType": "ORU^R03",
+      "label": "R03 #1",
+      "ackCode": "AA",
+      "sendOK": true,
+      "messageId": "fhir_1779512449623315438",
+      "fhirValid": true,
+      "issues": [],
+      "resourceTypes": [
+        "MessageHeader",
+        "DiagnosticReport",
+        "Patient",
+        "Observation"
+      ],
+      "hl7": "MSH|^~\\&|LIS|HOSP|EZHK|EZHK|20260523120000||ORU^R03^ORU_R01|ORUR030001|P|2.5\rPID|1||R3P001^^^HOSP^MR||R03PT^TEST^1|||M\rOBR|1|R3O001|R3L001|2093-3^CHOLESTEROL^LN|||20260523120000\rOBX|1|NM|2093-3^CHOLESTEROL^LN||175|mg/dL|<200||||F|||20260523120000"
+    },
+    {
+      "messageType": "ORU^R03",
+      "label": "R03 #2",
+      "ackCode": "AA",
+      "sendOK": true,
+      "messageId": "fhir_1779512449824758497",
+      "fhirValid": true,
+      "issues": [],
+      "resourceTypes": [
+        "MessageHeader",
+        "Patient",
+        "DiagnosticReport",
+        "Observation"
+      ],
+      "hl7": "MSH|^~\\&|LIS|HOSP|EZHK|EZHK|20260523120000||ORU^R03^ORU_R01|ORUR030002|P|2.5\rPID|1||R3P002^^^HOSP^MR||R03PT^TEST^2|||M\rOBR|1|R3O002|R3L002|2093-3^CHOLESTEROL^LN|||20260523120000\rOBX|1|NM|2093-3^CHOLESTEROL^LN||195|mg/dL|<200||||F|||20260523120000"
+    },
+    {
+      "messageType": "ORU^R03",
+      "label": "R03 #3",
+      "ackCode": "AA",
+      "sendOK": true,
+      "messageId": "fhir_1779512450016108839",
+      "fhirValid": true,
+      "issues": [],
+      "resourceTypes": [
+        "MessageHeader",
+        "Patient",
+        "DiagnosticReport",
+        "Observation"
+      ],
+      "hl7": "MSH|^~\\&|LIS|HOSP|EZHK|EZHK|20260523120000||ORU^R03^ORU_R01|ORUR030003|P|2.5\rPID|1||R3P003^^^HOSP^MR||R03PT^TEST^3|||M\rOBR|1|R3O003|R3L003|2093-3^CHOLESTEROL^LN|||20260523120000\rOBX|1|NM|2093-3^CHOLESTEROL^LN||215|mg/dL|<200||||F|||20260523120000"
+    },
+    {
+      "messageType": "ORM^O01",
+      "label": "Order METABOLIC PANEL",
+      "ackCode": "AA",
+      "sendOK": true,
+      "messageId": "fhir_1779512450231319537",
+      "fhirValid": true,
+      "issues": [],
+      "resourceTypes": [
+        "MessageHeader",
+        "Patient",
+        "ServiceRequest"
+      ],
+      "hl7": "MSH|^~\\&|EPIC|HOSP|EZHK|EZHK|20260523120000||ORM^O01^ORM_O01|ORMO010001|P|2.5\rPID|1||OPAT001^^^HOSP^MR||ORDERPT^TEST^1|||M\rORC|NW|ORD001^EPIC||GRPID|SC||||20260523120000\rOBR|1|ORD001^EPIC|LAB001|24323-8^METABOLIC PANEL^LN|||20260523120000|||||||20260523120000|SERUM|||STAT"
+    },
+    {
+      "messageType": "ORM^O01",
+      "label": "Order CBC WITH DIFF",
+      "ackCode": "AA",
+      "sendOK": true,
+      "messageId": "fhir_1779512450414657031",
+      "fhirValid": true,
+      "issues": [],
+      "resourceTypes": [
+        "MessageHeader",
+        "ServiceRequest",
+        "Patient"
+      ],
+      "hl7": "MSH|^~\\&|EPIC|HOSP|EZHK|EZHK|20260523120000||ORM^O01^ORM_O01|ORMO010002|P|2.5\rPID|1||OPAT002^^^HOSP^MR||ORDERPT^TEST^2|||M\rORC|NW|ORD002^EPIC||GRPID|SC||||20260523120000\rOBR|1|ORD002^EPIC|LAB002|71428-1^CBC WITH DIFF^LN|||20260523120000|||||||20260523120000|SERUM|||R"
+    },
+    {
+      "messageType": "ORM^O01",
+      "label": "Order HDL CHOLESTEROL",
+      "ackCode": "AA",
+      "sendOK": true,
+      "messageId": "fhir_1779512450607970588",
+      "fhirValid": true,
+      "issues": [],
+      "resourceTypes": [
+        "MessageHeader",
+        "Patient",
+        "ServiceRequest"
+      ],
+      "hl7": "MSH|^~\\&|EPIC|HOSP|EZHK|EZHK|20260523120000||ORM^O01^ORM_O01|ORMO010003|P|2.5\rPID|1||OPAT003^^^HOSP^MR||ORDERPT^TEST^3|||M\rORC|NW|ORD003^EPIC||GRPID|SC||||20260523120000\rOBR|1|ORD003^EPIC|LAB003|2085-9^HDL CHOLESTEROL^LN|||20260523120000|||||||20260523120000|SERUM|||R"
+    },
+    {
+      "messageType": "MDM^T02",
+      "label": "DISCHARGE SUMMARY",
+      "ackCode": "AA",
+      "sendOK": true,
+      "messageId": "fhir_1779512450839841008",
+      "fhirValid": true,
+      "issues": [],
+      "resourceTypes": [
+        "MessageHeader",
+        "Patient",
+        "Encounter",
+        "DocumentReference"
+      ],
+      "hl7": "MSH|^~\\&|EPIC|HOSP|EZHK|EZHK|20260523120000||MDM^T02^MDM_T02|MDMT020001|P|2.5\rEVN|T02|20260523120000\rPID|1||MPAT001^^^HOSP^MR||DOCPT^TEST^1|||M\rPV1|1|I|WARD01^101^A^HOSP\rTXA|1|18842-5^DISCHARGE SUMMARY^LN|TX|20260523120000|DR001^PROV^FIRST^^MD||||DOC001|||AU|OA|AV\rOBX|1|ED|18842-5^DISCHARGE SUMMARY^LN||^TEXT^18842-5^Base64^UGF0aWVudCBkaXNjaGFyZ2VkIGluIHN0YWJsZSBjb25kaXRpb24u||||||F"
+    },
+    {
+      "messageType": "MDM^T02",
+      "label": "H AND P",
+      "ackCode": "AA",
+      "sendOK": true,
+      "messageId": "fhir_1779512450996078772",
+      "fhirValid": true,
+      "issues": [],
+      "resourceTypes": [
+        "MessageHeader",
+        "Patient",
+        "Encounter",
+        "DocumentReference"
+      ],
+      "hl7": "MSH|^~\\&|EPIC|HOSP|EZHK|EZHK|20260523120000||MDM^T02^MDM_T02|MDMT020002|P|2.5\rEVN|T02|20260523120000\rPID|1||MPAT002^^^HOSP^MR||DOCPT^TEST^2|||M\rPV1|1|I|WARD01^102^A^HOSP\rTXA|1|34117-2^H AND P^LN|TX|20260523120000|DR002^PROV^FIRST^^MD||||DOC002|||AU|OA|AV\rOBX|1|ED|34117-2^H AND P^LN||^TEXT^34117-2^Base64^Q2hlc3QgcGFpbi4gQlAgMTQwLzkwLiBFQ0cgb3JkZXJlZC4=||||||F"
+    },
+    {
+      "messageType": "MDM^T02",
+      "label": "CONSULT NOTE",
+      "ackCode": "AA",
+      "sendOK": true,
+      "messageId": "fhir_1779512451220218224",
+      "fhirValid": true,
+      "issues": [],
+      "resourceTypes": [
+        "MessageHeader",
+        "Encounter",
+        "Patient",
+        "DocumentReference"
+      ],
+      "hl7": "MSH|^~\\&|EPIC|HOSP|EZHK|EZHK|20260523120000||MDM^T02^MDM_T02|MDMT020003|P|2.5\rEVN|T02|20260523120000\rPID|1||MPAT003^^^HOSP^MR||DOCPT^TEST^3|||M\rPV1|1|I|WARD01^103^A^HOSP\rTXA|1|11488-4^CONSULT NOTE^LN|TX|20260523120000|DR003^PROV^FIRST^^MD||||DOC003|||AU|OA|AV\rOBX|1|ED|11488-4^CONSULT NOTE^LN||^TEXT^11488-4^Base64^Q2FyZGlvbG9neTogcmVjb21tZW5kIGVjaG8u||||||F"
+    },
+    {
+      "messageType": "VXU^V04",
+      "label": "INFLUENZA vax",
+      "ackCode": "AA",
+      "sendOK": true,
+      "messageId": "fhir_1779512451381362369",
+      "fhirValid": true,
+      "issues": [],
+      "resourceTypes": [
+        "MessageHeader",
+        "Patient",
+        "Immunization"
+      ],
+      "hl7": "MSH|^~\\&|IMMREG|HOSP|EZHK|EZHK|20260523120000||VXU^V04^VXU_V04|VXUV040001|P|2.5\rPID|1||VPAT001^^^CLINIC^MR||VAXPT^TEST^1|||F\rORC|RE|VXU001^CLINIC\rRXA|0|1|20260523|20260523|140^INFLUENZA^CVX|1|mL|ML^^UCUM|00^NEW RECORD^NIP001|||CLINIC||LOT26A||||CP|A\rRXR|C28161^IM^NCIT|LA^LEFT ARM^HL70163"
+    },
+    {
+      "messageType": "VXU^V04",
+      "label": "DIPHTHERIA TETANUS vax",
+      "ackCode": "AA",
+      "sendOK": true,
+      "messageId": "fhir_1779512451572533962",
+      "fhirValid": true,
+      "issues": [],
+      "resourceTypes": [
+        "MessageHeader",
+        "Patient",
+        "Immunization"
+      ],
+      "hl7": "MSH|^~\\&|IMMREG|HOSP|EZHK|EZHK|20260523120000||VXU^V04^VXU_V04|VXUV040002|P|2.5\rPID|1||VPAT002^^^CLINIC^MR||VAXPT^TEST^2|||M\rORC|RE|VXU002^CLINIC\rRXA|0|1|20260523|20260523|20^DIPHTHERIA TETANUS^CVX|1|mL|ML^^UCUM|00^NEW RECORD^NIP001|||CLINIC||LOT26B||||CP|A\rRXR|C28161^IM^NCIT|LA^LEFT ARM^HL70163"
+    },
+    {
+      "messageType": "VXU^V04",
+      "label": "TETANUS TOXOID vax",
+      "ackCode": "AA",
+      "sendOK": true,
+      "messageId": "fhir_1779512451781106135",
+      "fhirValid": true,
+      "issues": [],
+      "resourceTypes": [
+        "MessageHeader",
+        "Patient",
+        "Immunization"
+      ],
+      "hl7": "MSH|^~\\&|IMMREG|HOSP|EZHK|EZHK|20260523120000||VXU^V04^VXU_V04|VXUV040003|P|2.5\rPID|1||VPAT003^^^CLINIC^MR||VAXPT^TEST^3|||F\rORC|RE|VXU003^CLINIC\rRXA|0|1|20260523|20260523|115^TETANUS TOXOID^CVX|1|mL|ML^^UCUM|00^NEW RECORD^NIP001|||CLINIC||LOT26C||||CP|A\rRXR|C28161^IM^NCIT|LA^LEFT ARM^HL70163"
+    },
+    {
+      "messageType": "SIU^S12",
+      "label": "CONSULT appt #1",
+      "ackCode": "AA",
+      "sendOK": true,
+      "messageId": "fhir_1779512451978222637",
+      "fhirValid": true,
+      "issues": [],
+      "resourceTypes": [
+        "MessageHeader",
+        "Patient",
+        "Appointment"
+      ],
+      "hl7": "MSH|^~\\&|SCHED|HOSP|EZHK|EZHK|20260523120000||SIU^S12^SIU_S12|SIUS120001|P|2.5\rSCH|APT001^SCHED|||||||CONSULT|||30^MINUTES^ANS|||||DR001^PROV^FIRST^^MD||APT001\rPID|1||SPAT001^^^CLINIC^MR||APPTPT^TEST^1|||M\rAIP|1||DR001^PROV^FIRST^^MD^PHYSICIAN|||20260523130000|30^MINUTES^ANS"
+    },
+    {
+      "messageType": "SIU^S12",
+      "label": "FOLLOWUP appt #2",
+      "ackCode": "AA",
+      "sendOK": true,
+      "messageId": "fhir_1779512452156061303",
+      "fhirValid": true,
+      "issues": [],
+      "resourceTypes": [
+        "MessageHeader",
+        "Patient",
+        "Appointment"
+      ],
+      "hl7": "MSH|^~\\&|SCHED|HOSP|EZHK|EZHK|20260523120000||SIU^S12^SIU_S12|SIUS120002|P|2.5\rSCH|APT002^SCHED|||||||FOLLOWUP|||30^MINUTES^ANS|||||DR002^PROV^FIRST^^MD||APT002\rPID|1||SPAT002^^^CLINIC^MR||APPTPT^TEST^2|||M\rAIP|1||DR002^PROV^FIRST^^MD^PHYSICIAN|||20260523130000|30^MINUTES^ANS"
+    },
+    {
+      "messageType": "SIU^S12",
+      "label": "PROCEDURE appt #3",
+      "ackCode": "AA",
+      "sendOK": true,
+      "messageId": "fhir_1779512452381729051",
+      "fhirValid": true,
+      "issues": [],
+      "resourceTypes": [
+        "MessageHeader",
+        "Appointment",
+        "Patient"
+      ],
+      "hl7": "MSH|^~\\&|SCHED|HOSP|EZHK|EZHK|20260523120000||SIU^S12^SIU_S12|SIUS120003|P|2.5\rSCH|APT003^SCHED|||||||PROCEDURE|||30^MINUTES^ANS|||||DR003^PROV^FIRST^^MD||APT003\rPID|1||SPAT003^^^CLINIC^MR||APPTPT^TEST^3|||M\rAIP|1||DR003^PROV^FIRST^^MD^PHYSICIAN|||20260523130000|30^MINUTES^ANS"
+    },
+    {
+      "messageType": "DFT^P03",
+      "label": "OFFICE VISIT charge",
+      "ackCode": "AA",
+      "sendOK": true,
+      "messageId": "fhir_1779512452585942962",
+      "fhirValid": true,
+      "issues": [],
+      "resourceTypes": [
+        "MessageHeader",
+        "Patient",
+        "Encounter",
+        "ChargeItem"
+      ],
+      "hl7": "MSH|^~\\&|BILLING|HOSP|EZHK|EZHK|20260523120000||DFT^P03^DFT_P03|DFTP030001|P|2.5\rEVN|P03|20260523120000\rPID|1||BPAT001^^^HOSP^MR||BILLPT^TEST^1|||M\rPV1|1|I|WARD01^101^A^HOSP\rFT1|1||TXN001|20260523||CG|99213^OFFICE VISIT^CPT||||150.00||DR001^PROV^FIRST^^MD\rDG1|1|ICD10|R07.9|CHEST PAIN|20260523120000|A"
+    },
+    {
+      "messageType": "DFT^P03",
+      "label": "BLOOD DRAW charge",
+      "ackCode": "AA",
+      "sendOK": true,
+      "messageId": "fhir_1779512452773664882",
+      "fhirValid": true,
+      "issues": [],
+      "resourceTypes": [
+        "MessageHeader",
+        "Patient",
+        "Encounter",
+        "ChargeItem"
+      ],
+      "hl7": "MSH|^~\\&|BILLING|HOSP|EZHK|EZHK|20260523120000||DFT^P03^DFT_P03|DFTP030002|P|2.5\rEVN|P03|20260523120000\rPID|1||BPAT002^^^HOSP^MR||BILLPT^TEST^2|||M\rPV1|1|I|WARD01^102^A^HOSP\rFT1|1||TXN002|20260523||CG|36415^BLOOD DRAW^CPT||||25.00||DR002^PROV^FIRST^^MD\rDG1|1|ICD10|R07.9|CHEST PAIN|20260523120000|A"
+    },
+    {
+      "messageType": "DFT^P03",
+      "label": "ECG charge",
+      "ackCode": "AA",
+      "sendOK": true,
+      "messageId": "fhir_1779512452983484390",
+      "fhirValid": true,
+      "issues": [],
+      "resourceTypes": [
+        "MessageHeader",
+        "Patient",
+        "Encounter",
+        "ChargeItem"
+      ],
+      "hl7": "MSH|^~\\&|BILLING|HOSP|EZHK|EZHK|20260523120000||DFT^P03^DFT_P03|DFTP030003|P|2.5\rEVN|P03|20260523120000\rPID|1||BPAT003^^^HOSP^MR||BILLPT^TEST^3|||M\rPV1|1|I|WARD01^103^A^HOSP\rFT1|1||TXN003|20260523||CG|93000^ECG^CPT||||75.00||DR003^PROV^FIRST^^MD\rDG1|1|ICD10|R07.9|CHEST PAIN|20260523120000|A"
+    },
+    {
+      "messageType": "MFN^M13",
+      "label": "Master file #1",
+      "ackCode": "AA",
+      "sendOK": true,
+      "messageId": "fhir_1779512453161810452",
+      "fhirValid": true,
+      "issues": [],
+      "resourceTypes": [
+        "MessageHeader",
+        "Organization"
+      ],
+      "hl7": "MSH|^~\\&|MASTERFILES|HOSP|EZHK|EZHK|20260523120000||MFN^M13^MFN_M13|MFNM130001|P|2.5\rMFI|HL7100^SITE_DEFINED^L|MFNM130001|UPD|||AL\rMFE|MAD|KEY001|20260523120000|MFN_VALUE_1^LABEL1^L|CWE"
+    },
+    {
+      "messageType": "MFN^M13",
+      "label": "Master file #2",
+      "ackCode": "AA",
+      "sendOK": true,
+      "messageId": "fhir_1779512453345015216",
+      "fhirValid": true,
+      "issues": [],
+      "resourceTypes": [
+        "MessageHeader",
+        "Organization"
+      ],
+      "hl7": "MSH|^~\\&|MASTERFILES|HOSP|EZHK|EZHK|20260523120000||MFN^M13^MFN_M13|MFNM130002|P|2.5\rMFI|HL7200^SITE_DEFINED^L|MFNM130002|UPD|||AL\rMFE|MAD|KEY002|20260523120000|MFN_VALUE_2^LABEL2^L|CWE"
+    }
+  ]
+}

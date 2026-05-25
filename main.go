@@ -13,6 +13,7 @@ import (
 	"ezhealthkonnect/processing"
 	"ezhealthkonnect/services"
 	"ezhealthkonnect/services/backpressure"
+	"ezhealthkonnect/services/connectors"
 	svcmapping "ezhealthkonnect/services/mapping"
 	"ezhealthkonnect/services/storage"
 	"ezhealthkonnect/services/dbpool"
@@ -48,6 +49,9 @@ var postgresTransformationService *services.PostgresTransformationService
 
 // Global Processing Engine
 var processingEngine *processing.ProcessingEngine
+
+// Global DLQ Service (wired into outbound connector executor and DLQController)
+var dlqSvc *connectors.DLQService
 
 // Global Code Template Service (wired into script executor via processingEngine)
 var codeTemplateSvc *services.CodeTemplateService
@@ -190,6 +194,27 @@ func main() {
 			processingEngine.SetCodeTemplateService(codeTemplateSvc)
 			log.Printf("📦 Code Template Service initialized (6 OOB libraries)")
 
+			// DLQ SERVICE: write delivery failures, redrive via pipeline service
+			dlqSvc = connectors.NewDLQService(db)
+			processingEngine.SetDLQService(dlqSvc)
+			redriver := processingEngine.GetPipelineRedriver()
+			dlqSvc.SetPipelineRedriver(redriver)
+			dlqSvc.StartPoller(context.Background(), redriver)
+			log.Printf("📥 DLQ Service initialized (auto-redrive poller started)")
+
+			// METRICS COLLECTOR: aggregate transformation quality + DLQ metrics every 5 min.
+			// AlertNotificationService is wired so threshold breaches dispatch email/webhook
+			// notifications. credStore enables decryption of SMTP credentials stored in settings.
+			notificationSvc := services.NewAlertNotificationService(db, credStore)
+			metricsCollector := services.NewMetricsCollector(db, notificationSvc)
+			metricsCollector.Start(context.Background())
+
+			// RETENTION ENFORCEMENT: mandatory HIPAA data retention — purges old messages,
+			// DLQ rows, quality scores, and pipeline history on a 1-hour schedule.
+			// Retention periods are configured in Admin > Settings > Message Queue.
+			retentionSvc := services.NewRetentionEnforcementService(db, 0)
+			retentionSvc.Start(context.Background())
+
 			// Rebuild HL7→FHIR OOB templates for all IG-covered message types.
 			// Runs in the background so it never delays server startup.
 			// Triggered every boot so new IG seed data (e.g. V115 anchors) is
@@ -320,7 +345,8 @@ func main() {
 
 	// ── Kubernetes / Docker health probes ─────────────────────────────────────
 	// GET /healthz  — liveness:  returns 200 as long as the process is alive
-	// GET /readyz   — readiness: returns 503 until DB is reachable + engine running
+	// GET /readyz   — readiness: returns 503 until all critical dependencies are up.
+	// Checked by Docker/Kubernetes before routing traffic to this container.
 	router.GET("/healthz", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "alive"})
 	})
@@ -333,7 +359,7 @@ func main() {
 		checks := map[string]check{}
 		ready := true
 
-		// Database reachability
+		// Database — critical; no DB means no transformation or delivery.
 		if db == nil {
 			checks["database"] = check{OK: false, Message: "not configured"}
 			ready = false
@@ -344,7 +370,22 @@ func main() {
 			checks["database"] = check{OK: true}
 		}
 
-		// Processing engine
+		// Object storage — critical when configured; raw HL7 and FHIR bundles stored here.
+		// When storage is not configured, passes as DB-only mode (local dev acceptable).
+		if objectStorageService != nil {
+			pingCtx, pingCancel := context.WithTimeout(c.Request.Context(), 3*time.Second)
+			defer pingCancel()
+			if err := objectStorageService.Ping(pingCtx); err != nil {
+				checks["object_storage"] = check{OK: false, Message: err.Error()}
+				ready = false
+			} else {
+				checks["object_storage"] = check{OK: true, Message: objectStorageService.DriverName()}
+			}
+		} else {
+			checks["object_storage"] = check{OK: true, Message: "not configured (DB-only mode)"}
+		}
+
+		// Processing engine — must be running to accept inbound messages.
 		if processingEngine == nil || !processingEngine.IsRunning() {
 			checks["engine"] = check{OK: false, Message: "not running"}
 			ready = false
@@ -459,8 +500,12 @@ func main() {
 		c.JSON(http.StatusOK, health)
 	})
 
-	// API routes
-	api := router.Group("/api")
+	// API routes — all /api endpoints require the request to have passed
+	// through the authenticated Node.js proxy (X-Internal-Proxy-Secret check).
+	// Role-sensitive sub-groups add requireProxiedAdmin() or requireProxiedSuperAdmin()
+	// on top of this base gate.
+	WarnIfProxySecretMissing()
+	api := router.Group("/api", requireProxiedRequest())
 	{
 		// HL7 ROUTES
 		hl7Group := api.Group("/hl7")
@@ -497,12 +542,7 @@ func main() {
 				c.JSON(200, gin.H{"success": true, "data": depths, "count": len(depths)})
 			})
 
-			// P2-5 Dead Letter Queue management
-			if db != nil {
-				dlqCtrl := controllers.NewDLQController(db)
-				dlqCtrl.RegisterRoutes(systemGroup.Group("/dlq"))
-				log.Printf("✅ DLQ Controller initialized")
-			}
+			// DLQ management moved to /api/fhir/dlq (registered below with the DLQService)
 
 			// Admin settings (storage, SMTP, security, HL7/FHIR, queue, connectors, alerts, performance)
 			if db != nil {
@@ -540,6 +580,21 @@ func main() {
 			vqGroup := fhirGroup.Group("/validation-queue")
 			vqCtrl.RegisterRoutes(vqGroup)
 
+			// ADDED: Transformation Quality Review Queue (integration team only)
+			qualityCtrl := controllers.NewQualityController(db)
+			qualityCtrl.RegisterRoutes(fhirGroup.Group("/quality", requireProxiedSuperAdmin()))
+
+			// MONITORING DASHBOARD: live ops KPIs, alerts, message feed, per-interface health.
+			// Requires proxy auth only (no role check) — all authenticated users can view.
+			monitoringCtrl := controllers.NewMonitoringController(db)
+			monitoringCtrl.RegisterRoutes(api.Group("/monitoring"))
+
+			// ADDED: Dead-Letter Queue management (admin access)
+			if dlqSvc != nil {
+				dlqCtrl := controllers.NewDLQController(db, dlqSvc)
+				dlqCtrl.RegisterRoutes(fhirGroup.Group("/dlq", requireProxiedAdmin()))
+			}
+
 			// ADDED: Ad-hoc FHIR Validator tool (fhir-validator.html)
 			fhirValidatorCtrl := controllers.NewFHIRValidatorController()
 			fhirValidatorCtrl.RegisterRoutes(fhirGroup)
@@ -555,6 +610,10 @@ func main() {
 			mappingDeltaSvc := services.NewHL7FHIRTransformServiceV3(db)
 			mappingDeltaCtrl := controllers.NewMappingDeltaController(db, mappingDeltaSvc)
 			mappingDeltaCtrl.RegisterRoutes(fhirGroup)
+
+			// ADDED: Optional segment block toggles (per-interface opt-in mappings)
+			optionalSegCtrl := controllers.NewOptionalSegmentsController(db)
+			optionalSegCtrl.RegisterRoutes(fhirGroup)
 
 			// ── OOB template rebuild ─────────────────────────────────────────────
 			// Rebuild endpoints are admin-only and run asynchronously.
@@ -1696,7 +1755,10 @@ func main() {
 		}
 	}
 
-	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	// HTTP server shutdown: allow extra 5 s for open HTTP connections to drain
+	// after the pipeline engine has stopped (engine wait runs first above).
+	httpShutdownTimeout := 15 * time.Second
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), httpShutdownTimeout)
 	defer shutdownCancel()
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		log.Printf("⚠️  HTTP server forced shutdown: %v", err)

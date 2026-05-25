@@ -111,7 +111,11 @@ var baseCatalog = []OOBMessageDef{
 	{MessageType: "ADT^A17", FHIRVersion: FHIRVersionR4, Description: "Swap Patients"},
 	{MessageType: "ADT^A28", FHIRVersion: FHIRVersionR4, Description: "Add Person Information"},
 	{MessageType: "ADT^A31", FHIRVersion: FHIRVersionR4, Description: "Update Person Information"},
+	{MessageType: "ADT^A39", FHIRVersion: FHIRVersionR4, Description: "Merge Patient — Person Identifier List"},
 	{MessageType: "ADT^A40", FHIRVersion: FHIRVersionR4, Description: "Merge Patient — Patient Identifier List"},
+	{MessageType: "ADT^A41", FHIRVersion: FHIRVersionR4, Description: "Merge Patient — Patient Account Number"},
+	{MessageType: "ADT^A42", FHIRVersion: FHIRVersionR4, Description: "Move Visit Information — Patient Identifier List"},
+	{MessageType: "ADT^A43", FHIRVersion: FHIRVersionR4, Description: "Move Patient Information — Patient Identifier List"},
 	{MessageType: "ADT^A45", FHIRVersion: FHIRVersionR4, Description: "Move Visit Information — Visit Number"},
 
 	// ── ORU — Observation Reporting ───────────────────────────────────────
@@ -554,6 +558,13 @@ func (b *OOBTemplateBuilder) BuildOne(ctx context.Context, def OOBMessageDef) Bu
 		}
 		filtered := make([]GeneratedMapping, 0, len(seg.Mappings))
 		for _, m := range seg.Mappings {
+			// OOB templates contain only IG ConceptMap-backed mappings.
+			// Heuristic candidates ("type_match", "name_similarity") are surfaced
+			// in the wizard UI with confidence scores but must never appear in
+			// OOB templates as if they were specified by the IG.
+			if m.Source != "anchor" && m.Source != "ig_db" {
+				continue
+			}
 			lp := strings.ToLower(m.FHIRPath)
 			if !strings.Contains(lp, ".response.code") && !strings.Contains(lp, ".response.identifier") {
 				filtered = append(filtered, m)
@@ -579,6 +590,10 @@ func (b *OOBTemplateBuilder) BuildOne(ctx context.Context, def OOBMessageDef) Bu
 		}
 		result.MappingsBuilt += len(filtered)
 	}
+
+	// Apply field-level corrections that schema-driven generation cannot infer.
+	resources = applyServiceRequestOverrides(resources)
+	resources = applyChargeItemOverrides(resources)
 
 	cfg := TemplateConfig{
 		Version:     TemplateVersion,
@@ -639,6 +654,126 @@ func (b *OOBTemplateBuilder) upsertTemplate(ctx context.Context,
 		cfgJSON, frJSON, time.Now(),
 	)
 	return err
+}
+
+// ── Post-generation field overrides ──────────────────────────────────────────
+//
+// These tables encode corrections that schema-driven generation cannot infer:
+//   - HL7 fields with no valid FHIR target (exclusions)
+//   - Fields whose HL7 table → FHIR value binding is unambiguous per the IG
+//     ConceptMaps and should be baked into the generated template (valueMaps)
+//
+// Rules applied in applyServiceRequestOverrides, called by BuildOne.
+
+// serviceRequestExclusions lists ORC source fields that must never appear in a
+// ServiceRequest resource block.  ORC.13 (Enterer's Location, PL composite) is
+// the canonical example: the HL7-to-FHIR IG has no ConceptMap entry for it and
+// its raw PL value (e.g. "^^^^OFFICE^^^^^Office") is incompatible with every
+// ServiceRequest element.
+var serviceRequestExclusions = map[string]bool{
+	"ORC.13": true,
+}
+
+// serviceRequestValueMaps injects valueMap annotations into generated ServiceRequest
+// mappings for fields whose HL7 table → FHIR value binding is standard.
+// Applied after schema-driven generation so the upsert always writes the correct map.
+var serviceRequestValueMaps = map[string]map[string]interface{}{
+	// ORC.1 (Order Control Code, HL7 Table 0119) → ServiceRequest.intent
+	"ORC.1": {
+		"NW": "order", "CA": "proposal", "OC": "proposal", "HD": "proposal",
+		"RP": "order", "SC": "order", "IP": "order", "CM": "order",
+		"DC": "proposal", "DE": "proposal", "DF": "proposal", "DR": "proposal",
+		"FU": "plan", "LI": "plan", "PA": "plan",
+		"RE": "reflex-order", "RL": "order", "RO": "reflex-order",
+		"RQ": "proposal", "RR": "order", "RU": "order",
+		"SN": "order", "SS": "order", "UA": "order", "UN": "order",
+		"UR": "order", "UX": "order", "XO": "order", "XR": "order",
+	},
+	// ORC.5 (Order Status, HL7 Table 0038) → ServiceRequest.status
+	// Includes plain-English variants sent by systems that don't follow Table 0038.
+	"ORC.5": {
+		"A":           "active",
+		"CA":          "revoked",
+		"CM":          "completed",
+		"DC":          "revoked",
+		"ER":          "entered-in-error",
+		"HD":          "on-hold",
+		"IP":          "active",
+		"RP":          "revoked",
+		"SC":          "active",
+		"Pending":     "active",
+		"Scheduled":   "active",
+		"Hold":        "on-hold",
+		"Cancelled":   "revoked",
+		"Completed":   "completed",
+		"In Progress": "active",
+		"New":         "draft",
+	},
+}
+
+// applyServiceRequestOverrides post-processes the generated resources map:
+//   - removes excluded ORC fields from ServiceRequest
+//   - injects standard valueMaps for ORC.1 (intent) and ORC.5 (status)
+//
+// Called by BuildOne after generation, before JSON marshaling.
+// chargeItemExclusions lists FT1 source fields that must never appear in a
+// ChargeItem resource block because their raw HL7 values are incompatible
+// with every ChargeItem element path they would otherwise be heuristically
+// mapped to.
+//
+//   - FT1.6 (Transaction Type, IS "CG"/"CR") has no ChargeItem counterpart;
+//     heuristically it lands on code, which is already correctly anchored to
+//     FT1.7 (the actual procedure/charge code).
+//   - FT1.11 (Transaction Amount Extended, NM "0.000000") lands on
+//     definitionCanonical — price is not a canonical URL.
+//   - FT1.2 (Transaction ID, NM "1133") lands on implicitRules — a numeric
+//     transaction ID is not a FHIR implicitRules URI.
+var chargeItemExclusions = map[string]bool{
+	"FT1.6":  true, // Transaction Type (CG/CR) — no ChargeItem target
+	"FT1.11": true, // Transaction Amount Extended — not a canonical URL
+	"FT1.2":  true, // Transaction ID — not a FHIR implicitRules URI
+}
+
+// applyChargeItemOverrides post-processes the generated resources map:
+//   - removes excluded FT1 fields from ChargeItem (see chargeItemExclusions)
+//
+// Called by BuildOne after generation, before JSON marshaling.
+func applyChargeItemOverrides(resources map[string]TemplateResourceBlock) map[string]TemplateResourceBlock {
+	block, ok := resources["ChargeItem"]
+	if !ok {
+		return resources
+	}
+	kept := make([]GeneratedMapping, 0, len(block.Mappings))
+	for _, m := range block.Mappings {
+		if chargeItemExclusions[m.HL7Path] {
+			continue
+		}
+		kept = append(kept, m)
+	}
+	block.Mappings = kept
+	resources["ChargeItem"] = block
+	return resources
+}
+
+func applyServiceRequestOverrides(resources map[string]TemplateResourceBlock) map[string]TemplateResourceBlock {
+	block, ok := resources["ServiceRequest"]
+	if !ok {
+		return resources
+	}
+
+	kept := make([]GeneratedMapping, 0, len(block.Mappings))
+	for _, m := range block.Mappings {
+		if serviceRequestExclusions[m.HL7Path] {
+			continue
+		}
+		if vm, hasVM := serviceRequestValueMaps[m.HL7Path]; hasVM {
+			m.ValueMap = vm
+		}
+		kept = append(kept, m)
+	}
+	block.Mappings = kept
+	resources["ServiceRequest"] = block
+	return resources
 }
 
 func uniqueResources(resources map[string]TemplateResourceBlock) []string {

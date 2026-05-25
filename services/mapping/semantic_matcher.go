@@ -44,12 +44,20 @@ type Candidate struct {
 // identified from the IG ConceptMaps; remove only if the IG is updated to
 // define a v2 source.
 var fhirPathBlocklist = []string{
-	"statusHistory",   // Encounter.statusHistory — no v2 source; requires period with start+end
-	"episodeOfCare",   // Encounter.episodeOfCare — EpisodeOfCare is a FHIR-server concept; no v2 source
+	// ── FHIR-server-managed / infrastructure ──────────────────────────────────
+	"statusHistory",   // Encounter.statusHistory — no v2 source; requires closed period (start+end)
+	"episodeOfCare",   // Encounter.episodeOfCare — FHIR-server concept; no v2 source
 	"Patient.link",    // FHIR-server-managed record linkage; not populated by v2 transforms
 	"implicitRules",   // Resource.implicitRules — FHIR infrastructure URL; no v2 source per IG
-	"Coverage.language",   // Resource.language on Coverage — BCP-47 code; no IN1/IN2 v2 source per IG ConceptMaps
-	"Coverage.dependent",  // Member sequence number assigned by insurer; no IN1/IN2 v2 source per IG ConceptMaps
+	"meta.profile",    // Resource.meta.profile — set by system configuration, not v2 field values
+	"meta.versionId",  // Resource.meta.versionId — server-assigned; no v2 source
+
+	// ── Narrative (always generated, never from v2 field values) ─────────────
+	"text.div",        // Resource.text.div — generated HTML; never mapped from HL7 fields
+	"text.status",     // Resource.text.status — always "generated"; set by narrative engine
+
+	// ── Coverage-specific ─────────────────────────────────────────────────────
+	"Coverage.dependent",  // Member sequence number assigned by insurer; no IN1/IN2 v2 source
 }
 
 // isBlocklisted returns true when fhirPath contains any blocklisted substring.
@@ -77,7 +85,10 @@ var knownAnchorsR4 = map[string][]Candidate{
 	"MSH.7":  {{FHIRPath: "MessageHeader.meta.lastUpdated", FHIRType: "instant", Confidence: 0.95, Source: "anchor"}},
 	"MSH.9":  {{FHIRPath: "MessageHeader.eventCoding.code", FHIRType: "code", Confidence: 0.99, Source: "anchor"}},
 	"MSH.10": {{FHIRPath: "MessageHeader.id", FHIRType: "id", Confidence: 0.99, Source: "anchor"}},
-	"MSH.11": {{FHIRPath: "MessageHeader.meta.security[0].code", FHIRType: "code", Confidence: 0.85, Source: "anchor"}},
+	// MSH.11 (Processing ID: P/T/D) is an operational mode flag, not a security
+	// classification. The HL7 v2-to-FHIR IG has no mapping for MSH.11 to
+	// meta.security — omitted. meta.security requires codes from the FHIR
+	// SecurityLabels value set, which has no equivalent for processing IDs.
 
 	// ── PID ───────────────────────────────────────────────────────────────
 	"PID.3":  {{FHIRPath: "Patient.identifier", FHIRType: "Identifier", Confidence: 0.99, Source: "anchor"}},
@@ -97,12 +108,29 @@ var knownAnchorsR4 = map[string][]Candidate{
 	"PID.30": {{FHIRPath: "Patient.deceasedBoolean", FHIRType: "boolean", Confidence: 0.90, Source: "anchor"}},
 
 	// ── PV1 ───────────────────────────────────────────────────────────────
+	// Fields with no IG FHIR target are empty-anchored to block the heuristic.
+	// Fields with IG targets that are not yet fully anchored are noted below.
+	"PV1.1":  {}, // Set ID (SI) — structural sequence number; no Encounter field
 	"PV1.2":  {{FHIRPath: "Encounter.class.code", FHIRType: "code", Confidence: 0.95, Source: "anchor"}},
 	"PV1.3":  {{FHIRPath: "Encounter.location[0].location.display", FHIRType: "string", Confidence: 0.88, Source: "anchor"}},
+	"PV1.4":  {}, // Admission Type (IS, Table 0007) — no v2-to-FHIR IG mapping; PV1.14 owns admitSource
+	"PV1.5":  {}, // Preadmit Number (CX) — no standard Encounter.identifier slot per IG
+	"PV1.6":  {}, // Prior Patient Location (PL) — no FHIR Encounter target
 	"PV1.7":  {{FHIRPath: "Encounter.participant[0].individual.display", FHIRType: "string", Confidence: 0.88, Source: "anchor"}},
+	"PV1.8":  {}, // Referring Doctor (XCN) — IG target is Encounter.participant[type=REF]; deferred to assembly
+	"PV1.9":  {}, // Consulting Doctor (XCN) — IG target is Encounter.participant[type=CON]; deferred to assembly
 	"PV1.10": {{FHIRPath: "Encounter.hospitalization.admitSource", FHIRType: "CodeableConcept", Confidence: 0.88, Source: "anchor"}},
+	"PV1.11": {}, // Temporary Location (PL) — no FHIR Encounter target
+	"PV1.12": {}, // Preadmit Test Indicator (IS, Table 0087) — no FHIR target; heuristic must not match Encounter.language
+	"PV1.13": {}, // Re-admission Indicator (IS, Table 0092) — no simple FHIR Encounter target
+	"PV1.14": {{FHIRPath: "Encounter.hospitalization.admitSource", FHIRType: "CodeableConcept", Confidence: 0.85, Source: "anchor"}}, // Admit Source (IS, Table 0023) — IG ConceptMap alternate source
+	"PV1.15": {}, // Ambulatory Status (IS, Table 0009) — no FHIR Encounter target
+	"PV1.16": {}, // VIP Indicator (IS, Table 0099) — no FHIR Encounter target
 	"PV1.17": {{FHIRPath: "Encounter.participant[1].individual.display", FHIRType: "string", Confidence: 0.85, Source: "anchor"}},
 	"PV1.18": {{FHIRPath: "Encounter.type[0].coding[0].code", FHIRType: "code", Confidence: 0.85, Source: "anchor"}},
+	"PV1.19": {{FHIRPath: "Encounter.identifier[0]", FHIRType: "Identifier", Confidence: 0.90, Source: "anchor"}}, // Visit Number (CX) → Encounter.identifier per IG ConceptMap
+	"PV1.20": {}, // Financial Class (FC composite) — no FHIR Encounter target
+	"PV1.36": {{FHIRPath: "Encounter.hospitalization.dischargeDisposition", FHIRType: "CodeableConcept", Confidence: 0.88, Source: "anchor"}}, // Discharge Disposition (IS, Table 0112) → IG ConceptMap
 	"PV1.44": {{FHIRPath: "Encounter.period.start", FHIRType: "dateTime", Confidence: 0.97, Source: "anchor"}},
 	"PV1.45": {{FHIRPath: "Encounter.period.end", FHIRType: "dateTime", Confidence: 0.97, Source: "anchor"}},
 
@@ -112,8 +140,10 @@ var knownAnchorsR4 = map[string][]Candidate{
 	// heuristic never runs and cannot match e.g. Encounter.statusHistory.
 	"EVN.1": {},
 	"EVN.2": {{FHIRPath: "Encounter.period.start", FHIRType: "dateTime", Confidence: 0.88, Source: "anchor"}},
+	"EVN.3": {}, // Date/Time Planned Event (DTM) — no direct FHIR Encounter target per IG ConceptMap
 	"EVN.4": {{FHIRPath: "Encounter.type[0].coding[0].code", FHIRType: "code", Confidence: 0.82, Source: "anchor"}},
 	"EVN.5": {{FHIRPath: "Encounter.participant[0].individual.display", FHIRType: "string", Confidence: 0.80, Source: "anchor"}},
+	"EVN.6": {}, // Event Occurred (DTM) — overlaps EVN.2; no distinct FHIR target per IG
 
 	// ── OBR ───────────────────────────────────────────────────────────────
 	// OBR.2/3 are EI (Entity Identifier) composites → full Identifier, not scalar .value
@@ -135,8 +165,11 @@ var knownAnchorsR4 = map[string][]Candidate{
 	"OBX.14": {{FHIRPath: "Observation.effectiveDateTime", FHIRType: "dateTime", Confidence: 0.93, Source: "anchor"}},
 
 	// ── ORC ───────────────────────────────────────────────────────────────
-	// ORC.2/3 are EI composites → full Identifier
-	"ORC.1":  {{FHIRPath: "ServiceRequest.status", FHIRType: "code", Confidence: 0.90, Source: "anchor"}},
+	// ORC.1 (Order Control Code, Table 0119) → intent per HL7-to-FHIR IG ConceptMap.
+	// ORC.5 (Order Status, Table 0038) → status; handled via valueMap injection in oob_template_builder.
+	// ORC.2/3 are EI composites → full Identifier.
+	// ORC.13 (Enterer's Location, PL) has no valid ServiceRequest target; excluded in oob_template_builder.
+	"ORC.1":  {{FHIRPath: "ServiceRequest.intent", FHIRType: "code", Confidence: 0.92, Source: "anchor"}},
 	"ORC.2":  {{FHIRPath: "ServiceRequest.identifier[0]", FHIRType: "Identifier", Confidence: 0.92, Source: "anchor"}},
 	"ORC.3":  {{FHIRPath: "ServiceRequest.identifier[1]", FHIRType: "Identifier", Confidence: 0.90, Source: "anchor"}},
 	"ORC.9":  {{FHIRPath: "ServiceRequest.authoredOn", FHIRType: "dateTime", Confidence: 0.93, Source: "anchor"}},
@@ -150,7 +183,11 @@ var knownAnchorsR4 = map[string][]Candidate{
 	"AL1.6": {{FHIRPath: "AllergyIntolerance.onsetDateTime", FHIRType: "dateTime", Confidence: 0.88, Source: "anchor"}},
 
 	// ── DG1 ───────────────────────────────────────────────────────────────
+	"DG1.1": {}, // Set ID (SI) — structural sequence; no Condition field
+	"DG1.2": {}, // Diagnosis Coding Method (IS, Table 0053) — OBSOLETE in v2.8.2; no FHIR target;
+	             // values like "ICD10"/"9" are coding system labels, NOT BCP-47 language tags
 	"DG1.3": {{FHIRPath: "Condition.code", FHIRType: "CodeableConcept", Confidence: 0.97, Source: "anchor"}},
+	"DG1.4": {{FHIRPath: "Condition.code.text", FHIRType: "string", Confidence: 0.90, Source: "anchor"}}, // Diagnosis Description (ST) → Condition.code.text per IG ConceptMap
 	"DG1.5": {{FHIRPath: "Condition.onsetDateTime", FHIRType: "dateTime", Confidence: 0.90, Source: "anchor"}},
 	"DG1.6": {{FHIRPath: "Condition.category[0].coding[0].code", FHIRType: "code", Confidence: 0.88, Source: "anchor"}},
 
@@ -269,8 +306,11 @@ var knownAnchorsR4 = map[string][]Candidate{
 	// ── AIP — Personnel Resource (practitioners) ───────────────────────────
 	// AIP.3 XCN → practitioner actor display (provider ID + name)
 	// AIP.4 CE  → practitioner role / type text
+	// AIP.6 TS  → Appointment.start (personnel start date/time = appointment start
+	//             when SCH.11.4 is absent; per HL7 v2-to-FHIR IG ConceptMap)
 	"AIP.3": {{FHIRPath: "Appointment.participant[0].actor.display", FHIRType: "string", Confidence: 0.92, Source: "anchor"}},
 	"AIP.4": {{FHIRPath: "Appointment.participant[0].type[0].text", FHIRType: "string", Confidence: 0.83, Source: "anchor"}},
+	"AIP.6": {{FHIRPath: "Appointment.start", FHIRType: "instant", Confidence: 0.90, Source: "anchor"}},
 
 	// ── TQ1 — Timing/Quantity (HL7 v2.5+ replacement for the TQ composite) ────
 	// Primary use in SIU messages: per-service timing for AIS/AIG/AIL/AIP blocks.
@@ -321,9 +361,15 @@ var knownAnchorsR4 = map[string][]Candidate{
 	"PR1.6": {{FHIRPath: "Procedure.performer[0].actor.display", FHIRType: "string", Confidence: 0.85, Source: "anchor"}},
 
 	// ── FT1 ───────────────────────────────────────────────────────────────
-	"FT1.4": {{FHIRPath: "ChargeItem.occurrenceDateTime", FHIRType: "dateTime", Confidence: 0.90, Source: "anchor"}},
-	"FT1.6": {{FHIRPath: "ChargeItem.code", FHIRType: "CodeableConcept", Confidence: 0.93, Source: "anchor"}},
-	"FT1.7": {{FHIRPath: "ChargeItem.quantity.value", FHIRType: "decimal", Confidence: 0.88, Source: "anchor"}},
+	// FT1.4  — Transaction Date/Time → occurrence (dateTime)
+	// FT1.7  — Transaction Code (CPT/ICD procedure/service code) → charge code;
+	//           NOT quantity — the code number must not land in quantity.value.
+	// FT1.10 — Transaction Quantity (service units) → actual service quantity.
+	// FT1.6  — Transaction Type (CG/CR two-char code) has no direct ChargeItem
+	//           counterpart and is excluded by applyChargeItemOverrides.
+	"FT1.4":  {{FHIRPath: "ChargeItem.occurrenceDateTime", FHIRType: "dateTime", Confidence: 0.90, Source: "anchor"}},
+	"FT1.7":  {{FHIRPath: "ChargeItem.code", FHIRType: "CodeableConcept", Confidence: 0.93, Source: "anchor"}},
+	"FT1.10": {{FHIRPath: "ChargeItem.quantity.value", FHIRType: "decimal", Confidence: 0.90, Source: "anchor"}},
 
 	// ── MFI / MFE ─────────────────────────────────────────────────────────
 	"MFI.1": {{FHIRPath: "MessageHeader.meta.tag[0].code", FHIRType: "code", Confidence: 0.88, Source: "anchor"}},
@@ -354,7 +400,7 @@ var knownAnchorsR5 = map[string][]Candidate{
 	"MSH.7":  {{FHIRPath: "MessageHeader.meta.lastUpdated", FHIRType: "instant", Confidence: 0.95, Source: "anchor"}},
 	"MSH.9":  {{FHIRPath: "MessageHeader.eventCoding.code", FHIRType: "code", Confidence: 0.99, Source: "anchor"}},
 	"MSH.10": {{FHIRPath: "MessageHeader.id", FHIRType: "id", Confidence: 0.99, Source: "anchor"}},
-	"MSH.11": {{FHIRPath: "MessageHeader.meta.security[0].code", FHIRType: "code", Confidence: 0.85, Source: "anchor"}},
+	// MSH.11 omitted — see R4 section above for rationale.
 
 	// ── PID ── (unchanged from R4 except PID.18 composite fix) ──────────
 	"PID.3":  {{FHIRPath: "Patient.identifier", FHIRType: "Identifier", Confidence: 0.99, Source: "anchor"}},
@@ -374,12 +420,28 @@ var knownAnchorsR5 = map[string][]Candidate{
 	"PID.30": {{FHIRPath: "Patient.deceasedBoolean", FHIRType: "boolean", Confidence: 0.90, Source: "anchor"}},
 
 	// ── PV1 ── R5: class→CodeableConcept[], hospitalization→admission, individual→actor
-	"PV1.2":  {{FHIRPath: "Encounter.class[0].coding[0].code", FHIRType: "code", Confidence: 0.95, Source: "anchor"}},   // R4: Encounter.class.code (Coding); R5: CodeableConcept[]
+	// Empty anchors mirror R4 — same IG rationale, only the anchored paths differ.
+	"PV1.1":  {}, // Set ID — no Encounter field (same as R4)
+	"PV1.2":  {{FHIRPath: "Encounter.class[0].coding[0].code", FHIRType: "code", Confidence: 0.95, Source: "anchor"}},   // R4: Coding; R5: CodeableConcept[]
 	"PV1.3":  {{FHIRPath: "Encounter.location[0].location.display", FHIRType: "string", Confidence: 0.88, Source: "anchor"}},
-	"PV1.7":  {{FHIRPath: "Encounter.participant[0].actor.display", FHIRType: "string", Confidence: 0.88, Source: "anchor"}},  // R4: .individual; R5: .actor
-	"PV1.10": {{FHIRPath: "Encounter.admission.admitSource", FHIRType: "CodeableConcept", Confidence: 0.88, Source: "anchor"}}, // R4: .hospitalization; R5: .admission
-	"PV1.17": {{FHIRPath: "Encounter.participant[1].actor.display", FHIRType: "string", Confidence: 0.85, Source: "anchor"}},  // R4: .individual; R5: .actor
+	"PV1.4":  {}, // Admission Type — no IG mapping (same as R4)
+	"PV1.5":  {}, // Preadmit Number — no IG mapping (same as R4)
+	"PV1.6":  {}, // Prior Patient Location — no FHIR target (same as R4)
+	"PV1.7":  {{FHIRPath: "Encounter.participant[0].actor.display", FHIRType: "string", Confidence: 0.88, Source: "anchor"}},  // R5: .actor
+	"PV1.8":  {}, // Referring Doctor — deferred to assembly (same as R4)
+	"PV1.9":  {}, // Consulting Doctor — deferred to assembly (same as R4)
+	"PV1.10": {{FHIRPath: "Encounter.admission.admitSource", FHIRType: "CodeableConcept", Confidence: 0.88, Source: "anchor"}}, // R5: .admission
+	"PV1.11": {}, // Temporary Location — no FHIR target (same as R4)
+	"PV1.12": {}, // Preadmit Test Indicator — no FHIR target (same as R4)
+	"PV1.13": {}, // Re-admission Indicator — no simple FHIR target (same as R4)
+	"PV1.14": {{FHIRPath: "Encounter.admission.admitSource", FHIRType: "CodeableConcept", Confidence: 0.85, Source: "anchor"}}, // R5: .admission
+	"PV1.15": {}, // Ambulatory Status — no FHIR target (same as R4)
+	"PV1.16": {}, // VIP Indicator — no FHIR target (same as R4)
+	"PV1.17": {{FHIRPath: "Encounter.participant[1].actor.display", FHIRType: "string", Confidence: 0.85, Source: "anchor"}},  // R5: .actor
 	"PV1.18": {{FHIRPath: "Encounter.type[0].coding[0].code", FHIRType: "code", Confidence: 0.85, Source: "anchor"}},
+	"PV1.19": {{FHIRPath: "Encounter.identifier[0]", FHIRType: "Identifier", Confidence: 0.90, Source: "anchor"}}, // Visit Number → Encounter.identifier (same as R4)
+	"PV1.20": {}, // Financial Class — no FHIR target (same as R4)
+	"PV1.36": {{FHIRPath: "Encounter.admission.dischargeDisposition", FHIRType: "CodeableConcept", Confidence: 0.88, Source: "anchor"}}, // R5: .admission
 	"PV1.44": {{FHIRPath: "Encounter.period.start", FHIRType: "dateTime", Confidence: 0.97, Source: "anchor"}},
 	"PV1.45": {{FHIRPath: "Encounter.period.end", FHIRType: "dateTime", Confidence: 0.97, Source: "anchor"}},
 
@@ -387,8 +449,10 @@ var knownAnchorsR5 = map[string][]Candidate{
 	// EVN.1 — same rationale as R4: no IG FHIR target, empty anchor prevents heuristic.
 	"EVN.1": {},
 	"EVN.2": {{FHIRPath: "Encounter.period.start", FHIRType: "dateTime", Confidence: 0.88, Source: "anchor"}},
+	"EVN.3": {}, // Date/Time Planned Event — no direct FHIR target (same as R4)
 	"EVN.4": {{FHIRPath: "Encounter.type[0].coding[0].code", FHIRType: "code", Confidence: 0.82, Source: "anchor"}},
 	"EVN.5": {{FHIRPath: "Encounter.participant[0].actor.display", FHIRType: "string", Confidence: 0.80, Source: "anchor"}}, // R4: .individual; R5: .actor
+	"EVN.6": {}, // Event Occurred — no distinct FHIR target per IG (same as R4)
 
 	// ── OBR ── EI composite → full Identifier (same fix as R4)
 	"OBR.2":  {{FHIRPath: "DiagnosticReport.identifier[0]", FHIRType: "Identifier", Confidence: 0.90, Source: "anchor"}},
@@ -408,8 +472,8 @@ var knownAnchorsR5 = map[string][]Candidate{
 	"OBX.11": {{FHIRPath: "Observation.status", FHIRType: "code", Confidence: 0.95, Source: "anchor"}},
 	"OBX.14": {{FHIRPath: "Observation.effectiveDateTime", FHIRType: "dateTime", Confidence: 0.93, Source: "anchor"}},
 
-	// ── ORC ── EI composite → full Identifier (same fix as R4)
-	"ORC.1":  {{FHIRPath: "ServiceRequest.status", FHIRType: "code", Confidence: 0.90, Source: "anchor"}},
+	// ── ORC ── ORC.1 → intent per HL7-to-FHIR IG; EI composites → full Identifier (same fix as R4)
+	"ORC.1":  {{FHIRPath: "ServiceRequest.intent", FHIRType: "code", Confidence: 0.92, Source: "anchor"}},
 	"ORC.2":  {{FHIRPath: "ServiceRequest.identifier[0]", FHIRType: "Identifier", Confidence: 0.92, Source: "anchor"}},
 	"ORC.3":  {{FHIRPath: "ServiceRequest.identifier[1]", FHIRType: "Identifier", Confidence: 0.90, Source: "anchor"}},
 	"ORC.9":  {{FHIRPath: "ServiceRequest.authoredOn", FHIRType: "dateTime", Confidence: 0.93, Source: "anchor"}},
@@ -422,8 +486,11 @@ var knownAnchorsR5 = map[string][]Candidate{
 	"AL1.5": {{FHIRPath: "AllergyIntolerance.reaction[0].description", FHIRType: "string", Confidence: 0.85, Source: "anchor"}},
 	"AL1.6": {{FHIRPath: "AllergyIntolerance.onsetDateTime", FHIRType: "dateTime", Confidence: 0.88, Source: "anchor"}},
 
-	// ── DG1 ── (unchanged from R4) ────────────────────────────────────────
+	// ── DG1 ── (same as R4) ───────────────────────────────────────────────
+	"DG1.1": {}, // Set ID — no Condition field
+	"DG1.2": {}, // Diagnosis Coding Method — OBSOLETE; no FHIR target
 	"DG1.3": {{FHIRPath: "Condition.code", FHIRType: "CodeableConcept", Confidence: 0.97, Source: "anchor"}},
+	"DG1.4": {{FHIRPath: "Condition.code.text", FHIRType: "string", Confidence: 0.90, Source: "anchor"}},
 	"DG1.5": {{FHIRPath: "Condition.onsetDateTime", FHIRType: "dateTime", Confidence: 0.90, Source: "anchor"}},
 	"DG1.6": {{FHIRPath: "Condition.category[0].coding[0].code", FHIRType: "code", Confidence: 0.88, Source: "anchor"}},
 
@@ -509,6 +576,7 @@ var knownAnchorsR5 = map[string][]Candidate{
 	"AIL.4": {{FHIRPath: "Appointment.participant[0].type[0].text", FHIRType: "string", Confidence: 0.82, Source: "anchor"}},
 	"AIP.3": {{FHIRPath: "Appointment.participant[0].actor.display", FHIRType: "string", Confidence: 0.92, Source: "anchor"}},
 	"AIP.4": {{FHIRPath: "Appointment.participant[0].type[0].text", FHIRType: "string", Confidence: 0.83, Source: "anchor"}},
+	"AIP.6": {{FHIRPath: "Appointment.start", FHIRType: "instant", Confidence: 0.90, Source: "anchor"}},
 
 	// ── TQ1 ── (same as R4; R5 Appointment timing fields are identical)
 	"TQ1.5":  {{FHIRPath: "Appointment.minutesDuration", FHIRType: "positiveInt", Confidence: 0.88, Source: "anchor"}},
@@ -549,10 +617,10 @@ var knownAnchorsR5 = map[string][]Candidate{
 	"PR1.5": {{FHIRPath: "Procedure.performedDateTime", FHIRType: "dateTime", Confidence: 0.93, Source: "anchor"}},
 	"PR1.6": {{FHIRPath: "Procedure.performer[0].actor.display", FHIRType: "string", Confidence: 0.85, Source: "anchor"}},
 
-	// ── FT1 ── (unchanged from R4) ────────────────────────────────────────
-	"FT1.4": {{FHIRPath: "ChargeItem.occurrenceDateTime", FHIRType: "dateTime", Confidence: 0.90, Source: "anchor"}},
-	"FT1.6": {{FHIRPath: "ChargeItem.code", FHIRType: "CodeableConcept", Confidence: 0.93, Source: "anchor"}},
-	"FT1.7": {{FHIRPath: "ChargeItem.quantity.value", FHIRType: "decimal", Confidence: 0.88, Source: "anchor"}},
+	// ── FT1 ── corrected from R4: FT1.7 is the charge code, FT1.10 is quantity
+	"FT1.4":  {{FHIRPath: "ChargeItem.occurrenceDateTime", FHIRType: "dateTime", Confidence: 0.90, Source: "anchor"}},
+	"FT1.7":  {{FHIRPath: "ChargeItem.code", FHIRType: "CodeableConcept", Confidence: 0.93, Source: "anchor"}},
+	"FT1.10": {{FHIRPath: "ChargeItem.quantity.value", FHIRType: "decimal", Confidence: 0.90, Source: "anchor"}},
 
 	// ── MFI / MFE ── (unchanged from R4) ─────────────────────────────────
 	"MFI.1": {{FHIRPath: "MessageHeader.meta.tag[0].code", FHIRType: "code", Confidence: 0.88, Source: "anchor"}},

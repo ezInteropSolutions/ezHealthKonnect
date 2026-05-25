@@ -340,7 +340,22 @@ class MessageManager {
             return;
         }
 
-        tbody.innerHTML = messages.map(message => `
+        tbody.innerHTML = messages.map(message => {
+            const ds = (message.delivery_status || '').toLowerCase();
+            const st = (message.status || '').toLowerCase();
+            const hasDLQ = ds === 'failed'
+                || st === 'failed' || st === 'error'
+                || (message.delivery_attempts > 0 && ds !== 'delivered' && ds !== 'not_required' && ds !== 'not_configured');
+            const dlqBadge = hasDLQ
+                ? `<span class="dlq-badge" title="Delivery failed — click to view in DLQ"
+                      onclick="event.stopPropagation(); messageManager.openDLQForMessage('${message.message_id}')"
+                      style="cursor:pointer;display:inline-flex;align-items:center;gap:3px;
+                             background:#fef3c7;border:1px solid #fcd34d;border-radius:10px;
+                             padding:1px 7px;font-size:11px;font-weight:600;color:#92400e;margin-left:6px;">
+                      <i class="fas fa-exclamation-triangle" style="font-size:9px;"></i> DLQ
+                   </span>`
+                : '';
+            return `
             <tr class="message-row" onclick="showMessageDetail('${message.message_id}')">
                 <td>
                     <div class="fw-bold">${message.message_id}</div>
@@ -348,7 +363,7 @@ class MessageManager {
                 </td>
                 <td>${message.interface_name}</td>
                 <td>${message.message_type || 'Unknown'}</td>
-                <td>${this.renderStatusBadge(message.status, message.delivery_status)}</td>
+                <td>${this.renderStatusBadge(message.status, message.delivery_status)}${dlqBadge}</td>
                 <td class="message-size">${this.formatBytes(message.message_size)}</td>
                 <td>
                     <div>${this.formatDateTime(message.received_at)}</div>
@@ -363,9 +378,11 @@ class MessageManager {
                         <button class="btn btn-outline-primary btn-sm" onclick="event.stopPropagation(); showMessageDetail('${message.message_id}')">
                             <i class="fas fa-eye"></i>
                         </button>
-                        ${message.status === 'failed' || message.status === 'error' ? `
-                            <button class="btn btn-outline-warning btn-sm" onclick="event.stopPropagation(); reprocessMessage('${message.message_id}')">
-                                <i class="fas fa-redo"></i>
+                        ${hasDLQ ? `
+                            <button class="btn btn-sm" title="View DLQ entries"
+                                style="background:#fef3c7;border:1px solid #fcd34d;color:#92400e;"
+                                onclick="event.stopPropagation(); messageManager.openDLQForMessage('${message.message_id}')">
+                                <i class="fas fa-exclamation-triangle"></i>
                             </button>
                         ` : ''}
                         <button class="btn btn-outline-danger btn-sm" onclick="event.stopPropagation(); confirmDeleteMessage('${message.id}')">
@@ -373,8 +390,8 @@ class MessageManager {
                         </button>
                     </div>
                 </td>
-            </tr>
-        `).join('');
+            </tr>`;
+        }).join('');
     }
 
     // Resolve the single display status from the two DB columns (status + delivery_status).
@@ -1560,6 +1577,12 @@ class MessageManager {
             ? `<tr><th style="color:#64748b;font-weight:500;padding:0.3rem 0;">Parsed</th><td style="color:#1e293b;padding:0.3rem 0;">${this.formatDateTime(message.parsed_at)}${message.parsing_time_ms ? ` <span style="color:#94a3b8;font-size:0.78rem;">(${message.parsing_time_ms}ms)</span>` : ''}</td></tr>`
             : '';
 
+        const _ds2 = (message.delivery_status || '').toLowerCase();
+        const _st2 = (message.status || '').toLowerCase();
+        const hasDLQSection = _ds2 === 'failed'
+            || _st2 === 'failed' || _st2 === 'error'
+            || (message.delivery_attempts > 0 && _ds2 !== 'delivered' && _ds2 !== 'not_required' && _ds2 !== 'not_configured');
+
         container.innerHTML = `
             <div>
                 <!-- Status bar -->
@@ -1598,8 +1621,173 @@ class MessageManager {
                         </div>
                     </div>
                 </div>
+
+                ${hasDLQSection ? `
+                <!-- Delivery Failures (DLQ) section -->
+                <div id="dlqSection" style="margin-top:1.25rem;">
+                    <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
+                        <i class="fas fa-exclamation-triangle" style="color:#d97706;font-size:13px;"></i>
+                        <span style="font-size:0.75rem;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:#92400e;">Delivery Failures</span>
+                        <span id="dlqLoadingSpinner" style="font-size:12px;color:#9ca3af;"><i class="fas fa-spinner fa-spin"></i></span>
+                    </div>
+                    <div id="dlqRowsContainer"></div>
+                </div>` : ''}
             </div>
         `;
+
+        if (hasDLQSection) {
+            this.loadDLQRowsForMessage(message.message_id);
+        }
+    }
+
+    async loadDLQRowsForMessage(messageId) {
+        const container = document.getElementById('dlqRowsContainer');
+        const spinner   = document.getElementById('dlqLoadingSpinner');
+        if (!container) return;
+
+        try {
+            const token = localStorage.getItem('accessToken');
+            const headers = { 'Content-Type': 'application/json' };
+            if (token) headers['Authorization'] = 'Bearer ' + token;
+            const res = await fetch(
+                `/api/fhir/dlq?message_id=${encodeURIComponent(messageId)}&status=&limit=10`,
+                { credentials: 'include', headers }
+            );
+            const data = await res.json();
+            if (spinner) spinner.style.display = 'none';
+            if (!data.success || !data.data || !data.data.length) {
+                container.innerHTML = `<div style="font-size:12px;color:#9ca3af;padding:8px 0;">No active DLQ rows for this message.</div>`;
+                return;
+            }
+            container.innerHTML = data.data.map(row => this.renderDLQRow(row)).join('');
+        } catch (err) {
+            if (spinner) spinner.style.display = 'none';
+            if (container) container.innerHTML = `<div style="font-size:12px;color:#dc2626;">Failed to load DLQ data.</div>`;
+        }
+    }
+
+    renderDLQRow(row) {
+        const statusColour = { pending: '#92400e', retrying: '#1e40af', abandoned: '#991b1b', resolved: '#166534' };
+        const statusBg     = { pending: '#fef3c7', retrying: '#dbeafe', abandoned: '#fee2e2', resolved: '#dcfce7' };
+        const st = row.Status || 'pending';
+        const isAbandoned = st === 'abandoned';
+        const fmtDate = iso => iso ? new Date(iso).toLocaleString(undefined, { month:'short', day:'2-digit', hour:'2-digit', minute:'2-digit' }) : '—';
+
+        return `
+        <div style="background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:12px 14px;margin-bottom:8px;font-size:12px;">
+            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px;">
+                <span style="background:${statusBg[st]};color:${statusColour[st]};padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;text-transform:uppercase;">${this.escapeHtml(st)}</span>
+                <span style="color:#6b7280;">Connector: <strong>${this.escapeHtml(row.ConnectorType || '—')}</strong></span>
+                <span style="color:#6b7280;">Attempts: <strong>${row.AttemptCount}</strong></span>
+                ${row.NextRetryAt && st === 'pending' ? `<span style="color:#6b7280;">Next retry: <strong>${fmtDate(row.NextRetryAt)}</strong></span>` : ''}
+                <span style="margin-left:auto;color:#9ca3af;">Created ${fmtDate(row.CreatedAt)}</span>
+            </div>
+            ${row.ErrorMessage ? `<div style="color:#dc2626;font-size:11px;margin-bottom:8px;word-break:break-word;">${this.escapeHtml(row.ErrorMessage)}</div>` : ''}
+            <div style="display:flex;gap:6px;flex-wrap:wrap;">
+                <button class="btn btn-sm" style="background:#2563eb;color:#fff;border:none;font-size:11px;padding:3px 10px;border-radius:4px;"
+                    onclick="event.stopPropagation(); messageManager.dlqRedriveFromModal('${this.escapeHtml(row.ID)}', this)">
+                    <i class="fas fa-${isAbandoned ? 'rotate-right' : 'redo'}"></i> ${isAbandoned ? 'Reactivate' : 'Redrive Now'}
+                </button>
+                <button class="btn btn-sm" style="background:#fff;color:#2563eb;border:1px solid #93c5fd;font-size:11px;padding:3px 10px;border-radius:4px;"
+                    onclick="event.stopPropagation(); messageManager.dlqScheduleFromModal('${this.escapeHtml(row.ID)}', this)">
+                    <i class="fas fa-calendar-alt"></i> Schedule
+                </button>
+                ${isAbandoned ? '' : `
+                <button class="btn btn-sm" style="background:#fff;color:#dc2626;border:1px solid #fca5a5;font-size:11px;padding:3px 10px;border-radius:4px;"
+                    onclick="event.stopPropagation(); messageManager.dlqAbandonFromModal('${this.escapeHtml(row.ID)}', this)">
+                    <i class="fas fa-ban"></i> Abandon
+                </button>`}
+                <a href="admin-dlq.html?message_id=${encodeURIComponent(row.MessageID || '')}" target="_blank"
+                   style="font-size:11px;color:#6b7280;padding:3px 8px;border:1px solid #e5e7eb;border-radius:4px;text-decoration:none;display:inline-flex;align-items:center;gap:4px;"
+                   onclick="event.stopPropagation()">
+                    <i class="fas fa-external-link-alt"></i> Full DLQ
+                </a>
+            </div>
+        </div>`;
+    }
+
+    async dlqRedriveFromModal(dlqId, btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+        try {
+            const token = localStorage.getItem('accessToken');
+            const headers = { 'Content-Type': 'application/json' };
+            if (token) headers['Authorization'] = 'Bearer ' + token;
+            const res = await fetch(`/api/fhir/dlq/${dlqId}/redrive`, {
+                method: 'POST', credentials: 'include', headers,
+                body: JSON.stringify({ mode: 'from_failed_step' }),
+            });
+            const data = await res.json();
+            if (data.success) {
+                AppDialogs.toast('Redrive triggered', 'success');
+                // Reload DLQ section
+                const msgId = this.selectedMessageId;
+                if (msgId) this.loadDLQRowsForMessage(msgId);
+            } else {
+                AppDialogs.toast(data.error || 'Redrive failed', 'error');
+                btn.disabled = false;
+                btn.innerHTML = '<i class="fas fa-redo"></i> Redrive Now';
+            }
+        } catch (_) {
+            AppDialogs.toast('Network error', 'error');
+            btn.disabled = false;
+        }
+    }
+
+    async dlqScheduleFromModal(dlqId, btn) {
+        const atStr = prompt('Schedule redrive at (YYYY-MM-DDTHH:MM, local time):',
+            new Date(Date.now() + 3600000).toISOString().slice(0,16));
+        if (!atStr) return;
+        const at = new Date(atStr).toISOString();
+        btn.disabled = true;
+        try {
+            const token = localStorage.getItem('accessToken');
+            const headers = { 'Content-Type': 'application/json' };
+            if (token) headers['Authorization'] = 'Bearer ' + token;
+            const res = await fetch(`/api/fhir/dlq/${dlqId}/schedule`, {
+                method: 'POST', credentials: 'include', headers,
+                body: JSON.stringify({ mode: 'from_failed_step', at }),
+            });
+            const data = await res.json();
+            if (data.success) {
+                AppDialogs.toast('Redrive scheduled', 'success');
+                if (this.selectedMessageId) this.loadDLQRowsForMessage(this.selectedMessageId);
+            } else {
+                AppDialogs.toast(data.error || 'Schedule failed', 'error');
+            }
+        } catch (_) {
+            AppDialogs.toast('Network error', 'error');
+        } finally {
+            btn.disabled = false;
+        }
+    }
+
+    async dlqAbandonFromModal(dlqId, btn) {
+        if (!confirm('Abandon this DLQ row? It will not be retried again.')) return;
+        btn.disabled = true;
+        try {
+            const token = localStorage.getItem('accessToken');
+            const headers = { 'Content-Type': 'application/json' };
+            if (token) headers['Authorization'] = 'Bearer ' + token;
+            const res = await fetch(`/api/fhir/dlq/${dlqId}/abandon`, {
+                method: 'POST', credentials: 'include', headers,
+            });
+            const data = await res.json();
+            if (data.success) {
+                AppDialogs.toast('Row abandoned', 'success');
+                if (this.selectedMessageId) this.loadDLQRowsForMessage(this.selectedMessageId);
+            } else {
+                AppDialogs.toast(data.error || 'Abandon failed', 'error');
+                btn.disabled = false;
+            }
+        } catch (_) {
+            AppDialogs.toast('Network error', 'error');
+            btn.disabled = false;
+        }
+    }
+
+    openDLQForMessage(messageId) {
+        window.open(`admin-dlq.html?message_id=${encodeURIComponent(messageId)}`, '_blank');
     }
 
     async loadMessageContent(messageId) {

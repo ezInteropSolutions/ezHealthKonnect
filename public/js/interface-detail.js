@@ -76,10 +76,36 @@ function loadInterfaceHeader() {
 
             document.getElementById('openPipelineBtn').href = 'pipeline-builder.html?interfaceId=' + _interfaceId;
             document.getElementById('openMessagesBtn').href = 'messages.html?interfaceId=' + _interfaceId;
+
+            loadDLQDepthBadge();
         })
         .catch(function() {
             document.getElementById('interfaceName').textContent = 'Interface not found';
         });
+}
+
+function loadDLQDepthBadge() {
+    if (!_interfaceId) return;
+    var token = localStorage.getItem('accessToken');
+    var headers = { 'Content-Type': 'application/json' };
+    if (token) headers['Authorization'] = 'Bearer ' + token;
+    fetch('/api/fhir/dlq/interface/' + _interfaceId + '/stats', { credentials: 'include', headers: headers })
+        .then(function(r) { return r.ok ? r.json() : null; })
+        .then(function(res) {
+            if (!res || !res.success) return;
+            var d = res.data || {};
+            var depth = (d.pending || 0) + (d.abandoned || 0);
+            var badge = document.getElementById('dlqDepthBadge');
+            if (!badge) return;
+            if (depth > 0) {
+                document.getElementById('dlqDepthCount').textContent = depth;
+                badge.href = 'admin-dlq.html?interface_id=' + _interfaceId;
+                badge.style.display = 'flex';
+            } else {
+                badge.style.display = 'none';
+            }
+        })
+        .catch(function() { /* non-fatal */ });
 }
 
 // ── Overview ──────────────────────────────────────────────────────────────────
@@ -253,14 +279,32 @@ function populateSettingsForm() {
     document.getElementById('settingDesc').value           = _interfaceData.description || '';
     document.getElementById('settingStatus').value         = _interfaceData.interface_status || _interfaceData.status || 'draft';
     document.getElementById('settingErrorThreshold').value = _interfaceData.error_threshold != null ? _interfaceData.error_threshold : '';
+
+    var dlq = _interfaceData.dlq_config || {};
+    document.getElementById('dlqMaxAttempts').value  = dlq.max_attempts       != null ? dlq.max_attempts       : '';
+    document.getElementById('dlqInitialDelay').value = dlq.initial_delay_s    != null ? dlq.initial_delay_s    : '';
+    document.getElementById('dlqRetryDelay').value   = dlq.retry_delay_s      != null ? dlq.retry_delay_s      : '';
+    document.getElementById('dlqBackoff').value      = dlq.backoff_multiplier != null ? dlq.backoff_multiplier : '';
+    document.getElementById('dlqExpiresAfter').value = dlq.expires_after_hours!= null ? dlq.expires_after_hours: '';
 }
 
 function saveSettings() {
+    var dlqConfig = {
+        max_attempts:        parseInt(document.getElementById('dlqMaxAttempts').value)  || null,
+        initial_delay_s:     parseInt(document.getElementById('dlqInitialDelay').value) || null,
+        retry_delay_s:       parseInt(document.getElementById('dlqRetryDelay').value)   || null,
+        backoff_multiplier:  parseFloat(document.getElementById('dlqBackoff').value)    || null,
+        expires_after_hours: parseInt(document.getElementById('dlqExpiresAfter').value) || 0,
+    };
+    // Strip nulls so Go backend uses its own defaults for unset fields
+    Object.keys(dlqConfig).forEach(function(k) { if (dlqConfig[k] === null) delete dlqConfig[k]; });
+
     var body = {
         name:            document.getElementById('settingName').value.trim(),
         description:     document.getElementById('settingDesc').value.trim(),
         interface_status:document.getElementById('settingStatus').value,
         error_threshold: parseInt(document.getElementById('settingErrorThreshold').value) || null,
+        dlq_config:      dlqConfig,
     };
     if (!body.name) { showToast('Name is required', false); return; }
     apiPut('/api/interfaces/' + _interfaceId, body)

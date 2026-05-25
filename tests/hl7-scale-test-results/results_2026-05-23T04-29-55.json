@@ -1,0 +1,73 @@
+{
+  "summary": {
+    "sent": 5,
+    "acked": 5,
+    "retrieved": 0,
+    "passed": 0,
+    "failed": 5,
+    "level": "standard",
+    "inputInterfaceId": "df5c7bc7-5dbe-4c47-8298-a4729b26ebd4"
+  },
+  "results": [
+    {
+      "messageType": "ADT^A01",
+      "label": "Inpatient admit #1",
+      "ackCode": "AA",
+      "sendOK": true,
+      "messageId": "",
+      "fhirValid": false,
+      "issues": [
+        "No output message found"
+      ],
+      "resourceTypes": []
+    },
+    {
+      "messageType": "ADT^A01",
+      "label": "Inpatient admit #2",
+      "ackCode": "AA",
+      "sendOK": true,
+      "messageId": "",
+      "fhirValid": false,
+      "issues": [
+        "No output message found"
+      ],
+      "resourceTypes": []
+    },
+    {
+      "messageType": "ADT^A01",
+      "label": "Inpatient admit #3",
+      "ackCode": "AA",
+      "sendOK": true,
+      "messageId": "",
+      "fhirValid": false,
+      "issues": [
+        "No output message found"
+      ],
+      "resourceTypes": []
+    },
+    {
+      "messageType": "ADT^A01",
+      "label": "Inpatient admit #4",
+      "ackCode": "AA",
+      "sendOK": true,
+      "messageId": "",
+      "fhirValid": false,
+      "issues": [
+        "No output message found"
+      ],
+      "resourceTypes": []
+    },
+    {
+      "messageType": "ADT^A01",
+      "label": "Inpatient admit #5",
+      "ackCode": "AA",
+      "sendOK": true,
+      "messageId": "",
+      "fhirValid": false,
+      "issues": [
+        "No output message found"
+      ],
+      "resourceTypes": []
+    }
+  ]
+}

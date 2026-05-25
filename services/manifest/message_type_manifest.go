@@ -175,7 +175,22 @@ var registry = map[string]*MessageTypeManifest{
 			"Patient", "Encounter", "Observation", "DiagnosticReport",
 			"Practitioner", "Specimen",
 		},
-		FocusTypes: []string{"DiagnosticReport"},
+		// OBRProcessor rebuilds all Observations from OBX segments and wires
+		// DiagnosticReport.result[], .subject, .encounter, and per-Observation
+		// .subject.  It also maps raw HL7 status codes to FHIR values and
+		// formats HL7 TS timestamps to FHIR instant.
+		SegmentProcessors: []string{"OBRProcessor"},
+		FocusTypes:        []string{"DiagnosticReport"},
+	},
+	// R03 — Unsolicited transmission of requested observation.
+	// Structurally identical to R01 (same MSH/PID/ORC/OBR/OBX/NTE layout).
+	"R03": {
+		AllowedResources: []string{
+			"Patient", "Encounter", "Observation", "DiagnosticReport",
+			"Practitioner", "Specimen",
+		},
+		SegmentProcessors: []string{"OBRProcessor"},
+		FocusTypes:        []string{"DiagnosticReport"},
 	},
 
 	// ── ORM / OMG — Orders ───────────────────────────────────────────────────
@@ -197,20 +212,49 @@ var registry = map[string]*MessageTypeManifest{
 	"S26": {AllowedResources: []string{"Patient", "Appointment"}, FocusTypes: []string{"Appointment"}},
 
 	// ── MDM — Medical Document Management ────────────────────────────────────
-	"T01": {AllowedResources: []string{"Patient", "Encounter", "DocumentReference", "Practitioner"}, FocusTypes: []string{"DocumentReference"}},
-	"T02": {AllowedResources: []string{"Patient", "Encounter", "DocumentReference", "Practitioner"}, FocusTypes: []string{"DocumentReference"}},
-	"T11": {AllowedResources: []string{"Patient", "Encounter", "DocumentReference", "Practitioner"}, FocusTypes: []string{"DocumentReference"}},
+	// TXAProcessor rebuilds the DocumentReference from TXA (metadata) and OBX
+	// (document content) segments and drops any Observation resources the generic
+	// template mapper produced from OBX — OBX in MDM is document content, not
+	// clinical observations.  MessageHeader.focus is overwritten to point only at
+	// the new DocumentReference.
+	"T01": {
+		AllowedResources:  []string{"Patient", "Encounter", "DocumentReference", "Practitioner"},
+		SegmentProcessors: []string{"TXAProcessor"},
+		FocusTypes:        []string{"DocumentReference"},
+	},
+	"T02": {
+		AllowedResources:  []string{"Patient", "Encounter", "DocumentReference", "Practitioner"},
+		SegmentProcessors: []string{"TXAProcessor"},
+		FocusTypes:        []string{"DocumentReference"},
+	},
+	"T11": {
+		AllowedResources:  []string{"Patient", "Encounter", "DocumentReference", "Practitioner"},
+		SegmentProcessors: []string{"TXAProcessor"},
+		FocusTypes:        []string{"DocumentReference"},
+	},
 
 	// ── VXU — Vaccination ────────────────────────────────────────────────────
-	"V04": {AllowedResources: []string{"Patient", "Immunization", "Practitioner"}, FocusTypes: []string{"Immunization"}},
+	"V04": {AllowedResources: []string{"Patient", "Immunization", "Practitioner"}, SegmentProcessors: []string{"VXUProcessor"}, FocusTypes: []string{"Immunization"}},
 
 	// ── MFN — Master File Notification ───────────────────────────────────────
-	"M02": {AllowedResources: []string{"Practitioner"}, FocusTypes: []string{"Practitioner"}},
-	"M05": {AllowedResources: []string{"Location"}, FocusTypes: []string{"Location"}},
+	// Known event codes map 1:1 to a specific master file type and FHIR resource.
+	// M01/M13/M14 are user-defined — the assembly dispatches on MFI.1, so
+	// AllowedResources must cover all types the assembly can produce.
+	"M01": {AllowedResources: []string{"Organization", "Practitioner", "Location", "ChargeItemDefinition"}, SegmentProcessors: []string{"MFNProcessor"}, FocusTypes: []string{"Organization", "Practitioner", "Location", "ChargeItemDefinition"}},
+	"M02": {AllowedResources: []string{"Practitioner"}, SegmentProcessors: []string{"MFNProcessor"}, FocusTypes: []string{"Practitioner"}},
+	"M05": {AllowedResources: []string{"Location"}, SegmentProcessors: []string{"MFNProcessor"}, FocusTypes: []string{"Location"}},
+	"M06": {AllowedResources: []string{"ChargeItemDefinition"}, SegmentProcessors: []string{"MFNProcessor"}, FocusTypes: []string{"ChargeItemDefinition"}},
+	// M13/M14 are site-defined — MFI.1 drives the actual FHIR resource type.
+	// EMP/INS/PAY/CLN → Organization; STF/PRA → Practitioner; LOC → Location; CDM → ChargeItemDefinition.
+	"M13": {AllowedResources: []string{"Organization", "Practitioner", "Location", "ChargeItemDefinition"}, SegmentProcessors: []string{"MFNProcessor"}, FocusTypes: []string{"Organization", "Practitioner", "Location", "ChargeItemDefinition"}},
+	"M14": {AllowedResources: []string{"Organization", "Practitioner", "Location", "ChargeItemDefinition"}, SegmentProcessors: []string{"MFNProcessor"}, FocusTypes: []string{"Organization", "Practitioner", "Location", "ChargeItemDefinition"}},
 	"M15": {AllowedResources: []string{"Substance"}, FocusTypes: []string{"Substance"}},
 
 	// ── DFT — Detailed Financial Transaction ─────────────────────────────────
-	"P03": {AllowedResources: []string{"Patient", "Encounter", "Claim", "ChargeItem"}, FocusTypes: []string{"Patient", "Encounter"}},
+	// P03 focus is ChargeItem — the primary artifact of a financial transaction
+	// posting. Patient and Encounter are reachable via ChargeItem.subject and
+	// ChargeItem.context respectively.
+	"P03": {AllowedResources: []string{"Patient", "Encounter", "Claim", "ChargeItem"}, FocusTypes: []string{"ChargeItem"}},
 }
 
 // Lookup returns the manifest for a message type string (e.g. "ADT^A40").

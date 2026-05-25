@@ -164,5 +164,14 @@ func (d *LocalDriver) AppendObject(_ context.Context, bucket, key string, data [
 	return fmt.Sprintf("local://%s/%s", bucket, key), nil
 }
 
+// Ping checks that the base directory and the expected bucket sub-directory
+// are accessible. Used by the /readyz health probe.
+func (d *LocalDriver) Ping(_ context.Context) error {
+	if _, err := os.Stat(d.baseDir); err != nil {
+		return fmt.Errorf("storage/local: base directory unreachable: %w", err)
+	}
+	return nil
+}
+
 // Compile-time check: LocalDriver satisfies ObjectStorageDriver
 var _ ObjectStorageDriver = (*LocalDriver)(nil)

@@ -76,6 +76,16 @@ func NewS3Driver(cfg S3DriverConfig) (*S3Driver, error) {
 // DriverName returns "s3".
 func (d *S3Driver) DriverName() string { return "s3" }
 
+// Ping verifies the S3/MinIO endpoint is reachable and the bucket exists.
+// Uses HeadBucket — a lightweight metadata-only call that does not read data.
+func (d *S3Driver) Ping(ctx context.Context) error {
+	_, err := d.client.HeadBucket(ctx, &s3.HeadBucketInput{Bucket: aws.String(d.cfg.Bucket)})
+	if err != nil {
+		return fmt.Errorf("storage/s3: bucket unreachable: %w", err)
+	}
+	return nil
+}
+
 // EnsureBucket creates the bucket if it does not already exist.
 func (d *S3Driver) EnsureBucket(ctx context.Context, bucket string) error {
 	_, err := d.client.HeadBucket(ctx, &s3.HeadBucketInput{Bucket: aws.String(bucket)})

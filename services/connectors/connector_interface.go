@@ -215,6 +215,16 @@ func (c *ConnectorConfig) Has(key string) bool {
 	return ok
 }
 
+// GetBoolDefault retrieves a bool value, returning defaultValue when the key
+// is absent. Use this instead of GetBool() whenever the zero value (false) is
+// not the intended default — e.g. enable_tls defaults to true.
+func (c *ConnectorConfig) GetBoolDefault(key string, defaultValue bool) bool {
+	if !c.Has(key) {
+		return defaultValue
+	}
+	return c.GetBool(key)
+}
+
 // GetMap safely retrieves a map[string]interface{} value from config
 func (c *ConnectorConfig) GetMap(key string) map[string]interface{} {
 	if val, ok := c.Config[key]; ok {

@@ -82,6 +82,7 @@ class InterfacesController {
                     i.retain_error_logs_forever,
                     i.fhir_validation_policy,
                     i.accepted_message_families,
+                    i.dlq_config,
                     i.total_processed,
                     i.successful_processed,
                     i.failed_processed,
@@ -137,6 +138,12 @@ class InterfacesController {
                 // FHIR Validation Policy (V66)
                 fhir_validation_policy: item.fhir_validation_policy || 'proceed',
                 fhirValidationPolicy: item.fhir_validation_policy || 'proceed',
+
+                // Recovery Queue (DLQ) config (V141)
+                dlq_config: this.parseJsonField(item.dlq_config) || {
+                    max_attempts: 10, initial_delay_s: 30,
+                    retry_delay_s: 60, backoff_multiplier: 2.0, expires_after_hours: 0
+                },
 
                 statistics: {
                     totalProcessed: item.total_processed || 0,
@@ -397,6 +404,7 @@ class InterfacesController {
                     i.status, i.total_processed, i.successful_processed, i.failed_processed,
                     i.last_processed_at, i.created_at, i.updated_at, i.version,
                     i.fhir_validation_policy,
+                    i.dlq_config,
                     i.log_level, i.debug_logging, i.log_retention_days, i.retain_error_logs_forever,
                     i.deployment_mode, i.auto_start, i.deployment_delay_seconds,
                     u.email as created_by_email,
@@ -466,6 +474,12 @@ class InterfacesController {
                 // FHIR Validation Policy (V66)
                 fhir_validation_policy: item.fhir_validation_policy || 'proceed',
                 fhirValidationPolicy: item.fhir_validation_policy || 'proceed',
+
+                // Recovery Queue (DLQ) config (V141)
+                dlq_config: this.parseJsonField(item.dlq_config) || {
+                    max_attempts: 10, initial_delay_s: 30,
+                    retry_delay_s: 60, backoff_multiplier: 2.0, expires_after_hours: 0
+                },
 
                 // Deployment settings
                 deployment_mode: item.deployment_mode || 'manual',
@@ -959,6 +973,8 @@ class InterfacesController {
                 targetConfig,
                 processingRules,
                 transformationMapping,
+                // Recovery Queue (DLQ) per-interface config
+                dlq_config,
                 // Connector step IDs — write directly to transformation_steps (single source of truth)
                 inboundStepId,
                 outboundStepId,
@@ -1054,6 +1070,16 @@ class InterfacesController {
             replacements.log_retention_days = parseInt(log_retention_days) || 30;
             replacements.retain_error_logs_forever = retain_error_logs_forever !== false && retain_error_logs_forever !== 'false';
 
+            // Recovery Queue (DLQ) config — merge with defaults so partial updates are safe
+            const defaultDLQConfig = {
+                max_attempts: 10, initial_delay_s: 30,
+                retry_delay_s: 60, backoff_multiplier: 2.0, expires_after_hours: 0
+            };
+            const incomingDLQ = (typeof dlq_config === 'object' && dlq_config !== null)
+                ? dlq_config
+                : (typeof dlq_config === 'string' ? JSON.parse(dlq_config) : {});
+            replacements.dlq_config = JSON.stringify({ ...defaultDLQConfig, ...incomingDLQ });
+
             // FHIR Validation Policy (V66) — accept both camelCase and snake_case
             const validPolicies = ['proceed', 'warn', 'reject', 'queue_review'];
             // snake_case takes precedence over camelCase alias (explicit API field wins)
@@ -1093,6 +1119,7 @@ class InterfacesController {
                     retain_error_logs_forever = :retain_error_logs_forever,
                     fhir_validation_policy = :fhir_validation_policy,
                     accepted_message_families = :acceptedMessageFamilies::jsonb,
+                    dlq_config = :dlq_config::jsonb,
                     updated_by = :userId,
                     updated_at = CURRENT_TIMESTAMP
                 WHERE id = :interfaceId

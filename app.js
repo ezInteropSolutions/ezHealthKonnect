@@ -250,6 +250,16 @@ const _requireAdminUser = (req, res, next) => {
     req.user = user;
     next();
 };
+// DLQ access — interface engineers, admins, and super-admins all need this.
+const _requireDLQAccess = (req, res, next) => {
+    const user = req.user || (req.session && req.session.user);
+    if (!user) return res.status(401).json({ success: false, message: 'Authentication required' });
+    const role = user.role;
+    if (role !== 'admin' && role !== 'super_admin' && role !== 'engineer')
+        return res.status(403).json({ success: false, message: 'Engineer or admin role required' });
+    req.user = user;
+    next();
+};
 // OOB template rebuild is vendor-only (super_admin). Client admins (role='admin') are denied.
 const _requireSuperAdminUser = (req, res, next) => {
     const user = req.user || (req.session && req.session.user);
@@ -262,6 +272,16 @@ app.post('/api/fhir/templates/rebuild-oob',          _verifyToken, _requireSuper
 app.post('/api/fhir/templates/rebuild-oob-ig',       _verifyToken, _requireSuperAdminUser, forwardToGo);
 app.post('/api/fhir/templates/rebuild-oob-targeted', _verifyToken, _requireSuperAdminUser, forwardToGo);
 app.get('/api/fhir/templates/rebuild-status',        _verifyToken, _requireSuperAdminUser, forwardToGo);
+
+// DLQ admin routes — must be registered before the catch-all /api/fhir route so
+// _verifyToken runs and populates req.user (needed for X-User-Role forwarding to Go).
+app.use('/api/fhir/dlq', _verifyToken, _requireDLQAccess, forwardToGo);
+
+// Quality review routes — same reason as DLQ
+app.use('/api/fhir/quality', _verifyToken, _requireSuperAdminUser, forwardToGo);
+
+// Monitoring dashboard — live KPIs, alerts, message feed, per-interface health
+app.use('/api/monitoring', _verifyToken, forwardToGo);
 
 // Apply explicit route handlers for Go backend routes
 app.use('/api/fhir', forwardToGo);

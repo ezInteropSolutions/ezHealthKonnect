@@ -842,6 +842,10 @@ func extractComponentValue(fieldValue string, componentPosition int) string {
 	if fieldValue == "" {
 		return ""
 	}
+	// Multi-repetition fields: take only the first repetition before splitting by component separator.
+	if idx := strings.IndexByte(fieldValue, '~'); idx >= 0 {
+		fieldValue = fieldValue[:idx]
+	}
 	components := strings.Split(fieldValue, "^")
 	if componentPosition > 0 && componentPosition <= len(components) {
 		return strings.TrimSpace(components[componentPosition-1])

@@ -60,7 +60,7 @@ func RXA20ToImmunizationStatus(code string) string {
 // RXA.5 component 3 to canonical FHIR system URIs.
 func rxaVaccineSystemToURI(system string) string {
 	switch strings.ToUpper(strings.TrimSpace(system)) {
-	case "CVX", "HL70292":
+	case "CVX", "HL70292", "LIM_CVX", "CVX_IIS":
 		return "http://hl7.org/fhir/sid/cvx"
 	case "NDC":
 		return "http://hl7.org/fhir/sid/ndc"

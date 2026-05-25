@@ -27,10 +27,12 @@ func init() {
 
 	// ── ORU^R01 — Observations / DiagnosticReport ─────────────────────────────
 	//
-	// Params (all optional, default ON when absent):
+	// Params (all optional, default ON when absent unless noted):
 	//   collapseTextOBX         bool  – merge consecutive TX/FT OBX by OBX.3
 	//   linkToDiagnosticReport  bool  – wire Observation refs into DR.result[]
 	//   liftEDAttachments       bool  – promote OBX.5 ED binary to DocumentReference
+	//   validateBase64          bool  – default OFF (passthrough); set true to
+	//                                   omit attachment data that fails base64 decode
 	RegisterAssemblyProcedure("assembleObservationsFromOBX",
 		func(
 			parsedHL7 map[string]interface{},
@@ -58,6 +60,10 @@ func init() {
 					rules.FacilityNamespace = s
 				}
 			}
+			if v, ok := params["validateBase64"]; ok {
+				b := asBool(v)
+				rules.ValidateBase64 = &b
+			}
 
 			return hl7assembly.AssembleORUObservations(parsedHL7, resources, rules)
 		},
@@ -65,7 +71,9 @@ func init() {
 
 	// ── MDM^T01-T11 — DocumentReference / TXA ────────────────────────────────
 	//
-	// Params: none currently exposed; all behaviour driven by TXA fields.
+	// Params (all optional):
+	//   facilityNamespace  string – Tier-3 coding fallback URI (MSH.4 auto-derived when absent)
+	//   validateBase64     bool   – default ON; set false to pass ED data through without checking
 	RegisterAssemblyProcedure("buildDocumentReferenceFromTXA",
 		func(
 			parsedHL7 map[string]interface{},
@@ -78,6 +86,10 @@ func init() {
 				if s, ok := v.(string); ok {
 					rules.FacilityNamespace = s
 				}
+			}
+			if v, ok := params["validateBase64"]; ok {
+				b := asBool(v)
+				rules.ValidateBase64 = &b
 			}
 
 			return hl7assembly.AssembleMDMDocument(parsedHL7, resources, rules)
