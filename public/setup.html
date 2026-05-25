@@ -1,0 +1,418 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Welcome — ezHealthKonnect Setup</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #0f172a 0%, #1e3a8a 50%, #6366f1 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 24px;
+        }
+
+        .card {
+            background: #fff;
+            border-radius: 20px;
+            width: 520px;
+            max-width: 100%;
+            padding: 44px 40px;
+            box-shadow: 0 32px 80px rgba(0,0,0,.35);
+        }
+
+        /* ── Header ── */
+        .header { text-align: center; margin-bottom: 32px; }
+        .logo-icon {
+            width: 56px; height: 56px; border-radius: 14px;
+            background: linear-gradient(135deg, #1e3a8a, #6366f1);
+            display: inline-flex; align-items: center; justify-content: center;
+            margin-bottom: 14px;
+        }
+        .logo-icon i { color: #fff; font-size: 1.5rem; }
+        .header h1 { font-size: 1.5rem; color: #0f172a; font-weight: 700; margin-bottom: 6px; }
+        .header h1 span { color: #6366f1; }
+        .header p { color: #64748b; font-size: 0.9rem; line-height: 1.5; }
+
+        /* ── Step indicator ── */
+        .steps {
+            display: flex; align-items: center; justify-content: center;
+            gap: 0; margin-bottom: 32px;
+        }
+        .step-dot {
+            width: 32px; height: 32px; border-radius: 50%;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 0.8rem; font-weight: 700;
+            background: #e2e8f0; color: #94a3b8;
+            transition: all .3s;
+            position: relative; z-index: 1;
+        }
+        .step-dot.active  { background: #1e3a8a; color: #fff; }
+        .step-dot.done    { background: #16a34a; color: #fff; }
+        .step-line {
+            flex: 1; height: 2px; background: #e2e8f0; max-width: 60px;
+            transition: background .3s;
+        }
+        .step-line.done { background: #16a34a; }
+
+        /* ── Forms ── */
+        .step-panel { display: none; }
+        .step-panel.active { display: block; }
+
+        .section-title {
+            font-size: 1rem; font-weight: 700; color: #0f172a;
+            margin-bottom: 4px;
+        }
+        .section-sub {
+            font-size: 0.83rem; color: #64748b;
+            margin-bottom: 20px; line-height: 1.5;
+        }
+
+        .field { display: flex; flex-direction: column; gap: 5px; margin-bottom: 16px; }
+        .field label {
+            font-size: 0.75rem; font-weight: 600; color: #374151;
+            text-transform: uppercase; letter-spacing: .05em;
+        }
+        .field input {
+            padding: 10px 12px; border: 1.5px solid #e2e8f0; border-radius: 8px;
+            font-size: 0.9rem; outline: none; transition: border-color .2s, box-shadow .2s;
+        }
+        .field input:focus {
+            border-color: #6366f1;
+            box-shadow: 0 0 0 3px rgba(99,102,241,.12);
+        }
+        .field input.error { border-color: #dc2626; }
+
+        .field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+
+        .pw-strength { margin-top: 4px; font-size: 0.75rem; display: flex; align-items: center; gap: 8px; min-height: 18px; }
+        .pw-bar { flex: 1; height: 4px; background: #e2e8f0; border-radius: 4px; overflow: hidden; }
+        .pw-fill { height: 100%; border-radius: 4px; transition: width .25s; }
+        .pw-fill--1,.pw-fill--2 { background: #dc2626; }
+        .pw-fill--3 { background: #d97706; }
+        .pw-fill--4 { background: #16a34a; }
+        .pw-fill--5 { background: #0284c7; }
+
+        .requirements {
+            background: #f8fafc; border: 1px solid #e2e8f0;
+            border-radius: 8px; padding: 10px 14px; margin-bottom: 16px;
+        }
+        .requirements p { font-size: 0.75rem; font-weight: 600; color: #374151; margin-bottom: 6px; }
+        .req-item {
+            font-size: 0.75rem; color: #94a3b8;
+            display: flex; align-items: center; gap: 6px; margin-bottom: 3px;
+        }
+        .req-item i { width: 12px; }
+        .req-item.met { color: #16a34a; }
+        .req-item.met i::before { content: '\f00c'; }
+
+        /* ── Buttons ── */
+        .btn-row { display: flex; gap: 10px; margin-top: 6px; }
+        .btn {
+            flex: 1; padding: 12px; border: none; border-radius: 9px;
+            font-size: 0.92rem; font-weight: 600; cursor: pointer;
+            transition: opacity .2s, box-shadow .2s;
+        }
+        .btn-primary {
+            background: linear-gradient(135deg, #1e3a8a, #6366f1);
+            color: #fff;
+        }
+        .btn-primary:hover { opacity: .9; box-shadow: 0 4px 14px rgba(99,102,241,.4); }
+        .btn-primary:disabled { opacity: .6; cursor: not-allowed; box-shadow: none; }
+        .btn-secondary {
+            background: #f1f5f9; color: #475569;
+        }
+        .btn-secondary:hover { background: #e2e8f0; }
+
+        /* ── Alert ── */
+        .alert {
+            padding: 10px 14px; border-radius: 8px; margin-bottom: 16px;
+            font-size: 0.85rem; line-height: 1.5;
+        }
+        .alert-error   { background: #fef2f2; color: #dc2626; border: 1px solid #fecaca; }
+        .alert-success { background: #f0fdf4; color: #15803d; border: 1px solid #bbf7d0; }
+
+        /* ── Success panel ── */
+        .success-panel { text-align: center; padding: 12px 0; }
+        .success-icon {
+            width: 72px; height: 72px; border-radius: 50%;
+            background: linear-gradient(135deg, #16a34a, #4ade80);
+            display: inline-flex; align-items: center; justify-content: center;
+            margin-bottom: 20px;
+        }
+        .success-icon i { color: #fff; font-size: 2rem; }
+        .success-panel h2 { font-size: 1.3rem; color: #0f172a; margin-bottom: 8px; }
+        .success-panel p  { color: #64748b; font-size: 0.88rem; line-height: 1.6; margin-bottom: 24px; }
+        .btn-login {
+            display: inline-block; padding: 12px 36px;
+            background: linear-gradient(135deg, #1e3a8a, #6366f1);
+            color: #fff; text-decoration: none; border-radius: 9px;
+            font-weight: 600; font-size: 0.92rem;
+        }
+        .btn-login:hover { opacity: .9; }
+    </style>
+</head>
+<body>
+<div class="card">
+
+    <!-- Header -->
+    <div class="header">
+        <div class="logo-icon"><i class="fas fa-heartbeat"></i></div>
+        <h1>ez<span>Health</span>Konnect</h1>
+        <p>Welcome. Let's set up your platform in under a minute.</p>
+    </div>
+
+    <!-- Step indicator -->
+    <div class="steps" id="step-indicator">
+        <div class="step-dot active" id="dot-1">1</div>
+        <div class="step-line" id="line-1"></div>
+        <div class="step-dot" id="dot-2">2</div>
+        <div class="step-line" id="line-2"></div>
+        <div class="step-dot" id="dot-3"><i class="fas fa-check" style="font-size:.7rem"></i></div>
+    </div>
+
+    <!-- ── Step 1: Organisation ── -->
+    <div class="step-panel active" id="step-1">
+        <p class="section-title">Your Organisation</p>
+        <p class="section-sub">This name will appear throughout the platform and in your licence.</p>
+
+        <div id="alert-1"></div>
+
+        <div class="field">
+            <label>Organisation Name</label>
+            <input type="text" id="orgName" placeholder="e.g. City General Hospital"
+                   autocomplete="organization" maxlength="120">
+        </div>
+
+        <div class="btn-row">
+            <button class="btn btn-primary" id="btn-next-1" onclick="goToStep2()">
+                Continue <i class="fas fa-arrow-right"></i>
+            </button>
+        </div>
+    </div>
+
+    <!-- ── Step 2: Admin Account ── -->
+    <div class="step-panel" id="step-2">
+        <p class="section-title">Administrator Account</p>
+        <p class="section-sub">This will be the first login. You can add more users after setup.</p>
+
+        <div id="alert-2"></div>
+
+        <div class="field-row">
+            <div class="field">
+                <label>First Name</label>
+                <input type="text" id="firstName" placeholder="Jane" autocomplete="given-name" maxlength="60">
+            </div>
+            <div class="field">
+                <label>Last Name</label>
+                <input type="text" id="lastName" placeholder="Smith" autocomplete="family-name" maxlength="60">
+            </div>
+        </div>
+
+        <div class="field">
+            <label>Email Address</label>
+            <input type="email" id="adminEmail" placeholder="jane@hospital.org" autocomplete="email" maxlength="200">
+        </div>
+
+        <div class="field">
+            <label>Password <small style="text-transform:none;font-weight:400">(min 8 characters)</small></label>
+            <input type="password" id="adminPassword" placeholder="Choose a strong password"
+                   autocomplete="new-password" maxlength="200">
+            <div class="pw-strength" id="pw-strength"></div>
+        </div>
+        <div class="field">
+            <label>Confirm Password</label>
+            <input type="password" id="adminPasswordConfirm" placeholder="Repeat your password"
+                   autocomplete="new-password" maxlength="200">
+        </div>
+
+        <div class="requirements">
+            <p>Password must include:</p>
+            <div class="req-item" id="req-length"><i class="fas fa-circle"></i> At least 8 characters</div>
+            <div class="req-item" id="req-upper"><i class="fas fa-circle"></i> One uppercase letter</div>
+            <div class="req-item" id="req-number"><i class="fas fa-circle"></i> One number</div>
+            <div class="req-item" id="req-special"><i class="fas fa-circle"></i> One special character</div>
+        </div>
+
+        <div class="btn-row">
+            <button class="btn btn-secondary" onclick="goToStep1()" style="flex:0 0 auto;padding-left:20px;padding-right:20px;">
+                <i class="fas fa-arrow-left"></i>
+            </button>
+            <button class="btn btn-primary" id="btn-submit" onclick="submitSetup()">
+                <i class="fas fa-check-circle"></i> Complete Setup
+            </button>
+        </div>
+    </div>
+
+    <!-- ── Step 3: Done ── -->
+    <div class="step-panel" id="step-3">
+        <div class="success-panel">
+            <div class="success-icon"><i class="fas fa-check"></i></div>
+            <h2>Setup Complete!</h2>
+            <p id="success-msg">
+                Your administrator account has been created.<br>
+                You can now log in and start configuring your interfaces.
+            </p>
+            <a href="/" class="btn-login">
+                <i class="fas fa-right-to-bracket"></i> Go to Login
+            </a>
+        </div>
+    </div>
+
+</div>
+
+<script>
+(function () {
+    'use strict';
+
+    // ── Check if setup is still needed ──────────────────────────────────────
+    fetch('/api/setup/status')
+        .then(r => r.json())
+        .then(d => {
+            if (!d.setupRequired) {
+                // Already set up — redirect to login
+                window.location.replace('/');
+            }
+        })
+        .catch(() => {}); // offline / error — proceed with setup page
+
+    // ── Step navigation ─────────────────────────────────────────────────────
+    function setStep(n) {
+        [1, 2, 3].forEach(i => {
+            document.getElementById(`step-${i}`).classList.toggle('active', i === n);
+            const dot = document.getElementById(`dot-${i}`);
+            dot.classList.remove('active', 'done');
+            if (i < n)       dot.classList.add('done');
+            else if (i === n) dot.classList.add('active');
+        });
+        [1, 2].forEach(i => {
+            const line = document.getElementById(`line-${i}`);
+            line.classList.toggle('done', i < n);
+        });
+        // Hide step indicator on success screen
+        document.getElementById('step-indicator').style.display = n === 3 ? 'none' : 'flex';
+    }
+
+    window.goToStep1 = function () { setStep(1); };
+    window.goToStep2 = function () {
+        const org = document.getElementById('orgName').value.trim();
+        clearAlert('alert-1');
+        if (!org) { showAlert('alert-1', 'Please enter your organisation name.'); return; }
+        setStep(2);
+        document.getElementById('firstName').focus();
+    };
+
+    // ── Password strength ────────────────────────────────────────────────────
+    function pwStrength(pw) {
+        if (!pw) return { score: 0, label: '' };
+        let s = 0;
+        if (pw.length >= 8)         s++;
+        if (pw.length >= 12)        s++;
+        if (/[A-Z]/.test(pw))       s++;
+        if (/[0-9]/.test(pw))       s++;
+        if (/[^A-Za-z0-9]/.test(pw)) s++;
+        const labels = ['', 'Very Weak', 'Weak', 'Fair', 'Strong', 'Very Strong'];
+        return { score: s, label: labels[s] || '' };
+    }
+
+    function updateRequirements(pw) {
+        const checks = {
+            'req-length':  pw.length >= 8,
+            'req-upper':   /[A-Z]/.test(pw),
+            'req-number':  /[0-9]/.test(pw),
+            'req-special': /[^A-Za-z0-9]/.test(pw)
+        };
+        for (const [id, met] of Object.entries(checks)) {
+            document.getElementById(id)?.classList.toggle('met', met);
+        }
+    }
+
+    const pwInput = document.getElementById('adminPassword');
+    pwInput.addEventListener('input', () => {
+        const { score, label } = pwStrength(pwInput.value);
+        const bar = document.getElementById('pw-strength');
+        bar.innerHTML = pwInput.value
+            ? `<div class="pw-bar"><div class="pw-fill pw-fill--${score}" style="width:${score * 20}%"></div></div><span>${label}</span>`
+            : '';
+        updateRequirements(pwInput.value);
+    });
+
+    // ── Alerts ───────────────────────────────────────────────────────────────
+    function showAlert(containerId, msg, type = 'error') {
+        const el = document.getElementById(containerId);
+        if (el) el.innerHTML = `<div class="alert alert-${type}">${msg.replace(/</g, '&lt;')}</div>`;
+    }
+    function clearAlert(containerId) {
+        const el = document.getElementById(containerId);
+        if (el) el.innerHTML = '';
+    }
+
+    // ── Submit ────────────────────────────────────────────────────────────────
+    window.submitSetup = async function () {
+        clearAlert('alert-2');
+
+        const firstName = document.getElementById('firstName').value.trim();
+        const lastName  = document.getElementById('lastName').value.trim();
+        const email     = document.getElementById('adminEmail').value.trim();
+        const password  = document.getElementById('adminPassword').value;
+        const confirm   = document.getElementById('adminPasswordConfirm').value;
+        const orgName   = document.getElementById('orgName').value.trim();
+
+        if (!firstName) { showAlert('alert-2', 'First name is required.'); return; }
+        if (!lastName)  { showAlert('alert-2', 'Last name is required.'); return; }
+        if (!email)     { showAlert('alert-2', 'Email address is required.'); return; }
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+            showAlert('alert-2', 'Please enter a valid email address.'); return;
+        }
+        if (password.length < 8) { showAlert('alert-2', 'Password must be at least 8 characters.'); return; }
+        if (password !== confirm) { showAlert('alert-2', 'Passwords do not match.'); return; }
+
+        const btn = document.getElementById('btn-submit');
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Setting up…';
+
+        try {
+            const r = await fetch('/api/setup/complete', {
+                method:  'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body:    JSON.stringify({ orgName, firstName, lastName, email, password })
+            });
+            const data = await r.json().catch(() => ({}));
+
+            if (!r.ok) throw new Error(data.message || 'Setup failed. Please try again.');
+
+            // Update success message with the chosen email
+            const emailEl = document.getElementById('success-msg');
+            if (emailEl) {
+                const esc = s => s.replace(/</g,'&lt;').replace(/>/g,'&gt;');
+                emailEl.innerHTML =
+                    `Your administrator account has been created for <strong>${esc(data.email || email)}</strong>.<br>
+                     You can now log in and start configuring your interfaces.`;
+            }
+
+            setStep(3);
+
+        } catch (err) {
+            showAlert('alert-2', err.message);
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fas fa-check-circle"></i> Complete Setup';
+        }
+    };
+
+    // Allow Enter key to advance steps
+    document.getElementById('orgName').addEventListener('keydown', e => {
+        if (e.key === 'Enter') window.goToStep2();
+    });
+    document.getElementById('adminPasswordConfirm').addEventListener('keydown', e => {
+        if (e.key === 'Enter') window.submitSetup();
+    });
+})();
+</script>
+</body>
+</html>

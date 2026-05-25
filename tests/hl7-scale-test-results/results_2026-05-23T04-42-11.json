@@ -1,0 +1,667 @@
+{
+  "summary": {
+    "sent": 41,
+    "acked": 41,
+    "retrieved": 41,
+    "passed": 15,
+    "failed": 26,
+    "level": "standard",
+    "inputInterfaceId": "df5c7bc7-5dbe-4c47-8298-a4729b26ebd4"
+  },
+  "results": [
+    {
+      "messageType": "ADT^A01",
+      "label": "Inpatient admit #1",
+      "ackCode": "AA",
+      "sendOK": true,
+      "messageId": "fhir_1779511308450520602",
+      "fhirValid": true,
+      "issues": [],
+      "resourceTypes": [
+        "MessageHeader",
+        "Encounter",
+        "Condition",
+        "Patient"
+      ]
+    },
+    {
+      "messageType": "ADT^A01",
+      "label": "Inpatient admit #2",
+      "ackCode": "AA",
+      "sendOK": true,
+      "messageId": "fhir_1779511308654776225",
+      "fhirValid": true,
+      "issues": [],
+      "resourceTypes": [
+        "MessageHeader",
+        "Patient",
+        "Condition",
+        "Encounter"
+      ]
+    },
+    {
+      "messageType": "ADT^A01",
+      "label": "Inpatient admit #3",
+      "ackCode": "AA",
+      "sendOK": true,
+      "messageId": "fhir_1779511308872936819",
+      "fhirValid": true,
+      "issues": [],
+      "resourceTypes": [
+        "MessageHeader",
+        "Encounter",
+        "Patient",
+        "Condition"
+      ]
+    },
+    {
+      "messageType": "ADT^A01",
+      "label": "Inpatient admit #4",
+      "ackCode": "AA",
+      "sendOK": true,
+      "messageId": "fhir_1779511309086880025",
+      "fhirValid": true,
+      "issues": [],
+      "resourceTypes": [
+        "MessageHeader",
+        "Patient",
+        "Condition",
+        "Encounter"
+      ]
+    },
+    {
+      "messageType": "ADT^A01",
+      "label": "Inpatient admit #5",
+      "ackCode": "AA",
+      "sendOK": true,
+      "messageId": "fhir_1779511309254390380",
+      "fhirValid": true,
+      "issues": [],
+      "resourceTypes": [
+        "MessageHeader",
+        "Condition",
+        "Encounter",
+        "Patient"
+      ]
+    },
+    {
+      "messageType": "ADT^A03",
+      "label": "Discharge #1",
+      "ackCode": "AA",
+      "sendOK": true,
+      "messageId": "fhir_1779511312346997190",
+      "fhirValid": true,
+      "issues": [],
+      "resourceTypes": [
+        "MessageHeader",
+        "Patient",
+        "Encounter"
+      ]
+    },
+    {
+      "messageType": "ADT^A03",
+      "label": "Discharge #2",
+      "ackCode": "AA",
+      "sendOK": true,
+      "messageId": "fhir_1779511316867167108",
+      "fhirValid": false,
+      "issues": [
+        "Missing: Patient",
+        "Missing: Encounter"
+      ],
+      "resourceTypes": [
+        "MessageHeader",
+        "Organization"
+      ]
+    },
+    {
+      "messageType": "ADT^A03",
+      "label": "Discharge #3",
+      "ackCode": "AA",
+      "sendOK": true,
+      "messageId": "fhir_1779511316876283109",
+      "fhirValid": false,
+      "issues": [
+        "Missing: Patient",
+        "Missing: Encounter"
+      ],
+      "resourceTypes": [
+        "MessageHeader",
+        "Organization"
+      ]
+    },
+    {
+      "messageType": "ADT^A04",
+      "label": "Outpatient #1",
+      "ackCode": "AA",
+      "sendOK": true,
+      "messageId": "fhir_1779511316947738004",
+      "fhirValid": false,
+      "issues": [
+        "Missing: Encounter"
+      ],
+      "resourceTypes": [
+        "MessageHeader",
+        "Patient",
+        "DiagnosticReport",
+        "Observation"
+      ]
+    },
+    {
+      "messageType": "ADT^A04",
+      "label": "Outpatient #2",
+      "ackCode": "AA",
+      "sendOK": true,
+      "messageId": "fhir_1779511316988329833",
+      "fhirValid": false,
+      "issues": [
+        "Missing: Encounter"
+      ],
+      "resourceTypes": [
+        "MessageHeader",
+        "Patient",
+        "DiagnosticReport",
+        "Observation"
+      ]
+    },
+    {
+      "messageType": "ADT^A04",
+      "label": "Outpatient #3",
+      "ackCode": "AA",
+      "sendOK": true,
+      "messageId": "fhir_1779511316989497760",
+      "fhirValid": false,
+      "issues": [
+        "Missing: Encounter"
+      ],
+      "resourceTypes": [
+        "MessageHeader",
+        "Patient",
+        "DiagnosticReport",
+        "Observation"
+      ]
+    },
+    {
+      "messageType": "ADT^A08",
+      "label": "Update #1",
+      "ackCode": "AA",
+      "sendOK": true,
+      "messageId": "fhir_1779511317025738204",
+      "fhirValid": false,
+      "issues": [
+        "Missing: Encounter"
+      ],
+      "resourceTypes": [
+        "MessageHeader",
+        "Patient",
+        "Patient"
+      ]
+    },
+    {
+      "messageType": "ADT^A08",
+      "label": "Update #2",
+      "ackCode": "AA",
+      "sendOK": true,
+      "messageId": "fhir_1779511317031449664",
+      "fhirValid": false,
+      "issues": [
+        "Missing: Encounter"
+      ],
+      "resourceTypes": [
+        "MessageHeader",
+        "DiagnosticReport",
+        "Patient",
+        "Observation",
+        "Observation"
+      ]
+    },
+    {
+      "messageType": "ADT^A28",
+      "label": "Add person #1",
+      "ackCode": "AA",
+      "sendOK": true,
+      "messageId": "fhir_1779511317078141316",
+      "fhirValid": true,
+      "issues": [],
+      "resourceTypes": [
+        "MessageHeader",
+        "DiagnosticReport",
+        "Patient",
+        "Observation",
+        "Observation"
+      ]
+    },
+    {
+      "messageType": "ADT^A28",
+      "label": "Add person #2",
+      "ackCode": "AA",
+      "sendOK": true,
+      "messageId": "fhir_1779511317117912268",
+      "fhirValid": true,
+      "issues": [],
+      "resourceTypes": [
+        "MessageHeader",
+        "DiagnosticReport",
+        "Patient",
+        "Observation"
+      ]
+    },
+    {
+      "messageType": "ADT^A39",
+      "label": "Merge patient",
+      "ackCode": "AA",
+      "sendOK": true,
+      "messageId": "fhir_1779511317125271126",
+      "fhirValid": true,
+      "issues": [],
+      "resourceTypes": [
+        "MessageHeader",
+        "DiagnosticReport",
+        "Patient",
+        "Observation",
+        "Observation"
+      ]
+    },
+    {
+      "messageType": "ORU^R01",
+      "label": "Lab result #1",
+      "ackCode": "AA",
+      "sendOK": true,
+      "messageId": "fhir_1779511317142195520",
+      "fhirValid": false,
+      "issues": [
+        "Missing: DiagnosticReport",
+        "Missing: Observation"
+      ],
+      "resourceTypes": [
+        "MessageHeader",
+        "Patient",
+        "Appointment"
+      ]
+    },
+    {
+      "messageType": "ORU^R01",
+      "label": "Lab result #2",
+      "ackCode": "AA",
+      "sendOK": true,
+      "messageId": "fhir_1779511317146877292",
+      "fhirValid": true,
+      "issues": [],
+      "resourceTypes": [
+        "MessageHeader",
+        "DiagnosticReport",
+        "Patient",
+        "Observation",
+        "Observation"
+      ]
+    },
+    {
+      "messageType": "ORU^R01",
+      "label": "Lab result #3",
+      "ackCode": "AA",
+      "sendOK": true,
+      "messageId": "fhir_1779511317165186071",
+      "fhirValid": false,
+      "issues": [
+        "Missing: DiagnosticReport",
+        "Missing: Observation"
+      ],
+      "resourceTypes": [
+        "MessageHeader",
+        "Patient",
+        "Appointment"
+      ]
+    },
+    {
+      "messageType": "ORU^R01",
+      "label": "Lab result #4",
+      "ackCode": "AA",
+      "sendOK": true,
+      "messageId": "fhir_1779511317176430081",
+      "fhirValid": false,
+      "issues": [
+        "Missing: DiagnosticReport",
+        "Missing: Observation"
+      ],
+      "resourceTypes": [
+        "MessageHeader",
+        "Encounter",
+        "Patient",
+        "DocumentReference"
+      ]
+    },
+    {
+      "messageType": "ORU^R01",
+      "label": "Lab result #5",
+      "ackCode": "AA",
+      "sendOK": true,
+      "messageId": "fhir_1779511317237756373",
+      "fhirValid": false,
+      "issues": [
+        "Missing: DiagnosticReport",
+        "Missing: Observation"
+      ],
+      "resourceTypes": [
+        "MessageHeader",
+        "Patient",
+        "Encounter",
+        "DocumentReference"
+      ]
+    },
+    {
+      "messageType": "ORU^R03",
+      "label": "R03 #1",
+      "ackCode": "AA",
+      "sendOK": true,
+      "messageId": "fhir_1779511317239641316",
+      "fhirValid": false,
+      "issues": [
+        "Missing: DiagnosticReport",
+        "Missing: Observation"
+      ],
+      "resourceTypes": [
+        "MessageHeader",
+        "Patient",
+        "Encounter"
+      ]
+    },
+    {
+      "messageType": "ORU^R03",
+      "label": "R03 #2",
+      "ackCode": "AA",
+      "sendOK": true,
+      "messageId": "fhir_1779511317246543922",
+      "fhirValid": false,
+      "issues": [
+        "Missing: DiagnosticReport",
+        "Missing: Observation"
+      ],
+      "resourceTypes": [
+        "MessageHeader",
+        "Patient",
+        "Immunization"
+      ]
+    },
+    {
+      "messageType": "ORU^R03",
+      "label": "R03 #3",
+      "ackCode": "AA",
+      "sendOK": true,
+      "messageId": "fhir_1779511317247140961",
+      "fhirValid": false,
+      "issues": [
+        "Missing: DiagnosticReport",
+        "Missing: Observation"
+      ],
+      "resourceTypes": [
+        "MessageHeader",
+        "Patient",
+        "Immunization"
+      ]
+    },
+    {
+      "messageType": "ORM^O01",
+      "label": "Order METABOLIC PANEL",
+      "ackCode": "AA",
+      "sendOK": true,
+      "messageId": "fhir_1779511317254332134",
+      "fhirValid": false,
+      "issues": [
+        "Missing: ServiceRequest"
+      ],
+      "resourceTypes": [
+        "MessageHeader",
+        "Appointment",
+        "Patient"
+      ]
+    },
+    {
+      "messageType": "ORM^O01",
+      "label": "Order CBC WITH DIFF",
+      "ackCode": "AA",
+      "sendOK": true,
+      "messageId": "fhir_1779511317255294101",
+      "fhirValid": false,
+      "issues": [
+        "Missing: ServiceRequest"
+      ],
+      "resourceTypes": [
+        "MessageHeader",
+        "Encounter",
+        "ChargeItem",
+        "Patient"
+      ]
+    },
+    {
+      "messageType": "ORM^O01",
+      "label": "Order HDL CHOLESTEROL",
+      "ackCode": "AA",
+      "sendOK": true,
+      "messageId": "fhir_1779511317268802286",
+      "fhirValid": true,
+      "issues": [],
+      "resourceTypes": [
+        "MessageHeader",
+        "ServiceRequest",
+        "Patient"
+      ]
+    },
+    {
+      "messageType": "MDM^T02",
+      "label": "DISCHARGE SUMMARY",
+      "ackCode": "AA",
+      "sendOK": true,
+      "messageId": "fhir_1779511317268600649",
+      "fhirValid": false,
+      "issues": [
+        "Missing: DocumentReference"
+      ],
+      "resourceTypes": [
+        "MessageHeader",
+        "Patient",
+        "Encounter"
+      ]
+    },
+    {
+      "messageType": "MDM^T02",
+      "label": "H AND P",
+      "ackCode": "AA",
+      "sendOK": true,
+      "messageId": "fhir_1779511317269598182",
+      "fhirValid": true,
+      "issues": [],
+      "resourceTypes": [
+        "MessageHeader",
+        "Patient",
+        "Encounter",
+        "DocumentReference"
+      ]
+    },
+    {
+      "messageType": "MDM^T02",
+      "label": "CONSULT NOTE",
+      "ackCode": "AA",
+      "sendOK": true,
+      "messageId": "fhir_1779511317278093028",
+      "fhirValid": false,
+      "issues": [
+        "Missing: DocumentReference"
+      ],
+      "resourceTypes": [
+        "MessageHeader",
+        "Patient",
+        "Encounter"
+      ]
+    },
+    {
+      "messageType": "VXU^V04",
+      "label": "INFLUENZA vax",
+      "ackCode": "AA",
+      "sendOK": true,
+      "messageId": "fhir_1779511317280058573",
+      "fhirValid": false,
+      "issues": [
+        "Missing: Immunization"
+      ],
+      "resourceTypes": [
+        "MessageHeader",
+        "Patient",
+        "Encounter"
+      ]
+    },
+    {
+      "messageType": "VXU^V04",
+      "label": "DIPHTHERIA TETANUS vax",
+      "ackCode": "AA",
+      "sendOK": true,
+      "messageId": "fhir_1779511317286303462",
+      "fhirValid": false,
+      "issues": [
+        "Missing: Immunization"
+      ],
+      "resourceTypes": [
+        "MessageHeader",
+        "Patient",
+        "Encounter"
+      ]
+    },
+    {
+      "messageType": "VXU^V04",
+      "label": "TETANUS TOXOID vax",
+      "ackCode": "AA",
+      "sendOK": true,
+      "messageId": "fhir_1779511317286282187",
+      "fhirValid": false,
+      "issues": [
+        "Missing: Immunization"
+      ],
+      "resourceTypes": [
+        "MessageHeader",
+        "Patient"
+      ]
+    },
+    {
+      "messageType": "SIU^S12",
+      "label": "CONSULT appt #1",
+      "ackCode": "AA",
+      "sendOK": true,
+      "messageId": "fhir_1779511317288437018",
+      "fhirValid": false,
+      "issues": [
+        "Missing: Appointment"
+      ],
+      "resourceTypes": [
+        "MessageHeader",
+        "Patient",
+        "Encounter",
+        "ChargeItem"
+      ]
+    },
+    {
+      "messageType": "SIU^S12",
+      "label": "FOLLOWUP appt #2",
+      "ackCode": "AA",
+      "sendOK": true,
+      "messageId": "fhir_1779511317300330194",
+      "fhirValid": false,
+      "issues": [
+        "Missing: Appointment"
+      ],
+      "resourceTypes": [
+        "MessageHeader",
+        "Patient",
+        "Encounter"
+      ]
+    },
+    {
+      "messageType": "SIU^S12",
+      "label": "PROCEDURE appt #3",
+      "ackCode": "AA",
+      "sendOK": true,
+      "messageId": "fhir_1779511317301335900",
+      "fhirValid": false,
+      "issues": [
+        "Missing: Appointment"
+      ],
+      "resourceTypes": [
+        "MessageHeader",
+        "Patient"
+      ]
+    },
+    {
+      "messageType": "DFT^P03",
+      "label": "OFFICE VISIT charge",
+      "ackCode": "AA",
+      "sendOK": true,
+      "messageId": "fhir_1779511317308881238",
+      "fhirValid": false,
+      "issues": [
+        "Missing: Encounter"
+      ],
+      "resourceTypes": [
+        "MessageHeader",
+        "ServiceRequest",
+        "Patient"
+      ]
+    },
+    {
+      "messageType": "DFT^P03",
+      "label": "BLOOD DRAW charge",
+      "ackCode": "AA",
+      "sendOK": true,
+      "messageId": "fhir_1779511317309391993",
+      "fhirValid": false,
+      "issues": [
+        "Missing: Encounter"
+      ],
+      "resourceTypes": [
+        "MessageHeader",
+        "Patient",
+        "ServiceRequest"
+      ]
+    },
+    {
+      "messageType": "DFT^P03",
+      "label": "ECG charge",
+      "ackCode": "AA",
+      "sendOK": true,
+      "messageId": "fhir_1779511317311060837",
+      "fhirValid": true,
+      "issues": [],
+      "resourceTypes": [
+        "MessageHeader",
+        "Encounter",
+        "Patient",
+        "ChargeItem"
+      ]
+    },
+    {
+      "messageType": "MFN^M13",
+      "label": "Master file #1",
+      "ackCode": "AA",
+      "sendOK": true,
+      "messageId": "fhir_1779511317371717642",
+      "fhirValid": true,
+      "issues": [],
+      "resourceTypes": [
+        "MessageHeader",
+        "Patient",
+        "Encounter"
+      ]
+    },
+    {
+      "messageType": "MFN^M13",
+      "label": "Master file #2",
+      "ackCode": "AA",
+      "sendOK": true,
+      "messageId": "fhir_1779511317442221912",
+      "fhirValid": true,
+      "issues": [],
+      "resourceTypes": [
+        "MessageHeader",
+        "Patient",
+        "Immunization"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,365 @@
+// processing/tcp_input_connector.go
+// TCP input connector for Go processing engine
+
+package processing
+
+import (
+	"bufio"
+	"context"
+	"fmt"
+	"net"
+	"sync"
+	"time"
+)
+
+// TCPInputConnector implements InputConnector for TCP connections
+type TCPInputConnector struct {
+	host         string
+	port         int
+	interfaceID  string
+	messageCount int64
+	errorCount   int64
+	lastActivity time.Time
+	listener     net.Listener
+	mu           sync.Mutex
+	running      bool
+}
+
+// NewTCPInputConnector creates a new TCP input connector
+func NewTCPInputConnector(config map[string]interface{}) (InputConnector, error) {
+	host, ok := config["host"].(string)
+	if !ok || host == "" || host == "localhost" || host == "127.0.0.1" {
+		// Always use 0.0.0.0 for Docker compatibility
+		// This allows connections from outside the container
+		host = "0.0.0.0"
+	}
+
+	port, ok := config["port"].(float64) // JSON numbers come as float64
+	if !ok {
+		return nil, fmt.Errorf("TCP port not specified")
+	}
+
+	// Extract interface_id if provided
+	interfaceID, _ := config["interface_id"].(string)
+
+	connector := &TCPInputConnector{
+		host:         host,
+		port:         int(port),
+		interfaceID:  interfaceID,
+		lastActivity: time.Now(),
+		running:      false,
+	}
+
+	fmt.Printf("✅ TCP input connector initialized: %s:%d (Interface: %s)\n", host, int(port), interfaceID)
+	return connector, nil
+}
+
+// Start begins listening for TCP messages
+func (t *TCPInputConnector) Start(ctx context.Context, messageChan chan<- Message) error {
+	t.mu.Lock()
+	if t.running {
+		t.mu.Unlock()
+		return fmt.Errorf("TCP listener already running on %s:%d", t.host, t.port)
+	}
+	t.mu.Unlock()
+
+	addr := fmt.Sprintf("%s:%d", t.host, t.port)
+	listener, err := net.Listen("tcp", addr)
+	if err != nil {
+		return fmt.Errorf("failed to start TCP listener on %s: %v", addr, err)
+	}
+
+	t.mu.Lock()
+	t.listener = listener
+	t.running = true
+	t.mu.Unlock()
+
+	fmt.Printf("🔌 TCP listener started on %s\n", addr)
+
+	// Start accepting connections in a goroutine
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				fmt.Printf("🛑 TCP listener context cancelled on %s\n", addr)
+				return
+			default:
+				conn, err := listener.Accept()
+				if err != nil {
+					t.mu.Lock()
+					if !t.running {
+						t.mu.Unlock()
+						return // Listener was closed
+					}
+					t.errorCount++
+					t.mu.Unlock()
+					fmt.Printf("❌ Error accepting connection on %s: %v\n", addr, err)
+					continue
+				}
+
+				// Handle connection in a separate goroutine
+				go t.handleConnection(conn, messageChan)
+			}
+		}
+	}()
+
+	return nil
+}
+
+// handleConnection processes an individual TCP connection
+func (t *TCPInputConnector) handleConnection(conn net.Conn, messageChan chan<- Message) {
+	defer conn.Close()
+
+	remoteAddr := conn.RemoteAddr().String()
+	fmt.Printf("📥 New TCP connection from %s\n", remoteAddr)
+
+	// Set read deadline
+	conn.SetReadDeadline(time.Now().Add(5 * time.Minute))
+
+	// Use direct reading to handle MLLP protocol
+	// MLLP format: <VT>message<FS><CR> where VT=0x0B, FS=0x1C, CR=0x0D
+	reader := bufio.NewReader(conn)
+	buffer := make([]byte, 0, 1024*1024) // 1MB max message
+
+	for {
+		// Read one byte at a time looking for MLLP start byte (0x0B)
+		b, err := reader.ReadByte()
+		if err != nil {
+			if err.Error() != "EOF" {
+				fmt.Printf("❌ Error reading from %s: %v\n", remoteAddr, err)
+			}
+			break
+		}
+
+		// Check for MLLP start byte
+		if b == 0x0B {
+			// Start of MLLP message, read until we find end markers (0x1C 0x0D)
+			buffer = buffer[:0] // Reset buffer
+
+			for {
+				b, err := reader.ReadByte()
+				if err != nil {
+					fmt.Printf("❌ Error reading message body from %s: %v\n", remoteAddr, err)
+					break
+				}
+
+				// Check for MLLP end markers
+				if b == 0x1C {
+					// File separator found, check for trailing CR
+					nextByte, err := reader.ReadByte()
+					if err == nil && nextByte == 0x0D {
+						// Complete MLLP message received
+						break
+					} else if err == nil {
+						// Not CR, add both bytes to buffer
+						buffer = append(buffer, b, nextByte)
+					}
+				} else {
+					buffer = append(buffer, b)
+				}
+
+				// Safety check for maximum message size
+				if len(buffer) > 1024*1024 {
+					fmt.Printf("⚠️ Message too large from %s, dropping\n", remoteAddr)
+					break
+				}
+			}
+
+			messageData := buffer
+			if len(messageData) == 0 {
+				continue
+			}
+
+			// Create message
+			now := time.Now()
+			message := Message{
+				ID:         fmt.Sprintf("tcp_%d", now.UnixNano()),
+				Content:    string(messageData),
+				Type:       "hl7",
+				Source:     "tcp",
+				Timestamp:  now.Format(time.RFC3339),
+				ReceivedAt: now, // Set ReceivedAt time.Time for database storage
+				Metadata:   make(map[string]interface{}),
+			}
+
+			// Store additional metadata
+			message.Metadata["source_address"] = remoteAddr
+			message.Metadata["message_size"] = len(messageData)
+			message.Metadata["interface_id"] = t.interfaceID
+
+			// Send to processing channel
+			fmt.Printf("🔄 Attempting to send message to processing channel (buffer: %d/%d)\n", len(messageChan), cap(messageChan))
+			select {
+			case messageChan <- message:
+				t.mu.Lock()
+				t.messageCount++
+				t.lastActivity = time.Now()
+				t.mu.Unlock()
+				fmt.Printf("✅ MLLP message received from %s (%d bytes)\n", remoteAddr, len(messageData))
+				fmt.Printf("✅ Message sent to processing channel successfully (ID: %s, Interface: %s)\n", message.ID, message.Metadata["interface_id"])
+
+				// Send HL7 ACK response with MLLP framing
+				ack := t.generateHL7ACK(string(messageData))
+				if ack != "" {
+					// Wrap ACK in MLLP envelope: <VT>ACK<FS><CR>
+					mllpAck := string([]byte{0x0B}) + ack + string([]byte{0x1C, 0x0D})
+					ackBytes := []byte(mllpAck)
+					if _, err := conn.Write(ackBytes); err != nil {
+						fmt.Printf("⚠️ Failed to send ACK to %s: %v\n", remoteAddr, err)
+					} else {
+						fmt.Printf("📤 MLLP ACK sent to %s\n", remoteAddr)
+					}
+				}
+			default:
+				t.mu.Lock()
+				t.errorCount++
+				t.mu.Unlock()
+				fmt.Printf("⚠️ Message channel full, dropping message from %s\n", remoteAddr)
+			}
+
+			// Reset read deadline after processing
+			conn.SetReadDeadline(time.Now().Add(5 * time.Minute))
+		}
+	}
+
+	fmt.Printf("📤 TCP connection closed from %s\n", remoteAddr)
+}
+
+// TestConnection tests the TCP connection
+func (t *TCPInputConnector) TestConnection() error {
+	addr := fmt.Sprintf("%s:%d", t.host, t.port)
+	fmt.Printf("🔍 Testing TCP listener availability on %s\n", addr)
+
+	// Try to create a test listener
+	listener, err := net.Listen("tcp", addr)
+	if err != nil {
+		return fmt.Errorf("port %d is not available: %v", t.port, err)
+	}
+	defer listener.Close()
+
+	fmt.Printf("✅ TCP port %d is available\n", t.port)
+	return nil
+}
+
+// Close cleans up the TCP connector
+func (t *TCPInputConnector) Close() error {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	if !t.running {
+		return nil
+	}
+
+	t.running = false
+
+	if t.listener != nil {
+		err := t.listener.Close()
+		if err != nil {
+			fmt.Printf("❌ Error closing TCP listener: %v\n", err)
+			return err
+		}
+		t.listener = nil
+	}
+
+	fmt.Printf("🔌 TCP listener closed on %s:%d\n", t.host, t.port)
+	return nil
+}
+
+// GetStatus returns connector status
+func (t *TCPInputConnector) GetStatus() ConnectorStatus {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	status := "stopped"
+	if t.running {
+		status = "listening"
+	}
+
+	return ConnectorStatus{
+		Type:         "TCP",
+		Status:       status,
+		LastActivity: t.lastActivity.Format(time.RFC3339),
+		MessageCount: t.messageCount,
+		ErrorCount:   t.errorCount,
+	}
+}
+
+// generateHL7ACK creates an HL7 ACK message from the received message
+func (t *TCPInputConnector) generateHL7ACK(hl7Message string) string {
+	// Parse MSH segment to extract message control ID
+	lines := []string{}
+	for _, line := range []string{hl7Message} {
+		if len(line) > 0 {
+			lines = append(lines, line)
+		}
+	}
+
+	if len(lines) == 0 {
+		return ""
+	}
+
+	// Find MSH segment
+	mshSegment := ""
+	for _, line := range lines {
+		if len(line) >= 3 && line[0:3] == "MSH" {
+			mshSegment = line
+			break
+		}
+	}
+
+	if mshSegment == "" {
+		return ""
+	}
+
+	// Parse MSH fields
+	fields := []string{}
+	if len(mshSegment) > 3 {
+		separator := mshSegment[3:4]
+		fields = []string{"MSH"}
+		fields = append(fields, separator)
+
+		// Split remaining fields
+		remaining := mshSegment[4:]
+		currentField := ""
+		for _, char := range remaining {
+			if string(char) == separator {
+				fields = append(fields, currentField)
+				currentField = ""
+			} else {
+				currentField += string(char)
+			}
+		}
+		if currentField != "" {
+			fields = append(fields, currentField)
+		}
+	}
+
+	// Extract message control ID (MSH.10)
+	messageControlID := "1"
+	if len(fields) > 10 {
+		messageControlID = fields[10]
+	}
+
+	// Get field separator
+	fieldSep := "|"
+	if len(mshSegment) > 3 {
+		fieldSep = mshSegment[3:4]
+	}
+
+	// Get encoding characters
+	encodingChars := "^~\\&"
+	if len(mshSegment) > 4 {
+		encodingChars = mshSegment[4:8]
+	}
+
+	// Get timestamp
+	timestamp := time.Now().Format("20060102150405")
+
+	// Build ACK message
+	ack := fmt.Sprintf("MSH%s%s%sEZHEALTH%s%s%s%s%sACK%s%s%sP%s2.5\r",
+		fieldSep, encodingChars, fieldSep, fieldSep, fieldSep, fieldSep,
+		timestamp, fieldSep, fieldSep, messageControlID, fieldSep, fieldSep)
+	ack += fmt.Sprintf("MSA%sAA%s%s\r", fieldSep, fieldSep, messageControlID)
+
+	return ack
+}

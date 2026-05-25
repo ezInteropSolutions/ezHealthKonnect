@@ -1,0 +1,218 @@
+name: Build, Validate and Publish Docker Image
+
+on:
+  push:
+    branches: [main, master]
+    tags: ['v*']
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ezinteropsolutions/ezhealthkonnect
+  # Local tag used during validation before pushing
+  LOCAL_TAG: ezhealthkonnect-ci:${{ github.run_id }}
+
+jobs:
+  # ── Job 1: Lint ────────────────────────────────────────────────────────────
+  lint:
+    name: Lint Dockerfile
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Lint Dockerfile with Hadolint
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: Dockerfile
+          ignore: DL3008,DL3018
+
+  # ── Job 2: Build → Scan → Smoke Test → Push ───────────────────────────────
+  build-validate-push:
+    name: Build, Scan and Push
+    runs-on: ubuntu-latest
+    needs: lint
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      # ── Build (load locally first — do NOT push yet) ──────────────────────
+      - name: Build image (local only)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          load: true
+          tags: ${{ env.LOCAL_TAG }}
+          no-cache: true
+
+      # ── Layer inspection: no secrets baked in ────────────────────────────
+      - name: Check for secrets in image layers
+        run: |
+          echo "=== Checking image history for hardcoded secret values ==="
+          docker history --no-trunc ${{ env.LOCAL_TAG }} | grep -iE \
+            '(password|secret|credential|api_key)\s*=\s*\S+' \
+            && echo "FAIL: Potential hardcoded secret found in image history" && exit 1 \
+            || echo "OK: No hardcoded secrets detected in image history"
+
+          echo ""
+          echo "=== Verifying .env is NOT baked into image ==="
+          docker run --rm ${{ env.LOCAL_TAG }} sh -c \
+            'test -f /app/.env && echo "FAIL: .env found in image" && exit 1 || echo "OK: No .env in image"'
+
+          echo ""
+          echo "=== Verifying .git is NOT baked into image ==="
+          docker run --rm ${{ env.LOCAL_TAG }} sh -c \
+            'test -d /app/.git && echo "FAIL: .git found in image" && exit 1 || echo "OK: No .git in image"'
+
+      # ── CVE scan with Trivy (informational — does not block push) ─────────
+      - name: Install Trivy
+        run: |
+          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh \
+            | sh -s -- -b /usr/local/bin latest
+
+      - name: Scan image for vulnerabilities (Trivy)
+        # Blocks on CRITICAL/HIGH CVEs that have a fix available.
+        # CVEs with no upstream fix are suppressed via .trivyignore (reviewed monthly).
+        # To see ALL findings including suppressed, check the table output above.
+        run: |
+          echo "=== Full findings (including suppressed) ==="
+          trivy image \
+            --format table \
+            --severity CRITICAL,HIGH \
+            --ignore-unfixed \
+            ${{ env.LOCAL_TAG }} || true
+
+          echo ""
+          echo "=== Enforced scan (blocks on fixable CVEs not in .trivyignore) ==="
+          trivy image \
+            --format table \
+            --severity CRITICAL,HIGH \
+            --ignore-unfixed \
+            --ignorefile .trivyignore \
+            --exit-code 1 \
+            ${{ env.LOCAL_TAG }}
+
+      # ── Smoke test: container starts and binaries run ─────────────────────
+      - name: Smoke test — binaries present and executable
+        run: |
+          echo "=== Checking go-api binary ==="
+          docker run --rm ${{ env.LOCAL_TAG }} sh -c \
+            'test -x /app/go-api && echo "OK: go-api binary is present and executable"'
+
+          echo "=== Checking Node.js ==="
+          docker run --rm ${{ env.LOCAL_TAG }} node --version
+
+          echo "=== Checking curl (health check tool) ==="
+          docker run --rm ${{ env.LOCAL_TAG }} curl --version | head -1
+
+      # ── Smoke test: full stack starts healthy ─────────────────────────────
+      - name: Smoke test — full stack health check
+        run: |
+          cat > /tmp/test.env <<'EOF'
+          APP_IMAGE=ezhealthkonnect-ci:${{ github.run_id }}
+          APP_PORT=3000
+          API_PORT=8080
+          DB_USER=ezhealth_user
+          DB_PASSWORD=TestPassword123!
+          DB_HOST_PORT=5432
+          DB_SSL=false
+          MINIO_USER=ezhealth_user
+          MINIO_PASSWORD=TestPassword123!
+          MINIO_API_PORT=9000
+          MINIO_CONSOLE_PORT=9001
+          SESSION_SECRET=ci-session-secret-not-for-production-use
+          JWT_SECRET=ci-jwt-secret-not-for-production-use
+          OLLAMA_PORT=11434
+          OLLAMA_CHAT_MODEL=llama3.2:3b
+          OLLAMA_EMBED_MODEL=nomic-embed-text
+          EOF
+
+          DC="docker compose -f docker-compose.prod.yml --env-file /tmp/test.env -p ezhk-ci"
+
+          echo "=== Starting stack ==="
+          $DC up -d
+
+          echo "=== Waiting for app to become healthy (up to 120s) ==="
+          timeout 120 bash -c '
+            DC="docker compose -f docker-compose.prod.yml --env-file /tmp/test.env -p ezhk-ci"
+            until $DC ps app | grep -q "(healthy)"; do
+              echo "  Waiting... ($($DC ps app --format "{{.Health}}" 2>/dev/null || echo starting))"
+              sleep 5
+            done
+          ' || {
+            echo "TIMEOUT: App did not become healthy in 120s"
+            echo "=== App logs ==="
+            $DC logs app --tail=50
+            exit 1
+          }
+
+          echo "=== Testing HTTP response ==="
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:3000/api/auth/session)
+          echo "  /api/auth/session → HTTP $STATUS"
+          if [ "$STATUS" != "200" ] && [ "$STATUS" != "401" ]; then
+            echo "FAIL: Unexpected status $STATUS"
+            $DC logs app --tail=30
+            exit 1
+          fi
+          echo "OK: Application is responding correctly"
+
+      - name: Dump logs on failure
+        if: failure()
+        run: docker compose -f docker-compose.prod.yml --env-file /tmp/test.env -p ezhk-ci logs --tail=100 || true
+
+      - name: Tear down test stack
+        if: always()
+        run: docker compose -f docker-compose.prod.yml --env-file /tmp/test.env -p ezhk-ci down -v --remove-orphans || true
+
+      # ── Push — only after ALL checks pass ────────────────────────────────
+      - name: Log in to GitHub Container Registry
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract image metadata
+        if: github.event_name != 'pull_request'
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' }}
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,prefix=sha-,format=short
+
+      - name: Push validated image to registry
+        if: github.event_name != 'pull_request'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          platforms: linux/amd64,linux/arm64
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # ── Image report ──────────────────────────────────────────────────────
+      - name: Print image size report
+        if: always()
+        run: |
+          echo "=== Image size ==="
+          docker images ${{ env.LOCAL_TAG }} --format "Size: {{.Size}}"
+          echo ""
+          echo "=== Layer breakdown (top 10 largest) ==="
+          docker history ${{ env.LOCAL_TAG }} --format "{{.Size}}\t{{.CreatedBy}}" \
+            | sort -rh | head -10

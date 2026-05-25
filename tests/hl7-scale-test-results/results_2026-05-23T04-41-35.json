@@ -1,0 +1,88 @@
+{
+  "summary": {
+    "sent": 5,
+    "acked": 5,
+    "retrieved": 5,
+    "passed": 5,
+    "failed": 0,
+    "level": "standard",
+    "inputInterfaceId": "df5c7bc7-5dbe-4c47-8298-a4729b26ebd4"
+  },
+  "results": [
+    {
+      "messageType": "ADT^A01",
+      "label": "Inpatient admit #1",
+      "ackCode": "AA",
+      "sendOK": true,
+      "messageId": "fhir_1779511286786966765",
+      "fhirValid": true,
+      "issues": [],
+      "resourceTypes": [
+        "MessageHeader",
+        "Encounter",
+        "Patient",
+        "Condition"
+      ]
+    },
+    {
+      "messageType": "ADT^A01",
+      "label": "Inpatient admit #2",
+      "ackCode": "AA",
+      "sendOK": true,
+      "messageId": "fhir_1779511286967541349",
+      "fhirValid": true,
+      "issues": [],
+      "resourceTypes": [
+        "MessageHeader",
+        "Condition",
+        "Encounter",
+        "Patient"
+      ]
+    },
+    {
+      "messageType": "ADT^A01",
+      "label": "Inpatient admit #3",
+      "ackCode": "AA",
+      "sendOK": true,
+      "messageId": "fhir_1779511287174904480",
+      "fhirValid": true,
+      "issues": [],
+      "resourceTypes": [
+        "MessageHeader",
+        "Patient",
+        "Condition",
+        "Encounter"
+      ]
+    },
+    {
+      "messageType": "ADT^A01",
+      "label": "Inpatient admit #4",
+      "ackCode": "AA",
+      "sendOK": true,
+      "messageId": "fhir_1779511287362953627",
+      "fhirValid": true,
+      "issues": [],
+      "resourceTypes": [
+        "MessageHeader",
+        "Encounter",
+        "Patient",
+        "Condition"
+      ]
+    },
+    {
+      "messageType": "ADT^A01",
+      "label": "Inpatient admit #5",
+      "ackCode": "AA",
+      "sendOK": true,
+      "messageId": "fhir_1779511287547053999",
+      "fhirValid": true,
+      "issues": [],
+      "resourceTypes": [
+        "MessageHeader",
+        "Patient",
+        "Condition",
+        "Encounter"
+      ]
+    }
+  ]
+}

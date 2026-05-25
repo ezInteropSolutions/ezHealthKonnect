@@ -1,0 +1,409 @@
+/**
+ * API Endpoint Tester Styles
+ *
+ * Styling for the API endpoint testing and field picker component
+ */
+
+/* ============================================================
+   MAIN CONTAINER
+   ============================================================ */
+
+.api-endpoint-tester {
+    border: 1px solid #e0e0e0;
+    border-radius: 6px;
+    padding: 20px;
+    margin-bottom: 20px;
+    background: #f9fafb;
+}
+
+.api-endpoint-tester h4 {
+    margin-top: 0;
+    margin-bottom: 8px;
+    color: #333;
+    font-size: 16px;
+    font-weight: 600;
+}
+
+.api-endpoint-tester .help-text {
+    margin: 0 0 16px 0;
+    color: #666;
+    font-size: 14px;
+    line-height: 1.5;
+}
+
+/* ============================================================
+   TEST DATA SECTION
+   ============================================================ */
+
+.test-data-section {
+    margin-bottom: 16px;
+}
+
+.test-data-section label {
+    display: block;
+    margin-bottom: 6px;
+    color: #444;
+    font-weight: 500;
+    font-size: 13px;
+}
+
+.test-data-section textarea {
+    width: 100%;
+    font-family: 'Courier New', 'Consolas', monospace;
+    font-size: 12px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    padding: 10px;
+    resize: vertical;
+    background: white;
+    transition: border-color 0.2s;
+}
+
+.test-data-section textarea:focus {
+    outline: none;
+    border-color: #007bff;
+    box-shadow: 0 0 0 3px rgba(0, 123, 255, 0.1);
+}
+
+.test-data-section small {
+    display: block;
+    margin-top: 4px;
+    color: #666;
+    font-size: 12px;
+}
+
+/* ============================================================
+   TEST BUTTON
+   ============================================================ */
+
+#test-api-btn {
+    padding: 10px 20px;
+    background: #007bff;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 500;
+    transition: background 0.2s;
+}
+
+#test-api-btn:hover:not(:disabled) {
+    background: #0056b3;
+}
+
+#test-api-btn:disabled {
+    background: #6c757d;
+    cursor: not-allowed;
+    opacity: 0.7;
+}
+
+/* ============================================================
+   TEST RESULTS
+   ============================================================ */
+
+#test-results-container {
+    margin-top: 20px;
+}
+
+.alert {
+    padding: 12px 16px;
+    border-radius: 4px;
+    margin-bottom: 16px;
+}
+
+.alert-success {
+    background: #d4edda;
+    border: 1px solid #c3e6cb;
+    color: #155724;
+}
+
+.alert-error {
+    background: #f8d7da;
+    border: 1px solid #f5c6cb;
+    color: #721c24;
+}
+
+.alert strong {
+    display: block;
+    margin-bottom: 4px;
+}
+
+.alert p {
+    margin: 4px 0;
+    font-size: 14px;
+}
+
+.alert details {
+    margin-top: 12px;
+}
+
+.alert summary {
+    cursor: pointer;
+    font-weight: 500;
+    margin-bottom: 8px;
+}
+
+/* ============================================================
+   TABS
+   ============================================================ */
+
+.tabs {
+    display: flex;
+    border-bottom: 2px solid #e0e0e0;
+    margin-bottom: 12px;
+    gap: 4px;
+}
+
+.tab-btn {
+    padding: 10px 16px;
+    border: none;
+    background: transparent;
+    cursor: pointer;
+    border-bottom: 3px solid transparent;
+    margin-bottom: -2px;
+    color: #666;
+    font-size: 13px;
+    font-weight: 500;
+    transition: all 0.2s;
+}
+
+.tab-btn:hover {
+    background: #f5f5f5;
+    color: #333;
+}
+
+.tab-btn.active {
+    border-bottom-color: #007bff;
+    color: #007bff;
+    font-weight: 600;
+}
+
+.tab-content {
+    display: none;
+}
+
+.tab-content.active {
+    display: block;
+}
+
+/* ============================================================
+   JSON VIEWER
+   ============================================================ */
+
+.json-viewer pre {
+    background: #f5f5f5;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    padding: 12px;
+    overflow-x: auto;
+    font-family: 'Courier New', 'Consolas', monospace;
+    font-size: 12px;
+    line-height: 1.5;
+    max-height: 400px;
+}
+
+.tab-content pre {
+    background: #f5f5f5;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    padding: 12px;
+    overflow-x: auto;
+    font-family: 'Courier New', 'Consolas', monospace;
+    font-size: 12px;
+    line-height: 1.5;
+    max-height: 400px;
+}
+
+.tab-content h5 {
+    margin-top: 0;
+    margin-bottom: 12px;
+    color: #333;
+    font-size: 14px;
+    font-weight: 600;
+}
+
+/* ============================================================
+   FIELD PICKER SECTION
+   ============================================================ */
+
+.field-picker-section {
+    margin-top: 24px;
+    border-top: 2px solid #e0e0e0;
+    padding-top: 20px;
+}
+
+.field-picker-section h4 {
+    margin-top: 0;
+    margin-bottom: 12px;
+    color: #333;
+    font-size: 16px;
+    font-weight: 600;
+}
+
+.field-list {
+    max-height: 500px;
+    overflow-y: auto;
+    padding-right: 4px;
+}
+
+/* Custom scrollbar for field list */
+.field-list::-webkit-scrollbar {
+    width: 8px;
+}
+
+.field-list::-webkit-scrollbar-track {
+    background: #f1f1f1;
+    border-radius: 4px;
+}
+
+.field-list::-webkit-scrollbar-thumb {
+    background: #888;
+    border-radius: 4px;
+}
+
+.field-list::-webkit-scrollbar-thumb:hover {
+    background: #555;
+}
+
+/* ============================================================
+   FIELD ITEMS
+   ============================================================ */
+
+.field-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 14px;
+    border: 1px solid #e0e0e0;
+    border-radius: 4px;
+    margin-bottom: 8px;
+    background: white;
+    transition: all 0.2s;
+}
+
+.field-item:hover {
+    border-color: #007bff;
+    box-shadow: 0 2px 6px rgba(0, 123, 255, 0.15);
+    transform: translateY(-1px);
+}
+
+.field-info {
+    flex: 1;
+    margin-right: 12px;
+}
+
+.field-path {
+    font-family: 'Courier New', 'Consolas', monospace;
+    font-size: 13px;
+    color: #333;
+    margin-right: 8px;
+    font-weight: 500;
+}
+
+.field-type {
+    font-size: 11px;
+    padding: 3px 8px;
+    border-radius: 3px;
+    font-weight: 600;
+    text-transform: uppercase;
+}
+
+.badge-string {
+    background: #e3f2fd;
+    color: #1976d2;
+}
+
+.badge-number {
+    background: #fff3e0;
+    color: #f57c00;
+}
+
+.badge-boolean {
+    background: #f3e5f5;
+    color: #7b1fa2;
+}
+
+.badge-object {
+    background: #e8f5e9;
+    color: #388e3c;
+}
+
+.badge-array {
+    background: #fce4ec;
+    color: #c2185b;
+}
+
+.badge-null {
+    background: #f5f5f5;
+    color: #757575;
+}
+
+.badge-unknown {
+    background: #ffe0b2;
+    color: #e65100;
+}
+
+.field-sample {
+    font-size: 12px;
+    color: #666;
+    margin-top: 6px;
+    font-family: 'Courier New', 'Consolas', monospace;
+    padding: 4px 8px;
+    background: #f9f9f9;
+    border-radius: 3px;
+    display: inline-block;
+}
+
+/* ============================================================
+   ADD FIELD BUTTON
+   ============================================================ */
+
+.btn-add-field {
+    padding: 8px 14px;
+    background: #007bff;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 500;
+    white-space: nowrap;
+    transition: all 0.2s;
+}
+
+.btn-add-field:hover:not(:disabled) {
+    background: #0056b3;
+    transform: scale(1.05);
+}
+
+.btn-add-field:disabled,
+.btn-add-field.btn-added {
+    background: #28a745;
+    cursor: not-allowed;
+}
+
+.btn-add-field:active:not(:disabled) {
+    transform: scale(0.98);
+}
+
+/* ============================================================
+   RESPONSIVE
+   ============================================================ */
+
+@media (max-width: 768px) {
+    .field-item {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+
+    .btn-add-field {
+        margin-top: 8px;
+        width: 100%;
+    }
+
+    .field-info {
+        margin-right: 0;
+        margin-bottom: 8px;
+    }
+}

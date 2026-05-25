@@ -1,0 +1,1245 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ezHealthKonnect Setup</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    /* Brand: Navy sidebar + pink accents + white body */
+    --navy:      #1e3a8a;
+    --navy-mid:  #1e40af;
+    --navy-light:#2563eb;
+    --pink-acc:  #db2777;
+    --pink-light:#fce7f3;
+
+    /* Light surfaces (80% white) */
+    --bg:        #ffffff;
+    --surface:   #f8fafc;
+    --surface2:  #f1f5f9;
+    --border:    #e2e8f0;
+    --border2:   #cbd5e1;
+
+    /* Status */
+    --green:     #16a34a;
+    --red:       #dc2626;
+    --yellow:    #d97706;
+    --text:      #0f172a;
+    --muted:     #64748b;
+
+    --sidebar-w: 220px;
+  }
+
+  html { height: 100%; overflow: hidden; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    display: flex;
+    height: 100%;
+    max-height: 100%;
+    font-size: 13px;
+    line-height: 1.5;
+    overflow: hidden;
+  }
+
+  /* ── Sidebar (navy — brand anchor) ───────────────────────────────────────── */
+  .sidebar {
+    width: var(--sidebar-w);
+    background: linear-gradient(180deg, #1e3a8a 0%, #1e2d6e 100%);
+    border-right: none;
+    display: flex;
+    flex-direction: column;
+    flex-shrink: 0;
+  }
+
+  .logo-area {
+    padding: 18px 20px 16px;
+    border-bottom: 1px solid rgba(255,255,255,0.1);
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 6px;
+  }
+  .logo-svg { width: 34px; height: 34px; }
+  .logo-name {
+    font-size: 15px; font-weight: 800;
+    color: #fff; letter-spacing: -0.5px; line-height: 1.1;
+  }
+  .logo-name span { color: #f9a8d4; }
+  .logo-sub {
+    font-size: 9px; color: rgba(255,255,255,0.45);
+    text-transform: uppercase; letter-spacing: 0.1em; margin-top: 1px;
+  }
+
+  .steps { list-style: none; padding: 16px 0; flex: 1; }
+  .step-item {
+    display: flex; align-items: center; gap: 10px;
+    padding: 8px 20px; cursor: default; transition: background 0.15s;
+  }
+  .step-dot {
+    width: 24px; height: 24px; border-radius: 50%;
+    border: 2px solid rgba(255,255,255,0.2);
+    background: rgba(255,255,255,0.08);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 11px; font-weight: 600;
+    color: rgba(255,255,255,0.35); flex-shrink: 0; transition: all 0.2s;
+  }
+  .step-label { font-size: 12px; color: rgba(255,255,255,0.4); transition: color 0.2s; }
+  .step-item.active .step-dot  { border-color: #f9a8d4; background: #db2777; color: #fff; }
+  .step-item.active .step-label { color: #fff; font-weight: 600; }
+  .step-item.done .step-dot    { border-color: #4ade80; background: #16a34a; color: #fff; }
+  .step-item.done .step-label  { color: rgba(255,255,255,0.45); }
+
+  .sidebar-footer {
+    padding: 16px 20px;
+    border-top: 1px solid rgba(255,255,255,0.08);
+    font-size: 10px; color: rgba(255,255,255,0.25); line-height: 1.6;
+  }
+
+  /* ── Main (white) ─────────────────────────────────────────────────────────── */
+  .main { flex: 1; display: flex; flex-direction: column; overflow: hidden; min-width: 0; }
+
+  .header {
+    padding: 10px 28px;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg);
+    display: flex; align-items: center; gap: 16px; flex-shrink: 0;
+  }
+  .header-text h1 { font-size: 17px; font-weight: 700; color: var(--navy); }
+  .header-text p  { font-size: 12px; color: var(--muted); margin-top: 1px; }
+
+  .content { flex: 1; overflow-y: auto; overflow-x: hidden; padding: 16px 28px; min-height: 0; background: var(--bg); }
+
+  .footer {
+    padding: 10px 28px;
+    border-top: 1px solid var(--border);
+    background: var(--surface);
+    display: flex; justify-content: flex-end; gap: 10px; flex-shrink: 0;
+  }
+
+  /* ── Buttons ──────────────────────────────────────────────────────────────── */
+  .btn {
+    padding: 8px 20px; border-radius: 7px; font-size: 13px; font-weight: 600;
+    cursor: pointer; border: 1px solid transparent;
+    transition: opacity 0.15s, background 0.15s, box-shadow 0.15s, transform 0.1s;
+    display: inline-flex; align-items: center; gap: 6px;
+  }
+  .btn:disabled { opacity: 0.38; cursor: not-allowed; }
+  .btn:active:not(:disabled) { transform: scale(0.97); }
+
+  .btn-primary { background: var(--navy-mid); color: #fff; }
+  .btn-primary:hover:not(:disabled) { background: var(--navy); }
+  .btn-pink    { background: var(--pink-acc); color: #fff; }
+  .btn-pink:hover:not(:disabled) { opacity: 0.88; }
+  .btn-ghost   { background: #fff; color: var(--text); border-color: var(--border2); }
+  .btn-ghost:hover:not(:disabled) { background: var(--surface2); }
+  .btn-success { background: var(--green); color: #fff; }
+  .btn-success:hover:not(:disabled) { opacity: 0.88; }
+  .btn-danger  { background: #fff; color: var(--red); border-color: #fca5a5; }
+  .btn-danger:hover:not(:disabled) { background: #fef2f2; }
+  .btn-icon {
+    padding: 7px 11px; border-radius: 6px; border: 1px solid var(--border2);
+    background: #fff; color: var(--muted); cursor: pointer; font-size: 15px;
+    display: inline-flex; align-items: center; transition: background 0.15s;
+  }
+  .btn-icon:hover { background: var(--surface2); }
+
+  /* ── Forms ────────────────────────────────────────────────────────────────── */
+  .form-group { margin-bottom: 10px; }
+  .form-row   { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .form-row-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }
+
+  label {
+    display: block; font-size: 10px; font-weight: 700; color: var(--muted);
+    margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.06em;
+  }
+
+  input[type="text"], input[type="password"], input[type="number"] {
+    width: 100%; background: #fff;
+    border: 1px solid var(--border2); border-radius: 6px;
+    padding: 7px 10px; color: var(--text); font-size: 13px;
+    font-family: inherit; transition: border-color 0.15s, box-shadow 0.15s; outline: none;
+  }
+  input:focus { border-color: var(--navy-light); box-shadow: 0 0 0 3px rgba(37,99,235,0.1); }
+  .hint { font-size: 10px; color: var(--muted); margin-top: 3px; }
+
+  .dir-row { display: flex; gap: 8px; }
+  .dir-row input { flex: 1; }
+
+  /* ── Section headers ──────────────────────────────────────────────────────── */
+  .section-title {
+    font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em;
+    color: var(--navy); border-bottom: 2px solid var(--pink-light);
+    padding-bottom: 4px; margin-bottom: 10px; margin-top: 14px;
+  }
+  .section-title:first-child { margin-top: 0; }
+
+  /* ── Check rows ───────────────────────────────────────────────────────────── */
+  .check-row {
+    display: flex; align-items: center; gap: 12px;
+    padding: 9px 14px; border-radius: 7px;
+    background: var(--surface); border: 1px solid var(--border);
+    margin-bottom: 8px;
+  }
+  .check-icon { font-size: 18px; width: 22px; text-align: center; }
+  .check-name { font-weight: 600; flex: 1; font-size: 13px; color: var(--text); }
+  .check-version { font-size: 11px; color: var(--green); font-weight: 500; }
+  .check-error   { font-size: 11px; color: var(--red); }
+
+  .spinner {
+    width: 20px; height: 20px;
+    border: 2px solid var(--border);
+    border-top-color: var(--navy-light);
+    border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* ── Progress log (keeps dark terminal style) ─────────────────────────────── */
+  .log {
+    background: #0f172a;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px 16px;
+    font-family: "Cascadia Code","Fira Code",Consolas,monospace;
+    font-size: 12px; line-height: 1.6;
+    flex: 1; min-height: 0;
+    overflow-y: auto; white-space: pre-wrap; word-break: break-all;
+  }
+  #content:has(#log) { display: flex; flex-direction: column; }
+  .log-line-info  { color: #94a3b8; }
+  .log-line-ok    { color: #4ade80; }
+  .log-line-warn  { color: #fbbf24; }
+  .log-line-error { color: #f87171; }
+
+  /* ── Progress bar ─────────────────────────────────────────────────────────── */
+  .progress-wrap {
+    background: var(--border); border-radius: 4px; height: 6px;
+    margin-bottom: 16px; overflow: hidden;
+  }
+  .progress-bar {
+    height: 100%;
+    background: linear-gradient(90deg, var(--navy-mid), var(--pink-acc));
+    border-radius: 4px; transition: width 0.4s ease; width: 0%;
+  }
+  .progress-label {
+    font-size: 12px; color: var(--muted); margin-bottom: 6px;
+    display: flex; justify-content: space-between;
+  }
+
+  /* ── Password strength ────────────────────────────────────────────────────── */
+  .strength-bar { display: flex; gap: 4px; margin-top: 6px; }
+  .strength-seg { flex: 1; height: 3px; border-radius: 2px; background: var(--border); transition: background 0.2s; }
+
+  /* ── Checkboxes ───────────────────────────────────────────────────────────── */
+  .checkbox-row {
+    display: flex; align-items: flex-start; gap: 10px;
+    padding: 8px 12px; border: 1px solid var(--border);
+    border-radius: 7px; cursor: pointer;
+    background: var(--surface); margin-bottom: 6px; transition: border-color 0.15s;
+  }
+  .checkbox-row:hover { border-color: var(--navy-light); background: #fff; }
+  .checkbox-row input[type="checkbox"] {
+    width: 15px; height: 15px; margin-top: 2px; flex-shrink: 0;
+    cursor: pointer; accent-color: var(--navy-mid);
+  }
+  .checkbox-row .cb-text strong { display: block; font-weight: 600; color: var(--text); }
+  .checkbox-row .cb-text span   { font-size: 11px; color: var(--muted); }
+
+  /* DB source toggle */
+  .db-source-toggle { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 12px; }
+  .db-source-card {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 14px; border: 2px solid var(--border);
+    border-radius: 8px; cursor: pointer;
+    background: var(--surface); transition: border-color 0.15s, background 0.15s;
+    font-size: 13px; font-weight: 500; color: var(--text);
+  }
+  .db-source-card:hover { border-color: var(--navy-light); background: #fff; }
+  .db-source-card.selected { border-color: var(--pink-acc); background: var(--pink-light); }
+  .db-source-card .ds-icon { font-size: 20px; }
+
+  /* ── Callouts ─────────────────────────────────────────────────────────────── */
+  .callout {
+    display: flex; gap: 10px; padding: 9px 14px;
+    border-radius: 7px; font-size: 12px; margin-bottom: 10px;
+  }
+  .callout-info { background: #eff6ff; border: 1px solid #bfdbfe; color: #1d4ed8; }
+  .callout-warn { background: #fffbeb; border: 1px solid #fde68a; color: #92400e; }
+  .callout-pink { background: var(--pink-light); border: 1px solid #fbcfe8; color: #9d174d; }
+
+  /* ── Welcome / edition picker ─────────────────────────────────────────────── */
+  .welcome-hero {
+    display: flex; flex-direction: column;
+    align-items: center; text-align: center; padding: 6px 0 4px;
+  }
+  .welcome-logo-big { width: 40px; height: 40px; margin-bottom: 8px; }
+  .welcome-hero .brand {
+    font-size: 22px; font-weight: 800;
+    color: var(--navy); letter-spacing: -1px; margin-bottom: 4px;
+  }
+  .welcome-hero .brand span { color: var(--pink-acc); }
+  .welcome-hero .tagline { font-size: 12px; color: var(--muted); margin-bottom: 12px; }
+
+  .edition-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; max-width: 560px; width: 100%; margin-top: 6px; }
+  .edition-card {
+    background: var(--surface); border: 2px solid var(--border);
+    border-radius: 10px; padding: 16px; cursor: pointer; text-align: left;
+    transition: border-color 0.2s, background 0.2s, box-shadow 0.2s; position: relative;
+  }
+  .edition-card:hover { border-color: var(--navy-light); background: #fff; box-shadow: 0 2px 12px rgba(30,64,175,0.08); }
+  .edition-card.selected { border-color: var(--pink-acc); background: var(--pink-light); }
+  .edition-card .ed-icon  { font-size: 24px; margin-bottom: 8px; }
+  .edition-card .ed-title { font-size: 14px; font-weight: 700; color: var(--navy); margin-bottom: 4px; }
+  .edition-card .ed-desc  { font-size: 11px; color: var(--muted); line-height: 1.5; }
+  .edition-card .ed-badge {
+    position: absolute; top: 10px; right: 10px;
+    font-size: 9px; font-weight: 700; padding: 2px 7px; border-radius: 10px;
+    background: var(--pink-light); color: var(--pink-acc);
+    text-transform: uppercase; letter-spacing: 0.05em;
+  }
+  .edition-card .ed-reqs {
+    margin-top: 10px; padding-top: 8px;
+    border-top: 1px solid var(--border);
+    font-size: 11px; color: var(--muted);
+  }
+  .edition-card .ed-reqs span { display: block; padding: 2px 0; }
+
+  /* ── Feature grid ─────────────────────────────────────────────────────────── */
+  .feature-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; max-width: 560px; width: 100%; margin-top: 10px; }
+  .feature-card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 8px; padding: 8px 12px; text-align: left;
+    display: flex; align-items: center; gap: 10px;
+  }
+  .feature-card .icon { font-size: 18px; flex-shrink: 0; }
+  .feature-card strong { display: block; font-size: 12px; margin-bottom: 2px; color: var(--navy); }
+  .feature-card span { font-size: 11px; color: var(--muted); }
+
+  /* ── Success screen ───────────────────────────────────────────────────────── */
+  .success-card { text-align: center; padding: 20px 0; }
+  .success-icon { font-size: 48px; margin-bottom: 10px; }
+  .success-card h2 { font-size: 22px; font-weight: 800; color: var(--navy); margin-bottom: 6px; }
+  .success-card p  { color: var(--muted); max-width: 460px; margin: 0 auto 16px; font-size: 13px; }
+
+  .url-card {
+    background: #eff6ff; border: 1px solid #bfdbfe;
+    border-radius: 8px; padding: 12px 20px;
+    max-width: 420px; margin: 0 auto 16px; text-align: left;
+  }
+  .url-card label { color: var(--muted); text-transform: uppercase; font-size: 10px; letter-spacing: 0.06em; }
+  .url-card .url  { font-size: 15px; font-weight: 700; color: var(--navy-light); margin-top: 3px; word-break: break-all; }
+
+  .steps-list { text-align: left; max-width: 440px; margin: 0 auto; }
+  .steps-list li {
+    padding: 6px 0; border-bottom: 1px solid var(--border);
+    color: var(--muted); font-size: 12px;
+  }
+  .steps-list li:last-child { border: none; }
+
+  .done-actions { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; margin-top: 16px; }
+
+  /* ── File browser modal ───────────────────────────────────────────────────── */
+  .modal-backdrop {
+    position: fixed; inset: 0; background: rgba(15,23,42,0.5);
+    z-index: 100; display: flex; align-items: center; justify-content: center;
+  }
+  .modal {
+    background: #fff; border: 1px solid var(--border);
+    border-radius: 12px; width: 520px; max-width: 95vw; max-height: 80vh;
+    display: flex; flex-direction: column; overflow: hidden;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.15);
+  }
+  .modal-header {
+    padding: 16px 20px; border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between;
+    background: var(--surface);
+  }
+  .modal-header h3 { font-size: 14px; font-weight: 700; color: var(--navy); }
+  .modal-close { background: none; border: none; color: var(--muted); font-size: 20px; cursor: pointer; padding: 0 4px; }
+  .modal-close:hover { color: var(--text); }
+  .modal-path {
+    padding: 8px 16px; background: #f8fafc; border-bottom: 1px solid var(--border);
+    font-size: 12px; font-family: monospace; color: var(--navy-light);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .modal-body { flex: 1; overflow-y: auto; padding: 6px 0; min-height: 200px; background: #fff; }
+  .dir-entry {
+    display: flex; align-items: center; gap: 10px;
+    padding: 8px 18px; cursor: pointer; transition: background 0.1s; font-size: 13px;
+  }
+  .dir-entry:hover { background: var(--surface); }
+  .dir-entry.up { color: var(--muted); font-style: italic; }
+  .dir-entry-icon { font-size: 16px; width: 20px; }
+  .modal-footer {
+    padding: 12px 18px; border-top: 1px solid var(--border); background: var(--surface);
+    display: flex; gap: 10px; justify-content: flex-end; align-items: center;
+  }
+  .modal-footer .selected-path {
+    flex: 1; font-size: 12px; color: var(--muted);
+    font-family: monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+</style>
+</head>
+<body>
+
+<!-- ── Sidebar ──────────────────────────────────────────────────────────────── -->
+<aside class="sidebar">
+  <div class="logo-area">
+    <img src="/logo.jpeg" alt="ezHealthKonnect" class="logo-svg" style="border-radius:8px;object-fit:contain;background:#fff;">
+    <div class="logo-name">ez<span>Health</span>Konnect</div>
+    <div class="logo-sub">Setup Wizard</div>
+  </div>
+
+  <ul class="steps" id="stepList">
+    <li class="step-item active" data-step="0"><div class="step-dot">1</div><span class="step-label">Welcome</span></li>
+    <li class="step-item"        data-step="1"><div class="step-dot">2</div><span class="step-label">Prerequisites</span></li>
+    <li class="step-item"        data-step="2"><div class="step-dot">3</div><span class="step-label">Configuration</span></li>
+    <li class="step-item"        data-step="3"><div class="step-dot">4</div><span class="step-label">Installing</span></li>
+    <li class="step-item"        data-step="4"><div class="step-dot">✓</div><span class="step-label">Complete</span></li>
+  </ul>
+
+  <div class="sidebar-footer">
+    <a href="https://www.ezInterOpSolutions.com" target="_blank"
+       style="color:rgba(255,255,255,0.35);text-decoration:none;"
+       onmouseover="this.style.color='rgba(248,187,217,0.7)'"
+       onmouseout="this.style.color='rgba(255,255,255,0.35)'">ezInterOp Solutions</a><br>
+    &copy; 2025–2026
+  </div>
+</aside>
+
+<!-- ── Main ────────────────────────────────────────────────────────────────── -->
+<main class="main">
+  <div class="header">
+    <div class="header-text">
+      <h1 id="pageTitle">Welcome to ezHealthKonnect</h1>
+      <p  id="pageDesc">Healthcare HL7 ↔ FHIR Integration Platform</p>
+    </div>
+  </div>
+
+  <div class="content" id="content"></div>
+
+  <div class="footer" id="footer">
+    <button class="btn btn-ghost"    id="btnBack" style="display:none" onclick="goBack()">← Back</button>
+    <button class="btn btn-primary"  id="btnNext" onclick="goNext()">Get Started →</button>
+  </div>
+</main>
+
+<!-- ── File browser modal ────────────────────────────────────────────────────── -->
+<div class="modal-backdrop" id="browseModal" style="display:none" onclick="closeBrowse(event)">
+  <div class="modal" onclick="event.stopPropagation()">
+    <div class="modal-header">
+      <h3>📁 Choose Install Directory</h3>
+      <button class="modal-close" onclick="closeBrowseModal()">✕</button>
+    </div>
+    <div class="modal-path" id="browsePath">/</div>
+    <div class="modal-body" id="browseBody"><div style="padding:24px;text-align:center;color:var(--muted)">Loading…</div></div>
+    <div class="modal-footer">
+      <span class="selected-path" id="browseSelected">—</span>
+      <button class="btn btn-ghost" onclick="closeBrowseModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="confirmBrowse()">Select This Folder</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ─────────────────────────────────────────────────────────────────────────────
+// State
+// ─────────────────────────────────────────────────────────────────────────────
+let currentStep = 0;
+let checksOK    = false;
+let cfg         = {};
+let appURL      = '';
+let installOK   = false;
+let installMode = 'docker'; // 'docker' | 'standalone'
+let dbSource    = 'local';  // 'local' | 'external'
+
+function setDbSource(src) {
+  dbSource = src;
+  const local    = document.getElementById('dsLocal');
+  const external = document.getElementById('dsExternal');
+  const hostRow  = document.getElementById('dbHostRow');
+  if (local)    local.classList.toggle('selected', src === 'local');
+  if (external) external.classList.toggle('selected', src === 'external');
+  if (hostRow)  hostRow.style.display = src === 'external' ? 'block' : 'none';
+}
+
+// File browser state
+let browseCurrentPath = '';
+let browseTargetInput = '';
+
+function stepDescs() {
+  if (installMode === 'standalone') {
+    return [
+      { title: 'Welcome to ezHealthKonnect',  desc: 'Healthcare HL7 ↔ FHIR Integration Platform' },
+      { title: 'Checking Prerequisites',       desc: 'Verifying OS, disk space, and port availability' },
+      { title: 'Configuration',               desc: 'Choose ports, install location, and passwords' },
+      { title: 'Installing',                  desc: 'Installing dependencies and starting services' },
+      { title: 'Installation Complete',       desc: 'ezHealthKonnect is running on your machine' },
+    ];
+  }
+  return [
+    { title: 'Welcome to ezHealthKonnect',  desc: 'Healthcare HL7 ↔ FHIR Integration Platform — Docker Edition' },
+    { title: 'Checking Prerequisites',       desc: 'Verifying that Docker is installed and running' },
+    { title: 'Configuration',               desc: 'Choose ports, install location, and passwords' },
+    { title: 'Installing',                  desc: 'Building and starting ezHealthKonnect' },
+    { title: 'Installation Complete',       desc: 'ezHealthKonnect is running on your machine' },
+  ];
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Navigation
+// ─────────────────────────────────────────────────────────────────────────────
+function setStep(n) {
+  currentStep = n;
+  const steps = stepDescs();
+  document.querySelectorAll('.step-item').forEach((el, i) => {
+    el.classList.toggle('active', i === n);
+    el.classList.toggle('done',   i < n);
+  });
+  document.getElementById('pageTitle').textContent = steps[n].title;
+  document.getElementById('pageDesc').textContent  = steps[n].desc;
+  renderStep(n);
+  updateNav();
+}
+
+function updateNav() {
+  const back = document.getElementById('btnBack');
+  const next = document.getElementById('btnNext');
+  back.style.display = (currentStep > 0 && currentStep < 3) ? 'inline-flex' : 'none';
+  if (currentStep === 0) { next.textContent = 'Get Started →'; next.className = 'btn btn-primary'; next.disabled = false; next.style.display = 'inline-flex'; }
+  if (currentStep === 1) { next.textContent = 'Next →';        next.className = 'btn btn-primary'; next.disabled = !checksOK; next.style.display = 'inline-flex'; }
+  if (currentStep === 2) { next.textContent = 'Install Now';   next.className = 'btn btn-pink';    next.disabled = false;    next.style.display = 'inline-flex'; }
+  if (currentStep === 3) { next.style.display = 'none'; }
+  if (currentStep === 4) { next.style.display = 'none'; } // Done screen has its own buttons
+}
+
+function goNext() {
+  if (currentStep === 0) { setStep(1); runChecks(); return; }
+  if (currentStep === 1) { setStep(2); loadDefaults(); return; }
+  if (currentStep === 2) { if (validateConfig()) startInstall(); return; }
+}
+
+function goBack() {
+  if (currentStep > 0 && currentStep < 3) setStep(currentStep - 1);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Screen: Welcome
+// ─────────────────────────────────────────────────────────────────────────────
+function renderStep(n) {
+  const c = document.getElementById('content');
+  if (n === 0) c.innerHTML = renderWelcome();
+  if (n === 1) c.innerHTML = renderChecks();
+  if (n === 2) c.innerHTML = renderConfig();
+  if (n === 3) c.innerHTML = renderInstalling();
+  if (n === 4) c.innerHTML = renderDone();
+}
+
+function renderWelcome() {
+  return `
+  <div class="welcome-hero">
+    <img src="/logo.jpeg" alt="ezHealthKonnect" class="welcome-logo-big" style="border-radius:16px;object-fit:contain;background:#fff;">
+    <div class="brand">ezHealth<span>Konnect</span></div>
+    <div class="tagline">AI-powered HL7 ↔ FHIR Healthcare Integration Platform</div>
+
+    <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.1em;margin-bottom:12px;width:100%;max-width:560px;text-align:left;">
+      Choose your edition
+    </div>
+
+    <div class="edition-grid">
+      <div class="edition-card ${installMode==='docker'?'selected':''}" id="edDocker" onclick="selectEdition('docker')">
+        <div class="ed-badge">Recommended</div>
+        <div class="ed-icon">🐳</div>
+        <div class="ed-title">Docker Edition</div>
+        <div class="ed-desc">All services run in containers. Simplest setup — isolated, portable, easy to upgrade.</div>
+        <div class="ed-reqs">
+          <span>✔ Docker Desktop (auto-installable)</span>
+          <span>✔ Windows, macOS, Linux</span>
+        </div>
+      </div>
+      <div class="edition-card ${installMode==='standalone'?'selected':''}" id="edStandalone" onclick="selectEdition('standalone')">
+        <div class="ed-icon">⚙️</div>
+        <div class="ed-title">Standalone Edition</div>
+        <div class="ed-desc">Native install — PostgreSQL + Node.js as system services. No Docker required.</div>
+        <div class="ed-reqs">
+          <span>✔ Windows 10/11 (winget)</span>
+          <span>✔ Linux → use install.sh</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="feature-grid">
+      <div class="feature-card"><div class="icon">🔀</div><strong>HL7 v2 → FHIR R4</strong><span>Real-time message transformation</span></div>
+      <div class="feature-card"><div class="icon">🤖</div><strong>AI Mapping</strong><span>Ollama-powered field suggestions</span></div>
+      <div class="feature-card"><div class="icon">🔌</div><strong>32 Connectors</strong><span>TCP/MLLP, HTTP, S3, Kafka & more</span></div>
+      <div class="feature-card"><div class="icon">🔐</div><strong>HIPAA Ready</strong><span>Audit logs & encrypted secrets</span></div>
+    </div>
+  </div>
+
+  <div class="callout callout-info" id="editionHint" style="margin-top:24px">
+    <span>ℹ️</span>
+    <span id="editionHintText">${editionHintText()}</span>
+  </div>`;
+}
+
+function editionHintText() {
+  return installMode === 'standalone'
+    ? 'Standalone: PostgreSQL and Node.js will be installed via winget. No Docker needed.'
+    : 'Docker Edition: prerequisites checked next. Docker Desktop will be offered if missing.';
+}
+
+function selectEdition(mode) {
+  installMode = mode;
+  document.getElementById('edDocker').classList.toggle('selected', mode === 'docker');
+  document.getElementById('edStandalone').classList.toggle('selected', mode === 'standalone');
+  document.getElementById('editionHintText').textContent = editionHintText();
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Screen: Prerequisites
+// ─────────────────────────────────────────────────────────────────────────────
+function renderChecks() {
+  return `
+  <div id="checkRows">
+    <div class="check-row"><div class="spinner"></div><div class="check-name">Checking prerequisites…</div></div>
+  </div>
+  <div class="callout callout-warn" id="checksHint" style="display:none">
+    <span>⚠️</span><span id="checksHintText"></span>
+  </div>
+  <div style="margin-top:16px;display:flex;gap:10px">
+    <button class="btn btn-ghost" onclick="runChecks()">↻ Retry</button>
+    ${installMode === 'docker' ? `<button class="btn btn-ghost" onclick="installDockerFlow()">Install Docker →</button>` : ''}
+  </div>`;
+}
+
+async function runChecks() {
+  document.getElementById('checkRows').innerHTML =
+    `<div class="check-row"><div class="spinner"></div><div class="check-name">Checking prerequisites…</div></div>`;
+  document.getElementById('btnNext').disabled = true;
+
+  const endpoint = installMode === 'standalone' ? '/api/checks-standalone' : '/api/checks';
+  const res   = await fetch(endpoint);
+  const items = await res.json();
+
+  let allOK = true;
+  let hasWarnings = false;
+  const html = items.map(c => {
+    if (!c.ok) allOK = false;
+    if (c.warning) hasWarnings = true;
+    const icon    = !c.ok ? '❌' : c.warning ? '⚠️' : '✅';
+    const detail  = !c.ok
+      ? `<div class="check-error">${esc(c.error)}</div>`
+      : c.warning
+        ? `<div class="check-error" style="color:var(--yellow)">${esc(c.warning)}</div>`
+        : `<div class="check-version">${esc(c.version || '')}</div>`;
+    return `<div class="check-row">
+      <div class="check-icon">${icon}</div>
+      <div class="check-name">${esc(c.name)}</div>
+      ${detail}
+    </div>`;
+  }).join('');
+
+  document.getElementById('checkRows').innerHTML = html;
+  const hint = document.getElementById('checksHint');
+  if (hint) {
+    hint.style.display = (!allOK || hasWarnings) ? 'flex' : 'none';
+    if (!allOK) {
+      document.getElementById('checksHintText').textContent = installMode === 'standalone'
+        ? 'Some requirements are not met. Review the items above, fix them, then retry.'
+        : 'Docker is not running. Install or start Docker Desktop then click Retry.';
+    } else if (hasWarnings) {
+      document.getElementById('checksHintText').textContent =
+        'Some ports are in use. You can change them in the Configuration step — installation is not blocked.';
+    }
+  }
+  checksOK = allOK; // warnings do not block — only hard failures do
+  updateNav();
+}
+
+async function installDockerFlow() {
+  const btn = document.querySelector('[onclick="installDockerFlow()"]');
+  if (btn) { btn.disabled = true; btn.textContent = 'Installing Docker…'; }
+  await fetch('/api/install-docker', { method: 'POST' });
+  const es = new EventSource('/api/docker-progress');
+  es.onmessage = (e) => {
+    const msg = JSON.parse(e.data);
+    if (msg.level === 'done') { es.close(); runChecks(); return; }
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Screen: Configuration
+// ─────────────────────────────────────────────────────────────────────────────
+function renderConfig() {
+  const isStandalone = installMode === 'standalone';
+  return `
+  <div class="section-title">Install Location</div>
+  <div class="form-group">
+    <label>Install Directory</label>
+    <div class="dir-row">
+      <input type="text" id="installDir" placeholder="${isStandalone ? 'e.g. C:\\ezHealthKonnect' : 'e.g. C:\\ezHealthKonnect'}">
+      <button class="btn-icon" title="Browse…" onclick="openBrowse('installDir')">📁</button>
+    </div>
+    <div class="hint">All application files, logs, and uploads will be stored here.</div>
+  </div>
+
+  <div class="section-title">Network Ports</div>
+  <div class="callout callout-info">
+    <span>ℹ️</span><span>Change any port if it conflicts with other software on this machine.</span>
+  </div>
+  <div class="form-row-3">
+    <div class="form-group"><label>Web UI Port</label><input type="text" id="appPort" placeholder="3000"></div>
+    <div class="form-group"><label>Go API Port</label><input type="text" id="apiPort" placeholder="8080"></div>
+    <div class="form-group"><label>PostgreSQL Port</label><input type="text" id="dbPort" placeholder="5432"></div>
+  </div>
+
+  ${!isStandalone ? `
+  <div class="form-row">
+    <div class="form-group"><label>MinIO API Port</label><input type="text" id="minioApiPort" placeholder="9000"></div>
+    <div class="form-group"><label>MinIO Console Port</label><input type="text" id="minioConPort" placeholder="9001"></div>
+  </div>` : ''}
+
+  <div class="section-title">Database</div>
+  ${isStandalone ? `
+  <div class="db-source-toggle">
+    <div class="db-source-card selected" id="dsLocal" onclick="setDbSource('local')">
+      <span class="ds-icon">🖥️</span>
+      <div><strong>Install locally</strong><br><span style="font-size:11px;color:var(--muted)">Fresh PostgreSQL on this machine</span></div>
+    </div>
+    <div class="db-source-card" id="dsExternal" onclick="setDbSource('external')">
+      <span class="ds-icon">☁️</span>
+      <div><strong>Use existing / cloud</strong><br><span style="font-size:11px;color:var(--muted)">Azure, AWS RDS, on-prem, etc.</span></div>
+    </div>
+  </div>
+  <div id="dbHostRow" style="display:none">
+    <div class="form-group">
+      <label>PostgreSQL Host</label>
+      <input type="text" id="dbHost" placeholder="e.g. myserver.postgres.database.azure.com">
+      <div class="hint">The DB, user, and password must already exist on the remote server.</div>
+    </div>
+  </div>` : ''}
+  ${isStandalone ? `
+  <div class="form-row">
+    <div class="form-group"><label>Database Name</label><input type="text" id="dbName" placeholder="ezhealthkonnect"></div>
+    <div class="form-group"><label>Database User</label><input type="text" id="dbUser" placeholder="ezhealth_user"></div>
+  </div>` : ''}
+  <div class="form-row">
+    <div class="form-group">
+      <label>Database Password</label>
+      <input type="password" id="dbPassword" placeholder="Strong password" oninput="strengthMeter('dbPassword','dbStr')">
+      <div class="strength-bar" id="dbStr">
+        <div class="strength-seg"></div><div class="strength-seg"></div>
+        <div class="strength-seg"></div><div class="strength-seg"></div>
+      </div>
+      <div class="hint">Keep this secret — stored in your .env file.</div>
+    </div>
+    ${!isStandalone ? `
+    <div class="form-group">
+      <label>Storage Password</label>
+      <input type="password" id="minioPassword" placeholder="Strong password" oninput="strengthMeter('minioPassword','minStr')">
+      <div class="strength-bar" id="minStr">
+        <div class="strength-seg"></div><div class="strength-seg"></div>
+        <div class="strength-seg"></div><div class="strength-seg"></div>
+      </div>
+      <div class="hint">Used for MinIO object storage (message archives).</div>
+    </div>` : ''}
+  </div>
+
+  <div class="section-title">Options</div>
+  <label class="checkbox-row" for="chkAI">
+    <input type="checkbox" id="chkAI">
+    <div class="cb-text">
+      <strong>Enable AI Companion (Ollama)</strong>
+      <span>Pulls llama3.2:3b and nomic-embed-text models (~2.3 GB). Enables AI mapping suggestions.</span>
+    </div>
+  </label>
+  <label class="checkbox-row" for="chkSvc">
+    <input type="checkbox" id="chkSvc" checked>
+    <div class="cb-text">
+      <strong>Register as a system service</strong>
+      <span>Auto-starts ezHealthKonnect when the machine boots (requires administrator / root).</span>
+    </div>
+  </label>`;
+}
+
+async function loadDefaults() {
+  const res = await fetch('/api/defaults');
+  const d   = await res.json();
+  const set = (id, val) => { const el = document.getElementById(id); if (el) el.value = val; };
+  set('installDir',   d.installDir);
+  set('appPort',      d.appPort);
+  set('apiPort',      d.apiPort);
+  set('dbPort',       d.dbPort);
+  set('minioApiPort', d.minioApiPort);
+  set('minioConPort', d.minioConPort);
+  const dbNameEl = document.getElementById('dbName');
+  if (dbNameEl) dbNameEl.value = 'ezhealthkonnect';
+  const dbUserEl = document.getElementById('dbUser');
+  if (dbUserEl) dbUserEl.value = 'ezhealth_user';
+}
+
+function validateConfig() {
+  const isStandalone = installMode === 'standalone';
+  const required = isStandalone
+    ? ['installDir','appPort','apiPort','dbPort','dbPassword']
+    : ['installDir','appPort','apiPort','dbPort','minioApiPort','minioConPort','dbPassword','minioPassword'];
+
+  for (const id of required) {
+    const el = document.getElementById(id);
+    if (!el || !el.value.trim()) {
+      if (el) { el.focus(); el.style.borderColor = 'var(--red)'; }
+      return false;
+    }
+    el.style.borderColor = '';
+  }
+
+  const g = id => { const el = document.getElementById(id); return el ? el.value.trim() : ''; };
+  const resolvedHost = dbSource === 'external' ? g('dbHost') : 'localhost';
+  if (dbSource === 'external' && !resolvedHost) {
+    const el = document.getElementById('dbHost');
+    if (el) { el.focus(); el.style.borderColor = 'var(--red)'; }
+    return false;
+  }
+  cfg = {
+    mode:            installMode,
+    installDir:      g('installDir'),
+    appPort:         g('appPort'),
+    apiPort:         g('apiPort'),
+    dbPort:          g('dbPort'),
+    dbHost:          resolvedHost,
+    dbPassword:      document.getElementById('dbPassword').value,
+    withAI:          document.getElementById('chkAI').checked,
+    registerService: document.getElementById('chkSvc').checked,
+    version:         'latest',
+    minioApiPort:    g('minioApiPort'),
+    minioConPort:    g('minioConPort'),
+    minioPassword:   g('minioPassword') || '',
+    dbUser:          g('dbUser') || 'ezhealth_user',
+    dbName:          g('dbName') || 'ezhealthkonnect',
+  };
+  return true;
+}
+
+function strengthMeter(inputId, barId) {
+  const val  = document.getElementById(inputId).value;
+  const segs = document.querySelectorAll(`#${barId} .strength-seg`);
+  let score = 0;
+  if (val.length >= 8)  score++;
+  if (val.length >= 12) score++;
+  if (/[A-Z]/.test(val) && /[a-z]/.test(val)) score++;
+  if (/[0-9!@#$%^&*]/.test(val)) score++;
+  const colors = ['var(--red)','var(--yellow)','var(--yellow)','var(--green)'];
+  segs.forEach((s, i) => s.style.background = i < score ? colors[score-1] : 'var(--border)');
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Screen: Installing
+// ─────────────────────────────────────────────────────────────────────────────
+function renderInstalling() {
+  return `
+  <div class="progress-label">
+    <span id="progressStep">Starting installation…</span>
+    <span id="progressPct">0%</span>
+  </div>
+  <div class="progress-wrap"><div class="progress-bar" id="progressBar"></div></div>
+  <div class="log" id="log"></div>`;
+}
+
+let logLines = 0;
+const MAX_LOG_LINES = 500;
+
+async function startInstall() {
+  setStep(3);
+
+  // Subscribe to SSE FIRST so we don't miss early messages
+  const es = new EventSource('/api/progress');
+  es.onmessage = (e) => {
+    const msg = JSON.parse(e.data);
+    if (msg.level === 'done') {
+      es.close();
+      appURL    = msg.msg || `http://localhost:${cfg.appPort}`;
+      installOK = true;
+      advanceProgress(100, 'Complete!');
+      setTimeout(() => setStep(4), 900);
+      return;
+    }
+    if (msg.level === 'failed') {
+      es.close();
+      advanceProgress(100, 'Failed');
+      document.getElementById('progressBar').style.background = 'var(--red)';
+      document.getElementById('progressPct').style.color = 'var(--red)';
+      document.getElementById('progressStep').textContent = '❌ Installation failed — see log above';
+      appendLog('error', '');
+      appendLog('error', '─────────────────────────────────────');
+      appendLog('error', '  Installation failed. Review the log above for details.');
+      appendLog('error', '  Fix the issue and run the installer again.');
+      appendLog('error', '─────────────────────────────────────');
+      // Show a retry button
+      const retryDiv = document.createElement('div');
+      retryDiv.style = 'margin-top:16px';
+      retryDiv.innerHTML = `<button class="btn btn-ghost" onclick="setStep(2)">← Back to Configuration</button>`;
+      document.getElementById('content').appendChild(retryDiv);
+      return;
+    }
+    appendLog(msg.level, msg.msg);
+    advanceProgress(null, msg.msg);
+  };
+  es.onerror = () => {
+    appendLog('warn', 'Connection to installer lost — the installation may still be running.');
+    es.close();
+  };
+
+  // THEN post config to kick off the goroutine
+  await fetch('/api/install', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(cfg),
+  });
+}
+
+function appendLog(level, msg) {
+  const log = document.getElementById('log');
+  if (!log) return;
+  logLines++;
+  if (logLines > MAX_LOG_LINES) {
+    const first = log.querySelector('div');
+    if (first) first.remove();
+  }
+  const div = document.createElement('div');
+  div.className = `log-line-${level}`;
+  div.textContent = msg;
+  log.appendChild(div);
+  log.scrollTop = log.scrollHeight;
+}
+
+let progressVal = 0;
+function advanceProgress(target, label) {
+  if (target !== undefined && target !== null) {
+    progressVal = target;
+  } else {
+    const gap = 95 - progressVal;
+    progressVal += Math.max(0.4, gap * 0.05);
+    progressVal  = Math.min(94, progressVal);
+  }
+  const bar  = document.getElementById('progressBar');
+  const pct  = document.getElementById('progressPct');
+  const step = document.getElementById('progressStep');
+  if (bar)  bar.style.width  = Math.round(progressVal) + '%';
+  if (pct)  pct.textContent  = Math.round(progressVal) + '%';
+  if (step && label) step.textContent = label;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Screen: Done
+// ─────────────────────────────────────────────────────────────────────────────
+function renderDone() {
+  const isStandalone = cfg.mode === 'standalone';
+  const items = isStandalone ? [
+    '✅ PostgreSQL installed and database created',
+    '✅ Node.js and Go API installed as native services',
+    '✅ Database migrations applied',
+    cfg.registerService ? '✅ Windows services registered (auto-start on boot)' : '',
+    cfg.withAI ? '⏳ AI models downloading in background (~2.3 GB)' : '',
+  ] : [
+    '✅ Docker containers started',
+    '✅ PostgreSQL database initialised and migrated',
+    '✅ MinIO object storage ready',
+    cfg.registerService ? '✅ System service registered (auto-start on boot)' : '',
+    cfg.withAI ? '⏳ AI models downloading in background (~2.3 GB)' : '',
+  ];
+
+  const url = esc(appURL || `http://localhost:${cfg.appPort}`);
+  return `
+  <div class="success-card">
+    <div class="success-icon">🎉</div>
+    <h2>Installation Complete!</h2>
+    <p>ezHealthKonnect is running. Open the platform and log in with the default credentials below.</p>
+
+    <div class="url-card">
+      <label>Platform URL</label>
+      <div class="url">${url}</div>
+    </div>
+
+    <ul class="steps-list">
+      ${items.filter(Boolean).map(t => `<li>${t}</li>`).join('')}
+    </ul>
+
+    <p style="margin-top:18px;font-size:12px;color:var(--yellow)">
+      ⚠️ Default login: admin@ezhealthkonnect.com / admin123 — change this immediately after first login.
+    </p>
+
+    <div class="done-actions">
+      <button class="btn btn-success" onclick="window.open('${url}','_blank')">🚀 Open in Browser</button>
+      <button class="btn btn-ghost"   onclick="copyToClipboard('${url}')">📋 Copy URL</button>
+      <button class="btn btn-danger"  onclick="confirmUninstall()">🗑 Uninstall</button>
+    </div>
+  </div>`;
+}
+
+function copyToClipboard(text) {
+  navigator.clipboard.writeText(text).then(() => alert('URL copied to clipboard.'));
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Uninstall
+// ─────────────────────────────────────────────────────────────────────────────
+async function confirmUninstall() {
+  const ok = confirm(
+    'Uninstall ezHealthKonnect?\n\n' +
+    '• All services will be stopped and removed\n' +
+    '• Application files in ' + (cfg.installDir || 'the install directory') + ' will be deleted\n' +
+    '• The database will be dropped\n\n' +
+    'This cannot be undone. Continue?'
+  );
+  if (!ok) return;
+
+  // Show a minimal progress view
+  document.getElementById('content').innerHTML = `
+    <div style="text-align:center;padding:60px 0">
+      <div class="spinner" style="margin:0 auto 20px;width:36px;height:36px;border-width:3px"></div>
+      <p style="color:var(--muted)">Uninstalling — please wait…</p>
+      <div class="log" id="log" style="margin-top:24px;height:260px;text-align:left"></div>
+    </div>`;
+  document.getElementById('footer').style.display = 'none';
+
+  // Subscribe SSE then trigger uninstall
+  const es = new EventSource('/api/progress');
+  es.onmessage = (e) => {
+    const msg = JSON.parse(e.data);
+    if (msg.level === 'done') {
+      es.close();
+      document.getElementById('content').innerHTML = `
+        <div class="success-card">
+          <div class="success-icon">🗑</div>
+          <h2>Uninstalled</h2>
+          <p style="color:var(--muted)">ezHealthKonnect has been removed from this machine.<br>You may close this window.</p>
+        </div>`;
+      return;
+    }
+    appendLog(msg.level, msg.msg);
+  };
+  es.onerror = () => es.close();
+
+  await fetch('/api/uninstall', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(cfg),
+  });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// File browser
+// ─────────────────────────────────────────────────────────────────────────────
+function openBrowse(inputId) {
+  browseTargetInput = inputId;
+  const current = document.getElementById(inputId).value.trim();
+  const start   = current || '/';
+  browseCurrentPath = start;
+  document.getElementById('browseModal').style.display = 'flex';
+  loadBrowse(start);
+}
+
+function closeBrowseModal() {
+  document.getElementById('browseModal').style.display = 'none';
+}
+
+function closeBrowse(e) {
+  if (e.target === document.getElementById('browseModal')) closeBrowseModal();
+}
+
+async function loadBrowse(path) {
+  document.getElementById('browsePath').textContent = path;
+  document.getElementById('browseSelected').textContent = path;
+  browseCurrentPath = path;
+  document.getElementById('browseBody').innerHTML =
+    `<div style="padding:24px;text-align:center;color:var(--muted)"><div class="spinner" style="margin:0 auto"></div></div>`;
+
+  const res  = await fetch('/api/browse?path=' + encodeURIComponent(path));
+  const data = await res.json();
+
+  let html = '';
+  if (data.parent) {
+    html += `<div class="dir-entry up" onclick="loadBrowse('${esc(data.parent)}')">
+      <span class="dir-entry-icon">⬆</span> .. (up)
+    </div>`;
+  }
+  if (data.dirs && data.dirs.length) {
+    html += data.dirs.map(d => `
+      <div class="dir-entry" onclick="loadBrowse('${esc(d.path)}')">
+        <span class="dir-entry-icon">📁</span>${esc(d.name)}
+      </div>`).join('');
+  } else if (!data.parent) {
+    html += `<div style="padding:20px;text-align:center;color:var(--muted);font-size:13px">No subdirectories</div>`;
+  }
+  document.getElementById('browseBody').innerHTML = html || `<div style="padding:20px;text-align:center;color:var(--muted);font-size:13px">Empty</div>`;
+}
+
+function confirmBrowse() {
+  const el = document.getElementById(browseTargetInput);
+  if (el) el.value = browseCurrentPath;
+  closeBrowseModal();
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Utility
+// ─────────────────────────────────────────────────────────────────────────────
+function esc(s) {
+  return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Boot — check if app is already installed
+// ─────────────────────────────────────────────────────────────────────────────
+(async function boot() {
+  // If launched with ?uninstall=1 (from Add/Remove Programs), go straight to uninstall
+  const params = new URLSearchParams(window.location.search);
+  if (params.get('uninstall') === '1') {
+    const state = await fetchInstalledState();
+    if (state && state.installed) {
+      showManageScreen(state, /*autoUninstall=*/true);
+      return;
+    }
+  }
+
+  const state = await fetchInstalledState();
+  if (state && state.installed) {
+    showManageScreen(state, false);
+  } else {
+    renderStep(0);
+    updateNav();
+  }
+})();
+
+async function fetchInstalledState() {
+  try {
+    const res = await fetch('/api/installed-state');
+    if (!res.ok) return null;
+    return await res.json();
+  } catch { return null; }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Management screen (shown when app is already installed)
+// ─────────────────────────────────────────────────────────────────────────────
+let installedState = null;
+
+function showManageScreen(state, autoUninstall) {
+  installedState = state;
+  // Hide sidebar step list — replace with simple branding only
+  document.getElementById('stepList').style.display = 'none';
+
+  const appURL = `http://localhost:${state.appPort || '3000'}`;
+  const statusColor = state.serviceRunning ? 'var(--green)' : 'var(--yellow)';
+  const statusText  = state.serviceRunning ? '● Running' : '● Stopped';
+
+  document.getElementById('pageTitle').textContent = 'ezHealthKonnect is Installed';
+  document.getElementById('pageDesc').textContent  = state.installDir || '';
+
+  document.getElementById('content').innerHTML = `
+    <div style="max-width:540px;margin:0 auto;padding-top:12px">
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px">
+        <span style="font-size:36px">🏥</span>
+        <div>
+          <div style="font-size:18px;font-weight:800">ezHealthKonnect</div>
+          <div style="font-size:13px;color:${statusColor};margin-top:2px;font-weight:600">${statusText}</div>
+        </div>
+      </div>
+
+      <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:14px 18px;margin-bottom:16px">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;font-size:12px">
+          <div><span style="color:var(--muted);text-transform:uppercase;font-size:10px;font-weight:700">Install Directory</span><div style="margin-top:3px;font-family:monospace;font-size:12px">${esc(state.installDir || 'C:\\ezHealthKonnect')}</div></div>
+          <div><span style="color:var(--muted);text-transform:uppercase;font-size:10px;font-weight:700">Web Port</span><div style="margin-top:3px">${esc(state.appPort || '3000')}</div></div>
+          <div><span style="color:var(--muted);text-transform:uppercase;font-size:10px;font-weight:700">Version</span><div style="margin-top:3px">${esc(state.version || 'unknown')}</div></div>
+          <div><span style="color:var(--muted);text-transform:uppercase;font-size:10px;font-weight:700">URL</span><div style="margin-top:3px"><a href="${esc(appURL)}" target="_blank" style="color:var(--navy-light)">${esc(appURL)}</a></div></div>
+        </div>
+      </div>
+
+      <div style="display:flex;flex-direction:column;gap:10px">
+        <button class="btn btn-success" style="width:100%;justify-content:center;padding:12px"
+          onclick="window.open('${esc(appURL)}','_blank')">
+          🚀 Open ezHealthKonnect
+        </button>
+        <button class="btn btn-ghost" style="width:100%;justify-content:center"
+          onclick="reinstallMode()">
+          🔄 Reinstall / Upgrade
+        </button>
+        <button class="btn btn-danger" style="width:100%;justify-content:center"
+          onclick="confirmUninstallManage()">
+          🗑 Uninstall ezHealthKonnect
+        </button>
+      </div>
+
+      <div style="margin-top:20px;font-size:11px;color:var(--muted);text-align:center">
+        To manage from Windows, search "Add or remove programs" and find ezHealthKonnect.
+      </div>
+    </div>`;
+
+  document.getElementById('footer').style.display = 'none';
+
+  if (autoUninstall) {
+    confirmUninstallManage();
+  }
+}
+
+function reinstallMode() {
+  installedState = null;
+  document.getElementById('stepList').style.display = '';
+  document.getElementById('footer').style.display = '';
+  renderStep(0);
+  updateNav();
+}
+
+async function confirmUninstallManage() {
+  const dir = installedState ? installedState.installDir : defaultInstallDirGuess();
+  const ok = confirm(
+    'Uninstall ezHealthKonnect?\n\n' +
+    '• Windows services will be stopped and removed\n' +
+    '• Application files in ' + dir + ' will be deleted\n\n' +
+    'This cannot be undone. Continue?'
+  );
+  if (!ok) return;
+
+  document.getElementById('content').innerHTML = `
+    <div style="text-align:center;padding:40px 0">
+      <div class="spinner" style="margin:0 auto 20px;width:36px;height:36px;border-width:3px"></div>
+      <p style="color:var(--muted)">Uninstalling — please wait…</p>
+      <div class="log" id="log" style="margin-top:24px;text-align:left"></div>
+    </div>`;
+
+  cfg = { mode: 'standalone', installDir: dir };
+
+  const es = new EventSource('/api/progress');
+  es.onmessage = (e) => {
+    const msg = JSON.parse(e.data);
+    if (msg.level === 'done') {
+      es.close();
+      document.getElementById('content').innerHTML = `
+        <div class="success-card">
+          <div class="success-icon">✅</div>
+          <h2>Uninstalled</h2>
+          <p style="color:var(--muted)">ezHealthKonnect has been removed.<br>You may close this window.</p>
+        </div>`;
+      fetch('/api/done', { method: 'POST' });
+      return;
+    }
+    appendLog(msg.level, msg.msg);
+  };
+  es.onerror = () => es.close();
+
+  await fetch('/api/uninstall', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(cfg),
+  });
+}
+
+function defaultInstallDirGuess() {
+  return 'C:\\ezHealthKonnect';
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,1632 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HL7 Interface Wizard - Left Sidebar Layout</title>
+    <style>
+        /* Interface Wizard Modal CSS - Left Sidebar Layout */
+        /* Navy Blue + Prominent Pastel Pink Theme with Left Sidebar */
+        
+        :root {
+            --wizard-navy: #1e3a8a;
+            --wizard-pink: #f8bbd9;
+            --wizard-pink-light: #fdf2f8;
+            --wizard-success: #22c55e;
+            --wizard-warning: #f59e0b;
+            --wizard-error: #ef4444;
+            --navy-primary: #1e3a8a;
+            --navy-secondary: #1e40af;
+            --pink-200: #f8bbd9;
+            --pink-100: #fce7f3;
+            --gray-50: #f9fafb;
+            --gray-100: #f3f4f6;
+            --gray-500: #6b7280;
+            --gray-600: #4b5563;
+        }
+
+        /* Modal Overlay */
+        .wizard-modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.7);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 10000;
+            backdrop-filter: blur(4px);
+            padding: 20px;
+            box-sizing: border-box;
+            animation: modalFadeIn 0.3s ease-out;
+        }
+
+        .wizard-modal-overlay.show {
+            display: flex;
+        }
+
+        @keyframes modalFadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+
+        /* Modal Container - Now with sidebar layout */
+        .wizard-modal-container {
+            background: white;
+            border-radius: 16px;
+            width: 100%;
+            max-width: 1200px;
+            max-height: 90vh;
+            overflow: hidden;
+            box-shadow: 0 25px 50px rgba(0, 0, 0, 0.3);
+            border: 2px solid var(--pink-200);
+            position: relative;
+            display: flex;
+            flex-direction: row; /* Changed to row for sidebar */
+            animation: modalSlideIn 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        @keyframes modalSlideIn {
+            from {
+                opacity: 0;
+                transform: translateY(50px) scale(0.95);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0) scale(1);
+            }
+        }
+
+        /* Left Sidebar for Steps */
+        .wizard-sidebar {
+            width: 280px;
+            background: linear-gradient(180deg, var(--navy-primary) 0%, var(--navy-secondary) 100%);
+            display: flex;
+            flex-direction: column;
+            position: relative;
+            overflow: hidden;
+            flex-shrink: 0;
+        }
+
+        .wizard-sidebar::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            right: 0;
+            width: 80px;
+            height: 100%;
+            background: linear-gradient(45deg, transparent 0%, rgba(248, 187, 217, 0.1) 100%);
+            pointer-events: none;
+        }
+
+        /* Sidebar Header */
+        .sidebar-header {
+            padding: 24px 20px;
+            border-bottom: 1px solid rgba(248, 187, 217, 0.2);
+            position: relative;
+            z-index: 2;
+        }
+
+        .sidebar-title {
+            font-size: 18px;
+            font-weight: 700;
+            color: white;
+            margin: 0 0 6px 0;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .sidebar-subtitle {
+            font-size: 12px;
+            color: rgba(255, 255, 255, 0.8);
+            margin: 0;
+            line-height: 1.4;
+        }
+
+        /* Step Navigation List */
+        .step-navigation {
+            flex: 1;
+            padding: 16px 0;
+            position: relative;
+            z-index: 2;
+        }
+
+        .step-list {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+
+        .step-item {
+            position: relative;
+            transition: all 0.3s ease;
+        }
+
+        .step-link {
+            display: flex;
+            align-items: center;
+            padding: 16px 20px;
+            color: rgba(255, 255, 255, 0.7);
+            text-decoration: none;
+            border-left: 4px solid transparent;
+            transition: all 0.3s ease;
+            position: relative;
+            cursor: pointer;
+        }
+
+        .step-link:hover {
+            background: rgba(248, 187, 217, 0.1);
+            color: rgba(255, 255, 255, 0.9);
+        }
+
+        /* Active Step */
+        .step-item.active .step-link {
+            background: rgba(248, 187, 217, 0.15);
+            border-left-color: var(--wizard-pink);
+            color: white;
+        }
+
+        /* Completed Step */
+        .step-item.completed .step-link {
+            color: rgba(34, 197, 94, 0.9);
+        }
+
+        .step-item.completed .step-number {
+            background: var(--wizard-success);
+            color: white;
+        }
+
+        .step-item.completed .step-number::after {
+            content: '✓';
+            font-size: 12px;
+            font-weight: 900;
+        }
+
+        /* Step Number Circle */
+        .step-number {
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            background: rgba(255, 255, 255, 0.1);
+            border: 2px solid rgba(255, 255, 255, 0.2);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 12px;
+            font-weight: 700;
+            margin-right: 12px;
+            transition: all 0.3s ease;
+            flex-shrink: 0;
+        }
+
+        .step-item.active .step-number {
+            background: var(--wizard-pink);
+            border-color: var(--wizard-pink);
+            color: var(--navy-primary);
+            transform: scale(1.1);
+            box-shadow: 0 4px 12px rgba(248, 187, 217, 0.4);
+        }
+
+        /* Step Content */
+        .step-content {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .step-title {
+            font-size: 13px;
+            font-weight: 600;
+            margin: 0 0 2px 0;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .step-description {
+            font-size: 11px;
+            opacity: 0.8;
+            margin: 0;
+            line-height: 1.3;
+        }
+
+        /* Main Content Area */
+        .wizard-main {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        /* Header in Main Area */
+        .wizard-header {
+            background: linear-gradient(135deg, var(--gray-50) 0%, white 100%);
+            border-bottom: 1px solid var(--pink-200);
+            padding: 20px 24px;
+            position: relative;
+            flex-shrink: 0;
+        }
+
+        .wizard-title {
+            font-size: 24px;
+            font-weight: 700;
+            color: var(--navy-primary);
+            margin: 0 0 8px 0;
+            padding-right: 100px;
+        }
+
+        .wizard-subtitle {
+            color: var(--gray-500);
+            font-size: 14px;
+            margin: 0;
+            padding-right: 100px;
+        }
+
+        /* Content Area */
+        .wizard-content {
+            flex: 1;
+            overflow-y: auto;
+            padding: 24px;
+            background: white;
+        }
+
+        .wizard-step {
+            display: none;
+            animation: fadeInUp 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .wizard-step.active {
+            display: block;
+        }
+
+        @keyframes fadeInUp {
+            from {
+                opacity: 0;
+                transform: translateY(20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        /* Navigation Footer */
+        .wizard-navigation {
+            background: linear-gradient(135deg, var(--gray-50) 0%, white 100%);
+            border-top: 1px solid var(--pink-200);
+            padding: 16px 24px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-shrink: 0;
+        }
+
+        .nav-info {
+            font-size: 12px;
+            color: var(--gray-500);
+            font-weight: 500;
+        }
+
+        .nav-buttons {
+            display: flex;
+            gap: 12px;
+        }
+
+        .wizard-btn {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 6px;
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .wizard-btn.primary {
+            background: var(--navy-primary);
+            color: white;
+        }
+
+        .wizard-btn.primary:hover {
+            background: var(--navy-secondary);
+            transform: translateY(-1px);
+        }
+
+        .wizard-btn.secondary {
+            background: white;
+            color: var(--navy-primary);
+            border: 2px solid var(--pink-200);
+        }
+
+        .wizard-btn.secondary:hover {
+            background: var(--wizard-pink-light);
+            border-color: var(--wizard-pink);
+        }
+
+        /* Modal Control Buttons */
+        .wizard-modal-controls {
+            position: absolute;
+            top: 16px;
+            right: 16px;
+            display: flex;
+            gap: 8px;
+            z-index: 10001;
+        }
+
+        .wizard-modal-control {
+            width: 36px;
+            height: 36px;
+            border: none;
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 50%;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 16px;
+            color: var(--gray-600);
+            transition: all 0.2s ease;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+            border: 1px solid var(--pink-200);
+        }
+
+        .wizard-modal-control:hover {
+            background: white;
+            transform: scale(1.1);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+        }
+
+        /* Maximized State */
+        .wizard-modal-overlay.maximized {
+            padding: 0 !important;
+            align-items: stretch !important;
+            justify-content: stretch !important;
+        }
+
+        .wizard-modal-overlay.maximized .wizard-modal-container {
+            width: 100vw !important;
+            height: 100vh !important;
+            max-width: none !important;
+            max-height: none !important;
+            margin: 0 !important;
+            border-radius: 0 !important;
+            border: none !important;
+        }
+
+        .wizard-modal-overlay.maximized .wizard-sidebar {
+            width: 320px; /* Slightly wider when maximized */
+        }
+
+        /* Responsive Design */
+        @media (max-width: 1024px) {
+            .wizard-sidebar {
+                width: 240px;
+            }
+            
+            .wizard-modal-overlay.maximized .wizard-sidebar {
+                width: 280px;
+            }
+        }
+
+        @media (max-width: 768px) {
+            .wizard-modal-container {
+                flex-direction: column;
+                max-height: 95vh;
+            }
+            
+            .wizard-sidebar {
+                width: 100%;
+                height: auto;
+                max-height: 200px;
+                overflow-y: auto;
+            }
+            
+            .step-navigation {
+                padding: 8px 0;
+            }
+            
+            .step-link {
+                padding: 12px 20px;
+            }
+            
+            .step-list {
+                display: flex;
+                overflow-x: auto;
+                gap: 4px;
+            }
+            
+            .step-item {
+                flex-shrink: 0;
+                min-width: 140px;
+            }
+        }
+
+        /* Form Styling */
+        .form-grid {
+            display: grid;
+            gap: 16px;
+            max-width: 100%;
+        }
+
+        .form-group {
+            margin-bottom: 16px;
+        }
+
+        .form-label {
+            display: block;
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--navy-primary);
+            margin-bottom: 6px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .form-input, .form-select, .form-textarea {
+            width: 100%;
+            padding: 10px 12px;
+            border: 2px solid var(--pink-200);
+            border-radius: 6px;
+            font-size: 14px;
+            transition: all 0.2s ease;
+            box-sizing: border-box;
+        }
+
+        .form-input:focus, .form-select:focus, .form-textarea:focus {
+            outline: none;
+            border-color: var(--wizard-pink);
+            box-shadow: 0 0 0 3px rgba(248, 187, 217, 0.2);
+        }
+
+        .form-textarea {
+            resize: vertical;
+            min-height: 80px;
+        }
+
+        /* ✅ NEW: Format + Connectivity specific styling */
+        .form-section {
+            background: var(--gray-50);
+            padding: 16px;
+            border-radius: 8px;
+            border: 1px solid var(--pink-200);
+            margin-bottom: 20px;
+        }
+
+        .form-section-title {
+            font-size: 14px;
+            font-weight: 700;
+            color: var(--navy-primary);
+            margin-bottom: 12px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .form-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+        }
+
+        .field-hint {
+            font-size: 11px;
+            color: var(--gray-500);
+            margin-top: 4px;
+            line-height: 1.3;
+        }
+
+        /* Sample content styling */
+        .step-header {
+            text-align: center;
+            margin-bottom: 24px;
+        }
+
+        .step-title {
+            font-size: 20px;
+            font-weight: 700;
+            color: var(--navy-primary);
+            margin-bottom: 8px;
+        }
+
+        .step-description {
+            color: var(--gray-500);
+            font-size: 14px;
+        }
+
+        .demo-content {
+            background: var(--wizard-pink-light);
+            border: 2px dashed var(--wizard-pink);
+            border-radius: 8px;
+            padding: 24px;
+            text-align: center;
+            color: var(--navy-primary);
+            font-weight: 500;
+        }
+
+        /* Step 4 FHIR Transformation Styles */
+        .step4-fhir-container {
+            padding: 0;
+        }
+
+        .fhir-transformation-interface {
+            min-height: 400px;
+        }
+
+        .fhir-transformation-results {
+            min-height: 300px;
+            border: 2px solid #e2e8f0;
+            border-radius: 12px;
+            background: white;
+        }
+
+        .mapping-config-header {
+            background: linear-gradient(135deg, #f8f9ff 0%, #fff 100%);
+            border: 2px solid #f8bbd9;
+            border-radius: 12px;
+            padding: 16px 20px;
+            margin-bottom: 16px;
+        }
+
+        .config-info {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .config-details h4 {
+            margin: 0 0 6px 0;
+            font-size: 16px;
+            font-weight: 600;
+            color: #1e3a8a;
+        }
+
+        .config-meta {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 12px;
+            color: #6b7280;
+        }
+
+        .message-type, .profile-type {
+            background: #e0e7ff;
+            color: #1e3a8a;
+            padding: 2px 8px;
+            border-radius: 6px;
+            font-weight: 500;
+        }
+
+        .config-status {
+            padding: 2px 8px;
+            border-radius: 6px;
+            font-weight: 500;
+            font-size: 11px;
+            text-transform: uppercase;
+        }
+
+        .config-status.unsaved {
+            background: #fef2f2;
+            color: #dc2626;
+        }
+
+        .config-status.saved {
+            background: #f0fdf4;
+            color: #16a34a;
+        }
+
+        .config-status.modified {
+            background: #fef3c7;
+            color: #d97706;
+        }
+
+        .separator {
+            color: #d1d5db;
+        }
+
+        .config-actions {
+            display: flex;
+            gap: 12px;
+        }
+
+        .config-btn {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 6px;
+            font-size: 13px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .config-btn.primary {
+            background: #1e3a8a;
+            color: white;
+        }
+
+        .config-btn.primary:hover {
+            background: #1e40af;
+            transform: translateY(-1px);
+        }
+
+        .config-btn.secondary {
+            background: white;
+            color: #1e3a8a;
+            border: 2px solid #e2e8f0;
+        }
+
+        .config-btn.secondary:hover {
+            background: #f8f9ff;
+            border-color: #f8bbd9;
+        }
+
+        .fhir-resource-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(248, 187, 217, 0.15);
+        }
+
+        /* Mapping Strategy */
+        .mapping-strategy {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: linear-gradient(135deg, #f8f9ff 0%, #fff 100%);
+            border: 2px solid #f8bbd9;
+            border-radius: 12px;
+            padding: 16px 20px;
+            margin-bottom: 24px;
+        }
+
+        .strategy-tabs {
+            display: flex;
+            gap: 2px;
+            background: #e5e7eb;
+            border-radius: 8px;
+            padding: 2px;
+        }
+
+        .strategy-tab {
+            padding: 8px 16px;
+            border: none;
+            background: none;
+            border-radius: 6px;
+            font-size: 13px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            color: #6b7280;
+        }
+
+        .strategy-tab.active {
+            background: #1e3a8a;
+            color: white;
+        }
+
+        .strategy-actions {
+            display: flex;
+            gap: 12px;
+        }
+
+        .strategy-btn {
+            padding: 10px 16px;
+            border: none;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .strategy-btn.primary {
+            background: #1e3a8a;
+            color: white;
+        }
+
+        .strategy-btn.primary:hover {
+            background: #1e40af;
+            transform: translateY(-1px);
+        }
+
+        .strategy-btn.secondary {
+            background: white;
+            color: #1e3a8a;
+            border: 2px solid #f8bbd9;
+        }
+
+        .fhir-resources-container {
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+    </style>
+</head>
+<body>
+    <!-- Wizard Modal with Left Sidebar Layout -->
+    <div class="wizard-modal-overlay show" id="wizardModalOverlay">
+        <div class="wizard-modal-container" id="wizardModalContainer">
+            
+            <!-- Modal Control Buttons -->
+            <div class="wizard-modal-controls">
+                <button class="wizard-modal-control maximize-btn" id="wizardModalMaximize" title="Maximize">
+                    <span id="maximizeIcon">⛶</span>
+                </button>
+                <button class="wizard-modal-control close-btn" id="wizardModalClose" title="Close">×</button>
+            </div>
+
+            <!-- Left Sidebar -->
+            <div class="wizard-sidebar">
+                <div class="sidebar-header">
+                    <h2 class="sidebar-title">
+                        🧙‍♂️ HL7 Interface
+                    </h2>
+                    <p class="sidebar-subtitle">AI-powered interface builder for seamless healthcare data integration</p>
+                </div>
+
+                <nav class="step-navigation">
+                    <ul class="step-list">
+                        <li class="step-item active" id="stepIndicator1">
+                            <a href="#" class="step-link" onclick="showStep(1)">
+                                <div class="step-number" id="stepCircle1">1</div>
+                                <div class="step-content">
+                                    <div class="step-title">Configure</div>
+                                    <div class="step-description">Set up format and connectivity</div>
+                                </div>
+                            </a>
+                        </li>
+                        <li class="step-item" id="stepIndicator2">
+                            <a href="#" class="step-link" onclick="showStep(2)">
+                                <div class="step-number" id="stepCircle2">2</div>
+                                <div class="step-content">
+                                    <div class="step-title">Upload</div>
+                                    <div class="step-description">Upload HL7 message files</div>
+                                </div>
+                            </a>
+                        </li>
+                        <li class="step-item" id="stepIndicator3">
+                            <a href="#" class="step-link" onclick="showStep(3)">
+                                <div class="step-number" id="stepCircle3">3</div>
+                                <div class="step-content">
+                                    <div class="step-title">Review</div>
+                                    <div class="step-description">Review parsed content</div>
+                                </div>
+                            </a>
+                        </li>
+                        <li class="step-item" id="stepIndicator4">
+                            <a href="#" class="step-link" onclick="showStep(4)">
+                                <div class="step-number" id="stepCircle4">4</div>
+                                <div class="step-content">
+                                    <div class="step-title">FHIR Transform</div>
+                                    <div class="step-description">HL7 to FHIR conversion</div>
+                                </div>
+                            </a>
+                        </li>
+                        <li class="step-item" id="stepIndicator5" style="display: none;">
+                            <a href="#" class="step-link" onclick="showStep(5)">
+                                <div class="step-number" id="stepCircle5">5</div>
+                                <div class="step-content">
+                                    <div class="step-title">FHIR Output</div>
+                                    <div class="step-description">Configure destination</div>
+                                </div>
+                            </a>
+                        </li>
+                        <li class="step-item" id="stepIndicator6">
+                            <a href="#" class="step-link" onclick="showStep(6)">
+                                <div class="step-number" id="stepCircle6">6</div>
+                                <div class="step-content">
+                                    <div class="step-title">Deploy</div>
+                                    <div class="step-description">Deploy and finalize</div>
+                                </div>
+                            </a>
+                        </li>
+                    </ul>
+                </nav>
+            </div>
+
+            <!-- Main Content Area -->
+            <div class="wizard-main">
+                <!-- Header -->
+                <div class="wizard-header">
+                    <h2 class="wizard-title">Interface Configuration</h2>
+                    <p class="wizard-subtitle">Set up message formats and connectivity for your HL7 interface</p>
+                </div>
+
+                <!-- Content -->
+                <div class="wizard-content">
+                    <!-- ✅ FIXED Step 1: Configure - Now with CORRECT ID fields -->
+                    <div class="wizard-step active" id="step1">
+                        <div class="step-header">
+                            <div class="step-progress">STEP 1 OF 6</div>
+                            <h3 class="step-title">Interface Configuration</h3>
+                            <p class="step-description">Configure message formats and connectivity for your interface</p>
+                        </div>
+
+                        <div class="form-grid">
+                            <!-- Basic Information -->
+                            <div class="form-section">
+                                <div class="form-section-title">
+                                    📋 Basic Information
+                                </div>
+                                
+                                <div class="form-group">
+                                    <label class="form-label" for="wizardInterfaceName">Interface Name *</label>
+                                    <input type="text" id="wizardInterfaceName" class="form-input" placeholder="e.g., ADT Patient Admissions" required>
+                                    <div class="field-hint">A descriptive name for this interface</div>
+                                </div>
+
+                                <div class="form-group">
+                                    <label class="form-label" for="wizardInterfaceDescription">Description</label>
+                                    <textarea id="wizardInterfaceDescription" class="form-textarea" placeholder="Brief description of this interface and its purpose"></textarea>
+                                    <div class="field-hint">Optional description for documentation purposes</div>
+                                </div>
+
+                                <div class="form-group">
+                                    <label class="form-label" for="wizardMessageType">Message Type</label>
+                                    <select id="wizardMessageType" class="form-select">
+                                        <option value="auto-detect">Auto-detect from file</option>
+                                        <option value="ADT^A01">ADT^A01 - Admit/Visit Notification</option>
+                                        <option value="ADT^A04">ADT^A04 - Register Patient</option>
+                                        <option value="ADT^A08">ADT^A08 - Update Patient Info</option>
+                                        <option value="ORU^R01">ORU^R01 - Observation Result</option>
+                                        <option value="ORM^O01">ORM^O01 - Order Message</option>
+                                        <option value="SIU^S12">SIU^S12 - Appointment Booking</option>
+                                    </select>
+                                    <div class="field-hint">Select the HL7 message type or auto-detect from uploaded file</div>
+                                </div>
+                            </div>
+
+                            <!-- ✅ FIXED: Source Configuration -->
+                            <div class="form-section">
+                                <div class="form-section-title">
+                                    📥 Source Configuration (Where messages come from)
+                                </div>
+                                
+                                <div class="form-row">
+                                    <div class="form-group">
+                                        <label class="form-label" for="wizardSourceType">Source Format *</label>
+                                        <select id="wizardSourceType" class="form-select" required>
+                                            <option value="">Select format...</option>
+                                            <option value="hl7v2">HL7 v2.x</option>
+                                            <option value="hl7v3">HL7 v3.x</option>
+                                            <option value="fhir">FHIR</option>
+                                            <option value="ccda">C-CDA</option>
+                                            <option value="file">File Format</option>
+                                            <option value="database">Database</option>
+                                        </select>
+                                        <div class="field-hint">The message format you're receiving</div>
+                                    </div>
+
+                                    <div class="form-group">
+                                        <label class="form-label" for="wizardSourceConnectivity">Source Connectivity *</label>
+                                        <select id="wizardSourceConnectivity" class="form-select" required>
+                                            <option value="">Select method...</option>
+                                            <option value="tcp">TCP/IP Listener</option>
+                                            <option value="http">HTTP Endpoint</option>
+                                            <option value="file">File Polling</option>
+                                            <option value="database">Database Polling</option>
+                                            <option value="sftp">SFTP</option>
+                                            <option value="mq">Message Queue</option>
+                                        </select>
+                                        <div class="field-hint">How you'll receive the messages</div>
+                                    </div>
+                                </div>
+
+                                <!-- Dynamic Source Config Container -->
+                                <div id="wizardSourceConfig" style="display: none;">
+                                    <!-- Source-specific configuration will be populated here -->
+                                </div>
+                            </div>
+
+                            <!-- ✅ FIXED: Target Configuration -->
+                            <div class="form-section">
+                                <div class="form-section-title">
+                                    📤 Target Configuration (Where messages go)
+                                </div>
+                                
+                                <div class="form-row">
+                                    <div class="form-group">
+                                        <label class="form-label" for="wizardTargetType">Target Format *</label>
+                                        <select id="wizardTargetType" class="form-select" required>
+                                            <option value="">Select format...</option>
+                                            <option value="fhir">FHIR R4</option>
+                                            <option value="hl7v2">HL7 v2.x</option>
+                                            <option value="ccda">C-CDA</option>
+                                            <option value="database">Database</option>
+                                            <option value="flatfile">Flat File</option>
+                                            <option value="json">JSON</option>
+                                            <option value="xml">XML</option>
+                                        </select>
+                                        <div class="field-hint">The format you want to convert to</div>
+                                    </div>
+
+                                    <div class="form-group">
+                                        <label class="form-label" for="wizardTargetConnectivity">Target Connectivity *</label>
+                                        <select id="wizardTargetConnectivity" class="form-select" required>
+                                            <option value="">Select method...</option>
+                                            <option value="http">HTTP/REST API</option>
+                                            <option value="database">Database Insert</option>
+                                            <option value="file">File Output</option>
+                                            <option value="tcp">TCP/IP Send</option>
+                                            <option value="sftp">SFTP Upload</option>
+                                            <option value="mq">Message Queue</option>
+                                        </select>
+                                        <div class="field-hint">How you'll deliver the messages</div>
+                                    </div>
+                                </div>
+
+                                <!-- Dynamic Target Config Container -->
+                                <div id="wizardTargetConfig" style="display: none;">
+                                    <!-- Target-specific configuration will be populated here -->
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Step 2: Upload -->
+                    <div class="wizard-step" id="step2">
+                        <div class="step-header">
+                            <div class="step-progress">STEP 2 OF 6</div>
+                            <h3 class="step-title">Upload HL7 Message</h3>
+                            <p class="step-description">Upload your HL7 message file for parsing and analysis</p>
+                        </div>
+                        <div class="demo-content">
+                            <p>📁 Upload Zone - Drag and drop your HL7 files here</p>
+                            <p>Supported formats: .hl7, .txt, .msg</p>
+                        </div>
+                    </div>
+
+                    <!-- Step 3: Review -->
+                    <div class="wizard-step" id="step3">
+                        <div class="step-header">
+                            <div class="step-progress">STEP 3 OF 6</div>
+                            <h3 class="step-title">Review Parsed Content</h3>
+                            <p class="step-description">Review the parsed HL7 message segments and fields</p>
+                        </div>
+                        <div class="demo-content">
+                            <p>📋 Parsed Message Review</p>
+                            <p>MSH, PID, PV1, OBX segments will be displayed here</p>
+                        </div>
+                    </div>
+
+                    <!-- Step 4: Mapping -->
+                    <div class="wizard-step" id="step4">
+                        <div class="step-header">
+                            <div class="step-progress">STEP 4 OF 6</div>
+                            <h3 class="step-title">HL7 to FHIR Transformation</h3>
+                            <p class="step-description">Transform parsed HL7 data to FHIR resources</p>
+                        </div>
+
+                        <div id="step4-content" class="step4-fhir-container">
+                            <!-- FHIR Transformation Interface -->
+                            <div class="fhir-transformation-interface">
+                                <!-- Configuration Header -->
+                                <div class="mapping-config-header">
+                                    <div class="config-info">
+                                        <div class="config-details">
+                                            <h4>🔄 HL7 → FHIR Transformation</h4>
+                                            <div class="config-meta">
+                                                <span class="message-type" id="fhir-message-type">Loading...</span>
+                                                <span class="separator">•</span>
+                                                <span class="profile-type">FHIR R4</span>
+                                                <span class="separator">•</span>
+                                                <span class="config-status unsaved" id="fhir-config-status">Ready</span>
+                                            </div>
+                                        </div>
+                                        <div class="config-actions">
+                                            <button class="config-btn primary" id="btn-transform-to-fhir" onclick="startFHIRTransformation()">
+                                                ▶️ Transform to FHIR
+                                            </button>
+                                            <button class="config-btn secondary" id="btn-view-fhir-json" onclick="viewFHIRJSON()" style="display: none;">
+                                                📄 View JSON
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- Optional Segment Mappings -->
+                                <div id="opt-seg-panel" style="display:none;margin:12px 0;padding:14px 16px;background:#f8faff;border:1px solid #e0e7ff;border-radius:8px">
+                                    <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+                                        <span style="font-size:13px;font-weight:700;color:#1e3a8a">Optional Output Resources</span>
+                                        <span id="opt-seg-badge" style="display:none;font-size:10px;background:#1e3a8a;color:#fff;border-radius:99px;padding:1px 7px;font-weight:600"></span>
+                                    </div>
+                                    <p style="font-size:11px;color:#6b7280;margin:0 0 10px;line-height:1.5">
+                                        These segment→resource mappings are <strong>off by default</strong> per the HL7→FHIR IG.
+                                        Enable those your downstream system requires — they take effect on every transform for this interface.
+                                    </p>
+                                    <div id="opt-seg-blocks" style="display:flex;flex-direction:column;gap:8px"></div>
+                                    <div style="margin-top:10px">
+                                        <button id="opt-seg-save-btn" class="config-btn secondary" onclick="window.step4FHIR.saveOptionalSegments()" style="font-size:11px;padding:5px 14px">
+                                            Save Options
+                                        </button>
+                                        <span id="opt-seg-status" style="margin-left:8px;font-size:11px;color:#6b7280"></span>
+                                    </div>
+                                </div>
+
+                                <!-- Transformation Results Container -->
+                                <div id="fhir-transformation-results" class="fhir-transformation-results">
+                                    <div class="transformation-placeholder">
+                                        <div style="text-align: center; padding: 60px 20px;">
+                                            <div style="font-size: 64px; margin-bottom: 24px; color: #1e3a8a;">🔄</div>
+                                            <div style="font-size: 20px; font-weight: 600; margin-bottom: 12px; color: #1e3a8a;">Ready for FHIR Transformation</div>
+                                            <div style="font-size: 16px; color: #6b7280; margin-bottom: 32px; max-width: 400px; margin-left: auto; margin-right: auto; line-height: 1.5;">
+                                                Click "Transform to FHIR" to convert your parsed HL7 data into FHIR R4 resources
+                                            </div>
+                                            <div style="display: flex; justify-content: center; gap: 16px; flex-wrap: wrap;">
+                                                <div style="background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px; padding: 12px; text-align: center; min-width: 120px;">
+                                                    <div style="font-size: 18px; font-weight: 600; color: #16a34a;">👤</div>
+                                                    <div style="font-size: 12px; color: #15803d; margin-top: 4px;">Patient</div>
+                                                </div>
+                                                <div style="background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 8px; padding: 12px; text-align: center; min-width: 120px;">
+                                                    <div style="font-size: 18px; font-weight: 600; color: #2563eb;">🏥</div>
+                                                    <div style="font-size: 12px; color: #1d4ed8; margin-top: 4px;">Encounter</div>
+                                                </div>
+                                                <div style="background: #fdf2f8; border: 1px solid #fbcfe8; border-radius: 8px; padding: 12px; text-align: center; min-width: 120px;">
+                                                    <div style="font-size: 18px; font-weight: 600; color: #db2777;">🔬</div>
+                                                    <div style="font-size: 12px; color: #be185d; margin-top: 4px;">Observation</div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- Enhanced Mapping Interface (Hidden by default) -->
+                                <div id="enhanced-mapping-interface" style="display: none; margin-top: 24px;">
+                                    <div class="mapping-strategy">
+                                        <div class="strategy-info">
+                                            <h4 style="margin: 0 0 8px 0; font-size: 16px; font-weight: 600; color: #1e3a8a;">Mapping Strategy</h4>
+                                            <div class="strategy-tabs">
+                                                <button class="strategy-tab active" data-strategy="automatic">Automatic</button>
+                                                <button class="strategy-tab" data-strategy="manual">Manual Review</button>
+                                                <button class="strategy-tab" data-strategy="custom">Custom Rules</button>
+                                            </div>
+                                        </div>
+                                        <div class="strategy-actions">
+                                            <button class="strategy-btn secondary" onclick="editFieldMappings()">
+                                                🔧 Edit Mappings
+                                            </button>
+                                            <button class="strategy-btn primary" onclick="validateTransformation()">
+                                                ✅ Validate
+                                            </button>
+                                        </div>
+                                    </div>
+
+                                    <!-- FHIR Resources Container -->
+                                    <div id="fhir-resources-container" class="fhir-resources-container">
+                                        <!-- Dynamic FHIR resource cards will be inserted here -->
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Step 5: FHIR Output Configuration (Conditional - FHIR Only) -->
+                    <div class="wizard-step" id="step5" style="display: none;">
+                        <div class="step-header">
+                            <div class="step-progress">STEP 5 OF 6</div>
+                            <h3 class="step-title">
+                                <span style="margin-right: 8px;">🌐</span>
+                                FHIR Output Configuration
+                            </h3>
+                            <p class="step-description">Configure where and how to deliver FHIR resources</p>
+                        </div>
+
+                        <div class="step-body">
+                            <!-- 1. FHIR Destination Section -->
+                            <div style="margin-bottom: 24px;">
+                                <label style="display: block; font-weight: 600; color: #1e3a8a; margin-bottom: 8px;">
+                                    FHIR Destination
+                                </label>
+                                <select id="fhirDestinationType" style="width: 100%; padding: 12px; border: 2px solid #e5e7eb; border-radius: 8px; font-size: 14px;">
+                                    <option value="fhir_http">FHIR Server (HTTP/HTTPS)</option>
+                                    <option value="epic_fhir">Epic FHIR Endpoint</option>
+                                    <option value="cerner_fhir">Cerner FHIR Endpoint</option>
+                                    <option value="ezhealth_store" disabled>ezHealthKonnect FHIR Store (Premium) ⭐</option>
+                                </select>
+                            </div>
+
+                            <!-- FHIR Server URL -->
+                            <div id="fhirServerUrlSection" style="margin-bottom: 24px;">
+                                <label style="display: block; font-weight: 600; color: #1e3a8a; margin-bottom: 8px;">
+                                    FHIR Base URL
+                                </label>
+                                <input type="url" id="fhirBaseUrl" placeholder="https://fhir.example.com/fhir/r4"
+                                       style="width: 100%; padding: 12px; border: 2px solid #e5e7eb; border-radius: 8px; font-size: 14px;">
+                                <small style="color: #6b7280; display: block; margin-top: 4px;">
+                                    The base URL of your FHIR server (e.g., https://fhir.example.com/fhir/r4)
+                                </small>
+                            </div>
+
+                            <!-- 2. Delivery Mode Toggle -->
+                            <div style="margin-bottom: 24px;">
+                                <label style="display: block; font-weight: 600; color: #1e3a8a; margin-bottom: 12px;">
+                                    Delivery Mode
+                                </label>
+                                <div style="display: flex; gap: 12px;">
+                                    <button type="button" id="bundleModeBtn" class="fhir-mode-btn active"
+                                            style="flex: 1; padding: 16px; border: 2px solid #f8bbd9; border-radius: 8px; background: #fdf2f8; cursor: pointer; transition: all 0.2s;">
+                                        <div style="font-weight: 600; color: #1e3a8a; margin-bottom: 4px;">
+                                            📦 Bundle
+                                        </div>
+                                        <div style="font-size: 12px; color: #6b7280;">
+                                            ✅ Recommended - Single transaction
+                                        </div>
+                                    </button>
+                                    <button type="button" id="individualModeBtn" class="fhir-mode-btn"
+                                            style="flex: 1; padding: 16px; border: 2px solid #e5e7eb; border-radius: 8px; background: #f9fafb; cursor: pointer; transition: all 0.2s;">
+                                        <div style="font-weight: 600; color: #1e3a8a; margin-bottom: 4px;">
+                                            📄 Individual
+                                        </div>
+                                        <div style="font-size: 12px; color: #6b7280;">
+                                            ⚠️ Multiple API calls
+                                        </div>
+                                    </button>
+                                </div>
+                            </div>
+
+                            <!-- 3. Resource Selection Presets -->
+                            <div style="margin-bottom: 24px;">
+                                <label style="display: block; font-weight: 600; color: #1e3a8a; margin-bottom: 12px;">
+                                    FHIR Resources to Deliver
+                                </label>
+                                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin-bottom: 16px;">
+                                    <button type="button" class="fhir-preset-card active" data-preset="essential"
+                                            style="padding: 16px; border: 2px solid #f8bbd9; border-radius: 8px; background: #fdf2f8; cursor: pointer; text-align: left; transition: all 0.2s;">
+                                        <div style="font-size: 24px; margin-bottom: 8px;">📋</div>
+                                        <div style="font-weight: 600; color: #1e3a8a; margin-bottom: 4px;">Essential</div>
+                                        <div style="font-size: 12px; color: #6b7280;">8 core resources</div>
+                                    </button>
+                                    <button type="button" class="fhir-preset-card" data-preset="clinical"
+                                            style="padding: 16px; border: 2px solid #e5e7eb; border-radius: 8px; background: #f9fafb; cursor: pointer; text-align: left; transition: all 0.2s;">
+                                        <div style="font-size: 24px; margin-bottom: 8px;">🩺</div>
+                                        <div style="font-weight: 600; color: #1e3a8a; margin-bottom: 4px;">Clinical</div>
+                                        <div style="font-size: 12px; color: #6b7280;">25+ resources</div>
+                                    </button>
+                                    <button type="button" class="fhir-preset-card" data-preset="comprehensive"
+                                            style="padding: 16px; border: 2px solid #e5e7eb; border-radius: 8px; background: #f9fafb; cursor: pointer; text-align: left; transition: all 0.2s;">
+                                        <div style="font-size: 24px; margin-bottom: 8px;">📚</div>
+                                        <div style="font-weight: 600; color: #1e3a8a; margin-bottom: 4px;">Comprehensive</div>
+                                        <div style="font-size: 12px; color: #6b7280;">50+ resources</div>
+                                    </button>
+                                    <button type="button" class="fhir-preset-card" data-preset="all"
+                                            style="padding: 16px; border: 2px solid #e5e7eb; border-radius: 8px; background: #f9fafb; cursor: pointer; text-align: left; transition: all 0.2s;">
+                                        <div style="font-size: 24px; margin-bottom: 8px;">🌐</div>
+                                        <div style="font-weight: 600; color: #1e3a8a; margin-bottom: 4px;">All</div>
+                                        <div style="font-size: 12px; color: #6b7280;">150+ resources</div>
+                                    </button>
+                                </div>
+
+                                <!-- Selected Resources Preview -->
+                                <div id="selectedResourcesPreview" style="padding: 12px; background: #f0f9ff; border-left: 4px solid #1e3a8a; border-radius: 4px;">
+                                    <strong style="color: #1e3a8a;">Selected:</strong>
+                                    <span id="selectedResourcesList" style="color: #6b7280; margin-left: 8px;">
+                                        Patient, Practitioner, Encounter, Observation, Condition, Procedure, MedicationRequest, MessageHeader
+                                    </span>
+                                </div>
+                            </div>
+
+                            <!-- 4. Advanced Settings (Collapsed by Default) -->
+                            <div style="margin-bottom: 24px;">
+                                <button type="button" id="fhirAdvancedToggleBtn"
+                                        style="width: 100%; padding: 12px; border: 1px solid #e5e7eb; border-radius: 8px; background: #f9fafb; cursor: pointer; text-align: left; font-weight: 600; color: #1e3a8a;">
+                                    ⚙️ Advanced Settings
+                                    <span style="float: right;">▼</span>
+                                </button>
+                                <div id="fhirAdvancedPanel" style="display: none; margin-top: 16px; padding: 16px; border: 1px solid #e5e7eb; border-radius: 8px; background: #ffffff;">
+
+                                    <!-- Authentication -->
+                                    <div style="margin-bottom: 16px;">
+                                        <label style="display: block; font-weight: 600; color: #1e3a8a; margin-bottom: 8px;">
+                                            Authentication
+                                        </label>
+                                        <select id="fhirAuthType" style="width: 100%; padding: 10px; border: 1px solid #e5e7eb; border-radius: 6px;">
+                                            <option value="none">None</option>
+                                            <option value="bearer_token">Bearer Token</option>
+                                            <option value="basic_auth">Basic Auth</option>
+                                            <option value="oauth2">OAuth 2.0</option>
+                                        </select>
+                                    </div>
+
+                                    <!-- Bearer Token Field (Conditional) -->
+                                    <div id="bearerTokenField" style="display: none; margin-bottom: 16px;">
+                                        <label style="display: block; font-weight: 600; color: #1e3a8a; margin-bottom: 8px;">
+                                            Bearer Token
+                                        </label>
+                                        <input type="password" id="fhirBearerToken" placeholder="Enter bearer token"
+                                               style="width: 100%; padding: 10px; border: 1px solid #e5e7eb; border-radius: 6px;">
+                                    </div>
+
+                                    <!-- Retry Settings -->
+                                    <div style="margin-bottom: 16px;">
+                                        <label style="display: block; font-weight: 600; color: #1e3a8a; margin-bottom: 8px;">
+                                            Retry Attempts
+                                        </label>
+                                        <input type="number" id="fhirRetryAttempts" value="3" min="0" max="10"
+                                               style="width: 100%; padding: 10px; border: 1px solid #e5e7eb; border-radius: 6px;">
+                                    </div>
+
+                                    <!-- Timeout -->
+                                    <div style="margin-bottom: 16px;">
+                                        <label style="display: block; font-weight: 600; color: #1e3a8a; margin-bottom: 8px;">
+                                            Timeout (seconds)
+                                        </label>
+                                        <input type="number" id="fhirTimeout" value="30" min="5" max="300"
+                                               style="width: 100%; padding: 10px; border: 1px solid #e5e7eb; border-radius: 6px;">
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Test Connection Button -->
+                            <div style="margin-bottom: 24px;">
+                                <button type="button" id="testFhirConnectionBtn"
+                                        style="width: 100%; padding: 14px; border: none; border-radius: 8px; background: #1e3a8a; color: white; font-weight: 600; cursor: pointer; transition: background 0.2s;">
+                                    🔗 Test FHIR Connection
+                                </button>
+                                <div id="fhirTestResult" style="margin-top: 12px; padding: 12px; border-radius: 6px; display: none;">
+                                    <!-- Test result will appear here -->
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Navigation Footer -->
+                        <div style="display: flex; justify-content: space-between; margin-top: 24px; padding-top: 24px; border-top: 1px solid #e5e7eb;">
+                            <button type="button" class="wizard-btn secondary" onclick="navigateStep(4)">
+                                ← Previous: FHIR Transform
+                            </button>
+                            <button type="button" class="wizard-btn primary" onclick="navigateStep(6)">
+                                Next: Deploy →
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Step 6: Deploy -->
+                    <div class="wizard-step" id="step6">
+                        <div class="step-header">
+                            <div class="step-progress">STEP 6 OF 6</div>
+                            <h3 class="step-title">Deploy Interface</h3>
+                            <p class="step-description">Review and deploy your new HL7 interface</p>
+                        </div>
+                        <div class="demo-content">
+                            <p>🚀 Ready for Deployment</p>
+                            <p>Final review and interface deployment options</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Navigation Footer -->
+                <div class="wizard-navigation">
+                    <div class="nav-info" id="navStep">Step 1 of 6 • Interface Configuration</div>
+                    <div class="nav-buttons">
+                        <button type="button" class="wizard-btn secondary" id="prevBtn" onclick="prevStep()" style="display: none;">
+                            ← Previous
+                        </button>
+                        <button type="button" class="wizard-btn primary" id="nextBtn" onclick="nextStep()">
+                            Next →
+                        </button>
+                        <button type="button" class="wizard-btn primary" id="finishBtn" onclick="finishWizard()" style="display: none;">
+                            🚀 Deploy Interface
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Simple demo functionality
+        let currentStep = 1;
+        const totalSteps = 5;
+        const stepTitles = [
+            'Interface Configuration',
+            'Upload HL7 Message',
+            'Review Parsed Content',
+            'HL7 to FHIR Transformation',
+            'Deploy Interface'
+        ];
+
+        function showStep(step) {
+            // Hide all steps
+            document.querySelectorAll('.wizard-step').forEach(el => el.classList.remove('active'));
+            document.querySelectorAll('.step-item').forEach(el => el.classList.remove('active', 'completed'));
+            
+            // Show current step
+            document.getElementById(`step${step}`).classList.add('active');
+            document.getElementById(`stepIndicator${step}`).classList.add('active');
+            
+            // Mark previous steps as completed
+            for (let i = 1; i < step; i++) {
+                document.getElementById(`stepIndicator${i}`).classList.add('completed');
+            }
+            
+            currentStep = step;
+            updateNavigation();
+        }
+
+        function nextStep() {
+            if (currentStep < totalSteps) {
+                let nextStepNum = currentStep + 1;
+
+                // FHIR Step Skip Logic: Skip HL7-specific steps (2 & 3) for FHIR sources
+                if (currentStep === 1) {
+                    const sourceType = document.getElementById('wizardSourceType')?.value;
+                    console.log('🔍 Source type detected:', sourceType);
+
+                    // If source is FHIR, skip steps 2 & 3 (HL7 upload and parsing)
+                    if (sourceType && sourceType.toLowerCase() === 'fhir') {
+                        console.log('🎯 FHIR source detected - skipping steps 2 & 3 (HL7 upload/parsing)');
+                        nextStepNum = 4; // Jump directly to mapping configuration
+                    }
+                }
+
+                showStep(nextStepNum);
+            }
+        }
+
+        function prevStep() {
+            if (currentStep > 1) {
+                let prevStepNum = currentStep - 1;
+
+                // FHIR Step Skip Logic: Skip HL7-specific steps (2 & 3) when going back
+                if (currentStep === 4) {
+                    const sourceType = document.getElementById('wizardSourceType')?.value;
+
+                    // If source is FHIR, skip back to step 1 (bypassing steps 2 & 3)
+                    if (sourceType && sourceType.toLowerCase() === 'fhir') {
+                        console.log('🎯 FHIR source detected - skipping back to step 1 (bypassing steps 2 & 3)');
+                        prevStepNum = 1; // Jump back to interface configuration
+                    }
+                }
+
+                showStep(prevStepNum);
+            }
+        }
+
+        function updateNavigation() {
+            const prevBtn = document.getElementById('prevBtn');
+            const nextBtn = document.getElementById('nextBtn');
+            const finishBtn = document.getElementById('finishBtn');
+            const navStep = document.getElementById('navStep');
+            
+            navStep.textContent = `Step ${currentStep} of ${totalSteps} • ${stepTitles[currentStep - 1]}`;
+            
+            prevBtn.style.display = currentStep === 1 ? 'none' : 'flex';
+            nextBtn.style.display = currentStep === totalSteps ? 'none' : 'flex';
+            finishBtn.style.display = currentStep === totalSteps ? 'flex' : 'none';
+        }
+
+        function finishWizard() {
+            alert('🎉 Interface deployment initiated!');
+        }
+
+        // ✅ FIXED: Auto-configure connectivity based on format selection
+        document.addEventListener('DOMContentLoaded', function() {
+            const sourceTypeSelect = document.getElementById('wizardSourceType');
+            const sourceConnectivitySelect = document.getElementById('wizardSourceConnectivity');
+            const targetTypeSelect = document.getElementById('wizardTargetType');
+            const targetConnectivitySelect = document.getElementById('wizardTargetConnectivity');
+
+            // Auto-suggest connectivity when format is selected
+            if (sourceTypeSelect) {
+                sourceTypeSelect.addEventListener('change', function() {
+                    const format = this.value;
+                    const suggestions = {
+                        'hl7v2': 'tcp',
+                        'hl7v3': 'http',
+                        'fhir': 'http',
+                        'ccda': 'http',
+                        'file': 'file',
+                        'database': 'database'
+                    };
+                    
+                    if (suggestions[format] && sourceConnectivitySelect) {
+                        sourceConnectivitySelect.value = suggestions[format];
+                    }
+                });
+            }
+
+            if (targetTypeSelect) {
+                targetTypeSelect.addEventListener('change', function() {
+                    const format = this.value;
+                    const suggestions = {
+                        'fhir': 'http',
+                        'hl7v2': 'tcp',
+                        'ccda': 'http',
+                        'database': 'database',
+                        'flatfile': 'file',
+                        'json': 'http',
+                        'xml': 'http'
+                    };
+                    
+                    if (suggestions[format] && targetConnectivitySelect) {
+                        targetConnectivitySelect.value = suggestions[format];
+                    }
+                });
+            }
+        });
+
+        // Maximize functionality
+        document.getElementById('wizardModalMaximize').addEventListener('click', function() {
+            const overlay = document.getElementById('wizardModalOverlay');
+            const icon = document.getElementById('maximizeIcon');
+            
+            overlay.classList.toggle('maximized');
+            icon.textContent = overlay.classList.contains('maximized') ? '🗗' : '⛶';
+        });
+
+        // Close functionality  
+        document.getElementById('wizardModalClose').addEventListener('click', function() {
+            document.getElementById('wizardModalOverlay').classList.remove('show');
+        });
+
+        // Initialize
+        updateNavigation();
+
+        // ============================================================
+        // Step 5: FHIR Output Configuration Event Handlers
+        // ============================================================
+
+        // Resource presets definition
+        const FHIR_RESOURCE_PRESETS = {
+            essential: ['Patient', 'Practitioner', 'Encounter', 'Observation', 'Condition', 'Procedure', 'MedicationRequest', 'MessageHeader'],
+            clinical: ['Patient', 'Practitioner', 'Encounter', 'Observation', 'Condition', 'Procedure', 'MedicationRequest', 'MedicationAdministration', 'AllergyIntolerance', 'Immunization', 'DiagnosticReport', 'Specimen', 'ServiceRequest', 'CarePlan', 'CareTeam', 'Goal', 'Device', 'DeviceUseStatement', 'FamilyMemberHistory', 'RiskAssessment', 'ClinicalImpression', 'DetectedIssue', 'MessageHeader', 'Organization', 'Location'],
+            comprehensive: ['Patient', 'Practitioner', 'PractitionerRole', 'Encounter', 'Observation', 'Condition', 'Procedure', 'MedicationRequest', 'MedicationAdministration', 'MedicationDispense', 'MedicationStatement', 'AllergyIntolerance', 'Immunization', 'DiagnosticReport', 'Specimen', 'ServiceRequest', 'CarePlan', 'CareTeam', 'Goal', 'Device', 'DeviceUseStatement', 'FamilyMemberHistory', 'RiskAssessment', 'ClinicalImpression', 'DetectedIssue', 'MessageHeader', 'Organization', 'OrganizationAffiliation', 'Location', 'HealthcareService', 'Endpoint', 'RelatedPerson', 'Group', 'Coverage', 'Claim', 'ClaimResponse', 'ExplanationOfBenefit', 'Account', 'Invoice', 'ChargeItem', 'ChargeItemDefinition', 'Contract', 'Consent', 'Provenance', 'AuditEvent', 'DocumentReference', 'DocumentManifest', 'Composition', 'Communication', 'CommunicationRequest'],
+            all: [] // Will be populated with all 150+ resources
+        };
+
+        // Delivery mode toggle
+        let selectedDeliveryMode = 'bundle'; // default
+        document.getElementById('bundleModeBtn')?.addEventListener('click', function() {
+            selectedDeliveryMode = 'bundle';
+            this.classList.add('active');
+            this.style.border = '2px solid #f8bbd9';
+            this.style.background = '#fdf2f8';
+            document.getElementById('individualModeBtn').classList.remove('active');
+            document.getElementById('individualModeBtn').style.border = '2px solid #e5e7eb';
+            document.getElementById('individualModeBtn').style.background = '#f9fafb';
+        });
+
+        document.getElementById('individualModeBtn')?.addEventListener('click', function() {
+            selectedDeliveryMode = 'individual';
+            this.classList.add('active');
+            this.style.border = '2px solid #f8bbd9';
+            this.style.background = '#fdf2f8';
+            document.getElementById('bundleModeBtn').classList.remove('active');
+            document.getElementById('bundleModeBtn').style.border = '2px solid #e5e7eb';
+            document.getElementById('bundleModeBtn').style.background = '#f9fafb';
+        });
+
+        // Resource preset selection
+        let selectedPreset = 'essential'; // default
+        document.querySelectorAll('.fhir-preset-card').forEach(card => {
+            card.addEventListener('click', function() {
+                // Remove active from all
+                document.querySelectorAll('.fhir-preset-card').forEach(c => {
+                    c.classList.remove('active');
+                    c.style.border = '2px solid #e5e7eb';
+                    c.style.background = '#f9fafb';
+                });
+
+                // Add active to clicked
+                this.classList.add('active');
+                this.style.border = '2px solid #f8bbd9';
+                this.style.background = '#fdf2f8';
+
+                // Update selected preset
+                selectedPreset = this.getAttribute('data-preset');
+
+                // Update preview
+                const resources = FHIR_RESOURCE_PRESETS[selectedPreset];
+                const preview = document.getElementById('selectedResourcesList');
+                if (preview) {
+                    if (selectedPreset === 'all') {
+                        preview.textContent = 'All 150+ FHIR R4 resources';
+                    } else {
+                        preview.textContent = resources.join(', ');
+                    }
+                }
+            });
+        });
+
+        // Advanced settings toggle
+        document.getElementById('fhirAdvancedToggleBtn')?.addEventListener('click', function() {
+            const panel = document.getElementById('fhirAdvancedPanel');
+            const arrow = this.querySelector('span');
+            if (panel.style.display === 'none') {
+                panel.style.display = 'block';
+                arrow.textContent = '▲';
+            } else {
+                panel.style.display = 'none';
+                arrow.textContent = '▼';
+            }
+        });
+
+        // Authentication type change
+        document.getElementById('fhirAuthType')?.addEventListener('change', function() {
+            const bearerField = document.getElementById('bearerTokenField');
+            if (this.value === 'bearer_token') {
+                bearerField.style.display = 'block';
+            } else {
+                bearerField.style.display = 'none';
+            }
+        });
+
+        // Test FHIR connection
+        document.getElementById('testFhirConnectionBtn')?.addEventListener('click', async function() {
+            const baseUrl = document.getElementById('fhirBaseUrl').value;
+            const resultDiv = document.getElementById('fhirTestResult');
+
+            if (!baseUrl) {
+                resultDiv.style.display = 'block';
+                resultDiv.style.background = '#fef2f2';
+                resultDiv.style.border = '1px solid #ef4444';
+                resultDiv.style.color = '#dc2626';
+                resultDiv.textContent = '❌ Please enter a FHIR Base URL';
+                return;
+            }
+
+            // Show loading
+            this.disabled = true;
+            this.textContent = '🔄 Testing connection...';
+            resultDiv.style.display = 'block';
+            resultDiv.style.background = '#fffbeb';
+            resultDiv.style.border = '1px solid #f59e0b';
+            resultDiv.style.color = '#d97706';
+            resultDiv.textContent = 'Testing FHIR endpoint...';
+
+            try {
+                const response = await fetch('/api/fhir/test-connection', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        base_url: baseUrl,
+                        auth_type: document.getElementById('fhirAuthType').value,
+                        bearer_token: document.getElementById('fhirBearerToken').value
+                    })
+                });
+
+                const result = await response.json();
+
+                if (result.success) {
+                    resultDiv.style.background = '#f0fdf4';
+                    resultDiv.style.border = '1px solid #22c55e';
+                    resultDiv.style.color = '#16a34a';
+                    resultDiv.innerHTML = `✅ Connection successful!<br><small>FHIR Version: ${result.fhir_version || 'R4'}</small>`;
+                } else {
+                    resultDiv.style.background = '#fef2f2';
+                    resultDiv.style.border = '1px solid #ef4444';
+                    resultDiv.style.color = '#dc2626';
+                    resultDiv.textContent = `❌ Connection failed: ${result.error}`;
+                }
+            } catch (error) {
+                resultDiv.style.background = '#fef2f2';
+                resultDiv.style.border = '1px solid #ef4444';
+                resultDiv.style.color = '#dc2626';
+                resultDiv.textContent = `❌ Error: ${error.message}`;
+            } finally {
+                this.disabled = false;
+                this.textContent = '🔗 Test FHIR Connection';
+            }
+        });
+
+        // ============================================================
+        // End of Step 5 Event Handlers
+        // ============================================================
+    </script>
+
+    <!-- Wizard Navigation with FHIR Step Skip Logic -->
+    <script src="js/core/wizard-navigation.js"></script>
+
+    <!-- Step 4 FHIR Transformation Module -->
+    <script src="js/step4-fhir-transform.js"></script>
+
+    <script src="/js/ai-assistant.js"></script>
+</body>
+</html>

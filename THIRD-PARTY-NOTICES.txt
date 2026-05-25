@@ -1,0 +1,158 @@
+ezHealthKonnect - Third-Party Software Notices
+================================================
+
+This file contains the licenses and notices for open source software
+components used in ezHealthKonnect.
+
+================================================================================
+SECTION 1: MIT LICENSE COMPONENTS
+================================================================================
+
+The following components are distributed under the MIT License:
+
+  Node.js dependencies:
+    axios                   https://github.com/axios/axios
+    bcryptjs                https://github.com/dcodeIO/bcrypt.js
+    bull                    https://github.com/OptimalBits/bull
+    cors                    https://github.com/expressjs/cors
+    express                 https://github.com/expressjs/express
+    express-session         https://github.com/expressjs/session
+    fast-xml-parser         https://github.com/NaturalIntelligence/fast-xml-parser
+    helmet                  https://github.com/helmetjs/helmet
+    hl7-dictionary          https://github.com/fernandojsg/hl7-dictionary
+    http-proxy-middleware   https://github.com/chimurai/http-proxy-middleware
+    ioredis                 https://github.com/redis/ioredis
+    jsonwebtoken            https://github.com/auth0/node-jsonwebtoken
+    morgan                  https://github.com/expressjs/morgan
+    multer                  https://github.com/expressjs/multer
+    node-fetch              https://github.com/node-fetch/node-fetch
+    p-limit                 https://github.com/sindresorhus/p-limit
+    pg                      https://github.com/brianc/node-postgres
+    redis                   https://github.com/redis/node-redis
+    sequelize               https://github.com/sequelize/sequelize
+    xml2js                  https://github.com/Leonidas-from-XIV/node-xml2js
+
+  Go dependencies:
+    github.com/dop251/goja                  https://github.com/dop251/goja
+    github.com/gin-gonic/gin                https://github.com/gin-gonic/gin
+    github.com/gin-contrib/cors             https://github.com/gin-contrib/cors
+    github.com/joho/godotenv                https://github.com/joho/godotenv
+    github.com/lib/pq                       https://github.com/lib/pq
+    github.com/parquet-go/parquet-go        https://github.com/parquet-go/parquet-go
+    github.com/sijms/go-ora/v2              https://github.com/sijms/go-ora
+    github.com/stretchr/testify             https://github.com/stretchr/testify
+    github.com/wk8/go-ordered-map/v2        https://github.com/wk8/go-ordered-map
+    github.com/google/uuid                  https://github.com/google/uuid
+
+MIT License text:
+  Permission is hereby granted, free of charge, to any person obtaining a copy
+  of this software and associated documentation files (the "Software"), to deal
+  in the Software without restriction, including without limitation the rights
+  to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+  copies of the Software, and to permit persons to whom the Software is
+  furnished to do so, subject to the following conditions:
+
+  The above copyright notice and this permission notice shall be included in all
+  copies or substantial portions of the Software.
+
+  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+  IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+  FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+  AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+  LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+  SOFTWARE.
+
+================================================================================
+SECTION 2: APACHE LICENSE 2.0 COMPONENTS
+================================================================================
+
+The following components are distributed under the Apache License, Version 2.0:
+
+  Node.js dependencies:
+    mongodb                 https://github.com/mongodb/node-mongodb-native
+    puppeteer               https://github.com/puppeteer/puppeteer
+
+  Go dependencies:
+    github.com/IBM/sarama                   https://github.com/IBM/sarama
+    github.com/aws/aws-sdk-go-v2            https://github.com/aws/aws-sdk-go-v2
+    github.com/linkedin/goavro/v2           https://github.com/linkedin/goavro
+    github.com/prometheus/client_golang     https://github.com/prometheus/client_golang
+    go.mongodb.org/mongo-driver             https://github.com/mongodb/mongo-go-driver
+    github.com/go-git/go-git/v5             https://github.com/go-git/go-git
+
+You may obtain a copy of the Apache License at:
+  http://www.apache.org/licenses/LICENSE-2.0
+
+================================================================================
+SECTION 3: BSD LICENSE COMPONENTS
+================================================================================
+
+The following components are distributed under BSD 2-Clause or 3-Clause licenses:
+
+  Node.js dependencies:
+    dotenv                  https://github.com/motdotla/dotenv          (BSD-2-Clause)
+    joi                     https://github.com/hapijs/joi               (BSD-3-Clause)
+
+  Go dependencies:
+    github.com/google/uuid                  BSD-3-Clause
+    github.com/microsoft/go-mssqldb        BSD-3-Clause
+    github.com/redis/go-redis/v9            BSD-2-Clause
+    github.com/xuri/excelize/v2             BSD-3-Clause
+    golang.org/x/crypto                     BSD-3-Clause
+    golang.org/x/net                        BSD-3-Clause
+    golang.org/x/sys                        BSD-3-Clause
+    golang.org/x/text                       BSD-3-Clause
+    github.com/ProtonMail/go-crypto         BSD-3-Clause
+
+================================================================================
+SECTION 4: ISC LICENSE COMPONENTS
+================================================================================
+
+  node-cron               https://github.com/node-cron/node-cron
+
+================================================================================
+SECTION 5: MOZILLA PUBLIC LICENSE 2.0 (MPL-2.0) COMPONENTS
+================================================================================
+
+The following components are distributed under the Mozilla Public License 2.0.
+MPL-2.0 is a weak copyleft license. If you modify the source files of these
+libraries (not your own application code), you must make those modified files
+available under MPL-2.0. Using these libraries unmodified in a larger work
+(open or commercial) does not require your work to be MPL-2.0.
+
+  Go dependencies:
+    github.com/go-sql-driver/mysql          https://github.com/go-sql-driver/mysql
+    github.com/rabbitmq/amqp091-go         https://github.com/rabbitmq/amqp091-go
+
+  Full license text: https://www.mozilla.org/en-US/MPL/2.0/
+
+================================================================================
+SECTION 6: FHIR / HL7 STANDARDS NOTICES
+================================================================================
+
+This software implements the HL7 FHIR R4 specification and the HL7 v2.x
+message format. These are open healthcare interoperability standards.
+
+  FHIR R4 Specification
+    Publisher:  HL7 International
+    License:    Creative Commons CC0 1.0 Universal (Public Domain Dedication)
+    URL:        https://hl7.org/fhir/R4/
+    Notice:     The FHIR specification is provided free of charge. HL7
+                has waived all copyright claims to the FHIR specification.
+
+  US Core Implementation Guide
+    Publisher:  HL7 International / ONC
+    License:    Creative Commons CC0 1.0 Universal
+    URL:        https://hl7.org/fhir/us/core/
+
+  HL7 v2.x Standard
+    Publisher:  HL7 International
+    Notice:     This software implements the HL7 v2 wire format (pipe-delimited
+                message structure) as a standards-based implementation.
+                The HL7 v2 segment and field definitions referenced herein
+                are descriptions of a public interoperability standard.
+
+================================================================================
+END OF THIRD-PARTY NOTICES
+================================================================================

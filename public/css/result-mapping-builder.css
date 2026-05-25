@@ -1,0 +1,231 @@
+/**
+ * ResultMappingBuilder Component Styles
+ * Visual builder for database column to output field mappings
+ */
+
+.result-mapping-builder {
+    border: 1px solid #dee2e6;
+    border-radius: 4px;
+    background: #fff;
+}
+
+.mapping-builder-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 16px;
+    background: #f8f9fa;
+    border-bottom: 1px solid #dee2e6;
+}
+
+.builder-label {
+    font-weight: 500;
+    color: #495057;
+    font-size: 14px;
+}
+
+.mapping-builder-header .add-mapping-btn {
+    font-size: 13px;
+    padding: 6px 12px;
+}
+
+.mapping-table-container {
+    padding: 16px;
+    min-height: 150px;
+}
+
+.mapping-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-bottom: 0;
+}
+
+.mapping-table thead th {
+    background: #f8f9fa;
+    color: #495057;
+    font-weight: 600;
+    font-size: 13px;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+    padding: 10px 12px;
+    border-bottom: 2px solid #dee2e6;
+}
+
+.mapping-table tbody tr {
+    border-bottom: 1px solid #f0f0f0;
+    transition: background-color 0.2s ease;
+}
+
+.mapping-table tbody tr:hover {
+    background-color: #f8f9fa;
+}
+
+.mapping-table tbody tr.highlight-row {
+    background-color: #d4edda;
+    animation: fadeHighlight 2s ease-in-out;
+}
+
+@keyframes fadeHighlight {
+    0% { background-color: #d4edda; }
+    100% { background-color: transparent; }
+}
+
+.mapping-table tbody td {
+    padding: 10px 12px;
+    vertical-align: middle;
+}
+
+.mapping-table input.form-control {
+    font-size: 14px;
+    padding: 8px 12px;
+    border: 1px solid #ced4da;
+    border-radius: 4px;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.mapping-table input.form-control:focus {
+    border-color: #80bdff;
+    box-shadow: 0 0 0 0.2rem rgba(0, 123, 255, 0.25);
+    outline: 0;
+}
+
+.mapping-table input.form-control::placeholder {
+    color: #adb5bd;
+    font-style: italic;
+}
+
+.mapping-table .delete-row-btn {
+    padding: 6px 10px;
+}
+
+.mapping-table .delete-row-btn:hover {
+    background-color: #dc3545;
+    border-color: #dc3545;
+    transform: scale(1.05);
+}
+
+.empty-state {
+    text-align: center;
+    padding: 40px 20px;
+    color: #6c757d;
+}
+
+.empty-state i {
+    font-size: 48px;
+    color: #dee2e6;
+    margin-bottom: 16px;
+}
+
+.empty-state p {
+    font-size: 16px;
+    font-weight: 500;
+    margin-bottom: 8px;
+    color: #495057;
+}
+
+.empty-state small {
+    font-size: 13px;
+    color: #6c757d;
+}
+
+.mapping-builder-footer {
+    padding: 12px 16px;
+    background: #f8f9fa;
+    border-top: 1px solid #dee2e6;
+}
+
+.mapping-builder-footer small {
+    display: block;
+    font-size: 12px;
+    color: #6c757d;
+    line-height: 1.5;
+}
+
+.mapping-builder-footer i {
+    color: #17a2b8;
+    margin-right: 4px;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+    .mapping-builder-header {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 10px;
+    }
+
+    .mapping-builder-header .add-mapping-btn {
+        width: 100%;
+    }
+
+    .mapping-table {
+        font-size: 13px;
+    }
+
+    .mapping-table thead th {
+        padding: 8px;
+        font-size: 11px;
+    }
+
+    .mapping-table tbody td {
+        padding: 8px;
+    }
+
+    .mapping-table input.form-control {
+        font-size: 13px;
+        padding: 6px 8px;
+    }
+}
+
+/* Dark mode support (optional) */
+@media (prefers-color-scheme: dark) {
+    .result-mapping-builder {
+        background: #2d3748;
+        border-color: #4a5568;
+    }
+
+    .mapping-builder-header,
+    .mapping-builder-footer {
+        background: #1a202c;
+        border-color: #4a5568;
+    }
+
+    .builder-label,
+    .mapping-table thead th {
+        color: #e2e8f0;
+    }
+
+    .mapping-table tbody tr {
+        border-color: #4a5568;
+    }
+
+    .mapping-table tbody tr:hover {
+        background-color: #374151;
+    }
+
+    .mapping-table input.form-control {
+        background: #374151;
+        color: #e2e8f0;
+        border-color: #4a5568;
+    }
+
+    .mapping-table input.form-control::placeholder {
+        color: #718096;
+    }
+
+    .empty-state {
+        color: #a0aec0;
+    }
+
+    .empty-state i {
+        color: #4a5568;
+    }
+
+    .empty-state p {
+        color: #cbd5e0;
+    }
+
+    .mapping-builder-footer small {
+        color: #a0aec0;
+    }
+}

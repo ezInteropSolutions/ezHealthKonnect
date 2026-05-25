@@ -1,0 +1,851 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FHIR Validator - ezHealthKonnect</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="css/dashboard.css">
+    <link rel="stylesheet" href="css/layout/main-layout.css?v=5">
+    <style>
+        .validator-layout {
+            display: grid;
+            grid-template-columns: 440px 1fr;
+            gap: 0;
+            height: calc(100vh - 56px);
+            overflow: hidden;
+        }
+
+        /* ── Input panel ── */
+        .input-panel {
+            display: flex;
+            flex-direction: column;
+            border-right: 1px solid #e5e7eb;
+            background: #fff;
+            overflow: hidden;
+        }
+
+        .input-panel-header {
+            padding: 14px 18px 10px;
+            border-bottom: 1px solid #e5e7eb;
+            background: #f8fafc;
+        }
+
+        .input-panel-header h2 {
+            font-size: 14px;
+            font-weight: 700;
+            color: #1e3a8a;
+            margin: 0 0 3px 0;
+        }
+
+        .input-panel-header p {
+            font-size: 11.5px;
+            color: #6b7280;
+            margin: 0;
+        }
+
+        .options-row {
+            display: flex;
+            gap: 8px;
+            padding: 10px 16px;
+            border-bottom: 1px solid #f0f0f0;
+            background: #fafafa;
+        }
+
+        .options-row select {
+            flex: 1;
+            padding: 5px 8px;
+            font-size: 12px;
+            border: 1px solid #d1d5db;
+            border-radius: 6px;
+            color: #374151;
+            background: #fff;
+            cursor: pointer;
+        }
+
+        .options-row label {
+            font-size: 10px;
+            color: #9ca3af;
+            display: block;
+            margin-bottom: 2px;
+        }
+
+        .options-row .opt-group { flex: 1; }
+
+        .fhir-textarea-wrap {
+            flex: 1;
+            padding: 10px 14px;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        #fhirInput {
+            flex: 1;
+            width: 100%;
+            font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+            font-size: 11.5px;
+            line-height: 1.6;
+            padding: 10px;
+            border: 1px solid #d1d5db;
+            border-radius: 8px;
+            resize: none;
+            color: #1f2937;
+            background: #fafafa;
+            outline: none;
+            transition: border-color 0.2s;
+            box-sizing: border-box;
+        }
+
+        #fhirInput:focus { border-color: #3b82f6; background: #fff; }
+        #fhirInput::placeholder { color: #9ca3af; font-style: italic; font-size: 11px; }
+
+        .sample-btn-row {
+            display: flex;
+            gap: 6px;
+            padding: 0 14px 8px;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+
+        .btn-sample {
+            padding: 4px 9px;
+            font-size: 11px;
+            border: 1px solid #bfdbfe;
+            background: #eff6ff;
+            color: #1d4ed8;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: 500;
+            transition: all 0.15s;
+        }
+
+        .btn-sample:hover { background: #dbeafe; border-color: #93c5fd; }
+
+        .input-actions {
+            display: flex;
+            gap: 8px;
+            padding: 0 14px 14px;
+        }
+
+        .btn-validate {
+            flex: 1;
+            padding: 9px 16px;
+            background: #1e3a8a;
+            color: #fff;
+            border: none;
+            border-radius: 8px;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            transition: background 0.2s;
+        }
+
+        .btn-validate:hover { background: #1e40af; }
+        .btn-validate:disabled { background: #9ca3af; cursor: not-allowed; }
+
+        .btn-clear {
+            padding: 9px 13px;
+            background: #f3f4f6;
+            color: #374151;
+            border: 1px solid #d1d5db;
+            border-radius: 8px;
+            font-size: 13px;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .btn-clear:hover { background: #e5e7eb; }
+
+        /* ── Results panel ── */
+        .results-panel {
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            background: #f9fafb;
+        }
+
+        .results-header {
+            padding: 12px 20px;
+            border-bottom: 1px solid #e5e7eb;
+            background: #fff;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            min-height: 48px;
+        }
+
+        .results-header h2 { font-size: 14px; font-weight: 700; color: #1f2937; margin: 0; flex: 1; }
+
+        .result-badges { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+
+        .badge {
+            font-size: 11px;
+            padding: 3px 9px;
+            border-radius: 12px;
+            font-weight: 600;
+        }
+
+        .badge-pass    { background: #d1fae5; color: #065f46; }
+        .badge-fail    { background: #fee2e2; color: #991b1b; }
+        .badge-warn    { background: #fef3c7; color: #92400e; }
+        .badge-info    { background: #f3f4f6; color: #374151; }
+        .badge-profile { background: #ede9fe; color: #5b21b6; }
+
+        .results-body { flex: 1; overflow-y: auto; padding: 16px 20px; }
+
+        /* ── Empty / spinner / error ── */
+        .empty-state {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
+            color: #9ca3af;
+            text-align: center;
+            gap: 12px;
+        }
+
+        .empty-state i       { font-size: 48px; color: #d1d5db; }
+        .empty-state h3      { font-size: 16px; font-weight: 600; color: #6b7280; margin: 0; }
+        .empty-state p       { font-size: 13px; margin: 0; max-width: 340px; line-height: 1.5; }
+
+        .parse-spinner {
+            display: none;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            color: #6b7280;
+            font-size: 13px;
+            padding: 40px;
+        }
+
+        .parse-spinner.visible { display: flex; }
+
+        .spinner-icon {
+            width: 20px; height: 20px;
+            border: 2px solid #e5e7eb;
+            border-top-color: #3b82f6;
+            border-radius: 50%;
+            animation: spin 0.7s linear infinite;
+        }
+
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        .parse-error {
+            display: none;
+            background: #fef2f2;
+            border: 1px solid #fecaca;
+            border-radius: 8px;
+            padding: 14px;
+            color: #991b1b;
+            font-size: 13px;
+        }
+
+        .parse-error.visible { display: block; }
+
+        /* ── Validation result cards ── */
+        .result-summary {
+            background: #fff;
+            border: 1px solid #e5e7eb;
+            border-radius: 10px;
+            padding: 14px 16px;
+            margin-bottom: 12px;
+        }
+
+        .result-summary.pass { border-left: 4px solid #22c55e; }
+        .result-summary.fail { border-left: 4px solid #ef4444; }
+
+        .summary-header {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 8px;
+        }
+
+        .summary-title { font-size: 13px; font-weight: 700; color: #1f2937; flex: 1; }
+        .summary-icon  { font-size: 16px; }
+        .summary-icon.pass { color: #22c55e; }
+        .summary-icon.fail { color: #ef4444; }
+
+        .summary-meta { font-size: 11.5px; color: #6b7280; display: flex; gap: 14px; flex-wrap: wrap; }
+        .summary-meta span { display: flex; align-items: center; gap: 4px; }
+
+        .issue-list {
+            margin-top: 10px;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        /* ── Structured issue rows ── */
+        .issue-row {
+            display: flex;
+            gap: 10px;
+            padding: 8px 12px;
+            border-radius: 6px;
+            margin-bottom: 4px;
+            align-items: flex-start;
+        }
+
+        .issue-row.issue-error   { background: #fef2f2; border-left: 3px solid #f87171; }
+        .issue-row.issue-warning { background: #fffbeb; border-left: 3px solid #fbbf24; }
+        .issue-row.issue-info    { background: #eff6ff; border-left: 3px solid #93c5fd; }
+
+        .issue-icon {
+            font-size: 13px;
+            margin-top: 1px;
+            flex-shrink: 0;
+            width: 16px;
+            text-align: center;
+        }
+
+        .issue-error   .issue-icon { color: #dc2626; }
+        .issue-warning .issue-icon { color: #d97706; }
+        .issue-info    .issue-icon { color: #2563eb; }
+
+        .issue-body { flex: 1; min-width: 0; }
+
+        .issue-header {
+            display: flex;
+            align-items: center;
+            gap: 7px;
+            margin-bottom: 3px;
+            flex-wrap: wrap;
+        }
+
+        .issue-type {
+            font-size: 10.5px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+        }
+
+        .issue-error   .issue-type { color: #991b1b; }
+        .issue-warning .issue-type { color: #92400e; }
+        .issue-info    .issue-type { color: #1e40af; }
+
+        .issue-path {
+            font-size: 11px;
+            font-family: 'Consolas', 'Monaco', monospace;
+            background: rgba(0,0,0,0.06);
+            padding: 1px 6px;
+            border-radius: 3px;
+            color: #374151;
+            font-weight: 600;
+        }
+
+        .issue-msg {
+            font-size: 12px;
+            color: #374151;
+            line-height: 1.5;
+        }
+
+        .resource-list {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            margin-top: 12px;
+        }
+
+        .resource-card {
+            background: #fff;
+            border: 1px solid #e5e7eb;
+            border-radius: 8px;
+            padding: 10px 14px;
+        }
+
+        .resource-card.pass { border-left: 3px solid #86efac; }
+        .resource-card.fail { border-left: 3px solid #fca5a5; }
+
+        .resource-card-header {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 4px;
+        }
+
+        .resource-type-badge {
+            font-size: 11px;
+            font-weight: 700;
+            padding: 2px 8px;
+            border-radius: 4px;
+            background: #ede9fe;
+            color: #5b21b6;
+        }
+
+        .resource-id {
+            font-size: 11px;
+            color: #9ca3af;
+            font-family: monospace;
+        }
+
+        .resource-status {
+            margin-left: auto;
+            font-size: 11px;
+            font-weight: 600;
+        }
+
+        .resource-status.pass { color: #16a34a; }
+        .resource-status.fail { color: #dc2626; }
+
+        /* ── Top bar ── */
+        .page-topbar {
+            height: 56px;
+            background: #fff;
+            border-bottom: 1px solid #e5e7eb;
+            display: flex;
+            align-items: center;
+            padding: 0 22px;
+            gap: 10px;
+        }
+
+        .page-topbar h1 { font-size: 15px; font-weight: 700; color: #1e3a8a; margin: 0; }
+
+        .page-topbar .breadcrumb { font-size: 12px; color: #9ca3af; }
+        .page-topbar .breadcrumb a { color: #6b7280; text-decoration: none; }
+        .page-topbar .breadcrumb a:hover { color: #1e3a8a; }
+    </style>
+</head>
+<body>
+    <div class="dashboard-container">
+        <!-- Sidebar (populated by sidebar-nav.js) -->
+        <nav class="sidebar" id="sidebar"></nav>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Top bar -->
+            <div class="page-topbar">
+                <i class="fas fa-shield-alt" style="color:#1e3a8a; font-size:15px;"></i>
+                <h1>FHIR Validator</h1>
+                <span class="breadcrumb">
+                    <a href="dashboard.html">Home</a> › Tools › FHIR Validator
+                </span>
+            </div>
+
+            <!-- Two-panel layout -->
+            <div class="validator-layout">
+
+                <!-- LEFT: Input -->
+                <div class="input-panel">
+                    <div class="input-panel-header">
+                        <h2><i class="fas fa-paste" style="margin-right:5px;"></i>Paste FHIR JSON</h2>
+                        <p>Paste a FHIR R4 resource or Bundle to validate it against the compiled R4 schema registry</p>
+                    </div>
+
+                    <!-- Options row -->
+                    <div class="options-row">
+                        <div class="opt-group">
+                            <label>Level</label>
+                            <select id="levelSelect">
+                                <option value="basic">Basic</option>
+                                <option value="standard" selected>Standard</option>
+                                <option value="strict">Strict</option>
+                            </select>
+                        </div>
+                        <div class="opt-group">
+                            <label>Profile</label>
+                            <select id="profileSelect">
+                                <option value="base" selected>Base R4</option>
+                                <option value="us-core">US Core</option>
+                            </select>
+                        </div>
+                        <div class="opt-group">
+                            <label>Version</label>
+                            <select id="versionSelect">
+                                <option value="R4" selected>R4</option>
+                                <option value="R5">R5</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <!-- Textarea -->
+                    <div class="fhir-textarea-wrap">
+                        <textarea id="fhirInput" placeholder='{"resourceType": "Patient", "id": "example", "name": [{"use": "official", "family": "Doe", "given": ["John"]}], "gender": "male", "birthDate": "1990-01-15"}'></textarea>
+                    </div>
+
+                    <!-- Sample buttons -->
+                    <div class="sample-btn-row">
+                        <span style="font-size:11px; color:#9ca3af; align-self:center;">Samples:</span>
+                        <button class="btn-sample" onclick="loadSample('patient')">Patient</button>
+                        <button class="btn-sample" onclick="loadSample('observation')">Observation</button>
+                        <button class="btn-sample" onclick="loadSample('bundle')">Bundle</button>
+                        <button class="btn-sample" onclick="loadSample('invalid')">Invalid</button>
+                    </div>
+
+                    <!-- Actions -->
+                    <div class="input-actions">
+                        <button class="btn-validate" id="validateBtn" onclick="validateResource()">
+                            <i class="fas fa-shield-alt"></i> Validate
+                        </button>
+                        <button class="btn-clear" onclick="clearAll()" title="Clear">
+                            <i class="fas fa-xmark"></i>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- RIGHT: Results -->
+                <div class="results-panel">
+                    <div class="results-header">
+                        <h2 id="resultsTitle">Results</h2>
+                        <div class="result-badges" id="resultBadges"></div>
+                    </div>
+
+                    <div class="results-body">
+                        <div class="parse-spinner" id="parseSpinner">
+                            <div class="spinner-icon"></div>
+                            Validating against R4 schema registry…
+                        </div>
+
+                        <div class="parse-error" id="parseError"></div>
+
+                        <div class="empty-state" id="emptyState">
+                            <i class="fas fa-shield-alt"></i>
+                            <h3>Nothing validated yet</h3>
+                            <p>Paste a FHIR resource or Bundle on the left and click <strong>Validate</strong> to run it against the compiled R4 schema registry including structure, terminology, and constraint checks.</p>
+                        </div>
+
+                        <div id="resultOutput" style="display:none;"></div>
+                    </div>
+                </div>
+
+            </div>
+        </main>
+    </div>
+
+    <script src="/js/core/app-dialogs.js"></script>
+    <script src="/js/services/AuthService.js"></script>
+    <script src="js/components/sidebar-nav.js?v=4"></script>
+
+    <script>
+        // ── Sample FHIR payloads ──────────────────────────────────────────────────
+        const SAMPLES = {
+            patient: {
+                resourceType: 'Patient',
+                id: 'example-patient',
+                name: [{ use: 'official', family: 'Doe', given: ['John', 'A'] }],
+                gender: 'male',
+                birthDate: '1990-01-15',
+                telecom: [{ system: 'phone', value: '555-123-4567', use: 'home' }],
+                address: [{ use: 'home', line: ['123 Main St'], city: 'Springfield', state: 'IL', postalCode: '62701' }]
+            },
+            observation: {
+                resourceType: 'Observation',
+                id: 'example-obs',
+                status: 'final',
+                category: [{ coding: [{ system: 'http://terminology.hl7.org/CodeSystem/observation-category', code: 'laboratory' }] }],
+                code: { coding: [{ system: 'http://loinc.org', code: '718-7', display: 'Hemoglobin' }] },
+                subject: { reference: 'Patient/example-patient' },
+                valueQuantity: { value: 14.2, unit: 'g/dL', system: 'http://unitsofmeasure.org', code: 'g/dL' }
+            },
+            bundle: {
+                resourceType: 'Bundle',
+                id: 'example-bundle',
+                type: 'collection',
+                entry: [
+                    { fullUrl: 'urn:uuid:patient-1', resource: { resourceType: 'Patient', id: 'patient-1', name: [{ family: 'Smith' }], gender: 'female' } },
+                    { fullUrl: 'urn:uuid:obs-1', resource: { resourceType: 'Observation', id: 'obs-1', status: 'final', code: { coding: [{ code: 'BP' }] }, subject: { reference: 'urn:uuid:patient-1' } } }
+                ]
+            },
+            invalid: {
+                resourceType: 'Patient',
+                id: 'bad-patient',
+                gender: 'unknown-gender-code',
+                telecom: [{ value: '555-0000' }]
+            }
+        };
+
+        function loadSample(name) {
+            document.getElementById('fhirInput').value = JSON.stringify(SAMPLES[name], null, 2);
+            // Invalid sample has terminology errors — switch to Strict so they surface
+            if (name === 'invalid') {
+                document.getElementById('levelSelect').value = 'strict';
+            }
+        }
+
+        function clearAll() {
+            document.getElementById('fhirInput').value = '';
+            showEmpty();
+        }
+
+        function showEmpty() {
+            document.getElementById('emptyState').style.display = 'flex';
+            document.getElementById('resultOutput').style.display = 'none';
+            document.getElementById('parseError').classList.remove('visible');
+            document.getElementById('parseSpinner').classList.remove('visible');
+            document.getElementById('resultBadges').innerHTML = '';
+            document.getElementById('resultsTitle').textContent = 'Results';
+        }
+
+        function esc(s) {
+            return String(s)
+                .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        }
+
+        async function validateResource() {
+            const raw = document.getElementById('fhirInput').value.trim();
+            if (!raw) {
+                document.getElementById('fhirInput').focus();
+                return;
+            }
+
+            // Try to parse JSON in browser first to give a fast error
+            let parsed;
+            try { parsed = JSON.parse(raw); } catch (e) {
+                const errEl = document.getElementById('parseError');
+                errEl.textContent = 'Invalid JSON: ' + e.message;
+                errEl.classList.add('visible');
+                document.getElementById('emptyState').style.display = 'none';
+                return;
+            }
+
+            // Show spinner
+            document.getElementById('emptyState').style.display = 'none';
+            document.getElementById('resultOutput').style.display = 'none';
+            document.getElementById('parseError').classList.remove('visible');
+            document.getElementById('parseSpinner').classList.add('visible');
+            document.getElementById('validateBtn').disabled = true;
+            document.getElementById('resultBadges').innerHTML = '';
+
+            const level   = document.getElementById('levelSelect').value;
+            const profile = document.getElementById('profileSelect').value;
+            const version = document.getElementById('versionSelect').value;
+
+            try {
+                const resp = await fetch('/api/fhir/validate', {
+                    method: 'POST',
+                    credentials: 'include',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ resource: parsed, level, profile, version })
+                });
+
+                const text = await resp.text();
+                document.getElementById('parseSpinner').classList.remove('visible');
+                document.getElementById('validateBtn').disabled = false;
+
+                if (!resp.ok) {
+                    const errEl = document.getElementById('parseError');
+                    errEl.textContent = `Server returned ${resp.status}: ${text}`;
+                    errEl.classList.add('visible');
+                    return;
+                }
+
+                let result;
+                try { result = JSON.parse(text); } catch (e) {
+                    const errEl = document.getElementById('parseError');
+                    errEl.textContent = `Invalid response from server: ${text.substring(0, 200)}`;
+                    errEl.classList.add('visible');
+                    return;
+                }
+
+                if (!result.success) {
+                    const errEl = document.getElementById('parseError');
+                    errEl.textContent = result.error || 'Validation request failed';
+                    errEl.classList.add('visible');
+                    return;
+                }
+
+                renderResult(result.data);
+
+            } catch (err) {
+                document.getElementById('parseSpinner').classList.remove('visible');
+                document.getElementById('validateBtn').disabled = false;
+                const errEl = document.getElementById('parseError');
+                errEl.textContent = 'Request failed: ' + err.message;
+                errEl.classList.add('visible');
+            }
+        }
+
+        // ── Issue parsing ─────────────────────────────────────────────────────
+
+        const CODE_META = {
+            'invalid-code':                   { label: 'Invalid Code',           icon: 'fa-ban' },
+            'required-field':                 { label: 'Missing Required Field',  icon: 'fa-asterisk' },
+            'modifier-element':               { label: 'Modifier Element',        icon: 'fa-triangle-exclamation' },
+            'must-support':                   { label: 'Must Support',            icon: 'fa-circle-info' },
+            'unresolved-reference':           { label: 'Unresolved Reference',    icon: 'fa-link-slash' },
+            'missing-resource-type':          { label: 'Missing resourceType',    icon: 'fa-file-circle-xmark' },
+            'unknown-resource-type':          { label: 'Unknown Resource Type',   icon: 'fa-file-circle-question' },
+            'no-profile':                     { label: 'No Profile Found',        icon: 'fa-layer-group' },
+            'external-terminology':           { label: 'External Terminology',    icon: 'fa-cloud' },
+            'partial-terminology':            { label: 'Partial Check',           icon: 'fa-cloud' },
+            'extensible-code-not-in-valueset':{ label: 'Code Not in ValueSet',   icon: 'fa-list-check' },
+            'missing-id':                     { label: 'Missing id',              icon: 'fa-fingerprint' },
+        };
+
+        function parseIssue(str) {
+            // Format: "[code] path: message"  or  "[code] message"
+            const codeMatch = str.match(/^\[([^\]]+)\]\s*/);
+            const code = codeMatch ? codeMatch[1] : '';
+            const rest = codeMatch ? str.slice(codeMatch[0].length) : str;
+
+            // Extract path if the segment before ": " looks like a FHIR path
+            const colonIdx = rest.indexOf(': ');
+            let path = '', message = rest;
+            if (colonIdx !== -1) {
+                const candidate = rest.slice(0, colonIdx);
+                if (/^[A-Z][a-zA-Z]+(\.[a-zA-Z0-9\[\]]+)*$/.test(candidate)) {
+                    path = candidate;
+                    message = rest.slice(colonIdx + 2);
+                }
+            }
+            const meta = CODE_META[code] || {
+                label: code.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase()),
+                icon: 'fa-circle-exclamation'
+            };
+            return { code, path, message, label: meta.label, icon: meta.icon };
+        }
+
+        function renderIssue(str, severity) {
+            const { label, icon, path, message } = parseIssue(str);
+            const cls = severity === 'error' ? 'issue-error'
+                      : severity === 'information' ? 'issue-info'
+                      : 'issue-warning';
+            const pathHtml = path
+                ? `<span class="issue-path">${esc(path)}</span>`
+                : '';
+            return `<div class="issue-row ${cls}">
+                <div class="issue-icon"><i class="fas ${icon}"></i></div>
+                <div class="issue-body">
+                    <div class="issue-header">
+                        <span class="issue-type">${esc(label)}</span>${pathHtml}
+                    </div>
+                    <div class="issue-msg">${esc(message)}</div>
+                </div>
+            </div>`;
+        }
+
+        // Classify warnings — some are info-severity (disclosed as information)
+        function issueClass(str) {
+            const m = str.match(/^\[([^\]]+)\]/);
+            const code = m ? m[1] : '';
+            if (code === 'external-terminology' || code === 'partial-terminology' || code === 'must-support') {
+                return 'information';
+            }
+            return 'warning';
+        }
+
+        // ── Result rendering ──────────────────────────────────────────────────
+
+        function renderResult(data) {
+            const isBundle  = data.mode === 'bundle';
+            const pass      = data.valid;
+            const resources = data.resources || [];
+            const infoCount = (data.warnings || []).filter(w => issueClass(w) === 'information').length;
+            const warnCount = data.warning_count - infoCount;
+
+            // Header
+            document.getElementById('resultsTitle').textContent =
+                isBundle ? `Bundle (${data.resource_count} resource${data.resource_count !== 1 ? 's' : ''})`
+                         : (resources[0]?.resource_type || 'Resource');
+
+            const badges = [];
+            if (pass) {
+                badges.push('<span class="badge badge-pass"><i class="fas fa-check" style="margin-right:3px;"></i>Valid</span>');
+            } else {
+                badges.push(`<span class="badge badge-fail"><i class="fas fa-times" style="margin-right:3px;"></i>${data.error_count} error${data.error_count !== 1 ? 's' : ''}</span>`);
+            }
+            if (warnCount > 0)
+                badges.push(`<span class="badge badge-warn">${warnCount} warning${warnCount !== 1 ? 's' : ''}</span>`);
+            if (infoCount > 0)
+                badges.push(`<span class="badge" style="background:#dbeafe;color:#1e40af;">${infoCount} info</span>`);
+            badges.push(`<span class="badge badge-profile">${esc(data.version)} / ${esc(data.profile)}</span>`);
+            badges.push(`<span class="badge badge-info">${esc(data.level)}</span>`);
+            badges.push(`<span class="badge badge-info"><i class="fas fa-clock" style="margin-right:3px;"></i>${data.duration_ms}ms</span>`);
+            document.getElementById('resultBadges').innerHTML = badges.join('');
+
+            let html = '';
+
+            // ── Summary banner ────────────────────────────────────────────────
+            const bannerColor = pass ? '#f0fdf4' : '#fef2f2';
+            const bannerBorder = pass ? '#86efac' : '#fca5a5';
+            const bannerIcon  = pass ? 'fa-circle-check' : 'fa-circle-xmark';
+            const bannerIconColor = pass ? '#16a34a' : '#dc2626';
+
+            html += `<div class="result-summary ${pass ? 'pass' : 'fail'}" style="background:${bannerColor};border-color:${bannerBorder};">
+                <div class="summary-header">
+                    <i class="fas ${bannerIcon} summary-icon ${pass ? 'pass' : 'fail'}" style="color:${bannerIconColor};font-size:18px;"></i>
+                    <span class="summary-title" style="font-size:14px;">${pass ? 'Validation passed' : 'Validation failed'}</span>
+                </div>
+                <div class="summary-meta" style="margin-top:6px;font-size:12px;display:flex;gap:16px;flex-wrap:wrap;color:#6b7280;">
+                    <span><i class="fas fa-cubes" style="margin-right:4px;"></i>${data.resource_count} resource${data.resource_count !== 1 ? 's' : ''}</span>
+                    <span style="color:${data.error_count ? '#dc2626' : '#9ca3af'};font-weight:${data.error_count ? '600' : '400'};">
+                        <i class="fas fa-times-circle" style="margin-right:4px;"></i>${data.error_count} error${data.error_count !== 1 ? 's' : ''}
+                    </span>
+                    <span style="color:${warnCount ? '#d97706' : '#9ca3af'};font-weight:${warnCount ? '600' : '400'};">
+                        <i class="fas fa-triangle-exclamation" style="margin-right:4px;"></i>${warnCount} warning${warnCount !== 1 ? 's' : ''}
+                    </span>
+                    ${infoCount ? `<span style="color:#2563eb;"><i class="fas fa-circle-info" style="margin-right:4px;"></i>${infoCount} info</span>` : ''}
+                    <span><i class="fas fa-layer-group" style="margin-right:4px;"></i>${esc(data.mode)}</span>
+                </div>
+            </div>`;
+
+            // ── Per-resource cards ────────────────────────────────────────────
+            if (resources.length > 0) {
+                html += '<div class="resource-list">';
+                resources.forEach(r => {
+                    const rPass   = r.valid;
+                    const rErrors = r.errors   || [];
+                    const rWarns  = r.warnings || [];
+                    const rInfos  = rWarns.filter(w => issueClass(w) === 'information');
+                    const rRealW  = rWarns.filter(w => issueClass(w) !== 'information');
+
+                    html += `<div class="resource-card ${rPass ? 'pass' : 'fail'}">
+                        <div class="resource-card-header">
+                            <span class="resource-type-badge">${esc(r.resource_type || '?')}</span>
+                            <code class="resource-id">${esc(r.resource_id || '—')}</code>
+                            <span class="resource-status ${rPass ? 'pass' : 'fail'}" style="margin-left:auto;font-size:12px;font-weight:700;">
+                                <i class="fas ${rPass ? 'fa-circle-check' : 'fa-circle-xmark'}" style="margin-right:3px;"></i>${rPass ? 'Valid' : 'Invalid'}
+                            </span>
+                        </div>`;
+
+                    if (rErrors.length) {
+                        html += `<div style="margin-top:8px;">
+                            <div style="font-size:10.5px;font-weight:700;color:#991b1b;text-transform:uppercase;letter-spacing:0.04em;margin-bottom:4px;">
+                                <i class="fas fa-times-circle" style="margin-right:4px;"></i>${rErrors.length} Error${rErrors.length !== 1 ? 's' : ''}
+                            </div>`;
+                        rErrors.forEach(e => { html += renderIssue(e, 'error'); });
+                        html += '</div>';
+                    }
+                    if (rRealW.length) {
+                        html += `<div style="margin-top:8px;">
+                            <div style="font-size:10.5px;font-weight:700;color:#92400e;text-transform:uppercase;letter-spacing:0.04em;margin-bottom:4px;">
+                                <i class="fas fa-triangle-exclamation" style="margin-right:4px;"></i>${rRealW.length} Warning${rRealW.length !== 1 ? 's' : ''}
+                            </div>`;
+                        rRealW.forEach(w => { html += renderIssue(w, 'warning'); });
+                        html += '</div>';
+                    }
+                    if (rInfos.length) {
+                        html += `<div style="margin-top:8px;">
+                            <div style="font-size:10.5px;font-weight:700;color:#1e40af;text-transform:uppercase;letter-spacing:0.04em;margin-bottom:4px;">
+                                <i class="fas fa-circle-info" style="margin-right:4px;"></i>${rInfos.length} Info
+                            </div>`;
+                        rInfos.forEach(i => { html += renderIssue(i, 'information'); });
+                        html += '</div>';
+                    }
+
+                    html += '</div>';
+                });
+                html += '</div>';
+            }
+
+            const out = document.getElementById('resultOutput');
+            out.innerHTML = html;
+            out.style.display = 'block';
+        }
+
+        // Ctrl+Enter to validate
+        document.getElementById('fhirInput').addEventListener('keydown', e => {
+            if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') validateResource();
+        });
+
+        window.AuthService.initialize();
+    </script>
+    <script src="/js/ai-assistant.js"></script>
+</body>
+</html>

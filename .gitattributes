@@ -1,0 +1,13 @@
+# Auto-detect text files
+* text=auto
+
+# Force LF everywhere (recommended)
+* text eol=lf
+
+# (Optional explicit types – redundancy is fine)
+*.md   text eol=lf
+*.json text eol=lf
+*.yml  text eol=lf
+*.yaml text eol=lf
+*.sh   text eol=lf
+*.sql  text eol=lf

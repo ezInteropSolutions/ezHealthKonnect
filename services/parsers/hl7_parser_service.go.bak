@@ -1,0 +1,269 @@
+// services/parsers/hl7_parser_service.go
+// Adapter for existing HL7 parser
+
+package parsers
+
+import (
+	"fmt"
+	"time"
+
+	"ezhealthkonnect/hl7"
+	"ezhealthkonnect/models"
+)
+
+// HL7ParserService wraps existing HL7 parser (Adapter Pattern)
+type HL7ParserService struct {
+	// No dependencies - parser is standalone
+}
+
+// NewHL7ParserService creates new HL7 parser service (OOB)
+func NewHL7ParserService() *HL7ParserService {
+	return &HL7ParserService{}
+}
+
+// Parse implements MessageParser interface
+func (hp *HL7ParserService) Parse(rawContent string) (*models.ParserResult, error) {
+	startTime := time.Now()
+
+	// Call EXISTING parser (reuse all existing code)
+	enhancedResult := hl7.ParseWithRealSchema(rawContent)
+
+	if !enhancedResult.Success {
+		return &models.ParserResult{
+			Success:     false,
+			Format:      models.FormatHL7v2,
+			ParsedJSON:  nil,
+			Error:       enhancedResult.Error,
+			ParsingTime: time.Since(startTime),
+		}, fmt.Errorf("HL7 parsing failed: %s", enhancedResult.Error)
+	}
+
+	// Convert EnhancedParsedMessage to standard JSON structure
+	parsedJSON := convertToStandardJSON(enhancedResult)
+
+	// Extract metadata from parsed result
+	metadata := models.ParserMetadata{
+		ParserVersion:    "Real Schema Parser v1.0",
+		DetectedVersion:  enhancedResult.Version,
+		MessageType:      enhancedResult.MessageType.Name,
+		MessageControlID: extractControlID(enhancedResult),
+		SegmentCount:     len(enhancedResult.EnhancedSegments),
+		FieldCount:       countTotalFields(enhancedResult),
+		ParsedAt:         time.Now(),
+	}
+
+	// Convert validation errors
+	validationResult := models.ValidationResult{
+		IsValid:      len(enhancedResult.ValidationErrors) == 0,
+		Warnings:     extractWarnings(enhancedResult.ValidationErrors),
+		Errors:       extractErrors(enhancedResult.ValidationErrors),
+		WarningCount: countWarnings(enhancedResult.ValidationErrors),
+		ErrorCount:   countErrors(enhancedResult.ValidationErrors),
+	}
+
+	return &models.ParserResult{
+		Success:          true,
+		Format:           models.FormatHL7v2,
+		ParsedJSON:       parsedJSON,
+		Metadata:         metadata,
+		ValidationResult: validationResult,
+		ParsingTime:      time.Since(startTime),
+	}, nil
+}
+
+// GetSupportedFormat returns the format this parser supports
+func (hp *HL7ParserService) GetSupportedFormat() models.MessageFormat {
+	return models.FormatHL7v2
+}
+
+// ValidateStructure validates message structure
+func (hp *HL7ParserService) ValidateStructure(rawContent string) (*models.ValidationResult, error) {
+	// Reuse existing parser's validation
+	enhancedResult := hl7.ParseWithRealSchema(rawContent)
+
+	return &models.ValidationResult{
+		IsValid:      len(enhancedResult.ValidationErrors) == 0,
+		Warnings:     extractWarnings(enhancedResult.ValidationErrors),
+		Errors:       extractErrors(enhancedResult.ValidationErrors),
+		WarningCount: countWarnings(enhancedResult.ValidationErrors),
+		ErrorCount:   countErrors(enhancedResult.ValidationErrors),
+	}, nil
+}
+
+// =====================================
+// HELPER FUNCTIONS
+// =====================================
+
+// convertToStandardJSON converts EnhancedParsedMessage to standard JSON
+func convertToStandardJSON(enhanced *hl7.EnhancedParsedMessage) map[string]interface{} {
+	result := make(map[string]interface{})
+
+	// Add metadata
+	result["version"] = enhanced.Version
+	result["messageType"] = map[string]interface{}{
+		"code":        enhanced.MessageType.Code,
+		"event":       enhanced.MessageType.Event,
+		"name":        enhanced.MessageType.Name,
+		"description": enhanced.MessageType.Description,
+	}
+	result["parsedAt"] = enhanced.ParsedAt
+	result["schemaUsed"] = enhanced.SchemaLoaded
+
+	// Add segments in order (IMPORTANT: preserve order)
+	segments := make(map[string]interface{})
+	segmentList := []map[string]interface{}{} // Ordered list
+
+	for _, segmentName := range enhanced.SegmentOrder {
+		if segment, exists := enhanced.EnhancedSegments[segmentName]; exists {
+			segmentData := convertSegmentToJSON(segment)
+			segments[segmentName] = segmentData
+
+			// Also add to ordered list
+			segmentList = append(segmentList, map[string]interface{}{
+				"name": segmentName,
+				"data": segmentData,
+			})
+		}
+	}
+
+	result["segments"] = segments        // Map for easy access
+	result["segmentOrder"] = segmentList // Array for order preservation
+
+	// Add validation info
+	if len(enhanced.ValidationErrors) > 0 {
+		validationErrors := make([]map[string]interface{}, 0)
+		for _, err := range enhanced.ValidationErrors {
+			validationErrors = append(validationErrors, map[string]interface{}{
+				"field":    err.Field,
+				"message":  err.Message,
+				"severity": err.Severity,
+			})
+		}
+		result["validationErrors"] = validationErrors
+	}
+
+	return result
+}
+
+// convertSegmentToJSON converts EnhancedSegment to JSON
+func convertSegmentToJSON(segment hl7.EnhancedSegment) map[string]interface{} {
+	segmentData := make(map[string]interface{})
+
+	segmentData["name"] = segment.Name
+	segmentData["description"] = segment.Description
+
+	// Convert fields
+	fields := make(map[string]interface{})
+	fieldList := []map[string]interface{}{} // Ordered
+
+	for _, fieldKey := range segment.FieldOrder {
+		if field, exists := segment.Fields[fieldKey]; exists {
+			fieldData := convertFieldToJSON(field)
+			fields[fieldKey] = fieldData
+
+			fieldList = append(fieldList, map[string]interface{}{
+				"key":  fieldKey,
+				"data": fieldData,
+			})
+		}
+	}
+
+	segmentData["fields"] = fields
+	segmentData["fieldOrder"] = fieldList
+
+	return segmentData
+}
+
+// convertFieldToJSON converts EnhancedField to JSON
+func convertFieldToJSON(field hl7.EnhancedField) map[string]interface{} {
+	fieldData := make(map[string]interface{})
+
+	fieldData["name"] = field.Name
+	fieldData["value"] = field.Value
+	fieldData["rawValue"] = field.RawValue
+	fieldData["dataType"] = field.DataType
+	fieldData["description"] = field.Description
+
+	// Add components if present
+	if len(field.Components) > 0 {
+		components := make([]interface{}, 0)
+		for _, comp := range field.Components {
+			components = append(components, map[string]interface{}{
+				"name":     comp.Name,
+				"value":    comp.Value,
+				"dataType": comp.DataType,
+			})
+		}
+		fieldData["components"] = components
+	}
+
+	// Add repetitions if present
+	if len(field.Repetitions) > 0 {
+		fieldData["repetitions"] = field.Repetitions
+	}
+
+	return fieldData
+}
+
+// extractControlID extracts message control ID from parsed message
+func extractControlID(enhanced *hl7.EnhancedParsedMessage) string {
+	if msh, exists := enhanced.EnhancedSegments["MSH"]; exists {
+		if field, exists := msh.Fields["MSH.10"]; exists {
+			return field.Value
+		}
+	}
+	return ""
+}
+
+// countTotalFields counts all fields in all segments
+func countTotalFields(enhanced *hl7.EnhancedParsedMessage) int {
+	count := 0
+	for _, segment := range enhanced.EnhancedSegments {
+		count += len(segment.Fields)
+	}
+	return count
+}
+
+// extractWarnings extracts warning messages
+func extractWarnings(errors []hl7.ValidationError) []string {
+	warnings := []string{}
+	for _, err := range errors {
+		if err.Severity == "warning" {
+			warnings = append(warnings, err.Message)
+		}
+	}
+	return warnings
+}
+
+// extractErrors extracts error messages
+func extractErrors(errors []hl7.ValidationError) []string {
+	errs := []string{}
+	for _, err := range errors {
+		if err.Severity == "error" {
+			errs = append(errs, err.Message)
+		}
+	}
+	return errs
+}
+
+// countWarnings counts warnings
+func countWarnings(errors []hl7.ValidationError) int {
+	count := 0
+	for _, err := range errors {
+		if err.Severity == "warning" {
+			count++
+		}
+	}
+	return count
+}
+
+// countErrors counts errors
+func countErrors(errors []hl7.ValidationError) int {
+	count := 0
+	for _, err := range errors {
+		if err.Severity == "error" {
+			count++
+		}
+	}
+	return count
+}

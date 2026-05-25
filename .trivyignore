@@ -1,0 +1,18 @@
+# ezHealthKonnect — Trivy CVE suppression list
+#
+# POLICY:
+#   Only suppress CVEs where --ignore-unfixed still flags them (i.e. the fix
+#   exists upstream but hasn't landed in Alpine yet, OR no fix exists at all).
+#   Never suppress a CVE that has a released fix we could apply.
+#
+# REVIEW: Check this file monthly. Remove any CVE once a fix is available
+#   by running:  trivy image --severity CRITICAL,HIGH --ignore-unfixed <image>
+#   If the CVE no longer appears, its fix has shipped — remove it from here.
+#
+# FORMAT:  CVE-YYYY-NNNNN  # package@version | reason | added YYYY-MM-DD
+#
+# ── Currently suppressed (no upstream fix in Alpine as of 2026-03-31) ────────
+#
+# ADD CVEs HERE after reviewing the first scan output.
+# Example:
+# CVE-2023-44487  # nghttp2 | HTTP/2 rapid reset - Alpine fix pending | added 2026-03-31

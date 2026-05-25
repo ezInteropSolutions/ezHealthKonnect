@@ -1,0 +1,571 @@
+/**
+ * ============================================================================
+ * SCRIPT ENRICHMENT EDITOR STYLES
+ * ============================================================================
+ * Color Scheme:
+ * - Primary: Navy Blue (#1e3a8a, #2563eb)
+ * - Accent: Pastel Pink (#fce7f3, #ec4899)
+ * - Base: White (#ffffff, #f8fafc)
+ * - Success: Green (#10b981)
+ * - Error: Red (#ef4444)
+ * - Warning: Yellow (#f59e0b)
+ * ============================================================================
+ */
+
+.script-enrichment-editor {
+    background: #ffffff;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    min-height: 500px;
+}
+
+/* ============================================================================
+   HEADER - REMOVED (title is in modal header)
+   ============================================================================ */
+
+/* ============================================================================
+   BODY - SIDE BY SIDE LAYOUT
+   ============================================================================ */
+
+.script-editor-body {
+    display: flex;
+    flex: 1;
+    overflow: hidden;
+    background: #f8fafc;
+}
+
+/* Variable Panel Sidebar - MATCHES CURRENT UI */
+.variable-panel-sidebar {
+    width: 280px;
+    background: #f9fafb;
+    border-right: 1px solid #e5e7eb;
+    display: flex;
+    flex-direction: column;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.variable-panel-sidebar.collapsed {
+    width: 48px;
+}
+
+.variable-panel-sidebar.collapsed .panel-body,
+.variable-panel-sidebar.collapsed .panel-footer,
+.variable-panel-sidebar.collapsed .panel-title {
+    display: none;
+}
+
+.variable-panel-sidebar .panel-header {
+    background: #1e3a8a;
+    color: white;
+    padding: 12px 16px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 1px solid #e5e7eb;
+}
+
+.variable-panel-sidebar .panel-title {
+    font-weight: 500;
+    font-size: 14px;
+    display: flex;
+    align-items: center;
+    gap: 0;
+}
+
+.variable-panel-sidebar .btn-collapse {
+    background: transparent;
+    border: none;
+    color: white;
+    width: 24px;
+    height: 24px;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.2s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 16px;
+}
+
+.variable-panel-sidebar .btn-collapse:hover {
+    background: rgba(255, 255, 255, 0.1);
+}
+
+.variable-panel-sidebar .panel-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 12px;
+}
+
+.variable-panel-sidebar .panel-footer {
+    padding: 12px 16px;
+    background: #f8fafc;
+    border-top: 1px solid #e2e8f0;
+    text-align: center;
+}
+
+.variable-panel-sidebar .panel-footer small {
+    color: #64748b;
+    font-size: 12px;
+}
+
+/* Code Editor Container */
+.code-editor-container {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    background: white;
+    margin: 12px;
+    border-radius: 8px;
+    box-shadow: 0 2px 8px rgba(30, 58, 138, 0.06);
+    overflow: hidden;
+}
+
+/* Editor Toolbar - MATCHES CURRENT UI */
+.editor-toolbar {
+    background: white;
+    border-bottom: 1px solid #e5e7eb;
+    padding: 12px 16px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.toolbar-left,
+.toolbar-right {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
+.btn-toolbar {
+    background: white;
+    border: 1px solid #d1d5db;
+    color: #374151;
+    padding: 8px 16px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 500;
+    transition: all 0.15s;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.btn-toolbar:hover {
+    background: #f9fafb;
+    border-color: #9ca3af;
+}
+
+/* Pastel Pink accent for Test Run button */
+.btn-toolbar#testScript {
+    background: #fce7f3;
+    border-color: #fbcfe8;
+    color: #831843;
+}
+
+.btn-toolbar#testScript:hover {
+    background: #fbcfe8;
+}
+
+.btn-toolbar i {
+    font-size: 14px;
+}
+
+/* Status Indicator */
+.status-indicator {
+    padding: 6px 12px;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 500;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.status-indicator i {
+    font-size: 10px;
+}
+
+.status-indicator.status-validating {
+    background: #f59e0b1a;
+    color: #f59e0b;
+}
+
+.status-indicator.status-success {
+    background: #10b9811a;
+    color: #10b981;
+}
+
+.status-indicator.status-error {
+    background: #ef44441a;
+    color: #ef4444;
+}
+
+/* Code Editor Wrapper */
+.code-editor-wrapper {
+    flex: 1;
+    position: relative;
+    display: flex;
+    overflow: hidden;
+}
+
+.line-numbers {
+    background: #f8fafc;
+    border-right: 2px solid #e2e8f0;
+    padding: 16px 8px;
+    text-align: right;
+    user-select: none;
+    overflow-y: hidden;
+    width: 50px;
+    font-family: 'Courier New', monospace;
+    font-size: 13px;
+    color: #94a3b8;
+    line-height: 1.6;
+}
+
+.line-number {
+    height: 20.8px; /* Match textarea line height */
+}
+
+.code-editor {
+    flex: 1;
+    padding: 16px;
+    border: none;
+    outline: none;
+    font-family: 'Courier New', monospace;
+    font-size: 13px;
+    line-height: 1.6;
+    resize: none;
+    background: white;
+    color: #1e293b;
+    overflow-y: auto;
+}
+
+.code-editor::placeholder {
+    color: #94a3b8;
+}
+
+.code-editor.drag-over {
+    background: linear-gradient(135deg, rgba(236, 72, 153, 0.05) 0%, rgba(252, 231, 243, 0.1) 100%);
+    border: 2px dashed #ec4899;
+}
+
+/* Validation Results */
+.validation-results {
+    background: #fef2f2;
+    border-top: 2px solid #fecaca;
+    padding: 12px 16px;
+}
+
+.validation-error {
+    color: #ef4444;
+    font-size: 13px;
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+}
+
+.validation-error i {
+    margin-top: 2px;
+    flex-shrink: 0;
+}
+
+.validation-error strong {
+    font-weight: 600;
+}
+
+/* ============================================================================
+   CONFIGURATION SECTION
+   ============================================================================ */
+
+.script-config-section {
+    background: white;
+    border-top: 1px solid #e5e7eb;
+    padding: 12px 16px;
+}
+
+.config-row {
+    display: grid;
+    grid-template-columns: 2fr 1fr auto;
+    gap: 12px;
+    align-items: center;
+}
+
+.config-field label {
+    display: block;
+    font-weight: 600;
+    color: #1e3a8a;
+    margin-bottom: 6px;
+    font-size: 13px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.config-field label i {
+    color: #ec4899;
+}
+
+.config-field input {
+    width: 100%;
+    padding: 10px 12px;
+    border: 1px solid #cbd5e1;
+    border-radius: 6px;
+    font-size: 13px;
+    transition: all 0.2s;
+}
+
+.config-field input:focus {
+    outline: none;
+    border-color: #2563eb;
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+}
+
+.config-field small {
+    display: block;
+    margin-top: 4px;
+    color: #64748b;
+    font-size: 12px;
+}
+
+.config-checkbox {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+}
+
+.checkbox-label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+    margin-bottom: 0 !important;
+}
+
+.checkbox-label input[type="checkbox"] {
+    width: 18px;
+    height: 18px;
+    cursor: pointer;
+    accent-color: #2563eb;
+}
+
+.checkbox-label span {
+    font-weight: 500;
+    color: #1e293b;
+}
+
+/* ============================================================================
+   FOOTER
+   ============================================================================ */
+
+.script-editor-footer {
+    background: #f8fafc;
+    border-top: 2px solid #e2e8f0;
+    padding: 16px 24px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.footer-left,
+.footer-right {
+    display: flex;
+    gap: 12px;
+}
+
+.btn-help {
+    background: white;
+    border: 1px solid #cbd5e1;
+    color: #64748b;
+    padding: 10px 16px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 500;
+    transition: all 0.2s;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.btn-help:hover {
+    background: #f8fafc;
+    color: #1e3a8a;
+    border-color: #1e3a8a;
+}
+
+.btn-cancel {
+    background: white;
+    border: 1px solid #cbd5e1;
+    color: #64748b;
+    padding: 10px 20px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 500;
+    transition: all 0.2s;
+}
+
+.btn-cancel:hover {
+    background: #f8fafc;
+    color: #ef4444;
+    border-color: #ef4444;
+}
+
+.btn-save {
+    background: #1e3a8a;
+    border: none;
+    color: white;
+    padding: 10px 24px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 600;
+    transition: all 0.15s;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.btn-save:hover {
+    background: #1e40af;
+}
+
+/* ============================================================================
+   LOADING STATE
+   ============================================================================ */
+
+.loading-state {
+    text-align: center;
+    padding: 40px 20px;
+    color: #94a3b8;
+}
+
+.loading-state i {
+    font-size: 24px;
+    margin-bottom: 12px;
+    display: block;
+    color: #2563eb;
+}
+
+.loading-state p {
+    margin: 0;
+    font-size: 13px;
+}
+
+/* ============================================================================
+   RESPONSIVE
+   ============================================================================ */
+
+@media (max-width: 1024px) {
+    .config-row {
+        grid-template-columns: 1fr;
+    }
+
+    .variable-panel-sidebar {
+        width: 280px;
+    }
+}
+
+@media (max-width: 768px) {
+    .script-editor-body {
+        flex-direction: column;
+    }
+
+    .variable-panel-sidebar {
+        width: 100%;
+        max-height: 300px;
+        border-right: none;
+        border-bottom: 2px solid #e2e8f0;
+    }
+
+    .variable-panel-sidebar.collapsed {
+        max-height: 48px;
+    }
+}
+
+/* ============================================================================
+   SCROLLBAR STYLING
+   ============================================================================ */
+
+.code-editor::-webkit-scrollbar,
+.line-numbers::-webkit-scrollbar,
+.panel-body::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+.code-editor::-webkit-scrollbar-track,
+.line-numbers::-webkit-scrollbar-track,
+.panel-body::-webkit-scrollbar-track {
+    background: #f1f5f9;
+}
+
+.code-editor::-webkit-scrollbar-thumb,
+.line-numbers::-webkit-scrollbar-thumb,
+.panel-body::-webkit-scrollbar-thumb {
+    background: #cbd5e1;
+    border-radius: 4px;
+}
+
+.code-editor::-webkit-scrollbar-thumb:hover,
+.line-numbers::-webkit-scrollbar-thumb:hover,
+.panel-body::-webkit-scrollbar-thumb:hover {
+    background: #94a3b8;
+}
+
+/* Empty State - Matches Current UI */
+.empty-state {
+    text-align: center;
+    padding: 40px 20px;
+    color: #6b7280;
+}
+
+.empty-icon {
+    font-size: 32px;
+    margin-bottom: 12px;
+}
+
+.empty-state p {
+    margin: 0 0 8px 0;
+    font-size: 13px;
+    color: #374151;
+}
+
+.empty-state small {
+    color: #9ca3af;
+    font-size: 12px;
+}
+
+/* Error State - Matches Current UI */
+.error-state {
+    background: #fef2f2;
+    border: 1px solid #fecaca;
+    border-radius: 6px;
+    padding: 16px;
+    margin: 16px;
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+}
+
+.error-icon {
+    font-size: 20px;
+    flex-shrink: 0;
+}
+
+.error-state p {
+    margin: 0 0 4px 0;
+    font-size: 13px;
+    color: #dc2626;
+    font-weight: 500;
+}
+
+.error-state small {
+    color: #ef4444;
+    font-size: 12px;
+}

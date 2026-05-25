@@ -1,0 +1,112 @@
+package services
+
+import (
+	"ezhealthkonnect/models"
+	"ezhealthkonnect/services/connectors"
+	"fmt"
+)
+
+// DestinationConnectorFactory creates the appropriate connector based on destination configuration
+// This implements the Factory design pattern for easy extensibility
+type DestinationConnectorFactory struct {
+	// Registry of available connectors (for future extensibility)
+	connectorRegistry map[string]func(models.DestinationConfig) (connectors.OutputConnector, error)
+}
+
+// NewDestinationConnectorFactory creates a new connector factory
+func NewDestinationConnectorFactory() *DestinationConnectorFactory {
+	factory := &DestinationConnectorFactory{
+		connectorRegistry: make(map[string]func(models.DestinationConfig) (connectors.OutputConnector, error)),
+	}
+
+	// Register built-in connectors
+	factory.registerBuiltInConnectors()
+
+	return factory
+}
+
+// registerBuiltInConnectors registers all built-in connector types
+func (f *DestinationConnectorFactory) registerBuiltInConnectors() {
+	// FHIR connector
+	f.connectorRegistry["fhir"] = func(config models.DestinationConfig) (connectors.OutputConnector, error) {
+		connector := connectors.NewFHIROutputConnector()
+		err := connector.Connect(config)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create FHIR connector: %w", err)
+		}
+		return connector, nil
+	}
+
+	// HL7 connector (future implementation)
+	f.connectorRegistry["hl7"] = func(config models.DestinationConfig) (connectors.OutputConnector, error) {
+		return nil, fmt.Errorf("HL7 connector not yet implemented")
+	}
+
+	// Database connector (future implementation)
+	f.connectorRegistry["database"] = func(config models.DestinationConfig) (connectors.OutputConnector, error) {
+		return nil, fmt.Errorf("Database connector not yet implemented")
+	}
+
+	// File connector (future implementation)
+	f.connectorRegistry["file"] = func(config models.DestinationConfig) (connectors.OutputConnector, error) {
+		return nil, fmt.Errorf("File connector not yet implemented")
+	}
+
+	// API connector (future implementation)
+	f.connectorRegistry["api"] = func(config models.DestinationConfig) (connectors.OutputConnector, error) {
+		return nil, fmt.Errorf("API connector not yet implemented")
+	}
+
+	// Queue connector (future implementation)
+	f.connectorRegistry["queue"] = func(config models.DestinationConfig) (connectors.OutputConnector, error) {
+		return nil, fmt.Errorf("Queue connector not yet implemented")
+	}
+}
+
+// CreateConnector creates and returns the appropriate connector for the given configuration
+func (f *DestinationConnectorFactory) CreateConnector(config models.DestinationConfig) (connectors.OutputConnector, error) {
+	// Validate configuration
+	if err := config.Validate(); err != nil {
+		return nil, fmt.Errorf("invalid destination configuration: %w", err)
+	}
+
+	// Determine connector type
+	connectorType := config.Type
+	if connectorType == "" {
+		return nil, fmt.Errorf("destination type not specified in configuration")
+	}
+
+	// Look up connector factory function in registry
+	factoryFunc, exists := f.connectorRegistry[connectorType]
+	if !exists {
+		return nil, fmt.Errorf("unsupported destination type: %s (available: fhir, hl7, database, file, api, queue)", connectorType)
+	}
+
+	// Create connector using factory function
+	connector, err := factoryFunc(config)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create %s connector: %w", connectorType, err)
+	}
+
+	fmt.Printf("✅ Created %s connector: %s\n", connectorType, connector.GetMetadata().Name)
+	return connector, nil
+}
+
+// RegisterCustomConnector allows registration of custom connector types
+// This enables users to add their own connector implementations
+func (f *DestinationConnectorFactory) RegisterCustomConnector(
+	connectorType string,
+	factoryFunc func(models.DestinationConfig) (connectors.OutputConnector, error),
+) {
+	f.connectorRegistry[connectorType] = factoryFunc
+	fmt.Printf("✅ Registered custom connector type: %s\n", connectorType)
+}
+
+// GetSupportedTypes returns a list of all supported connector types
+func (f *DestinationConnectorFactory) GetSupportedTypes() []string {
+	types := make([]string, 0, len(f.connectorRegistry))
+	for connectorType := range f.connectorRegistry {
+		types = append(types, connectorType)
+	}
+	return types
+}

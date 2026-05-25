@@ -1,0 +1,30 @@
+/**
+ * StaticFieldDropdown - Simple dropdown styles
+ */
+
+.static-dropdown-wrapper {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.dropdown-search {
+    font-family: 'Courier New', monospace;
+    font-size: 13px;
+}
+
+.field-dropdown {
+    font-family: 'Courier New', monospace;
+    font-size: 12px;
+    min-height: 150px;
+    max-height: 200px;
+    overflow-y: auto;
+}
+
+.field-dropdown option {
+    padding: 4px 8px;
+}
+
+.field-dropdown option:hover {
+    background: #f0f7ff;
+}

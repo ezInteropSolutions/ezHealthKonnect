@@ -1,0 +1,447 @@
+{
+  "messageType": "ORU^R01",
+  "version": "2.5.1",
+  "generatedAt": "2024-09-26T12:00:00Z",
+  "coverage": {
+    "totalHL7Fields": 189,
+    "mappedFields": 55,
+    "coveragePercent": 29.1,
+    "requiredCoverage": 8
+  },
+  "resources": {
+    "Patient": {
+      "resourceType": "Patient",
+      "priority": 1,
+      "required": true,
+      "references": [],
+      "mappings": [
+        {
+          "hl7Path": "PID.3.1",
+          "fhirPath": "Patient.identifier[0].value",
+          "transform": "string_direct",
+          "required": true,
+          "confidence": 0.99,
+          "valueMap": {}
+        },
+        {
+          "hl7Path": "PID.5.1",
+          "fhirPath": "Patient.name[0].family",
+          "transform": "name_component",
+          "required": true,
+          "confidence": 0.98,
+          "valueMap": {}
+        },
+        {
+          "hl7Path": "PID.5.2",
+          "fhirPath": "Patient.name[0].given[0]",
+          "transform": "name_component",
+          "required": false,
+          "confidence": 0.98,
+          "valueMap": {}
+        },
+        {
+          "hl7Path": "PID.7",
+          "fhirPath": "Patient.birthDate",
+          "transform": "hl7_date_to_fhir",
+          "required": false,
+          "confidence": 0.99,
+          "valueMap": {}
+        },
+        {
+          "hl7Path": "PID.8",
+          "fhirPath": "Patient.gender",
+          "transform": "hl7_table_0001_gender",
+          "required": false,
+          "confidence": 0.99,
+          "valueMap": {
+            "M": "male",
+            "F": "female",
+            "U": "unknown",
+            "O": "other"
+          }
+        }
+      ]
+    },
+    "Observation": {
+      "resourceType": "Observation",
+      "priority": 2,
+      "required": true,
+      "references": [
+        {
+          "path": "subject",
+          "target": "Patient",
+          "field": "id"
+        },
+        {
+          "path": "encounter",
+          "target": "Encounter",
+          "field": "id"
+        }
+      ],
+      "mappings": [
+        {
+          "hl7Path": "OBX.3.1",
+          "fhirPath": "Observation.code.coding[0].code",
+          "transform": "coded_element_code",
+          "required": true,
+          "confidence": 0.99,
+          "valueMap": {}
+        },
+        {
+          "hl7Path": "OBX.3.2",
+          "fhirPath": "Observation.code.coding[0].display",
+          "transform": "coded_element_display",
+          "required": false,
+          "confidence": 0.95,
+          "valueMap": {}
+        },
+        {
+          "hl7Path": "OBX.3.3",
+          "fhirPath": "Observation.code.coding[0].system",
+          "transform": "coding_system_mapping",
+          "required": false,
+          "confidence": 0.90,
+          "valueMap": {}
+        },
+        {
+          "hl7Path": "OBX.5",
+          "fhirPath": "Observation.valueQuantity.value",
+          "transform": "observation_value",
+          "required": false,
+          "confidence": 0.95,
+          "valueMap": {}
+        },
+        {
+          "hl7Path": "OBX.6.1",
+          "fhirPath": "Observation.valueQuantity.unit",
+          "transform": "unit_mapping",
+          "required": false,
+          "confidence": 0.90,
+          "valueMap": {}
+        },
+        {
+          "hl7Path": "OBX.7",
+          "fhirPath": "Observation.referenceRange[0].text",
+          "transform": "reference_range",
+          "required": false,
+          "confidence": 0.85,
+          "valueMap": {}
+        },
+        {
+          "hl7Path": "OBX.8",
+          "fhirPath": "Observation.interpretation[0].coding[0].code",
+          "transform": "hl7_table_0078_abnormal_flags",
+          "required": false,
+          "confidence": 0.90,
+          "valueMap": {
+            "L": "L",
+            "H": "H",
+            "LL": "LL",
+            "HH": "HH",
+            "N": "N",
+            "A": "A"
+          }
+        },
+        {
+          "hl7Path": "OBX.11",
+          "fhirPath": "Observation.status",
+          "transform": "hl7_table_0085_observation_result_status",
+          "required": true,
+          "confidence": 0.99,
+          "valueMap": {
+            "F": "final",
+            "P": "preliminary",
+            "C": "corrected",
+            "D": "cancelled",
+            "I": "registered",
+            "N": "final",
+            "O": "unknown",
+            "R": "registered",
+            "S": "preliminary",
+            "X": "cancelled",
+            "U": "unknown",
+            "W": "preliminary"
+          }
+        },
+        {
+          "hl7Path": "OBX.14",
+          "fhirPath": "Observation.effectiveDateTime",
+          "transform": "hl7_datetime_to_fhir",
+          "required": false,
+          "confidence": 0.95,
+          "valueMap": {}
+        }
+      ]
+    },
+    "DiagnosticReport": {
+      "resourceType": "DiagnosticReport",
+      "priority": 3,
+      "required": false,
+      "references": [
+        {
+          "path": "subject",
+          "target": "Patient",
+          "field": "id"
+        },
+        {
+          "path": "encounter",
+          "target": "Encounter",
+          "field": "id"
+        }
+      ],
+      "mappings": [
+        {
+          "hl7Path": "OBR.4.1",
+          "fhirPath": "DiagnosticReport.code.coding[0].code",
+          "transform": "coded_element_code",
+          "required": true,
+          "confidence": 0.99,
+          "valueMap": {}
+        },
+        {
+          "hl7Path": "OBR.4.2",
+          "fhirPath": "DiagnosticReport.code.coding[0].display",
+          "transform": "coded_element_display",
+          "required": false,
+          "confidence": 0.95,
+          "valueMap": {}
+        },
+        {
+          "hl7Path": "OBR.7",
+          "fhirPath": "DiagnosticReport.effectiveDateTime",
+          "transform": "hl7_datetime_to_fhir",
+          "required": false,
+          "confidence": 0.95,
+          "valueMap": {}
+        },
+        {
+          "hl7Path": "OBR.25",
+          "fhirPath": "DiagnosticReport.status",
+          "transform": "hl7_table_0123_result_status",
+          "required": true,
+          "confidence": 0.95,
+          "valueMap": {
+            "P": "preliminary",
+            "F": "final",
+            "C": "corrected",
+            "X": "cancelled"
+          }
+        }
+      ]
+    },
+    "Specimen": {
+      "resourceType": "Specimen",
+      "priority": 4,
+      "required": false,
+      "references": [
+        {
+          "path": "subject",
+          "target": "Patient",
+          "field": "id"
+        }
+      ],
+      "mappings": [
+        {
+          "hl7Path": "SPM.2.1",
+          "fhirPath": "Specimen.identifier[0].value",
+          "transform": "string_direct",
+          "required": false,
+          "confidence": 0.95,
+          "valueMap": {}
+        },
+        {
+          "hl7Path": "SPM.4.1",
+          "fhirPath": "Specimen.type.coding[0].code",
+          "transform": "coded_element_code",
+          "required": false,
+          "confidence": 0.90,
+          "valueMap": {}
+        },
+        {
+          "hl7Path": "SPM.17.1",
+          "fhirPath": "Specimen.collection.collectedDateTime",
+          "transform": "hl7_datetime_to_fhir",
+          "required": false,
+          "confidence": 0.90,
+          "valueMap": {}
+        }
+      ]
+    },
+    "MessageHeader": {
+      "resourceType": "MessageHeader",
+      "priority": 5,
+      "required": true,
+      "references": [],
+      "mappings": [
+        {
+          "hl7Path": "MSH.3",
+          "fhirPath": "MessageHeader.source.name",
+          "transform": "string_direct",
+          "required": false,
+          "confidence": 0.90,
+          "valueMap": {}
+        },
+        {
+          "hl7Path": "MSH.9.1",
+          "fhirPath": "MessageHeader.eventCoding.code",
+          "transform": "string_direct",
+          "required": true,
+          "confidence": 0.99,
+          "valueMap": {}
+        },
+        {
+          "hl7Path": "MSH.7",
+          "fhirPath": "MessageHeader.meta.lastUpdated",
+          "transform": "hl7_datetime_to_fhir",
+          "required": false,
+          "confidence": 0.90,
+          "valueMap": {}
+        }
+      ]
+    }
+  },
+  "transforms": {
+    "string_direct": {
+      "name": "string_direct",
+      "type": "direct",
+      "description": "Direct string copy with null/empty validation",
+      "validation": "non_empty",
+      "parameters": {
+        "trim": "true"
+      }
+    },
+    "name_component": {
+      "name": "name_component",
+      "type": "string_transform",
+      "description": "Name component with proper case handling",
+      "validation": "non_empty",
+      "parameters": {
+        "case": "proper",
+        "trim": "true"
+      }
+    },
+    "hl7_date_to_fhir": {
+      "name": "hl7_date_to_fhir",
+      "type": "date_conversion",
+      "description": "Convert HL7 date (YYYYMMDD) to FHIR date",
+      "validation": "valid_date",
+      "parameters": {
+        "input_format": "YYYYMMDD",
+        "output_format": "YYYY-MM-DD"
+      }
+    },
+    "hl7_datetime_to_fhir": {
+      "name": "hl7_datetime_to_fhir",
+      "type": "datetime_conversion",
+      "description": "Convert HL7 timestamp to FHIR instant",
+      "validation": "valid_datetime",
+      "parameters": {
+        "input_format": "YYYYMMDDHHMMSS",
+        "output_format": "YYYY-MM-DDTHH:MM:SSZ"
+      }
+    },
+    "hl7_table_0001_gender": {
+      "name": "hl7_table_0001_gender",
+      "type": "valueset",
+      "description": "HL7 Table 0001 - Administrative Sex",
+      "validation": "known_value",
+      "parameters": {
+        "table": "0001",
+        "default": "unknown"
+      }
+    },
+    "coded_element_code": {
+      "name": "coded_element_code",
+      "type": "coded_element",
+      "description": "Extract code from coded element",
+      "validation": "non_empty",
+      "parameters": {
+        "component": "code"
+      }
+    },
+    "coded_element_display": {
+      "name": "coded_element_display",
+      "type": "coded_element",
+      "description": "Extract display text from coded element",
+      "validation": "non_empty",
+      "parameters": {
+        "component": "display"
+      }
+    },
+    "observation_value": {
+      "name": "observation_value",
+      "type": "multi_type",
+      "description": "Handle various observation value types",
+      "validation": "type_appropriate",
+      "parameters": {
+        "types": "numeric,string,datetime"
+      }
+    },
+    "unit_mapping": {
+      "name": "unit_mapping",
+      "type": "unit_conversion",
+      "description": "Map HL7 units to UCUM",
+      "validation": "known_unit",
+      "parameters": {
+        "target_system": "UCUM"
+      }
+    },
+    "reference_range": {
+      "name": "reference_range",
+      "type": "string_transform",
+      "description": "Reference range text formatting",
+      "validation": "non_empty",
+      "parameters": {
+        "format": "normalize"
+      }
+    },
+    "hl7_table_0078_abnormal_flags": {
+      "name": "hl7_table_0078_abnormal_flags",
+      "type": "valueset",
+      "description": "HL7 Table 0078 - Abnormal Flags",
+      "validation": "known_value",
+      "parameters": {
+        "table": "0078",
+        "default": "N"
+      }
+    },
+    "hl7_table_0085_observation_result_status": {
+      "name": "hl7_table_0085_observation_result_status",
+      "type": "valueset",
+      "description": "HL7 Table 0085 - Observation Result Status",
+      "validation": "known_value",
+      "parameters": {
+        "table": "0085",
+        "default": "final"
+      }
+    },
+    "hl7_table_0123_result_status": {
+      "name": "hl7_table_0123_result_status",
+      "type": "valueset",
+      "description": "HL7 Table 0123 - Result Status",
+      "validation": "known_value",
+      "parameters": {
+        "table": "0123",
+        "default": "final"
+      }
+    },
+    "coding_system_mapping": {
+      "name": "coding_system_mapping",
+      "type": "system_mapping",
+      "description": "Map coding system to standard URI",
+      "validation": "known_system",
+      "parameters": {
+        "type": "coding"
+      }
+    }
+  },
+  "metadata": {
+    "totalMappings": 24,
+    "requiredMappings": 6,
+    "coverage": "core_lab_results",
+    "generatedBy": "ezHealthKonnect OOB Template Generator v1.0",
+    "compatibleWith": ["2.5", "2.5.1"],
+    "targetFHIRVersion": "R4",
+    "confidence": "production_ready"
+  }
+}

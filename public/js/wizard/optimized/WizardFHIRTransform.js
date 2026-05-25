@@ -1,0 +1,765 @@
+// WizardFHIRTransform.js - FHIR Transformation for Optimized Wizard
+// Handles step 4 FHIR transformation in the optimized wizard system
+
+class WizardFHIRTransform {
+    constructor() {
+        this.fhirResult = null;
+        this.isTransforming = false;
+        this.apiBaseUrl = this.getApiBaseUrl();
+
+        console.log('🔄 WizardFHIRTransform initialized for optimized wizard');
+    }
+
+    // Start FHIR transformation using data from optimized wizard
+    async startOptimizedFHIRTransformation() {
+        console.log('🔄 Starting optimized FHIR transformation...');
+
+        if (this.isTransforming) {
+            console.warn('⚠️ Transformation already in progress');
+            return;
+        }
+
+        // Get parsed HL7 data from wizard controller
+        const parsedHL7Data = this.getParsedHL7DataFromWizard();
+        if (!parsedHL7Data) {
+            this.showOptimizedError('No HL7 data available for transformation. Please complete step 2 first.');
+            return;
+        }
+
+        this.isTransforming = true;
+        this.updateOptimizedConfigStatus('transforming');
+        this.showOptimizedLoadingState();
+
+        try {
+            // parsedHL7Data already contains the .data from the parse result
+            const requestData = {
+                parsedHL7Data: parsedHL7Data,  // Direct use of parsed data (already extracted from result.data)
+                createBundle: true,
+                validationMode: 'strict',
+                fhirVersion: window.wizardController?.model?.data?.targetConfig?.version || 'R4',
+                targetProfile: 'base'
+            };
+
+            console.log('📡 Sending transform request to:', `${this.apiBaseUrl}/api/fhir/test-transform-v3`);
+            console.log('📊 Request payload:', JSON.stringify(requestData, null, 2));
+
+            const response = await fetch(`${this.apiBaseUrl}/api/fhir/test-transform-v3`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(requestData)
+            });
+
+            if (response.ok) {
+                this.fhirResult = await response.json();
+                console.log('📋 FHIR transformation response:', this.fhirResult);
+
+                // Check if the transformation generated mappings and/or assembled resources.
+                // Assembly-driven types (MFN, DFT, MDM, VXU, ORU, SIU) may return fhirResources
+                // that are not covered by atomicMappings — always augment atomicMappings with
+                // synthesized rows for any resource type produced by the procedure assembly that
+                // is not already represented by field-level mappings.
+                const hasAtomicMappings = this.fhirResult.atomicMappings && this.fhirResult.atomicMappings.length > 0;
+                const hasFhirResources  = this.fhirResult.fhirResources  && this.fhirResult.fhirResources.length  > 0;
+
+                if (hasAtomicMappings || hasFhirResources) {
+                    if (hasFhirResources) {
+                        // Determine which resource types are already covered by field-level mappings.
+                        const coveredTypes = new Set(
+                            (this.fhirResult.atomicMappings || [])
+                                .map(m => m.resourceType || (m.fhirPath || m.fhirField || '').split('.')[0])
+                                .filter(Boolean)
+                        );
+
+                        // Synthesize display rows for assembled resources (Practitioner, Location,
+                        // Organization, Immunization, ChargeItem, DocumentReference, Observation …)
+                        // that have no field-level counterpart — e.g. MFN assembly produces
+                        // Practitioner from STF, but the profile only maps MSH→MessageHeader.
+                        const uncoveredResources = this.fhirResult.fhirResources
+                            .filter(r => r.resourceType && !coveredTypes.has(r.resourceType));
+
+                        if (uncoveredResources.length > 0) {
+                            console.log('🔧 Augmenting atomicMappings with synthesized rows for assembled resources:',
+                                [...new Set(uncoveredResources.map(r => r.resourceType))]);
+                            const synthesized = this._synthesizeMappingsFromResources(
+                                uncoveredResources,
+                                window.wizardController?.model?.data?.parsedHL7Data
+                            );
+                            this.fhirResult.atomicMappings = [
+                                ...(this.fhirResult.atomicMappings || []),
+                                ...synthesized,
+                            ];
+                            this.fhirResult._assemblyDriven = true;
+                        } else if (!hasAtomicMappings) {
+                            // Pure assembly result — synthesize everything.
+                            console.log('🔧 Assembly-driven result — synthesizing display mappings from fhirResources');
+                            this.fhirResult.atomicMappings = this._synthesizeMappingsFromResources(
+                                this.fhirResult.fhirResources,
+                                window.wizardController?.model?.data?.parsedHL7Data
+                            );
+                            this.fhirResult._assemblyDriven = true;
+                        }
+                    }
+
+                    console.log('✅ FHIR transformation completed with atomic mappings:', this.fhirResult.atomicMappings.length);
+                    console.log('📊 FHIR resources generated:', this.fhirResult.fhirResources?.length || 0);
+
+                    // Store the result in the wizard model for Step 4 access
+                    this.storeFHIRResultInWizard(this.fhirResult);
+
+                    // Update the wizard view with results
+                    this.showOptimizedTransformationResults(this.fhirResult);
+
+                    // Fetch and inject OOB guide for this message type (non-blocking)
+                    this.injectOOBGuide();
+
+                    // Determine status based on validation errors but always show mappings
+                    if (this.fhirResult.success) {
+                        this.updateOptimizedConfigStatus('completed');
+                        console.log('✅ Transformation completed successfully');
+                    } else {
+                        this.updateOptimizedConfigStatus('completed-with-warnings');
+                        console.log('⚠️ Transformation completed with validation warnings');
+                    }
+
+                    // Show enhanced mapping interface
+                    this.showEnhancedMappingInterface();
+
+                    // Show JSON view button
+                    const jsonButton = document.getElementById('btn-view-fhir-json');
+                    if (jsonButton) {
+                        jsonButton.style.display = 'inline-flex';
+                    }
+                } else {
+                    // Backend returned neither atomicMappings nor fhirResources
+                    const errorMsg = this.fhirResult.errors && this.fhirResult.errors.length > 0
+                        ? this.fhirResult.errors.join(', ')
+                        : 'Transformation completed but no resources or mappings were generated. Check the sample message is valid HL7.';
+                    console.error('❌ FHIR transformation failed:', errorMsg);
+                    this.showOptimizedError(`Transformation failed: ${errorMsg}`);
+                    this.updateOptimizedConfigStatus('error');
+                }
+
+            } else {
+                const errorText = await response.text();
+                console.error('❌ API Error:', response.status, errorText);
+                this.showOptimizedError(`Transformation failed: ${response.status} - ${errorText}`);
+                this.updateOptimizedConfigStatus('error');
+            }
+        } catch (error) {
+            console.error('❌ Failed to transform to FHIR:', error);
+            this.showOptimizedError(`Network error: ${error.message}`);
+            this.updateOptimizedConfigStatus('error');
+        } finally {
+            this.isTransforming = false;
+        }
+    }
+
+    // Store FHIR transformation result in the wizard model for Step 4 access
+    storeFHIRResultInWizard(fhirResult) {
+        try {
+            if (window.wizardController?.model?.data) {
+                console.log('💾 Storing FHIR result in wizard model for Step 4 access');
+                window.wizardController.model.data.fhirTransformResult = fhirResult;
+                console.log('✅ FHIR result stored successfully');
+                console.log('📊 Stored mappings count:', fhirResult.atomicMappings?.length || 0);
+                console.log('📊 Current step:', window.wizardController.model.currentStep);
+
+                // Refresh the current step view to show the new mapping count
+                const currentStep = window.wizardController.model.currentStep;
+
+                // Step 3 (index 2) or Step 4 (index 3) - both need to show mapping data
+                if (currentStep === 2 || currentStep === 3) {
+                    console.log(`🔄 Refreshing Step ${currentStep + 1} view with new FHIR transformation result`);
+                    const currentData = window.wizardController.model.getCurrentStepData();
+                    console.log('📦 Current step data before render:', {
+                        hasFhirTransformResult: !!currentData.fhirTransformResult,
+                        mappingCount: currentData.fhirTransformResult?.atomicMappings?.length || 0
+                    });
+
+                    // Wait for any ongoing animation to complete before updating UI
+                    const attemptUpdate = () => {
+                        if (window.wizardController.view.isAnimating) {
+                            console.log('⏳ Animation in progress, waiting 500ms before updating...');
+                            setTimeout(attemptUpdate, 500);
+                        } else {
+                            console.log('✨ Animation complete, updating mapping display now');
+
+                            // Update mapping count in the header
+                            const mappingCountElement = document.getElementById('mapping-count');
+                            if (mappingCountElement) {
+                                mappingCountElement.textContent = fhirResult.atomicMappings?.length || 0;
+                                console.log('✅ Updated mapping count badge');
+                            }
+
+                            // Update the mapping container content
+                            const mappingContainer = document.getElementById('fhir-mapping-container');
+                            console.log('🔍 Looking for mapping container:', {
+                                found: !!mappingContainer,
+                                currentHTML: mappingContainer?.innerHTML?.substring(0, 100)
+                            });
+
+                            if (mappingContainer) {
+                                console.log('🔄 Updating mapping container with new mappings');
+                                console.log('📊 Generating mapping content for:', {
+                                    mappingCount: currentData.fhirTransformResult?.atomicMappings?.length,
+                                    hasTransformResult: !!currentData.fhirTransformResult
+                                });
+
+                                const newContent = window.wizardController.view.getFHIRMappingContent(currentData);
+                                console.log('📄 Generated content length:', newContent.length, 'chars');
+                                console.log('📄 Content preview:', newContent.substring(0, 200));
+
+                                mappingContainer.innerHTML = newContent;
+                                console.log('✅ Mapping container innerHTML updated successfully');
+
+                                // Rebuild the resource filter dropdown options from the actual mappings
+                                const filterSelect = document.getElementById('resource-filter');
+                                if (filterSelect && currentData.fhirTransformResult?.atomicMappings?.length > 0) {
+                                    const mappings = currentData.fhirTransformResult.atomicMappings;
+                                    const resourceNames = [...new Set(
+                                        mappings.map(m => {
+                                            const path = m.resourceType || m.targetPath || m.fhirPath || m.fhirField || '';
+                                            const match = path.match(/^([A-Z][A-Za-z]+)/);
+                                            return match ? match[1] : null;
+                                        }).filter(Boolean)
+                                    )];
+                                    filterSelect.innerHTML = '<option value="all">All Resources</option>' +
+                                        resourceNames.map(r => `<option value="${r}">${r}</option>`).join('');
+                                }
+
+                                // Force browser repaint to ensure visual update
+                                void mappingContainer.offsetHeight;
+                                mappingContainer.style.opacity = '0.99';
+                                setTimeout(() => {
+                                    mappingContainer.style.opacity = '1';
+                                    console.log('🎨 Forced visual repaint completed');
+                                }, 10);
+                            } else {
+                                console.warn('⚠️ Mapping container not found, doing full re-render');
+                                console.log('🔄 Available elements:', {
+                                    wizardContent: !!document.getElementById('wizard-content'),
+                                    stepContent: !!document.querySelector('.wizard-step-content'),
+                                    allIds: Array.from(document.querySelectorAll('[id]')).map(el => el.id)
+                                });
+                                window.wizardController.view.renderStep(currentStep, currentData);
+                            }
+
+                            // Re-validate the step to enable Next button
+                            if (window.wizardController.view.validateCurrentStep) {
+                                console.log('🔍 Re-validating step after FHIR transformation...');
+                                window.wizardController.view.validateCurrentStep();
+                            }
+                        }
+                    };
+
+                    attemptUpdate();
+                }
+            } else {
+                console.warn('⚠️ Could not store FHIR result - wizard model not available');
+            }
+        } catch (error) {
+            console.error('❌ Error storing FHIR result:', error);
+        }
+    }
+
+    // Get parsed HL7 data from the optimized wizard system
+    getParsedHL7DataFromWizard() {
+        try {
+            // Try different sources for parsed HL7 data
+            if (window.wizardController?.model?.data?.parsedHL7Data) {
+                return window.wizardController.model.data.parsedHL7Data;
+            }
+
+            if (window.wizardView?.parsedHL7Data) {
+                return window.wizardView.parsedHL7Data;
+            }
+
+            if (window.wizard?.data?.parsedHL7Data) {
+                return window.wizard.data.parsedHL7Data;
+            }
+
+            console.warn('⚠️ No parsed HL7 data found in wizard system');
+            return null;
+        } catch (error) {
+            console.error('❌ Error getting parsed HL7 data:', error);
+            return null;
+        }
+    }
+
+    // Show loading state in optimized wizard
+    showOptimizedLoadingState() {
+        const resultsContainer = document.getElementById('optimized-fhir-transformation-results');
+        if (!resultsContainer) return;
+
+        resultsContainer.innerHTML = `
+            <div style="text-align: center; padding: 60px 20px;">
+                <div style="position: relative; display: inline-block; margin-bottom: 24px;">
+                    <div style="width: 60px; height: 60px; border: 4px solid #e2e8f0; border-top: 4px solid #1e3a8a; border-radius: 50%; animation: spin 1s linear infinite;"></div>
+                </div>
+                <div style="font-size: 18px; font-weight: 600; margin-bottom: 12px; color: #1e3a8a;">Transforming to FHIR...</div>
+                <div style="font-size: 14px; color: #6b7280; margin-bottom: 24px;">Converting HL7 segments to FHIR ${window.wizardController?.model?.data?.targetConfig?.version || 'R4'} resources</div>
+                <div style="background: #f8fafc; border-radius: 8px; padding: 16px; max-width: 400px; margin: 0 auto;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                        <span style="font-size: 12px; color: #64748b;">Processing...</span>
+                        <span style="font-size: 12px; color: #1e3a8a; font-weight: 600;">75%</span>
+                    </div>
+                    <div style="width: 100%; height: 6px; background: #e2e8f0; border-radius: 3px; overflow: hidden;">
+                        <div style="width: 75%; height: 100%; background: linear-gradient(90deg, #1e3a8a, #1e40af); animation: progress-slide 2s ease-in-out infinite;"></div>
+                    </div>
+                </div>
+                <style>
+                    @keyframes spin {
+                        0% { transform: rotate(0deg); }
+                        100% { transform: rotate(360deg); }
+                    }
+                    @keyframes progress-slide {
+                        0%, 100% { transform: translateX(-10px); }
+                        50% { transform: translateX(10px); }
+                    }
+                </style>
+            </div>
+        `;
+    }
+
+    // Show transformation results in optimized wizard
+    showOptimizedTransformationResults(fhirResult) {
+        const resultsContainer = document.getElementById('optimized-fhir-transformation-results');
+        if (!resultsContainer) return;
+
+        // Use the WizardView method to render the results
+        if (window.wizardView && typeof window.wizardView.getFHIRTransformationResults === 'function') {
+            resultsContainer.innerHTML = window.wizardView.getFHIRTransformationResults(fhirResult);
+        } else {
+            console.warn('⚠️ WizardView FHIR methods not available, using fallback');
+            resultsContainer.innerHTML = this.getFallbackResultsHTML(fhirResult);
+        }
+    }
+
+    // Fallback results HTML if WizardView methods aren't available
+    getFallbackResultsHTML(fhirResult) {
+        const resources = fhirResult.fhirResources || [];
+        const atomicMappings = fhirResult.atomicMappings || [];
+
+        return `
+            <div style="padding: 20px;">
+                <div style="background: linear-gradient(135deg, #f0fdf4 0%, #ffffff 100%); border: 2px solid #bbf7d0; border-radius: 12px; padding: 20px; margin-bottom: 24px;">
+                    <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 8px;">
+                        <span style="font-size: 24px;">✅</span>
+                        <h4 style="margin: 0; font-size: 18px; font-weight: 600; color: #16a34a;">Transformation Complete</h4>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 16px; color: #15803d; font-size: 14px;">
+                        <span><strong>${resources.length}</strong> FHIR resources created</span>
+                        <span>•</span>
+                        <span><strong>${atomicMappings.length}</strong> field mappings applied</span>
+                        <span>•</span>
+                        <span>FHIR ${window.wizardController?.model?.data?.targetConfig?.version || 'R4'} compliant</span>
+                    </div>
+                </div>
+
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px;">
+                    ${resources.map((resource, index) => `
+                        <div style="background: white; border: 2px solid #e2e8f0; border-radius: 12px; overflow: hidden;">
+                            <div style="background: linear-gradient(135deg, #1e3a8a 0%, #1e40af 100%); color: white; padding: 16px;">
+                                <h5 style="margin: 0; font-size: 16px; font-weight: 600;">${resource.resourceType}</h5>
+                                <p style="margin: 4px 0 0 0; font-size: 12px; opacity: 0.9;">Resource ${index + 1}</p>
+                            </div>
+                            <div style="padding: 16px;">
+                                <div style="color: #6b7280;">ID: ${resource.id || 'N/A'}</div>
+                            </div>
+                        </div>
+                    `).join('')}
+                </div>
+            </div>
+        `;
+    }
+
+    // Show enhanced mapping interface
+    showEnhancedMappingInterface() {
+        const enhancedInterface = document.getElementById('optimized-enhanced-mapping-interface');
+        if (enhancedInterface) {
+            enhancedInterface.style.display = 'block';
+        }
+    }
+
+    /**
+     * Synthesize display-only atomicMappings from assembled FHIR resources.
+     * Called when the Go assembly produced fhirResources but no DB field-level
+     * atomicMappings exist (MFN, DFT, MDM, VXU, SIU structural assembly).
+     * The returned mappings are for UI display only — they show the user what
+     * the assembly mapped.  They are not re-applied at runtime (the assembly
+     * handles that directly).
+     */
+    _synthesizeMappingsFromResources(fhirResources, parsedHL7Data) {
+        const mappings = [];
+
+        // HL7 segment → FHIR resource role hint (for display labels)
+        const segmentHints = {
+            Organization: ['STF', 'ZEM', 'MFE', 'MFI'],
+            Practitioner: ['STF', 'PRA', 'ZEM'],
+            Location:     ['LOC', 'LCH', 'LRL'],
+            ChargeItemDefinition: ['CDM', 'PRC'],
+            Appointment:  ['SCH', 'AIG', 'AIL', 'AIP'],
+            DocumentReference: ['TXA', 'OBX'],
+            Immunization: ['RXA', 'RXR', 'OBX'],
+            DiagnosticReport: ['OBR', 'OBX'],
+            Observation:  ['OBX'],
+            Patient:      ['PID', 'NK1'],
+            Encounter:    ['PV1', 'PV2'],
+            MessageHeader: ['MSH'],
+        };
+
+        // Build set of segment keys that are actually present in the parsed message
+        const presentSegments = new Set(
+            Object.keys(parsedHL7Data?.enhancedSegments || parsedHL7Data || {})
+        );
+
+        for (const resource of fhirResources) {
+            const rt = resource.resourceType;
+            if (!rt) continue;
+
+            const srcSegments = segmentHints[rt] || [rt.substring(0, 3).toUpperCase()];
+
+            // Walk one level of the resource and emit a mapping row per populated field
+            for (const [key, value] of Object.entries(resource)) {
+                if (key === 'resourceType' || key === 'meta' || key === 'text' || key === 'id') continue;
+                if (value === null || value === undefined) continue;
+
+                // Pick the first candidate segment that actually appears in the message;
+                // fall back to the first hint if none match (e.g. when parsedHL7Data absent)
+                const seg = srcSegments.find(s => presentSegments.has(s)) || srcSegments[0] || 'HL7';
+                const isArray = Array.isArray(value);
+                const displayVal = isArray
+                    ? (value.length > 0 ? JSON.stringify(value[0]).substring(0, 50) : '[]')
+                    : String(value).substring(0, 50);
+                const compositeHint = isArray
+                    ? (key === 'participant' ? 'forEach/condition' : key === 'identifier' ? 'firstOf' : 'composite')
+                    : null;
+
+                mappings.push({
+                    hl7Path:          isArray ? `${seg} (${compositeHint})` : `${seg} (field mapping)`,
+                    hl7Value:         '',
+                    fhirPath:         `${rt}.${key}`,
+                    fhirField:        `${rt}.${key}`,
+                    fhirValue:        displayVal,
+                    transformedValue: displayVal,
+                    resourceType:     rt,
+                    confidence:       0.75,
+                    _assembled:       true,
+                    _composite:       isArray,
+                    _compositeType:   compositeHint,
+                });
+            }
+        }
+
+        return mappings;
+    }
+
+    // Show error state in optimized wizard
+    showOptimizedError(message) {
+        const resultsContainer = document.getElementById('optimized-fhir-transformation-results');
+        if (!resultsContainer) return;
+
+        resultsContainer.innerHTML = `
+            <div style="text-align: center; padding: 60px 20px;">
+                <div style="font-size: 64px; margin-bottom: 24px; color: #dc2626;">⚠️</div>
+                <div style="font-size: 18px; font-weight: 600; margin-bottom: 12px; color: #dc2626;">Transformation Failed</div>
+                <div style="font-size: 14px; color: #6b7280; margin-bottom: 32px; max-width: 400px; margin-left: auto; margin-right: auto; line-height: 1.5;">
+                    ${message}
+                </div>
+                <button onclick="window.startOptimizedFHIRTransformation()"
+                        style="padding: 12px 24px; background: #dc2626; color: white; border: none; border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer;">
+                    🔄 Retry Transformation
+                </button>
+            </div>
+        `;
+    }
+
+    // Update configuration status
+    updateOptimizedConfigStatus(status) {
+        const statusElement = document.getElementById('fhir-config-status');
+        if (!statusElement) return;
+
+        const statusConfig = {
+            'ready': { text: 'Ready', class: 'status-ready' },
+            'transforming': { text: 'Transforming', class: 'status-transforming' },
+            'completed': { text: 'Completed', class: 'status-completed' },
+            'error': { text: 'Error', class: 'status-error' }
+        };
+
+        const config = statusConfig[status] || statusConfig.ready;
+        statusElement.textContent = config.text;
+
+        // Update background color based on status
+        const bgColors = {
+            'ready': '#fef2f2',
+            'transforming': '#fef3c7',
+            'completed': '#f0fdf4',
+            'error': '#fef2f2'
+        };
+
+        const textColors = {
+            'ready': '#dc2626',
+            'transforming': '#d97706',
+            'completed': '#16a34a',
+            'error': '#dc2626'
+        };
+
+        statusElement.style.backgroundColor = bgColors[status];
+        statusElement.style.color = textColors[status];
+    }
+
+    // View FHIR JSON in modal
+    viewOptimizedFHIRJSON() {
+        if (!this.fhirResult) {
+            console.warn('⚠️ No FHIR result available');
+            return;
+        }
+        this.showOptimizedJSONModal(this.fhirResult, 'Complete FHIR Transformation Result');
+    }
+
+    // View specific resource details
+    viewOptimizedResourceDetails(index) {
+        if (!this.fhirResult?.fhirResources?.[index]) {
+            console.warn('⚠️ Resource not found');
+            return;
+        }
+
+        const resource = this.fhirResult.fhirResources[index];
+        this.showOptimizedJSONModal(resource, `${resource.resourceType} Resource`);
+    }
+
+    // Show JSON in modal for optimized wizard
+    showOptimizedJSONModal(data, title = 'FHIR JSON') {
+        // Create modal if it doesn't exist
+        let modal = document.getElementById('optimizedFhirJsonModal');
+        if (!modal) {
+            modal = document.createElement('div');
+            modal.id = 'optimizedFhirJsonModal';
+            modal.style.cssText = `
+                position: fixed;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 100%;
+                background: rgba(0, 0, 0, 0.5);
+                z-index: 10000;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                backdrop-filter: blur(2px);
+            `;
+            document.body.appendChild(modal);
+        }
+
+        modal.innerHTML = `
+            <div style="background: white; border-radius: 12px; max-width: 90%; width: 900px; max-height: 80vh; overflow: hidden; display: flex; flex-direction: column;">
+                <div style="padding: 20px; border-bottom: 1px solid #e2e8f0; display: flex; justify-content: space-between; align-items: center;">
+                    <h3 style="margin: 0; font-size: 18px; font-weight: 600; color: #1e3a8a;">${title}</h3>
+                    <button onclick="window.closeOptimizedFHIRModal()" style="background: none; border: none; font-size: 24px; cursor: pointer; color: #6b7280;">×</button>
+                </div>
+                <div style="flex: 1; overflow-y: auto; padding: 20px; background: #f9fafb;">
+                    <pre style="font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace; font-size: 12px; line-height: 1.6; margin: 0; white-space: pre-wrap; word-wrap: break-word;">${JSON.stringify(data, null, 2)}</pre>
+                </div>
+            </div>
+        `;
+
+        modal.style.display = 'flex';
+
+        // Close on outside click
+        modal.onclick = function(e) {
+            if (e.target === modal) {
+                modal.style.display = 'none';
+            }
+        };
+    }
+
+    // Close FHIR modal
+    closeOptimizedFHIRModal() {
+        const modal = document.getElementById('optimizedFhirJsonModal');
+        if (modal) {
+            modal.style.display = 'none';
+        }
+    }
+
+    // Get API base URL
+    getApiBaseUrl() {
+        if (window.envConfig && window.envConfig.getApiBaseUrl) {
+            return window.envConfig.getApiBaseUrl();
+        }
+        if (window.envConfig && window.envConfig.getApiUrl) {
+            return window.envConfig.getApiUrl('');
+        }
+        const protocol = window.location.protocol;
+        const hostname = window.location.hostname;
+        const url = `${protocol}//${hostname}:8080`;
+        return url;
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // OOB Guide panel
+    // ─────────────────────────────────────────────────────────────────────────
+
+    // injectOOBGuide fetches the user guide for the current message type and
+    // inserts a collapsible info panel above the transformation results.
+    async injectOOBGuide() {
+        try {
+            const messageType = window.wizardController?.model?.data?.messageType
+                             || window.wizardController?.model?.data?.detectedMessageType;
+            if (!messageType) return;
+
+            const resp = await fetch(`/api/wizard/message-guide/${encodeURIComponent(messageType)}`);
+            if (!resp.ok) return;
+            const data = await resp.json();
+            if (!data.guide) return;
+
+            const container = document.getElementById('fhir-transform-results');
+            if (!container) return;
+
+            // Don't duplicate if already present
+            if (container.querySelector('.oob-guide-panel')) return;
+
+            const panel = document.createElement('div');
+            panel.className = 'oob-guide-panel';
+            panel.style.cssText = `
+                background: #eff6ff; border: 1.5px solid #bfdbfe; border-radius: 10px;
+                margin-bottom: 20px; overflow: hidden; font-size: 14px;
+            `;
+            panel.innerHTML = `
+                <div class="oob-guide-header" style="
+                    display: flex; justify-content: space-between; align-items: center;
+                    padding: 12px 16px; cursor: pointer; user-select: none;
+                    background: #dbeafe; border-bottom: 1.5px solid #bfdbfe;
+                " onclick="this.parentElement.querySelector('.oob-guide-body').style.display =
+                    this.parentElement.querySelector('.oob-guide-body').style.display === 'none' ? 'block' : 'none';
+                    this.querySelector('.oob-guide-chevron').textContent =
+                    this.parentElement.querySelector('.oob-guide-body').style.display === 'none' ? '▶' : '▼';">
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <span style="font-size: 18px;">ℹ️</span>
+                        <div>
+                            <div style="font-weight: 600; color: #1e40af; font-size: 14px;">
+                                ${messageType} — Out-of-Box Mapping Guide
+                            </div>
+                            <div style="color: #3b82f6; font-size: 12px; margin-top: 2px;">
+                                This message type is fully supported without wizard configuration.
+                                Click to read what's mapped automatically and when to use the wizard.
+                            </div>
+                        </div>
+                    </div>
+                    <span class="oob-guide-chevron" style="color: #3b82f6; font-size: 16px; font-weight: bold;">▼</span>
+                </div>
+                <div class="oob-guide-body" style="padding: 20px; max-height: 500px; overflow-y: auto;">
+                    ${this._renderGuideMarkdown(data.guide)}
+                </div>
+            `;
+            container.insertBefore(panel, container.firstChild);
+        } catch (e) {
+            // Guide is informational — never block on failure
+            console.debug('OOB guide fetch skipped:', e.message);
+        }
+    }
+
+    // _renderGuideMarkdown converts the guide's markdown to safe HTML.
+    // Handles: ## headings, **bold**, | tables |, `code`, --- horizontal rules, bullet lists.
+    _renderGuideMarkdown(md) {
+        if (!md) return '';
+        const esc = s => s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+        let html = '';
+        const lines = md.split('\n');
+        let inTable = false, inList = false;
+
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i];
+
+            // Horizontal rule
+            if (/^---+$/.test(line.trim())) {
+                if (inTable) { html += '</tbody></table>'; inTable = false; }
+                if (inList)  { html += '</ul>'; inList = false; }
+                html += '<hr style="border:none;border-top:1px solid #bfdbfe;margin:12px 0;">';
+                continue;
+            }
+
+            // Headings
+            const h1 = line.match(/^#\s+(.*)/);
+            const h2 = line.match(/^##\s+(.*)/);
+            const h3 = line.match(/^###\s+(.*)/);
+            if (h1) { html += `<h3 style="margin:0 0 4px 0;color:#1e3a8a;font-size:16px;">${esc(h1[1])}</h3>`; continue; }
+            if (h2) { html += `<h4 style="margin:12px 0 6px 0;color:#1e40af;font-size:14px;font-weight:600;">${esc(h2[1])}</h4>`; continue; }
+            if (h3) { html += `<h5 style="margin:8px 0 4px 0;color:#1e40af;font-size:13px;font-weight:600;">${esc(h3[1])}</h5>`; continue; }
+
+            // Table rows  |col|col|
+            if (/^\|/.test(line)) {
+                if (!inTable) { html += '<table style="width:100%;border-collapse:collapse;font-size:13px;margin:8px 0;"><tbody>'; inTable = true; }
+                const cells = line.replace(/^\||\|$/g,'').split('|');
+                if (cells.every(c => /^[-: ]+$/.test(c))) continue; // separator row
+                const isHeader = i > 0 && /^\|/.test(lines[i-1]) && i+1 < lines.length && /^[|\s-:]+$/.test(lines[i+1]);
+                const tag = isHeader ? 'th' : 'td';
+                const rowStyle = isHeader ? 'background:#dbeafe;' : '';
+                html += `<tr style="${rowStyle}">${cells.map(c => `<${tag} style="padding:4px 8px;border:1px solid #bfdbfe;">${this._inlineFormat(c.trim())}</${tag}>`).join('')}</tr>`;
+                continue;
+            }
+            if (inTable) { html += '</tbody></table>'; inTable = false; }
+
+            // Bullet lists
+            const bullet = line.match(/^[-*]\s+(.*)/);
+            if (bullet) {
+                if (!inList) { html += '<ul style="margin:4px 0 4px 16px;padding:0;">'; inList = true; }
+                html += `<li style="margin:2px 0;">${this._inlineFormat(bullet[1])}</li>`;
+                continue;
+            }
+            if (inList) { html += '</ul>'; inList = false; }
+
+            // Blank line
+            if (line.trim() === '') { html += '<br>'; continue; }
+
+            // Normal paragraph
+            html += `<p style="margin:4px 0;">${this._inlineFormat(line)}</p>`;
+        }
+        if (inTable) html += '</tbody></table>';
+        if (inList)  html += '</ul>';
+        return html;
+    }
+
+    _inlineFormat(s) {
+        const esc = t => t.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+        return esc(s)
+            .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+            .replace(/`([^`]+)`/g, '<code style="background:#e0f2fe;padding:1px 4px;border-radius:3px;font-size:12px;">$1</code>')
+            .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" style="color:#2563eb;">$1</a>');
+    }
+}
+
+// Initialize global instance for optimized wizard
+window.optimizedFHIRTransform = new WizardFHIRTransform();
+
+// Global functions for HTML onclick handlers in optimized wizard
+window.startOptimizedFHIRTransformation = function() {
+    window.optimizedFHIRTransform.startOptimizedFHIRTransformation();
+};
+
+window.viewOptimizedFHIRJSON = function() {
+    window.optimizedFHIRTransform.viewOptimizedFHIRJSON();
+};
+
+window.viewOptimizedResourceDetails = function(index) {
+    window.optimizedFHIRTransform.viewOptimizedResourceDetails(index);
+};
+
+window.closeOptimizedFHIRModal = function() {
+    window.optimizedFHIRTransform.closeOptimizedFHIRModal();
+};
+
+window.editOptimizedFieldMappings = function() {
+    console.log('🔧 Edit field mappings requested for optimized wizard');
+    // This could open an advanced mapping interface
+    AppDialogs.toast('Advanced field mapping interface coming soon.', 'info');
+};
+
+window.validateOptimizedTransformation = function() {
+    console.log('✅ Validate transformation requested for optimized wizard');
+    // This could run validation checks
+    AppDialogs.toast('FHIR validation checks coming soon.', 'info');
+};
+
+console.log('📝 Optimized Wizard FHIR Transform module loaded');

@@ -1,0 +1,110 @@
+# golangci-lint configuration for ezHealthKonnect
+# Run: golangci-lint run ./...
+# CI: golangci-lint run --out-format=github-actions ./...
+#
+# Install: go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+
+linters:
+  enable:
+    - govet          # Correctness: suspicious code constructs
+    - staticcheck    # Advanced static analysis (replaces many deprecated linters)
+    - unused         # Unused code detection
+    - gofmt          # Formatting consistency
+    - goimports      # Import grouping and ordering
+    - misspell       # Common spelling mistakes
+    - gosimple       # Simplification suggestions
+    - ineffassign    # Detects assignments whose values are never used
+    - typecheck      # Compilation correctness (always enabled)
+    - forbidigo      # Forbid specific patterns (fmt.Printf in production code)
+    - revive         # Fast, configurable replacement for golint
+
+linters-settings:
+  forbidigo:
+    # Forbid unstructured logging patterns in production code.
+    # All logging must go through services/logger (slog-based).
+    # EXCEPTION: services/backup/* and test files are excluded via exclude-rules below.
+    forbid:
+      - p: '^fmt\.Printf$'
+        msg: "Use logger.Info/Warn/Error instead of fmt.Printf (P11: structured logging)"
+      - p: '^fmt\.Println$'
+        msg: "Use logger.Info/Warn/Error instead of fmt.Println (P11: structured logging)"
+      - p: '^fmt\.Fprintf\(os\.Stdout'
+        msg: "Use logger.Info/Warn/Error instead of fmt.Fprintf(os.Stdout, ...) (P11)"
+      - p: '^log\.Printf$'
+        msg: "Use logger.Info/Warn/Error instead of log.Printf (P11: structured logging)"
+      - p: '^log\.Println$'
+        msg: "Use logger.Info/Warn/Error instead of log.Println (P11: structured logging)"
+      - p: '^log\.Print$'
+        msg: "Use logger.Info/Warn/Error instead of log.Print (P11: structured logging)"
+
+  revive:
+    rules:
+      - name: exported                       # Exported types/funcs must have comments
+        disabled: false
+      - name: var-naming                     # Consistent naming conventions
+        disabled: false
+      - name: error-return                   # error should be last return value
+        disabled: false
+      - name: unused-parameter               # Warn on unused function parameters
+        disabled: false
+      - name: empty-block                    # Warn on empty if/for blocks
+        disabled: false
+      - name: superfluous-else               # Simplify else after return
+        disabled: false
+
+  gofmt:
+    simplify: true
+
+  goimports:
+    # Group imports: stdlib, then external, then internal
+    local-prefixes: ezhealthkonnect
+
+  misspell:
+    locale: US
+
+issues:
+  exclude-rules:
+    # Allow fmt.Print* in test files (test output is intentionally unstructured)
+    - path: '_test\.go'
+      linters: [forbidigo]
+
+    # Allow fmt.Print* in the legacy backup package (pre-dates this standard)
+    - path: 'services/backup/'
+      linters: [forbidigo, revive]
+
+    # Allow fmt.Print* in the logger package itself (bootstrap only)
+    - path: 'services/logger/'
+      linters: [forbidigo]
+
+    # Allow log.Printf in main.go startup only (before logger.Init() runs)
+    - path: '^main\.go$'
+      linters: [forbidigo]
+      text: 'log\.'
+
+    # Allow fmt.Print* in migration scripts and debug utilities
+    - path: 'test_.*\.go'
+      linters: [forbidigo]
+
+    # Suppress "exported function X should have comment" for now (gradual adoption)
+    - linters: [revive]
+      text: 'exported function .* should have comment'
+
+  # Maximum issues per linter (0 = unlimited)
+  max-issues-per-linter: 50
+  max-same-issues: 5
+
+  # Include test files in linting
+  exclude-use-default: false
+
+run:
+  # Timeout for analysis
+  timeout: 5m
+
+  # Directories to skip entirely
+  skip-dirs:
+    - vendor
+    - node_modules
+    - services/backup   # Legacy package with pre-existing issues
+
+  # Go version
+  go: '1.23'

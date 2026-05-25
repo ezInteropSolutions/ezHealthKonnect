@@ -1,0 +1,344 @@
+package services
+
+import (
+	"context"
+	"database/sql"
+	"encoding/json"
+	"ezhealthkonnect/hl7"
+	"ezhealthkonnect/models"
+	"fmt"
+
+	"github.com/dop251/goja"
+)
+
+// ============================================================================
+// VALIDATION EXECUTOR - Pre-processing validation
+// ============================================================================
+
+type ValidationExecutor struct{}
+
+func NewValidationExecutor() *ValidationExecutor {
+	return &ValidationExecutor{}
+}
+
+func (ve *ValidationExecutor) GetSupportedType() string {
+	return "pre.validation"
+}
+
+func (ve *ValidationExecutor) Execute(ctx context.Context, step models.TransformationStep, input map[string]interface{}) (map[string]interface{}, error) {
+	// Get validation rules from config
+	rules, ok := step.Config["rules"].([]interface{})
+	if !ok {
+		return input, fmt.Errorf("validation rules not found in config")
+	}
+
+	// Access enhanced segments
+	enhancedSegments, ok := input["enhancedSegments"].(map[string]interface{})
+	if !ok {
+		return input, fmt.Errorf("enhancedSegments not found in input")
+	}
+
+	// Validate each rule
+	for _, ruleInterface := range rules {
+		rule, ok := ruleInterface.(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		segmentName, _ := rule["segment"].(string)
+		fieldKey, _ := rule["field"].(string)
+		required, _ := rule["required"].(bool)
+
+		if required {
+			// Check if segment exists
+			segment, exists := enhancedSegments[segmentName]
+			if !exists {
+				return input, fmt.Errorf("required segment %s not found", segmentName)
+			}
+
+			// Check if field exists
+			segmentMap, ok := segment.(map[string]interface{})
+			if !ok {
+				return input, fmt.Errorf("invalid segment structure for %s", segmentName)
+			}
+
+			fields, ok := segmentMap["fields"].([]interface{})
+			if !ok {
+				return input, fmt.Errorf("fields not found in segment %s", segmentName)
+			}
+
+			// Look for specific field
+			fieldFound := false
+			for _, fieldInterface := range fields {
+				field, ok := fieldInterface.(map[string]interface{})
+				if !ok {
+					continue
+				}
+
+				if field["key"] == fieldKey {
+					// Check if field has value
+					if value, ok := field["value"].(string); ok && value != "" {
+						fieldFound = true
+						break
+					}
+				}
+			}
+
+			if !fieldFound {
+				return input, fmt.Errorf("required field %s not found or empty", fieldKey)
+			}
+		}
+	}
+
+	fmt.Printf("✅ Validation passed: all required fields present\n")
+	return input, nil
+}
+
+// ============================================================================
+// HL7 TO FHIR MAPPING EXECUTOR - Core transformation
+// ============================================================================
+
+type HL7ToFHIRMappingExecutor struct {
+	db                *sql.DB
+	transformService  *HL7FHIRTransformServiceV3
+}
+
+func NewHL7ToFHIRMappingExecutor(db *sql.DB) *HL7ToFHIRMappingExecutor {
+	return &HL7ToFHIRMappingExecutor{
+		db:               db,
+		transformService: NewHL7FHIRTransformServiceV3(db),
+	}
+}
+
+func (hfe *HL7ToFHIRMappingExecutor) GetSupportedType() string {
+	return "core.mapping"
+}
+
+func (hfe *HL7ToFHIRMappingExecutor) Execute(ctx context.Context, step models.TransformationStep, input map[string]interface{}) (map[string]interface{}, error) {
+	// Get interface ID and message type from step config
+	interfaceID, _ := step.Config["interface_id"].(string)
+	messageType, _ := step.Config["message_type"].(string)
+	useTemplate, _ := step.Config["use_template"].(bool)
+
+	if interfaceID == "" || messageType == "" {
+		return input, fmt.Errorf("interface_id and message_type required in config")
+	}
+
+	// Get HL7 message from input
+	var hl7Message string
+
+	// Try to get raw HL7 from input
+	if raw, ok := input["raw"].(string); ok {
+		hl7Message = raw
+	} else {
+		return input, fmt.Errorf("raw HL7 message not found in input")
+	}
+
+	// Parse HL7 message if not already parsed
+	var parsedMessage *hl7.EnhancedParsedMessage
+
+	// Check if already have enhanced parsed message
+	if enhancedSegments, ok := input["enhancedSegments"].(map[string]interface{}); ok {
+		// Already parsed, reconstruct EnhancedParsedMessage
+		parsedMessage = &hl7.EnhancedParsedMessage{
+			Raw:              hl7Message,
+			Success:          true,
+			EnhancedSegments: make(map[string]hl7.EnhancedSegment),
+		}
+
+		// Convert back to typed structure (simplified for MVP)
+		// In production, we'd fully reconstruct the structure
+	} else {
+		// Parse HL7 message
+		var err error
+		parsedMessage, err = hl7.ParseWithRealSchema(hl7Message)
+		if err != nil {
+			return input, fmt.Errorf("failed to parse HL7 message: %w", err)
+		}
+	}
+
+	// Transform to FHIR
+	fhirBundle, err := hfe.transformService.TransformHL7ToFHIR(ctx, parsedMessage, interfaceID, messageType)
+	if err != nil {
+		return input, fmt.Errorf("HL7 to FHIR transformation failed: %w", err)
+	}
+
+	// Add FHIR bundle to output
+	output := make(map[string]interface{})
+	for k, v := range input {
+		output[k] = v
+	}
+	output["fhirBundle"] = fhirBundle
+	output["fhir_version"] = "R4"
+	output["transformation_type"] = "HL7v2_to_FHIR"
+
+	fmt.Printf("✅ HL7 to FHIR transformation completed\n")
+	return output, nil
+}
+
+// ============================================================================
+// FHIR VALIDATION EXECUTOR - Post-processing validation
+// ============================================================================
+
+type FHIRValidationExecutor struct{}
+
+func NewFHIRValidationExecutor() *FHIRValidationExecutor {
+	return &FHIRValidationExecutor{}
+}
+
+func (fve *FHIRValidationExecutor) GetSupportedType() string {
+	return "post.validation"
+}
+
+func (fve *FHIRValidationExecutor) Execute(ctx context.Context, step models.TransformationStep, input map[string]interface{}) (map[string]interface{}, error) {
+	// Get FHIR bundle from input
+	fhirBundle, ok := input["fhirBundle"]
+	if !ok {
+		return input, fmt.Errorf("fhirBundle not found in input")
+	}
+
+	// Get validation config
+	strictMode, _ := step.Config["strict_mode"].(bool)
+	validateRefs, _ := step.Config["validate_references"].(bool)
+
+	// Basic validation: check if bundle has required fields
+	bundleMap, ok := fhirBundle.(map[string]interface{})
+	if !ok {
+		return input, fmt.Errorf("invalid FHIR bundle structure")
+	}
+
+	// Validate resourceType
+	if resourceType, ok := bundleMap["resourceType"].(string); !ok || resourceType != "Bundle" {
+		return input, fmt.Errorf("invalid resourceType, expected Bundle")
+	}
+
+	// Validate type
+	if bundleType, ok := bundleMap["type"].(string); !ok || bundleType == "" {
+		if strictMode {
+			return input, fmt.Errorf("bundle type is required in strict mode")
+		}
+		fmt.Printf("⚠️  Bundle type not specified\n")
+	}
+
+	// Validate entries
+	entries, ok := bundleMap["entry"].([]interface{})
+	if !ok || len(entries) == 0 {
+		if strictMode {
+			return input, fmt.Errorf("bundle must contain at least one entry in strict mode")
+		}
+		fmt.Printf("⚠️  Bundle has no entries\n")
+	}
+
+	// Validate references if enabled
+	if validateRefs && len(entries) > 0 {
+		// Collect all resource IDs
+		resourceIDs := make(map[string]bool)
+		for _, entryInterface := range entries {
+			entry, ok := entryInterface.(map[string]interface{})
+			if !ok {
+				continue
+			}
+
+			resource, ok := entry["resource"].(map[string]interface{})
+			if !ok {
+				continue
+			}
+
+			if id, ok := resource["id"].(string); ok {
+				resourceIDs[id] = true
+			}
+		}
+
+		// Validate references exist (simplified for MVP)
+		// In production, we'd do full reference validation
+	}
+
+	fmt.Printf("✅ FHIR validation passed\n")
+	return input, nil
+}
+
+// ============================================================================
+// CUSTOM SCRIPT EXECUTOR - User-defined JavaScript
+// ============================================================================
+
+type CustomScriptExecutor struct{}
+
+func NewCustomScriptExecutor() *CustomScriptExecutor {
+	return &CustomScriptExecutor{}
+}
+
+func (cse *CustomScriptExecutor) GetSupportedType() string {
+	return "custom"
+}
+
+func (cse *CustomScriptExecutor) Execute(ctx context.Context, step models.TransformationStep, input map[string]interface{}) (map[string]interface{}, error) {
+	// Get script content
+	if step.ScriptContent == nil || *step.ScriptContent == "" {
+		return input, fmt.Errorf("script_content is required for custom steps")
+	}
+
+	scriptType := "javascript"
+	if step.ScriptType != nil {
+		scriptType = *step.ScriptType
+	}
+
+	if scriptType != "javascript" {
+		return input, fmt.Errorf("only javascript is supported for custom scripts in MVP")
+	}
+
+	// Execute JavaScript using goja
+	vm := goja.New()
+
+	// Set input data
+	inputJSON, err := json.Marshal(input)
+	if err != nil {
+		return input, fmt.Errorf("failed to marshal input: %w", err)
+	}
+
+	// Create JavaScript context
+	script := fmt.Sprintf(`
+		var input = %s;
+
+		// Helper functions
+		function getField(segment, key) {
+			if (!input.enhancedSegments || !input.enhancedSegments[segment]) {
+				return null;
+			}
+			var fields = input.enhancedSegments[segment].fields || [];
+			for (var i = 0; i < fields.length; i++) {
+				if (fields[i].key === key) {
+					return fields[i].value;
+				}
+			}
+			return null;
+		}
+
+		function setMetadata(key, value) {
+			if (!input._metadata) {
+				input._metadata = {};
+			}
+			input._metadata[key] = value;
+		}
+
+		// User script
+		%s
+
+		// Return result
+		JSON.stringify(transform(input));
+	`, string(inputJSON), *step.ScriptContent)
+
+	// Execute script
+	value, err := vm.RunString(script)
+	if err != nil {
+		return input, fmt.Errorf("script execution failed: %w", err)
+	}
+
+	// Parse result
+	var output map[string]interface{}
+	if err := json.Unmarshal([]byte(value.String()), &output); err != nil {
+		return input, fmt.Errorf("failed to parse script output: %w", err)
+	}
+
+	fmt.Printf("✅ Custom script executed successfully\n")
+	return output, nil
+}

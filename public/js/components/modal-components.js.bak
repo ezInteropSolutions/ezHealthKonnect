@@ -1,0 +1,481 @@
+// js/components/modal-components-refactored.js - Modal Components Loader (Refactored)
+// Uses shared InterfaceConfigComponents for consistency
+
+(function() {
+    'use strict';
+
+    function loadModalComponents() {
+        loadCreateModal();
+        loadEditModal();
+        loadDetailsModal();
+    }
+
+    function loadCreateModal() {
+        const container = document.getElementById('create-modal-container');
+        if (!container) {
+            console.warn('⚠️ Create modal container not found');
+            return;
+        }
+        console.log('✅ Loading create modal...');
+
+        // Simple create modal - redirects to wizard for full configuration
+        container.innerHTML = `
+            <!-- Compact Create Interface Modal -->
+            <div class="modal-overlay" id="createModal">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h3 class="modal-title">Create New Interface</h3>
+                        <button class="modal-close" onclick="closeCreateModal()">&times;</button>
+                    </div>
+                    <div class="modal-body">
+                        <form id="createInterfaceForm">
+                            <div class="form-group">
+                                <label for="interfaceName">Interface Name</label>
+                                <input type="text" id="interfaceName" name="name" required
+                                       placeholder="e.g., ADT Patient Admissions">
+                            </div>
+
+                            <div class="form-group">
+                                <label for="interfaceDescription">Description</label>
+                                <textarea id="interfaceDescription" name="description"
+                                          placeholder="Brief description of this interface"></textarea>
+                            </div>
+
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label for="sourceType">Source Type</label>
+                                    <select id="sourceType" name="sourceType" required>
+                                        <option value="">Select source...</option>
+                                        <option value="file">File</option>
+                                        <option value="tcp">TCP</option>
+                                        <option value="http">HTTP</option>
+                                        <option value="database">Database</option>
+                                    </select>
+                                </div>
+
+                                <div class="form-group">
+                                    <label for="targetType">Target Type</label>
+                                    <select id="targetType" name="targetType" required>
+                                        <option value="">Select target...</option>
+                                        <option value="file">File</option>
+                                        <option value="tcp">TCP</option>
+                                        <option value="http">HTTP</option>
+                                        <option value="database">Database</option>
+                                        <option value="fhir">FHIR</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </form>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="modal-btn secondary" onclick="closeCreateModal()">Cancel</button>
+                        <button type="submit" class="modal-btn primary" form="createInterfaceForm">Create Interface</button>
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
+    function loadEditModal() {
+        const container = document.getElementById('edit-modal-container');
+        if (!container) {
+            console.warn('⚠️ Edit modal container not found');
+            return;
+        }
+        console.log('✅ Loading edit modal (REFACTORED with shared components)...');
+
+        // ✅ REFACTORED: Using shared InterfaceConfigComponents with tabs and maximize
+        container.innerHTML = `
+            <!-- Edit Interface Modal (Refactored with Tabs) -->
+            <div class="modal-overlay" id="editModal">
+                <div class="modal-content large" id="editModalContent">
+                    <div class="modal-header">
+                        <h3 class="modal-title" id="editTitle">Edit Interface Configuration</h3>
+                        <div class="modal-controls">
+                            <button class="modal-control-btn" id="editModalMaximize" onclick="toggleEditModalMaximize()" title="Maximize">
+                                <span id="editMaximizeIcon">⛶</span>
+                            </button>
+                            <button class="modal-close" onclick="closeEditModal()">&times;</button>
+                        </div>
+                    </div>
+
+                    <!-- Tab Navigation -->
+                    <div class="modal-tabs">
+                        <button class="modal-tab active" data-tab="basic" onclick="switchEditTab('basic')">
+                            <span class="tab-icon">&#9776;</span> Basic
+                        </button>
+                        <button class="modal-tab" data-tab="source" onclick="switchEditTab('source')">
+                            <span class="tab-icon">&#8594;</span> Source
+                        </button>
+                        <button class="modal-tab" data-tab="target" onclick="switchEditTab('target')">
+                            <span class="tab-icon">&#9654;</span> Target
+                        </button>
+                        <button class="modal-tab" data-tab="deployment" onclick="switchEditTab('deployment')">
+                            <span class="tab-icon">&#9881;</span> Deploy
+                        </button>
+                    </div>
+
+                    <div class="modal-body">
+                        <form id="editInterfaceForm" onsubmit="handleEditInterface(event)">
+                            <input type="hidden" id="editInterfaceId" name="id">
+
+                            <!-- Tab 1: Basic Information -->
+                            <div class="tab-content active" id="editTabBasic">
+                                <div class="config-section">
+                                    <div class="form-group">
+                                        <label for="editInterfaceName" class="form-label required">Interface Name</label>
+                                        <input type="text" id="editInterfaceName" class="form-control" name="name" required>
+                                    </div>
+
+                                    <div class="form-group">
+                                        <label for="editInterfaceDescription" class="form-label">Description</label>
+                                        <textarea id="editInterfaceDescription" class="form-control" name="description" rows="3"></textarea>
+                                    </div>
+
+                                    <div class="form-row">
+                                        <div class="form-group">
+                                            <label for="editStatus" class="form-label">Status</label>
+                                            <select id="editStatus" class="form-control" name="status">
+                                                <option value="inactive">Inactive</option>
+                                                <option value="testing">Testing</option>
+                                                <option value="active">Active</option>
+                                                <option value="configured">Configured</option>
+                                            </select>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Tab 2: Source Configuration -->
+                            <div class="tab-content" id="editTabSource">
+                                <div class="config-section">
+                                    <div class="form-row">
+                                        <!-- Source Type Selector (rendered by shared component) -->
+                                        <div id="editSourceTypeContainer"></div>
+
+                                        <!-- Source Connectivity Selector (rendered by shared component) -->
+                                        <div id="editSourceConnectivityContainer"></div>
+                                    </div>
+
+                                    <!-- Dynamic Source Configuration Panel (rendered by shared component) -->
+                                    <div id="editSourceConfigPanel" class="config-panel"></div>
+                                </div>
+                            </div>
+
+                            <!-- Tab 3: Target Configuration -->
+                            <div class="tab-content" id="editTabTarget">
+                                <div class="config-section">
+                                    <!-- Target Connectivity Selector (rendered by shared component) -->
+                                    <div id="editTargetConnectivityContainer"></div>
+
+                                    <!-- Dynamic Target Configuration Panel (rendered by shared component) -->
+                                    <div id="editTargetConfigPanel" class="config-panel"></div>
+                                </div>
+                            </div>
+
+                            <!-- Tab 4: Deployment Settings -->
+                            <div class="tab-content" id="editTabDeployment">
+                                <div id="editDeploymentSettingsContainer"></div>
+                            </div>
+
+                        </form>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="modal-btn secondary" onclick="closeEditModal()">Cancel</button>
+                        <button type="submit" class="modal-btn primary" form="editInterfaceForm">Save Changes</button>
+                    </div>
+                </div>
+            </div>
+        `;
+
+        // Setup tab switching and maximize functions
+        setupEditModalFunctions();
+    }
+
+    function loadDetailsModal() {
+        const container = document.getElementById('details-modal-container');
+        if (!container) {
+            console.warn('⚠️ Details modal container not found');
+            return;
+        }
+        console.log('✅ Loading details modal...');
+
+        container.innerHTML = `
+            <!-- Interface Details Modal -->
+            <div class="modal-overlay" id="detailsModal">
+                <div class="modal-content large">
+                    <div class="modal-header">
+                        <h3 class="modal-title" id="detailsTitle">Interface Details</h3>
+                        <button class="modal-close" onclick="closeDetailsModal()">&times;</button>
+                    </div>
+                    <div class="modal-body" id="detailsContent">
+                        <!-- Content populated dynamically -->
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="modal-btn secondary" onclick="closeDetailsModal()">Close</button>
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
+    /**
+     * Populate Edit Form with Interface Data
+     * Uses shared InterfaceConfigComponents
+     */
+    window.populateEditForm = function(interfaceData) {
+        console.log('📝 Populating edit form with data:', interfaceData);
+
+        // Basic fields
+        document.getElementById('editInterfaceId').value = interfaceData.id || '';
+        document.getElementById('editInterfaceName').value = interfaceData.name || '';
+        document.getElementById('editInterfaceDescription').value = interfaceData.description || '';
+        document.getElementById('editStatus').value = interfaceData.status || 'inactive';
+
+        // Extract connectivity from V30 JSONB structure or fallback to string
+        // Handle both snake_case (from API) and camelCase (from frontend)
+        let sourceConnectivityValue = interfaceData.source_connectivity || interfaceData.sourceConnectivity;
+        let sourceConfigData = interfaceData.source_config || interfaceData.sourceConfig || {};
+
+        // Handle V30 migration: source_connectivity might be JSONB {type, config}
+        if (typeof sourceConnectivityValue === 'object' && sourceConnectivityValue !== null) {
+            console.log('🔄 Detected V30 JSONB connectivity structure:', sourceConnectivityValue);
+            const connectivityObj = sourceConnectivityValue;
+            sourceConnectivityValue = connectivityObj.type || 'tcp';
+            // Merge config from connectivity object - this is the actual config to use
+            sourceConfigData = { ...connectivityObj.config, ...sourceConfigData };
+            console.log('📋 Extracted source config from V30 structure:', sourceConfigData);
+        }
+
+        // Source Type - use shared component
+        // Handle both snake_case (from API) and camelCase
+        const sourceTypeContainer = document.getElementById('editSourceTypeContainer');
+        if (sourceTypeContainer) {
+            sourceTypeContainer.innerHTML = InterfaceConfigComponents.getSourceTypeSelector(
+                interfaceData.source_type || interfaceData.sourceType || 'hl7v2',
+                { idPrefix: 'edit', showHint: false }
+            );
+        }
+
+        // Source Connectivity - use shared component
+        const sourceConnectivityContainer = document.getElementById('editSourceConnectivityContainer');
+        if (sourceConnectivityContainer) {
+            sourceConnectivityContainer.innerHTML = InterfaceConfigComponents.getSourceConnectivitySelector(
+                sourceConnectivityValue || 'tcp',
+                { idPrefix: 'edit', showHint: false }
+            );
+        }
+
+        // Source Config Panel - use shared component with extracted data
+        const dataForSourcePanel = {
+            ...interfaceData,
+            sourceConnectivity: sourceConnectivityValue,
+            sourceConfig: sourceConfigData,
+            sourceType: interfaceData.source_type || interfaceData.sourceType || 'hl7v2'
+        };
+        console.log('📦 Data being passed to updateEditSourceConfigPanel:', {
+            sourceConnectivity: dataForSourcePanel.sourceConnectivity,
+            sourceConfig: dataForSourcePanel.sourceConfig,
+            sourceType: dataForSourcePanel.sourceType
+        });
+        updateEditSourceConfigPanel(dataForSourcePanel);
+
+        // Extract target connectivity from V30 JSONB structure or fallback to string
+        // Handle both snake_case (from API) and camelCase (from frontend)
+        let targetConnectivityValue = interfaceData.target_connectivity || interfaceData.targetConnectivity || 'http';
+        let targetConfigData = interfaceData.target_config || interfaceData.targetConfig || {};
+
+        // Handle V30 migration: target_connectivity might be JSONB {type, config}
+        if (typeof targetConnectivityValue === 'object' && targetConnectivityValue !== null) {
+            console.log('🔄 Detected V30 JSONB target connectivity structure:', targetConnectivityValue);
+            const connectivityObj = targetConnectivityValue;
+            targetConnectivityValue = connectivityObj.type || 'http';
+            // Merge config from connectivity object - this is the actual config to use
+            targetConfigData = { ...connectivityObj.config, ...targetConfigData };
+            console.log('📋 Extracted target config from V30 structure:', targetConfigData);
+        }
+
+        // Target Connectivity - use shared component
+        const targetConnectivityContainer = document.getElementById('editTargetConnectivityContainer');
+        if (targetConnectivityContainer) {
+            targetConnectivityContainer.innerHTML = InterfaceConfigComponents.getTargetConnectivitySelector(
+                targetConnectivityValue,
+                { idPrefix: 'edit', showHint: false }
+            );
+        }
+
+        // Target Config Panel - use shared component with extracted data
+        updateEditTargetConfigPanel({
+            ...interfaceData,
+            targetConnectivity: targetConnectivityValue,
+            targetConfig: targetConfigData
+        });
+
+        // Deployment Settings - use shared component
+        const deploymentSettingsContainer = document.getElementById('editDeploymentSettingsContainer');
+        if (deploymentSettingsContainer) {
+            console.log('🚀 Populating deployment settings with data:', {
+                deployment_mode: interfaceData.deployment_mode,
+                auto_start: interfaceData.auto_start,
+                deployment_delay_seconds: interfaceData.deployment_delay_seconds
+            });
+            deploymentSettingsContainer.innerHTML = InterfaceConfigComponents.getDeploymentSettingsPanel(
+                interfaceData,
+                'edit'
+            );
+            // Initialize event handlers for deployment settings
+            InterfaceConfigComponents.initDeploymentSettingsEvents(document, 'edit');
+        } else {
+            console.warn('⚠️ editDeploymentSettingsContainer not found in DOM');
+        }
+
+        // Attach event listeners
+        attachEditModalListeners();
+    };
+
+    /**
+     * Update Edit Source Config Panel
+     */
+    function updateEditSourceConfigPanel(interfaceData) {
+        const sourceConfigPanel = document.getElementById('editSourceConfigPanel');
+        if (!sourceConfigPanel) return;
+
+        const sourceType = document.getElementById('editsourceType')?.value || interfaceData.sourceType || interfaceData.source_type || 'hl7v2';
+        const sourceConnectivity = document.getElementById('editsourceConnectivity')?.value || interfaceData.sourceConnectivity || 'tcp';
+        const sourceConfig = interfaceData.sourceConfig || {};
+
+        console.log('🔄 Updating edit source config panel:', { sourceType, sourceConnectivity, sourceConfig });
+        console.log('🔍 DEBUG: Full interfaceData passed to updateEditSourceConfigPanel:', interfaceData);
+
+        sourceConfigPanel.innerHTML = InterfaceConfigComponents.getSourceConfigPanel(
+            sourceConnectivity,
+            sourceType,
+            sourceConfig,
+            { idPrefix: 'edit' }
+        );
+
+        // Attach event listeners for the new panel
+        InterfaceConfigComponents.attachEventListeners(
+            sourceConfigPanel,
+            'edit',
+            {
+                onConnectivityChange: () => updateEditSourceConfigPanel(interfaceData),
+                onSourceTypeChange: () => updateEditSourceConfigPanel(interfaceData)
+            }
+        );
+    }
+
+    /**
+     * Update Edit Target Config Panel
+     */
+    function updateEditTargetConfigPanel(interfaceData) {
+        const targetConfigPanel = document.getElementById('editTargetConfigPanel');
+        if (!targetConfigPanel) return;
+
+        const targetConnectivity = document.getElementById('edittargetConnectivity')?.value || interfaceData.targetConnectivity || 'http';
+        const targetConfig = interfaceData.targetConfig || {};
+
+        console.log('🔄 Updating edit target config panel:', { targetConnectivity });
+
+        targetConfigPanel.innerHTML = InterfaceConfigComponents.getTargetConfigPanel(
+            targetConnectivity,
+            null, // targetType not needed
+            targetConfig,
+            { idPrefix: 'edit' }
+        );
+
+        // Attach event listeners for the new panel
+        // Use 'edittarget' prefix for auth listeners since auth fields use idPrefix + 'target'
+        InterfaceConfigComponents.attachEventListeners(
+            targetConfigPanel,
+            'edittarget'
+        );
+    }
+
+    /**
+     * Attach Event Listeners to Edit Modal
+     */
+    function attachEditModalListeners() {
+        console.log('🔧 Attaching edit modal event listeners...');
+
+        // Source Type Change
+        const sourceTypeSelect = document.getElementById('editsourceType');
+        if (sourceTypeSelect) {
+            sourceTypeSelect.addEventListener('change', (e) => {
+                console.log('🔄 Edit: Source type changed to:', e.target.value);
+                updateEditSourceConfigPanel({ sourceType: e.target.value });
+            });
+        }
+
+        // Source Connectivity Change
+        const sourceConnectivitySelect = document.getElementById('editsourceConnectivity');
+        if (sourceConnectivitySelect) {
+            sourceConnectivitySelect.addEventListener('change', (e) => {
+                console.log('🔄 Edit: Source connectivity changed to:', e.target.value);
+                updateEditSourceConfigPanel({ sourceConnectivity: e.target.value });
+            });
+        }
+
+        // Target Connectivity Change
+        const targetConnectivitySelect = document.getElementById('edittargetConnectivity');
+        if (targetConnectivitySelect) {
+            targetConnectivitySelect.addEventListener('change', (e) => {
+                console.log('🔄 Edit: Target connectivity changed to:', e.target.value);
+                updateEditTargetConfigPanel({ targetConnectivity: e.target.value });
+            });
+        }
+
+        console.log('✅ Edit modal listeners attached');
+    }
+
+    /**
+     * Setup Edit Modal Functions (tabs, maximize)
+     */
+    function setupEditModalFunctions() {
+        // Expose functions globally
+        window.switchEditTab = function(tabName) {
+            // Update tab buttons
+            document.querySelectorAll('.modal-tab').forEach(tab => {
+                tab.classList.remove('active');
+                if (tab.dataset.tab === tabName) {
+                    tab.classList.add('active');
+                }
+            });
+
+            // Update tab content
+            document.querySelectorAll('.tab-content').forEach(content => {
+                content.classList.remove('active');
+            });
+
+            const tabContent = document.getElementById(`editTab${tabName.charAt(0).toUpperCase() + tabName.slice(1)}`);
+            if (tabContent) {
+                tabContent.classList.add('active');
+            }
+        };
+
+        window.toggleEditModalMaximize = function() {
+            const modalContent = document.getElementById('editModalContent');
+            const icon = document.getElementById('editMaximizeIcon');
+
+            if (modalContent) {
+                modalContent.classList.toggle('maximized');
+                if (modalContent.classList.contains('maximized')) {
+                    icon.textContent = '⧉';
+                } else {
+                    icon.textContent = '⛶';
+                }
+            }
+        };
+
+        console.log('✅ Edit modal functions setup complete');
+    }
+
+    // Run on load
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', loadModalComponents);
+    } else {
+        loadModalComponents();
+    }
+
+    console.log('✅ Modal components loader initialized (REFACTORED VERSION)');
+})();

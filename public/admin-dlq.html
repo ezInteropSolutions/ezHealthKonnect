@@ -1,0 +1,489 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dead-Letter Queue - ezHealthKonnect</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="css/dashboard.css">
+    <link rel="stylesheet" href="css/layout/main-layout.css?v=5">
+    <style>
+        .page-topbar {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 10px 20px;
+            background: #fff;
+            border-bottom: 1px solid #e5e7eb;
+            height: 56px;
+            box-sizing: border-box;
+            flex-shrink: 0;
+        }
+        .page-topbar h1 { font-size: 15px; font-weight: 700; color: #111827; margin: 0; }
+        .page-topbar .breadcrumb { font-size: 12px; color: #9ca3af; margin-left: auto; }
+        .page-topbar .breadcrumb a { color: #6b7280; text-decoration: none; }
+        .page-topbar .refresh-btn { margin-left: 12px; }
+
+        .dlq-layout { padding: 20px; flex: 1; overflow-y: auto; }
+
+        /* Stats bar */
+        .stats-bar {
+            display: flex;
+            gap: 12px;
+            margin-bottom: 18px;
+            flex-wrap: wrap;
+        }
+        .stat-card {
+            background: #fff;
+            border: 2px solid #e5e7eb;
+            border-radius: 8px;
+            padding: 12px 20px;
+            min-width: 120px;
+            text-align: center;
+            cursor: pointer;
+            transition: border-color 0.15s, box-shadow 0.15s;
+            user-select: none;
+        }
+        .stat-card:hover { border-color: #93c5fd; box-shadow: 0 2px 8px rgba(37,99,235,0.1); }
+        .stat-card.active-filter { border-color: #2563eb; box-shadow: 0 0 0 3px rgba(37,99,235,0.15); }
+        .stat-card .stat-value {
+            font-size: 26px;
+            font-weight: 700;
+            color: #1e3a8a;
+        }
+        .stat-card.pending .stat-value  { color: #d97706; }
+        .stat-card.retrying .stat-value { color: #2563eb; }
+        .stat-card.abandoned .stat-value{ color: #ef4444; }
+        .stat-card.resolved .stat-value { color: #16a34a; }
+        .stat-card .stat-label { font-size: 11px; color: #6b7280; text-transform: uppercase; margin-top: 2px; }
+        .stat-card-all {
+            background: #f8fafc;
+            border: 2px dashed #d1d5db;
+            border-radius: 8px;
+            padding: 12px 20px;
+            min-width: 80px;
+            text-align: center;
+            cursor: pointer;
+            transition: border-color 0.15s;
+            user-select: none;
+        }
+        .stat-card-all:hover { border-color: #6b7280; }
+        .stat-card-all.active-filter { border-color: #374151; }
+        .stat-card-all .stat-value { font-size: 26px; font-weight: 700; color: #374151; }
+        .stat-card-all .stat-label { font-size: 11px; color: #6b7280; text-transform: uppercase; margin-top: 2px; }
+
+        /* Filter row */
+        .filter-row {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 14px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+        .filter-row select, .filter-row input {
+            border: 1px solid #d1d5db;
+            border-radius: 6px;
+            padding: 6px 10px;
+            font-size: 13px;
+            background: #fff;
+        }
+        .filter-row select { min-width: 140px; }
+        .filter-row input  { min-width: 200px; }
+
+        /* Bulk actions */
+        .bulk-bar {
+            display: none;
+            gap: 8px;
+            margin-bottom: 10px;
+            align-items: center;
+        }
+        .bulk-bar.visible { display: flex; }
+        .bulk-count { font-size: 13px; color: #374151; }
+
+        /* Table */
+        .dlq-table-wrap {
+            background: #fff;
+            border: 1px solid #e5e7eb;
+            border-radius: 8px;
+            overflow: auto;
+        }
+        .dlq-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 13px;
+        }
+        .dlq-table thead th {
+            background: #f8fafc;
+            padding: 10px 12px;
+            text-align: left;
+            font-weight: 600;
+            color: #374151;
+            border-bottom: 1px solid #e5e7eb;
+            white-space: nowrap;
+        }
+        .dlq-table tbody tr:hover { background: #f0f9ff; }
+        .dlq-table tbody tr.selected { background: #dbeafe; }
+        .dlq-table td {
+            padding: 9px 12px;
+            border-bottom: 1px solid #f1f5f9;
+            vertical-align: middle;
+        }
+        .dlq-table td:last-child { white-space: nowrap; }
+
+        /* Status badge */
+        .badge-status {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+        .badge-pending  { background: #fef3c7; color: #92400e; }
+        .badge-retrying { background: #dbeafe; color: #1e40af; }
+        .badge-abandoned{ background: #fee2e2; color: #991b1b; }
+        .badge-resolved { background: #dcfce7; color: #166534; }
+
+        /* Monospace IDs */
+        .mono { font-family: 'Courier New', monospace; font-size: 12px; color: #374151; }
+        .mono-sm { font-size: 11px; }
+        .truncate { max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .err-cell { max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #dc2626; }
+
+        /* Action buttons */
+        .btn-sm {
+            padding: 4px 10px;
+            border-radius: 5px;
+            font-size: 12px;
+            font-weight: 500;
+            cursor: pointer;
+            border: 1px solid transparent;
+        }
+        .btn-redrive  { background: #2563eb; color: #fff; border-color: #1d4ed8; }
+        .btn-redrive:hover  { background: #1d4ed8; }
+        .btn-abandon  { background: #fff; color: #dc2626; border-color: #fca5a5; }
+        .btn-abandon:hover  { background: #fee2e2; }
+        .btn-primary  { background: #1e3a8a; color: #fff; border-color: #1e3a8a; padding: 7px 16px; border-radius: 6px; }
+        .btn-primary:hover { background: #1e40af; }
+        .btn-secondary{ background: #fff; color: #374151; border-color: #d1d5db; padding: 7px 14px; border-radius: 6px; }
+        .btn-secondary:hover { background: #f9fafb; }
+
+        /* Redrive modal */
+        .modal-overlay {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.45);
+            z-index: 900;
+            align-items: center;
+            justify-content: center;
+        }
+        .modal-overlay.open { display: flex; }
+        .modal-box {
+            background: #fff;
+            border-radius: 10px;
+            width: 480px;
+            max-width: 95vw;
+            padding: 24px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.25);
+        }
+        .modal-box h3 { margin: 0 0 16px; font-size: 15px; color: #1e3a8a; }
+        .mode-option {
+            display: flex;
+            align-items: flex-start;
+            gap: 12px;
+            border: 2px solid #e5e7eb;
+            border-radius: 8px;
+            padding: 14px 16px;
+            margin-bottom: 10px;
+            cursor: pointer;
+            transition: border-color 0.15s, background 0.15s;
+        }
+        .mode-option:hover { border-color: #93c5fd; background: #f8fbff; }
+        .mode-option.selected { border-color: #2563eb; background: #eff6ff; }
+        .mode-option input[type=radio] {
+            margin-top: 2px;
+            flex-shrink: 0;
+            accent-color: #2563eb;
+            width: 16px; height: 16px;
+            cursor: pointer;
+        }
+        .mode-body { flex: 1; }
+        .mode-label { font-size: 13px; font-weight: 600; color: #1f2937; line-height: 1.3; }
+        .mode-desc  { font-size: 12px; color: #6b7280; margin-top: 4px; line-height: 1.5; }
+        .modal-footer { display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px; }
+        .modal-subtitle { font-size: 12px; color: #6b7280; margin: -10px 0 14px; }
+
+        /* Detail drawer */
+        .drawer-overlay {
+            display: none;
+            position: fixed;
+            inset: 0;
+            z-index: 800;
+        }
+        .drawer-overlay.open { display: block; }
+        .drawer {
+            position: fixed;
+            top: 0; right: 0;
+            width: 520px;
+            max-width: 95vw;
+            height: 100vh;
+            background: #fff;
+            box-shadow: -4px 0 24px rgba(0,0,0,0.15);
+            overflow-y: auto;
+            padding: 20px;
+            z-index: 801;
+        }
+        .drawer h3 { margin: 0 0 14px; font-size: 14px; color: #1e3a8a; display: flex; justify-content: space-between; }
+        .drawer-close { cursor: pointer; color: #6b7280; font-size: 18px; }
+        .detail-section { margin-bottom: 16px; }
+        .detail-section h4 { font-size: 12px; font-weight: 600; text-transform: uppercase; color: #6b7280; margin: 0 0 6px; }
+        .detail-grid { display: grid; grid-template-columns: 140px 1fr; gap: 4px 8px; font-size: 12px; }
+        .detail-grid .key { color: #6b7280; }
+        .detail-grid .val { color: #1f2937; word-break: break-all; }
+        pre.payload {
+            background: #1e293b;
+            color: #e2e8f0;
+            padding: 12px;
+            border-radius: 6px;
+            font-size: 11px;
+            overflow-x: auto;
+            white-space: pre-wrap;
+            max-height: 200px;
+            margin: 0;
+        }
+
+        /* Empty state */
+        .empty-state { padding: 40px; text-align: center; color: #9ca3af; }
+        .empty-state i { font-size: 36px; margin-bottom: 10px; }
+
+        /* Loading */
+        .loading-row td { text-align: center; padding: 30px; color: #9ca3af; }
+
+        /* Schedule panel inside redrive modal */
+        .schedule-panel {
+            margin-top: 14px;
+            padding: 14px;
+            background: #f8fafc;
+            border: 1px solid #e5e7eb;
+            border-radius: 8px;
+        }
+        .schedule-panel label { font-size: 12px; font-weight: 600; color: #374151; display: block; margin-bottom: 8px; }
+        .preset-chips { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
+        .preset-chip {
+            padding: 4px 12px;
+            border: 1px solid #d1d5db;
+            border-radius: 20px;
+            font-size: 12px;
+            cursor: pointer;
+            background: #fff;
+            color: #374151;
+            transition: all 0.15s;
+        }
+        .preset-chip:hover { border-color: #93c5fd; background: #eff6ff; }
+        .preset-chip.active { background: #2563eb; color: #fff; border-color: #1d4ed8; }
+        .schedule-panel input[type=datetime-local] {
+            width: 100%;
+            border: 1px solid #d1d5db;
+            border-radius: 6px;
+            padding: 7px 10px;
+            font-size: 13px;
+            box-sizing: border-box;
+        }
+
+        .btn-schedule { background: #fff; color: #2563eb; border-color: #93c5fd; }
+        .btn-schedule:hover { background: #eff6ff; }
+        .btn-confirm-schedule { background: #2563eb; color: #fff; border-color: #1d4ed8; padding: 7px 16px; border-radius: 6px; }
+        .btn-confirm-schedule:hover { background: #1d4ed8; }
+
+        /* Row state */
+        .row-abandoned td { opacity: 0.75; }
+    </style>
+</head>
+<body>
+<div class="dashboard-container">
+    <nav class="sidebar" id="sidebar"></nav>
+    <main class="main-content">
+        <div class="page-topbar">
+            <i class="fas fa-exclamation-triangle" style="color:#d97706; font-size:15px;"></i>
+            <h1>Dead-Letter Queue</h1>
+            <span class="breadcrumb">
+                <a href="dashboard.html">Home</a> › Admin › Dead-Letter Queue
+            </span>
+            <button class="btn-secondary refresh-btn" onclick="window._dlq.load()" style="font-size:12px;">
+                <i class="fas fa-sync-alt"></i> Refresh
+            </button>
+        </div>
+        <div class="dlq-layout">
+
+            <!-- Retention info strip -->
+            <div style="display:flex;align-items:center;gap:8px;background:#f0f9ff;border:1px solid #bae6fd;
+                        border-radius:7px;padding:8px 14px;font-size:12px;color:#0369a1;margin-bottom:14px;">
+                <i class="fas fa-info-circle"></i>
+                <span>DLQ row lifetime is controlled by <strong>Recovery Queue → Payload Expires After</strong> on each interface.
+                      Abandoned rows with no expiry are kept indefinitely until manually purged.</span>
+                <a href="interfaces.html" style="margin-left:auto;color:#0369a1;font-weight:600;white-space:nowrap;">
+                    Configure per interface →
+                </a>
+            </div>
+
+            <!-- Stats bar — click any tile to filter the table -->
+            <div class="stats-bar" id="statsBar">
+                <div class="stat-card-all active-filter" id="statCardAll"
+                     onclick="window._dlq.filterByStatus('')" title="Show all statuses">
+                    <div class="stat-value" id="statAll">—</div>
+                    <div class="stat-label">All</div>
+                </div>
+                <div class="stat-card pending" id="statCardPending"
+                     onclick="window._dlq.filterByStatus('pending')" title="Show pending">
+                    <div class="stat-value" id="statPending">—</div>
+                    <div class="stat-label">Pending</div>
+                </div>
+                <div class="stat-card retrying" id="statCardRetrying"
+                     onclick="window._dlq.filterByStatus('retrying')" title="Show retrying">
+                    <div class="stat-value" id="statRetrying">—</div>
+                    <div class="stat-label">Retrying</div>
+                </div>
+                <div class="stat-card abandoned" id="statCardAbandoned"
+                     onclick="window._dlq.filterByStatus('abandoned')" title="Show abandoned">
+                    <div class="stat-value" id="statAbandoned">—</div>
+                    <div class="stat-label">Abandoned</div>
+                </div>
+                <div class="stat-card resolved" id="statCardResolved"
+                     onclick="window._dlq.filterByStatus('resolved')" title="Show resolved">
+                    <div class="stat-value" id="statResolved">—</div>
+                    <div class="stat-label">Resolved</div>
+                </div>
+            </div>
+
+            <!-- Filter row -->
+            <div class="filter-row">
+                <select id="filterStatus">
+                    <option value="">All statuses</option>
+                    <option value="pending">Pending</option>
+                    <option value="retrying">Retrying</option>
+                    <option value="abandoned">Abandoned</option>
+                    <option value="resolved">Resolved</option>
+                </select>
+                <input type="text" id="filterInterface" placeholder="Filter by interface name or ID…"
+                    list="ifaceDatalist" autocomplete="off">
+                <datalist id="ifaceDatalist"></datalist>
+                <button class="btn-primary" style="padding:6px 14px; font-size:12px;" onclick="window._dlq.load()">
+                    <i class="fas fa-filter"></i> Apply
+                </button>
+            </div>
+
+            <!-- Bulk action bar (hidden until checkboxes selected) -->
+            <div class="bulk-bar" id="bulkBar">
+                <span class="bulk-count" id="bulkCount">0 selected</span>
+                <button class="btn-sm btn-redrive" onclick="window._dlq.bulkRedrive()">
+                    <i class="fas fa-redo"></i> Bulk Redrive
+                </button>
+                <button class="btn-sm btn-schedule" onclick="window._dlq.bulkSchedule()">
+                    <i class="fas fa-calendar-alt"></i> Bulk Schedule
+                </button>
+                <button class="btn-sm btn-abandon" onclick="window._dlq.bulkAbandon()">
+                    <i class="fas fa-ban"></i> Bulk Abandon
+                </button>
+                <button class="btn-secondary" style="font-size:12px; padding:4px 10px;" onclick="window._dlq.clearSelection()">
+                    Clear
+                </button>
+            </div>
+
+            <!-- DLQ table -->
+            <div class="dlq-table-wrap">
+                <table class="dlq-table">
+                    <thead>
+                        <tr>
+                            <th style="width:36px;"><input type="checkbox" id="checkAll" onchange="window._dlq.toggleAll(this)"></th>
+                            <th>Status</th>
+                            <th>Interface</th>
+                            <th>Message ID</th>
+                            <th>Step</th>
+                            <th>Connector</th>
+                            <th>Error</th>
+                            <th>Attempts</th>
+                            <th>Next Retry</th>
+                            <th>Created</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="dlqTableBody">
+                        <tr class="loading-row"><td colspan="11"><i class="fas fa-spinner fa-spin"></i> Loading…</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </main>
+</div>
+
+<!-- Redrive / Bulk-Schedule modal -->
+<div class="modal-overlay" id="redriveModal">
+    <div class="modal-box">
+        <h3 id="modalTitle"><i class="fas fa-redo" style="color:#2563eb;"></i> Redrive Message</h3>
+        <p class="modal-subtitle" id="modalSubtitle">Choose how to re-run this message through the pipeline.</p>
+
+        <div class="mode-option selected" id="modeOptionFailed"
+             onclick="window._dlq.selectModeDiv('from_failed_step')">
+            <input type="radio" name="redriveMode" value="from_failed_step" checked>
+            <div class="mode-body">
+                <div class="mode-label">From Failed Step</div>
+                <div class="mode-desc">Resume from the step that failed using the data snapshot captured at that point. Faster — skips already-completed steps.</div>
+            </div>
+        </div>
+        <div class="mode-option" id="modeOptionStart"
+             onclick="window._dlq.selectModeDiv('from_start')">
+            <input type="radio" name="redriveMode" value="from_start">
+            <div class="mode-body">
+                <div class="mode-label">From Start</div>
+                <div class="mode-desc">Re-run the entire pipeline from scratch using the original incoming message. Use when upstream enrichment steps need to run again (e.g. after fixing an API config).</div>
+            </div>
+        </div>
+
+        <!-- Schedule picker — only shown for bulk operations -->
+        <div class="schedule-panel" id="schedulePanel" style="display:none;">
+            <label style="font-size:12px;font-weight:600;color:#374151;display:block;margin-bottom:8px;">
+                Schedule delivery for
+            </label>
+            <div class="preset-chips">
+                <button type="button" class="preset-chip" data-hours="1"
+                    onclick="window._dlq.applyPreset(1)">In 1 hour</button>
+                <button type="button" class="preset-chip" data-hours="4"
+                    onclick="window._dlq.applyPreset(4)">In 4 hours</button>
+                <button type="button" class="preset-chip" data-hours="24"
+                    onclick="window._dlq.applyPreset(24)">Tomorrow</button>
+                <button type="button" class="preset-chip" data-hours="72"
+                    onclick="window._dlq.applyPreset(72)">In 3 days</button>
+            </div>
+            <input type="datetime-local" id="scheduleAt">
+        </div>
+
+        <div class="modal-footer">
+            <button class="btn-secondary" onclick="window._dlq.closeRedriveModal()">Cancel</button>
+            <!-- Confirm Schedule — only visible when schedule panel is open (bulk only) -->
+            <button class="btn-confirm-schedule" id="confirmScheduleBtn"
+                onclick="window._dlq.confirmSchedule()" style="display:none;">
+                <i class="fas fa-calendar-check"></i> Confirm Schedule
+            </button>
+            <!-- Redrive Now — hidden when schedule panel open -->
+            <button class="btn-primary" id="redriveNowBtn" onclick="window._dlq.confirmRedrive()">
+                <i class="fas fa-redo"></i> Redrive Now
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- Detail drawer -->
+<div class="drawer-overlay" id="drawerOverlay" onclick="window._dlq.closeDrawer()"></div>
+<div class="drawer" id="detailDrawer" style="transform: translateX(100%);">
+    <h3>
+        DLQ Row Detail
+        <span class="drawer-close" onclick="window._dlq.closeDrawer()"><i class="fas fa-times"></i></span>
+    </h3>
+    <div id="drawerContent"></div>
+</div>
+
+<script src="js/components/sidebar-nav.js"></script>
+<script src="js/admin-dlq.js"></script>
+</body>
+</html>

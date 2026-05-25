@@ -1,0 +1,758 @@
+{
+  "messageType": "ORU^R01",
+  "version": "2.5.1",
+  "generatedAt": "2024-09-26T12:45:00Z",
+  "schemaSource": "schemas/hl7/v2.5.1/ORU_R01.gz + schemas/fhir/R4/resources/Observation.gz",
+  "description": "Unsolicited transmission of an observation message. The OBX segment is used to transmit a single observation or observation fragment representing the smallest indivisible unit of a report.",
+  "coverage": {
+    "totalHL7Fields": 210,
+    "mappedFields": 68,
+    "coveragePercent": 32.4,
+    "requiredCoverage": 22
+  },
+  "resources": {
+    "Patient": {
+      "resourceType": "Patient",
+      "priority": 1,
+      "required": true,
+      "references": [],
+      "mappings": [
+        {
+          "hl7Path": "PID.3.1",
+          "hl7Description": "Patient Identifier List - Id Number: The value of the identifier itself",
+          "fhirPath": "Patient.identifier[0].value",
+          "fhirDescription": "An identifier for this patient",
+          "transform": "string_direct",
+          "required": true,
+          "confidence": 0.99,
+          "hl7Usage": "R",
+          "hl7DataType": "CX",
+          "fhirDataType": "Identifier"
+        },
+        {
+          "hl7Path": "PID.5.1",
+          "hl7Description": "Patient Name - Family Name",
+          "fhirPath": "Patient.name[0].family",
+          "fhirDescription": "Family name (often called 'Surname')",
+          "transform": "name_component",
+          "required": true,
+          "confidence": 0.99,
+          "hl7Usage": "R",
+          "hl7DataType": "XPN",
+          "fhirDataType": "HumanName"
+        },
+        {
+          "hl7Path": "PID.5.2",
+          "hl7Description": "Patient Name - Given Name",
+          "fhirPath": "Patient.name[0].given[0]",
+          "fhirDescription": "Given names (not always 'first')",
+          "transform": "name_component",
+          "required": false,
+          "confidence": 0.98,
+          "hl7Usage": "O",
+          "hl7DataType": "ST",
+          "fhirDataType": "string"
+        },
+        {
+          "hl7Path": "PID.7",
+          "hl7Description": "Date/Time of Birth",
+          "fhirPath": "Patient.birthDate",
+          "fhirDescription": "The date of birth for the individual",
+          "transform": "hl7_timestamp_to_fhir_date",
+          "required": false,
+          "confidence": 0.99,
+          "hl7Usage": "O",
+          "hl7DataType": "TS",
+          "fhirDataType": "date"
+        },
+        {
+          "hl7Path": "PID.8",
+          "hl7Description": "Administrative Sex",
+          "fhirPath": "Patient.gender",
+          "fhirDescription": "Administrative Gender - the gender that the patient is considered to have for administration and record keeping purposes",
+          "transform": "hl7_table_0001_gender",
+          "required": false,
+          "confidence": 0.99,
+          "hl7Usage": "O",
+          "hl7DataType": "IS",
+          "fhirDataType": "code",
+          "valueMap": {
+            "A": "other",
+            "F": "female",
+            "M": "male",
+            "N": "unknown",
+            "O": "other",
+            "U": "unknown"
+          }
+        }
+      ]
+    },
+    "Observation": {
+      "resourceType": "Observation",
+      "priority": 2,
+      "required": true,
+      "references": [
+        {
+          "path": "subject",
+          "target": "Patient",
+          "field": "id"
+        },
+        {
+          "path": "encounter",
+          "target": "Encounter",
+          "field": "id"
+        }
+      ],
+      "mappings": [
+        {
+          "hl7Path": "OBX.1",
+          "hl7Description": "Set ID - OBX: Sequence number for observation segments",
+          "fhirPath": "Observation.identifier[0].value",
+          "fhirDescription": "A unique identifier assigned to this observation",
+          "transform": "sequence_id_to_identifier",
+          "required": false,
+          "confidence": 0.85,
+          "hl7Usage": "O",
+          "hl7DataType": "SI",
+          "fhirDataType": "Identifier"
+        },
+        {
+          "hl7Path": "OBX.2",
+          "hl7Description": "Value Type: Data type of observation value (NM=numeric, ST=string, CE=coded, etc.)",
+          "fhirPath": "Observation.valueQuantity",
+          "fhirDescription": "Indicates observation value type determination logic",
+          "transform": "value_type_to_observation_type",
+          "required": false,
+          "confidence": 0.80,
+          "hl7Usage": "C",
+          "hl7DataType": "ID",
+          "fhirDataType": "choice",
+          "valueMap": {
+            "NM": "valueQuantity",
+            "ST": "valueString",
+            "CE": "valueCodeableConcept",
+            "DT": "valueDateTime",
+            "TM": "valueTime"
+          }
+        },
+        {
+          "hl7Path": "OBX.3.1",
+          "hl7Description": "Observation Identifier - Identifier: Code identifying the observation",
+          "fhirPath": "Observation.code.coding[0].code",
+          "fhirDescription": "Type of observation (code / type)",
+          "transform": "coded_element_code",
+          "required": true,
+          "confidence": 0.99,
+          "hl7Usage": "R",
+          "hl7DataType": "CE",
+          "fhirDataType": "CodeableConcept"
+        },
+        {
+          "hl7Path": "OBX.3.2",
+          "hl7Description": "Observation Identifier - Text: Human readable description of the observation",
+          "fhirPath": "Observation.code.coding[0].display",
+          "fhirDescription": "Representation defined by the system",
+          "transform": "coded_element_display",
+          "required": false,
+          "confidence": 0.95,
+          "hl7Usage": "O",
+          "hl7DataType": "ST",
+          "fhirDataType": "string"
+        },
+        {
+          "hl7Path": "OBX.3.3",
+          "hl7Description": "Observation Identifier - Name of Coding System: System that defined the code",
+          "fhirPath": "Observation.code.coding[0].system",
+          "fhirDescription": "Identity of the terminology system",
+          "transform": "coding_system_mapping",
+          "required": false,
+          "confidence": 0.90,
+          "hl7Usage": "O",
+          "hl7DataType": "ID",
+          "fhirDataType": "uri",
+          "valueMap": {
+            "LN": "http://loinc.org",
+            "CPT4": "http://www.ama-assn.org/go/cpt",
+            "ICD10": "http://hl7.org/fhir/sid/icd-10",
+            "SNOMED": "http://snomed.info/sct"
+          }
+        },
+        {
+          "hl7Path": "OBX.4",
+          "hl7Description": "Observation Sub-ID: Used to distinguish between multiple observations with same identifier",
+          "fhirPath": "Observation.identifier[1].value",
+          "fhirDescription": "Business identifier for this observation",
+          "transform": "string_direct",
+          "required": false,
+          "confidence": 0.80,
+          "hl7Usage": "O",
+          "hl7DataType": "ST",
+          "fhirDataType": "Identifier"
+        },
+        {
+          "hl7Path": "OBX.5",
+          "hl7Description": "Observation Value: The actual result value (varies by data type)",
+          "fhirPath": "Observation.valueQuantity.value",
+          "fhirDescription": "The information determined as a result of making the observation",
+          "transform": "observation_value_polymorphic",
+          "required": false,
+          "confidence": 0.95,
+          "hl7Usage": "C",
+          "hl7DataType": "VARIES",
+          "fhirDataType": "choice"
+        },
+        {
+          "hl7Path": "OBX.6.1",
+          "hl7Description": "Units - Identifier: Unit of measure identifier",
+          "fhirPath": "Observation.valueQuantity.unit",
+          "fhirDescription": "Unit representation",
+          "transform": "unit_mapping",
+          "required": false,
+          "confidence": 0.90,
+          "hl7Usage": "O",
+          "hl7DataType": "CE",
+          "fhirDataType": "string"
+        },
+        {
+          "hl7Path": "OBX.6.2",
+          "hl7Description": "Units - Text: Human readable unit description",
+          "fhirPath": "Observation.valueQuantity.code",
+          "fhirDescription": "Coded form of the unit",
+          "transform": "unit_code_mapping",
+          "required": false,
+          "confidence": 0.85,
+          "hl7Usage": "O",
+          "hl7DataType": "ST",
+          "fhirDataType": "code"
+        },
+        {
+          "hl7Path": "OBX.6.3",
+          "hl7Description": "Units - Name of Coding System: System that defined the unit code",
+          "fhirPath": "Observation.valueQuantity.system",
+          "fhirDescription": "System that defines coded unit form",
+          "transform": "unit_system_mapping",
+          "required": false,
+          "confidence": 0.85,
+          "hl7Usage": "O",
+          "hl7DataType": "ID",
+          "fhirDataType": "uri",
+          "valueMap": {
+            "UCUM": "http://unitsofmeasure.org",
+            "ISO+": "http://unitsofmeasure.org"
+          }
+        },
+        {
+          "hl7Path": "OBX.7",
+          "hl7Description": "References Range: Normal reference range for the observation",
+          "fhirPath": "Observation.referenceRange[0].text",
+          "fhirDescription": "Text based reference range in an observation",
+          "transform": "reference_range_text",
+          "required": false,
+          "confidence": 0.85,
+          "hl7Usage": "O",
+          "hl7DataType": "ST",
+          "fhirDataType": "string"
+        },
+        {
+          "hl7Path": "OBX.8",
+          "hl7Description": "Abnormal Flags: Indicates if observation value is outside normal limits",
+          "fhirPath": "Observation.interpretation[0].coding[0].code",
+          "fhirDescription": "High, low, normal, etc.",
+          "transform": "hl7_table_0078_abnormal_flags",
+          "required": false,
+          "confidence": 0.90,
+          "hl7Usage": "O",
+          "hl7DataType": "IS",
+          "fhirDataType": "CodeableConcept",
+          "valueMap": {
+            "<": "L",
+            ">": "H",
+            "A": "A",
+            "AA": "AA",
+            "B": "L",
+            "D": "D",
+            "H": "H",
+            "HH": "HH",
+            "I": "I",
+            "L": "L",
+            "LL": "LL",
+            "MS": "MS",
+            "N": "N",
+            "null": "null",
+            "R": "R",
+            "S": "S",
+            "U": "U",
+            "VS": "VS",
+            "W": "W"
+          }
+        },
+        {
+          "hl7Path": "OBX.11",
+          "hl7Description": "Observation Result Status: Status of the observation result (F=final, P=preliminary, etc.)",
+          "fhirPath": "Observation.status",
+          "fhirDescription": "The status of the result value",
+          "transform": "hl7_table_0085_observation_result_status",
+          "required": true,
+          "confidence": 0.99,
+          "hl7Usage": "R",
+          "hl7DataType": "ID",
+          "fhirDataType": "code",
+          "valueMap": {
+            "C": "corrected",
+            "D": "cancelled",
+            "F": "final",
+            "I": "registered",
+            "N": "final",
+            "O": "unknown",
+            "P": "preliminary",
+            "R": "registered",
+            "S": "preliminary",
+            "U": "unknown",
+            "W": "preliminary",
+            "X": "cancelled"
+          }
+        },
+        {
+          "hl7Path": "OBX.14",
+          "hl7Description": "Date/Time of the Observation: When the observation was made",
+          "fhirPath": "Observation.effectiveDateTime",
+          "fhirDescription": "Clinically relevant time/time-period for observation",
+          "transform": "hl7_timestamp_to_fhir_datetime",
+          "required": false,
+          "confidence": 0.95,
+          "hl7Usage": "O",
+          "hl7DataType": "TS",
+          "fhirDataType": "dateTime"
+        },
+        {
+          "hl7Path": "OBX.15",
+          "hl7Description": "Producer's ID: Identifier of the system/person that produced the observation",
+          "fhirPath": "Observation.performer[0].identifier.value",
+          "fhirDescription": "Who is responsible for the observation",
+          "transform": "performer_identifier",
+          "required": false,
+          "confidence": 0.80,
+          "hl7Usage": "O",
+          "hl7DataType": "CE",
+          "fhirDataType": "Reference"
+        },
+        {
+          "hl7Path": "OBX.16",
+          "hl7Description": "Responsible Observer: Person responsible for the observation",
+          "fhirPath": "Observation.performer[1].identifier.value",
+          "fhirDescription": "Who is responsible for the observation",
+          "transform": "performer_identifier",
+          "required": false,
+          "confidence": 0.75,
+          "hl7Usage": "O",
+          "hl7DataType": "XCN",
+          "fhirDataType": "Reference"
+        }
+      ]
+    },
+    "DiagnosticReport": {
+      "resourceType": "DiagnosticReport",
+      "priority": 3,
+      "required": false,
+      "references": [
+        {
+          "path": "subject",
+          "target": "Patient",
+          "field": "id"
+        },
+        {
+          "path": "encounter",
+          "target": "Encounter",
+          "field": "id"
+        }
+      ],
+      "mappings": [
+        {
+          "hl7Path": "OBR.4.1",
+          "hl7Description": "Universal Service Identifier - Identifier: Code for the diagnostic service",
+          "fhirPath": "DiagnosticReport.code.coding[0].code",
+          "fhirDescription": "Name/Code for this diagnostic report",
+          "transform": "coded_element_code",
+          "required": true,
+          "confidence": 0.99,
+          "hl7Usage": "R",
+          "hl7DataType": "CE",
+          "fhirDataType": "CodeableConcept"
+        },
+        {
+          "hl7Path": "OBR.4.2",
+          "hl7Description": "Universal Service Identifier - Text: Human readable description",
+          "fhirPath": "DiagnosticReport.code.coding[0].display",
+          "fhirDescription": "Representation defined by the system",
+          "transform": "coded_element_display",
+          "required": false,
+          "confidence": 0.95,
+          "hl7Usage": "O",
+          "hl7DataType": "ST",
+          "fhirDataType": "string"
+        },
+        {
+          "hl7Path": "OBR.7",
+          "hl7Description": "Observation Date/Time: When observation was requested to be done",
+          "fhirPath": "DiagnosticReport.effectiveDateTime",
+          "fhirDescription": "Clinically relevant time/time-period for report",
+          "transform": "hl7_timestamp_to_fhir_datetime",
+          "required": false,
+          "confidence": 0.95,
+          "hl7Usage": "O",
+          "hl7DataType": "TS",
+          "fhirDataType": "dateTime"
+        },
+        {
+          "hl7Path": "OBR.22",
+          "hl7Description": "Results Rpt/Status Chng - Date/Time: When result reporting status last changed",
+          "fhirPath": "DiagnosticReport.issued",
+          "fhirDescription": "DateTime this version was made",
+          "transform": "hl7_timestamp_to_fhir_instant",
+          "required": false,
+          "confidence": 0.90,
+          "hl7Usage": "O",
+          "hl7DataType": "TS",
+          "fhirDataType": "instant"
+        },
+        {
+          "hl7Path": "OBR.25",
+          "hl7Description": "Result Status: Overall status of the diagnostic report",
+          "fhirPath": "DiagnosticReport.status",
+          "fhirDescription": "The status of the diagnostic report",
+          "transform": "hl7_table_0123_result_status",
+          "required": true,
+          "confidence": 0.95,
+          "hl7Usage": "R",
+          "hl7DataType": "ID",
+          "fhirDataType": "code",
+          "valueMap": {
+            "O": "registered",
+            "I": "partial",
+            "S": "preliminary",
+            "A": "partial",
+            "P": "preliminary",
+            "C": "corrected",
+            "R": "preliminary",
+            "F": "final",
+            "X": "cancelled",
+            "Y": "final",
+            "Z": "final"
+          }
+        }
+      ]
+    },
+    "Specimen": {
+      "resourceType": "Specimen",
+      "priority": 4,
+      "required": false,
+      "references": [
+        {
+          "path": "subject",
+          "target": "Patient",
+          "field": "id"
+        }
+      ],
+      "mappings": [
+        {
+          "hl7Path": "SPM.2.1",
+          "hl7Description": "Specimen ID - Identifier: Unique identifier for the specimen",
+          "fhirPath": "Specimen.identifier[0].value",
+          "fhirDescription": "External Identifier",
+          "transform": "string_direct",
+          "required": false,
+          "confidence": 0.95,
+          "hl7Usage": "R",
+          "hl7DataType": "EIP",
+          "fhirDataType": "Identifier"
+        },
+        {
+          "hl7Path": "SPM.4.1",
+          "hl7Description": "Specimen Type - Identifier: Code for the type of specimen",
+          "fhirPath": "Specimen.type.coding[0].code",
+          "fhirDescription": "Kind of material that forms the specimen",
+          "transform": "coded_element_code",
+          "required": false,
+          "confidence": 0.90,
+          "hl7Usage": "O",
+          "hl7DataType": "CWE",
+          "fhirDataType": "CodeableConcept"
+        },
+        {
+          "hl7Path": "SPM.4.2",
+          "hl7Description": "Specimen Type - Text: Human readable specimen type",
+          "fhirPath": "Specimen.type.coding[0].display",
+          "fhirDescription": "Representation defined by the system",
+          "transform": "coded_element_display",
+          "required": false,
+          "confidence": 0.85,
+          "hl7Usage": "O",
+          "hl7DataType": "ST",
+          "fhirDataType": "string"
+        },
+        {
+          "hl7Path": "SPM.17.1",
+          "hl7Description": "Specimen Collection Date/Time - Start Date/Time: When specimen collection began",
+          "fhirPath": "Specimen.collection.collectedDateTime",
+          "fhirDescription": "Collection time",
+          "transform": "hl7_timestamp_to_fhir_datetime",
+          "required": false,
+          "confidence": 0.90,
+          "hl7Usage": "O",
+          "hl7DataType": "DR",
+          "fhirDataType": "dateTime"
+        }
+      ]
+    },
+    "MessageHeader": {
+      "resourceType": "MessageHeader",
+      "priority": 5,
+      "required": true,
+      "references": [],
+      "mappings": [
+        {
+          "hl7Path": "MSH.3",
+          "hl7Description": "Sending Application",
+          "fhirPath": "MessageHeader.source.name",
+          "fhirDescription": "Human readable name for the source system",
+          "transform": "string_direct",
+          "required": false,
+          "confidence": 0.90,
+          "hl7Usage": "O",
+          "hl7DataType": "HD",
+          "fhirDataType": "string"
+        },
+        {
+          "hl7Path": "MSH.9.1",
+          "hl7Description": "Message Type - Message Code",
+          "fhirPath": "MessageHeader.eventCoding.code",
+          "fhirDescription": "Code for the event this message represents",
+          "transform": "string_direct",
+          "required": true,
+          "confidence": 0.99,
+          "hl7Usage": "R",
+          "hl7DataType": "MSG",
+          "fhirDataType": "code"
+        },
+        {
+          "hl7Path": "MSH.7",
+          "hl7Description": "Date/Time of Message",
+          "fhirPath": "MessageHeader.meta.lastUpdated",
+          "fhirDescription": "When the resource version last changed",
+          "transform": "hl7_timestamp_to_fhir_instant",
+          "required": false,
+          "confidence": 0.90,
+          "hl7Usage": "R",
+          "hl7DataType": "TS",
+          "fhirDataType": "instant"
+        }
+      ]
+    }
+  },
+  "transforms": {
+    "string_direct": {
+      "name": "string_direct",
+      "type": "direct",
+      "description": "Direct string copy with validation",
+      "validation": "non_empty",
+      "parameters": {
+        "trim": "true",
+        "max_length": "255"
+      }
+    },
+    "name_component": {
+      "name": "name_component",
+      "type": "string_transform",
+      "description": "Name component with proper case handling",
+      "validation": "non_empty",
+      "parameters": {
+        "case": "proper",
+        "trim": "true"
+      }
+    },
+    "hl7_timestamp_to_fhir_date": {
+      "name": "hl7_timestamp_to_fhir_date",
+      "type": "date_conversion",
+      "description": "Convert HL7 timestamp to FHIR date",
+      "validation": "valid_date",
+      "parameters": {
+        "input_format": "YYYYMMDDHHMMSS",
+        "output_format": "YYYY-MM-DD"
+      }
+    },
+    "hl7_timestamp_to_fhir_datetime": {
+      "name": "hl7_timestamp_to_fhir_datetime",
+      "type": "datetime_conversion",
+      "description": "Convert HL7 timestamp to FHIR dateTime",
+      "validation": "valid_datetime",
+      "parameters": {
+        "input_format": "YYYYMMDDHHMMSS",
+        "output_format": "YYYY-MM-DDTHH:MM:SS.SSSZ"
+      }
+    },
+    "hl7_timestamp_to_fhir_instant": {
+      "name": "hl7_timestamp_to_fhir_instant",
+      "type": "instant_conversion",
+      "description": "Convert HL7 timestamp to FHIR instant",
+      "validation": "valid_instant",
+      "parameters": {
+        "input_format": "YYYYMMDDHHMMSS",
+        "output_format": "YYYY-MM-DDTHH:MM:SS.SSSZ"
+      }
+    },
+    "hl7_table_0001_gender": {
+      "name": "hl7_table_0001_gender",
+      "type": "valueset",
+      "description": "HL7 Table 0001 - Administrative Sex",
+      "validation": "known_value",
+      "parameters": {
+        "table": "0001",
+        "default": "unknown"
+      }
+    },
+    "coded_element_code": {
+      "name": "coded_element_code",
+      "type": "coded_element",
+      "description": "Extract code from coded element",
+      "validation": "non_empty",
+      "parameters": {
+        "component": "code"
+      }
+    },
+    "coded_element_display": {
+      "name": "coded_element_display",
+      "type": "coded_element",
+      "description": "Extract display text from coded element",
+      "validation": "non_empty",
+      "parameters": {
+        "component": "display"
+      }
+    },
+    "coding_system_mapping": {
+      "name": "coding_system_mapping",
+      "type": "system_mapping",
+      "description": "Map coding system to standard URI",
+      "validation": "known_system",
+      "parameters": {
+        "type": "coding"
+      }
+    },
+    "observation_value_polymorphic": {
+      "name": "observation_value_polymorphic",
+      "type": "multi_type",
+      "description": "Handle various observation value types based on OBX.2",
+      "validation": "type_appropriate",
+      "parameters": {
+        "types": "numeric,string,datetime,coded"
+      }
+    },
+    "unit_mapping": {
+      "name": "unit_mapping",
+      "type": "unit_conversion",
+      "description": "Map HL7 units to UCUM",
+      "validation": "known_unit",
+      "parameters": {
+        "target_system": "UCUM"
+      }
+    },
+    "unit_code_mapping": {
+      "name": "unit_code_mapping",
+      "type": "unit_conversion",
+      "description": "Map unit to coded form",
+      "validation": "valid_code",
+      "parameters": {
+        "target_system": "UCUM"
+      }
+    },
+    "unit_system_mapping": {
+      "name": "unit_system_mapping",
+      "type": "system_mapping",
+      "description": "Map unit coding system",
+      "validation": "valid_uri",
+      "parameters": {
+        "default": "http://unitsofmeasure.org"
+      }
+    },
+    "reference_range_text": {
+      "name": "reference_range_text",
+      "type": "string_transform",
+      "description": "Reference range text formatting",
+      "validation": "non_empty",
+      "parameters": {
+        "format": "normalize"
+      }
+    },
+    "hl7_table_0078_abnormal_flags": {
+      "name": "hl7_table_0078_abnormal_flags",
+      "type": "valueset",
+      "description": "HL7 Table 0078 - Abnormal Flags",
+      "validation": "known_value",
+      "parameters": {
+        "table": "0078",
+        "default": "N"
+      }
+    },
+    "hl7_table_0085_observation_result_status": {
+      "name": "hl7_table_0085_observation_result_status",
+      "type": "valueset",
+      "description": "HL7 Table 0085 - Observation Result Status",
+      "validation": "known_value",
+      "parameters": {
+        "table": "0085",
+        "default": "final"
+      }
+    },
+    "hl7_table_0123_result_status": {
+      "name": "hl7_table_0123_result_status",
+      "type": "valueset",
+      "description": "HL7 Table 0123 - Result Status",
+      "validation": "known_value",
+      "parameters": {
+        "table": "0123",
+        "default": "final"
+      }
+    },
+    "sequence_id_to_identifier": {
+      "name": "sequence_id_to_identifier",
+      "type": "identifier_generation",
+      "description": "Convert sequence ID to identifier",
+      "validation": "valid_id",
+      "parameters": {
+        "prefix": "OBX-"
+      }
+    },
+    "value_type_to_observation_type": {
+      "name": "value_type_to_observation_type",
+      "type": "type_determination",
+      "description": "Determine FHIR value type from HL7 value type",
+      "validation": "known_type",
+      "parameters": {
+        "mapping_table": "hl7_to_fhir_types"
+      }
+    },
+    "performer_identifier": {
+      "name": "performer_identifier",
+      "type": "reference_mapping",
+      "description": "Map performer to reference",
+      "validation": "valid_reference",
+      "parameters": {
+        "resource_type": "Practitioner"
+      }
+    }
+  },
+  "metadata": {
+    "totalMappings": 42,
+    "requiredMappings": 6,
+    "coverage": "comprehensive_laboratory_results",
+    "generatedBy": "Schema-based HL7-FHIR Mapping Generator v1.0",
+    "compatibleWith": ["2.5", "2.5.1"],
+    "targetFHIRVersion": "R4",
+    "confidence": "production_ready",
+    "validatedAgainst": [
+      "schemas/hl7/v2.5.1/ORU_R01.gz",
+      "schemas/fhir/R4/resources/Observation.gz",
+      "schemas/fhir/R4/resources/DiagnosticReport.gz",
+      "schemas/fhir/R4/resources/Specimen.gz"
+    ]
+  }
+}

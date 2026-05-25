@@ -1,0 +1,93 @@
+{
+  "summary": {
+    "sent": 5,
+    "acked": 5,
+    "retrieved": 5,
+    "passed": 5,
+    "failed": 0,
+    "level": "standard",
+    "inputInterfaceId": "df5c7bc7-5dbe-4c47-8298-a4729b26ebd4"
+  },
+  "results": [
+    {
+      "messageType": "ADT^A01",
+      "label": "Inpatient admit #1",
+      "ackCode": "AA",
+      "sendOK": true,
+      "messageId": "fhir_1779512691403966212",
+      "fhirValid": true,
+      "issues": [],
+      "resourceTypes": [
+        "MessageHeader",
+        "Encounter",
+        "Condition",
+        "Patient"
+      ],
+      "hl7": "MSH|^~\\&|EPIC|HOSP|EZHK|EZHK|20260523120000||ADT^A01^ADT_A01|ADTA010001|P|2.5\rEVN|A01|20260523120000\rPID|1||PAT001^^^HOSP^MR||SMITH^JOHN^Q|||M|||123 MAIN ST^^ANYTOWN^CA^90210\rPV1|1|I|WARD01^101^A^HOSP|||DR001^JONES^WILLIAM^^MD||MED|||ADM\rDG1|1|ICD10|J18.9|PNEUMONIA|20260523120000|A"
+    },
+    {
+      "messageType": "ADT^A01",
+      "label": "Inpatient admit #2",
+      "ackCode": "AA",
+      "sendOK": true,
+      "messageId": "fhir_1779512691609760880",
+      "fhirValid": true,
+      "issues": [],
+      "resourceTypes": [
+        "MessageHeader",
+        "Patient",
+        "Condition",
+        "Encounter"
+      ],
+      "hl7": "MSH|^~\\&|EPIC|HOSP|EZHK|EZHK|20260523120000||ADT^A01^ADT_A01|ADTA010002|P|2.5\rEVN|A01|20260523120000\rPID|1||PAT002^^^HOSP^MR||JOHNSON^MARY^A|||F|||456 OAK AVE^^SPRINGFIELD^IL^62701\rPV1|1|I|ICU^201^B^HOSP|||DR003^PATEL^ANIL^^MD||CARD|||ADM\rDG1|1|ICD10|J18.9|PNEUMONIA|20260523120000|A"
+    },
+    {
+      "messageType": "ADT^A01",
+      "label": "Inpatient admit #3",
+      "ackCode": "AA",
+      "sendOK": true,
+      "messageId": "fhir_1779512691820736616",
+      "fhirValid": true,
+      "issues": [],
+      "resourceTypes": [
+        "MessageHeader",
+        "Patient",
+        "Condition",
+        "Encounter"
+      ],
+      "hl7": "MSH|^~\\&|EPIC|HOSP|EZHK|EZHK|20260523120000||ADT^A01^ADT_A01|ADTA010003|P|2.5\rEVN|A01|20260523120000\rPID|1||PAT003^^^HOSP^MR||WILLIAMS^ROBERT|||M|||789 PINE RD^^CHICAGO^IL^60601\rPV1|1|E|ED^301^C^HOSP|||DR005^BROWN^JAMES^^MD||EMER|||ADM\rDG1|1|ICD10|J18.9|PNEUMONIA|20260523120000|A"
+    },
+    {
+      "messageType": "ADT^A01",
+      "label": "Inpatient admit #4",
+      "ackCode": "AA",
+      "sendOK": true,
+      "messageId": "fhir_1779512692015620542",
+      "fhirValid": true,
+      "issues": [],
+      "resourceTypes": [
+        "MessageHeader",
+        "Patient",
+        "Condition",
+        "Encounter"
+      ],
+      "hl7": "MSH|^~\\&|EPIC|HOSP|EZHK|EZHK|20260523120000||ADT^A01^ADT_A01|ADTA010004|P|2.5\rEVN|A01|20260523120000\rPID|1||PAT004^^^HOSP^MR||DAVIS^LINDA^K|||F|||321 ELM ST^^AURORA^CO^80010\rPV1|1|I|ONCO^401^A^HOSP|||DR006^GARCIA^MARIA^^MD||ONC|||ADM\rDG1|1|ICD10|J18.9|PNEUMONIA|20260523120000|A"
+    },
+    {
+      "messageType": "ADT^A01",
+      "label": "Inpatient admit #5",
+      "ackCode": "AA",
+      "sendOK": true,
+      "messageId": "fhir_1779512692226345494",
+      "fhirValid": true,
+      "issues": [],
+      "resourceTypes": [
+        "MessageHeader",
+        "Patient",
+        "Encounter",
+        "Condition"
+      ],
+      "hl7": "MSH|^~\\&|EPIC|HOSP|EZHK|EZHK|20260523120000||ADT^A01^ADT_A01|ADTA010005|P|2.5\rEVN|A01|20260523120000\rPID|1||PAT005^^^HOSP^MR||MARTINEZ^CARLOS|||M|||654 MAPLE DR^^DENVER^CO^80202\rPV1|1|O|OPD^501^D^HOSP|||DR007^WILSON^PAUL^^MD||SURG|||ADM\rDG1|1|ICD10|J18.9|PNEUMONIA|20260523120000|A"
+    }
+  ]
+}

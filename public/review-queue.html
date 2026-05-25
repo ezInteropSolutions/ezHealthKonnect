@@ -1,0 +1,479 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FHIR Validation Review Queue - ezHealthKonnect</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="css/dashboard.css">
+    <link rel="stylesheet" href="css/layout/main-layout.css?v=5">
+    <style>
+        /* ── Review Queue page-specific styles ─────────────────────────── */
+        .rq-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            background: white;
+            border: 1px solid #f8bbd9;
+            border-radius: 6px;
+            padding: 10px 16px;
+            margin-bottom: 8px;
+            flex-shrink: 0;
+            gap: 12px;
+        }
+        .rq-header-left { display: flex; align-items: center; gap: 16px; }
+        .rq-title { font-size: 16px; font-weight: 700; color: #1e3a8a; margin: 0; }
+        .rq-subtitle { font-size: 11px; color: #6b7280; margin: 0; }
+
+        /* stat chips */
+        .rq-stats { display: flex; gap: 8px; }
+        .rq-stat { display: flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 6px; font-size: 12px; font-weight: 600; border: 1px solid; }
+        .rq-stat-pending  { color: #d97706; border-color: #fcd34d; background: #fffbeb; }
+        .rq-stat-review   { color: #2563eb; border-color: #93c5fd; background: #eff6ff; }
+        .rq-stat-resolved { color: #059669; border-color: #6ee7b7; background: #ecfdf5; }
+
+        /* filter bar */
+        .rq-filters {
+            display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
+            background: #f8fafc; border-bottom: 1px solid #f8bbd9;
+            padding: 8px 12px; flex-shrink: 0;
+        }
+        .rq-filter-select {
+            padding: 5px 8px; border: 1px solid #e2e8f0; border-radius: 5px;
+            font-size: 12px; height: 32px; background: white; cursor: pointer;
+            color: #1e293b;
+        }
+        .rq-search {
+            position: relative; flex: 1; min-width: 200px; max-width: 280px;
+        }
+        .rq-search i { position: absolute; left: 9px; top: 50%; transform: translateY(-50%); color: #94a3b8; font-size: 12px; }
+        .rq-search input {
+            width: 100%; padding: 5px 8px 5px 28px; border: 1px solid #e2e8f0;
+            border-radius: 5px; font-size: 12px; height: 32px; background: white;
+        }
+        .rq-search input:focus { outline: none; border-color: #3b82f6; }
+
+        /* table */
+        .rq-section {
+            background: white; border-radius: 8px; border: 1px solid #f8bbd9;
+            flex: 1; display: flex; flex-direction: column; overflow: hidden; min-height: 0;
+        }
+        .rq-table-wrap { flex: 1; overflow: auto; min-height: 0; }
+        .rq-table {
+            width: 100%; border-collapse: collapse; font-size: 13px;
+        }
+        .rq-table thead th {
+            background: #f8fafc; border-bottom: 2px solid #f8bbd9;
+            padding: 10px 12px; text-align: left; font-size: 11px; font-weight: 700;
+            color: #1e3a8a; text-transform: uppercase; letter-spacing: 0.4px;
+            white-space: nowrap; position: sticky; top: 0; z-index: 1;
+        }
+        .rq-table tbody tr {
+            border-bottom: 1px solid #f1f5f9; cursor: pointer; transition: background 0.1s;
+        }
+        .rq-table tbody tr:hover { background: #f8fafc; }
+        .rq-table tbody td { padding: 9px 12px; vertical-align: middle; }
+
+        /* failure chips */
+        .failure-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+        .failure-chip {
+            padding: 2px 7px; border-radius: 10px; font-size: 10px; font-weight: 600;
+            background: #fef2f2; color: #dc2626; border: 1px solid #fca5a5;
+        }
+        .failure-chip.warn {
+            background: #fffbeb; color: #d97706; border-color: #fcd34d;
+        }
+
+        /* status badge */
+        .rq-badge {
+            padding: 2px 8px; border-radius: 10px; font-size: 10px; font-weight: 700;
+            text-transform: uppercase; letter-spacing: 0.3px; display: inline-block;
+        }
+        .rq-badge-pending  { background: #fffbeb; color: #d97706; border: 1px solid #fcd34d; }
+        .rq-badge-review   { background: #eff6ff; color: #2563eb; border: 1px solid #93c5fd; }
+        .rq-badge-resolved { background: #ecfdf5; color: #059669; border: 1px solid #6ee7b7; }
+        .rq-badge-rejected { background: #fef2f2; color: #dc2626; border: 1px solid #fca5a5; }
+
+        /* action buttons */
+        .rq-actions { display: flex; gap: 4px; align-items: center; justify-content: flex-end; }
+        .rq-btn {
+            padding: 4px 10px; border-radius: 5px; font-size: 11px; font-weight: 600;
+            cursor: pointer; border: 1px solid; transition: all 0.15s; white-space: nowrap;
+        }
+        .rq-btn-primary { background: #1e3a8a; color: white; border-color: #1e3a8a; }
+        .rq-btn-primary:hover { background: #1e40af; }
+        .rq-btn-warn    { background: white; color: #d97706; border-color: #fcd34d; }
+        .rq-btn-warn:hover { background: #fffbeb; }
+        .rq-btn-danger  { background: white; color: #dc2626; border-color: #fca5a5; }
+        .rq-btn-danger:hover { background: #fef2f2; }
+
+        /* empty state */
+        .rq-empty {
+            text-align: center; padding: 60px 20px; color: #94a3b8;
+        }
+        .rq-empty i { font-size: 36px; margin-bottom: 12px; display: block; color: #cbd5e1; }
+        .rq-empty strong { display: block; color: #475569; font-size: 14px; margin-bottom: 4px; }
+
+        /* footer */
+        .rq-footer {
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 8px 12px; border-top: 1px solid #e5e7eb; background: #f8fafc;
+            flex-shrink: 0; font-size: 12px; color: #64748b; flex-wrap: wrap; gap: 6px;
+        }
+        .rq-footer select {
+            padding: 3px 6px; border: 1px solid #e2e8f0; border-radius: 4px;
+            font-size: 11px; background: white;
+        }
+        .rq-pagination { display: flex; gap: 3px; align-items: center; }
+        .rq-page-btn {
+            padding: 3px 9px; border: 1px solid #e2e8f0; border-radius: 4px;
+            background: white; cursor: pointer; font-size: 11px; color: #475569;
+        }
+        .rq-page-btn:hover { background: #f1f5f9; }
+        .rq-page-btn.active { background: #1e3a8a; color: white; border-color: #1e3a8a; }
+
+        /* ── Detail Modal ────────────────────────────────────────────────── */
+        .rq-modal-overlay {
+            display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5);
+            z-index: 5000; align-items: center; justify-content: center;
+        }
+        .rq-modal-overlay.open { display: flex; }
+        .rq-modal {
+            background: white; border-radius: 10px; width: 92%; max-width: 960px;
+            max-height: 90vh; display: flex; flex-direction: column;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.2);
+        }
+        .rq-modal-header {
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 14px 18px; border-bottom: 1px solid #e5e7eb; flex-shrink: 0;
+        }
+        .rq-modal-title { font-size: 15px; font-weight: 700; color: #1e3a8a; margin: 0; }
+        .rq-modal-close {
+            background: none; border: none; cursor: pointer; font-size: 18px;
+            color: #94a3b8; padding: 4px;
+        }
+        .rq-modal-close:hover { color: #475569; }
+        .rq-modal-body { flex: 1; overflow: auto; padding: 18px; }
+        .rq-modal-footer {
+            padding: 12px 18px; border-top: 1px solid #e5e7eb; display: flex;
+            gap: 8px; justify-content: flex-end; flex-shrink: 0; flex-wrap: wrap;
+        }
+
+        /* modal tabs */
+        .rq-tabs { display: flex; border-bottom: 1px solid #e5e7eb; margin-bottom: 16px; }
+        .rq-tab {
+            padding: 8px 16px; border: none; background: none; cursor: pointer;
+            font-size: 13px; font-weight: 500; color: #64748b; border-bottom: 2px solid transparent;
+        }
+        .rq-tab.active { color: #1e3a8a; border-bottom-color: #1e3a8a; }
+
+        /* failure list */
+        .failure-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 16px; }
+        .failure-row {
+            display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px;
+            border-radius: 6px; background: #fef2f2; border: 1px solid #fca5a5;
+        }
+        .failure-row.warn { background: #fffbeb; border-color: #fcd34d; }
+        .failure-row-icon { color: #dc2626; font-size: 14px; flex-shrink: 0; margin-top: 1px; }
+        .failure-row.warn .failure-row-icon { color: #d97706; }
+        .failure-row-body { flex: 1; }
+        .failure-row-field { font-weight: 600; color: #1e293b; font-size: 13px; }
+        .failure-row-detail { font-size: 11px; color: #64748b; margin-top: 2px; }
+        .failure-row-action { flex-shrink: 0; }
+
+        /* override input */
+        .override-input {
+            display: flex; gap: 6px; margin-top: 6px; align-items: center;
+        }
+        .override-input input {
+            flex: 1; padding: 4px 8px; border: 1px solid #e2e8f0; border-radius: 4px;
+            font-size: 12px;
+        }
+        .override-input input:focus { outline: none; border-color: #3b82f6; }
+
+        /* code blocks */
+        .code-block {
+            background: #0f172a; border-radius: 6px; padding: 14px; overflow: auto;
+            max-height: 300px; font-size: 11px; line-height: 1.5; color: #e2e8f0;
+            font-family: 'Consolas', 'Monaco', monospace; white-space: pre;
+        }
+        .code-label {
+            font-size: 11px; font-weight: 600; color: #64748b; text-transform: uppercase;
+            letter-spacing: 0.4px; margin-bottom: 6px;
+        }
+        .panel-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+        @media (max-width: 700px) { .panel-grid { grid-template-columns: 1fr; } }
+    </style>
+</head>
+<body>
+<div class="dashboard-container">
+    <!-- Sidebar — identical structure to interfaces.html -->
+    <nav class="sidebar" id="sidebar">
+        <button class="sidebar-toggle" id="sidebarToggle">
+            <span class="toggle-icon">‹</span>
+        </button>
+        <div class="logo-container">
+            <img src="/assets/logos/ezHealthKonnect.jpeg" alt="ezHealthKonnect" class="logo-image">
+            <div class="logo-text">
+                <h3 class="brand-name">ez<span class="brand-accent">Health</span>Konnect</h3>
+                <p class="brand-tagline">Healthcare Integration</p>
+            </div>
+        </div>
+        <div class="nav-menu">
+            <div class="nav-section">
+                <div class="section-header">
+                    <span class="section-title">Main</span>
+                    <i class="fas fa-chevron-down nav-section-chevron"></i>
+                </div>
+                <div class="nav-items">
+                    <a href="dashboard.html" class="nav-item">
+                        <span class="nav-icon"><i class="far fa-house"></i></span>
+                        <span class="nav-label">Dashboard</span>
+                    </a>
+                    <a href="interfaces.html" class="nav-item">
+                        <span class="nav-icon"><i class="fas fa-plug"></i></span>
+                        <span class="nav-label">Interfaces</span>
+                    </a>
+                    <a href="messages.html" class="nav-item">
+                        <span class="nav-icon"><i class="far fa-envelope"></i></span>
+                        <span class="nav-label">Messages</span>
+                    </a>
+                    <a href="review-queue.html" class="nav-item active">
+                        <span class="nav-icon"><i class="far fa-circle-exclamation"></i></span>
+                        <span class="nav-label">Review Queue</span>
+                        <span class="nav-badge" id="rqNavBadge" style="display:none"></span>
+                    </a>
+                    <a href="#templates" class="nav-item">
+                        <span class="nav-icon"><i class="far fa-file-lines"></i></span>
+                        <span class="nav-label">Templates</span>
+                    </a>
+                </div>
+            </div>
+            <div class="nav-section">
+                <div class="section-header">
+                    <span class="section-title">Analytics</span>
+                    <i class="fas fa-chevron-down nav-section-chevron"></i>
+                </div>
+                <div class="nav-items">
+                    <a href="monitoring.html" class="nav-item">
+                        <span class="nav-icon"><i class="far fa-chart-bar"></i></span>
+                        <span class="nav-label">Monitoring</span>
+                    </a>
+                    <a href="reports.html" class="nav-item">
+                        <span class="nav-icon"><i class="fas fa-chart-line"></i></span>
+                        <span class="nav-label">Reports</span>
+                    </a>
+                </div>
+            </div>
+            <div class="nav-section">
+                <div class="section-header">
+                    <span class="section-title">Tools</span>
+                    <i class="fas fa-chevron-down nav-section-chevron"></i>
+                </div>
+                <div class="nav-items">
+                    <a href="hl7-reader.html" class="nav-item">
+                        <span class="nav-icon"><i class="fas fa-stethoscope"></i></span>
+                        <span class="nav-label">HL7 Reader</span>
+                    </a>
+                </div>
+            </div>
+            <div class="nav-section admin-section" id="adminSection" style="display:none">
+                <div class="section-header">
+                    <span class="section-title">Admin</span>
+                    <i class="fas fa-chevron-down nav-section-chevron"></i>
+                </div>
+                <div class="nav-items">
+                    <a href="user-management.html" class="nav-item">
+                        <span class="nav-icon"><i class="fas fa-users"></i></span>
+                        <span class="nav-label">Users</span>
+                    </a>
+                    <a href="settings.html" class="nav-item">
+                        <span class="nav-icon"><i class="fas fa-sliders"></i></span>
+                        <span class="nav-label">Settings</span>
+                    </a>
+                </div>
+            </div>
+        </div>
+        <div class="user-profile">
+            <div class="user-info">
+                <div class="user-avatar" id="userAvatar">U</div>
+                <div class="user-details">
+                    <span class="user-name" id="userName">Loading...</span>
+                    <span class="user-role" id="userRole">USER</span>
+                </div>
+            </div>
+            <button class="logout-btn" onclick="logout()" title="Logout">
+                <span class="nav-icon"><i class="fas fa-right-from-bracket"></i></span>
+                <span class="nav-label">Logout</span>
+            </button>
+        </div>
+    </nav>
+
+    <!-- Main Content -->
+    <main class="main-content" id="mainContent">
+
+        <!-- Header row -->
+        <div class="rq-header">
+            <div class="rq-header-left">
+                <div>
+                    <p class="rq-title"><i class="far fa-circle-exclamation" style="margin-right:6px;color:#d97706;"></i>FHIR Validation Review Queue</p>
+                    <p class="rq-subtitle">Messages held for missing required fields — action required before delivery</p>
+                </div>
+                <div class="rq-stats">
+                    <div class="rq-stat rq-stat-pending"><i class="far fa-clock"></i> <span id="statPending">0</span> Pending</div>
+                    <div class="rq-stat rq-stat-review"><i class="far fa-eye"></i> <span id="statInReview">0</span> In Review</div>
+                    <div class="rq-stat rq-stat-resolved"><i class="far fa-circle-check"></i> <span id="statResolved">0</span> Resolved</div>
+                </div>
+            </div>
+            <button class="rq-btn rq-btn-primary" onclick="loadQueue()" style="gap:6px;display:flex;align-items:center;">
+                <i class="far fa-rotate-right"></i> Refresh
+            </button>
+        </div>
+
+        <!-- Table section -->
+        <div class="rq-section" id="rqSection">
+
+            <!-- Filter bar -->
+            <div class="rq-filters">
+                <div class="rq-search">
+                    <i class="fas fa-search"></i>
+                    <input type="text" id="rqSearch" placeholder="Search by interface, message type…" oninput="applyRQFilters()">
+                </div>
+                <select class="rq-filter-select" id="rqStatusFilter" onchange="applyRQFilters()">
+                    <option value="all">All Status</option>
+                    <option value="pending_review">Pending Review</option>
+                    <option value="in_review">In Review</option>
+                    <option value="resolved_override">Resolved (Override)</option>
+                    <option value="resolved_provided">Resolved (Value Provided)</option>
+                    <option value="resolved_rejected">Rejected</option>
+                </select>
+                <select class="rq-filter-select" id="rqMsgTypeFilter" onchange="applyRQFilters()">
+                    <option value="all">All Message Types</option>
+                    <option value="ADT">ADT</option>
+                    <option value="ORU">ORU</option>
+                    <option value="ORM">ORM</option>
+                    <option value="MDM">MDM</option>
+                    <option value="SIU">SIU</option>
+                </select>
+                <select class="rq-filter-select" id="rqSeverityFilter" onchange="applyRQFilters()">
+                    <option value="all">All Severities</option>
+                    <option value="error">Error (required fields)</option>
+                    <option value="warning">Warning</option>
+                </select>
+            </div>
+
+            <!-- Table -->
+            <div class="rq-table-wrap" id="rqTableWrap">
+                <table class="rq-table" id="rqTable">
+                    <thead>
+                        <tr>
+                            <th>Interface</th>
+                            <th>Msg Type</th>
+                            <th>Received</th>
+                            <th>Validation Failures</th>
+                            <th>Status</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="rqTableBody">
+                        <tr><td colspan="6" style="text-align:center;padding:40px;color:#94a3b8;">
+                            <i class="far fa-circle-notch fa-spin" style="font-size:20px;"></i>
+                            <div style="margin-top:8px;">Loading review queue…</div>
+                        </td></tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- Footer / pagination -->
+            <div class="rq-footer">
+                <div id="rqInfo" style="color:#64748b;font-size:0.8rem;"></div>
+                <div style="display:flex;align-items:center;gap:10px;">
+                    <span>Show <select id="rqPageSize" onchange="handleRQPageSize()">
+                        <option value="25" selected>25</option>
+                        <option value="50">50</option>
+                        <option value="100">100</option>
+                    </select> per page</span>
+                    <div class="rq-pagination" id="rqPagination"></div>
+                </div>
+            </div>
+        </div>
+    </main>
+</div>
+
+<!-- ── Detail / Action Modal ──────────────────────────────────────────────── -->
+<div class="rq-modal-overlay" id="rqModal">
+    <div class="rq-modal">
+        <div class="rq-modal-header">
+            <p class="rq-modal-title" id="rqModalTitle">Review Item</p>
+            <button class="rq-modal-close" onclick="closeRQModal()"><i class="fas fa-times"></i></button>
+        </div>
+        <div class="rq-modal-body">
+            <div class="rq-tabs">
+                <button class="rq-tab active" onclick="switchRQTab('failures', this)">
+                    <i class="far fa-triangle-exclamation" style="margin-right:5px;"></i>Failures &amp; Actions
+                </button>
+                <button class="rq-tab" onclick="switchRQTab('hl7', this)">
+                    <i class="far fa-code" style="margin-right:5px;"></i>Raw HL7
+                </button>
+                <button class="rq-tab" onclick="switchRQTab('fhir', this)">
+                    <i class="far fa-code-branch" style="margin-right:5px;"></i>Partial FHIR
+                </button>
+            </div>
+
+            <!-- Tab: failures -->
+            <div id="rqTab-failures">
+                <p style="font-size:12px;color:#64748b;margin-bottom:12px;">
+                    Provide missing values or choose an action for each failure. All changes are applied before re-triggering delivery.
+                </p>
+                <div class="failure-list" id="rqFailureList"></div>
+
+                <!-- Global note -->
+                <div style="margin-top:12px;">
+                    <label style="font-size:12px;font-weight:600;color:#475569;display:block;margin-bottom:4px;">
+                        Reviewer notes (optional)
+                    </label>
+                    <textarea id="rqReviewNotes" rows="2" style="width:100%;padding:6px 8px;border:1px solid #e2e8f0;border-radius:5px;font-size:12px;resize:vertical;"
+                        placeholder="Add context or reason for override…"></textarea>
+                </div>
+            </div>
+
+            <!-- Tab: raw HL7 -->
+            <div id="rqTab-hl7" style="display:none">
+                <p class="code-label">Raw HL7 Message</p>
+                <div class="code-block" id="rqRawHL7">— not available —</div>
+            </div>
+
+            <!-- Tab: partial FHIR -->
+            <div id="rqTab-fhir" style="display:none">
+                <p class="code-label">Partial FHIR Bundle (what was transformed before validation halt)</p>
+                <div class="code-block" id="rqPartialFHIR">— not available —</div>
+            </div>
+        </div>
+        <div class="rq-modal-footer">
+            <button class="rq-btn rq-btn-danger" onclick="rejectItem()">
+                <i class="far fa-ban" style="margin-right:4px;"></i>Reject &amp; DLQ
+            </button>
+            <button class="rq-btn rq-btn-warn" onclick="overrideItem()">
+                <i class="far fa-forward" style="margin-right:4px;"></i>Override &amp; Deliver As-Is
+            </button>
+            <button class="rq-btn rq-btn-primary" onclick="resolveWithValues()">
+                <i class="far fa-paper-plane" style="margin-right:4px;"></i>Apply Values &amp; Deliver
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- Toast notification -->
+<div id="rqToast" style="
+    position:fixed;bottom:20px;right:20px;padding:10px 18px;border-radius:8px;
+    font-size:13px;font-weight:600;color:white;z-index:9999;
+    display:none;box-shadow:0 4px 16px rgba(0,0,0,0.15);
+"></div>
+
+<script src="js/components/sidebar-nav.js?v=3"></script>
+<script src="/js/core/app-dialogs.js"></script>
+    <script src="/js/services/AuthService.js"></script>
+<script src="js/review-queue.js?v=1"></script>
+    <script src="/js/ai-assistant.js"></script>
+</body>
+</html>

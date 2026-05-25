@@ -1,0 +1,239 @@
+package controllers
+
+import (
+	"net/http"
+
+	"github.com/gin-gonic/gin"
+
+	"ezhealthkonnect/models"
+	"ezhealthkonnect/services"
+)
+
+// PipelineExecutionController handles pipeline execution API endpoints
+// MVC: This is a CONTROLLER - thin orchestration layer, no business logic
+type PipelineExecutionController struct {
+	executionEngine *services.HybridExecutionEngine
+}
+
+// NewPipelineExecutionController creates a new pipeline execution controller (OOB)
+func NewPipelineExecutionController(executionEngine *services.HybridExecutionEngine) *PipelineExecutionController {
+	return &PipelineExecutionController{
+		executionEngine: executionEngine,
+	}
+}
+
+// ExecutePipeline executes a transformation pipeline
+// POST /api/pipelines/execute
+func (pec *PipelineExecutionController) ExecutePipeline(c *gin.Context) {
+	var request models.HybridExecutionRequest
+
+	if err := c.ShouldBindJSON(&request); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"error":   "Invalid request format: " + err.Error(),
+		})
+		return
+	}
+
+	// Validate required fields
+	if request.PipelineID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"error":   "pipeline_id is required",
+		})
+		return
+	}
+
+	if request.MessageID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"error":   "message_id is required",
+		})
+		return
+	}
+
+	// Delegate to service (MVC pattern)
+	result, err := pec.executionEngine.ExecutePipeline(
+		c.Request.Context(),
+		request.PipelineID,
+		request.MessageID,
+		request.InputData,
+	)
+
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"error":   err.Error(),
+			"result":  result, // Include partial result for debugging
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"result":  result,
+	})
+}
+
+// TestPipeline tests a pipeline with sample data
+// POST /api/pipelines/test
+func (pec *PipelineExecutionController) TestPipeline(c *gin.Context) {
+	var request struct {
+		PipelineID  string                 `json:"pipeline_id"`
+		TestMessage string                 `json:"test_message"` // Raw HL7 or parsed JSON
+		InputData   map[string]interface{} `json:"input_data"`
+	}
+
+	if err := c.ShouldBindJSON(&request); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"error":   "Invalid request format: " + err.Error(),
+		})
+		return
+	}
+
+	// Generate test message ID
+	messageID := "test_" + request.PipelineID
+
+	// Execute pipeline
+	result, err := pec.executionEngine.ExecutePipeline(
+		c.Request.Context(),
+		request.PipelineID,
+		messageID,
+		request.InputData,
+	)
+
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{ // Return 200 even on failure for test mode
+			"success": false,
+			"error":   err.Error(),
+			"result":  result,
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"result":  result,
+	})
+}
+
+// GetPipelineStats returns execution statistics for a pipeline
+// GET /api/pipelines/:id/stats
+func (pec *PipelineExecutionController) GetPipelineStats(c *gin.Context) {
+	pipelineID := c.Param("id")
+
+	if pipelineID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"error":   "pipeline_id is required",
+		})
+		return
+	}
+
+	// Delegate to service
+	stats, err := pec.executionEngine.GetPipelineExecutionStats(
+		c.Request.Context(),
+		pipelineID,
+	)
+
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"error":   err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"stats":   stats,
+	})
+}
+
+// ExecuteValidationStep executes a single validation step
+// POST /api/processing/execute/validation
+func (pec *PipelineExecutionController) ExecuteValidationStep(c *gin.Context) {
+	pec.executeStep(c, "pre.validation")
+}
+
+// ExecuteEnrichmentStep executes a single enrichment step
+// POST /api/processing/execute/enrichment
+func (pec *PipelineExecutionController) ExecuteEnrichmentStep(c *gin.Context) {
+	pec.executeStep(c, "pre.enrichment")
+}
+
+// ExecuteMappingStep executes a single mapping step
+// POST /api/processing/execute/mapping
+func (pec *PipelineExecutionController) ExecuteMappingStep(c *gin.Context) {
+	pec.executeStep(c, "core.mapping")
+}
+
+// ExecuteCustomStep executes a single custom step
+// POST /api/processing/execute/custom
+func (pec *PipelineExecutionController) ExecuteCustomStep(c *gin.Context) {
+	pec.executeStep(c, "custom.javascript")
+}
+
+// executeStep is a helper to execute individual steps (DRY principle)
+func (pec *PipelineExecutionController) executeStep(c *gin.Context, stepType string) {
+	var request struct {
+		Step      *models.TransformationStep `json:"step"`
+		InputData map[string]interface{}     `json:"inputData"`
+	}
+
+	if err := c.ShouldBindJSON(&request); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"error":   "Invalid request format: " + err.Error(),
+		})
+		return
+	}
+
+	// Override step type if not set
+	if request.Step.StepType == "" {
+		request.Step.StepType = stepType
+	}
+
+	// Get executor from registry
+	executor := pec.executionEngine.executorRegistry.GetExecutor(request.Step.StepType)
+
+	// Execute step
+	outputData, err := executor.Execute(
+		c.Request.Context(),
+		request.Step,
+		request.InputData,
+	)
+
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{ // Return 200 for easier frontend handling
+			"success": false,
+			"error":   err.Error(),
+			"data":    request.InputData, // Return input on failure
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    outputData,
+	})
+}
+
+// RegisterRoutes registers all pipeline execution routes
+func (pec *PipelineExecutionController) RegisterRoutes(router *gin.RouterGroup) {
+	pipelines := router.Group("/pipelines")
+	{
+		pipelines.POST("/execute", pec.ExecutePipeline)
+		pipelines.POST("/test", pec.TestPipeline)
+		pipelines.GET("/:id/stats", pec.GetPipelineStats)
+	}
+
+	processing := router.Group("/processing/execute")
+	{
+		processing.POST("/validation", pec.ExecuteValidationStep)
+		processing.POST("/enrichment", pec.ExecuteEnrichmentStep)
+		processing.POST("/mapping", pec.ExecuteMappingStep)
+		processing.POST("/custom", pec.ExecuteCustomStep)
+	}
+}

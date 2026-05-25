@@ -1,0 +1,519 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Interface Detail – ezHealthKonnect</title>
+    <link rel="stylesheet" href="css/dashboard.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        :root {
+            --pink:        #db2777;
+            --pink-dark:   #9d174d;
+            --pink-light:  #fce7f3;
+            --pink-mid:    #f9a8d4;
+            --navy:        #1e3a8a;
+            --navy-light:  #eff6ff;
+            --white:       #ffffff;
+            --page-bg:     #ffffff;
+            --card-border: #f0e4ef;
+            --row-hover:   #f9fafb;
+            --text:        #1a202c;
+            --muted:       #6b7280;
+        }
+        body { background: var(--page-bg); }
+        .main-content { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+
+        /* ── Page header ─────────────────────────────────────────────────────── */
+        .page-header {
+            padding: 16px 28px;
+            background: var(--white);
+            border-bottom: 1px solid var(--card-border);
+            display: flex; align-items: center; gap: 12px;
+            flex-shrink: 0;
+        }
+        .back-btn {
+            display: inline-flex; align-items: center; gap: 6px;
+            padding: 6px 12px; background: #f3f4f6; color: #374151;
+            border: 1px solid #e5e7eb; border-radius: 6px; font-size: 13px;
+            cursor: pointer; text-decoration: none; transition: background .12s;
+        }
+        .back-btn:hover { background: #e5e7eb; }
+        .page-header-title { flex: 1; }
+        .page-header-title h1 { font-size: 17px; font-weight: 700; color: var(--text); }
+        .page-header-title p { font-size: 12px; color: var(--muted); margin-top: 2px; }
+        .status-pill {
+            font-size: 11px; font-weight: 700; padding: 3px 10px; border-radius: 10px;
+        }
+        .status-pill.active { background: #dcfce7; color: #166534; }
+        .status-pill.paused { background: #fef3c7; color: #92400e; }
+        .status-pill.error  { background: #fee2e2; color: #991b1b; }
+        .status-pill.draft  { background: #f3f4f6; color: var(--muted); }
+
+        /* ── Two-column layout ───────────────────────────────────────────────── */
+        .detail-layout { flex: 1; display: flex; overflow: hidden; }
+
+        /* ── Left nav ────────────────────────────────────────────────────────── */
+        .detail-leftnav {
+            width: 200px; flex-shrink: 0;
+            border-right: 1px solid var(--card-border);
+            background: #fafafa; padding: 16px 0;
+        }
+        .leftnav-section { padding: 0 12px 8px; font-size: 10px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .08em; }
+        .leftnav-tab {
+            display: flex; align-items: center; gap: 9px;
+            padding: 9px 16px; font-size: 13px; color: #374151;
+            cursor: pointer; border-left: 3px solid transparent; transition: all .12s;
+        }
+        .leftnav-tab:hover { background: var(--navy-light); color: var(--navy); }
+        .leftnav-tab.active { background: var(--navy-light); color: var(--navy); border-left-color: var(--navy); font-weight: 600; }
+        .leftnav-tab i { width: 16px; text-align: center; font-size: 13px; }
+
+        /* ── Content area ────────────────────────────────────────────────────── */
+        .detail-content { flex: 1; overflow-y: auto; padding: 20px 28px 32px; }
+        .tab-section { display: none; }
+        .tab-section.active { display: block; }
+
+        /* ── KPI cards ───────────────────────────────────────────────────────── */
+        .kpi-grid { display: grid; grid-template-columns: repeat(4,1fr); gap: 14px; margin-bottom: 20px; }
+        .kpi-card {
+            background: #fff; border: 1px solid var(--card-border); border-radius: 8px;
+            padding: 14px 16px;
+        }
+        .kpi-label { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin-bottom: 6px; }
+        .kpi-value { font-size: 22px; font-weight: 800; color: var(--text); }
+        .kpi-sub   { font-size: 11px; color: var(--muted); margin-top: 3px; }
+
+        /* ── Section headers ─────────────────────────────────────────────────── */
+        .section-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+        .section-header h2 { font-size: 15px; font-weight: 700; color: var(--text); }
+        .section-label { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .07em; color: var(--muted); margin: 20px 0 10px; }
+
+        /* ── Mini messages table ─────────────────────────────────────────────── */
+        .mini-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+        .mini-table th {
+            text-align: left; padding: 7px 10px; font-size: 10px; font-weight: 700;
+            text-transform: uppercase; letter-spacing: .06em; color: var(--muted);
+            border-bottom: 2px solid var(--card-border); background: #fafafa;
+        }
+        .mini-table td { padding: 9px 10px; border-bottom: 1px solid #f3f4f6; color: var(--text); }
+        .mini-table tr:hover td { background: var(--row-hover); }
+        .status-dot {
+            display: inline-block; width: 7px; height: 7px; border-radius: 50%;
+            margin-right: 5px; vertical-align: middle;
+        }
+        .status-dot.completed, .status-dot.success { background: #22c55e; }
+        .status-dot.failed, .status-dot.error      { background: #dc2626; }
+        .status-dot.pending                         { background: #f59e0b; }
+
+        /* ── Alert cards (reuse from alerts.html) ────────────────────────────── */
+        .alert-card {
+            background: #fff; border: 1px solid var(--card-border); border-radius: 8px;
+            padding: 13px 16px; display: flex; align-items: flex-start; gap: 12px;
+            margin-bottom: 8px;
+        }
+        .alert-card.critical { border-left: 4px solid #dc2626; }
+        .alert-card.warning  { border-left: 4px solid #f59e0b; }
+        .alert-card.info     { border-left: 4px solid var(--pink); }
+        .alert-sev-dot { width: 10px; height: 10px; border-radius: 50%; margin-top: 5px; flex-shrink: 0; }
+        .alert-sev-dot.critical { background: #dc2626; }
+        .alert-sev-dot.warning  { background: #f59e0b; }
+        .alert-sev-dot.info     { background: var(--pink); }
+        .alert-body { flex: 1; min-width: 0; }
+        .alert-title { font-size: 13px; font-weight: 600; color: var(--text); margin-bottom: 3px; }
+        .alert-meta { font-size: 12px; color: var(--muted); }
+
+        /* ── Settings form ───────────────────────────────────────────────────── */
+        .settings-card {
+            background: #fff; border: 1px solid var(--card-border); border-radius: 8px;
+            padding: 20px; max-width: 600px;
+        }
+        .form-group { margin-bottom: 16px; }
+        .form-group label { display: block; font-size: 12px; font-weight: 600; color: #374151; margin-bottom: 5px; }
+        .form-group input, .form-group select, .form-group textarea {
+            width: 100%; padding: 8px 12px; border: 1px solid #e5e7eb; border-radius: 6px;
+            font-size: 13px; color: var(--text); background: #fff; box-sizing: border-box;
+        }
+        .form-group input:focus, .form-group select:focus { outline: 2px solid #93c5fd; border-color: var(--navy); }
+        .btn-primary {
+            display: inline-flex; align-items: center; gap: 6px;
+            padding: 8px 16px; background: var(--navy); color: #fff;
+            border: none; border-radius: 6px; font-size: 13px; font-weight: 600; cursor: pointer;
+        }
+        .btn-primary:hover { background: #1e40af; }
+        .btn-danger {
+            display: inline-flex; align-items: center; gap: 6px;
+            padding: 8px 16px; background: #dc2626; color: #fff;
+            border: none; border-radius: 6px; font-size: 13px; font-weight: 600; cursor: pointer;
+        }
+        .btn-danger:hover { background: #b91c1c; }
+        .btn-ghost {
+            padding: 7px 14px; background: #f3f4f6; color: #374151;
+            border: 1px solid #e5e7eb; border-radius: 6px; font-size: 13px; cursor: pointer;
+        }
+
+        /* ── Rule cards ──────────────────────────────────────────────────────── */
+        .rule-card {
+            background: #fff; border: 1px solid var(--card-border); border-radius: 8px;
+            padding: 13px 16px; display: flex; align-items: center; gap: 12px; margin-bottom: 8px;
+        }
+        .rule-type-badge {
+            font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 4px;
+            background: var(--navy-light); color: var(--navy); white-space: nowrap;
+        }
+        .rule-info { flex: 1; min-width: 0; }
+        .rule-name { font-size: 13px; font-weight: 600; color: var(--text); }
+        .rule-desc { font-size: 12px; color: var(--muted); margin-top: 2px; }
+
+        /* ── Loading ─────────────────────────────────────────────────────────── */
+        .loading-row { text-align: center; padding: 32px; color: var(--muted); font-size: 13px; }
+        .loading-row i { animation: spin 1s linear infinite; margin-right: 8px; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        .empty-state { text-align: center; padding: 32px; color: var(--muted); }
+        .empty-state i { font-size: 32px; color: var(--pink-mid); margin-bottom: 10px; display: block; }
+
+        /* ── Responsive KPIs ─────────────────────────────────────────────────── */
+        @media (max-width: 900px) { .kpi-grid { grid-template-columns: repeat(2,1fr); } }
+        @media (max-width: 600px) { .kpi-grid { grid-template-columns: 1fr; } }
+        /* ── Docs panel ──────────────────────────────────────────────────────── */
+        .docs-overlay { display:none; position:fixed; inset:0; background:rgba(15,23,42,.35); z-index:1100; }
+        .docs-overlay.open { display:block; }
+        .docs-panel { position:fixed; top:0; right:-720px; width:720px; height:100%; background:#fff; box-shadow:-4px 0 32px rgba(0,0,0,.14); display:flex; flex-direction:column; transition:right .25s cubic-bezier(.4,0,.2,1); z-index:1101; }
+        .docs-panel.open { right:0; }
+        .docs-panel-accent { height:3px; background:linear-gradient(90deg,var(--pink) 0%,var(--navy) 100%); flex-shrink:0; }
+        .docs-panel-header { display:flex; align-items:center; gap:12px; padding:16px 20px; background:var(--navy); color:#fff; flex-shrink:0; }
+        .docs-panel-header h2 { font-size:15px; font-weight:700; flex:1; }
+        .docs-panel-header p  { font-size:12px; color:#93c5fd; margin-top:1px; }
+        .docs-close { background:rgba(255,255,255,.15); border:none; color:#fff; width:30px; height:30px; border-radius:6px; font-size:16px; cursor:pointer; display:flex; align-items:center; justify-content:center; flex-shrink:0; }
+        .docs-close:hover { background:rgba(255,255,255,.25); }
+        .docs-body { display:flex; flex:1; overflow:hidden; }
+        .docs-toc { width:210px; flex-shrink:0; border-right:1px solid #e5e7eb; overflow-y:auto; padding:12px 0; background:#f9fafb; }
+        .toc-section-label { padding:8px 14px 4px; font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:.07em; color:var(--muted); }
+        .toc-item { display:block; padding:6px 16px; font-size:12px; color:#374151; cursor:pointer; border-left:3px solid transparent; transition:all .1s; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+        .toc-item:hover { background:var(--navy-light); color:var(--navy); }
+        .toc-item.active { background:var(--navy-light); color:var(--navy); border-left-color:var(--navy); font-weight:600; }
+        .toc-item.sub { padding-left:26px; font-size:12px; color:#6b7280; }
+        .toc-item.sub.active { color:var(--navy); }
+        .docs-content { flex:1; overflow-y:auto; padding:28px 32px 48px; }
+        .doc-section-block { display:none; }
+        .doc-section-block.active { display:block; }
+        .doc-subsection { margin-bottom:32px; }
+        .doc-subsection h4 { font-size:13px; font-weight:700; color:var(--navy); margin:0 0 12px; padding:8px 12px; background:var(--navy-light); border-radius:6px; border-left:3px solid var(--navy); }
+        .doc-subsection p { font-size:13px; color:#374151; line-height:1.65; margin:0 0 10px; }
+        .doc-table { width:100%; border-collapse:collapse; font-size:12px; margin:10px 0 14px; }
+        .doc-table th { text-align:left; padding:7px 10px; background:var(--navy); color:#fff; font-size:11px; font-weight:700; }
+        .doc-table td { padding:7px 10px; border-bottom:1px solid #f0f4ff; color:#374151; }
+        .doc-table tr:last-child td { border-bottom:none; }
+        .doc-table tr:nth-child(even) td { background:#f8faff; }
+        .doc-table code { font-size:11px; background:#e0e7ff; color:var(--navy); padding:1px 5px; border-radius:3px; }
+        .doc-section-block pre, .doc-subsection pre { background:#0f172a; color:#e2e8f0; border-radius:8px; padding:16px; font-size:12px; line-height:1.6; overflow-x:auto; margin:8px 0 14px; font-family:'Consolas','Monaco',monospace; }
+        .doc-section-block code:not(pre code) { background:#e0e7ff; color:var(--navy); padding:1px 5px; border-radius:3px; font-size:12px; }
+        .doc-example { border:1px solid #bfdbfe; border-radius:8px; margin:10px 0 14px; overflow:hidden; }
+        .doc-example-label { padding:6px 12px; background:var(--navy-light); color:var(--navy); font-size:11px; font-weight:600; }
+        .doc-example pre { margin:0; border-radius:0; }
+        .doc-flow { display:flex; flex-direction:column; gap:8px; margin:10px 0 14px; }
+        .flow-step { display:flex; align-items:flex-start; gap:10px; padding:8px 12px; background:#f8faff; border-radius:6px; border-left:3px solid var(--navy); font-size:13px; color:#374151; }
+        .flow-num { min-width:22px; height:22px; background:var(--navy); color:#fff; border-radius:50%; font-size:11px; font-weight:700; display:flex; align-items:center; justify-content:center; flex-shrink:0; }
+        .flow-num.state-open { background:#dc2626; } .flow-num.state-ack { background:#f59e0b; } .flow-num.state-res { background:#16a34a; }
+        .doc-tip { background:#f0fdf4; border-left:4px solid #16a34a; border-radius:0 6px 6px 0; padding:10px 14px; font-size:12px; color:#166534; margin:10px 0 14px; }
+        .doc-warning { background:#fef9c3; border-left:4px solid #ca8a04; border-radius:0 6px 6px 0; padding:10px 14px; font-size:12px; color:#713f12; margin:10px 0 14px; }
+        .faq-item { border:1px solid #e5e7eb; border-radius:8px; margin-bottom:10px; overflow:hidden; }
+        .faq-q { padding:12px 14px; background:var(--navy-light); color:var(--navy); font-size:13px; font-weight:600; cursor:pointer; }
+        .faq-a { padding:12px 14px; font-size:13px; color:#374151; line-height:1.65; border-top:1px solid #e5e7eb; }
+        .http-get  { background:#dbeafe; color:#1d4ed8; padding:1px 6px; border-radius:3px; font-size:10px; font-weight:700; }
+        .http-post { background:#dcfce7; color:#166534; padding:1px 6px; border-radius:3px; font-size:10px; font-weight:700; }
+        .http-put  { background:#fef3c7; color:#92400e; padding:1px 6px; border-radius:3px; font-size:10px; font-weight:700; }
+        .http-del  { background:#fee2e2; color:#991b1b; padding:1px 6px; border-radius:3px; font-size:10px; font-weight:700; }
+    </style>
+</head>
+<body>
+<div class="dashboard-container">
+    <nav class="sidebar" id="sidebar"></nav>
+
+    <div class="main-content">
+        <!-- Page header -->
+        <div class="page-header">
+            <a class="back-btn" href="interfaces.html"><i class="fas fa-arrow-left"></i> Interfaces</a>
+            <div class="page-header-title">
+                <h1 id="interfaceName">Loading…</h1>
+                <p id="interfaceDesc"></p>
+            </div>
+            <span class="status-pill draft" id="statusPill" style="display:none"></span>
+            <a id="dlqDepthBadge" href="admin-dlq.html" title="Open Dead-Letter Queue"
+               style="display:none;text-decoration:none;align-items:center;gap:5px;
+                      background:#fef3c7;border:1px solid #fcd34d;border-radius:12px;
+                      padding:3px 10px;font-size:12px;font-weight:600;color:#92400e;">
+                <i class="fas fa-exclamation-triangle" style="font-size:11px;"></i>
+                <span id="dlqDepthCount">0</span> in DLQ
+            </a>
+            <a class="btn-ghost" id="pipelineLink" href="#" style="font-size:13px;text-decoration:none;display:none">
+                <i class="fas fa-diagram-project"></i> Open Pipeline
+            </a>
+        </div>
+
+        <!-- Two-column layout -->
+        <div class="detail-layout">
+            <!-- Left nav -->
+            <div class="detail-leftnav">
+                <div class="leftnav-section">Interface</div>
+                <div class="leftnav-tab active" data-tab="overview" onclick="activateTab('overview')">
+                    <i class="fas fa-gauge"></i> Overview
+                </div>
+                <div class="leftnav-tab" data-tab="pipeline" onclick="activateTab('pipeline')">
+                    <i class="fas fa-diagram-project"></i> Pipeline
+                </div>
+                <div class="leftnav-tab" data-tab="messages" onclick="activateTab('messages')">
+                    <i class="fas fa-envelope"></i> Messages
+                </div>
+                <div class="leftnav-tab" data-tab="alerts" onclick="activateTab('alerts')">
+                    <i class="fas fa-bell"></i> Alerts
+                </div>
+                <div class="leftnav-tab" data-tab="settings" onclick="activateTab('settings')">
+                    <i class="fas fa-gear"></i> Settings
+                </div>
+            </div>
+
+            <!-- Content area -->
+            <div class="detail-content">
+
+                <!-- ── Tab: Overview ──────────────────────────────────────── -->
+                <div id="tab-overview" class="tab-section active">
+                    <div class="section-header">
+                        <h2>Overview</h2>
+                        <button class="btn-ghost" onclick="loadOverview()"><i class="fas fa-rotate"></i> Refresh</button>
+                    </div>
+                    <div class="kpi-grid" id="kpiGrid">
+                        <div class="loading-row" style="grid-column:1/-1"><i class="fas fa-spinner fa-spin"></i> Loading metrics…</div>
+                    </div>
+                    <div class="section-label">Recent Messages</div>
+                    <div style="overflow-x:auto">
+                        <table class="mini-table">
+                            <thead>
+                                <tr>
+                                    <th>Message ID</th>
+                                    <th>Type</th>
+                                    <th>Status</th>
+                                    <th>Received</th>
+                                    <th>Time (ms)</th>
+                                </tr>
+                            </thead>
+                            <tbody id="recentMessages">
+                                <tr><td colspan="5" class="loading-row"><i class="fas fa-spinner fa-spin"></i></td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- ── Tab: Pipeline ──────────────────────────────────────── -->
+                <div id="tab-pipeline" class="tab-section">
+                    <div class="section-header"><h2>Pipeline</h2></div>
+                    <p style="font-size:13px;color:var(--muted);margin-bottom:16px">
+                        Open the visual pipeline builder to configure transformation steps, routing, and connectors for this interface.
+                    </p>
+                    <a id="openPipelineBtn" href="#" class="btn-primary" style="text-decoration:none">
+                        <i class="fas fa-diagram-project"></i> Open Pipeline Builder
+                    </a>
+                </div>
+
+                <!-- ── Tab: Messages ──────────────────────────────────────── -->
+                <div id="tab-messages" class="tab-section">
+                    <div class="section-header"><h2>Messages</h2></div>
+                    <p style="font-size:13px;color:var(--muted);margin-bottom:16px">
+                        Browse all messages received by this interface, inspect payloads, and view processing status.
+                    </p>
+                    <a id="openMessagesBtn" href="#" class="btn-primary" style="text-decoration:none">
+                        <i class="fas fa-envelope-open-text"></i> Open Message Viewer
+                    </a>
+                </div>
+
+                <!-- ── Tab: Alerts ────────────────────────────────────────── -->
+                <div id="tab-alerts" class="tab-section">
+                    <div class="section-header">
+                        <h2>Alerts</h2>
+                        <div style="display:flex;gap:8px">
+                            <button onclick="openAlertDocs()" style="display:inline-flex;align-items:center;gap:6px;padding:7px 13px;background:#eff6ff;color:#1e3a8a;border:1px solid #bfdbfe;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer">
+                                <i class="fas fa-circle-question"></i> Help
+                            </button>
+                            <a href="alerts.html" class="btn-ghost" style="text-decoration:none;font-size:13px">
+                                <i class="fas fa-list-check"></i> Manage All Rules
+                            </a>
+                        </div>
+                    </div>
+
+                    <div class="section-label">Active Alerts for this Interface</div>
+                    <div id="interfaceAlertList">
+                        <div class="loading-row"><i class="fas fa-spinner fa-spin"></i></div>
+                    </div>
+
+                    <div class="section-label">Alert Rules</div>
+                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+                        <span style="font-size:12px;color:var(--muted)">Rules applying to this interface (including global rules)</span>
+                        <button class="btn-primary" onclick="openNewRuleForInterface()" style="font-size:12px;padding:6px 12px">
+                            <i class="fas fa-plus"></i> Add Rule
+                        </button>
+                    </div>
+                    <div id="interfaceRuleList">
+                        <div class="loading-row"><i class="fas fa-spinner fa-spin"></i></div>
+                    </div>
+                </div>
+
+                <!-- ── Tab: Settings ──────────────────────────────────────── -->
+                <div id="tab-settings" class="tab-section">
+                    <div class="section-header"><h2>Settings</h2></div>
+                    <div class="settings-card">
+                        <div class="form-group">
+                            <label>Interface Name</label>
+                            <input type="text" id="settingName" placeholder="Interface name">
+                        </div>
+                        <div class="form-group">
+                            <label>Description</label>
+                            <input type="text" id="settingDesc" placeholder="Optional description">
+                        </div>
+                        <div class="form-group">
+                            <label>Status</label>
+                            <select id="settingStatus">
+                                <option value="active">Active</option>
+                                <option value="paused">Paused</option>
+                                <option value="draft">Draft</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Error Threshold (%)</label>
+                            <input type="number" id="settingErrorThreshold" min="0" max="100" step="1" placeholder="10">
+                            <div style="font-size:11px;color:var(--muted);margin-top:4px">Default error rate threshold for this interface. Used when no per-interface alert rule is configured.</div>
+                        </div>
+                        <!-- Recovery Queue (DLQ) config -->
+                        <div style="margin-top:22px;padding-top:18px;border-top:1px solid var(--card-border)">
+                            <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px;">
+                                <i class="fas fa-exclamation-triangle" style="color:#d97706;font-size:13px;"></i>
+                                <span style="font-size:13px;font-weight:600;color:var(--text-primary)">Recovery Queue</span>
+                                <span style="font-size:11px;color:var(--muted)">— DLQ retry behaviour for this interface</span>
+                            </div>
+                            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+                                <div class="form-group">
+                                    <label>Max Attempts</label>
+                                    <input type="number" id="dlqMaxAttempts" min="1" max="100" step="1" placeholder="10">
+                                    <div style="font-size:11px;color:var(--muted);margin-top:3px">Total delivery attempts before abandonment (default 10)</div>
+                                </div>
+                                <div class="form-group">
+                                    <label>Initial Delay (s)</label>
+                                    <input type="number" id="dlqInitialDelay" min="0" step="1" placeholder="30">
+                                    <div style="font-size:11px;color:var(--muted);margin-top:3px">Delay before first retry in seconds (default 30)</div>
+                                </div>
+                                <div class="form-group">
+                                    <label>Retry Delay (s)</label>
+                                    <input type="number" id="dlqRetryDelay" min="1" step="1" placeholder="60">
+                                    <div style="font-size:11px;color:var(--muted);margin-top:3px">Base delay between retries (default 60)</div>
+                                </div>
+                                <div class="form-group">
+                                    <label>Backoff Multiplier</label>
+                                    <input type="number" id="dlqBackoff" min="1" max="10" step="0.1" placeholder="2.0">
+                                    <div style="font-size:11px;color:var(--muted);margin-top:3px">Exponential backoff factor per attempt (default 2.0, max delay 24 h)</div>
+                                </div>
+                                <div class="form-group" style="grid-column:1/-1;">
+                                    <label>Payload Expires After (hours)</label>
+                                    <input type="number" id="dlqExpiresAfter" min="0" step="1" placeholder="0">
+                                    <div style="font-size:11px;color:var(--muted);margin-top:3px">Hours until an abandoned row's payload is purged. 0 = never expire.</div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div style="display:flex;gap:10px;margin-top:20px;padding-top:16px;border-top:1px solid var(--card-border)">
+                            <button class="btn-primary" onclick="saveSettings()">Save Changes</button>
+                            <button class="btn-danger" onclick="confirmDelete()" style="margin-left:auto">
+                                <i class="fas fa-trash"></i> Delete Interface
+                            </button>
+                        </div>
+                    </div>
+
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ── Alert Docs Panel (shared with alerts.html) ───────────────────────────── -->
+<div class="docs-overlay" id="docsOverlay" onclick="closeDocsPanel(event)"></div>
+<div class="docs-panel" id="docsPanel">
+    <div class="docs-panel-accent"></div>
+    <div class="docs-panel-header">
+        <div style="flex:1">
+            <h2><i class="fas fa-book" style="margin-right:8px"></i>Alert Management — Help &amp; Documentation</h2>
+            <p>Configuration guides, API reference, and real-world examples</p>
+        </div>
+        <button class="docs-close" onclick="closeDocsPanel()" title="Close">×</button>
+    </div>
+    <div class="docs-body">
+        <nav class="docs-toc" id="docsToc"></nav>
+        <div class="docs-content" id="docsContent"></div>
+    </div>
+</div>
+
+<script src="js/components/sidebar-nav.js"></script>
+<script src="js/alert-docs.js"></script>
+<script src="js/interface-detail.js"></script>
+<script>
+// ── Docs panel (alert-docs) ────────────────────────────────────────────────────
+(function () {
+    'use strict';
+    let _currentSub = null;
+
+    function buildToc() {
+        const toc = document.getElementById('docsToc');
+        if (!toc || !window.ALERT_DOCS) return;
+        let html = '';
+        ALERT_DOCS.sections.forEach(sec => {
+            html += `<div class="toc-section-label">${sec.title}</div>`;
+            sec.subsections.forEach(sub => {
+                html += `<a class="toc-item sub" data-id="${sub.id}" onclick="docShowSection('${sub.id}')">${sub.title}</a>`;
+            });
+        });
+        toc.innerHTML = html;
+    }
+
+    function buildContent() {
+        const el = document.getElementById('docsContent');
+        if (!el || !window.ALERT_DOCS) return;
+        let html = '';
+        ALERT_DOCS.sections.forEach(sec => {
+            sec.subsections.forEach(sub => {
+                html += `<div class="doc-section-block" id="doc-block-${sub.id}"><div class="doc-subsection"><h4>${sub.title}</h4>${sub.body}</div></div>`;
+            });
+        });
+        el.innerHTML = html;
+    }
+
+    window.docShowSection = function (id) {
+        _currentSub = id;
+        document.querySelectorAll('.doc-section-block').forEach(b => b.classList.remove('active'));
+        const block = document.getElementById('doc-block-' + id);
+        if (block) { block.classList.add('active'); document.getElementById('docsContent').scrollTop = 0; }
+        document.querySelectorAll('.toc-item').forEach(a => a.classList.remove('active'));
+        const tocItem = document.querySelector(`.toc-item[data-id="${id}"]`);
+        if (tocItem) tocItem.classList.add('active');
+    };
+
+    window.openDocsPanel = function (startId) {
+        document.getElementById('docsOverlay').classList.add('open');
+        document.getElementById('docsPanel').classList.add('open');
+        const target = startId || _currentSub || ALERT_DOCS.sections[0]?.subsections[0]?.id;
+        if (target) docShowSection(target);
+    };
+
+    window.openAlertDocs = function () { openDocsPanel('rules-types'); };
+
+    window.closeDocsPanel = function (e) {
+        if (e && e.target !== document.getElementById('docsOverlay')) return;
+        document.getElementById('docsOverlay').classList.remove('open');
+        document.getElementById('docsPanel').classList.remove('open');
+    };
+
+    document.addEventListener('keydown', e => { if (e.key === 'Escape') closeDocsPanel(); });
+    buildToc();
+    buildContent();
+})();
+</script>
+    <script src="/js/ai-assistant.js"></script>
+</body>
+</html>

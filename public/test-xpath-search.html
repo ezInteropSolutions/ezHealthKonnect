@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>XPath Autocomplete - Description Search Test</title>
+    <link rel="stylesheet" href="/css/components/xpath-autocomplete.css">
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+            background: #f5f7fa;
+        }
+        .test-container {
+            background: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+        }
+        h1 {
+            color: #2c3e50;
+            margin-bottom: 10px;
+        }
+        .instructions {
+            background: #e8f4ff;
+            padding: 15px;
+            border-radius: 6px;
+            margin-bottom: 30px;
+            color: #2c3e50;
+        }
+        .instructions h3 {
+            margin-top: 0;
+            color: #4a90e2;
+        }
+        .instructions ul {
+            margin: 10px 0;
+            padding-left: 20px;
+        }
+        .test-section {
+            margin-bottom: 30px;
+        }
+        .test-section h3 {
+            color: #4a90e2;
+            margin-bottom: 15px;
+        }
+        .selected-value {
+            margin-top: 15px;
+            padding: 12px;
+            background: #f8f9fa;
+            border-left: 3px solid #4a90e2;
+            border-radius: 4px;
+            font-family: 'Courier New', monospace;
+            font-size: 13px;
+            color: #2c3e50;
+        }
+        .selected-value strong {
+            color: #4a90e2;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            font-weight: 600;
+        }
+    </style>
+</head>
+<body>
+    <div class="test-container">
+        <h1>🔍 XPath Autocomplete - Description Search Test</h1>
+
+        <div class="instructions">
+            <h3>✨ Enhanced Features</h3>
+            <ul>
+                <li><strong>Search by description:</strong> Type "Patient" to find Patient ID, Patient Name, etc.</li>
+                <li><strong>Search by field key:</strong> Type "PID.5" to find Patient Name</li>
+                <li><strong>Natural language:</strong> Type "name" or "birth" to find relevant fields</li>
+                <li><strong>Field key badges:</strong> Each result shows the HL7 field key (e.g., PID.5) prominently</li>
+                <li><strong>Smart scoring:</strong> Description matches are prioritized higher than before</li>
+            </ul>
+        </div>
+
+        <div class="test-section">
+            <h3>🧪 Try these searches:</h3>
+            <ul>
+                <li>"patient" - Should find Patient ID, Patient Name</li>
+                <li>"name" - Should find Patient Name</li>
+                <li>"birth" or "dob" - Should find Date of Birth</li>
+                <li>"sex" or "gender" - Should find Administrative Sex</li>
+                <li>"PID.5" - Should find Patient Name (field key search)</li>
+            </ul>
+        </div>
+
+        <div class="test-section">
+            <h3>Field Path Selector</h3>
+            <div id="xpath-container"></div>
+            <div class="selected-value" id="selected-value">
+                <strong>Selected:</strong> <span id="selected-path">None</span>
+            </div>
+        </div>
+    </div>
+
+    <script src="/js/pipeline/components/XPathAutocomplete.js"></script>
+    <script>
+        // Initialize XPath autocomplete
+        const container = document.getElementById('xpath-container');
+        const selectedPathDisplay = document.getElementById('selected-path');
+
+        const autocomplete = new XPathAutocomplete(container, {
+            format: 'hl7v2',
+            version: 'v2.5',
+            messageType: 'ADT_A01',
+            placeholder: 'Search by field name, description, or path (e.g., "patient name" or "PID.5")...',
+            onChange: (path) => {
+                console.log('Selected path:', path);
+                selectedPathDisplay.textContent = path;
+            }
+        });
+
+        console.log('✅ XPath Autocomplete initialized');
+        console.log('📊 Try searching for: "patient", "name", "birth", or "PID.5"');
+    </script>
+</body>
+</html>

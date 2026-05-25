@@ -1,0 +1,58 @@
+# Dependencies
+node_modules/
+
+# Schema binary files — 1.5 GB, managed via ezhealthkonnect-schemas GitHub repo.
+# catalog.json and build-packages.ps1 ARE tracked (they live in schemas/).
+# The actual .gz files are downloaded by users via Settings → Schema Packages.
+schemas/fhir/R4/resources/
+schemas/fhir/R4/profiles/
+schemas/fhir/R4/valuesets/
+schemas/fhir/R5/
+schemas/hl7/
+
+# Claude / AI tooling
+.claude/
+
+# Editors
+.vscode/
+.idea/
+
+# OS junk
+Thumbs.db
+desktop.ini
+.DS_Store
+
+# Temp / logs
+*docker_logs.txt
+scratchpad*
+mongodb_data.tar.gz
+
+# ── Secrets — NEVER commit these ──────────────────────────────────────────────
+.env
+.env.*
+!.env.example
+
+# ── Compiled Go binaries ───────────────────────────────────────────────────────
+go-api
+go-api.exe
+go-api-linux
+go-api-arm64
+go-api-new
+go-api-siu
+
+# ── Python ────────────────────────────────────────────────────────────────────
+*.pyc
+*.pyo
+__pycache__/
+
+# ── Installer build output ─────────────────────────────────────────────────────
+installer/dist/
+installer/ezhealthkonnect-installer
+installer/ezhealthkonnect-installer.exe
+postgres_data.tar.gz
+
+# ── Playwright test artifacts ──────────────────────────────────────────────────
+test-results/
+tests/playwright-report/
+tests/playwright/.auth/
+.auth/

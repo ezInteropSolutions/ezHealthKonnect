@@ -1,0 +1,214 @@
+/**
+ * XPath Autocomplete Component Styles
+ */
+
+.xpath-autocomplete {
+    position: relative;
+    width: 100%;
+}
+
+.xpath-input-wrapper {
+    position: relative;
+    display: flex;
+    align-items: center;
+}
+
+.xpath-input {
+    width: 100%;
+    padding: 8px 32px 8px 12px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    font-size: 14px;
+    font-family: 'Courier New', monospace;
+    transition: border-color 0.2s;
+}
+
+.xpath-input:focus {
+    outline: none;
+    border-color: #4a90e2;
+    box-shadow: 0 0 0 2px rgba(74, 144, 226, 0.1);
+}
+
+.xpath-loading {
+    position: absolute;
+    right: 10px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: #4a90e2;
+    font-size: 16px;
+}
+
+.xpath-dropdown {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    margin-top: 4px;
+    background: white;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    z-index: 1000;
+    max-height: 400px;
+    overflow: hidden;
+}
+
+.xpath-dropdown-list {
+    max-height: 400px;
+    overflow-y: auto;
+}
+
+.xpath-dropdown-item {
+    padding: 10px 12px;
+    cursor: pointer;
+    border-bottom: 1px solid #f0f0f0;
+    transition: background-color 0.15s;
+}
+
+.xpath-dropdown-item:last-child {
+    border-bottom: none;
+}
+
+.xpath-dropdown-item:hover,
+.xpath-dropdown-item.active {
+    background-color: #f5f8fb;
+}
+
+.xpath-dropdown-item.active {
+    border-left: 3px solid #4a90e2;
+}
+
+.xpath-item-path {
+    font-family: 'Courier New', monospace;
+    font-size: 13px;
+    color: #2c3e50;
+    margin-bottom: 4px;
+    font-weight: 500;
+}
+
+.xpath-item-path strong {
+    background-color: #fff3cd;
+    padding: 1px 2px;
+    border-radius: 2px;
+}
+
+/* New header layout for field key + name */
+.xpath-item-header {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    margin-bottom: 4px;
+}
+
+.xpath-item-key {
+    font-family: 'Courier New', monospace;
+    font-size: 13px;
+    color: #4a90e2;
+    font-weight: 700;
+    background: #e8f4ff;
+    padding: 2px 6px;
+    border-radius: 3px;
+    white-space: nowrap;
+}
+
+.xpath-item-key strong {
+    background-color: #fff3cd;
+    padding: 1px 2px;
+    border-radius: 2px;
+}
+
+.xpath-item-name {
+    font-size: 14px;
+    color: #2c3e50;
+    font-weight: 500;
+    flex: 1;
+}
+
+.xpath-item-name strong {
+    background-color: #fff3cd;
+    padding: 1px 2px;
+    border-radius: 2px;
+}
+
+.xpath-item-details {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+    font-size: 12px;
+    padding-left: 4px;
+}
+
+.xpath-item-path-small {
+    font-family: 'Courier New', monospace;
+    color: #888;
+    font-size: 11px;
+    flex: 1;
+    min-width: 200px;
+}
+
+.xpath-item-description {
+    color: #666;
+    flex: 1;
+    min-width: 200px;
+}
+
+.xpath-item-type {
+    color: #4a90e2;
+    font-weight: 600;
+    background: #e8f4ff;
+    padding: 2px 6px;
+    border-radius: 3px;
+}
+
+.xpath-item-cardinality {
+    color: #888;
+    font-family: monospace;
+}
+
+.xpath-dropdown-empty {
+    padding: 16px;
+    text-align: center;
+    color: #999;
+    font-size: 14px;
+}
+
+.xpath-error {
+    font-size: 0.875rem;
+    color: #dc3545;
+    margin-top: 4px;
+}
+
+/* Scrollbar styling for dropdown */
+.xpath-dropdown-list::-webkit-scrollbar {
+    width: 8px;
+}
+
+.xpath-dropdown-list::-webkit-scrollbar-track {
+    background: #f1f1f1;
+    border-radius: 4px;
+}
+
+.xpath-dropdown-list::-webkit-scrollbar-thumb {
+    background: #ccc;
+    border-radius: 4px;
+}
+
+.xpath-dropdown-list::-webkit-scrollbar-thumb:hover {
+    background: #999;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+    .xpath-dropdown {
+        max-height: 300px;
+    }
+
+    .xpath-dropdown-list {
+        max-height: 300px;
+    }
+
+    .xpath-item-details {
+        flex-direction: column;
+        gap: 4px;
+    }
+}

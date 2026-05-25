@@ -1,0 +1,33 @@
+/**
+ * FieldPathInput Styles - Minimal CSS
+ */
+
+.field-path-input-wrapper {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    margin-bottom: 6px;
+}
+
+.field-path-input {
+    flex: 1;
+    font-family: 'Courier New', monospace;
+    font-size: 13px;
+}
+
+.search-toggle {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    white-space: nowrap;
+}
+
+.search-hint {
+    display: block;
+    color: #6b7280;
+    font-size: 12px;
+}
+
+.search-mode-label {
+    color: #4a90e2;
+}

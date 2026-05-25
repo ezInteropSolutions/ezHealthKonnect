@@ -1,0 +1,383 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Migration - ezHealthKonnect</title>
+    <link rel="stylesheet" href="css/dashboard.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        :root {
+            --pink:       #db2777;
+            --pink-dark:  #9d174d;
+            --pink-light: #fce7f3;
+            --navy:       #1e3a8a;
+            --navy-light: #eff6ff;
+        }
+
+        body { background: #f8fafc; }
+
+        /* ── Layout shell (matches alerts.html pattern) ── */
+        .main-content { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+
+        .page-header {
+            padding: 20px 28px 16px;
+            background: #fff;
+            border-bottom: 1px solid #e5e7eb;
+            display: flex; align-items: center; justify-content: space-between;
+            flex-shrink: 0;
+        }
+        .page-header h1 { font-size: 18px; font-weight: 700; color: #1a202c; display: flex; align-items: center; gap: 8px; }
+        .page-header h1 i { color: var(--navy); }
+        .page-header p { font-size: 13px; color: #6b7280; margin: 3px 0 0; }
+
+        /* ── Two-column layout ── */
+        .migration-layout {
+            flex: 1; display: flex; overflow: hidden;
+        }
+
+        /* ── Left nav ── */
+        .migration-leftnav {
+            width: 200px; flex-shrink: 0;
+            border-right: 1px solid #e5e7eb;
+            background: #fafafa;
+            padding: 16px 0;
+        }
+        .leftnav-section { padding: 0 12px 8px; font-size: 10px; font-weight: 700; color: #9ca3af; text-transform: uppercase; letter-spacing: .08em; }
+        .leftnav-tab {
+            display: flex; align-items: center; gap: 9px;
+            padding: 9px 16px; font-size: 13px; color: #374151;
+            cursor: pointer; user-select: none;
+            border-left: 3px solid transparent; transition: all .12s;
+        }
+        .leftnav-tab:hover { background: var(--navy-light); color: var(--navy); }
+        .leftnav-tab.active { background: var(--navy-light); color: var(--navy); border-left-color: var(--navy); font-weight: 600; }
+        .leftnav-tab i { width: 16px; text-align: center; font-size: 13px; }
+        .leftnav-tab.disabled { opacity: .4; pointer-events: none; }
+
+        /* ── Content area ── */
+        .migration-content {
+            flex: 1; overflow-y: auto; padding: 28px 32px 40px;
+        }
+        .tab-section { display: none; }
+        .tab-section.active { display: block; }
+
+        /* ── Buttons ── */
+        .btn { display: inline-flex; align-items: center; gap: 6px; padding: 8px 18px; border-radius: 6px; font-size: 13px; font-weight: 500; cursor: pointer; border: none; transition: all .15s; }
+        .btn-primary { background: var(--navy); color: #fff; }
+        .btn-primary:hover { background: #1e40af; }
+        .btn-secondary { background: #f3f4f6; color: #374151; border: 1px solid #e5e7eb; }
+        .btn-secondary:hover { background: #e5e7eb; }
+        .btn-success { background: #16a34a; color: #fff; }
+        .btn-success:hover { background: #15803d; }
+        .btn-sm { padding: 5px 12px; font-size: 12px; }
+        .btn:disabled { opacity: .6; cursor: not-allowed; }
+
+        /* ── Upload zone ── */
+        .upload-zone {
+            border: 2px dashed #d1d5db;
+            border-radius: 12px;
+            padding: 48px 32px;
+            text-align: center;
+            cursor: pointer;
+            transition: all .2s;
+            background: #fff;
+            max-width: 680px;
+        }
+        .upload-zone:hover, .upload-zone.dragover { border-color: var(--navy); background: var(--navy-light); }
+        .upload-zone i { font-size: 40px; color: #9ca3af; margin-bottom: 12px; }
+        .upload-zone.dragover i { color: var(--navy); }
+        .upload-zone h3 { font-size: 16px; font-weight: 600; color: #374151; margin: 0 0 6px; }
+        .upload-zone p { font-size: 13px; color: #6b7280; margin: 0; }
+        .upload-zone .or { margin: 16px 0; font-size: 13px; color: #9ca3af; }
+
+        /* ── Preview panel ── */
+        #preview-panel { display: none; }
+        #preview-panel.visible { display: block; }
+
+        .channel-info-card {
+            background: #fff; border: 1px solid #e5e7eb; border-radius: 10px;
+            padding: 20px 24px; margin-bottom: 20px; max-width: 860px;
+        }
+        .channel-info-card h2 { font-size: 18px; font-weight: 700; color: #111827; margin: 0 0 4px; }
+        .channel-meta { display: flex; gap: 16px; flex-wrap: wrap; margin-top: 10px; }
+        .channel-meta-item { font-size: 12px; color: #6b7280; display: flex; align-items: center; gap: 4px; }
+        .channel-meta-item strong { color: #374151; }
+
+        /* ── Summary badges ── */
+        .summary-row { display: flex; gap: 12px; margin-bottom: 20px; flex-wrap: wrap; }
+        .summary-badge {
+            display: flex; align-items: center; gap: 8px;
+            padding: 10px 16px; border-radius: 8px; font-size: 13px; font-weight: 500;
+        }
+        .summary-badge.auto { background: #dcfce7; color: #166534; }
+        .summary-badge.review { background: #fef9c3; color: #713f12; }
+        .summary-badge.unsupported { background: #fee2e2; color: #991b1b; }
+        .summary-badge i { font-size: 15px; }
+
+        /* ── Section cards ── */
+        .section-card {
+            background: #fff; border: 1px solid #e5e7eb; border-radius: 10px;
+            margin-bottom: 16px; overflow: hidden; max-width: 860px;
+        }
+        .section-card-header {
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 14px 20px; background: #f9fafb; border-bottom: 1px solid #e5e7eb;
+            cursor: pointer;
+        }
+        .section-card-header h3 { font-size: 14px; font-weight: 600; color: #374151; margin: 0; display: flex; align-items: center; gap: 8px; }
+        .section-card-body { padding: 16px 20px; }
+
+        /* ── Connector rows ── */
+        .connector-row {
+            display: flex; align-items: center; gap: 12px;
+            padding: 10px 14px; border-radius: 8px;
+            background: #f8fafc; border: 1px solid #e5e7eb; margin-bottom: 8px;
+        }
+        .connector-mirth { font-size: 12px; color: #6b7280; flex: 1; }
+        .connector-arrow { color: #9ca3af; }
+        .connector-ezhk { font-size: 13px; font-weight: 500; color: #1e3a8a; flex: 1; }
+        .connector-config-preview { font-size: 11px; color: #9ca3af; font-family: monospace; }
+
+        /* ── Pills ── */
+        .pill { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; }
+        .pill-auto { background: #dcfce7; color: #166534; }
+        .pill-review { background: #fef9c3; color: #713f12; }
+        .pill-unsupported { background: #fee2e2; color: #991b1b; }
+
+        /* ── Steps table ── */
+        .steps-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+        .steps-table th {
+            text-align: left; padding: 8px 12px; font-size: 11px; font-weight: 600;
+            text-transform: uppercase; letter-spacing: .05em; color: #9ca3af;
+            background: #f9fafb; border-bottom: 1px solid #e5e7eb;
+        }
+        .steps-table td { padding: 10px 12px; border-bottom: 1px solid #f3f4f6; vertical-align: top; }
+        .steps-table tr:last-child td { border-bottom: none; }
+        .steps-table tr.skipped td { opacity: .35; text-decoration: line-through; }
+
+        .step-script-toggle { font-size: 11px; color: var(--navy); cursor: pointer; text-decoration: underline; white-space: nowrap; }
+        .step-script-block {
+            display: none; margin-top: 8px; background: #1e293b;
+            border-radius: 6px; padding: 12px; overflow-x: auto;
+        }
+        .step-script-block.visible { display: block; }
+        .step-script-block pre { margin: 0; font-size: 11px; color: #e2e8f0; white-space: pre-wrap; word-break: break-word; }
+
+        .skip-checkbox { accent-color: var(--pink); cursor: pointer; }
+
+        /* ── Conversion state badges ── */
+        .conv-badge { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 9999px; font-size: 10px; font-weight: 600; white-space: nowrap; }
+        .conv-auto { background: #dcfce7; color: #166534; }
+        .conv-ai   { background: #e0e7ff; color: #3730a3; }
+
+        /* ── Field mapping table inside step rows ── */
+        .mapping-table { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 6px; background: #f9fafb; border-radius: 6px; overflow: hidden; border: 1px solid #e5e7eb; }
+        .mapping-table th { padding: 5px 10px; text-align: left; font-size: 10px; font-weight: 700; color: #6b7280; text-transform: uppercase; background: #f3f4f6; }
+        .mapping-table td { padding: 4px 10px; border-top: 1px solid #e5e7eb; }
+
+        /* ── AI rewrite button ── */
+        .btn-rewrite {
+            display: inline-flex; align-items: center; gap: 5px;
+            padding: 3px 10px; border-radius: 6px; border: 1px solid #6366f1;
+            background: #eef2ff; color: #4338ca; font-size: 11px; font-weight: 600;
+            cursor: pointer; transition: all .15s;
+        }
+        .btn-rewrite:hover:not(:disabled) { background: #6366f1; color: #fff; }
+        .btn-rewrite:disabled { opacity: .6; cursor: not-allowed; }
+
+        /* ── Import form ── */
+        #import-form { display: none; max-width: 560px; }
+        #import-form.visible { display: block; }
+        .form-group { margin-bottom: 16px; }
+        .form-group label { display: block; font-size: 13px; font-weight: 500; color: #374151; margin-bottom: 5px; }
+        .form-group input, .form-group textarea {
+            width: 100%; padding: 8px 12px; border: 1px solid #d1d5db;
+            border-radius: 6px; font-size: 13px; box-sizing: border-box;
+        }
+        .form-group input:focus, .form-group textarea:focus { outline: none; border-color: var(--navy); box-shadow: 0 0 0 2px rgba(30,58,138,.15); }
+        .action-row { display: flex; gap: 10px; align-items: center; margin-top: 20px; }
+        .section-divider { border: none; border-top: 1px solid #e5e7eb; margin: 28px 0; max-width: 860px; }
+
+        /* ── History table ── */
+        .history-wrap { background: #fff; border: 1px solid #e5e7eb; border-radius: 10px; overflow: hidden; }
+        .history-wrap table { width: 100%; border-collapse: collapse; font-size: 13px; }
+        .history-wrap thead tr { background: #f9fafb; }
+        .history-wrap th { padding: 10px 14px; text-align: left; font-size: 11px; font-weight: 700; color: #6b7280; text-transform: uppercase; border-bottom: 1px solid #e5e7eb; }
+        .history-wrap td { padding: 11px 14px; border-bottom: 1px solid #f3f4f6; }
+        .history-wrap tr:last-child td { border-bottom: none; }
+
+        /* ── Toast ── */
+        .toast { position: fixed; bottom: 24px; right: 24px; padding: 12px 20px; border-radius: 8px; font-size: 13px; font-weight: 500; box-shadow: 0 4px 12px rgba(0,0,0,.15); z-index: 9999; display: none; }
+        .toast.success { background: #16a34a; color: #fff; display: flex; align-items: center; gap: 8px; }
+        .toast.error   { background: #dc2626; color: #fff; display: flex; align-items: center; gap: 8px; }
+
+        /* ── Spinner ── */
+        .spinner { display: inline-block; width: 16px; height: 16px; border: 2px solid rgba(255,255,255,.4); border-top-color: #fff; border-radius: 50%; animation: spin .6s linear infinite; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+    </style>
+</head>
+<body>
+<div class="dashboard-container">
+    <nav class="sidebar" id="sidebar"></nav>
+
+    <div class="main-content">
+
+        <!-- Page header -->
+        <div class="page-header">
+            <div>
+                <h1><i class="fas fa-exchange-alt"></i> Migration</h1>
+                <p>Import interfaces from Mirth Connect and other integration engines</p>
+            </div>
+            <div>
+                <button class="btn btn-secondary btn-sm" id="btn-reset" style="display:none" onclick="resetMigration()">
+                    <i class="fas fa-redo"></i> Start over
+                </button>
+            </div>
+        </div>
+
+        <!-- Two-column layout -->
+        <div class="migration-layout">
+
+            <!-- Left nav -->
+            <div class="migration-leftnav">
+                <div class="leftnav-section">Sources</div>
+                <div class="leftnav-tab active" data-tab="mirth" onclick="switchTab('mirth')">
+                    <i class="fas fa-exchange-alt"></i> Mirth Connect
+                </div>
+                <div class="leftnav-tab disabled" data-tab="rhapsody">
+                    <i class="fas fa-random"></i> Rhapsody
+                    <small style="font-size:10px;color:#9ca3af;margin-left:auto">soon</small>
+                </div>
+                <div class="leftnav-section" style="margin-top:16px">History</div>
+                <div class="leftnav-tab" data-tab="history" onclick="switchTab('history')">
+                    <i class="fas fa-history"></i> Past Imports
+                </div>
+            </div>
+
+            <!-- Content area -->
+            <div class="migration-content">
+
+                <!-- ===== MIRTH TAB ===== -->
+                <div id="tab-mirth" class="tab-section active">
+
+                    <!-- Upload zone -->
+                    <div id="upload-zone" class="upload-zone"
+                        ondragover="onDragOver(event)" ondragleave="onDragLeave(event)" ondrop="onDrop(event)"
+                        onclick="document.getElementById('file-input').click()">
+                        <div><i class="fas fa-cloud-upload-alt"></i></div>
+                        <h3>Drop your Mirth channel export here</h3>
+                        <p>Supports Mirth Connect 3.x and NextGen Connect .xml channel exports</p>
+                        <div class="or">— or —</div>
+                        <button class="btn btn-primary" onclick="event.stopPropagation(); document.getElementById('file-input').click()">
+                            <i class="fas fa-folder-open"></i> Browse files
+                        </button>
+                        <input type="file" id="file-input" accept=".xml" style="display:none" onchange="onFileSelected(event)">
+                    </div>
+
+                    <!-- Preview panel (hidden until file is analysed) -->
+                    <div id="preview-panel">
+
+                        <!-- Channel info -->
+                        <div class="channel-info-card" id="channel-info"></div>
+
+                        <!-- Summary badges -->
+                        <div class="summary-row" id="summary-row"></div>
+
+                        <!-- Source connector -->
+                        <div class="section-card">
+                            <div class="section-card-header" onclick="toggleSection('source-body')">
+                                <h3><i class="fas fa-arrow-circle-down" style="color:#16a34a"></i> Source Connector</h3>
+                                <i class="fas fa-chevron-down" id="chevron-source-body"></i>
+                            </div>
+                            <div class="section-card-body" id="source-body"></div>
+                        </div>
+
+                        <!-- Destination connectors -->
+                        <div class="section-card">
+                            <div class="section-card-header" onclick="toggleSection('destinations-body')">
+                                <h3><i class="fas fa-arrow-circle-right" style="color:#2563eb"></i> Destination Connectors</h3>
+                                <i class="fas fa-chevron-down" id="chevron-destinations-body"></i>
+                            </div>
+                            <div class="section-card-body" id="destinations-body"></div>
+                        </div>
+
+                        <!-- Transformer steps + filter rules -->
+                        <div class="section-card">
+                            <div class="section-card-header" onclick="toggleSection('steps-body')">
+                                <h3>
+                                    <i class="fas fa-code" style="color:#7c3aed"></i>
+                                    Transformer Steps &amp; Filter Rules
+                                    <span id="steps-badge" style="font-weight:400;font-size:12px;color:#6b7280"></span>
+                                </h3>
+                                <i class="fas fa-chevron-down" id="chevron-steps-body"></i>
+                            </div>
+                            <div class="section-card-body" id="steps-body">
+                                <p style="font-size:13px;color:#6b7280;margin:0 0 12px">
+                                    <strong>Mapper</strong> steps are auto-converted to field mapping rows.
+                                    <strong>JavaScript</strong> steps can be rewritten by AI.
+                                    Check <strong>Skip</strong> for steps you don't want to import.
+                                </p>
+                                <table class="steps-table">
+                                    <thead>
+                                        <tr>
+                                            <th style="width:40px">Skip</th>
+                                            <th style="width:40px">#</th>
+                                            <th>Name / Mappings</th>
+                                            <th style="width:110px">Mirth Type</th>
+                                            <th style="width:150px">ezHK Step Type</th>
+                                            <th>Note</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="steps-tbody"></tbody>
+                                </table>
+                            </div>
+                        </div>
+
+                        <hr class="section-divider">
+
+                        <!-- Import form -->
+                        <div id="import-form">
+                            <h3 style="font-size:15px;font-weight:700;color:#111827;margin:0 0 16px">
+                                <i class="fas fa-download" style="color:var(--navy)"></i> Create Interface
+                            </h3>
+                            <div class="form-group">
+                                <label>Interface Name</label>
+                                <input type="text" id="input-interface-name" placeholder="e.g. ADT Inbound MLLP">
+                            </div>
+                            <div class="form-group">
+                                <label>Description</label>
+                                <input type="text" id="input-description" placeholder="Migrated from Mirth Connect">
+                            </div>
+                            <div class="action-row">
+                                <button class="btn btn-success" id="btn-import" onclick="doImport()">
+                                    <i class="fas fa-download"></i> Import Channel
+                                </button>
+                                <span id="import-status" style="font-size:13px;color:#6b7280"></span>
+                            </div>
+                        </div>
+
+                    </div><!-- /preview-panel -->
+                </div><!-- /tab-mirth -->
+
+                <!-- ===== HISTORY TAB ===== -->
+                <div id="tab-history" class="tab-section">
+                    <h2 style="font-size:16px;font-weight:700;color:#111827;margin:0 0 20px">Past Imports</h2>
+                    <div id="history-content">
+                        <p style="color:#6b7280;font-size:14px">Loading…</p>
+                    </div>
+                </div>
+
+            </div><!-- /migration-content -->
+        </div><!-- /migration-layout -->
+
+    </div><!-- /main-content -->
+</div><!-- /dashboard-container -->
+
+<!-- Toast notification -->
+<div class="toast" id="toast"></div>
+
+<script src="js/components/sidebar-nav.js"></script>
+<script src="js/migration.js"></script>
+</body>
+</html>

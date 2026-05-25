@@ -1,0 +1,88 @@
+{
+  "generatedAt": "2024-09-26T12:00:00Z",
+  "totalTemplates": 11,
+  "completedTemplates": 3,
+  "messageTypes": [
+    "ADT^A01", "ADT^A04", "ADT^A08", "ADT^A03",
+    "ORU^R01",
+    "ORM^O01",
+    "MDM^T01", "MDM^T02",
+    "SIU^S12",
+    "DFT^P03",
+    "RDE^O11"
+  ],
+  "hl7Versions": ["2.3", "2.5.1"],
+  "minConfidence": 0.85,
+  "templateKeys": [
+    "ADT^A01_v2.5.1",
+    "ORU^R01_v2.5.1",
+    "ORM^O01_v2.5.1"
+  ],
+  "completedTemplateKeys": [
+    "ADT^A01_v2.5.1",
+    "ORU^R01_v2.5.1",
+    "ORM^O01_v2.5.1"
+  ],
+  "statistics": {
+    "totalMappings": 64,
+    "requiredMappings": 14,
+    "averageConfidence": 0.94,
+    "resourceDistribution": {
+      "Patient": 3,
+      "Encounter": 2,
+      "MessageHeader": 3,
+      "Observation": 1,
+      "DiagnosticReport": 1,
+      "Specimen": 1,
+      "ServiceRequest": 1,
+      "Practitioner": 1
+    },
+    "transformFunctionCount": 15,
+    "valueSetMappings": 8
+  },
+  "targetFHIRResources": [
+    "Patient",
+    "Encounter",
+    "Observation",
+    "DiagnosticReport",
+    "ServiceRequest",
+    "DocumentReference",
+    "Appointment",
+    "MedicationRequest",
+    "Account",
+    "ChargeItem",
+    "Specimen",
+    "Practitioner",
+    "MessageHeader"
+  ],
+  "coverageAreas": [
+    "core_demographics_encounter",
+    "core_lab_results",
+    "core_orders_service_requests",
+    "medical_document_management",
+    "scheduling_appointments",
+    "financial_transactions",
+    "pharmacy_medication_orders"
+  ],
+  "generationEngine": {
+    "name": "ezHealthKonnect OOB Template Generator",
+    "version": "1.0",
+    "architecture": "Schema-driven programmatic mapping generation",
+    "designedFor": "Million+ message processing engine",
+    "approach": "Out-of-Box templates with customization support"
+  },
+  "implementation": {
+    "schemaAnalyzer": "mapping_generator/schema_analyzer.go",
+    "mappingRules": "mapping_generator/mapping_rules.go",
+    "templateGenerator": "mapping_generator/template_generator.go",
+    "cliTool": "mapping_generator/cmd/main.go"
+  },
+  "nextSteps": [
+    "Complete remaining message type templates (MDM, SIU, DFT, RDE)",
+    "Generate v2.3 variants of all templates",
+    "Integrate with V9 database schema (hl7_fhir_templates table)",
+    "Update transformation service V3 to use OOB templates",
+    "Performance testing with million+ message volumes",
+    "Add custom mapping overlay support for interface-specific needs"
+  ]
+}

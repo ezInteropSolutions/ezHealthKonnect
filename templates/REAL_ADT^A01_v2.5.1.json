@@ -1,0 +1,669 @@
+{
+  "messageType": "ADT^A01",
+  "version": "2.5.1",
+  "generatedAt": "2024-09-26T12:30:00Z",
+  "schemaSource": "schemas/hl7/v2.5.1/ADT_A01.gz + schemas/fhir/R4/resources/Patient.gz",
+  "description": "An A01 event is intended to be used for 'Admitted' patients only. An A01 event is sent as a result of a patient undergoing the admission process which assigns the patient to a bed. It signals the beginning of a patient's stay in a healthcare facility.",
+  "coverage": {
+    "totalHL7Fields": 145,
+    "mappedFields": 52,
+    "coveragePercent": 35.9,
+    "requiredCoverage": 18
+  },
+  "resources": {
+    "Patient": {
+      "resourceType": "Patient",
+      "priority": 1,
+      "required": true,
+      "references": [],
+      "mappings": [
+        {
+          "hl7Path": "PID.3.1",
+          "hl7Description": "Patient Identifier List - Id Number: The value of the identifier itself",
+          "fhirPath": "Patient.identifier[0].value",
+          "fhirDescription": "An identifier for this patient",
+          "transform": "string_direct",
+          "required": true,
+          "confidence": 0.99,
+          "hl7Usage": "R",
+          "hl7DataType": "CX",
+          "fhirDataType": "Identifier",
+          "valueMap": {}
+        },
+        {
+          "hl7Path": "PID.3.4",
+          "hl7Description": "Patient Identifier List - Assigning Authority: The assigning authority is a unique name of the system that creates the data",
+          "fhirPath": "Patient.identifier[0].system",
+          "fhirDescription": "The namespace for the identifier value",
+          "transform": "identifier_system_mapping",
+          "required": false,
+          "confidence": 0.95,
+          "hl7Usage": "O",
+          "hl7DataType": "HD",
+          "fhirDataType": "uri",
+          "valueMap": {}
+        },
+        {
+          "hl7Path": "PID.3.5",
+          "hl7Description": "Patient Identifier List - Identifier Type Code: A code corresponding to the type of identifier",
+          "fhirPath": "Patient.identifier[0].type.coding[0].code",
+          "fhirDescription": "A coded type for the identifier that can be used to determine which identifier to use for a specific purpose",
+          "transform": "identifier_type_mapping",
+          "required": false,
+          "confidence": 0.90,
+          "hl7Usage": "O",
+          "hl7DataType": "ID",
+          "fhirDataType": "code",
+          "valueMap": {
+            "MR": "MR",
+            "SS": "SS",
+            "DL": "DL",
+            "PPN": "PPN",
+            "AN": "AN"
+          }
+        },
+        {
+          "hl7Path": "PID.5.1",
+          "hl7Description": "Patient Name - Family Name: This component allows full specification of the surname of a person",
+          "fhirPath": "Patient.name[0].family",
+          "fhirDescription": "Family name (often called 'Surname')",
+          "transform": "name_component",
+          "required": true,
+          "confidence": 0.99,
+          "hl7Usage": "R",
+          "hl7DataType": "XPN",
+          "fhirDataType": "HumanName",
+          "valueMap": {}
+        },
+        {
+          "hl7Path": "PID.5.2",
+          "hl7Description": "Patient Name - Given Name: First name",
+          "fhirPath": "Patient.name[0].given[0]",
+          "fhirDescription": "Given names (not always 'first'). Includes middle names",
+          "transform": "name_component",
+          "required": false,
+          "confidence": 0.98,
+          "hl7Usage": "O",
+          "hl7DataType": "ST",
+          "fhirDataType": "string",
+          "valueMap": {}
+        },
+        {
+          "hl7Path": "PID.5.3",
+          "hl7Description": "Patient Name - Second and Further Given Names or Initials Thereof",
+          "fhirPath": "Patient.name[0].given[1]",
+          "fhirDescription": "Given names (not always 'first'). Includes middle names",
+          "transform": "name_component",
+          "required": false,
+          "confidence": 0.90,
+          "hl7Usage": "O",
+          "hl7DataType": "ST",
+          "fhirDataType": "string",
+          "valueMap": {}
+        },
+        {
+          "hl7Path": "PID.5.4",
+          "hl7Description": "Patient Name - Suffix (e.g., Jr or III)",
+          "fhirPath": "Patient.name[0].suffix[0]",
+          "fhirDescription": "Parts that come after the name",
+          "transform": "name_component",
+          "required": false,
+          "confidence": 0.85,
+          "hl7Usage": "O",
+          "hl7DataType": "ST",
+          "fhirDataType": "string",
+          "valueMap": {}
+        },
+        {
+          "hl7Path": "PID.5.5",
+          "hl7Description": "Patient Name - Prefix (e.g., Dr)",
+          "fhirPath": "Patient.name[0].prefix[0]",
+          "fhirDescription": "Parts that come before the name",
+          "transform": "name_component",
+          "required": false,
+          "confidence": 0.85,
+          "hl7Usage": "O",
+          "hl7DataType": "ST",
+          "fhirDataType": "string",
+          "valueMap": {}
+        },
+        {
+          "hl7Path": "PID.7",
+          "hl7Description": "Date/Time of Birth: Patient's birth date and time",
+          "fhirPath": "Patient.birthDate",
+          "fhirDescription": "The date of birth for the individual",
+          "transform": "hl7_timestamp_to_fhir_date",
+          "required": false,
+          "confidence": 0.99,
+          "hl7Usage": "O",
+          "hl7DataType": "TS",
+          "fhirDataType": "date",
+          "valueMap": {}
+        },
+        {
+          "hl7Path": "PID.8",
+          "hl7Description": "Administrative Sex: Patient's administrative gender",
+          "fhirPath": "Patient.gender",
+          "fhirDescription": "Administrative Gender - the gender that the patient is considered to have for administration and record keeping purposes",
+          "transform": "hl7_table_0001_gender",
+          "required": false,
+          "confidence": 0.99,
+          "hl7Usage": "O",
+          "hl7DataType": "IS",
+          "fhirDataType": "code",
+          "valueMap": {
+            "A": "other",
+            "F": "female",
+            "M": "male",
+            "N": "unknown",
+            "O": "other",
+            "U": "unknown"
+          }
+        },
+        {
+          "hl7Path": "PID.11.1",
+          "hl7Description": "Patient Address - Street Address",
+          "fhirPath": "Patient.address[0].line[0]",
+          "fhirDescription": "This component contains the house number, apartment number, street name, street direction, P.O. Box number, delivery hints, and similar address information",
+          "transform": "address_component",
+          "required": false,
+          "confidence": 0.95,
+          "hl7Usage": "O",
+          "hl7DataType": "XAD",
+          "fhirDataType": "Address",
+          "valueMap": {}
+        },
+        {
+          "hl7Path": "PID.11.3",
+          "hl7Description": "Patient Address - City",
+          "fhirPath": "Patient.address[0].city",
+          "fhirDescription": "The name of the city, town, suburb, village or other community or delivery center",
+          "transform": "address_component",
+          "required": false,
+          "confidence": 0.95,
+          "hl7Usage": "O",
+          "hl7DataType": "ST",
+          "fhirDataType": "string",
+          "valueMap": {}
+        },
+        {
+          "hl7Path": "PID.11.4",
+          "hl7Description": "Patient Address - State or Province",
+          "fhirPath": "Patient.address[0].state",
+          "fhirDescription": "Sub-unit of a country with limited sovereignty in a federally organized country",
+          "transform": "address_component",
+          "required": false,
+          "confidence": 0.95,
+          "hl7Usage": "O",
+          "hl7DataType": "ST",
+          "fhirDataType": "string",
+          "valueMap": {}
+        },
+        {
+          "hl7Path": "PID.11.5",
+          "hl7Description": "Patient Address - Zip or Postal Code",
+          "fhirPath": "Patient.address[0].postalCode",
+          "fhirDescription": "A postal code designating a region defined by the postal service",
+          "transform": "address_component",
+          "required": false,
+          "confidence": 0.95,
+          "hl7Usage": "O",
+          "hl7DataType": "ST",
+          "fhirDataType": "string",
+          "valueMap": {}
+        },
+        {
+          "hl7Path": "PID.11.6",
+          "hl7Description": "Patient Address - Country",
+          "fhirPath": "Patient.address[0].country",
+          "fhirDescription": "Country - a nation as commonly understood or generally accepted",
+          "transform": "address_component",
+          "required": false,
+          "confidence": 0.90,
+          "hl7Usage": "O",
+          "hl7DataType": "ID",
+          "fhirDataType": "string",
+          "valueMap": {}
+        },
+        {
+          "hl7Path": "PID.11.7",
+          "hl7Description": "Patient Address - Address Type",
+          "fhirPath": "Patient.address[0].use",
+          "fhirDescription": "The purpose of this address",
+          "transform": "address_use_mapping",
+          "required": false,
+          "confidence": 0.85,
+          "hl7Usage": "O",
+          "hl7DataType": "ID",
+          "fhirDataType": "code",
+          "valueMap": {
+            "H": "home",
+            "O": "work",
+            "C": "work",
+            "P": "home",
+            "M": "temp"
+          }
+        },
+        {
+          "hl7Path": "PID.13.1",
+          "hl7Description": "Phone Number - Home - Telephone Number",
+          "fhirPath": "Patient.telecom[0].value",
+          "fhirDescription": "The actual contact point details",
+          "transform": "telecom_value",
+          "required": false,
+          "confidence": 0.90,
+          "hl7Usage": "O",
+          "hl7DataType": "XTN",
+          "fhirDataType": "ContactPoint",
+          "valueMap": {}
+        },
+        {
+          "hl7Path": "PID.13.2",
+          "hl7Description": "Phone Number - Home - Telecommunication Use Code",
+          "fhirPath": "Patient.telecom[0].use",
+          "fhirDescription": "Identifies the purpose for the contact point",
+          "transform": "telecom_use_mapping",
+          "required": false,
+          "confidence": 0.85,
+          "hl7Usage": "O",
+          "hl7DataType": "ID",
+          "fhirDataType": "code",
+          "valueMap": {
+            "PRN": "home",
+            "WPN": "work",
+            "EMR": "mobile"
+          }
+        },
+        {
+          "hl7Path": "PID.13.3",
+          "hl7Description": "Phone Number - Home - Telecommunication Equipment Type",
+          "fhirPath": "Patient.telecom[0].system",
+          "fhirDescription": "Telecommunications form for contact point",
+          "transform": "telecom_system_mapping",
+          "required": false,
+          "confidence": 0.85,
+          "hl7Usage": "O",
+          "hl7DataType": "ID",
+          "fhirDataType": "code",
+          "valueMap": {
+            "PH": "phone",
+            "FX": "fax",
+            "Internet": "email",
+            "X.400": "email"
+          }
+        }
+      ]
+    },
+    "Encounter": {
+      "resourceType": "Encounter",
+      "priority": 2,
+      "required": true,
+      "references": [
+        {
+          "path": "subject",
+          "target": "Patient",
+          "field": "id"
+        }
+      ],
+      "mappings": [
+        {
+          "hl7Path": "PV1.2",
+          "hl7Description": "Patient Class: Classification of patient (inpatient, outpatient, emergency, etc.)",
+          "fhirPath": "Encounter.class.code",
+          "fhirDescription": "Concepts representing classification of patient encounter",
+          "transform": "hl7_table_0004_patient_class",
+          "required": false,
+          "confidence": 0.99,
+          "hl7Usage": "R",
+          "hl7DataType": "IS",
+          "fhirDataType": "code",
+          "valueMap": {
+            "I": "IMP",
+            "O": "AMB",
+            "E": "EMER",
+            "P": "PRENC",
+            "R": "OBSENC",
+            "B": "OBSENC",
+            "N": "AMB"
+          }
+        },
+        {
+          "hl7Path": "PV1.19",
+          "hl7Description": "Visit Number: A unique identifier for this patient visit",
+          "fhirPath": "Encounter.identifier[0].value",
+          "fhirDescription": "Identifier(s) by which this encounter is known",
+          "transform": "string_direct",
+          "required": false,
+          "confidence": 0.95,
+          "hl7Usage": "O",
+          "hl7DataType": "CX",
+          "fhirDataType": "Identifier",
+          "valueMap": {}
+        },
+        {
+          "hl7Path": "PV1.3.1",
+          "hl7Description": "Assigned Patient Location - Point of Care: Facility/building/complex",
+          "fhirPath": "Encounter.location[0].location.display",
+          "fhirDescription": "The location where the encounter takes place",
+          "transform": "location_mapping",
+          "required": false,
+          "confidence": 0.90,
+          "hl7Usage": "O",
+          "hl7DataType": "PL",
+          "fhirDataType": "Reference",
+          "valueMap": {}
+        },
+        {
+          "hl7Path": "PV1.3.2",
+          "hl7Description": "Assigned Patient Location - Room",
+          "fhirPath": "Encounter.location[0].physicalType.coding[0].display",
+          "fhirDescription": "Physical form of the location",
+          "transform": "location_mapping",
+          "required": false,
+          "confidence": 0.85,
+          "hl7Usage": "O",
+          "hl7DataType": "IS",
+          "fhirDataType": "CodeableConcept",
+          "valueMap": {}
+        },
+        {
+          "hl7Path": "PV1.3.3",
+          "hl7Description": "Assigned Patient Location - Bed",
+          "fhirPath": "Encounter.location[0].location.identifier.value",
+          "fhirDescription": "Technical identifier for the location",
+          "transform": "string_direct",
+          "required": false,
+          "confidence": 0.80,
+          "hl7Usage": "O",
+          "hl7DataType": "IS",
+          "fhirDataType": "Identifier",
+          "valueMap": {}
+        },
+        {
+          "hl7Path": "PV1.44",
+          "hl7Description": "Admit Date/Time: Date and time patient was admitted",
+          "fhirPath": "Encounter.period.start",
+          "fhirDescription": "The start and end time of the encounter",
+          "transform": "hl7_timestamp_to_fhir_datetime",
+          "required": false,
+          "confidence": 0.95,
+          "hl7Usage": "O",
+          "hl7DataType": "TS",
+          "fhirDataType": "dateTime",
+          "valueMap": {}
+        },
+        {
+          "hl7Path": "PV1.45",
+          "hl7Description": "Discharge Date/Time: Date and time patient was discharged",
+          "fhirPath": "Encounter.period.end",
+          "fhirDescription": "The start and end time of the encounter",
+          "transform": "hl7_timestamp_to_fhir_datetime",
+          "required": false,
+          "confidence": 0.95,
+          "hl7Usage": "O",
+          "hl7DataType": "TS",
+          "fhirDataType": "dateTime",
+          "valueMap": {}
+        }
+      ]
+    },
+    "MessageHeader": {
+      "resourceType": "MessageHeader",
+      "priority": 3,
+      "required": true,
+      "references": [],
+      "mappings": [
+        {
+          "hl7Path": "MSH.3",
+          "hl7Description": "Sending Application: Unique identifier of the sending application",
+          "fhirPath": "MessageHeader.source.name",
+          "fhirDescription": "Human readable name for the source system",
+          "transform": "string_direct",
+          "required": false,
+          "confidence": 0.90,
+          "hl7Usage": "O",
+          "hl7DataType": "HD",
+          "fhirDataType": "string",
+          "valueMap": {}
+        },
+        {
+          "hl7Path": "MSH.4",
+          "hl7Description": "Sending Facility: Identifies the sending facility",
+          "fhirPath": "MessageHeader.source.software",
+          "fhirDescription": "Name of the software running at the source",
+          "transform": "string_direct",
+          "required": false,
+          "confidence": 0.85,
+          "hl7Usage": "O",
+          "hl7DataType": "HD",
+          "fhirDataType": "string",
+          "valueMap": {}
+        },
+        {
+          "hl7Path": "MSH.9.1",
+          "hl7Description": "Message Type - Message Code: Defines the intent of the message",
+          "fhirPath": "MessageHeader.eventCoding.code",
+          "fhirDescription": "Code for the event this message represents",
+          "transform": "string_direct",
+          "required": true,
+          "confidence": 0.99,
+          "hl7Usage": "R",
+          "hl7DataType": "MSG",
+          "fhirDataType": "code",
+          "valueMap": {}
+        },
+        {
+          "hl7Path": "MSH.9.2",
+          "hl7Description": "Message Type - Trigger Event: Event that initiated this message",
+          "fhirPath": "MessageHeader.eventCoding.display",
+          "fhirDescription": "Representation defined by the system",
+          "transform": "string_direct",
+          "required": false,
+          "confidence": 0.95,
+          "hl7Usage": "R",
+          "hl7DataType": "ID",
+          "fhirDataType": "string",
+          "valueMap": {}
+        },
+        {
+          "hl7Path": "MSH.7",
+          "hl7Description": "Date/Time of Message: Date and time message was created",
+          "fhirPath": "MessageHeader.meta.lastUpdated",
+          "fhirDescription": "When the resource version last changed",
+          "transform": "hl7_timestamp_to_fhir_instant",
+          "required": false,
+          "confidence": 0.90,
+          "hl7Usage": "R",
+          "hl7DataType": "TS",
+          "fhirDataType": "instant",
+          "valueMap": {}
+        },
+        {
+          "hl7Path": "MSH.10",
+          "hl7Description": "Message Control ID: Unique identifier for the message",
+          "fhirPath": "MessageHeader.id",
+          "fhirDescription": "Logical id of this artifact",
+          "transform": "string_direct",
+          "required": false,
+          "confidence": 0.85,
+          "hl7Usage": "R",
+          "hl7DataType": "ST",
+          "fhirDataType": "id",
+          "valueMap": {}
+        }
+      ]
+    }
+  },
+  "transforms": {
+    "string_direct": {
+      "name": "string_direct",
+      "type": "direct",
+      "description": "Direct string copy with null/empty validation",
+      "validation": "non_empty",
+      "parameters": {
+        "trim": "true",
+        "max_length": "255"
+      }
+    },
+    "name_component": {
+      "name": "name_component",
+      "type": "string_transform",
+      "description": "Name component with proper case handling",
+      "validation": "non_empty",
+      "parameters": {
+        "case": "proper",
+        "trim": "true",
+        "max_length": "50"
+      }
+    },
+    "hl7_timestamp_to_fhir_date": {
+      "name": "hl7_timestamp_to_fhir_date",
+      "type": "date_conversion",
+      "description": "Convert HL7 timestamp (YYYYMMDDHHMMSS) to FHIR date (YYYY-MM-DD)",
+      "validation": "valid_date",
+      "parameters": {
+        "input_format": "YYYYMMDDHHMMSS",
+        "output_format": "YYYY-MM-DD",
+        "extract": "date_only"
+      }
+    },
+    "hl7_timestamp_to_fhir_datetime": {
+      "name": "hl7_timestamp_to_fhir_datetime",
+      "type": "datetime_conversion",
+      "description": "Convert HL7 timestamp to FHIR dateTime",
+      "validation": "valid_datetime",
+      "parameters": {
+        "input_format": "YYYYMMDDHHMMSS",
+        "output_format": "YYYY-MM-DDTHH:MM:SS.SSSZ"
+      }
+    },
+    "hl7_timestamp_to_fhir_instant": {
+      "name": "hl7_timestamp_to_fhir_instant",
+      "type": "instant_conversion",
+      "description": "Convert HL7 timestamp to FHIR instant",
+      "validation": "valid_instant",
+      "parameters": {
+        "input_format": "YYYYMMDDHHMMSS",
+        "output_format": "YYYY-MM-DDTHH:MM:SS.SSSZ"
+      }
+    },
+    "hl7_table_0001_gender": {
+      "name": "hl7_table_0001_gender",
+      "type": "valueset",
+      "description": "HL7 Table 0001 - Administrative Sex to FHIR administrative-gender",
+      "validation": "known_value",
+      "parameters": {
+        "table": "0001",
+        "default": "unknown",
+        "target_valueset": "http://hl7.org/fhir/ValueSet/administrative-gender"
+      }
+    },
+    "hl7_table_0004_patient_class": {
+      "name": "hl7_table_0004_patient_class",
+      "type": "valueset",
+      "description": "HL7 Table 0004 - Patient Class to FHIR encounter-class",
+      "validation": "known_value",
+      "parameters": {
+        "table": "0004",
+        "default": "AMB",
+        "target_valueset": "http://terminology.hl7.org/ValueSet/v3-ActEncounterCode"
+      }
+    },
+    "address_component": {
+      "name": "address_component",
+      "type": "string_transform",
+      "description": "Address component with case handling and validation",
+      "validation": "non_empty",
+      "parameters": {
+        "case": "proper",
+        "trim": "true",
+        "max_length": "100"
+      }
+    },
+    "address_use_mapping": {
+      "name": "address_use_mapping",
+      "type": "valueset",
+      "description": "Map HL7 address type to FHIR address use",
+      "validation": "known_value",
+      "parameters": {
+        "default": "home",
+        "target_valueset": "http://hl7.org/fhir/ValueSet/address-use"
+      }
+    },
+    "telecom_value": {
+      "name": "telecom_value",
+      "type": "string_transform",
+      "description": "Telecom value with format validation",
+      "validation": "valid_phone_email",
+      "parameters": {
+        "format": "normalize",
+        "remove_separators": "true"
+      }
+    },
+    "telecom_use_mapping": {
+      "name": "telecom_use_mapping",
+      "type": "valueset",
+      "description": "Map HL7 telecom use to FHIR contact point use",
+      "validation": "known_value",
+      "parameters": {
+        "default": "home",
+        "target_valueset": "http://hl7.org/fhir/ValueSet/contact-point-use"
+      }
+    },
+    "telecom_system_mapping": {
+      "name": "telecom_system_mapping",
+      "type": "valueset",
+      "description": "Map HL7 telecom equipment type to FHIR contact point system",
+      "validation": "known_value",
+      "parameters": {
+        "default": "phone",
+        "target_valueset": "http://hl7.org/fhir/ValueSet/contact-point-system"
+      }
+    },
+    "identifier_system_mapping": {
+      "name": "identifier_system_mapping",
+      "type": "system_mapping",
+      "description": "Map HL7 assigning authority to FHIR identifier system URI",
+      "validation": "valid_uri",
+      "parameters": {
+        "type": "identifier",
+        "default_namespace": "urn:oid:"
+      }
+    },
+    "identifier_type_mapping": {
+      "name": "identifier_type_mapping",
+      "type": "valueset",
+      "description": "Map HL7 identifier type to FHIR identifier type",
+      "validation": "known_value",
+      "parameters": {
+        "default": "usual",
+        "target_valueset": "http://hl7.org/fhir/ValueSet/identifier-type"
+      }
+    },
+    "location_mapping": {
+      "name": "location_mapping",
+      "type": "string_transform",
+      "description": "Location display with proper formatting",
+      "validation": "non_empty",
+      "parameters": {
+        "case": "proper",
+        "trim": "true",
+        "max_length": "100"
+      }
+    }
+  },
+  "metadata": {
+    "totalMappings": 34,
+    "requiredMappings": 4,
+    "coverage": "comprehensive_patient_admission",
+    "generatedBy": "Schema-based HL7-FHIR Mapping Generator v1.0",
+    "compatibleWith": ["2.5", "2.5.1"],
+    "targetFHIRVersion": "R4",
+    "confidence": "production_ready",
+    "validatedAgainst": [
+      "schemas/hl7/v2.5.1/ADT_A01.gz",
+      "schemas/fhir/R4/resources/Patient.gz",
+      "schemas/fhir/R4/resources/Encounter.gz"
+    ]
+  }
+}
