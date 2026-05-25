@@ -61,7 +61,7 @@ test.describe('Dashboard', () => {
 
         await expect(sidebar).toBeVisible();
         await toggle.click();
-        // After collapse, nav labels should either be hidden or sidebar class changes
+        await page.waitForTimeout(400); // Wait for CSS transition to complete
         const collapsed = await sidebar.evaluate(el =>
             el.classList.contains('collapsed') || el.offsetWidth < 80
         );
@@ -69,6 +69,7 @@ test.describe('Dashboard', () => {
 
         // Expand again
         await toggle.click();
+        await page.waitForTimeout(400); // Wait for CSS transition to complete
         const expanded = await sidebar.evaluate(el =>
             !el.classList.contains('collapsed') && el.offsetWidth >= 80
         );

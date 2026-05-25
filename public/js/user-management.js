@@ -15,6 +15,7 @@
         searchTerm: '',
         filterRole: '',
         filterStatus: '',
+        currentUserId: null,
         activeTab: 'users',
         drawer: { open: false, userId: null, activeTab: 'profile' },
         audit: { page: 1, total: 0 }
@@ -176,7 +177,7 @@
                 <td>${fmt(login)}</td>
                 <td class="um-td-actions">
                     <button class="um-action-btn" title="View / Edit" data-action="edit" data-id="${esc(u.id)}"><i class="fas fa-pen-to-square"></i></button>
-                    <button class="um-action-btn um-action-btn--danger" title="Delete" data-action="delete" data-id="${esc(u.id)}"><i class="fas fa-trash"></i></button>
+                    <button class="um-action-btn um-action-btn--danger" title="${u.id === state.currentUserId ? 'Cannot delete your own account' : 'Delete'}" data-action="delete" data-id="${esc(u.id)}" ${u.id === state.currentUserId ? 'disabled' : ''}><i class="fas fa-trash"></i></button>
                 </td>
             </tr>`;
         }).join('');
@@ -728,6 +729,7 @@
             if (av) av.textContent = (data.user.name || data.user.email || 'A')[0].toUpperCase();
             if (un) un.textContent = data.user.name || data.user.email;
             if (ur) ur.textContent = data.user.role.toUpperCase();
+            state.currentUserId = data.user.id;
             return true;
         } catch (e) {
             window.location.href = '/';

@@ -106,10 +106,19 @@ test.describe('Authentication', () => {
         await page.locator('#loginButton').click();
         await expect(page).toHaveURL(/dashboard\.html/, { timeout: 15_000 });
 
-        // Logout: fetch the logout API (clears server session) then navigate to login.
-        // page.goto('/api/auth/logout') returns JSON without triggering the JS redirect
-        // that doLogout() performs via window.location.href assignment.
-        await page.evaluate(() => fetch('/api/auth/logout').catch(() => {}));
+        // Call server-side logout, then clear all client-side auth state
+        await page.evaluate(async () => {
+            try { await fetch('/api/auth/logout'); } catch (e) { /* ignore */ }
+            // Clear JWT token and all auth state from localStorage
+            localStorage.removeItem('accessToken');
+            localStorage.removeItem('refreshToken');
+            localStorage.removeItem('token');
+            localStorage.removeItem('user');
+            sessionStorage.clear();
+            return null;
+        });
+        // Also clear cookies so session cookie is removed
+        await page.context().clearCookies();
         await page.waitForTimeout(300);
         await page.goto('/login.html');
         await expect(page).toHaveURL(/login\.html/);

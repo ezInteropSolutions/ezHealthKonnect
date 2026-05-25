@@ -50,3 +50,9 @@ installer/dist/
 installer/ezhealthkonnect-installer
 installer/ezhealthkonnect-installer.exe
 postgres_data.tar.gz
+
+# ── Playwright test artifacts ──────────────────────────────────────────────────
+test-results/
+tests/playwright-report/
+tests/playwright/.auth/
+.auth/

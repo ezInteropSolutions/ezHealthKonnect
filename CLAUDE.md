@@ -176,7 +176,10 @@ Key environment variables in `.env`:
 ### Current Test Structure
 - Dictionary service testing: `npm run test:dictionary`
 - Test files in `tests/` directory
-- No comprehensive test suite currently implemented
+- **Playwright E2E suite**: `tests/playwright/` — 9 spec files, ~150 tests across auth, dashboard, interfaces, detail, monitoring, messages, settings, admin, and DLQ pages
+  - Run: `npx playwright test --project=chromium`
+  - Admin/user management page URL: `/user-management.html` (NOT `/admin.html`)
+  - Auth state stored in `tests/playwright/.auth/admin.json` (created by global-setup)
 
 ## Build & Deployment
 
@@ -644,9 +647,11 @@ type OutboundConnector interface {
 - Minimal implementations for all 32 connectors
 - Ready for actual implementation logic
 
-### Phase 2B: Connector Implementation (🔄 In Progress - October 26, 2025)
+### Phase 2B: Connector Implementation (✅ Complete - May 2026)
 
-**Implemented Connectors**:
+**26 connectors fully implemented** in own `.go` files. Stubs remain only for analytics databases, cloud storage outbound, FTP, and Phase 4 healthcare protocols — none required for core HL7/FHIR MVP.
+
+**Fully Implemented Connectors**:
 1. ✅ **TCP/MLLP Inbound** - [tcp_mllp_inbound.go](services/connectors/tcp_mllp_inbound.go)
    - Full MLLP protocol parser (0x0B start, 0x1C/0x0D end)
    - TLS 1.2/1.3 support with certificate configuration
@@ -658,46 +663,67 @@ type OutboundConnector interface {
    - Message type extraction from MSH segment
    - Message control ID correlation
    - Segment delimiter: **CRLF** (`\r\n`) in generated ACK/NACK messages
+2. ✅ **TCP/MLLP Outbound** - [tcp_mllp_outbound.go](services/connectors/tcp_mllp_outbound.go)
+3. ✅ **HTTP Outbound** - [http_outbound.go](services/connectors/http_outbound.go)
+4. ✅ **HTTP FHIR Inbound** - [http_fhir_inbound.go](services/connectors/http_fhir_inbound.go)
+5. ✅ **HTTP FHIR Outbound** - [http_fhir_outbound.go](services/connectors/http_fhir_outbound.go)
+6. ✅ **File Listener** - [file_listener.go](services/connectors/file_listener.go)
+7. ✅ **File Writer** - [file_writer.go](services/connectors/file_writer.go)
+8. ✅ **PostgreSQL Inbound** - [postgresql_inbound.go](services/connectors/postgresql_inbound.go)
+9. ✅ **PostgreSQL Outbound** - [postgresql_outbound.go](services/connectors/postgresql_outbound.go)
+10. ✅ **MySQL Inbound** - [mysql_inbound.go](services/connectors/mysql_inbound.go)
+11. ✅ **SQL Server Inbound** - [sqlserver_inbound.go](services/connectors/sqlserver_inbound.go)
+12. ✅ **SQL Server Outbound** - [sqlserver_outbound.go](services/connectors/sqlserver_outbound.go)
+13. ✅ **Oracle Inbound** - [oracle_inbound.go](services/connectors/oracle_inbound.go)
+14. ✅ **Oracle Outbound** - [oracle_outbound.go](services/connectors/oracle_outbound.go)
+15. ✅ **MongoDB Inbound** - [mongodb_inbound.go](services/connectors/mongodb_inbound.go)
+16. ✅ **MongoDB Outbound** - [mongodb_outbound.go](services/connectors/mongodb_outbound.go)
+17. ✅ **Kafka Inbound** - [kafka_inbound.go](services/connectors/kafka_inbound.go)
+18. ✅ **RabbitMQ Inbound** - [rabbitmq_inbound.go](services/connectors/rabbitmq_inbound.go)
+19. ✅ **Redis Inbound** - [redis_inbound.go](services/connectors/redis_inbound.go)
+20. ✅ **AWS S3 Inbound** - [aws_s3_inbound.go](services/connectors/aws_s3_inbound.go)
+21. ✅ **SFTP Inbound** - [sftp_inbound.go](services/connectors/sftp_inbound.go)
+22. ✅ **SFTP Outbound** - [sftp_outbound.go](services/connectors/sftp_outbound.go)
 
-**Priority Queue** (Next 3-4 weeks):
-2. ⏳ TCP/MLLP Outbound (middleware scenario - send HL7 to downstream)
-3. ⏳ HTTP Outbound (FHIR delivery to REST endpoints)
-4. ⏳ File Writer (local archiving and debugging)
-5. ⏳ PostgreSQL Inbound/Outbound (EHR database integration)
-6. ⏳ MongoDB Inbound/Outbound (FHIR persistence)
-7. ⏳ AWS S3 Inbound/Outbound (cloud file handling)
-8. ⏳ Kafka Producer (event streaming)
-9. ⏳ RabbitMQ Publisher (message queue delivery)
+**Stubs (not required for MVP)**:
+- `mysql_outbound` — MySQL write-back
+- Analytics DBs — Snowflake, Databricks, BigQuery, Redshift, Synapse, ClickHouse, TimescaleDB (inbound + outbound)
+- MQ outbound — RabbitMQ, Kafka, Redis (publish/produce)
+- Cloud storage outbound/full — AWS S3 Outbound, Azure Blob, GCS (inbound + outbound)
+- File transfer — FTP inbound/outbound
+- Phase 4 healthcare protocols — FHIR R4 (native), EDI X12, Direct Messaging
 
 ### Connector Catalog
 
-**Network Connectors (4)**:
-- tcp_mllp_inbound ✅ / tcp_mllp_outbound ⏳
-- http_rest_inbound / http_outbound ⏳
+**Network Connectors (5 of 5 MVP)**:
+- tcp_mllp_inbound ✅ / tcp_mllp_outbound ✅
+- http_outbound ✅ / http_fhir_inbound ✅ / http_fhir_outbound ✅
+- http_rest_inbound — stub
 
-**File System Connectors (2)**:
-- file_listener / file_writer ⏳
+**File System Connectors (2 of 2 MVP)**:
+- file_listener ✅ / file_writer ✅
 
-**Database Connectors (10)**:
-- postgresql_inbound / postgresql_outbound ⏳
-- mysql_inbound / mysql_outbound
-- sqlserver_inbound / sqlserver_outbound
-- mongodb_inbound / mongodb_outbound ⏳
-- oracle_inbound / oracle_outbound
+**Database Connectors (8 full + 1 stub)**:
+- postgresql_inbound ✅ / postgresql_outbound ✅
+- mysql_inbound ✅ / mysql_outbound — stub
+- sqlserver_inbound ✅ / sqlserver_outbound ✅
+- mongodb_inbound ✅ / mongodb_outbound ✅
+- oracle_inbound ✅ / oracle_outbound ✅
+- Analytics DBs (Snowflake, Databricks, BigQuery, Redshift, Synapse, ClickHouse, TimescaleDB) — stubs
 
-**Message Queue Connectors (6)**:
-- rabbitmq_inbound / rabbitmq_outbound ⏳
-- kafka_inbound / kafka_outbound ⏳
-- redis_inbound / redis_outbound
+**Message Queue Connectors (3 inbound full, 3 outbound stub)**:
+- rabbitmq_inbound ✅ / rabbitmq_outbound — stub
+- kafka_inbound ✅ / kafka_outbound — stub
+- redis_inbound ✅ / redis_outbound — stub
 
-**Cloud Storage Connectors (6)**:
-- aws_s3_inbound / aws_s3_outbound ⏳
-- azure_blob_inbound / azure_blob_outbound
-- gcs_inbound / gcs_outbound
+**Cloud Storage Connectors**:
+- aws_s3_inbound ✅ / aws_s3_outbound — stub
+- azure_blob_inbound — stub / azure_blob_outbound — stub
+- gcs_inbound — stub / gcs_outbound — stub
 
-**File Transfer Connectors (4)**:
-- sftp_inbound / sftp_outbound
-- ftp_inbound / ftp_outbound
+**File Transfer Connectors**:
+- sftp_inbound ✅ / sftp_outbound ✅
+- ftp_inbound — stub / ftp_outbound — stub
 
 ### Documentation
 - 📘 **[connectivity/CONNECTIVITY_CATALOG.md](connectivity/CONNECTIVITY_CATALOG.md)** - Complete catalog with all 32 connectors

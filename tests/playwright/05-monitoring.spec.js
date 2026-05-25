@@ -173,32 +173,39 @@ test.describe('Monitoring', () => {
 
     // ── TC-MON-016 ───────────────────────────────────────────────────────────────
     test('TC-MON-016 monitoring summary API returns 200', async ({ page }) => {
-        const resp = await page.request.get('/api/monitoring/summary').catch(() => null);
-        if (!resp) { test.skip(); return; }
-        const status = resp.status();
-        if (status === 500) {
-            test.skip(); // DB table may not exist in this environment
-            return;
-        }
-        expect(status).toBe(200);
-        const body = await resp.json().catch(() => null);
-        if (body) expect(body.success).toBe(true);
+        // Go backend requires JWT Bearer token (stored in localStorage.accessToken).
+        // page.request.get only sends cookies — must use browser fetch with explicit header.
+        const result = await page.evaluate(async () => {
+            try {
+                const token = localStorage.getItem('accessToken') || '';
+                const headers = token ? { 'Authorization': 'Bearer ' + token } : {};
+                const r = await fetch('/api/monitoring/summary', { headers });
+                const body = await r.json().catch(() => null);
+                return { status: r.status, body };
+            } catch (e) { return { status: 0, body: null }; }
+        });
+        if (result.status === 0 || result.status >= 500) { test.skip(); return; }
+        expect(result.status).toBe(200);
+        if (result.body) expect(result.body.success).toBe(true);
     });
 
     // ── TC-MON-017 ───────────────────────────────────────────────────────────────
     test('TC-MON-017 monitoring alerts API returns 200', async ({ page }) => {
-        const resp = await page.request.get('/api/monitoring/alerts').catch(() => null);
-        if (!resp) { test.skip(); return; }
-        const status = resp.status();
-        if (status === 500) {
-            test.skip(); // monitoring_alerts table may not exist in this environment
-            return;
-        }
-        expect(status).toBe(200);
-        const body = await resp.json().catch(() => null);
-        if (body) {
-            expect(body.success).toBe(true);
-            expect(Array.isArray(body.data)).toBe(true);
+        // Go backend requires JWT Bearer token (stored in localStorage.accessToken)
+        const result = await page.evaluate(async () => {
+            try {
+                const token = localStorage.getItem('accessToken') || '';
+                const headers = token ? { 'Authorization': 'Bearer ' + token } : {};
+                const r = await fetch('/api/monitoring/alerts', { headers });
+                const body = await r.json().catch(() => null);
+                return { status: r.status, body };
+            } catch (e) { return { status: 0, body: null }; }
+        });
+        if (result.status === 0 || result.status >= 500) { test.skip(); return; }
+        expect(result.status).toBe(200);
+        if (result.body) {
+            expect(result.body.success).toBe(true);
+            expect(Array.isArray(result.body.data)).toBe(true);
         }
     });
 

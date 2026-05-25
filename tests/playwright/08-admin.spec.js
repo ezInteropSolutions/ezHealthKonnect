@@ -24,7 +24,7 @@
 const { test, expect } = require('@playwright/test');
 
 // Best-guess URL patterns for the admin / user management page
-const ADMIN_URLS = ['/admin.html', '/admin/users.html', '/users.html'];
+const ADMIN_URLS = ['/user-management.html', '/admin.html', '/admin/users.html', '/users.html'];
 
 let adminUrl = null;
 
@@ -120,10 +120,11 @@ test.describe('Admin / User Management', () => {
             return;
         }
         await search.fill('zzzznotauser99999_xyzxyz');
-        await page.waitForTimeout(600);
+        // Server-side search: 350ms debounce + API call — need enough time
+        await page.waitForTimeout(1500);
         const rows    = await page.locator('tbody tr:not(.empty-row)').count();
-        const empty   = page.locator('[class*="empty"], text=/no users|no results/i');
-        const isEmpty = rows === 0 || await empty.isVisible().catch(() => false);
+        const empty   = page.locator('[class*="empty"], [class*="no-result"]').first();
+        const isEmpty = rows === 0 || await empty.isVisible({ timeout: 1000 }).catch(() => false);
         expect(isEmpty).toBe(true);
     });
 
@@ -144,73 +145,62 @@ test.describe('Admin / User Management', () => {
     });
 
     // ── TC-ADMIN-008 ─────────────────────────────────────────────────────────────
-    test('TC-ADMIN-008 clicking Edit on a user row opens edit modal', async ({ page }) => {
+    test('TC-ADMIN-008 clicking Edit on a user row opens edit drawer', async ({ page }) => {
         if (!adminUrl) { test.skip(); return; }
-        const editBtn = page.locator(
-            'tbody tr button, tbody tr a'
-        ).filter({ hasText: /edit/i }).first();
-        if (!await editBtn.isVisible({ timeout: 5000 }).catch(() => false)) {
-            // Try action menu / kebab icon
-            const actionBtn = page.locator('tbody tr [class*="action"], tbody tr [class*="menu"]').first();
-            if (!await actionBtn.isVisible().catch(() => false)) {
-                test.skip();
-                return;
-            }
-            await actionBtn.click();
-            await page.waitForTimeout(200);
-        } else {
-            await editBtn.click();
-        }
-        const modal = page.locator('.modal, [class*="modal"], [role="dialog"]').first();
-        await expect(modal).toBeVisible({ timeout: 5000 });
-    });
-
-    // ── TC-ADMIN-009 ─────────────────────────────────────────────────────────────
-    test('TC-ADMIN-009 edit modal contains user fields', async ({ page }) => {
-        if (!adminUrl) { test.skip(); return; }
-        const editBtn = page.locator(
-            'tbody tr button, tbody tr a'
-        ).filter({ hasText: /edit/i }).first();
+        // Edit button uses data-action="edit" with an icon — no text content
+        const editBtn = page.locator('tbody tr [data-action="edit"]').first();
         if (!await editBtn.isVisible({ timeout: 5000 }).catch(() => false)) {
             test.skip();
             return;
         }
         await editBtn.click();
-        const modal = page.locator('.modal, [class*="modal"], [role="dialog"]').first();
-        if (!await modal.isVisible({ timeout: 5000 }).catch(() => false)) {
+        await page.waitForTimeout(300);
+        // App uses a side drawer (#um-drawer), not a modal
+        const drawer = page.locator('#um-drawer, .um-drawer').first();
+        await expect(drawer).toBeVisible({ timeout: 5000 });
+    });
+
+    // ── TC-ADMIN-009 ─────────────────────────────────────────────────────────────
+    test('TC-ADMIN-009 edit drawer contains user fields', async ({ page }) => {
+        if (!adminUrl) { test.skip(); return; }
+        const editBtn = page.locator('tbody tr [data-action="edit"]').first();
+        if (!await editBtn.isVisible({ timeout: 5000 }).catch(() => false)) {
             test.skip();
             return;
         }
-        // Should have at least one relevant field
-        const fields = modal.locator('input, select');
+        await editBtn.click();
+        const drawer = page.locator('#um-drawer, .um-drawer').first();
+        if (!await drawer.isVisible({ timeout: 5000 }).catch(() => false)) {
+            test.skip();
+            return;
+        }
+        const fields = drawer.locator('input, select');
         const count  = await fields.count();
         expect(count).toBeGreaterThanOrEqual(1);
     });
 
     // ── TC-ADMIN-010 ─────────────────────────────────────────────────────────────
-    test('TC-ADMIN-010 edit modal cancel dismisses without navigating away', async ({ page }) => {
+    test('TC-ADMIN-010 edit drawer close dismisses without navigating away', async ({ page }) => {
         if (!adminUrl) { test.skip(); return; }
-        const editBtn = page.locator('tbody tr button, tbody tr a').filter({ hasText: /edit/i }).first();
+        const editBtn = page.locator('tbody tr [data-action="edit"]').first();
         if (!await editBtn.isVisible({ timeout: 5000 }).catch(() => false)) {
             test.skip();
             return;
         }
         await editBtn.click();
-        const modal = page.locator('.modal, [class*="modal"], [role="dialog"]').first();
-        if (!await modal.isVisible({ timeout: 5000 }).catch(() => false)) {
+        const drawer = page.locator('#um-drawer, .um-drawer').first();
+        if (!await drawer.isVisible({ timeout: 5000 }).catch(() => false)) {
             test.skip();
             return;
         }
-        const cancelBtn = modal.locator(
-            'button[aria-label*="close" i], button.close, .close-btn, button'
-        ).filter({ hasText: /cancel|close/i }).first();
-        if (await cancelBtn.isVisible().catch(() => false)) {
-            await cancelBtn.click();
+        const closeBtn = page.locator('#um-drawer-close, .um-drawer-close').first();
+        if (await closeBtn.isVisible().catch(() => false)) {
+            await closeBtn.click();
         } else {
             await page.keyboard.press('Escape');
         }
         await page.waitForTimeout(400);
-        await expect(modal).toBeHidden();
+        await expect(drawer).toBeHidden();
         await expect(page).toHaveURL(new RegExp(adminUrl.replace('.html', '')));
     });
 
@@ -291,11 +281,15 @@ test.describe('Admin / User Management', () => {
             test.skip(); // Can't identify own row
             return;
         }
-        const deleteBtn = adminRow.locator('button, a').filter({ hasText: /delete|remove/i }).first();
-        const isDisabled = await deleteBtn.isDisabled().catch(() => true);
-        const isAbsent   = !(await deleteBtn.isVisible().catch(() => false));
-        // Self-delete should be prevented
-        expect(isDisabled || isAbsent).toBe(true);
+        // Delete button uses data-action="delete" with icon only (no text content)
+        const deleteBtn = adminRow.locator('[data-action="delete"]').first();
+        const isVisible = await deleteBtn.isVisible({ timeout: 3000 }).catch(() => false);
+        if (!isVisible) {
+            // Delete button absent — self-delete is prevented
+            return;
+        }
+        const isDisabled = await deleteBtn.isDisabled().catch(() => false);
+        expect(isDisabled).toBe(true);
     });
 
     // ── TC-ADMIN-015 ─────────────────────────────────────────────────────────────
