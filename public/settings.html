@@ -1586,16 +1586,39 @@
                     <div class="settings-card">
                         <div class="settings-card-header">
                             <i class="fas fa-cubes" style="color:#1e3a8a"></i>
-                            <div><h3>Available Models</h3><p>Models currently pulled on this Ollama instance. Use <code>ollama pull &lt;model&gt;</code> to add more.</p></div>
+                            <div>
+                                <h3>Model Library</h3>
+                                <p>Download and activate models directly from this page. All downloads go to your local Ollama instance — no cloud, no PHI risk.</p>
+                            </div>
                         </div>
                         <div class="settings-card-body">
-                            <div id="aiModelGrid" style="display:grid;gap:10px">
-                                <p style="color:#6b7280;font-size:13px">Run a connection test to see available models.</p>
+                            <!-- Currently installed models -->
+                            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+                                <strong style="font-size:13px">Installed on this Ollama instance</strong>
+                                <button class="btn btn-secondary" style="font-size:12px;padding:4px 10px" onclick="refreshLocalModels()">
+                                    <i class="fas fa-sync-alt"></i> Refresh
+                                </button>
                             </div>
-                            <details style="margin-top:16px">
-                                <summary style="cursor:pointer;font-size:13px;font-weight:600;color:#1e3a8a">Recommended models for ezHealthKonnect</summary>
-                                <div id="aiCatalogGrid" style="margin-top:12px;display:grid;gap:8px"></div>
-                            </details>
+                            <div id="aiModelGrid" style="display:grid;gap:10px;margin-bottom:20px">
+                                <p style="color:#6b7280;font-size:13px">Run a connection test or click Refresh to see installed models.</p>
+                            </div>
+
+                            <!-- Recommended catalog with download buttons -->
+                            <strong style="font-size:13px">Recommended for ezHealthKonnect</strong>
+                            <p style="font-size:12px;color:#6b7280;margin:4px 0 12px">Click Download to pull a model directly to your Ollama instance.</p>
+                            <div id="aiCatalogGrid" style="display:grid;gap:10px"></div>
+
+                            <!-- Pull progress area -->
+                            <div id="aiPullProgress" style="display:none;margin-top:16px;padding:14px;background:#f0fdf4;border:1px solid #86efac;border-radius:8px;font-size:13px">
+                                <div style="display:flex;justify-content:space-between;margin-bottom:8px">
+                                    <strong id="aiPullModelName">Downloading…</strong>
+                                    <button onclick="cancelModelPull()" style="background:none;border:none;color:#ef4444;cursor:pointer;font-size:12px">Cancel</button>
+                                </div>
+                                <div style="background:#d1fae5;border-radius:4px;height:8px;overflow:hidden">
+                                    <div id="aiPullBar" style="background:#10b981;height:100%;width:0%;transition:width 0.3s"></div>
+                                </div>
+                                <div id="aiPullStatus" style="margin-top:6px;color:#065f46;font-size:12px">Starting download…</div>
+                            </div>
                         </div>
                     </div>
 
@@ -2667,8 +2690,13 @@ async function loadAISettings() {
 
         // Auto-load feedback summary
         loadFeedbackSummary();
+
+        // Load model catalog with download buttons (non-blocking)
+        loadModelCatalog();
+        refreshLocalModels();
     } catch (e) {
         // Settings not yet saved — defaults shown, fine to continue
+        loadModelCatalog();
     }
 }
 
@@ -2839,6 +2867,172 @@ function updateServerAdvisor() {
             </div>
             <div style="grid-column:1/-1;color:#374151">${esc(notes)}</div>
         </div>`;
+}
+
+// ── Model download (browser-triggered Ollama pull via SSE) ────────────────────
+
+let _pullAbortController = null;
+
+async function loadModelCatalog() {
+    try {
+        const resp = await fetch('/api/ai/models/catalog', { credentials: 'include' });
+        if (!resp.ok) return;
+        const body = await resp.json();
+        if (body.success && Array.isArray(body.data)) {
+            renderCatalogWithDownload(body.data);
+        }
+    } catch (_) { /* silent */ }
+}
+
+async function refreshLocalModels() {
+    const grid = document.getElementById('aiModelGrid');
+    if (grid) grid.innerHTML = '<p style="color:#6b7280;font-size:13px"><i class="fas fa-spinner fa-spin"></i> Loading…</p>';
+    try {
+        const resp = await fetch('/api/ai/models/local', { credentials: 'include' });
+        if (!resp.ok) return;
+        const body = await resp.json();
+        const models = body.data || [];
+        if (!grid) return;
+        if (models.length === 0) {
+            grid.innerHTML = '<p style="color:#6b7280;font-size:13px">No models installed. Download one from the catalog below.</p>';
+            return;
+        }
+        grid.innerHTML = models.map(name => {
+            const isEmbed = name.includes('embed') || name.includes('nomic');
+            return `<div style="display:flex;align-items:center;gap:12px;padding:8px 12px;border:1px solid #d1fae5;border-radius:6px;background:#f0fdf4">
+                <i class="fas fa-check-circle" style="color:#10b981;font-size:14px"></i>
+                <div style="flex:1;font-weight:600;font-size:13px">${esc(name)}</div>
+                ${isEmbed ? '<span style="font-size:10px;color:#059669;font-weight:600">EMBED</span>'
+                          : `<button onclick="setActiveModel('${esc(name)}')" style="font-size:11px;padding:2px 8px;border:1px solid #d1d5db;border-radius:4px;cursor:pointer;background:#fff">
+                               Set Active
+                             </button>`}
+            </div>`;
+        }).join('');
+    } catch (e) {
+        if (grid) grid.innerHTML = `<p style="color:#ef4444;font-size:13px">${esc(e.message)}</p>`;
+    }
+}
+
+function setActiveModel(modelName) {
+    const sel = document.getElementById('aiChatModel');
+    if (!sel) return;
+    // Add option if not present, then select it
+    if (!Array.from(sel.options).some(o => o.value === modelName)) {
+        sel.appendChild(new Option(modelName, modelName));
+    }
+    sel.value = modelName;
+    setStatus('aiSaveStatus', `Chat model set to ${modelName} — save to apply.`, 'success');
+}
+
+function renderCatalogWithDownload(catalog) {
+    const grid = document.getElementById('aiCatalogGrid');
+    if (!grid) return;
+    grid.innerHTML = catalog.map(m => {
+        const tagHtml = (m.tags || []).map(t =>
+            `<span style="background:#dbeafe;color:#1e40af;font-size:10px;padding:1px 6px;border-radius:10px">${esc(t)}</span>`
+        ).join(' ');
+        const borderColor = m.recommended ? '#93c5fd' : '#e5e7eb';
+        const bgColor     = m.recommended ? '#eff6ff' : '#fff';
+        return `<div style="padding:12px 14px;border:1px solid ${borderColor};border-radius:8px;background:${bgColor};font-size:13px">
+            <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
+                <div style="flex:1;min-width:0">
+                    <div style="display:flex;align-items:center;gap:6px;margin-bottom:3px">
+                        <strong>${esc(m.display_name)}</strong>
+                        ${m.recommended ? '<span style="font-size:10px;color:#1d4ed8;font-weight:700;background:#dbeafe;padding:1px 6px;border-radius:10px">★ RECOMMENDED</span>' : ''}
+                    </div>
+                    <div style="color:#6b7280;font-size:12px;margin-bottom:5px">${esc(m.best_for)}</div>
+                    <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+                        ${tagHtml}
+                        <span style="color:#6b7280;font-size:11px">RAM: ${esc(m.ram_required)}</span>
+                        <span style="color:#6b7280;font-size:11px">Download: ${esc(m.disk_size)}</span>
+                    </div>
+                    <div style="color:#6b7280;font-size:11px;margin-top:4px">${esc(m.notes)}</div>
+                </div>
+                <div style="display:flex;flex-direction:column;gap:4px;flex-shrink:0">
+                    <button onclick="downloadModel('${esc(m.name)}','${esc(m.disk_size)}')"
+                        style="font-size:12px;padding:4px 12px;border:1px solid #3b82f6;border-radius:6px;background:#3b82f6;color:#fff;cursor:pointer;white-space:nowrap">
+                        <i class="fas fa-download"></i> Download
+                    </button>
+                    <button onclick="setActiveModel('${esc(m.name)}')"
+                        style="font-size:12px;padding:4px 12px;border:1px solid #d1d5db;border-radius:6px;background:#fff;cursor:pointer;white-space:nowrap">
+                        Set Active
+                    </button>
+                </div>
+            </div>
+        </div>`;
+    }).join('');
+}
+
+async function downloadModel(modelName, diskSize) {
+    const progress   = document.getElementById('aiPullProgress');
+    const nameEl     = document.getElementById('aiPullModelName');
+    const bar        = document.getElementById('aiPullBar');
+    const statusEl   = document.getElementById('aiPullStatus');
+    if (!progress) return;
+
+    nameEl.textContent = `Downloading ${modelName} (${diskSize})…`;
+    bar.style.width = '0%';
+    statusEl.textContent = 'Connecting to Ollama…';
+    progress.style.display = 'block';
+    progress.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+
+    _pullAbortController = new AbortController();
+    try {
+        const resp = await fetch('/api/ai/models/pull', {
+            method: 'POST',
+            credentials: 'include',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ model: modelName }),
+            signal: _pullAbortController.signal,
+        });
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+
+        const reader  = resp.body.getReader();
+        const decoder = new TextDecoder();
+        let   buffer  = '';
+
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop();
+            for (const line of lines) {
+                if (!line.startsWith('data: ')) continue;
+                const payload = line.slice(6);
+                if (payload === '[DONE]') {
+                    bar.style.width = '100%';
+                    statusEl.textContent = '✅ Download complete!';
+                    nameEl.textContent = `${modelName} — ready`;
+                    await refreshLocalModels();
+                    setTimeout(() => { progress.style.display = 'none'; }, 3000);
+                    return;
+                }
+                if (payload.startsWith('[ERROR]')) {
+                    throw new Error(payload.slice(7).trim());
+                }
+                try {
+                    const ev = JSON.parse(payload);
+                    statusEl.textContent = ev.status || 'Downloading…';
+                    if (ev.percent > 0) bar.style.width = ev.percent + '%';
+                    else if (ev.status === 'success') bar.style.width = '100%';
+                } catch (_) { /* skip non-JSON */ }
+            }
+        }
+    } catch (e) {
+        if (e.name === 'AbortError') {
+            statusEl.textContent = 'Download cancelled.';
+            bar.style.background = '#f59e0b';
+        } else {
+            statusEl.textContent = '❌ ' + e.message;
+            bar.style.background = '#ef4444';
+        }
+        setTimeout(() => { progress.style.display = 'none'; bar.style.background = '#10b981'; }, 4000);
+    }
+}
+
+function cancelModelPull() {
+    if (_pullAbortController) _pullAbortController.abort();
 }
 
 async function saveAISettings() {

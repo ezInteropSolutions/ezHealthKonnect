@@ -90,10 +90,10 @@ func (m *ConversationMemory) FormatHistory(turns []ConversationTurn) string {
 		if len(role) > 0 {
 			role = strings.ToUpper(role[:1]) + role[1:]
 		}
-		// Truncate very long turns to keep prompt size manageable
+		// Truncate turns to keep prompt within CPU inference budget (~6 input tokens/sec on CPU).
 		content := t.Content
-		if len(content) > 800 {
-			content = content[:800] + "…"
+		if len(content) > 400 {
+			content = content[:400] + "…"
 		}
 		sb.WriteString(fmt.Sprintf("**%s**: %s\n\n", role, content))
 	}
@@ -101,11 +101,57 @@ func (m *ConversationMemory) FormatHistory(turns []ConversationTurn) string {
 	return sb.String()
 }
 
+// HistoryMessage is a conversation turn with timestamp — returned by the history endpoint.
+type HistoryMessage struct {
+	Role      string    `json:"role"`
+	Content   string    `json:"content"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+// LoadHistoryWithTimestamps returns the last `limit` turns for a session with timestamps.
+// userID must match the turn's stored user_id — prevents cross-user IDOR.
+// Returned oldest-first so the UI can render them in order.
+func (m *ConversationMemory) LoadHistoryWithTimestamps(ctx context.Context, sessionID, userID string, limit int) ([]HistoryMessage, error) {
+	if m.db == nil {
+		return nil, nil
+	}
+	if userID == "" {
+		return nil, fmt.Errorf("user_id required to load conversation history")
+	}
+	if limit <= 0 {
+		limit = 50
+	}
+	rows, err := m.db.QueryContext(ctx, `
+		SELECT role, content, created_at FROM (
+			SELECT role, content, created_at
+			FROM   ai_conversations
+			WHERE  session_id = $1 AND user_id = $3
+			ORDER  BY created_at DESC
+			LIMIT  $2
+		) recent
+		ORDER BY created_at ASC
+	`, sessionID, limit, userID)
+	if err != nil {
+		return nil, fmt.Errorf("load history for session %s: %w", sessionID, err)
+	}
+	defer rows.Close()
+
+	var msgs []HistoryMessage
+	for rows.Next() {
+		var h HistoryMessage
+		if err := rows.Scan(&h.Role, &h.Content, &h.CreatedAt); err != nil {
+			continue
+		}
+		msgs = append(msgs, h)
+	}
+	return msgs, nil
+}
+
 // PruneOldSessions deletes conversation history older than `days` days.
 // Safe to call periodically from a maintenance goroutine.
 func (m *ConversationMemory) PruneOldSessions(ctx context.Context, days int) (int64, error) {
 	result, err := m.db.ExecContext(ctx,
-		`DELETE FROM ai_conversations WHERE created_at < NOW() - ($1 || ' days')::INTERVAL`,
+		`DELETE FROM ai_conversations WHERE created_at < NOW() - INTERVAL '1 day' * $1`,
 		days)
 	if err != nil {
 		return 0, err

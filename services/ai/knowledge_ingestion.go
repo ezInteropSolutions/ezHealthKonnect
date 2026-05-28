@@ -48,6 +48,9 @@ func (k *KnowledgeIngestionService) IngestAll(ctx context.Context, schemaDir str
 	if r := k.IngestCCDBuiltinKnowledge(ctx); r != nil {
 		results = append(results, *r)
 	}
+	for _, r := range k.IngestAppDocs(ctx, ".") {
+		results = append(results, r)
+	}
 	return results
 }
 
@@ -161,6 +164,84 @@ func (k *KnowledgeIngestionService) IngestX12BuiltinKnowledge(ctx context.Contex
 	}
 
 	log.Printf("✅ AI KB — X12: %d entries, %d chunks, %d errors",
+		result.FilesScanned, result.ChunksStored, len(result.Errors))
+	return result
+}
+
+// IngestAppDocs ingests architecture and documentation files (*.md) from the project.
+// ONLY documentation is ingested — no Go or JavaScript source files are included,
+// so no implementation details are exposed to users through the AI assistant.
+// rootDir should be the project root (e.g. "." when running inside the container).
+func (k *KnowledgeIngestionService) IngestAppDocs(ctx context.Context, rootDir string) []IngestionResult {
+	var results []IngestionResult
+	if r := k.ingestDocDir(ctx, filepath.Join(rootDir, "architecture"), "app_docs", "arch"); r != nil {
+		results = append(results, *r)
+	}
+	if r := k.ingestDocDir(ctx, filepath.Join(rootDir, "connectivity"), "app_docs", "connectivity"); r != nil {
+		results = append(results, *r)
+	}
+	if r := k.IngestBuiltinAppKnowledge(ctx); r != nil {
+		results = append(results, *r)
+	}
+	return results
+}
+
+// ingestDocDir walks a directory and ingests all markdown (.md) files.
+func (k *KnowledgeIngestionService) ingestDocDir(ctx context.Context, dir, sourceType, refPrefix string) *IngestionResult {
+	result := &IngestionResult{SourceType: sourceType + ":" + refPrefix}
+	if _, err := os.Stat(dir); os.IsNotExist(err) {
+		return nil // directory absent — skip silently
+	}
+
+	_ = filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return nil
+		}
+		if strings.ToLower(filepath.Ext(path)) != ".md" {
+			return nil
+		}
+		result.FilesScanned++
+		text, ref, readErr := readSchemaFile(path)
+		if readErr != nil {
+			result.Errors = append(result.Errors, fmt.Sprintf("%s: %v", path, readErr))
+			return nil
+		}
+		ref = refPrefix + ":" + ref
+		n, embedErr := k.embedding.IngestText(ctx, sourceType, ref, path, text, nil)
+		if embedErr != nil {
+			result.Errors = append(result.Errors, fmt.Sprintf("%s embed: %v", path, embedErr))
+			return nil
+		}
+		result.ChunksStored += n
+		return nil
+	})
+
+	log.Printf("✅ AI KB — %s/%s: %d files, %d chunks, %d errors",
+		sourceType, refPrefix, result.FilesScanned, result.ChunksStored, len(result.Errors))
+	return result
+}
+
+// IngestBuiltinAppKnowledge ingests static knowledge about ezHealthKonnect's own
+// pipeline step types, connector configs, and app behaviour.
+// This lets ezCompanion answer "how do I..." questions accurately without exposing source code.
+func (k *KnowledgeIngestionService) IngestBuiltinAppKnowledge(ctx context.Context) *IngestionResult {
+	result := &IngestionResult{SourceType: "app_docs"}
+
+	if err := k.embedding.ClearSourceType(ctx, "app_docs"); err != nil {
+		result.Errors = append(result.Errors, fmt.Sprintf("clear: %v", err))
+	}
+
+	for _, entry := range appBuiltinKnowledge {
+		result.FilesScanned++
+		n, err := k.embedding.IngestText(ctx, "app_docs", entry.ref, "builtin:app", entry.content, nil)
+		if err != nil {
+			result.Errors = append(result.Errors, fmt.Sprintf("%s: %v", entry.ref, err))
+			continue
+		}
+		result.ChunksStored += n
+	}
+
+	log.Printf("✅ AI KB — App Docs (builtin): %d entries, %d chunks, %d errors",
 		result.FilesScanned, result.ChunksStored, len(result.Errors))
 	return result
 }

@@ -12,6 +12,8 @@ import (
 	"net/http"
 	"os"
 	"time"
+
+	"ezhealthkonnect/services"
 )
 
 // OllamaClient talks to a local Ollama instance via its REST API.
@@ -22,31 +24,55 @@ type OllamaClient struct {
 	EmbedModel string
 }
 
-// NewOllamaClient creates a client from environment variables.
+// NewOllamaClient creates a client, preferring DB system_settings over env vars.
+// Priority: DB (system_settings key="ai") → OLLAMA_* env vars → hardcoded defaults.
 // OLLAMA_HOST        (default: http://ollama:11434)
-// OLLAMA_CHAT_MODEL  (default: llama3.1:8b)
+// OLLAMA_CHAT_MODEL  (default: llama3.2:3b)
 // OLLAMA_EMBED_MODEL (default: nomic-embed-text)
 func NewOllamaClient() *OllamaClient {
 	host := os.Getenv("OLLAMA_HOST")
 	if host == "" {
 		host = "http://ollama:11434"
 	}
-	chatModel := os.Getenv("OLLAMA_CHAT_MODEL")
+
+	// Seed from DB settings; chatModel() re-reads on every request so the
+	// stored value here is only the startup snapshot / fallback.
+	dbCfg := services.GetAppSettings().GetAIConfig().Ollama
+
+	chatModel := dbCfg.ChatModel
 	if chatModel == "" {
-		chatModel = "llama3.2:3b" // 3B is ~3x faster on CPU-only Docker; override via OLLAMA_CHAT_MODEL env
+		chatModel = os.Getenv("OLLAMA_CHAT_MODEL")
 	}
-	embedModel := os.Getenv("OLLAMA_EMBED_MODEL")
+	if chatModel == "" {
+		chatModel = "llama3.2:3b"
+	}
+
+	embedModel := dbCfg.EmbedModel
+	if embedModel == "" {
+		embedModel = os.Getenv("OLLAMA_EMBED_MODEL")
+	}
 	if embedModel == "" {
 		embedModel = "nomic-embed-text"
 	}
+
 	return &OllamaClient{
 		baseURL: host,
 		httpClient: &http.Client{
-			Timeout: 300 * time.Second, // LLM generation can be slow on CPU (llama3.1:8b cold start ~2–3 min)
+			Timeout: 600 * time.Second, // large models on CPU can take several minutes
 		},
 		ChatModel:  chatModel,
 		EmbedModel: embedModel,
 	}
+}
+
+// chatModel returns the active chat model name, re-reading from the settings
+// cache on every call so a model switch in the UI takes effect within the
+// cache TTL (~5 min) without restarting the process.
+func (c *OllamaClient) chatModel() string {
+	if m := services.GetAppSettings().GetAIConfig().Ollama.ChatModel; m != "" {
+		return m
+	}
+	return c.ChatModel
 }
 
 // ─── Generate (text completion) ───────────────────────────────────────────────
@@ -66,7 +92,7 @@ type generateResponse struct {
 // Generate sends a prompt to the chat model and returns the full response text.
 func (c *OllamaClient) Generate(ctx context.Context, prompt string) (string, error) {
 	body, _ := json.Marshal(generateRequest{
-		Model:  c.ChatModel,
+		Model:  c.chatModel(),
 		Prompt: prompt,
 		Stream: false,
 	})
@@ -97,7 +123,7 @@ func (c *OllamaClient) Generate(ctx context.Context, prompt string) (string, err
 // GenerateCapped sends a prompt with a hard token cap (num_predict) to bound latency.
 func (c *OllamaClient) GenerateCapped(ctx context.Context, prompt string, maxTokens int) (string, error) {
 	opts := map[string]any{"num_predict": maxTokens, "temperature": 0.1}
-	body, _ := json.Marshal(generateRequest{Model: c.ChatModel, Prompt: prompt, Stream: false, Options: opts})
+	body, _ := json.Marshal(generateRequest{Model: c.chatModel(), Prompt: prompt, Stream: false, Options: opts})
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/api/generate", bytes.NewReader(body))
 	if err != nil {
 		return "", err
@@ -123,7 +149,7 @@ func (c *OllamaClient) GenerateCapped(ctx context.Context, prompt string, maxTok
 // Returns when generation is complete or ctx is cancelled.
 func (c *OllamaClient) GenerateStream(ctx context.Context, prompt string, onToken func(string) error) error {
 	body, _ := json.Marshal(generateRequest{
-		Model:  c.ChatModel,
+		Model:  c.chatModel(),
 		Prompt: prompt,
 		Stream: true,
 	})
@@ -237,7 +263,7 @@ func (c *OllamaClient) Ping(ctx context.Context) error {
 func (c *OllamaClient) ProviderName() string { return "ollama" }
 
 // ChatModelName satisfies LLMProvider.
-func (c *OllamaClient) ChatModelName() string { return c.ChatModel }
+func (c *OllamaClient) ChatModelName() string { return c.chatModel() }
 
 // EmbedModelName satisfies EmbedProvider.
 func (c *OllamaClient) EmbedModelName() string { return c.EmbedModel }

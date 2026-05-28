@@ -51,6 +51,23 @@ func (c *AIController) requireAIEnabled() gin.HandlerFunc {
 	}
 }
 
+// requireAdminRole returns a middleware that restricts an endpoint to admin and super_admin users.
+// The role is forwarded by the Node.js proxy in X-User-Role; this is defense-in-depth —
+// the proxy layer already enforces the same constraint before the request reaches Go.
+func (c *AIController) requireAdminRole() gin.HandlerFunc {
+	return func(ctx *gin.Context) {
+		role := ctx.GetHeader("X-User-Role")
+		if role != "admin" && role != "super_admin" {
+			ctx.AbortWithStatusJSON(http.StatusForbidden, gin.H{
+				"success": false,
+				"error":   "Admin role required",
+			})
+			return
+		}
+		ctx.Next()
+	}
+}
+
 // RegisterRoutes registers all AI endpoints under the given router group.
 func (c *AIController) RegisterRoutes(group *gin.RouterGroup) {
 	// Status — always reachable so the frontend can detect disabled state
@@ -72,18 +89,28 @@ func (c *AIController) RegisterRoutes(group *gin.RouterGroup) {
 	gated.POST("/trace-message/stream", c.TraceMessageStream)
 	gated.POST("/explain-step/stream", c.ExplainStepStream)
 
-	// Knowledge base management (admin)
-	gated.POST("/ingest", c.IngestAll)
-	gated.POST("/ingest/interface/:id", c.IngestInterface)
-	gated.POST("/ingest/pipeline/:id", c.IngestPipeline)
+	// Conversation history
+	gated.GET("/conversations", c.GetConversationHistory)
 
-	// Feedback loop — improves future suggestions
+	// Model catalog + status — read-only, any authenticated user
+	gated.GET("/models/catalog", c.GetModelCatalog)
+	gated.GET("/models/local", c.GetLocalModels)
+
+	// Feedback — user-facing writes
 	gated.POST("/feedback/mapping", c.FeedbackMapping)
 	gated.POST("/feedback/error-resolved", c.FeedbackErrorResolved)
 	gated.POST("/feedback/response", c.FeedbackResponse)
 	gated.GET("/feedback/summary", c.FeedbackSummary)
-	gated.GET("/feedback/export", c.FeedbackExport)
-	gated.POST("/feedback/submit-to-team", c.FeedbackSubmitToTeam)
+
+	// Admin-only: knowledge base ingest, model pull, feedback export/submit
+	admin := group.Use(c.requireAIEnabled(), c.requireAdminRole())
+	admin.POST("/ingest", c.IngestAll)
+	admin.POST("/ingest/interface/:id", c.IngestInterface)
+	admin.POST("/ingest/pipeline/:id", c.IngestPipeline)
+	admin.POST("/ingest/docs", c.IngestDocs)
+	admin.POST("/models/pull", c.PullModelStream)
+	admin.GET("/feedback/export", c.FeedbackExport)
+	admin.POST("/feedback/submit-to-team", c.FeedbackSubmitToTeam)
 }
 
 // ─── GET /api/ai/status ───────────────────────────────────────────────────────
@@ -185,10 +212,9 @@ func (c *AIController) ExplainError(ctx *gin.Context) {
 
 type askRequest struct {
 	Question  string                `json:"question" binding:"required"`
-	SessionID string                `json:"session_id"`          // enables conversation memory
-	UserID    string                `json:"user_id"`             // for turn attribution
-	Context   ai.RequestContext     `json:"context"`             // current UI state
-	History   []ai.ConversationTurn `json:"history"`             // explicit history (overrides DB lookup)
+	SessionID string                `json:"session_id"`  // enables conversation memory
+	Context   ai.RequestContext     `json:"context"`     // current UI state
+	History   []ai.ConversationTurn `json:"history"`     // explicit history (overrides DB lookup)
 }
 
 func (c *AIController) Ask(ctx *gin.Context) {
@@ -197,13 +223,13 @@ func (c *AIController) Ask(ctx *gin.Context) {
 		ctx.JSON(http.StatusBadRequest, gin.H{"success": false, "error": err.Error()})
 		return
 	}
-	reqCtx, cancel := context.WithTimeout(ctx.Request.Context(), 300*time.Second)
+	reqCtx, cancel := context.WithTimeout(ctx.Request.Context(), 600*time.Second)
 	defer cancel()
 
 	answer, chunks, err := c.svc.AskQuestion(reqCtx, ai.AskInput{
 		Question:        req.Question,
 		SessionID:       req.SessionID,
-		UserID:          req.UserID,
+		UserID:          ctx.GetHeader("X-User-ID"),
 		RequestContext:  req.Context,
 		HistoryOverride: req.History,
 	})
@@ -236,14 +262,14 @@ func (c *AIController) AskStream(ctx *gin.Context) {
 
 	sseHeaders(ctx)
 
-	reqCtx, cancel := context.WithTimeout(ctx.Request.Context(), 300*time.Second)
+	reqCtx, cancel := context.WithTimeout(ctx.Request.Context(), 600*time.Second)
 	defer cancel()
 
 	writeSSE := sseWriter(ctx)
 	_, err := c.svc.AskQuestionStream(reqCtx, ai.AskInput{
 		Question:        req.Question,
 		SessionID:       req.SessionID,
-		UserID:          req.UserID,
+		UserID:          ctx.GetHeader("X-User-ID"),
 		RequestContext:  req.Context,
 		HistoryOverride: req.History,
 	}, func(token string) error {
@@ -674,9 +700,8 @@ func (c *AIController) FeedbackExport(ctx *gin.Context) {
 // ─── POST /api/ai/feedback/submit-to-team ────────────────────────────────────
 
 type submitToTeamRequest struct {
-	Days          int    `json:"days"`
-	AdminComment  string `json:"admin_comment"` // operator's notes to include
-	WebhookURL    string `json:"webhook_url"`   // overrides setting (for testing)
+	Days         int    `json:"days"`
+	AdminComment string `json:"admin_comment"` // operator's notes to include
 }
 
 // FeedbackSubmitToTeam sends an anonymized aggregate report to the ezHealthKonnect
@@ -688,10 +713,7 @@ func (c *AIController) FeedbackSubmitToTeam(ctx *gin.Context) {
 		req.Days = 30
 	}
 
-	webhookURL := req.WebhookURL
-	if webhookURL == "" {
-		webhookURL = services.GetAppSettings().GetAIConfig().FeedbackWebhookURL
-	}
+	webhookURL := services.GetAppSettings().GetAIConfig().FeedbackWebhookURL
 
 	reqCtx, cancel := context.WithTimeout(ctx.Request.Context(), 15*time.Second)
 	defer cancel()
@@ -717,6 +739,128 @@ func (c *AIController) FeedbackSubmitToTeam(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": fmt.Sprintf("Submitted %d feedback records to ezHealthKonnect team.", summary.Total),
+	})
+}
+
+// ─── GET /api/ai/conversations ────────────────────────────────────────────────
+
+// GetConversationHistory returns stored turns for a session so the frontend
+// can replay history when the user reopens the chat panel.
+func (c *AIController) GetConversationHistory(ctx *gin.Context) {
+	sessionID := ctx.Query("session_id")
+	if sessionID == "" {
+		ctx.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "session_id required"})
+		return
+	}
+	userID := ctx.GetHeader("X-User-ID")
+	if userID == "" {
+		ctx.JSON(http.StatusUnauthorized, gin.H{"success": false, "error": "authentication required"})
+		return
+	}
+	limit := 50
+	if v := ctx.Query("limit"); v != "" {
+		fmt.Sscanf(v, "%d", &limit)
+	}
+
+	reqCtx, cancel := context.WithTimeout(ctx.Request.Context(), 10*time.Second)
+	defer cancel()
+
+	msgs, err := c.svc.Memory.LoadHistoryWithTimestamps(reqCtx, sessionID, userID, limit)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": err.Error()})
+		return
+	}
+	ctx.JSON(http.StatusOK, gin.H{"success": true, "data": msgs, "count": len(msgs)})
+}
+
+// ─── GET /api/ai/models/catalog ───────────────────────────────────────────────
+
+// GetModelCatalog returns the curated list of recommended Ollama models.
+func (c *AIController) GetModelCatalog(ctx *gin.Context) {
+	ctx.JSON(http.StatusOK, gin.H{"success": true, "data": ai.ModelCatalog()})
+}
+
+// ─── GET /api/ai/models/local ─────────────────────────────────────────────────
+
+// GetLocalModels lists models already downloaded on the Ollama instance.
+func (c *AIController) GetLocalModels(ctx *gin.Context) {
+	ollama := c.svc.OllamaClient()
+	if ollama == nil {
+		ctx.JSON(http.StatusServiceUnavailable, gin.H{"success": false, "error": "Ollama not configured"})
+		return
+	}
+	reqCtx, cancel := context.WithTimeout(ctx.Request.Context(), 10*time.Second)
+	defer cancel()
+
+	models, err := ollama.ListModels(reqCtx)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": err.Error()})
+		return
+	}
+	ctx.JSON(http.StatusOK, gin.H{"success": true, "data": models, "count": len(models)})
+}
+
+// ─── POST /api/ai/models/pull ─────────────────────────────────────────────────
+
+type pullModelRequest struct {
+	Model string `json:"model" binding:"required"`
+}
+
+// PullModelStream triggers an Ollama model pull and streams progress as SSE.
+// Each event: data: {"status":"...","completed":N,"total":N,"percent":N}
+// End:         data: [DONE]
+// Error:       data: [ERROR] message
+func (c *AIController) PullModelStream(ctx *gin.Context) {
+	var req pullModelRequest
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"success": false, "error": err.Error()})
+		return
+	}
+
+	ollama := c.svc.OllamaClient()
+	if ollama == nil {
+		ctx.JSON(http.StatusServiceUnavailable, gin.H{"success": false, "error": "Ollama not configured"})
+		return
+	}
+
+	sseHeaders(ctx)
+	writeSSE := sseWriter(ctx)
+
+	// 30-minute timeout — large models take time
+	reqCtx, cancel := context.WithTimeout(ctx.Request.Context(), 30*time.Minute)
+	defer cancel()
+
+	err := ollama.PullModel(reqCtx, req.Model, func(event ai.PullProgress) error {
+		b, _ := json.Marshal(event)
+		return writeSSE(string(b))
+	})
+	if err != nil {
+		writeSSE("[ERROR] " + err.Error())
+	}
+	writeSSE("[DONE]")
+}
+
+// ─── POST /api/ai/ingest/docs ─────────────────────────────────────────────────
+
+// IngestDocs rebuilds the app documentation knowledge (architecture docs, connector docs).
+// Does NOT ingest source code — only behavioural documentation safe to expose to users.
+func (c *AIController) IngestDocs(ctx *gin.Context) {
+	reqCtx, cancel := context.WithTimeout(ctx.Request.Context(), 15*time.Minute)
+	defer cancel()
+
+	results := c.svc.Ingestion.IngestAppDocs(reqCtx, ".")
+	totalChunks, totalErrors := 0, 0
+	for _, r := range results {
+		totalChunks += r.ChunksStored
+		totalErrors += len(r.Errors)
+	}
+	ctx.JSON(http.StatusOK, gin.H{
+		"success": totalErrors == 0,
+		"data": gin.H{
+			"results":      results,
+			"total_chunks": totalChunks,
+			"total_errors": totalErrors,
+		},
 	})
 }
 

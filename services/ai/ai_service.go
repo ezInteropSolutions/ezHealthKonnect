@@ -23,13 +23,15 @@ ezHealthKonnect: Interfaces connect healthcare systems via 32+ connectors (TCP/M
 
 Healthcare standards: HL7 v2 (ADT, ORU, ORM, MDM, SIU — segments MSH/PID/PV1/OBR/OBX/DG1), FHIR R4 (Patient, Encounter, Observation, Condition, Procedure, Bundle, Claim), X12 835/837/270/271, CCD/C-CDA R2.1, LOINC, SNOMED CT, ICD-10, RxNorm, CPT, NPI. Da Vinci PAS STU2 (CMS-0057-F): prior authorization via FHIR $submit operation; payer responds with ClaimResponse; X12 review action codes A1=AA (approved), A2=CP (partial approval), A3/A4=AD (denied), A6=PE (pended/pending review).
 
-Rules: Be direct and practical. For pipeline script steps use function named transform(input) returning the modified object. Never invent field codes. Say "I don't know" when uncertain.`
+Rules: Be direct and practical. For pipeline script steps use function named transform(input) returning the modified object. Never invent field codes. Say "I don't know" when uncertain.
+PHI/data isolation is absolute: ezHealthKonnect runs entirely on-premise. No patient data, HL7 messages, or AI queries ever leave the local Docker network. OpenAI, Anthropic, ChatGPT, and all cloud AI providers are intentionally disconnected for HIPAA compliance. When asked about data leaving the network or external AI services, state this definitively — never hedge with "possibly" or "indirectly".`
 
 // AIService wires together all local AI capabilities.
 type AIService struct {
 	llm         LLMProvider      // chat/generation provider (may be queued)
 	embedder    LLMProvider      // embedding provider (always Ollama for RAG consistency)
 	ollama      *OllamaClient    // kept for backward-compat; same as llm when using Ollama
+	db          *sql.DB          // kept for startup chunk-count check in BackgroundIngestAll
 	rag         *RAGService
 	embedding   *EmbeddingService
 	Ingestion   *KnowledgeIngestionService   // static schema files (HL7, FHIR, X12, CCD)
@@ -51,6 +53,7 @@ func NewAIServiceWithProvider(db *sql.DB, chatProvider LLMProvider, embedProvide
 	return &AIService{
 		llm:         chatProvider,
 		embedder:    embedProvider,
+		db:          db,
 		rag:         newRAGServiceWithProvider(db, chatProvider, embedProvider),
 		embedding:   embedding,
 		Ingestion:   NewKnowledgeIngestionService(embedding),
@@ -733,7 +736,7 @@ func (s *AIService) AskQuestion(ctx context.Context, input AskInput) (string, []
 	// Layer 3: conversation history
 	history := input.HistoryOverride
 	if len(history) == 0 && input.SessionID != "" && s.Memory != nil {
-		history, _ = s.Memory.LoadHistory(ctx, input.SessionID, 10)
+		history, _ = s.Memory.LoadHistory(ctx, input.SessionID, 2)
 	}
 
 	// Layer 2: live system context
@@ -751,8 +754,10 @@ func (s *AIService) AskQuestion(ctx context.Context, input AskInput) (string, []
 	systemPrompt := ctxPrefix + historyText + ezCompanionSystemPrompt
 
 	// Layer 1: RAG retrieval + LLM generation
-	// Also search operational KB so answers reference YOUR interfaces, not hypothetical ones
-	answer, chunks, err := s.rag.Query(ctx, input.Question, systemPrompt, defaultTopK, nil)
+	// topK=4 and maxTokens=400 keep total round-trip within 600s on CPU-only hardware.
+	// On CPU, llama3.2:3b evaluates ~6 input tokens/sec and generates ~1 token/sec;
+	// 400-token output cap + reduced history/RAG keeps total time to ~450s worst-case.
+	answer, chunks, err := s.rag.QueryCapped(ctx, input.Question, systemPrompt, 4, 400, nil)
 	if err != nil {
 		return "", chunks, err
 	}
@@ -883,16 +888,34 @@ type ConversationTurn struct {
 func (s *AIService) BackgroundIngestAll(schemaDir string) {
 	go func() {
 		ctx := context.Background()
-		log.Printf("🤖 AI KB — starting background knowledge ingestion from %s", schemaDir)
 
-		schemaResults := s.Ingestion.IngestAll(ctx, schemaDir)
+		// Skip expensive static schema ingest (HL7, FHIR, X12, CCD) when the KB
+		// already has app_docs and schema chunks from a previous run. Static schemas
+		// don't change between restarts — only re-ingest them via POST /api/ai/ingest.
+		// Operational data (interfaces, pipelines) is always refreshed because it changes.
+		skipStatic := false
+		if s.db != nil {
+			var n int
+			if err := s.db.QueryRowContext(ctx,
+				`SELECT COUNT(*) FROM ai_knowledge_chunks WHERE source_type IN ('app_docs','ig_anchors','ig_assemblyrules','ig_valuesets','x12','ccd')`).
+				Scan(&n); err == nil && n > 0 {
+				skipStatic = true
+				log.Printf("🤖 AI KB — %d static chunks already present, skipping schema re-ingest (restart optimisation)", n)
+			}
+		}
+
+		var schemaResults []IngestionResult
+		if !skipStatic {
+			log.Printf("🤖 AI KB — starting full knowledge ingestion from %s", schemaDir)
+			schemaResults = s.Ingestion.IngestAll(ctx, schemaDir)
+		}
 		opResults := s.Operational.IngestAll(ctx)
 
 		total := 0
 		for _, r := range append(schemaResults, opResults...) {
 			total += r.ChunksStored
 		}
-		log.Printf("✅ AI KB — ingestion complete: %d total chunks", total)
+		log.Printf("✅ AI KB — ingestion complete: %d chunks stored", total)
 	}()
 }
 

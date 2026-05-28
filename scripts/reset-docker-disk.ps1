@@ -3,41 +3,32 @@
 # Safely backs up postgres + minio, wipes the Docker WSL disk to reclaim space,
 # then fully restores and brings the stack back up.
 #
-# SAFE DEFAULTS:
-#   - Keeps last 3 dated backups — never overwrites a good backup
-#   - Verifies backup integrity BEFORE deleting the .vhdx
-#   - Aborts the wipe if backup looks too small or corrupt
-#   - Supports running phases independently so a failed restore
-#     doesn't force you to re-backup (which would destroy your data)
-#
 # Usage:
-#   Full run (backup → wipe → restore):
+#   Full run (backup, wipe, restore):
 #       .\scripts\reset-docker-disk.ps1
 #
-#   Backup only (no wipe, no restore):
+#   Backup only:
 #       .\scripts\reset-docker-disk.ps1 -Phase Backup
 #
-#   Restore only (after manual Docker restart, skips backup + wipe):
+#   Restore only (after a failed restore or manual Docker restart):
 #       .\scripts\reset-docker-disk.ps1 -Phase Restore
 #
-#   Wipe only (backup must already exist and be verified):
-#       .\scripts\reset-docker-disk.ps1 -Phase Wipe
-#
-# ─────────────────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------------
 
 param(
-    [ValidateSet("All", "Backup", "Wipe", "Restore")]
+    [ValidateSet("All","Backup","Wipe","Restore")]
     [string]$Phase = "All",
 
-    # Where to store backups — must be on Windows filesystem (survives .vhdx wipe)
-    # Change this to a different drive (e.g. D:\Backups) if C: is running low
     [string]$BackupDir = "$env:USERPROFILE\ezHealthKonnect-Backups",
 
-    # How many dated backups to keep (oldest deleted automatically)
     [int]$KeepBackups = 3,
 
-    # Minimum expected backup size in MB — abort if smaller (catches empty-volume backups)
-    [int]$MinBackupMB = 100
+    [int]$MinBackupMB = 100,
+
+    # Skip the interactive "Type YES" confirmation in the Wipe phase.
+    # Used by the one-click .bat launcher; do NOT pass this flag manually
+    # unless you are certain a valid backup already exists.
+    [switch]$AutoConfirm
 )
 
 Set-StrictMode -Version Latest
@@ -48,10 +39,13 @@ $VhdxPath   = "$env:LOCALAPPDATA\Docker\wsl\disk\docker_data.vhdx"
 $DockerExe  = "$env:ProgramFiles\Docker\Docker\Docker Desktop.exe"
 $Timestamp  = Get-Date -Format "yyyyMMdd_HHmm"
 
-# ─── HELPERS ─────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
 
 function Write-Step([string]$msg) {
-    Write-Host "`n==> $msg" -ForegroundColor Cyan
+    Write-Host ""
+    Write-Host "==> $msg" -ForegroundColor Cyan
 }
 
 function Write-OK([string]$msg) {
@@ -62,8 +56,9 @@ function Write-Warn([string]$msg) {
     Write-Host "    WARN: $msg" -ForegroundColor Yellow
 }
 
-function Abort([string]$msg) {
-    Write-Host "`nABORTED: $msg" -ForegroundColor Red
+function Safe-Abort([string]$msg) {
+    Write-Host ""
+    Write-Host "ABORTED: $msg" -ForegroundColor Red
     Write-Host "The .vhdx has NOT been deleted. Your data is safe." -ForegroundColor Green
     exit 1
 }
@@ -71,148 +66,182 @@ function Abort([string]$msg) {
 function Wait-ForDocker {
     Write-Host "    Waiting for Docker daemon" -NoNewline
     $deadline = (Get-Date).AddSeconds(180)
+    $ready = $false
     while ((Get-Date) -lt $deadline) {
         Start-Sleep -Seconds 5
         Write-Host "." -NoNewline
         docker info 2>$null | Out-Null
         if ($LASTEXITCODE -eq 0) {
-            Write-Host " ready." -ForegroundColor Green
-            return
+            $ready = $true
+            break
         }
     }
-    Write-Host ""
-    throw "Docker did not become ready within 3 minutes. Start Docker Desktop manually, then re-run with -Phase Restore."
+    if ($ready) {
+        Write-Host " ready." -ForegroundColor Green
+    } else {
+        Write-Host ""
+        throw "Docker did not start within 3 minutes. Start Docker Desktop manually then re-run with -Phase Restore."
+    }
 }
 
 function Get-LatestBackup([string]$prefix) {
-    Get-ChildItem "$BackupDir\${prefix}_*.tar.gz" -ErrorAction SilentlyContinue |
-        Sort-Object LastWriteTime -Descending |
-        Select-Object -First 1
+    $pattern = Join-Path $BackupDir "${prefix}_*.tar.gz"
+    $files = Get-ChildItem $pattern -ErrorAction SilentlyContinue |
+             Sort-Object LastWriteTime -Descending
+    if ($files) { return $files[0] } else { return $null }
 }
 
-function Verify-Backup([string]$path, [string]$label) {
+function Verify-Backup([string]$filePath, [string]$label) {
     Write-Host "    Verifying $label backup..."
-
-    # Size check
-    $sizeMB = [math]::Round((Get-Item $path).Length / 1MB, 1)
+    $sizeMB = [math]::Round((Get-Item $filePath).Length / 1MB, 1)
     if ($sizeMB -lt $MinBackupMB) {
-        Abort "$label backup is only ${sizeMB} MB (minimum $MinBackupMB MB). This looks like an empty volume was backed up. The .vhdx will NOT be deleted."
+        Safe-Abort "$label backup is only ${sizeMB} MB (minimum $MinBackupMB MB). Looks like an empty volume was backed up. The .vhdx will NOT be deleted."
     }
-    Write-OK "Size: ${sizeMB} MB"
+    Write-OK "Size OK: ${sizeMB} MB"
 
-    # Integrity check — list the archive contents
-    docker run --rm `
-        -v "${path}:/check/file.tar.gz" `
-        alpine tar tzf /check/file.tar.gz 2>$null | Out-Null
-
+    $mountPath = $filePath -replace '\\','/' -replace '^([A-Za-z]):','/$1'
+    docker run --rm -v "${mountPath}:/check/file.tar.gz" alpine tar tzf /check/file.tar.gz 2>$null | Out-Null
     if ($LASTEXITCODE -ne 0) {
-        Abort "$label backup failed integrity check (tar could not read the archive). The .vhdx will NOT be deleted."
+        Safe-Abort "$label backup failed integrity check (tar could not read the archive). The .vhdx will NOT be deleted."
     }
     Write-OK "Archive integrity OK"
 }
 
 function Prune-OldBackups([string]$prefix) {
-    $all = Get-ChildItem "$BackupDir\${prefix}_*.tar.gz" -ErrorAction SilentlyContinue |
-               Sort-Object LastWriteTime -Descending
-    if ($all.Count -gt $KeepBackups) {
-        $all | Select-Object -Skip $KeepBackups | ForEach-Object {
-            Write-Warn "Removing old backup: $($_.Name)"
-            Remove-Item $_.FullName -Force
+    $pattern = Join-Path $BackupDir "${prefix}_*.tar.gz"
+    $files = Get-ChildItem $pattern -ErrorAction SilentlyContinue |
+             Sort-Object LastWriteTime -Descending
+    if ($files.Count -gt $KeepBackups) {
+        $toDelete = $files | Select-Object -Skip $KeepBackups
+        foreach ($f in $toDelete) {
+            Write-Warn "Removing old backup: $($f.Name)"
+            Remove-Item $f.FullName -Force
         }
     }
 }
 
-# ─── PHASE: BACKUP ───────────────────────────────────────────────────────────
+function Convert-ToDockerPath([string]$winPath) {
+    return $winPath -replace '\\','/' -replace '^([A-Za-z]):','/$1'
+}
+
+# ---------------------------------------------------------------------------
+# Phase: Backup
+# ---------------------------------------------------------------------------
 
 function Run-Backup {
     Write-Step "PHASE 1: BACKUP"
 
-    # Ensure backup directory exists on Windows filesystem
-    if (-not (Test-Path $BackupDir)) { New-Item -ItemType Directory -Path $BackupDir | Out-Null }
+    if (-not (Test-Path $BackupDir)) {
+        New-Item -ItemType Directory -Path $BackupDir | Out-Null
+    }
 
-    $pgFile    = "$BackupDir\postgres_${Timestamp}.tar.gz"
-    $minioFile = "$BackupDir\minio_${Timestamp}.tar.gz"
+    # Ensure Docker is running before we do anything
+    docker info 2>$null | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "    Docker is not running -- starting Docker Desktop..."
+        Start-Process $DockerExe
+        Wait-ForDocker
+    }
 
-    # Check volumes exist before backing up
-    $volumes = docker volume ls --format "{{.Name}}" 2>$null
-    if ($volumes -notcontains "ezhealthkonnect_postgres_data") {
-        Abort "Volume 'ezhealthkonnect_postgres_data' does not exist. Nothing to back up — is the stack running?"
+    # Check the postgres volume actually exists before backing up
+    docker volume inspect ezhealthkonnect_postgres_data 2>$null | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        Safe-Abort "Volume ezhealthkonnect_postgres_data does not exist. Is the stack running?"
     }
 
     Write-Step "Stopping all containers"
     Set-Location $ComposeDir
     docker compose down
 
-    # Convert Windows path to Docker-compatible mount format
-    $backupDirDocker = $BackupDir -replace '\\', '/' -replace '^([A-Z]):', '/$1'
+    $pgFile    = Join-Path $BackupDir "postgres_${Timestamp}.tar.gz"
+    $minioFile = Join-Path $BackupDir "minio_${Timestamp}.tar.gz"
+    $backupDockerPath = Convert-ToDockerPath $BackupDir
 
-    Write-Host "    Backing up postgres → $pgFile"
+    Write-Host "    Backing up postgres -> $pgFile"
     docker run --rm `
-        -v ezhealthkonnect_postgres_data:/data `
-        -v "${backupDirDocker}:/backup" `
-        alpine tar czf /backup/postgres_${Timestamp}.tar.gz -C /data .
+        -v "ezhealthkonnect_postgres_data:/data" `
+        -v "${backupDockerPath}:/backup" `
+        alpine tar czf "/backup/postgres_${Timestamp}.tar.gz" -C /data .
 
-    Write-Host "    Backing up minio → $minioFile"
+    Write-Host "    Backing up minio -> $minioFile"
     docker run --rm `
-        -v ezhealthkonnect_minio_data:/data `
-        -v "${backupDirDocker}:/backup" `
-        alpine tar czf /backup/minio_${Timestamp}.tar.gz -C /data .
+        -v "ezhealthkonnect_minio_data:/data" `
+        -v "${backupDockerPath}:/backup" `
+        alpine tar czf "/backup/minio_${Timestamp}.tar.gz" -C /data .
 
-    # Verify both backups before allowing the wipe phase to proceed
     Verify-Backup $pgFile    "postgres"
     Verify-Backup $minioFile "minio"
 
-    # Clean up old backups beyond retention limit
     Prune-OldBackups "postgres"
     Prune-OldBackups "minio"
 
     Write-OK "Backup complete. Safe to wipe."
-    Write-Host "    Postgres: $pgFile" -ForegroundColor White
-    Write-Host "    MinIO:    $minioFile" -ForegroundColor White
+    Write-Host "    Postgres : $pgFile" -ForegroundColor White
+    Write-Host "    MinIO    : $minioFile" -ForegroundColor White
 }
 
-# ─── PHASE: WIPE ─────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------------
+# Phase: Wipe
+# ---------------------------------------------------------------------------
 
 function Run-Wipe {
     Write-Step "PHASE 2: WIPE DOCKER DISK"
 
-    # Safety gate — refuse to wipe if no verified backup exists
     $latestPg    = Get-LatestBackup "postgres"
     $latestMinio = Get-LatestBackup "minio"
 
     if (-not $latestPg) {
-        Abort "No postgres backup found in $BackupDir. Run with -Phase Backup first."
+        Safe-Abort "No postgres backup found in $BackupDir. Run with -Phase Backup first."
     }
     if (-not $latestMinio) {
-        Abort "No minio backup found in $BackupDir. Run with -Phase Backup first."
+        Safe-Abort "No minio backup found in $BackupDir. Run with -Phase Backup first."
     }
 
-    Write-Host "    Latest postgres backup: $($latestPg.Name) ($([math]::Round($latestPg.Length/1MB,1)) MB)"
-    Write-Host "    Latest minio backup:    $($latestMinio.Name) ($([math]::Round($latestMinio.Length/1MB,1)) MB)"
-
+    $pgMB    = [math]::Round($latestPg.Length / 1MB, 1)
+    $minioMB = [math]::Round($latestMinio.Length / 1MB, 1)
+    Write-Host "    Latest postgres backup : $($latestPg.Name) (${pgMB} MB)"
+    Write-Host "    Latest minio backup    : $($latestMinio.Name) (${minioMB} MB)"
     Write-Host ""
     Write-Host "    About to delete: $VhdxPath" -ForegroundColor Yellow
     Write-Host "    This will wipe ALL Docker images, containers, and volumes." -ForegroundColor Yellow
-    $confirm = Read-Host "    Type YES to confirm"
-    if ($confirm -ne "YES") { Abort "Cancelled by user." }
+
+    if ($AutoConfirm) {
+        Write-Host ""
+        Write-Host "    AUTO-CONFIRM mode -- proceeding in 10 seconds. Press Ctrl+C to abort." -ForegroundColor Yellow
+        for ($i = 10; $i -gt 0; $i--) {
+            Write-Host "    $i..." -NoNewline
+            Start-Sleep -Seconds 1
+        }
+        Write-Host ""
+    } else {
+        $confirm = Read-Host "    Type YES to confirm"
+        if ($confirm -ne "YES") {
+            Safe-Abort "Cancelled by user."
+        }
+    }
 
     Write-Host "    Stopping Docker Desktop..."
-    Get-Process "Docker Desktop" -ErrorAction SilentlyContinue | Stop-Process -Force
-    Start-Sleep -Seconds 8
+    $proc = Get-Process "Docker Desktop" -ErrorAction SilentlyContinue
+    if ($proc) {
+        $proc | Stop-Process -Force
+        Start-Sleep -Seconds 8
+    }
 
     Write-Host "    Shutting down WSL..."
     wsl --shutdown 2>$null | Out-Null
     Start-Sleep -Seconds 3
 
     if (-not (Test-Path $VhdxPath)) {
-        Write-Warn ".vhdx not found — may already be deleted. Continuing."
+        Write-Warn ".vhdx not found at $VhdxPath -- may already be deleted. Continuing."
     } else {
         Remove-Item $VhdxPath -Force
         Write-OK "Deleted $VhdxPath"
     }
 }
 
-# ─── PHASE: RESTORE ──────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------------
+# Phase: Restore
+# ---------------------------------------------------------------------------
 
 function Run-Restore {
     Write-Step "PHASE 3: RESTORE"
@@ -224,11 +253,12 @@ function Run-Restore {
     if (-not $latestMinio) { throw "No minio backup found in $BackupDir" }
 
     Write-Host "    Restoring from:"
-    Write-Host "      Postgres: $($latestPg.FullName)"
-    Write-Host "      MinIO:    $($latestMinio.FullName)"
+    Write-Host "      Postgres : $($latestPg.FullName)"
+    Write-Host "      MinIO    : $($latestMinio.FullName)"
 
     Write-Step "Starting Docker Desktop"
-    if (-not (Get-Process "Docker Desktop" -ErrorAction SilentlyContinue)) {
+    $running = Get-Process "Docker Desktop" -ErrorAction SilentlyContinue
+    if (-not $running) {
         Start-Process $DockerExe
     }
     Wait-ForDocker
@@ -239,19 +269,19 @@ function Run-Restore {
     docker volume create ezhealthkonnect_ollama_data   | Out-Null
     Write-OK "Volumes created"
 
-    $backupDirDocker = $BackupDir -replace '\\', '/' -replace '^([A-Z]):', '/$1'
+    $backupDockerPath = Convert-ToDockerPath $BackupDir
 
-    Write-Step "Restoring postgres data"
+    Write-Step "Restoring postgres"
     docker run --rm `
-        -v ezhealthkonnect_postgres_data:/data `
-        -v "${backupDirDocker}:/backup" `
+        -v "ezhealthkonnect_postgres_data:/data" `
+        -v "${backupDockerPath}:/backup" `
         alpine sh -c "cd /data && tar xzf /backup/$($latestPg.Name)"
     Write-OK "Postgres restored"
 
-    Write-Step "Restoring minio data"
+    Write-Step "Restoring minio"
     docker run --rm `
-        -v ezhealthkonnect_minio_data:/data `
-        -v "${backupDirDocker}:/backup" `
+        -v "ezhealthkonnect_minio_data:/data" `
+        -v "${backupDockerPath}:/backup" `
         alpine sh -c "cd /data && tar xzf /backup/$($latestMinio.Name)"
     Write-OK "MinIO restored"
 
@@ -265,17 +295,17 @@ function Run-Restore {
     Start-Sleep -Seconds 5
     Write-Host ""
     docker compose ps
-    Write-Host "`nAll done. App at http://localhost:3000" -ForegroundColor Green
+    Write-Host ""
+    Write-Host "All done. App at http://localhost:3000" -ForegroundColor Green
 }
 
-# ─── ENTRYPOINT ──────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------------
+# Entry point
+# ---------------------------------------------------------------------------
 
 Write-Host "ezHealthKonnect Docker Disk Reset" -ForegroundColor Magenta
 Write-Host "Phase: $Phase | Backup dir: $BackupDir | Keep: $KeepBackups backups"
 
-switch ($Phase) {
-    "Backup"  { Run-Backup }
-    "Wipe"    { Run-Wipe }
-    "Restore" { Run-Restore }
-    "All"     { Run-Backup; Run-Wipe; Run-Restore }
-}
+if ($Phase -eq "All" -or $Phase -eq "Backup") { Run-Backup }
+if ($Phase -eq "All" -or $Phase -eq "Wipe")   { Run-Wipe }
+if ($Phase -eq "All" -or $Phase -eq "Restore") { Run-Restore }

@@ -291,7 +291,7 @@ app.use('/api/processing', forwardToGo);  // NEW: Processing engine routes
 app.use('/api/mllp', forwardToGo);        // NEW: MLLP connectivity routes
 app.use('/api/connectivity', forwardToGo); // Connector types + interface connectivity
 app.use('/api/zsegments',   forwardToGo); // Enterprise Z-segment mapping configuration
-app.use('/api/ai', forwardToGo);           // Local AI assistant (Ollama/RAG — no PHI leaves network)
+// NOTE: /api/ai routes are registered after session middleware below (require req.session.user)
 app.use('/api/code-templates', forwardToGo); // Code Template Libraries (JS function injection into script steps)
 // /api/git is registered below (after session middleware, with requireAuth)
 app.post('/api/pipeline/reference-variables', forwardToGo);  // Exact match - avoid intercepting /api/pipelines/*
@@ -367,13 +367,21 @@ app.use(setupCheckMiddleware);
 // ─────────────────────────────────────────────────────────────────────────────
 
 // Analytics + Alerts + Git + Migration routes — require session auth before forwarding to Go
-const { requireAuth: _analyticsAuth } = require('./middleware/auth');
+const { requireAuth: _analyticsAuth, requireAdmin: _requireAdminAuth } = require('./middleware/auth');
 app.use('/api/analytics', _analyticsAuth, forwardToGo);
 app.use('/api/alerts',    _analyticsAuth, forwardToGo);
 // Override the early /api/git registration with an auth-protected version (session is now initialized)
 app.use('/api/git',       _analyticsAuth, forwardToGo);
 // Mirth Connect migration — auth required
 app.use('/api/migration', _analyticsAuth, forwardToGo);
+
+// AI assistant — session is now available; admin-only for privileged operations.
+// Specific-path rules must be registered before the catch-all /api/ai.
+app.use('/api/ai/ingest',                    _analyticsAuth, _requireAdminAuth, forwardToGo);
+app.use('/api/ai/models/pull',               _analyticsAuth, _requireAdminAuth, forwardToGo);
+app.use('/api/ai/feedback/export',           _analyticsAuth, _requireAdminAuth, forwardToGo);
+app.use('/api/ai/feedback/submit-to-team',   _analyticsAuth, _requireAdminAuth, forwardToGo);
+app.use('/api/ai', _analyticsAuth, forwardToGo);
 
 // Add request ID for audit logging
 app.use((req, res, next) => {

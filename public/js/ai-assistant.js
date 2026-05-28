@@ -17,17 +17,94 @@
 
     // ── Constants ──────────────────────────────────────────────────────────────
     const API_BASE    = '/api/ai';
-    const SESSION_KEY = 'ai_session_id';
     const WIDGET_ID   = 'ai-assistant-widget';
 
-    // ── Session ID (persists across page loads in sessionStorage) ─────────────
+    // ── User identity + persistent session ────────────────────────────────────
+    // Session IDs are stored in localStorage (not sessionStorage) so they survive
+    // tab closes and browser restarts — users return to their conversation.
+    // Key is scoped per user so different logins don't share history.
+    let _userId   = '';
+    let _userName = '';
+
+    function sessionKey() {
+        return _userId ? `ezc_sid_${_userId}` : 'ezc_sid_anon';
+    }
+
     function getSessionId() {
-        let id = sessionStorage.getItem(SESSION_KEY);
+        let id = localStorage.getItem(sessionKey());
         if (!id) {
-            id = 'session-' + Date.now() + '-' + Math.random().toString(36).slice(2);
-            sessionStorage.setItem(SESSION_KEY, id);
+            id = 'sid-' + Date.now() + '-' + Math.random().toString(36).slice(2, 9);
+            localStorage.setItem(sessionKey(), id);
         }
         return id;
+    }
+
+    function newConversation() {
+        const id = 'sid-' + Date.now() + '-' + Math.random().toString(36).slice(2, 9);
+        localStorage.setItem(sessionKey(), id);
+        _historyLoaded = false;
+        const msgs = document.getElementById('ai-messages');
+        if (msgs) {
+            msgs.innerHTML = '<div class="ai-msg system">Started a new conversation. How can I help?</div>';
+        }
+    }
+
+    // Fetch the logged-in user from the existing /api/auth/session endpoint.
+    // Caches result in module scope — called once on widget init.
+    async function resolveCurrentUser() {
+        // Prefer explicitly injected user (set by page before script runs)
+        if (window.__currentUser && window.__currentUser.id) {
+            _userId   = window.__currentUser.id;
+            _userName = window.__currentUser.name || '';
+            return;
+        }
+        try {
+            const resp = await fetch('/api/auth/session', { credentials: 'include' });
+            if (!resp.ok) return;
+            const data = await resp.json();
+            if (data.authenticated && data.user) {
+                _userId   = data.user.id   || '';
+                _userName = data.user.name || '';
+                window.__currentUser = data.user;
+            }
+        } catch { /* silent — widget still works without user ID */ }
+    }
+
+    // ── History loading ────────────────────────────────────────────────────────
+    let _historyLoaded = false;
+
+    async function loadAndRenderHistory() {
+        if (_historyLoaded) return;
+        _historyLoaded = true;
+
+        const sid = getSessionId();
+        try {
+            const resp = await fetch(`${API_BASE}/conversations?session_id=${encodeURIComponent(sid)}&limit=60`,
+                { credentials: 'include' });
+            if (!resp.ok) return;
+            const data = await resp.json();
+            const msgs = data.data;
+            if (!Array.isArray(msgs) || msgs.length === 0) return;
+
+            const container = document.getElementById('ai-messages');
+            if (!container) return;
+
+            // Insert history above the existing welcome message
+            const welcome = container.firstChild;
+            const divider = document.createElement('div');
+            divider.className = 'ai-msg system';
+            divider.style.cssText = 'font-size:11px;color:#94a3b8;text-align:center;padding:6px 0';
+            divider.textContent = `── previous conversation (${msgs.length} messages) ──`;
+            container.insertBefore(divider, welcome);
+
+            for (const msg of msgs) {
+                const el = document.createElement('div');
+                el.className = `ai-msg ${msg.role === 'user' ? 'user' : 'assistant'}`;
+                el.innerHTML = renderMarkdownInline(msg.content);
+                container.insertBefore(el, welcome);
+            }
+            container.scrollTop = container.scrollHeight;
+        } catch { /* silent */ }
     }
 
     // ── Auto-detect page context ───────────────────────────────────────────────
@@ -91,10 +168,10 @@
         const body = {
             question,
             session_id: getSessionId(),
+            user_id:    _userId,
             context:    ctx,
             history:    []
         };
-        if (window.__currentUser) body.user_id = window.__currentUser.id || '';
         return streamIntoEl('/ask/stream', body, targetEl);
     }
 
@@ -169,16 +246,8 @@
         });
         if (!resp.ok) throw new Error(`AI service error (HTTP ${resp.status})`);
 
-        const renderMarkdown = (text) => {
-            return escapeHtml(text)
-                .replace(/```([\s\S]*?)```/g, '<pre>$1</pre>')
-                .replace(/`([^`]+)`/g, '<code>$1</code>')
-                .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-                .replace(/\n/g, '<br>');
-        };
-
         return readSSEStream(resp, (_tok, full) => {
-            targetEl.innerHTML = renderMarkdown(full);
+            targetEl.innerHTML = renderMarkdownInline(full);
             const msgs = document.getElementById('ai-messages');
             if (msgs) msgs.scrollTop = msgs.scrollHeight;
         });
@@ -455,11 +524,17 @@
 <div id="ai-backdrop"></div>
 <div id="ai-panel">
     <div id="ai-panel-header">
-        <div>
+        <div style="flex:1;min-width:0">
             <div class="ai-title">✏️ ezCompanion</div>
-            <div class="ai-subtitle">Co-developer · Integration Expert · App Guide</div>
+            <div class="ai-subtitle" id="ai-user-subtitle">Co-developer · Integration Expert · App Guide</div>
         </div>
-        <button id="ai-close-btn">✕</button>
+        <div style="display:flex;gap:6px;align-items:center;flex-shrink:0">
+            <button id="ai-new-btn" title="New conversation"
+                style="background:rgba(255,255,255,0.15);border:none;color:#fff;cursor:pointer;font-size:12px;padding:4px 8px;border-radius:6px;opacity:0.9;line-height:1;white-space:nowrap">
+                + New
+            </button>
+            <button id="ai-close-btn">✕</button>
+        </div>
     </div>
     <div id="ai-context-bar">Loading context…</div>
     <div id="ai-messages">
@@ -533,6 +608,14 @@
 
     function escapeHtml(s) {
         return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    }
+
+    function renderMarkdownInline(text) {
+        return escapeHtml(text)
+            .replace(/```([\s\S]*?)```/g, '<pre>$1</pre>')
+            .replace(/`([^`]+)`/g, '<code>$1</code>')
+            .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+            .replace(/\n/g, '<br>');
     }
 
     // ── Feedback widget ────────────────────────────────────────────────────────
@@ -632,7 +715,10 @@
         document.getElementById('ai-backdrop').classList.add('visible');
         updateContextBar();
         document.getElementById('ai-input').focus();
-        if (!wasAlreadyOpen) checkStatus();
+        if (!wasAlreadyOpen) {
+            checkStatus();
+            loadAndRenderHistory();
+        }
     }
 
     function closeDrawer() {
@@ -643,6 +729,7 @@
     function wireEvents() {
         const toggleBtn = document.getElementById('ai-toggle-btn');
         const closeBtn  = document.getElementById('ai-close-btn');
+        const newBtn    = document.getElementById('ai-new-btn');
         const backdrop  = document.getElementById('ai-backdrop');
         const input     = document.getElementById('ai-input');
         const sendBtn   = document.getElementById('ai-send-btn');
@@ -650,6 +737,7 @@
         toggleBtn.addEventListener('click', openDrawer);
         closeBtn.addEventListener('click', closeDrawer);
         backdrop.addEventListener('click', closeDrawer);
+        if (newBtn) newBtn.addEventListener('click', newConversation);
 
         // Close on Escape
         document.addEventListener('keydown', e => { if (e.key === 'Escape') closeDrawer(); });
@@ -816,12 +904,19 @@
     };
 
     // ── Init ───────────────────────────────────────────────────────────────────
-    function init() {
+    async function init() {
         if (document.getElementById(WIDGET_ID)) return; // already mounted
         injectStyles();
         buildWidget();
         wireEvents();
         updateContextBar();
+
+        // Resolve user identity so session keys are user-scoped
+        await resolveCurrentUser();
+        if (_userName) {
+            const sub = document.getElementById('ai-user-subtitle');
+            if (sub) sub.textContent = `Signed in as ${_userName}`;
+        }
     }
 
     if (document.readyState === 'loading') {
