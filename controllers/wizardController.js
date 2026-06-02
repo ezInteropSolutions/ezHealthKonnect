@@ -8,9 +8,7 @@ const auditService = require('../services/auditService');
 const TransformationPipelineService = require('../services/TransformationPipelineService');
 const MessageTypeMappingService = require('../services/MessageTypeMappingService');
 const { v4: uuidv4 } = require('uuid');
-const axios = require('axios');
-
-const GO_BACKEND_URL = `http://localhost:${process.env.API_PORT || 8080}`;
+const { GO_BACKEND_URL, goClient } = require('../services/goBackendClient');
 
 class WizardController {
     /**
@@ -292,8 +290,8 @@ class WizardController {
             // Activate interface in Go backend
             try {
                 console.log('🚀 Activating interface in Go backend...');
-                const activateResponse = await axios.post(
-                    `${GO_BACKEND_URL}/api/processing/interfaces/${result.interfaceId}/activate`,
+                const activateResponse = await goClient.post(
+                    `/api/processing/interfaces/${result.interfaceId}/activate`,
                     {},
                     { timeout: 10000 }
                 );
@@ -324,7 +322,7 @@ class WizardController {
             });
 
             // Re-ingest interface into AI knowledge base (fire-and-forget, non-blocking)
-            axios.post(`${GO_BACKEND_URL}/api/ai/ingest/interface/${result.interfaceId}`)
+            goClient.post(`/api/ai/ingest/interface/${result.interfaceId}`)
                 .catch(err => console.warn('[AI] Interface KB ingestion failed (non-fatal):', err.message));
 
             res.json({
@@ -1159,8 +1157,7 @@ class WizardController {
                 // and stores only changed/added/removed entries in mapping_overrides.
                 let deltaSaved = false;
                 try {
-                    const goUrl = `${process.env.GO_BACKEND_URL || 'http://127.0.0.1:8080'}/api/fhir/interfaces/${interfaceId}/mapping-delta/${encodeURIComponent(messageType)}`;
-                    const deltaResp = await axios.put(goUrl, { atomicMappings }, { timeout: 10000 });
+                    const deltaResp = await goClient.put(`/api/fhir/interfaces/${interfaceId}/mapping-delta/${encodeURIComponent(messageType)}`, { atomicMappings }, { timeout: 10000 });
                     if (deltaResp.data?.success) {
                         const { overrideCount, isPureOOB } = deltaResp.data;
                         console.log(`✅ Delta mapping saved: ${overrideCount} overrides (isPureOOB=${isPureOOB})`);

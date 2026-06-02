@@ -121,9 +121,10 @@ function scoreResponse(answer, persona, question) {
     hits.push('Answered (detailed)');
   }
 
-  // Uncertainty signals
+  // Uncertainty signals — skip the low-confidence prefix (expected behaviour when RAG=0)
+  const strippedAnswer = answer.replace(/^_I don't have specific product documentation[^_]*_\s*/i, '');
   const uncertain = /i don't know|i'm not sure|i cannot|i do not have|unable to|not aware|no information/i;
-  if (uncertain.test(answer)) {
+  if (uncertain.test(strippedAnswer)) {
     issues.push('Expressed uncertainty — knowledge gap likely');
     score -= 1;
   }
@@ -152,9 +153,12 @@ function scoreResponse(answer, persona, question) {
     }
   }
 
-  // Hallucination signals (mentioning non-existent things)
-  const hallucination = /openai|anthropic|chatgpt|gpt-4|claude api|send.*cloud/i;
-  if (hallucination.test(answer)) {
+  // Hallucination signals (mentioning non-existent things in a positive/uncertain context)
+  // Only flag if external AI is mentioned WITHOUT clear negation — a correct answer that
+  // says "we do NOT send to OpenAI" should not be penalised.
+  const hallucinationTerms = /openai|anthropic|chatgpt|gpt-4|claude api|send.*cloud/i;
+  const negationContext = /not\s+send|does\s+not\s+send|never\s+send|intentionally\s+removed|not\s+connected|no\s+patient\s+data|not\s+directly|zero\s+visibility|does\s+not\s+use|not\s+used|were\s+removed|have\s+been\s+removed/i;
+  if (hallucinationTerms.test(answer) && !negationContext.test(answer)) {
     issues.push('⚠️  Possible hallucination: mentioned external AI service');
     score -= 2;
   }

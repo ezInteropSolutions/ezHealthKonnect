@@ -1,5 +1,6 @@
 // controllers/MessageController.js
 // Enhanced message management controller for interface-specific functionality
+const { goClient: _goClient } = require('../services/goBackendClient');
 
 class MessageController {
     constructor() {
@@ -572,10 +573,7 @@ class MessageController {
             // Trigger actual reprocessing via Go backend
             // Send the raw message back to the processing engine
             try {
-                const axios = require('axios');
-                const goBackendUrl = process.env.GO_BACKEND_URL || 'http://localhost:8080';
-
-                await axios.post(`${goBackendUrl}/api/processing/reprocess`, {
+                await _goClient.post(`/api/processing/reprocess`, {
                     messageId: messageId,
                     interfaceId: interfaceId,
                     rawMessage: message.raw_message,
@@ -1547,13 +1545,11 @@ class MessageController {
 
             // Step 2: Get the transformed message from object storage via Go API
             let transformedMessage = null;
-            const goBackendUrl = process.env.GO_BACKEND_URL || `http://localhost:${process.env.API_PORT || 8080}`;
             const storageParams = { interfaceId: inputMessage.interface_id };
             try {
-                const axios = require('axios');
                 const [rawResp, transformedResp] = await Promise.allSettled([
-                    axios.get(`${goBackendUrl}/api/messages/${inputMessage.message_id}/raw`, { params: storageParams, timeout: 10000 }),
-                    axios.get(`${goBackendUrl}/api/messages/${inputMessage.message_id}/transformed`, { params: storageParams, timeout: 10000 })
+                    _goClient.get(`/api/messages/${inputMessage.message_id}/raw`, { params: storageParams, timeout: 10000 }),
+                    _goClient.get(`/api/messages/${inputMessage.message_id}/transformed`, { params: storageParams, timeout: 10000 })
                 ]);
                 const rawContent = rawResp.status === 'fulfilled' && rawResp.value.data?.success
                     ? rawResp.value.data.content : null;
@@ -1919,10 +1915,8 @@ class MessageController {
             }
 
             // Fetch logs from Go API (backed by object storage)
-            const goBackendUrl = process.env.GO_BACKEND_URL || `http://localhost:${process.env.API_PORT || 8080}`;
-            const axios = require('axios');
-            const logsResp = await axios.get(
-                `${goBackendUrl}/api/messages/${messageId}/logs`,
+            const logsResp = await _goClient.get(
+                `/api/messages/${messageId}/logs`,
                 { params: { interfaceId }, timeout: 10000 }
             );
 

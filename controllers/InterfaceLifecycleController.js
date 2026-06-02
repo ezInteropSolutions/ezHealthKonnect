@@ -8,7 +8,12 @@ const GO_BACKEND_URL = process.env.GO_BACKEND_URL || `http://localhost:${process
 async function goFetch(path, options = {}) {
     let fetch;
     try { fetch = require('node-fetch'); } catch { fetch = global.fetch; }
-    return fetch(`${GO_BACKEND_URL}${path}`, { timeout: 10000, ...options });
+    const secret = process.env.INTERNAL_PROXY_SECRET || process.env.JWT_SECRET || '';
+    const headers = {
+        ...(options.headers || {}),
+        ...(secret ? { 'X-Internal-Proxy-Secret': secret } : {}),
+    };
+    return fetch(`${GO_BACKEND_URL}${path}`, { timeout: 10000, ...options, headers });
 }
 
 class InterfaceLifecycleController {

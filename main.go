@@ -175,9 +175,17 @@ func main() {
 				fhirSchemaDir := cfg.GetFHIRSchemaDirectory()
 				log.Printf("🔧 Initializing FHIR schema system from: %s", fhirSchemaDir)
 				fhir.InitFHIRSchemaLoader(fhirSchemaDir)
-				if err := r4.InitRegistry(fhirSchemaDir); err != nil {
-					log.Printf("⚠️  [r4] Registry init warning: %v", err)
-				}
+				// r4.InitRegistry compiles all FHIR profiles and valuesets from .gz files.
+				// Run in background so the HTTP listener opens immediately.
+				// The registry uses sync.Once internally, so any request that needs a
+				// compiled profile blocks transparently until loading completes.
+				go func() {
+					if err := r4.InitRegistry(fhirSchemaDir); err != nil {
+						log.Printf("⚠️  [r4] Registry init warning: %v", err)
+					} else {
+						log.Printf("✅ FHIR R4 registry ready")
+					}
+				}()
 			}
 
 			// Initialize Processing Engine
@@ -1206,6 +1214,106 @@ func main() {
 				c.JSON(http.StatusOK, response)
 			})
 
+			// GET /api/fhir/mapping-catalogue?messageType=ADT%5EA01&fhirVersion=R4
+			// Returns the atomicMappings list from the OOB template without running the
+			// full transform pipeline (no HL7 parse, no FHIR schema loader, no bundle).
+			// Used by the wizard step-3 preview — replaces the old 2-call flow that took
+			// 5-30 s with a single DB read that returns in ~50 ms.
+			fhirGroup.GET("/mapping-catalogue", func(c *gin.Context) {
+				messageType := c.Query("messageType")
+				if messageType == "" {
+					c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "messageType query parameter is required"})
+					return
+				}
+				fhirVersion := c.DefaultQuery("fhirVersion", "R4")
+
+				svc := services.NewHL7FHIRTransformServiceV3(db)
+				req := &services.TransformRequest{FHIRVersion: fhirVersion}
+				fieldMappings, _, err := svc.GetFieldMappingsPublic(c.Request.Context(), messageType, fhirVersion, req)
+				if err != nil || len(fieldMappings) == 0 {
+					// Fall back to ADT^A01 so the UI always gets something usable
+					log.Printf("⚠️ mapping-catalogue: no template for %s (%v), falling back to ADT^A01", messageType, err)
+					fallbackReq := &services.TransformRequest{FHIRVersion: fhirVersion}
+					fieldMappings, _, err = svc.GetFieldMappingsPublic(c.Request.Context(), "ADT^A01", fhirVersion, fallbackReq)
+					if err != nil {
+						c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": err.Error()})
+						return
+					}
+					messageType = "ADT^A01"
+				}
+
+				atomicMappings := svc.ConvertToAtomicMappingsPublic(fieldMappings)
+				c.JSON(http.StatusOK, gin.H{
+					"success":         true,
+					"messageType":     messageType,
+					"hl7Version":      "2.5",
+					"fhirVersion":     fhirVersion,
+					"atomicMappings":  atomicMappings,
+					"validationErrors": []string{},
+				})
+			})
+
+			// GET /api/fhir/interfaces/:id/resolved-mappings?messageType=ADT%5EA01&fhirVersion=R4
+			// Returns the fully-resolved atomicMappings for the given interface + message type,
+			// exactly as the runtime 5-step chain would produce them.
+			// This is the single read path for the pipeline builder UI — the step config stores
+			// only a reference (interface_id + message_type); the UI fetches from here on open.
+			fhirGroup.GET("/interfaces/:interfaceId/resolved-mappings", func(c *gin.Context) {
+				interfaceID := c.Param("interfaceId")
+				messageType := c.DefaultQuery("messageType", "ADT^A01")
+				fhirVersion := c.DefaultQuery("fhirVersion", "R4")
+
+				svc := services.NewHL7FHIRTransformServiceV3(db)
+				req := &services.TransformRequest{
+					InterfaceID: interfaceID,
+					FHIRVersion: fhirVersion,
+				}
+				fieldMappings, _, err := svc.GetFieldMappingsPublic(c.Request.Context(), messageType, fhirVersion, req)
+				if err != nil || len(fieldMappings) == 0 {
+					log.Printf("⚠️ resolved-mappings: no mappings for interface %s / %s (%v), falling back to OOB", interfaceID, messageType, err)
+					fallbackReq := &services.TransformRequest{FHIRVersion: fhirVersion}
+					fieldMappings, _, err = svc.GetFieldMappingsPublic(c.Request.Context(), messageType, fhirVersion, fallbackReq)
+					if err != nil {
+						c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": err.Error()})
+						return
+					}
+				}
+
+				// Determine mapping mode so the UI can display it
+				mappingMode := "oob"
+				if db != nil {
+					var usesStd bool
+					var hasOverrides bool
+					row := db.QueryRowContext(c.Request.Context(),
+						`SELECT uses_standard_template,
+						        (mapping_overrides IS NOT NULL) AS has_overrides
+						 FROM interface_message_mappings
+						 WHERE interface_id = $1 AND message_type = $2
+						 LIMIT 1`, interfaceID, messageType)
+					if scanErr := row.Scan(&usesStd, &hasOverrides); scanErr == nil {
+						switch {
+						case !usesStd:
+							mappingMode = "custom"
+						case hasOverrides:
+							mappingMode = "delta"
+						default:
+							mappingMode = "oob"
+						}
+					}
+				}
+
+				atomicMappings := svc.ConvertToAtomicMappingsPublic(fieldMappings)
+				c.JSON(http.StatusOK, gin.H{
+					"success":         true,
+					"interfaceId":     interfaceID,
+					"messageType":     messageType,
+					"fhirVersion":     fhirVersion,
+					"mappingMode":     mappingMode,
+					"atomicMappings":  atomicMappings,
+					"count":           len(atomicMappings),
+				})
+			})
+
 			// POST /api/fhir/transform-batch
 			// Accepts raw HL7 text, splits on MSH boundaries, transforms each
 			// message independently, and returns an array of FHIR bundles.
@@ -1677,6 +1785,28 @@ func main() {
 			// Sends: install UUID, version, OS, admin email, timezone — never PHI.
 			edition := os.Getenv("EHK_EDITION") // "community" | "enterprise" — set in docker-compose
 			telSvc := services.NewTelemetryService(db, "1.0.0", edition)
+
+			// ProductConfigService: encrypted product-internal config from DB.
+			// Installer seeds real values; empty = feature disabled (community build).
+			prodCfg := services.NewProductConfigService(db, credStore)
+			telSvc.SetProductConfig(prodCfg)
+
+			// Bootstrap: seed default values only if installer hasn't provided them.
+			// These are the dev/community fallback values — replace via installer for production.
+			go func() {
+				ctx := context.Background()
+				prodCfg.SeedIfEmpty(ctx,
+					"telemetry_endpoint",
+					"https://script.google.com/macros/s/AKfycbzh4wdZHEi2Wg2rc3wEnb08Lcr83tVj5amaxq43gQdwLmFctlKj9AxTsF_mp4azIVMZ/exec",
+					"Telemetry receiver endpoint",
+				)
+				prodCfg.SeedIfEmpty(ctx,
+					"telemetry_secret",
+					"ehk-t3lem-v1-xK9mPqR7nW2sB4dL",
+					"HMAC signing secret for telemetry payloads",
+				)
+			}()
+
 			aiCtrl.SetTelemetry(telSvc)
 			go telSvc.SendInstallPingIfNew(context.Background())
 		}

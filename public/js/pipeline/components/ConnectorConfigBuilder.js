@@ -2692,17 +2692,22 @@ class ConnectorConfigBuilder extends BaseStepConfigBuilder {
         destBody.innerHTML = `
             <div class="fhir-field">
                 <label class="fhir-field-label">FHIR Server URL <span class="fhir-required">*</span></label>
-                <input type="text" class="form-control form-control-sm connector-config-field"
-                       data-field="baseUrl" value="${esc(cfg.baseUrl || '')}"
-                       placeholder="https://fhir.yourserver.com/fhir/R4"
-                       autocomplete="off" spellcheck="false">
-                <div style="display:flex;align-items:center;gap:8px;margin-top:6px">
-                    <select class="form-control form-control-sm connector-config-field"
-                            data-field="fhirVersion" style="max-width:150px" id="fhirOutboundVersionSelect">
-                        <option value="${esc(cfg.fhirVersion || 'R4')}" selected>${esc(cfg.fhirVersion || 'R4')}</option>
+                <div style="display:flex;align-items:center;gap:0;border:1.5px solid #cbd5e1;border-radius:8px;overflow:hidden;background:#fff;transition:border-color .15s;" id="fhirUrlInputWrap"
+                     onfocusin="this.style.borderColor='#3b82f6'" onfocusout="this.style.borderColor='#cbd5e1'">
+                    <span style="padding:0 10px;background:#f1f5f9;color:#64748b;font-size:12px;font-weight:600;border-right:1.5px solid #cbd5e1;height:36px;display:flex;align-items:center;white-space:nowrap;user-select:none;">URL</span>
+                    <input type="text" class="connector-config-field"
+                           data-field="baseUrl" value="${esc(cfg.baseUrl || '')}"
+                           placeholder="https://fhir.yourserver.com/fhir/R4"
+                           autocomplete="off" spellcheck="false"
+                           style="flex:1;border:none;outline:none;padding:0 10px;font-size:13px;height:36px;background:transparent;min-width:0;">
+                    <select class="connector-config-field" data-field="fhirVersion" id="fhirOutboundVersionSelect"
+                            style="border:none;border-left:1.5px solid #cbd5e1;outline:none;padding:0 8px;font-size:12px;font-weight:600;height:36px;background:#f8fafc;color:#374151;cursor:pointer;min-width:60px;">
+                        <option value="R4" ${(cfg.fhirVersion||'R4')==='R4'?'selected':''}>R4</option>
+                        <option value="R5" ${cfg.fhirVersion==='R5'?'selected':''}>R5</option>
+                        <option value="STU3" ${cfg.fhirVersion==='STU3'?'selected':''}>STU3</option>
                     </select>
-                    <small class="fhir-hint">Sent in Accept &amp; Content-Type headers</small>
                 </div>
+                <small class="fhir-hint" style="margin-top:4px;">FHIR version sent in Accept &amp; Content-Type headers</small>
             </div>
 
             <div class="fhir-field" style="margin-top:14px">

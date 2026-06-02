@@ -70,7 +70,7 @@ function Wait-ForDocker {
     while ((Get-Date) -lt $deadline) {
         Start-Sleep -Seconds 5
         Write-Host "." -NoNewline
-        docker info 2>$null | Out-Null
+        & { $ErrorActionPreference = "SilentlyContinue"; docker info 2>&1 | Out-Null }
         if ($LASTEXITCODE -eq 0) {
             $ready = $true
             break
@@ -100,7 +100,7 @@ function Verify-Backup([string]$filePath, [string]$label) {
     Write-OK "Size OK: ${sizeMB} MB"
 
     $mountPath = $filePath -replace '\\','/' -replace '^([A-Za-z]):','/$1'
-    docker run --rm -v "${mountPath}:/check/file.tar.gz" alpine tar tzf /check/file.tar.gz 2>$null | Out-Null
+    & { $ErrorActionPreference = "SilentlyContinue"; docker run --rm -v "${mountPath}:/check/file.tar.gz" alpine tar tzf /check/file.tar.gz 2>&1 | Out-Null }
     if ($LASTEXITCODE -ne 0) {
         Safe-Abort "$label backup failed integrity check (tar could not read the archive). The .vhdx will NOT be deleted."
     }
@@ -136,7 +136,7 @@ function Run-Backup {
     }
 
     # Ensure Docker is running before we do anything
-    docker info 2>$null | Out-Null
+    & { $ErrorActionPreference = "SilentlyContinue"; docker info 2>&1 | Out-Null }
     if ($LASTEXITCODE -ne 0) {
         Write-Host "    Docker is not running -- starting Docker Desktop..."
         Start-Process $DockerExe
@@ -144,7 +144,7 @@ function Run-Backup {
     }
 
     # Check the postgres volume actually exists before backing up
-    docker volume inspect ezhealthkonnect_postgres_data 2>$null | Out-Null
+    & { $ErrorActionPreference = "SilentlyContinue"; docker volume inspect ezhealthkonnect_postgres_data 2>&1 | Out-Null }
     if ($LASTEXITCODE -ne 0) {
         Safe-Abort "Volume ezhealthkonnect_postgres_data does not exist. Is the stack running?"
     }
@@ -228,7 +228,7 @@ function Run-Wipe {
     }
 
     Write-Host "    Shutting down WSL..."
-    wsl --shutdown 2>$null | Out-Null
+    & { $ErrorActionPreference = "SilentlyContinue"; wsl --shutdown 2>&1 | Out-Null }
     Start-Sleep -Seconds 3
 
     if (-not (Test-Path $VhdxPath)) {
@@ -291,6 +291,10 @@ function Run-Restore {
 
     Write-Step "Starting the stack"
     docker compose up -d
+
+    Write-Step "Pruning build cache"
+    & { $ErrorActionPreference = "SilentlyContinue"; docker builder prune -f 2>&1 | Out-Null }
+    Write-OK "Build cache cleared"
 
     Start-Sleep -Seconds 5
     Write-Host ""

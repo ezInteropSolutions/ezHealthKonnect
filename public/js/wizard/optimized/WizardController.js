@@ -268,9 +268,7 @@ class WizardController extends EventTarget {
                     }
                     const firstBtn = document.querySelector(`.msg-type-preview-btn[data-msg-type="${initialType}"]`);
                     window._previewMappingForType(initialType, firstBtn).then(() => {
-                        // Pre-parse remaining sample messages so subsequent pill clicks only need 1 network call
-                        window._preParseSamples();
-                        // Pre-warm full mapping cache for other common types
+                        // Pre-warm mapping cache for other common types (silent — no DOM effect)
                         const allCommon = ['ADT^A01', 'ORU^R01', 'ORM^O01', 'OML^O21', 'ADT^A03', 'SIU^S12', 'MDM^T02', 'MFN^M02', 'VXU^V04', 'DFT^P03', 'BAR^P01'];
                         const others = allCommon.filter(t => t !== initialType);
                         window._prewarmMappingCache(others);
@@ -1631,24 +1629,27 @@ function _mappingSkeletonHTML(messageType) {
  * Preview FHIR mappings for a specific HL7 message type without touching model state.
  * Called from the message-type pill selector in Step 3 (getStep4Template).
  */
-window._previewMappingForType = async function(messageType, btnEl) {
+window._previewMappingForType = async function(messageType, btnEl, options = {}) {
     const ctrl = window.wizardController;
     if (!ctrl) return;
+    const silent = options.silent === true; // Pre-warm mode: populate cache without touching the DOM
 
     const fhirVersion = ctrl.model.data.targetConfig?.version || 'R4';
     const preset = ctrl.model.data.mappingOptions?.transformationPreset || 'standard';
     const cacheKey = `${messageType}:${fhirVersion}:${preset}`;
 
-    // Highlight active pill
-    document.querySelectorAll('.msg-type-preview-btn').forEach(b => {
-        b.style.background = 'white';
-        b.style.color = '#6b7280';
-        b.style.borderColor = '#e5e7eb';
-    });
-    if (btnEl) {
-        btnEl.style.background = '#1e3a8a';
-        btnEl.style.color = 'white';
-        btnEl.style.borderColor = '#1e3a8a';
+    // Highlight active pill (skip in silent/pre-warm mode)
+    if (!silent) {
+        document.querySelectorAll('.msg-type-preview-btn').forEach(b => {
+            b.style.background = 'white';
+            b.style.color = '#6b7280';
+            b.style.borderColor = '#e5e7eb';
+        });
+        if (btnEl) {
+            btnEl.style.background = '#1e3a8a';
+            btnEl.style.color = 'white';
+            btnEl.style.borderColor = '#1e3a8a';
+        }
     }
 
     const mappingContainer = document.getElementById('fhir-mapping-container');
@@ -1681,19 +1682,24 @@ window._previewMappingForType = async function(messageType, btnEl) {
         return;
     }
 
-    // --- Cache miss: show skeleton, cancel any in-flight request, start fetch ---
+    // --- Cache miss: show skeleton and fetch ---
     const loadingEl = document.getElementById('msg-type-preview-loading');
-    if (loadingEl) loadingEl.style.display = 'inline';
-    if (mappingContainer) {
-        mappingContainer.innerHTML = _mappingSkeletonHTML(messageType);
+    let signal;
+    if (silent) {
+        // Pre-warm: use an independent controller so we never abort the visible request
+        signal = new AbortController().signal;
+    } else {
+        // Visible load: cancel any previous in-flight visible request and show skeleton
+        if (loadingEl) loadingEl.style.display = 'inline';
+        if (mappingContainer) {
+            mappingContainer.innerHTML = _mappingSkeletonHTML(messageType);
+        }
+        if (window._mappingPreviewAbort) {
+            window._mappingPreviewAbort.abort();
+        }
+        window._mappingPreviewAbort = new AbortController();
+        signal = window._mappingPreviewAbort.signal;
     }
-
-    // Abort previous in-flight request pair
-    if (window._mappingPreviewAbort) {
-        window._mappingPreviewAbort.abort();
-    }
-    window._mappingPreviewAbort = new AbortController();
-    const { signal } = window._mappingPreviewAbort;
 
     // Complete, validated sample HL7 messages per type (hoisted to window for pre-parse access)
     if (!window._SAMPLE_HL7) window._SAMPLE_HL7 = {
@@ -1789,69 +1795,67 @@ window._previewMappingForType = async function(messageType, btnEl) {
     };
 
     try {
-        let hl7Message = SAMPLE_HL7[messageType];
-        let parsedHL7Data;
         let effectiveType = messageType;
+        let catalogueJson;
 
+        // Fast path: single DB read (~50ms) — no HL7 parse, no FHIR bundle, no schema loader
         try {
-            parsedHL7Data = await attemptParse(hl7Message || SAMPLE_HL7['ADT^A01'], messageType);
-        } catch (parseErr) {
-            if (parseErr.name === 'AbortError') throw parseErr;
-            console.warn(`⚠️ Parse failed for ${messageType} (${parseErr.message}), falling back to ADT^A01`);
-            parsedHL7Data = await attemptParse(SAMPLE_HL7['ADT^A01'], 'ADT^A01');
+            const catalogueResp = await fetch(
+                `/api/fhir/mapping-catalogue?messageType=${encodeURIComponent(messageType)}&fhirVersion=${encodeURIComponent(fhirVersion)}`,
+                { signal }
+            );
+            if (!catalogueResp.ok) throw new Error(`${catalogueResp.status}`);
+            catalogueJson = await catalogueResp.json();
+            if (!catalogueJson.atomicMappings?.length) throw new Error('empty catalogue');
+        } catch (catalogueErr) {
+            if (catalogueErr.name === 'AbortError') throw catalogueErr;
+            // Backend fell back to ADT^A01 already — but if the endpoint itself failed, try ADT explicitly
+            console.warn(`⚠️ Catalogue fetch failed for ${messageType} (${catalogueErr.message}), falling back to ADT^A01`);
+            const fallbackResp = await fetch(
+                `/api/fhir/mapping-catalogue?messageType=${encodeURIComponent('ADT^A01')}&fhirVersion=${encodeURIComponent(fhirVersion)}`,
+                { signal }
+            );
+            if (!fallbackResp.ok) throw new Error(`Catalogue fallback failed: ${fallbackResp.status}`);
+            catalogueJson = await fallbackResp.json();
             effectiveType = 'ADT^A01';
         }
 
-        const mappingOptions = ctrl.model.data.mappingOptions || {};
-        const transformResp = await fetch('/api/fhir/test-transform-v3', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                parsedHL7Data,
-                createBundle: true,
-                validationMode: mappingOptions.validationLevel || 'strict',
-                fhirVersion,
-                transformationPreset: mappingOptions.transformationPreset || 'standard',
-                missingFieldHandling: mappingOptions.missingFieldHandling || 'omit'
-            }),
-            signal
-        });
-        if (!transformResp.ok) throw new Error(`Transform failed: ${transformResp.status}`);
-        const transformJson = await transformResp.json();
-
-        const atomicMappings = transformJson.atomicMappings || transformJson.data?.atomicMappings || [];
-        const hl7Version = parsedHL7Data?.version || parsedHL7Data?.messageHeader?.version || '2.x';
-        const transformResult = { ...transformJson, atomicMappings };
+        const atomicMappings = catalogueJson.atomicMappings || [];
+        const hl7Version = catalogueJson.hl7Version || '2.5';
+        const transformResult = { ...catalogueJson, atomicMappings };
 
         // Store in cache so revisiting this pill is instant
         window._mappingPreviewCache.set(cacheKey, { effectiveType, transformResult, hl7Version });
 
-        if (mappingContainer && ctrl.view) {
-            const previewData = {
-                ...ctrl.model.getCurrentStepData(),
-                detectedMessageType: effectiveType,
-                fhirTransformResult: transformResult,
-                previewHL7Version: hl7Version
-            };
-            mappingContainer.innerHTML = ctrl.view.getFHIRMappingContent(previewData);
+        if (!silent) {
+            // Update the visible mapping container only for non-background loads
+            if (mappingContainer && ctrl.view) {
+                const previewData = {
+                    ...ctrl.model.getCurrentStepData(),
+                    detectedMessageType: effectiveType,
+                    fhirTransformResult: transformResult,
+                    previewHL7Version: hl7Version
+                };
+                mappingContainer.innerHTML = ctrl.view.getFHIRMappingContent(previewData);
 
-            const countEl = document.getElementById('mapping-count');
-            if (countEl) countEl.textContent = atomicMappings.length;
-            const typeEl = document.getElementById('fhir-message-type');
-            if (typeEl) typeEl.textContent = effectiveType + (effectiveType !== messageType ? ' (fallback)' : '');
-            const versionEl = document.getElementById('fhir-hl7-version');
-            if (versionEl) versionEl.textContent = 'HL7 v' + hl7Version;
-            _updateResourceFilter(atomicMappings);
-            _updateCoverageBar(atomicMappings, transformJson.validationErrors);
+                const countEl = document.getElementById('mapping-count');
+                if (countEl) countEl.textContent = atomicMappings.length;
+                const typeEl = document.getElementById('fhir-message-type');
+                if (typeEl) typeEl.textContent = effectiveType + (effectiveType !== messageType ? ' (fallback)' : '');
+                const versionEl = document.getElementById('fhir-hl7-version');
+                if (versionEl) versionEl.textContent = 'HL7 v' + hl7Version;
+                _updateResourceFilter(atomicMappings);
+                _updateCoverageBar(atomicMappings, catalogueJson.validationErrors);
+            }
+
+            if (ctrl.model?.data) {
+                ctrl.model.data.fhirTransformResult = transformResult;
+                ctrl.model.data.detectedMessageType = ctrl.model.data.detectedMessageType || effectiveType;
+            }
+
+            // Re-enable Next once we have mapping results (covers the step-2-skip scenario)
+            ctrl.view?.validateCurrentStep?.();
         }
-
-        if (ctrl.model?.data) {
-            ctrl.model.data.fhirTransformResult = transformResult;
-            ctrl.model.data.detectedMessageType = ctrl.model.data.detectedMessageType || effectiveType;
-        }
-
-        // Re-enable Next once we have mapping results (covers the step-2-skip scenario)
-        ctrl.view?.validateCurrentStep?.();
 
     } catch (err) {
         if (err.name === 'AbortError') return; // Superseded by a newer pill click — silently discard
@@ -1898,8 +1902,8 @@ window._prewarmMappingCache = function(types) {
     types.forEach((type, i) => {
         const key = `${type}:${fhirVersion}:${preset}`;
         if (!window._mappingPreviewCache.has(key)) {
-            // Stagger slightly so we don't hammer the server all at once
-            setTimeout(() => window._previewMappingForType(type, null), i * 400);
+            // Silent background pre-warm — never touches the DOM, never aborts the visible request
+            setTimeout(() => window._previewMappingForType(type, null, { silent: true }), i * 400);
         }
     });
 };

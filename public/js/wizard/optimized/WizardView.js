@@ -1531,7 +1531,7 @@ class WizardView extends EventTarget {
                                 <div style="display: flex; gap: 12px;">
                                     <button style="padding: 8px 16px; border: 2px solid #f472b6; border-radius: 6px; font-size: 13px; font-weight: 500; cursor: pointer; display: flex; align-items: center; gap: 6px; background: white; color: #be185d; transition: all 0.2s ease;"
                                             id="btn-ai-suggest-mappings" onclick="window.aiSuggestMappings()">
-                                        ✏️ AI Suggest
+                                        💡 AI Suggest
                                     </button>
                                     <button style="padding: 8px 16px; border: 2px solid #6366f1; border-radius: 6px; font-size: 13px; font-weight: 500; cursor: pointer; display: flex; align-items: center; gap: 6px; background: white; color: #6366f1; transition: all 0.2s ease;"
                                             id="btn-view-fhir-json" onclick="window.viewRawFHIRJSON()">
@@ -1858,6 +1858,12 @@ class WizardView extends EventTarget {
                             ` : ''}
                         </div>
                     </div>
+                </div>
+
+                <!-- Runtime resource note -->
+                <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:10px 14px;margin-bottom:16px;font-size:12px;color:#64748b;display:flex;align-items:flex-start;gap:8px;">
+                    <span style="flex-shrink:0;margin-top:1px;">ℹ️</span>
+                    <span>All resources below are based on the OOB template for this message type. At runtime, <strong>only resources whose segments are present in the incoming message</strong> will be included in the FHIR output — unused resources are automatically excluded.</span>
                 </div>
 
                 <!-- Resource Mapping Groups -->
@@ -2507,35 +2513,26 @@ class WizardView extends EventTarget {
                     ${resources.map((resource, index) => this.renderOptimizedFHIRResourceCard(resource, index)).join('')}
                 </div>
 
-                <!-- Field Mappings Summary -->
-                ${atomicMappings.length > 0 ? `
-                    <div style="background: white; border: 2px solid #f8bbd9; border-radius: 12px; overflow: hidden;">
-                        <div style="background: linear-gradient(135deg, #1e3a8a 0%, #1e40af 100%); color: white; padding: 16px;">
-                            <h5 style="margin: 0; font-size: 16px; font-weight: 600;">🔗 Field Mappings Applied</h5>
-                            <p style="margin: 4px 0 0 0; font-size: 14px; opacity: 0.9;">${atomicMappings.length} HL7 fields successfully mapped to FHIR elements</p>
+                <!-- Field Mappings by Resource -->
+                ${atomicMappings.length > 0 ? (() => {
+                    const resourceTypes = [...new Set(
+                        [...resources.map(r => r.resourceType), ...atomicMappings.map(m => {
+                            const path = m.resourceType || m.targetPath || m.fhirPath || m.fhirField || '';
+                            const match = path.match(/^([A-Z][A-Za-z]+)/);
+                            return match ? match[1] : null;
+                        })].filter(Boolean)
+                    )];
+                    return `
+                    <div style="margin-top: 8px;">
+                        <div style="font-size: 13px; font-weight: 600; color: #374151; margin-bottom: 12px; display: flex; align-items: center; gap: 8px;">
+                            🔗 Field Mappings by Resource
+                            <span style="font-size: 11px; font-weight: 400; color: #6b7280;">(${atomicMappings.length} total)</span>
                         </div>
-                        <div style="max-height: 300px; overflow-y: auto;">
-                            ${atomicMappings.slice(0, 8).map(mapping => `
-                                <div style="padding: 12px 16px; border-bottom: 1px solid #f1f5f9; display: flex; justify-content: space-between; align-items: center;">
-                                    <div style="flex: 1; font-family: monospace;">
-                                        <div style="font-size: 13px; font-weight: 600; color: #1e293b;">${mapping.hl7Path}</div>
-                                        <div style="font-size: 11px; color: #64748b; margin-top: 2px;">"${(mapping.hl7Value || '').substring(0, 30)}${(mapping.hl7Value || '').length > 30 ? '...' : ''}"</div>
-                                    </div>
-                                    <div style="margin: 0 16px; color: #6b7280; font-weight: bold;">→</div>
-                                    <div style="flex: 1; text-align: right; font-family: monospace;">
-                                        <div style="font-size: 13px; font-weight: 600; color: #1e40af;">${mapping.fhirPath}</div>
-                                        <div style="font-size: 11px; color: #64748b; margin-top: 2px;">"${(mapping.fhirValue || '').substring(0, 30)}${(mapping.fhirValue || '').length > 30 ? '...' : ''}"</div>
-                                    </div>
-                                </div>
-                            `).join('')}
-                            ${atomicMappings.length > 8 ? `
-                                <div style="padding: 12px 16px; text-align: center; color: #6b7280; font-size: 12px; font-style: italic;">
-                                    ... and ${atomicMappings.length - 8} more mappings
-                                </div>
-                            ` : ''}
+                        <div style="display: flex; flex-direction: column; gap: 12px;">
+                            ${resourceTypes.map(rt => this.renderResourceMappingGroup(rt, atomicMappings, fhirResult)).join('')}
                         </div>
-                    </div>
-                ` : ''}
+                    </div>`;
+                })() : ''}
             </div>
         `;
     }
@@ -8056,14 +8053,25 @@ if (!document.getElementById('table-modal-styles')) {
 window.aiSuggestMappings = async function() {
     console.log('🤖 aiSuggestMappings called, AIAssistant:', window.AIAssistant);
 
-    // Get the HL7 sample from the wizard model (step 1)
+    // Get the HL7 sample from the wizard model (step 2) — fall back to OOB sample if skipped
     const wzCtrl = window.wizardController;
-    const hl7Sample = wzCtrl?.model?.data?.hl7Message || '';
-    const msgType   = wzCtrl?.model?.data?.detectedMessageType || wzCtrl?.model?.data?.messageType || '';
+    const userHL7  = wzCtrl?.model?.data?.hl7Message || '';
+    // Resolve the active message type from the highlighted pill, then the model
+    const activePillBtn = document.querySelector('.msg-type-preview-btn[style*="background: rgb(30, 58, 138)"]')
+        || document.querySelector('.msg-type-preview-btn.active');
+    const msgType = wzCtrl?.model?.data?.detectedMessageType
+        || activePillBtn?.dataset?.msgType
+        || wzCtrl?.model?.data?.messageType
+        || 'ADT^A01';
 
+    let hl7Sample = userHL7;
     if (!hl7Sample) {
-        AppDialogs.toast('No HL7 sample message found. Please complete Step 1 first.', 'warning');
-        return;
+        // User skipped step 2 — use the built-in OOB sample for the active message type
+        hl7Sample = window._SAMPLE_HL7?.[msgType] || window._SAMPLE_HL7?.['ADT^A01'] || '';
+        if (!hl7Sample) {
+            AppDialogs.toast('No HL7 sample available. Please complete Step 2 first.', 'warning');
+            return;
+        }
     }
 
     // Show the suggestion panel (inject if not present)
@@ -8075,8 +8083,8 @@ window.aiSuggestMappings = async function() {
         panel.innerHTML = `
 <div style="background:linear-gradient(135deg,#f472b6,#1e3a8a);padding:14px 18px;display:flex;align-items:center;justify-content:space-between;color:#fff;flex-shrink:0;">
   <div>
-    <div style="font-weight:700;font-size:15px;">✏️ AI Mapping Suggestions</div>
-    <div style="font-size:11px;opacity:0.85;margin-top:2px;" id="ai-ms-subtitle">Analysing ${msgType || 'HL7'} → FHIR R4…</div>
+    <div style="font-weight:700;font-size:15px;">💡 AI Mapping Suggestions</div>
+    <div style="font-size:11px;opacity:0.85;margin-top:2px;" id="ai-ms-subtitle">Analysing ${msgType || 'HL7'} → FHIR R4${!userHL7 ? ' (using OOB sample)' : ''}…</div>
   </div>
   <button onclick="document.getElementById('ai-mapping-suggestion-panel').remove()" style="background:rgba(255,255,255,0.15);border:none;color:#fff;font-size:18px;cursor:pointer;padding:4px 8px;border-radius:6px;">✕</button>
 </div>
@@ -8191,15 +8199,16 @@ window.aiSuggestMappings = async function() {
         const okCount  = alreadyMapped.length;
         const totalFields = allSuggestions.length;
         const coverage = totalFields > 0 ? Math.round((okCount / totalFields) * 100) : 0;
+        const analysisLabel = userHL7 ? `fields found in your HL7 message` : `OOB template fields`;
         const summaryHtml = `
 <div style="background:#f0f9ff;border:1px solid #bae6fd;border-radius:8px;padding:10px 12px;margin-bottom:10px;font-size:12px;">
-  <div style="font-weight:700;color:#0369a1;margin-bottom:6px;">📊 Mapping coverage: ${coverage}% (${okCount}/${totalFields} standard fields mapped)</div>
+  <div style="font-weight:700;color:#0369a1;margin-bottom:6px;">📊 ${totalFields} ${analysisLabel} — ${coverage}% covered (${okCount} mapped, ${gapCount} gap${gapCount !== 1 ? 's' : ''})</div>
   ${okCount > 0 ? `<div style="color:#16a34a;margin-bottom:3px;">✅ Already mapped (${okCount}): ${alreadyMapped.map(s=>`<span style="font-family:monospace;background:#dcfce7;padding:1px 4px;border-radius:3px;margin:1px;">${s.source_field}</span>`).join(' ')}</div>` : ''}
-  ${gapCount > 0 ? `<div style="color:#d97706;">⚠️ Gaps found (${gapCount}): ${suggestions.map(s=>`<span style="font-family:monospace;background:#fef9c3;padding:1px 4px;border-radius:3px;margin:1px;">${s.source_field}</span>`).join(' ')}</div>` : '<div style="color:#16a34a;">✅ All standard fields are mapped.</div>'}
+  ${gapCount > 0 ? `<div style="color:#d97706;">⚠️ Gaps found (${gapCount}): ${suggestions.map(s=>`<span style="font-family:monospace;background:#fef9c3;padding:1px 4px;border-radius:3px;margin:1px;">${s.source_field}</span>`).join(' ')}</div>` : `<div style="color:#16a34a;">✅ All ${analysisLabel} are mapped.</div>`}
 </div>`;
 
         if (suggestions.length === 0) {
-            tableEl.innerHTML = summaryHtml + '<div style="text-align:center;padding:24px;color:#16a34a;font-weight:600;">✅ No gaps — all standard fields are already mapped!</div>';
+            tableEl.innerHTML = summaryHtml + `<div style="text-align:center;padding:24px;color:#16a34a;font-weight:600;">✅ No gaps — all ${analysisLabel} are already mapped!</div>`;
             statusEl.textContent = `Coverage: ${coverage}% — nothing missing.`;
             footerEl.style.display = 'none';
             return;

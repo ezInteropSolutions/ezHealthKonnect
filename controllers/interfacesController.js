@@ -1,5 +1,6 @@
 // controllers/interfacesController.js - UPDATED WITH CONNECTIVITY SUPPORT
 console.log('🔧 Loading Enhanced Interfaces Controller with Format + Connectivity Support...');
+const { GO_BACKEND_URL: _GO_URL, internalHeaders: _goHeaders, goClient: _goClient } = require('../services/goBackendClient');
 
 class InterfacesController {
     constructor() {
@@ -784,10 +785,10 @@ class InterfacesController {
             // Do this regardless of DB status — Go runtime may be active even if DB shows inactive
             try {
                 console.log(`🛑 Deactivating interface ${interfaceId} in Go backend before delete...`);
-                const goBackendUrl = `http://localhost:${process.env.API_PORT || 8080}/api/processing/interfaces/${interfaceId}/deactivate`;
+                const goBackendUrl = `${_GO_URL}/api/processing/interfaces/${interfaceId}/deactivate`;
                 const deactivateResponse = await fetch(goBackendUrl, {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' }
+                    headers: _goHeaders(),
                 });
 
                 if (deactivateResponse.ok) {
@@ -1106,10 +1107,10 @@ class InterfacesController {
                     target_type = :targetType,
                     target_connectivity = :targetConnectivity::jsonb,
                     message_type = :messageType,
-                    source_config = :sourceConfig::jsonb,
-                    target_config = :targetConfig::jsonb,
-                    processing_rules = :processingRules::jsonb,
-                    transformation_mapping = :transformationMapping::jsonb,
+                    source_config      = COALESCE(NULLIF(:sourceConfig::jsonb,      '{}'::jsonb), source_config),
+                    target_config      = COALESCE(NULLIF(:targetConfig::jsonb,      '{}'::jsonb), target_config),
+                    processing_rules   = COALESCE(NULLIF(:processingRules::jsonb,   '{}'::jsonb), processing_rules),
+                    transformation_mapping = COALESCE(NULLIF(:transformationMapping::jsonb, '{}'::jsonb), transformation_mapping),
                     deployment_mode = :deployment_mode,
                     auto_start = :auto_start,
                     deployment_delay_seconds = :deployment_delay_seconds,
@@ -1202,9 +1203,7 @@ class InterfacesController {
             // Tell the Go engine to reload the filter cache for this interface
             // so the new accept list takes effect immediately without restart.
             try {
-                const axios = require('axios');
-                const goBackendUrl = process.env.GO_BACKEND_URL || `http://localhost:${process.env.API_PORT || 8080}`;
-                await axios.post(`${goBackendUrl}/api/interfaces/${interfaceId}/reload-filter`, {}, { timeout: 3000 });
+                await _goClient.post(`/api/interfaces/${interfaceId}/reload-filter`, {}, { timeout: 3000 });
             } catch (_) { /* non-fatal — filter reloads on next engine restart */ }
 
             console.log(`✅ Interface ${interfaceId} updated successfully`);

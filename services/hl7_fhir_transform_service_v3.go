@@ -42,11 +42,12 @@ import (
 type AssemblyRule struct {
 	ID             string
 	MessageType    string
-	RuleType       string // "reference"|"focus"|"result"|"subject"|"performer"|"encounter"|"author"
+	RuleType       string                 // "reference"|"focus"|"result"|"subject"|"performer"|"encounter"|"author"|"logical_ref"
 	SourceResource string
 	TargetResource string
 	ReferencePath  string
 	ConditionExpr  string
+	Config         map[string]interface{} // rule-specific parameters (from config JSONB column); nil for standard rules
 	Sequence       int
 }
 

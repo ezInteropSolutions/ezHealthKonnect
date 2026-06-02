@@ -12,6 +12,15 @@ class InterfaceDeploymentService {
     }
 
     /**
+     * Returns the headers required for direct server-to-server calls to the Go backend.
+     * The Go API requires X-Internal-Proxy-Secret on all /api routes.
+     */
+    _internalHeaders() {
+        const secret = process.env.INTERNAL_PROXY_SECRET || process.env.JWT_SECRET || '';
+        return secret ? { 'X-Internal-Proxy-Secret': secret } : {};
+    }
+
+    /**
      * Initialize deployment service and auto-start interfaces on application startup
      */
     async initializeOnStartup() {
@@ -151,7 +160,7 @@ class InterfaceDeploymentService {
                     const response = await axios.post(
                         `${this.goBackendUrl}/api/processing/interfaces/${id}/activate`,
                         {},
-                        { timeout: 10000 }
+                        { timeout: 10000, headers: this._internalHeaders() }
                     );
 
                     if (response.data.success) {
@@ -221,7 +230,7 @@ class InterfaceDeploymentService {
     /**
      * Wait for Go backend to be ready (including processing engine)
      */
-    async waitForGoBackend(timeoutSeconds = 30) {
+    async waitForGoBackend(timeoutSeconds = 60) {
         const startTime = Date.now();
         const timeoutMs = timeoutSeconds * 1000;
         let attempts = 0;
@@ -229,23 +238,36 @@ class InterfaceDeploymentService {
         while (Date.now() - startTime < timeoutMs) {
             attempts++;
             try {
-                // Check if processing engine is initialized and ready
+                // validateStatus: accept any HTTP response — we only want to know Go's HTTP
+                // server is up. A 401 means Go is live but the endpoint needs auth; that's
+                // fine for deployment purposes. Only a connection failure means "not ready".
                 const response = await axios.get(`${this.goBackendUrl}/api/processing/engine/status`, {
-                    timeout: 2000
+                    timeout: 2000,
+                    validateStatus: () => true
                 });
 
-                if (response.status === 200 && response.data.success) {
+                if (response.status === 200 && response.data?.success) {
                     console.log(`✅ Go backend & Processing Engine ready (attempt ${attempts})\n`);
                     return true;
                 }
+
+                // 401 = Go HTTP server is up, endpoint is auth-protected — consider it ready
+                if (response.status === 401) {
+                    console.log(`✅ Go backend up (attempt ${attempts})\n`);
+                    return true;
+                }
+
+                // Any other non-success status — Go is up but still initialising, keep waiting
+                await new Promise(resolve => setTimeout(resolve, 2000));
+
             } catch (error) {
-                // Backend not ready yet, wait and retry
-                console.log(`   ⏳ Waiting for processing engine... (attempt ${attempts})`);
+                // Connection refused or timeout = Go truly not up yet
+                console.log(`   ⏳ Waiting for Go backend... (attempt ${attempts})`);
                 await new Promise(resolve => setTimeout(resolve, 2000));
             }
         }
 
-        throw new Error(`Processing engine not ready after ${timeoutSeconds}s (${attempts} attempts)`);
+        throw new Error(`Go backend not reachable after ${timeoutSeconds}s (${attempts} attempts)`);
     }
 
     /**
@@ -300,7 +322,7 @@ class InterfaceDeploymentService {
             const response = await axios.post(
                 `${this.goBackendUrl}/api/processing/interfaces/${interfaceId}/deactivate`,
                 {},
-                { timeout: 10000 }
+                { timeout: 10000, headers: this._internalHeaders() }
             );
 
             if (response.data.success) {

@@ -23,8 +23,7 @@ ezHealthKonnect: Interfaces connect healthcare systems via 32+ connectors (TCP/M
 
 Healthcare standards: HL7 v2 (ADT, ORU, ORM, MDM, SIU — segments MSH/PID/PV1/OBR/OBX/DG1), FHIR R4 (Patient, Encounter, Observation, Condition, Procedure, Bundle, Claim), X12 835/837/270/271, CCD/C-CDA R2.1, LOINC, SNOMED CT, ICD-10, RxNorm, CPT, NPI. Da Vinci PAS STU2 (CMS-0057-F): prior authorization via FHIR $submit operation; payer responds with ClaimResponse; X12 review action codes A1=AA (approved), A2=CP (partial approval), A3/A4=AD (denied), A6=PE (pended/pending review).
 
-Rules: Be direct and practical. For pipeline script steps use function named transform(input) returning the modified object. Never invent field codes. Say "I don't know" when uncertain.
-PHI/data isolation is absolute: ezHealthKonnect runs entirely on-premise. No patient data, HL7 messages, or AI queries ever leave the local Docker network. OpenAI, Anthropic, ChatGPT, and all cloud AI providers are intentionally disconnected for HIPAA compliance. When asked about data leaving the network or external AI services, state this definitively — never hedge with "possibly" or "indirectly".`
+Rules: Be direct and practical. For pipeline script steps use function named transform(input) returning the modified object. Never invent field codes. Say "I don't know" when uncertain.`
 
 // AIService wires together all local AI capabilities.
 type AIService struct {
@@ -260,9 +259,19 @@ type MappingSuggestion struct {
 func (s *AIService) SuggestMappings(ctx context.Context, sampleMessage, targetFormat string, reqCtx RequestContext) ([]MappingSuggestion, []RetrievedChunk, error) {
 	det, _ := s.DetectFormat(ctx, sampleMessage)
 
-	// Fast path: return well-known static mappings instantly (no LLM needed).
-	if static := staticHL7FHIRMappings(sampleMessage, det.Format, targetFormat); len(static) > 0 {
-		return static, nil, nil
+	// Fast path: message-centric analysis for HL7→FHIR.
+	// staticHL7FHIRMappings derives suggestions from the fields actually present
+	// in the message (not a fixed catalogue list). zSegmentSuggestions adds
+	// Extension proposals for any custom Z-segment fields found.
+	if det.Format == "hl7_v2" || det.Format == "hl7v2" {
+		if targetFormat == "fhir_r4" || targetFormat == "fhir" {
+			standard := staticHL7FHIRMappings(sampleMessage, det.Format, targetFormat)
+			custom := zSegmentSuggestions(sampleMessage)
+			combined := append(standard, custom...)
+			if len(combined) > 0 {
+				return qualifySuggestions(combined), nil, nil
+			}
+		}
 	}
 
 	// Slow path: ask the LLM (only for non-HL7 or unknown formats).
@@ -299,7 +308,59 @@ Return 3-5 mappings only. data_type: string|date|code|decimal|boolean.`,
 			return nil, chunks, fmt.Errorf("parse mapping suggestions: %w", err)
 		}
 	}
-	return suggestions, chunks, nil
+	return qualifySuggestions(suggestions), chunks, nil
+}
+
+// segmentResourceHints maps standard HL7 segment names to their primary FHIR
+// resource for use when qualifying bare FHIR paths (e.g. "identifier" → "Patient.identifier").
+var segmentResourceHints = map[string]string{
+	"MSH": "MessageHeader", "PID": "Patient", "PD1": "Patient",
+	"PV1": "Encounter", "PV2": "Encounter", "EVN": "Encounter",
+	"OBR": "DiagnosticReport", "OBX": "Observation",
+	"ORC": "ServiceRequest", "AL1": "AllergyIntolerance",
+	"DG1": "Condition", "NK1": "RelatedPerson",
+	"IN1": "Coverage", "IN2": "Coverage",
+	"ROL": "PractitionerRole", "GT1": "RelatedPerson",
+	"PR1": "Procedure", "FT1": "ChargeItem",
+	"TXA": "DocumentReference", "SCH": "Appointment",
+	"AIS": "Appointment", "AIG": "Appointment", "AIL": "Appointment", "AIP": "Appointment",
+	"RXA": "Immunization", "RXR": "Immunization",
+	"STF": "Practitioner", "PRA": "PractitionerRole",
+	"LOC": "Location", "MFI": "MessageHeader", "MFE": "MessageHeader",
+	"ACC": "Condition", "AUT": "ClaimResponse",
+}
+
+// fhirResourceQualifiedRe matches paths that already start with a FHIR resource
+// name (e.g. "Patient.name", "Encounter.period.start").
+var fhirResourceQualifiedRe = regexp.MustCompile(`^[A-Z][a-zA-Z]+\.`)
+
+// qualifyFHIRPath ensures a FHIR path starts with a resource name.
+// If the path is already qualified ("Patient.identifier") it is returned unchanged.
+// Otherwise the resource is derived from the source HL7 field segment.
+func qualifyFHIRPath(targetField, sourceField string) string {
+	if fhirResourceQualifiedRe.MatchString(targetField) {
+		return targetField
+	}
+	// Derive segment name: "PID.3" → "PID"
+	seg := strings.ToUpper(strings.SplitN(strings.TrimSpace(sourceField), ".", 2)[0])
+	var resource string
+	if len(seg) > 0 && seg[0] == 'Z' {
+		resource = inferZSegmentResource(seg)
+	} else if r, ok := segmentResourceHints[seg]; ok {
+		resource = r
+	}
+	if resource == "" {
+		return targetField // cannot infer — return unchanged rather than guess wrongly
+	}
+	return resource + "." + targetField
+}
+
+// qualifySuggestions runs qualifyFHIRPath on every suggestion in the slice.
+func qualifySuggestions(suggestions []MappingSuggestion) []MappingSuggestion {
+	for i := range suggestions {
+		suggestions[i].TargetField = qualifyFHIRPath(suggestions[i].TargetField, suggestions[i].SourceField)
+	}
+	return suggestions
 }
 
 // staticHL7FHIRMappings returns HL7v2→FHIR R4 field mapping suggestions for
@@ -639,14 +700,147 @@ func staticHL7FHIRMappings(sampleMessage, detectedFormat, targetFormat string) [
 		},
 	}
 
-	// Build result from only the segments present in the message.
+	// Build a field-level lookup so we can check field-by-field below.
+	catalogueLookup := map[string]MappingSuggestion{}
+	for _, segSuggestions := range catalogue {
+		for _, s := range segSuggestions {
+			catalogueLookup[s.SourceField] = s
+		}
+	}
+
+	// Walk the actual message lines and emit a catalogue suggestion only when
+	// the corresponding field has a non-empty value in the submitted HL7.
+	// This makes the fallback message-centric: the suggestions are derived from
+	// what is actually in the HL7, not from a fixed catalogue list.
 	var result []MappingSuggestion
-	for seg, suggestions := range catalogue {
-		if presentSegments[seg] {
-			result = append(result, suggestions...)
+	seen := map[string]bool{}
+	normalised := strings.ReplaceAll(strings.ReplaceAll(sampleMessage, "\r\n", "\n"), "\r", "\n")
+	for _, line := range strings.Split(normalised, "\n") {
+		line = strings.TrimSpace(line)
+		if len(line) < 3 {
+			continue
+		}
+		pipeIdx := strings.Index(line, "|")
+		if pipeIdx <= 0 {
+			continue
+		}
+		segName := strings.ToUpper(strings.TrimSpace(line[:pipeIdx]))
+		if len(segName) < 2 || segName[0] == 'Z' {
+			continue // Z-segments are handled by zSegmentSuggestions in SuggestMappings
+		}
+		for i, val := range strings.Split(line[pipeIdx+1:], "|") {
+			if strings.TrimSpace(val) == "" {
+				continue
+			}
+			fieldPath := fmt.Sprintf("%s.%d", segName, i+1)
+			if seen[fieldPath] {
+				continue
+			}
+			seen[fieldPath] = true
+			if s, found := catalogueLookup[fieldPath]; found {
+				result = append(result, s)
+			}
 		}
 	}
 	return result
+}
+
+// zSegmentSuggestions inspects the raw HL7 message for custom Z-segments
+// (names starting with "Z") and returns heuristic FHIR Extension suggestions
+// for each non-empty field. These are not in any standard catalogue and would
+// otherwise be invisible to the AI Suggest gap analysis.
+func zSegmentSuggestions(message string) []MappingSuggestion {
+	var suggestions []MappingSuggestion
+	normalised := strings.ReplaceAll(strings.ReplaceAll(message, "\r\n", "\n"), "\r", "\n")
+	for _, line := range strings.Split(normalised, "\n") {
+		line = strings.TrimSpace(line)
+		if len(line) < 3 {
+			continue
+		}
+		pipeIdx := strings.Index(line, "|")
+		if pipeIdx <= 0 {
+			continue
+		}
+		segName := strings.ToUpper(strings.TrimSpace(line[:pipeIdx]))
+		if len(segName) < 2 || segName[0] != 'Z' {
+			continue
+		}
+
+		resource := inferZSegmentResource(segName)
+		fields := strings.Split(line[pipeIdx+1:], "|")
+		for i, val := range fields {
+			val = strings.TrimSpace(val)
+			if val == "" {
+				continue
+			}
+			fieldNum := i + 1
+			extType, dataType, transformKey := inferZFieldExtension(val)
+			// e.g. "Extension.valueCode" → "Patient.extension.valueCode"
+			fhirPath := resource + "." + strings.TrimPrefix(extType, "Extension.")
+			suggestions = append(suggestions, MappingSuggestion{
+				SourceField:  fmt.Sprintf("%s.%d", segName, fieldNum),
+				TargetField:  fhirPath,
+				Confidence:   0.65,
+				Reasoning:    fmt.Sprintf("Custom Z-segment %s.%d → %s FHIR Extension (value: %q). Attach to %s based on segment name prefix.", segName, fieldNum, extType, truncate(val, 25), resource),
+				DataType:     dataType,
+				TransformKey: transformKey,
+			})
+		}
+	}
+	return suggestions
+}
+
+// inferZSegmentResource maps a Z-segment name to the most likely FHIR resource
+// that should own the Extension, based on common naming conventions.
+func inferZSegmentResource(seg string) string {
+	seg = strings.ToUpper(seg)
+	switch {
+	case strings.HasPrefix(seg, "ZP") || strings.HasPrefix(seg, "ZD"):
+		// ZPD, ZPI, ZPA, ZPR, ZDM → patient demographics / identifiers
+		return "Patient"
+	case strings.HasPrefix(seg, "ZV") || strings.HasPrefix(seg, "ZE") || strings.HasPrefix(seg, "ZA"):
+		// ZVI, ZVS, ZEN, ZAD → visit / encounter / admission
+		return "Encounter"
+	case strings.HasPrefix(seg, "ZO") || strings.HasPrefix(seg, "ZR"):
+		// ZOB, ZOR, ZRS → observation / result
+		return "Observation"
+	case strings.HasPrefix(seg, "ZI") || strings.HasPrefix(seg, "ZC"):
+		// ZIN, ZCO → insurance / coverage / condition
+		return "Coverage"
+	case strings.HasPrefix(seg, "ZM") || strings.HasPrefix(seg, "ZH"):
+		// ZMH, ZHD → message header level
+		return "MessageHeader"
+	default:
+		// Unknown prefix — Patient is the safest default for most clinical Z-segments
+		return "Patient"
+	}
+}
+
+// inferZFieldExtension picks the most appropriate FHIR Extension value type
+// based on the field's value pattern.
+func inferZFieldExtension(val string) (fhirPath, dataType, transformKey string) {
+	// 14-digit timestamp: YYYYMMDDHHmmss
+	if matched, _ := regexp.MatchString(`^\d{14}$`, val); matched {
+		return "Extension.valueDateTime", "TS", "ts_to_datetime"
+	}
+	// 8-digit date: YYYYMMDD
+	if matched, _ := regexp.MatchString(`^\d{8}$`, val); matched {
+		return "Extension.valueDate", "DT", "ts_to_date"
+	}
+	// Short uppercase alpha code (1-5 chars): IS/ID
+	if matched, _ := regexp.MatchString(`^[A-Z]{1,5}$`, val); matched {
+		return "Extension.valueCode", "IS", "string_direct"
+	}
+	// Numeric (integer or decimal)
+	if matched, _ := regexp.MatchString(`^-?\d+(\.\d+)?$`, val); matched {
+		return "Extension.valueDecimal", "NM", "string_direct"
+	}
+	// Boolean-like
+	if val == "Y" || val == "N" || val == "true" || val == "false" {
+		return "Extension.valueBoolean", "ID", "string_direct"
+	}
+	// Default: string
+	return "Extension.valueString", "ST", "string_direct"
 }
 
 // extractPresentSegments returns a set of the unique HL7 segment names
@@ -733,6 +927,12 @@ type AskInput struct {
 //  2. Live system context (interface/pipeline/step data)
 //  3. Conversation history (session memory)
 func (s *AIService) AskQuestion(ctx context.Context, input AskInput) (string, []RetrievedChunk, error) {
+	// Guardrail: return pre-written authoritative answer for high-stakes question classes.
+	// Bypasses the LLM entirely to guarantee correctness where small models hallucinate.
+	if guardrailAnswer, matched := guardrailCheck(input.Question); matched {
+		return guardrailAnswer, nil, nil
+	}
+
 	// Layer 3: conversation history
 	history := input.HistoryOverride
 	if len(history) == 0 && input.SessionID != "" && s.Memory != nil {
@@ -760,6 +960,11 @@ func (s *AIService) AskQuestion(ctx context.Context, input AskInput) (string, []
 	answer, chunks, err := s.rag.QueryCapped(ctx, input.Question, systemPrompt, 4, 400, nil)
 	if err != nil {
 		return "", chunks, err
+	}
+
+	// Confidence signal: when RAG found no relevant chunks, flag the answer as ungrounded.
+	if len(chunks) == 0 {
+		answer = lowConfidencePrefix + answer
 	}
 
 	// Persist turns
@@ -794,11 +999,22 @@ func (s *AIService) AskQuestionStream(ctx context.Context, input AskInput, onTok
 		historyText = s.Memory.FormatHistory(history)
 	}
 
+	// Guardrail: stream pre-written answer for high-stakes question classes.
+	if guardrailAnswer, matched := guardrailCheck(input.Question); matched {
+		_ = onToken(guardrailAnswer)
+		return nil, nil
+	}
+
 	// Fast RAG: topK=3, no filter — gives operational KB hits (confirmed mappings,
 	// interface configs) without full-scale retrieval latency.
 	var chunks []RetrievedChunk
 	if s.rag != nil && s.rag.db != nil {
 		chunks, _ = s.rag.Retrieve(ctx, input.Question, 3, nil) // non-fatal
+	}
+
+	// Confidence signal: stream a caveat first when no KB context was found.
+	if len(chunks) == 0 {
+		_ = onToken(lowConfidencePrefix)
 	}
 
 	systemPrompt := ctxPrefix + historyText + ezCompanionSystemPrompt

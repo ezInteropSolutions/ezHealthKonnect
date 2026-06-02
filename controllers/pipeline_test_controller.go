@@ -185,6 +185,9 @@ func (c *PipelineTestController) TestPipeline(ctx *gin.Context) {
 		log.Printf("✅ [Test] %s parsed: type=%s fields=%d schemaLoaded=%v",
 			detectedFormat, parseResult.Metadata.MessageType,
 			len(parseResult.EnhancedFields), parseResult.TypeName != "")
+		// Store parsed message as sample so the field browser in the mapping UI
+		// is populated immediately after a successful test run.
+		go c.storeSampleMessage(interfaceID, messageType, detectedFormat, parseResult.ParsedJSON)
 	} else {
 		log.Printf("⚠️  [Test] %s parse error: %s — raw content preserved", detectedFormat, parseResult.Error)
 	}
@@ -238,6 +241,67 @@ func (c *PipelineTestController) TestPipeline(ctx *gin.Context) {
 
 	log.Printf("✅ Test completed: %d steps executed, status=%s", len(result.ExecutionLog), result.Status)
 	ctx.JSON(http.StatusOK, response)
+}
+
+// storeSampleMessage persists the parsed message content to sample_parsed_messages
+// so the HL7 field browser in the mapping UI is populated after a test run.
+// Runs in a goroutine — failures are logged but never surface to the caller.
+func (c *PipelineTestController) storeSampleMessage(
+	interfaceID, messageType, format string,
+	parsedJSON map[string]interface{},
+) {
+	if parsedJSON == nil || parsedJSON["enhancedSegments"] == nil {
+		return // nothing useful to store
+	}
+
+	// The sample_parsed_messages table expects { enhancedSegments: {...} }
+	content := map[string]interface{}{
+		"enhancedSegments": parsedJSON["enhancedSegments"],
+	}
+	if v, ok := parsedJSON["segmentOrder"]; ok {
+		content["segmentOrder"] = v
+	}
+
+	contentJSON, err := json.Marshal(content)
+	if err != nil {
+		log.Printf("⚠️  [Test] storeSampleMessage: marshal error: %v", err)
+		return
+	}
+
+	// Extract HL7 version from parsed content; fall back to "2.5"
+	hl7Version := "2.5"
+	if v, ok := parsedJSON["version"].(string); ok && v != "" {
+		hl7Version = v
+	}
+
+	// Only store HL7v2 messages — other formats have a different structure
+	sampleFormat := "hl7v2"
+	if format != "hl7v2" && format != "hl7" {
+		sampleFormat = format
+	}
+
+	ctx := context.Background()
+
+	// Upsert: update existing global sample for this message type, or insert one.
+	// Using ON CONFLICT so concurrent test runs are safe.
+	_, err = c.db.ExecContext(ctx, `
+		INSERT INTO sample_parsed_messages
+			(message_type, hl7_version, format, parsed_content, description,
+			 interface_id, sample_scope, source, priority, is_active)
+		VALUES ($1, $2, $3, $4,
+		        'Auto-captured from pipeline test',
+		        $5::uuid, 'global', 'pipeline-test', 50, TRUE)
+		ON CONFLICT ON CONSTRAINT unique_sample_per_type_version DO UPDATE
+			SET parsed_content = EXCLUDED.parsed_content,
+			    source         = 'pipeline-test',
+			    updated_at     = CURRENT_TIMESTAMP
+	`, messageType, hl7Version, sampleFormat, contentJSON, interfaceID)
+
+	if err != nil {
+		log.Printf("⚠️  [Test] storeSampleMessage: db error: %v", err)
+	} else {
+		log.Printf("✅ [Test] Sample message stored for %s (type=%s v=%s)", interfaceID, messageType, hl7Version)
+	}
 }
 
 // loadPipelineFromDB loads a pipeline configuration from the database

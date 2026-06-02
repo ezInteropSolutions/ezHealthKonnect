@@ -2280,7 +2280,10 @@ class InterfaceConfigComponents {
                                     (container.querySelector(`#${prefix}DeliveryModeIndividual`)?.checked ? 'individual' : 'bundle');
                 const authType = container.querySelector(`#${prefix}HttpAuthType`)?.value;
 
-                if (endpoint) config.endpoint = endpoint;
+                if (endpoint) {
+                    config.endpoint = endpoint;
+                    config.baseUrl = endpoint; // canonical field name in http_fhir_outbound step config
+                }
                 if (version) config.version = version;
                 if (format) config.format = format;
                 if (deliveryMode) config.deliveryMode = deliveryMode;

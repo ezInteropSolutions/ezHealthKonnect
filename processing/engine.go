@@ -340,9 +340,10 @@ func (pe *ProcessingEngine) ActivateInterface(interfaceID string) error {
 	pe.mutex.Lock()
 	defer pe.mutex.Unlock()
 
-	// Check if already active
+	// Already active — idempotent: succeed silently so the Node.js deployment
+	// service calling /activate after Go's own startup doesn't see a 500.
 	if _, exists := pe.activeInterfaces[interfaceID]; exists {
-		return fmt.Errorf("interface already active")
+		return nil
 	}
 
 	// Get interface name, transformation mapping, and message family filter.

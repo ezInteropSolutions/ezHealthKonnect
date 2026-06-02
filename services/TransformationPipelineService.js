@@ -51,7 +51,7 @@ class TransformationPipelineService {
             // Step 3: Add all pipeline steps based on interface type
             const stepsCreated = await this.addDefaultPipelineSteps(
                 sequelize, t, pipelineId,
-                { sourceType, targetType, connectivityInfo, templateId, wizardMappings }
+                { sourceType, targetType, connectivityInfo, templateId, wizardMappings, interfaceId, messageType }
             );
 
             console.log('✅ Pipeline created successfully:', { pipelineId, templateId, stepsCreated });
@@ -184,7 +184,7 @@ class TransformationPipelineService {
      * @returns {number}    total steps created
      */
     async addDefaultPipelineSteps(sequelize, t, pipelineId, ctx) {
-        const { sourceType, targetType, connectivityInfo, templateId, wizardMappings } = ctx;
+        const { sourceType, targetType, connectivityInfo, templateId, wizardMappings, interfaceId, messageType } = ctx;
         let count = 0;
 
         // ── Source connector (always first) ──────────────────────────────────
@@ -214,15 +214,16 @@ class TransformationPipelineService {
 
         if (isHL7toFHIR) {
             // HL7 v2 → FHIR R4
+            // The step config is a REFERENCE, not a data store.
+            // interface_message_mappings is the single source of truth for all mapping data.
+            // The runtime resolves the actual mappings via the 5-step chain using interface_id.
+            const mappingMode = templateId ? 'oob' : 'custom';
             const stepConfig = {
                 fhir_version: 'R4',
-                use_template: !!templateId,
-                template_id: templateId
+                interface_id: interfaceId || null,
+                message_type: messageType || null,
+                mapping_mode: mappingMode,
             };
-            if (!templateId && wizardMappings?.atomicMappings?.length) {
-                stepConfig.use_template = false;
-                stepConfig.custom_mapping = wizardMappings;
-            }
             await sequelize.query(`
                 INSERT INTO transformation_steps
                     (pipeline_id, step_name, step_type, sequence, config, enabled)
@@ -232,7 +233,7 @@ class TransformationPipelineService {
                 transaction: t
             });
             count++;
-            console.log('✅ Added HL7→FHIR Transform step');
+            console.log('✅ Added HL7→FHIR Transform step (interface_id:', interfaceId, ', mode:', mappingMode, ')');
 
         } else {
             // Future flows (HL7→HL7 passthrough, FHIR→FHIR, CSV→FHIR, etc.) go here

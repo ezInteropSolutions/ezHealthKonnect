@@ -3,7 +3,7 @@
 
 const axios = require('axios');
 const crypto = require('crypto');
-const GO_BACKEND_URL = process.env.GO_BACKEND_URL || `http://127.0.0.1:${process.env.API_PORT || 8080}`;
+const { GO_BACKEND_URL, goClient } = require('../services/goBackendClient');
 
 // ── Credential encryption for step configs ─────────────────────────────────
 // Uses the same APP_CREDENTIAL_KEY + AES-256-GCM algorithm as the Go
@@ -148,16 +148,13 @@ exports.testPipeline = async (req, res) => {
         console.log('🧪 [Node.js] Proxying test request to Go backend:', GO_BACKEND_URL);
 
         // Forward request to Go backend with increased limits for large pipeline responses
-        const response = await axios.post(
-            `${GO_BACKEND_URL}/api/fhir/pipeline/test`,
+        const response = await goClient.post(
+            `/api/fhir/pipeline/test`,
             req.body,
             {
                 timeout: 60000,
-                maxContentLength: 50 * 1024 * 1024,  // 50MB
+                maxContentLength: 50 * 1024 * 1024,
                 maxBodyLength: 50 * 1024 * 1024,
-                headers: {
-                    'Content-Type': 'application/json'
-                }
             }
         );
 
@@ -640,7 +637,7 @@ exports.savePipeline = async (req, res) => {
             await t.commit();
 
             // Re-ingest pipeline into AI knowledge base (fire-and-forget, non-blocking)
-            axios.post(`${GO_BACKEND_URL}/api/ai/ingest/pipeline/${actualPipelineId}`)
+            goClient.post(`/api/ai/ingest/pipeline/${actualPipelineId}`)
                 .catch(err => console.warn('[AI] Pipeline KB ingestion failed (non-fatal):', err.message));
 
             res.json({
@@ -942,7 +939,7 @@ exports.clonePipeline = async (req, res) => {
 // Proxy execution to Go backend
 exports.executePipeline = async (req, res) => {
     try {
-        const response = await axios.post(`${GO_BACKEND_URL}/api/fhir/pipeline/test`, req.body);
+        const response = await goClient.post(`/api/fhir/pipeline/test`, req.body);
         res.json(response.data);
     } catch (error) {
         const status = error.response?.status || 500;

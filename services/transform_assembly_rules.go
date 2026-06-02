@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"encoding/json"
 	"log"
 	"strings"
 )
@@ -28,7 +29,8 @@ func (s *HL7FHIRTransformServiceV3) loadAssemblyRulesForType(ctx context.Context
 	all := make(map[string][]AssemblyRule)
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, message_type, rule_type, source_resource, target_resource,
-		       reference_path, COALESCE(condition_expr,''), sequence
+		       reference_path, COALESCE(condition_expr,''), sequence,
+		       COALESCE(config::text, '{}')
 		FROM   assembly_rules
 		WHERE  is_active = true
 		ORDER  BY message_type, sequence`)
@@ -40,11 +42,18 @@ func (s *HL7FHIRTransformServiceV3) loadAssemblyRulesForType(ctx context.Context
 	defer rows.Close()
 	for rows.Next() {
 		var r AssemblyRule
+		var configJSON string
 		if err2 := rows.Scan(&r.ID, &r.MessageType, &r.RuleType,
 			&r.SourceResource, &r.TargetResource,
-			&r.ReferencePath, &r.ConditionExpr, &r.Sequence); err2 != nil {
+			&r.ReferencePath, &r.ConditionExpr, &r.Sequence,
+			&configJSON); err2 != nil {
 			log.Printf("⚠️  assembly_rules scan error: %v", err2)
 			continue
+		}
+		if configJSON != "" && configJSON != "{}" {
+			if err3 := json.Unmarshal([]byte(configJSON), &r.Config); err3 != nil {
+				log.Printf("⚠️  assembly_rules config parse error (rule %s): %v", r.ID, err3)
+			}
 		}
 		all[r.MessageType] = append(all[r.MessageType], r)
 	}
@@ -185,6 +194,90 @@ func (s *HL7FHIRTransformServiceV3) applyOneAssemblyRule(
 			if _, exists := r[rule.ReferencePath]; !exists {
 				r[rule.ReferencePath] = []interface{}{ref}
 			}
+		}
+
+	case "logical_ref":
+		// Build an identifier-based FHIR reference instead of a URL reference.
+		// Produces: source.referencePath = [{identifier:{system,value}, display}]
+		//
+		// Config keys (from assembly_rules.config JSONB):
+		//   identifier_system  — system URI for the identifier (e.g. "urn:local:payer")
+		//   identifier_field   — field name on the target resource holding the value
+		//   display_field      — field name on the target resource for display text
+		//                        (defaults to identifier_field when absent)
+		//
+		// Resolution priority:
+		//   1. Target resource exists in bundle → read identifier_field / display_field
+		//   2. Existing display-only reference at source.referencePath (from field mapping)
+		//      → use display value as both identifier value and display text
+		identifierSystem, _ := rule.Config["identifier_system"].(string)
+		identifierField, _  := rule.Config["identifier_field"].(string)
+		displayField, _     := rule.Config["display_field"].(string)
+		if displayField == "" {
+			displayField = identifierField
+		}
+
+		for _, r := range resources {
+			if rt, _ := r["resourceType"].(string); rt != rule.SourceResource {
+				continue
+			}
+
+			// Priority 1: find target resource in bundle and read its fields.
+			identifierValue, displayValue := "", ""
+			for _, t := range resources {
+				if trt, _ := t["resourceType"].(string); trt != rule.TargetResource {
+					continue
+				}
+				if identifierField != "" {
+					identifierValue, _ = t[identifierField].(string)
+				}
+				if displayField != "" {
+					displayValue, _ = t[displayField].(string)
+				}
+				break
+			}
+
+			// Priority 2: existing display-only reference at the path (from field mapping).
+			if identifierValue == "" {
+				switch existing := r[rule.ReferencePath].(type) {
+				case []interface{}:
+					if len(existing) > 0 {
+						if m, ok := existing[0].(map[string]interface{}); ok {
+							if d, _ := m["display"].(string); d != "" {
+								identifierValue = d
+								if displayValue == "" {
+									displayValue = d
+								}
+							}
+						}
+					}
+				case map[string]interface{}:
+					if d, _ := existing["display"].(string); d != "" {
+						identifierValue = d
+						if displayValue == "" {
+							displayValue = d
+						}
+					}
+				}
+			}
+
+			if identifierValue == "" {
+				continue // nothing to wire for this resource
+			}
+
+			ref := map[string]interface{}{}
+			if identifierSystem != "" {
+				ref["identifier"] = map[string]interface{}{
+					"system": identifierSystem,
+					"value":  identifierValue,
+				}
+			}
+			if displayValue != "" {
+				ref["display"] = displayValue
+			}
+
+			// referencePath is always an array for logical_ref targets (e.g. Coverage.payor is 1..*)
+			r[rule.ReferencePath] = []interface{}{ref}
 		}
 	}
 

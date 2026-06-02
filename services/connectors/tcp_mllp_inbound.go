@@ -117,13 +117,11 @@ func (c *TCPMLLPInboundConnector) Initialize(config []byte) error {
 		c.port = 2575 // Default MLLP port
 	}
 
-	// TLS defaults to enabled. Operators must explicitly set enable_tls: false
-	// to opt out, which triggers a startup warning.
-	c.enableTLS = cfg.GetBoolDefault("enable_tls", true)
+	// TLS defaults to disabled. Set enable_tls: true with certificate_file + key_file
+	// to enable TLS. A warning is printed when TLS is off to remind operators.
+	c.enableTLS = cfg.GetBoolDefault("enable_tls", false)
 	if !c.enableTLS {
-		log.Printf("⚠️  SECURITY WARNING: TLS is DISABLED on MLLP listener (port %d).", c.port)
-		log.Printf("⚠️  HL7 messages will be transmitted in plaintext. This is not acceptable for production.")
-		log.Printf("⚠️  Set enable_tls: true and provide certificate_file + key_file to enable TLS.")
+		log.Printf("⚠️  SECURITY NOTE: TLS is DISABLED on MLLP listener (port %d). Set enable_tls: true in production.", c.port)
 	}
 
 	c.maxConnections = cfg.GetInt("max_connections")

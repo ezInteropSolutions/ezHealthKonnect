@@ -495,7 +495,13 @@
             else if (step.connectorType.includes('kafka')) targetConnectivityValue = 'kafka';
             else if (step.connectorType.includes('rabbitmq')) targetConnectivityValue = 'rabbitmq';
             else targetConnectivityValue = 'http';
-            targetConfigData = step.config || {};
+            targetConfigData = { ...(step.config || {}) };
+            // Normalize field names: step config may use 'baseUrl' (http_fhir_outbound canonical)
+            // but InterfaceConfigComponents renders and collects using 'endpoint'.
+            // This single alias keeps both screens reading from the same store.
+            if (!targetConfigData.endpoint && targetConfigData.baseUrl) {
+                targetConfigData.endpoint = targetConfigData.baseUrl;
+            }
             console.log('✅ Target config from connector.outbound step (single source of truth):', targetConfigData);
         } else {
             // Fallback: legacy target_connectivity column

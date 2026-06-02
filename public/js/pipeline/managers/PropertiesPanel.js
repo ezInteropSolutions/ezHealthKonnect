@@ -1645,45 +1645,58 @@ class PropertiesPanel {
         console.log('🗺️ use_standard_template:', step.config?.use_standard_template);
         console.log('🗺️ =============================================');
 
-        // Reference-based template system:
-        // 1. Check if step uses standard template (use_standard_template: true)
-        // 2. If so, we'll fetch template mappings asynchronously
-        // 3. Custom overrides can be stored in step.config.custom_overrides
-        const usesStandardTemplate = step.config?.use_standard_template === true;
-        const customOverrides = step.config?.custom_overrides || [];
-        const embeddedMappings = step.config?.embedded_mappings;
+        // interface_message_mappings is the single source of truth.
+        // If the step carries interface_id we always fetch the resolved mapping live
+        // from GET /api/fhir/interfaces/:id/resolved-mappings so the UI shows what
+        // the runtime chain actually uses (including Z-segments, AI additions, deltas).
+        const interfaceId = step.config?.interface_id || this.builder.pipeline?.interfaceId;
+        const messageType = step.config?.message_type || this.builder.pipeline?.messageType || 'ADT^A01';
+        const mappingMode = step.config?.mapping_mode || 'oob';
+
         let mappings = [];
         let mappingSource = 'none';
 
-        // Priority: embedded_mappings > mappings array > template reference
-        if (embeddedMappings) {
-            if (Array.isArray(embeddedMappings)) {
-                mappings = embeddedMappings;
-            } else if (embeddedMappings.atomicMappings && Array.isArray(embeddedMappings.atomicMappings)) {
-                mappings = embeddedMappings.atomicMappings;
-            } else if (embeddedMappings.mappings && Array.isArray(embeddedMappings.mappings)) {
-                mappings = embeddedMappings.mappings;
-            } else if (embeddedMappings.custom_mapping_config && Array.isArray(embeddedMappings.custom_mapping_config)) {
-                mappings = embeddedMappings.custom_mapping_config;
+        // Legacy embedded_mappings / config.mappings — only used if no interface_id present
+        if (!interfaceId) {
+            const embeddedMappings = step.config?.embedded_mappings;
+            if (embeddedMappings) {
+                if (Array.isArray(embeddedMappings)) mappings = embeddedMappings;
+                else if (Array.isArray(embeddedMappings.atomicMappings)) mappings = embeddedMappings.atomicMappings;
+                mappingSource = 'embedded';
+            } else if (Array.isArray(step.config?.mappings) && step.config.mappings.length > 0) {
+                mappings = step.config.mappings;
+                mappingSource = 'config';
             }
-            mappingSource = 'embedded';
-            console.log('🗺️ Using embedded_mappings:', mappings.length, 'mappings');
-        } else if (step.config?.mappings && Array.isArray(step.config.mappings) && step.config.mappings.length > 0) {
-            mappings = step.config.mappings;
-            mappingSource = 'config';
-            console.log('🗺️ Using config.mappings:', mappings.length, 'mappings');
-        } else if (usesStandardTemplate) {
-            // Template reference - will be loaded asynchronously
-            mappingSource = 'template_reference';
-            console.log('🗺️ Uses standard template - will fetch asynchronously');
+        } else {
+            // Has interface reference — resolved live from backend
+            mappingSource = 'interface_ref';
         }
+
+        console.log('🗺️ mappingSource:', mappingSource, '| interfaceId:', interfaceId, '| mode:', mappingMode);
 
         const mappingCount = mappings.length;
         const configJSON = JSON.stringify(step.config, null, 2);
 
+        // Mapping mode pill — shown in the section header so users always know which
+        // path the runtime will take for this interface.
+        const modeMeta = {
+            oob:    { label: '🔗 Tracking OOB template',  bg: '#e0f2fe', color: '#0369a1', tip: 'Mappings come from the standard OOB template. Updates to the template are picked up automatically at runtime.' },
+            delta:  { label: '⚡ OOB + custom additions', bg: '#fef9c3', color: '#854d0e', tip: 'Base OOB template plus your additions. OOB updates still flow through; your additions are preserved.' },
+            custom: { label: '✏️ Fully custom',           bg: '#fce7f3', color: '#9d174d', tip: 'Fully custom mapping — no automatic OOB updates. You own the full configuration.' },
+        };
+        const mode    = interfaceId ? (mappingMode || 'oob') : 'oob';
+        const modeObj = modeMeta[mode] || modeMeta.oob;
+
         return `
             <div class="form-section">
-                <h4>HL7→FHIR Mapping Configuration</h4>
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+                    <h4 style="margin:0;">HL7→FHIR Mapping Configuration</h4>
+                    ${interfaceId ? `
+                    <span title="${modeObj.tip}"
+                          style="font-size:11px;padding:3px 10px;border-radius:12px;background:${modeObj.bg};color:${modeObj.color};font-weight:600;cursor:help;border:1px solid ${modeObj.color}33;">
+                        ${modeObj.label}
+                    </span>` : ''}
+                </div>
 
                 <!-- Tab Navigation -->
                 <div class="config-tabs" style="display: flex; gap: 0.5rem; margin-bottom: 1rem; border-bottom: 2px solid #e5e7eb;">
@@ -1765,17 +1778,23 @@ class PropertiesPanel {
 
                     <div id="mappingStatusBar" style="margin-bottom: 1rem; padding: 0.75rem; background: #f8fafc; border-radius: 6px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem;">
                         <span id="mappingStatusText" style="color: #475569; font-size: 0.875rem;">
-                            ${mappingSource === 'template_reference' ?
-                                '<i class="fas fa-spinner fa-spin"></i> Loading standard template...' :
-                                `<strong>${mappingCount}</strong> mappings configured`
+                            ${mappingSource === 'interface_ref'
+                                ? '<i class="fas fa-spinner fa-spin"></i> Loading mappings…'
+                                : `<strong>${mappingCount}</strong> mappings configured`
                             }
+                            ${mappingSource === 'interface_ref' ? (() => {
+                                const modeLabels = { oob: '🔗 Tracking OOB template', delta: '⚡ OOB + custom additions', custom: '✏️ Fully custom' };
+                                return `<span style="margin-left:6px;font-size:11px;padding:2px 7px;border-radius:10px;background:#e0f2fe;color:#0369a1;font-weight:600;">${modeLabels[mappingMode] || mappingMode}</span>`;
+                            })() : ''}
                             ${mappingSource === 'embedded' ? '<span style="color: #059669; font-weight: 500;">(from wizard)</span>' : ''}
                             ${mappingSource === 'config' && mappingCount > 0 ? '<span style="color: #3b82f6; font-weight: 500;">(custom)</span>' : ''}
                             ${mappingSource === 'none' ? '<span style="color: #f59e0b; font-weight: 500;">(using standard template at runtime)</span>' : ''}
                         </span>
                         <div style="display: flex; gap: 0.5rem; align-items: center;">
-                            <button id="loadStandardTemplateBtn" class="btn btn-secondary" style="font-size: 0.8rem; padding: 0.4rem 0.8rem;" title="Load mappings from the standard template for this message type">
-                                <i class="fas fa-download"></i> Load Standard Template
+                            <button id="loadStandardTemplateBtn" class="btn btn-secondary" style="font-size: 0.8rem; padding: 0.4rem 0.8rem;"
+                                title="${mappingSource === 'interface_ref' ? 'Refresh resolved mappings from the interface configuration' : 'Load mappings from the standard template for this message type'}">
+                                <i class="fas fa-${mappingSource === 'interface_ref' ? 'sync-alt' : 'download'}"></i>
+                                ${mappingSource === 'interface_ref' ? 'Refresh Mappings' : 'Load Standard Template'}
                             </button>
                             <input type="text" id="mappingSearchInput" placeholder="Search mappings..." style="
                                 padding: 0.375rem 0.75rem;
@@ -1792,9 +1811,12 @@ class PropertiesPanel {
                         overflow-y: auto;
                         border: 1px solid #e5e7eb;
                         border-radius: 6px;
-                    " data-auto-load-template="${mappingSource === 'template_reference' || mappingSource === 'none' ? 'true' : 'false'}">
-                        ${mappingSource === 'template_reference' ?
-                            '<div style="padding: 2rem; text-align: center; color: #64748b;"><i class="fas fa-spinner fa-spin fa-2x"></i><p style="margin-top: 1rem;">Loading standard template mappings...</p></div>' :
+                    " data-auto-load-template="${mappingSource === 'interface_ref' || mappingSource === 'template_reference' || mappingSource === 'none' ? 'true' : 'false'}"
+                       data-interface-id="${interfaceId || ''}"
+                       data-message-type="${messageType || ''}"
+                       data-mapping-mode="${mappingMode || 'oob'}">
+                        ${mappingSource === 'interface_ref' || mappingSource === 'template_reference' ?
+                            '<div style="padding: 2rem; text-align: center; color: #64748b;"><i class="fas fa-spinner fa-spin fa-2x"></i><p style="margin-top: 1rem;">Loading mappings…</p></div>' :
                             this.renderMappingTable(mappings)
                         }
                     </div>
@@ -2402,6 +2424,11 @@ OBX|3|NM|2075-0^Chloride||102|mmol/L</pre>
      * "" / undefined           → "Other"
      */
     _mappingResourceType(mapping) {
+        // Prefer the explicit resourceType field set by the backend.
+        const explicit = mapping.resourceType || mapping.fhirResourceType;
+        if (explicit) return explicit;
+
+        // Fallback: parse the leading segment from a fully-qualified FHIR path.
         const path = mapping.fhirPath || mapping.targetField || mapping.targetPath || '';
         if (!path) return 'Other';
         if (path.startsWith('[')) return 'Enriched Data';
@@ -2411,7 +2438,8 @@ OBX|3|NM|2075-0^Chloride||102|mmol/L</pre>
         if (dot > 0) end = Math.min(end, dot);
         if (bracket > 0) end = Math.min(end, bracket);
         const rt = path.slice(0, end).trim();
-        return rt || 'Other';
+        // Only use the parsed segment if it looks like a FHIR resource type (PascalCase).
+        return /^[A-Z][A-Za-z]+$/.test(rt) ? rt : 'Other';
     }
 
     // Icon + accent colour per resource type
@@ -2478,7 +2506,15 @@ OBX|3|NM|2075-0^Chloride||102|mmol/L</pre>
                         ${dataType}
                         ${window._transformBadge ? window._transformBadge(transformType, index) : ''}
                     </td>
-                    <td style="padding: 0.6rem 0.75rem; text-align: center;">
+                    <td style="padding: 0.6rem 0.75rem; text-align: center; white-space: nowrap;">
+                        <button class="edit-mapping-btn" data-index="${index}"
+                            onclick="event.stopPropagation(); window.propertiesPanel.editMapping(${index})"
+                            style="background:none;border:none;color:#2563eb;cursor:pointer;padding:3px 6px;"
+                            onmouseover="this.style.color='#1d4ed8'"
+                            onmouseout="this.style.color='#2563eb'"
+                            title="Edit mapping">
+                            <i class="fas fa-pencil-alt" style="font-size:0.8rem;"></i>
+                        </button>
                         <button class="delete-mapping-btn" data-index="${index}"
                             onclick="event.stopPropagation(); window.propertiesPanel.deleteMapping(${index})"
                             style="background:none;border:none;color:#dc2626;cursor:pointer;padding:3px 6px;"
@@ -4615,8 +4651,12 @@ OBX|3|NM|2075-0^Chloride||102|mmol/L</pre>
             this.currentStep.config.mappings = [];
         }
 
-        // Get mapping (undefined for new mapping)
-        const mapping = index !== undefined ? this.currentStep.config.mappings[index] : {};
+        // Get mapping (undefined for new mapping).
+        // In interface_ref mode config.mappings is empty — the rendered table is backed
+        // by _displayedTemplateMappings fetched from the backend, so fall back to that.
+        const mapping = index !== undefined
+            ? (this.currentStep.config.mappings[index] || this._displayedTemplateMappings?.[index] || {})
+            : {};
 
         // Create edit modal with NO-CODE enhancements
         const editModalHTML = `
@@ -4650,8 +4690,10 @@ OBX|3|NM|2075-0^Chloride||102|mmol/L</pre>
                                     <option value="enriched">Enriched Data</option>
                                     <option value="custom">Custom XPath</option>
                                 </select>
-                                <button class="btn btn-secondary" style="font-size: 0.85rem; padding: 0.5rem 0.75rem; flex-shrink: 0;" onclick="window.propertiesPanel.browseVariables()">
-                                    📚 Browse Variables
+                                <button class="btn btn-secondary" style="font-size: 0.85rem; padding: 0.5rem 0.75rem; flex-shrink: 0;"
+                                        onclick="window.propertiesPanel.switchToManualEntry()"
+                                        title="Type the field path manually">
+                                    <i class="fas fa-pencil-alt"></i> Type Manually
                                 </button>
                             </div>
 
@@ -4689,48 +4731,57 @@ OBX|3|NM|2075-0^Chloride||102|mmol/L</pre>
                                 style="width: 100%; padding: 0.5rem; border: 1px solid #cbd5e1; border-radius: 4px; display: none;"
                                 placeholder="e.g., PID.5 or [\\"Step Name\\"].enriched_data.fieldName">
                             <small style="color: #64748b; font-size: 0.8rem; margin-top: 0.25rem; display: block;">
-                                💡 Tip: Select from dropdown or click "Browse Variables" to use enriched data
+                                💡 Tip: Select from dropdown, type manually, or browse the live HL7 payload below
                             </small>
+
+                            <!-- HL7 Payload Browser -->
+                            <div style="margin-top: 0.6rem;">
+                                <button type="button" id="hl7BrowserToggle"
+                                    onclick="window.propertiesPanel.toggleHL7Browser()"
+                                    style="width:100%; text-align:left; padding:0.45rem 0.75rem; background:#f0f9ff; border:1px solid #bae6fd; border-radius:6px; cursor:pointer; font-size:0.82rem; font-weight:600; color:#0369a1; display:flex; align-items:center; gap:0.5rem;">
+                                    <i class="fas fa-sitemap" style="font-size:0.78rem;"></i>
+                                    Browse fields from HL7 payload
+                                    <i class="fas fa-chevron-right" id="hl7BrowserChevron" style="margin-left:auto; font-size:0.72rem; transition:transform 0.2s;"></i>
+                                </button>
+                                <div id="hl7BrowserBody" style="display:none; margin-top:0.25rem; border:1px solid #bae6fd; border-radius:6px; overflow:hidden;">
+                                    <div style="padding:0.5rem; border-bottom:1px solid #e0f2fe; background:#f0f9ff;">
+                                        <input type="text" id="hl7BrowserSearch" placeholder="🔍 Filter fields (e.g. PID, ZIN, patient)"
+                                            style="width:100%; padding:0.35rem 0.6rem; border:1px solid #bae6fd; border-radius:4px; font-size:0.82rem; outline:none; box-sizing:border-box;"
+                                            oninput="window.propertiesPanel.filterHL7Browser(this.value)">
+                                    </div>
+                                    <div id="hl7BrowserContent" style="max-height:260px; overflow-y:auto; background:#fff;">
+                                        <div style="padding:1rem; text-align:center; color:#94a3b8; font-size:0.85rem;">
+                                            <i class="fas fa-spinner fa-spin"></i> Loading payload structure…
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
 
                         <!-- Target Field (FHIR Path) -->
                         <div class="form-group">
-                            <label style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem;">
-                                <span style="font-weight: 600;">FHIR Target Path</span>
+                            <label style="display:flex; align-items:center; gap:0.5rem; margin-bottom:0.5rem;">
+                                <span style="font-weight:600;">FHIR Target Path</span>
                             </label>
-                            <select id="editFhirPathDropdown" style="width: 100%; padding: 0.5rem; border: 1px solid #cbd5e1; border-radius: 4px; background: white; margin-bottom: 0.5rem;" onchange="window.propertiesPanel.selectFhirPath()">
-                                <option value="">-- Select FHIR Resource Path --</option>
-                                <optgroup label="Patient Resource">
-                                    <option value="Patient.identifier[0].value">Patient.identifier[0].value - Patient ID</option>
-                                    <option value="Patient.name[0].family">Patient.name[0].family - Family Name</option>
-                                    <option value="Patient.name[0].given[0]">Patient.name[0].given[0] - Given Name</option>
-                                    <option value="Patient.birthDate">Patient.birthDate - Date of Birth</option>
-                                    <option value="Patient.gender">Patient.gender - Gender</option>
-                                    <option value="Patient.address[0].line[0]">Patient.address[0].line[0] - Address Line</option>
-                                    <option value="Patient.address[0].city">Patient.address[0].city - City</option>
-                                    <option value="Patient.telecom[0].value">Patient.telecom[0].value - Phone</option>
-                                    <option value="Patient.maritalStatus.text">Patient.maritalStatus.text - Marital Status</option>
-                                </optgroup>
-                                <optgroup label="Encounter Resource">
-                                    <option value="Encounter.identifier[0].value">Encounter.identifier[0].value - Visit ID</option>
-                                    <option value="Encounter.class.code">Encounter.class.code - Encounter Class</option>
-                                    <option value="Encounter.period.start">Encounter.period.start - Admit Date</option>
-                                    <option value="Encounter.location[0].location.display">Encounter.location[0].location.display - Location</option>
-                                    <option value="Encounter.participant[0].individual.display">Encounter.participant[0].individual.display - Provider</option>
-                                </optgroup>
-                                <optgroup label="Observation Resource">
-                                    <option value="Observation.code.coding[0].code">Observation.code.coding[0].code - Test Code</option>
-                                    <option value="Observation.valueQuantity.value">Observation.valueQuantity.value - Numeric Value</option>
-                                    <option value="Observation.valueQuantity.unit">Observation.valueQuantity.unit - Unit</option>
-                                    <option value="Observation.referenceRange[0].text">Observation.referenceRange[0].text - Reference Range</option>
-                                    <option value="Observation.status">Observation.status - Status</option>
-                                </optgroup>
-                            </select>
-                            <input type="text" id="editFhirPath" value="${mapping.fhirPath || mapping.targetField || mapping.targetPath || ''}"
-                                style="width: 100%; padding: 0.5rem; border: 1px solid #cbd5e1; border-radius: 4px;"
-                                placeholder="e.g., Patient.name[0].family">
-                            <small style="color: #64748b; font-size: 0.8rem; margin-top: 0.25rem; display: block;">
-                                💡 Select from dropdown or type custom FHIR path
+                            <div style="position:relative;">
+                                <i class="fas fa-search" style="position:absolute; left:0.6rem; top:50%; transform:translateY(-50%); color:#94a3b8; font-size:0.78rem; pointer-events:none;"></i>
+                                <input type="text" id="editFhirPath"
+                                    value="${mapping.fhirPath || mapping.targetField || mapping.targetPath || ''}"
+                                    placeholder="Search or type path (e.g. Coverage.subscriberId)"
+                                    autocomplete="off"
+                                    style="width:100%; padding:0.5rem 0.75rem 0.5rem 2rem; border:1px solid #cbd5e1; border-radius:4px; box-sizing:border-box; font-size:0.875rem;"
+                                    oninput="window.propertiesPanel._filterFhirDropdown(this.value)"
+                                    onfocus="window.propertiesPanel._showFhirDropdown()"
+                                    onblur="setTimeout(() => window.propertiesPanel._hideFhirDropdown(), 200)"
+                                    onkeydown="window.propertiesPanel._fhirDropdownKeydown(event)">
+                                <div id="editFhirSuggestions"
+                                    style="display:none; position:absolute; top:calc(100% + 2px); left:0; right:0; z-index:2000;
+                                           background:white; border:1px solid #cbd5e1; border-radius:4px;
+                                           box-shadow:0 4px 16px rgba(0,0,0,0.12); max-height:240px; overflow-y:auto;">
+                                </div>
+                            </div>
+                            <small style="color:#64748b; font-size:0.8rem; margin-top:0.25rem; display:block;">
+                                💡 Select from list (built from this interface's mappings) or type a custom path
                             </small>
                         </div>
 
@@ -4765,6 +4816,9 @@ OBX|3|NM|2075-0^Chloride||102|mmol/L</pre>
         const existingModal = document.getElementById('editMappingModal');
         if (existingModal) existingModal.remove();
 
+        // Reset browser state so each new modal open loads fresh content
+        this._hl7BrowserLoaded = false;
+
         // Add to DOM
         document.body.insertAdjacentHTML('beforeend', editModalHTML);
 
@@ -4784,22 +4838,249 @@ OBX|3|NM|2075-0^Chloride||102|mmol/L</pre>
      * Initialize mapping modal event handlers (NO-CODE features)
      */
     initializeMappingModalHandlers() {
-        // HL7 Field Dropdown - auto-fill text input when selected
-        const hl7Dropdown = document.getElementById('editHl7FieldDropdown');
+        const hl7Dropdown  = document.getElementById('editHl7FieldDropdown');
+        const hl7TextInput = document.getElementById('editHl7Field');
+        const sourceType   = document.getElementById('editSourceType');
+
+        // ── Pre-populate source field ─────────────────────────────────────────
+        // The text input was pre-filled from the mapping object at template render
+        // time. Now decide which UI control should actually show it.
+        if (hl7TextInput && hl7TextInput.value) {
+            const val = hl7TextInput.value;
+
+            if (val.startsWith('[')) {
+                // Enriched data reference e.g. ["Step"].enriched_data.field
+                sourceType.value = 'enriched';
+                hl7Dropdown.style.display  = 'none';
+                hl7TextInput.style.display = 'block';
+                hl7TextInput.placeholder   = 'e.g., ["database_enrichment"].enriched_data.fieldName';
+            } else {
+                // Standard HL7 path — try to find it in the dropdown
+                const match = Array.from(hl7Dropdown.options).find(o => o.value === val);
+                if (match) {
+                    hl7Dropdown.value = val;
+                    // Dropdown already visible; text input stays hidden
+                } else {
+                    // Not in the standard list (Z-segment, custom field) — show text input
+                    sourceType.value           = 'custom';
+                    hl7Dropdown.style.display  = 'none';
+                    hl7TextInput.style.display = 'block';
+                    hl7TextInput.placeholder   = 'e.g., ZIN.2 or PID.5.1';
+                }
+            }
+        }
+
+        // ── Wire up dropdown → text input sync ───────────────────────────────
         if (hl7Dropdown) {
             hl7Dropdown.addEventListener('change', (e) => {
-                if (e.target.value) {
-                    document.getElementById('editHl7Field').value = e.target.value;
-                }
+                if (e.target.value) hl7TextInput.value = e.target.value;
             });
         }
 
-        // Data Type Dropdown - pre-select if existing value
+        // ── Build FHIR path suggestions from live template mappings ──────────
+        // Sync build first (instant) using whatever is already in memory,
+        // then async-enrich with OOB template so Coverage, Practitioner etc.
+        // are always available even if not yet in this interface's mapping set.
+        this._fhirPathGroups = this._buildFhirPathOptions();
+        this._enrichFhirDropdownWithOOB();
+
+        // ── Pre-populate Data Type dropdown ───────────────────────────────────
         const dataTypeDropdown = document.getElementById('editDataTypeDropdown');
         const existingDataType = document.getElementById('editDataType').value;
         if (dataTypeDropdown && existingDataType) {
             dataTypeDropdown.value = existingDataType;
         }
+    }
+
+    /**
+     * Switches the source input to manual text entry (for Z-segments or any path
+     * not in the standard HL7 dropdown).
+     */
+    switchToManualEntry() {
+        const sourceType   = document.getElementById('editSourceType');
+        const hl7Dropdown  = document.getElementById('editHl7FieldDropdown');
+        const hl7TextInput = document.getElementById('editHl7Field');
+        if (!sourceType) return;
+
+        sourceType.value           = 'custom';
+        hl7Dropdown.style.display  = 'none';
+        hl7TextInput.style.display = 'block';
+        hl7TextInput.placeholder   = 'e.g., ZIN.2 or PID.5.1';
+        hl7TextInput.focus();
+    }
+
+    // ── HL7 Payload Browser ────────────────────────────────────────────────────
+
+    toggleHL7Browser() {
+        const body    = document.getElementById('hl7BrowserBody');
+        const chevron = document.getElementById('hl7BrowserChevron');
+        if (!body) return;
+
+        const opening = body.style.display === 'none';
+        body.style.display    = opening ? 'block' : 'none';
+        chevron.style.transform = opening ? 'rotate(90deg)' : '';
+
+        // Load content the first time it's opened
+        if (opening && !this._hl7BrowserLoaded) {
+            this._hl7BrowserLoaded = true;
+            this._loadHL7PayloadBrowser();
+        }
+    }
+
+    async _loadHL7PayloadBrowser() {
+        const content     = document.getElementById('hl7BrowserContent');
+        if (!content) return;
+
+        const interfaceId = this.currentStep?.config?.interface_id || this.builder.pipeline?.interfaceId;
+        const messageType = this.currentStep?.config?.message_type || this.builder.pipeline?.messageType || 'ADT^A01';
+
+        try {
+            const params = new URLSearchParams({ messageType });
+            if (interfaceId) params.set('interfaceId', interfaceId);
+
+            const resp = await fetch(`/api/schemas/hl7/fields?${params}`, { credentials: 'include' });
+            const data = await resp.json();
+
+            if (!data.success || !data.xpathTree) {
+                const messagesUrl = interfaceId
+                    ? `/messages.html?interfaceId=${encodeURIComponent(interfaceId)}`
+                    : '/messages.html';
+                content.innerHTML = `
+                    <div style="padding:1rem 1.25rem; font-size:0.82rem; color:#475569; line-height:1.7;">
+                        <div style="display:flex; gap:0.6rem; align-items:flex-start; margin-bottom:0.75rem;">
+                            <i class="fas fa-info-circle" style="color:#0369a1; margin-top:2px; flex-shrink:0;"></i>
+                            <span>No sample message found yet. Run the pipeline with a test message — the field structure is captured automatically.</span>
+                        </div>
+                        <div style="font-weight:600; margin-bottom:0.4rem; color:#1e293b;">How to enable it:</div>
+                        <ol style="margin:0 0 0.75rem 1.1rem; padding:0; display:flex; flex-direction:column; gap:0.3rem;">
+                            <li>Close this modal</li>
+                            <li>Click the <strong>Test Pipeline</strong> button on this page</li>
+                            <li>Paste or type a sample HL7 message and run it</li>
+                            <li>Reopen this edit modal — all segments including Z-segments will appear here</li>
+                        </ol>
+                    </div>`;
+                return;
+            }
+
+            // xpathTree.children = segments
+            this._hl7BrowserSegments = data.xpathTree.children || [];
+            content.innerHTML = this._renderHL7BrowserSegments(this._hl7BrowserSegments);
+
+        } catch (err) {
+            content.innerHTML = `<div style="padding:1rem; text-align:center; color:#ef4444; font-size:0.82rem;">Failed to load: ${err.message}</div>`;
+        }
+    }
+
+    _renderHL7BrowserSegments(segments) {
+        if (!segments || segments.length === 0) return '<div style="padding:1rem; text-align:center; color:#94a3b8; font-size:0.82rem;">No segments found</div>';
+
+        const esc = s => String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+
+        return segments.map((seg, si) => {
+            // Each segment's fields are inside seg.children[0] (the "fields" node)
+            const fieldsNode = (seg.children || []).find(c => c.name === 'fields');
+            const fieldNodes = (fieldsNode?.children || []).filter(f => f.type === 'field-value');
+
+            const fieldRows = fieldNodes.map(f => {
+                const subNodes = [];
+                // Find matching field-object to get subfields
+                const fObj = (fieldsNode?.children || []).find(c => c.type === 'field-object' && c.name.startsWith(f.name));
+                const subfieldsNode = (fObj?.children || []).find(c => c.name === 'subfields');
+                if (subfieldsNode) subNodes.push(...(subfieldsNode.children || []));
+
+                const key  = esc(f.name);
+                const desc = esc(f.description || '');
+                const ex   = f.example != null ? esc(f.example) : '';
+
+                const subRows = subNodes.map(sf => {
+                    const sk  = esc(sf.name);
+                    const sex = sf.example != null ? esc(sf.example) : '';
+                    return `<div class="hl7-field-row hl7-subfield-row" data-hl7key="${sk}"
+                                style="padding:0.28rem 0.75rem 0.28rem 2.5rem; display:flex; align-items:center; gap:0.5rem; cursor:pointer; border-bottom:1px solid #f1f5f9;"
+                                onmouseover="this.style.background='#eff6ff'" onmouseout="this.style.background=''"
+                                onclick="window.propertiesPanel.useHL7Field('${sk}')">
+                        <code style="min-width:70px; font-size:0.75rem; color:#6d28d9; background:#ede9fe; padding:1px 5px; border-radius:3px;">${sk}</code>
+                        <span style="flex:1; font-size:0.75rem; color:#475569; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${sex ? `"${sex}"` : ''}</span>
+                    </div>`;
+                }).join('');
+
+                return `<div class="hl7-field-row" data-hl7key="${key}"
+                            style="padding:0.32rem 0.75rem; display:flex; align-items:center; gap:0.5rem; cursor:pointer; border-bottom:1px solid #f1f5f9;"
+                            onmouseover="this.style.background='#eff6ff'" onmouseout="this.style.background=''"
+                            onclick="window.propertiesPanel.useHL7Field('${key}')">
+                    <code style="min-width:55px; font-size:0.78rem; color:#1e3a8a; background:#dbeafe; padding:1px 5px; border-radius:3px; flex-shrink:0;">${key}</code>
+                    <span style="flex:1; font-size:0.78rem; color:#374151; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${desc}">${desc}</span>
+                    ${ex ? `<span style="font-size:0.73rem; color:#64748b; max-width:90px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex-shrink:0;" title="${ex}">"${ex}"</span>` : ''}
+                </div>${subRows}`;
+            }).join('');
+
+            const segName = esc(seg.name);
+            const segDesc = esc(seg.description || '');
+            const isZ     = seg.name.startsWith('Z');
+
+            return `<div class="hl7-browser-segment" data-segment="${segName}">
+                <div style="padding:0.4rem 0.75rem; background:${isZ ? '#fef9c3' : '#f8fafc'}; border-bottom:1px solid #e2e8f0;
+                            display:flex; align-items:center; gap:0.5rem; cursor:pointer; user-select:none;"
+                     onclick="this.nextElementSibling.style.display = this.nextElementSibling.style.display==='none' ? 'block' : 'none'">
+                    <i class="fas fa-caret-right" style="font-size:0.7rem; color:#94a3b8;"></i>
+                    <code style="font-size:0.8rem; font-weight:700; color:${isZ ? '#92400e' : '#1e3a8a'};">${segName}</code>
+                    <span style="font-size:0.78rem; color:#64748b;">${segDesc}</span>
+                    ${isZ ? '<span style="font-size:0.7rem; background:#fde68a; color:#92400e; padding:1px 5px; border-radius:3px; font-weight:600;">Z-seg</span>' : ''}
+                    <span style="margin-left:auto; font-size:0.72rem; color:#94a3b8;">${fieldNodes.length} fields</span>
+                </div>
+                <div style="display:none;">${fieldRows}</div>
+            </div>`;
+        }).join('');
+    }
+
+    filterHL7Browser(query) {
+        const q = query.trim().toLowerCase();
+        document.querySelectorAll('.hl7-browser-segment').forEach(seg => {
+            const rows = seg.querySelectorAll('.hl7-field-row');
+            let anyMatch = false;
+            rows.forEach(row => {
+                const key  = (row.dataset.hl7key || '').toLowerCase();
+                const text = (row.textContent || '').toLowerCase();
+                const show = !q || key.includes(q) || text.includes(q);
+                row.style.display = show ? '' : 'none';
+                if (show) anyMatch = true;
+            });
+            const segName = (seg.dataset.segment || '').toLowerCase();
+            seg.style.display = (!q || anyMatch || segName.includes(q)) ? '' : 'none';
+            // Auto-expand segments that have matching fields
+            if (q && anyMatch) {
+                const body = seg.querySelector('div[style*="display"]');
+                if (body) body.style.display = 'block';
+            }
+        });
+    }
+
+    /**
+     * Called when a field row is clicked in the HL7 payload browser.
+     * Populates the source field input and switches to manual entry mode.
+     */
+    useHL7Field(hl7Key) {
+        const hl7TextInput = document.getElementById('editHl7Field');
+        const sourceType   = document.getElementById('editSourceType');
+        const hl7Dropdown  = document.getElementById('editHl7FieldDropdown');
+        if (!hl7TextInput) return;
+
+        // Switch to manual entry mode with the selected key
+        sourceType.value           = 'custom';
+        hl7Dropdown.style.display  = 'none';
+        hl7TextInput.style.display = 'block';
+        hl7TextInput.value         = hl7Key;
+
+        // Highlight the selected row briefly
+        document.querySelectorAll('.hl7-field-row').forEach(r => r.style.background = '');
+        const selected = document.querySelector(`.hl7-field-row[data-hl7key="${hl7Key}"]`);
+        if (selected) {
+            selected.style.background = '#dbeafe';
+            setTimeout(() => { selected.style.background = ''; }, 800);
+        }
+
+        // Reset the browser loaded flag so it reloads fresh next open
+        this._hl7BrowserLoaded = false;
     }
 
     /**
@@ -4955,11 +5236,177 @@ OBX|3|NM|2075-0^Chloride||102|mmol/L</pre>
     /**
      * Select FHIR path from dropdown (NO-CODE)
      */
-    selectFhirPath() {
-        const dropdown = document.getElementById('editFhirPathDropdown');
-        const input = document.getElementById('editFhirPath');
-        if (dropdown && input && dropdown.value) {
-            input.value = dropdown.value;
+    // ── FHIR path combobox ─────────────────────────────────────────────────────
+
+    /**
+     * Builds grouped option data from _displayedTemplateMappings.
+     * Returns [{resourceType, paths:[fullPath,...]}] sorted alphabetically.
+     * Pure data — no DOM touch.
+     */
+    _buildFhirPathOptions(extraMappings = []) {
+        const src = [...(this._displayedTemplateMappings || []), ...extraMappings];
+        const seen   = new Set();
+        const groups = new Map(); // resourceType → Set<fullPath>
+
+        src.forEach(m => {
+            const rt  = m.resourceType || m.fhirResourceType || '';
+            const raw = m.fhirPath || m.targetPath || m.targetField || '';
+            if (!rt || !raw) return;
+
+            // Exclude bare FHIR polymorphic type placeholders produced by the
+            // Z-segment logic gap (valueDecimal, valueString, valueCode, etc.).
+            // A bare "valueFoo" with no dots/brackets is never a valid FHIR
+            // element path on a resource root.
+            if (/^value[A-Z][a-z]+$/.test(raw)) return;
+
+            // raw may be "name[0].family" or "Patient.name[0].family" — normalise
+            const full = raw.startsWith(rt + '.') ? raw : `${rt}.${raw}`;
+            if (seen.has(full)) return;
+            seen.add(full);
+
+            if (!groups.has(rt)) groups.set(rt, []);
+            groups.get(rt).push(full);
+        });
+
+        return [...groups.entries()]
+            .sort(([a], [b]) => a.localeCompare(b))
+            .map(([resourceType, paths]) => ({
+                resourceType,
+                paths: paths.sort(),
+            }));
+    }
+
+    /**
+     * Fetches the OOB standard template for this message type and merges its
+     * FHIR paths into _fhirPathGroups.  Runs async — the dropdown is already
+     * usable with interface mappings while this completes in the background.
+     */
+    async _enrichFhirDropdownWithOOB() {
+        const messageType = this.currentStep?.config?.message_type
+                         || this.builder.pipeline?.messageType
+                         || 'ADT^A01';
+        try {
+            const resp = await window.pipelineAPI.getStandardTemplateMappings(messageType);
+            if (!resp.success || !resp.data?.mappings?.length) return;
+
+            this._fhirPathGroups = this._buildFhirPathOptions(resp.data.mappings);
+
+            // If the suggestions panel is currently open, refresh it live
+            const box = document.getElementById('editFhirSuggestions');
+            if (box && box.style.display !== 'none') {
+                const inp = document.getElementById('editFhirPath');
+                this._filterFhirDropdown(inp?.value || '');
+            }
+        } catch (e) {
+            // Silent — interface-only paths remain available
+        }
+    }
+
+    /** Renders suggestion HTML for the given groups + optional search query. */
+    _renderFhirSuggestions(groups, query) {
+        const q = (query || '').trim().toLowerCase();
+
+        if (!groups.length) {
+            return `<div style="padding:0.75rem; text-align:center; color:#94a3b8; font-size:0.82rem;">
+                No mappings loaded — open the mapping panel first
+            </div>`;
+        }
+
+        const esc    = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+        const hilite = (text) => {
+            if (!q) return esc(text);
+            const re = new RegExp(`(${q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi');
+            return esc(text).replace(re, '<mark style="background:#fef08a;border-radius:2px;padding:0 1px;">$1</mark>');
+        };
+
+        let html = '';
+        let totalShown = 0;
+
+        groups.forEach(({ resourceType, paths }) => {
+            const filtered = q ? paths.filter(p => p.toLowerCase().includes(q)) : paths;
+            if (!filtered.length) return;
+            totalShown += filtered.length;
+
+            html += `<div>
+                <div style="padding:0.3rem 0.75rem; background:#f8fafc; border-bottom:1px solid #f1f5f9;
+                            font-size:0.72rem; font-weight:700; color:#475569;
+                            text-transform:uppercase; letter-spacing:0.5px; position:sticky; top:0; z-index:1;">
+                    ${esc(resourceType)}
+                </div>
+                ${filtered.map(path => `
+                    <div class="fhir-suggestion-item" data-value="${esc(path)}"
+                        style="padding:0.38rem 0.75rem 0.38rem 1.25rem; cursor:pointer;
+                               font-size:0.82rem; color:#1e293b; border-bottom:1px solid #f8fafc;"
+                        onmouseover="this.style.background='#eff6ff'"
+                        onmouseout="this.style.background=''"
+                        onmousedown="window.propertiesPanel._selectFhirPath('${esc(path)}')">
+                        ${hilite(path)}
+                    </div>`).join('')}
+            </div>`;
+        });
+
+        if (totalShown === 0 && q) {
+            html = `<div style="padding:0.75rem; font-size:0.82rem; color:#64748b; text-align:center;">
+                No match — <strong>"${esc(q)}"</strong> will be used as a custom path
+            </div>`;
+        }
+
+        return html;
+    }
+
+    _showFhirDropdown() {
+        const box = document.getElementById('editFhirSuggestions');
+        const inp = document.getElementById('editFhirPath');
+        if (!box) return;
+        box.innerHTML = this._renderFhirSuggestions(
+            this._fhirPathGroups || [],
+            inp?.value || ''
+        );
+        box.style.display = 'block';
+    }
+
+    _filterFhirDropdown(query) {
+        const box = document.getElementById('editFhirSuggestions');
+        if (!box) return;
+        if (box.style.display === 'none') box.style.display = 'block';
+        box.innerHTML = this._renderFhirSuggestions(
+            this._fhirPathGroups || [],
+            query
+        );
+    }
+
+    _hideFhirDropdown() {
+        const box = document.getElementById('editFhirSuggestions');
+        if (box) box.style.display = 'none';
+    }
+
+    _selectFhirPath(path) {
+        const inp = document.getElementById('editFhirPath');
+        if (inp) inp.value = path;
+        this._hideFhirDropdown();
+    }
+
+    /** Arrow-key + Enter navigation inside the FHIR suggestions. */
+    _fhirDropdownKeydown(e) {
+        const box   = document.getElementById('editFhirSuggestions');
+        const items = box ? [...box.querySelectorAll('.fhir-suggestion-item')] : [];
+        const cur   = box ? box.querySelector('.fhir-suggestion-item[data-focused]') : null;
+
+        if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+            e.preventDefault();
+            if (!items.length) { this._showFhirDropdown(); return; }
+            let idx = cur ? items.indexOf(cur) : -1;
+            if (cur) { cur.style.background = ''; delete cur.dataset.focused; }
+            idx = e.key === 'ArrowDown'
+                ? Math.min(idx + 1, items.length - 1)
+                : Math.max(idx - 1, 0);
+            items[idx].style.background = '#eff6ff';
+            items[idx].dataset.focused  = '1';
+            items[idx].scrollIntoView({ block: 'nearest' });
+        } else if (e.key === 'Enter') {
+            if (cur) { this._selectFhirPath(cur.dataset.value); e.preventDefault(); }
+        } else if (e.key === 'Escape') {
+            this._hideFhirDropdown();
         }
     }
 
@@ -4995,43 +5442,64 @@ OBX|3|NM|2075-0^Chloride||102|mmol/L</pre>
             transformType: dataType
         };
 
-        // Add or update mapping
-        if (index === undefined) {
-            // Adding new mapping
-            this.currentStep.config.mappings.push(mappingObject);
-            this.builder.dragDropManager.showNotification('Mapping added', 'success');
-        } else {
-            // Updating existing mapping
-            this.currentStep.config.mappings[index] = mappingObject;
-            this.builder.dragDropManager.showNotification('Mapping updated', 'success');
-        }
-
-        // Close modal
+        // Close modal immediately so the user sees feedback
         document.getElementById('editMappingModal').remove();
 
-        // Auto-save immediately
-        this.builder.updateStep(this.currentStep);
-        this.builder.savePipeline().then(() => {
-            console.log('[Field Mapping] Pipeline auto-saved after mapping change');
-        }).catch(err => {
-            console.error('[Field Mapping] Auto-save failed:', err);
-        });
+        if (this._isInterfaceRefMode()) {
+            // ── Interface-ref mode: persist via delta endpoint ──────────────────
+            // Work against _displayedTemplateMappings (the live fetched list).
+            // The backend diffs the full list against OOB and stores only the delta.
+            if (!this._displayedTemplateMappings) this._displayedTemplateMappings = [];
 
-        // Refresh properties panel
-        this.showStepProperties(this.currentStep);
+            if (index === undefined) {
+                this._displayedTemplateMappings.push(mappingObject);
+            } else {
+                // Merge: keep backend fields (id, confidence, isRequired) that the
+                // edit modal may not have touched.
+                this._displayedTemplateMappings[index] = Object.assign(
+                    {}, this._displayedTemplateMappings[index], mappingObject
+                );
+            }
 
-        // Mark as unsaved
-        this.builder.markAsUnsaved();
+            const atomicMappings = this._toAtomicMappings(this._displayedTemplateMappings);
+            this._saveMappingDelta(atomicMappings)
+                .then(result => {
+                    const label = index === undefined ? 'Mapping added' : 'Mapping updated';
+                    const detail = result.isPureOOB ? ' (matches OOB — no delta stored)' : ` (${result.overrideCount} override${result.overrideCount !== 1 ? 's' : ''})`;
+                    this.builder.dragDropManager.showNotification(label + detail, 'success');
+                    // Re-render the full panel so the mode badge and table refresh from backend
+                    this.showStepProperties(this.currentStep);
+                })
+                .catch(err => {
+                    this.builder.dragDropManager.showNotification('Save failed: ' + err.message, 'error');
+                    console.error('[Field Mapping] Delta save failed:', err);
+                });
+        } else {
+            // ── Embedded / config mode: write directly to step config ───────────
+            if (index === undefined) {
+                this.currentStep.config.mappings.push(mappingObject);
+                this.builder.dragDropManager.showNotification('Mapping added', 'success');
+            } else {
+                this.currentStep.config.mappings[index] = mappingObject;
+                this.builder.dragDropManager.showNotification('Mapping updated', 'success');
+            }
+
+            this.builder.updateStep(this.currentStep);
+            this.builder.savePipeline().then(() => {
+                console.log('[Field Mapping] Pipeline auto-saved after mapping change');
+            }).catch(err => {
+                console.error('[Field Mapping] Auto-save failed:', err);
+            });
+
+            this.showStepProperties(this.currentStep);
+            this.builder.markAsUnsaved();
+        }
     }
 
     /**
      * Delete a mapping
      */
     async deleteMapping(index) {
-        if (!this.currentStep || !this.currentStep.config || !this.currentStep.config.mappings) {
-            return;
-        }
-
         const confirmed = await this.builder.dragDropManager.showConfirmDialog(
             'Are you sure you want to delete this mapping?',
             {
@@ -5042,28 +5510,118 @@ OBX|3|NM|2075-0^Chloride||102|mmol/L</pre>
             }
         );
 
-        if (!confirmed) {
-            return;
+        if (!confirmed) return;
+
+        if (this._isInterfaceRefMode()) {
+            // ── Interface-ref mode: remove from live list, persist via delta ───
+            if (!this._displayedTemplateMappings || index >= this._displayedTemplateMappings.length) return;
+
+            // Keep a copy in case we need to roll back on failure
+            const removed = this._displayedTemplateMappings.splice(index, 1)[0];
+            const atomicMappings = this._toAtomicMappings(this._displayedTemplateMappings);
+
+            this._saveMappingDelta(atomicMappings)
+                .then(result => {
+                    const detail = result.isPureOOB ? ' (back to pure OOB)' : ` (${result.overrideCount} override${result.overrideCount !== 1 ? 's' : ''} remain)`;
+                    this.builder.dragDropManager.showNotification('Mapping deleted' + detail, 'success');
+                    this.showStepProperties(this.currentStep);
+                })
+                .catch(err => {
+                    // Restore the removed item so the UI stays consistent
+                    this._displayedTemplateMappings.splice(index, 0, removed);
+                    this.builder.dragDropManager.showNotification('Delete failed: ' + err.message, 'error');
+                    console.error('[Field Mapping] Delta delete failed:', err);
+                });
+        } else {
+            // ── Embedded / config mode: splice from step config ─────────────
+            if (!this.currentStep?.config?.mappings) return;
+
+            this.currentStep.config.mappings.splice(index, 1);
+
+            this.builder.updateStep(this.currentStep);
+            this.builder.savePipeline().then(() => {
+                console.log('[Field Mapping] Pipeline auto-saved after mapping deletion');
+            }).catch(err => {
+                console.error('[Field Mapping] Auto-save failed:', err);
+            });
+
+            this.showStepProperties(this.currentStep);
+            this.builder.markAsUnsaved();
+            this.builder.dragDropManager.showNotification('Mapping deleted', 'success');
         }
+    }
 
-        // Remove mapping
-        this.currentStep.config.mappings.splice(index, 1);
+    // ── Delta helpers ──────────────────────────────────────────────────────────
 
-        // Auto-save immediately
-        this.builder.updateStep(this.currentStep);
-        this.builder.savePipeline().then(() => {
-            console.log('[Field Mapping] Pipeline auto-saved after mapping deletion');
-        }).catch(err => {
-            console.error('[Field Mapping] Auto-save failed:', err);
+    /**
+     * Returns true when the current step resolves its mappings from the interface
+     * (interface_ref mode).  In this mode edits must go to the delta endpoint,
+     * not to config.mappings.
+     */
+    _isInterfaceRefMode() {
+        return !!(this.currentStep?.config?.interface_id ||
+                  this.builder.pipeline?.interfaceId);
+    }
+
+    /**
+     * Converts the display-format mapping objects (from _displayedTemplateMappings)
+     * to the AtomicMapping shape expected by the delta endpoint.
+     *
+     * Display objects may carry hl7Field/fhirPath keys (from the edit modal) or
+     * sourcePath/targetPath keys (as returned by the backend).  Both are handled.
+     *
+     * FHIR paths from the edit modal include the resource type prefix
+     * ("Patient.name[0].family").  AtomicMapping splits that into:
+     *   resourceType = "Patient"
+     *   targetPath   = "name[0].family"
+     */
+    _toAtomicMappings(displayMappings) {
+        return displayMappings.map(m => {
+            const hl7Path    = m.sourcePath  || m.hl7Field    || m.sourceField || '';
+            const rawFhir    = m.fhirPath    || m.targetPath  || m.targetField || '';
+            let   resourceType = m.resourceType || m.fhirResourceType || '';
+            let   targetPath   = rawFhir;
+
+            // Split "Patient.name[0].family" → resourceType + targetPath only when
+            // resourceType is not already known.
+            if (!resourceType && rawFhir) {
+                const match = rawFhir.match(/^([A-Z][A-Za-z]+)\.(.+)$/);
+                if (match) { resourceType = match[1]; targetPath = match[2]; }
+            }
+
+            return {
+                id:               m.id            || '',
+                sourcePath:       hl7Path,
+                targetPath:       targetPath,
+                resourceType:     resourceType,
+                fhirResourceType: resourceType,
+                transformType:    m.transformType  || m.dataType || '',
+                isRequired:       m.isRequired     || false,
+                confidence:       m.confidence     || 0,
+            };
         });
+    }
 
-        // Refresh properties panel
-        this.showStepProperties(this.currentStep);
-
-        // Mark as unsaved
-        this.builder.markAsUnsaved();
-
-        this.builder.dragDropManager.showNotification('Mapping deleted', 'success');
+    /**
+     * Sends the full current mapping list to the delta endpoint.
+     * The backend diffs against the OOB template and stores only what changed.
+     * Returns the response payload (includes overrideCount, isPureOOB).
+     */
+    async _saveMappingDelta(atomicMappings) {
+        const interfaceId  = this.currentStep?.config?.interface_id || this.builder.pipeline?.interfaceId;
+        const messageType  = this.currentStep?.config?.message_type || this.builder.pipeline?.messageType || 'ADT^A01';
+        const resp = await fetch(
+            `/api/fhir/interfaces/${encodeURIComponent(interfaceId)}/mapping-delta/${encodeURIComponent(messageType)}`,
+            {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                credentials: 'include',
+                body: JSON.stringify({ atomicMappings }),
+            }
+        );
+        const data = await resp.json();
+        if (!data.success) throw new Error(data.error || 'Failed to save mapping delta');
+        return data;
     }
 
     /**
@@ -5104,89 +5662,108 @@ OBX|3|NM|2075-0^Chloride||102|mmol/L</pre>
     }
 
     /**
-     * Load standard HL7-FHIR template mappings from the database
+     * Refresh mappings for the HL7→FHIR step.
+     * When interface_id is present: fetches the live resolved mapping (includes Z-segments,
+     * AI additions, delta overrides — whatever the runtime would use).
+     * Falls back to the OOB standard template when there is no interface context.
      */
     async loadStandardTemplateMappings(step) {
         try {
-            // Get the message type from the pipeline
-            const messageType = this.builder.pipeline?.messageType || 'ADT^A01';
+            const interfaceId = step.config?.interface_id || this.builder.pipeline?.interfaceId;
+            const messageType = step.config?.message_type || this.builder.pipeline?.messageType || 'ADT^A01';
+            const tableContainer = document.getElementById('mappingTableContainer');
+            const statusText    = document.getElementById('mappingStatusText');
 
-            this.builder.dragDropManager.showNotification(`Loading standard template for ${messageType}...`, 'info');
+            this.builder.dragDropManager.showNotification(`Refreshing mappings for ${messageType}…`, 'info');
 
-            // Fetch the standard template mappings from the API
-            const response = await window.pipelineAPI.getStandardTemplateMappings(messageType);
+            let mappings = [];
+            let statusHtml = '';
 
-            if (!response.success) {
-                throw new Error(response.error || 'Failed to fetch template mappings');
+            if (interfaceId) {
+                // ── Live resolved mapping (the source of truth) ──
+                const resp = await fetch(
+                    `/api/fhir/interfaces/${encodeURIComponent(interfaceId)}/resolved-mappings?messageType=${encodeURIComponent(messageType)}`,
+                    { credentials: 'include' }
+                );
+                const data = await resp.json();
+                if (!data.success) throw new Error(data.error || 'resolved-mappings failed');
+                mappings = data.atomicMappings || [];
+                const modeLabels = { oob: '🔗 Tracking OOB template', delta: '⚡ OOB + custom additions', custom: '✏️ Fully custom' };
+                statusHtml = `<strong>${mappings.length}</strong> mappings
+                    <span style="margin-left:6px;font-size:11px;padding:2px 7px;border-radius:10px;background:#e0f2fe;color:#0369a1;font-weight:600;">
+                        ${modeLabels[data.mappingMode] || data.mappingMode}
+                    </span>`;
+            } else {
+                // ── OOB fallback ──
+                const response = await window.pipelineAPI.getStandardTemplateMappings(messageType);
+                if (!response.success) throw new Error(response.error || 'Failed to fetch template');
+                const { template, mappings: tplMappings } = response.data;
+                mappings = tplMappings || [];
+                statusHtml = `<strong>${mappings.length}</strong> mappings
+                    <span style="color:#059669;font-weight:500;">(OOB: ${template?.name || 'standard'})</span>`;
             }
 
-            const { template, mappings, mappingCount } = response.data;
-
-            if (!mappings || mappings.length === 0) {
-                this.builder.dragDropManager.showNotification(`No standard template found for ${messageType}`, 'warning');
+            if (!mappings.length) {
+                this.builder.dragDropManager.showNotification(`No mappings found for ${messageType}`, 'warning');
                 return;
             }
 
-            // Initialize step config if needed
-            if (!step.config) {
-                step.config = {};
-            }
+            if (tableContainer) tableContainer.innerHTML = this.renderMappingTable(mappings);
+            if (statusText)    statusText.innerHTML = statusHtml;
 
-            // Store the mappings in the step config
-            step.config.mappings = mappings;
-            step.config.use_template = true;
-            step.config.template_id = template?.id;
-            step.config.template_name = template?.name;
-
-            console.log(`📚 Loaded ${mappingCount} mappings from template "${template?.name}"`, mappings);
-
-            // Update the mapping table in-place (avoid full modal re-render which loses state)
-            const tableContainer = document.getElementById('mappingTableContainer');
-            if (tableContainer) {
-                tableContainer.innerHTML = this.renderMappingTable(mappings);
-                console.log('✅ Mapping table updated in-place');
-            }
-
-            // Update the status bar
-            const statusText = document.getElementById('mappingStatusText');
-            if (statusText) {
-                statusText.innerHTML = `<strong>${mappingCount}</strong> mappings configured <span style="color: #059669; font-weight: 500;">(from template: ${template?.name || 'standard'})</span>`;
-            }
-
-            this.builder.dragDropManager.showNotification(`Loaded ${mappingCount} mappings from standard template`, 'success');
-
-            // Mark as unsaved
+            this.builder.dragDropManager.showNotification(`Loaded ${mappings.length} mappings`, 'success');
             this.builder.markAsUnsaved();
 
         } catch (error) {
-            console.error('Error loading standard template mappings:', error);
-            this.builder.dragDropManager.showNotification(`Failed to load template: ${error.message}`, 'error');
+            console.error('Error refreshing mappings:', error);
+            this.builder.dragDropManager.showNotification(`Failed to load mappings: ${error.message}`, 'error');
         }
     }
 
     /**
-     * Auto-load template mappings for display only (doesn't modify step config)
-     * Called when opening an HL7-FHIR step that uses standard template
+     * Auto-load mappings for display — always called when the step is opened.
+     * When interface_id is present: fetches the live resolved mapping from the backend
+     * (exactly what the runtime 5-step chain would use, including Z-segments and AI additions).
+     * Falls back to the OOB standard template when no interface_id is set.
      */
     async autoLoadTemplateMappings(step, container) {
         try {
-            const messageType = this.builder.pipeline?.messageType || 'ADT^A01';
-            console.log(`🔄 Auto-fetching template for ${messageType}...`);
+            const interfaceId = container?.dataset?.interfaceId || step.config?.interface_id || this.builder.pipeline?.interfaceId;
+            const messageType = container?.dataset?.messageType || step.config?.message_type || this.builder.pipeline?.messageType || 'ADT^A01';
 
-            const response = await window.pipelineAPI.getStandardTemplateMappings(messageType);
+            let mappings = [];
+            let sourceLabel = '';
+            let mappingMode = container?.dataset?.mappingMode || step.config?.mapping_mode || 'oob';
 
-            if (!response.success) {
-                throw new Error(response.error || 'Failed to fetch template');
+            if (interfaceId) {
+                // ── Primary path: resolved-mappings endpoint (live, includes all customisations) ──
+                console.log(`🔄 Fetching resolved mappings for interface ${interfaceId} / ${messageType}…`);
+                const resp = await fetch(
+                    `/api/fhir/interfaces/${encodeURIComponent(interfaceId)}/resolved-mappings?messageType=${encodeURIComponent(messageType)}`,
+                    { credentials: 'include' }
+                );
+                const data = await resp.json();
+                if (!data.success) throw new Error(data.error || 'resolved-mappings failed');
+                mappings = data.atomicMappings || [];
+                mappingMode = data.mappingMode || mappingMode;
+                const modeLabels = { oob: '🔗 Tracking OOB template', delta: '⚡ OOB + custom additions', custom: '✏️ Fully custom' };
+                sourceLabel = `<span style="margin-left:6px;font-size:11px;padding:2px 7px;border-radius:10px;background:#e0f2fe;color:#0369a1;font-weight:600;">${modeLabels[mappingMode] || mappingMode}</span>`;
+            } else {
+                // ── Fallback: OOB standard template (no interface context) ──
+                console.log(`🔄 Auto-fetching OOB template for ${messageType}…`);
+                const response = await window.pipelineAPI.getStandardTemplateMappings(messageType);
+                if (!response.success) throw new Error(response.error || 'Failed to fetch template');
+                const { template, mappings: tplMappings } = response.data;
+                mappings = tplMappings || [];
+                sourceLabel = `<span style="color:#059669;font-weight:500;">(OOB template: ${template?.name || 'standard'})</span>`;
             }
-
-            const { template, mappings, mappingCount } = response.data;
 
             if (!mappings || mappings.length === 0) {
                 container.innerHTML = `
                     <div style="padding: 2rem; text-align: center; color: #64748b;">
                         <i class="fas fa-info-circle fa-2x" style="color: #f59e0b;"></i>
-                        <p style="margin-top: 1rem;">No standard template found for ${messageType}</p>
-                        <p style="font-size: 0.85rem;">Click "Load Standard Template" to import one, or add custom mappings below.</p>
+                        <p style="margin-top: 1rem;">No mappings found for ${messageType}</p>
+                        <p style="font-size: 0.85rem;">Complete the wizard to configure mappings, or add them manually below.</p>
                     </div>
                 `;
                 return;
@@ -5195,23 +5772,17 @@ OBX|3|NM|2075-0^Chloride||102|mmol/L</pre>
             // Update the status bar
             const statusText = document.getElementById('mappingStatusText');
             if (statusText) {
-                statusText.innerHTML = `
-                    <strong>${mappingCount}</strong> mappings
-                    <span style="color: #059669; font-weight: 500;">(standard template: ${template?.name || messageType})</span>
-                `;
+                statusText.innerHTML = `<strong>${mappings.length}</strong> mappings ${sourceLabel}`;
             }
 
             // Render the mappings table
             container.innerHTML = this.renderMappingTable(mappings);
-
-            // Store template reference for display purposes (not modifying step config)
             this._displayedTemplateMappings = mappings;
-            this._displayedTemplateName = template?.name;
 
-            console.log(`✅ Auto-loaded ${mappingCount} mappings from template "${template?.name}"`);
+            console.log(`✅ Loaded ${mappings.length} mappings (mode: ${mappingMode})`);
 
         } catch (error) {
-            console.error('Error auto-loading template mappings:', error);
+            console.error('Error loading mappings:', error);
             container.innerHTML = `
                 <div style="padding: 2rem; text-align: center; color: #ef4444;">
                     <i class="fas fa-exclamation-triangle fa-2x"></i>

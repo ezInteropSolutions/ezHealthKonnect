@@ -525,7 +525,7 @@ exports.getUniversalHL7Fields = async (req, res) => {
         const fieldTree = await SampleMessageService.buildFieldTreeWithFallback(
             'hl7v2',
             messageType,
-            interfaceId ? parseInt(interfaceId) : null
+            interfaceId || null   // UUID string — do not parseInt
         );
 
         if (!fieldTree || fieldTree.children.length === 0) {

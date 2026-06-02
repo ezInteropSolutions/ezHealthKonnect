@@ -32,16 +32,12 @@ import (
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-// telemetryEndpoint is the default Google Apps Script receiver.
-// Operators can override this in Settings → AI → Feedback Webhook URL.
-// The URL is HTTPS — transport is encrypted by Google's TLS.
-const telemetryEndpoint = "https://script.google.com/macros/s/AKfycbzh4wdZHEi2Wg2rc3wEnb08Lcr83tVj5amaxq43gQdwLmFctlKj9AxTsF_mp4azIVMZ/exec"
-
-// telemetrySecret is a shared HMAC secret embedded in the binary.
-// The Apps Script verifies the signature before writing any row.
-// This prevents random internet traffic from polluting the Sheet.
-// Not a substitute for keeping the URL private — treat both as sensitive.
-const telemetrySecret = "ehk-t3lem-v1-xK9mPqR7nW2sB4dL"
+// telemetryEndpoint and telemetrySecret are no longer hardcoded constants.
+// They are stored encrypted in the product_config table and read at runtime
+// via ProductConfigService. Official installer builds seed real values;
+// community / self-built installs get empty rows → telemetry silently disabled.
+//
+// DB keys:  "telemetry_endpoint"  |  "telemetry_secret"
 
 // ─── Payload types ────────────────────────────────────────────────────────────
 
@@ -82,10 +78,11 @@ type feedbackSubmit struct {
 // TelemetryService sends anonymized product usage signals to the ezHealthKonnect team.
 // All methods are safe to call with a nil receiver (dev/air-gapped mode).
 type TelemetryService struct {
-	db      *sql.DB
-	client  *http.Client
-	version string
-	edition string
+	db         *sql.DB
+	client     *http.Client
+	version    string
+	edition    string
+	prodConfig *ProductConfigService
 }
 
 // NewTelemetryService creates a TelemetryService. Pass version from build flags, edition
@@ -103,10 +100,16 @@ func NewTelemetryService(db *sql.DB, version, edition string) *TelemetryService 
 		// The redirect is to script.googleusercontent.com and should be followed
 		// as a GET to retrieve the response. Go's default behaviour (POST→GET on 302)
 		// is exactly right here, so no custom CheckRedirect is needed.
-		client: &http.Client{Timeout: 15 * time.Second},
+		client:  &http.Client{Timeout: 15 * time.Second},
 		version: version,
 		edition: edition,
 	}
+}
+
+// SetProductConfig wires in the ProductConfigService after construction.
+// Must be called before SendInstallPingIfNew or SendFeedback.
+func (t *TelemetryService) SetProductConfig(pc *ProductConfigService) {
+	t.prodConfig = pc
 }
 
 // SendInstallPingIfNew fires the install_ping exactly once per installation.
@@ -144,7 +147,11 @@ func (t *TelemetryService) SendInstallPingIfNew(ctx context.Context) {
 		Timezone:       tz,
 		RegisteredAt:   time.Now().UTC(),
 	}
-	payload.Sig = sign(installID + t.version)
+	secret := ""
+	if t.prodConfig != nil {
+		secret = t.prodConfig.Get(ctx, "telemetry_secret")
+	}
+	payload.Sig = sign(installID+t.version, secret)
 
 	if err := t.post(ctx, payload); err != nil {
 		log.Printf("⚠️  Telemetry install ping failed (non-critical): %v", err)
@@ -204,7 +211,11 @@ func (t *TelemetryService) SendFeedback(ctx context.Context, summary interface{}
 			payload.ByEndpoint = ep
 		}
 	}
-	payload.Sig = sign(installID + t.version + fmt.Sprintf("%d", payload.Total))
+	secret := ""
+	if t.prodConfig != nil {
+		secret = t.prodConfig.Get(ctx, "telemetry_secret")
+	}
+	payload.Sig = sign(installID+t.version+fmt.Sprintf("%d", payload.Total), secret)
 
 	return t.post(ctx, payload)
 }
@@ -217,12 +228,18 @@ func (t *TelemetryService) post(ctx context.Context, payload interface{}) error 
 		return fmt.Errorf("marshal telemetry payload: %w", err)
 	}
 
-	endpoint := telemetryEndpoint
-	// Operator override via AI settings
+	// Resolve endpoint: operator override → DB product_config → disabled
+	endpoint := ""
 	if t.db != nil {
 		if override := GetAppSettings().GetAIConfig().FeedbackWebhookURL; override != "" {
 			endpoint = override
 		}
+	}
+	if endpoint == "" && t.prodConfig != nil {
+		endpoint = t.prodConfig.Get(ctx, "telemetry_endpoint")
+	}
+	if endpoint == "" {
+		return nil // telemetry disabled — no endpoint configured
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
@@ -308,10 +325,14 @@ func (t *TelemetryService) fetchPublicIP(ctx context.Context) string {
 	return strings.TrimSpace(string(b))
 }
 
-// sign returns a short HMAC-SHA256 signature of data using the embedded secret.
+// sign returns a short HMAC-SHA256 signature of data using secret.
 // The Apps Script verifies this to reject requests not from a real installation.
-func sign(data string) string {
-	mac := hmac.New(sha256.New, []byte(telemetrySecret))
+// Returns "" when secret is empty (community build — caller should skip sending).
+func sign(data, secret string) string {
+	if secret == "" {
+		return ""
+	}
+	mac := hmac.New(sha256.New, []byte(secret))
 	mac.Write([]byte(data))
-	return hex.EncodeToString(mac.Sum(nil))[:16] // first 16 hex chars is sufficient
+	return hex.EncodeToString(mac.Sum(nil))[:16]
 }
