@@ -93,7 +93,7 @@ services:
 
   # ── Application ─────────────────────────────────────────────────────────────
   app:
-    image: ${APP_IMAGE:-ghcr.io/ezinteropsolutions/ezhealthkonnect:latest}
+    image: ${APP_IMAGE:-shanawaz107/ezhealthkonnect:latest}
     container_name: ezhk-app
     restart: unless-stopped
     environment:
