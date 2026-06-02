@@ -660,11 +660,15 @@
                 step_id:          opts.stepId       || '',
             };
             try {
-                await fetch(`${API_BASE}/feedback/response`, {
+                const resp = await fetch(`${API_BASE}/feedback/response`, {
                     method: 'POST', credentials: 'include',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(payload),
                 });
+                if (!resp.ok) {
+                    const body = await resp.json().catch(() => ({}));
+                    throw new Error(body.error || `HTTP ${resp.status}`);
+                }
                 statusEl.textContent = sentiment === 'positive' ? '✅ Thanks!' : '✅ Noted';
                 commentBox.style.display = 'none';
                 // Dim the buttons so they can't be clicked again
@@ -672,7 +676,7 @@
                     b.disabled = true;
                     b.style.opacity = b.dataset.v === sentiment ? '1' : '0.25';
                 });
-            } catch { statusEl.textContent = '(feedback failed)'; }
+            } catch (e) { statusEl.textContent = `(feedback failed: ${e.message})`; }
         }
 
         widget.querySelectorAll('.ai-fb-btn').forEach(btn => {
@@ -797,6 +801,7 @@
                 endpoint:        'ask',
                 promptPreview:   question,
                 responsePreview: typeof fullResponse === 'string' ? fullResponse : bubble.textContent,
+                sessionId:       getSessionId(),
                 interfaceId:     ctx.interface_id || '',
                 pipelineId:      ctx.pipeline_id  || '',
             });

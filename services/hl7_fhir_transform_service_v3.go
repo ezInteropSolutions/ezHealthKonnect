@@ -1651,23 +1651,34 @@ func (s *HL7FHIRTransformServiceV3) createResourceFromAtomicMappings(
 			}
 		}
 
-		// Extract HL7 value using atomic extraction
-		hl7Value, found := s.extractHL7ValueAtomic(enhancedSegments, mapping)
-		if !found {
-			if mapping.IsRequired {
-				warnings = append(warnings, fmt.Sprintf("Required mapping %s.%s → %s.%s has no HL7 data",
-					mapping.SegmentName, mapping.HL7Field, resourceType, mapping.FHIRElementPath))
+		// Static value: skip HL7 extraction and use the literal directly.
+		var hl7Value string
+		if mapping.DataTypeTransform == "static_value" {
+			if mapping.StaticValue == "" {
+				log.Printf("⚠️  static_value mapping → %s.%s has no StaticValue set — skipping",
+					resourceType, mapping.FHIRElementPath)
+				continue
 			}
-			log.Printf("⚠️  No HL7 data found for %s.%s.%s", mapping.SegmentName, mapping.HL7Field, mapping.HL7Component)
-			continue
+			hl7Value = mapping.StaticValue
+			log.Printf("📌 static_value: %s.%s = %q", resourceType, mapping.FHIRElementPath, hl7Value)
+		} else {
+			// Extract HL7 value using atomic extraction
+			var found bool
+			hl7Value, found = s.extractHL7ValueAtomic(enhancedSegments, mapping)
+			if !found {
+				if mapping.IsRequired {
+					warnings = append(warnings, fmt.Sprintf("Required mapping %s.%s → %s.%s has no HL7 data",
+						mapping.SegmentName, mapping.HL7Field, resourceType, mapping.FHIRElementPath))
+				}
+				log.Printf("⚠️  No HL7 data found for %s.%s.%s", mapping.SegmentName, mapping.HL7Field, mapping.HL7Component)
+				continue
+			}
+			if hl7Value == "" {
+				log.Printf("⚠️  Empty HL7 value for %s.%s", mapping.SegmentName, mapping.HL7Field)
+				continue
+			}
+			log.Printf("✅ Found HL7 value: %s.%s = '%s'", mapping.SegmentName, mapping.HL7Field, hl7Value)
 		}
-
-		if hl7Value == "" {
-			log.Printf("⚠️  Empty HL7 value for %s.%s", mapping.SegmentName, mapping.HL7Field)
-			continue
-		}
-
-		log.Printf("✅ Found HL7 value: %s.%s = '%s'", mapping.SegmentName, mapping.HL7Field, hl7Value)
 
 		// OBX.5 value[x]: inject OBX.2 (data-type indicator) and OBX.6 (units)
 		// into a fresh copy of TransformationRules so transformOBXValueByType can
@@ -2510,6 +2521,10 @@ func (s *HL7FHIRTransformServiceV3) convertV9TemplateToFieldMappings(templateDat
 				transformRules["condition"] = cond
 			}
 
+			// staticValue: literal constant injected directly into the FHIR field.
+			// SegmentName/HL7Field are intentionally empty for these mappings.
+			staticValue, _ := mapping["staticValue"].(string)
+
 			fieldMapping := FieldMapping{
 				SegmentName:         segmentName,
 				HL7Field:            hl7Field,
@@ -2517,6 +2532,7 @@ func (s *HL7FHIRTransformServiceV3) convertV9TemplateToFieldMappings(templateDat
 				FHIRResourceType:    resourceType,
 				FHIRElementPath:     fhirPath,
 				DataTypeTransform:   transformFunc,
+				StaticValue:         staticValue,
 				IsRequired:          required,
 				Confidence:          confidence,
 				TransformationRules: transformRules,
@@ -2787,13 +2803,16 @@ func (s *HL7FHIRTransformServiceV3) convertToAtomicMappings(fieldMappings []Fiel
 	atomicMappings := make([]AtomicMapping, len(fieldMappings))
 
 	for i, fieldMapping := range fieldMappings {
-		// Build HL7 source path from segment and field components
-		sourcePath := fieldMapping.SegmentName + "." + fieldMapping.HL7Field
-		if fieldMapping.HL7Component != "" {
-			sourcePath += "." + fieldMapping.HL7Component
-		}
-		if fieldMapping.HL7SubComponent != "" {
-			sourcePath += "." + fieldMapping.HL7SubComponent
+		// Static value mappings have no HL7 source — SourcePath stays empty.
+		var sourcePath string
+		if fieldMapping.DataTypeTransform != "static_value" {
+			sourcePath = fieldMapping.SegmentName + "." + fieldMapping.HL7Field
+			if fieldMapping.HL7Component != "" {
+				sourcePath += "." + fieldMapping.HL7Component
+			}
+			if fieldMapping.HL7SubComponent != "" {
+				sourcePath += "." + fieldMapping.HL7SubComponent
+			}
 		}
 
 		atomicMappings[i] = AtomicMapping{
@@ -2803,6 +2822,7 @@ func (s *HL7FHIRTransformServiceV3) convertToAtomicMappings(fieldMappings []Fiel
 			ResourceType:     fieldMapping.FHIRResourceType,
 			FHIRResourceType: fieldMapping.FHIRResourceType,
 			TransformType:    fieldMapping.DataTypeTransform,
+			DefaultValue:     fieldMapping.StaticValue, // carried to UI for static_value display
 			IsRequired:       fieldMapping.IsRequired,
 			Confidence:       fieldMapping.Confidence,
 		}
@@ -3074,12 +3094,13 @@ func (s *HL7FHIRTransformServiceV3) getDefaultMappingsForTesting(messageType str
 
 // MappingOverride is a single delta entry stored in interface_message_mappings.mapping_overrides.
 type MappingOverride struct {
-	Action     string  `json:"action"`               // "replace" | "add" | "remove"
-	HL7Path    string  `json:"hl7Path"`              // "PID.5.1" — segment.field[.component]
-	FHIRPath   string  `json:"fhirPath,omitempty"`   // full FHIR target path incl. resource type
-	Transform  string  `json:"transform,omitempty"`  // transform key
-	IsRequired bool    `json:"isRequired,omitempty"`
-	Confidence float64 `json:"confidence,omitempty"`
+	Action      string  `json:"action"`               // "replace" | "add" | "remove"
+	HL7Path     string  `json:"hl7Path"`              // "PID.5.1" — segment.field[.component]; empty for static_value
+	FHIRPath    string  `json:"fhirPath,omitempty"`   // full FHIR target path incl. resource type
+	Transform   string  `json:"transform,omitempty"`  // transform key
+	StaticValue string  `json:"staticValue,omitempty"` // literal constant for transform == "static_value"
+	IsRequired  bool    `json:"isRequired,omitempty"`
+	Confidence  float64 `json:"confidence,omitempty"`
 }
 
 // MappingDelta is the envelope stored in mapping_overrides.
@@ -3132,15 +3153,22 @@ func mergeMappings(base []FieldMapping, delta *MappingDelta) []FieldMapping {
 			}
 
 		case "add":
-			if _, exists := indexed[ov.HL7Path]; !exists {
-				parts := strings.Split(ov.HL7Path, ".")
-				if len(parts) < 2 {
-					continue
-				}
-				seg, field := parts[0], parts[1]
-				comp := ""
-				if len(parts) > 2 {
-					comp = parts[2]
+			// Use FHIRPath as the dedup key for static_value mappings (HL7Path is "").
+			addKey := ov.HL7Path
+			if ov.Transform == "static_value" && addKey == "" {
+				addKey = "static:" + ov.FHIRPath
+			}
+			if _, exists := indexed[addKey]; !exists {
+				var seg, field, comp string
+				if ov.Transform != "static_value" {
+					parts := strings.Split(ov.HL7Path, ".")
+					if len(parts) < 2 {
+						continue
+					}
+					seg, field = parts[0], parts[1]
+					if len(parts) > 2 {
+						comp = parts[2]
+					}
 				}
 				fhirResource, fhirElem := "", ov.FHIRPath
 				if fp := strings.SplitN(ov.FHIRPath, ".", 2); len(fp) == 2 {
@@ -3153,10 +3181,11 @@ func mergeMappings(base []FieldMapping, delta *MappingDelta) []FieldMapping {
 					FHIRResourceType:  fhirResource,
 					FHIRElementPath:   fhirElem,
 					DataTypeTransform: ov.Transform,
+					StaticValue:       ov.StaticValue,
 					IsRequired:        ov.IsRequired,
 					Confidence:        ov.Confidence,
 				}
-				indexed[ov.HL7Path] = len(result)
+				indexed[addKey] = len(result)
 				result = append(result, newFM)
 			}
 
@@ -3249,12 +3278,13 @@ func (s *HL7FHIRTransformServiceV3) ComputeDelta(
 		if !inOOB {
 			// New mapping not in OOB → add
 			overrides = append(overrides, MappingOverride{
-				Action:     "add",
-				HL7Path:    key,
-				FHIRPath:   am.FHIRResourceType + "." + am.TargetPath,
-				Transform:  am.TransformType,
-				IsRequired: am.IsRequired,
-				Confidence: am.Confidence,
+				Action:      "add",
+				HL7Path:     key,
+				FHIRPath:    am.FHIRResourceType + "." + am.TargetPath,
+				Transform:   am.TransformType,
+				StaticValue: am.DefaultValue, // populated only for static_value mappings
+				IsRequired:  am.IsRequired,
+				Confidence:  am.Confidence,
 			})
 			continue
 		}

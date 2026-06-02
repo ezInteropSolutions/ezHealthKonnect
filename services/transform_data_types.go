@@ -26,6 +26,10 @@ func (s *HL7FHIRTransformServiceV3) transformValueAtomic(
 	log.Printf("🔧 Transforming '%s' using '%s'", hl7Value, mapping.DataTypeTransform)
 
 	switch mapping.DataTypeTransform {
+	case "static_value":
+		// Value was injected by createResourceFromAtomicMappings from StaticValue;
+		// pass it through unchanged so it is written directly to the FHIR path.
+		return hl7Value, nil
 	case "msh9_trigger_event_to_coding":
 		// ✅ EXPLICIT CASE for trigger event transformation
 		result := s.transformTriggerEventToCoding(hl7Value)
@@ -170,7 +174,7 @@ func (s *HL7FHIRTransformServiceV3) transformValueAtomic(
 			}
 		}
 		log.Printf("🔍 No transformation specified, using raw value")
-		return hl7Value, nil
+		return stripHL7Caret(hl7Value, mapping.FHIRDataType), nil
 	default:
 		// Handle lookup:<valueSetName> transforms inlined from profile v2.0
 		if strings.HasPrefix(mapping.DataTypeTransform, "lookup:") {
@@ -219,8 +223,29 @@ func (s *HL7FHIRTransformServiceV3) transformValueAtomic(
 		}
 
 		log.Printf("⚠️ Unknown transformation '%s', using raw value", mapping.DataTypeTransform)
-		return hl7Value, nil
+		return stripHL7Caret(hl7Value, mapping.FHIRDataType), nil
 	}
+}
+
+// stripHL7Caret removes HL7 component separators ('^') from a string before
+// it is written to a FHIR primitive field.  When a composite HL7 value arrives
+// without a component-level mapping we keep only the first component (the
+// primary value) so the caret never appears in FHIR output.
+//
+// Only applied to FHIR primitive types — complex types (CodeableConcept,
+// HumanName, Address, …) are handled by their own transforms and must not
+// be stripped here.
+func stripHL7Caret(value, fhirDataType string) string {
+	if !strings.Contains(value, "^") {
+		return value
+	}
+	switch strings.ToLower(strings.TrimSpace(fhirDataType)) {
+	case "string", "id", "code", "uri", "url", "canonical", "markdown",
+		"positiveint", "unsignedint", "integer", "decimal",
+		"boolean", "date", "datetime", "instant", "time", "":
+		return strings.TrimSpace(strings.SplitN(value, "^", 2)[0])
+	}
+	return value
 }
 
 // tsToISODateTime converts a raw HL7 timestamp string to ISO 8601 / FHIR dateTime format.
@@ -1181,7 +1206,14 @@ func (s *HL7FHIRTransformServiceV3) transformOBXValueByType(value string, rules 
 	}
 	switch valueType {
 	case "NM": // Numeric → valueQuantity
-		quantity := map[string]interface{}{"value": value}
+		// Some senders embed unit in OBX.5 as "value^unit" even when OBX.2=NM
+		// (non-conformant but common). Strip anything after '^' so only the
+		// numeric part is written to valueQuantity.value.
+		numStr := value
+		if idx := strings.IndexByte(value, '^'); idx >= 0 {
+			numStr = strings.TrimSpace(value[:idx])
+		}
+		quantity := map[string]interface{}{"value": numStr}
 		if rules != nil {
 			if unit, ok := rules["unit"].(string); ok && unit != "" {
 				quantity["unit"] = unit
@@ -1190,10 +1222,34 @@ func (s *HL7FHIRTransformServiceV3) transformOBXValueByType(value string, rules 
 			}
 		}
 		return map[string]interface{}{"valueQuantity": quantity}
+	case "CQ": // Composite Quantity: "value^unit" (HL7 Table 0580)
+		// e.g. "180^cm", "72^kg" → valueQuantity
+		parts := strings.SplitN(value, "^", 2)
+		qty := map[string]interface{}{"value": strings.TrimSpace(parts[0])}
+		if len(parts) > 1 && strings.TrimSpace(parts[1]) != "" {
+			unit := strings.TrimSpace(parts[1])
+			qty["unit"] = unit
+			qty["system"] = "http://unitsofmeasure.org"
+			qty["code"] = unit
+		}
+		if rules != nil {
+			if unit, ok := rules["unit"].(string); ok && unit != "" {
+				qty["unit"] = unit
+				qty["code"] = unit
+			}
+		}
+		return map[string]interface{}{"valueQuantity": qty}
 	case "CE", "CWE", "CNE": // Coded → valueCodeableConcept
 		return map[string]interface{}{"valueCodeableConcept": s.transformCEToCodeableConcept(value, rules)}
 	case "ST", "TX", "FT": // String/Text → valueString
-		return map[string]interface{}{"valueString": value}
+		// Strip any HL7 component separator that leaked into a string field.
+		// A value like "180^cm" in an ST-typed OBX means the sender encoded a
+		// composite where only the first component is meaningful as plain text.
+		strVal := value
+		if idx := strings.IndexByte(value, '^'); idx >= 0 {
+			strVal = strings.TrimSpace(value[:idx])
+		}
+		return map[string]interface{}{"valueString": strVal}
 	case "TS", "DT", "TM": // Timestamp → valueDateTime
 		return map[string]interface{}{"valueDateTime": s.transformTSToDate(value)}
 	case "SN": // Structured numeric: comparator^number^separator^number2 (HL7 v2)
@@ -1223,8 +1279,13 @@ func (s *HL7FHIRTransformServiceV3) transformOBXValueByType(value string, rules 
 		}
 		return map[string]interface{}{"valueString": value}
 	default:
-		// No OBX.2 known — return as string
-		return map[string]interface{}{"valueString": value}
+		// OBX.2 absent or unrecognised — return as string, but sanitize any
+		// HL7 component separator so it never appears in FHIR output.
+		strVal := value
+		if idx := strings.IndexByte(value, '^'); idx >= 0 {
+			strVal = strings.TrimSpace(value[:idx])
+		}
+		return map[string]interface{}{"valueString": strVal}
 	}
 }
 

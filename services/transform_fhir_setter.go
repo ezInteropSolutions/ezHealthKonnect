@@ -45,6 +45,13 @@ func (s *HL7FHIRTransformServiceV3) setAtomicFieldInResource(
 		}
 	}
 
+	// Extension path: extension[url=<URL>].<valueType>
+	// Must be checked before the generic array handler because URLs contain dots
+	// which confuse strings.Split and because the index is not numeric.
+	if url, valueType, ok := parseExtensionPath(fieldPath); ok {
+		return s.setExtensionValue(resource, url, valueType, value)
+	}
+
 	// Handle paths with array indices (e.g., "name[0].given[1]")
 	if strings.Contains(fieldPath, "[") {
 		return s.setFieldWithArrayIndices(resource, fieldPath, value, schema)
@@ -986,4 +993,103 @@ func filterResolvedRequiredFieldWarnings(allWarnings []string, resources []map[s
 		kept = append(kept, w)
 	}
 	return kept
+}
+
+// ── FHIR Extension path support ────────────────────────────────────────────
+//
+// Extension paths use the notation:
+//   extension[url=<URL>].<valueType>
+//
+// The URL contains dots (e.g. http://hl7.org/fhir/StructureDefinition/...)
+// so the generic array handler, which splits on ".", cannot be used here.
+
+// parseExtensionPath parses a FHIR extension path of the form
+//
+//	extension[url=<URL>].<valueType>
+//
+// and returns the URL, value type (e.g. "valueBoolean"), and true on success.
+// A resource-type prefix (e.g. "Patient.") is silently consumed if present.
+// Returns ("", "", false) for any path that is not an extension path.
+func parseExtensionPath(fieldPath string) (url, valueType string, ok bool) {
+	// Trim optional resource-type prefix ("Patient.extension[…]" → "extension[…]")
+	path := fieldPath
+	if dot := strings.Index(path, ".extension[url="); dot >= 0 {
+		path = path[dot+1:]
+	}
+
+	const extPrefix = "extension[url="
+	if !strings.HasPrefix(path, extPrefix) {
+		return "", "", false
+	}
+
+	// Locate the closing ']' — everything between extPrefix and ']' is the URL.
+	end := strings.Index(path, "]")
+	if end < 0 {
+		return "", "", false
+	}
+	url = path[len(extPrefix):end]
+	if url == "" {
+		return "", "", false
+	}
+
+	// Rest after ']': expect ".<valueType>" or nothing.
+	rest := path[end+1:]
+	if rest == "" {
+		return url, "", true
+	}
+	if !strings.HasPrefix(rest, ".") {
+		return "", "", false
+	}
+	valueType = rest[1:]
+	return url, valueType, true
+}
+
+// setExtensionValue writes a value into the FHIR extension array of resource,
+// finding the existing extension with the given URL or creating a new one.
+//
+// For example, given url="http://…/patient-organ-donor" and valueType="valueBoolean":
+//
+//	resource["extension"] = [{"url":"http://…/patient-organ-donor","valueBoolean":true}]
+func (s *HL7FHIRTransformServiceV3) setExtensionValue(
+	resource map[string]interface{},
+	url, valueType string,
+	value interface{},
+) error {
+	if url == "" {
+		return fmt.Errorf("extension url must not be empty")
+	}
+
+	// Resolve the extension array (create if absent).
+	var exts []interface{}
+	if existing, ok := resource["extension"].([]interface{}); ok {
+		exts = existing
+	}
+
+	// Find an existing extension object with this URL so we can update it
+	// in-place rather than creating duplicates on repeated calls.
+	var extObj map[string]interface{}
+	for _, raw := range exts {
+		if m, ok := raw.(map[string]interface{}); ok {
+			if m["url"] == url {
+				extObj = m
+				break
+			}
+		}
+	}
+
+	// No existing entry — create a new extension object and append it.
+	if extObj == nil {
+		extObj = map[string]interface{}{"url": url}
+		exts = append(exts, extObj)
+		resource["extension"] = exts
+	}
+
+	// Default to valueString when no value[x] type was specified.
+	vt := valueType
+	if vt == "" {
+		vt = "valueString"
+	}
+	extObj[vt] = value
+	log.Printf("✅ Set extension [%s].%s = %v", url, vt, value)
+	return nil
 }

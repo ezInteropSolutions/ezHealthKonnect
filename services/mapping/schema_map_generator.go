@@ -106,6 +106,18 @@ var segmentToResource = map[string]string{
 	"ZPD": "Patient",
 }
 
+// GetSegmentToResource returns a snapshot of the authoritative segment →
+// primary FHIR resource table. Callers receive a copy — mutations do not
+// affect the internal table. Intended for API endpoints that expose the table
+// to UI consumers so the frontend never needs a static copy.
+func GetSegmentToResource() map[string]string {
+	result := make(map[string]string, len(segmentToResource))
+	for k, v := range segmentToResource {
+		result[k] = v
+	}
+	return result
+}
+
 // ── Field Classification ────────────────────────────────────────────────────
 //
 // FieldCategory classifies the semantic role of an HL7 v2 field for FHIR

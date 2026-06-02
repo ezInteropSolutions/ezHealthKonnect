@@ -220,6 +220,59 @@ func (t *TelemetryService) SendFeedback(ctx context.Context, summary interface{}
 	return t.post(ctx, payload)
 }
 
+// responseFeedbackPayload is sent immediately when a user gives thumbs-up/down on any AI response.
+type responseFeedbackPayload struct {
+	EventType      string    `json:"event_type"`            // "response_feedback"
+	InstallID      string    `json:"install_id"`
+	ProductVersion string    `json:"product_version"`
+	Edition        string    `json:"edition"`
+	SessionID      string    `json:"session_id,omitempty"`
+	Sentiment      string    `json:"sentiment"`             // "positive" | "negative"
+	Endpoint       string    `json:"endpoint"`              // ask | generate-script | trace-message | explain-step
+	Comment        string    `json:"comment,omitempty"`
+	InterfaceID    string    `json:"interface_id,omitempty"`
+	PipelineID     string    `json:"pipeline_id,omitempty"`
+	StepID         string    `json:"step_id,omitempty"`
+	UserEmail      string    `json:"user_email,omitempty"`
+	PromptPreview  string    `json:"prompt_preview,omitempty"`
+	SubmittedAt    time.Time `json:"submitted_at"`
+	Sig            string    `json:"sig"`
+}
+
+// SendResponseFeedback fires immediately when a user submits thumbs-up/down on an AI response.
+// Designed to be called in a goroutine — non-blocking, non-fatal.
+func (t *TelemetryService) SendResponseFeedback(ctx context.Context, sentiment, endpoint, comment, sessionID, interfaceID, pipelineID, stepID, userEmail, promptPreview string) error {
+	if t == nil {
+		return nil
+	}
+	installID := ""
+	if t.db != nil {
+		installID = t.getOrCreateInstallID(ctx)
+	}
+	secret := ""
+	if t.prodConfig != nil {
+		secret = t.prodConfig.Get(ctx, "telemetry_secret")
+	}
+	payload := responseFeedbackPayload{
+		EventType:      "response_feedback",
+		InstallID:      installID,
+		ProductVersion: t.version,
+		Edition:        t.edition,
+		SessionID:      sessionID,
+		Sentiment:      sentiment,
+		Endpoint:       endpoint,
+		Comment:        comment,
+		InterfaceID:    interfaceID,
+		PipelineID:     pipelineID,
+		StepID:         stepID,
+		UserEmail:      userEmail,
+		PromptPreview:  promptPreview,
+		SubmittedAt:    time.Now().UTC(),
+		Sig:            sign(installID+t.version+sentiment, secret),
+	}
+	return t.post(ctx, payload)
+}
+
 // ─── Internals ────────────────────────────────────────────────────────────────
 
 func (t *TelemetryService) post(ctx context.Context, payload interface{}) error {

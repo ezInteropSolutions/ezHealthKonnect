@@ -225,3 +225,15 @@ func LookupForVersion(hl7DataType string, _ FHIRVersion) TypeEntry {
 func IsComposite(hl7DataType string) bool {
 	return Lookup(hl7DataType).ComponentSeparator
 }
+
+// AllTypes returns a snapshot of the full HL7 data type registry.
+// Callers receive a copy — mutations do not affect the registry.
+// Intended for API endpoints that expose the registry to UI consumers
+// (e.g. FhirMappingAssistant) so the frontend never needs a static copy.
+func AllTypes() map[string]TypeEntry {
+	result := make(map[string]TypeEntry, len(typeRegistry))
+	for k, v := range typeRegistry {
+		result[k] = v
+	}
+	return result
+}

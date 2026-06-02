@@ -133,6 +133,9 @@ type FieldMapping struct {
 	// Confidence is the semantic matcher score from the OOB template generator (0.0–1.0).
 	// Stored in the template JSON and forwarded to the frontend for display.
 	Confidence float64 `json:"confidence,omitempty"`
+	// StaticValue carries a literal constant for DataTypeTransform == "static_value" mappings.
+	// When set, HL7 extraction is skipped and this value is written directly to the FHIR path.
+	StaticValue string `json:"staticValue,omitempty"`
 }
 
 type ValueSetMapping struct {

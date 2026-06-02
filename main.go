@@ -522,6 +522,8 @@ func main() {
 			hl7Group.POST("/parse", hl7Ctrl.ParseMessage)
 			hl7Group.POST("/validate", hl7Ctrl.ValidateMessage)
 			hl7Group.GET("/stats", hl7Ctrl.GetStats)
+			hl7Group.GET("/type-registry", hl7Ctrl.GetTypeRegistry)
+			hl7Group.GET("/segment-resources", hl7Ctrl.GetSegmentResources)
 		}
 
 		// SYSTEM ROUTES

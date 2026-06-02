@@ -8,6 +8,7 @@ import (
 
 	"ezhealthkonnect/config"
 	"ezhealthkonnect/hl7"
+	"ezhealthkonnect/services/mapping"
 
 	"github.com/gin-gonic/gin"
 )
@@ -376,6 +377,34 @@ func (ctrl *HL7Controller) getMessageDescription(messageType string) string {
 		return desc
 	}
 	return "Unknown message type"
+}
+
+// GetTypeRegistry returns the complete HL7 data type → FHIR type + transform
+// registry. Used by the FhirMappingAssistant to detect composite types and
+// auto-suggest transforms without keeping a static copy in the frontend.
+//
+// GET /api/hl7/type-registry
+func (ctrl *HL7Controller) GetTypeRegistry(c *gin.Context) {
+	types := mapping.AllTypes()
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    types,
+		"count":   len(types),
+	})
+}
+
+// GetSegmentResources returns the authoritative segment → primary FHIR resource
+// table. Used by the FhirMappingAssistant to resolve the default FHIR resource
+// for any HL7 segment (including Z-segments such as ZPD → Patient).
+//
+// GET /api/hl7/segment-resources
+func (ctrl *HL7Controller) GetSegmentResources(c *gin.Context) {
+	resources := mapping.GetSegmentToResource()
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    resources,
+		"count":   len(resources),
+	})
 }
 
 // parseBatch parses every individual message in a multi-MSH input and returns

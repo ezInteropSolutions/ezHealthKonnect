@@ -1691,11 +1691,17 @@ class PropertiesPanel {
             <div class="form-section">
                 <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
                     <h4 style="margin:0;">HL7→FHIR Mapping Configuration</h4>
-                    ${interfaceId ? `
-                    <span title="${modeObj.tip}"
-                          style="font-size:11px;padding:3px 10px;border-radius:12px;background:${modeObj.bg};color:${modeObj.color};font-weight:600;cursor:help;border:1px solid ${modeObj.color}33;">
-                        ${modeObj.label}
-                    </span>` : ''}
+                    <div style="display:flex;align-items:center;gap:6px;">
+                        <span title="Message type this step is mapping. Comes from the interface configuration."
+                              style="font-size:11px;padding:3px 10px;border-radius:12px;background:#f0fdf4;color:#166534;font-weight:600;cursor:help;border:1px solid #bbf7d0;font-family:monospace;">
+                            ${messageType || 'unknown'}
+                        </span>
+                        ${interfaceId ? `
+                        <span title="${modeObj.tip}"
+                              style="font-size:11px;padding:3px 10px;border-radius:12px;background:${modeObj.bg};color:${modeObj.color};font-weight:600;cursor:help;border:1px solid ${modeObj.color}33;">
+                            ${modeObj.label}
+                        </span>` : ''}
+                    </div>
                 </div>
 
                 <!-- Tab Navigation -->
@@ -2486,25 +2492,63 @@ OBX|3|NM|2075-0^Chloride||102|mmol/L</pre>
         });
 
         const renderRow = ({ mapping, index }) => {
-            const fhirPath = mapping.fhirPath || mapping.targetField || mapping.targetPath || 'N/A';
-            const hl7Field = mapping.hl7Field || mapping.sourceField || mapping.sourcePath || 'N/A';
-            const dataType = mapping.dataType || mapping.hl7DataType || '-';
+            // ── Normalise FHIR path to always show resource-qualified form ──────
+            // OOB mappings carry resourceType + targetPath separately;
+            // user-added mappings carry the full path in fhirPath.
+            const rawFhir      = mapping.fhirPath || mapping.targetField || mapping.targetPath || 'N/A';
+            const rt           = mapping.resourceType || mapping.fhirResourceType || '';
+            const fhirPath     = (rt && rawFhir !== 'N/A' && !rawFhir.startsWith(rt + '.'))
+                ? `${rt}.${rawFhir}`
+                : rawFhir;
+
             const transformType = mapping.transformType || mapping.dataTypeTransform || '';
+            const isStatic     = transformType === 'static_value';
+            const staticVal    = mapping.staticValue || mapping.defaultValue || '';
+
+            // Source column: show HL7 field or a "Static" indicator
+            const hl7FieldRaw  = mapping.hl7Field || mapping.sourceField || mapping.sourcePath || '';
+            const hl7Field     = isStatic
+                ? `<em style="color:#059669;font-size:0.78rem;">static: "${staticVal}"</em>`
+                : `<code style="background:#dbeafe;padding:2px 7px;border-radius:3px;color:#1e3a8a;font-weight:500;font-size:0.82rem;">${hl7FieldRaw || 'N/A'}</code>`;
+
+            // Transform badge — inlined so it works on pipeline-builder.html
+            // regardless of whether WizardView.js is loaded.
+            const TRANSFORM_LABELS = {
+                'ce_to_codeableconcept':           'CE → Code',
+                'cx_to_identifier':                'CX → ID',
+                'xpn_to_humanname':                'XPN → Name',
+                'xad_to_address':                  'XAD → Addr',
+                'xtn_to_contactpoint':             'XTN → Contact',
+                'ts_to_datetime':                  'TS → DateTime',
+                'ts_to_date':                      'TS → Date',
+                'gender_mapping':                  'Gender',
+                'administrative_sex':              'Gender',
+                'msh9_trigger_event_to_coding':    'Event Coding',
+                'obx_value_by_type':               'OBX Value',
+                'hl7_active_flag':                 'Y/N → Bool',
+                'static_value':                    'Static',
+            };
+            let transformBadge = '';
+            if (isStatic) {
+                transformBadge = `<span style="display:inline-block;padding:2px 6px;border-radius:10px;font-size:10px;font-weight:600;background:#dcfce7;color:#166534;border:1px solid #bbf7d0;white-space:nowrap;">Static</span>`;
+            } else if (transformType) {
+                const label = TRANSFORM_LABELS[transformType] || transformType;
+                transformBadge = `<span style="display:inline-block;padding:2px 6px;border-radius:10px;font-size:10px;font-weight:600;background:#eff6ff;color:#2563eb;border:1px solid #bfdbfe;white-space:nowrap;max-width:90px;overflow:hidden;text-overflow:ellipsis;" title="${transformType}">${label}</span>`;
+            } else {
+                transformBadge = `<span style="display:inline-block;padding:2px 6px;border-radius:10px;font-size:10px;font-weight:500;background:#f3f4f6;color:#9ca3af;border:1px solid #e5e7eb;white-space:nowrap;" title="Auto-translate based on HL7 and FHIR data types">Auto</span>`;
+            }
             return `
                 <tr class="mapping-row" data-index="${index}"
                     style="border-bottom: 1px solid #f1f5f9; cursor: pointer; transition: background 0.15s;"
                     onclick="window.propertiesPanel.editMapping(${index})"
                     onmouseover="this.style.background='#f0f9ff'"
                     onmouseout="this.style.background=''">
-                    <td style="padding: 0.6rem 0.75rem;">
-                        <code style="background: #dbeafe; padding: 2px 7px; border-radius: 3px; color: #1e3a8a; font-weight: 500; font-size: 0.82rem;">${hl7Field}</code>
-                    </td>
+                    <td style="padding: 0.6rem 0.75rem;">${hl7Field}</td>
                     <td style="padding: 0.6rem 0.75rem;">
                         <code style="background: #fce7f3; padding: 2px 7px; border-radius: 3px; color: #831843; font-weight: 500; font-size: 0.82rem;">${fhirPath}</code>
                     </td>
                     <td style="padding: 0.6rem 0.75rem; color: #64748b; font-size: 0.82rem;">
-                        ${dataType}
-                        ${window._transformBadge ? window._transformBadge(transformType, index) : ''}
+                        ${transformBadge}
                     </td>
                     <td style="padding: 0.6rem 0.75rem; text-align: center; white-space: nowrap;">
                         <button class="edit-mapping-btn" data-index="${index}"
@@ -4373,7 +4417,7 @@ OBX|3|NM|2075-0^Chloride||102|mmol/L</pre>
             this.builder.dragDropManager.showNotification('Warning: Variable added but save failed. Click Save Pipeline manually.', 'warning');
         });
 
-        this.showStepProperties(this.currentStep);
+        this._refreshMappingPanel();
         this.builder.dragDropManager.showNotification('Variable added & saved', 'success');
         this.builder.markAsUnsaved();
     }
@@ -4561,7 +4605,7 @@ OBX|3|NM|2075-0^Chloride||102|mmol/L</pre>
 
         this.currentStep.config.mappings.splice(index, 1);
         this.builder.dragDropManager.showNotification('Mapping deleted & saved', 'success');
-        this.showStepProperties(this.currentStep);
+        this._refreshMappingPanel();
         this.builder.markAsUnsaved();
 
         // Auto-save after deletion
@@ -4628,7 +4672,7 @@ OBX|3|NM|2075-0^Chloride||102|mmol/L</pre>
             console.error('[Field Mapping] Auto-save failed:', err);
         });
 
-        this.showStepProperties(this.currentStep);
+        this._refreshMappingPanel();
         this.builder.dragDropManager.showNotification(`Added system variable: ${lhs}`, 'success');
         this.builder.markAsUnsaved();
     }
@@ -4689,6 +4733,7 @@ OBX|3|NM|2075-0^Chloride||102|mmol/L</pre>
                                     <option value="hl7">HL7 Field</option>
                                     <option value="enriched">Enriched Data</option>
                                     <option value="custom">Custom XPath</option>
+                                    <option value="static_value">Static Value</option>
                                 </select>
                                 <button class="btn btn-secondary" style="font-size: 0.85rem; padding: 0.5rem 0.75rem; flex-shrink: 0;"
                                         onclick="window.propertiesPanel.switchToManualEntry()"
@@ -4727,11 +4772,21 @@ OBX|3|NM|2075-0^Chloride||102|mmol/L</pre>
                             </select>
 
                             <!-- Custom Text Input (hidden by default) -->
-                            <input type="text" id="editHl7Field" value="${mapping.hl7Field || mapping.sourceField || mapping.sourcePath || ''}"
+                            <!-- data-hl7dtype carries the HL7 data type for composite detection -->
+                            <input type="text" id="editHl7Field"
+                                value="${mapping.hl7Field || mapping.sourceField || mapping.sourcePath || ''}"
+                                data-hl7dtype="${mapping.hl7DataType || ''}"
                                 style="width: 100%; padding: 0.5rem; border: 1px solid #cbd5e1; border-radius: 4px; display: none;"
                                 placeholder="e.g., PID.5 or [\\"Step Name\\"].enriched_data.fieldName">
-                            <small style="color: #64748b; font-size: 0.8rem; margin-top: 0.25rem; display: block;">
-                                💡 Tip: Select from dropdown, type manually, or browse the live HL7 payload below
+                            <!-- Hidden: current resource type, used by CompositeTypePicker -->
+                            <input type="hidden" id="editResourceType"
+                                value="${mapping.resourceType || mapping.fhirResourceType || ''}">
+                            <!-- Static Value Input (hidden by default) -->
+                            <input type="text" id="editStaticValue" value="${mapping.staticValue || mapping.defaultValue || ''}"
+                                style="width: 100%; padding: 0.5rem; border: 1px solid #c6f6d5; border-radius: 4px; display: none; background: #f0fff4;"
+                                placeholder="Literal value, e.g.  group  or  active  or  true">
+                            <small id="editSourceTip" style="color: #64748b; font-size: 0.8rem; margin-top: 0.25rem; display: block;">
+                                💡 Tip: Select from dropdown, type manually, browse the payload below, or choose Static Value for a literal constant
                             </small>
 
                             <!-- HL7 Payload Browser -->
@@ -4762,8 +4817,21 @@ OBX|3|NM|2075-0^Chloride||102|mmol/L</pre>
                         <div class="form-group">
                             <label style="display:flex; align-items:center; gap:0.5rem; margin-bottom:0.5rem;">
                                 <span style="font-weight:600;">FHIR Target Path</span>
+                                <button type="button"
+                                    onclick="window.propertiesPanel._openExtensionBuilder()"
+                                    style="margin-left:auto;padding:3px 10px;background:#ede9fe;border:1px solid #c4b5fd;border-radius:5px;
+                                           cursor:pointer;font-size:0.75rem;font-weight:600;color:#5b21b6;white-space:nowrap;"
+                                    title="Open guided extension mapping popup">
+                                    🔌 Extension
+                                </button>
                             </label>
-                            <div style="position:relative;">
+
+                            <!-- Composite type picker — shown when HL7 source is a composite type.
+                                 Hidden for primitive types; CompositeTypePicker renders into this div. -->
+                            <div id="compositeModeContainer" style="display:none; margin-bottom:0.5rem;"></div>
+
+                            <!-- Simple path input — hidden while composite picker is active -->
+                            <div id="fhirSimpleSection" style="position:relative;">
                                 <i class="fas fa-search" style="position:absolute; left:0.6rem; top:50%; transform:translateY(-50%); color:#94a3b8; font-size:0.78rem; pointer-events:none;"></i>
                                 <input type="text" id="editFhirPath"
                                     value="${mapping.fhirPath || mapping.targetField || mapping.targetPath || ''}"
@@ -4785,9 +4853,36 @@ OBX|3|NM|2075-0^Chloride||102|mmol/L</pre>
                             </small>
                         </div>
 
+                        <!-- Transform Type -->
+                        <div class="form-group">
+                            <label style="font-weight: 600; margin-bottom: 0.5rem; display: block;">
+                                Transform
+                                <small style="font-weight:400; color:#64748b; margin-left:0.4rem;">(how the HL7 value is converted)</small>
+                            </label>
+                            <select id="editTransformType"
+                                data-current="${mapping.transformType || mapping.dataTypeTransform || ''}"
+                                style="width: 100%; padding: 0.5rem; border: 1px solid #cbd5e1; border-radius: 4px; background: white;">
+                                <option value="">Auto (engine selects based on data types)</option>
+                                <option value="ce_to_codeableconcept">CE → CodeableConcept</option>
+                                <option value="cx_to_identifier">CX → Identifier</option>
+                                <option value="xpn_to_humanname">XPN → HumanName</option>
+                                <option value="xad_to_address">XAD → Address</option>
+                                <option value="xtn_to_contactpoint">XTN → ContactPoint</option>
+                                <option value="ts_to_datetime">TS → dateTime</option>
+                                <option value="ts_to_date">TS → date</option>
+                                <option value="gender_mapping">Gender (M/F/U → male/female/unknown)</option>
+                                <option value="hl7_active_flag">Y/N → Boolean (active flag)</option>
+                                <option value="msh9_trigger_event_to_coding">MSH-9 → EventCoding</option>
+                                <option value="obx_value_by_type">OBX value by type</option>
+                            </select>
+                            <small style="color:#64748b; font-size:0.8rem; margin-top:0.25rem; display:block;">
+                                💡 For ZPD / custom segments: pick <strong>Y/N → Boolean</strong> for flag fields, or leave Auto
+                            </small>
+                        </div>
+
                         <!-- Data Type -->
                         <div class="form-group">
-                            <label style="font-weight: 600; margin-bottom: 0.5rem; display: block;">Data Type</label>
+                            <label style="font-weight: 600; margin-bottom: 0.5rem; display: block;">Data Type <small style="font-weight:400; color:#64748b;">(optional hint)</small></label>
                             <select id="editDataTypeDropdown" style="width: 100%; padding: 0.5rem; border: 1px solid #cbd5e1; border-radius: 4px; background: white;" onchange="document.getElementById('editDataType').value = this.value">
                                 <option value="">-- Select Data Type --</option>
                                 <option value="string">string - Text value</option>
@@ -4799,7 +4894,7 @@ OBX|3|NM|2075-0^Chloride||102|mmol/L</pre>
                                 <option value="code">code - Coded value</option>
                                 <option value="uri">uri - URI/URL</option>
                             </select>
-                            <input type="hidden" id="editDataType" value="${mapping.dataType || mapping.hl7DataType || mapping.transformType || ''}">
+                            <input type="hidden" id="editDataType" value="${mapping.dataType || mapping.hl7DataType || ''}">
                         </div>
                     </div>
                     <div class="modal-footer">
@@ -4843,9 +4938,24 @@ OBX|3|NM|2075-0^Chloride||102|mmol/L</pre>
         const sourceType   = document.getElementById('editSourceType');
 
         // ── Pre-populate source field ─────────────────────────────────────────
-        // The text input was pre-filled from the mapping object at template render
-        // time. Now decide which UI control should actually show it.
-        if (hl7TextInput && hl7TextInput.value) {
+        const staticInput = document.getElementById('editStaticValue');
+
+        // Check for static_value mapping first (transformType == "static_value" or
+        // sourcePath is empty but staticValue/defaultValue is populated).
+        const existingTransform = hl7TextInput?.closest('.modal-body')
+            ? document.getElementById('editDataType')?.value : '';
+
+        const mappingIsStatic = (existingTransform === 'static_value') ||
+            (staticInput?.value && !hl7TextInput?.value);
+
+        if (mappingIsStatic && staticInput?.value) {
+            sourceType.value           = 'static_value';
+            hl7Dropdown.style.display  = 'none';
+            hl7TextInput.style.display = 'none';
+            staticInput.style.display  = 'block';
+            const browser = document.getElementById('hl7PayloadBrowser');
+            if (browser) browser.style.display = 'none';
+        } else if (hl7TextInput && hl7TextInput.value) {
             const val = hl7TextInput.value;
 
             if (val.startsWith('[')) {
@@ -4870,6 +4980,12 @@ OBX|3|NM|2075-0^Chloride||102|mmol/L</pre>
             }
         }
 
+        // ── Pre-select transform type ─────────────────────────────────────────
+        const transformSelect = document.getElementById('editTransformType');
+        if (transformSelect && transformSelect.dataset.current) {
+            transformSelect.value = transformSelect.dataset.current;
+        }
+
         // ── Wire up dropdown → text input sync ───────────────────────────────
         if (hl7Dropdown) {
             hl7Dropdown.addEventListener('change', (e) => {
@@ -4890,6 +5006,204 @@ OBX|3|NM|2075-0^Chloride||102|mmol/L</pre>
         if (dataTypeDropdown && existingDataType) {
             dataTypeDropdown.value = existingDataType;
         }
+
+        // ── Composite type detection ──────────────────────────────────────────
+        // When the HL7 source field has a known composite data type (XPN, XAD, …)
+        // show the CompositeTypePicker in place of the plain FHIR path input.
+        this._checkCompositeMode();
+    }
+
+    // ── Composite type mapping helpers ──────────────────────────────────────
+
+    /**
+     * Reads the current HL7 data type from the source field and activates the
+     * CompositeTypePicker when the type is composite. Safe to call multiple times.
+     */
+    _checkCompositeMode() {
+        if (typeof HL7TypeCatalog === 'undefined') return; // catalog not loaded yet
+
+        const hl7Input   = document.getElementById('editHl7Field');
+        const hl7DataType = (hl7Input && hl7Input.dataset.hl7dtype) || '';
+
+        if (hl7DataType && HL7TypeCatalog.isComposite(hl7DataType)) {
+            const hl7Field    = (hl7Input && hl7Input.value) || '';
+            const resourceType = (document.getElementById('editResourceType') || {}).value || '';
+            this._activateCompositePicker(hl7Field, hl7DataType, resourceType);
+        } else {
+            this._deactivateCompositePicker();
+        }
+    }
+
+    /**
+     * Shows the CompositeTypePicker, hides the plain FHIR path input.
+     * Wires the 'mapping-selected' and 'composite-dismissed' events.
+     */
+    _activateCompositePicker(hl7Field, hl7DataType, resourceType) {
+        const container    = document.getElementById('compositeModeContainer');
+        const simpleSection = document.getElementById('fhirSimpleSection');
+        if (!container) return;
+
+        // Destroy any existing picker instance first
+        if (this._compositePickerInstance) {
+            this._compositePickerInstance.destroy();
+            this._compositePickerInstance = null;
+        }
+
+        container.style.display     = '';
+        if (simpleSection) simpleSection.style.display = 'none';
+
+        const picker = new CompositeTypePicker(container, {
+            hl7Field:     hl7Field,
+            hl7DataType:  hl7DataType,
+            resourceType: resourceType,
+        });
+        picker.render();
+        this._compositePickerInstance = picker;
+
+        // 'mapping-selected': populate all form fields from picker selection
+        container.addEventListener('mapping-selected', (e) => {
+            this._onCompositePickerSelect(e.detail);
+        }, { once: false });
+
+        // 'composite-dismissed': user clicked "Type manually" — fall back to input
+        container.addEventListener('composite-dismissed', () => {
+            this._deactivateCompositePicker();
+        }, { once: true });
+    }
+
+    /**
+     * Hides the CompositeTypePicker and restores the plain FHIR path input.
+     */
+    _deactivateCompositePicker() {
+        const container     = document.getElementById('compositeModeContainer');
+        const simpleSection = document.getElementById('fhirSimpleSection');
+
+        if (this._compositePickerInstance) {
+            this._compositePickerInstance.destroy();
+            this._compositePickerInstance = null;
+        }
+        if (container)     container.style.display     = 'none';
+        if (simpleSection) simpleSection.style.display = '';
+    }
+
+    /**
+     * Handles a 'mapping-selected' event from the CompositeTypePicker.
+     * Populates the HL7 source, FHIR target, and transform fields so the
+     * existing saveEditedMapping() path works unchanged.
+     */
+    _onCompositePickerSelect(detail) {
+        // Source field
+        const hl7Input  = document.getElementById('editHl7Field');
+        const srcType   = document.getElementById('editSourceType');
+        const hl7Drop   = document.getElementById('editHl7FieldDropdown');
+        if (hl7Input) {
+            hl7Input.value              = detail.hl7Field || '';
+            hl7Input.dataset.hl7dtype   = detail.hl7DataType || '';
+        }
+        // Switch source type to 'custom' so saveEditedMapping reads from the text input
+        if (srcType)  srcType.value          = 'custom';
+        if (hl7Drop)  hl7Drop.style.display  = 'none';
+        if (hl7Input) hl7Input.style.display = 'block';
+
+        // FHIR path — set the hidden input AND the visible input (for review)
+        const fhirInput = document.getElementById('editFhirPath');
+        if (fhirInput)  fhirInput.value = detail.fhirPath || '';
+
+        // Transform type
+        const transformSel = document.getElementById('editTransformType');
+        if (transformSel) transformSel.value = detail.transformType || '';
+
+        // Show a brief confirmation banner inside the composite container
+        const container = document.getElementById('compositeModeContainer');
+        if (container) {
+            const banner = document.createElement('div');
+            banner.style.cssText = 'margin-top:0.4rem;padding:0.4rem 0.75rem;background:#d1fae5;border:1px solid #6ee7b7;border-radius:5px;font-size:0.8rem;color:#065f46;display:flex;justify-content:space-between;align-items:center;';
+            const esc = s => String(s).replace(/</g, '&lt;').replace(/>/g, '&gt;');
+            banner.innerHTML = '<span>✓ Selected: <strong>' + esc(detail.hl7Field) + '</strong> → <strong>' + esc(detail.fhirPath) + '</strong></span>'
+                + '<button type="button" style="background:none;border:none;cursor:pointer;font-size:0.8rem;color:#065f46;text-decoration:underline;" onclick="window.propertiesPanel._deactivateCompositePicker()">Change</button>';
+            container.appendChild(banner);
+        }
+    }
+
+    /**
+     * Opens the ExtensionBuilder popup pre-loaded with the current HL7 source
+     * field context. On confirm, populates fhirPath, transformType, and
+     * deactivates the composite picker if active.
+     */
+    _openExtensionBuilder() {
+        if (typeof ExtensionBuilder === 'undefined' || typeof FhirExtensionCatalog === 'undefined') {
+            this.builder.dragDropManager.showNotification(
+                'Extension Builder not loaded — refresh the page', 'error');
+            return;
+        }
+
+        const hl7Input    = document.getElementById('editHl7Field');
+        const resourceEl  = document.getElementById('editResourceType');
+        const hl7Field    = (hl7Input && hl7Input.value) || '';
+        const hl7DataType = (hl7Input && hl7Input.dataset.hl7dtype) || '';
+        const resourceType = (resourceEl && resourceEl.value) || this._inferResourceType();
+
+        const builder = new ExtensionBuilder({
+            hl7Field:     hl7Field,
+            hl7DataType:  hl7DataType,
+            resourceType: resourceType,
+            onConfirm: (result) => {
+                // Populate FHIR path
+                const fhirInput = document.getElementById('editFhirPath');
+                if (fhirInput) fhirInput.value = result.fhirPath;
+
+                // Set transform
+                const transformSel = document.getElementById('editTransformType');
+                if (transformSel) transformSel.value = result.transform || '';
+
+                // Deactivate composite picker — extension path is now the target
+                this._deactivateCompositePicker();
+
+                this.builder.dragDropManager.showNotification(
+                    '🔌 Extension path set — click Save to apply', 'success');
+            },
+        });
+        builder.open();
+    }
+
+    /**
+     * Re-renders the properties panel while preserving the mapping table's
+     * scroll position. Use this everywhere instead of calling
+     * showStepProperties(this.currentStep) directly after a mapping change,
+     * so the user's scroll position survives the DOM rebuild.
+     */
+    _refreshMappingPanel() {
+        const container = document.getElementById('mappingTableContainer');
+        const scrollTop = container ? container.scrollTop : 0;
+
+        this.showStepProperties(this.currentStep);
+
+        // Restore scroll after the DOM has been fully rebuilt
+        requestAnimationFrame(() => {
+            const restored = document.getElementById('mappingTableContainer');
+            if (restored && scrollTop > 0) {
+                restored.scrollTop = scrollTop;
+            }
+        });
+    }
+
+    /**
+     * Infers the FHIR resource type from the current step config or pipeline
+     * when editResourceType is not explicitly set (e.g. on new mappings).
+     */
+    _inferResourceType() {
+        // Try the current step's mapped resource types
+        const step = this.currentStep;
+        if (step && step.config && step.config.mappings && step.config.mappings.length > 0) {
+            const rt = step.config.mappings[0].resourceType
+                    || step.config.mappings[0].fhirResourceType;
+            if (rt) return rt;
+        }
+        // Fall back to pipeline message type → default resource
+        const messageType = this.builder.pipeline && this.builder.pipeline.messageType;
+        if (messageType && messageType.startsWith('ADT')) return 'Patient';
+        if (messageType && messageType.startsWith('ORU')) return 'Observation';
+        return 'Patient';
     }
 
     /**
@@ -5081,30 +5395,50 @@ OBX|3|NM|2075-0^Chloride||102|mmol/L</pre>
 
         // Reset the browser loaded flag so it reloads fresh next open
         this._hl7BrowserLoaded = false;
+
+        // The payload browser doesn't carry per-field data types yet, so clear
+        // any previously detected composite type and re-check. When hl7DataType
+        // is unknown the composite picker stays hidden (graceful degradation).
+        const hl7Input = document.getElementById('editHl7Field');
+        if (hl7Input) hl7Input.dataset.hl7dtype = '';
+        this._checkCompositeMode();
     }
 
     /**
      * Toggle source input based on source type selection (NO-CODE)
      */
     toggleSourceInput() {
-        const sourceType = document.getElementById('editSourceType').value;
-        const hl7Dropdown = document.getElementById('editHl7FieldDropdown');
-        const customInput = document.getElementById('editHl7Field');
+        const sourceType   = document.getElementById('editSourceType').value;
+        const hl7Dropdown  = document.getElementById('editHl7FieldDropdown');
+        const customInput  = document.getElementById('editHl7Field');
+        const staticInput  = document.getElementById('editStaticValue');
+        const browser      = document.getElementById('hl7PayloadBrowser');
+        const tip          = document.getElementById('editSourceTip');
+
+        // Reset all
+        hl7Dropdown.style.display  = 'none';
+        customInput.style.display  = 'none';
+        staticInput.style.display  = 'none';
+        if (browser) browser.style.display = 'none';
 
         if (sourceType === 'hl7') {
-            // Show HL7 dropdown, hide custom input
             hl7Dropdown.style.display = 'block';
-            customInput.style.display = 'none';
+            if (browser) browser.style.display = 'block';
+            if (tip) tip.textContent = '💡 Select from dropdown, type manually, or browse the payload below';
         } else if (sourceType === 'enriched') {
-            // Hide dropdown, show text input with placeholder for enriched data
-            hl7Dropdown.style.display = 'none';
-            customInput.style.display = 'block';
-            customInput.placeholder = 'e.g., ["database_enrichment"].enriched_data.fieldName';
+            customInput.style.display  = 'block';
+            customInput.placeholder    = 'e.g., ["database_enrichment"].enriched_data.fieldName';
+            if (tip) tip.textContent = '💡 Reference enriched data from a previous step';
+        } else if (sourceType === 'static_value') {
+            staticInput.style.display  = 'block';
+            staticInput.focus();
+            if (tip) tip.textContent = '💡 This literal value will be written directly to the FHIR path — no HL7 field needed';
         } else {
-            // Custom XPath - show text input with generic placeholder
-            hl7Dropdown.style.display = 'none';
-            customInput.style.display = 'block';
-            customInput.placeholder = 'Enter custom XPath expression';
+            // Custom XPath
+            customInput.style.display  = 'block';
+            customInput.placeholder    = 'Enter custom XPath expression';
+            if (browser) browser.style.display = 'block';
+            if (tip) tip.textContent = '💡 Type any custom path manually';
         }
     }
 
@@ -5414,33 +5748,55 @@ OBX|3|NM|2075-0^Chloride||102|mmol/L</pre>
      * Save edited mapping
      */
     saveEditedMapping(index) {
-        // Get value from text input (which is populated by dropdowns or manual entry)
-        let hl7Field = document.getElementById('editHl7Field').value.trim();
-        const fhirPath = document.getElementById('editFhirPath').value.trim();
-        const dataType = document.getElementById('editDataType').value.trim();
+        const sourceType = document.getElementById('editSourceType')?.value || 'hl7';
+        const fhirPath   = document.getElementById('editFhirPath').value.trim();
 
-        // If hl7Field is empty, check if user selected from dropdown but didn't trigger change
-        if (!hl7Field) {
-            const dropdown = document.getElementById('editHl7FieldDropdown');
-            if (dropdown && dropdown.value) {
-                hl7Field = dropdown.value;
-            }
-        }
-
-        if (!hl7Field || !fhirPath) {
-            this.builder.dragDropManager.showNotification('HL7 Field and FHIR Path are required', 'error');
+        if (!fhirPath) {
+            this.builder.dragDropManager.showNotification('FHIR Target Path is required', 'error');
             return;
         }
 
-        // Create mapping object
-        const mappingObject = {
-            hl7Field: hl7Field,
-            sourcePath: hl7Field,
-            fhirPath: fhirPath,
-            targetPath: fhirPath,
-            dataType: dataType,
-            transformType: dataType
-        };
+        let mappingObject;
+
+        if (sourceType === 'static_value') {
+            // ── Static value mapping ────────────────────────────────────────
+            const staticValue = document.getElementById('editStaticValue')?.value.trim() || '';
+            if (!staticValue) {
+                this.builder.dragDropManager.showNotification('Static Value is required', 'error');
+                return;
+            }
+            mappingObject = {
+                sourcePath:    '',
+                hl7Field:      '',
+                fhirPath,
+                targetPath:    fhirPath,
+                staticValue,
+                defaultValue:  staticValue,
+                transformType: 'static_value',
+                dataType:      '',
+            };
+        } else {
+            // ── HL7 / enriched / custom source mapping ───────────────────────
+            let hl7Field = document.getElementById('editHl7Field').value.trim();
+            if (!hl7Field) {
+                const dropdown = document.getElementById('editHl7FieldDropdown');
+                if (dropdown && dropdown.value) hl7Field = dropdown.value;
+            }
+            if (!hl7Field) {
+                this.builder.dragDropManager.showNotification('HL7 Field is required', 'error');
+                return;
+            }
+            const transformType = document.getElementById('editTransformType')?.value || '';
+            const dataType      = document.getElementById('editDataType')?.value || '';
+            mappingObject = {
+                hl7Field,
+                sourcePath:    hl7Field,
+                fhirPath,
+                targetPath:    fhirPath,
+                transformType,
+                dataType,
+            };
+        }
 
         // Close modal immediately so the user sees feedback
         document.getElementById('editMappingModal').remove();
@@ -5465,10 +5821,17 @@ OBX|3|NM|2075-0^Chloride||102|mmol/L</pre>
             this._saveMappingDelta(atomicMappings)
                 .then(result => {
                     const label = index === undefined ? 'Mapping added' : 'Mapping updated';
-                    const detail = result.isPureOOB ? ' (matches OOB — no delta stored)' : ` (${result.overrideCount} override${result.overrideCount !== 1 ? 's' : ''})`;
-                    this.builder.dragDropManager.showNotification(label + detail, 'success');
-                    // Re-render the full panel so the mode badge and table refresh from backend
-                    this.showStepProperties(this.currentStep);
+                    if (result.isPureOOB) {
+                        this.builder.dragDropManager.showNotification(
+                            `${label} — but your changes match the standard template, so no custom override was stored. If you intended to customise this mapping, try changing a value that differs from the OOB default.`,
+                            'warning'
+                        );
+                    } else {
+                        const detail = ` (${result.overrideCount} override${result.overrideCount !== 1 ? 's' : ''})`;
+                        this.builder.dragDropManager.showNotification(label + detail, 'success');
+                    }
+                    // Re-render preserving the mapping table scroll position
+                    this._refreshMappingPanel();
                 })
                 .catch(err => {
                     this.builder.dragDropManager.showNotification('Save failed: ' + err.message, 'error');
@@ -5491,7 +5854,7 @@ OBX|3|NM|2075-0^Chloride||102|mmol/L</pre>
                 console.error('[Field Mapping] Auto-save failed:', err);
             });
 
-            this.showStepProperties(this.currentStep);
+            this._refreshMappingPanel();
             this.builder.markAsUnsaved();
         }
     }
@@ -5589,13 +5952,16 @@ OBX|3|NM|2075-0^Chloride||102|mmol/L</pre>
                 if (match) { resourceType = match[1]; targetPath = match[2]; }
             }
 
+            const isStatic = (m.transformType === 'static_value') ||
+                             (m.staticValue && !hl7Path);
             return {
                 id:               m.id            || '',
-                sourcePath:       hl7Path,
+                sourcePath:       isStatic ? '' : hl7Path,
                 targetPath:       targetPath,
                 resourceType:     resourceType,
                 fhirResourceType: resourceType,
-                transformType:    m.transformType  || m.dataType || '',
+                transformType:    isStatic ? 'static_value' : (m.transformType || ''),
+                defaultValue:     isStatic ? (m.staticValue || m.defaultValue || '') : '',
                 isRequired:       m.isRequired     || false,
                 confidence:       m.confidence     || 0,
             };

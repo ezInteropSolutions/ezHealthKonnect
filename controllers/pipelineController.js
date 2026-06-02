@@ -746,17 +746,25 @@ exports.getStandardTemplateMappings = async (req, res) => {
                 for (const resourceType of Object.keys(config.resources)) {
                     const resource = config.resources[resourceType];
                     if (resource && resource.mappings && Array.isArray(resource.mappings)) {
-                        // Normalize mapping field names to match UI expectations
+                        // Normalize field names for UI compatibility.
+                        // GeneratedMapping uses hl7Path/fhirPath/transform; the UI
+                        // reads hl7Field/fhirPath/transformType.  All rich type fields
+                        // (hl7DataType, fhirDataType, transform) are preserved so
+                        // FhirMappingAssistant can detect composite types and suggest
+                        // transforms without a static frontend copy.
                         const resourceMappings = resource.mappings.map(m => ({
-                            // Keep original fields
                             ...m,
-                            // Add resourceType for context
-                            fhirResource: resourceType,
-                            // Normalize field names for UI compatibility
-                            hl7Field: m.hl7Path || m.hl7Field || m.sourceField || m.sourcePath,
-                            sourcePath: m.hl7Path || m.sourcePath || m.hl7Field,
-                            targetPath: m.fhirPath || m.targetPath,
-                            dataType: m.hl7DataType || m.dataType || ''
+                            resourceType,
+                            hl7Field:      m.hl7Path     || m.hl7Field    || m.sourceField || m.sourcePath || '',
+                            sourcePath:    m.hl7Path     || m.sourcePath  || m.hl7Field    || '',
+                            fhirPath:      m.fhirPath    || m.targetPath  || '',
+                            targetPath:    m.fhirPath    || m.targetPath  || '',
+                            // Alias transform → transformType (UI name); keep both
+                            transformType: m.transform   || m.transformType || m.dataTypeTransform || '',
+                            // Preserve typed names; dataType stays for backward compat
+                            hl7DataType:   m.hl7DataType || m.dataType    || '',
+                            fhirDataType:  m.fhirDataType || '',
+                            dataType:      m.hl7DataType || m.dataType    || '',
                         }));
                         mappings.push(...resourceMappings);
                     }

@@ -169,10 +169,12 @@ const forwardToGo = async (req, res) => {
         if (req.user) {
             const uid = req.user.id || req.user.userId; // JWT uses 'userId'; session uses 'id'
             if (uid) options.headers['X-User-ID'] = String(uid);
-            if (req.user.role) options.headers['X-User-Role'] = String(req.user.role);
+            if (req.user.role)  options.headers['X-User-Role']  = String(req.user.role);
+            if (req.user.email) options.headers['X-User-Email'] = String(req.user.email);
         } else if (req.session && req.session.user && req.session.user.id) {
             options.headers['X-User-ID'] = String(req.session.user.id);
-            if (req.session.user.role) options.headers['X-User-Role'] = String(req.session.user.role);
+            if (req.session.user.role)  options.headers['X-User-Role']  = String(req.session.user.role);
+            if (req.session.user.email) options.headers['X-User-Email'] = String(req.session.user.email);
         }
         
         // Add body for POST/PUT/PATCH requests

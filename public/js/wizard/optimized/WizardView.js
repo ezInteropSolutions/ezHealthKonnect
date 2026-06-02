@@ -9170,6 +9170,8 @@ window._transformLabel = function(key) {
         'obx_status_to_obs_status':        'Obs Status',
         'abnormal_flag_to_interpretation': 'Abnormal Flag',
         'obx_value_by_type':               'OBX Value',
+        'static_value':                    'Static',
+        'hl7_active_flag':                 'Y/N → Bool',
     };
     return MAP[key] || key;
 };

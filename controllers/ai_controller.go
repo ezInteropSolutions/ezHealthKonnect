@@ -650,6 +650,18 @@ func (c *AIController) FeedbackResponse(ctx *gin.Context) {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": err.Error()})
 		return
 	}
+
+	// Fire telemetry to Google Sheets — non-blocking, non-fatal.
+	if c.telemetry != nil {
+		userEmail := ctx.GetHeader("X-User-Email")
+		go c.telemetry.SendResponseFeedback(
+			context.Background(),
+			req.Sentiment, req.Endpoint, req.Comment,
+			req.SessionID, req.InterfaceID, req.PipelineID, req.StepID,
+			userEmail, req.PromptPreview,
+		)
+	}
+
 	ctx.JSON(http.StatusOK, gin.H{"success": true, "data": gin.H{"id": id}})
 }
 
