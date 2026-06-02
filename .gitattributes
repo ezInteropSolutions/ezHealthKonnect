@@ -4,6 +4,16 @@
 # Force LF everywhere (recommended)
 * text eol=lf
 
+# Binary files — must come after wildcard rules to override them
+*.gz   binary
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.ico  binary
+*.pdf  binary
+*.zip  binary
+
 # (Optional explicit types – redundancy is fine)
 *.md   text eol=lf
 *.json text eol=lf
