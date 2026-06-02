@@ -9,8 +9,8 @@ on:
   workflow_dispatch:
 
 env:
-  REGISTRY: ghcr.io
-  IMAGE_NAME: ezinteropsolutions/ezhealthkonnect
+  REGISTRY: docker.io
+  IMAGE_NAME: shanawaz107/ezhealthkonnect
   # Local tag used during validation before pushing
   LOCAL_TAG: ezhealthkonnect-ci:${{ github.run_id }}
 
@@ -174,13 +174,12 @@ jobs:
         run: docker compose -f docker-compose.prod.yml --env-file /tmp/test.env -p ezhk-ci down -v --remove-orphans || true
 
       # ── Push — only after ALL checks pass ────────────────────────────────
-      - name: Log in to GitHub Container Registry
+      - name: Log in to Docker Hub
         if: github.event_name != 'pull_request'
         uses: docker/login-action@v3
         with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Extract image metadata
         if: github.event_name != 'pull_request'
