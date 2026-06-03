@@ -85,6 +85,17 @@ func runDockerInstallation(cfg *Config) {
 	}
 	emit("ok", "Image downloaded successfully")
 
+	// Step 4b: Extract database migrations from image to install dir.
+	// docker-compose.prod.yml mounts ./database/migrations into the Flyway
+	// container. The migrations live inside the app image, not on the host,
+	// so we copy them out here once after the pull.
+	emitStep(4, "Extracting database migrations")
+	if err := extractMigrations(cfg.InstallDir); err != nil {
+		emit("error", "Failed to extract migrations: "+err.Error())
+		return
+	}
+	emit("ok", "Migrations ready")
+
 	// Step 5: Start services
 	emitStep(5, "Starting services")
 	if err := runDockerCompose(composeDest, listenersDest, envPath, cfg.WithAI); err != nil {
@@ -116,6 +127,20 @@ func runDockerInstallation(cfg *Config) {
 	emit("info", "")
 	emit("ok", "Platform URL: "+appURL)
 	success = true
+}
+
+func extractMigrations(installDir string) error {
+	dest := filepath.Join(installDir, "database", "migrations")
+	if err := os.MkdirAll(dest, 0755); err != nil {
+		return err
+	}
+	// Copy /app/database/migrations out of the image into the host install dir.
+	return streamCmd(exec.Command(
+		"docker", "run", "--rm",
+		"-v", installDir+":/output",
+		"shanawaz107/ezhealthkonnect:latest",
+		"sh", "-c", "cp -r /app/database/migrations /output/database/",
+	))
 }
 
 func runDockerPull() error {
