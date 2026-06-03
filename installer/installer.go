@@ -216,7 +216,8 @@ OLLAMA_EMBED_MODEL=nomic-embed-text
 func randomSecret(n int) string {
 	b := make([]byte, n)
 	rand.Read(b) //nolint:errcheck
-	return base64.StdEncoding.EncodeToString(b)
+	// RawURLEncoding avoids +, /, = which break .env file parsing in Docker.
+	return base64.RawURLEncoding.EncodeToString(b)
 }
 
 func emitStep(n int, label string) {
