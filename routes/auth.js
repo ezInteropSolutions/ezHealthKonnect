@@ -177,16 +177,25 @@ router.post('/login', async (req, res) => {
 
         console.log(`✅ Login successful for: ${user.name} (${user.source})`);
 
-        res.json({
-            message: 'Login successful',
-            token: token,
-            user: {
-                id: user.id,
-                email: user.email,
-                name: user.name,
-                role: user.role
+        // Persist session before responding so the cookie is valid on the
+        // very next request the client makes after redirect.
+        req.session.save((saveErr) => {
+            if (saveErr) {
+                console.error('Session save error:', saveErr);
+                return res.status(500).json({ message: 'Session error — please try again' });
             }
+            res.json({
+                message: 'Login successful',
+                token: token,
+                user: {
+                    id: user.id,
+                    email: user.email,
+                    name: user.name,
+                    role: user.role
+                }
+            });
         });
+        return;
         
     } catch (error) {
         console.error('Login error:', error);
