@@ -52,6 +52,16 @@ func runDockerInstallation(cfg *Config) {
 	}
 	emit("ok", "Directory ready: "+cfg.InstallDir)
 
+	// Step 1b: Remove any stale volumes from a previous failed install.
+	// A leftover postgres_data volume carries the old generated password,
+	// causing "password authentication failed" on the next install attempt.
+	emit("info", "Removing any stale data volumes from a previous install...")
+	_ = exec.Command("docker", "volume", "rm", "-f",
+		"ezhealthkonnect_postgres_data",
+		"ezhealthkonnect_minio_data",
+		"ezhealthkonnect_schemas_data",
+	).Run()
+
 	// Step 2: Write embedded compose files
 	emitStep(2, "Writing compose configuration")
 	composeDest := filepath.Join(cfg.InstallDir, "docker-compose.prod.yml")
