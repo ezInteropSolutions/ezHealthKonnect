@@ -210,6 +210,10 @@ MINIO_CONSOLE_PORT=%s
 SESSION_SECRET=%s
 JWT_SECRET=%s
 
+# Cookies work over plain HTTP (installer default).
+# Set to true only when the platform is behind an HTTPS reverse proxy.
+SESSION_COOKIE_SECURE=false
+
 OLLAMA_PORT=11434
 OLLAMA_CHAT_MODEL=llama3.2:3b
 OLLAMA_EMBED_MODEL=nomic-embed-text
