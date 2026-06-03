@@ -89,6 +89,10 @@ func (m *mockDLQServicer) BulkAbandon(_ context.Context, dlqIDs []string) (int64
 	return m.bulkAffected, m.bulkErr
 }
 
+func (m *mockDLQServicer) BulkSchedule(_ context.Context, _ []string, _ string, _ time.Time) (int64, error) {
+	return m.bulkAffected, m.bulkErr
+}
+
 // ─── Router helper ───────────────────────────────────────────────────────────
 
 // dlqRouter builds a minimal Gin router wired to dc with all DLQ routes.
@@ -429,6 +433,9 @@ func (m *mockDLQServicerSequenced) ExecuteRedrive(_ context.Context, dlqID, _ st
 }
 func (m *mockDLQServicerSequenced) Abandon(_ context.Context, _ string) error    { return nil }
 func (m *mockDLQServicerSequenced) BulkAbandon(_ context.Context, _ []string) (int64, error) {
+	return 0, nil
+}
+func (m *mockDLQServicerSequenced) BulkSchedule(_ context.Context, _ []string, _ string, _ time.Time) (int64, error) {
 	return 0, nil
 }
 
