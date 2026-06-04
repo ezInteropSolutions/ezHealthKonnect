@@ -348,7 +348,7 @@ const sessionConfig = {
     saveUninitialized: false,
     name: 'ezhealth.sid',
     cookie: {
-        secure: process.env.NODE_ENV === 'production' && process.env.SESSION_COOKIE_SECURE !== 'false',
+        secure: process.env.SESSION_COOKIE_SECURE === 'true',
         httpOnly: true,
         maxAge: _sessionTimeoutMinutes * 60 * 1000,
         sameSite: 'lax'

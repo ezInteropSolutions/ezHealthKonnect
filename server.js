@@ -59,10 +59,6 @@ async function startServer() {
             console.log(`🛡️  Compliance: HIPAA/GDPR audit logging via PostgreSQL`);
             console.log(`📊 Audit Logs: PostgreSQL audit_logs table + logs/audit.log backup`);
 
-            console.log(`\n🔑 Default Admin Credentials:`);
-            console.log(`   Email: admin@ezhealthkonnect.com`);
-            console.log(`   Password: admin123`);
-
             console.log('\n✅ Server ready - PostgreSQL-only production mode active!');
             console.log('🚀 All user data now stored securely in PostgreSQL database');
 
