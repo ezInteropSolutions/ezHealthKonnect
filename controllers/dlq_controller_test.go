@@ -93,6 +93,10 @@ func (m *mockDLQServicer) BulkSchedule(_ context.Context, _ []string, _ string, 
 	return m.bulkAffected, m.bulkErr
 }
 
+func (m *mockDLQServicer) InterfaceStats(_ context.Context, _ string) (map[string]int, error) {
+	return m.statsMap, m.statsErr
+}
+
 // ─── Router helper ───────────────────────────────────────────────────────────
 
 // dlqRouter builds a minimal Gin router wired to dc with all DLQ routes.
@@ -437,6 +441,10 @@ func (m *mockDLQServicerSequenced) BulkAbandon(_ context.Context, _ []string) (i
 }
 func (m *mockDLQServicerSequenced) BulkSchedule(_ context.Context, _ []string, _ string, _ time.Time) (int64, error) {
 	return 0, nil
+}
+
+func (m *mockDLQServicerSequenced) InterfaceStats(_ context.Context, _ string) (map[string]int, error) {
+	return nil, nil
 }
 
 // ─── TC-DLQ-C014..C015: BulkAbandon ─────────────────────────────────────────
