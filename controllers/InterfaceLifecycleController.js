@@ -117,6 +117,7 @@ class InterfaceLifecycleController {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
+                    'X-Internal-Proxy-Secret': process.env.INTERNAL_PROXY_SECRET || process.env.JWT_SECRET || '',
                 },
                 timeout: 30000
             });
@@ -200,6 +201,7 @@ class InterfaceLifecycleController {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
+                    'X-Internal-Proxy-Secret': process.env.INTERNAL_PROXY_SECRET || process.env.JWT_SECRET || '',
                 },
                 timeout: 30000
             });
@@ -275,6 +277,7 @@ class InterfaceLifecycleController {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
+                    'X-Internal-Proxy-Secret': process.env.INTERNAL_PROXY_SECRET || process.env.JWT_SECRET || '',
                 },
                 timeout: 30000
             });
