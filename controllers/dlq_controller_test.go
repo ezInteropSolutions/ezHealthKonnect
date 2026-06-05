@@ -56,7 +56,7 @@ type mockDLQServicer struct {
 	lastBulkIDs         []string
 }
 
-func (m *mockDLQServicer) ListPending(_ context.Context, interfaceID, status string, limit, offset int) ([]*connectors.DLQRow, error) {
+func (m *mockDLQServicer) ListPending(_ context.Context, interfaceID, _ /*messageID*/, status string, limit, offset int) ([]*connectors.DLQRow, error) {
 	m.lastListInterfaceID = interfaceID
 	m.lastListStatus = status
 	m.lastListLimit = limit
@@ -418,7 +418,7 @@ type mockDLQServicerSequenced struct {
 	callCount   *int
 }
 
-func (m *mockDLQServicerSequenced) ListPending(_ context.Context, _, _ string, _, _ int) ([]*connectors.DLQRow, error) {
+func (m *mockDLQServicerSequenced) ListPending(_ context.Context, _, _, _ string, _, _ int) ([]*connectors.DLQRow, error) {
 	return nil, nil
 }
 func (m *mockDLQServicerSequenced) Stats(_ context.Context) (map[string]int, error) {
