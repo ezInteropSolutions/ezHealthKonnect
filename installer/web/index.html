@@ -454,7 +454,7 @@ let checksOK    = false;
 let cfg         = {};
 let appURL      = '';
 let installOK   = false;
-let installMode = 'docker'; // 'docker' | 'standalone'
+let installMode = 'standalone'; // 'docker' | 'standalone'
 let dbSource    = 'local';  // 'local' | 'external'
 
 function setDbSource(src) {
@@ -551,23 +551,24 @@ function renderWelcome() {
     </div>
 
     <div class="edition-grid">
-      <div class="edition-card ${installMode==='docker'?'selected':''}" id="edDocker" onclick="selectEdition('docker')">
-        <div class="ed-badge">Recommended</div>
-        <div class="ed-icon">🐳</div>
-        <div class="ed-title">Docker Edition</div>
-        <div class="ed-desc">All services run in containers. Simplest setup — isolated, portable, easy to upgrade.</div>
-        <div class="ed-reqs">
-          <span>✔ Docker Desktop (auto-installable)</span>
-          <span>✔ Windows, macOS, Linux</span>
-        </div>
-      </div>
       <div class="edition-card ${installMode==='standalone'?'selected':''}" id="edStandalone" onclick="selectEdition('standalone')">
+        <div class="ed-badge">Recommended for Windows</div>
         <div class="ed-icon">⚙️</div>
         <div class="ed-title">Standalone Edition</div>
-        <div class="ed-desc">Native install — PostgreSQL + Node.js as system services. No Docker required.</div>
+        <div class="ed-desc">Runs natively on Windows — any port you configure just works. No Docker, no port mapping, no complexity.</div>
         <div class="ed-reqs">
-          <span>✔ Windows 10/11 (winget)</span>
-          <span>✔ Linux → use install.sh</span>
+          <span>✔ Windows 10/11</span>
+          <span>✔ PostgreSQL + Node.js auto-installed</span>
+        </div>
+      </div>
+      <div class="edition-card ${installMode==='docker'?'selected':''}" id="edDocker" onclick="selectEdition('docker')">
+        <div class="ed-badge" style="background:var(--navy-mid)">Linux / Servers</div>
+        <div class="ed-icon">🐳</div>
+        <div class="ed-title">Docker Edition</div>
+        <div class="ed-desc">Containerised deployment for Linux servers. Uses host networking — any port works with zero configuration.</div>
+        <div class="ed-reqs">
+          <span>✔ Docker Desktop (auto-installable)</span>
+          <span>✔ Linux servers (host networking)</span>
         </div>
       </div>
     </div>
@@ -588,8 +589,8 @@ function renderWelcome() {
 
 function editionHintText() {
   return installMode === 'standalone'
-    ? 'Standalone: PostgreSQL and Node.js will be installed via winget. No Docker needed.'
-    : 'Docker Edition: prerequisites checked next. Docker Desktop will be offered if missing.';
+    ? 'Standalone: PostgreSQL and Node.js installed automatically. Any port you configure just works — no Docker, no port mapping.'
+    : 'Docker Edition: recommended for Linux servers. Docker Desktop will be installed if missing.';
 }
 
 function selectEdition(mode) {
