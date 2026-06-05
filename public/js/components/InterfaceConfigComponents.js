@@ -148,7 +148,11 @@ class InterfaceConfigComponents {
                                    min="1" max="65535"
                                    placeholder="2575"
                                    name="${direction}Port">
-                            <div class="form-hint">OOB: 2575 is standard HL7 port</div>
+                            <div class="form-hint">
+                                Standard HL7 MLLP port is 2575.<br>
+                                <strong>Standalone / Linux Docker:</strong> any port works.<br>
+                                <strong>Windows Docker Desktop:</strong> use 2575 or 6500–6700.
+                            </div>
                         </div>
                     </div>
                 ` : `

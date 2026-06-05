@@ -563,6 +563,13 @@
                     Schema Packages
                 </div>
 
+                <hr class="settings-nav-divider">
+
+                <div class="settings-nav-item" data-section="docker-ports" onclick="switchSection('docker-ports')">
+                    <span class="nav-icon"><i class="fas fa-network-wired"></i></span>
+                    Docker Ports
+                </div>
+
             </aside>
 
             <!-- ── Settings Panel ────────────────────────────────────────── -->
@@ -1759,6 +1766,90 @@
                     <div class="schema-pkg-grid" id="schemaPkgGrid"></div>
                 </div><!-- /section-schemas -->
 
+                <!-- ══════════════════════════════════════════════════════════
+                     DOCKER PORT CONFIGURATION
+                ══════════════════════════════════════════════════════════ -->
+                <div class="settings-section" id="section-docker-ports">
+                    <div class="section-title-row">
+                        <i class="fas fa-network-wired" style="font-size:20px;color:#1e3a8a"></i>
+                        <h2>Docker Port Configuration</h2>
+                    </div>
+                    <p class="section-subtitle">
+                        Configure which host ports Docker forwards into the container for HL7/MLLP and HTTP/FHIR interfaces.
+                        Changes take effect after clicking <strong>Apply &amp; Restart</strong> — the container will
+                        restart automatically and be back in ~15 seconds.
+                    </p>
+
+                    <div id="dockerPortStatus" style="display:none;margin-bottom:16px;padding:12px 16px;border-radius:6px;font-size:13px;"></div>
+
+                    <div class="settings-card">
+                        <h3 style="margin-top:0">Deployment Mode</h3>
+                        <div class="form-grid">
+                            <div class="form-group">
+                                <label class="form-label">Mode</label>
+                                <select id="dpDeploymentMode" class="form-control" onchange="onDockerModeChange()">
+                                    <option value="docker">Docker (Windows/Linux)</option>
+                                    <option value="docker_host">Docker with Host Networking (Linux only)</option>
+                                    <option value="standalone">Standalone (any port works)</option>
+                                </select>
+                                <div class="form-hint">
+                                    <strong>Standalone / Host Networking:</strong> any port works — no mapping needed.<br>
+                                    <strong>Docker (Windows):</strong> only ports in the ranges below are reachable from outside.
+                                </div>
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">Docker Socket</label>
+                                <div id="dockerSocketStatus" style="padding:8px 12px;border-radius:4px;font-size:13px;background:#f3f4f6;color:#6b7280">
+                                    Checking...
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="settings-card" id="dockerPortRangeCard">
+                        <h3 style="margin-top:0">Port Ranges</h3>
+                        <p style="font-size:13px;color:#6b7280;margin-top:0">
+                            These ranges are mapped from your host into the Docker container.
+                            Any interface port you configure must fall within one of these ranges.
+                        </p>
+                        <div class="form-grid">
+                            <div class="form-group">
+                                <label class="form-label">Standard HL7 MLLP Port</label>
+                                <input type="number" id="dpStandardMllp" class="form-control" value="2575" min="1024" max="65535">
+                                <div class="form-hint">Always mapped. Default: 2575.</div>
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">HL7 TCP/MLLP Range</label>
+                                <input type="text" id="dpHl7Range" class="form-control" placeholder="6500-6700">
+                                <div class="form-hint">Format: start-end (e.g. 6500-6700). Keep under 500 ports on Windows Docker Desktop.</div>
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">HTTP / FHIR Range</label>
+                                <input type="text" id="dpHttpRange" class="form-control" placeholder="8081-8099">
+                                <div class="form-hint">Format: start-end (e.g. 8081-8099).</div>
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">Compose File Path (in container)</label>
+                                <input type="text" id="dpComposePath" class="form-control" value="/app/docker-compose.prod.yml">
+                                <div class="form-hint">Must be mounted as a volume for the app to rewrite it.</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="settings-actions">
+                        <button class="btn btn-secondary" onclick="loadDockerPortSettings()">
+                            <i class="fas fa-sync"></i> Refresh
+                        </button>
+                        <button class="btn btn-primary" onclick="saveDockerPortSettings()">
+                            <i class="fas fa-save"></i> Save
+                        </button>
+                        <button class="btn btn-danger" id="dpRestartBtn" onclick="applyAndRestart()" style="margin-left:auto">
+                            <i class="fas fa-redo"></i> Apply &amp; Restart
+                        </button>
+                        <span class="status-msg" id="dockerPortStatusMsg"></span>
+                    </div>
+                </div><!-- /section-docker-ports -->
+
 
                 <script>
                 (function() {
@@ -2090,7 +2181,7 @@ function updateTime() {
 }
 
 // ─── Section switching ────────────────────────────────────────────────────────
-const SECTIONS = ['smtp','security','hl7fhir','queue','connectors','alerts','performance','storage','git','ai','schemas'];
+const SECTIONS = ['smtp','security','hl7fhir','queue','connectors','alerts','performance','storage','git','ai','schemas','docker-ports'];
 
 function switchSection(name) {
     SECTIONS.forEach(s => {
@@ -2124,7 +2215,94 @@ async function loadSection(name) {
         case 'storage':    return loadStorageSettings();
         case 'git':        return loadGitSection();
         case 'ai':         return loadAISettings();
-        case 'schemas':    return loadSchemaCatalog();
+        case 'schemas':      return loadSchemaCatalog();
+        case 'docker-ports': return loadDockerPortSettings();
+    }
+}
+
+// ─── Docker Port Configuration ────────────────────────────────────────────────
+
+async function loadDockerPortSettings() {
+    try {
+        const res = await fetch('/api/system/settings/docker-ports');
+        const json = await res.json();
+        if (!json.success) throw new Error(json.error);
+        const d = json.data;
+        document.getElementById('dpDeploymentMode').value = d.deployment_mode || 'docker';
+        document.getElementById('dpHl7Range').value       = d.hl7_port_range  || '6500-6700';
+        document.getElementById('dpHttpRange').value      = d.http_port_range  || '8081-8099';
+        document.getElementById('dpStandardMllp').value   = d.standard_mllp_port || 2575;
+        document.getElementById('dpComposePath').value    = d.compose_file_path || '/app/docker-compose.prod.yml';
+        onDockerModeChange();
+        updateDockerSocketStatus(json.docker_available);
+    } catch (e) {
+        showDockerPortStatus('error', 'Failed to load settings: ' + e.message);
+    }
+}
+
+function onDockerModeChange() {
+    const mode = document.getElementById('dpDeploymentMode').value;
+    const card = document.getElementById('dockerPortRangeCard');
+    card.style.display = (mode === 'docker') ? '' : 'none';
+}
+
+function updateDockerSocketStatus(available) {
+    const el = document.getElementById('dockerSocketStatus');
+    const btn = document.getElementById('dpRestartBtn');
+    if (available) {
+        el.style.background = '#d1fae5';
+        el.style.color = '#065f46';
+        el.innerHTML = '<i class="fas fa-check-circle"></i> Docker socket connected — Apply &amp; Restart is available';
+        btn.disabled = false;
+    } else {
+        el.style.background = '#fef3c7';
+        el.style.color = '#92400e';
+        el.innerHTML = '<i class="fas fa-exclamation-triangle"></i> Docker socket not available. Mount <code>/var/run/docker.sock</code> to enable self-restart.';
+        btn.disabled = true;
+        btn.title = 'Mount /var/run/docker.sock into the container to enable this';
+    }
+}
+
+async function saveDockerPortSettings() {
+    const payload = {
+        deployment_mode:    document.getElementById('dpDeploymentMode').value,
+        hl7_port_range:     document.getElementById('dpHl7Range').value.trim(),
+        http_port_range:    document.getElementById('dpHttpRange').value.trim(),
+        standard_mllp_port: parseInt(document.getElementById('dpStandardMllp').value, 10),
+        compose_file_path:  document.getElementById('dpComposePath').value.trim(),
+    };
+    try {
+        const res  = await fetch('/api/system/settings/docker-ports', { method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload) });
+        const json = await res.json();
+        if (!json.success) throw new Error(json.error);
+        showDockerPortStatus('success', '✅ Saved. Click Apply &amp; Restart to activate new port ranges.');
+    } catch (e) {
+        showDockerPortStatus('error', 'Save failed: ' + e.message);
+    }
+}
+
+function showDockerPortStatus(type, msg) {
+    const el = document.getElementById('dockerPortStatusMsg');
+    el.className = 'status-msg ' + type;
+    el.innerHTML = msg;
+}
+
+async function applyAndRestart() {
+    if (!confirm('The container will restart and the app will be unavailable for ~15 seconds. Continue?')) return;
+    const btn = document.getElementById('dpRestartBtn');
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Restarting...';
+    showDockerPortStatus('info', '🔄 Restarting container with new port ranges...');
+    try {
+        const res  = await fetch('/api/system/settings/docker-ports/restart', { method: 'POST' });
+        const json = await res.json();
+        if (!json.success) throw new Error(json.error);
+        showDockerPortStatus('info', '✅ Restart initiated. Reconnecting in 20 seconds...');
+        setTimeout(() => { window.location.reload(); }, 20000);
+    } catch (e) {
+        // Connection reset is expected — the container is restarting
+        showDockerPortStatus('info', '✅ Container restarting. Page will reload in 20 seconds...');
+        setTimeout(() => { window.location.reload(); }, 20000);
     }
 }
 

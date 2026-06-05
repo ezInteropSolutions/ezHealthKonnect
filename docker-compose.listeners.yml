@@ -1,17 +1,6 @@
 # docker-compose.listeners.yml
-# Adds HL7/FHIR listener port bindings to the app service.
-# Include this file for production deployments where the application
-# must accept inbound HL7 MLLP and FHIR HTTP connections.
-#
-# Usage:
-#   docker compose -f docker-compose.prod.yml -f docker-compose.listeners.yml up -d
-#
-# NOTE: This file is intentionally excluded during image validation (validate-image.ps1)
-# so the smoke-test stack does not conflict with a running production instance.
+# Port bindings are now handled entirely in docker-compose.prod.yml
+# (full range 0.0.0.0:1024-65535). This file is kept as a valid empty
+# override so the installer compose command (-f prod -f listeners) still works.
 services:
-  app:
-    ports:
-      - "2575:2575"
-      - "6610:6610"
-      - "6661-6670:6661-6670"
-      - "8081-8099:8081-8099"
+  app: {}

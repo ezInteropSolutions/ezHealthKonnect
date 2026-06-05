@@ -103,6 +103,11 @@ func (sc *SettingsController) RegisterRoutes(rg *gin.RouterGroup) {
 	rg.PUT("/ai", sc.UpdateAISettings)
 	rg.POST("/ai/test", sc.TestAIConnection)
 	rg.GET("/ai/catalog", sc.GetAIModelCatalog)
+
+	// ── Docker Port Configuration ─────────────────────────────────────────────
+	rg.GET("/docker-ports", sc.GetDockerPortSettings)
+	rg.PUT("/docker-ports", sc.UpdateDockerPortSettings)
+	rg.POST("/docker-ports/restart", sc.RestartWithNewPorts)
 }
 
 // ─── GET /api/system/settings/storage ────────────────────────────────────────
@@ -1124,3 +1129,115 @@ func (sc *SettingsController) GetAIModelCatalog(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": result})
 }
 
+
+// ─── Docker Port Configuration ────────────────────────────────────────────────
+
+const settingsKeyDockerPorts = "docker_ports"
+
+var defaultDockerPortConfig = services.DockerPortConfig{
+	HL7PortRange:     "6500-6700",
+	HTTPPortRange:    "8081-8099",
+	StandardMLLPPort: 2575,
+	ComposeFilePath:  "/app/docker-compose.prod.yml",
+	DeploymentMode:   "docker",
+}
+
+func (sc *SettingsController) GetDockerPortSettings(c *gin.Context) {
+	raw, err := sc.loadRawSetting(settingsKeyDockerPorts)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": err.Error()})
+		return
+	}
+
+	cfg := defaultDockerPortConfig
+	json.Unmarshal(raw, &cfg) //nolint:errcheck
+
+	svc := services.NewDockerPortService()
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    cfg,
+		"docker_available": svc.IsDockerAvailable(),
+	})
+}
+
+func (sc *SettingsController) UpdateDockerPortSettings(c *gin.Context) {
+	var cfg services.DockerPortConfig
+	if err := c.ShouldBindJSON(&cfg); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": err.Error()})
+		return
+	}
+
+	if cfg.ComposeFilePath == "" {
+		cfg.ComposeFilePath = "/app/docker-compose.prod.yml"
+	}
+	if cfg.StandardMLLPPort == 0 {
+		cfg.StandardMLLPPort = 2575
+	}
+
+	value, err := json.Marshal(cfg)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": err.Error()})
+		return
+	}
+
+	_, err = sc.db.Exec(`
+		INSERT INTO system_settings (key, value, updated_by, updated_at)
+		VALUES ($1, $2, 'admin', NOW())
+		ON CONFLICT (key) DO UPDATE
+		SET value = EXCLUDED.value, updated_by = EXCLUDED.updated_by, updated_at = NOW()
+	`, settingsKeyDockerPorts, string(value))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": err.Error()})
+		return
+	}
+
+	// Also update the compose file on disk so it reflects the new ranges
+	svc := services.NewDockerPortService()
+	if svc.IsDockerAvailable() {
+		if err := svc.UpdateComposePortRanges(cfg.ComposeFilePath, cfg.HL7PortRange, cfg.HTTPPortRange); err != nil {
+			log.Printf("⚠️  UpdateDockerPortSettings: compose file update failed: %v", err)
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "Docker port settings saved. Click 'Apply & Restart' to activate.",
+		"data":    cfg,
+	})
+}
+
+func (sc *SettingsController) RestartWithNewPorts(c *gin.Context) {
+	raw, err := sc.loadRawSetting(settingsKeyDockerPorts)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": err.Error()})
+		return
+	}
+
+	cfg := defaultDockerPortConfig
+	json.Unmarshal(raw, &cfg) //nolint:errcheck
+
+	svc := services.NewDockerPortService()
+	if !svc.IsDockerAvailable() {
+		c.JSON(http.StatusServiceUnavailable, gin.H{
+			"success": false,
+			"error":   "Docker socket not available. Mount /var/run/docker.sock into the container to enable self-restart.",
+		})
+		return
+	}
+
+	// Respond immediately — the container will restart and the connection will drop
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "Container restart initiated. The app will be back in ~15 seconds.",
+	})
+
+	// Flush response before restarting
+	c.Writer.Flush()
+
+	go func() {
+		time.Sleep(500 * time.Millisecond)
+		if err := svc.RestartAppContainer(cfg.HL7PortRange, cfg.HTTPPortRange); err != nil {
+			log.Printf("❌ RestartWithNewPorts: %v", err)
+		}
+	}()
+}
