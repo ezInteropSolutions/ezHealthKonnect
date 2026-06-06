@@ -117,6 +117,37 @@ Get-ChildItem $RepoRoot | Where-Object {
     Copy-Item $_.FullName $BundleDir -Recurse -Force
 }
 
+# Include core HL7 schema versions needed for out-of-box parsing.
+# These files are already .gz compressed so the zip gains no further size reduction.
+# v2.3 (68 MB): covers most legacy HIS/EHR systems (ADT, ORU, MDM)
+# v2.5 (124 MB): modern standard, widely deployed (ADT, ORU, SIU)
+# v2.5.1 (131 MB): ANSI-approved revision of v2.5
+# fhir (4.8 MB): FHIR R4 resource schemas
+# v2.1/v2.2/v2.4/v2.6/v2.7/v2.7.1/v2.8 are omitted (rare, install via Schema Registry)
+$CoreSchemaVersions = @('v2.3', 'v2.5', 'v2.5.1')
+$SchemaSrc = Join-Path $RepoRoot "schemas"
+$SchemaDst = Join-Path $BundleDir "schemas"
+New-Item -ItemType Directory -Force $SchemaDst | Out-Null
+
+foreach ($ver in $CoreSchemaVersions) {
+    $src = Join-Path $SchemaSrc "hl7\$ver"
+    $dst = Join-Path $SchemaDst "hl7\$ver"
+    if (Test-Path $src) {
+        New-Item -ItemType Directory -Force (Join-Path $SchemaDst "hl7") | Out-Null
+        Copy-Item $src $dst -Recurse -Force
+        $szMB = '{0:N1}' -f ((Get-ChildItem $src -Recurse | Measure-Object -Property Length -Sum).Sum / 1MB)
+        Ok "  Schema hl7/$ver included ($szMB MB)"
+    } else {
+        Warn "  Schema hl7/$ver not found in repo -- skipping"
+    }
+}
+$fhirSrc = Join-Path $SchemaSrc "fhir"
+if (Test-Path $fhirSrc) {
+    Copy-Item $fhirSrc (Join-Path $SchemaDst "fhir") -Recurse -Force
+    $szMB = '{0:N1}' -f ((Get-ChildItem $fhirSrc -Recurse | Measure-Object -Property Length -Sum).Sum / 1MB)
+    Ok "  Schema fhir included ($szMB MB)"
+}
+
 $fileCount     = (Get-ChildItem $BundleDir -Recurse -File).Count
 $bundleSizeMB  = '{0:N1}' -f ((Get-ChildItem $BundleDir -Recurse | Measure-Object -Property Length -Sum).Sum / 1MB)
 Ok "Bundle staged: $fileCount files, $bundleSizeMB MB uncompressed"

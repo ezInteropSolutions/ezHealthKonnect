@@ -756,6 +756,10 @@ LOG_LEVEL=info
 OBJECT_STORAGE_DRIVER=local
 LOCAL_STORAGE_PATH=%s\storage
 
+# HL7/FHIR schema files — bundled with the installer
+EZHEALTHKONNECT_SCHEMA_DIR=%s\schemas
+FHIR_SCHEMA_DIR=%s\schemas\fhir
+
 AI_ENABLED=%v
 OLLAMA_URL=http://localhost:11434
 OLLAMA_CHAT_MODEL=llama3.2:3b
@@ -765,6 +769,8 @@ OLLAMA_EMBED_MODEL=nomic-embed-text
 		cfg.AppPort, cfg.APIPort,
 		cfg.DBHost, cfg.DBPort, cfg.DBName, cfg.DBUser, cfg.DBPassword,
 		session, jwt,
+		cfg.InstallDir,
+		cfg.InstallDir,
 		cfg.InstallDir,
 		cfg.WithAI,
 	)
