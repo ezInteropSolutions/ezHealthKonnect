@@ -56,19 +56,23 @@ hdr "PostgreSQL initdb"
 /usr/pgsql-15/bin/postgresql-15-setup initdb 2>/dev/null \
   && ok "initdb complete" || skip "initdb (may already be done)"
 
-# Start PostgreSQL (no systemd in Docker — use pg_ctl)
-su - postgres -c "/usr/pgsql-15/bin/pg_ctl -D /var/lib/pgsql/15/data -l /tmp/pg.log start -w" 2>/dev/null \
-  && ok "PostgreSQL started" || skip "pg_ctl start"
+# Start PostgreSQL — use runuser (no PAM needed in minimal containers)
+if runuser -l postgres -c "/usr/pgsql-15/bin/pg_ctl -D /var/lib/pgsql/15/data -l /tmp/pg.log start -w" 2>/dev/null; then
+  ok "PostgreSQL started"
+else
+  fail "PostgreSQL failed to start"
+  cat /tmp/pg.log 2>/dev/null | tail -20 || true
+fi
 
-sleep 3
+sleep 2
 
 # ── 6. Peer auth DB setup ─────────────────────────────────────────────────────
 hdr "PostgreSQL Peer Auth"
-su - postgres -c "$PSQL -d postgres -c \"CREATE USER ezhealth_user WITH PASSWORD 'testpass';\" -q" 2>/dev/null \
+runuser -l postgres -c "$PSQL -d postgres -c \"CREATE USER ezhealth_user WITH PASSWORD 'testpass';\" -q" 2>/dev/null \
   && ok "CREATE USER" || fail "CREATE USER"
-su - postgres -c "$PSQL -d postgres -c \"CREATE DATABASE ezhealthkonnect OWNER ezhealth_user;\" -q" 2>/dev/null \
+runuser -l postgres -c "$PSQL -d postgres -c \"CREATE DATABASE ezhealthkonnect OWNER ezhealth_user;\" -q" 2>/dev/null \
   && ok "CREATE DATABASE" || fail "CREATE DATABASE"
-su - postgres -c "$PSQL -d postgres -c \"GRANT ALL PRIVILEGES ON DATABASE ezhealthkonnect TO ezhealth_user;\" -q" 2>/dev/null \
+runuser -l postgres -c "$PSQL -d postgres -c \"GRANT ALL PRIVILEGES ON DATABASE ezhealthkonnect TO ezhealth_user;\" -q" 2>/dev/null \
   && ok "GRANT PRIVILEGES" || skip "GRANT PRIVILEGES"
 
 # ── 7. Node.js ────────────────────────────────────────────────────────────────
@@ -81,9 +85,9 @@ ok "node: $NODE_VER"
 
 # ── 8. Cleanup ────────────────────────────────────────────────────────────────
 hdr "DB Cleanup"
-su - postgres -c "$PSQL -d postgres -c \"DROP DATABASE IF EXISTS ezhealthkonnect;\" -q" 2>/dev/null \
+runuser -l postgres -c "$PSQL -d postgres -c \"DROP DATABASE IF EXISTS ezhealthkonnect;\" -q" 2>/dev/null \
   && ok "DROP DATABASE" || fail "DROP DATABASE"
-su - postgres -c "$PSQL -d postgres -c \"DROP USER IF EXISTS ezhealth_user;\" -q" 2>/dev/null \
+runuser -l postgres -c "$PSQL -d postgres -c \"DROP USER IF EXISTS ezhealth_user;\" -q" 2>/dev/null \
   && ok "DROP USER" || fail "DROP USER"
 
 echo ""
