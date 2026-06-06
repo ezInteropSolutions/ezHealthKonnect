@@ -76,16 +76,19 @@ fi
 
 # ── 5. Start PostgreSQL ────────────────────────────────────────────────────────
 hdr "PostgreSQL Service Start"
-# The ubuntu-22.04 GHA runner ships with PG 14 already running on port 5432.
-# That blocks PG 15 from claiming the port. Stop PG 14 first (no-op in Docker).
-$SUDO pg_ctlcluster 14 main stop --force 2>/dev/null || true
+# ubuntu-22.04 runner ships PG 14 on port 5432 via systemd.
+# Stop ALL clusters cleanly via the postgresql meta-service, then start PG 15.
+# On Docker (no systemd) the systemctl calls are no-ops; pg_ctlcluster handles it.
+$SUDO systemctl stop postgresql 2>/dev/null || \
+  $SUDO pg_ctlcluster 14 main stop --force 2>/dev/null || true
 
-if $SUDO pg_ctlcluster 15 main status 2>/dev/null | grep -q "online"; then
-  ok "PostgreSQL 15 already running"
+if $SUDO systemctl start postgresql@15-main 2>/dev/null; then
+  ok "PostgreSQL 15 started"
 elif $SUDO pg_ctlcluster 15 main start 2>/dev/null; then
   ok "PostgreSQL 15 started"
 else
   fail "PostgreSQL 15 failed to start"
+  $SUDO journalctl -u postgresql@15-main --no-pager -n 20 2>/dev/null || true
   $SUDO cat /var/log/postgresql/postgresql-15-main.log 2>/dev/null | tail -20 || true
 fi
 
