@@ -3,6 +3,7 @@
 package main
 
 import (
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -13,6 +14,17 @@ import (
 	"strings"
 	"time"
 )
+
+// http1Client forces HTTP/1.1 for all installer downloads.
+// EDB's CDN (and some GitHub CDN edges) drop large HTTP/2 streams with
+// INTERNAL_ERROR after a few MB — HTTP/1.1 is slower to negotiate but
+// never triggers that bug.
+var http1Client = &http.Client{
+	Transport: &http.Transport{
+		TLSNextProto:          make(map[string]func(string, *tls.Conn) http.RoundTripper),
+		ResponseHeaderTimeout: 60 * time.Second,
+	},
+}
 
 const (
 	releasesBase = "https://github.com/ezInteropSolutions/ezHealthKonnect/releases"
@@ -176,12 +188,23 @@ func installPostgresIfNeeded(isLocal bool) (string, error) {
 }
 
 func installPostgres() (string, error) {
-	// Already installed?
 	if p := findPsql(); p != "" {
 		emit("info", "PostgreSQL already installed: "+p)
 		return p, nil
 	}
 
+	// Try winget first — available on Windows 10 1709+ and all Windows 11.
+	// Faster and avoids HTTP/2 CDN issues with large EDB installer.
+	if err := installViaWinget("PostgreSQL.PostgreSQL.15", "PostgreSQL 15"); err == nil {
+		emit("info", "Waiting for PostgreSQL service to start...")
+		time.Sleep(10 * time.Second)
+		exec.Command("net", "start", "postgresql-x64-15").Run() //nolint:errcheck
+		if p := findPsql(); p != "" {
+			return p, nil
+		}
+	}
+
+	// Fall back to direct EDB download.
 	if err := installPostgresDirect(); err != nil {
 		return "", fmt.Errorf("PostgreSQL install failed: %w", err)
 	}
@@ -201,7 +224,7 @@ func installPostgres() (string, error) {
 
 func installPostgresDirect() error {
 	tmp := filepath.Join(os.TempDir(), "postgresql-installer.exe")
-	emit("info", "Downloading PostgreSQL 15 installer (~200 MB)...")
+	emit("info", "Downloading PostgreSQL 15 installer (~350 MB)...")
 	if err := downloadFileProgress(postgresDirectURL, tmp); err != nil {
 		return fmt.Errorf("download failed: %w", err)
 	}
@@ -321,6 +344,15 @@ func installNodeJS() (string, error) {
 		return p, nil
 	}
 
+	// Try winget first.
+	if err := installViaWinget("OpenJS.NodeJS.LTS", "Node.js LTS"); err == nil {
+		time.Sleep(5 * time.Second)
+		if p := findNode(); p != "" {
+			return p, nil
+		}
+	}
+
+	// Fall back to direct MSI download.
 	if err := installNodeJSDirect(); err != nil {
 		return "", fmt.Errorf("Node.js install failed: %w", err)
 	}
@@ -359,6 +391,28 @@ func installNodeJSDirect() error {
 	return nil
 }
 
+// installViaWinget installs a package by winget ID silently.
+// Returns an error if winget is unavailable or the install fails.
+func installViaWinget(packageID, displayName string) error {
+	winget, err := exec.LookPath("winget")
+	if err != nil {
+		return fmt.Errorf("winget not found")
+	}
+	emit("info", fmt.Sprintf("Installing %s via winget (id: %s)...", displayName, packageID))
+	cmd := exec.Command(winget,
+		"install", "-e",
+		"--id", packageID,
+		"--accept-source-agreements",
+		"--accept-package-agreements",
+		"--silent",
+	)
+	if err := streamCmd(cmd); err != nil {
+		return fmt.Errorf("winget install %s: %w", packageID, err)
+	}
+	emit("ok", displayName+" installed via winget")
+	return nil
+}
+
 func findNode() string {
 	if p, err := exec.LookPath("node"); err == nil {
 		return p
@@ -380,7 +434,7 @@ func findNode() string {
 
 // resolveLatestTag calls the GitHub Releases API to find the current latest tag.
 func resolveLatestTag() (string, error) {
-	client := &http.Client{Timeout: 10 * time.Second}
+	client := &http.Client{Timeout: 10 * time.Second, Transport: http1Client.Transport}
 	req, err := http.NewRequest("GET",
 		"https://api.github.com/repos/ezInteropSolutions/ezHealthKonnect/releases/latest", nil)
 	if err != nil {
@@ -460,8 +514,32 @@ func downloadAppBundle(installDir, cfgVersion string) error {
 	return extractZip(tmp, installDir, true)
 }
 
+// downloadFileProgress downloads url to dest, showing progress every 5 s.
+// Retries up to 3 times on error. Uses HTTP/1.1 to avoid CDN stream bugs.
 func downloadFileProgress(url, dest string) error {
-	resp, err := http.Get(url) //nolint:gosec
+	const maxAttempts = 3
+	var lastErr error
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		if attempt > 1 {
+			emit("warn", fmt.Sprintf("  Download error: %v — retrying (%d/%d)...", lastErr, attempt, maxAttempts))
+			time.Sleep(4 * time.Second)
+		}
+		lastErr = downloadOnce(url, dest)
+		if lastErr == nil {
+			return nil
+		}
+	}
+	return lastErr
+}
+
+func downloadOnce(url, dest string) error {
+	req, err := http.NewRequest("GET", url, nil) //nolint:gosec
+	if err != nil {
+		return err
+	}
+	req.Header.Set("User-Agent", "ezHealthKonnect-Installer/1.0")
+
+	resp, err := http1Client.Do(req)
 	if err != nil {
 		return err
 	}
@@ -479,7 +557,7 @@ func downloadFileProgress(url, dest string) error {
 
 	total := resp.ContentLength
 	var downloaded int64
-	buf := make([]byte, 32*1024)
+	buf := make([]byte, 64*1024)
 	last := time.Now()
 
 	for {
