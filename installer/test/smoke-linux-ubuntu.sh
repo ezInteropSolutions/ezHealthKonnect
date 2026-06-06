@@ -76,16 +76,17 @@ fi
 
 # ── 5. Start PostgreSQL ────────────────────────────────────────────────────────
 hdr "PostgreSQL Service Start"
-# pg_ctlcluster is the Ubuntu-recommended way to manage clusters.
-# pg_ctl works in vanilla Docker; pg_ctlcluster works on both runners and Docker.
-if $SUDO pg_ctlcluster 15 main start 2>/dev/null; then
-  ok "PostgreSQL started (pg_ctlcluster)"
-elif $SUDO su - postgres -c "/usr/lib/postgresql/15/bin/pg_ctl \
-    -D /var/lib/postgresql/15/main -l /tmp/pg.log start -w" 2>/dev/null; then
-  ok "PostgreSQL started (pg_ctl fallback)"
+# The ubuntu-22.04 GHA runner ships with PG 14 already running on port 5432.
+# That blocks PG 15 from claiming the port. Stop PG 14 first (no-op in Docker).
+$SUDO pg_ctlcluster 14 main stop --force 2>/dev/null || true
+
+if $SUDO pg_ctlcluster 15 main status 2>/dev/null | grep -q "online"; then
+  ok "PostgreSQL 15 already running"
+elif $SUDO pg_ctlcluster 15 main start 2>/dev/null; then
+  ok "PostgreSQL 15 started"
 else
-  fail "PostgreSQL failed to start"
-  $SUDO cat /tmp/pg.log 2>/dev/null || true
+  fail "PostgreSQL 15 failed to start"
+  $SUDO cat /var/log/postgresql/postgresql-15-main.log 2>/dev/null | tail -20 || true
 fi
 
 sleep 2
