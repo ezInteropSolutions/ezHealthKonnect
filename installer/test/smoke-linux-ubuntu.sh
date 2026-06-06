@@ -63,6 +63,11 @@ ok "apt-get update after PGDG repo"
 
 # ── 4. PostgreSQL install ──────────────────────────────────────────────────────
 hdr "PostgreSQL 15 Install"
+# Remove pre-installed PG 14 BEFORE installing PG 15 so the apt post-install
+# hook runs on a free port 5432 and properly initializes the cluster.
+# No-op on Docker / fresh prod systems where PG 14 was never installed.
+$SUDO apt-get remove -y postgresql-14 postgresql-client-14 2>/dev/null || true
+
 $SUDO apt-get install -y -qq postgresql-15 postgresql-client-15
 ok "postgresql-15 installed"
 
@@ -76,12 +81,11 @@ fi
 
 # ── 5. Start PostgreSQL ────────────────────────────────────────────────────────
 hdr "PostgreSQL Service Start"
-# ubuntu-22.04 GHA runner pre-installs PG 14 holding port 5432.
-# apt-get remove runs the pre-removal hook which stops the service cleanly,
-# freeing the port. This is a no-op on Docker / fresh prod machines.
-$SUDO apt-get remove -y postgresql-14 2>/dev/null || true
-
-if $SUDO pg_ctlcluster 15 main start 2>/dev/null; then
+# With PG 14 removed before install, the PG 15 apt post-install hook should
+# have already created and started the cluster. Check first, start if needed.
+if $SUDO pg_ctlcluster 15 main status 2>/dev/null | grep -q "online"; then
+  ok "PostgreSQL 15 already running"
+elif $SUDO pg_ctlcluster 15 main start 2>/dev/null; then
   ok "PostgreSQL 15 started"
 else
   fail "PostgreSQL 15 failed to start"
