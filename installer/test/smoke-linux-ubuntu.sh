@@ -13,9 +13,9 @@ export DEBIAN_FRONTEND=noninteractive
 
 PASS=0; FAIL=0; SKIP=0
 
-ok()   { echo -e "  \033[32mPASS\033[0m  $1"; ((PASS++)); }
-fail() { echo -e "  \033[31mFAIL\033[0m  $1"; ((FAIL++)); }
-skip() { echo -e "  \033[33mSKIP\033[0m  $1 (non-fatal)"; ((SKIP++)); }
+ok()   { echo -e "  \033[32mPASS\033[0m  $1"; ((++PASS)); }
+fail() { echo -e "  \033[31mFAIL\033[0m  $1"; ((++FAIL)); }
+skip() { echo -e "  \033[33mSKIP\033[0m  $1 (non-fatal)"; ((++SKIP)); }
 hdr()  { echo -e "\n\033[36m=== $1 ===\033[0m"; }
 
 echo ""
