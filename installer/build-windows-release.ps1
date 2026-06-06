@@ -1,117 +1,154 @@
 <#
 .SYNOPSIS
-    Build a self-contained Windows standalone installer for development/testing.
+    Build a single self-contained Windows installer exe for ezHealthKonnect.
 
 .DESCRIPTION
-    1. Cross-compiles go-api.exe for Windows using Docker
-    2. Packages the app into ezhealthkonnect-windows-amd64.zip
-    3. Cross-compiles the installer exe for Windows using Docker
-    4. Copies both files to ../dist/ so you can run the installer with the
-       bundle sitting beside it — no GitHub release required.
+    Produces ONE file: ezHealthKonnect-Setup-Win64.exe (~35 MB).
+    The app bundle is embedded directly inside the exe — no sidecar zip,
+    no GitHub release, no internet required at install time (except npm).
+
+    Steps:
+      1. Cross-compile go-api.exe for Windows via Docker
+      2. Package the app source + go-api.exe into a zip (no node_modules)
+      3. Embed the zip into the installer via -tags embedded
+      4. Output: ../dist/ezHealthKonnect-Setup-Win64.exe
+
+    Node.js dependencies (node_modules) are NOT bundled — the installer
+    runs "npm install --omit=dev" during installation. This requires
+    internet access on the target machine for that one step.
 
 .EXAMPLE
     cd installer
     .\build-windows-release.ps1
 
-    Output:
-      ../dist/ezHealthKonnect-Setup-Win64.exe   — installer
-      ../dist/ezhealthkonnect-windows-amd64.zip — app bundle (place next to installer)
+    Then distribute only:
+      dist\ezHealthKonnect-Setup-Win64.exe
 #>
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-$RepoRoot  = (Resolve-Path "$PSScriptRoot\..").Path
-$DistDir   = Join-Path $RepoRoot "dist"
-$TmpBundle = Join-Path $env:TEMP "ezhk-bundle-build"
-$BundleName = "ezhealthkonnect-windows-amd64"
-$BundleDir  = Join-Path $TmpBundle $BundleName
+$RepoRoot   = (Resolve-Path "$PSScriptRoot\..").Path
+$DistDir    = Join-Path $RepoRoot "dist"
+$AssetsDir  = Join-Path $PSScriptRoot "assets"
+$BundleZip  = Join-Path $AssetsDir "bundle-windows.zip"  # embed source
+$TmpDir     = Join-Path $env:TEMP "ezhk-bundle-$$"
+$BundleDir  = Join-Path $TmpDir "ezhealthkonnect"        # strip-root dir name
 
-function Step($n, $msg) { Write-Host "`n── Step $n`: $msg" -ForegroundColor Cyan }
-function Ok($msg)        { Write-Host "  OK  $msg" -ForegroundColor Green }
-function Fail($msg)      { Write-Host "  ERR $msg" -ForegroundColor Red; exit 1 }
+function Step($n, $msg) { Write-Host "`n── Step $n: $msg" -ForegroundColor Cyan }
+function Ok($msg)        { Write-Host "   OK  $msg" -ForegroundColor Green }
+function Warn($msg)      { Write-Host "  WARN $msg" -ForegroundColor Yellow }
+function Fail($msg)      { Write-Host ""
+                           Write-Host "  FAIL $msg" -ForegroundColor Red
+                           Write-Host "       Build aborted." -ForegroundColor Red
+                           exit 1 }
 
-# ── Check Docker ──────────────────────────────────────────────────────────────
-Step 0 "Checking Docker"
-if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
-    Fail "Docker not found. Install Docker Desktop or use the go-build-check skill."
+function Require-Docker {
+    if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
+        Fail "Docker not found. Install Docker Desktop and try again."
+    }
+    $info = docker info 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        Fail "Docker daemon is not running. Start Docker Desktop and try again."
+    }
 }
-docker info *>$null
-if ($LASTEXITCODE -ne 0) { Fail "Docker daemon not running." }
-Ok "Docker ready"
 
-# ── Prepare dist dir ──────────────────────────────────────────────────────────
-New-Item -ItemType Directory -Force $DistDir | Out-Null
-New-Item -ItemType Directory -Force $BundleDir | Out-Null
+function Confirm-File($path, $label) {
+    if (-not (Test-Path $path)) { Fail "$label not found at: $path" }
+    $size = '{0:N1}' -f ((Get-Item $path).Length / 1MB)
+    Ok "$label ready ($size MB)"
+}
 
-# ── Step 1: Cross-compile go-api.exe for Windows ──────────────────────────────
+# ── Preflight ─────────────────────────────────────────────────────────────────
+Write-Host ""
+Write-Host "  ezHealthKonnect — Windows Installer Build" -ForegroundColor White
+Write-Host "  ==========================================" -ForegroundColor DarkGray
+Write-Host "  Repo  : $RepoRoot" -ForegroundColor DarkGray
+Write-Host "  Output: $DistDir\ezHealthKonnect-Setup-Win64.exe" -ForegroundColor DarkGray
+Write-Host ""
+
+Require-Docker
+
+New-Item -ItemType Directory -Force $DistDir   | Out-Null
+New-Item -ItemType Directory -Force $AssetsDir | Out-Null
+
+# ── Step 1: Cross-compile go-api.exe for Windows ─────────────────────────────
 Step 1 "Cross-compiling go-api.exe for Windows (via Docker)"
 
-$GoApiExe = Join-Path $BundleDir "go-api.exe"
+New-Item -ItemType Directory -Force $BundleDir | Out-Null
+$GoApiInBundle = Join-Path $BundleDir "go-api.exe"
 
+# Build directly into the bundle staging dir
 docker run --rm `
   -v "${RepoRoot}:/work" `
   -w /work `
   -e GOOS=windows `
   -e GOARCH=amd64 `
   -e CGO_ENABLED=0 `
-  golang:1.25-alpine `
-  go build -ldflags "-s -w" -o /work/dist/go-api.exe .
+  golang:1.24-alpine `
+  go build -ldflags "-s -w" -o /work/installer/assets/_go-api-tmp.exe .
 
-if ($LASTEXITCODE -ne 0) { Fail "go-api.exe cross-compile failed." }
-Copy-Item (Join-Path $DistDir "go-api.exe") $GoApiExe
-Ok "go-api.exe built"
-
-# ── Step 2: Install production Node.js dependencies ───────────────────────────
-Step 2 "Installing production Node.js dependencies"
-
-Push-Location $RepoRoot
-try {
-    npm install --omit=dev --prefer-offline 2>&1 | Out-Null
-    if ($LASTEXITCODE -ne 0) { Fail "npm install failed." }
-    Ok "npm install --omit=dev done"
-} finally {
-    Pop-Location
+if ($LASTEXITCODE -ne 0) {
+    Fail "go-api.exe cross-compile failed. Check Go source for errors."
 }
 
-# ── Step 3: Package app bundle ────────────────────────────────────────────────
-Step 3 "Packaging app bundle"
+Move-Item (Join-Path $AssetsDir "_go-api-tmp.exe") $GoApiInBundle -Force
+Confirm-File $GoApiInBundle "go-api.exe"
 
-# Exclusion list mirrors the release workflow rsync excludes
-$Exclude = @(
-    '.git', '.github', 'logs', 'installer', 'architecture', 'docs',
-    'connectivity', 'tests', 'dist', 'dist-go',
-    '.env', '.env.*', '*.test.js',
-    'go-api', 'go-api.exe', 'go-api-linux',
-    'node_modules\.cache'
+# ── Step 2: Assemble app bundle ───────────────────────────────────────────────
+Step 2 "Assembling app bundle (source + go-api.exe, no node_modules)"
+
+# Directories and files to exclude from the bundle
+$ExcludeNames = @(
+    '.git', '.github',
+    'installer', 'dist', 'dist-go',
+    'architecture', 'docs', 'connectivity',
+    'tests', 'logs',
+    'schemas',        # 1.5 GB — schema packages downloaded separately
+    'downloads',      # dev download cache
+    'node_modules'    # installed by npm on the target machine
+)
+# Exact filenames to exclude at root level
+$ExcludeFiles = @(
+    '.env', '.env.production',
+    'go-api', 'go-api-linux', 'go-api-siu', 'go-api-new', 'ezhealthkonnect'
 )
 
-# Copy source files into bundle dir
+# Copy root items that aren't excluded
 Get-ChildItem $RepoRoot | Where-Object {
-    $item = $_.Name
-    -not ($Exclude | Where-Object { $item -like $_ })
+    $name = $_.Name
+    $excluded = $false
+    foreach ($ex in $ExcludeNames) { if ($name -ieq $ex) { $excluded = $true; break } }
+    foreach ($ex in $ExcludeFiles) { if ($name -ieq $ex) { $excluded = $true; break } }
+    -not $excluded
 } | ForEach-Object {
     Copy-Item $_.FullName $BundleDir -Recurse -Force
 }
 
-# Copy node_modules (already installed without .cache)
-if (Test-Path (Join-Path $RepoRoot "node_modules")) {
-    Copy-Item (Join-Path $RepoRoot "node_modules") $BundleDir -Recurse -Force
-}
+# go-api.exe was already placed in $BundleDir above
+$fileCount = (Get-ChildItem $BundleDir -Recurse -File).Count
+$bundleSizeMB = '{0:N1}' -f ((Get-ChildItem $BundleDir -Recurse | Measure-Object -Property Length -Sum).Sum / 1MB)
+Ok "Bundle staged: $fileCount files, $bundleSizeMB MB uncompressed"
 
-$ZipDest = Join-Path $DistDir "$BundleName.zip"
-if (Test-Path $ZipDest) { Remove-Item $ZipDest -Force }
+# ── Step 3: Zip bundle into installer/assets/bundle-windows.zip ──────────────
+Step 3 "Compressing bundle → installer/assets/bundle-windows.zip"
 
-Push-Location $TmpBundle
+if (Test-Path $BundleZip) { Remove-Item $BundleZip -Force }
+
+Push-Location $TmpDir
 try {
-    Compress-Archive -Path $BundleName -DestinationPath $ZipDest -CompressionLevel Optimal
-    Ok "Bundle: $ZipDest ($('{0:N1}' -f ((Get-Item $ZipDest).Length / 1MB)) MB)"
+    Compress-Archive -Path "ezhealthkonnect" -DestinationPath $BundleZip -CompressionLevel Optimal
 } finally {
     Pop-Location
 }
 
-# ── Step 4: Cross-compile installer exe for Windows ───────────────────────────
-Step 4 "Cross-compiling installer exe for Windows (via Docker)"
+Confirm-File $BundleZip "bundle-windows.zip"
+
+# Clean up staging dir — no longer needed
+Remove-Item $TmpDir -Recurse -Force -ErrorAction SilentlyContinue
+
+# ── Step 4: Cross-compile installer with embedded bundle ──────────────────────
+Step 4 "Cross-compiling installer exe with embedded bundle (via Docker)"
 
 $InstallerExe = Join-Path $DistDir "ezHealthKonnect-Setup-Win64.exe"
 
@@ -121,26 +158,33 @@ docker run --rm `
   -e GOOS=windows `
   -e GOARCH=amd64 `
   -e CGO_ENABLED=0 `
-  golang:1.25-alpine `
-  go build -ldflags "-s -w -H windowsgui" -o /work/dist/ezHealthKonnect-Setup-Win64.exe .
+  golang:1.24-alpine `
+  go build -tags embedded -ldflags "-s -w -H windowsgui" -o /work/dist/ezHealthKonnect-Setup-Win64.exe .
 
-if ($LASTEXITCODE -ne 0) { Fail "Installer cross-compile failed." }
-Ok "Installer: $InstallerExe ($('{0:N1}' -f ((Get-Item $InstallerExe).Length / 1MB)) MB)"
+if ($LASTEXITCODE -ne 0) {
+    # Clean up the bundle zip so it doesn't get committed
+    Remove-Item $BundleZip -Force -ErrorAction SilentlyContinue
+    Fail "Installer cross-compile failed. Check the output above for Go errors."
+}
 
-# ── Cleanup temp dir ──────────────────────────────────────────────────────────
-Remove-Item $TmpBundle -Recurse -Force -ErrorAction SilentlyContinue
+Confirm-File $InstallerExe "ezHealthKonnect-Setup-Win64.exe"
+
+# ── Cleanup embedded asset (don't leave 26 MB zip in source tree) ─────────────
+Remove-Item $BundleZip -Force -ErrorAction SilentlyContinue
+Ok "Cleaned up installer/assets/bundle-windows.zip"
 
 # ── Done ──────────────────────────────────────────────────────────────────────
+$finalSizeMB = '{0:N1}' -f ((Get-Item $InstallerExe).Length / 1MB)
+
 Write-Host ""
-Write-Host "════════════════════════════════════════════════" -ForegroundColor Green
-Write-Host "  Build complete!" -ForegroundColor Green
+Write-Host "  ╔══════════════════════════════════════════════════╗" -ForegroundColor Green
+Write-Host "  ║  Build complete!                                 ║" -ForegroundColor Green
+Write-Host "  ╠══════════════════════════════════════════════════╣" -ForegroundColor Green
+Write-Host "  ║  dist\ezHealthKonnect-Setup-Win64.exe            ║" -ForegroundColor White
+Write-Host ("  ║  Size: {0,-43}║" -f "$finalSizeMB MB (self-contained)") -ForegroundColor White
+Write-Host "  ╠══════════════════════════════════════════════════╣" -ForegroundColor Green
+Write-Host "  ║  To distribute: copy just this ONE file.         ║" -ForegroundColor White
+Write-Host "  ║  Run it on any Windows 10/11 machine.            ║" -ForegroundColor White
+Write-Host "  ║  No sidecar zip, no GitHub release needed.       ║" -ForegroundColor White
+Write-Host "  ╚══════════════════════════════════════════════════╝" -ForegroundColor Green
 Write-Host ""
-Write-Host "  Files in $DistDir`:``" -ForegroundColor White
-Write-Host "    ezHealthKonnect-Setup-Win64.exe   (installer)" -ForegroundColor White
-Write-Host "    ezhealthkonnect-windows-amd64.zip (app bundle)" -ForegroundColor White
-Write-Host ""
-Write-Host "  To install:" -ForegroundColor White
-Write-Host "    1. Copy both files to the same folder" -ForegroundColor White
-Write-Host "    2. Run ezHealthKonnect-Setup-Win64.exe" -ForegroundColor White
-Write-Host "    3. The installer detects the zip — no internet needed" -ForegroundColor White
-Write-Host "════════════════════════════════════════════════" -ForegroundColor Green
