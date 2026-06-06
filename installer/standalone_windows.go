@@ -420,6 +420,17 @@ func downloadAppBundle(installDir, cfgVersion string) error {
 		return extractZip(tmp, installDir, true)
 	}
 
+	// Side-by-side bundle: if a zip sits next to the installer exe, use it.
+	// Supports offline installs and dev testing without a GitHub release.
+	if exePath, err := os.Executable(); err == nil {
+		sidecar := filepath.Join(filepath.Dir(exePath), "ezhealthkonnect-windows-amd64.zip")
+		if _, statErr := os.Stat(sidecar); statErr == nil {
+			emit("info", "Using local bundle: ezhealthkonnect-windows-amd64.zip")
+			emit("info", "Extracting...")
+			return extractZip(sidecar, installDir, true)
+		}
+	}
+
 	// Slow path: download from GitHub releases.
 	// Priority: 1) explicit version from config UI  2) build-time version
 	// injected via -X main.version=...  3) GitHub API latest release.
