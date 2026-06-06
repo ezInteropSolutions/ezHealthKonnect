@@ -11,6 +11,9 @@
 set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
 
+# Auto-detect: empty when already root (Docker), "sudo" when non-root (CI runner)
+if [ "$(id -u)" -eq 0 ]; then SUDO=""; else SUDO="sudo"; fi
+
 PASS=0; FAIL=0; SKIP=0
 
 ok()   { echo -e "  \033[32mPASS\033[0m  $1"; ((++PASS)); }
@@ -43,24 +46,24 @@ fi
 
 # ── 3. PGDG repo setup ─────────────────────────────────────────────────────────
 hdr "PostgreSQL 15 — PGDG Repo Setup"
-apt-get update -qq
-apt-get install -y -qq curl gnupg lsb-release 2>/dev/null
+$SUDO apt-get update -qq
+$SUDO apt-get install -y -qq curl gnupg lsb-release 2>/dev/null
 ok "curl + gnupg + lsb-release installed"
 
 curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
-  | gpg --dearmor -o /etc/apt/trusted.gpg.d/postgresql.gpg
+  | $SUDO gpg --dearmor -o /etc/apt/trusted.gpg.d/postgresql.gpg
 ok "PGDG signing key added"
 
 echo "deb https://apt.postgresql.org/pub/repos/apt ${CODENAME}-pgdg main" \
-  > /etc/apt/sources.list.d/pgdg.list
+  | $SUDO tee /etc/apt/sources.list.d/pgdg.list > /dev/null
 ok "PGDG repo list written"
 
-apt-get update -qq
+$SUDO apt-get update -qq
 ok "apt-get update after PGDG repo"
 
 # ── 4. PostgreSQL install ──────────────────────────────────────────────────────
 hdr "PostgreSQL 15 Install"
-apt-get install -y -qq postgresql-15 postgresql-client-15
+$SUDO apt-get install -y -qq postgresql-15 postgresql-client-15
 ok "postgresql-15 installed"
 
 if command -v psql >/dev/null 2>&1; then
@@ -74,7 +77,7 @@ fi
 # ── 5. Start PostgreSQL ────────────────────────────────────────────────────────
 hdr "PostgreSQL Service Start"
 # In Docker there is no systemd — start directly
-su - postgres -c "/usr/lib/postgresql/15/bin/pg_ctl \
+$SUDO su - postgres -c "/usr/lib/postgresql/15/bin/pg_ctl \
   -D /var/lib/postgresql/15/main \
   -l /tmp/pg.log start -w" 2>/dev/null && ok "PostgreSQL started" \
   || { skip "pg_ctl start (may need initdb first)"; }
@@ -90,19 +93,19 @@ CREATE_USER="CREATE USER ezhealth_user WITH PASSWORD 'testpass123';"
 CREATE_DB="CREATE DATABASE ezhealthkonnect OWNER ezhealth_user;"
 GRANT="GRANT ALL PRIVILEGES ON DATABASE ezhealthkonnect TO ezhealth_user;"
 
-if su - postgres -c "$PSQL -d postgres -c \"$CREATE_USER\" -q" 2>/dev/null; then
+if $SUDO su - postgres -c "$PSQL -d postgres -c \"$CREATE_USER\" -q" 2>/dev/null; then
   ok "CREATE USER via peer auth"
 else
   fail "CREATE USER via peer auth"
 fi
 
-if su - postgres -c "$PSQL -d postgres -c \"$CREATE_DB\" -q" 2>/dev/null; then
+if $SUDO su - postgres -c "$PSQL -d postgres -c \"$CREATE_DB\" -q" 2>/dev/null; then
   ok "CREATE DATABASE via peer auth"
 else
   fail "CREATE DATABASE via peer auth"
 fi
 
-su - postgres -c "$PSQL -d postgres -c \"$GRANT\" -q" 2>/dev/null && true
+$SUDO su - postgres -c "$PSQL -d postgres -c \"$GRANT\" -q" 2>/dev/null && true
 ok "GRANT PRIVILEGES via peer auth"
 
 # ── 7. App user connectivity ───────────────────────────────────────────────────
@@ -113,7 +116,7 @@ if $PSQL -h localhost -U ezhealth_user -d ezhealthkonnect -c "SELECT 1;" -q 2>/d
 else
   skip "TCP connection as app user (pg_hba may need md5 — socket works)"
   # Try unix socket instead
-  if su - postgres -c "$PSQL -U ezhealth_user -d ezhealthkonnect -c 'SELECT 1;' -q" 2>/dev/null; then
+  if $SUDO su - postgres -c "$PSQL -U ezhealth_user -d ezhealthkonnect -c 'SELECT 1;' -q" 2>/dev/null; then
     ok "App user can connect via socket"
   else
     fail "App user cannot connect at all"
@@ -133,7 +136,7 @@ for sql in /tmp/migrations/V1__Init.sql /tmp/migrations/V2__Users.sql /tmp/migra
   PGPASSWORD=testpass123 $PSQL -h localhost -U ezhealth_user -d ezhealthkonnect -f "$sql" -q 2>/dev/null \
     && ok "  $(basename $sql)" \
     || { # Try via socket
-         su - postgres -c "$PSQL -U ezhealth_user -d ezhealthkonnect -f $sql -q" 2>/dev/null \
+         $SUDO su - postgres -c "$PSQL -U ezhealth_user -d ezhealthkonnect -f $sql -q" 2>/dev/null \
            && ok "  $(basename $sql) (via socket)" \
            || fail "  $(basename $sql)"; }
 done
@@ -142,8 +145,8 @@ done
 hdr "Node.js 20 LTS — NodeSource"
 curl -fsSL https://deb.nodesource.com/setup_20.x -o /tmp/nodesource-setup.sh
 chmod +x /tmp/nodesource-setup.sh
-bash /tmp/nodesource-setup.sh 2>/dev/null
-apt-get install -y -qq nodejs
+$SUDO bash /tmp/nodesource-setup.sh 2>/dev/null
+$SUDO apt-get install -y -qq nodejs
 ok "nodejs installed"
 
 if command -v node >/dev/null 2>&1; then
@@ -209,10 +212,10 @@ fi
 
 # ── 11. Drop cleanup test ──────────────────────────────────────────────────────
 hdr "DB Cleanup (Uninstall Path)"
-su - postgres -c "$PSQL -d postgres -c \"SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname='ezhealthkonnect' AND pid<>pg_backend_pid();\" -q" 2>/dev/null && true
-su - postgres -c "$PSQL -d postgres -c \"DROP DATABASE IF EXISTS ezhealthkonnect;\" -q" 2>/dev/null \
+$SUDO su - postgres -c "$PSQL -d postgres -c \"SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname='ezhealthkonnect' AND pid<>pg_backend_pid();\" -q" 2>/dev/null && true
+$SUDO su - postgres -c "$PSQL -d postgres -c \"DROP DATABASE IF EXISTS ezhealthkonnect;\" -q" 2>/dev/null \
   && ok "DROP DATABASE" || fail "DROP DATABASE"
-su - postgres -c "$PSQL -d postgres -c \"DROP USER IF EXISTS ezhealth_user;\" -q" 2>/dev/null \
+$SUDO su - postgres -c "$PSQL -d postgres -c \"DROP USER IF EXISTS ezhealth_user;\" -q" 2>/dev/null \
   && ok "DROP USER" || fail "DROP USER"
 
 # ── Summary ────────────────────────────────────────────────────────────────────
