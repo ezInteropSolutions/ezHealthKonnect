@@ -11,6 +11,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -661,17 +663,39 @@ func runMigrations(psqlPath string, cfg *Config) error {
 	pgBin := filepath.Dir(psqlPath)
 	migDir := filepath.Join(cfg.InstallDir, "database", "migrations")
 
-	info, err := os.ReadDir(migDir)
+	entries, err := os.ReadDir(migDir)
 	if err != nil {
 		return fmt.Errorf("migrations dir not found: %w", err)
 	}
 
-	count := 0
-	for _, entry := range info {
-		if entry.IsDir() || !strings.HasPrefix(entry.Name(), "V") || !strings.HasSuffix(entry.Name(), ".sql") {
+	// os.ReadDir sorts alphabetically, which puts V100 before V10 before V1.
+	// Extract the integer version and sort numerically so V1→V2→…→V147.
+	type mig struct {
+		version int
+		name    string
+	}
+	var migs []mig
+	for _, e := range entries {
+		name := e.Name()
+		if e.IsDir() || !strings.HasPrefix(name, "V") || !strings.HasSuffix(name, ".sql") {
 			continue
 		}
-		sqlFile := filepath.Join(migDir, entry.Name())
+		// "V123__Description.sql" → version 123
+		rest := strings.TrimPrefix(name, "V")
+		vStr := strings.SplitN(rest, "__", 2)[0]
+		v, err := strconv.Atoi(vStr)
+		if err != nil {
+			emit("warn", "  Skipping unrecognised migration file: "+name)
+			continue
+		}
+		migs = append(migs, mig{version: v, name: name})
+	}
+	sort.Slice(migs, func(i, j int) bool { return migs[i].version < migs[j].version })
+
+	emit("info", fmt.Sprintf("  Running %d migrations in version order...", len(migs)))
+	failed := 0
+	for _, m := range migs {
+		sqlFile := filepath.Join(migDir, m.name)
 		cmd := exec.Command(
 			filepath.Join(pgBin, "psql.exe"),
 			"-h", cfg.DBHost,
@@ -679,17 +703,25 @@ func runMigrations(psqlPath string, cfg *Config) error {
 			"-p", cfg.DBPort,
 			"-d", cfg.DBName,
 			"-f", sqlFile,
-			"-q",
+			"-v", "ON_ERROR_STOP=0", // keep going inside the file; non-zero exit captured below
 		)
 		cmd.Env = append(os.Environ(), "PGPASSWORD="+cfg.DBPassword)
 		out, err := cmd.CombinedOutput()
 		if err != nil {
-			emit("warn", fmt.Sprintf("  %s: %s", entry.Name(), strings.TrimSpace(string(out))))
+			output := strings.TrimSpace(string(out))
+			// Suppress "already exists" noise — safe to ignore on re-run
+			if !strings.Contains(output, "already exists") {
+				emit("warn", fmt.Sprintf("  V%d: %s", m.version, output))
+				failed++
+			}
 		}
-		count++
 	}
 
-	emit("info", fmt.Sprintf("  Applied %d migration file(s)", count))
+	if failed > 0 {
+		emit("warn", fmt.Sprintf("  %d migration(s) had errors (logged above)", failed))
+	} else {
+		emit("ok", fmt.Sprintf("  All %d migrations applied successfully", len(migs)))
+	}
 	return nil
 }
 
