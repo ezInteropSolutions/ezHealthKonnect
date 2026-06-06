@@ -931,16 +931,29 @@ func removeService(name string) {
 	exec.Command("sc", "delete", name).Run() //nolint:errcheck
 }
 
-// runStandaloneUninstall stops Windows services and removes the install directory.
+// runStandaloneUninstall stops services, drops the database, and removes all files.
 func runStandaloneUninstall(cfg *Config) {
 	const svcAPI = "ezhealthkonnect-api"
 	const svcApp = "ezhealthkonnect"
 
+	// ── 1. Stop services before touching anything else ─────────────────────
 	emit("info", "── Stopping and removing Windows services")
 	removeService(svcAPI)
 	removeService(svcApp)
-	emit("ok", "Services removed")
+	emit("ok", "Services stopped and removed")
 
+	// ── 2. Drop database + user ────────────────────────────────────────────
+	// Read credentials from the installed .env so we use exactly what was
+	// configured at install time, even if defaults were changed.
+	emit("info", "── Dropping PostgreSQL database and user")
+	dbCfg := loadEnvForUninstall(cfg.InstallDir)
+	if err := dropDatabaseAndUser(dbCfg); err != nil {
+		emit("warn", "Database cleanup had issues (may already be removed): "+err.Error())
+	} else {
+		emit("ok", fmt.Sprintf("Database '%s' and user '%s' dropped", dbCfg.dbName, dbCfg.dbUser))
+	}
+
+	// ── 3. Remove app files ────────────────────────────────────────────────
 	emit("info", "── Removing install directory: "+cfg.InstallDir)
 	if err := os.RemoveAll(cfg.InstallDir); err != nil {
 		emit("warn", "Could not fully remove "+cfg.InstallDir+": "+err.Error())
@@ -948,9 +961,97 @@ func runStandaloneUninstall(cfg *Config) {
 		emit("ok", "Install directory removed")
 	}
 
+	// ── 4. Remove Add/Remove Programs entry ────────────────────────────────
 	emit("info", "── Removing Add/Remove Programs entry")
 	removeUninstallRegistry()
 	emit("ok", "Registry entry removed")
 
 	emit("ok", "Uninstall complete — you may close this window")
+}
+
+// dbUninstallConfig holds the minimal DB info needed to drop during uninstall.
+type dbUninstallConfig struct {
+	host     string
+	port     string
+	dbName   string
+	dbUser   string
+	psqlPath string
+}
+
+// loadEnvForUninstall reads the .env file from installDir and extracts DB settings.
+// Falls back to installer defaults if the file cannot be read.
+func loadEnvForUninstall(installDir string) dbUninstallConfig {
+	cfg := dbUninstallConfig{
+		host:     "localhost",
+		port:     "5432",
+		dbName:   "ezhealthkonnect",
+		dbUser:   "ezhealth_user",
+		psqlPath: findPsql(),
+	}
+
+	envPath := filepath.Join(installDir, ".env")
+	data, err := os.ReadFile(envPath)
+	if err != nil {
+		return cfg // file gone or unreadable — use defaults
+	}
+
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		k, v, ok := strings.Cut(line, "=")
+		if !ok {
+			continue
+		}
+		switch strings.TrimSpace(k) {
+		case "DB_HOST":
+			cfg.host = strings.TrimSpace(v)
+		case "DB_PORT":
+			cfg.port = strings.TrimSpace(v)
+		case "DB_NAME":
+			cfg.dbName = strings.TrimSpace(v)
+		case "DB_USER":
+			cfg.dbUser = strings.TrimSpace(v)
+		}
+	}
+	return cfg
+}
+
+// dropDatabaseAndUser terminates active connections then drops the DB and user.
+func dropDatabaseAndUser(cfg dbUninstallConfig) error {
+	if cfg.psqlPath == "" {
+		return fmt.Errorf("psql.exe not found — PostgreSQL may already be removed")
+	}
+
+	pgBin := filepath.Dir(cfg.psqlPath)
+	psql := filepath.Join(pgBin, "psql.exe")
+	adminPw := pgAdminPassword()
+
+	run := func(db, sql string) error {
+		cmd := exec.Command(psql, "-h", cfg.host, "-U", "postgres", "-p", cfg.port, "-d", db, "-c", sql, "-q")
+		cmd.Env = append(os.Environ(), "PGPASSWORD="+adminPw)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			msg := strings.TrimSpace(string(out))
+			if strings.Contains(msg, "does not exist") {
+				return nil // already gone — not an error
+			}
+			return fmt.Errorf("%s: %s", sql, msg)
+		}
+		return nil
+	}
+
+	// Terminate any active connections so DROP DATABASE doesn't fail.
+	_ = run("postgres", fmt.Sprintf(
+		`SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '%s' AND pid <> pg_backend_pid();`,
+		cfg.dbName))
+
+	if err := run("postgres", fmt.Sprintf("DROP DATABASE IF EXISTS %s;", cfg.dbName)); err != nil {
+		return err
+	}
+	if err := run("postgres", fmt.Sprintf("DROP USER IF EXISTS %s;", cfg.dbUser)); err != nil {
+		return err
+	}
+	return nil
 }
