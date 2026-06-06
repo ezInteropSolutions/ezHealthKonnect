@@ -556,8 +556,8 @@ class WizardModel extends EventTarget {
             mappingsCount: this.data.fhirTransformResult?.atomicMappings?.length,
             debug_logging: this.data.debug_logging,
             debugLogging: this.data.debugLogging,
-            auto_start: this.data.auto_start,
-            deployment_mode: this.data.deployment_mode
+            auto_start: this.data.autoStart || this.data.auto_start,
+            deployment_mode: this.data.deploymentMode || this.data.deployment_mode
         });
 
         // Deep log targetConfig to identify JSON issues
@@ -608,9 +608,9 @@ class WizardModel extends EventTarget {
             retain_error_logs_forever: this.data.retainErrorLogs !== false && this.data.retain_error_logs_forever !== false,
 
             // Deployment configuration (V33)
-            auto_start: this.data.auto_start || false,
-            deployment_mode: this.data.deployment_mode || 'manual',
-            deployment_delay_seconds: this.data.deployment_delay_seconds || 0,
+            auto_start: this.data.autoStart || this.data.auto_start || false,
+            deployment_mode: this.data.deploymentMode || this.data.deployment_mode || 'manual',
+            deployment_delay_seconds: this.data.deploymentDelay || this.data.deployment_delay_seconds || 0,
 
             // Processing flow — drives which transform steps the pipeline service creates
             transformationFlow: this.data.transformationFlow || 'hl7_to_fhir',

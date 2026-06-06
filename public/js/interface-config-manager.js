@@ -397,60 +397,79 @@ class BasicInterfaceConfigManager {
      * Uses InterfaceConfigComponents for unified data collection (same as Wizard)
      */
     collectFormData() {
-        console.log('📋 Starting form data collection (using InterfaceConfigComponents)...');
+        console.log('📋 Collecting form data via ConnectorConfigBuilder instances...');
 
-        // Use the unified InterfaceConfigComponents for data collection
-        // This ensures Wizard and Edit modal use the same logic
-        const configData = InterfaceConfigComponents.collectFormData(document, 'edit');
-
-        // Read connector step IDs stored by populateEditForm — these target transformation_steps directly
+        // Connector step IDs set by populateEditForm
         const stepIds = document.getElementById('editConnectorStepIds');
         const inboundStepId = stepIds?.dataset.inboundStepId || null;
         const outboundStepId = stepIds?.dataset.outboundStepId || null;
+
+        // Full builder configs — these are the single source of truth sent to the backend
+        const inboundBuilderConfig = window._editInboundBuilder?.getConfig() || {};
+        const outboundBuilderConfig = window._editOutboundBuilder?.getConfig() || {};
+
+        // Collect deployment settings from shared component (still uses InterfaceConfigComponents)
+        const deploymentData = InterfaceConfigComponents.collectDeploymentSettings
+            ? InterfaceConfigComponents.collectDeploymentSettings(document, 'edit')
+            : {};
 
         const formData = {
             id: document.getElementById('editInterfaceId')?.value || '',
             name: document.getElementById('editInterfaceName')?.value || '',
             description: document.getElementById('editInterfaceDescription')?.value || '',
             status: document.getElementById('editStatus')?.value || 'inactive',
-            // Connector step IDs — server writes directly to transformation_steps rows
+
+            // Connector step IDs — backend uses these for precise row targeting
             inboundStepId: inboundStepId || undefined,
             outboundStepId: outboundStepId || undefined,
-            // Use unified component data
-            sourceType: configData.sourceType,
-            sourceConnectivity: configData.sourceConnectivity,
-            targetConnectivity: configData.targetConnectivity,
-            sourceConfig: configData.sourceConfig,
-            targetConfig: configData.targetConfig,
+
+            // Full connector configs — backend replaces the entire step config when connectorType is present
+            sourceConnectorConfig: Object.keys(inboundBuilderConfig).length > 0 ? inboundBuilderConfig : undefined,
+            targetConnectorConfig: Object.keys(outboundBuilderConfig).length > 0 ? outboundBuilderConfig : undefined,
+
+            // Inner config — kept for backward compat with interfaces table source_config / target_config columns
+            sourceConfig: inboundBuilderConfig.config || {},
+            targetConfig: outboundBuilderConfig.config || {},
+
+            // Connectivity strings for interfaces table columns
+            sourceConnectivity: inboundBuilderConfig.connectorType || undefined,
+            targetConnectivity: outboundBuilderConfig.connectorType || undefined,
+
             // Deployment settings
-            deployment_mode: configData.deployment_mode,
-            auto_start: configData.auto_start,
-            deployment_delay_seconds: configData.deployment_delay_seconds,
+            deployment_mode: deploymentData.deployment_mode,
+            auto_start: deploymentData.auto_start,
+            deployment_delay_seconds: deploymentData.deployment_delay_seconds,
+
             // Logging settings
             log_level: getLogLevel(),
-            debug_logging: getLogLevel() !== 'off', // kept for backward compat
+            debug_logging: getLogLevel() !== 'off',
             log_retention_days: parseInt(document.getElementById('editLogRetention')?.value) || 30,
             retain_error_logs_forever: document.getElementById('editRetainErrors')?.checked !== false,
         };
 
-        console.log('📝 Form data collected via InterfaceConfigComponents:', formData);
-
-        // Backward compatibility: set format and messageType from sourceType
+        // Derive sourceType / targetType for interfaces table (COALESCE keeps existing if null)
+        const connectorToSourceType = {
+            'tcp_mllp_inbound': 'hl7v2', 'http_fhir_inbound': 'fhir',
+            'http_rest_inbound': 'json',  'file_listener': 'file',
+            'postgresql_inbound': 'database', 'mysql_inbound': 'database',
+            'sqlserver_inbound': 'database', 'oracle_inbound': 'database',
+            'mongodb_inbound': 'database', 'kafka_inbound': 'kafka',
+            'rabbitmq_inbound': 'rabbitmq', 'redis_inbound': 'redis',
+            'aws_s3_inbound': 'file', 'sftp_inbound': 'sftp',
+        };
+        const connectorToTargetType = {
+            'http_outbound': 'fhir', 'http_fhir_outbound': 'fhir',
+            'tcp_mllp_outbound': 'hl7v2', 'file_writer': 'file',
+            'postgresql_outbound': 'database', 'mysql_outbound': 'database',
+            'sqlserver_outbound': 'database', 'oracle_outbound': 'database',
+            'mongodb_outbound': 'database',
+        };
+        formData.sourceType = connectorToSourceType[inboundBuilderConfig.connectorType] || undefined;
+        formData.targetType  = connectorToTargetType[outboundBuilderConfig.connectorType] || undefined;
         formData.format = formData.sourceType;
         formData.messageType = formData.sourceType;
 
-        // Set targetType based on targetConnectivity (backend expects this field)
-        // Map: sink -> sink, http -> fhir, tcp -> hl7v2, file -> file, database -> database
-        const targetTypeMap = {
-            'sink': 'sink',
-            'http': 'fhir',
-            'tcp': 'hl7v2',
-            'file': 'file',
-            'database': 'database'
-        };
-        formData.targetType = targetTypeMap[formData.targetConnectivity] || 'fhir';
-
-        // Collect processing rules (if fields exist)
+        // Processing rules (fields may not exist in new layout)
         formData.processingRules = {
             routingMode: document.getElementById('editRoutingMode')?.value || 'direct',
             targetFhirInterface: document.getElementById('editTargetFhirInterface')?.value || '',
@@ -458,13 +477,8 @@ class BasicInterfaceConfigManager {
             retryPolicy: document.getElementById('editRetryPolicy')?.value || '3'
         };
 
-        // Performance settings (if fields exist)
-        const tableStrategy = document.getElementById('editTableStrategy')?.value;
-        formData.useDedicatedTable = tableStrategy === 'dedicated';
-        formData.tableManagementStrategy = tableStrategy || 'shared';
-        formData.expectedVolume = document.getElementById('editExpectedVolume')?.value || 'low';
-
-        console.log('📦 Collected form data:', formData);
+        console.log('📦 Collected form data (inbound connectorType:', inboundBuilderConfig.connectorType,
+                    ', outbound connectorType:', outboundBuilderConfig.connectorType, ')');
         return formData;
     }
 

@@ -979,6 +979,9 @@ class InterfacesController {
                 // Connector step IDs — write directly to transformation_steps (single source of truth)
                 inboundStepId,
                 outboundStepId,
+                // Full connector configs from ConnectorConfigBuilder — replaces entire step config
+                sourceConnectorConfig,
+                targetConnectorConfig,
                 // Deployment settings (V32)
                 deployment_mode,
                 auto_start,
@@ -1131,24 +1134,55 @@ class InterfacesController {
 
             // ── PRIMARY WRITE: update transformation_steps directly ──────────────────
             // transformation_steps is the single source of truth for connector config.
-            // The Go engine reads ONLY from here. If the client sent step IDs, update
-            // the full config block. Fall back to a field-merge when no step ID is given
-            // (e.g. legacy save path that only sends sourceConfig).
-            if (sourceConfig && Object.keys(sourceConfig).length > 0) {
+            // When the client sends a full sourceConnectorConfig (from ConnectorConfigBuilder),
+            // replace the entire step config so connectorType + config are always in sync.
+            // Fall back to a field-merge when only sourceConfig is present (legacy path).
+            const _updateStep = async (fullConnectorCfg, innerConfig, stepId, stepType) => {
+                const hasFullConfig = fullConnectorCfg && fullConnectorCfg.connectorType;
+                const hasInnerConfig = innerConfig && Object.keys(innerConfig).length > 0;
+                if (!hasFullConfig && !hasInnerConfig) return;
                 try {
-                    if (inboundStepId) {
-                        // Client sent the step ID — update that exact row
+                    if (hasFullConfig && stepId) {
+                        // Full replacement — connectorType + config in one atomic write
+                        await this.database.sequelize.query(`
+                            UPDATE transformation_steps
+                            SET    config = :fullConfig::jsonb,
+                                   updated_at = CURRENT_TIMESTAMP
+                            WHERE  id = :stepId
+                        `, {
+                            replacements: { fullConfig: JSON.stringify(fullConnectorCfg), stepId },
+                            type: this.database.sequelize.QueryTypes.UPDATE
+                        });
+                        console.log(`✅ Full config replacement for ${stepType} step ${stepId}: connectorType=${fullConnectorCfg.connectorType}`);
+                    } else if (hasFullConfig) {
+                        // Full config but no stepId — find by interface + step_type
+                        await this.database.sequelize.query(`
+                            UPDATE transformation_steps ts
+                            SET    config = :fullConfig::jsonb,
+                                   updated_at = CURRENT_TIMESTAMP
+                            FROM   transformation_pipelines tp
+                            WHERE  tp.id = ts.pipeline_id
+                              AND  tp.interface_id = :interfaceId
+                              AND  ts.step_type = :stepType
+                        `, {
+                            replacements: { fullConfig: JSON.stringify(fullConnectorCfg), interfaceId, stepType },
+                            type: this.database.sequelize.QueryTypes.UPDATE
+                        });
+                        console.log(`✅ Full config replacement for ${stepType} (by interface): connectorType=${fullConnectorCfg.connectorType}`);
+                    } else if (hasInnerConfig && stepId) {
+                        // Legacy merge-patch — only inner config fields changed
                         await this.database.sequelize.query(`
                             UPDATE transformation_steps
                             SET    config = jsonb_set(config, '{config}', config->'config' || :patch::jsonb, true),
                                    updated_at = CURRENT_TIMESTAMP
                             WHERE  id = :stepId
                         `, {
-                            replacements: { patch: JSON.stringify(sourceConfig), stepId: inboundStepId },
+                            replacements: { patch: JSON.stringify(innerConfig), stepId },
                             type: this.database.sequelize.QueryTypes.UPDATE
                         });
-                    } else {
-                        // No step ID — find by interface + step_type
+                        console.log(`✅ Merge-patch for ${stepType} step ${stepId}`);
+                    } else if (hasInnerConfig) {
+                        // Legacy merge-patch — no step ID
                         await this.database.sequelize.query(`
                             UPDATE transformation_steps ts
                             SET    config = jsonb_set(ts.config, '{config}', ts.config->'config' || :patch::jsonb, true),
@@ -1156,49 +1190,20 @@ class InterfacesController {
                             FROM   transformation_pipelines tp
                             WHERE  tp.id = ts.pipeline_id
                               AND  tp.interface_id = :interfaceId
-                              AND  ts.step_type = 'connector.inbound'
+                              AND  ts.step_type = :stepType
                         `, {
-                            replacements: { patch: JSON.stringify(sourceConfig), interfaceId },
+                            replacements: { patch: JSON.stringify(innerConfig), interfaceId, stepType },
                             type: this.database.sequelize.QueryTypes.UPDATE
                         });
+                        console.log(`✅ Merge-patch for ${stepType} (by interface)`);
                     }
-                    console.log(`✅ Updated connector.inbound config for interface ${interfaceId}: ${JSON.stringify(sourceConfig)}`);
                 } catch (err) {
-                    console.warn(`⚠️ Failed to update connector.inbound step: ${err.message}`);
+                    console.warn(`⚠️ Failed to update ${stepType} step: ${err.message}`);
                 }
-            }
+            };
 
-            if (targetConfig && Object.keys(targetConfig).length > 0) {
-                try {
-                    if (outboundStepId) {
-                        await this.database.sequelize.query(`
-                            UPDATE transformation_steps
-                            SET    config = jsonb_set(config, '{config}', config->'config' || :patch::jsonb, true),
-                                   updated_at = CURRENT_TIMESTAMP
-                            WHERE  id = :stepId
-                        `, {
-                            replacements: { patch: JSON.stringify(targetConfig), stepId: outboundStepId },
-                            type: this.database.sequelize.QueryTypes.UPDATE
-                        });
-                    } else {
-                        await this.database.sequelize.query(`
-                            UPDATE transformation_steps ts
-                            SET    config = jsonb_set(ts.config, '{config}', ts.config->'config' || :patch::jsonb, true),
-                                   updated_at = CURRENT_TIMESTAMP
-                            FROM   transformation_pipelines tp
-                            WHERE  tp.id = ts.pipeline_id
-                              AND  tp.interface_id = :interfaceId
-                              AND  ts.step_type = 'connector.outbound'
-                        `, {
-                            replacements: { patch: JSON.stringify(targetConfig), interfaceId },
-                            type: this.database.sequelize.QueryTypes.UPDATE
-                        });
-                    }
-                    console.log(`✅ Updated connector.outbound config for interface ${interfaceId}: ${JSON.stringify(targetConfig)}`);
-                } catch (err) {
-                    console.warn(`⚠️ Failed to update connector.outbound step: ${err.message}`);
-                }
-            }
+            await _updateStep(sourceConnectorConfig, sourceConfig, inboundStepId,  'connector.inbound');
+            await _updateStep(targetConnectorConfig, targetConfig, outboundStepId, 'connector.outbound');
 
             // Tell the Go engine to reload the filter cache for this interface
             // so the new accept list takes effect immediately without restart.

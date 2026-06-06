@@ -317,31 +317,14 @@
                                 </div>
                             </div>
 
-                            <!-- Tab 2: Source Configuration -->
+                            <!-- Tab 2: Source (Inbound) Connector — powered by ConnectorConfigBuilder -->
                             <div class="tab-content" id="editTabSource">
-                                <div class="config-section">
-                                    <div class="form-row">
-                                        <!-- Source Type Selector (rendered by shared component) -->
-                                        <div id="editSourceTypeContainer"></div>
-
-                                        <!-- Source Connectivity Selector (rendered by shared component) -->
-                                        <div id="editSourceConnectivityContainer"></div>
-                                    </div>
-
-                                    <!-- Dynamic Source Configuration Panel (rendered by shared component) -->
-                                    <div id="editSourceConfigPanel" class="config-panel"></div>
-                                </div>
+                                <div id="editInboundConnectorContainer" style="padding: 4px 0;"></div>
                             </div>
 
-                            <!-- Tab 3: Target Configuration -->
+                            <!-- Tab 3: Target (Outbound) Connector — powered by ConnectorConfigBuilder -->
                             <div class="tab-content" id="editTabTarget">
-                                <div class="config-section">
-                                    <!-- Target Connectivity Selector (rendered by shared component) -->
-                                    <div id="editTargetConnectivityContainer"></div>
-
-                                    <!-- Dynamic Target Configuration Panel (rendered by shared component) -->
-                                    <div id="editTargetConfigPanel" class="config-panel"></div>
-                                </div>
+                                <div id="editOutboundConnectorContainer" style="padding: 4px 0;"></div>
                             </div>
 
                             <!-- Tab 4: Deployment Settings -->
@@ -449,86 +432,38 @@
         hiddenStepIds.dataset.inboundStepId = interfaceData.inboundStepId || '';
         hiddenStepIds.dataset.outboundStepId = interfaceData.outboundStepId || '';
 
-        // Source Type - use shared component
-        // Handle both snake_case (from API) and camelCase
-        const sourceTypeContainer = document.getElementById('editSourceTypeContainer');
-        if (sourceTypeContainer) {
-            sourceTypeContainer.innerHTML = InterfaceConfigComponents.getSourceTypeSelector(
-                interfaceData.source_type || interfaceData.sourceType || 'hl7v2',
-                { idPrefix: 'edit', showHint: false }
-            );
+        // ── Inbound ConnectorConfigBuilder (Source tab) ──────────────────────────
+        // Destroy any previous instance before recreating
+        if (window._editInboundBuilder) {
+            try { window._editInboundBuilder.destroy(); } catch (_) {}
+            window._editInboundBuilder = null;
+        }
+        const inboundContainer = document.getElementById('editInboundConnectorContainer');
+        if (inboundContainer && typeof ConnectorConfigBuilder !== 'undefined') {
+            // inboundStepConfig = full step config: { connectorType, config: {...}, ... }
+            // Fall back to building a minimal config from legacy fields when no step exists yet.
+            const inboundStepCfg = interfaceData.inboundStepConfig && interfaceData.inboundStepConfig.connectorType
+                ? interfaceData.inboundStepConfig
+                : { connectorType: sourceConnectivityValue === 'http' ? 'http_fhir_inbound' : 'tcp_mllp_inbound', config: sourceConfigData };
+            window._editInboundBuilder = new ConnectorConfigBuilder(inboundContainer, inboundStepCfg, 'inbound');
+            window._editInboundBuilder.init();
+            console.log('✅ Inbound ConnectorConfigBuilder initialized with:', inboundStepCfg);
         }
 
-        // Source Connectivity - use shared component
-        const sourceConnectivityContainer = document.getElementById('editSourceConnectivityContainer');
-        if (sourceConnectivityContainer) {
-            sourceConnectivityContainer.innerHTML = InterfaceConfigComponents.getSourceConnectivitySelector(
-                sourceConnectivityValue || 'tcp',
-                { idPrefix: 'edit', showHint: false }
-            );
+        // ── Outbound ConnectorConfigBuilder (Target tab) ──────────────────────
+        if (window._editOutboundBuilder) {
+            try { window._editOutboundBuilder.destroy(); } catch (_) {}
+            window._editOutboundBuilder = null;
         }
-
-        // Source Config Panel - use shared component with extracted data
-        const dataForSourcePanel = {
-            ...interfaceData,
-            sourceConnectivity: sourceConnectivityValue,
-            sourceConfig: sourceConfigData,
-            sourceType: interfaceData.source_type || interfaceData.sourceType || 'hl7v2'
-        };
-        console.log('📦 Data being passed to updateEditSourceConfigPanel:', {
-            sourceConnectivity: dataForSourcePanel.sourceConnectivity,
-            sourceConfig: dataForSourcePanel.sourceConfig,
-            sourceType: dataForSourcePanel.sourceType
-        });
-        updateEditSourceConfigPanel(dataForSourcePanel);
-
-        // ── Single source of truth: use outbound connector step config ──
-        let targetConnectivityValue;
-        let targetConfigData = {};
-
-        if (interfaceData.outboundStepConfig && interfaceData.outboundStepConfig.connectorType) {
-            const step = interfaceData.outboundStepConfig;
-            if (step.connectorType.includes('http') || step.connectorType.includes('fhir')) targetConnectivityValue = 'http';
-            else if (step.connectorType.includes('mllp') || step.connectorType.includes('tcp')) targetConnectivityValue = 'tcp';
-            else if (step.connectorType.includes('file')) targetConnectivityValue = 'file';
-            else if (step.connectorType.includes('database') || step.connectorType.includes('postgresql')) targetConnectivityValue = 'database';
-            else if (step.connectorType.includes('kafka')) targetConnectivityValue = 'kafka';
-            else if (step.connectorType.includes('rabbitmq')) targetConnectivityValue = 'rabbitmq';
-            else targetConnectivityValue = 'http';
-            targetConfigData = { ...(step.config || {}) };
-            // Normalize field names: step config may use 'baseUrl' (http_fhir_outbound canonical)
-            // but InterfaceConfigComponents renders and collects using 'endpoint'.
-            // This single alias keeps both screens reading from the same store.
-            if (!targetConfigData.endpoint && targetConfigData.baseUrl) {
-                targetConfigData.endpoint = targetConfigData.baseUrl;
-            }
-            console.log('✅ Target config from connector.outbound step (single source of truth):', targetConfigData);
-        } else {
-            // Fallback: legacy target_connectivity column
-            targetConnectivityValue = interfaceData.target_connectivity || interfaceData.targetConnectivity || 'http';
-            targetConfigData = interfaceData.target_config || interfaceData.targetConfig || {};
-            if (typeof targetConnectivityValue === 'object' && targetConnectivityValue !== null) {
-                targetConfigData = { ...targetConnectivityValue.config, ...targetConfigData };
-                targetConnectivityValue = targetConnectivityValue.type || 'http';
-            }
-            console.log('⚠️ Target config from legacy target_connectivity (no connector step found):', targetConfigData);
+        const outboundContainer = document.getElementById('editOutboundConnectorContainer');
+        if (outboundContainer && typeof ConnectorConfigBuilder !== 'undefined') {
+            const outboundStepCfg = interfaceData.outboundStepConfig && interfaceData.outboundStepConfig.connectorType
+                ? interfaceData.outboundStepConfig
+                : { connectorType: 'http_outbound', config: interfaceData.target_config || interfaceData.targetConfig || {} };
+            window._editOutboundBuilder = new ConnectorConfigBuilder(outboundContainer, outboundStepCfg, 'outbound');
+            window._editOutboundBuilder.init();
+            console.log('✅ Outbound ConnectorConfigBuilder initialized with:', outboundStepCfg);
         }
-
-        // Target Connectivity - use shared component
-        const targetConnectivityContainer = document.getElementById('editTargetConnectivityContainer');
-        if (targetConnectivityContainer) {
-            targetConnectivityContainer.innerHTML = InterfaceConfigComponents.getTargetConnectivitySelector(
-                targetConnectivityValue,
-                { idPrefix: 'edit', showHint: false }
-            );
-        }
-
-        // Target Config Panel - use shared component with extracted data
-        updateEditTargetConfigPanel({
-            ...interfaceData,
-            targetConnectivity: targetConnectivityValue,
-            targetConfig: targetConfigData
-        });
 
         // Deployment Settings - use shared component
         const deploymentSettingsContainer = document.getElementById('editDeploymentSettingsContainer');
@@ -559,106 +494,7 @@
             window.setFamilyFilterValue(families || null);
         }
 
-        // Attach event listeners
-        attachEditModalListeners();
     };
-
-    /**
-     * Update Edit Source Config Panel
-     */
-    function updateEditSourceConfigPanel(interfaceData) {
-        const sourceConfigPanel = document.getElementById('editSourceConfigPanel');
-        if (!sourceConfigPanel) return;
-
-        const sourceType = document.getElementById('editsourceType')?.value || interfaceData.sourceType || interfaceData.source_type || 'hl7v2';
-        const sourceConnectivity = document.getElementById('editsourceConnectivity')?.value || interfaceData.sourceConnectivity || 'tcp';
-        const sourceConfig = interfaceData.sourceConfig || {};
-
-        console.log('🔄 Updating edit source config panel:', { sourceType, sourceConnectivity, sourceConfig });
-        console.log('🔍 DEBUG: Full interfaceData passed to updateEditSourceConfigPanel:', interfaceData);
-
-        sourceConfigPanel.innerHTML = InterfaceConfigComponents.getSourceConfigPanel(
-            sourceConnectivity,
-            sourceType,
-            sourceConfig,
-            { idPrefix: 'edit' }
-        );
-
-        // Attach event listeners for the new panel
-        InterfaceConfigComponents.attachEventListeners(
-            sourceConfigPanel,
-            'edit',
-            {
-                onConnectivityChange: () => updateEditSourceConfigPanel(interfaceData),
-                onSourceTypeChange: () => updateEditSourceConfigPanel(interfaceData)
-            }
-        );
-    }
-
-    /**
-     * Update Edit Target Config Panel
-     */
-    function updateEditTargetConfigPanel(interfaceData) {
-        const targetConfigPanel = document.getElementById('editTargetConfigPanel');
-        if (!targetConfigPanel) return;
-
-        const targetConnectivity = document.getElementById('edittargetConnectivity')?.value || interfaceData.targetConnectivity || 'http';
-        const targetConfig = interfaceData.targetConfig || {};
-
-        console.log('🔄 Updating edit target config panel:', { targetConnectivity });
-
-        targetConfigPanel.innerHTML = InterfaceConfigComponents.getTargetConfigPanel(
-            targetConnectivity,
-            null, // targetType not needed
-            targetConfig,
-            { idPrefix: 'edit' }
-        );
-
-        // Attach event listeners for the new panel
-        // Use 'edittarget' prefix for auth listeners since auth fields use idPrefix + 'target'
-        InterfaceConfigComponents.attachEventListeners(
-            targetConfigPanel,
-            'edittarget'
-        );
-    }
-
-    /**
-     * Attach Event Listeners to Edit Modal
-     */
-    function attachEditModalListeners() {
-        console.log('🔧 Attaching edit modal event listeners...');
-
-        // Source Type Change
-        const sourceTypeSelect = document.getElementById('editsourceType');
-        if (sourceTypeSelect) {
-            sourceTypeSelect.addEventListener('change', (e) => {
-                console.log('🔄 Edit: Source type changed to:', e.target.value);
-                updateEditSourceConfigPanel({ sourceType: e.target.value });
-            });
-        }
-
-        // Source Connectivity Change
-        const sourceConnectivitySelect = document.getElementById('editsourceConnectivity');
-        if (sourceConnectivitySelect) {
-            sourceConnectivitySelect.addEventListener('change', (e) => {
-                console.log('🔄 Edit: Source connectivity changed to:', e.target.value);
-                updateEditSourceConfigPanel({ sourceConnectivity: e.target.value });
-            });
-        }
-
-        // Target Connectivity Change
-        const targetConnectivitySelect = document.getElementById('edittargetConnectivity');
-        if (targetConnectivitySelect) {
-            targetConnectivitySelect.addEventListener('change', (e) => {
-                console.log('🔄 Edit: Target connectivity changed to:', e.target.value);
-                updateEditTargetConfigPanel({ targetConnectivity: e.target.value });
-            });
-        }
-
-        // FHIR Validation Policy — no extra listener needed; select handles state natively
-
-        console.log('✅ Edit modal listeners attached');
-    }
 
     /**
      * Setup Edit Modal Functions (tabs, maximize)

@@ -1235,6 +1235,7 @@ class WizardController {
             }
 
             // Activate interface in Go backend if auto_start or auto deployment mode
+            let finalStatus = interfaceData.status || 'configured';
             if (wizardData.auto_start || wizardData.deployment_mode === 'auto' || interfaceData.status === 'active') {
                 try {
                     console.log('🚀 Auto-starting interface in Go backend...');
@@ -1244,6 +1245,7 @@ class WizardController {
                         { timeout: 10000 }
                     );
                     if (activateResponse.data.success) {
+                        finalStatus = 'active';
                         console.log('✅ Interface activated successfully in Go backend');
                     } else {
                         console.warn('⚠️ Interface activation returned non-success:', activateResponse.data);
@@ -1277,7 +1279,7 @@ class WizardController {
                     name: createdInterface?.name || wizardData.name,
                     description: createdInterface?.description || wizardData.description,
                     messageType: createdInterface?.message_type || wizardData.messageType,
-                    status: createdInterface?.status || wizardData.status,
+                    status: finalStatus,
                     mappingsCount: wizardData.mappings?.length || 0
                 }
             });
