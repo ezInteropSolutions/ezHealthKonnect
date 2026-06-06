@@ -46,6 +46,7 @@ go-api-siu
 __pycache__/
 
 # ── Installer build output ─────────────────────────────────────────────────────
+dist/
 installer/dist/
 installer/ezhealthkonnect-installer
 installer/ezhealthkonnect-installer.exe
