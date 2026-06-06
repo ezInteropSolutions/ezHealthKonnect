@@ -76,14 +76,19 @@ fi
 
 # ── 5. Start PostgreSQL ────────────────────────────────────────────────────────
 hdr "PostgreSQL Service Start"
-# In Docker there is no systemd — start directly
-$SUDO su - postgres -c "/usr/lib/postgresql/15/bin/pg_ctl \
-  -D /var/lib/postgresql/15/main \
-  -l /tmp/pg.log start -w" 2>/dev/null && ok "PostgreSQL started" \
-  || { skip "pg_ctl start (may need initdb first)"; }
+# pg_ctlcluster is the Ubuntu-recommended way to manage clusters.
+# pg_ctl works in vanilla Docker; pg_ctlcluster works on both runners and Docker.
+if $SUDO pg_ctlcluster 15 main start 2>/dev/null; then
+  ok "PostgreSQL started (pg_ctlcluster)"
+elif $SUDO su - postgres -c "/usr/lib/postgresql/15/bin/pg_ctl \
+    -D /var/lib/postgresql/15/main -l /tmp/pg.log start -w" 2>/dev/null; then
+  ok "PostgreSQL started (pg_ctl fallback)"
+else
+  fail "PostgreSQL failed to start"
+  $SUDO cat /tmp/pg.log 2>/dev/null || true
+fi
 
-# Give it a moment
-sleep 3
+sleep 2
 
 # ── 6. PostgreSQL peer auth (the critical DB setup path) ───────────────────────
 hdr "PostgreSQL Peer Auth (su - postgres)"
