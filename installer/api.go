@@ -190,7 +190,7 @@ func handleChecksStandalone(w http.ResponseWriter, _ *http.Request) {
 		checks = append(checks, checkPortFree(port))
 	}
 
-	// winget (Windows only — needed to install PostgreSQL + Node.js)
+	// Package manager checks
 	if runtime.GOOS == "windows" {
 		checks = append(checks, checkWinget())
 	}
@@ -213,6 +213,9 @@ func checkOS() CheckResult {
 			return CheckResult{Name: "Linux Kernel", OK: true, Version: strings.TrimSpace(string(out))}
 		}
 		return CheckResult{Name: "Linux", OK: true}
+	case "darwin":
+		return CheckResult{Name: "macOS", OK: false,
+			Error: "macOS support is coming soon — use Docker Edition in the meantime"}
 	default:
 		return CheckResult{Name: runtime.GOOS, OK: false,
 			Error: "Standalone Edition supports Windows and Linux only"}
@@ -286,6 +289,19 @@ func checkWinget() CheckResult {
 	}
 	return CheckResult{Name: "winget (App Installer)", OK: true,
 		Version: strings.TrimSpace(string(out))}
+}
+
+func checkHomebrew() CheckResult {
+	out, err := exec.Command("brew", "--version").Output()
+	if err != nil {
+		return CheckResult{Name: "Homebrew", OK: true,
+			Warning: "Not found — the installer will install it automatically"}
+	}
+	ver := strings.TrimSpace(string(out))
+	if idx := strings.Index(ver, "\n"); idx >= 0 {
+		ver = ver[:idx]
+	}
+	return CheckResult{Name: "Homebrew", OK: true, Version: ver}
 }
 
 func handleChecks(w http.ResponseWriter, _ *http.Request) {

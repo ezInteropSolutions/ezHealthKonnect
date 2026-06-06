@@ -1,0 +1,142 @@
+name: Test Linux Installer
+
+on:
+  push:
+    paths:
+      - 'installer/**'
+      - 'database/migrations/**'
+      - '.github/workflows/test-installer-linux.yml'
+  pull_request:
+    paths:
+      - 'installer/**'
+      - 'database/migrations/**'
+  workflow_dispatch:
+
+jobs:
+  smoke-ubuntu:
+    name: Smoke — Ubuntu 22.04
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run Ubuntu smoke test
+        run: bash installer/test/smoke-linux-ubuntu.sh
+
+  smoke-rocky:
+    name: Smoke — Rocky Linux 9
+    runs-on: ubuntu-latest          # host is Ubuntu; we run inside a Rocky container
+    timeout-minutes: 20
+    container:
+      image: rockylinux:9
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install git (Rocky minimal has none)
+        run: dnf install -y -q git
+
+      - name: Run Rocky Linux smoke test
+        run: bash installer/test/smoke-linux-rocky.sh
+
+  build-linux-installer:
+    name: Build Linux Installer Binary
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: [smoke-ubuntu]          # only build if smoke tests pass
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Create placeholder bundle for non-embedded build check
+        run: |
+          mkdir -p installer/assets
+          # Build without -tags embedded to verify the package compiles cleanly on Linux
+          cd installer
+          GOOS=linux GOARCH=amd64 go build -o /dev/null .
+          echo "Installer package compiles cleanly for linux/amd64"
+
+      - name: Build full embedded installer
+        run: |
+          # Assemble a minimal test bundle (no schemas — just enough to embed)
+          BUNDLE_DIR=$(mktemp -d)/ezhealthkonnect
+          mkdir -p "$BUNDLE_DIR"
+
+          # Build go-api for linux
+          GOOS=linux GOARCH=amd64 CGO_ENABLED=0 \
+            go build -ldflags "-s -w" -o "$BUNDLE_DIR/go-api" .
+
+          # Copy core app files
+          for f in package.json app.js server.js go.mod go.sum; do
+            [ -f "$f" ] && cp "$f" "$BUNDLE_DIR/" || true
+          done
+          for d in controllers services routes middleware models public database; do
+            [ -d "$d" ] && cp -r "$d" "$BUNDLE_DIR/" || true
+          done
+
+          # Zip the bundle
+          (cd "$(dirname $BUNDLE_DIR)" && zip -r -q installer/assets/bundle-linux-amd64.zip ezhealthkonnect)
+
+          # Build the installer with embedded bundle
+          cd installer
+          GOOS=linux GOARCH=amd64 CGO_ENABLED=0 \
+            go build -tags embedded -ldflags "-s -w" \
+            -o ../dist/ezHealthKonnect-Setup-Linux-x64 .
+
+          ls -lh ../dist/ezHealthKonnect-Setup-Linux-x64
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ezHealthKonnect-Setup-Linux-x64
+          path: dist/ezHealthKonnect-Setup-Linux-x64
+          retention-days: 7
+
+  migration-sort-test:
+    name: Migration Sort Order
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify migration files are sortable numerically
+        run: |
+          echo "Checking migration file naming convention..."
+          FAIL=0
+          for f in database/migrations/V*.sql; do
+            base=$(basename "$f")
+            # Must match V<number>__<description>.sql
+            if ! echo "$base" | grep -qE '^V[0-9]+__.+\.sql$'; then
+              echo "  FAIL: $base does not match V<N>__<desc>.sql"
+              FAIL=1
+            fi
+          done
+
+          # Verify numeric order matches lexicographic expectation
+          # (i.e., no file would be sorted wrong by the Go installer)
+          SORTED_LEX=$(ls database/migrations/V*.sql | sort | xargs -n1 basename)
+          SORTED_NUM=$(ls database/migrations/V*.sql | \
+            awk -F'[V_]' '{print $2, $0}' | sort -n | awk '{print $2}' | xargs -n1 basename)
+
+          if [ "$SORTED_LEX" != "$SORTED_NUM" ]; then
+            echo ""
+            echo "  WARN: Lexicographic and numeric sort orders differ."
+            echo "  The Go installer sorts numerically — this is expected and correct."
+            echo "  Numeric order (what the installer uses):"
+            echo "$SORTED_NUM" | head -20
+          else
+            echo "  Lex and numeric order match (all files V1..V9 range or consistent)"
+          fi
+
+          COUNT=$(ls database/migrations/V*.sql | wc -l)
+          echo "  Total migrations: $COUNT"
+          echo "  Last migration: $(ls database/migrations/V*.sql | awk -F'[V_]' '{print $2, $0}' | sort -n | tail -1 | awk '{print $2}' | xargs basename)"
+
+          exit $FAIL
