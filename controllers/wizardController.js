@@ -1239,8 +1239,8 @@ class WizardController {
             if (wizardData.auto_start || wizardData.deployment_mode === 'auto' || interfaceData.status === 'active') {
                 try {
                     console.log('🚀 Auto-starting interface in Go backend...');
-                    const activateResponse = await axios.post(
-                        `${GO_BACKEND_URL}/api/processing/interfaces/${interfaceId}/activate`,
+                    const activateResponse = await goClient.post(
+                        `/api/processing/interfaces/${interfaceId}/activate`,
                         {},
                         { timeout: 10000 }
                     );

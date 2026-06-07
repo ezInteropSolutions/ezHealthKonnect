@@ -38,6 +38,7 @@ DB_NAME=ezhealthkonnect
 DB_USER=ezhealth_user
 DB_PASS=""
 WITH_AI=false
+OLLAMA_CHAT_MODEL=llama3.2:3b
 REGISTER_SVC=true
 LOCAL_BUNDLE=""
 VERSION=latest
@@ -149,6 +150,24 @@ collect_config() {
 
   read -rp "  Enable AI companion (Ollama)? [y/N]: " input
   [[ "$input" =~ ^[Yy] ]] && WITH_AI=true
+
+  if [[ "$WITH_AI" == "true" ]]; then
+    echo ""
+    echo "  Select ezCompanion chat model:"
+    echo "    1) llama3.2:3b          (~2 GB)  Fast · CPU-only  [default]"
+    echo "    2) qwen2.5-coder:7b     (~5 GB)  Best for HL7 scripts · needs 8+ GB RAM"
+    echo "    3) llama3.1:8b          (~5 GB)  General reasoning    · needs 8+ GB RAM"
+    echo "    4) mistral-nemo:12b     (~7 GB)  Premium quality      · needs 16+ GB RAM"
+    echo ""
+    read -rp "  Model choice [1]: " model_choice
+    case "$model_choice" in
+      2) OLLAMA_CHAT_MODEL="qwen2.5-coder:7b"  ;;
+      3) OLLAMA_CHAT_MODEL="llama3.1:8b"        ;;
+      4) OLLAMA_CHAT_MODEL="mistral-nemo:12b"   ;;
+      *) OLLAMA_CHAT_MODEL="llama3.2:3b"        ;;
+    esac
+    info "Chat model: ${OLLAMA_CHAT_MODEL}  (change any time in Settings → AI)"
+  fi
 
   echo ""
 
@@ -353,7 +372,7 @@ LOCAL_STORAGE_PATH=${INSTALL_DIR}/storage
 
 AI_ENABLED=${WITH_AI}
 OLLAMA_URL=http://localhost:11434
-OLLAMA_CHAT_MODEL=llama3.2:3b
+OLLAMA_CHAT_MODEL=${OLLAMA_CHAT_MODEL}
 OLLAMA_EMBED_MODEL=nomic-embed-text
 EOF
 
@@ -446,9 +465,9 @@ install_ollama() {
   if curl -fsSL https://ollama.ai/install.sh | sh >/dev/null 2>&1; then
     systemctl enable --now ollama 2>/dev/null || true
     # Pull models in background — these are large, don't block install
-    nohup ollama pull llama3.2:3b       >/dev/null 2>&1 &
-    nohup ollama pull nomic-embed-text  >/dev/null 2>&1 &
-    ok "Ollama installed — models downloading in background (~2.3 GB)"
+    nohup ollama pull "${OLLAMA_CHAT_MODEL}" >/dev/null 2>&1 &
+    nohup ollama pull nomic-embed-text       >/dev/null 2>&1 &
+    ok "Ollama installed — ${OLLAMA_CHAT_MODEL} + nomic-embed-text downloading in background"
   else
     warn "Ollama install failed — AI features won't be available. Install manually: https://ollama.ai"
   fi

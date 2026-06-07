@@ -1121,18 +1121,48 @@ async function loadSystemStatus() {
         }
     } catch (e) { /* non-critical */ }
 
-    // DLQ count — unresolved dead letter entries
+    // ezCompanion AI status
+    await loadAIStatus();
+
+    // DLQ count — pending + retrying entries
     try {
-        const r = await fetch('/api/system/dlq?page_size=1', { credentials: 'include' });
+        const r = await fetch('/api/fhir/dlq/stats', { credentials: 'include' });
         if (r.ok) {
             const d = await r.json();
-            const count = d.pagination ? d.pagination.total : 0;
+            const stats = d.data || {};
+            const count = (stats.pending || 0) + (stats.retrying || 0);
             const el = document.getElementById('dlqCount');
             const metric = document.getElementById('dlqMetric');
             if (el) el.textContent = count;
             if (metric) metric.classList.toggle('status-dual-metric--alert', count > 0);
         }
     } catch (e) { /* non-critical */ }
+}
+
+// ezCompanion AI status — polls /api/ai/status and reflects real Ollama reachability.
+// Also refreshes every 5 minutes to catch model changes in settings.
+async function loadAIStatus() {
+    const el = document.getElementById('aiStatus');
+    if (!el) return;
+    try {
+        const r = await fetch('/api/ai/status', { credentials: 'include' });
+        const d = await r.json();
+        const status = d.data || {};
+        if (status.provider_reachable) {
+            const modelShort = status.chat_model ? status.chat_model.split(':')[0] : '';
+            el.textContent  = modelShort ? `Online (${modelShort})` : 'Online';
+            el.className    = 'status-value success';
+        } else if (status.provider_enabled === false) {
+            el.textContent  = 'Disabled';
+            el.className    = 'status-value warning';
+        } else {
+            el.textContent  = 'Offline';
+            el.className    = 'status-value error';
+        }
+    } catch (_) {
+        const el2 = document.getElementById('aiStatus');
+        if (el2) { el2.textContent = 'Unavailable'; el2.className = 'status-value error'; }
+    }
 }
 
 // Initialize on page load
@@ -1143,7 +1173,8 @@ window.addEventListener('load', function() {
     loadRecentActivity();
     loadSystemStatus();
     updateTime();
-    setInterval(updateTime, 60000); // Update time every minute
+    setInterval(updateTime, 60000);
+    setInterval(loadAIStatus, 5 * 60 * 1000); // re-poll AI status every 5 min
 });
 
 // Load dashboard-specific data that depends on the current user's role

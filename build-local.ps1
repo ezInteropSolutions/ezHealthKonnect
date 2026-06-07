@@ -1,5 +1,5 @@
 #Requires -Version 5.1
-param([string]$Version = 'v1.0.2-beta')
+param([string]$Version = 'v1.0.4-beta')
 
 $ErrorActionPreference = 'Stop'
 $ROOT   = $PSScriptRoot
@@ -93,6 +93,17 @@ foreach ($d in $dirs) {
 }
 Copy-Item "$DIST\go-api.exe" (Join-Path $TMP 'go-api.exe') -Force
 
+# Install production node_modules into the bundle so the installer is self-contained
+# (no npm registry access needed on the target machine).
+Write-Host "   Installing production node_modules (this takes a minute)..." -ForegroundColor DarkYellow
+$npmResult = & npm install --omit=dev --silent --prefix $TMP 2>&1
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "   WARN: npm install had issues: $npmResult" -ForegroundColor Yellow
+} else {
+    $nmSz = [math]::Round((Get-ChildItem (Join-Path $TMP 'node_modules') -Recurse | Measure-Object -Property Length -Sum).Sum / 1MB, 0)
+    Write-Host "   OK: node_modules bundled ($nmSz MB)" -ForegroundColor Green
+}
+
 if (Test-Path $BUNDLE_ZIP) { Remove-Item $BUNDLE_ZIP -Force }
 # Compress $TMP itself (not its contents) so the zip has a root dir matching CI format:
 #   ezhealthkonnect-v1.0.2-beta/app.js
@@ -110,7 +121,7 @@ Write-Host "   OK: bundle-windows.zip ($sz MB)" -ForegroundColor Green
 # -- Step 3: Build installer.exe with embedded bundle --------------------------
 Write-Host "`n-- Step 3: Build installer.exe (embedded)" -ForegroundColor Yellow
 
-$s3 = "/src/dist/ezhealthkonnect-installer.exe"
+$s3 = "/src/dist/ezHealthKonnect-Setup-Win64.exe"
 $script3 = "GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -tags embedded -ldflags `"-s -w -X main.version=$Version`" -o $s3 ."
 [System.IO.File]::WriteAllText("$DIST\_s3.sh", $script3)
 
@@ -122,14 +133,14 @@ docker run --rm `
 
 Remove-Item "$DIST\_s3.sh" -ErrorAction SilentlyContinue
 
-if (-not (Test-Path "$DIST\ezhealthkonnect-installer.exe")) {
+if (-not (Test-Path "$DIST\ezHealthKonnect-Setup-Win64.exe")) {
     Write-Host "ERROR: installer.exe not built" -ForegroundColor Red; exit 1
 }
-$sz = [math]::Round((Get-Item "$DIST\ezhealthkonnect-installer.exe").Length / 1MB, 1)
-Write-Host "   OK: ezhealthkonnect-installer.exe ($sz MB)" -ForegroundColor Green
+$sz = [math]::Round((Get-Item "$DIST\ezHealthKonnect-Setup-Win64.exe").Length / 1MB, 1)
+Write-Host "   OK: ezHealthKonnect-Setup-Win64.exe ($sz MB)" -ForegroundColor Green
 
 # -- Done ----------------------------------------------------------------------
 Write-Host ""
 Write-Host "Build complete!" -ForegroundColor Green
-Write-Host "  dist\ezhealthkonnect-installer.exe - copy this to the target machine" -ForegroundColor Green
+Write-Host "  dist\ezHealthKonnect-Setup-Win64.exe - copy this to the target machine" -ForegroundColor Green
 Write-Host ""

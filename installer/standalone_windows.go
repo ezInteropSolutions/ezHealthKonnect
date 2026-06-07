@@ -83,13 +83,18 @@ func runStandaloneInstallation(cfg *Config) {
 
 	// ── Step 5: npm install ────────────────────────────────────────────────
 	emitStep(5, "Installing Node.js dependencies")
-	npmPath := filepath.Join(filepath.Dir(nodePath), "npm.cmd")
-	npmCmd := exec.Command(npmPath, "install", "--omit=dev", "--silent")
-	npmCmd.Dir = cfg.InstallDir
-	if err := streamCmd(npmCmd); err != nil {
-		emit("warn", "npm install had warnings: "+err.Error())
+	nodeModulesDir := filepath.Join(cfg.InstallDir, "node_modules")
+	if _, err := os.Stat(nodeModulesDir); err == nil {
+		emit("ok", "Node.js dependencies already bundled â skipping npm install")
 	} else {
-		emit("ok", "Node.js dependencies installed")
+		npmPath := filepath.Join(filepath.Dir(nodePath), "npm.cmd")
+		npmCmd := exec.Command(npmPath, "install", "--omit=dev", "--silent")
+		npmCmd.Dir = cfg.InstallDir
+		if err := streamCmd(npmCmd); err != nil {
+			emit("warn", "npm install had warnings: "+err.Error())
+		} else {
+			emit("ok", "Node.js dependencies installed")
+		}
 	}
 
 	// ── Step 6: Database setup ─────────────────────────────────────────────

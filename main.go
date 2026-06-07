@@ -37,6 +37,7 @@ import (
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
+	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
@@ -60,6 +61,12 @@ var codeTemplateSvc *services.CodeTemplateService
 var objectStorageService *storage.ObjectStorageService
 
 func main() {
+	// Load .env before anything reads os.Getenv — harmless if the file doesn't exist
+	// (production deployments pass variables via the shell/service manager instead).
+	if err := godotenv.Load(); err != nil && !os.IsNotExist(err) {
+		log.Printf("⚠️  .env not loaded: %v", err)
+	}
+
 	// Record start time
 	startTime = time.Now()
 

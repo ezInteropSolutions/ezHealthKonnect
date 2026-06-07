@@ -385,6 +385,10 @@ app.use('/api/ai/feedback/export',           _analyticsAuth, _requireAdminAuth, 
 app.use('/api/ai/feedback/submit-to-team',   _analyticsAuth, _requireAdminAuth, forwardToGo);
 app.use('/api/ai', _analyticsAuth, forwardToGo);
 
+// Admin smoke-test — session auth + admin role required; streams SSE
+const smokeTestRoutes = require('./routes/adminSmokeTest');
+app.use('/api/admin/smoke-test', _analyticsAuth, _requireAdminAuth, smokeTestRoutes);
+
 // Add request ID for audit logging
 app.use((req, res, next) => {
     req.requestId = require('crypto').randomUUID();

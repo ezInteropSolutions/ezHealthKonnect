@@ -41,21 +41,29 @@ function requireRole(...roles) {
     };
 }
 
-// Middleware to verify JWT token (optional, for API authentication)
+// Middleware to verify JWT token (optional, for API authentication).
+// Accepts either a Bearer token (API callers) or a valid session cookie
+// (browser requests from pages like sidebar-nav.js pollers).
 function verifyToken(req, res, next) {
     const token = req.header('Authorization')?.replace('Bearer ', '') || req.query.token;
 
-    if (!token) {
-        return res.status(401).json({ message: 'Access token required' });
+    if (token) {
+        try {
+            const decoded = jwt.verify(token, process.env.JWT_SECRET);
+            req.user = decoded;
+            return next();
+        } catch (error) {
+            return res.status(401).json({ message: 'Invalid or expired token' });
+        }
     }
 
-    try {
-        const decoded = jwt.verify(token, process.env.JWT_SECRET);
-        req.user = decoded;
-        next();
-    } catch (error) {
-        return res.status(401).json({ message: 'Invalid or expired token' });
+    // Fall back to session auth for browser requests (no Bearer token sent)
+    if (req.session && req.session.user) {
+        req.user = req.session.user;
+        return next();
     }
+
+    return res.status(401).json({ message: 'Access token required' });
 }
 
 module.exports = {

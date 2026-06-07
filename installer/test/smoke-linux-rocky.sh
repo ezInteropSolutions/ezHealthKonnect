@@ -53,15 +53,22 @@ PSQL=/usr/pgsql-15/bin/psql
 
 # ── 5. initdb ─────────────────────────────────────────────────────────────────
 hdr "PostgreSQL initdb"
-/usr/pgsql-15/bin/postgresql-15-setup initdb 2>/dev/null \
-  && ok "initdb complete" || skip "initdb (may already be done)"
+PGDATA=/var/lib/pgsql/15/data
+# postgresql-15-setup reads PGDATA from the systemd unit file, which does not
+# exist in a Docker container. Call initdb directly instead.
+if [ -f "$PGDATA/PG_VERSION" ]; then
+  ok "initdb already done"
+else
+  runuser -l postgres -c "/usr/pgsql-15/bin/initdb -D $PGDATA" 2>/dev/null \
+    && ok "initdb complete" || fail "initdb failed"
+fi
 
 # Start PostgreSQL — use runuser (no PAM needed in minimal containers)
-if runuser -l postgres -c "/usr/pgsql-15/bin/pg_ctl -D /var/lib/pgsql/15/data -l /tmp/pg.log start -w" 2>/dev/null; then
+if runuser -l postgres -c "/usr/pgsql-15/bin/pg_ctl -D $PGDATA -l /tmp/pg.log start -w" 2>/dev/null; then
   ok "PostgreSQL started"
 else
   fail "PostgreSQL failed to start"
-  cat /tmp/pg.log 2>/dev/null | tail -20 || true
+  tail -20 /tmp/pg.log 2>/dev/null || true
 fi
 
 sleep 2

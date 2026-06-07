@@ -101,6 +101,7 @@
                             <span class="nav-icon"><i class="fas fa-sliders"></i></span>
                             <span class="nav-label">Settings</span>
                         </a>
+                        <a href="smoke-test.html" class="nav-item"><span class="nav-icon"><i class="fas fa-flask"></i></span><span class="nav-label">System Test</span></a>
                     </div>
                 </div>
             </div>
@@ -210,11 +211,11 @@
                                 </div>
                             </div>
                         </div>
-                        <div class="status-item">
+                        <div class="status-item" id="aiStatusItem" style="cursor:pointer" onclick="window.AIAssistant && AIAssistant.openWithContext({page:'dashboard'})" title="Open ezCompanion AI assistant">
                             <span class="status-icon"><i class="fas fa-robot"></i></span>
                             <div class="status-info">
-                                <span class="status-label">AI Claude</span>
-                                <span class="status-value success" id="aiStatus">Available</span>
+                                <span class="status-label">ezCompanion</span>
+                                <span class="status-value" id="aiStatus">Checking…</span>
                             </div>
                         </div>
                         <div class="status-item">
