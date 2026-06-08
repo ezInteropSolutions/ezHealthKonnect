@@ -80,11 +80,14 @@ jobs:
             [ -d "$d" ] && cp -r "$d" "$BUNDLE_DIR/" || true
           done
 
-          # Zip the bundle
-          (cd "$(dirname $BUNDLE_DIR)" && zip -r -q installer/assets/bundle-linux-amd64.zip ezhealthkonnect)
+          # Zip the bundle — use absolute path so the output lands in the repo,
+          # not relative to the temp directory where BUNDLE_DIR lives.
+          BUNDLE_ZIP="$GITHUB_WORKSPACE/installer/assets/bundle-linux-amd64.zip"
+          mkdir -p "$GITHUB_WORKSPACE/installer/assets"
+          (cd "$(dirname $BUNDLE_DIR)" && zip -r -q "$BUNDLE_ZIP" ezhealthkonnect)
 
           # Build the installer with embedded bundle
-          cd installer
+          cd "$GITHUB_WORKSPACE/installer"
           GOOS=linux GOARCH=amd64 CGO_ENABLED=0 \
             go build -tags embedded -ldflags "-s -w" \
             -o ../dist/ezHealthKonnect-Setup-Linux-x64 .
