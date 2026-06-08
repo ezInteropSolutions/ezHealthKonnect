@@ -63,10 +63,16 @@ ok "apt-get update after PGDG repo"
 
 # ── 4. PostgreSQL install ──────────────────────────────────────────────────────
 hdr "PostgreSQL 15 Install"
-# Remove pre-installed PG 14 BEFORE installing PG 15 so the apt post-install
-# hook runs on a free port 5432 and properly initializes the cluster.
-# No-op on Docker / fresh prod systems where PG 14 was never installed.
-$SUDO apt-get remove -y postgresql-14 postgresql-client-14 2>/dev/null || true
+# The ubuntu-22.04 GHA runner ships with PG 14 running on port 5432.
+# Steps:
+#   1. Stop PG 14 so apt postrm can drop the cluster cleanly.
+#   2. --purge removes binaries AND the pg_lsclusters cluster entry (port 5432
+#      registration). plain "remove" leaves the entry → PG 15 post-install hook
+#      sees port 5432 taken and skips pg_createcluster → no cluster 15 is created.
+#   3. Install PG 15 — with port 5432 free, the hook creates and starts cluster 15.
+$SUDO systemctl stop postgresql@14-main 2>/dev/null || true
+$SUDO systemctl stop postgresql         2>/dev/null || true
+$SUDO apt-get remove --purge -y postgresql-14 postgresql-client-14 2>/dev/null || true
 
 $SUDO apt-get install -y -qq postgresql-15 postgresql-client-15
 ok "postgresql-15 installed"
