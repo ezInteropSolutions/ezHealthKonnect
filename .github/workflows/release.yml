@@ -307,6 +307,7 @@ jobs:
     needs: [build-windows, build-linux]
     permissions:
       contents: write
+      actions: write
 
     steps:
       - uses: actions/checkout@v4
