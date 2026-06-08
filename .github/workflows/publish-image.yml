@@ -73,33 +73,27 @@ jobs:
           docker run --rm ${{ env.LOCAL_TAG }} sh -c \
             'test -d /app/.git && echo "FAIL: .git found in image" && exit 1 || echo "OK: No .git in image"'
 
-      # ── CVE scan with Trivy (informational — does not block push) ─────────
-      - name: Install Trivy
-        run: |
-          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh \
-            | sh -s -- -b /usr/local/bin latest
+      # ── CVE scan with Trivy ───────────────────────────────────────────────
+      # Full findings — informational, never blocks the push.
+      - name: Trivy scan (full, informational)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: ${{ env.LOCAL_TAG }}
+          format: table
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: '0'
 
-      - name: Scan image for vulnerabilities (Trivy)
-        # Blocks on CRITICAL/HIGH CVEs that have a fix available.
-        # CVEs with no upstream fix are suppressed via .trivyignore (reviewed monthly).
-        # To see ALL findings including suppressed, check the table output above.
-        run: |
-          echo "=== Full findings (including suppressed) ==="
-          trivy image \
-            --format table \
-            --severity CRITICAL,HIGH \
-            --ignore-unfixed \
-            ${{ env.LOCAL_TAG }} || true
-
-          echo ""
-          echo "=== Enforced scan (blocks on fixable CVEs not in .trivyignore) ==="
-          trivy image \
-            --format table \
-            --severity CRITICAL,HIGH \
-            --ignore-unfixed \
-            --ignorefile .trivyignore \
-            --exit-code 1 \
-            ${{ env.LOCAL_TAG }}
+      # Enforced scan — blocks on fixable CVEs not suppressed in .trivyignore.
+      - name: Trivy scan (enforced — blocks on fixable CVEs)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: ${{ env.LOCAL_TAG }}
+          format: table
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          trivyignores: .trivyignore
+          exit-code: '1'
 
       # ── Smoke test: container starts and binaries run ─────────────────────
       - name: Smoke test — binaries present and executable
