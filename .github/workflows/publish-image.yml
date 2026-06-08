@@ -74,26 +74,37 @@ jobs:
             'test -d /app/.git && echo "FAIL: .git found in image" && exit 1 || echo "OK: No .git in image"'
 
       # ── CVE scan with Trivy ───────────────────────────────────────────────
+      - name: Install Trivy
+        run: |
+          sudo apt-get install -y wget apt-transport-https gnupg
+          wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key \
+            | gpg --dearmor \
+            | sudo tee /usr/share/keyrings/trivy.gpg > /dev/null
+          echo "deb [signed-by=/usr/share/keyrings/trivy.gpg] https://aquasecurity.github.io/trivy-repo/deb generic main" \
+            | sudo tee /etc/apt/sources.list.d/trivy.list
+          sudo apt-get update -qq
+          sudo apt-get install -y trivy
+          trivy --version
+
       # Full findings — informational, never blocks the push.
       - name: Trivy scan (full, informational)
-        uses: aquasecurity/trivy-action@0.28.0
-        with:
-          image-ref: ${{ env.LOCAL_TAG }}
-          format: table
-          severity: CRITICAL,HIGH
-          ignore-unfixed: true
-          exit-code: '0'
+        run: |
+          trivy image \
+            --format table \
+            --severity CRITICAL,HIGH \
+            --ignore-unfixed \
+            ${{ env.LOCAL_TAG }} || true
 
       # Enforced scan — blocks on fixable CVEs not suppressed in .trivyignore.
       - name: Trivy scan (enforced — blocks on fixable CVEs)
-        uses: aquasecurity/trivy-action@0.28.0
-        with:
-          image-ref: ${{ env.LOCAL_TAG }}
-          format: table
-          severity: CRITICAL,HIGH
-          ignore-unfixed: true
-          trivyignores: .trivyignore
-          exit-code: '1'
+        run: |
+          trivy image \
+            --format table \
+            --severity CRITICAL,HIGH \
+            --ignore-unfixed \
+            --ignorefile .trivyignore \
+            --exit-code 1 \
+            ${{ env.LOCAL_TAG }}
 
       # ── Smoke test: container starts and binaries run ─────────────────────
       - name: Smoke test — binaries present and executable
