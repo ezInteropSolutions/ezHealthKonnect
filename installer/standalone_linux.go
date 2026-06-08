@@ -77,19 +77,24 @@ func runStandaloneInstallation(cfg *Config) {
 
 	// ── Step 5: npm install ────────────────────────────────────────────────────
 	emitStep(5, "Installing Node.js dependencies")
-	npmCmd := exec.Command(nodePath, filepath.Join(filepath.Dir(nodePath), "npm"),
-		"install", "--omit=dev", "--silent")
-	npmCmd.Dir = cfg.InstallDir
-	// npm is usually a script wrapper — try npm directly
-	npmDirect := exec.Command("npm", "install", "--omit=dev", "--silent")
-	npmDirect.Dir = cfg.InstallDir
-	if err := streamCmd(npmDirect); err != nil {
-		// Fallback: node path-based npm
-		if err2 := streamCmd(npmCmd); err2 != nil {
-			emit("warn", "npm install had warnings: "+err2.Error())
+	nodeModulesDir := filepath.Join(cfg.InstallDir, "node_modules")
+	if _, err := os.Stat(nodeModulesDir); err == nil {
+		emit("ok", "Node.js dependencies already bundled — skipping npm install")
+	} else {
+		npmCmd := exec.Command(nodePath, filepath.Join(filepath.Dir(nodePath), "npm"),
+			"install", "--omit=dev", "--silent")
+		npmCmd.Dir = cfg.InstallDir
+		// npm is usually a script wrapper — try npm directly
+		npmDirect := exec.Command("npm", "install", "--omit=dev", "--silent")
+		npmDirect.Dir = cfg.InstallDir
+		if err := streamCmd(npmDirect); err != nil {
+			// Fallback: node path-based npm
+			if err2 := streamCmd(npmCmd); err2 != nil {
+				emit("warn", "npm install had warnings: "+err2.Error())
+			}
 		}
+		emit("ok", "Node.js dependencies installed")
 	}
-	emit("ok", "Node.js dependencies installed")
 
 	// ── Step 6: Database setup ─────────────────────────────────────────────────
 	emitStep(6, "Setting up PostgreSQL database")

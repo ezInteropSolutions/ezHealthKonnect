@@ -72,7 +72,6 @@ class SmokeTestRunner extends EventEmitter {
     async run() {
         this._aborted = false;
         this._results = [];
-        this._cookie  = '';
         this._state   = { adtId: null, oruId: null, fhirId: null, fileId: null };
         this._startMs = Date.now();
 
