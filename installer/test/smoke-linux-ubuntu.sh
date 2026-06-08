@@ -96,26 +96,26 @@ fi
 sleep 2
 
 # ── 6. PostgreSQL peer auth (the critical DB setup path) ───────────────────────
-hdr "PostgreSQL Peer Auth (su - postgres)"
+hdr "PostgreSQL Peer Auth (runuser)"
 PSQL=/usr/lib/postgresql/15/bin/psql
 
 CREATE_USER="CREATE USER ezhealth_user WITH PASSWORD 'testpass123';"
 CREATE_DB="CREATE DATABASE ezhealthkonnect OWNER ezhealth_user;"
 GRANT="GRANT ALL PRIVILEGES ON DATABASE ezhealthkonnect TO ezhealth_user;"
 
-if $SUDO su - postgres -c "$PSQL -d postgres -c \"$CREATE_USER\" -q" 2>/dev/null; then
+if $SUDO runuser -l postgres -c "$PSQL -d postgres -c \"$CREATE_USER\" -q" 2>/dev/null; then
   ok "CREATE USER via peer auth"
 else
   fail "CREATE USER via peer auth"
 fi
 
-if $SUDO su - postgres -c "$PSQL -d postgres -c \"$CREATE_DB\" -q" 2>/dev/null; then
+if $SUDO runuser -l postgres -c "$PSQL -d postgres -c \"$CREATE_DB\" -q" 2>/dev/null; then
   ok "CREATE DATABASE via peer auth"
 else
   fail "CREATE DATABASE via peer auth"
 fi
 
-$SUDO su - postgres -c "$PSQL -d postgres -c \"$GRANT\" -q" 2>/dev/null && true
+$SUDO runuser -l postgres -c "$PSQL -d postgres -c \"$GRANT\" -q" 2>/dev/null && true
 ok "GRANT PRIVILEGES via peer auth"
 
 # ── 7. App user connectivity ───────────────────────────────────────────────────
@@ -126,7 +126,7 @@ if $PSQL -h localhost -U ezhealth_user -d ezhealthkonnect -c "SELECT 1;" -q 2>/d
 else
   skip "TCP connection as app user (pg_hba may need md5 — socket works)"
   # Try unix socket instead
-  if $SUDO su - postgres -c "$PSQL -U ezhealth_user -d ezhealthkonnect -c 'SELECT 1;' -q" 2>/dev/null; then
+  if $SUDO runuser -l postgres -c "$PSQL -U ezhealth_user -d ezhealthkonnect -c 'SELECT 1;' -q" 2>/dev/null; then
     ok "App user can connect via socket"
   else
     fail "App user cannot connect at all"
@@ -146,7 +146,7 @@ for sql in /tmp/migrations/V1__Init.sql /tmp/migrations/V2__Users.sql /tmp/migra
   PGPASSWORD=testpass123 $PSQL -h localhost -U ezhealth_user -d ezhealthkonnect -f "$sql" -q 2>/dev/null \
     && ok "  $(basename $sql)" \
     || { # Try via socket
-         $SUDO su - postgres -c "$PSQL -U ezhealth_user -d ezhealthkonnect -f $sql -q" 2>/dev/null \
+         $SUDO runuser -l postgres -c "$PSQL -U ezhealth_user -d ezhealthkonnect -f $sql -q" 2>/dev/null \
            && ok "  $(basename $sql) (via socket)" \
            || fail "  $(basename $sql)"; }
 done
@@ -222,10 +222,10 @@ fi
 
 # ── 11. Drop cleanup test ──────────────────────────────────────────────────────
 hdr "DB Cleanup (Uninstall Path)"
-$SUDO su - postgres -c "$PSQL -d postgres -c \"SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname='ezhealthkonnect' AND pid<>pg_backend_pid();\" -q" 2>/dev/null && true
-$SUDO su - postgres -c "$PSQL -d postgres -c \"DROP DATABASE IF EXISTS ezhealthkonnect;\" -q" 2>/dev/null \
+$SUDO runuser -l postgres -c "$PSQL -d postgres -c \"SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname='ezhealthkonnect' AND pid<>pg_backend_pid();\" -q" 2>/dev/null && true
+$SUDO runuser -l postgres -c "$PSQL -d postgres -c \"DROP DATABASE IF EXISTS ezhealthkonnect;\" -q" 2>/dev/null \
   && ok "DROP DATABASE" || fail "DROP DATABASE"
-$SUDO su - postgres -c "$PSQL -d postgres -c \"DROP USER IF EXISTS ezhealth_user;\" -q" 2>/dev/null \
+$SUDO runuser -l postgres -c "$PSQL -d postgres -c \"DROP USER IF EXISTS ezhealth_user;\" -q" 2>/dev/null \
   && ok "DROP USER" || fail "DROP USER"
 
 # ── Summary ────────────────────────────────────────────────────────────────────
