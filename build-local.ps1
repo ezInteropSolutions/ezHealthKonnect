@@ -1,5 +1,5 @@
-#Requires -Version 5.1
-param([string]$Version = 'v1.0.4-beta')
+﻿#Requires -Version 5.1
+param([string]$Version = 'v26.06.08')
 
 $ErrorActionPreference = 'Stop'
 $ROOT   = $PSScriptRoot
@@ -53,14 +53,14 @@ $files = @(
     'Dockerfile', 'docker-compose.prod.yml', 'docker-compose.yml',
     'COMMERCIAL_LICENSE.md', 'THIRD-PARTY-NOTICES.txt'
 )
-# Runtime directories — no dev/test/build/docs dirs
+# Runtime directories â€” no dev/test/build/docs dirs
 $dirs = @(
     'controllers', 'services', 'middleware', 'routes', 'config',
     'models', 'processing', 'utils', 'public',
     'fhir', 'hl7',
     'templates'
 )
-# NOTE: schemas/ excluded — 1.5 GB of FHIR JSON schemas, too large to embed.
+# NOTE: schemas/ excluded â€” 1.5 GB of FHIR JSON schemas, too large to embed.
 # App degrades gracefully: logs warning but runs without schema validation.
 # Excluded (not in $dirs above):
 #   installer/       - build tooling only
@@ -78,7 +78,7 @@ $dirs = @(
 #   architecture/    - docs only
 #   .claude/ .vscode/ .claire/ - IDE tooling
 
-# Only ship database/migrations — not backups or init scripts
+# Only ship database/migrations â€” not backups or init scripts
 $migDir = Join-Path $TMP 'database\migrations'
 New-Item -ItemType Directory -Path $migDir -Force | Out-Null
 Copy-Item (Join-Path $ROOT 'database\migrations\*') $migDir -Recurse -Force
