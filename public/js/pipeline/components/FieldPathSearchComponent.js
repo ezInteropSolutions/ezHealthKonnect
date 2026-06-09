@@ -28,13 +28,14 @@ class FieldPathSearchComponent {
             showCategories: options.showCategories !== false, // Default true
             maxSuggestions: options.maxSuggestions || 10,
             caseSensitive: options.caseSensitive || false,
-            // NEW: Additional fields to include (e.g., step output variables)
-            // Format: [{ name: 'var_name', path: 'steps.step_alias.var_name', description: '...', category: 'Step Outputs' }]
+            // Additional fields to include (e.g., step output variables)
             additionalFields: options.additionalFields || [],
-            // NEW: Callback to dynamically fetch step variables
+            // Callback to dynamically fetch step variables
             getStepVariables: options.getStepVariables || null,
-            // NEW: Include predefined HL7 fields (default true)
+            // Include predefined HL7 fields (default true; set false for CDA-only pipelines)
             includeHL7Fields: options.includeHL7Fields !== false,
+            // messageType: when 'CCD'/'CCDA'/'CDA', enables USCDI CDA field search
+            messageType: options.messageType || '',
             ...options
         };
 
@@ -43,8 +44,18 @@ class FieldPathSearchComponent {
         this.recentPaths = this.loadRecentPaths();
         // Cache for dynamically loaded step variables
         this.cachedStepVariables = null;
+        // Cache for CDA USCDI search results (keyed by query)
+        this._cdaCache = {};
+        // Pending CDA fetch abort controller
+        this._cdaFetchController = null;
 
         this.initialize();
+    }
+
+    // Returns true when the pipeline is CDA/CCD — activates USCDI search mode.
+    get isCDAMessageType() {
+        const mt = (this.options.messageType || '').toUpperCase();
+        return mt === 'CCD' || mt === 'CCDA' || mt === 'CDA' || mt === 'C32' || mt === 'HITSP';
     }
 
     initialize() {
@@ -137,14 +148,27 @@ class FieldPathSearchComponent {
             return;
         }
 
-        this.searchFields(query);
+        if (this.isCDAMessageType) {
+            this._searchCDAFields(query);
+        } else {
+            this.searchFields(query);
+        }
     }
 
     handleFocus(e) {
-        if (this.input.value.trim().length === 0) {
-            this.showBrowseMode();
+        const query = this.input.value.trim();
+        if (query.length === 0) {
+            if (this.isCDAMessageType) {
+                this._showCDABrowseHint();
+            } else {
+                this.showBrowseMode();
+            }
         } else {
-            this.searchFields(this.input.value.trim());
+            if (this.isCDAMessageType) {
+                this._searchCDAFields(query);
+            } else {
+                this.searchFields(query);
+            }
         }
     }
 
@@ -200,6 +224,179 @@ class FieldPathSearchComponent {
             }
         }, 200);
     }
+
+    // ── CDA / USCDI search ─────────────────────────────────────────────────────
+
+    /** Browse hint shown when a CDA pipeline has an empty search box. */
+    _showCDABrowseHint() {
+        const allFields = this.getAllFields();
+        const recentFields = this.recentPaths
+            .map(p => allFields.find(f => f.path === p))
+            .filter(Boolean)
+            .slice(0, 5);
+
+        let html = '';
+        if (recentFields.length > 0) {
+            html += '<div class="field-path-category">⏱️ Recently Used</div>';
+            recentFields.forEach(f => { html += this.renderFieldItem(f, ''); });
+        }
+        html += `
+            <div class="field-path-hint" style="padding:12px;text-align:center;color:#888;">
+                🏥 Type a clinical term to search CDA fields<br>
+                e.g. <code>allergy</code>, <code>patient</code>, <code>medication</code>
+            </div>`;
+        this.dropdown.innerHTML = html;
+        this.showDropdown();
+    }
+
+    /**
+     * Async CDA USCDI field search. Calls /api/fhir/field-search, caches results,
+     * and renders CDA items with expand-on-demand affordance.
+     */
+    async _searchCDAFields(query) {
+        if (!query || query.length < 2) return;
+
+        // Return cached results immediately
+        if (this._cdaCache[query]) {
+            this._renderCDAResults(this._cdaCache[query], query);
+            return;
+        }
+
+        // Cancel previous in-flight fetch
+        if (this._cdaFetchController) {
+            this._cdaFetchController.abort();
+        }
+        this._cdaFetchController = new AbortController();
+
+        // Show loading hint while fetching
+        this.dropdown.innerHTML = `
+            <div class="field-path-hint" style="padding:10px;text-align:center;color:#888;">
+                🔍 Searching CDA fields…
+            </div>`;
+        this.showDropdown();
+
+        try {
+            const url = `/api/fhir/field-search?q=${encodeURIComponent(query)}&messageType=CCD&maxResults=${this.options.maxSuggestions}`;
+            const resp = await fetch(url, { signal: this._cdaFetchController.signal });
+            if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+            const data = await resp.json();
+            const results = data.results || [];
+            this._cdaCache[query] = results;
+            this._renderCDAResults(results, query);
+        } catch (err) {
+            if (err.name === 'AbortError') return; // superseded by newer query
+            console.warn('[FieldPathSearchComponent] CDA search error:', err);
+            // Fall back to static HL7 search on API failure
+            this.searchFields(query);
+        }
+    }
+
+    /** Renders CDA SearchResult entries with expand toggle for FHIR path + CDA XPath. */
+    _renderCDAResults(results, query) {
+        if (results.length === 0) {
+            if (this.options.allowCustom) {
+                this.showCustomOption(query);
+            } else {
+                this.hideDropdown();
+            }
+            return;
+        }
+
+        let html = '<div class="field-path-category">🏥 CDA Clinical Fields (USCDI)</div>';
+        results.forEach(r => { html += this._renderCDAItem(r, query); });
+
+        if (this.options.allowCustom && query) {
+            html += `
+                <div class="field-path-item custom-path" data-path="${this.escapeHtml(query)}">
+                    <div class="field-path-icon">✏️</div>
+                    <div class="field-path-content">
+                        <div class="field-path-name">Custom: ${this.highlightMatch(query, query)}</div>
+                        <div class="field-path-desc">Use custom field path</div>
+                    </div>
+                </div>`;
+        }
+
+        this.dropdown.innerHTML = html;
+        this._attachCDAExpandListeners();
+        this.showDropdown();
+    }
+
+    /** Renders one CDA result row with a ⊕ expand button. */
+    _renderCDAItem(result, query) {
+        const conformanceBadge = result.conformance
+            ? `<span class="cda-conformance cda-conformance--${result.conformance.toLowerCase()}">${result.conformance}</span>`
+            : '';
+        const highlightedLabel = this.highlightMatch(result.label || result.shortPath, query);
+        const highlightedPath = this.highlightMatch(result.shortPath, query);
+        const uscdiMeta = [result.uscdiClass, result.valueSet].filter(Boolean).join(' · ');
+
+        const hasPaths = result.fhirPath || result.cdaXPath;
+        const expandBtn = hasPaths
+            ? `<button class="cda-expand-btn" title="Show FHIR path and CDA XPath" aria-label="Expand paths">⊕</button>`
+            : '';
+
+        const fhirRow = result.fhirPath
+            ? `<div class="cda-expanded-row">
+                   <span class="cda-path-label">FHIR</span>
+                   <code class="cda-path-value">${this.escapeHtml(result.fhirPath)}</code>
+                   <button class="cda-copy-btn" data-copy="${this.escapeHtml(result.fhirPath)}" title="Copy FHIR path">📋</button>
+               </div>`
+            : '';
+        const cdaRow = result.cdaXPath
+            ? `<div class="cda-expanded-row">
+                   <span class="cda-path-label">XPath</span>
+                   <code class="cda-path-value">${this.escapeHtml(result.cdaXPath)}</code>
+                   <button class="cda-copy-btn" data-copy="${this.escapeHtml(result.cdaXPath)}" title="Copy CDA XPath">📋</button>
+               </div>`
+            : '';
+
+        return `
+            <div class="field-path-item cda-field-item" data-path="${this.escapeHtml(result.shortPath)}">
+                <div class="field-path-icon" style="background:#10b981;">🏥</div>
+                <div class="field-path-content">
+                    <div class="field-path-name">
+                        ${highlightedLabel}
+                        ${conformanceBadge}
+                        ${expandBtn}
+                    </div>
+                    <div class="field-path-path">${highlightedPath}</div>
+                    <div class="field-path-desc">${this.escapeHtml(uscdiMeta)}</div>
+                    ${hasPaths ? `<div class="cda-expanded-paths" style="display:none;">${fhirRow}${cdaRow}</div>` : ''}
+                </div>
+            </div>`;
+    }
+
+    /** Wires expand buttons and copy buttons inside the rendered CDA dropdown. */
+    _attachCDAExpandListeners() {
+        this.dropdown.querySelectorAll('.cda-expand-btn').forEach(btn => {
+            btn.addEventListener('mousedown', e => {
+                e.preventDefault();
+                e.stopPropagation();
+                const item = btn.closest('.cda-field-item');
+                if (!item) return;
+                const panel = item.querySelector('.cda-expanded-paths');
+                if (!panel) return;
+                const isOpen = panel.style.display !== 'none';
+                panel.style.display = isOpen ? 'none' : 'block';
+                btn.textContent = isOpen ? '⊕' : '⊖';
+            });
+        });
+
+        this.dropdown.querySelectorAll('.cda-copy-btn').forEach(btn => {
+            btn.addEventListener('mousedown', e => {
+                e.preventDefault();
+                e.stopPropagation();
+                const text = btn.dataset.copy;
+                if (text && navigator.clipboard) {
+                    navigator.clipboard.writeText(text).catch(() => {});
+                }
+                btn.textContent = '✅';
+                setTimeout(() => { btn.textContent = '📋'; }, 1500);
+            });
+        });
+    }
+
+    // ── End CDA / USCDI search ─────────────────────────────────────────────────
 
     searchFields(query) {
         console.log('[FieldPathSearchComponent] Searching for:', query);
@@ -807,6 +1004,84 @@ class FieldPathSearchComponent {
                 border-radius: 3px;
                 font-size: 11px;
             }
+
+            /* ── CDA / USCDI result styles ── */
+
+            .cda-conformance {
+                display: inline-block;
+                font-size: 9px;
+                font-weight: 700;
+                letter-spacing: 0.5px;
+                padding: 1px 5px;
+                border-radius: 3px;
+                margin-left: 5px;
+                vertical-align: middle;
+                text-transform: uppercase;
+            }
+            .cda-conformance--shall  { background: #dcfce7; color: #15803d; }
+            .cda-conformance--should { background: #fef9c3; color: #92400e; }
+            .cda-conformance--may    { background: #f0f4ff; color: #4338ca; }
+
+            .cda-expand-btn {
+                background: none;
+                border: none;
+                cursor: pointer;
+                font-size: 13px;
+                padding: 0 3px;
+                color: #6b7280;
+                vertical-align: middle;
+                line-height: 1;
+            }
+            .cda-expand-btn:hover { color: #111; }
+
+            .cda-expanded-paths {
+                margin-top: 6px;
+                padding: 6px 8px;
+                background: #f8fafc;
+                border: 1px solid #e2e8f0;
+                border-radius: 4px;
+            }
+
+            .cda-expanded-row {
+                display: flex;
+                align-items: center;
+                gap: 6px;
+                margin-bottom: 4px;
+                font-size: 11px;
+            }
+            .cda-expanded-row:last-child { margin-bottom: 0; }
+
+            .cda-path-label {
+                flex-shrink: 0;
+                width: 36px;
+                font-weight: 600;
+                color: #64748b;
+                text-transform: uppercase;
+                font-size: 9px;
+            }
+
+            .cda-path-value {
+                flex: 1;
+                font-family: 'Courier New', monospace;
+                font-size: 10px;
+                color: #1e40af;
+                background: #eff6ff;
+                padding: 2px 5px;
+                border-radius: 3px;
+                word-break: break-all;
+            }
+
+            .cda-copy-btn {
+                flex-shrink: 0;
+                background: none;
+                border: none;
+                cursor: pointer;
+                font-size: 12px;
+                padding: 0;
+                line-height: 1;
+                opacity: 0.7;
+            }
+            .cda-copy-btn:hover { opacity: 1; }
 
             /* Scrollbar */
             .field-path-search-dropdown::-webkit-scrollbar {

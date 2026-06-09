@@ -20,6 +20,7 @@ import (
 	"ezhealthkonnect/services/ai"
 	"ezhealthkonnect/services/schema"
 	"ezhealthkonnect/services/executors/enrichment"
+	fhirnarrative "ezhealthkonnect/services/fhir_narrative"
 	"ezhealthkonnect/services/logger"
 	appmetrics "ezhealthkonnect/services/metrics"
 	"fmt"
@@ -622,6 +623,39 @@ func main() {
 			fhirGroup.POST("/pipeline/test-api-endpoint", transformTestCtrl.TestAPIEndpoint) // Test API endpoint before configuring mapping
 			fhirGroup.POST("/pipeline/validate-script", transformTestCtrl.ValidateScript)    // Validate JavaScript script
 			fhirGroup.GET("/pipeline/:interfaceId/:messageType", transformTestCtrl.GetPipeline)
+			fhirGroup.GET("/field-search", transformTestCtrl.SearchFields)   // USCDI smart search for CDA field picker
+			fhirGroup.POST("/cda/parse", transformTestCtrl.ParseCDA)          // CDA document parse + section summary (wizard preview)
+
+			// FHIR Narrative Generator
+			// Accepts a FHIR resource as JSON body and returns XHTML narrative.
+			// If resource.text.div is already populated it is echoed back unchanged.
+			// POST /api/fhir/narrative/:resourceType       — primary form
+			// GET  /api/fhir/narrative/:resourceType/:id  — spec form (resource JSON in body)
+			narrativeGen := fhirnarrative.NewFHIRNarrativeGenerator()
+			narrativeHandler := func(c *gin.Context) {
+				var resource map[string]interface{}
+				if err := c.ShouldBindJSON(&resource); err != nil {
+					c.JSON(http.StatusBadRequest, gin.H{
+						"success": false,
+						"error":   "FHIR resource JSON required in request body",
+					})
+					return
+				}
+				hadExisting := false
+				if textMap, ok := resource["text"].(map[string]interface{}); ok {
+					if div, ok := textMap["div"].(string); ok && div != "" {
+						hadExisting = true
+					}
+				}
+				div := narrativeGen.Generate(resource)
+				c.JSON(http.StatusOK, gin.H{
+					"success":   true,
+					"narrative": div,
+					"generated": !hadExisting && div != "",
+				})
+			}
+			fhirGroup.POST("/narrative/:resourceType", narrativeHandler)
+			fhirGroup.GET("/narrative/:resourceType/:id", narrativeHandler)
 
 			// ADDED: Delta/override model — interface-level sparse overrides on OOB templates
 			mappingDeltaSvc := services.NewHL7FHIRTransformServiceV3(db)

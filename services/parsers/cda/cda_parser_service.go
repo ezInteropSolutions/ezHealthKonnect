@@ -129,6 +129,7 @@ func (s *CDAParserService) Parse(raw string) *models.ParserResult {
 	result.Metadata = models.ParserMetadata{
 		DetectedVersion: string(profile),
 		ParsedAt:        time.Now(),
+		MessageType:     "CCD",
 	}
 
 	return result
@@ -317,6 +318,31 @@ func (s *CDAParserService) populateEnhancedFields(result *models.ParserResult, s
 		result.EnhancedFields[sec.SectionKey] = field
 		result.FieldOrder = append(result.FieldOrder, sec.SectionKey)
 	}
+}
+
+// =====================================
+// Smart field search
+// =====================================
+
+// SearchFields returns USCDI-labeled SearchResult entries for a free-text query,
+// enriched with CDA XPath and conformance. Used by the smart search API when
+// messageType=CCD so the field picker shows clinical labels instead of raw paths.
+func (s *CDAParserService) SearchFields(query string, maxResults int) []*uscdi.SearchResult {
+	results := s.vocabulary.Search(query, "cda", maxResults)
+	resolver := NewCDAPathResolver(s.schemaLoader, s.vocabulary)
+	for _, r := range results {
+		fhirPath, xPath, conformance := resolver.ResolveShortPath(r.ShortPath)
+		if r.FHIRPath == "" && fhirPath != "" {
+			r.FHIRPath = fhirPath
+		}
+		if xPath != "" {
+			r.CDAXPath = xPath
+		}
+		if conformance != "" {
+			r.Conformance = conformance
+		}
+	}
+	return results
 }
 
 // =====================================

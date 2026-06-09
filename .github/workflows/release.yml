@@ -339,34 +339,81 @@ jobs:
 
       - name: Generate release notes
         run: |
-          cat > release-notes.md << 'NOTES'
-          ## Installation
+          VERSION="${{ steps.ver.outputs.value }}"
 
-          ### Windows — Setup Wizard
-          1. Download `ezHealthKonnect-Setup-Win64.exe`
-          2. Run it (right-click → Run as administrator if prompted)
-          3. Follow the on-screen setup wizard
+          # Commits since previous tag (or all commits for the very first release)
+          PREV_TAG=$(git describe --tags --abbrev=0 "${VERSION}^" 2>/dev/null || echo "")
+          if [ -n "$PREV_TAG" ]; then
+            RANGE="${PREV_TAG}..${VERSION}"
+          else
+            RANGE="HEAD"
+          fi
 
-          ### Linux — Setup Wizard
-          ```bash
-          chmod +x ezHealthKonnect-Setup-Linux-x64
-          sudo ./ezHealthKonnect-Setup-Linux-x64
-          ```
-          Supports Ubuntu 20.04+, Rocky Linux 8/9, RHEL 8/9, and other systemd-based distros.
+          # Categorise by conventional-commit prefix
+          FEATURES=$(git log $RANGE --oneline --no-decorate | grep -E '^[0-9a-f]+ feat' || true)
+          FIXES=$(git log $RANGE --oneline --no-decorate | grep -E '^[0-9a-f]+ fix' || true)
+          OTHER=$(git log $RANGE --oneline --no-decorate | grep -vE '^[0-9a-f]+ (feat|fix|chore|docs|test|ci|refactor|perf|style)' || true)
+          CHORE=$(git log $RANGE --oneline --no-decorate | grep -E '^[0-9a-f]+ (chore|refactor|perf)' || true)
 
-          Both installers are **self-contained** — PostgreSQL, Node.js, and all application
-          dependencies are included. No internet connection required during installation.
+          {
+            if [ -n "$FEATURES" ]; then
+              echo "## New Features"
+              echo "$FEATURES" | sed 's/^[0-9a-f]* feat[^:]*: /- /'
+              echo ""
+            fi
 
-          ---
+            if [ -n "$FIXES" ]; then
+              echo "## Bug Fixes"
+              echo "$FIXES" | sed 's/^[0-9a-f]* fix[^:]*: /- /'
+              echo ""
+            fi
 
-          ## Assets
+            if [ -n "$CHORE" ]; then
+              echo "## Internals"
+              echo "$CHORE" | sed 's/^[0-9a-f]* [a-z]*[^:]*: /- /'
+              echo ""
+            fi
 
-          | File | Description |
-          |------|-------------|
-          | `ezHealthKonnect-Setup-Win64.exe` | Windows self-contained installer |
-          | `ezHealthKonnect-Setup-Linux-x64` | Linux self-contained installer |
-          | `SHA256SUMS.txt` | File checksums for verification |
-          NOTES
+            if [ -n "$OTHER" ]; then
+              echo "## Other Changes"
+              echo "$OTHER" | sed 's/^[0-9a-f]* /- /'
+              echo ""
+            fi
+
+            if [ -n "$PREV_TAG" ]; then
+              echo "**Full diff**: [\`${PREV_TAG}..${VERSION}\`](../../compare/${PREV_TAG}...${VERSION})"
+              echo ""
+            fi
+
+            echo "---"
+            echo ""
+            echo "## Installation"
+            echo ""
+            echo "### Windows — Setup Wizard"
+            echo "1. Download \`ezHealthKonnect-Setup-Win64.exe\`"
+            echo "2. Run it (right-click → Run as administrator if prompted)"
+            echo "3. Follow the on-screen setup wizard"
+            echo ""
+            echo "### Linux — Setup Wizard"
+            echo '```bash'
+            echo "chmod +x ezHealthKonnect-Setup-Linux-x64"
+            echo "sudo ./ezHealthKonnect-Setup-Linux-x64"
+            echo '```'
+            echo "Supports Ubuntu 20.04+, Rocky Linux 8/9, RHEL 8/9, and other systemd-based distros."
+            echo ""
+            echo "Both installers are **self-contained** — PostgreSQL, Node.js, and all application"
+            echo "dependencies are included. No internet connection required during installation."
+            echo ""
+            echo "---"
+            echo ""
+            echo "## Assets"
+            echo ""
+            echo "| File | Description |"
+            echo "|------|-------------|"
+            echo "| \`ezHealthKonnect-Setup-Win64.exe\` | Windows self-contained installer |"
+            echo "| \`ezHealthKonnect-Setup-Linux-x64\` | Linux self-contained installer |"
+            echo "| \`SHA256SUMS.txt\` | File checksums for verification |"
+          } > release-notes.md
 
       # ── Private repo release (internal tracking) ──────────────────────────────
       - name: Delete existing private release if present

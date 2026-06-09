@@ -369,6 +369,7 @@ class WizardView extends EventTarget {
                                 <select id="sourceType" class="form-control" required>
                                     <option value="hl7v2" ${data.sourceType === 'hl7v2' ? 'selected' : ''}>HL7 v2.x (Standard)</option>
                                     <option value="fhir" ${data.sourceType === 'fhir' ? 'selected' : ''}>FHIR</option>
+                                    <option value="ccda" ${(data.sourceType === 'ccda' || data.sourceType === 'cda') ? 'selected' : ''}>CDA/CCD (C-CDA, C32)</option>
                                     <option value="file" ${data.sourceType === 'file' ? 'selected' : ''}>File-based</option>
                                 </select>
                             </div>
@@ -405,6 +406,11 @@ class WizardView extends EventTarget {
                                         File Processor (Batch processing, user-driven)
                                     </option>
                                 </optgroup>
+                                <optgroup label="⚙️ Custom">
+                                    <option value="others" ${data.transformationFlow === 'others' ? 'selected' : ''}>
+                                        Other / Custom (Configure in Pipeline Builder)
+                                    </option>
+                                </optgroup>
                             </select>
                             <div class="form-hint">
                                 ℹ️ Transformation flows automatically process messages. Passthrough flows store for manual processing.
@@ -419,7 +425,7 @@ class WizardView extends EventTarget {
                     </div>
 
                     <!-- Message Family Filter Section -->
-                    <div class="config-section" id="wizardFamilyFilterSection" style="display:${['hl7_to_fhir','hl7_to_fhir_r5'].includes(data.transformationFlow || 'hl7_to_fhir') ? 'block' : 'none'};">
+                    <div class="config-section" id="wizardFamilyFilterSection" style="display:${(typeof getFlow !== 'undefined' ? getFlow(data.transformationFlow || 'hl7_to_fhir').showFamilyFilter : ['hl7_to_fhir','hl7_to_fhir_r5'].includes(data.transformationFlow || 'hl7_to_fhir')) ? 'block' : 'none'};">
                         <h4 class="section-title">🔀 Message Family Filter</h4>
                         <div style="background:linear-gradient(to right,#f0fdf4,#f0f9ff);border-left:3px solid #34d399;padding:14px;border-radius:6px;">
                             <p style="font-size:0.82rem;color:#6b7280;margin:0 0 10px;">
@@ -974,31 +980,27 @@ class WizardView extends EventTarget {
     }
 
     /**
-     * Check if this is a sink-only flow (no external routing)
+     * Check if this is a sink-only flow (no external routing).
+     * Delegates to FlowRegistry when available.
      */
     isSinkOnlyFlow(transformationFlow) {
-        const sinkOnlyFlows = [
-            'passthrough',      // Passthrough - store only, no transformation
-            'fhir_receiver',    // FHIR Receiver - direct storage
-            'file_processor'    // File processor - batch processing
-        ];
-        return sinkOnlyFlows.includes(transformationFlow);
+        if (typeof getFlow !== 'undefined') {
+            return getFlow(transformationFlow).isSinkOnly;
+        }
+        // Fallback (FlowRegistry not yet loaded)
+        return ['passthrough', 'fhir_receiver', 'file_processor', 'others'].includes(transformationFlow);
     }
 
     /**
-     * Check if delivery mode options should be shown based on selected transformation flow
-     * Only show for automatic transformation flows, not for passthrough/receiver flows
+     * Check if delivery mode options should be shown based on selected transformation flow.
+     * Delegates to FlowRegistry when available.
      */
     shouldShowDeliveryMode(transformationFlow) {
-        // Delivery mode is relevant for transformation flows that output FHIR
-        const transformationFlowsWithDelivery = [
-            'hl7_to_fhir',         // HL7 v2.x → FHIR R4
-            'hl7_to_fhir_r5',      // HL7 v2.x → FHIR R5
-            'ccd_to_fhir',         // CCD/C-CDA → FHIR R4
-            // Easy to add: 'x12_to_fhir', 'csv_to_fhir', etc.
-        ];
-
-        return transformationFlowsWithDelivery.includes(transformationFlow);
+        if (typeof getFlow !== 'undefined') {
+            return getFlow(transformationFlow).hasDelivery;
+        }
+        // Fallback
+        return ['hl7_to_fhir', 'hl7_to_fhir_r5', 'ccd_to_fhir'].includes(transformationFlow);
     }
 
     /**
@@ -4990,11 +4992,24 @@ PV1|1|I|ICU^101^1|||DOC123^Smith^Jane|||EMERGENCY|||
         const sourceTypeSelect = container.querySelector('#sourceType');
         if (sourceTypeSelect) {
             sourceTypeSelect.addEventListener('change', (e) => {
-                console.log('🔄 Source type changed:', e.target.value);
+                const srcType = e.target.value;
+                console.log('🔄 Source type changed:', srcType);
                 this.updateSourceConfigPanel(container);
 
+                // Auto-set transformation flow when CDA/CCD source is chosen
+                const flowSelectEl = container.querySelector('#transformationFlow');
+                if (flowSelectEl) {
+                    if (srcType === 'ccda' && flowSelectEl.value !== 'ccd_to_fhir') {
+                        flowSelectEl.value = 'ccd_to_fhir';
+                        flowSelectEl.dispatchEvent(new Event('change'));
+                    } else if (srcType === 'hl7v2' && flowSelectEl.value === 'ccd_to_fhir') {
+                        flowSelectEl.value = 'hl7_to_fhir';
+                        flowSelectEl.dispatchEvent(new Event('change'));
+                    }
+                }
+
                 this.dispatchEvent(new CustomEvent('fieldChange', {
-                    detail: { field: 'sourceType', value: e.target.value }
+                    detail: { field: 'sourceType', value: srcType }
                 }));
             });
             console.log('✅ Source type selector listener attached');
@@ -5060,6 +5075,10 @@ PV1|1|I|ICU^101^1|||DOC123^Smith^Jane|||EMERGENCY|||
                         'file_processor': {
                             title: '📦 File Processor (Batch Processing)',
                             text: 'Processes files in batches. Stores content for manual review and processing. Ideal for bulk data loads.'
+                        },
+                        'others': {
+                            title: '⚙️ Other / Custom Pipeline',
+                            text: 'Set up your source and target connectors here. After the wizard completes, you\'ll be taken directly to the Pipeline Builder to configure your custom transformation steps.'
                         }
                     };
 
@@ -5073,11 +5092,25 @@ PV1|1|I|ICU^101^1|||DOC123^Smith^Jane|||EMERGENCY|||
                     }
                 }
 
-                // Show/hide family filter based on whether flow is HL7→FHIR
+                // Auto-set Source Format when flow implies a specific format
+                const sourceTypeSelectEl = container.querySelector('#sourceType');
+                if (sourceTypeSelectEl) {
+                    if (flow === 'ccd_to_fhir' && sourceTypeSelectEl.value !== 'ccda') {
+                        sourceTypeSelectEl.value = 'ccda';
+                        sourceTypeSelectEl.dispatchEvent(new Event('change'));
+                    } else if ((flow === 'hl7_to_fhir' || flow === 'hl7_to_fhir_r5') && sourceTypeSelectEl.value === 'ccda') {
+                        sourceTypeSelectEl.value = 'hl7v2';
+                        sourceTypeSelectEl.dispatchEvent(new Event('change'));
+                    }
+                }
+
+                // Show/hide family filter based on FlowRegistry (falls back to HL7-only check)
                 const familyFilterSection = container.querySelector('#wizardFamilyFilterSection');
                 if (familyFilterSection) {
-                    const isHL7Flow = flow === 'hl7_to_fhir' || flow === 'hl7_to_fhir_r5';
-                    familyFilterSection.style.display = isHL7Flow ? 'block' : 'none';
+                    const showFilter = typeof getFlow !== 'undefined'
+                        ? getFlow(flow).showFamilyFilter
+                        : (flow === 'hl7_to_fhir' || flow === 'hl7_to_fhir_r5');
+                    familyFilterSection.style.display = showFilter ? 'block' : 'none';
                 }
 
                 // Re-render target config panel to show/hide delivery mode

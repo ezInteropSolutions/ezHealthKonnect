@@ -341,7 +341,8 @@ func (t *TelemetryService) getOrCreateInstallID(ctx context.Context) string {
 
 // getFirstAdminEmail returns the email of the first admin user.
 // Used only for the install ping so the team has a contact point.
-// Operators can remove this by setting telemetry_admin_email = "" in system_settings.
+// Opt-out: set system_settings key 'telemetry_admin_email' = 'none' to suppress.
+// No patient emails are ever used — this reads only from the users table (staff accounts).
 func (t *TelemetryService) getFirstAdminEmail(ctx context.Context) string {
 	// Check for explicit override first
 	var override string

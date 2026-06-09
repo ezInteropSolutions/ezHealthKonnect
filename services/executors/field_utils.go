@@ -8,6 +8,7 @@
 package executors
 
 import (
+	cdaSchema "ezhealthkonnect/cda"
 	"ezhealthkonnect/hl7"
 	"fmt"
 	"strconv"
@@ -24,9 +25,24 @@ type FieldPathType string
 const (
 	PathTypeHL7     FieldPathType = "hl7"     // e.g., PID.3, MSH.9.1
 	PathTypeFHIR    FieldPathType = "fhir"    // e.g., Patient.name[0].given
+	PathTypeCDA     FieldPathType = "cda"     // e.g., allergiesAndIntolerances.medicationAllergyCode
 	PathTypeJSON    FieldPathType = "json"    // e.g., data.patient.name
 	PathTypeUnknown FieldPathType = "unknown"
 )
+
+// cdaSectionKeys is the set of USCDI-keyed section names emitted by CDAParserService.
+// A dot-separated path whose first segment matches one of these is a CDA short path.
+var cdaSectionKeys = map[string]struct{}{
+	"allergiesAndIntolerances": {},
+	"medications":              {},
+	"problems":                 {},
+	"vitalSigns":               {},
+	"results":                  {},
+	"encounters":               {},
+	"procedures":               {},
+	"immunizations":            {},
+	"socialHistory":            {},
+}
 
 // DetectPathType determines the type of field path notation
 func DetectPathType(path string) FieldPathType {
@@ -36,8 +52,22 @@ func DetectPathType(path string) FieldPathType {
 	if IsFHIRPath(path) {
 		return PathTypeFHIR
 	}
+	if IsCDAPath(path) {
+		return PathTypeCDA
+	}
 	// Default to JSON path
 	return PathTypeJSON
+}
+
+// IsCDAPath returns true when the path is a CDA short-path whose first segment
+// is a known USCDI section key (e.g. "allergiesAndIntolerances.medicationAllergyCode").
+func IsCDAPath(path string) bool {
+	dot := strings.IndexByte(path, '.')
+	if dot <= 0 {
+		return false
+	}
+	_, ok := cdaSectionKeys[path[:dot]]
+	return ok
 }
 
 // IsHL7FieldPath checks if path is HL7 field notation (e.g., PID.3, MSH.9.1)
@@ -114,9 +144,40 @@ func GetFieldValue(data map[string]interface{}, path string) interface{} {
 		return resolveHL7FieldValue(data, path)
 	case PathTypeFHIR:
 		return resolveFHIRFieldValue(data, path)
+	case PathTypeCDA:
+		return resolveCDAFieldValue(data, path)
 	default:
 		return resolveJSONPathValue(data, path)
 	}
+}
+
+// resolveCDAFieldValue reads a USCDI short-path (sectionKey.fieldKey) from CDA
+// ParsedJSON. Returns the value of the first matching entry in the section, or nil.
+func resolveCDAFieldValue(data map[string]interface{}, path string) interface{} {
+	parts := strings.SplitN(path, ".", 2)
+	if len(parts) != 2 {
+		return nil
+	}
+	sectionKey, fieldKey := parts[0], parts[1]
+
+	// ParsedJSON layout: { "sections": { sectionKey: { "entries": [...] } } }
+	sections, _ := data["sections"].(map[string]interface{})
+	if sections == nil {
+		return nil
+	}
+	sectionData, _ := sections[sectionKey].(map[string]interface{})
+	if sectionData == nil {
+		return nil
+	}
+	entries, _ := sectionData["entries"].([]interface{})
+	if len(entries) == 0 {
+		return nil
+	}
+	first, _ := entries[0].(map[string]interface{})
+	if first == nil {
+		return nil
+	}
+	return first[fieldKey]
 }
 
 // resolveHL7FieldValue retrieves value from HL7 enhanced segments (format-agnostic version)
@@ -498,9 +559,39 @@ func UpdateFieldValue(data map[string]interface{}, path string, newValue interfa
 		return modifyHL7FieldValue(data, path, newValue)
 	case PathTypeFHIR:
 		return modifyFHIRFieldValue(data, path, newValue)
+	case PathTypeCDA:
+		return modifyCDAFieldValue(data, path, newValue)
 	default:
 		return modifyJSONPathValue(data, path, newValue)
 	}
+}
+
+// modifyCDAFieldValue updates a field in the first entry of a CDA ParsedJSON section.
+func modifyCDAFieldValue(data map[string]interface{}, path string, newValue interface{}) bool {
+	parts := strings.SplitN(path, ".", 2)
+	if len(parts) != 2 {
+		return false
+	}
+	sectionKey, fieldKey := parts[0], parts[1]
+
+	sections, _ := data["sections"].(map[string]interface{})
+	if sections == nil {
+		return false
+	}
+	sectionData, _ := sections[sectionKey].(map[string]interface{})
+	if sectionData == nil {
+		return false
+	}
+	entries, _ := sectionData["entries"].([]interface{})
+	if len(entries) == 0 {
+		return false
+	}
+	first, _ := entries[0].(map[string]interface{})
+	if first == nil {
+		return false
+	}
+	first[fieldKey] = newValue
+	return true
 }
 
 // modifyHL7FieldValue updates value in HL7 enhanced segments (format-agnostic version)
@@ -707,9 +798,48 @@ func GetAbsolutePath(path string) string {
 		return getHL7AbsolutePath(path)
 	case PathTypeFHIR:
 		return getFHIRAbsolutePath(path)
+	case PathTypeCDA:
+		return getCDAAbsolutePath(path)
 	default:
 		return path
 	}
+}
+
+// GetCDAAbsolutePath returns the full JSON path for a CDA USCDI short-path.
+// "allergiesAndIntolerances.medicationAllergyCode" →
+// "sections.allergiesAndIntolerances.entries[0].medicationAllergyCode"
+func GetCDAAbsolutePath(path string) string {
+	return getCDAAbsolutePath(path)
+}
+
+func getCDAAbsolutePath(path string) string {
+	parts := strings.SplitN(path, ".", 2)
+	if len(parts) != 2 {
+		return path
+	}
+	return fmt.Sprintf("sections.%s.entries[0].%s", parts[0], parts[1])
+}
+
+// GetXPathForCDA returns the absolute CDA XPath for a USCDI short-path using
+// the given schema loader. Returns "" when the section or field is not in the schema.
+// Example: "allergiesAndIntolerances.medicationAllergyCode" →
+//   "//section[code/@code='48765-2']//participant/playingEntity/code/@code"
+func GetXPathForCDA(path string, loader *cdaSchema.CDASchemaLoader) string {
+	parts := strings.SplitN(path, ".", 2)
+	if len(parts) != 2 {
+		return ""
+	}
+	sectionKey, fieldKey := parts[0], parts[1]
+
+	section := loader.GetSection(sectionKey)
+	if section == nil {
+		return ""
+	}
+	field := loader.GetField(sectionKey, fieldKey)
+	if field == nil || field.XPath == "" {
+		return ""
+	}
+	return fmt.Sprintf("//section[code/@code='%s']//%s", section.LOINCCode, field.XPath)
 }
 
 // getHL7AbsolutePath converts HL7 notation to absolute JSON path

@@ -1820,8 +1820,51 @@ class MessageManager {
             return;
         }
 
+        // Detect CDA/CCD content: message_type "CCD" (agreed convention) OR XML ClinicalDocument content
+        const isCDA = message.message_type === 'CCD'
+            || (rawContent && (rawContent.includes('<ClinicalDocument') || rawContent.includes('ClinicalDocument>')));
+
+        if (isCDA && typeof ClinicalDocumentViewer !== 'undefined') {
+            const height = 'calc(90vh - 280px)';
+            container.innerHTML = `
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;height:${height};min-height:0;">
+                    <div id="cdaViewerMount" style="height:100%;min-height:0;"></div>
+                    ${this._contentPanel('outbound', 'Pipeline Output', outboundContent, message.transformed_content_uri, { source: outboundSource, messageId })}
+                </div>`;
+
+            const viewer = new ClinicalDocumentViewer(
+                document.getElementById('cdaViewerMount'),
+                { interfaceId: this.currentInterfaceId, messageId, format: 'ccda' }
+            );
+            await viewer.mount();
+            return;
+        }
+
+        // Detect FHIR Bundle on the outbound side — offer narrative view
+        const isFHIRBundle = outboundContent && (() => {
+            try { const p = JSON.parse(outboundContent); return p.resourceType === 'Bundle'; }
+            catch { return false; }
+        })();
+
         // Outbound panel label and toggle depend on whether we have the exact sent payload
         const outboundLabel = outboundSource === 'outbound' ? 'Outbound (Sent)' : 'Pipeline Output';
+
+        if (isFHIRBundle && typeof ClinicalDocumentViewer !== 'undefined') {
+            const height = 'calc(90vh - 280px)';
+            container.innerHTML = `
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;height:${height};min-height:0;">
+                    ${this._contentPanel('inbound', 'Inbound', rawContent, message.raw_content_uri, { source: 'raw', messageId })}
+                    <div id="fhirViewerMount" style="height:100%;min-height:0;"></div>
+                </div>`;
+
+            const fhirBundle = JSON.parse(outboundContent);
+            const viewer = new ClinicalDocumentViewer(
+                document.getElementById('fhirViewerMount'),
+                { format: 'fhir', parsedContent: fhirBundle }
+            );
+            await viewer.mount();
+            return;
+        }
 
         container.innerHTML = `<div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;height:calc(90vh - 280px);min-height:0;">
             ${this._contentPanel('inbound', 'Inbound', rawContent, message.raw_content_uri, { source: 'raw', messageId })}
@@ -1854,7 +1897,8 @@ class MessageManager {
         const { source, messageId } = opts;
 
         const isHL7  = content && (content.startsWith('MSH|') || content.includes('\rMSH|'));
-        const isFHIR = !isHL7 && content && (content.trim().startsWith('{') || content.trim().startsWith('['));
+        const isCDAXML = !isHL7 && content && (content.includes('<ClinicalDocument') || content.includes('ClinicalDocument>'));
+        const isFHIR = !isHL7 && !isCDAXML && content && (content.trim().startsWith('{') || content.trim().startsWith('['));
 
         let typeTag, highlighted;
         if (isEmpty) {
@@ -1864,6 +1908,9 @@ class MessageManager {
         } else if (isHL7) {
             typeTag = `<span style="background:#dbeafe;color:#1e40af;padding:0.2rem 0.55rem;border-radius:4px;font-size:0.75rem;font-weight:600;">HL7 v2</span>`;
             highlighted = this._highlightHL7(content);
+        } else if (isCDAXML) {
+            typeTag = `<span style="background:#fef3c7;color:#92400e;padding:0.2rem 0.55rem;border-radius:4px;font-size:0.75rem;font-weight:600;">CDA/CCD XML</span>`;
+            highlighted = this._escapeHtml(content);
         } else if (isFHIR) {
             typeTag = `<span style="background:#dcfce7;color:#166534;padding:0.2rem 0.55rem;border-radius:4px;font-size:0.75rem;font-weight:600;">FHIR JSON</span>`;
             try { highlighted = this._escapeHtml(JSON.stringify(JSON.parse(content), null, 2)); }

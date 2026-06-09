@@ -1214,6 +1214,20 @@ PV1|1|I|ICU^101^1|||DOC123^Smith^Jane|||EMERGENCY|||`
                 const status = interfaceData.status || 'draft';
                 const messageType = interfaceData.message_type || payload.messageType || 'ADT^A01';
 
+                // "Others / Custom" flow: skip the completion modal and go straight to
+                // the pipeline builder so the user can wire up their custom steps.
+                if (response.redirectToPipelineBuilder && interfaceId) {
+                    this.view.showNotification(
+                        `Interface "${payload.name}" created. Opening Pipeline Builder…`,
+                        'success',
+                        3000
+                    );
+                    setTimeout(() => {
+                        window.location.href = `/pipeline-builder.html?interfaceId=${encodeURIComponent(interfaceId)}`;
+                    }, 1200);
+                    return;
+                }
+
                 // Show completion modal with action buttons instead of simple notification
                 this.view.showCompletionModal({
                     interfaceId: interfaceId,

@@ -5,6 +5,7 @@
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
+    "release": "node scripts/release.js",
     "dictionary": "node services/hl7_dictionary_service.js",
     "dictionary:dev": "nodemon services/hl7_dictionary_service.js",
     "test:dictionary": "node test_dictionary.js",

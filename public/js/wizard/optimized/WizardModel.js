@@ -503,16 +503,32 @@ class WizardModel extends EventTarget {
         console.log('📋 Model nextStep called, current:', this.currentStep);
 
         let nextStepNum = this.currentStep + 1;
+        const sourceType = this.data.sourceType;
+        const transformationFlow = this.data.transformationFlow;
 
-        // FHIR Step Skip Logic: Skip HL7-specific steps (2 & 3) for FHIR sources
         if (this.currentStep === 1) {
-            const sourceType = this.data.sourceType;
-            console.log('🔍 Source type detected:', sourceType);
+            console.log('🔍 Source type detected:', sourceType, '/ flow:', transformationFlow);
 
-            // If source is FHIR, skip steps 2 & 3 (HL7 upload and parsing)
-            if (sourceType && sourceType.toLowerCase() === 'fhir') {
-                console.log('🎯 FHIR source detected - skipping steps 2 & 3 (HL7 upload/parsing)');
-                nextStepNum = 4; // Jump directly to mapping configuration
+            const isFHIRSource = sourceType && sourceType.toLowerCase() === 'fhir';
+            const flow = typeof getFlow !== 'undefined' ? getFlow(transformationFlow) : null;
+
+            if (isFHIRSource) {
+                // Existing: FHIR source skips upload + review, goes to mapping config
+                console.log('🎯 FHIR source — skipping steps 2 & 3');
+                nextStepNum = 4;
+            } else if (flow && flow.skipUploadSteps) {
+                // Sink/custom flows: skip upload + review; also skip mapping if not needed
+                nextStepNum = flow.showMappingUI ? 4 : 5;
+                console.log(`🎯 Flow "${transformationFlow}" (skipUploadSteps) — jumping to step ${nextStepNum}`);
+            }
+        }
+
+        // CDA and any flow with showMappingUI=false that reaches step 3: skip mapping step
+        if (this.currentStep === 3 && typeof getFlow !== 'undefined') {
+            const flow = getFlow(transformationFlow);
+            if (!flow.showMappingUI) {
+                console.log(`🎯 Flow "${transformationFlow}" — skipping mapping step 4, jumping to 5`);
+                nextStepNum = 5;
             }
         }
 
@@ -523,16 +539,28 @@ class WizardModel extends EventTarget {
 
     previousStep() {
         let prevStepNum = Math.max(1, this.currentStep - 1);
+        const sourceType = this.data.sourceType;
+        const transformationFlow = this.data.transformationFlow;
+        const isFHIRSource = sourceType && sourceType.toLowerCase() === 'fhir';
+        const flow = typeof getFlow !== 'undefined' ? getFlow(transformationFlow) : null;
 
-        // FHIR Step Skip Logic: Skip HL7-specific steps (2 & 3) when going back
         if (this.currentStep === 4) {
-            const sourceType = this.data.sourceType;
-
-            // If source is FHIR, skip back to step 1 (bypassing steps 2 & 3)
-            if (sourceType && sourceType.toLowerCase() === 'fhir') {
-                console.log('🎯 FHIR source detected - skipping back to step 1 (bypassing steps 2 & 3)');
-                prevStepNum = 1; // Jump back to interface configuration
+            if (isFHIRSource) {
+                // Existing: FHIR source jumps back to step 1
+                console.log('🎯 FHIR source — skipping back to step 1');
+                prevStepNum = 1;
+            } else if (flow && flow.skipUploadSteps) {
+                prevStepNum = 1;
+                console.log(`🎯 Flow "${transformationFlow}" — skipping back to step 1`);
             }
+        }
+
+        // If we're on step 5 and the flow skips the mapping step, jump back over step 4
+        if (this.currentStep === 5 && flow && !flow.showMappingUI) {
+            // CDA: came via 1→2→3→5, so go back to 3
+            // sink/custom (skipUploadSteps): came via 1→5, so go back to 1
+            prevStepNum = flow.skipUploadSteps ? 1 : 3;
+            console.log(`🎯 Flow "${transformationFlow}" — skipping mapping step backwards, going to ${prevStepNum}`);
         }
 
         return this.goToStep(prevStepNum);

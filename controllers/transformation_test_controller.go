@@ -3,15 +3,18 @@ package controllers
 import (
 	"context"
 	"database/sql"
-	"ezhealthkonnect/models"
-	"ezhealthkonnect/services"
-	"ezhealthkonnect/services/executors"
-	"ezhealthkonnect/services/parsers"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
+	"strconv"
 	"strings"
+
+	"ezhealthkonnect/models"
+	"ezhealthkonnect/services"
+	"ezhealthkonnect/services/executors"
+	"ezhealthkonnect/services/parsers"
+	cdaparser "ezhealthkonnect/services/parsers/cda"
 
 	"github.com/dop251/goja"
 	"github.com/gin-gonic/gin"
@@ -22,15 +25,22 @@ type TransformationTestController struct {
 	executorRegistry *services.ExecutorRegistry
 	pipelineService  *services.TransformationPipelineService
 	parserRegistry   *parsers.ParserRegistry
+	cdaParser        *cdaparser.CDAParserService // nil when schema files unavailable
 }
 
 func NewTransformationTestController(db *sql.DB, credStore *services.CredentialStore) *TransformationTestController {
-	return &TransformationTestController{
+	ctrl := &TransformationTestController{
 		db:               db,
 		executorRegistry: services.NewExecutorRegistry(db, credStore),
 		pipelineService:  services.NewTransformationPipelineService(db, credStore),
 		parserRegistry:   parsers.NewParserRegistry(),
 	}
+	if svc, err := cdaparser.NewFromSchemaDir("./cda/schemas"); err != nil {
+		log.Printf("⚠️  CDA smart search unavailable: %v", err)
+	} else {
+		ctrl.cdaParser = svc
+	}
+	return ctrl
 }
 
 func (c *TransformationTestController) TestPipeline(ctx *gin.Context) {
@@ -1501,4 +1511,86 @@ func breakCycles(data map[string]interface{}) map[string]interface{} {
 		}
 	}
 	return clean
+}
+
+// SearchFields handles GET /api/fhir/field-search
+// Query params: q (query text), messageType (e.g. "CCD"), maxResults (default 20)
+//
+// When messageType=CCD the response contains USCDI-labeled CDA section fields
+// enriched with FHIR path, CDA XPath, and conformance (SHALL/SHOULD/MAY).
+// Other message types return an empty result set — HL7 fields are served from
+// the static list embedded in FieldPathSearchComponent.js.
+func (c *TransformationTestController) SearchFields(ctx *gin.Context) {
+	messageType := ctx.Query("messageType")
+	query := ctx.Query("q")
+	maxResults := 20
+	if n, err := strconv.Atoi(ctx.Query("maxResults")); err == nil && n > 0 && n <= 100 {
+		maxResults = n
+	}
+
+	// Non-CDA message types: return empty (HL7 picker is static JS)
+	switch strings.ToUpper(messageType) {
+	case "CCD", "CCDA", "CDA", "C32", "HITSP":
+		// handled below
+	default:
+		ctx.JSON(http.StatusOK, gin.H{
+			"success": true,
+			"results": []interface{}{},
+			"format":  messageType,
+			"count":   0,
+		})
+		return
+	}
+
+	if c.cdaParser == nil {
+		ctx.JSON(http.StatusServiceUnavailable, gin.H{
+			"success": false,
+			"error":   "CDA smart search unavailable — schema not loaded",
+		})
+		return
+	}
+
+	if query == "" {
+		ctx.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"error":   "query parameter 'q' is required",
+		})
+		return
+	}
+
+	results := c.cdaParser.SearchFields(query, maxResults)
+	ctx.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"results": results,
+		"format":  "cda",
+		"count":   len(results),
+	})
+}
+
+// ParseCDA accepts raw CDA/CCD XML and returns the fully parsed document
+// (sections, header, profile detection).  Used by the wizard preview step
+// and the POST /api/cda/preview Node.js proxy.
+func (c *TransformationTestController) ParseCDA(ctx *gin.Context) {
+	body, err := ctx.GetRawData()
+	if err != nil || len(body) == 0 {
+		ctx.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "request body (raw CDA/CCD XML) required"})
+		return
+	}
+	if c.cdaParser == nil {
+		ctx.JSON(http.StatusServiceUnavailable, gin.H{"success": false, "error": "CDA parser not available — check schema files"})
+		return
+	}
+	result := c.cdaParser.Parse(string(body))
+	if !result.Success {
+		ctx.JSON(http.StatusBadRequest, gin.H{"success": false, "error": result.Error})
+		return
+	}
+	ctx.JSON(http.StatusOK, gin.H{
+		"success":  true,
+		"format":   result.Format,
+		"profile":  result.Metadata.DetectedVersion,
+		"sections": result.ParsedJSON["sections"],
+		"header":   result.ParsedJSON["header"],
+		"metadata": result.Metadata,
+	})
 }

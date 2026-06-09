@@ -1961,6 +1961,44 @@ class MessageController {
         }
     }
 
+    /**
+     * Get parsed content (narrativeHTML, structured sections) for a CDA/FHIR message.
+     * Proxies to Go backend which owns the object storage client.
+     * Returns { success, parsed_content, format } — gracefully null if Go endpoint is not yet available.
+     */
+    async getParsedContent(req, res) {
+        try {
+            await this.ensureDatabase();
+
+            const { interfaceId, messageId } = req.params;
+            const userId = req.session.user.id;
+
+            const check = await this.database.sequelize.query(
+                `SELECT id FROM interfaces WHERE id = :interfaceId AND user_id = :userId`,
+                { replacements: { interfaceId, userId }, type: this.database.sequelize.QueryTypes.SELECT }
+            );
+            if (check.length === 0) {
+                return res.status(404).json({ success: false, error: 'Interface not found or access denied' });
+            }
+
+            // Delegate to Go backend — it owns the object storage client
+            const goResp = await _goClient.get(`/api/messages/${messageId}/parsed`, {
+                params: { interfaceId },
+                timeout: 10000
+            });
+
+            return res.json({
+                success: true,
+                parsed_content: goResp.data.parsed_content || null,
+                format: goResp.data.format || null
+            });
+        } catch (error) {
+            // Go endpoint may not be implemented yet — degrade gracefully
+            console.warn(`⚠️ getParsedContent: ${error.message}`);
+            return res.json({ success: false, parsed_content: null, error: error.message });
+        }
+    }
+
     async getTableNameForMessage(messageId, userId) {
         // Helper to find which table a message belongs to
         if (!userId) return null;

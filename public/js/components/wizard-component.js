@@ -143,14 +143,20 @@
                                             <label for="wizardMessageType" class="form-label">Message Type</label>
                                             <select id="wizardMessageType" class="form-select">
                                                 <option value="auto-detect">Auto-detect from file</option>
-                                                <option value="ADT^A01">ADT^A01 - Admit/Visit Notification</option>
-                                                <option value="ADT^A04">ADT^A04 - Register Patient</option>
-                                                <option value="ADT^A08">ADT^A08 - Update Patient Info</option>
-                                                <option value="ORU^R01">ORU^R01 - Observation Result</option>
-                                                <option value="ORM^O01">ORM^O01 - Order Message</option>
-                                                <option value="SIU^S12">SIU^S12 - Appointment Booking</option>
+                                                <optgroup label="HL7 v2.x">
+                                                    <option value="ADT^A01">ADT^A01 - Admit/Visit Notification</option>
+                                                    <option value="ADT^A04">ADT^A04 - Register Patient</option>
+                                                    <option value="ADT^A08">ADT^A08 - Update Patient Info</option>
+                                                    <option value="ORU^R01">ORU^R01 - Observation Result</option>
+                                                    <option value="ORM^O01">ORM^O01 - Order Message</option>
+                                                    <option value="SIU^S12">SIU^S12 - Appointment Booking</option>
+                                                </optgroup>
+                                                <optgroup label="CDA / CCD">
+                                                    <option value="CCD">CCD - Continuity of Care Document</option>
+                                                    <option value="CCD-C32">C32 - HITSP C32 (legacy, auto-normalized)</option>
+                                                </optgroup>
                                             </select>
-                                            <div class="field-hint">Select the HL7 message type or auto-detect from uploaded file</div>
+                                            <div class="field-hint">Select the message type or auto-detect from uploaded file</div>
                                         </div>
                                     </div>
 
@@ -167,8 +173,8 @@
                                                     <option value="">Select format...</option>
                                                     <option value="hl7v2">HL7 v2.x</option>
                                                     <option value="hl7v3">HL7 v3.x</option>
-                                                    <option value="fhir">FHIR</option>
-                                                    <option value="ccda">C-CDA</option>
+                                                    <option value="fhir">FHIR R4</option>
+                                                    <option value="ccda">CDA/CCD (C-CDA 2.1, C32)</option>
                                                     <option value="file">File Format</option>
                                                     <option value="database">Database</option>
                                                 </select>
@@ -187,6 +193,63 @@
                                                     <option value="mq">Message Queue</option>
                                                 </select>
                                                 <div class="field-hint">How you'll receive the messages</div>
+                                            </div>
+                                        </div>
+
+                                        <!-- CDA/CCD-specific configuration panel — shown when ccda selected -->
+                                        <div id="wizardCDAPanel" style="display:none;margin-top:0.75rem;border:1px solid #fcd34d;border-radius:6px;background:#fffbeb;padding:1rem;">
+                                            <div style="font-size:0.82rem;font-weight:600;color:#92400e;margin-bottom:0.6rem;">
+                                                📄 CDA/CCD Document Settings
+                                            </div>
+                                            <div class="form-group" style="margin-bottom:0.6rem;">
+                                                <label class="form-label" for="wizardCDAProfile">Document Profile</label>
+                                                <select id="wizardCDAProfile" class="form-select">
+                                                    <option value="auto">Auto-detect (C-CDA 2.1 or C32)</option>
+                                                    <option value="ccda_2_1">C-CDA 2.1 (preferred)</option>
+                                                    <option value="c32">C32 / HITSP (legacy — auto-normalized)</option>
+                                                </select>
+                                            </div>
+                                            <div class="form-group" style="margin-bottom:0.6rem;">
+                                                <label class="form-label">USCDI Sections to Extract</label>
+                                                <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.2rem 1rem;font-size:0.82rem;">
+                                                    <label style="display:flex;align-items:center;gap:0.35rem;cursor:pointer;">
+                                                        <input type="checkbox" class="cdaWizardSection" value="allergiesAndIntolerances" checked> Allergies &amp; Intolerances
+                                                    </label>
+                                                    <label style="display:flex;align-items:center;gap:0.35rem;cursor:pointer;">
+                                                        <input type="checkbox" class="cdaWizardSection" value="medications" checked> Medications
+                                                    </label>
+                                                    <label style="display:flex;align-items:center;gap:0.35rem;cursor:pointer;">
+                                                        <input type="checkbox" class="cdaWizardSection" value="problems" checked> Problems / Conditions
+                                                    </label>
+                                                    <label style="display:flex;align-items:center;gap:0.35rem;cursor:pointer;">
+                                                        <input type="checkbox" class="cdaWizardSection" value="vitalSigns" checked> Vital Signs
+                                                    </label>
+                                                    <label style="display:flex;align-items:center;gap:0.35rem;cursor:pointer;">
+                                                        <input type="checkbox" class="cdaWizardSection" value="results" checked> Lab Results
+                                                    </label>
+                                                    <label style="display:flex;align-items:center;gap:0.35rem;cursor:pointer;">
+                                                        <input type="checkbox" class="cdaWizardSection" value="immunizations" checked> Immunizations
+                                                    </label>
+                                                    <label style="display:flex;align-items:center;gap:0.35rem;cursor:pointer;">
+                                                        <input type="checkbox" class="cdaWizardSection" value="procedures"> Procedures
+                                                    </label>
+                                                    <label style="display:flex;align-items:center;gap:0.35rem;cursor:pointer;">
+                                                        <input type="checkbox" class="cdaWizardSection" value="socialHistory"> Social History
+                                                    </label>
+                                                </div>
+                                            </div>
+                                            <div class="form-group" style="margin-bottom:0.6rem;">
+                                                <label class="form-label" for="wizardCDAOutput">Output Format</label>
+                                                <select id="wizardCDAOutput" class="form-select">
+                                                    <option value="fhir_r4">FHIR R4 Bundle (recommended)</option>
+                                                    <option value="ccda">C-CDA 2.1 (pass-through / re-serialize)</option>
+                                                    <option value="json">Structured JSON (USCDI-keyed)</option>
+                                                </select>
+                                            </div>
+                                            <!-- Preview area — populated after file upload -->
+                                            <div id="wizardCDAPreview" style="display:none;margin-top:0.5rem;border-top:1px solid #fcd34d;padding-top:0.6rem;">
+                                                <div style="font-size:0.75rem;font-weight:600;color:#92400e;margin-bottom:0.3rem;">Document Preview</div>
+                                                <div id="wizardCDAPreviewContent" style="font-size:0.78rem;color:#78350f;"></div>
                                             </div>
                                         </div>
 
@@ -342,10 +405,10 @@
                                 
                                 <div id="uploadZone" class="upload-zone">
                                     <div class="upload-content">
-                                        <div class="upload-icon">📄</div>
-                                        <div class="upload-title">Drop HL7 file here or click to browse</div>
-                                        <div class="upload-subtitle">Supports .hl7, .txt, and .msg files</div>
-                                        <input type="file" id="hl7FileUpload" accept=".hl7,.txt,.msg" style="display: none;">
+                                        <div class="upload-icon" id="uploadIcon">📄</div>
+                                        <div class="upload-title" id="uploadTitle">Drop HL7 file here or click to browse</div>
+                                        <div class="upload-subtitle" id="uploadSubtitle">Supports .hl7, .txt, and .msg files</div>
+                                        <input type="file" id="hl7FileUpload" accept=".hl7,.txt,.msg,.ccd,.xml" style="display: none;">
                                     </div>
                                 </div>
                                 
@@ -498,7 +561,10 @@
 
         // Auto-suggest and show connectivity configuration based on selection
         setupConnectivityHandlers();
-        
+
+        // CDA/CCD-specific wizard mode — show panel, update upload labels
+        setupCDAMode();
+
         // ESC key to close
         document.addEventListener('keydown', (e) => {
             if (e.key === 'Escape') {
@@ -584,11 +650,32 @@
                     'file': 'file',
                     'database': 'database'
                 };
-                
+
                 if (suggestions[format]) {
                     sourceConnectivitySelect.value = suggestions[format];
                     // Trigger change event to show config
                     sourceConnectivitySelect.dispatchEvent(new Event('change'));
+                }
+            });
+        }
+
+        // Message Type → Source Format auto-select
+        // When user picks CCD/C32 in Message Type, automatically set Source Format to CDA/CCD
+        const messageTypeSelect = document.getElementById('wizardMessageType');
+        if (messageTypeSelect && sourceTypeSelect) {
+            messageTypeSelect.addEventListener('change', function() {
+                const val = this.value;
+                if (val === 'CCD' || val === 'CCD-C32') {
+                    if (sourceTypeSelect.value !== 'ccda') {
+                        sourceTypeSelect.value = 'ccda';
+                        sourceTypeSelect.dispatchEvent(new Event('change'));
+                    }
+                } else if (val.indexOf('^') !== -1 || val === 'auto-detect') {
+                    // HL7 v2 message type — switch back to hl7v2 if format not yet set
+                    if (sourceTypeSelect.value === '' || sourceTypeSelect.value === 'ccda') {
+                        sourceTypeSelect.value = 'hl7v2';
+                        sourceTypeSelect.dispatchEvent(new Event('change'));
+                    }
                 }
             });
         }
@@ -615,11 +702,137 @@
         }
     }
     
+    // ── CDA/CCD wizard mode ───────────────────────────────────────────────────
+    // Watches the Source Format selector.  When ccda is chosen:
+    //   • shows the CDA panel with profile/section/output selectors
+    //   • adapts Step 2 (Upload) labels and file-accept attribute
+    //   • wires the file-upload to POST /api/fhir/cda/parse for a live preview
+    function setupCDAMode() {
+        var sourceTypeSelect = document.getElementById('wizardSourceType');
+        if (!sourceTypeSelect) return;
+
+        sourceTypeSelect.addEventListener('change', function() {
+            applyCDAMode(this.value === 'ccda');
+        });
+
+        // Honour pre-selected value (e.g., deep-link with ?format=ccda)
+        applyCDAMode(sourceTypeSelect.value === 'ccda');
+    }
+
+    function applyCDAMode(isCDA) {
+        var cdaPanel   = document.getElementById('wizardCDAPanel');
+        var uploadIcon = document.getElementById('uploadIcon');
+        var uploadTitle   = document.getElementById('uploadTitle');
+        var uploadSub     = document.getElementById('uploadSubtitle');
+        var fileInput     = document.getElementById('hl7FileUpload');
+        var step2Header   = document.querySelector('#step2 .step-title');
+        var step2Desc     = document.querySelector('#step2 .step-description');
+        var parseBtn      = document.getElementById('parseBtn');
+
+        if (isCDA) {
+            if (cdaPanel)    cdaPanel.style.display = 'block';
+            if (uploadIcon)  uploadIcon.textContent = '📋';
+            if (uploadTitle) uploadTitle.textContent = 'Drop CDA/CCD file here or click to browse';
+            if (uploadSub)   uploadSub.textContent = 'Supports .ccd and .xml files (C-CDA 2.1 and C32/HITSP)';
+            if (fileInput)   fileInput.accept = '.ccd,.xml';
+            if (step2Header) step2Header.textContent = 'Upload CDA/CCD Document';
+            if (step2Desc)   step2Desc.textContent = 'Upload a sample CDA/CCD document to analyze structure';
+            if (parseBtn)    parseBtn.textContent = 'Parse CDA Document';
+            wireCDAFileUpload();
+        } else {
+            if (cdaPanel)    cdaPanel.style.display = 'none';
+            if (uploadIcon)  uploadIcon.textContent = '📄';
+            if (uploadTitle) uploadTitle.textContent = 'Drop HL7 file here or click to browse';
+            if (uploadSub)   uploadSub.textContent = 'Supports .hl7, .txt, and .msg files';
+            if (fileInput)   fileInput.accept = '.hl7,.txt,.msg,.ccd,.xml';
+            if (step2Header) step2Header.textContent = 'Upload Sample HL7 Message';
+            if (step2Desc)   step2Desc.textContent = 'Upload a sample HL7 message to analyze structure';
+            if (parseBtn)    parseBtn.textContent = 'Parse HL7 Message';
+        }
+    }
+
+    var _cdaFileWired = false;
+    function wireCDAFileUpload() {
+        if (_cdaFileWired) return;
+        _cdaFileWired = true;
+
+        var fileInput = document.getElementById('hl7FileUpload');
+        if (!fileInput) return;
+
+        fileInput.addEventListener('change', function() {
+            var file = this.files && this.files[0];
+            if (!file) return;
+
+            var ext = file.name.split('.').pop().toLowerCase();
+            if (ext !== 'ccd' && ext !== 'xml') return;
+
+            var sourceType = (document.getElementById('wizardSourceType') || {}).value;
+            if (sourceType !== 'ccda') return;
+
+            var reader = new FileReader();
+            reader.onload = function(e) {
+                previewCDADocument(e.target.result);
+            };
+            reader.readAsText(file);
+        });
+    }
+
+    function previewCDADocument(xmlContent) {
+        var preview = document.getElementById('wizardCDAPreview');
+        var previewContent = document.getElementById('wizardCDAPreviewContent');
+        if (!preview || !previewContent) return;
+
+        previewContent.textContent = 'Parsing document…';
+        preview.style.display = 'block';
+
+        fetch('/api/fhir/cda/parse', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/xml' },
+            credentials: 'include',
+            body: xmlContent
+        })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (!data.success) {
+                previewContent.textContent = 'Parse error: ' + (data.error || 'unknown');
+                return;
+            }
+            var profile = data.profile || data.format || 'CDA';
+            var sections = data.sections || {};
+            var sectionNames = Object.keys(sections);
+            var html = '<strong>Profile:</strong> ' + escapeWiz(profile) + '<br>';
+            if (sectionNames.length > 0) {
+                html += '<strong>Sections found (' + sectionNames.length + '):</strong> ';
+                html += sectionNames.map(function(k) { return escapeWiz(k); }).join(', ');
+                html += '<br>';
+            }
+            var header = data.header || {};
+            var patient = header.patient || {};
+            if (patient.firstName || patient.lastName) {
+                html += '<strong>Patient:</strong> ' + escapeWiz((patient.firstName || '') + ' ' + (patient.lastName || '')) + '<br>';
+            }
+            if (patient.dateOfBirth) {
+                html += '<strong>DOB:</strong> ' + escapeWiz(patient.dateOfBirth);
+            }
+            previewContent.innerHTML = html;
+        })
+        .catch(function(err) {
+            previewContent.textContent = 'Preview unavailable: ' + err.message;
+        });
+    }
+
+    function escapeWiz(s) {
+        return String(s)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;');
+    }
+
     // Load component when DOM is ready
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', loadWizardComponent);
     } else {
         loadWizardComponent();
     }
-    
+
 })();

@@ -1047,20 +1047,27 @@ function getInitialStatusDisplay(interface) {
 // Source format label map — mirrors InterfaceConfigComponents.js sourceType values
 const SOURCE_FORMAT_LABELS = {
     'hl7v2': 'HL7 v2.x',
+    'hl7v3': 'HL7 v3.x',
     'fhir':  'FHIR',
     'cda':   'CDA',
+    'ccda':  'C-CDA',
     'x12':   'X12',
     'json':  'JSON',
     'xml':   'XML',
     'csv':   'CSV',
 };
 
+const CDA_FORMAT_KEYS = new Set(['cda', 'ccda', 'c32', 'hitsp']);
+
 // Returns a badge showing the inbound source format (not the defaulted message_type)
 function getSourceFormatBadge(iface) {
     const fmt = (iface.sourceType || iface.source_type || '').toLowerCase();
     if (!fmt) return '';
     const label = SOURCE_FORMAT_LABELS[fmt] || fmt.toUpperCase();
-    return `<span class="msg-type-badge">${label}</span>`;
+    const style = CDA_FORMAT_KEYS.has(fmt)
+        ? 'color:#92400e;background:#fef3c7;border-color:#fcd34d;'
+        : '';
+    return `<span class="msg-type-badge" style="${style}">${label}</span>`;
 }
 
 function renderStatusBadge(iface) {

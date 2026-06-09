@@ -262,7 +262,8 @@ const FormFieldSchema = {
                     { value: 'hl7_to_fhir_stu3', label: 'HL7 v2 to FHIR STU3' },
                     { value: 'passthrough', label: 'Passthrough (No Transform)' },
                     { value: 'fhir_receiver', label: 'FHIR Receiver' },
-                    { value: 'file_processor', label: 'File Processor' }
+                    { value: 'file_processor', label: 'File Processor' },
+                    { value: 'others', label: 'Other / Custom (Configure in Pipeline Builder)' }
                 ]
             }
         ],

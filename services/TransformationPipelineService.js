@@ -173,17 +173,28 @@ class TransformationPipelineService {
      *
      * Step layout:
      *   seq   5 — source connector  (always, if connectivity provided)
-     *   seq  60 — flow-specific transforms (e.g. HL7→FHIR)
+     *   seq  60 — flow-specific transform (keyed by transformationFlow)
      *   seq 295 — target connector  (always, if connectivity provided)
      *
-     * Supported flows:
-     *   hl7v2 → fhir  : HL7→FHIR Transform (seq 60)
-     *   (others)       : connector → connector only, no transform in between
+     * Transform steps are driven by FLOW_STEP_TEMPLATES below (single source of truth).
+     * Adding a new flow: add one entry to FLOW_STEP_TEMPLATES — no other changes needed here.
      *
      * @param {object} ctx  { sourceType, targetType, connectivityInfo, templateId, wizardMappings }
      * @returns {number}    total steps created
      */
+
+    // Single source of truth: maps transformationFlow → pipeline step definition.
+    // Mirror of FlowRegistry.js on the frontend (same keys).
+
     async addDefaultPipelineSteps(sequelize, t, pipelineId, ctx) {
+        const FLOW_STEP_TEMPLATES = {
+            hl7_to_fhir:    { stepType: 'hl7_fhir_transform', stepName: 'HL7→FHIR Transform',  sequence: 60, fhirVersion: 'R4' },
+            hl7_to_fhir_r5: { stepType: 'hl7_fhir_transform', stepName: 'HL7→FHIR Transform',  sequence: 60, fhirVersion: 'R5' },
+            hl7_to_fhir_stu3: { stepType: 'hl7_fhir_transform', stepName: 'HL7→FHIR Transform', sequence: 60, fhirVersion: 'STU3' },
+            ccd_to_fhir:    { stepType: 'cda.to_fhir',         stepName: 'CDA→FHIR Transform',  sequence: 60, fhirVersion: 'R4' },
+            // passthrough, fhir_receiver, file_processor, others → no transform step (not listed here)
+        };
+
         const { sourceType, targetType, connectivityInfo, templateId, wizardMappings, interfaceId, messageType } = ctx;
         let count = 0;
 
@@ -196,30 +207,18 @@ class TransformationPipelineService {
             count++;
         }
 
-        // ── Flow-specific transform steps ─────────────────────────────────────
-        const flow = `${sourceType}→${targetType}`;
+        // ── Flow-specific transform step ──────────────────────────────────────
         const transformationFlow = connectivityInfo?.transformationFlow;
-        console.log(`⚙️ Building transform steps for flow: ${flow} (transformationFlow: ${transformationFlow})`);
-
-        // Only add HL7→FHIR transform when the wizard explicitly selected that flow.
-        // fhir_receiver, sink_only, and passthrough flows must NOT get a transform step.
-        // Safety net: if sourceConnectivity is a FHIR inbound connector, never add HL7→FHIR.
         const srcConn = connectivityInfo?.sourceConnectivity || '';
         const isFHIRInboundConnector = srcConn.includes('fhir') || srcConn === 'http_rest_inbound';
-        const isHL7toFHIR = sourceType === 'hl7v2' && targetType === 'fhir'
-            && !isFHIRInboundConnector
-            && transformationFlow !== 'fhir_receiver'
-            && transformationFlow !== 'sink_only'
-            && transformationFlow !== 'passthrough';
 
-        if (isHL7toFHIR) {
-            // HL7 v2 → FHIR R4
-            // The step config is a REFERENCE, not a data store.
-            // interface_message_mappings is the single source of truth for all mapping data.
-            // The runtime resolves the actual mappings via the 5-step chain using interface_id.
+        console.log(`⚙️ Building transform steps for flow: ${sourceType}→${targetType} (transformationFlow: ${transformationFlow})`);
+
+        const template = FLOW_STEP_TEMPLATES[transformationFlow];
+        if (template && !isFHIRInboundConnector) {
             const mappingMode = templateId ? 'oob' : 'custom';
             const stepConfig = {
-                fhir_version: 'R4',
+                fhir_version: template.fhirVersion,
                 interface_id: interfaceId || null,
                 message_type: messageType || null,
                 mapping_mode: mappingMode,
@@ -229,15 +228,13 @@ class TransformationPipelineService {
                     (pipeline_id, step_name, step_type, sequence, config, enabled)
                 VALUES ($1, $2, $3, $4, $5, true)
             `, {
-                bind: [pipelineId, 'HL7→FHIR Transform', 'hl7_fhir_transform', 60, JSON.stringify(stepConfig)],
+                bind: [pipelineId, template.stepName, template.stepType, template.sequence, JSON.stringify(stepConfig)],
                 transaction: t
             });
             count++;
-            console.log('✅ Added HL7→FHIR Transform step (interface_id:', interfaceId, ', mode:', mappingMode, ')');
-
+            console.log(`✅ Added ${template.stepName} step (type: ${template.stepType}, interface_id: ${interfaceId}, mode: ${mappingMode})`);
         } else {
-            // Future flows (HL7→HL7 passthrough, FHIR→FHIR, CSV→FHIR, etc.) go here
-            console.log(`ℹ️ No transform steps defined for flow "${flow}" — source and target connectors only`);
+            console.log(`ℹ️ No transform steps defined for flow "${transformationFlow}" — source and target connectors only`);
         }
 
         // ── Target connector (always last) ────────────────────────────────────

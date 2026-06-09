@@ -426,6 +426,23 @@ func (h *HTTPFHIRInboundConnector) handleFHIRRequest(w http.ResponseWriter, r *h
 		defer r.Body.Close()
 	}
 
+	// ── 2.5 CDA/CCD Content-Type early exit ───────────────────────────────────
+	// Clients posting application/hl7-ccd+xml are sending a CDA document, not a
+	// FHIR resource.  Short-circuit FHIR routing and enqueue directly as "CCD".
+	if len(body) > 0 && strings.Contains(r.Header.Get("Content-Type"), "application/hl7-ccd+xml") {
+		cdaHeaders := map[string]string{
+			"X-HTTP-Method": r.Method,
+			"Content-Type":  r.Header.Get("Content-Type"),
+			"User-Agent":    r.Header.Get("User-Agent"),
+		}
+		cdaMsg := h.buildMessage(r, body, "CCD", cdaHeaders)
+		if !h.enqueue(w, cdaMsg) {
+			return
+		}
+		h.sendAccepted(w, "CDA/CCD document accepted for processing")
+		return
+	}
+
 	// ── 3. Merge body-parsed FHIR identity with URL-parsed info ───────────────
 	//   URL takes priority for resourceType/resourceID (explicit routing).
 	//   Body fills in what the URL doesn't provide.

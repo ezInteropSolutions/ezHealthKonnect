@@ -230,17 +230,26 @@ const StepVariablesProvider = {
     },
 
     /**
-     * Create FieldPathSearchComponent options with step variables
+     * Create FieldPathSearchComponent options with step variables.
+     * Automatically reads messageType from the active pipeline so that CDA
+     * pipelines (messageType=CCD) get USCDI search mode in the field picker.
+     *
      * @param {Function} onSelect - Callback when field is selected
      * @param {Object} additionalOptions - Additional options to merge
      * @returns {Object} Options for FieldPathSearchComponent
      */
     createFieldSearchOptions(onSelect, additionalOptions = {}) {
+        const messageType = window.pipelineBuilder?.getPipeline?.()?.messageType || '';
+        const isCDA = ['CCD', 'CCDA', 'CDA', 'C32', 'HITSP'].includes((messageType || '').toUpperCase());
+
         return {
             onSelect,
-            placeholder: 'Search fields or variables... (e.g., PID.8, steps.empi.mrn)',
+            placeholder: isCDA
+                ? 'Search CDA fields... (e.g., allergy, patient, medication)'
+                : 'Search fields or variables... (e.g., PID.8, steps.empi.mrn)',
             allowCustom: true,
             showCategories: true,
+            messageType,
             getStepVariables: () => this.getStepVariablesForSearch(),
             ...additionalOptions
         };

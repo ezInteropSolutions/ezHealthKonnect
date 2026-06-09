@@ -36,10 +36,39 @@ func SerializeForOutput(content interface{}, format string) (string, string, err
 		return serializeToFHIR(content)
 	case "csv":
 		return serializeToCSV(content)
+	case "ccda", "cda", "ccd":
+		return serializeToCDA(content)
 	case "json", "":
 		return serializeToJSON(content)
 	default:
 		return serializeToJSON(content)
+	}
+}
+
+// ──────────────────────────────────────────────────────────────
+// CDA / C-CDA 2.1 serializer
+// Accepts a FHIR Bundle map and converts it to CDA XML via CDASerializer.
+// ──────────────────────────────────────────────────────────────
+
+func serializeToCDA(content interface{}) (string, string, error) {
+	const ct = "application/hl7-cda+xml"
+
+	switch v := content.(type) {
+	case string:
+		// Already serialized XML — pass through
+		if strings.Contains(v, "ClinicalDocument") {
+			return v, ct, nil
+		}
+		return "", ct, fmt.Errorf("cda serialize: string content does not appear to be a CDA document")
+	case map[string]interface{}:
+		s := NewCDASerializer()
+		xml, err := s.Serialize(v, "C-CDA 2.1")
+		if err != nil {
+			return "", ct, fmt.Errorf("cda serialize: %w", err)
+		}
+		return xml, ct, nil
+	default:
+		return "", ct, fmt.Errorf("cda serialize: unsupported content type %T", content)
 	}
 }
 

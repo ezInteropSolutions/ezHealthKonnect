@@ -539,6 +539,7 @@
     <div id="ai-context-bar">Loading context…</div>
     <div id="ai-messages">
         <div class="ai-msg system">Hi! I'm ezCompanion — your co-developer and healthcare integration expert.<br><br>I can help you <strong>build &amp; configure</strong> interfaces and pipelines, <strong>write pipeline scripts</strong>, answer questions about <strong>HL7, FHIR, X12, CCD</strong>, debug integration errors, or walk you through any <strong>ezHealthKonnect</strong> feature. Just ask!</div>
+        <div class="ai-msg system" style="background:#fff7ed;border-left:3px solid #f97316;color:#92400e;font-size:11px;padding:6px 10px;">&#9888;&#65039; <strong>Do not paste real patient data (PHI) here.</strong> Use synthetic or de-identified examples when troubleshooting message formats.</div>
     </div>
     <div id="ai-quick-actions">
         <button class="ai-quick-btn" data-q="How do I create a new interface in ezHealthKonnect?">Create interface</button>

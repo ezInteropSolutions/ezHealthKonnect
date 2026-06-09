@@ -41,6 +41,9 @@ func (pf *ParserFactory) registerParsers() {
 	// Register HL7 v2 parser (REUSES EXISTING CODE)
 	pf.parsers[models.FormatHL7v2] = parsers.NewHL7ParserService()
 
+	// Register CDA/CCD parser — gracefully skipped if schema dir is missing.
+	pf.RegisterCDAParser("./cda/schemas")
+
 	log.Printf("✅ ParserFactory registered %d parsers", len(pf.parsers))
 }
 

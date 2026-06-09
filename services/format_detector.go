@@ -33,7 +33,17 @@ func (fd *FormatDetector) DetectFormat(rawContent string) *models.FormatDetectio
 		}
 	}
 
-	// 2. Check for HL7 v3 / CDA
+	// 2. Check for CCD/CCDA before generic HL7v3 — CDA is HL7v3 XML and would
+	// otherwise match the HL7v3 check first, causing the CDA parser to be skipped.
+	if fd.isCCDA(rawContent) {
+		return &models.FormatDetectionResult{
+			DetectedFormat: models.FormatCCDA,
+			Confidence:     0.95,
+			Indicators:     []string{"ClinicalDocument root element", "CDA namespace"},
+		}
+	}
+
+	// 3. Check for HL7 v3 (non-CDA)
 	if fd.isHL7v3(rawContent) {
 		return &models.FormatDetectionResult{
 			DetectedFormat: models.FormatHL7v3,
@@ -42,21 +52,12 @@ func (fd *FormatDetector) DetectFormat(rawContent string) *models.FormatDetectio
 		}
 	}
 
-	// 3. Check for FHIR
+	// 4. Check for FHIR
 	if fd.isFHIR(rawContent) {
 		return &models.FormatDetectionResult{
 			DetectedFormat: models.FormatFHIR,
 			Confidence:     0.95,
 			Indicators:     []string{"FHIR resourceType found"},
-		}
-	}
-
-	// 4. Check for CCD/CCDA
-	if fd.isCCDA(rawContent) {
-		return &models.FormatDetectionResult{
-			DetectedFormat: models.FormatCCDA,
-			Confidence:     0.90,
-			Indicators:     []string{"CDA namespace"},
 		}
 	}
 

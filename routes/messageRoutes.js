@@ -33,8 +33,9 @@ router.get('/test', (req, res) => {
 });
 
 // INTERFACE-SPECIFIC MESSAGE ROUTES (Performance Optimized)
-router.get('/interface/:interfaceId',       sessionAuth, canRead,  (req, res) => MessageController.getInterfaceMessages(req, res));
-router.get('/interface/:interfaceId/stats', sessionAuth, canRead,  (req, res) => MessageController.getInterfaceStats(req, res));
+router.get('/interface/:interfaceId',                                     sessionAuth, canRead,  (req, res) => MessageController.getInterfaceMessages(req, res));
+router.get('/interface/:interfaceId/stats',                               sessionAuth, canRead,  (req, res) => MessageController.getInterfaceStats(req, res));
+router.get('/interface/:interfaceId/message/:messageId/parsed',           sessionAuth, canRead,  (req, res) => MessageController.getParsedContent(req, res));
 
 // GLOBAL ENDPOINTS REMOVED - Use interface-specific endpoints only
 router.get('/', sessionAuth, canRead, (req, res) => {

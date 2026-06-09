@@ -1274,6 +1274,7 @@ class WizardController {
             res.json({
                 success: true,
                 interfaceId: interfaceId,
+                redirectToPipelineBuilder: wizardData.transformationFlow === 'others',
                 interface: {
                     id: interfaceId,
                     name: createdInterface?.name || wizardData.name,

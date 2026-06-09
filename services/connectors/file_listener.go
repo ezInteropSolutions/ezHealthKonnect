@@ -330,6 +330,8 @@ func (f *FileListenerConnector) detectContentType(fileName string) string {
 	switch ext {
 	case ".hl7":
 		return "x-application/hl7-v2+er7"
+	case ".ccd":
+		return "application/hl7-ccd+xml"
 	case ".xml":
 		return "application/xml"
 	case ".json":

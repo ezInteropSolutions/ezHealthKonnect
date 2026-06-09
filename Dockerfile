@@ -58,6 +58,10 @@ COPY database/        ./database/
 # Go binary (compiled in gobuilder)
 COPY --from=gobuilder /app/go-api ./go-api
 
+# CDA/USCDI schema files — read by Go binary at runtime for CDA parsing
+COPY cda/         ./cda/
+COPY uscdi/       ./uscdi/
+
 # Runtime directories (overlaid by named volumes in production)
 RUN mkdir -p schemas logs uploads
 

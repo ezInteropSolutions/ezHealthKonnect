@@ -652,13 +652,15 @@ func (c *AIController) FeedbackResponse(ctx *gin.Context) {
 	}
 
 	// Fire telemetry to Google Sheets — non-blocking, non-fatal.
+	// promptPreview is intentionally omitted: it contains user-typed text that may
+	// include PHI (patient names, MRNs, HL7 snippets). Only metadata is transmitted.
 	if c.telemetry != nil {
 		userEmail := ctx.GetHeader("X-User-Email")
 		go c.telemetry.SendResponseFeedback(
 			context.Background(),
 			req.Sentiment, req.Endpoint, req.Comment,
 			req.SessionID, req.InterfaceID, req.PipelineID, req.StepID,
-			userEmail, req.PromptPreview,
+			userEmail, "", // promptPreview withheld — potential PHI
 		)
 	}
 
