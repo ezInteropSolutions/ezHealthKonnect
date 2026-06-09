@@ -9,6 +9,7 @@ import (
 
 	"ezhealthkonnect/models"
 	"ezhealthkonnect/services/parsers"
+	cdaparser "ezhealthkonnect/services/parsers/cda"
 )
 
 // MessageParser interface - all parsers implement this
@@ -40,14 +41,22 @@ func (pf *ParserFactory) registerParsers() {
 	// Register HL7 v2 parser (REUSES EXISTING CODE)
 	pf.parsers[models.FormatHL7v2] = parsers.NewHL7ParserService()
 
-	// TODO: Register other parsers as they're implemented
-	// pf.parsers[models.FormatXML] = parsers.NewXMLParser()
-	// pf.parsers[models.FormatJSON] = parsers.NewJSONParser()
-	// pf.parsers[models.FormatFHIR] = parsers.NewFHIRParser()
-	// pf.parsers[models.FormatEDI] = parsers.NewEDIParser()
-	// pf.parsers[models.FormatCSV] = parsers.NewCSVParser()
-
 	log.Printf("✅ ParserFactory registered %d parsers", len(pf.parsers))
+}
+
+// RegisterCDAParser initialises and registers the CDA/CCD parser using
+// schema files from schemaDir (e.g. "./cda/schemas").
+// Returns nil and logs a warning if the schema directory is missing or invalid —
+// existing HL7/FHIR processing is unaffected.
+func (pf *ParserFactory) RegisterCDAParser(schemaDir string) error {
+	svc, err := cdaparser.NewFromSchemaDir(schemaDir)
+	if err != nil {
+		log.Printf("⚠️  CDA parser not registered: %v", err)
+		return err
+	}
+	pf.parsers[models.FormatCCDA] = svc
+	log.Printf("✅ CDA parser registered (schema: %s)", schemaDir)
+	return nil
 }
 
 // GetParser returns appropriate parser for format (OOB selection)

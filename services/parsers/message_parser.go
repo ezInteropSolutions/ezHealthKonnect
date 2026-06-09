@@ -68,6 +68,8 @@ func resolveFormatAlias(format string) string {
 		return string(models.FormatHL7v2)
 	case "fhir":
 		return string(models.FormatFHIR)
+	case "cda", "ccd", "c32", "hitsp":
+		return string(models.FormatCCDA)
 	// "json" is intentionally NOT remapped to "fhir" — plain JSON goes to
 	// PassthroughParser which does a best-effort field merge without claiming
 	// FHIR semantics. FHIRParserService itself detects FHIR via resourceType.

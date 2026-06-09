@@ -8,6 +8,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/config v1.32.9
 	github.com/aws/aws-sdk-go-v2/credentials v1.19.9
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.96.0
+	github.com/beevik/etree v1.4.1
 	github.com/dop251/goja v0.0.0-20250630131328-58d95d85e994
 	github.com/extrame/xls v0.0.1
 	github.com/gin-contrib/cors v1.7.6

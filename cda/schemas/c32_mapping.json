@@ -1,0 +1,136 @@
+{
+  "version": "C-CDA R2.1",
+  "source": "C32_R2.1_mapping.xlsx",
+  "description": "Maps legacy C32/HITSP template OIDs to C-CDA R2.1 template OIDs for normalization",
+  "profileDetection": {
+    "c32TemplateIds": [
+      "2.16.840.1.113883.3.88.11.32.1",
+      "2.16.840.1.113883.3.88.11.83.1"
+    ],
+    "hitspTemplateIds": [
+      "1.3.6.1.4.1.19376.1.5.3.1.1.1",
+      "2.16.840.1.113883.3.88.11.83.1"
+    ]
+  },
+  "mappings": [
+    {
+      "table": "ALLERGY_ENTRY",
+      "column": "Severity",
+      "newTemplateId": "2.16.840.1.113883.10.20.22.4.8",
+      "oldTemplateIds": [
+        "2.16.840.1.113883.10.20.1.55",
+        "1.3.6.1.4.1.19376.1.5.3.1.4.1"
+      ]
+    },
+    {
+      "table": "ALLERGY_ENTRY",
+      "column": "Allergy Status",
+      "newTemplateId": "2.16.840.1.113883.10.20.22.4.28",
+      "oldTemplateIds": [
+        "2.16.840.1.113883.10.20.1.39"
+      ]
+    },
+    {
+      "table": "ALLERGY_ENTRY",
+      "column": "Reaction",
+      "newTemplateId": "2.16.840.1.113883.10.20.22.4.9",
+      "oldTemplateIds": [
+        "2.16.840.1.113883.10.20.1.54"
+      ]
+    },
+    {
+      "table": "FAMILY_HISTORY_COMPONENT",
+      "column": "Death observation",
+      "newTemplateId": "2.16.840.1.113883.10.20.22.4.47",
+      "oldTemplateIds": [
+        "2.16.840.1.113883.10.20.1.42"
+      ]
+    },
+    {
+      "table": "FAMILY_HISTORY_COMPONENT",
+      "column": "Age observation",
+      "newTemplateId": "2.16.840.1.113883.10.20.22.4.31",
+      "oldTemplateIds": [
+        "2.16.840.1.113883.10.20.22.4.38"
+      ]
+    },
+    {
+      "table": "IMMUNIZATION",
+      "column": "Supply Activity",
+      "newTemplateId": "2.16.840.1.113883.10.20.22.4.17",
+      "oldTemplateIds": [
+        "2.16.840.1.113883.10.20.1.34",
+        "1.3.6.1.4.1.19376.1.5.3.1.4.7.3",
+        "2.16.840.1.113883.3.88.11.83.8.3"
+      ]
+    },
+    {
+      "table": "IMMUNIZATION",
+      "column": "Supply Activity (alt)",
+      "newTemplateId": "2.16.840.1.113883.10.20.22.4.18",
+      "oldTemplateIds": [
+        "2.16.840.1.113883.10.20.1.34",
+        "1.3.6.1.4.1.19376.1.5.3.1.4.7.3"
+      ]
+    },
+    {
+      "table": "IMMUNIZATION_MED_DISPENSE",
+      "column": "Medication Information Constraints",
+      "newTemplateId": "2.16.840.1.113883.10.20.22.4.23",
+      "oldTemplateIds": [
+        "2.16.840.1.113883.10.20.1.53",
+        "1.3.6.1.4.1.19376.1.5.3.1.4.7.2",
+        "2.16.840.1.113883.3.88.11.83.8.2"
+      ]
+    },
+    {
+      "table": "IMMUNIZATION_MED_SUPPLY",
+      "column": "Medication Information Constraints",
+      "newTemplateId": "2.16.840.1.113883.10.20.22.4.23",
+      "oldTemplateIds": [
+        "2.16.840.1.113883.10.20.1.53",
+        "1.3.6.1.4.1.19376.1.5.3.1.4.7.2",
+        "2.16.840.1.113883.3.88.11.83.8.2"
+      ]
+    },
+    {
+      "table": "MEDICATION",
+      "column": "Supply Activity",
+      "newTemplateId": "2.16.840.1.113883.10.20.22.4.17",
+      "oldTemplateIds": [
+        "2.16.840.1.113883.10.20.1.34",
+        "1.3.6.1.4.1.19376.1.5.3.1.4.7.3",
+        "2.16.840.1.113883.3.88.11.83.8.3"
+      ]
+    },
+    {
+      "table": "MEDICATION",
+      "column": "Supply Activity (alt)",
+      "newTemplateId": "2.16.840.1.113883.10.20.22.4.18",
+      "oldTemplateIds": [
+        "2.16.840.1.113883.10.20.1.34",
+        "1.3.6.1.4.1.19376.1.5.3.1.4.7.3"
+      ]
+    },
+    {
+      "table": "MEDICATION_MED_DISPENSE",
+      "column": "Medication Information Constraints",
+      "newTemplateId": "2.16.840.1.113883.10.20.22.4.23",
+      "oldTemplateIds": [
+        "2.16.840.1.113883.10.20.1.53",
+        "1.3.6.1.4.1.19376.1.5.3.1.4.7.2",
+        "2.16.840.1.113883.3.88.11.83.8.2"
+      ]
+    },
+    {
+      "table": "MEDICATION_MED_SUPPLY",
+      "column": "Medication Information Constraints",
+      "newTemplateId": "2.16.840.1.113883.10.20.22.4.23",
+      "oldTemplateIds": [
+        "2.16.840.1.113883.10.20.1.53",
+        "1.3.6.1.4.1.19376.1.5.3.1.4.7.2",
+        "2.16.840.1.113883.3.88.11.83.8.2"
+      ]
+    }
+  ]
+}
