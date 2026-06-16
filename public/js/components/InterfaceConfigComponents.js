@@ -906,6 +906,14 @@ class InterfaceConfigComponents {
                                name="${direction}ArchivePath">
                         <div class="form-hint">📦 Directory for archived files (required if using move/archive)</div>
                     </div>
+                    <div class="form-group">
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="${prefix}CreateDirs" name="${direction}CreateDirs"
+                                   ${(config.createDirs || config.create_dirs) ? 'checked' : ''}>
+                            <span>Create directory if it does not exist</span>
+                        </label>
+                        <div class="form-hint">📁 Automatically create the watch directory on first use</div>
+                    </div>
                 ` : `
                     <div class="form-group">
                         <label for="${prefix}FilenamePattern" class="form-label">File Naming Pattern</label>
@@ -2233,12 +2241,14 @@ class InterfaceConfigComponents {
                 const filePollingInterval = container.querySelector(`#${prefix}PollingInterval`)?.value;
                 const fileAfterProcessing = container.querySelector(`#${prefix}AfterProcessing`)?.value;
                 const archivePath = container.querySelector(`#${prefix}ArchivePath`)?.value;
+                const createDirs = container.querySelector(`#${prefix}CreateDirs`)?.checked;
 
                 if (directoryPath) config.directory_path = directoryPath;
                 if (filePattern) config.file_pattern = filePattern;
                 if (filePollingInterval) config.polling_interval = parseInt(filePollingInterval);
                 if (fileAfterProcessing) config.after_processing = fileAfterProcessing;
                 if (archivePath) config.archive_path = archivePath;
+                config.create_dirs = createDirs === true;
                 break;
         }
 

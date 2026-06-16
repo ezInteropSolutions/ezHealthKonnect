@@ -444,7 +444,7 @@
             // Fall back to building a minimal config from legacy fields when no step exists yet.
             const inboundStepCfg = interfaceData.inboundStepConfig && interfaceData.inboundStepConfig.connectorType
                 ? interfaceData.inboundStepConfig
-                : { connectorType: sourceConnectivityValue === 'http' ? 'http_fhir_inbound' : 'tcp_mllp_inbound', config: sourceConfigData };
+                : { connectorType: sourceConnectivityValue === 'http' ? 'http_rest_inbound' : 'tcp_mllp_inbound', config: sourceConfigData };
             window._editInboundBuilder = new ConnectorConfigBuilder(inboundContainer, inboundStepCfg, 'inbound');
             window._editInboundBuilder.init();
             console.log('✅ Inbound ConnectorConfigBuilder initialized with:', inboundStepCfg);

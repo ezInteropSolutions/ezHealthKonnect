@@ -27,6 +27,7 @@ type FileListenerConnector struct {
 	archivePath      string // where to move processed files
 	encoding         string // UTF-8, ASCII, etc.
 	recursive        bool   // scan subdirectories
+	createDirs       bool   // auto-create directory if it does not exist
 	messageChan      chan<- *models.InboundMessage
 	stopChan         chan struct{}
 	mu               sync.RWMutex
@@ -125,9 +126,23 @@ func (f *FileListenerConnector) Initialize(config []byte) error {
 		f.recursive = recursive
 	}
 
-	// Validate directory exists
+	// Auto-create directory
+	if cd, ok := cfg["create_dirs"].(bool); ok {
+		f.createDirs = cd
+	} else if cd, ok := cfg["createDirs"].(bool); ok {
+		f.createDirs = cd
+	}
+
+	// Validate / create directory
 	if _, err := os.Stat(f.directoryPath); os.IsNotExist(err) {
-		return fmt.Errorf("directory does not exist: %s", f.directoryPath)
+		if f.createDirs {
+			if mkErr := os.MkdirAll(f.directoryPath, 0755); mkErr != nil {
+				return fmt.Errorf("failed to create directory: %w", mkErr)
+			}
+			log.Printf("📁 File Listener: created directory %s", f.directoryPath)
+		} else {
+			return fmt.Errorf("directory does not exist: %s", f.directoryPath)
+		}
 	}
 
 	// Create archive directory if needed
@@ -143,6 +158,33 @@ func (f *FileListenerConnector) Initialize(config []byte) error {
 	// Mark as initialized for base connector validation
 	f.BaseInboundConnector.BaseConnector.initialized = true
 
+	return nil
+}
+
+// TestConnection verifies the watch directory is accessible and readable.
+func (f *FileListenerConnector) TestConnection(ctx context.Context) error {
+	f.mu.RLock()
+	dir := f.directoryPath
+	f.mu.RUnlock()
+
+	if dir == "" {
+		return fmt.Errorf("directory_path not configured")
+	}
+	info, err := os.Stat(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("directory does not exist: %s", dir)
+		}
+		return fmt.Errorf("cannot access directory %s: %w", dir, err)
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("path is not a directory: %s", dir)
+	}
+	// Verify we can list the directory (read permission check)
+	if _, err := os.ReadDir(dir); err != nil {
+		return fmt.Errorf("directory not readable: %s: %w", dir, err)
+	}
+	log.Printf("✅ File Listener TestConnection: directory %s is accessible", dir)
 	return nil
 }
 

@@ -18,8 +18,10 @@ import (
 	"ezhealthkonnect/models"
 	"ezhealthkonnect/services"
 	"ezhealthkonnect/services/backpressure"
+	cdastorage "ezhealthkonnect/services/cda_storage"
 	. "ezhealthkonnect/services/connectors" // Import connectors package for factory
 	"ezhealthkonnect/services/logger"
+	"ezhealthkonnect/services/parsers"
 	"ezhealthkonnect/services/storage"
 )
 
@@ -316,6 +318,14 @@ func (pe *ProcessingEngine) SetCodeTemplateService(svc *services.CodeTemplateSer
 func (pe *ProcessingEngine) SetDLQService(dlqSvc *DLQService) {
 	if pe.transformationService != nil {
 		pe.transformationService.GetExecutorRegistry().SetDLQService(dlqSvc)
+	}
+}
+
+// SetCDADocumentStore upgrades the cda.parse executor with a document store so that
+// every successfully parsed CDA document is persisted asynchronously after parsing.
+func (pe *ProcessingEngine) SetCDADocumentStore(store cdastorage.CDADocumentStore) {
+	if pe.transformationService != nil {
+		pe.transformationService.GetExecutorRegistry().SetCDADocumentStore(store)
 	}
 }
 
@@ -987,6 +997,205 @@ func (pe *ProcessingEngine) TransformInterfaceMessages(
 	// TODO: Implement when TransformationService is ready
 	return nil, fmt.Errorf("transformation service not yet implemented")
 }
+// ReprocessMessage re-runs the transformation pipeline for a message that is already
+// stored in PostgreSQL (and optionally in object storage). Unlike InjectTestMessage,
+// it operates on the EXISTING database row — no new row is inserted — so the message
+// ID stays stable across retries.
+//
+// Content priority: raw_content_uri (object storage) → raw_message (DB column).
+// The pipeline is executed asynchronously; status is updated to "processing" immediately.
+func (pe *ProcessingEngine) ReprocessMessage(interfaceID, messageID string) error {
+	if !pe.IsRunning() {
+		return fmt.Errorf("processing engine is not running — activate the interface first")
+	}
+
+	tableName := fmt.Sprintf("messages_intf_%s", sanitizeInterfaceID(interfaceID))
+	var rawContentURI, rawMessage, msgType, srcType string
+	err := pe.db.QueryRow(
+		fmt.Sprintf(`SELECT COALESCE(raw_content_uri,''), COALESCE(raw_message,''), COALESCE(message_type,''), COALESCE(source_type,'')
+		             FROM %s WHERE message_id = $1`, tableName),
+		messageID,
+	).Scan(&rawContentURI, &rawMessage, &msgType, &srcType)
+	if err != nil {
+		return fmt.Errorf("message %s not found: %w", messageID, err)
+	}
+
+	// Mark in-progress before launching goroutine so the UI updates immediately.
+	// Reset delivery_status to 'pending' so the pipeline's 'not_required' flip works
+	// if there is no connector.outbound step, and delivery_attempts is NOT incremented
+	// here — only the OutboundConnectorExecutor increments it on actual delivery attempt.
+	pe.updateMessageStatus(interfaceID, messageID, "processing", map[string]interface{}{
+		"last_error_message": nil,
+		"error_count":        0,
+		"delivery_status":    "pending",
+	})
+
+	go func() {
+		ctx := context.Background()
+		ctx = context.WithValue(ctx, "message_id", messageID)
+		ctx = context.WithValue(ctx, "interface_id", interfaceID)
+
+		// Create a logger so re-run activity is visible in the message logs tab.
+		logger := pe.createLogger(interfaceID, messageID, "", msgType)
+		if logger != nil {
+			logger.Info(services.LogCategoryConnection, "Reprocess started", map[string]interface{}{
+				"message_type": msgType,
+				"trigger":      "manual_reprocess",
+			})
+		}
+
+		// Resolve raw content — object storage first, then DB column.
+		content := ""
+		if pe.objectStorage != nil && rawContentURI != "" {
+			if data, readErr := pe.objectStorage.GetRawMessageByURI(ctx, rawContentURI); readErr == nil {
+				content = string(data)
+				if logger != nil {
+					logger.Info(services.LogCategoryConnection, "Raw content loaded from object storage", map[string]interface{}{
+						"uri":         rawContentURI,
+						"content_len": len(content),
+					})
+				}
+			} else {
+				log.Printf("⚠️  [reprocess] object storage read failed for %s: %v — trying raw_message column", messageID, readErr)
+				if logger != nil {
+					logger.Warning(services.LogCategoryConnection, "Object storage read failed — falling back to DB column", map[string]interface{}{
+						"error": readErr.Error(),
+					})
+				}
+			}
+		}
+		if content == "" {
+			content = rawMessage
+			if content != "" && logger != nil {
+				logger.Info(services.LogCategoryConnection, "Raw content loaded from database column", map[string]interface{}{
+					"content_len": len(content),
+				})
+			}
+		}
+		if content == "" {
+			errMsg := "Reprocess failed: no raw content found in storage or database"
+			if logger != nil {
+				logger.Error(services.LogCategoryConnection, errMsg, nil)
+			}
+			pe.updateMessageStatus(interfaceID, messageID, "failed", map[string]interface{}{
+				"last_error_message": errMsg,
+			})
+			return
+		}
+
+		if logger != nil {
+			logger.LogParsingStart(msgType)
+		}
+
+		var result *models.ParserResult
+
+		// Mirror the storeAndParse fast-paths so re-run uses the same parser as
+		// the original message delivery.
+		if srcType == "http_fhir" {
+			// FHIR fast-path: content is already a JSON FHIR bundle — no HL7 parsing.
+			fhirParser := parsers.NewFHIRParserService()
+			pr := fhirParser.Parse(content)
+			if !pr.Success {
+				errMsg := "Reprocess FHIR parse failed: " + pr.Error
+				if logger != nil {
+					logger.Error(services.LogCategoryParsing, errMsg, nil)
+				}
+				pe.updateMessageStatus(interfaceID, messageID, "failed", map[string]interface{}{
+					"last_error_message": errMsg,
+				})
+				return
+			}
+			fhirParsedJSON := pr.ParsedJSON
+			fhirParsedJSON["_format"] = string(models.FormatFHIR)
+			if len(pr.EnhancedFields) > 0 {
+				fhirParsedJSON["enhancedFields"] = pr.EnhancedFields
+			}
+			result = &models.ParserResult{
+				Success:    true,
+				Format:     models.FormatFHIR,
+				ParsedJSON: fhirParsedJSON,
+				Metadata: models.ParserMetadata{
+					MessageType: msgType,
+					ParsedAt:    time.Now(),
+				},
+			}
+			if logger != nil {
+				logger.LogParsingComplete(msgType, 0, len(fhirParsedJSON))
+			}
+		} else {
+			if pe.parserService == nil {
+				errMsg := "Reprocess failed: parser service unavailable"
+				if logger != nil {
+					logger.Error(services.LogCategoryParsing, errMsg, nil)
+				}
+				pe.updateMessageStatus(interfaceID, messageID, "failed", map[string]interface{}{
+					"last_error_message": errMsg,
+				})
+				return
+			}
+			var parseErr error
+			result, parseErr = pe.parserService.ParseToJSON(ctx, messageID, interfaceID, content)
+			if parseErr != nil {
+				errMsg := "Reprocess parse failed: " + parseErr.Error()
+				if logger != nil {
+					logger.LogParsingError(msgType, parseErr.Error(), 0)
+				}
+				pe.updateMessageStatus(interfaceID, messageID, "failed", map[string]interface{}{
+					"last_error_message": errMsg,
+				})
+				return
+			}
+			if logger != nil {
+				parsedLen := 0
+				if result != nil {
+					parsedLen = len(result.ParsedJSON)
+				}
+				logger.LogParsingComplete(msgType, result.ParsingTime.Milliseconds(), parsedLen)
+			}
+		}
+
+		log.Printf("🔄 [reprocess] Re-running pipeline for message %s (type: %s, source: %s)", messageID, msgType, srcType)
+		pe.executeTransformationPipelineWithLogger(ctx, interfaceID, messageID, msgType, result, logger)
+	}()
+
+	return nil
+}
+
+// InjectTestMessage creates a synthetic InboundMessage from caller-supplied content
+// and runs it through the full processing pipeline (store → parse → transform → deliver).
+// This is used by the UI "Send Test Message" feature for interfaces whose inbound connector
+// has no live socket to receive messages (e.g. file_listener, postgresql_inbound).
+// The message is processed asynchronously; the caller receives the assigned message ID.
+func (pe *ProcessingEngine) InjectTestMessage(interfaceID, content, messageType, contentType string) (string, error) {
+	if !pe.IsRunning() {
+		return "", fmt.Errorf("processing engine is not running — activate the interface first")
+	}
+	msgID := fmt.Sprintf("test-%d", time.Now().UnixNano())
+
+	// Mirror the source type so storeAndParse uses the same fast-path as a real message.
+	// FHIR bundles sent with application/fhir+json get the http_fhir fast-path; all other
+	// formats use the generic HL7/CDA parser path.
+	sourceType := "ui_test"
+	if strings.Contains(strings.ToLower(contentType), "fhir") {
+		sourceType = "http_fhir"
+	}
+
+	msg := &models.InboundMessage{
+		MessageID:      msgID,
+		InterfaceID:    interfaceID,
+		Content:        content,
+		ContentType:    contentType,
+		SourceType:     sourceType,
+		SourceEndpoint: "send-test-message",
+		ReceivedAt:     time.Now(),
+		MessageType:    messageType,
+		MessageSize:    len(content),
+		Priority:       5,
+	}
+	go pe.processSingleMessage(interfaceID, msg)
+	return msgID, nil
+}
+
 // ==================== BACKPRESSURE METRICS ====================
 
 // GetQueueDepths returns current worker pool metrics for all active interfaces.

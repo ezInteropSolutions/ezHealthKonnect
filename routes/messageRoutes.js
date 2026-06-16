@@ -36,6 +36,7 @@ router.get('/test', (req, res) => {
 router.get('/interface/:interfaceId',                                     sessionAuth, canRead,  (req, res) => MessageController.getInterfaceMessages(req, res));
 router.get('/interface/:interfaceId/stats',                               sessionAuth, canRead,  (req, res) => MessageController.getInterfaceStats(req, res));
 router.get('/interface/:interfaceId/message/:messageId/parsed',           sessionAuth, canRead,  (req, res) => MessageController.getParsedContent(req, res));
+router.get('/interface/:interfaceId/message/:messageId/fhir-output',      sessionAuth, canRead,  (req, res) => MessageController.getFhirOutput(req, res));
 
 // GLOBAL ENDPOINTS REMOVED - Use interface-specific endpoints only
 router.get('/', sessionAuth, canRead, (req, res) => {
@@ -56,7 +57,6 @@ router.get('/flow/:sourceInterfaceId/:targetInterfaceId/status', sessionAuth, ca
 
 // Write operations                                       — operator+
 router.post('/send/:interfaceId',   sessionAuth, canWrite, (req, res) => MessageController.sendMessage(req, res));
-router.post('/flow/hl7-to-fhir',   sessionAuth, canWrite, (req, res) => MessageController.sendHL7ToFHIR(req, res));
 router.post('/:messageId/reprocess', sessionAuth, canWrite, (req, res) => MessageController.reprocessMessage(req, res));
 router.delete('/:messageId',        sessionAuth, canWrite, (req, res) => MessageController.deleteMessage(req, res));
 

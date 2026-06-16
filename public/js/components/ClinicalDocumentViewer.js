@@ -33,42 +33,107 @@ class ClinicalDocumentViewer {
     async mount() {
         this._container.innerHTML = this._tpl.loading();
 
+        if (this._format === 'ccda') {
+            await this._renderCDAWithXSLT();
+            return;
+        }
+
+        // FHIR path: use parsedContent passed in directly, or fetch sections
         if (!this._parsedContent && this._interfaceId && this._messageId) {
             await this._fetchParsedContent();
         }
-
         if (!this._parsedContent) {
             this._container.innerHTML = this._tpl.unavailable();
             return;
         }
-
-        if (this._format === 'ccda') {
-            this._renderCDA();
-        } else {
-            await this._renderFHIR();
-        }
+        await this._renderFHIR();
     }
 
     destroy() {
         this._container.innerHTML = '';
     }
 
-    // ── Fetch parsed content ──────────────────────────────────────────────────
+    // ── XSLT-based CDA rendering ──────────────────────────────────────────────
 
-    async _fetchParsedContent() {
+    async _renderCDAWithXSLT() {
         try {
-            const url = '/api/messages/interface/' + this._interfaceId + '/message/' + this._messageId + '/parsed';
-            const resp = await fetch(url);
-            if (!resp.ok) return;
-            const data = await resp.json();
-            if (data.success && data.parsed_content) {
-                this._parsedContent = data.parsed_content;
-                this._format = data.format || this._format;
+            // Fetch raw XML and XSLT stylesheet in parallel
+            const [rawXml, xsltText] = await Promise.all([
+                this._fetchRawXml(),
+                this._loadXSLT(),
+            ]);
+
+            if (!rawXml || !xsltText) {
+                this._container.innerHTML = this._tpl.unavailable();
+                return;
             }
-        } catch (_) { /* degrade gracefully */ }
+
+            const parser  = new DOMParser();
+            const xmlDoc  = parser.parseFromString(rawXml,  'application/xml');
+            const xsltDoc = parser.parseFromString(xsltText, 'application/xml');
+
+            // Abort on parse errors
+            if (xmlDoc.querySelector('parsererror') || xsltDoc.querySelector('parsererror')) {
+                console.warn('[ClinicalDocumentViewer] XML/XSLT parse error');
+                this._container.innerHTML = this._tpl.unavailable();
+                return;
+            }
+
+            const proc = new XSLTProcessor();
+            proc.importStylesheet(xsltDoc);
+            const resultDoc = proc.transformToDocument(xmlDoc);
+
+            if (!resultDoc || !resultDoc.documentElement) {
+                this._container.innerHTML = this._tpl.unavailable();
+                return;
+            }
+
+            // Render in a sandboxed iframe for clean CSS isolation
+            this._container.innerHTML = '';
+            const iframe = document.createElement('iframe');
+            iframe.style.cssText = 'width:100%;height:100%;border:none;display:block;';
+            iframe.setAttribute('sandbox', 'allow-scripts allow-same-origin');
+            this._container.style.overflow = 'hidden';
+            this._container.appendChild(iframe);
+
+            const iframeDoc = iframe.contentDocument || iframe.contentWindow.document;
+            iframeDoc.open();
+            iframeDoc.write('<!DOCTYPE html>');
+            // XMLSerializer handles the transformed document tree
+            const html = new XMLSerializer().serializeToString(resultDoc);
+            iframeDoc.write(html.replace(/^<\?xml[^?]*\?>/, ''));
+            iframeDoc.close();
+
+        } catch (err) {
+            console.warn('[ClinicalDocumentViewer] XSLT render failed:', err.message);
+            this._container.innerHTML = this._tpl.unavailable();
+        }
     }
 
-    // ── CDA rendering ──────────────────────────────────────────────────────────
+    async _fetchRawXml() {
+        if (!this._interfaceId || !this._messageId) return null;
+        try {
+            const url = '/api/messages/' + encodeURIComponent(this._messageId) +
+                        '/raw?interfaceId=' + encodeURIComponent(this._interfaceId);
+            const resp = await fetch(url);
+            if (!resp.ok) return null;
+            const data = await resp.json();
+            return (data && data.success && data.content) ? data.content : null;
+        } catch (_) { return null; }
+    }
+
+    async _loadXSLT() {
+        if (ClinicalDocumentViewer._xsltCache) return ClinicalDocumentViewer._xsltCache;
+        try {
+            const resp = await fetch('/xslt/cda.xsl');
+            if (!resp.ok) return null;
+            const text = await resp.text();
+            ClinicalDocumentViewer._xsltCache = text;
+            return text;
+        } catch (_) { return null; }
+    }
+
+    // ── Legacy section-based CDA rendering (kept as reference / FHIR viewer base) ──
 
     _renderCDA() {
         const sections = this._parsedContent.sections || {};
@@ -358,6 +423,8 @@ ClinicalDocumentViewer.SECTION_LABELS = {
     socialHistory:            'Social History',
     header:                   'Patient Info',
 };
+
+ClinicalDocumentViewer._xsltCache = null;
 
 ClinicalDocumentViewer.FHIR_RESOURCE_LABELS = {
     Patient:             'Patient Demographics',

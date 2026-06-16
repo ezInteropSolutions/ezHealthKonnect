@@ -541,6 +541,7 @@ class BasicInterfaceConfigManager {
             const afterProcessing = document.getElementById(`${idPrefix}sourceAfterProcessing`)?.value;
             const archivePath = document.getElementById(`${idPrefix}sourceArchivePath`)?.value;
             const encoding = document.getElementById(`${idPrefix}sourceEncoding`)?.value;
+            const createDirs = document.getElementById(`${idPrefix}sourceCreateDirs`)?.checked;
 
             // Use snake_case for consistency with Go backend
             if (directoryPath) config.directory_path = directoryPath;
@@ -549,6 +550,7 @@ class BasicInterfaceConfigManager {
             if (afterProcessing) config.after_processing = afterProcessing;
             if (archivePath) config.archive_path = archivePath;
             if (encoding) config.encoding = encoding;
+            config.create_dirs = createDirs === true;
 
             console.log('📂 File source config collected:', config);
         }

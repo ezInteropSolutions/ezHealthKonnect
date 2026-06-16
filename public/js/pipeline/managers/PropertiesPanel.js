@@ -6740,12 +6740,13 @@ OBX|3|NM|2075-0^Chloride||102|mmol/L</pre>
             console.log('[PropertiesPanel] ✅ Saved FHIR Validation config:', step.config);
         }
 
-        // File Parser / Remove Duplicates / Data Masking / Normalizer / API & DB Enrichment / Payload Builder — delegated to active step builder
+        // File Parser / Remove Duplicates / Data Masking / Normalizer / API & DB Enrichment / Payload Builder / CDA steps — delegated to active step builder
         if (this.activeStepBuilder && (
             VisualStep.isFileParser(step) || VisualStep.isRemoveDuplicates(step) ||
             VisualStep.isDataMasking(step) || VisualStep.isNormalizer(step) ||
             VisualStep.isAPIEnrichment(step) || VisualStep.isDatabaseEnrichment(step) ||
-            VisualStep.isDeidentify(step) || VisualStep.isPayloadBuilder(step)
+            VisualStep.isDeidentify(step) || VisualStep.isPayloadBuilder(step) ||
+            VisualStep.isCdaStep(step)
         )) {
             this.activeStepBuilder.collectConfig(step);
         }
@@ -7229,6 +7230,30 @@ OBX|3|NM|2075-0^Chloride||102|mmol/L</pre>
             if (this.activeStepBuilder) { this.activeStepBuilder.destroy(); }
             this.activeStepBuilder = StepBuilderRegistry.create('payload.builder', this);
             return this.activeStepBuilder.render(step);
+        }
+
+        if (VisualStep.isCdaParseStep(step)) {
+            console.log('🏥 Using CDA Parse step builder');
+            if (this.activeStepBuilder) { this.activeStepBuilder.destroy(); }
+            this.activeStepBuilder = StepBuilderRegistry.create('cda.parse', this);
+            return this.activeStepBuilder.render(step);
+        }
+
+        if (VisualStep.isCdaToFhirStep(step)) {
+            console.log('🏥 Using CDA→FHIR 4-tab step builder');
+            if (this.activeStepBuilder) { this.activeStepBuilder.destroy(); }
+            this.activeStepBuilder = StepBuilderRegistry.create('cda.to_fhir', this);
+            return this.activeStepBuilder.render(step);
+        }
+
+        if (VisualStep.isCdaStep(step)) {
+            // fhir.to_cda and cda.normalize also use StepBuilderRegistry
+            const type = step.stepType || step.step_type || '';
+            if (this.activeStepBuilder) { this.activeStepBuilder.destroy(); }
+            this.activeStepBuilder = StepBuilderRegistry.create(type, this);
+            if (this.activeStepBuilder) {
+                return this.activeStepBuilder.render(step);
+            }
         }
 
         // Destroy any registered builder when falling through to generic UI

@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"time"
@@ -452,6 +453,20 @@ func (pe *ProcessingEngine) storeAndParse(interfaceID string, msg *models.Inboun
 	} else if pe.parserService != nil {
 		log.Printf("🔄 Starting JSON conversion for message: %s (type: %s)", msg.MessageID, messageType)
 
+		// Reject empty content early — no point trying to parse 0 bytes.
+		if strings.TrimSpace(msg.Content) == "" {
+			log.Printf("⚠️  Empty content for message %s — marking failed", msg.MessageID)
+			if logger != nil {
+				logger.Error(services.LogCategoryParsing, "Message content is empty — cannot parse", nil)
+			}
+			pe.updateMessageStatus(interfaceID, msg.MessageID, "failed", map[string]interface{}{
+				"last_error_message":      "Message content is empty",
+				"error_count":             1,
+				"processing_completed_at": time.Now(),
+			})
+			return
+		}
+
 		if logger != nil {
 			logger.LogParsingStart(messageType)
 		}
@@ -477,6 +492,14 @@ func (pe *ProcessingEngine) storeAndParse(interfaceID string, msg *models.Inboun
 				)
 				pe.errorService.CaptureError(interfaceID, msg.MessageID, errCtx)
 			}
+
+			// Mark the message as failed so the UI shows the correct status.
+			// Without this the row stays at status='received' indefinitely.
+			pe.updateMessageStatus(interfaceID, msg.MessageID, "failed", map[string]interface{}{
+				"last_error_message":      fmt.Sprintf("Parse failed: %v", err),
+				"error_count":             1,
+				"processing_completed_at": time.Now(),
+			})
 		} else {
 			log.Printf("✅ JSON conversion completed for %s in %dms",
 				msg.MessageID, result.ParsingTime.Milliseconds())
@@ -539,10 +562,18 @@ func (pe *ProcessingEngine) executeTransformationPipeline(
 	log.Printf("🔍 [MVC PIPELINE] Interface: %s, MessageType: %s", interfaceID, messageType)
 	log.Printf("🔍 [MVC PIPELINE] About to set up defer for panic recovery...")
 
-	// Defer panic recovery for transformation pipeline
+	// Defer panic recovery for transformation pipeline.
+	// MUST update status to 'failed' here so the message never stays stuck
+	// at 'processing' when a pipeline step panics.
 	defer func() {
 		if r := recover(); r != nil {
-			log.Printf("🚨 PANIC RECOVERED in transformation pipeline: %v (message: %s)", r, messageID)
+			stack := string(debug.Stack())
+			log.Printf("🚨 PANIC RECOVERED in transformation pipeline: %v (message: %s)\nStack trace:\n%s", r, messageID, stack)
+			pe.updateMessageStatus(interfaceID, messageID, "failed", map[string]interface{}{
+				"last_error_message":      fmt.Sprintf("Pipeline panic: %v", r),
+				"error_count":             1,
+				"processing_completed_at": time.Now(),
+			})
 			if pe.errorService != nil {
 				errCtx := models.NewErrorContext(
 					models.StageTransformation,
@@ -593,6 +624,17 @@ func (pe *ProcessingEngine) executeTransformationPipeline(
 	pe.updateMessageStatus(interfaceID, messageID, "processing", map[string]interface{}{
 		"processing_started_at": time.Now(),
 	})
+
+	// Guard: a nil parseResult would panic below — treat it the same as a parse failure.
+	if parseResult == nil {
+		log.Printf("❌ [MVC PIPELINE] nil parseResult for message %s — marking failed", messageID)
+		pe.updateMessageStatus(interfaceID, messageID, "failed", map[string]interface{}{
+			"last_error_message":      "Pipeline received nil parse result",
+			"error_count":             1,
+			"processing_completed_at": time.Now(),
+		})
+		return
+	}
 
 	// Step 2: Wire parsed_format into pipeline message envelope as _format.
 	// enrichMessageEnvelope() in ExecutePipeline will build _semantic_index and _sensitivity_map.

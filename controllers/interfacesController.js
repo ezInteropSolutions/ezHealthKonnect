@@ -92,7 +92,27 @@ class InterfacesController {
                     i.updated_at,
                     i.version,
                     i.processing_stats,
-                    u.email as created_by_email
+                    u.email as created_by_email,
+                    (SELECT ts.config::text
+                     FROM transformation_steps ts
+                     JOIN transformation_pipelines tp ON tp.id = ts.pipeline_id
+                     WHERE tp.interface_id = i.id AND ts.step_type = 'connector.inbound'
+                     ORDER BY ts.sequence LIMIT 1) AS inbound_step_config,
+                    (SELECT ts.id::text
+                     FROM transformation_steps ts
+                     JOIN transformation_pipelines tp ON tp.id = ts.pipeline_id
+                     WHERE tp.interface_id = i.id AND ts.step_type = 'connector.inbound'
+                     ORDER BY ts.sequence LIMIT 1) AS inbound_step_id,
+                    (SELECT ts.config::text
+                     FROM transformation_steps ts
+                     JOIN transformation_pipelines tp ON tp.id = ts.pipeline_id
+                     WHERE tp.interface_id = i.id AND ts.step_type = 'connector.outbound'
+                     ORDER BY ts.sequence LIMIT 1) AS outbound_step_config,
+                    (SELECT ts.id::text
+                     FROM transformation_steps ts
+                     JOIN transformation_pipelines tp ON tp.id = ts.pipeline_id
+                     WHERE tp.interface_id = i.id AND ts.step_type = 'connector.outbound'
+                     ORDER BY ts.sequence LIMIT 1) AS outbound_step_id
                 FROM interfaces i
                 LEFT JOIN users u ON i.created_by = u.id
                 WHERE i.user_id = :userId AND i.is_active = true
@@ -114,6 +134,7 @@ class InterfacesController {
                 // ✅ UPDATED: Include source and target connectivity
                 sourceType: item.source_type,
                 sourceConnectivity: item.source_connectivity,
+                sourceFormat: this.deriveSourceFormat(item.source_connectivity),
                 targetType: item.target_type,
                 targetConnectivity: item.target_connectivity,
 
@@ -158,7 +179,13 @@ class InterfacesController {
                 lastActivity: item.last_processed_at, // Frontend compatibility
                 createdBy: item.created_by_email || 'Unknown',
                 version: item.version || 1,
-                processingStats: this.parseJsonField(item.processing_stats)
+                processingStats: this.parseJsonField(item.processing_stats),
+
+                // Connector step configs — mirror of getInterface so edit modal shows pipeline-accurate data
+                inboundStepId: item.inbound_step_id || null,
+                inboundStepConfig: this.parseJsonField(item.inbound_step_config),
+                outboundStepId: item.outbound_step_id || null,
+                outboundStepConfig: this.parseJsonField(item.outbound_step_config)
             }));
 
             return res.json({
@@ -455,6 +482,7 @@ class InterfacesController {
                 // Connectivity metadata (display/fallback only — Go reads from connectorSteps below)
                 sourceType: item.source_type,
                 sourceConnectivity: item.source_connectivity,
+                sourceFormat: this.deriveSourceFormat(item.source_connectivity),
                 targetType: item.target_type,
                 targetConnectivity: item.target_connectivity,
                 sourceConfig: this.parseJsonField(item.source_config),
@@ -1269,6 +1297,45 @@ class InterfacesController {
             console.warn('❌ Failed to parse JSON field:', jsonString);
             return {};
         }
+    }
+
+    /**
+     * Derive the actual message format (hl7v2, fhir, ccda, json, ...) from an
+     * interface's connectivity config, instead of trusting the static
+     * `message_type` column (which only encodes an HL7v2 trigger event like
+     * "ADT^A01" and goes stale if the connector is reconfigured later).
+     *
+     * Vocabulary mirrors models.MessageFormat (Go): hl7v2, hl7v3, fhir, ccda,
+     * xml, json, edi, csv, unknown.
+     */
+    deriveSourceFormat(sourceConnectivity) {
+        const KNOWN_FORMATS = new Set(['hl7v2', 'hl7v3', 'fhir', 'ccda', 'xml', 'json', 'edi', 'csv']);
+        const CONNECTOR_TYPE_FORMAT = {
+            tcp_mllp_inbound: 'hl7v2',
+            tcp_mllp: 'hl7v2',
+            tcp: 'hl7v2',
+            http_fhir_inbound: 'fhir',
+            http_fhir: 'fhir',
+            http_rest_inbound: 'json',
+            file_listener: 'hl7v2',
+            file: 'hl7v2'
+        };
+
+        const conn = this.parseJsonField(sourceConnectivity);
+        const config = conn?.config || {};
+
+        // Explicit format set on the connector config wins (e.g. file_listener
+        // reading .ccda files, http_fhir_inbound's "fhir" type).
+        if (typeof config.type === 'string' && KNOWN_FORMATS.has(config.type.toLowerCase())) {
+            return config.type.toLowerCase();
+        }
+
+        const connectorType = config?.connectorconfig?.connectorType || conn?.type;
+        if (connectorType && CONNECTOR_TYPE_FORMAT[connectorType]) {
+            return CONNECTOR_TYPE_FORMAT[connectorType];
+        }
+
+        return 'unknown';
     }
 
     /**

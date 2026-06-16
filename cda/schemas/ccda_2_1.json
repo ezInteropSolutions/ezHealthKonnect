@@ -12,6 +12,38 @@
     "2.16.840.1.113883.10.20.22.1.9": "Progress Note",
     "2.16.840.1.113883.10.20.22.1.14": "Referral Note"
   },
+  "documentTypeSections": {
+    "CCD": {
+      "SHALL": ["allergiesAndIntolerances", "medications", "problems", "results", "vitalSigns", "immunizations", "socialHistory"],
+      "SHOULD": ["encounters", "procedures", "functionalStatus", "familyHistory", "assessmentAndPlan", "payersInsurance"],
+      "MAY": ["mentalStatus", "medicalEquipment", "advanceDirectives", "healthConcerns", "goals"]
+    },
+    "Discharge Summary": {
+      "SHALL": ["dischargeDiagnosis", "dischargeMedications", "hospitalCourse", "allergiesAndIntolerances", "problems"],
+      "SHOULD": ["admissionDiagnosis", "admissionMedications", "procedures", "vitalSigns", "dischargeInstructions"],
+      "MAY": ["results", "socialHistory", "dischargePhysical", "immunizations"]
+    },
+    "Referral Note": {
+      "SHALL": ["reasonForReferral", "problems", "medications", "allergiesAndIntolerances"],
+      "SHOULD": ["encounters", "results", "procedures", "socialHistory"],
+      "MAY": ["vitalSigns", "immunizations", "familyHistory"]
+    },
+    "History and Physical": {
+      "SHALL": ["chiefComplaint", "historyOfPresentIllness", "physicalExamination", "assessment"],
+      "SHOULD": ["pastMedicalHistory", "reviewOfSystems", "medications", "allergiesAndIntolerances", "vitalSigns"],
+      "MAY": ["problems", "results", "immunizations", "socialHistory"]
+    },
+    "Consultation Note": {
+      "SHALL": ["assessment", "chiefComplaint", "medications", "allergiesAndIntolerances", "problems"],
+      "SHOULD": ["encounters", "procedures", "results", "vitalSigns"],
+      "MAY": ["immunizations", "socialHistory", "familyHistory"]
+    },
+    "Progress Note": {
+      "SHALL": ["assessment", "problems"],
+      "SHOULD": ["medications", "vitalSigns", "results"],
+      "MAY": ["socialHistory", "immunizations"]
+    }
+  },
   "sections": [
     {
       "key": "allergiesAndIntolerances",
@@ -66,6 +98,27 @@
           "conformance": "SHOULD",
           "dataType": "TS",
           "xpath": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/effectiveTime/low/@value"
+        },
+        {
+          "key": "authorGiven",
+          "uscdiElement": "Author Given Name",
+          "conformance": "MAY",
+          "dataType": "ST",
+          "xpath": "entry/act/author/assignedAuthor/assignedPerson/name/given"
+        },
+        {
+          "key": "authorFamily",
+          "uscdiElement": "Author Family Name",
+          "conformance": "MAY",
+          "dataType": "ST",
+          "xpath": "entry/act/author/assignedAuthor/assignedPerson/name/family"
+        },
+        {
+          "key": "authorNPI",
+          "uscdiElement": "Author NPI",
+          "conformance": "MAY",
+          "dataType": "ST",
+          "xpath": "entry/act/author/assignedAuthor/id/@extension"
         }
       ]
     },
@@ -116,14 +169,35 @@
           "uscdiElement": "Start Date",
           "conformance": "SHOULD",
           "dataType": "IVL_TS",
-          "xpath": "entry/substanceAdministration/effectiveTime[@xsi:type='IVL_TS']/low/@value"
+          "xpath": "entry/substanceAdministration/effectiveTime/low/@value"
         },
         {
           "key": "stopDate",
           "uscdiElement": "Stop Date",
           "conformance": "MAY",
           "dataType": "IVL_TS",
-          "xpath": "entry/substanceAdministration/effectiveTime[@xsi:type='IVL_TS']/high/@value"
+          "xpath": "entry/substanceAdministration/effectiveTime/high/@value"
+        },
+        {
+          "key": "authorGiven",
+          "uscdiElement": "Information Source Given Name",
+          "conformance": "MAY",
+          "dataType": "ST",
+          "xpath": "entry/substanceAdministration/author/assignedAuthor/assignedPerson/name/given"
+        },
+        {
+          "key": "authorFamily",
+          "uscdiElement": "Information Source Family Name",
+          "conformance": "MAY",
+          "dataType": "ST",
+          "xpath": "entry/substanceAdministration/author/assignedAuthor/assignedPerson/name/family"
+        },
+        {
+          "key": "authorNPI",
+          "uscdiElement": "Information Source NPI",
+          "conformance": "MAY",
+          "dataType": "ST",
+          "xpath": "entry/substanceAdministration/author/assignedAuthor/id/@extension"
         }
       ]
     },
@@ -169,6 +243,20 @@
           "conformance": "MAY",
           "dataType": "TS",
           "xpath": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/effectiveTime/high/@value"
+        },
+        {
+          "key": "authorGiven",
+          "uscdiElement": "Recorder Given Name",
+          "conformance": "MAY",
+          "dataType": "ST",
+          "xpath": "entry/act/author/assignedAuthor/assignedPerson/name/given"
+        },
+        {
+          "key": "authorFamily",
+          "uscdiElement": "Recorder Family Name",
+          "conformance": "MAY",
+          "dataType": "ST",
+          "xpath": "entry/act/author/assignedAuthor/assignedPerson/name/family"
         }
       ]
     },
@@ -258,6 +346,20 @@
           "conformance": "SHALL",
           "dataType": "TS",
           "xpath": "entry/organizer/effectiveTime/@value"
+        },
+        {
+          "key": "authorGiven",
+          "uscdiElement": "Performer Given Name",
+          "conformance": "MAY",
+          "dataType": "ST",
+          "xpath": "entry/organizer/author/assignedAuthor/assignedPerson/name/given"
+        },
+        {
+          "key": "authorFamily",
+          "uscdiElement": "Performer Family Name",
+          "conformance": "MAY",
+          "dataType": "ST",
+          "xpath": "entry/organizer/author/assignedAuthor/assignedPerson/name/family"
         }
       ]
     },
@@ -287,12 +389,32 @@
           "xpath": "entry/encounter/effectiveTime/@value"
         },
         {
-          "key": "performerName",
-          "uscdiElement": "Encounter Provider",
+          "key": "performerGiven",
+          "uscdiElement": "Encounter Provider Given Name",
           "conformance": "SHOULD",
-          "dataType": "PN",
-          "xpath": "entry/encounter/performer/assignedEntity/assignedPerson/name/given",
-          "xpathFamily": "entry/encounter/performer/assignedEntity/assignedPerson/name/family"
+          "dataType": "ST",
+          "xpath": "entry/encounter/performer/assignedEntity/assignedPerson/name/given"
+        },
+        {
+          "key": "performerFamily",
+          "uscdiElement": "Encounter Provider Family Name",
+          "conformance": "SHOULD",
+          "dataType": "ST",
+          "xpath": "entry/encounter/performer/assignedEntity/assignedPerson/name/family"
+        },
+        {
+          "key": "performerNPI",
+          "uscdiElement": "Encounter Provider NPI",
+          "conformance": "SHOULD",
+          "dataType": "ST",
+          "xpath": "entry/encounter/performer/assignedEntity/id/@extension"
+        },
+        {
+          "key": "performerOrgName",
+          "uscdiElement": "Encounter Provider Organization",
+          "conformance": "MAY",
+          "dataType": "ST",
+          "xpath": "entry/encounter/performer/assignedEntity/representedOrganization/name"
         }
       ]
     },
@@ -329,6 +451,27 @@
           "conformance": "SHALL",
           "dataType": "CS",
           "xpath": "entry/procedure/statusCode/@code"
+        },
+        {
+          "key": "performerGiven",
+          "uscdiElement": "Procedure Performer Given Name",
+          "conformance": "SHOULD",
+          "dataType": "ST",
+          "xpath": "entry/procedure/performer/assignedEntity/assignedPerson/name/given"
+        },
+        {
+          "key": "performerFamily",
+          "uscdiElement": "Procedure Performer Family Name",
+          "conformance": "SHOULD",
+          "dataType": "ST",
+          "xpath": "entry/procedure/performer/assignedEntity/assignedPerson/name/family"
+        },
+        {
+          "key": "performerNPI",
+          "uscdiElement": "Procedure Performer NPI",
+          "conformance": "MAY",
+          "dataType": "ST",
+          "xpath": "entry/procedure/performer/assignedEntity/id/@extension"
         }
       ]
     },
@@ -372,6 +515,27 @@
           "conformance": "SHALL",
           "dataType": "CS",
           "xpath": "entry/substanceAdministration/statusCode/@code"
+        },
+        {
+          "key": "performerGiven",
+          "uscdiElement": "Immunization Performer Given Name",
+          "conformance": "MAY",
+          "dataType": "ST",
+          "xpath": "entry/substanceAdministration/performer/assignedEntity/assignedPerson/name/given"
+        },
+        {
+          "key": "performerFamily",
+          "uscdiElement": "Immunization Performer Family Name",
+          "conformance": "MAY",
+          "dataType": "ST",
+          "xpath": "entry/substanceAdministration/performer/assignedEntity/assignedPerson/name/family"
+        },
+        {
+          "key": "performerOrg",
+          "uscdiElement": "Immunization Performer Organization",
+          "conformance": "MAY",
+          "dataType": "ST",
+          "xpath": "entry/substanceAdministration/performer/assignedEntity/representedOrganization/name"
         }
       ]
     },
@@ -407,6 +571,997 @@
           "conformance": "SHOULD",
           "dataType": "TS",
           "xpath": "entry/observation/effectiveTime/@value"
+        },
+        {
+          "key": "pregnancyStatus",
+          "uscdiElement": "Pregnancy Status",
+          "conformance": "SHOULD",
+          "dataType": "CD",
+          "xpath": "entry/observation[code/@code='82810-3']/value/@code",
+          "xpathDisplay": "entry/observation[code/@code='82810-3']/value/@displayName"
+        },
+        {
+          "key": "sexualOrientation",
+          "uscdiElement": "Sexual Orientation",
+          "conformance": "SHOULD",
+          "dataType": "CD",
+          "xpath": "entry/observation[code/@code='76690-7']/value/@code",
+          "xpathDisplay": "entry/observation[code/@code='76690-7']/value/@displayName"
+        },
+        {
+          "key": "genderIdentity",
+          "uscdiElement": "Gender Identity",
+          "conformance": "SHOULD",
+          "dataType": "CD",
+          "xpath": "entry/observation[code/@code='76691-5']/value/@code",
+          "xpathDisplay": "entry/observation[code/@code='76691-5']/value/@displayName"
+        }
+      ]
+    },
+
+    {
+      "key": "functionalStatus",
+      "uscdiClass": "Functional Status",
+      "displayName": "Functional Status",
+      "loincCode": "47420-5",
+      "templateId": "2.16.840.1.113883.10.20.22.2.14.1",
+      "templateIdOptional": "2.16.840.1.113883.10.20.22.2.14",
+      "conformance": "SHOULD",
+      "entryTemplateId": "2.16.840.1.113883.10.20.22.4.67",
+      "fields": [
+        {
+          "key": "observationCode",
+          "uscdiElement": "Functional Status Type",
+          "conformance": "SHALL",
+          "dataType": "CD",
+          "valueSet": "LOINC",
+          "xpath": "entry/observation/code/@code",
+          "xpathDisplay": "entry/observation/code/@displayName"
+        },
+        {
+          "key": "value",
+          "uscdiElement": "Functional Status Result",
+          "conformance": "SHALL",
+          "dataType": "CD",
+          "xpath": "entry/observation/value/@code",
+          "xpathDisplay": "entry/observation/value/@displayName"
+        },
+        {
+          "key": "effectiveTime",
+          "uscdiElement": "Observation Date",
+          "conformance": "SHALL",
+          "dataType": "TS",
+          "xpath": "entry/observation/effectiveTime/@value"
+        }
+      ]
+    },
+    {
+      "key": "mentalStatus",
+      "uscdiClass": "Mental Status",
+      "displayName": "Mental Status",
+      "loincCode": "10190-7",
+      "templateId": "2.16.840.1.113883.10.20.22.2.56",
+      "conformance": "MAY",
+      "entryTemplateId": "2.16.840.1.113883.10.20.22.4.74",
+      "fields": [
+        {
+          "key": "observationCode",
+          "uscdiElement": "Mental Status Type",
+          "conformance": "SHALL",
+          "dataType": "CD",
+          "valueSet": "LOINC, SNOMED CT",
+          "xpath": "entry/observation/code/@code",
+          "xpathDisplay": "entry/observation/code/@displayName"
+        },
+        {
+          "key": "value",
+          "uscdiElement": "Mental Status Result",
+          "conformance": "SHALL",
+          "dataType": "CD",
+          "xpath": "entry/observation/value/@code",
+          "xpathDisplay": "entry/observation/value/@displayName"
+        },
+        {
+          "key": "effectiveTime",
+          "uscdiElement": "Observation Date",
+          "conformance": "SHALL",
+          "dataType": "TS",
+          "xpath": "entry/observation/effectiveTime/@value"
+        }
+      ]
+    },
+    {
+      "key": "familyHistory",
+      "uscdiClass": "Family History",
+      "displayName": "Family History",
+      "loincCode": "10157-6",
+      "templateId": "2.16.840.1.113883.10.20.22.2.15",
+      "conformance": "SHOULD",
+      "entryTemplateId": "2.16.840.1.113883.10.20.22.4.45",
+      "fields": [
+        {
+          "key": "relationship",
+          "uscdiElement": "Family Member Relationship",
+          "conformance": "SHALL",
+          "dataType": "CD",
+          "valueSet": "Family Member Value",
+          "xpath": "entry/organizer/subject/relatedSubject/code/@code",
+          "xpathDisplay": "entry/organizer/subject/relatedSubject/code/@displayName"
+        },
+        {
+          "key": "conditionCode",
+          "uscdiElement": "Family History Condition",
+          "conformance": "SHALL",
+          "dataType": "CD",
+          "valueSet": "SNOMED CT, ICD-10-CM",
+          "xpath": "entry/organizer/component/observation/value/@code",
+          "xpathDisplay": "entry/organizer/component/observation/value/@displayName",
+          "xpathSystem": "entry/organizer/component/observation/value/@codeSystem"
+        },
+        {
+          "key": "conditionStatus",
+          "uscdiElement": "Family History Condition Status",
+          "conformance": "SHOULD",
+          "dataType": "CS",
+          "xpath": "entry/organizer/component/observation/entryRelationship/observation/value/@code"
+        },
+        {
+          "key": "onsetAge",
+          "uscdiElement": "Age of Onset",
+          "conformance": "MAY",
+          "dataType": "PQ",
+          "xpath": "entry/organizer/component/observation/entryRelationship[@typeCode='SUBJ']/observation/value/@value",
+          "xpathUnit": "entry/organizer/component/observation/entryRelationship[@typeCode='SUBJ']/observation/value/@unit"
+        }
+      ]
+    },
+    {
+      "key": "assessmentAndPlan",
+      "uscdiClass": "Assessment and Plan",
+      "displayName": "Assessment and Plan",
+      "loincCode": "51847-2",
+      "templateId": "2.16.840.1.113883.10.20.22.2.9.1",
+      "templateIdOptional": "2.16.840.1.113883.10.20.22.2.9",
+      "conformance": "SHOULD",
+      "entryTemplateId": "2.16.840.1.113883.10.20.22.4.146",
+      "fields": [
+        {
+          "key": "activityCode",
+          "uscdiElement": "Assessment or Plan Activity",
+          "conformance": "SHALL",
+          "dataType": "CD",
+          "xpath": "entry/observation/code/@code",
+          "xpathDisplay": "entry/observation/code/@displayName"
+        },
+        {
+          "key": "effectiveTime",
+          "uscdiElement": "Activity Date",
+          "conformance": "SHOULD",
+          "dataType": "IVL_TS",
+          "xpath": "entry/observation/effectiveTime/@value"
+        },
+        {
+          "key": "status",
+          "uscdiElement": "Activity Status",
+          "conformance": "SHOULD",
+          "dataType": "CS",
+          "xpath": "entry/observation/statusCode/@code"
+        }
+      ]
+    },
+    {
+      "key": "planOfTreatment",
+      "uscdiClass": "Plan of Treatment",
+      "displayName": "Plan of Treatment",
+      "loincCode": "18776-5",
+      "templateId": "2.16.840.1.113883.10.20.22.2.10",
+      "conformance": "SHOULD",
+      "entryTemplateId": "2.16.840.1.113883.10.20.22.4.40",
+      "fields": [
+        {
+          "key": "activityCode",
+          "uscdiElement": "Planned Activity",
+          "conformance": "SHALL",
+          "dataType": "CD",
+          "valueSet": "SNOMED CT, CPT",
+          "xpath": "entry/observation/code/@code",
+          "xpathDisplay": "entry/observation/code/@displayName"
+        },
+        {
+          "key": "effectiveTime",
+          "uscdiElement": "Planned Date",
+          "conformance": "SHOULD",
+          "dataType": "IVL_TS",
+          "xpath": "entry/observation/effectiveTime/low/@value"
+        },
+        {
+          "key": "status",
+          "uscdiElement": "Activity Intent",
+          "conformance": "SHALL",
+          "dataType": "CS",
+          "xpath": "entry/observation/moodCode"
+        }
+      ]
+    },
+    {
+      "key": "medicalEquipment",
+      "uscdiClass": "Medical Equipment",
+      "displayName": "Medical Equipment",
+      "loincCode": "46264-8",
+      "templateId": "2.16.840.1.113883.10.20.22.2.23.1",
+      "templateIdOptional": "2.16.840.1.113883.10.20.22.2.23",
+      "conformance": "MAY",
+      "entryTemplateId": "2.16.840.1.113883.10.20.22.4.50",
+      "fields": [
+        {
+          "key": "equipmentCode",
+          "uscdiElement": "Equipment Type",
+          "conformance": "SHALL",
+          "dataType": "CD",
+          "xpath": "entry/supply/participant/participantRole/playingDevice/code/@code",
+          "xpathDisplay": "entry/supply/participant/participantRole/playingDevice/code/@displayName"
+        },
+        {
+          "key": "productName",
+          "uscdiElement": "Product Name",
+          "conformance": "SHOULD",
+          "dataType": "ST",
+          "xpath": "entry/supply/participant/participantRole/playingDevice/manufacturerModelName"
+        },
+        {
+          "key": "effectiveTime",
+          "uscdiElement": "Supply Date",
+          "conformance": "SHOULD",
+          "dataType": "IVL_TS",
+          "xpath": "entry/supply/effectiveTime/low/@value"
+        },
+        {
+          "key": "quantity",
+          "uscdiElement": "Quantity",
+          "conformance": "MAY",
+          "dataType": "PQ",
+          "xpath": "entry/supply/quantity/@value"
+        }
+      ]
+    },
+    {
+      "key": "advanceDirectives",
+      "uscdiClass": "Advance Directives",
+      "displayName": "Advance Directives",
+      "loincCode": "42348-3",
+      "templateId": "2.16.840.1.113883.10.20.22.2.21.1",
+      "templateIdOptional": "2.16.840.1.113883.10.20.22.2.21",
+      "conformance": "SHOULD",
+      "entryTemplateId": "2.16.840.1.113883.10.20.22.4.61",
+      "fields": [
+        {
+          "key": "directiveCode",
+          "uscdiElement": "Advance Directive Type",
+          "conformance": "SHALL",
+          "dataType": "CD",
+          "xpath": "entry/observation/code/@code",
+          "xpathDisplay": "entry/observation/code/@displayName"
+        },
+        {
+          "key": "value",
+          "uscdiElement": "Directive Value",
+          "conformance": "SHALL",
+          "dataType": "CD",
+          "xpath": "entry/observation/value/@code",
+          "xpathDisplay": "entry/observation/value/@displayName"
+        },
+        {
+          "key": "effectiveTime",
+          "uscdiElement": "Directive Period",
+          "conformance": "SHOULD",
+          "dataType": "IVL_TS",
+          "xpath": "entry/observation/effectiveTime/low/@value"
+        },
+        {
+          "key": "custodianName",
+          "uscdiElement": "Document Custodian",
+          "conformance": "MAY",
+          "dataType": "ST",
+          "xpath": "entry/observation/participant/participantRole/playingEntity/name"
+        }
+      ]
+    },
+    {
+      "key": "healthConcerns",
+      "uscdiClass": "Health Concerns",
+      "displayName": "Health Concerns",
+      "loincCode": "75310-3",
+      "templateId": "2.16.840.1.113883.10.20.22.2.58",
+      "conformance": "SHOULD",
+      "entryTemplateId": "2.16.840.1.113883.10.20.22.4.132",
+      "fields": [
+        {
+          "key": "concernCode",
+          "uscdiElement": "Health Concern",
+          "conformance": "SHALL",
+          "dataType": "CD",
+          "valueSet": "SNOMED CT, ICD-10-CM",
+          "xpath": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/value/@code",
+          "xpathDisplay": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/value/@displayName"
+        },
+        {
+          "key": "status",
+          "uscdiElement": "Concern Status",
+          "conformance": "SHALL",
+          "dataType": "CS",
+          "xpath": "entry/act/statusCode/@code"
+        },
+        {
+          "key": "effectiveTime",
+          "uscdiElement": "Concern Date",
+          "conformance": "SHOULD",
+          "dataType": "IVL_TS",
+          "xpath": "entry/act/effectiveTime/low/@value"
+        }
+      ]
+    },
+    {
+      "key": "goals",
+      "uscdiClass": "Goals",
+      "displayName": "Goals",
+      "loincCode": "61146-5",
+      "templateId": "2.16.840.1.113883.10.20.22.2.60",
+      "conformance": "MAY",
+      "entryTemplateId": "2.16.840.1.113883.10.20.22.4.121",
+      "fields": [
+        {
+          "key": "goalCode",
+          "uscdiElement": "Goal Description",
+          "conformance": "SHALL",
+          "dataType": "CD",
+          "xpath": "entry/observation/code/@code",
+          "xpathDisplay": "entry/observation/code/@displayName"
+        },
+        {
+          "key": "value",
+          "uscdiElement": "Goal Target",
+          "conformance": "SHOULD",
+          "dataType": "CD",
+          "xpath": "entry/observation/value/@code",
+          "xpathDisplay": "entry/observation/value/@displayName"
+        },
+        {
+          "key": "targetDate",
+          "uscdiElement": "Target Date",
+          "conformance": "SHOULD",
+          "dataType": "IVL_TS",
+          "xpath": "entry/observation/effectiveTime/high/@value"
+        },
+        {
+          "key": "achievementStatus",
+          "uscdiElement": "Achievement Status",
+          "conformance": "SHOULD",
+          "dataType": "CD",
+          "xpath": "entry/observation/entryRelationship[@typeCode='REFR']/observation/value/@code",
+          "xpathDisplay": "entry/observation/entryRelationship[@typeCode='REFR']/observation/value/@displayName"
+        }
+      ]
+    },
+    {
+      "key": "payersInsurance",
+      "uscdiClass": "Insurance",
+      "displayName": "Payers",
+      "loincCode": "48768-6",
+      "templateId": "2.16.840.1.113883.10.20.22.2.18",
+      "conformance": "SHOULD",
+      "entryTemplateId": "2.16.840.1.113883.10.20.22.4.60",
+      "fields": [
+        {
+          "key": "coverageType",
+          "uscdiElement": "Insurance Type",
+          "conformance": "SHALL",
+          "dataType": "CD",
+          "xpath": "entry/act/entryRelationship[@typeCode='COMP']/act/code/@code",
+          "xpathDisplay": "entry/act/entryRelationship[@typeCode='COMP']/act/code/@displayName"
+        },
+        {
+          "key": "payerName",
+          "uscdiElement": "Payer Name",
+          "conformance": "SHALL",
+          "dataType": "ST",
+          "xpath": "entry/act/entryRelationship[@typeCode='COMP']/act/performer/assignedEntity/representedOrganization/name"
+        },
+        {
+          "key": "memberId",
+          "uscdiElement": "Member ID",
+          "conformance": "SHALL",
+          "dataType": "ST",
+          "xpath": "entry/act/entryRelationship[@typeCode='COMP']/act/participant[@typeCode='COV']/participantRole/id/@extension"
+        },
+        {
+          "key": "groupNumber",
+          "uscdiElement": "Group Number",
+          "conformance": "SHOULD",
+          "dataType": "ST",
+          "xpath": "entry/act/entryRelationship[@typeCode='COMP']/act/participant[@typeCode='HLD']/participantRole/id/@extension"
+        },
+        {
+          "key": "subscriberName",
+          "uscdiElement": "Subscriber Name",
+          "conformance": "SHOULD",
+          "dataType": "ST",
+          "xpath": "entry/act/entryRelationship[@typeCode='COMP']/act/participant[@typeCode='HLD']/participantRole/playingEntity/name/given"
+        }
+      ]
+    },
+
+    {
+      "key": "dischargeDiagnosis",
+      "uscdiClass": "Discharge Diagnosis",
+      "displayName": "Discharge Diagnosis",
+      "loincCode": "11535-2",
+      "templateId": "2.16.840.1.113883.10.20.22.2.24",
+      "conformance": "SHALL",
+      "entryTemplateId": "2.16.840.1.113883.10.20.22.4.33",
+      "fields": [
+        {
+          "key": "conditionCode",
+          "uscdiElement": "Discharge Diagnosis",
+          "conformance": "SHALL",
+          "dataType": "CD",
+          "valueSet": "ICD-10-CM, SNOMED CT",
+          "xpath": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/value/@code",
+          "xpathDisplay": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/value/@displayName",
+          "xpathSystem": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/value/@codeSystem"
+        },
+        {
+          "key": "status",
+          "uscdiElement": "Diagnosis Status",
+          "conformance": "SHALL",
+          "dataType": "CS",
+          "xpath": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/entryRelationship/observation/value/@code"
+        },
+        {
+          "key": "effectiveTime",
+          "uscdiElement": "Diagnosis Date",
+          "conformance": "SHOULD",
+          "dataType": "TS",
+          "xpath": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/effectiveTime/low/@value"
+        }
+      ]
+    },
+    {
+      "key": "dischargeMedications",
+      "uscdiClass": "Discharge Medications",
+      "displayName": "Discharge Medications",
+      "loincCode": "10183-2",
+      "templateId": "2.16.840.1.113883.10.20.22.2.11.1",
+      "templateIdOptional": "2.16.840.1.113883.10.20.22.2.11",
+      "conformance": "SHALL",
+      "entryTemplateId": "2.16.840.1.113883.10.20.22.4.16",
+      "fields": [
+        {
+          "key": "drugCode",
+          "uscdiElement": "Discharge Medication",
+          "conformance": "SHALL",
+          "dataType": "CE",
+          "valueSet": "RxNorm",
+          "xpath": "entry/substanceAdministration/consumable/manufacturedProduct/manufacturedMaterial/code/@code",
+          "xpathDisplay": "entry/substanceAdministration/consumable/manufacturedProduct/manufacturedMaterial/code/@displayName"
+        },
+        {
+          "key": "doseQuantity",
+          "uscdiElement": "Dose Quantity",
+          "conformance": "SHOULD",
+          "dataType": "PQ",
+          "xpath": "entry/substanceAdministration/doseQuantity/@value",
+          "xpathUnit": "entry/substanceAdministration/doseQuantity/@unit"
+        },
+        {
+          "key": "routeCode",
+          "uscdiElement": "Route",
+          "conformance": "SHOULD",
+          "dataType": "CE",
+          "xpath": "entry/substanceAdministration/routeCode/@code",
+          "xpathDisplay": "entry/substanceAdministration/routeCode/@displayName"
+        },
+        {
+          "key": "status",
+          "uscdiElement": "Medication Status",
+          "conformance": "SHALL",
+          "dataType": "CS",
+          "xpath": "entry/substanceAdministration/statusCode/@code"
+        },
+        {
+          "key": "startDate",
+          "uscdiElement": "Start Date",
+          "conformance": "SHOULD",
+          "dataType": "IVL_TS",
+          "xpath": "entry/substanceAdministration/effectiveTime/low/@value"
+        }
+      ]
+    },
+    {
+      "key": "admissionDiagnosis",
+      "uscdiClass": "Admission Diagnosis",
+      "displayName": "Hospital Admission Diagnosis",
+      "loincCode": "46241-6",
+      "templateId": "2.16.840.1.113883.10.20.22.2.43",
+      "conformance": "SHOULD",
+      "entryTemplateId": "2.16.840.1.113883.10.20.22.4.34",
+      "fields": [
+        {
+          "key": "conditionCode",
+          "uscdiElement": "Admission Diagnosis",
+          "conformance": "SHALL",
+          "dataType": "CD",
+          "valueSet": "ICD-10-CM, SNOMED CT",
+          "xpath": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/value/@code",
+          "xpathDisplay": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/value/@displayName",
+          "xpathSystem": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/value/@codeSystem"
+        },
+        {
+          "key": "effectiveTime",
+          "uscdiElement": "Admission Date",
+          "conformance": "SHOULD",
+          "dataType": "TS",
+          "xpath": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/effectiveTime/low/@value"
+        }
+      ]
+    },
+    {
+      "key": "admissionMedications",
+      "uscdiClass": "Admission Medications",
+      "displayName": "Admission Medications",
+      "loincCode": "42346-7",
+      "templateId": "2.16.840.1.113883.10.20.22.2.44",
+      "conformance": "SHOULD",
+      "entryTemplateId": "2.16.840.1.113883.10.20.22.4.16",
+      "fields": [
+        {
+          "key": "drugCode",
+          "uscdiElement": "Admission Medication",
+          "conformance": "SHALL",
+          "dataType": "CE",
+          "valueSet": "RxNorm",
+          "xpath": "entry/substanceAdministration/consumable/manufacturedProduct/manufacturedMaterial/code/@code",
+          "xpathDisplay": "entry/substanceAdministration/consumable/manufacturedProduct/manufacturedMaterial/code/@displayName"
+        },
+        {
+          "key": "status",
+          "uscdiElement": "Medication Status",
+          "conformance": "SHALL",
+          "dataType": "CS",
+          "xpath": "entry/substanceAdministration/statusCode/@code"
+        },
+        {
+          "key": "startDate",
+          "uscdiElement": "Start Date",
+          "conformance": "SHOULD",
+          "dataType": "IVL_TS",
+          "xpath": "entry/substanceAdministration/effectiveTime/low/@value"
+        }
+      ]
+    },
+    {
+      "key": "hospitalCourse",
+      "uscdiClass": "Hospital Course",
+      "displayName": "Hospital Course",
+      "loincCode": "8648-8",
+      "templateId": "2.16.840.1.113883.10.20.22.2.38",
+      "conformance": "SHALL",
+      "fields": []
+    },
+    {
+      "key": "dischargeInstructions",
+      "uscdiClass": "Discharge Instructions",
+      "displayName": "Discharge Instructions",
+      "loincCode": "8653-8",
+      "templateId": "2.16.840.1.113883.10.20.22.2.41",
+      "conformance": "SHOULD",
+      "entryTemplateId": "2.16.840.1.113883.10.20.22.4.20",
+      "fields": [
+        {
+          "key": "instructionCode",
+          "uscdiElement": "Instruction Topic",
+          "conformance": "SHALL",
+          "dataType": "CD",
+          "xpath": "entry/act/code/@code",
+          "xpathDisplay": "entry/act/code/@displayName"
+        },
+        {
+          "key": "instructionText",
+          "uscdiElement": "Instruction Text",
+          "conformance": "SHOULD",
+          "dataType": "ST",
+          "xpath": "entry/act/text"
+        }
+      ]
+    },
+    {
+      "key": "dischargePhysical",
+      "uscdiClass": "Discharge Physical",
+      "displayName": "Discharge Physical Examination",
+      "loincCode": "10184-0",
+      "templateId": "2.16.840.1.113883.10.20.22.2.35",
+      "conformance": "MAY",
+      "entryTemplateId": "2.16.840.1.113883.10.20.22.4.2",
+      "fields": [
+        {
+          "key": "observationCode",
+          "uscdiElement": "Physical Exam Finding",
+          "conformance": "SHALL",
+          "dataType": "CD",
+          "xpath": "entry/observation/code/@code",
+          "xpathDisplay": "entry/observation/code/@displayName"
+        },
+        {
+          "key": "value",
+          "uscdiElement": "Finding Value",
+          "conformance": "SHALL",
+          "dataType": "ANY",
+          "xpath": "entry/observation/value/@value",
+          "xpathDisplay": "entry/observation/value/@displayName"
+        },
+        {
+          "key": "effectiveTime",
+          "uscdiElement": "Examination Date",
+          "conformance": "SHALL",
+          "dataType": "TS",
+          "xpath": "entry/observation/effectiveTime/@value"
+        }
+      ]
+    },
+
+    {
+      "key": "chiefComplaint",
+      "uscdiClass": "Chief Complaint",
+      "displayName": "Chief Complaint",
+      "loincCode": "10154-3",
+      "templateId": "2.16.840.1.113883.10.20.22.2.13",
+      "conformance": "SHALL",
+      "fields": []
+    },
+    {
+      "key": "historyOfPresentIllness",
+      "uscdiClass": "History of Present Illness",
+      "displayName": "History of Present Illness",
+      "loincCode": "10164-2",
+      "templateId": "2.16.840.1.113883.10.20.22.2.20",
+      "conformance": "SHALL",
+      "fields": []
+    },
+    {
+      "key": "pastMedicalHistory",
+      "uscdiClass": "Past Medical History",
+      "displayName": "Past Medical History",
+      "loincCode": "11348-0",
+      "templateId": "2.16.840.1.113883.10.20.22.2.39",
+      "conformance": "SHOULD",
+      "entryTemplateId": "2.16.840.1.113883.10.20.22.4.4",
+      "fields": [
+        {
+          "key": "conditionCode",
+          "uscdiElement": "Past Condition",
+          "conformance": "SHALL",
+          "dataType": "CD",
+          "valueSet": "SNOMED CT, ICD-10-CM",
+          "xpath": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/value/@code",
+          "xpathDisplay": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/value/@displayName",
+          "xpathSystem": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/value/@codeSystem"
+        },
+        {
+          "key": "onsetDate",
+          "uscdiElement": "Onset Date",
+          "conformance": "SHOULD",
+          "dataType": "TS",
+          "xpath": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/effectiveTime/low/@value"
+        },
+        {
+          "key": "resolutionDate",
+          "uscdiElement": "Resolution Date",
+          "conformance": "MAY",
+          "dataType": "TS",
+          "xpath": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/effectiveTime/high/@value"
+        }
+      ]
+    },
+    {
+      "key": "reviewOfSystems",
+      "uscdiClass": "Review of Systems",
+      "displayName": "Review of Systems",
+      "loincCode": "10187-3",
+      "templateId": "2.16.840.1.113883.10.20.22.2.70",
+      "conformance": "SHOULD",
+      "fields": []
+    },
+    {
+      "key": "physicalExamination",
+      "uscdiClass": "Physical Examination",
+      "displayName": "Physical Examination",
+      "loincCode": "29545-1",
+      "templateId": "2.16.840.1.113883.10.20.22.2.35",
+      "conformance": "SHOULD",
+      "entryTemplateId": "2.16.840.1.113883.10.20.22.4.2",
+      "fields": [
+        {
+          "key": "observationCode",
+          "uscdiElement": "Physical Exam Finding",
+          "conformance": "SHALL",
+          "dataType": "CD",
+          "valueSet": "SNOMED CT, LOINC",
+          "xpath": "entry/observation/code/@code",
+          "xpathDisplay": "entry/observation/code/@displayName"
+        },
+        {
+          "key": "value",
+          "uscdiElement": "Finding Value",
+          "conformance": "SHALL",
+          "dataType": "ANY",
+          "xpath": "entry/observation/value/@value",
+          "xpathDisplay": "entry/observation/value/@displayName",
+          "xpathUnit": "entry/observation/value/@unit"
+        },
+        {
+          "key": "effectiveTime",
+          "uscdiElement": "Examination Date",
+          "conformance": "SHALL",
+          "dataType": "TS",
+          "xpath": "entry/observation/effectiveTime/@value"
+        }
+      ]
+    },
+    {
+      "key": "assessment",
+      "uscdiClass": "Assessment",
+      "displayName": "Assessment",
+      "loincCode": "51848-0",
+      "templateId": "2.16.840.1.113883.10.20.22.2.8",
+      "conformance": "SHOULD",
+      "fields": []
+    },
+    {
+      "key": "reasonForReferral",
+      "uscdiClass": "Reason for Referral",
+      "displayName": "Reason for Referral",
+      "loincCode": "42349-1",
+      "templateId": "2.16.840.1.113883.10.20.22.2.42",
+      "conformance": "SHALL",
+      "entryTemplateId": "2.16.840.1.113883.10.20.22.4.22",
+      "fields": [
+        {
+          "key": "referralCode",
+          "uscdiElement": "Referral Reason",
+          "conformance": "SHALL",
+          "dataType": "CD",
+          "xpath": "entry/act/code/@code",
+          "xpathDisplay": "entry/act/code/@displayName"
+        },
+        {
+          "key": "referralText",
+          "uscdiElement": "Referral Description",
+          "conformance": "SHOULD",
+          "dataType": "ST",
+          "xpath": "entry/act/text"
+        },
+        {
+          "key": "effectiveTime",
+          "uscdiElement": "Referral Date",
+          "conformance": "SHALL",
+          "dataType": "IVL_TS",
+          "xpath": "entry/act/effectiveTime/low/@value"
+        }
+      ]
+    },
+
+    {
+      "key": "careTeam",
+      "uscdiClass": "Care Team Members",
+      "displayName": "Care Team",
+      "loincCode": "85847-2",
+      "templateId": "2.16.840.1.113883.10.20.22.2.500",
+      "conformance": "SHOULD",
+      "entryTemplateId": "2.16.840.1.113883.10.20.22.4.500",
+      "fields": [
+        {
+          "key": "memberRole",
+          "uscdiElement": "Care Team Member Role",
+          "conformance": "SHOULD",
+          "dataType": "CD",
+          "xpath": "entry/organizer/participant/functionCode/@code"
+        },
+        {
+          "key": "memberId",
+          "uscdiElement": "Care Team Member Identifier",
+          "conformance": "SHOULD",
+          "dataType": "II",
+          "xpath": "entry/organizer/participant/participantRole/id"
+        },
+        {
+          "key": "status",
+          "uscdiElement": "Care Team Status",
+          "conformance": "SHOULD",
+          "dataType": "CS",
+          "xpath": "entry/organizer/statusCode/@code"
+        }
+      ]
+    },
+
+    {
+      "key": "header.patient",
+      "uscdiClass": "Patient Demographics",
+      "displayName": "Patient (Header)",
+      "loincCode": "",
+      "templateId": "",
+      "conformance": "SHALL",
+      "isHeader": true,
+      "fields": [
+        {
+          "key": "patientId",
+          "uscdiElement": "Patient ID",
+          "conformance": "SHALL",
+          "dataType": "II",
+          "xpath": "ClinicalDocument/recordTarget/patientRole/id/@extension"
+        },
+        {
+          "key": "patientIdRoot",
+          "uscdiElement": "Patient ID Root OID",
+          "conformance": "SHALL",
+          "dataType": "OID",
+          "xpath": "ClinicalDocument/recordTarget/patientRole/id/@root"
+        },
+        {
+          "key": "givenName",
+          "uscdiElement": "Given Name",
+          "conformance": "SHALL",
+          "dataType": "PN",
+          "xpath": "ClinicalDocument/recordTarget/patientRole/patient/name/given"
+        },
+        {
+          "key": "familyName",
+          "uscdiElement": "Family Name",
+          "conformance": "SHALL",
+          "dataType": "PN",
+          "xpath": "ClinicalDocument/recordTarget/patientRole/patient/name/family"
+        },
+        {
+          "key": "birthDate",
+          "uscdiElement": "Date of Birth",
+          "conformance": "SHALL",
+          "dataType": "TS",
+          "xpath": "ClinicalDocument/recordTarget/patientRole/patient/birthTime/@value"
+        },
+        {
+          "key": "gender",
+          "uscdiElement": "Administrative Sex",
+          "conformance": "SHALL",
+          "dataType": "CD",
+          "xpath": "ClinicalDocument/recordTarget/patientRole/patient/administrativeGenderCode/@code",
+          "xpathDisplay": "ClinicalDocument/recordTarget/patientRole/patient/administrativeGenderCode/@displayName"
+        },
+        {
+          "key": "race",
+          "uscdiElement": "Race",
+          "conformance": "SHOULD",
+          "dataType": "CD",
+          "xpath": "ClinicalDocument/recordTarget/patientRole/patient/raceCode/@code",
+          "xpathDisplay": "ClinicalDocument/recordTarget/patientRole/patient/raceCode/@displayName"
+        },
+        {
+          "key": "ethnicity",
+          "uscdiElement": "Ethnicity",
+          "conformance": "SHOULD",
+          "dataType": "CD",
+          "xpath": "ClinicalDocument/recordTarget/patientRole/patient/ethnicGroupCode/@code",
+          "xpathDisplay": "ClinicalDocument/recordTarget/patientRole/patient/ethnicGroupCode/@displayName"
+        },
+        {
+          "key": "addressLine",
+          "uscdiElement": "Address",
+          "conformance": "SHOULD",
+          "dataType": "AD",
+          "xpath": "ClinicalDocument/recordTarget/patientRole/addr/streetAddressLine"
+        },
+        {
+          "key": "city",
+          "uscdiElement": "City",
+          "conformance": "SHOULD",
+          "dataType": "ST",
+          "xpath": "ClinicalDocument/recordTarget/patientRole/addr/city"
+        },
+        {
+          "key": "state",
+          "uscdiElement": "State",
+          "conformance": "SHOULD",
+          "dataType": "ST",
+          "xpath": "ClinicalDocument/recordTarget/patientRole/addr/state"
+        },
+        {
+          "key": "postalCode",
+          "uscdiElement": "Postal Code",
+          "conformance": "SHOULD",
+          "dataType": "ST",
+          "xpath": "ClinicalDocument/recordTarget/patientRole/addr/postalCode"
+        },
+        {
+          "key": "telecom",
+          "uscdiElement": "Phone / Email",
+          "conformance": "SHOULD",
+          "dataType": "TEL",
+          "xpath": "ClinicalDocument/recordTarget/patientRole/telecom/@value"
+        }
+      ]
+    },
+    {
+      "key": "header.author",
+      "uscdiClass": "Author",
+      "displayName": "Document Author (Header)",
+      "loincCode": "",
+      "templateId": "",
+      "conformance": "SHALL",
+      "isHeader": true,
+      "fields": [
+        {
+          "key": "authorNPI",
+          "uscdiElement": "Author NPI",
+          "conformance": "SHOULD",
+          "dataType": "ST",
+          "xpath": "ClinicalDocument/author/assignedAuthor/id/@extension"
+        },
+        {
+          "key": "authorGiven",
+          "uscdiElement": "Author Given Name",
+          "conformance": "SHALL",
+          "dataType": "PN",
+          "xpath": "ClinicalDocument/author/assignedAuthor/assignedPerson/name/given"
+        },
+        {
+          "key": "authorFamily",
+          "uscdiElement": "Author Family Name",
+          "conformance": "SHALL",
+          "dataType": "PN",
+          "xpath": "ClinicalDocument/author/assignedAuthor/assignedPerson/name/family"
+        },
+        {
+          "key": "authorOrgName",
+          "uscdiElement": "Author Organization",
+          "conformance": "SHOULD",
+          "dataType": "ON",
+          "xpath": "ClinicalDocument/author/assignedAuthor/representedOrganization/name"
+        },
+        {
+          "key": "authorTime",
+          "uscdiElement": "Authoring Time",
+          "conformance": "SHALL",
+          "dataType": "TS",
+          "xpath": "ClinicalDocument/author/time/@value"
+        }
+      ]
+    },
+    {
+      "key": "header.custodian",
+      "uscdiClass": "Custodian",
+      "displayName": "Document Custodian (Header)",
+      "loincCode": "",
+      "templateId": "",
+      "conformance": "SHALL",
+      "isHeader": true,
+      "fields": [
+        {
+          "key": "custodianOrgName",
+          "uscdiElement": "Custodian Organization Name",
+          "conformance": "SHALL",
+          "dataType": "ON",
+          "xpath": "ClinicalDocument/custodian/assignedCustodian/representedCustodianOrganization/name"
+        },
+        {
+          "key": "custodianId",
+          "uscdiElement": "Custodian Organization ID",
+          "conformance": "SHOULD",
+          "dataType": "II",
+          "xpath": "ClinicalDocument/custodian/assignedCustodian/representedCustodianOrganization/id/@extension"
+        },
+        {
+          "key": "custodianIdRoot",
+          "uscdiElement": "Custodian OID",
+          "conformance": "SHOULD",
+          "dataType": "OID",
+          "xpath": "ClinicalDocument/custodian/assignedCustodian/representedCustodianOrganization/id/@root"
         }
       ]
     }

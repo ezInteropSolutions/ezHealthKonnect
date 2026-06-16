@@ -71,10 +71,12 @@ class WizardController extends EventTarget {
         this.model.addEventListener('dataChange', (event) => {
             const { step, data, validation } = event.detail;
 
-            // IMPORTANT: Don't re-render Step 1 or Step 4 on every data change
-            // Step 1: Prevents input fields from losing focus on every keystroke
-            // Step 4: Preserves UI state (shown/hidden sections) when checkboxes/radios change
-            if (step === 1 || step === 4) {
+            // IMPORTANT: Don't re-render form-heavy steps on every data change to avoid
+            // losing focus / destroying connector builder UI state on each field edit.
+            // Step 1: Interface config — keystroke re-render causes focus loss
+            // Step 4: Target config (HL7 flow) — checkbox changes destroy section state
+            // Step 5: Target config (CDA flow) — outbound builder changes cause reload
+            if (step === 1 || step === 4 || step === 5) {
                 console.log(`ℹ️ Step ${step} data changed, updating validation only (not re-rendering)`);
                 this.view.showValidation(validation);
                 return;
@@ -549,21 +551,32 @@ class WizardController extends EventTarget {
             console.log('✅ Model allows next step, loading step:', this.model.currentStep);
             await this.loadStep(this.model.currentStep);
         } else {
-            console.log('❌ Model validation failed, showing warning');
+            console.log('❌ Model nextStep blocked, showing warning');
 
-            // Show specific validation errors instead of generic message
             const errors = this.model.validation.errors;
             if (errors && Object.keys(errors).length > 0) {
+                // Real field-level validation errors — list them.
                 const errorMessages = Object.entries(errors)
-                    .map(([field, message]) => `• ${message}`)
+                    .map(([, message]) => `• ${message}`)
                     .join('\n');
                 console.log('❌ Validation errors:', errorMessages);
                 this.view.showNotification(
-                    `Please fix the following issues:\n\n${errorMessages}`,
+                    `Please fix the following before continuing:\n\n${errorMessages}`,
                     'warning'
                 );
             } else {
-                this.view.showNotification('Please resolve validation errors before proceeding', 'warning');
+                // No field errors — the step itself is incomplete or a required
+                // field was not filled in.  Give the user a step-specific hint.
+                const stepHints = {
+                    1: 'Please complete the interface name and processing flow before continuing.',
+                    2: 'Please configure a source connector before continuing.',
+                    3: 'Please complete the processing configuration before continuing.',
+                    4: 'Please complete the target configuration before continuing.',
+                    5: 'Please select a mapping template or define custom mappings.',
+                };
+                const hint = stepHints[this.model.currentStep]
+                    || 'Please complete this step before continuing.';
+                this.view.showNotification(hint, 'warning');
             }
         }
     }

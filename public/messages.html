@@ -756,37 +756,9 @@
                         </select>
                     </div>
                     <div class="form-group">
-                        <label class="form-label" style="color: #1e3a8a; font-weight: 600;">Message Type</label>
-                        <input type="text" class="form-control" id="sendMessageType" placeholder="e.g., Patient, ADT^A01" required style="border-color: #e2e8f0;">
-                    </div>
-                    <div class="form-group">
-                        <label class="form-label" style="color: #1e3a8a; font-weight: 600;">Message Flow Type</label>
-                        <select class="form-control" id="sendFlowType" onchange="messageManager.handleFlowTypeChange()" style="border-color: #e2e8f0;">
-                            <option value="single">Single Interface Test</option>
-                            <option value="hl7-to-fhir">HL7 → FHIR Flow</option>
-                        </select>
-                    </div>
-
-                    <!-- Target Interface for Flow (Hidden by default) -->
-                    <div class="form-group" id="targetInterfaceGroup" style="display: none;">
-                        <label class="form-label" style="color: #1e3a8a; font-weight: 600;">Target FHIR Interface</label>
-                        <select class="form-control" id="sendTargetInterface" style="border-color: #e2e8f0;">
-                            <option value="">Select FHIR Interface</option>
-                        </select>
-                    </div>
-
-                    <div class="form-group">
-                        <label class="form-label" style="color: #1e3a8a; font-weight: 600;">Content Type</label>
-                        <select class="form-control" id="sendContentType" style="border-color: #e2e8f0;">
-                            <option value="application/fhir+json">FHIR JSON</option>
-                            <option value="application/json">JSON</option>
-                            <option value="application/hl7-v2">HL7 v2</option>
-                            <option value="text/plain">Plain Text</option>
-                        </select>
-                    </div>
-                    <div class="form-group">
                         <label class="form-label" style="color: #1e3a8a; font-weight: 600;">Message Content</label>
-                        <textarea class="form-control message-content" id="sendMessageContent" rows="12" required placeholder="Enter your message content here..." style="border-color: #e2e8f0;"></textarea>
+                        <textarea class="form-control message-content" id="sendMessageContent" rows="14" required placeholder="Paste HL7, FHIR JSON, XML, or any raw message content here..." style="border-color: #e2e8f0;"></textarea>
+                        <small class="form-text" style="color: #64748b;">Content type and message type are detected automatically. The message is routed through this interface's connectivity exactly as a live message would be.</small>
                     </div>
                     <div class="form-group">
                         <div style="display: flex; gap: 0.5rem;">

@@ -311,11 +311,22 @@ class WizardView extends EventTarget {
             case 1:
                 return this.getStep1Template(data);
             case 2:
-                return this.getStep2Template(data); // HL7 Parsing (old step 4)
+                if (data?.transformationFlow === 'ccd_to_fhir') {
+                    return this.getStep2CDATemplate(data);
+                }
+                return this.getStep2Template(data); // HL7 Parsing
             case 3:
+                if (data?.transformationFlow === 'ccd_to_fhir') {
+                    return this.getStep3CDATemplate({ ...data, cdaConformanceResult: this._cdaConformanceResult || null });
+                }
                 return this.getStep4Template(data); // FHIR Transform
             case 4:
                 return this.getStep3Template(data); // Target Config
+            case 5:
+                if (data?.transformationFlow === 'ccd_to_fhir') {
+                    return this.getStep3Template(data); // CDA: Target Config at model step 5 (3→5 skip)
+                }
+                return this.getStep5Template(data); // HL7: Mapping configuration
             default:
                 return '<div class="wizard-error">Invalid step</div>';
         }
@@ -672,6 +683,508 @@ class WizardView extends EventTarget {
                     <div class="parsing-results" id="parsingResults" style="display: ${data.parsedHL7Data ? 'block' : 'none'}">
                         ${data.parsedHL7Data ? this.getTransformationResultsTemplate(data) : ''}
                     </div>
+                </div>
+            </div>
+        `;
+    }
+
+    /**
+     * Step 2 for CDA/CCD flow — overview of all 21 supported sections.
+     */
+    getStep2CDATemplate(data) {
+        const sections = [
+            { icon: '👤', cda: 'Patient Demographics',          fhir: 'Patient',                 fields: 8  },
+            { icon: '🤧', cda: 'Allergies &amp; Intolerances',  fhir: 'AllergyIntolerance',      fields: 7  },
+            { icon: '💊', cda: 'Medications',                   fhir: 'MedicationStatement',     fields: 9  },
+            { icon: '🏥', cda: 'Problems / Conditions',         fhir: 'Condition',               fields: 6  },
+            { icon: '🩺', cda: 'Vital Signs',                   fhir: 'Observation',             fields: 6  },
+            { icon: '🧪', cda: 'Lab Results',                   fhir: 'Observation',             fields: 9  },
+            { icon: '📅', cda: 'Encounters',                    fhir: 'Encounter',               fields: 5  },
+            { icon: '🔬', cda: 'Procedures',                    fhir: 'Procedure',               fields: 4  },
+            { icon: '💉', cda: 'Immunizations',                 fhir: 'Immunization',            fields: 7  },
+            { icon: '📝', cda: 'Assessment &amp; Plan',         fhir: 'Observation',             fields: 6  },
+            { icon: '👨‍⚕️', cda: 'Care Team',               fhir: 'Practitioner',            fields: 3  },
+            { icon: '🎯', cda: 'Goals',                         fhir: 'Goal',                    fields: 3  },
+            { icon: '📋', cda: 'Plan of Care',                  fhir: 'CarePlan',                fields: 4  },
+            { icon: '👨‍👩‍👧', cda: 'Family History',          fhir: 'FamilyMemberHistory',     fields: 3  },
+            { icon: '🏃', cda: 'Social History',                fhir: 'Observation',             fields: 4  },
+            { icon: '⚖️', cda: 'Functional Status',             fhir: 'Observation',             fields: 3  },
+            { icon: '🧠', cda: 'Mental Status',                 fhir: 'Observation',             fields: 3  },
+            { icon: '⚠️', cda: 'Health Concerns',               fhir: 'Condition',               fields: 3  },
+            { icon: '🏦', cda: 'Payers / Insurance',            fhir: 'Coverage',                fields: 4  },
+            { icon: '🩻', cda: 'Medical Equipment',             fhir: 'DeviceUseStatement',      fields: 3  },
+        ];
+        const totalFields = sections.reduce((sum, s) => sum + s.fields, 0);
+        const cards = sections.map(s => `
+            <div style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:white;border:1px solid #e5e7eb;border-radius:8px;">
+                <span style="font-size:18px;flex-shrink:0;">${s.icon}</span>
+                <div style="min-width:0;flex:1;">
+                    <div style="font-size:12px;font-weight:600;color:#374151;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${s.cda}</div>
+                    <div style="font-size:11px;color:#1e3a8a;font-weight:500;">${s.fhir}</div>
+                </div>
+                <span style="flex-shrink:0;font-size:10px;color:#6b7280;background:#f3f4f6;border-radius:4px;padding:2px 6px;">${s.fields}f</span>
+            </div>`).join('');
+
+        return `
+            <div class="wizard-step-content" data-step="2">
+                <div class="wizard-step-header">
+                    <h3>CDA/CCD Document Processing</h3>
+                    <p>Your C-CDA/CCD files will be parsed and transformed to FHIR R4 automatically. Click <strong>Next</strong> to review field-level mappings.</p>
+                </div>
+
+                <div style="background:linear-gradient(to right,#f0fdf4,#dcfce7);border:1px solid #86efac;border-radius:8px;padding:14px 16px;margin-bottom:16px;display:flex;align-items:center;gap:16px;flex-wrap:wrap;">
+                    <div style="display:flex;align-items:center;gap:8px;">
+                        <span style="font-size:20px;">✅</span>
+                        <strong style="font-size:13px;color:#166534;">OOB C-CDA 2.1 → FHIR R4 US Core 6.1.0 template pre-configured</strong>
+                    </div>
+                    <div style="display:flex;gap:16px;margin-left:auto;flex-wrap:wrap;">
+                        <span style="font-size:12px;color:#15803d;"><strong>${sections.length}</strong> sections</span>
+                        <span style="font-size:12px;color:#15803d;"><strong>${totalFields}+</strong> field mappings</span>
+                        <span style="font-size:12px;color:#15803d;"><strong>Auto-applied</strong></span>
+                    </div>
+                </div>
+
+                <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:8px;margin-bottom:16px;">
+                    ${cards}
+                </div>
+
+                <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:12px 16px;font-size:12px;color:#1e40af;">
+                    Click <strong>Next</strong> to see the full field-level mapping review with transforms and conformance levels for each section.
+                </div>
+
+                <!-- Sprint C: CDA Conformance Check (optional, drop-a-file) -->
+                <div id="cdaComplianceSection" style="margin-top:16px;">
+                    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+                        <span style="font-size:12px;font-weight:600;color:#374151;">Conformance Check <span style="font-weight:400;color:#9ca3af;">(optional)</span></span>
+                        <span id="cdaComplianceBadge" style="display:none;"></span>
+                    </div>
+                    <div id="cdaComplianceDropZone"
+                         style="border:2px dashed #d1d5db;border-radius:8px;padding:16px;text-align:center;cursor:pointer;transition:border-color 0.2s,background 0.2s;">
+                        <input type="file" id="cdaComplianceFileInput" accept=".xml,.cda,.ccd" style="display:none;">
+                        <div id="cdaComplianceDropContent">
+                            <div style="font-size:20px;margin-bottom:6px;">📄</div>
+                            <div style="font-size:12px;color:#6b7280;">Drop a C-CDA XML file here or <button type="button" id="cdaComplianceBrowseBtn" style="background:none;border:none;color:#1e40af;cursor:pointer;font-size:12px;text-decoration:underline;padding:0;">browse</button></div>
+                            <div style="font-size:11px;color:#9ca3af;margin-top:4px;">Validates sections against C-CDA 2.1 SHALL/SHOULD rules</div>
+                        </div>
+                        <div id="cdaComplianceLoading" style="display:none;">
+                            <div style="font-size:12px;color:#6b7280;">Analyzing CDA document…</div>
+                        </div>
+                    </div>
+                    <div id="cdaComplianceResult" style="display:none;margin-top:10px;font-size:12px;"></div>
+                </div>
+            </div>
+        `;
+    }
+
+    /**
+     * Run CDA conformance check against POST /api/cda/validate.
+     * Called from setupStep2Listeners when the CDA drop zone is present.
+     * @param {string} rawXML - Raw CDA XML string from the dropped/selected file.
+     * @param {HTMLElement} container - The step container element.
+     */
+    async _runCDAComplianceCheck(rawXML, container) {
+        const loadingEl = container.querySelector('#cdaComplianceLoading');
+        const contentEl = container.querySelector('#cdaComplianceDropContent');
+        const resultEl  = container.querySelector('#cdaComplianceResult');
+        const badgeEl   = container.querySelector('#cdaComplianceBadge');
+
+        if (loadingEl) loadingEl.style.display = 'block';
+        if (contentEl) contentEl.style.display = 'none';
+        if (resultEl)  resultEl.style.display  = 'none';
+        if (badgeEl)   badgeEl.style.display   = 'none';
+
+        try {
+            const resp = await fetch('/api/cda/validate', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ xml: rawXML }),
+            });
+
+            const rawText = await resp.text();
+            let data;
+            try {
+                data = JSON.parse(rawText);
+            } catch (_) {
+                throw new Error(`Validator unavailable (${resp.status}): ${rawText.slice(0, 120)}`);
+            }
+            if (!data.success || !data.report) {
+                throw new Error(data.error || 'Validation failed');
+            }
+
+            const report = data.report;
+            const shallScore = report.shallScore ?? 0;
+            const shouldScore = report.shouldScore ?? 0;
+
+            // Count SHALL present/missing
+            let shallPresent = 0, shallTotal = 0;
+            const missingShall = [];
+            (report.sectionReports || []).forEach(sr => {
+                if (sr.conformance === 'SHALL') {
+                    shallTotal++;
+                    if (sr.status !== 'missing') shallPresent++;
+                    else missingShall.push(sr.title || sr.sectionKey);
+                }
+            });
+
+            // Badge
+            let badgeColor, badgeIcon, badgeText;
+            if (shallScore >= 1.0) {
+                badgeColor = '#166534'; badgeIcon = '✅';
+                badgeText  = `${shallPresent}/${shallTotal} SHALL sections present`;
+            } else if (shallScore > 0) {
+                badgeColor = '#92400e'; badgeIcon = '⚠️';
+                badgeText  = `${shallPresent}/${shallTotal} SHALL sections — ${missingShall.length} missing`;
+            } else {
+                badgeColor = '#991b1b'; badgeIcon = '❌';
+                badgeText  = 'No SHALL sections found';
+            }
+            const badgeBg  = shallScore >= 1.0 ? '#f0fdf4' : shallScore > 0 ? '#fffbeb' : '#fef2f2';
+            const badgeBorder = shallScore >= 1.0 ? '#86efac' : shallScore > 0 ? '#fcd34d' : '#fecaca';
+
+            // Store result as view-level state so step 3 can display it as advisory
+            this._cdaConformanceResult = {
+                shallScore, shallPresent, shallTotal,
+                missingShall, shouldScore,
+                overallScore: report.overallScore ?? 0
+            };
+
+            if (badgeEl) {
+                badgeEl.style.display = 'inline-flex';
+                badgeEl.style.alignItems = 'center';
+                badgeEl.style.gap = '4px';
+                badgeEl.style.padding = '3px 8px';
+                badgeEl.style.borderRadius = '6px';
+                badgeEl.style.background = badgeBg;
+                badgeEl.style.border = `1px solid ${badgeBorder}`;
+                badgeEl.style.color = badgeColor;
+                badgeEl.style.fontSize = '11px';
+                badgeEl.style.fontWeight = '600';
+                badgeEl.innerHTML = `${badgeIcon} ${badgeText}`;
+            }
+
+            // Detail list of missing SHALL sections
+            let detailHTML = '';
+            if (missingShall.length > 0) {
+                detailHTML = `<div style="margin-top:8px;padding:8px 10px;background:#fef2f2;border:1px solid #fecaca;border-radius:6px;">
+                    <div style="font-weight:600;color:#991b1b;margin-bottom:4px;">Missing SHALL sections:</div>
+                    <ul style="margin:0;padding-left:16px;color:#b91c1c;">
+                        ${missingShall.map(s => `<li>${s}</li>`).join('')}
+                    </ul>
+                </div>`;
+            }
+
+            // SHOULD summary
+            const shouldPct = Math.round(shouldScore * 100);
+            const shouldSummary = `<div style="margin-top:6px;color:#6b7280;">SHOULD score: <strong>${shouldPct}%</strong> — overall: <strong>${Math.round(report.overallScore * 100)}%</strong></div>`;
+
+            if (resultEl) {
+                resultEl.style.display = 'block';
+                resultEl.innerHTML = detailHTML + shouldSummary;
+            }
+
+        } catch (err) {
+            if (badgeEl) {
+                badgeEl.style.display = 'inline-flex';
+                badgeEl.style.padding = '3px 8px';
+                badgeEl.style.borderRadius = '6px';
+                badgeEl.style.background = '#fef2f2';
+                badgeEl.style.border = '1px solid #fecaca';
+                badgeEl.style.color = '#991b1b';
+                badgeEl.style.fontSize = '11px';
+                badgeEl.innerHTML = `❌ ${err.message}`;
+            }
+        } finally {
+            if (loadingEl) loadingEl.style.display = 'none';
+            if (contentEl) contentEl.style.display = 'block';
+        }
+    }
+
+    /**
+     * Wire up the CDA compliance check drop zone.
+     * Called from setupStep2Listeners when the drop zone element is present.
+     */
+    _setupCDAComplianceListeners(container) {
+        const dropZone   = container.querySelector('#cdaComplianceDropZone');
+        const fileInput  = container.querySelector('#cdaComplianceFileInput');
+        const browseBtn  = container.querySelector('#cdaComplianceBrowseBtn');
+        if (!dropZone || !fileInput) return;
+
+        // File selected via input
+        fileInput.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = (ev) => this._runCDAComplianceCheck(ev.target.result, container);
+            reader.readAsText(file);
+        });
+
+        // Browse button
+        if (browseBtn) {
+            browseBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                fileInput.click();
+            });
+        }
+
+        // Click on drop zone opens file picker
+        dropZone.addEventListener('click', () => fileInput.click());
+
+        // Drag-and-drop
+        dropZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            dropZone.style.borderColor = '#6366f1';
+            dropZone.style.background  = '#eef2ff';
+        });
+        dropZone.addEventListener('dragleave', () => {
+            dropZone.style.borderColor = '#d1d5db';
+            dropZone.style.background  = '';
+        });
+        dropZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropZone.style.borderColor = '#d1d5db';
+            dropZone.style.background  = '';
+            const file = e.dataTransfer?.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = (ev) => this._runCDAComplianceCheck(ev.target.result, container);
+            reader.readAsText(file);
+        });
+    }
+
+    /**
+     * Step 3 for CDA/CCD flow — read-only field-level mapping review from the OOB template.
+     */
+    getStep3CDATemplate(data) {
+        const conf = {
+            SHALL:  { color: '#dc2626', bg: '#fef2f2', border: '#fecaca' },
+            SHOULD: { color: '#b45309', bg: '#fffbeb', border: '#fde68a' },
+            MAY:    { color: '#4b5563', bg: '#f9fafb', border: '#e5e7eb' },
+        };
+        const badge = (c) => `<span style="font-size:10px;font-weight:700;color:${conf[c].color};background:${conf[c].bg};border:1px solid ${conf[c].border};border-radius:4px;padding:1px 5px;">${c}</span>`;
+        const bar = (v) => `<div style="display:flex;align-items:center;gap:6px;"><div style="width:50px;height:5px;background:#e5e7eb;border-radius:3px;overflow:hidden;"><div style="height:100%;width:${Math.round(v*100)}%;background:#1e3a8a;border-radius:3px;"></div></div><span style="font-size:10px;color:#6b7280;">${Math.round(v*100)}%</span></div>`;
+        const fn = (t) => `<code style="font-size:10px;background:#f1f5f9;padding:1px 5px;border-radius:3px;color:#1e40af;">${t}</code>`;
+
+        const row = (m) => `
+            <tr style="border-bottom:1px solid #f3f4f6;">
+                <td style="padding:6px 10px;font-size:11px;font-family:monospace;color:#374151;">${m.cda}</td>
+                <td style="padding:6px 10px;font-size:11px;font-family:monospace;color:#1e40af;word-break:break-all;">${m.fhir}</td>
+                <td style="padding:6px 10px;">${fn(m.tx)}</td>
+                <td style="padding:6px 10px;">${badge(m.conf)}</td>
+                <td style="padding:6px 10px;">${bar(m.score)}</td>
+            </tr>`;
+
+        const section = (label, icon, fhirRes, profile, mappings) => `
+            <details style="border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;margin-bottom:8px;">
+                <summary style="padding:10px 14px;background:#f8fafc;cursor:pointer;display:flex;align-items:center;gap:10px;user-select:none;list-style:none;">
+                    <span style="font-size:16px;">${icon}</span>
+                    <span style="font-weight:600;font-size:13px;color:#1e293b;flex:1;">${label}</span>
+                    <span style="font-size:11px;color:#1e3a8a;font-weight:500;background:#eff6ff;border:1px solid #bfdbfe;border-radius:4px;padding:1px 7px;">${fhirRes}</span>
+                    <span style="font-size:10px;color:#6b7280;margin-left:6px;">${mappings.length} fields ▸</span>
+                </summary>
+                <div style="padding:0;background:white;">
+                    <div style="padding:4px 14px 6px;font-size:10px;color:#6b7280;">US Core: <em>${profile}</em></div>
+                    <table style="width:100%;border-collapse:collapse;font-size:11px;">
+                        <thead><tr style="background:#f8fafc;">
+                            <th style="padding:5px 10px;text-align:left;color:#6b7280;font-weight:500;width:22%;">CDA Field</th>
+                            <th style="padding:5px 10px;text-align:left;color:#6b7280;font-weight:500;width:35%;">FHIR Path</th>
+                            <th style="padding:5px 10px;text-align:left;color:#6b7280;font-weight:500;width:22%;">Transform</th>
+                            <th style="padding:5px 10px;text-align:left;color:#6b7280;font-weight:500;width:10%;">Conf.</th>
+                            <th style="padding:5px 10px;text-align:left;color:#6b7280;font-weight:500;width:11%;">Score</th>
+                        </tr></thead>
+                        <tbody>${mappings.map(row).join('')}</tbody>
+                    </table>
+                </div>
+            </details>`;
+
+        const s = section;
+        const r = (cda, fhir, tx, conf, score) => ({ cda, fhir, tx, conf, score });
+
+        // Advisory banner: show conformance check result if it came from step 2
+        const conf2 = data.cdaConformanceResult;
+        const conformanceBanner = conf2 && conf2.missingShall && conf2.missingShall.length > 0 ? `
+            <div style="display:flex;align-items:flex-start;gap:10px;background:#fffbeb;border:1px solid #fcd34d;border-radius:8px;padding:10px 14px;margin-bottom:14px;font-size:12px;">
+                <span style="font-size:16px;flex-shrink:0;">⚠️</span>
+                <div>
+                    <strong style="color:#92400e;">Conformance advisory (from step 2):</strong>
+                    <span style="color:#78350f;margin-left:4px;">${conf2.shallPresent}/${conf2.shallTotal} SHALL sections present — missing: ${conf2.missingShall.join(', ')}.</span>
+                    <span style="color:#9ca3af;margin-left:4px;">OOB template covers all sections; source document may not contain this data.</span>
+                </div>
+            </div>` : '';
+
+        return `
+            <div class="wizard-step-content" data-step="3">
+                <div class="wizard-step-header">
+                    <h3>OOB Template Mapping Review <span style="font-size:12px;font-weight:400;color:#6b7280;vertical-align:middle;margin-left:6px;">Read-only · Auto-applied</span></h3>
+                    <p>All 21 CDA sections mapped to FHIR R4 US Core 6.1.0 using the built-in OOB template. Expand any section to inspect field-level mappings.</p>
+                </div>
+
+                ${conformanceBanner}
+
+                <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:16px;">
+                    ${[['21','Sections'],['90+','Field Mappings'],['US Core 6.1','Profile'],['85%+','Avg. Confidence']].map(([v,l])=>`
+                    <div style="background:#f8fafc;border:1px solid #e5e7eb;border-radius:8px;padding:12px;text-align:center;">
+                        <div style="font-size:18px;font-weight:700;color:#1e3a8a;">${v}</div>
+                        <div style="font-size:11px;color:#6b7280;">${l}</div>
+                    </div>`).join('')}
+                </div>
+
+                <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;flex-wrap:wrap;">
+                    <span style="font-size:11px;color:#374151;font-weight:600;">Conformance:</span>
+                    ${badge('SHALL')} <span style="font-size:11px;color:#6b7280;">Required</span>
+                    &nbsp;${badge('SHOULD')} <span style="font-size:11px;color:#6b7280;">Recommended</span>
+                    &nbsp;${badge('MAY')} <span style="font-size:11px;color:#6b7280;">Optional</span>
+                    <div style="margin-left:auto;display:flex;gap:8px;">
+                        <button type="button"
+                                onclick="window.aiSuggestCDAMappings()"
+                                style="padding:7px 14px;border:2px solid #f472b6;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;background:white;color:#be185d;display:flex;align-items:center;gap:5px;">
+                            💡 AI Suggest
+                        </button>
+                    </div>
+                </div>
+
+                ${s('Patient Demographics','👤','Patient','us-core-patient',[
+                    r('patientId',         'Patient.identifier[0].value',                    'string_direct',                   'SHALL',  0.95),
+                    r('familyName',        'Patient.name[0].family',                         'cda_name_to_fhir',                'SHALL',  0.95),
+                    r('givenName',         'Patient.name[0].given[0]',                       'cda_name_to_fhir',                'SHALL',  0.92),
+                    r('birthDate',         'Patient.birthDate',                              'cda_timestamp_to_fhir_date',      'SHALL',  0.95),
+                    r('gender',            'Patient.gender',                                 'cda_gender_to_fhir',              'SHALL',  0.92),
+                    r('addressLine',       'Patient.address[0].line[0]',                     'string_direct',                   'SHOULD', 0.80),
+                    r('city',              'Patient.address[0].city',                        'string_direct',                   'SHOULD', 0.80),
+                    r('phone',             'Patient.telecom[0].value',                       'string_direct',                   'SHOULD', 0.75),
+                ])}
+                ${s('Allergies & Intolerances','🤧','AllergyIntolerance','us-core-allergyintolerance',[
+                    r('medicationAllergyCode',    'AllergyIntolerance.code.coding[0].code',          'cda_code_to_codeable_concept',    'SHALL',  0.95),
+                    r('medicationAllergyDisplay', 'AllergyIntolerance.code.coding[0].display',       'string_direct',                   'SHOULD', 0.88),
+                    r('severity',                 'AllergyIntolerance.reaction[0].severity',         'allergy_severity_to_fhir',        'SHOULD', 0.82),
+                    r('status',                   'AllergyIntolerance.clinicalStatus.coding[0].code','allergy_status_to_fhir',          'SHALL',  0.88),
+                    r('onsetDate',                'AllergyIntolerance.onsetDateTime',                'cda_timestamp_to_fhir_datetime',  'SHOULD', 0.80),
+                    r('authorGiven',              'AllergyIntolerance.recorder.display',             'string_direct',                   'MAY',    0.65),
+                    r('authorNPI',                'AllergyIntolerance.recorder.identifier.value',    'string_direct',                   'MAY',    0.60),
+                ])}
+                ${s('Medications','💊','MedicationStatement','us-core-medicationstatement',[
+                    r('drugCode',         'MedicationStatement.medication.coding[0].code',   'cda_code_to_codeable_concept',    'SHALL',  0.95),
+                    r('drugDisplay',      'MedicationStatement.medication.coding[0].display','string_direct',                   'SHOULD', 0.88),
+                    r('status',           'MedicationStatement.status',                      'medication_status_to_fhir',       'SHALL',  0.90),
+                    r('startDate',        'MedicationStatement.effectivePeriod.start',       'cda_timestamp_to_fhir_datetime',  'SHOULD', 0.82),
+                    r('stopDate',         'MedicationStatement.effectivePeriod.end',         'cda_timestamp_to_fhir_datetime',  'SHOULD', 0.80),
+                    r('routeCode',        'MedicationStatement.dosage[0].route.coding[0].code','cda_code_to_codeable_concept', 'SHOULD', 0.78),
+                    r('doseQuantity',     'MedicationStatement.dosage[0].doseQuantity.value','cda_quantity_to_fhir',           'SHOULD', 0.80),
+                    r('doseUnit',         'MedicationStatement.dosage[0].doseQuantity.unit', 'string_direct',                  'SHOULD', 0.78),
+                    r('authorGiven',      'MedicationStatement.informationSource.display',   'string_direct',                  'MAY',    0.65),
+                ])}
+                ${s('Problems / Conditions','🏥','Condition','us-core-condition-problems-health-concerns',[
+                    r('conditionCode',    'Condition.code.coding[0].code',                   'cda_code_to_codeable_concept',    'SHALL',  0.95),
+                    r('conditionDisplay', 'Condition.code.coding[0].display',                'string_direct',                   'SHOULD', 0.90),
+                    r('status',           'Condition.clinicalStatus.coding[0].code',         'condition_status_to_fhir',        'SHALL',  0.88),
+                    r('onsetDate',        'Condition.onsetDateTime',                         'cda_timestamp_to_fhir_datetime',  'SHOULD', 0.82),
+                    r('authorGiven',      'Condition.recorder.display',                      'string_direct',                   'MAY',    0.65),
+                    r('authorNPI',        'Condition.recorder.identifier.value',             'string_direct',                   'MAY',    0.60),
+                ])}
+                ${s('Vital Signs','🩺','Observation','us-core-vital-signs',[
+                    r('vitalCode',        'Observation.code.coding[0].code',                 'cda_code_to_codeable_concept',    'SHALL',  0.95),
+                    r('vitalDisplay',     'Observation.code.coding[0].display',              'string_direct',                   'SHOULD', 0.88),
+                    r('value',            'Observation.valueQuantity.value',                 'cda_quantity_to_fhir',            'SHALL',  0.92),
+                    r('valueUnit',        'Observation.valueQuantity.unit',                  'string_direct',                   'SHALL',  0.90),
+                    r('effectiveDate',    'Observation.effectiveDateTime',                   'cda_timestamp_to_fhir_datetime',  'SHALL',  0.95),
+                    r('status',           'Observation.status',                              'observation_status_to_fhir',      'SHALL',  0.90),
+                ])}
+                ${s('Lab Results','🧪','Observation','us-core-observation-lab',[
+                    r('testCode',         'Observation.code.coding[0].code',                 'cda_code_to_codeable_concept',    'SHALL',  0.95),
+                    r('testDisplay',      'Observation.code.coding[0].display',              'string_direct',                   'SHOULD', 0.88),
+                    r('resultValue',      'Observation.valueQuantity.value',                 'cda_quantity_to_fhir',            'SHALL',  0.90),
+                    r('resultUnit',       'Observation.valueQuantity.unit',                  'string_direct',                   'SHALL',  0.88),
+                    r('status',           'Observation.status',                              'observation_status_to_fhir',      'SHALL',  0.92),
+                    r('effectiveDate',    'Observation.effectiveDateTime',                   'cda_timestamp_to_fhir_datetime',  'SHALL',  0.90),
+                    r('referenceRange',   'Observation.referenceRange[0].text',             'string_direct',                   'SHOULD', 0.75),
+                    r('performerGiven',   'Observation.performer[0].display',                'string_direct',                   'MAY',    0.65),
+                    r('performerNPI',     'Observation.performer[0].identifier.value',       'string_direct',                   'MAY',    0.60),
+                ])}
+                ${s('Encounters','📅','Encounter','us-core-encounter',[
+                    r('encounterCode',    'Encounter.type[0].coding[0].code',                'cda_code_to_codeable_concept',    'SHALL',  0.95),
+                    r('encounterDate',    'Encounter.period.start',                          'cda_timestamp_to_fhir_datetime',  'SHALL',  0.90),
+                    r('encounterEndDate', 'Encounter.period.end',                            'cda_timestamp_to_fhir_datetime',  'SHOULD', 0.80),
+                    r('encounterStatus',  'Encounter.status',                                'encounter_status_to_fhir',        'SHALL',  0.88),
+                    r('encounterType',    'Encounter.class.code',                            'string_direct',                   'SHOULD', 0.75),
+                ])}
+                ${s('Procedures','🔬','Procedure','us-core-procedure',[
+                    r('procedureCode',    'Procedure.code.coding[0].code',                   'cda_code_to_codeable_concept',    'SHALL',  0.92),
+                    r('procedureDate',    'Procedure.performedDateTime',                     'cda_timestamp_to_fhir_datetime',  'SHALL',  0.90),
+                    r('procedureStatus',  'Procedure.status',                                'procedure_status_to_fhir',        'SHALL',  0.85),
+                    r('bodySite',         'Procedure.bodySite[0].coding[0].code',            'cda_code_to_codeable_concept',    'MAY',    0.70),
+                ])}
+                ${s('Immunizations','💉','Immunization','us-core-immunization',[
+                    r('vaccineCode',      'Immunization.vaccineCode.coding[0].code',         'cda_code_to_codeable_concept',    'SHALL',  0.95),
+                    r('vaccineDisplay',   'Immunization.vaccineCode.coding[0].display',      'string_direct',                   'SHOULD', 0.88),
+                    r('adminDate',        'Immunization.occurrenceDateTime',                 'cda_timestamp_to_fhir_datetime',  'SHALL',  0.92),
+                    r('status',           'Immunization.status',                             'immunization_status_to_fhir',     'SHALL',  0.90),
+                    r('lotNumber',        'Immunization.lotNumber',                          'string_direct',                   'SHOULD', 0.80),
+                    r('performerGiven',   'Immunization.performer[0].actor.display',         'string_direct',                   'MAY',    0.65),
+                    r('performerOrg',     'Immunization.performer[0].actor.display',         'string_direct',                   'MAY',    0.60),
+                ])}
+                ${s('Assessment & Plan','📝','Observation','us-core-observation-clinical-result',[
+                    r('observationCode',    'Observation.code.coding[0].code',               'cda_code_to_codeable_concept',    'SHALL',  0.88),
+                    r('observationDisplay', 'Observation.code.coding[0].display',            'string_direct',                   'SHOULD', 0.82),
+                    r('value',              'Observation.valueString',                       'string_direct',                   'SHOULD', 0.78),
+                    r('valueDisplay',       'Observation.valueCodeableConcept.text',         'string_direct',                   'SHOULD', 0.75),
+                    r('effectiveDate',      'Observation.effectiveDateTime',                 'cda_timestamp_to_fhir_datetime',  'SHOULD', 0.80),
+                    r('authorGiven',        'Observation.performer[0].display',              'string_direct',                   'MAY',    0.65),
+                ])}
+                ${s('Care Team','👨‍⚕️','Practitioner','us-core-practitioner',[
+                    r('providerName',     'Practitioner.name[0].family',                     'cda_name_to_fhir',                'SHALL',  0.88),
+                    r('providerNPI',      'Practitioner.identifier[0].value',                'string_direct',                   'SHOULD', 0.85),
+                    r('providerRole',     'Practitioner.qualification[0].code.coding[0].code','cda_code_to_codeable_concept',  'SHOULD', 0.72),
+                ])}
+                ${s('Goals','🎯','Goal','us-core-goal',[
+                    r('goalDescription',  'Goal.description.text',                           'string_direct',                   'SHALL',  0.90),
+                    r('goalStatus',       'Goal.lifecycleStatus',                            'goal_status_to_fhir',             'SHALL',  0.85),
+                    r('goalTargetDate',   'Goal.target[0].dueDate',                          'cda_timestamp_to_fhir_date',      'SHOULD', 0.78),
+                ])}
+                ${s('Plan of Care','📋','CarePlan','us-core-careplan',[
+                    r('planTitle',        'CarePlan.title',                                  'string_direct',                   'SHOULD', 0.80),
+                    r('planStatus',       'CarePlan.status',                                 'careplan_status_to_fhir',         'SHALL',  0.85),
+                    r('planIntent',       'CarePlan.intent',                                 'string_direct',                   'SHALL',  0.82),
+                    r('planDescription',  'CarePlan.description',                            'string_direct',                   'SHOULD', 0.75),
+                ])}
+                ${s('Family History','👨‍👩‍👧','FamilyMemberHistory','us-core-familymemberhistory',[
+                    r('relationship',     'FamilyMemberHistory.relationship.coding[0].code', 'cda_code_to_codeable_concept',    'SHALL',  0.90),
+                    r('conditionCode',    'FamilyMemberHistory.condition[0].code.coding[0].code','cda_code_to_codeable_concept','SHOULD', 0.82),
+                    r('onsetAge',         'FamilyMemberHistory.condition[0].onsetAge.value', 'cda_quantity_to_fhir',            'MAY',    0.65),
+                ])}
+                ${s('Social History','🏃','Observation','us-core-observation-social-history',[
+                    r('socialHistoryCode',   'Observation.code.coding[0].code',              'cda_code_to_codeable_concept',    'SHALL',  0.88),
+                    r('socialHistoryValue',  'Observation.valueCodeableConcept.coding[0].code','cda_code_to_codeable_concept', 'SHOULD', 0.80),
+                    r('socialHistoryStatus', 'Observation.status',                           'observation_status_to_fhir',      'SHALL',  0.85),
+                    r('socialHistoryDate',   'Observation.effectiveDateTime',                'cda_timestamp_to_fhir_datetime',  'SHOULD', 0.78),
+                ])}
+                ${s('Functional Status','⚖️','Observation','us-core-observation-clinical-result',[
+                    r('functionCode',     'Observation.code.coding[0].code',                 'cda_code_to_codeable_concept',    'SHALL',  0.85),
+                    r('functionValue',    'Observation.valueCodeableConcept.coding[0].code', 'cda_code_to_codeable_concept',    'SHOULD', 0.78),
+                    r('functionStatus',   'Observation.status',                              'observation_status_to_fhir',      'SHALL',  0.84),
+                ])}
+                ${s('Mental Status','🧠','Observation','us-core-observation-clinical-result',[
+                    r('mentalStatusCode',  'Observation.code.coding[0].code',                'cda_code_to_codeable_concept',    'SHALL',  0.85),
+                    r('mentalStatusValue', 'Observation.valueCodeableConcept.coding[0].code','cda_code_to_codeable_concept',    'SHOULD', 0.78),
+                    r('mentalStatusDate',  'Observation.effectiveDateTime',                  'cda_timestamp_to_fhir_datetime',  'SHOULD', 0.75),
+                ])}
+                ${s('Health Concerns','⚠️','Condition','us-core-condition-problems-health-concerns',[
+                    r('concernCode',      'Condition.code.coding[0].code',                   'cda_code_to_codeable_concept',    'SHALL',  0.90),
+                    r('concernStatus',    'Condition.clinicalStatus.coding[0].code',         'condition_status_to_fhir',        'SHALL',  0.85),
+                    r('concernCategory',  'Condition.category[0].coding[0].code',            'cda_code_to_codeable_concept',    'SHOULD', 0.75),
+                ])}
+                ${s('Payers / Insurance','🏦','Coverage','us-core-coverage',[
+                    r('payorName',        'Coverage.payor[0].display',                       'string_direct',                   'SHALL',  0.88),
+                    r('memberId',         'Coverage.identifier[0].value',                    'string_direct',                   'SHOULD', 0.85),
+                    r('groupId',          'Coverage.class[0].value',                         'string_direct',                   'SHOULD', 0.80),
+                    r('coverageStatus',   'Coverage.status',                                 'string_direct',                   'SHALL',  0.82),
+                ])}
+                ${s('Medical Equipment','🩻','DeviceUseStatement','us-core-implantable-device',[
+                    r('deviceCode',       'DeviceUseStatement.device.display',               'cda_code_to_codeable_concept',    'SHALL',  0.85),
+                    r('deviceStatus',     'DeviceUseStatement.status',                       'string_direct',                   'SHALL',  0.80),
+                    r('implantDate',      'DeviceUseStatement.timingDateTime',               'cda_timestamp_to_fhir_datetime',  'SHOULD', 0.75),
+                ])}
+
+                <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:12px 16px;font-size:12px;color:#1e40af;margin-top:4px;">
+                    These mappings are applied automatically at runtime — no manual configuration required. Click <strong>Next</strong> to set up the delivery target.
                 </div>
             </div>
         `;
@@ -4596,16 +5109,20 @@ PV1|1|I|ICU^101^1|||DOC123^Smith^Jane|||EMERGENCY|||
         }
         console.log('🎯 Found step elements:', stepElements.length);
 
+        // CDA flow: model step 5 = visual step 4 (3→5 skip bypasses mapping step)
+        const flow = this.controller?.model?.data?.transformationFlow;
+        const visualStep = (currentStep === 5 && flow === 'ccd_to_fhir') ? 4 : currentStep;
+
         stepElements.forEach((element, index) => {
             const stepNumber = index + 1;
             element.classList.remove('active', 'completed');
 
-            if (stepNumber === currentStep) {
+            if (stepNumber === visualStep) {
                 console.log(`🎯 Setting step ${stepNumber} as ACTIVE`);
                 element.classList.add('active');
                 element.setAttribute('aria-selected', 'true');
                 element.setAttribute('tabindex', '0');
-            } else if (stepNumber < currentStep) {
+            } else if (stepNumber < visualStep) {
                 element.classList.add('completed');
                 element.setAttribute('aria-selected', 'false');
                 element.setAttribute('tabindex', '-1');
@@ -4646,7 +5163,9 @@ PV1|1|I|ICU^101^1|||DOC123^Smith^Jane|||EMERGENCY|||
         }
 
         if (nextBtn && finishBtn) {
-            if (currentStep === 4) {
+            const flow = this.controller?.model?.data?.transformationFlow;
+            const isLastStep = currentStep === 4 || (currentStep === 5 && flow === 'ccd_to_fhir');
+            if (isLastStep) {
                 nextBtn.style.display = 'none';
                 finishBtn.style.display = 'inline-flex';
                 finishBtn.disabled = !validation.isValid;
@@ -5287,6 +5806,11 @@ PV1|1|I|ICU^101^1|||DOC123^Smith^Jane|||EMERGENCY|||
 
         // Segment toggle functionality
         this.setupSegmentToggles(container);
+
+        // CDA conformance check (Sprint C) — only present in the CDA flow step 2
+        if (container.querySelector('#cdaComplianceDropZone')) {
+            this._setupCDAComplianceListeners(container);
+        }
     }
 
     /**
@@ -5827,7 +6351,11 @@ PV1|1|I|ICU^101^1|||DOC123^Smith^Jane|||EMERGENCY|||
                 isValid = this.validateStep4();
                 break;
             case 5:
-                isValid = this.validateStep5();
+                if (window.wizardController?.getCurrentData()?.transformationFlow === 'ccd_to_fhir') {
+                    isValid = this.validateStep4(); // CDA: Target Config at model step 5
+                } else {
+                    isValid = this.validateStep5();
+                }
                 break;
             case 6:
                 isValid = true; // Summary step is always valid
@@ -6220,6 +6748,10 @@ PV1|1|I|ICU^101^1|||DOC123^Smith^Jane|||EMERGENCY|||
      * Validate step 2: HL7 Parsing & Sample (updated for consolidated steps)
      */
     validateStep2() {
+        // CDA flow has no user input on step 2 — always valid
+        const flow = window.wizardController?.getCurrentData()?.transformationFlow;
+        if (flow === 'ccd_to_fhir') return true;
+
         // Check if HL7 message is provided AND parsed
         const hl7Message = this.container.querySelector('#hl7Message')?.value;
         const parseResults = this.container.querySelector('#parsingResults');
@@ -6243,8 +6775,11 @@ PV1|1|I|ICU^101^1|||DOC123^Smith^Jane|||EMERGENCY|||
      * Validate step 3: FHIR Transform/Mapping
      */
     validateStep3() {
-        // Step 3 is valid if we have FHIR transformation results with mappings
+        // CDA flow shows a read-only template review — always valid
         const data = window.wizardController?.getCurrentData();
+        if (data?.transformationFlow === 'ccd_to_fhir') return true;
+
+        // Step 3 is valid if we have FHIR transformation results with mappings
         const hasFhirResult = data?.fhirTransformResult;
         const hasMappings = data?.fhirTransformResult?.atomicMappings?.length > 0;
 
@@ -6300,16 +6835,18 @@ PV1|1|I|ICU^101^1|||DOC123^Smith^Jane|||EMERGENCY|||
             prevBtn.disabled = currentStep === 1;
         }
 
-        // Next button (hide on last step - Step 4)
+        // Next button (hide on last step — Step 4, or Step 5 for CDA flow)
+        const flow = this.controller?.model?.data?.transformationFlow;
+        const isLastStep = currentStep === 4 || (currentStep === 5 && flow === 'ccd_to_fhir');
         if (nextBtn) {
-            nextBtn.disabled = !isValid || currentStep === 4;
-            nextBtn.style.display = currentStep === 4 ? 'none' : 'inline-flex';
+            nextBtn.disabled = !isValid || isLastStep;
+            nextBtn.style.display = isLastStep ? 'none' : 'inline-flex';
         }
 
-        // Finish button (show on last step - Step 4)
+        // Finish button (show on last step)
         if (finishBtn) {
             finishBtn.disabled = !isValid;
-            finishBtn.style.display = currentStep === 4 ? 'inline-flex' : 'none';
+            finishBtn.style.display = isLastStep ? 'inline-flex' : 'none';
         }
     }
 
@@ -8391,6 +8928,179 @@ window.aiSuggestMappings = async function() {
             </div>`;
         statusEl.textContent = isServiceDown ? 'AI service unavailable.' : 'Error fetching suggestions.';
     }
+};
+
+// ── AI Suggest CDA Mappings ──────────────────────────────────────────────────
+window.aiSuggestCDAMappings = async function() {
+    const OOB_SECTIONS = new Set([
+        'allergiesAndIntolerances','medications','problems','vitalSigns','labResults',
+        'encounters','procedures','immunizations','assessmentAndPlan','careTeam',
+        'goals','planOfCare','familyHistory','socialHistory','functionalStatus',
+        'mentalStatus','healthConcerns','payors','medicalEquipment',
+        // alternate names used in real-world CDA documents
+        'allergies','medicationsAdministered','problemList','vitalSignsOrganizer',
+        'results','encounterHistory','proceduresPerformed','immunizationsAdministered',
+        'assessmentScale','planOfTreatment','careTeamMembers','goalsSection',
+        'socialHistorySection','functionalStatusSection',
+    ]);
+
+    // Build or show panel
+    let panel = document.getElementById('ai-cda-suggestion-panel');
+    if (panel) { panel.style.display = 'flex'; return; }
+
+    panel = document.createElement('div');
+    panel.id = 'ai-cda-suggestion-panel';
+    panel.style.cssText = 'position:fixed;top:0;right:0;width:500px;height:100vh;background:#fff;border-left:1px solid #e2e8f0;box-shadow:-4px 0 24px rgba(30,58,138,0.12);z-index:10010;display:flex;flex-direction:column;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;';
+    panel.innerHTML = `
+<div style="background:linear-gradient(135deg,#f472b6,#1e3a8a);padding:14px 18px;display:flex;align-items:center;justify-content:space-between;color:#fff;flex-shrink:0;">
+  <div>
+    <div style="font-weight:700;font-size:15px;">💡 AI CDA Mapping Suggestions</div>
+    <div style="font-size:11px;opacity:0.85;margin-top:2px;">Paste a sample C-CDA document to detect custom sections</div>
+  </div>
+  <button onclick="document.getElementById('ai-cda-suggestion-panel').remove()" style="background:rgba(255,255,255,0.15);border:none;color:#fff;font-size:18px;cursor:pointer;padding:4px 8px;border-radius:6px;">✕</button>
+</div>
+<div style="padding:14px 16px;border-bottom:1px solid #f0f0f0;flex-shrink:0;background:#fafafa;">
+  <p style="margin:0 0 8px;font-size:12px;color:#374151;">Paste a sample C-CDA/CCD XML document. The AI will identify which sections are covered by the OOB template and suggest mappings for any custom sections it finds.</p>
+  <textarea id="cda-ai-sample-xml" rows="8"
+    style="width:100%;box-sizing:border-box;font-family:monospace;font-size:11px;border:1px solid #d1d5db;border-radius:6px;padding:8px;resize:vertical;color:#374151;"
+    placeholder="&lt;ClinicalDocument xmlns=&quot;urn:hl7-org:v3&quot;&gt;&#10;  &lt;component&gt;...&lt;/component&gt;&#10;&lt;/ClinicalDocument&gt;"></textarea>
+  <div style="display:flex;gap:8px;margin-top:8px;">
+    <button id="cda-ai-analyze-btn"
+      style="flex:1;padding:8px;background:#1e3a8a;color:#fff;border:none;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;">
+      🔍 Analyze Document
+    </button>
+    <button onclick="document.getElementById('cda-ai-sample-xml').value=''"
+      style="padding:8px 12px;background:white;border:1px solid #d1d5db;border-radius:6px;font-size:12px;cursor:pointer;color:#6b7280;">
+      Clear
+    </button>
+  </div>
+</div>
+<div id="cda-ai-status" style="padding:8px 16px;font-size:12px;color:#6b7280;border-bottom:1px solid #f0f0f0;flex-shrink:0;display:none;"></div>
+<div id="cda-ai-results" style="flex:1;overflow-y:auto;padding:14px 16px;"></div>`;
+    document.body.appendChild(panel);
+
+    const analyzeBtn = panel.querySelector('#cda-ai-analyze-btn');
+    const statusEl   = panel.querySelector('#cda-ai-status');
+    const resultsEl  = panel.querySelector('#cda-ai-results');
+
+    analyzeBtn.addEventListener('click', async () => {
+        const xml = panel.querySelector('#cda-ai-sample-xml').value.trim();
+        if (!xml) {
+            resultsEl.innerHTML = '<div style="padding:20px;text-align:center;color:#d97706;">⚠️ Please paste a CDA XML document first.</div>';
+            return;
+        }
+
+        analyzeBtn.disabled = true;
+        analyzeBtn.textContent = '⏳ Analyzing…';
+        statusEl.style.display = 'block';
+        statusEl.textContent = 'Sending to AI — this may take 30–90 seconds on CPU…';
+        resultsEl.innerHTML = '<div style="text-align:center;padding:40px;color:#94a3b8;line-height:1.8;">🤖 AI is analyzing your CDA document…<br><span style="font-size:11px;color:#cbd5e1;">Identifying sections and checking OOB template coverage</span></div>';
+
+        try {
+            // Extract section names from the XML for local coverage check
+            const sectionMatches = [...xml.matchAll(/<section[^>]*>[\s\S]*?<\/section>/gi)];
+            const xmlSectionIds = [];
+            sectionMatches.forEach(m => {
+                const idMatch = m[0].match(/templateId[^>]*root="([^"]+)"/i)
+                    || m[0].match(/<id[^>]*extension="([^"]+)"/i);
+                const titleMatch = m[0].match(/<title[^>]*>([^<]+)<\/title>/i);
+                const codeMatch  = m[0].match(/<code[^>]*displayName="([^"]+)"/i)
+                    || m[0].match(/<code[^>]*code="([^"]+)"/i);
+                xmlSectionIds.push({
+                    title:    titleMatch?.[1]?.trim() || '',
+                    code:     codeMatch?.[1]?.trim()  || '',
+                    template: idMatch?.[1]?.trim()    || '',
+                });
+            });
+
+            // Call AI endpoint
+            let aiResult = null;
+            try {
+                const resp = await fetch('/api/ai/suggest-mappings', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'include',
+                    body: JSON.stringify({ message: xml, source_format: 'cda', target_format: 'fhir_r4' }),
+                });
+                const text = await resp.text();
+                try { aiResult = JSON.parse(text); } catch { /* endpoint may not support CDA yet */ }
+            } catch (_) { /* network error */ }
+
+            // Build local coverage report from extracted sections
+            const covered   = [];
+            const uncovered = [];
+            xmlSectionIds.forEach(sec => {
+                const key = (sec.title || sec.code || '').toLowerCase().replace(/\s+/g, '');
+                const isOOB = [...OOB_SECTIONS].some(oob => key.includes(oob.toLowerCase()) || oob.toLowerCase().includes(key.substring(0, 8)));
+                (isOOB ? covered : uncovered).push(sec);
+            });
+
+            const sectionRow = (s, isOOB) => `
+                <div style="display:flex;align-items:center;gap:10px;padding:7px 10px;border-bottom:1px solid #f3f4f6;font-size:12px;">
+                    <span>${isOOB ? '✅' : '⚠️'}</span>
+                    <div style="flex:1;">
+                        <div style="font-weight:500;color:#374151;">${s.title || s.code || 'Unknown section'}</div>
+                        ${s.template ? `<div style="font-size:10px;color:#94a3b8;font-family:monospace;">${s.template}</div>` : ''}
+                    </div>
+                    <span style="font-size:10px;font-weight:600;padding:2px 6px;border-radius:4px;${isOOB ? 'background:#dcfce7;color:#16a34a;' : 'background:#fef9c3;color:#b45309;'}">${isOOB ? 'OOB covered' : 'Custom'}</span>
+                </div>`;
+
+            // AI suggestions for custom sections (from API response or generated message)
+            const suggestions = aiResult?.data?.suggestions || [];
+            const aiSugHtml = suggestions.length > 0 ? `
+                <div style="margin-top:12px;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;">
+                    <div style="background:#f8fafc;padding:8px 12px;border-bottom:1px solid #e5e7eb;font-size:12px;font-weight:600;color:#374151;">
+                        💡 AI Field Mapping Suggestions (${suggestions.length})
+                    </div>
+                    <table style="width:100%;border-collapse:collapse;font-size:11px;">
+                        <thead><tr style="background:#f1f5f9;">
+                            <th style="padding:5px 8px;text-align:left;color:#6b7280;">CDA Field</th>
+                            <th style="padding:5px 8px;text-align:left;color:#6b7280;">FHIR Path</th>
+                            <th style="padding:5px 8px;text-align:left;color:#6b7280;">Transform</th>
+                            <th style="padding:5px 8px;text-align:left;color:#6b7280;">Conf.</th>
+                        </tr></thead>
+                        <tbody>${suggestions.map(s => `
+                        <tr style="border-bottom:1px solid #f3f4f6;">
+                            <td style="padding:5px 8px;font-family:monospace;color:#374151;">${s.source_field || ''}</td>
+                            <td style="padding:5px 8px;font-family:monospace;color:#1e40af;word-break:break-all;">${s.target_field || ''}</td>
+                            <td style="padding:5px 8px;"><code style="font-size:10px;background:#f1f5f9;padding:1px 4px;border-radius:3px;">${s.transform_key || 'string_direct'}</code></td>
+                            <td style="padding:5px 8px;font-size:10px;color:#6b7280;">${s.confidence ? Math.round(s.confidence * 100) + '%' : '—'}</td>
+                        </tr>`).join('')}</tbody>
+                    </table>
+                </div>` : (uncovered.length > 0 ? `
+                <div style="margin-top:12px;background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:12px;font-size:12px;color:#92400e;">
+                    <strong>⚠️ Custom sections detected.</strong> The ezCompanion AI service (Ollama) needs to be running to generate mapping suggestions for these sections. These sections will be skipped during transformation unless manually mapped in the Pipeline Builder.
+                </div>` : '') ;
+
+            resultsEl.innerHTML = `
+                <div style="background:#f0f9ff;border:1px solid #bae6fd;border-radius:8px;padding:10px 12px;margin-bottom:12px;font-size:12px;">
+                    <div style="font-weight:700;color:#0369a1;margin-bottom:4px;">
+                        📊 ${xmlSectionIds.length} section${xmlSectionIds.length !== 1 ? 's' : ''} detected — ${covered.length} OOB covered, ${uncovered.length} custom
+                    </div>
+                    <div style="color:#16a34a;">Coverage: <strong>${xmlSectionIds.length > 0 ? Math.round(covered.length / xmlSectionIds.length * 100) : 100}%</strong> of document sections handled by OOB template</div>
+                </div>
+                ${xmlSectionIds.length === 0 ? '<div style="padding:16px;color:#d97706;font-size:12px;text-align:center;">No &lt;section&gt; elements found. Make sure the pasted content is a valid C-CDA XML document.</div>' : ''}
+                ${covered.length > 0 ? `
+                    <div style="border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;margin-bottom:8px;">
+                        <div style="background:#f0fdf4;padding:7px 10px;border-bottom:1px solid #e5e7eb;font-size:11px;font-weight:600;color:#166534;">✅ OOB-covered sections (${covered.length})</div>
+                        ${covered.map(s => sectionRow(s, true)).join('')}
+                    </div>` : ''}
+                ${uncovered.length > 0 ? `
+                    <div style="border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;margin-bottom:8px;">
+                        <div style="background:#fffbeb;padding:7px 10px;border-bottom:1px solid #e5e7eb;font-size:11px;font-weight:600;color:#92400e;">⚠️ Custom sections — not in OOB template (${uncovered.length})</div>
+                        ${uncovered.map(s => sectionRow(s, false)).join('')}
+                    </div>` : ''}
+                ${aiSugHtml}`;
+
+            statusEl.textContent = `Analysis complete — ${covered.length} covered, ${uncovered.length} custom.`;
+        } catch (err) {
+            resultsEl.innerHTML = `<div style="text-align:center;padding:30px;color:#dc2626;font-size:12px;">Error: ${err.message}</div>`;
+            statusEl.textContent = 'Analysis failed.';
+        } finally {
+            analyzeBtn.disabled = false;
+            analyzeBtn.textContent = '🔍 Analyze Document';
+        }
+    });
 };
 
 // Keep old name as alias so any surviving references don't 404

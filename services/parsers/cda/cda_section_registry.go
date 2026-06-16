@@ -82,15 +82,31 @@ func (r *SectionRegistry) Keys() []string {
 func (r *SectionRegistry) Len() int { return len(r.processors) }
 
 // =====================================
-// Package-level default registry
+// Schema-driven default registry
 // =====================================
 
-// defaultRegistry is the registry populated by section processor init() calls.
-var defaultRegistry = NewSectionRegistry()
+// DefaultSectionRegistry builds a SectionRegistry from a CDASchemaLoader.
+// Every section defined in ccda_2_1.json (excluding isHeader pseudo-sections)
+// gets a GenericSectionProcessor registered automatically.  When ccda_2_1.json
+// gains a new section the registry picks it up at the next startup — zero Go
+// code change required.
+func DefaultSectionRegistry(loader *cdaSchema.CDASchemaLoader) *SectionRegistry {
+	registry := NewSectionRegistry()
+	for _, def := range loader.AllSections() {
+		if def.IsHeader {
+			continue // header pseudo-sections are parsed by CDAHeaderParser
+		}
+		registry.Register(NewGenericSectionProcessor(def))
+	}
+	return registry
+}
 
-// DefaultSectionRegistry returns the package-level registry.
-// All section processor files in this package register into it via init().
-func DefaultSectionRegistry() *SectionRegistry { return defaultRegistry }
+// legacyRegistry is kept for the transition period while old section_*.go
+// files still exist. Their init() calls register into this registry; it is
+// not used by CDAParserService after DefaultSectionRegistry(loader) was adopted.
+var legacyRegistry = NewSectionRegistry()
 
-// RegisterSection is the convenience wrapper called by each section processor's init().
-func RegisterSection(p SectionProcessor) { defaultRegistry.Register(p) }
+// RegisterSection is kept for backward compatibility with the section_*.go
+// init() functions. It writes into legacyRegistry, which is not used in
+// production after the generic processor was introduced in Sprint B.
+func RegisterSection(p SectionProcessor) { legacyRegistry.Register(p) }

@@ -236,23 +236,10 @@ class MessageManager {
             this.interfaces.forEach(interfaceItem => {
                 const sendOption = document.createElement('option');
                 sendOption.value = interfaceItem.id;
-                sendOption.textContent = `${interfaceItem.name} (${interfaceItem.format})`;
+                const fmt = interfaceItem.sourceFormat || interfaceItem.messageType || interfaceItem.sourceType || '';
+                sendOption.textContent = fmt ? `${interfaceItem.name} (${fmt})` : interfaceItem.name;
                 sendSelect.appendChild(sendOption);
             });
-        }
-
-        // Target interface selector (for HL7→FHIR flow)
-        const targetSelect = document.getElementById('sendTargetInterface');
-        if (targetSelect) {
-            targetSelect.innerHTML = '<option value="">Select FHIR Interface</option>';
-            this.interfaces
-                .filter(i => i.format === 'FHIR' || i.format === 'fhir')
-                .forEach(interfaceItem => {
-                    const option = document.createElement('option');
-                    option.value = interfaceItem.id;
-                    option.textContent = interfaceItem.name;
-                    targetSelect.appendChild(option);
-                });
         }
 
         // Current interface selector (for interface-specific mode)
@@ -261,7 +248,8 @@ class MessageManager {
             this.interfaces.forEach(interfaceItem => {
                 const option = document.createElement('option');
                 option.value = interfaceItem.id;
-                option.textContent = `${interfaceItem.name} (${interfaceItem.format})`;
+                const ifmt = interfaceItem.sourceFormat || interfaceItem.messageType || interfaceItem.sourceType || '';
+                option.textContent = ifmt ? `${interfaceItem.name} (${ifmt})` : interfaceItem.name;
                 if (interfaceItem.id === this.currentInterfaceId) {
                     option.selected = true;
                 }
@@ -344,15 +332,14 @@ class MessageManager {
             const ds = (message.delivery_status || '').toLowerCase();
             const st = (message.status || '').toLowerCase();
             const hasDLQ = ds === 'failed'
-                || st === 'failed' || st === 'error'
-                || (message.delivery_attempts > 0 && ds !== 'delivered' && ds !== 'not_required' && ds !== 'not_configured');
+                || st === 'failed' || st === 'error';
             const dlqBadge = hasDLQ
-                ? `<span class="dlq-badge" title="Delivery failed — click to view in DLQ"
-                      onclick="event.stopPropagation(); messageManager.openDLQForMessage('${message.message_id}')"
+                ? `<span class="dlq-badge" title="Pipeline or delivery failure — click for details"
+                      onclick="event.stopPropagation(); showMessageDetail('${message.message_id}')"
                       style="cursor:pointer;display:inline-flex;align-items:center;gap:3px;
                              background:#fef3c7;border:1px solid #fcd34d;border-radius:10px;
                              padding:1px 7px;font-size:11px;font-weight:600;color:#92400e;margin-left:6px;">
-                      <i class="fas fa-exclamation-triangle" style="font-size:9px;"></i> DLQ
+                      <i class="fas fa-exclamation-triangle" style="font-size:9px;"></i> Failed
                    </span>`
                 : '';
             return `
@@ -379,9 +366,9 @@ class MessageManager {
                             <i class="fas fa-eye"></i>
                         </button>
                         ${hasDLQ ? `
-                            <button class="btn btn-sm" title="View DLQ entries"
+                            <button class="btn btn-sm" title="Pipeline or delivery failure — click for details"
                                 style="background:#fef3c7;border:1px solid #fcd34d;color:#92400e;"
-                                onclick="event.stopPropagation(); messageManager.openDLQForMessage('${message.message_id}')">
+                                onclick="event.stopPropagation(); showMessageDetail('${message.message_id}')">
                                 <i class="fas fa-exclamation-triangle"></i>
                             </button>
                         ` : ''}
@@ -704,9 +691,16 @@ class MessageManager {
                     subtitle.textContent = `${message.message_id}${message.message_type ? ' · ' + message.message_type : ''}`;
                 }
 
-                // Show/hide action buttons based on message status
-                document.getElementById('reprocessBtn').style.display =
-                    ['failed', 'error'].includes(message.status) ? 'inline-block' : 'none';
+                // Show reprocess button for all messages (not just failures)
+                const reprocessBtn = document.getElementById('reprocessBtn');
+                if (reprocessBtn) {
+                    reprocessBtn.style.display = 'inline-block';
+                    const isFailed = ['failed', 'error'].includes(message.status);
+                    reprocessBtn.textContent = isFailed ? 'Reprocess' : 'Re-run';
+                    reprocessBtn.title = isFailed
+                        ? 'Retry this failed message through the pipeline'
+                        : 'Run this message through the pipeline again';
+                }
                 document.getElementById('deleteBtn').style.display = 'inline-block';
             } else {
                 this.showError('Failed to load message details');
@@ -1580,8 +1574,7 @@ class MessageManager {
         const _ds2 = (message.delivery_status || '').toLowerCase();
         const _st2 = (message.status || '').toLowerCase();
         const hasDLQSection = _ds2 === 'failed'
-            || _st2 === 'failed' || _st2 === 'error'
-            || (message.delivery_attempts > 0 && _ds2 !== 'delivered' && _ds2 !== 'not_required' && _ds2 !== 'not_configured');
+            || _st2 === 'failed' || _st2 === 'error';
 
         container.innerHTML = `
             <div>
@@ -1806,10 +1799,28 @@ class MessageManager {
 
         const rawData         = rawResult.status === 'fulfilled' ? rawResult.value : null;
         const transformedData = transformedResult.status === 'fulfilled' ? transformedResult.value : null;
-        const rawContent      = rawData?.content || null;
-        const outboundContent = transformedData?.content || null;
+        let rawContent      = rawData?.content || null;
+        let outboundContent = transformedData?.content || null;
         // source = "outbound" → exact delivered payload; "pipeline" → fallback pipeline context
         const outboundSource  = transformedData?.source || 'pipeline';
+
+        // Fallback: use inline raw_message from the already-loaded message record
+        if (!rawContent && message.raw_message) {
+            rawContent = message.raw_message;
+        }
+
+        // Fallback: fetch stored FHIR bundle from cda_documents for CDA/CCD messages
+        if (!outboundContent && this.currentInterfaceId &&
+            (message.message_type === 'CCD' || (rawContent && rawContent.trimStart().startsWith('<')))) {
+            try {
+                const fhirResp = await fetch(
+                    `/api/messages/interface/${this.currentInterfaceId}/message/${messageId}/fhir-output`
+                ).then(r => r.ok ? r.json() : null);
+                if (fhirResp && fhirResp.success && fhirResp.content) {
+                    outboundContent = fhirResp.content;
+                }
+            } catch (_) { /* degrade gracefully */ }
+        }
 
         if (!rawContent && !outboundContent) {
             container.innerHTML = `<div style="padding:2.5rem;text-align:center;color:#94a3b8;background:#f8fafc;border-radius:8px;border:2px dashed #e2e8f0;">
@@ -1826,17 +1837,34 @@ class MessageManager {
 
         if (isCDA && typeof ClinicalDocumentViewer !== 'undefined') {
             const height = 'calc(90vh - 280px)';
+            const interfaceId = this.currentInterfaceId || '';
+
+            // Left pane: raw XML text panel + overlapping CDA viewer pane (lazy-mounted on toggle)
+            // Right pane: pipeline output / sent payload (existing toggle)
             container.innerHTML = `
                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;height:${height};min-height:0;">
-                    <div id="cdaViewerMount" style="height:100%;min-height:0;"></div>
+                    <div id="cdaLeftPanel"
+                         data-message-id="${messageId}"
+                         data-interface-id="${interfaceId}"
+                         style="height:100%;min-height:0;position:relative;">
+                        <div id="cdaRawPane" style="height:100%;display:flex;flex-direction:column;">
+                            ${this._contentPanel('inbound', 'Inbound (Raw XML)', rawContent, message.raw_content_uri, { source: 'raw', messageId, cdaViewToggle: true })}
+                        </div>
+                        <div id="cdaViewerPane" style="position:absolute;inset:0;display:none;flex-direction:column;background:#fff;border:1px solid #e2e8f0;border-radius:8px;overflow:hidden;">
+                            <div style="display:flex;align-items:center;gap:0.5rem;padding:0.6rem 0.85rem;background:#f8fafc;border-bottom:1px solid #e2e8f0;flex-shrink:0;">
+                                <span style="font-size:0.8rem;font-weight:700;color:#374151;">Clinical Document</span>
+                                <span style="background:#fef3c7;color:#92400e;padding:0.2rem 0.55rem;border-radius:4px;font-size:0.75rem;font-weight:600;">CDA/CCD Viewer</span>
+                                <div style="margin-left:auto;">
+                                    <button onclick="messageManager._toggleCDAView(false)"
+                                        style="background:#f1f5f9;color:#475569;border:1px solid #cbd5e1;padding:0.2rem 0.5rem;border-radius:4px;cursor:pointer;font-size:0.72rem;">
+                                        <i class="fas fa-code"></i> Raw XML</button>
+                                </div>
+                            </div>
+                            <div id="cdaViewerMount" style="flex:1;min-height:0;overflow:auto;"></div>
+                        </div>
+                    </div>
                     ${this._contentPanel('outbound', 'Pipeline Output', outboundContent, message.transformed_content_uri, { source: outboundSource, messageId })}
                 </div>`;
-
-            const viewer = new ClinicalDocumentViewer(
-                document.getElementById('cdaViewerMount'),
-                { interfaceId: this.currentInterfaceId, messageId, format: 'ccda' }
-            );
-            await viewer.mount();
             return;
         }
 
@@ -1890,6 +1918,34 @@ class MessageManager {
         } catch(e) { /* ignore */ }
     }
 
+    // Toggle the CDA left panel between raw XML and the rendered CDA viewer.
+    // showViewer=true → slide to CDA sections view (lazy-mounts on first call)
+    // showViewer=false → slide back to raw XML
+    async _toggleCDAView(showViewer) {
+        const leftPanel  = document.getElementById('cdaLeftPanel');
+        const rawPane    = document.getElementById('cdaRawPane');
+        const viewerPane = document.getElementById('cdaViewerPane');
+        if (!leftPanel || !rawPane || !viewerPane) return;
+
+        if (showViewer) {
+            rawPane.style.display    = 'none';
+            viewerPane.style.display = 'flex';
+            const mountEl = document.getElementById('cdaViewerMount');
+            if (mountEl && !mountEl.dataset.mounted && typeof ClinicalDocumentViewer !== 'undefined') {
+                mountEl.dataset.mounted = '1';
+                const viewer = new ClinicalDocumentViewer(mountEl, {
+                    interfaceId: leftPanel.dataset.interfaceId,
+                    messageId:   leftPanel.dataset.messageId,
+                    format:      'ccda',
+                });
+                await viewer.mount();
+            }
+        } else {
+            rawPane.style.display    = 'flex';
+            viewerPane.style.display = 'none';
+        }
+    }
+
     // opts: { source: 'outbound'|'pipeline'|'raw', messageId }
     _contentPanel(side, label, content, uri, opts = {}) {
         const idSuffix = side + '-' + Date.now();
@@ -1923,7 +1979,7 @@ class MessageManager {
         const sizeStr = content ? this.formatBytes(content.length) : '';
         const uriHtml = uri ? `<span style="color:#94a3b8;font-size:0.7rem;font-family:monospace;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:200px;" title="${uri}">📦 ${uri.split('/').slice(-1)[0]}</span>` : '';
 
-        // Pipeline-output toggle: only on the outbound panel when messageId is known
+        // Toggle buttons: pipeline-output toggle (outbound) or CDA viewer toggle (inbound CDA)
         let toggleBtn = '';
         let sourceNote = '';
         if (side === 'outbound' && messageId) {
@@ -1939,6 +1995,13 @@ class MessageManager {
                     style="background:#f1f5f9;color:#475569;border:1px solid #cbd5e1;padding:0.2rem 0.5rem;border-radius:4px;cursor:pointer;font-size:0.72rem;">
                     <i class="fas fa-arrow-left"></i> Sent Payload</button>`;
             }
+        }
+        // CDA viewer toggle: shown on the inbound raw-XML panel for CDA/CCD messages
+        if (opts.cdaViewToggle) {
+            toggleBtn = `<button onclick="messageManager._toggleCDAView(true)"
+                title="Show rendered CDA document sections"
+                style="background:#fef3c7;color:#92400e;border:1px solid #fde68a;padding:0.2rem 0.5rem;border-radius:4px;cursor:pointer;font-size:0.72rem;">
+                <i class="fas fa-file-medical-alt"></i> CDA View</button>`;
         }
 
         return `
@@ -2073,27 +2136,35 @@ class MessageManager {
         return content.replace(/</g, '&lt;').replace(/>/g, '&gt;');
     }
 
-    // NEW: Handle flow type changes
-    handleFlowTypeChange() {
-        const flowType = document.getElementById('sendFlowType').value;
-        const targetGroup = document.getElementById('targetInterfaceGroup');
-        const sourceLabel = document.querySelector('label[for="sendInterface"]');
+    // Auto-detect content type and message type from raw pasted content so the
+    // user doesn't have to pick them manually. Mirrors the sniffing the Go
+    // format detector does for live messages (services/format_detector.go).
+    detectMessageFormat(content) {
+        const trimmed = (content || '').trim();
 
-        if (flowType === 'hl7-to-fhir') {
-            targetGroup.style.display = 'block';
-            if (sourceLabel) {
-                sourceLabel.textContent = 'Source HL7 Interface';
-            }
-
-            // Auto-set HL7 content type
-            document.getElementById('sendContentType').value = 'application/hl7-v2';
-            document.getElementById('sendMessageType').value = 'ADT^A01';
-        } else {
-            targetGroup.style.display = 'none';
-            if (sourceLabel) {
-                sourceLabel.textContent = 'Target Interface';
-            }
+        if (/^MSH\|/.test(trimmed)) {
+            // HL7 v2: MSH.9 (message type, e.g. ADT^A01) is the 9th field.
+            const fields = trimmed.split(/\r?\n/)[0].split('|');
+            const messageType = fields[8] || 'HL7';
+            return { contentType: 'application/hl7-v2', messageType };
         }
+
+        if (/^</.test(trimmed)) {
+            const messageType = /ClinicalDocument/i.test(trimmed) ? 'CDA' : 'XML';
+            return { contentType: 'application/xml', messageType };
+        }
+
+        try {
+            const parsed = JSON.parse(trimmed);
+            if (parsed && parsed.resourceType) {
+                return { contentType: 'application/fhir+json', messageType: parsed.resourceType };
+            }
+            return { contentType: 'application/json', messageType: 'JSON' };
+        } catch (e) {
+            // Not JSON either — send as-is.
+        }
+
+        return { contentType: 'text/plain', messageType: 'unknown' };
     }
 
     async sendMessage() {
@@ -2103,94 +2174,54 @@ class MessageManager {
             return;
         }
 
-        const flowType = document.getElementById('sendFlowType').value;
         const sourceInterfaceId = document.getElementById('sendInterface').value;
-        const messageType = document.getElementById('sendMessageType').value;
-        const contentType = document.getElementById('sendContentType').value;
         const messageContent = document.getElementById('sendMessageContent').value;
+        const { contentType, messageType } = this.detectMessageFormat(messageContent);
 
         try {
-            let response;
-            let isSuccess = false;
+            // Routes the content through the interface's real connectivity
+            // (TCP/MLLP, HTTP, or pipeline inject) — same path a live message takes.
+            const response = await fetch(`/api/messages/send/${sourceInterfaceId}`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    messageContent,
+                    messageType,
+                    contentType
+                })
+            });
 
-            if (flowType === 'hl7-to-fhir') {
-                // HL7 → FHIR message flow
-                const targetInterfaceId = document.getElementById('sendTargetInterface').value;
+            const responseData = await response.json();
+            console.log('🔍 Send message response:', responseData);
 
-                if (!targetInterfaceId) {
-                    this.showError('Please select a target FHIR interface');
-                    return;
-                }
+            if (response.ok && responseData.success) {
+                // Show detailed connectivity success message
+                const endpoint = responseData.interface?.endpoint || 'endpoint';
+                const method = responseData.delivery?.method || 'connectivity';
+                const interfaceName = responseData.interface?.name || 'Unknown';
+                const interfaceType = responseData.interface?.type || 'Unknown';
+                const messageId = responseData.messageId || 'Unknown';
 
-                response = await fetch('/api/messages/flow/hl7-to-fhir', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({
-                        sourceInterfaceId,
-                        targetInterfaceId,
-                        hl7Message: messageContent,
-                        messageType,
-                        priority: 5
-                    })
-                });
+                this.showSuccess(`📡 Message sent via ${method.toUpperCase()}!<br>
+                                 <small>Interface: ${interfaceName} (${interfaceType})<br>
+                                 Endpoint: ${endpoint}<br>
+                                 Message ID: ${messageId}</small>`);
 
-                if (response.ok) {
-                    const data = await response.json();
-                    this.showSuccess(`HL7→FHIR flow initiated! Correlation ID: ${data.data.correlationId}`);
-                    isSuccess = true;
-                } else {
-                    const error = await response.json();
-                    this.showError(error.error || 'Failed to initiate HL7→FHIR flow');
-                }
-            } else {
-                // Single interface test message
-                response = await fetch(`/api/messages/send/${sourceInterfaceId}`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({
-                        messageContent,
-                        messageType,
-                        contentType
-                    })
-                });
-
-                const responseData = await response.json();
-                console.log('🔍 Send message response:', responseData);
-
-                if (response.ok && responseData.success) {
-                    // Show detailed connectivity success message
-                    const endpoint = responseData.interface?.endpoint || 'endpoint';
-                    const method = responseData.delivery?.method || 'connectivity';
-                    const interfaceName = responseData.interface?.name || 'Unknown';
-                    const interfaceType = responseData.interface?.type || 'Unknown';
-                    const messageId = responseData.messageId || 'Unknown';
-
-                    this.showSuccess(`📡 Message sent via ${method.toUpperCase()}!<br>
-                                     <small>Interface: ${interfaceName} (${interfaceType})<br>
-                                     Endpoint: ${endpoint}<br>
-                                     Message ID: ${messageId}</small>`);
-                    isSuccess = true;
-                } else {
-                    // Show detailed connectivity error message
-                    let errorMsg = responseData.error || 'Failed to send message';
-                    if (responseData.details) {
-                        errorMsg += `<br><small>Details: ${responseData.details}</small>`;
-                    }
-                    if (responseData.message) {
-                        errorMsg += `<br><small>${responseData.message}</small>`;
-                    }
-                    this.showError(errorMsg);
-                }
-            }
-
-            if (isSuccess) {
                 closeSendMessageModal();
                 form.reset();
                 this.loadMessages(); // Refresh messages
+            } else {
+                // Show detailed connectivity error message
+                let errorMsg = responseData.error || 'Failed to send message';
+                if (responseData.details) {
+                    errorMsg += `<br><small>Details: ${responseData.details}</small>`;
+                }
+                if (responseData.message) {
+                    errorMsg += `<br><small>${responseData.message}</small>`;
+                }
+                this.showError(errorMsg);
             }
 
         } catch (error) {
@@ -2201,12 +2232,8 @@ class MessageManager {
 
     loadSampleMessage(type) {
         const textarea = document.getElementById('sendMessageContent');
-        const messageTypeInput = document.getElementById('sendMessageType');
-        const contentTypeSelect = document.getElementById('sendContentType');
 
         if (type === 'fhir') {
-            messageTypeInput.value = 'Patient';
-            contentTypeSelect.value = 'application/fhir+json';
             textarea.value = JSON.stringify({
                 "resourceType": "Patient",
                 "id": "example-patient-001",
@@ -2229,8 +2256,6 @@ class MessageManager {
                 }]
             }, null, 2);
         } else if (type === 'hl7') {
-            messageTypeInput.value = 'ADT^A01';
-            contentTypeSelect.value = 'application/hl7-v2';
             textarea.value = 'MSH|^~\\&|SYSTEM|SENDER|RECEIVER|DESTINATION|20250915141530||ADT^A01|12345|P|2.5\r\n' +
                 'PID|1||12345^^^MRN||Doe^John^||19900515|M|||123 Main St^^Anytown^ST^12345^US||(555)123-4567|||S||12345|||US\r\n' +
                 'PV1|1|I|ICU^001^01||||DOC001^Doctor^Attending|||||||||||12345||\r\n';
@@ -2257,11 +2282,14 @@ class MessageManager {
             });
 
             if (response.ok) {
-                this.showSuccess('Message queued for reprocessing');
-                this.loadMessages();
+                this.showSuccess('Re-run started — watching for completion…');
+                // Refresh modal immediately to show 'Processing' state; keep it open
+                // so the user can see the final result without hunting for the right row.
                 if (this.selectedMessageId === id) {
-                    closeMessageDetailModal();
+                    await this.showMessageDetail(id);
                 }
+                // Poll until status is no longer in-flight, then do a final refresh
+                this._pollReprocessStatus(id);
             } else {
                 const error = await response.json();
                 this.showError(error.error || 'Failed to reprocess message');
@@ -2270,6 +2298,39 @@ class MessageManager {
             console.error('Failed to reprocess message:', error);
             this.showError('Failed to reprocess message');
         }
+    }
+
+    // Poll the message status every 1.5 s until the pipeline finishes (max 30 s),
+    // then refresh the modal and the list so the user sees the actual final state.
+    async _pollReprocessStatus(messageId) {
+        const IN_FLIGHT = new Set(['received', 'reprocessing', 'processing', 'queued']);
+        const MAX_POLLS = 20; // 20 × 1.5 s = 30 s
+        let polls = 0;
+
+        const poll = async () => {
+            polls++;
+            try {
+                const r = await fetch(`/api/messages/${messageId}`);
+                if (r.ok) {
+                    const data = await r.json();
+                    const msg = (data.data && data.data.message) || data.data || data;
+                    const status = (msg.status || '').toLowerCase();
+                    if (!IN_FLIGHT.has(status) || polls >= MAX_POLLS) {
+                        // Pipeline finished — refresh modal (only if still open) and list
+                        const modalOpen = document.getElementById('messageDetailModal')?.classList.contains('show');
+                        if (modalOpen && this.selectedMessageId === messageId) {
+                            await this.showMessageDetail(messageId);
+                        }
+                        this.loadMessages();
+                        return;
+                    }
+                }
+            } catch (_) { /* ignore, keep polling */ }
+            setTimeout(poll, 1500);
+        };
+
+        // First check after 1.5 s (pipeline needs at least that long to finish)
+        setTimeout(poll, 1500);
     }
 
     async confirmDeleteMessage(messageId) {

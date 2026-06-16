@@ -246,7 +246,7 @@ class TransformationPipelineService {
             count++;
         }
 
-        console.log(`✅ Added ${count} step(s) for ${flow} pipeline`);
+        console.log(`✅ Added ${count} step(s) for ${sourceType}→${targetType} (${transformationFlow}) pipeline`);
         return count;
     }
 

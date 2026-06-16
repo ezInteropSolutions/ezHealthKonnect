@@ -224,6 +224,11 @@ func GetRegistry() *SchemaRegistry {
 // Get returns the CompiledProfile for the given (version, resourceType, profile) triple.
 // Empty strings default to "R4" and "base" respectively.
 func (r *SchemaRegistry) Get(version, resourceType, profile string) (*CompiledProfile, bool) {
+	if r == nil {
+		// InitRegistry() runs in a background goroutine; a validator built
+		// before it completes can be holding a not-yet-populated registry.
+		return nil, false
+	}
 	if version == "" {
 		version = "R4"
 	}
@@ -239,6 +244,9 @@ func (r *SchemaRegistry) Get(version, resourceType, profile string) (*CompiledPr
 
 // List returns all RegistryKeys registered for version.
 func (r *SchemaRegistry) List(version string) []RegistryKey {
+	if r == nil {
+		return nil
+	}
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	var keys []RegistryKey

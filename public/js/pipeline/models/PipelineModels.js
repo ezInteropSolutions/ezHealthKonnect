@@ -553,6 +553,40 @@ class VisualStep {
     }
 
     /**
+     * Check if a step is a CDA parse step (cda.parse)
+     * @param {VisualStep|Object} step
+     * @returns {boolean}
+     */
+    static isCdaParseStep(step) {
+        if (!step) return false;
+        const type = step.stepType || step.step_type || '';
+        return type === 'cda.parse';
+    }
+
+    /**
+     * Check if a step is a CDA-to-FHIR transform step (cda.to_fhir)
+     * @param {VisualStep|Object} step
+     * @returns {boolean}
+     */
+    static isCdaToFhirStep(step) {
+        if (!step) return false;
+        const type = step.stepType || step.step_type || '';
+        return type === 'cda.to_fhir';
+    }
+
+    /**
+     * Check if a step is any CDA-family step (parse, transform, normalize, or fhir.to_cda)
+     * @param {VisualStep|Object} step
+     * @returns {boolean}
+     */
+    static isCdaStep(step) {
+        if (!step) return false;
+        const type = step.stepType || step.step_type || '';
+        return type === 'cda.parse' || type === 'cda.to_fhir' ||
+               type === 'cda.normalize' || type === 'fhir.to_cda';
+    }
+
+    /**
      * Get the canonical (new) type name for any step type
      * @param {string} stepType - Old or new type name
      * @returns {string} Canonical type name

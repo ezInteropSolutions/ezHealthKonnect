@@ -15,17 +15,25 @@
 package cdaparser
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"runtime"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
 	cdaSchema "ezhealthkonnect/cda"
+	cdadocument "ezhealthkonnect/cda/document"
 	"ezhealthkonnect/models"
 	"ezhealthkonnect/uscdi"
 	"github.com/beevik/etree"
+)
+
+const (
+	defaultMaxDocSizeMB = 50
+	hardCapDocSizeMB    = 200
 )
 
 // CDAParserService parses CDA/CCD XML documents and returns a schema-enriched
@@ -34,9 +42,10 @@ type CDAParserService struct {
 	schemaLoader *cdaSchema.CDASchemaLoader
 	vocabulary   *uscdi.USCDIVocabulary
 	normalizer   *cdaSchema.C32TemplateNormalizer
-	headerParser *CDAHeaderParser
 	registry     *SectionRegistry
+	typedParser  *cdadocument.CDAParser // Sprint B typed document model
 	maxWorkers   int
+	maxDocSizeMB int // 0 = use default (50 MB)
 }
 
 // NewCDAParserService constructs a service with all dependencies injected.
@@ -51,10 +60,24 @@ func NewCDAParserService(
 		schemaLoader: loader,
 		vocabulary:   vocab,
 		normalizer:   normalizer,
-		headerParser: NewCDAHeaderParser(),
 		registry:     registry,
+		typedParser:  cdadocument.NewCDAParser(loader),
 		maxWorkers:   resolveSectionWorkers(),
+		maxDocSizeMB: resolveMaxDocSizeMB(),
 	}
+}
+
+// WithMaxDocSizeMB overrides the document size limit at construction time.
+// Values above hardCapDocSizeMB (200 MB) are silently clamped.
+func (s *CDAParserService) WithMaxDocSizeMB(mb int) *CDAParserService {
+	if mb <= 0 {
+		mb = defaultMaxDocSizeMB
+	}
+	if mb > hardCapDocSizeMB {
+		mb = hardCapDocSizeMB
+	}
+	s.maxDocSizeMB = mb
+	return s
 }
 
 // Format returns the canonical format string for the ParserRegistry.
@@ -64,6 +87,11 @@ func (s *CDAParserService) Format() string {
 
 // Parse is the main entry point. It accepts raw CDA/CCD XML and returns a
 // fully populated ParserResult. Returns Success=false on fatal parse errors.
+//
+// Documents larger than maxDocSizeMB use streaming XML parsing via
+// etree.Document.ReadFrom(io.Reader) to avoid loading the full string into
+// memory twice. The hard cap (200 MB default) rejects oversized documents
+// immediately with a descriptive error.
 func (s *CDAParserService) Parse(raw string) *models.ParserResult {
 	start := time.Now()
 
@@ -73,11 +101,34 @@ func (s *CDAParserService) Parse(raw string) *models.ParserResult {
 		FieldOrder:     []string{},
 	}
 
-	// 1. Parse XML
-	doc := etree.NewDocument()
-	if err := doc.ReadFromString(raw); err != nil {
+	// Size gate — reject documents above the hard cap.
+	limit := s.maxDocSizeMB
+	if limit <= 0 {
+		limit = defaultMaxDocSizeMB
+	}
+	hardCap := hardCapDocSizeMB
+	docBytes := len(raw)
+	if docBytes > hardCap*1024*1024 {
 		result.Success = false
-		result.Error = fmt.Sprintf("cda: XML parse error: %v", err)
+		result.Error = fmt.Sprintf(
+			"cda: document size %d MB exceeds hard cap of %d MB",
+			docBytes/(1024*1024), hardCap,
+		)
+		return result
+	}
+
+	// 1. Parse XML — streaming path for large documents (> maxDocSizeMB).
+	doc := etree.NewDocument()
+	var parseErr error
+	if docBytes > limit*1024*1024 {
+		// Use streaming reader to avoid doubling memory footprint.
+		_, parseErr = doc.ReadFrom(bytes.NewReader([]byte(raw)))
+	} else {
+		parseErr = doc.ReadFromString(raw)
+	}
+	if parseErr != nil {
+		result.Success = false
+		result.Error = fmt.Sprintf("cda: XML parse error: %v", parseErr)
 		return result
 	}
 
@@ -110,14 +161,18 @@ func (s *CDAParserService) Parse(raw string) *models.ParserResult {
 		root = doc.Root()
 	}
 
-	// 4. Extract document header
-	headerResult := s.headerParser.Parse(root)
+	// 4. Build typed document model (Sprint B/D).
+	// Moved before section processing so the typed header can produce the JSON header map.
+	typedDoc := s.typedParser.ParseDocument(root, workingXML)
+	result.TypedDocument = typedDoc
 
 	// 5. Process sections in parallel
 	sectionResults := s.processSectionsParallel(root)
 
-	// 6. Assemble ParsedJSON
-	parsed := s.assembleJSON(raw, profile, normResult.Substitutions, headerResult, sectionResults)
+	// 6. Assemble ParsedJSON — header map derived from typed CDADocument (Sprint D).
+	// This removes the XPath-based CDAHeaderParser dependency entirely.
+	headerMap := headerToJSON(typedDoc)
+	parsed := s.assembleJSON(raw, profile, normResult.Substitutions, headerMap, sectionResults)
 	result.ParsedJSON = parsed
 
 	// 7. Populate EnhancedFields for the field picker
@@ -171,13 +226,7 @@ func (s *CDAParserService) processSectionsParallel(root *etree.Element) []*Secti
 		go func() {
 			defer wg.Done()
 			for job := range jobs {
-				proc, ok := s.registry.Get(job.sectionKey)
-				if !ok {
-					// No processor — emit a minimal result preserving narrative HTML.
-					resultsCh <- s.fallbackResult(job.sectionEl, job.sectionKey)
-					continue
-				}
-				resultsCh <- proc.Process(job.sectionEl, job.schema)
+				resultsCh <- s.processOneSectionSafe(job)
 			}
 		}()
 	}
@@ -200,6 +249,26 @@ func (s *CDAParserService) processSectionsParallel(root *etree.Element) []*Secti
 		results = append(results, r)
 	}
 	return results
+}
+
+// processOneSectionSafe runs the registered processor for job and recovers any
+// panic (e.g. unsupported etree XPath predicate) so a single bad section never
+// crashes the whole goroutine pool or the Go process.
+func (s *CDAParserService) processOneSectionSafe(job sectionJob) (res *SectionResult) {
+	defer func() {
+		if r := recover(); r != nil {
+			res = &SectionResult{
+				SectionKey: job.sectionKey,
+				Entries:    []map[string]interface{}{},
+				Error:      fmt.Sprintf("section processor panic (recovered): %v", r),
+			}
+		}
+	}()
+	proc, ok := s.registry.Get(job.sectionKey)
+	if !ok {
+		return s.fallbackResult(job.sectionEl, job.sectionKey)
+	}
+	return proc.Process(job.sectionEl, job.schema)
 }
 
 // resolveSectionKey determines the section key from a <section> element.
@@ -238,11 +307,13 @@ func (s *CDAParserService) fallbackResult(el *etree.Element, key string) *Sectio
 // Result assembly
 // =====================================
 
+// assembleJSON builds the parsedCDA map[string]interface{} stored on ParserResult.ParsedJSON.
+// headerMap is now supplied by headerToJSON() from the typed CDADocument (Sprint D).
 func (s *CDAParserService) assembleJSON(
 	raw string,
 	profile cdaSchema.CDAProfile,
 	substitutions int,
-	header *ParseResult,
+	headerMap map[string]interface{},
 	sections []*SectionResult,
 ) map[string]interface{} {
 
@@ -261,14 +332,11 @@ func (s *CDAParserService) assembleJSON(
 		if sec.Error != "" {
 			entry["error"] = sec.Error
 		}
-
-		// Attach schema metadata if available
 		if schemaDef := s.schemaLoader.GetSection(sec.SectionKey); schemaDef != nil {
 			entry["loincCode"] = schemaDef.LOINCCode
 			entry["displayName"] = schemaDef.DisplayName
 			entry["uscdiClass"] = schemaDef.USCDIClass
 		}
-
 		sectionsMap[sec.SectionKey] = entry
 	}
 
@@ -277,19 +345,13 @@ func (s *CDAParserService) assembleJSON(
 		"cdaProfile":   string(profile),
 		"uscdiVersion": string(uscdi.USCDIv3),
 		"raw":          raw,
-		"header":       map[string]interface{}{
-			"patient":  header.Patient,
-			"document": header.Document,
-			"author":   header.Author,
-		},
-		"sections": sectionsMap,
+		"header":       headerMap,
+		"sections":     sectionsMap,
 	}
-
 	if substitutions > 0 {
 		parsed["normalizedFrom"] = string(profile)
 		parsed["templateSubstitutions"] = substitutions
 	}
-
 	return parsed
 }
 
@@ -364,7 +426,7 @@ func NewFromSchemaDir(schemaDir string) (*CDAParserService, error) {
 	}
 
 	normalizer := cdaSchema.NewC32TemplateNormalizer(loader)
-	return NewCDAParserService(loader, vocab, normalizer, DefaultSectionRegistry()), nil
+	return NewCDAParserService(loader, vocab, normalizer, DefaultSectionRegistry(loader)), nil
 }
 
 // =====================================
@@ -426,4 +488,154 @@ func resolveSectionWorkers() int {
 		return n
 	}
 	return 4
+}
+
+func resolveMaxDocSizeMB() int {
+	if val := os.Getenv("CDA_MAX_DOCUMENT_SIZE_MB"); val != "" {
+		if n, err := strconv.Atoi(val); err == nil && n > 0 {
+			if n > hardCapDocSizeMB {
+				n = hardCapDocSizeMB
+			}
+			return n
+		}
+	}
+	return defaultMaxDocSizeMB
+}
+
+// =====================================
+// Typed-header → JSON conversion (Sprint D)
+// =====================================
+
+// headerToJSON converts a CDAHeader (from the typed document model) into the
+// map[string]interface{} shape expected by assembleJSON() and the legacy Map() path.
+// Keys match those historically produced by CDAHeaderParser so all downstream
+// consumers (generic_mapper.go legacy path, UI field picker) continue to work.
+func headerToJSON(doc *cdadocument.CDADocument) map[string]interface{} {
+	if doc == nil {
+		return map[string]interface{}{
+			"patient":  map[string]interface{}{},
+			"document": map[string]interface{}{},
+			"author":   map[string]interface{}{},
+		}
+	}
+	h := doc.Header
+	return map[string]interface{}{
+		"patient":  patientToLegacyJSON(h.Patient),
+		"document": documentToJSON(h),
+		"author":   authorToJSON(h),
+	}
+}
+
+// patientToLegacyJSON maps CDAPatient fields to the same key names that
+// CDAHeaderParser.parsePatient() produced, so the legacy buildLegacyPatient()
+// function in generic_mapper.go continues to work without modification.
+func patientToLegacyJSON(p cdadocument.CDAPatient) map[string]interface{} {
+	m := make(map[string]interface{})
+
+	// Names — use="L" (legal) preferred
+	for _, n := range p.Names {
+		if n.Use == "L" || n.Use == "" {
+			if len(n.Given) > 0 {
+				m["firstName"] = n.Given[0]
+				if len(n.Given) > 1 {
+					m["middleName"] = n.Given[1]
+				}
+			}
+			m["lastName"] = n.Family
+			break
+		}
+	}
+	if _, hasFirst := m["firstName"]; !hasFirst && len(p.Names) > 0 {
+		n := p.Names[0]
+		if len(n.Given) > 0 {
+			m["firstName"] = n.Given[0]
+			if len(n.Given) > 1 {
+				m["middleName"] = n.Given[1]
+			}
+		}
+		m["lastName"] = n.Family
+	}
+
+	m["dateOfBirth"] = p.BirthDate.Value
+	m["sex"] = p.Gender.Code
+	m["sexDisplay"] = p.Gender.DisplayName
+	m["race"] = p.Race.Code
+	m["raceDisplay"] = p.Race.DisplayName
+	m["ethnicity"] = p.Ethnicity.Code
+	m["ethnicityDisplay"] = p.Ethnicity.DisplayName
+
+	// All <id> elements as [{root, extension}] array
+	ids := make([]interface{}, 0, len(p.Ids))
+	for _, id := range p.Ids {
+		ids = append(ids, map[string]interface{}{
+			"root":      id.Root,
+			"extension": id.Extension,
+		})
+	}
+	m["ids"] = ids
+
+	// First home/permanent address
+	for _, addr := range p.Addresses {
+		if addr.NullFlavor != "" {
+			continue
+		}
+		addrMap := make(map[string]interface{})
+		if len(addr.StreetLines) > 0 {
+			addrMap["street"] = addr.StreetLines[0]
+		}
+		addrMap["city"] = addr.City
+		addrMap["state"] = addr.State
+		addrMap["postalCode"] = addr.PostalCode
+		addrMap["country"] = addr.Country
+		m["address"] = addrMap
+		break
+	}
+
+	// First home phone
+	for _, t := range p.Telecoms {
+		if t.Use == "HP" || t.Use == "" {
+			m["phone"] = strings.TrimPrefix(t.Value, "tel:")
+			break
+		}
+	}
+
+	// Language
+	for _, lang := range p.Languages {
+		if lang.PreferenceInd && lang.Code != "" {
+			m["preferredLanguage"] = lang.Code
+			break
+		}
+	}
+
+	return m
+}
+
+func documentToJSON(h cdadocument.CDAHeader) map[string]interface{} {
+	return map[string]interface{}{
+		"title":         h.Title,
+		"effectiveTime": h.EffectiveTime.Value,
+		"versionNumber": h.VersionNumber,
+	}
+}
+
+func authorToJSON(h cdadocument.CDAHeader) map[string]interface{} {
+	if len(h.Authors) == 0 {
+		return map[string]interface{}{}
+	}
+	a := h.Authors[0]
+	m := make(map[string]interface{})
+	if a.AssignedAuthor.AssignedPerson != nil && len(a.AssignedAuthor.AssignedPerson.Names) > 0 {
+		n := a.AssignedAuthor.AssignedPerson.Names[0]
+		if len(n.Given) > 0 {
+			m["given"] = n.Given[0]
+		}
+		m["family"] = n.Family
+	}
+	for _, id := range a.AssignedAuthor.Ids {
+		if id.Root == "2.16.840.1.113883.4.6" { // NPI OID
+			m["npi"] = id.Extension
+			break
+		}
+	}
+	return m
 }

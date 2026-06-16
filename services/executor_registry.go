@@ -13,6 +13,7 @@ import (
 	"ezhealthkonnect/hl7"
 	"ezhealthkonnect/models"
 	"ezhealthkonnect/services/connectors"
+	cdastorage "ezhealthkonnect/services/cda_storage"
 	"ezhealthkonnect/services/executors/control"
 	"ezhealthkonnect/services/executors/enrichment"
 	payloadexecutor "ezhealthkonnect/services/executors/payload"
@@ -80,6 +81,14 @@ func (er *ExecutorRegistry) SetDLQService(dlqSvc *connectors.DLQService) {
 	log.Printf("📥 [DLQ] Outbound connector executor upgraded with DLQ support")
 }
 
+// SetCDADocumentStore upgrades the cda.parse executor with a document store so that
+// every successfully parsed CDA document is persisted asynchronously.
+// Call this after NewExecutorRegistry once the CDADocumentStore is ready.
+func (er *ExecutorRegistry) SetCDADocumentStore(store cdastorage.CDADocumentStore) {
+	er.executors["cda.parse"] = transform.NewCDAParseExecutorWithStore(store)
+	log.Printf("📄 [CDA Storage] cda.parse executor upgraded with document storage")
+}
+
 // autoRegisterExecutors registers all built-in executors (OOB pattern)
 func (er *ExecutorRegistry) autoRegisterExecutors() {
 	// Essential OOB executor
@@ -117,9 +126,10 @@ func (er *ExecutorRegistry) autoRegisterExecutors() {
 	er.Register(transform.NewDeidentifyExecutor())           // deidentify (HIPAA P1)
 
 	// CDA transform executors
-	er.Register(transform.NewCDAToFHIRExecutor())       // cda.to_fhir
+	er.Register(transform.NewCDAToFHIRExecutor(er.db))  // cda.to_fhir
 	er.Register(transform.NewFHIRToCDAExecutor())       // fhir.to_cda
 	er.Register(transform.NewCDANormalizerExecutor())   // cda.normalize
+	er.Register(transform.NewCDAParseExecutor())        // cda.parse
 
 	// Connector bridge executors (DLQ service wired later via SetDLQService)
 	er.Register(transform.NewOutboundConnectorExecutor())    // connector.outbound

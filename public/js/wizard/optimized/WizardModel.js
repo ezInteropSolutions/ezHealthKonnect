@@ -154,6 +154,7 @@ class WizardModel extends EventTarget {
                 };
             case 2:
                 return {
+                    transformationFlow: this.data.transformationFlow,
                     sourceType: this.data.sourceType,
                     sourceConnectivity: this.data.sourceConnectivity,
                     sourceConfig: this.data.sourceConfig,
@@ -165,11 +166,11 @@ class WizardModel extends EventTarget {
                 };
             case 3:
                 return {
+                    transformationFlow: this.data.transformationFlow,
                     hl7Message: this.data.hl7Message,
                     useSampleHL7: this.data.useSampleHL7,
                     parsedHL7Data: this.data.parsedHL7Data,
                     detectedMessageType: this.data.detectedMessageType,
-                    transformationFlow: this.data.transformationFlow,
                     // Include FHIR transformation result for mapping display
                     fhirTransformResult: this.data.fhirTransformResult,
                     // Include family filter for message-type preview selector
@@ -195,6 +196,23 @@ class WizardModel extends EventTarget {
                     detectedMessageType: this.data.detectedMessageType
                 };
             case 5:
+                if (this.data.transformationFlow === 'ccd_to_fhir') {
+                    // CDA: model step 5 = Target Config (same data as case 4)
+                    return {
+                        name: this.data.name,
+                        description: this.data.description,
+                        sourceType: this.data.sourceType,
+                        sourceConnectivity: this.data.sourceConnectivity,
+                        sourceConfig: this.data.sourceConfig,
+                        transformationFlow: this.data.transformationFlow,
+                        targetType: this.data.targetType,
+                        targetConnectivity: this.data.targetConnectivity,
+                        targetConfig: this.data.targetConfig,
+                        fhirTransformResult: this.data.fhirTransformResult,
+                        parsedHL7Data: this.data.parsedHL7Data,
+                        detectedMessageType: this.data.detectedMessageType
+                    };
+                }
                 return {
                     messageType: this.data.messageType,
                     mappingTemplate: this.data.mappingTemplate,
@@ -279,7 +297,11 @@ class WizardModel extends EventTarget {
                 this.validateStep3(); // Target config validation
                 break;
             case 5:
-                this.validateStep5();
+                if (this.data.transformationFlow === 'ccd_to_fhir') {
+                    this.validateStep3(); // CDA: Target Config at model step 5 (3→5 skip)
+                } else {
+                    this.validateStep5();
+                }
                 break;
             case 6:
                 this.validateStep6();
@@ -322,6 +344,9 @@ class WizardModel extends EventTarget {
      * Step 2 validation: Source configuration
      */
     validateStep2() {
+        // CDA step 2 is informational only — no connectivity fields to validate
+        if (this.data.transformationFlow === 'ccd_to_fhir') return;
+
         if (!this.data.sourceType) {
             this.validation.errors.sourceType = 'Source type is required';
         }
@@ -465,8 +490,13 @@ class WizardModel extends EventTarget {
         }
 
         if (step > this.currentStep + 1) {
-            console.log('❌ Cannot skip steps');
-            return false;
+            // Allow jumps that the flow explicitly defines (e.g. CDA: 3→5, sink: 1→5).
+            const flowNext = this._computeNextStepNum();
+            if (step !== flowNext) {
+                console.log('❌ Cannot skip steps (not a flow-defined jump)');
+                return false;
+            }
+            console.log(`✅ Flow-defined jump allowed: ${this.currentStep} → ${step}`);
         }
 
         // Can only advance if current step is valid
@@ -499,39 +529,40 @@ class WizardModel extends EventTarget {
         return true;
     }
 
-    nextStep() {
-        console.log('📋 Model nextStep called, current:', this.currentStep);
-
+    /**
+     * Returns the step number that nextStep() should navigate to from the
+     * current step, accounting for flow-defined skips (CDA skips step 4, etc.).
+     * Used by both nextStep() and canGoToStep() so they agree on what "next" means.
+     */
+    _computeNextStepNum() {
         let nextStepNum = this.currentStep + 1;
         const sourceType = this.data.sourceType;
         const transformationFlow = this.data.transformationFlow;
 
         if (this.currentStep === 1) {
-            console.log('🔍 Source type detected:', sourceType, '/ flow:', transformationFlow);
-
             const isFHIRSource = sourceType && sourceType.toLowerCase() === 'fhir';
             const flow = typeof getFlow !== 'undefined' ? getFlow(transformationFlow) : null;
-
             if (isFHIRSource) {
-                // Existing: FHIR source skips upload + review, goes to mapping config
-                console.log('🎯 FHIR source — skipping steps 2 & 3');
                 nextStepNum = 4;
             } else if (flow && flow.skipUploadSteps) {
-                // Sink/custom flows: skip upload + review; also skip mapping if not needed
                 nextStepNum = flow.showMappingUI ? 4 : 5;
-                console.log(`🎯 Flow "${transformationFlow}" (skipUploadSteps) — jumping to step ${nextStepNum}`);
             }
         }
 
-        // CDA and any flow with showMappingUI=false that reaches step 3: skip mapping step
         if (this.currentStep === 3 && typeof getFlow !== 'undefined') {
             const flow = getFlow(transformationFlow);
-            if (!flow.showMappingUI) {
-                console.log(`🎯 Flow "${transformationFlow}" — skipping mapping step 4, jumping to 5`);
+            if (flow && !flow.showMappingUI) {
                 nextStepNum = 5;
             }
         }
 
+        return nextStepNum;
+    }
+
+    nextStep() {
+        console.log('📋 Model nextStep called, current:', this.currentStep);
+        const nextStepNum = this._computeNextStepNum();
+        console.log(`🎯 Flow next step: ${this.currentStep} → ${nextStepNum}`);
         const result = this.goToStep(nextStepNum);
         console.log('📋 Model nextStep result:', result);
         return result;

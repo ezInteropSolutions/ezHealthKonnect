@@ -1,0 +1,141 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- CCD with patient carrying three identifiers: MRN, SSN, and Medicare Beneficiary ID.
+     Test criterion: CDAPatient.Ids must contain exactly 3 elements.
+     Also covers: two names (legal + maiden), two addresses (home + work),
+                  two telecoms (home phone + email), two languages, relatedDocument. -->
+<ClinicalDocument xmlns="urn:hl7-org:v3"
+                  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <realmCode code="US"/>
+  <typeId root="2.16.840.1.113883.1.3" extension="POCD_HD000040"/>
+  <templateId root="2.16.840.1.113883.10.20.22.1.1"/>
+  <templateId root="2.16.840.1.113883.10.20.22.1.2"/>
+  <id root="2.16.840.1.113883.19.5.99999.1" extension="MULTI-ID-001"/>
+  <code code="34133-9" codeSystem="2.16.840.1.113883.6.1"
+        codeSystemName="LOINC" displayName="Summarization of Episode Note"/>
+  <title>Multi-Identifier Patient Test CCD</title>
+  <effectiveTime value="20240601080000"/>
+  <confidentialityCode code="N" codeSystem="2.16.840.1.113883.5.25"/>
+  <setId root="2.16.840.1.113883.19.5.99999.1" extension="MULTI-ID-SET"/>
+  <versionNumber value="2"/>
+  <recordTarget>
+    <patientRole>
+      <!-- Identifier 1: Medical Record Number -->
+      <id root="2.16.840.1.113883.19.5.99999.2"
+          extension="MRN-987654"
+          assigningAuthorityName="Good Health Hospital"/>
+      <!-- Identifier 2: Social Security Number -->
+      <id root="2.16.840.1.113883.4.1"
+          extension="123-45-6789"
+          assigningAuthorityName="SSA"/>
+      <!-- Identifier 3: Medicare Beneficiary ID -->
+      <id root="2.16.840.1.113883.4.927"
+          extension="1EG4-TE5-MK72"
+          assigningAuthorityName="CMS"/>
+      <!-- Home address -->
+      <addr use="HP">
+        <streetAddressLine>123 Elm Street</streetAddressLine>
+        <streetAddressLine>Apt 4B</streetAddressLine>
+        <city>Seattle</city>
+        <state>WA</state>
+        <postalCode>98101</postalCode>
+        <country>US</country>
+      </addr>
+      <!-- Work address -->
+      <addr use="WP">
+        <streetAddressLine>500 Tech Plaza</streetAddressLine>
+        <city>Bellevue</city>
+        <state>WA</state>
+        <postalCode>98004</postalCode>
+        <country>US</country>
+      </addr>
+      <!-- Home phone -->
+      <telecom use="HP" value="tel:+1(206)555-0199"/>
+      <!-- Work email -->
+      <telecom use="WP" value="mailto:evelyn.chen@example.com"/>
+      <patient>
+        <!-- Legal name -->
+        <name use="L">
+          <given>Evelyn</given>
+          <given>Mae</given>
+          <family>Chen</family>
+          <suffix>PhD</suffix>
+        </name>
+        <!-- Maiden name -->
+        <name use="A">
+          <given>Evelyn</given>
+          <family>Wong</family>
+        </name>
+        <administrativeGenderCode code="F" codeSystem="2.16.840.1.113883.5.1"
+                                  displayName="Female"/>
+        <birthTime value="19720414"/>
+        <maritalStatusCode code="M" codeSystem="2.16.840.1.113883.5.2"
+                           displayName="Married"/>
+        <raceCode code="2028-9" codeSystem="2.16.840.1.113883.6.238"
+                  displayName="Asian"/>
+        <ethnicGroupCode code="2186-5" codeSystem="2.16.840.1.113883.6.238"
+                         displayName="Not Hispanic or Latino"/>
+        <languageCommunication>
+          <languageCode code="en"/>
+          <preferenceInd value="true"/>
+        </languageCommunication>
+        <languageCommunication>
+          <languageCode code="zh"/>
+          <preferenceInd value="false"/>
+        </languageCommunication>
+      </patient>
+    </patientRole>
+  </recordTarget>
+  <author>
+    <time value="20240601080000"/>
+    <assignedAuthor>
+      <id root="2.16.840.1.113883.4.6" extension="1234567890"/>
+      <assignedPerson>
+        <name>
+          <prefix>Dr.</prefix>
+          <given>Robert</given>
+          <family>Nguyen</family>
+        </name>
+      </assignedPerson>
+      <representedOrganization>
+        <id root="2.16.840.1.113883.19.5.9999.2"/>
+        <name>Pacific Medical Group</name>
+      </representedOrganization>
+    </assignedAuthor>
+  </author>
+  <custodian>
+    <assignedCustodian>
+      <representedCustodianOrganization>
+        <id root="2.16.840.1.113883.19.5.9999.2"/>
+        <name>Pacific Medical Group</name>
+        <telecom value="tel:+1(206)555-2000" use="WP"/>
+        <addr use="WP">
+          <streetAddressLine>500 Tech Plaza</streetAddressLine>
+          <city>Bellevue</city>
+          <state>WA</state>
+          <postalCode>98004</postalCode>
+          <country>US</country>
+        </addr>
+      </representedCustodianOrganization>
+    </assignedCustodian>
+  </custodian>
+  <relatedDocument typeCode="RPLC">
+    <parentDocument>
+      <id root="2.16.840.1.113883.19.5.99999.1" extension="MULTI-ID-000"/>
+      <setId root="2.16.840.1.113883.19.5.99999.1" extension="MULTI-ID-SET"/>
+      <versionNumber value="1"/>
+    </parentDocument>
+  </relatedDocument>
+  <component>
+    <structuredBody>
+      <component>
+        <section>
+          <templateId root="2.16.840.1.113883.10.20.22.2.6.1"/>
+          <code code="48765-2" codeSystem="2.16.840.1.113883.6.1"
+                displayName="Allergies and Adverse Reactions"/>
+          <title>Allergies and Adverse Reactions</title>
+          <text><paragraph>No known drug allergies.</paragraph></text>
+        </section>
+      </component>
+    </structuredBody>
+  </component>
+</ClinicalDocument>

@@ -21,9 +21,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/google/uuid"
-
 	"ezhealthkonnect/fhir"
+	"ezhealthkonnect/fhir/r4"
 	"ezhealthkonnect/hl7" // For composite field parsing
 	"ezhealthkonnect/services/hl7assembly"
 	"ezhealthkonnect/services/manifest"
@@ -2910,32 +2909,13 @@ func (s *HL7FHIRTransformServiceV3) createBundle(resources []map[string]interfac
 	}
 	sorted = append(sorted, rest...)
 
-	// Assign a urn:uuid: fullUrl to every entry and build a lookup map so we can
-	// rewrite all internal ResourceType/id references to their urn:uuid: equivalents.
+	// Assign a urn:uuid: fullUrl to every entry and rewrite all internal
+	// ResourceType/id references to their urn:uuid: equivalents.
 	// FHIR spec (3.3.2.1): when fullUrl is urn:uuid:, relative references like
 	// "Patient/id" are resolved against a base of "urn:uuid:" — they never match.
 	// Every internal reference MUST use the same urn:uuid: that was assigned here.
-	shortToUUID := make(map[string]string, len(sorted)) // "Patient/patient-123" → "urn:uuid:..."
-	entries := make([]map[string]interface{}, len(sorted))
-	for i, resource := range sorted {
-		fullURL := "urn:uuid:" + uuid.New().String()
-		rt, _ := resource["resourceType"].(string)
-		id, _ := resource["id"].(string)
-		if rt != "" && id != "" {
-			shortToUUID[rt+"/"+id] = fullURL
-		}
-		entries[i] = map[string]interface{}{
-			"fullUrl":  fullURL,
-			"resource": resource,
-		}
-	}
-
-	// Rewrite all internal references in every resource to use urn:uuid: form.
-	for _, entry := range entries {
-		if res, ok := entry["resource"].(map[string]interface{}); ok {
-			rewriteReferences(res, shortToUUID)
-		}
-	}
+	// Shared with the CDA→FHIR pipeline — see fhir/r4/bundle_assembler.go.
+	entries := r4.AssembleEntries(sorted)
 
 	// FHIR id must match [A-Za-z0-9\-\.]{1,64}.  The requestID may contain underscores
 	// (e.g. "transform_v3_1775471815062417349") — strip them and truncate.
@@ -2951,29 +2931,6 @@ func (s *HL7FHIRTransformServiceV3) createBundle(resources []map[string]interfac
 		"timestamp":    time.Now().Format(time.RFC3339),
 		"entry":        entries,
 	}
-}
-
-// rewriteReferences walks any FHIR resource map and replaces "reference" values
-// of the form "ResourceType/id" with their urn:uuid: equivalents from the lookup.
-// This is called after all entries have been assigned their fullUrls so that
-// subject, result[], performer[], etc. all point to the correct urn:uuid:.
-func rewriteReferences(node interface{}, lookup map[string]string) interface{} {
-	switch v := node.(type) {
-	case map[string]interface{}:
-		if ref, ok := v["reference"].(string); ok {
-			if uuid, found := lookup[ref]; found {
-				v["reference"] = uuid
-			}
-		}
-		for k, child := range v {
-			v[k] = rewriteReferences(child, lookup)
-		}
-	case []interface{}:
-		for i, item := range v {
-			v[i] = rewriteReferences(item, lookup)
-		}
-	}
-	return node
 }
 
 // =====================================

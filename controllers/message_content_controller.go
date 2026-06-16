@@ -41,8 +41,40 @@ func (mc *MessageContentController) RegisterRoutes(rg *gin.RouterGroup) {
 	rg.GET("/messages/:messageId/logs", mc.GetProcessingLogs)
 }
 
+// lookupMessageURI fetches a stored object URI from the per-interface message table.
+// column must be one of the known URI columns; returns "" on any error or miss.
+func (mc *MessageContentController) lookupMessageURI(interfaceID, messageID, column string) string {
+	if mc.db == nil || interfaceID == "" {
+		return ""
+	}
+	// Guard against SQL injection — only allow known column names
+	allowed := map[string]bool{
+		"raw_content_uri":         true,
+		"parsed_content_uri":      true,
+		"transformed_content_uri": true,
+	}
+	if !allowed[column] {
+		return ""
+	}
+	tableName := "messages_intf_" + strings.ReplaceAll(interfaceID, "-", "_")
+	query := fmt.Sprintf(
+		`SELECT %s FROM %s WHERE message_id = $1 OR id::text = $1 LIMIT 1`,
+		column, tableName,
+	)
+	var uri sql.NullString
+	_ = mc.db.QueryRow(query, messageID).Scan(&uri)
+	if uri.Valid && uri.String != "" {
+		return uri.String
+	}
+	return ""
+}
+
 // GetRawContent serves the original bytes of a message.
-// Query param `interfaceId` is required (used to build the storage key path).
+// Query param `interfaceId` is optional — resolved from the DB when omitted.
+//
+// Lookup order:
+//  1. raw_content_uri stored in the interface table (correct across day boundaries)
+//  2. Reconstruct key from current date (fallback — only works same-day)
 func (mc *MessageContentController) GetRawContent(c *gin.Context) {
 	if mc.objStorage == nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{
@@ -66,6 +98,23 @@ func (mc *MessageContentController) GetRawContent(c *gin.Context) {
 		return
 	}
 
+	// Prefer the stored URI — avoids date-embedded key mismatch for cross-day retrievals
+	if uri := mc.lookupMessageURI(interfaceID, messageID, "raw_content_uri"); uri != "" {
+		if data, err := mc.objStorage.GetRawMessageByURI(c.Request.Context(), uri); err == nil {
+			c.JSON(http.StatusOK, gin.H{
+				"success":   true,
+				"messageId": messageID,
+				"content":   string(data),
+				"size":      len(data),
+				"driver":    mc.objStorage.DriverName(),
+			})
+			return
+		} else {
+			log.Printf("⚠️  GetRawContent: URI %s failed: %v — falling back to key-based lookup", uri, err)
+		}
+	}
+
+	// Fallback: reconstruct key from current date (works when same-day)
 	data, err := mc.objStorage.GetRawMessage(c.Request.Context(), interfaceID, messageID)
 	if err != nil {
 		log.Printf("⚠️  GetRawContent: %v", err)
@@ -76,14 +125,12 @@ func (mc *MessageContentController) GetRawContent(c *gin.Context) {
 		return
 	}
 
-	// Return as plain text (HL7 is pipe-delimited text; FHIR is JSON text)
-	content := string(data)
 	c.JSON(http.StatusOK, gin.H{
-		"success":    true,
-		"messageId":  messageID,
-		"content":    content,
-		"size":       len(data),
-		"driver":     mc.objStorage.DriverName(),
+		"success":   true,
+		"messageId": messageID,
+		"content":   string(data),
+		"size":      len(data),
+		"driver":    mc.objStorage.DriverName(),
 	})
 }
 

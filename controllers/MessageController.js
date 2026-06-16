@@ -421,12 +421,52 @@ class MessageController {
                     };
 
                 } else {
-                    // Unsupported source type
-                    return res.status(400).json({
-                        success: false,
-                        error: `Unsupported source type: ${interfaceData.source_type}`,
-                        supportedTypes: ['tcp', 'mllp', 'http', 'fhir']
-                    });
+                    // Fallback: inject directly into the processing engine pipeline.
+                    // Handles file_listener, postgresql_inbound, sftp_inbound, ccda, and any
+                    // other connector type that has no live socket for test messages.
+                    // Must go through _goClient (services/goBackendClient.js) so the
+                    // X-Internal-Proxy-Secret header is attached — the Go backend's
+                    // requireProxiedRequest() middleware rejects unauthenticated direct
+                    // calls to /api/* with "direct access to internal API not permitted".
+                    const _proxySecret = process.env.INTERNAL_PROXY_SECRET || process.env.JWT_SECRET || '';
+                    let injectData;
+                    try {
+                        const injectResp = await _goClient.post(
+                            `/api/processing/interfaces/${interfaceId}/inject`,
+                            {
+                                content: messageContent,
+                                messageType: messageType || 'unknown',
+                                contentType: contentType || 'application/xml'
+                            },
+                            {
+                                headers: _proxySecret ? { 'X-Internal-Proxy-Secret': _proxySecret } : {},
+                                timeout: 15000
+                            }
+                        );
+                        injectData = injectResp.data;
+                    } catch (axiosErr) {
+                        throw {
+                            success: false,
+                            status: axiosErr.response?.status || 500,
+                            response: axiosErr.response?.data?.error || axiosErr.message || 'Inject failed',
+                            method: 'pipeline_inject'
+                        };
+                    }
+
+                    if (!injectData || !injectData.success) {
+                        throw {
+                            success: false,
+                            status: 500,
+                            response: (injectData && injectData.error) || 'Inject failed',
+                            method: 'pipeline_inject'
+                        };
+                    }
+                    deliveryResult = {
+                        success: true,
+                        status: 200,
+                        response: `Message injected into pipeline (ID: ${injectData.messageId})`,
+                        method: 'pipeline_inject'
+                    };
                 }
 
                 console.log(`📨 Message delivery result:`, deliveryResult);
@@ -515,10 +555,9 @@ class MessageController {
                 try {
                     console.log(`🔍 Checking table ${metadata.table_name} for message ${messageId}`);
 
-                    // Use $1 placeholder instead of :messageId for better UUID handling
-                    const checkQuery = `SELECT * FROM ${metadata.table_name} WHERE id = $1`;
+                    const checkQuery = `SELECT * FROM ${metadata.table_name} WHERE message_id = :messageId OR id::text = :messageId`;
                     const result = await this.database.sequelize.query(checkQuery, {
-                        bind: [messageId],
+                        replacements: { messageId },
                         type: this.database.sequelize.QueryTypes.SELECT,
                         logging: (sql, timing) => {
                             console.log(`📝 Executing SQL: ${sql}`);
@@ -554,49 +593,43 @@ class MessageController {
                 });
             }
 
-            // Update message status to reprocessing and reset delivery status
+            // Mark as reprocessing and clear the last error.
+            // Do NOT touch delivery_status or delivery_attempts here — the Go pipeline
+            // owns those: OutboundConnectorExecutor sets 'delivered'/'failed', and
+            // the engine resets to 'pending' so the 'not_required' flip works correctly.
             const updateQuery = `
                 UPDATE ${tableName}
                 SET status = 'reprocessing',
-                    delivery_status = 'queued',
-                    delivery_attempts = COALESCE(delivery_attempts, 0) + 1,
+                    delivery_status = 'pending',
                     last_error_message = NULL,
                     updated_at = CURRENT_TIMESTAMP
-                WHERE id = $1
+                WHERE message_id = :messageId OR id::text = :messageId
             `;
 
             await this.database.sequelize.query(updateQuery, {
-                bind: [messageId],
+                replacements: { messageId },
                 type: this.database.sequelize.QueryTypes.UPDATE
             });
 
-            // Trigger actual reprocessing via Go backend
-            // Send the raw message back to the processing engine
+            // Trigger reprocessing via Go backend: reads raw content from object storage,
+            // re-parses, and re-runs the transformation pipeline on the existing DB row.
             try {
-                await _goClient.post(`/api/processing/reprocess`, {
-                    messageId: messageId,
-                    interfaceId: interfaceId,
-                    rawMessage: message.raw_message,
-                    messageType: message.message_type
-                });
+                await _goClient.post(
+                    `/api/processing/interfaces/${interfaceId}/reprocess/${messageId}`
+                );
             } catch (goError) {
-                console.warn('⚠️ Could not trigger Go backend reprocessing, will rely on status change:', goError.message);
-
-                // Fallback: Reset status to 'received' so it gets picked up by processing engine
-                setTimeout(async () => {
-                    try {
-                        await this.database.sequelize.query(`
-                            UPDATE ${tableName}
-                            SET status = 'received'
-                            WHERE id = :messageId
-                        `, {
-                            replacements: { messageId },
-                            type: this.database.sequelize.QueryTypes.UPDATE
-                        });
-                    } catch (err) {
-                        console.error('Error updating reprocess status:', err);
-                    }
-                }, 1000);
+                console.error('❌ Go reprocess call failed:', goError.message);
+                // Roll back status so the message isn't stuck as 'reprocessing'
+                await this.database.sequelize.query(
+                    `UPDATE ${tableName} SET status = 'failed',
+                     last_error_message = 'Reprocess trigger failed: engine unavailable'
+                     WHERE message_id = :messageId OR id::text = :messageId`,
+                    { replacements: { messageId }, type: this.database.sequelize.QueryTypes.UPDATE }
+                );
+                return res.status(503).json({
+                    success: false,
+                    error: 'Processing engine unavailable — ensure the interface is activated'
+                });
             }
 
             res.json({
@@ -1049,154 +1082,6 @@ class MessageController {
             res.status(500).json({
                 success: false,
                 error: 'Failed to load interface statistics'
-            });
-        }
-    }
-
-    /**
-     * HL7 TO FHIR MESSAGE FLOW (NEW)
-     */
-
-    /**
-     * Send HL7 message from source interface to FHIR target interface
-     */
-    async sendHL7ToFHIR(req, res) {
-        try {
-            await this.ensureDatabase();
-
-            const {
-                sourceInterfaceId,
-                targetInterfaceId,
-                hl7Message,
-                messageType = 'ADT^A01',
-                priority = 5
-            } = req.body;
-
-            const userId = req.session.user.id;
-
-            // Verify both interfaces exist and belong to user
-            const interfacesCheck = await this.database.sequelize.query(`
-                SELECT id, name, format, connectivity_type, status
-                FROM interfaces
-                WHERE id IN (:sourceInterfaceId, :targetInterfaceId) AND user_id = :userId
-            `, {
-                replacements: { sourceInterfaceId, targetInterfaceId, userId },
-                type: this.database.sequelize.QueryTypes.SELECT
-            });
-
-            if (interfacesCheck.length !== 2) {
-                return res.status(404).json({
-                    success: false,
-                    error: 'One or both interfaces not found or access denied'
-                });
-            }
-
-            const sourceInterface = interfacesCheck.find(i => i.id === sourceInterfaceId);
-            const targetInterface = interfacesCheck.find(i => i.id === targetInterfaceId);
-
-            // Validate interface compatibility
-            if (sourceInterface.format !== 'HL7' && sourceInterface.format !== 'hl7') {
-                return res.status(400).json({
-                    success: false,
-                    error: 'Source interface must be HL7 format'
-                });
-            }
-
-            if (targetInterface.format !== 'FHIR' && targetInterface.format !== 'fhir') {
-                return res.status(400).json({
-                    success: false,
-                    error: 'Target interface must be FHIR format'
-                });
-            }
-
-            // Generate correlation ID for tracking
-            const correlationId = require('crypto').randomUUID();
-            const messageId = `HL7_TO_FHIR_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-
-            // Create source message entry
-            const sourceMessageQuery = `
-                INSERT INTO message_processing_enhanced (
-                    interface_id, message_id, correlation_id, status, priority,
-                    source_type, message_type, message_size, message_encoding,
-                    received_at
-                ) VALUES (
-                    :sourceInterfaceId, :messageId, :correlationId, 'received', :priority,
-                    'hl7_test_flow', :messageType, :messageSize, 'UTF-8',
-                    NOW()
-                ) RETURNING id
-            `;
-
-            const sourceMessageResult = await this.database.sequelize.query(sourceMessageQuery, {
-                replacements: {
-                    sourceInterfaceId,
-                    messageId,
-                    correlationId,
-                    priority,
-                    messageType,
-                    messageSize: Buffer.byteLength(hl7Message, 'utf8')
-                },
-                type: this.database.sequelize.QueryTypes.INSERT
-            });
-
-            // Add to message queue for processing
-            const queueEntry = {
-                id: require('crypto').randomUUID(),
-                interface_id: sourceInterfaceId,
-                target_interface_id: targetInterfaceId,
-                message_id: messageId,
-                correlation_id: correlationId,
-                action_type: 'hl7_to_fhir_transform',
-                priority: priority,
-                payload: {
-                    hl7_message: hl7Message,
-                    message_type: messageType,
-                    source_interface: sourceInterface,
-                    target_interface: targetInterface
-                },
-                status: 'pending',
-                scheduled_for: new Date(),
-                created_at: new Date()
-            };
-
-            await this.database.sequelize.query(`
-                INSERT INTO message_processing_queue (
-                    id, interface_id, message_id, correlation_id, action_type,
-                    priority, payload, status, scheduled_for, created_at
-                ) VALUES (
-                    :id, :interface_id, :message_id, :correlation_id, :action_type,
-                    :priority, :payload, :status, :scheduled_for, :created_at
-                )
-            `, {
-                replacements: {
-                    ...queueEntry,
-                    payload: JSON.stringify(queueEntry.payload)
-                },
-                type: this.database.sequelize.QueryTypes.INSERT
-            });
-
-            res.json({
-                success: true,
-                data: {
-                    messageId,
-                    correlationId,
-                    sourceInterface: {
-                        id: sourceInterface.id,
-                        name: sourceInterface.name
-                    },
-                    targetInterface: {
-                        id: targetInterface.id,
-                        name: targetInterface.name
-                    },
-                    status: 'queued_for_processing',
-                    queuedAt: new Date().toISOString()
-                }
-            });
-
-        } catch (error) {
-            console.error('Failed to send HL7 to FHIR:', error);
-            res.status(500).json({
-                success: false,
-                error: 'Failed to process HL7 to FHIR message flow'
             });
         }
     }
@@ -1981,21 +1866,127 @@ class MessageController {
                 return res.status(404).json({ success: false, error: 'Interface not found or access denied' });
             }
 
-            // Delegate to Go backend — it owns the object storage client
-            const goResp = await _goClient.get(`/api/messages/${messageId}/parsed`, {
-                params: { interfaceId },
-                timeout: 10000
+            // Read raw message from the interface-specific table
+            const tableName = `messages_intf_${interfaceId.replace(/-/g, '_')}`;
+            let rawMessage = null;
+            let messageType = null;
+            try {
+                const rows = await this.database.sequelize.query(
+                    `SELECT raw_message, message_type FROM ${tableName}
+                     WHERE message_id = :messageId OR id::text = :messageId
+                     LIMIT 1`,
+                    { replacements: { messageId }, type: this.database.sequelize.QueryTypes.SELECT }
+                );
+                if (rows.length > 0) {
+                    rawMessage   = rows[0].raw_message;
+                    messageType  = rows[0].message_type;
+                }
+            } catch (dbErr) {
+                console.warn(`⚠️ getParsedContent DB read: ${dbErr.message}`);
+            }
+
+            // raw_message is NULL for file-based messages (content in object storage).
+            // Fall back to Go's raw content endpoint which reads from MinIO using the
+            // stored raw_content_uri (correct across day boundaries).
+            if (!rawMessage) {
+                try {
+                    const _proxySecret = process.env.INTERNAL_PROXY_SECRET || process.env.JWT_SECRET || '';
+                    const rawResp = await _goClient.get(`/api/messages/${messageId}/raw`, {
+                        params: { interfaceId },
+                        headers: _proxySecret ? { 'X-Internal-Proxy-Secret': _proxySecret } : {},
+                        timeout: 10000,
+                    });
+                    if (rawResp.data && rawResp.data.success && rawResp.data.content) {
+                        rawMessage = rawResp.data.content;
+                    }
+                } catch (fetchErr) {
+                    console.warn(`⚠️ getParsedContent: object storage fetch failed: ${fetchErr.message}`);
+                }
+            }
+
+            if (!rawMessage) {
+                return res.json({ success: false, parsed_content: null });
+            }
+
+            // Only parse CDA/XML content — HL7v2 has its own viewer
+            const isCDA = (messageType || '').toUpperCase().includes('CCD') ||
+                          (messageType || '').toUpperCase().includes('CDA') ||
+                          rawMessage.trimStart().startsWith('<');
+            if (!isCDA) {
+                return res.json({ success: false, parsed_content: null, reason: 'not_cda' });
+            }
+
+            // Call Go's CDA parse endpoint with the raw XML.
+            // Explicitly include the proxy secret — axios does not merge it from the
+            // interceptor when the per-request headers object replaces the defaults.
+            const _proxySecret = process.env.INTERNAL_PROXY_SECRET || process.env.JWT_SECRET || '';
+            const goResp = await _goClient.post(`/api/fhir/cda/parse`, rawMessage, {
+                headers: {
+                    'Content-Type': 'application/xml',
+                    ...((_proxySecret) ? { 'X-Internal-Proxy-Secret': _proxySecret } : {}),
+                },
+                timeout: 15000
             });
+
+            if (!goResp.data || !goResp.data.success) {
+                return res.json({ success: false, parsed_content: null });
+            }
 
             return res.json({
                 success: true,
-                parsed_content: goResp.data.parsed_content || null,
-                format: goResp.data.format || null
+                format: goResp.data.format || 'ccda',
+                parsed_content: {
+                    sections: goResp.data.sections || {},
+                    header:   goResp.data.header   || null,
+                    metadata: goResp.data.metadata  || null,
+                    profile:  goResp.data.profile   || null,
+                }
             });
         } catch (error) {
-            // Go endpoint may not be implemented yet — degrade gracefully
             console.warn(`⚠️ getParsedContent: ${error.message}`);
             return res.json({ success: false, parsed_content: null, error: error.message });
+        }
+    }
+
+    /**
+     * Return the stored FHIR bundle for a CDA message.
+     * Reads from cda_documents.fhir_bundle (inline) or object-storage URI.
+     * Route: GET /api/messages/interface/:interfaceId/message/:messageId/fhir-output
+     */
+    async getFhirOutput(req, res) {
+        try {
+            await this.ensureDatabase();
+            const { interfaceId, messageId } = req.params;
+            const userId = req.session.user.id;
+
+            const check = await this.database.sequelize.query(
+                `SELECT id FROM interfaces WHERE id = :interfaceId AND user_id = :userId`,
+                { replacements: { interfaceId, userId }, type: this.database.sequelize.QueryTypes.SELECT }
+            );
+            if (check.length === 0) {
+                return res.status(404).json({ success: false, error: 'Interface not found' });
+            }
+
+            // Look up the stored FHIR bundle from cda_documents keyed by message_id
+            const rows = await this.database.sequelize.query(
+                `SELECT fhir_bundle FROM cda_documents
+                 WHERE message_id = :messageId AND deleted_at IS NULL
+                 ORDER BY created_at DESC LIMIT 1`,
+                { replacements: { messageId }, type: this.database.sequelize.QueryTypes.SELECT }
+            );
+
+            if (!rows.length || !rows[0].fhir_bundle) {
+                return res.json({ success: false, content: null });
+            }
+
+            const bundle = typeof rows[0].fhir_bundle === 'string'
+                ? rows[0].fhir_bundle
+                : JSON.stringify(rows[0].fhir_bundle);
+
+            return res.json({ success: true, content: bundle, format: 'fhir_json' });
+        } catch (error) {
+            console.warn(`⚠️ getFhirOutput: ${error.message}`);
+            return res.json({ success: false, content: null, error: error.message });
         }
     }
 

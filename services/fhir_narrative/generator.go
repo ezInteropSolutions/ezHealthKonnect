@@ -36,10 +36,32 @@ func (g *FHIRNarrativeGenerator) Generate(resource map[string]interface{}) strin
 		return GenerateConditionNarrative(resource)
 	case "MedicationStatement":
 		return GenerateMedicationNarrative(resource)
+	case "MedicationRequest":
+		return GenerateMedicationNarrative(resource)
 	case "Observation":
 		return GenerateObservationNarrative(resource)
 	case "Patient":
 		return GeneratePatientNarrative(resource)
+	case "Encounter":
+		return GenerateEncounterNarrative(resource)
+	case "Procedure":
+		return GenerateProcedureNarrative(resource)
+	case "Immunization":
+		return GenerateImmunizationNarrative(resource)
+	case "FamilyMemberHistory":
+		return GenerateFamilyMemberHistoryNarrative(resource)
+	case "Goal":
+		return GenerateGoalNarrative(resource)
+	case "Coverage":
+		return GenerateCoverageNarrative(resource)
+	case "DeviceUseStatement":
+		return GenerateDeviceNarrative(resource)
+	case "CarePlan":
+		return GenerateCarePlanNarrative(resource)
+	case "Practitioner":
+		return GeneratePractitionerNarrative(resource)
+	case "Organization":
+		return GenerateOrganizationNarrative(resource)
 	default:
 		return ""
 	}

@@ -127,7 +127,7 @@ class InterfaceService {
                 id: interfaceId,
                 name: interfaceData.name,
                 description: interfaceData.description || '',
-                message_type: interfaceData.messageType || 'ADT^A01',
+                message_type: interfaceData.messageType || null,
                 source_type: interfaceData.sourceType,
                 target_type: interfaceData.targetType,
                 // V30+ migration: ONLY use connectivity fields (no legacy duplication)

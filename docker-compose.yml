@@ -103,6 +103,7 @@ services:
       FLYWAY_USER: ezhealth_user
       FLYWAY_PASSWORD: secure_password_change_me
       FLYWAY_BASELINE_ON_MIGRATE: true
+      FLYWAY_PLACEHOLDER_REPLACEMENT: "false"
     volumes:
       # Only schema migrations (no data inserts)
       - ./database/migrations:/flyway/sql
@@ -204,7 +205,10 @@ services:
       # Example .env:  HOST_DATA_PATH=C:/Users/ShanawazKhan/Documents/HealthData
       # Inside the container the files appear at:  /mnt/host/
       - ${HOST_DATA_PATH:-C:/Users/Public}:/mnt/host
-    
+      # CCD/CDA file drop folder — files placed in C:\Projects\test on Windows
+      # appear at /data/ccd/inbox inside the container
+      - C:/Projects/test:/data/ccd/inbox
+
     # Wait for PostgreSQL, MinIO, and migrations to complete
     depends_on:
       flyway:

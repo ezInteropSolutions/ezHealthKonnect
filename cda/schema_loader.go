@@ -114,6 +114,32 @@ func (l *CDASchemaLoader) ResolveC32TemplateID(oldOID string) (string, bool) {
 	return newOID, found
 }
 
+// GetDocumentTypeSections returns the section conformance map for a given document
+// type (e.g. "CCD", "Discharge Summary"). Returns nil if not defined.
+func (l *CDASchemaLoader) GetDocumentTypeSections(docType string) *DocumentTypeSectionInfo {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	if l.profile.DocumentTypeSections == nil {
+		return nil
+	}
+	info, ok := l.profile.DocumentTypeSections[docType]
+	if !ok {
+		return nil
+	}
+	return &info
+}
+
+// AllDocumentTypes returns the document types defined in documentTypeSections.
+func (l *CDASchemaLoader) AllDocumentTypes() []string {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	result := make([]string, 0, len(l.profile.DocumentTypeSections))
+	for dt := range l.profile.DocumentTypeSections {
+		result = append(result, dt)
+	}
+	return result
+}
+
 // C32MappingCount returns the number of C32→C-CDA template OID mappings loaded.
 func (l *CDASchemaLoader) C32MappingCount() int {
 	l.mu.RLock()

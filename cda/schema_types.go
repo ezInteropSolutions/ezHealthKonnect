@@ -14,13 +14,21 @@ const (
 	ProfileBase   CDAProfile = "CDA R2"
 )
 
+// DocumentTypeSectionInfo lists which sections a document type SHALL, SHOULD, or MAY include.
+type DocumentTypeSectionInfo struct {
+	SHALL  []string `json:"SHALL"`
+	SHOULD []string `json:"SHOULD"`
+	MAY    []string `json:"MAY,omitempty"`
+}
+
 // CDAProfileDef is the top-level schema document (ccda_2_1.json).
 type CDAProfileDef struct {
-	Profile           string                    `json:"profile"`
-	Version           string                    `json:"version"`
-	HL7Version        string                    `json:"hl7Version"`
-	DocumentTemplates map[string]string         `json:"documentTemplates"` // OID → display name
-	Sections          []*CDASectionDef          `json:"sections"`
+	Profile              string                              `json:"profile"`
+	Version              string                              `json:"version"`
+	HL7Version           string                              `json:"hl7Version"`
+	DocumentTemplates    map[string]string                   `json:"documentTemplates"`    // OID → display name
+	DocumentTypeSections map[string]DocumentTypeSectionInfo  `json:"documentTypeSections"` // doc type → section conformance lists
+	Sections             []*CDASectionDef                    `json:"sections"`
 
 	// Built at load time — not in JSON.
 	sectionByKey        map[string]*CDASectionDef
@@ -30,15 +38,16 @@ type CDAProfileDef struct {
 
 // CDASectionDef defines a C-CDA section (allergies, medications, etc.).
 type CDASectionDef struct {
-	Key                string        `json:"key"`               // e.g. "allergiesAndIntolerances"
-	USCDIClass         string        `json:"uscdiClass"`        // USCDI class label
-	DisplayName        string        `json:"displayName"`       // Human-readable name
-	LOINCCode          string        `json:"loincCode"`         // Section LOINC code
-	TemplateID         string        `json:"templateId"`        // C-CDA 2.1 SHALL template OID
-	TemplateIDOptional string        `json:"templateIdOptional"` // C-CDA 2.1 MAY template OID
-	Conformance        string        `json:"conformance"`       // SHALL / SHOULD / MAY
-	EntryTemplateID    string        `json:"entryTemplateId,omitempty"`
-	ObsTemplateID      string        `json:"observationTemplateId,omitempty"`
+	Key                string         `json:"key"`                        // e.g. "allergiesAndIntolerances"
+	USCDIClass         string         `json:"uscdiClass"`                 // USCDI class label
+	DisplayName        string         `json:"displayName"`                // Human-readable name
+	LOINCCode          string         `json:"loincCode"`                  // Section LOINC code
+	TemplateID         string         `json:"templateId"`                 // C-CDA 2.1 SHALL template OID
+	TemplateIDOptional string         `json:"templateIdOptional"`         // C-CDA 2.1 MAY template OID
+	Conformance        string         `json:"conformance"`                // SHALL / SHOULD / MAY
+	EntryTemplateID    string         `json:"entryTemplateId,omitempty"`
+	ObsTemplateID      string         `json:"observationTemplateId,omitempty"`
+	IsHeader           bool           `json:"isHeader,omitempty"`         // true for header pseudo-sections
 	Fields             []*CDAFieldDef `json:"fields"`
 
 	// Built at load time.

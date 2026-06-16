@@ -13,6 +13,11 @@ import (
 	"ezhealthkonnect/processing"
 	"ezhealthkonnect/services"
 	"ezhealthkonnect/services/backpressure"
+	cdaSchemaLoader "ezhealthkonnect/cda"
+	cdafhir "ezhealthkonnect/services/cda_fhir"
+	cdastorage "ezhealthkonnect/services/cda_storage"
+	cdaterminology "ezhealthkonnect/services/cda_terminology"
+	cdaparser "ezhealthkonnect/services/parsers/cda"
 	"ezhealthkonnect/services/connectors"
 	svcmapping "ezhealthkonnect/services/mapping"
 	"ezhealthkonnect/services/storage"
@@ -60,6 +65,9 @@ var codeTemplateSvc *services.CodeTemplateService
 
 // Global Object Storage Service
 var objectStorageService *storage.ObjectStorageService
+
+// Global CDA Document Store
+var cdaDocumentStore cdastorage.CDADocumentStore
 
 func main() {
 	// Load .env before anything reads os.Getenv — harmless if the file doesn't exist
@@ -159,7 +167,7 @@ func main() {
 			postgresTransformationService = services.NewPostgresTransformationService(db)
 			log.Printf("✅ PostgreSQL Transformation Service initialized")
 
-			// Initialize Object Storage Service
+			// Initialize Object Storage Service + CDA Document Store
 			if storageDriver, storageErr := storage.NewDriverFromEnv(); storageErr == nil {
 				bucket := storage.DefaultBucketName()
 				if objSvc, objErr := storage.NewObjectStorageService(storageDriver, bucket); objErr == nil {
@@ -168,8 +176,12 @@ func main() {
 				} else {
 					log.Printf("⚠️  Object Storage Service init failed: %v", objErr)
 				}
+				// CDA Document Store: uses same driver for large-doc routing.
+				cdaDocumentStore = cdastorage.NewCDADocumentStore(db, storageDriver, bucket)
 			} else {
 				log.Printf("⚠️  Object Storage driver unavailable: %v — falling back to DB-only mode", storageErr)
+				// CDA Document Store: inline-only mode (no object storage).
+				cdaDocumentStore = cdastorage.NewCDADocumentStore(db, nil, "")
 			}
 
 			// Initialize schema systems BEFORE the processing engine so the FHIR
@@ -202,6 +214,11 @@ func main() {
 				log.Printf("❌ Failed to start Processing Engine: %v", err)
 			} else {
 				log.Printf("✅ Processing Engine initialized and started")
+			}
+
+			// CDA DOCUMENT STORE: wire into cda.parse executor for auto-persistence
+			if cdaDocumentStore != nil {
+				processingEngine.SetCDADocumentStore(cdaDocumentStore)
 			}
 
 			// CODE TEMPLATES: wire the service into the pipeline executor
@@ -665,6 +682,35 @@ func main() {
 			// ADDED: Optional segment block toggles (per-interface opt-in mappings)
 			optionalSegCtrl := controllers.NewOptionalSegmentsController(db)
 			optionalSegCtrl.RegisterRoutes(fhirGroup)
+
+			// ADDED: CDA Schema Browser + Mapping Delta APIs (/api/cda/*)
+			// Shares the same CDA schema loader and mapper used by the cda.to_fhir executor.
+			{
+				cdaLoader, cdaLoaderErr := cdaSchemaLoader.NewCDASchemaLoader("./cda/schemas")
+				if cdaLoaderErr != nil {
+					log.Printf("⚠️  [cda] Schema loader unavailable: %v — /api/cda/schema endpoints will return 503", cdaLoaderErr)
+				}
+				cdaMapper := cdafhir.NewGenericCDAFHIRMapper(db, cdaLoader)
+				cdaTermSvc := cdaterminology.NewTerminologyService(db)
+				cdaMapper.WithTerminologyService(cdaTermSvc)
+				cdaSchemaCtrl := controllers.NewCDASchemaController(db, cdaLoader, cdaMapper)
+				cdaSchemaCtrl.RegisterRoutes(api.Group("/cda"))
+				log.Printf("✅ CDA Schema Controller registered (/api/cda/schema, /api/cda/mappings, /api/cda/templates)")
+
+				// Sprint C — conformance validation (POST /api/cda/validate)
+				cdaValidationCtrl := controllers.NewCDAValidationController(cdaLoader)
+				cdaValidationCtrl.RegisterRoutes(api.Group("/cda"))
+				log.Printf("✅ CDA Validation Controller registered (/api/cda/validate)")
+
+				// Sprint E — document storage (POST/GET/DELETE /api/cda/documents)
+				var cdaParserForStore *cdaparser.CDAParserService
+				if svc, err := cdaparser.NewFromSchemaDir("./cda/schemas"); err == nil {
+					cdaParserForStore = svc
+				}
+				cdaDocCtrl := controllers.NewCDADocumentController(cdaDocumentStore, cdaParserForStore)
+				cdaDocCtrl.RegisterRoutes(api.Group("/cda/documents"))
+				log.Printf("✅ CDA Document Controller registered (/api/cda/documents)")
+			}
 
 			// ── OOB template rebuild ─────────────────────────────────────────────
 			// Rebuild endpoints are admin-only and run asynchronously.

@@ -105,15 +105,16 @@ func NewFHIRR4Validator(p ProfileProvider, t TerminologyLookup, c ConstraintChec
 	return &FHIRR4Validator{profiles: p, terminology: t, constraints: c}
 }
 
-var globalValidator *FHIRR4Validator
-
-// GetValidator returns the package-level singleton FHIRR4Validator.
-// The singleton is created lazily on first call using the package singletons.
+// GetValidator returns a validator wired to the current package-level
+// singletons (globalRegistry, globalTermRegistry, globalConstraintRegistry).
+//
+// InitRegistry() populates globalRegistry in a background goroutine so the
+// HTTP listener can open immediately; a validator is rebuilt fresh on every
+// call (just three pointer fields — no schema work) rather than cached,
+// so a call made before InitRegistry() finishes can never permanently
+// freeze a nil *SchemaRegistry into a long-lived singleton.
 func GetValidator() *FHIRR4Validator {
-	if globalValidator == nil {
-		globalValidator = NewFHIRR4Validator(nil, nil, nil)
-	}
-	return globalValidator
+	return NewFHIRR4Validator(nil, nil, nil)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

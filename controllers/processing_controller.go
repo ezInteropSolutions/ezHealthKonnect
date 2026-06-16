@@ -60,6 +60,15 @@ func (pc *ProcessingController) RegisterRoutes(router *gin.RouterGroup) {
 		// Message transformation (MVC + OOB: retrieve parsedJSON → map → transform → store FHIR)
 		processing.POST("/transform/message/:interfaceId/:messageId", pc.TransformStoredMessage)
 		processing.POST("/transform/interface/:interfaceId", pc.TransformInterfaceMessages)
+
+		// Test message injection — bypasses the inbound connector so any interface
+		// type (file, database, cloud storage) can receive a test payload from the UI.
+		processing.POST("/interfaces/:id/inject", pc.InjectTestMessage)
+
+		// Reprocess a stored message through the full transformation pipeline again.
+		// Reads raw content from object storage (or DB raw_message fallback), re-parses,
+		// and re-runs all pipeline steps. The existing DB row is updated in-place.
+		processing.POST("/interfaces/:id/reprocess/:messageId", pc.ReprocessStoredMessage)
 	}
 }
 
@@ -337,6 +346,87 @@ func (pc *ProcessingController) TransformStoredMessage(c *gin.Context) {
 		"processing_time":  result.ProcessingTimeMs,
 		"metadata":         result.TransformationMetadata,
 		"validation_errors": result.ValidationErrors,
+	})
+}
+
+// InjectTestMessage injects a test payload directly into the processing pipeline,
+// bypassing the inbound connector. Useful for file-based, database-polled, and
+// cloud-storage interfaces that have no live socket to accept a test message.
+//
+// POST /api/processing/interfaces/:id/inject
+// Body: { "content": "...", "messageType": "CCD", "contentType": "application/xml" }
+func (pc *ProcessingController) InjectTestMessage(c *gin.Context) {
+	if !pc.checkEngine(c) {
+		return
+	}
+	interfaceID := c.Param("id")
+	if interfaceID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "interface ID is required"})
+		return
+	}
+
+	var req struct {
+		Content     string `json:"content" binding:"required"`
+		MessageType string `json:"messageType"`
+		ContentType string `json:"contentType"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": err.Error()})
+		return
+	}
+	if req.ContentType == "" {
+		req.ContentType = "application/xml"
+	}
+	if req.MessageType == "" {
+		req.MessageType = "unknown"
+	}
+
+	msgID, err := pc.engine.InjectTestMessage(interfaceID, req.Content, req.MessageType, req.ContentType)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"error":   err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success":      true,
+		"messageId":    msgID,
+		"interfaceId":  interfaceID,
+		"message":      "Test message injected — processing asynchronously",
+	})
+}
+
+// ReprocessStoredMessage re-runs the transformation pipeline for a message that
+// already exists in the database. Raw content is read from object storage; the
+// existing DB row is updated in-place (same message ID, no duplicate inserted).
+//
+// POST /api/processing/interfaces/:id/reprocess/:messageId
+func (pc *ProcessingController) ReprocessStoredMessage(c *gin.Context) {
+	if !pc.checkEngine(c) {
+		return
+	}
+	interfaceID := c.Param("id")
+	messageID := c.Param("messageId")
+	if interfaceID == "" || messageID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "interface ID and message ID are required"})
+		return
+	}
+
+	if err := pc.engine.ReprocessMessage(interfaceID, messageID); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"error":   err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success":     true,
+		"messageId":   messageID,
+		"interfaceId": interfaceID,
+		"message":     "Message queued for reprocessing — pipeline executing asynchronously",
 	})
 }
 

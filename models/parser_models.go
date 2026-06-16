@@ -37,6 +37,12 @@ type ParserResult struct {
 	FieldOrder      []string                  `json:"field_order,omitempty"`
 	TypeName        string                    `json:"type_name,omitempty"`        // human-readable schema name
 	TypeDescription string                    `json:"type_description,omitempty"` // schema description
+
+	// TypedDocument holds the format-specific strongly-typed document model.
+	// For CDA/CCD documents this is *cdadocument.CDADocument (Sprint B).
+	// The json:"-" tag prevents double-serialisation since ParsedJSON already
+	// carries the data; Sprint C/D consumers type-assert this field in Go.
+	TypedDocument interface{} `json:"-"`
 }
 
 // EnhancedField is a format-agnostic, schema-annotated message field.
