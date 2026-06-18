@@ -25,6 +25,13 @@ func MapCoverage(entries []cdadocument.CDAEntry, patientRef string) []map[string
 	return resources
 }
 
+// payerTypeDisplay corrects known LOINC display names that differ from the FHIR
+// canonical value (the source CDA carries short display text, FHIR validator uses
+// the official LOINC long name).
+var payerTypeDisplay = map[string]string{
+	"48768-6": "Payment sources Document",
+}
+
 func buildCoverageResource(idx int, entry cdadocument.CDAEntry, patientRef string) map[string]interface{} {
 	r := map[string]interface{}{
 		"resourceType": "Coverage",
@@ -38,8 +45,18 @@ func buildCoverageResource(idx int, entry cdadocument.CDAEntry, patientRef strin
 		r["subscriber"] = ref(patientRef)
 	}
 
-	// Coverage type from entry code
+	// Coverage type from entry code; correct LOINC display when needed.
 	if cc := transforms.CDACodeToCodeableConcept(entry.Code); cc != nil {
+		if codings, ok := cc["coding"].([]interface{}); ok && len(codings) > 0 {
+			if c0, ok := codings[0].(map[string]interface{}); ok {
+				if code, _ := c0["code"].(string); code != "" {
+					if canonical, ok := payerTypeDisplay[code]; ok {
+						c0["display"] = canonical
+						cc["text"] = canonical
+					}
+				}
+			}
+		}
 		r["type"] = cc
 	}
 
@@ -48,22 +65,55 @@ func buildCoverageResource(idx int, entry cdadocument.CDAEntry, patientRef strin
 		r["period"] = period
 	}
 
-	// Payer from HLD (holder/payer) participant
+	// Payer: first try outer HLD/PRF participants, then fall back to the nested
+	// policy-activity act's performers (C-CDA 2.1 Coverage Activity template places
+	// the payer organisation inside entryRelationship[COMP]/act/performer).
+	payorFound := false
 	for _, p := range entry.Participants {
 		if p.TypeCode == "HLD" || p.TypeCode == "PRF" {
-			if p.ParticipantRole.ScopingEntity != nil {
-				ent := p.ParticipantRole.ScopingEntity
-				if ent.Desc != "" {
-					r["payor"] = []interface{}{
-						map[string]interface{}{"display": ent.Desc},
-					}
-				}
+			if p.ParticipantRole.ScopingEntity != nil && p.ParticipantRole.ScopingEntity.Desc != "" {
+				r["payor"] = []interface{}{map[string]interface{}{"display": p.ParticipantRole.ScopingEntity.Desc}}
+				payorFound = true
 			}
 			break
 		}
 	}
+	if !payorFound {
+		for _, rel := range entry.EntryRelationships {
+			if rel.TypeCode != "COMP" {
+				continue
+			}
+			for _, perf := range rel.Entry.Performers {
+				org := perf.AssignedEntity.RepresentedOrganization
+				if org != nil && len(org.Names) > 0 && org.Names[0] != "" {
+					r["payor"] = []interface{}{map[string]interface{}{"display": org.Names[0]}}
+					payorFound = true
+					break
+				}
+			}
+			if payorFound {
+				break
+			}
+		}
+	}
+	// us-core-coverage requires payor; use a placeholder when truly unavailable.
+	if !payorFound {
+		r["payor"] = []interface{}{map[string]interface{}{"display": "Unknown"}}
+	}
 
-	// Member ID from entry relationships (coverage entitlement observation)
+	// Relationship: subscriber-to-patient relationship required by us-core-coverage.
+	// When subscriber == beneficiary (the patient is their own subscriber), it is "self".
+	r["relationship"] = map[string]interface{}{
+		"coding": []interface{}{
+			map[string]interface{}{
+				"system":  "http://terminology.hl7.org/CodeSystem/subscriber-relationship",
+				"code":    "self",
+				"display": "Self",
+			},
+		},
+	}
+
+	// Member / subscriber ID from COMP policy-activity entry identifiers.
 	for _, rel := range entry.EntryRelationships {
 		if rel.TypeCode == "COMP" {
 			for _, id := range rel.Entry.Id {

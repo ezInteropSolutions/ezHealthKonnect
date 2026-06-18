@@ -268,6 +268,11 @@ func (s *PostgresDocumentStore) List(ctx context.Context, filter ListFilter) ([]
 		args = append(args, filter.InterfaceID)
 		n++
 	}
+	if filter.MessageID != "" {
+		where += fmt.Sprintf(" AND message_id = $%d", n)
+		args = append(args, filter.MessageID)
+		n++
+	}
 	if filter.DateFrom != nil {
 		where += fmt.Sprintf(" AND created_at >= $%d", n)
 		args = append(args, *filter.DateFrom)

@@ -687,6 +687,9 @@
                 <button class="tab-btn" id="logsTabBtn" onclick="switchTab('logs')">
                     <i class="fas fa-list-alt"></i> Logs
                 </button>
+                <button class="tab-btn" id="mappingLogTabBtn" onclick="switchTab('mappingLog')">
+                    <i class="fas fa-sitemap"></i> Mapping Log
+                </button>
             </div>
 
             <div class="modal-body" style="flex: 1; overflow-y: auto; min-height: 0;">
@@ -715,6 +718,13 @@
                 <div id="logsTab" class="tab-content">
                     <div id="messageLogsView">
                         <div class="loading">Loading logs...</div>
+                    </div>
+                </div>
+
+                <!-- Mapping Log Tab -->
+                <div id="mappingLogTab" class="tab-content">
+                    <div id="messageMappingLogView">
+                        <div class="loading">Loading mapping log...</div>
                     </div>
                 </div>
             </div>

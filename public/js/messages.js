@@ -1406,6 +1406,171 @@ class MessageManager {
 
     }
 
+    /**
+     * Load the CDA→FHIR mapping log for a message (section timings, resource
+     * counts, dedup/synthesis events). Only populated for messages processed
+     * through a cda.to_fhir pipeline step; gracefully shows an empty state
+     * for everything else (mirrors loadLogs()'s 503/empty handling).
+     */
+    async loadMappingLog(messageId) {
+        try {
+            const container = document.getElementById('messageMappingLogView');
+            container.innerHTML = '<div class="text-center"><i class="fas fa-spinner fa-spin"></i> Loading mapping log...</div>';
+
+            const ifaceId = this.currentInterfaceId || this.messageData?.message?.interface_id || '';
+            const response = await fetch(`/api/messages/${messageId}/mapping-log${ifaceId ? '?interfaceId=' + encodeURIComponent(ifaceId) : ''}`);
+
+            if (response.status === 503) {
+                container.innerHTML = `
+                    <div style="background:#f8fafc;border-radius:8px;padding:1.5rem;text-align:center;border:1px dashed #cbd5e1;">
+                        <i class="fas fa-cloud" style="font-size:1.75rem;color:#94a3b8;display:block;margin-bottom:0.5rem;"></i>
+                        <div style="font-weight:600;color:#475569;margin-bottom:0.35rem;">Object storage not configured</div>
+                        <div style="color:#64748b;font-size:0.85rem;">Mapping logs are stored in object storage (MinIO/S3).<br>Configure OBJECT_STORAGE_* environment variables to enable this view.</div>
+                    </div>`;
+                return;
+            }
+
+            if (response.status === 404) {
+                const data = await response.json().catch(() => ({}));
+                container.innerHTML = `
+                    <div style="background: #f8fafc; padding: 2rem; border-radius: 8px; text-align: center; border: 2px dashed #e2e8f0;">
+                        <i class="fas fa-sitemap" style="font-size:1.75rem;color:#94a3b8;display:block;margin-bottom:0.5rem;"></i>
+                        <div style="font-weight: 600; color: #64748b; margin-bottom: 0.35rem;">No mapping log for this message</div>
+                        <div style="color: #94a3b8; font-size: 0.82rem;">${this.escapeHtml(data.error || 'This message was not processed through a CDA→FHIR pipeline step, or the message is older than today.')}</div>
+                    </div>`;
+                return;
+            }
+
+            if (!response.ok) {
+                throw new Error('Failed to fetch mapping log');
+            }
+
+            const data = await response.json();
+            if (!data.success) {
+                throw new Error(data.error || 'Failed to load mapping log');
+            }
+
+            container.innerHTML = this._renderMappingLog(data.mappingLog || {});
+        } catch (error) {
+            console.error('Failed to load mapping log:', error);
+            document.getElementById('messageMappingLogView').innerHTML = '<div class="alert alert-warning">Unable to load mapping log.</div>';
+        }
+    }
+
+    /**
+     * Renders the mapping log summary cards, per-section breakdown table, and
+     * assembly events (dedup/synthesis) list.
+     */
+    _renderMappingLog(log) {
+        const summary = log.summary || {};
+        const sections = log.sections || [];
+        const assembly = log.assembly || [];
+
+        const statCard = (label, value, color) => `
+            <div style="background:#f8fafc;border-radius:6px;padding:0.6rem 0.9rem;text-align:center;min-width:90px;">
+                <div style="font-size:1.05rem;font-weight:700;color:${color || '#1e3a8a'};">${value}</div>
+                <div style="font-size:0.68rem;color:#94a3b8;text-transform:uppercase;font-weight:600;margin-top:0.15rem;">${label}</div>
+            </div>`;
+
+        const summaryHTML = `
+            <div style="display:flex;gap:0.6rem;flex-wrap:wrap;margin-bottom:1rem;">
+                ${statCard('Resources', summary.totalResources ?? 0)}
+                ${statCard('Total Time', `${summary.totalTimeMs ?? 0}ms`)}
+                ${statCard('Mapping', `${summary.mappingTimeMs ?? 0}ms`)}
+                ${statCard('Assembly', `${summary.assemblyTimeMs ?? 0}ms`)}
+                ${statCard('Deduplicated', summary.deduplicatedCount ?? 0, summary.deduplicatedCount ? '#d97706' : undefined)}
+                ${statCard('Synthesized', summary.synthesizedCount ?? 0, summary.synthesizedCount ? '#7c3aed' : undefined)}
+            </div>`;
+
+        // Toggle JS shared by every section row — expands/collapses the entry-level
+        // drill-down row directly beneath it without needing a named handler.
+        const toggleJs = "var d=this.nextElementSibling; var open=d.style.display==='table-row'; d.style.display=open?'none':'table-row'; var c=this.querySelector('.mlog-chevron'); if(c) c.style.transform=open?'rotate(0deg)':'rotate(90deg)';";
+
+        const entryRow = (e) => {
+            const refsHTML = (e.resourceRefs && e.resourceRefs.length > 0)
+                ? e.resourceRefs.map(ref => `<span style="background:#eff6ff;color:#1e40af;padding:0.1rem 0.4rem;border-radius:3px;font-size:0.72rem;font-family:monospace;margin-right:0.3rem;display:inline-block;margin-bottom:0.2rem;">${this.escapeHtml(ref)}</span>`).join('')
+                : `<span style="color:#94a3b8;font-size:0.75rem;">not mapped</span>`;
+            const codeText = e.code ? `${this.escapeHtml(e.code)}${e.codeSystem ? ' (' + this.escapeHtml(e.codeSystem) + ')' : ''}` : '—';
+            return `<tr style="border-bottom:1px solid #f1f5f9;">
+                <td style="padding:0.3rem 0.5rem;color:#94a3b8;font-size:0.75rem;">${e.entryIndex}</td>
+                <td style="padding:0.3rem 0.5rem;color:#6b7280;font-size:0.75rem;">${this.escapeHtml(e.entryType || '—')}</td>
+                <td style="padding:0.3rem 0.5rem;color:#6b7280;font-size:0.75rem;font-family:monospace;">${codeText}</td>
+                <td style="padding:0.3rem 0.5rem;color:#374151;font-size:0.78rem;">${this.escapeHtml(e.displayName || '—')}</td>
+                <td style="padding:0.3rem 0.5rem;">${refsHTML}</td>
+            </tr>`;
+        };
+
+        const entriesDetailTable = (entries) => `
+            <table style="width:100%;border-collapse:collapse;background:#fafbfc;">
+                <thead><tr style="border-bottom:1px solid #e5e7eb;">
+                    <th style="padding:0.2rem 0.5rem;text-align:left;font-size:0.68rem;color:#9ca3af;font-weight:500;">#</th>
+                    <th style="padding:0.2rem 0.5rem;text-align:left;font-size:0.68rem;color:#9ca3af;font-weight:500;">Entry Type</th>
+                    <th style="padding:0.2rem 0.5rem;text-align:left;font-size:0.68rem;color:#9ca3af;font-weight:500;">Code</th>
+                    <th style="padding:0.2rem 0.5rem;text-align:left;font-size:0.68rem;color:#9ca3af;font-weight:500;">Description</th>
+                    <th style="padding:0.2rem 0.5rem;text-align:left;font-size:0.68rem;color:#9ca3af;font-weight:500;">→ FHIR Resource(s)</th>
+                </tr></thead>
+                <tbody>${entries.map(entryRow).join('')}</tbody>
+            </table>`;
+
+        const sectionRows = sections.map(s => {
+            const hasErrors = s.errors && s.errors.length > 0;
+            const errorBadge = hasErrors
+                ? `<span style="background:#fee2e2;color:#991b1b;padding:0.1rem 0.45rem;border-radius:3px;font-size:0.72rem;font-weight:600;">${s.errors.length} error${s.errors.length > 1 ? 's' : ''}</span>`
+                : `<span style="color:#94a3b8;font-size:0.78rem;">—</span>`;
+            const hasEntries = s.entries && s.entries.length > 0;
+            const chevron = hasEntries
+                ? `<i class="fas fa-chevron-right mlog-chevron" style="font-size:0.65rem;color:#94a3b8;margin-right:0.4rem;display:inline-block;transition:transform 0.15s;"></i>`
+                : `<span style="display:inline-block;width:1rem;"></span>`;
+            const mainRow = `<tr ${hasEntries ? `style="cursor:pointer;" onclick="${toggleJs}"` : ''}>
+                <td style="padding:0.25rem 0.5rem;color:#374151;font-size:0.8rem;">${chevron}${this.escapeHtml(s.title || s.sectionKey || '—')}</td>
+                <td style="padding:0.25rem 0.5rem;color:#6b7280;font-size:0.78rem;text-align:right;">${s.entriesIn ?? 0}</td>
+                <td style="padding:0.25rem 0.5rem;color:#6b7280;font-size:0.78rem;text-align:right;">${s.resourcesOut ?? 0}</td>
+                <td style="padding:0.25rem 0.5rem;color:#6b7280;font-size:0.78rem;text-align:right;">${s.processingTimeMs ?? 0}ms</td>
+                <td style="padding:0.25rem 0.5rem;">${errorBadge}</td>
+            </tr>`;
+            const detailRow = hasEntries
+                ? `<tr style="display:none;"><td colspan="5" style="padding:0.4rem 0.5rem 0.6rem 1.5rem;">${entriesDetailTable(s.entries)}</td></tr>`
+                : '';
+            return mainRow + detailRow;
+        }).join('');
+
+        const sectionsHTML = sections.length > 0 ? `
+            <div style="margin-top:0.75rem;">
+                <div style="font-size:0.7rem;font-weight:700;text-transform:uppercase;color:#94a3b8;margin-bottom:0.4rem;">Sections (${sections.length}) — click a row to see entry→resource detail</div>
+                <table style="width:100%;border-collapse:collapse;">
+                    <thead><tr style="border-bottom:1px solid #e5e7eb;">
+                        <th style="padding:0.25rem 0.5rem;text-align:left;font-size:0.72rem;color:#9ca3af;font-weight:500;">Section</th>
+                        <th style="padding:0.25rem 0.5rem;text-align:right;font-size:0.72rem;color:#9ca3af;font-weight:500;">Entries In</th>
+                        <th style="padding:0.25rem 0.5rem;text-align:right;font-size:0.72rem;color:#9ca3af;font-weight:500;">Resources Out</th>
+                        <th style="padding:0.25rem 0.5rem;text-align:right;font-size:0.72rem;color:#9ca3af;font-weight:500;">Time</th>
+                        <th style="padding:0.25rem 0.5rem;text-align:left;font-size:0.72rem;color:#9ca3af;font-weight:500;">Errors</th>
+                    </tr></thead>
+                    <tbody>${sectionRows}</tbody>
+                </table>
+            </div>` : '';
+
+        const assemblyHTML = assembly.length > 0 ? `
+            <div style="margin-top:1rem;">
+                <div style="font-size:0.7rem;font-weight:700;text-transform:uppercase;color:#94a3b8;margin-bottom:0.4rem;">Assembly Events (${assembly.length})</div>
+                ${assembly.map(e => `
+                    <div style="background:#faf5ff;border-left:3px solid #a78bfa;padding:0.5rem 0.75rem;margin-bottom:0.4rem;border-radius:4px;font-size:0.8rem;">
+                        <strong style="color:#5b21b6;">${this.escapeHtml(e.action || '')}</strong>
+                        <span style="color:#64748b;"> · ${this.escapeHtml(e.rule || '')} · ${this.escapeHtml(e.resourceType || '')}</span>
+                        <div style="color:#475569;margin-top:0.2rem;">${this.escapeHtml(e.detail || '')}</div>
+                    </div>
+                `).join('')}
+            </div>` : '';
+
+        if (sections.length === 0 && assembly.length === 0) {
+            return `
+                <div style="background: #f8fafc; padding: 2rem; border-radius: 8px; text-align: center; border: 2px dashed #e2e8f0;">
+                    <div style="font-weight: 600; color: #64748b;">Mapping log is empty</div>
+                </div>`;
+        }
+
+        return `<div>${summaryHTML}${sectionsHTML}${assemblyHTML}</div>`;
+    }
+
     escapeHtml(text) {
         const div = document.createElement('div');
         div.textContent = text;
@@ -1839,7 +2004,8 @@ class MessageManager {
             const height = 'calc(90vh - 280px)';
             const interfaceId = this.currentInterfaceId || '';
 
-            // Left pane: raw XML text panel + overlapping CDA viewer pane (lazy-mounted on toggle)
+            // Left pane: three overlapping panes (Raw XML / CDA Viewer / Parsed CCD), switched
+            // via a persistent button bar shown identically in all three (_cdaButtonBar).
             // Right pane: pipeline output / sent payload (existing toggle)
             container.innerHTML = `
                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;height:${height};min-height:0;">
@@ -1847,20 +2013,27 @@ class MessageManager {
                          data-message-id="${messageId}"
                          data-interface-id="${interfaceId}"
                          style="height:100%;min-height:0;position:relative;">
-                        <div id="cdaRawPane" style="height:100%;display:flex;flex-direction:column;">
-                            ${this._contentPanel('inbound', 'Inbound (Raw XML)', rawContent, message.raw_content_uri, { source: 'raw', messageId, cdaViewToggle: true })}
+                        <div id="cdaRawPane" data-cda-pane="raw" style="height:100%;display:flex;flex-direction:column;">
+                            ${this._contentPanel('inbound', 'Inbound', rawContent, message.raw_content_uri, { source: 'raw', messageId, customToggleHtml: this._cdaButtonBar('raw') })}
                         </div>
-                        <div id="cdaViewerPane" style="position:absolute;inset:0;display:none;flex-direction:column;background:#fff;border:1px solid #e2e8f0;border-radius:8px;overflow:hidden;">
+                        <div id="cdaViewerPane" data-cda-pane="viewer" style="position:absolute;inset:0;display:none;flex-direction:column;background:#fff;border:1px solid #e2e8f0;border-radius:8px;overflow:hidden;">
                             <div style="display:flex;align-items:center;gap:0.5rem;padding:0.6rem 0.85rem;background:#f8fafc;border-bottom:1px solid #e2e8f0;flex-shrink:0;">
                                 <span style="font-size:0.8rem;font-weight:700;color:#374151;">Clinical Document</span>
-                                <span style="background:#fef3c7;color:#92400e;padding:0.2rem 0.55rem;border-radius:4px;font-size:0.75rem;font-weight:600;">CDA/CCD Viewer</span>
-                                <div style="margin-left:auto;">
-                                    <button onclick="messageManager._toggleCDAView(false)"
-                                        style="background:#f1f5f9;color:#475569;border:1px solid #cbd5e1;padding:0.2rem 0.5rem;border-radius:4px;cursor:pointer;font-size:0.72rem;">
-                                        <i class="fas fa-code"></i> Raw XML</button>
-                                </div>
+                                <div style="margin-left:auto;"><span data-cda-btnbar>${this._cdaButtonBar('viewer')}</span></div>
                             </div>
                             <div id="cdaViewerMount" style="flex:1;min-height:0;overflow:auto;"></div>
+                        </div>
+                        <div id="cdaParsedPane" data-cda-pane="parsed" style="position:absolute;inset:0;display:none;flex-direction:column;background:#fff;border:1px solid #e2e8f0;border-radius:8px;overflow:hidden;">
+                            <div style="display:flex;align-items:center;gap:0.5rem;padding:0.6rem 0.85rem;background:#f8fafc;border-bottom:1px solid #e2e8f0;flex-shrink:0;">
+                                <span style="font-size:0.8rem;font-weight:700;color:#374151;">Clinical Document</span>
+                                <div style="margin-left:auto;display:flex;gap:0.4rem;align-items:center;">
+                                    <span data-cda-btnbar>${this._cdaButtonBar('parsed')}</span>
+                                    <button onclick="messageManager._copyContentById('cdaParsedMount')"
+                                        style="background:#2563eb;color:white;border:none;padding:0.25rem 0.6rem;border-radius:4px;cursor:pointer;font-size:0.75rem;">
+                                        <i class="fas fa-copy"></i> Copy</button>
+                                </div>
+                            </div>
+                            <div id="cdaParsedMount" style="flex:1;min-height:0;overflow:auto;"></div>
                         </div>
                     </div>
                     ${this._contentPanel('outbound', 'Pipeline Output', outboundContent, message.transformed_content_uri, { source: outboundSource, messageId })}
@@ -1919,30 +2092,71 @@ class MessageManager {
     }
 
     // Toggle the CDA left panel between raw XML and the rendered CDA viewer.
-    // showViewer=true → slide to CDA sections view (lazy-mounts on first call)
-    // showViewer=false → slide back to raw XML
-    async _toggleCDAView(showViewer) {
-        const leftPanel  = document.getElementById('cdaLeftPanel');
-        const rawPane    = document.getElementById('cdaRawPane');
-        const viewerPane = document.getElementById('cdaViewerPane');
-        if (!leftPanel || !rawPane || !viewerPane) return;
+    // Renders the persistent 3-button bar (Raw XML / CDA Viewer / Parsed CCD) shown
+    // identically in all three CDA content panes; the active pane's button is disabled
+    // and highlighted so users can jump directly between any of the three at any time.
+    _cdaButtonBar(active) {
+        const buttons = [
+            { key: 'raw',    label: 'Raw XML',    icon: 'fa-code' },
+            { key: 'viewer', label: 'CDA Viewer',  icon: 'fa-file-medical-alt' },
+            { key: 'parsed', label: 'Parsed CCD',  icon: 'fa-sitemap' },
+        ];
+        return `<div style="display:flex;gap:0.4rem;">` + buttons.map(b => {
+            const isActive = b.key === active;
+            return `<button onclick="messageManager._switchCDAPane('${b.key}')" ${isActive ? 'disabled' : ''}
+                style="background:${isActive ? '#2563eb' : '#f1f5f9'};color:${isActive ? '#fff' : '#475569'};border:1px solid ${isActive ? '#2563eb' : '#cbd5e1'};padding:0.2rem 0.5rem;border-radius:4px;cursor:${isActive ? 'default' : 'pointer'};font-size:0.72rem;font-weight:${isActive ? '600' : '400'};">
+                <i class="fas ${b.icon}"></i> ${b.label}</button>`;
+        }).join('') + `</div>`;
+    }
 
-        if (showViewer) {
-            rawPane.style.display    = 'none';
-            viewerPane.style.display = 'flex';
+    // Switches the CDA left panel between Raw XML / CDA Viewer / Parsed CCD, lazy-mounting
+    // each view on first visit and re-rendering the button bar in all three panes so the
+    // active state stays consistent regardless of which pane the user switches from.
+    async _switchCDAPane(target) {
+        const leftPanel = document.getElementById('cdaLeftPanel');
+        if (!leftPanel) return;
+        const panes = {
+            raw:    document.getElementById('cdaRawPane'),
+            viewer: document.getElementById('cdaViewerPane'),
+            parsed: document.getElementById('cdaParsedPane'),
+        };
+        for (const [key, el] of Object.entries(panes)) {
+            if (!el) continue;
+            el.style.display = (key === target) ? 'flex' : 'none';
+            // Re-render the button bar inside this pane's header so all three stay in sync.
+            const bar = el.querySelector('[data-cda-btnbar]');
+            if (bar) bar.innerHTML = this._cdaButtonBar(target);
+        }
+
+        const interfaceId = leftPanel.dataset.interfaceId;
+        const messageId   = leftPanel.dataset.messageId;
+
+        if (target === 'viewer') {
             const mountEl = document.getElementById('cdaViewerMount');
             if (mountEl && !mountEl.dataset.mounted && typeof ClinicalDocumentViewer !== 'undefined') {
                 mountEl.dataset.mounted = '1';
-                const viewer = new ClinicalDocumentViewer(mountEl, {
-                    interfaceId: leftPanel.dataset.interfaceId,
-                    messageId:   leftPanel.dataset.messageId,
-                    format:      'ccda',
-                });
+                const viewer = new ClinicalDocumentViewer(mountEl, { interfaceId, messageId, format: 'ccda' });
                 await viewer.mount();
             }
-        } else {
-            rawPane.style.display    = 'flex';
-            viewerPane.style.display = 'none';
+        } else if (target === 'parsed') {
+            const mountEl = document.getElementById('cdaParsedMount');
+            if (mountEl && !mountEl.dataset.loaded) {
+                mountEl.dataset.loaded = '1';
+                mountEl.innerHTML = '<div style="padding:1rem;color:#94a3b8;font-size:0.85rem;"><i class="fas fa-spinner fa-spin"></i> Loading parsed CCD JSON...</div>';
+                try {
+                    const resp = await fetch('/api/messages/' + encodeURIComponent(messageId) +
+                        '/parsed-content?interfaceId=' + encodeURIComponent(interfaceId));
+                    const data = await resp.json();
+                    if (resp.ok && data.success && data.parsedContent) {
+                        mountEl.style.cssText = 'flex:1;min-height:0;overflow:auto;padding:1rem;background:#0f172a;color:#e2e8f0;font-family:\'Courier New\',monospace;font-size:0.78rem;line-height:1.6;white-space:pre-wrap;word-break:break-all;';
+                        mountEl.textContent = JSON.stringify(data.parsedContent, null, 2);
+                    } else {
+                        mountEl.innerHTML = `<div style="padding:1rem;color:#94a3b8;font-size:0.85rem;">${this._escapeHtml(data.error || 'Parsed CCD JSON not available for this message')}</div>`;
+                    }
+                } catch (err) {
+                    mountEl.innerHTML = `<div style="padding:1rem;color:#94a3b8;font-size:0.85rem;">Failed to load parsed CCD JSON: ${this._escapeHtml(err.message)}</div>`;
+                }
+            }
         }
     }
 
@@ -1979,10 +2193,14 @@ class MessageManager {
         const sizeStr = content ? this.formatBytes(content.length) : '';
         const uriHtml = uri ? `<span style="color:#94a3b8;font-size:0.7rem;font-family:monospace;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:200px;" title="${uri}">📦 ${uri.split('/').slice(-1)[0]}</span>` : '';
 
-        // Toggle buttons: pipeline-output toggle (outbound) or CDA viewer toggle (inbound CDA)
+        // Toggle buttons: pipeline-output toggle (outbound), or a caller-supplied bar
+        // (e.g. the CDA Viewer/Raw XML/Parsed CCD button group) that replaces all
+        // default toggle logic for this panel.
         let toggleBtn = '';
         let sourceNote = '';
-        if (side === 'outbound' && messageId) {
+        if (opts.customToggleHtml) {
+            toggleBtn = opts.customToggleHtml;
+        } else if (side === 'outbound' && messageId) {
             if (source === 'outbound') {
                 toggleBtn = `<button onclick="messageManager._toggleOutboundSource('${messageId}','outbound')"
                     title="View full pipeline context (all step variables)"
@@ -1996,16 +2214,20 @@ class MessageManager {
                     <i class="fas fa-arrow-left"></i> Sent Payload</button>`;
             }
         }
-        // CDA viewer toggle: shown on the inbound raw-XML panel for CDA/CCD messages
-        if (opts.cdaViewToggle) {
-            toggleBtn = `<button onclick="messageManager._toggleCDAView(true)"
-                title="Show rendered CDA document sections"
-                style="background:#fef3c7;color:#92400e;border:1px solid #fde68a;padding:0.2rem 0.5rem;border-radius:4px;cursor:pointer;font-size:0.72rem;">
-                <i class="fas fa-file-medical-alt"></i> CDA View</button>`;
+        // Parsed JSON toggle: shown on inbound panels that don't supply their own button
+        // bar — the literal ParserResult.ParsedJSON that engine_message_processor.go's
+        // auto JSON-conversion step produces and hands to the transformation pipeline as
+        // input. Available for every format (HL7, CDA, FHIR).
+        let parsedJsonBtn = '';
+        if (!opts.customToggleHtml && side === 'inbound' && messageId) {
+            parsedJsonBtn = `<button onclick="messageManager._toggleParsedJSON(true,'${idSuffix}','${messageId}')"
+                title="Show the JSON document this message was converted to for downstream pipeline processing"
+                style="background:#ede9fe;color:#5b21b6;border:1px solid #ddd6fe;padding:0.2rem 0.5rem;border-radius:4px;cursor:pointer;font-size:0.72rem;">
+                <i class="fas fa-code"></i> Parsed JSON</button>`;
         }
 
         return `
-        <div data-panel="${side}" style="display:flex;flex-direction:column;min-height:0;background:#fff;border:1px solid #e2e8f0;border-radius:8px;overflow:hidden;">
+        <div data-panel="${side}" style="position:relative;height:100%;min-height:0;display:flex;flex-direction:column;background:#fff;border:1px solid #e2e8f0;border-radius:8px;overflow:hidden;">
             <div style="display:flex;align-items:center;gap:0.5rem;padding:0.6rem 0.85rem;background:#f8fafc;border-bottom:1px solid #e2e8f0;flex-shrink:0;flex-wrap:wrap;">
                 <span style="font-size:0.8rem;font-weight:700;color:#374151;">${label}</span>
                 ${typeTag}
@@ -2013,14 +2235,66 @@ class MessageManager {
                 <span style="color:#94a3b8;font-size:0.78rem;">${sizeStr}</span>
                 ${uriHtml}
                 <div style="margin-left:auto;display:flex;gap:0.4rem;align-items:center;">
-                    ${toggleBtn}
+                    <span data-cda-btnbar>${toggleBtn}</span>
+                    ${parsedJsonBtn}
                     ${!isEmpty ? `<button onclick="messageManager._copyContentById('${idSuffix}')"
                         style="background:#2563eb;color:white;border:none;padding:0.25rem 0.6rem;border-radius:4px;cursor:pointer;font-size:0.75rem;">
                         <i class="fas fa-copy"></i> Copy</button>` : ''}
                 </div>
             </div>
             <div id="${idSuffix}" style="flex:1;overflow:auto;padding:1rem;background:#0f172a;color:#e2e8f0;font-family:'Courier New',monospace;font-size:0.78rem;line-height:1.6;white-space:pre-wrap;word-break:break-all;">${highlighted}</div>
+            ${parsedJsonBtn ? `
+            <div id="parsedJsonPane-${idSuffix}" style="position:absolute;inset:0;display:none;flex-direction:column;background:#fff;">
+                <div style="display:flex;align-items:center;gap:0.5rem;padding:0.6rem 0.85rem;background:#f8fafc;border-bottom:1px solid #e2e8f0;flex-shrink:0;">
+                    <span style="font-size:0.8rem;font-weight:700;color:#374151;">Parsed JSON</span>
+                    <span style="background:#ede9fe;color:#5b21b6;padding:0.2rem 0.55rem;border-radius:4px;font-size:0.75rem;font-weight:600;">Downstream pipeline input</span>
+                    <div style="margin-left:auto;display:flex;gap:0.4rem;align-items:center;">
+                        <button onclick="messageManager._toggleParsedJSON(false,'${idSuffix}')"
+                            style="background:#f1f5f9;color:#475569;border:1px solid #cbd5e1;padding:0.2rem 0.5rem;border-radius:4px;cursor:pointer;font-size:0.72rem;">
+                            <i class="fas fa-arrow-left"></i> Back</button>
+                        <button onclick="messageManager._copyContentById('parsedJsonMount-${idSuffix}')"
+                            style="background:#2563eb;color:white;border:none;padding:0.25rem 0.6rem;border-radius:4px;cursor:pointer;font-size:0.75rem;">
+                            <i class="fas fa-copy"></i> Copy</button>
+                    </div>
+                </div>
+                <div id="parsedJsonMount-${idSuffix}" style="flex:1;overflow:auto;padding:1rem;background:#0f172a;color:#e2e8f0;font-family:'Courier New',monospace;font-size:0.78rem;line-height:1.6;white-space:pre-wrap;word-break:break-all;"></div>
+            </div>` : ''}
         </div>`;
+    }
+
+    // Toggles the generic "Parsed JSON" overlay for any inbound content panel —
+    // fetches /api/messages/:messageId/parsed-content (the JSON produced by the
+    // automatic format-detection/parse step that feeds the transformation pipeline).
+    async _toggleParsedJSON(show, idSuffix, messageId) {
+        const panel = document.getElementById('parsedJsonPane-' + idSuffix);
+        const rawEl = document.getElementById(idSuffix);
+        if (!panel || !rawEl) return;
+
+        if (!show) {
+            panel.style.display = 'none';
+            rawEl.style.display = 'block';
+            return;
+        }
+
+        rawEl.style.display = 'none';
+        panel.style.display = 'flex';
+        const mountEl = document.getElementById('parsedJsonMount-' + idSuffix);
+        if (!mountEl || mountEl.dataset.loaded) return;
+        mountEl.dataset.loaded = '1';
+        mountEl.innerHTML = '<div style="color:#94a3b8;"><i class="fas fa-spinner fa-spin"></i> Loading parsed JSON...</div>';
+        try {
+            const interfaceId = this.currentInterfaceId || '';
+            const resp = await fetch('/api/messages/' + encodeURIComponent(messageId) +
+                '/parsed-content?interfaceId=' + encodeURIComponent(interfaceId));
+            const data = await resp.json();
+            if (resp.ok && data.success && data.parsedContent) {
+                mountEl.textContent = JSON.stringify(data.parsedContent, null, 2);
+            } else {
+                mountEl.innerHTML = `<div style="color:#94a3b8;">${this._escapeHtml(data.error || 'Parsed JSON not available for this message')}</div>`;
+            }
+        } catch (err) {
+            mountEl.innerHTML = `<div style="color:#94a3b8;">Failed to load parsed JSON: ${this._escapeHtml(err.message)}</div>`;
+        }
     }
 
     _escapeHtml(s) {
@@ -2571,6 +2845,8 @@ function switchTab(tabName) {
         messageManager.loadMessageContent(messageManager.selectedMessageId);
     } else if (tabName === 'logs' && messageManager.selectedMessageId) {
         messageManager.loadLogs(messageManager.selectedMessageId);
+    } else if (tabName === 'mappingLog' && messageManager.selectedMessageId) {
+        messageManager.loadMappingLog(messageManager.selectedMessageId);
     }
 }
 

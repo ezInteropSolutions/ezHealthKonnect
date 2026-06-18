@@ -13,6 +13,8 @@
 //   onSectionFailure      — "continue" | "fail-fast" (default: "continue")
 //   enabledSections       — []string — whitelist of sections to process (default: all)
 //   terminologyValidation — bool (default: false)
+//   mappingLogEnabled     — bool (default: true) — persist the MappingLog to object
+//                           storage; disable per-pipeline if log volume isn't needed
 
 package transform
 
@@ -29,14 +31,35 @@ import (
 	cdadocument "ezhealthkonnect/cda/document"
 	"ezhealthkonnect/models"
 	cdafhir "ezhealthkonnect/services/cda_fhir"
+	cdastorage "ezhealthkonnect/services/cda_storage"
 	"ezhealthkonnect/services/executors"
+	cdaparser "ezhealthkonnect/services/parsers/cda"
+	"ezhealthkonnect/services/storage"
 )
 
 // CDAToFHIRExecutor converts a parsed CDA document to a FHIR R4 Bundle.
 type CDAToFHIRExecutor struct {
 	*executors.BaseExecutor
-	mapper    *cdafhir.GenericCDAFHIRMapper
-	cdaParser *cdadocument.CDAParser // used for auto-parse when _cdaDocument is absent
+	mapper        *cdafhir.GenericCDAFHIRMapper
+	parserService *cdaparser.CDAParserService   // used for auto-parse when _cdaDocument is absent; also produces ParsedJSON for auto-persist
+	objStorage    *storage.ObjectStorageService // optional; nil = no mapping log persistence
+	cdaDocStore   cdastorage.CDADocumentStore   // optional; nil = no auto-persisted parsed content
+}
+
+// SetObjectStorageService wires in the object storage service so the executor can
+// persist MappingLog documents asynchronously after each CDA→FHIR conversion.
+func (e *CDAToFHIRExecutor) SetObjectStorageService(svc *storage.ObjectStorageService) {
+	e.objStorage = svc
+}
+
+// SetCDADocumentStore wires in the document store so that, when this executor's
+// auto-parse path runs (no separate cda.parse step in the pipeline), the parsed
+// CDA content it already produces is also persisted — giving every CDA interface
+// access to GET /api/cda/documents/:id/json without requiring a cda.parse step.
+// Does nothing when a cda.parse step already ran (output came from "_cdaDocument"
+// instead of auto-parse), since that step persists its own result already.
+func (e *CDAToFHIRExecutor) SetCDADocumentStore(store cdastorage.CDADocumentStore) {
+	e.cdaDocStore = store
 }
 
 // NewCDAToFHIRExecutor constructs the executor with a live DB connection for
@@ -61,9 +84,13 @@ func NewCDAToFHIRExecutor(db *sql.DB) *CDAToFHIRExecutor {
 	}
 
 	exec.mapper = cdafhir.NewGenericCDAFHIRMapper(db, loader)
-	if loader != nil {
-		exec.cdaParser = cdadocument.NewCDAParser(loader)
+
+	if svc, err := cdaparser.NewFromSchemaDir("./cda/schemas"); err == nil {
+		exec.parserService = svc
+	} else {
+		log.Printf("⚠️  [cda.to_fhir] CDAParserService init failed (%v) — auto-parse persistence disabled", err)
 	}
+
 	log.Printf("✅ [cda.to_fhir] GenericCDAFHIRMapper initialised (schema-driven, three-tier lookup)")
 	return exec
 }
@@ -76,6 +103,7 @@ type cdaToFHIRConfig struct {
 	OnSectionFailure      string   `json:"onSectionFailure"`
 	EnabledSections       []string `json:"enabledSections"`
 	TerminologyValidation bool     `json:"terminologyValidation"`
+	MappingLogEnabled     *bool    `json:"mappingLogEnabled"` // nil = default true
 }
 
 // Execute resolves the parsed CDA map, drives GenericCDAFHIRMapper.Map(), and
@@ -101,11 +129,15 @@ func (e *CDAToFHIRExecutor) Execute(
 		json.Unmarshal(raw, &cfg) //nolint:errcheck
 	}
 
-	// Extract interfaceID from execution context for three-tier template lookup
+	// Extract interfaceID for three-tier template lookup and mapping-log storage keys.
+	// inputData carries it only in ad-hoc/test invocations; real pipeline runs set it
+	// on ctx (processing/engine_message_processor.go) instead, so check both.
 	interfaceID := ""
-	if v, ok := inputData["interfaceId"].(string); ok {
+	if v, ok := inputData["interfaceId"].(string); ok && v != "" {
 		interfaceID = v
-	} else if v, ok := inputData["interface_id"].(string); ok {
+	} else if v, ok := inputData["interface_id"].(string); ok && v != "" {
+		interfaceID = v
+	} else if v, ok := ctx.Value("interface_id").(string); ok {
 		interfaceID = v
 	}
 
@@ -137,7 +169,13 @@ func (e *CDAToFHIRExecutor) Execute(
 
 	// Auto-parse path: extract raw XML from parsedCDA["raw"] and run the typed
 	// MapDocument() path without requiring a separate cda.parse pipeline step.
-	if output == nil && e.cdaParser != nil {
+	// Uses the same CDAParserService the cda.parse executor uses (not just the bare
+	// typed parser) so the ParsedJSON it produces can also be persisted below —
+	// giving every CDA interface structured parsed-content storage even when its
+	// pipeline has no separate cda.parse step.
+	var autoParseResult *models.ParserResult
+	var autoParseRawXML string
+	if output == nil && e.parserService != nil {
 		parsedCDA := e.resolveParsedCDA(inputData, cfg.SourceField)
 		rawXML := ""
 		if parsedCDA != nil {
@@ -147,16 +185,21 @@ func (e *CDAToFHIRExecutor) Execute(
 			rawXML = e.resolveRawXML(inputData)
 		}
 		if rawXML != "" {
-			if doc, err := e.cdaParser.ParseFromRawXML(rawXML); err == nil {
+			result := e.parserService.Parse(rawXML)
+			if !result.Success {
+				log.Printf("  ⚠️  [cda.to_fhir] XML auto-parse failed: %v", result.Error)
+			} else if doc, ok := result.TypedDocument.(*cdadocument.CDADocument); ok {
 				log.Printf("  📄 [cda.to_fhir] Auto-parsed raw CDA XML → typed MapDocument path")
 				out, err := e.mapper.MapDocument(ctx, doc, mapConfig)
 				if err == nil {
 					output = out
+					autoParseResult = result
+					autoParseRawXML = rawXML
 				} else {
 					log.Printf("  ⚠️  [cda.to_fhir] MapDocument failed after auto-parse: %v", err)
 				}
 			} else {
-				log.Printf("  ⚠️  [cda.to_fhir] XML auto-parse failed: %v", err)
+				log.Printf("  ⚠️  [cda.to_fhir] auto-parse produced no typed document")
 			}
 		}
 	}
@@ -200,8 +243,9 @@ func (e *CDAToFHIRExecutor) Execute(
 
 	e.SetStepOutputWithDetails(outputData,
 		map[string]interface{}{
-			"fhirBundle":        output.FHIRBundle,
-			"processingResult":  output.ProcessingResult,
+			"fhirBundle":       output.FHIRBundle,
+			"processingResult": output.ProcessingResult,
+			"mappingLog":       output.MappingLog,
 		},
 		map[string]interface{}{
 			"duration_ms":         durationMs,
@@ -215,7 +259,56 @@ func (e *CDAToFHIRExecutor) Execute(
 		},
 	)
 
+	messageID, _ := ctx.Value("message_id").(string)
+
+	// Persist mapping log to object storage asynchronously (non-blocking), unless
+	// disabled via step config (mappingLogEnabled: false). Keyed by the pipeline
+	// message_id (not the CDA document's own ID) so it's retrievable the same way
+	// as raw/parsed/transformed content via GET /api/messages/:messageId/mapping-log.
+	mappingLogEnabled := cfg.MappingLogEnabled == nil || *cfg.MappingLogEnabled
+	if mappingLogEnabled && e.objStorage != nil && messageID != "" {
+		ml := output.MappingLog
+		go e.writeMappingLog(interfaceID, messageID, ml)
+	}
+
+	// Persist the parsed CDA content from the auto-parse path (only set when no
+	// separate cda.parse step already ran and persisted its own result).
+	if e.cdaDocStore != nil && autoParseResult != nil {
+		saveInput := &cdastorage.SaveInput{
+			InterfaceID:   interfaceID,
+			MessageID:     messageID,
+			RawXML:        autoParseRawXML,
+			ParsedJSON:    autoParseResult.ParsedJSON,
+			TypedDocument: autoParseResult.TypedDocument,
+			FieldCount:    len(autoParseResult.EnhancedFields),
+			FHIRBundle:    output.FHIRBundle,
+		}
+		if sections, ok := autoParseResult.ParsedJSON["sections"].(map[string]interface{}); ok {
+			saveInput.SectionCount = len(sections)
+		}
+		store := e.cdaDocStore
+		go func() {
+			saveCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			if _, err := store.Save(saveCtx, saveInput); err != nil {
+				log.Printf("⚠️  [cda.to_fhir] Parsed document storage failed (non-fatal): %v", err)
+			}
+		}()
+	}
+
 	return outputData, nil
+}
+
+// writeMappingLog persists the MappingLog to object storage in a background goroutine.
+func (e *CDAToFHIRExecutor) writeMappingLog(interfaceID, messageID string, ml interface{}) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	uri, err := e.objStorage.StoreMappingLog(ctx, interfaceID, messageID, ml)
+	if err != nil {
+		log.Printf("⚠️  [cda.to_fhir] Failed to persist mapping log for message %s: %v", messageID, err)
+		return
+	}
+	log.Printf("📋 [cda.to_fhir] Mapping log persisted: %s", uri)
 }
 
 // resolveParsedCDA locates the CDA parsed map, checking:
@@ -305,5 +398,9 @@ func (e *CDAToFHIRExecutor) GetOutputVariables(step *models.TransformationStep) 
 			Description: "Section-level success/failure breakdown with error details", Category: "CDA Transform"},
 		{Name: "Failed sections", Path: "_stepOutput.processingResult.failedSections", DataType: "array",
 			Description: "Section keys that encountered errors during mapping", Category: "CDA Transform"},
+		{Name: "Mapping log", Path: "_stepOutput.mappingLog", DataType: "object",
+			Description: "Per-section timing, resource counts, dedup/synthesis events from CDA→FHIR assembly", Category: "CDA Transform"},
+		{Name: "Mapping log summary", Path: "_stepOutput.mappingLog.summary", DataType: "object",
+			Description: "Totals: resources, timing, deduplicated/synthesized counts", Category: "CDA Transform"},
 	}
 }

@@ -156,6 +156,8 @@ func MapAuthor(authors []cdadocument.CDAAuthor) map[string]interface{} {
 			if len(idents) > 0 {
 				p["identifier"] = idents
 			}
+			// CDA identity for assembly-layer deduplication.
+			embedCDAIds(p, a.AssignedAuthor.Ids)
 		}
 
 		// Telecoms
@@ -201,6 +203,8 @@ func MapCustodian(custodian cdadocument.CDACustodian) map[string]interface{} {
 		if len(idents) > 0 {
 			r["identifier"] = idents
 		}
+		// CDA identity for assembly-layer deduplication.
+		embedCDAIds(r, org.Ids)
 	}
 	if len(org.Addresses) > 0 {
 		var addresses []interface{}

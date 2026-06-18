@@ -20,6 +20,9 @@ import (
 
 	cdadocument "ezhealthkonnect/cda/document"
 	"ezhealthkonnect/fhir/r4"
+	"ezhealthkonnect/services/cda_fhir/assembly"
+	"ezhealthkonnect/services/cda_fhir/assembly/rules"
+	mappinglog "ezhealthkonnect/services/cda_fhir/mapping_log"
 	"ezhealthkonnect/services/cda_fhir/mappers"
 )
 
@@ -137,7 +140,7 @@ func (m *GenericCDAFHIRMapper) MapDocument(
 
 	start := time.Now()
 
-	// Apply config defaults (same defaults as Map())
+	// Apply config defaults (same defaults as Map()).
 	if config.CCDAVersion == "" {
 		config.CCDAVersion = "2.1"
 	}
@@ -158,6 +161,14 @@ func (m *GenericCDAFHIRMapper) MapDocument(
 		DocumentType: config.DocType,
 		CCDAVersion:  config.CCDAVersion,
 	}
+
+	// Document identifier for MappingLog — prefer extension (the actual value),
+	// fall back to root OID, then empty string.
+	docID := doc.Header.DocumentId.Extension
+	if docID == "" {
+		docID = doc.Header.DocumentId.Root
+	}
+	logBuilder := mappinglog.NewLogBuilder(docID)
 
 	var (
 		allResources []map[string]interface{}
@@ -210,7 +221,9 @@ func (m *GenericCDAFHIRMapper) MapDocument(
 
 	sectionResults := make([][]map[string]interface{}, len(sectionKeys))
 	sectionErrs := make([][]SectionError, len(sectionKeys))
+	sectionLogs := make([]mappinglog.SectionLog, len(sectionKeys))
 
+	mappingStart := time.Now()
 	for idx, sectionKey := range sectionKeys {
 		section := doc.SectionsByKey[sectionKey]
 		fn := typedSectionDispatchers[sectionKey]
@@ -218,6 +231,8 @@ func (m *GenericCDAFHIRMapper) MapDocument(
 		wg.Add(1)
 		go func(i int, sk string, sec *cdadocument.CDASection, fn sectionMapFn) {
 			defer wg.Done()
+
+			sb := mappinglog.NewSectionBuilder(sk, sec.Title, len(sec.Entries))
 
 			var (
 				resources []map[string]interface{}
@@ -232,17 +247,55 @@ func (m *GenericCDAFHIRMapper) MapDocument(
 							Error:      fmt.Sprintf("panic: %v", r),
 							Severity:   "error",
 						})
+						sb.AddError(fmt.Sprintf("panic: %v", r))
 					}
 				}()
-				resources = fn(sec.Entries, patientRef)
+				// Call the mapper once per entry (instead of once for the whole
+				// section) so we can record which entry produced which resource(s)
+				// for the Mapping Log's entry-level drill-down. Safe because no
+				// typed mapper does cross-entry lookups within a single call — each
+				// entry's CDAEntry (including its own nested Components) is processed
+				// independently; the only cross-resource merging (BP panel synthesis,
+				// dedup) happens later in the assembly layer, over the flattened
+				// allResources list, not here.
+				for entryIdx, entry := range sec.Entries {
+					entryResources := fn([]cdadocument.CDAEntry{entry}, patientRef)
+					resources = append(resources, entryResources...)
+
+					trace := mappinglog.EntryTrace{
+						EntryIndex:  entryIdx,
+						EntryType:   entry.EntryType,
+						Code:        entry.Code.Code,
+						CodeSystem:  entry.Code.CodeSystem,
+						DisplayName: entry.Code.DisplayName,
+						Resources:   entryResources,
+					}
+					if trace.DisplayName == "" {
+						// Many CDA sections wrap the clinically meaningful content in an
+						// outer act (e.g. an Allergy Concern Act coded "CONC", no display
+						// name) with the real substance/observation nested in an
+						// entryRelationship. The mapper already unwraps that into the
+						// resource's own "code" field, so fall back to reading it from
+						// there instead of showing an uninformative wrapper code.
+						trace.DisplayName = displayNameFromResources(entryResources)
+					}
+					if len(entry.Id) > 0 && entry.Id[0].Extension != "" {
+						trace.EntryID = entry.Id[0].Root + ":" + entry.Id[0].Extension
+					}
+					sb.AddEntry(trace)
+				}
 			}()
 
 			sectionResults[i] = resources
 			sectionErrs[i] = errs
+			sectionLogs[i] = sb.Build(len(resources))
 		}(idx, sectionKey, section, fn)
 	}
 	wg.Wait()
+	mappingMs := time.Since(mappingStart).Milliseconds()
 
+	// Serial merge of section results (build allResources before renumbering IDs
+	// and resolving entry traces below — both depend on final resource state).
 	for idx, sectionKey := range sectionKeys {
 		errs := sectionErrs[idx]
 		resources := sectionResults[idx]
@@ -261,10 +314,10 @@ func (m *GenericCDAFHIRMapper) MapDocument(
 	// ── Resource ID uniqueness ────────────────────────────────────────────────
 	// Multiple CDA sections can dispatch to the same typed mapper (e.g. "problems"
 	// and "healthConcerns" both → MapConditions), and each mapper numbers its own
-	// output starting at 1 — without this pass, resources from different sections
-	// can collide on the same id (two unrelated resources both named
-	// "condition-1"). Patient/Practitioner/Organization are single, stable header
-	// resources referenced elsewhere by their fixed literal id — left untouched.
+	// output starting at 1. Without this pass, resources from different sections
+	// can collide on the same id (two things both named "condition-1").
+	// Patient/Practitioner/Organization are stable header resources — left untouched.
+	// NOTE: _cdaIds is NOT stripped here; the assembly layer reads it below.
 	idCounters := make(map[string]int)
 	for _, r := range allResources {
 		rt := strField(r, "resourceType")
@@ -276,7 +329,75 @@ func (m *GenericCDAFHIRMapper) MapDocument(
 		r["id"] = fmt.Sprintf("%s-%d", resourceIDPrefix(rt), idCounters[rt])
 	}
 
+	// Resolve each entry trace's resource refs now that IDs are final (the
+	// resource maps were mutated in place above), then merge section logs.
+	for i := range sectionLogs {
+		for j := range sectionLogs[i].Entries {
+			sectionLogs[i].Entries[j].ResolveRefs()
+		}
+	}
+	for _, sl := range sectionLogs {
+		logBuilder.AddSection(sl)
+	}
+
+	// ── Assembly layer ────────────────────────────────────────────────────────
+	// Runs serially after all section goroutines have completed and IDs are stable.
+	// DeduplicationRule populates dedupRedirects; BPPanelSynthesisRule appends new
+	// resources to assemblyCtx.Resources beyond the original slice boundary.
+	assemblyStart := time.Now()
+	var dedupRedirects map[string]string
+
+	if !config.Assembly.Disabled && len(allResources) > 0 {
+		originalCount := len(allResources)
+
+		engine := assembly.NewDefaultRuleEngine()
+		engine.Register(rules.NewDeduplicationRule())
+		engine.Register(rules.NewBPPanelSynthesisRule())
+
+		assemblyCtx := &assembly.AssemblyContext{
+			// Pass a copy of the slice header so rules can append without modifying
+			// allResources. The backing array is shared for read access; we reconcile
+			// by reading assemblyCtx.Resources after Run().
+			Resources:      append([]map[string]interface{}(nil), allResources...),
+			DedupRedirects: make(map[string]string),
+			Removed:        make(map[string]bool),
+			Log:            logBuilder,
+			Config:         config.Assembly,
+		}
+
+		if err := engine.Run(assemblyCtx); err != nil {
+			log.Printf("  ⚠️  [cda.to_fhir/assembly] %v", err)
+		}
+
+		dedupRedirects = assemblyCtx.DedupRedirects
+
+		// Filter duplicates out of allResources.
+		if len(assemblyCtx.Removed) > 0 {
+			filtered := make([]map[string]interface{}, 0, len(allResources))
+			for _, r := range allResources {
+				key := strField(r, "resourceType") + "/" + strField(r, "id")
+				if !assemblyCtx.Removed[key] {
+					filtered = append(filtered, r)
+				}
+			}
+			allResources = filtered
+		}
+
+		// Collect synthesized resources appended by rules beyond the original slice.
+		for i := originalCount; i < len(assemblyCtx.Resources); i++ {
+			allResources = append(allResources, assemblyCtx.Resources[i])
+		}
+	}
+	assemblyMs := time.Since(assemblyStart).Milliseconds()
+
+	// ── Strip _cdaIds internal field ─────────────────────────────────────────
+	// Must happen after assembly (which reads _cdaIds) and before FHIR emission.
+	for _, r := range allResources {
+		delete(r, "_cdaIds")
+	}
+
 	// ── US Core profiles + narratives ────────────────────────────────────────
+	serialStart := time.Now()
 	for i, r := range allResources {
 		rt := strField(r, "resourceType")
 		if config.ProfileMode != "base" {
@@ -290,15 +411,21 @@ func (m *GenericCDAFHIRMapper) MapDocument(
 			}
 		}
 		allResources[i] = r
-		_ = rt // kept for future per-resource processing
+		_ = rt // reserved for per-resource post-processing
 	}
+	serialMs := time.Since(serialStart).Milliseconds()
 
 	// ── Assemble FHIR Bundle ─────────────────────────────────────────────────
 	// urn:uuid: fullUrls + internal reference rewriting — shared with the
-	// HL7→FHIR v3 pipeline; see fhir/r4/bundle_assembler.go. Resolves both the
-	// "fullUrl must be absolute" and "fullUrl must be unique" bundle constraints,
-	// and ensures every "Patient/patient-1"-style reference resolves correctly.
-	entries := r4.AssembleEntries(allResources)
+	// HL7→FHIR v3 pipeline; see fhir/r4/bundle_assembler.go. When dedup redirects
+	// exist, AssembleEntriesWithRedirects collapses dedup rewriting and reference
+	// rewriting into one O(n×depth) pass.
+	var entries []interface{}
+	if len(dedupRedirects) > 0 {
+		entries = r4.AssembleEntriesWithRedirects(allResources, dedupRedirects)
+	} else {
+		entries = r4.AssembleEntries(allResources)
+	}
 
 	bundle := map[string]interface{}{
 		"resourceType": "Bundle",
@@ -320,13 +447,48 @@ func (m *GenericCDAFHIRMapper) MapDocument(
 	pr.SectionsProcessed = len(successSects) + len(failedSects)
 	pr.PartialSuccess = len(failedSects) > 0 && len(successSects) > 0
 
-	durationMs := time.Since(start).Milliseconds()
-	log.Printf("  ✅ [cda.to_fhir/typed] %s → %d resources (%d sections ok, %d failed) in %dms",
-		config.DocType, len(allResources), len(successSects), len(failedSects), durationMs)
+	totalMs := time.Since(start).Milliseconds()
+	logBuilder.SetTimings(totalMs, mappingMs, assemblyMs, serialMs)
+	mappingLogResult := logBuilder.Build(len(allResources))
+
+	log.Printf("  ✅ [cda.to_fhir/typed] %s → %d resources (%d ok, %d failed) mapping=%dms assembly=%dms serial=%dms total=%dms",
+		config.DocType, len(allResources), len(successSects), len(failedSects),
+		mappingMs, assemblyMs, serialMs, totalMs)
 
 	if m.db != nil {
-		go m.writeTransformAuditLog(ctx, config, pr, durationMs)
+		go m.writeTransformAuditLog(ctx, config, pr, totalMs)
 	}
 
-	return &MapOutput{FHIRBundle: bundle, ProcessingResult: pr}, nil
+	return &MapOutput{FHIRBundle: bundle, ProcessingResult: pr, MappingLog: mappingLogResult}, nil
+}
+
+// displayNameFromResources extracts a human-readable label from the first
+// produced resource's "code" CodeableConcept (text, then first coding's
+// display, then first coding's code). Used as a Mapping Log fallback when the
+// source CDA entry itself carries no useful display name.
+func displayNameFromResources(resources []map[string]interface{}) string {
+	for _, r := range resources {
+		code, ok := r["code"].(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if text := strField(code, "text"); text != "" {
+			return text
+		}
+		codings, ok := code["coding"].([]interface{})
+		if !ok || len(codings) == 0 {
+			continue
+		}
+		c, ok := codings[0].(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if display := strField(c, "display"); display != "" {
+			return display
+		}
+		if codeVal := strField(c, "code"); codeVal != "" {
+			return codeVal
+		}
+	}
+	return ""
 }

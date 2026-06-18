@@ -74,11 +74,20 @@ func (sp *sectionParser) parseSection(el *etree.Element, ep *entryParser) CDASec
 		sec.Title = strings.TrimSpace(titleEl.Text())
 	}
 
+	var narrativeIndex map[string]string
 	if textEl := el.SelectElement("text"); textEl != nil {
+		narrativeIndex = buildNarrativeIndex(textEl)
 		sec.NarrativeText = serializeElement(textEl)
 	}
 
 	sec.Entries = ep.parseEntries(el)
+
+	// Resolve any "#id" reference placeholders against the narrative index.
+	if len(narrativeIndex) > 0 {
+		for i := range sec.Entries {
+			resolveEntryRefs(&sec.Entries[i], narrativeIndex)
+		}
+	}
 
 	return sec
 }
@@ -191,6 +200,114 @@ func normalizeTitleToKey(el *etree.Element) string {
 		}
 	}
 	return result
+}
+
+// ========================
+// Narrative reference resolution
+// ========================
+
+// buildNarrativeIndex walks the section's <text> narrative element and builds a
+// map from each element's ID attribute value to its plain-text content. This
+// allows <reference value="#id"/> anchors in structured entries to be resolved
+// to the human-readable text displayed to the clinician.
+func buildNarrativeIndex(el *etree.Element) map[string]string {
+	idx := make(map[string]string)
+	walkForIDs(el, idx)
+	return idx
+}
+
+func walkForIDs(el *etree.Element, idx map[string]string) {
+	if id := el.SelectAttrValue("ID", ""); id != "" {
+		if text := narrativeInnerText(el); text != "" {
+			idx[id] = text
+		}
+	}
+	for _, child := range el.ChildElements() {
+		walkForIDs(child, idx)
+	}
+}
+
+// narrativeInnerText returns the concatenated plain-text of el and all its
+// descendants. It walks el.Child directly so that mixed content — text nodes
+// interspersed with child elements — is captured correctly.
+func narrativeInnerText(el *etree.Element) string {
+	if el == nil {
+		return ""
+	}
+	var sb strings.Builder
+	for _, token := range el.Child {
+		switch t := token.(type) {
+		case *etree.CharData:
+			if s := strings.TrimSpace(t.Data); s != "" {
+				if sb.Len() > 0 {
+					sb.WriteByte(' ')
+				}
+				sb.WriteString(s)
+			}
+		case *etree.Element:
+			if s := narrativeInnerText(t); s != "" {
+				if sb.Len() > 0 {
+					sb.WriteByte(' ')
+				}
+				sb.WriteString(s)
+			}
+		}
+	}
+	return sb.String()
+}
+
+// resolveCodeRef replaces a "#id" placeholder in code.OriginalText with the
+// resolved narrative text. No-op when OriginalText does not start with "#".
+func resolveCodeRef(code *CDACode, idx map[string]string) {
+	if !strings.HasPrefix(code.OriginalText, "#") {
+		return
+	}
+	anchor := strings.TrimPrefix(code.OriginalText, "#")
+	if text, ok := idx[anchor]; ok {
+		code.OriginalText = text
+	} else {
+		code.OriginalText = ""
+	}
+	for i := range code.Translations {
+		resolveCodeRef(&code.Translations[i], idx)
+	}
+}
+
+// resolveEntryRefs resolves all "#id" reference placeholders in every CDACode
+// field within an entry, recursing into components and entryRelationships.
+func resolveEntryRefs(entry *CDAEntry, idx map[string]string) {
+	resolveCodeRef(&entry.Code, idx)
+	if entry.Value != nil && entry.Value.Code != nil {
+		resolveCodeRef(entry.Value.Code, idx)
+	}
+	if entry.RouteCode != nil {
+		resolveCodeRef(entry.RouteCode, idx)
+	}
+	if entry.Consumable != nil {
+		if mat := entry.Consumable.ManufacturedProduct.ManufacturedMaterial; mat != nil {
+			resolveCodeRef(&mat.Code, idx)
+		}
+	}
+	for i := range entry.Participants {
+		resolveCodeRef(&entry.Participants[i].FunctionCode, idx)
+		resolveCodeRef(&entry.Participants[i].ParticipantRole.Code, idx)
+		if pe := entry.Participants[i].ParticipantRole.PlayingEntity; pe != nil {
+			resolveCodeRef(&pe.Code, idx)
+		}
+		if se := entry.Participants[i].ParticipantRole.ScopingEntity; se != nil {
+			resolveCodeRef(&se.Code, idx)
+		}
+	}
+	for i := range entry.Performers {
+		resolveCodeRef(&entry.Performers[i].FunctionCode, idx)
+		resolveCodeRef(&entry.Performers[i].AssignedEntity.Code, idx)
+	}
+	for i := range entry.Components {
+		resolveEntryRefs(&entry.Components[i], idx)
+	}
+	for i := range entry.EntryRelationships {
+		resolveEntryRefs(&entry.EntryRelationships[i].Entry, idx)
+	}
 }
 
 // ========================

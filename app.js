@@ -450,6 +450,9 @@ app.use('/api/wizard', wizardRoutes);
 app.get('/api/messages/:messageId/raw', forwardToGo);
 app.get('/api/messages/:messageId/transformed', forwardToGo);
 app.get('/api/messages/:messageId/logs', forwardToGo);
+app.get('/api/messages/:messageId/mapping-log', forwardToGo);
+app.get('/api/messages/:messageId/parsed-cda', forwardToGo);
+app.get('/api/messages/:messageId/parsed-content', forwardToGo);
 console.log('🔄 Mounting /api/messages...');
 app.use('/api/messages', messageRoutes);
 

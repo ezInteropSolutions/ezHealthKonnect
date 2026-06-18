@@ -63,6 +63,16 @@ func parseCD(el *etree.Element) CDACode {
 	}
 	if ot := el.SelectElement("originalText"); ot != nil {
 		c.OriginalText = strings.TrimSpace(ot.Text())
+		// When no inline text is present, check for a <reference value="#id"/> child
+		// that points to the section's narrative. Store the anchor so that
+		// section_parser can resolve it against the narrative index after parsing.
+		if c.OriginalText == "" {
+			if ref := ot.SelectElement("reference"); ref != nil {
+				if val := ref.SelectAttrValue("value", ""); strings.HasPrefix(val, "#") {
+					c.OriginalText = val
+				}
+			}
+		}
 	}
 	for _, t := range el.SelectElements("translation") {
 		c.Translations = append(c.Translations, parseCD(t))

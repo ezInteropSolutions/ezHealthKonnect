@@ -37,7 +37,7 @@ func MapObservations(entries []cdadocument.CDAEntry, patientRef string, category
 	flat := flattenObservationEntries(remaining)
 	for _, entry := range flat {
 		r := buildObservationResource(len(resources)+1, entry, patientRef, category)
-		if len(r) > 2 {
+		if r != nil && len(r) > 2 {
 			resources = append(resources, r)
 		}
 	}
@@ -171,6 +171,32 @@ func flattenObservationEntries(entries []cdadocument.CDAEntry) []cdadocument.CDA
 }
 
 func buildObservationResource(idx int, entry cdadocument.CDAEntry, patientRef string, category string) map[string]interface{} {
+	// C-CDA shell entries: outer observation has a nullFlavor code and nullFlavor/absent
+	// value. This pattern appears in SDOH assessments (e.g. AUDIT-C) where the actual
+	// Q&A pair lives in a COMP entryRelationship. Substitute the child observation's
+	// code, value, and effective time so the FHIR Observation carries clinical data.
+	if entry.Code.NullFlavor != "" && entry.Code.Code == "" {
+		for _, rel := range entry.EntryRelationships {
+			if rel.TypeCode != "COMP" {
+				continue
+			}
+			if rel.Entry.Code.Code != "" && rel.Entry.Code.NullFlavor == "" {
+				entry.Code = rel.Entry.Code
+				if entry.Value == nil || entry.Value.NullFlavor != "" {
+					entry.Value = rel.Entry.Value
+				}
+				if rel.Entry.EffectiveTime.Low.Value != "" || rel.Entry.EffectiveTime.Value.Value != "" {
+					entry.EffectiveTime = rel.Entry.EffectiveTime
+				}
+				break
+			}
+		}
+	}
+	// If no substitution resolved the code, skip — no useful clinical data to emit.
+	if entry.Code.NullFlavor != "" && entry.Code.Code == "" {
+		return nil
+	}
+
 	r := map[string]interface{}{
 		"resourceType": "Observation",
 		"id":           fmt.Sprintf("observation-%d", idx),
@@ -212,25 +238,63 @@ func buildObservationResource(idx int, entry cdadocument.CDAEntry, patientRef st
 		setObservationValue(r, *entry.Value)
 	}
 
-	// Interpretation from entry relationships (typeCode=COMP with interpretation code)
-	for _, rel := range entry.EntryRelationships {
-		if rel.TypeCode != "COMP" {
-			continue
-		}
-		if rel.Entry.Value != nil && rel.Entry.Value.Code != nil {
-			if cc := transforms.CDACodeToCodeableConcept(*rel.Entry.Value.Code); cc != nil {
-				r["interpretation"] = []interface{}{cc}
+	// Interpretation from entry relationships (typeCode=COMP with interpretation code,
+	// when the COMP child has NOT already been used to substitute code/value above).
+	if _, alreadyHasValue := r["valueCodeableConcept"]; !alreadyHasValue {
+		for _, rel := range entry.EntryRelationships {
+			if rel.TypeCode != "COMP" {
+				continue
 			}
+			if rel.Entry.Value != nil && rel.Entry.Value.Code != nil {
+				if cc := transforms.CDACodeToCodeableConcept(*rel.Entry.Value.Code); cc != nil {
+					r["interpretation"] = []interface{}{cc}
+				}
+			}
+			break
 		}
-		break
+	}
+
+	// us-core-2: must have value[x], component, hasMember, or dataAbsentReason.
+	if !hasObservationValue(r) {
+		r["dataAbsentReason"] = dataAbsentReasonUnknown()
 	}
 
 	return r
 }
 
+// dataAbsentReasonUnknown returns a FHIR dataAbsentReason CC for "unknown".
+func dataAbsentReasonUnknown() map[string]interface{} {
+	return map[string]interface{}{
+		"coding": []interface{}{
+			map[string]interface{}{
+				"system":  "http://terminology.hl7.org/CodeSystem/data-absent-reason",
+				"code":    "unknown",
+				"display": "Unknown",
+			},
+		},
+	}
+}
+
+// hasObservationValue returns true when the observation resource already carries
+// a value[x], component, hasMember, or dataAbsentReason — used to decide whether
+// us-core-2's presence requirement is already satisfied.
+func hasObservationValue(r map[string]interface{}) bool {
+	for _, key := range []string{
+		"valueQuantity", "valueCodeableConcept", "valueString", "valueBoolean",
+		"valueInteger", "valueRange", "valueRatio", "valueSampledData", "valuePeriod",
+		"dataAbsentReason", "component", "hasMember",
+	} {
+		if _, ok := r[key]; ok {
+			return true
+		}
+	}
+	return false
+}
+
 // setObservationValue populates the correct FHIR value[x] key based on CDAValue type.
 func setObservationValue(r map[string]interface{}, v cdadocument.CDAValue) {
 	if v.NullFlavor != "" {
+		r["dataAbsentReason"] = dataAbsentReasonUnknown()
 		return
 	}
 	switch v.Type {
@@ -302,6 +366,12 @@ func observationCategoryDisplay(code string) string {
 		return "Social History"
 	case "functional-status":
 		return "Functional Status"
+	case "cognitive-status":
+		return "Cognitive Status"
+	case "disability-status":
+		return "Disability Status"
+	case "sdoh":
+		return "SDOH"
 	case "survey":
 		return "Survey"
 	case "exam":

@@ -72,6 +72,8 @@ func buildPractitionerResource(idx int, p cdadocument.CDAParticipant) map[string
 		if len(idents) > 0 {
 			r["identifier"] = idents
 		}
+		// CDA identity for assembly-layer deduplication.
+		embedCDAIds(r, p.ParticipantRole.Ids)
 	}
 
 	// Role code → qualification

@@ -96,6 +96,11 @@ func buildServiceRequestResource(idx int, entry cdadocument.CDAEntry, patientRef
 	}
 	if cc := transforms.CDACodeToCodeableConcept(entry.Code); cc != nil {
 		r["code"] = cc
+	} else {
+		// us-core-servicerequest requires code (1..1). When the CDA entry carries a
+		// nullFlavor code (EHR didn't provide a coded procedure), emit a text-only
+		// CodeableConcept so the resource is at least structurally valid.
+		r["code"] = map[string]interface{}{"text": "Unknown"}
 	}
 	if period := transforms.CDATimeRangeToPeriod(entry.EffectiveTime); period != nil {
 		r["occurrencePeriod"] = period

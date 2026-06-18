@@ -34,18 +34,30 @@ func buildConditionResource(idx int, entry cdadocument.CDAEntry, patientRef stri
 		r["subject"] = ref(patientRef)
 	}
 
-	// Find the problem observation via SUBJ entryRelationship
+	// Find the problem observation via SUBJ entryRelationship (standard problem list).
+	// Health concern sections use REFR instead — fall back to REFR when no SUBJ is found.
 	problemObs := findRelByTypeCode(entry.EntryRelationships, "SUBJ")
 	if problemObs == nil {
-		problemObs = &entry // flat structure
+		problemObs = findRelByTypeCode(entry.EntryRelationships, "REFR")
+	}
+	if problemObs == nil {
+		problemObs = &entry // flat structure (direct problem observation)
 	}
 
-	// Code from observation value (CD: ICD-10, SNOMED)
+	// Code: prefer observation value (CD: ICD-10/SNOMED for standard problem entries)
 	if problemObs.Value != nil {
 		if cc := transforms.CDAValueToFHIR(*problemObs.Value); cc != nil {
 			if ccMap, ok := cc.(map[string]interface{}); ok {
 				r["code"] = ccMap
 			}
+		}
+	}
+	// Fallback: use the observation's own code when the value yields nothing
+	// (health concern acts and REFR observations carry the condition concept as code,
+	// not value — e.g. PHQ-9 44261-6 or a problem coded at code rather than value).
+	if _, hasCode := r["code"]; !hasCode {
+		if cc := transforms.CDACodeToCodeableConcept(problemObs.Code); cc != nil {
+			r["code"] = cc
 		}
 	}
 

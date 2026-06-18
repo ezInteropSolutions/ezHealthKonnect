@@ -65,30 +65,34 @@ func (s *ObjectStorageService) Ping(ctx context.Context) error {
 }
 
 // ─── Key helpers ────────────────────────────────────────────────────────────
+//
+// Every key is date-partitioned using the caller-supplied timestamp t (not
+// time.Now() internally) so DeleteMessageObjects can reconstruct the exact key
+// an object was written under using the message's original received_at date —
+// reconstructing with "now" would silently miss every object older than today.
 
-func rawKey(interfaceID, messageID string) string {
-	t := time.Now().UTC()
+func rawKey(interfaceID, messageID string, t time.Time) string {
 	return fmt.Sprintf("%s/%04d/%02d/%02d/raw/%s.raw", interfaceID, t.Year(), t.Month(), t.Day(), messageID)
 }
 
-func parsedKey(interfaceID, messageID string) string {
-	t := time.Now().UTC()
+func parsedKey(interfaceID, messageID string, t time.Time) string {
 	return fmt.Sprintf("%s/%04d/%02d/%02d/parsed/%s.json", interfaceID, t.Year(), t.Month(), t.Day(), messageID)
 }
 
-func outboundKey(interfaceID, messageID, ext string) string {
-	t := time.Now().UTC()
+func outboundKey(interfaceID, messageID, ext string, t time.Time) string {
 	return fmt.Sprintf("%s/%04d/%02d/%02d/outbound/%s.%s", interfaceID, t.Year(), t.Month(), t.Day(), messageID, ext)
 }
 
-func transformedKey(interfaceID, messageID string) string {
-	t := time.Now().UTC()
+func transformedKey(interfaceID, messageID string, t time.Time) string {
 	return fmt.Sprintf("%s/%04d/%02d/%02d/transformed/%s.json", interfaceID, t.Year(), t.Month(), t.Day(), messageID)
 }
 
-func logKey(interfaceID, messageID string) string {
-	t := time.Now().UTC()
+func logKey(interfaceID, messageID string, t time.Time) string {
 	return fmt.Sprintf("%s/%04d/%02d/%02d/logs/%s.ndjson", interfaceID, t.Year(), t.Month(), t.Day(), messageID)
+}
+
+func mappingLogKey(interfaceID, messageID string, t time.Time) string {
+	return fmt.Sprintf("%s/%04d/%02d/%02d/mapping_log/%s.json", interfaceID, t.Year(), t.Month(), t.Day(), messageID)
 }
 
 // ParseKeyFromURI extracts bucket and key from a storage URI (s3://bucket/key or local://bucket/key).
@@ -120,7 +124,7 @@ func indexOf(s string, b byte) int {
 // StoreRawMessage saves the original bytes received from an inbound connector.
 // Returns the storage URI to persist in the database.
 func (s *ObjectStorageService) StoreRawMessage(ctx context.Context, interfaceID, messageID string, content []byte) (string, error) {
-	key := rawKey(interfaceID, messageID)
+	key := rawKey(interfaceID, messageID, time.Now().UTC())
 	uri, err := s.driver.PutObject(ctx, s.bucket, key, bytes.NewReader(content), int64(len(content)), "application/octet-stream")
 	if err != nil {
 		return "", fmt.Errorf("storage: store raw message %s: %w", messageID, err)
@@ -130,7 +134,7 @@ func (s *ObjectStorageService) StoreRawMessage(ctx context.Context, interfaceID,
 
 // GetRawMessage retrieves the original bytes for a message.
 func (s *ObjectStorageService) GetRawMessage(ctx context.Context, interfaceID, messageID string) ([]byte, error) {
-	key := rawKey(interfaceID, messageID)
+	key := rawKey(interfaceID, messageID, time.Now().UTC())
 	data, _, err := s.driver.GetObjectBytes(ctx, s.bucket, key)
 	if err != nil {
 		return nil, fmt.Errorf("storage: get raw message %s: %w", messageID, err)
@@ -156,7 +160,7 @@ func (s *ObjectStorageService) GetRawMessageByURI(ctx context.Context, uri strin
 // Returns the storage URI to persist in the database.
 func (s *ObjectStorageService) StoreOutboundPayload(ctx context.Context, interfaceID, messageID, content, contentType string) (string, error) {
 	ext := contentTypeToExt(contentType)
-	key := outboundKey(interfaceID, messageID, ext)
+	key := outboundKey(interfaceID, messageID, ext, time.Now().UTC())
 	data := []byte(content)
 	uri, err := s.driver.PutObject(ctx, s.bucket, key, bytes.NewReader(data), int64(len(data)), contentType)
 	if err != nil {
@@ -170,7 +174,7 @@ func (s *ObjectStorageService) StoreOutboundPayload(ctx context.Context, interfa
 func (s *ObjectStorageService) GetOutboundPayload(ctx context.Context, interfaceID, messageID string) (string, string, error) {
 	// Try each known extension in priority order
 	for _, ext := range []string{"json", "hl7", "xml", "csv", "txt"} {
-		key := outboundKey(interfaceID, messageID, ext)
+		key := outboundKey(interfaceID, messageID, ext, time.Now().UTC())
 		data, info, err := s.driver.GetObjectBytes(ctx, s.bucket, key)
 		if err == nil {
 			ct := extToContentType(ext)
@@ -224,7 +228,7 @@ func (s *ObjectStorageService) StoreParsedContent(ctx context.Context, interface
 	if err != nil {
 		return "", fmt.Errorf("storage: marshal parsed content for %s: %w", messageID, err)
 	}
-	key := parsedKey(interfaceID, messageID)
+	key := parsedKey(interfaceID, messageID, time.Now().UTC())
 	uri, err := s.driver.PutObject(ctx, s.bucket, key, bytes.NewReader(data), int64(len(data)), "application/json")
 	if err != nil {
 		return "", fmt.Errorf("storage: store parsed content %s: %w", messageID, err)
@@ -234,7 +238,7 @@ func (s *ObjectStorageService) StoreParsedContent(ctx context.Context, interface
 
 // GetParsedContent retrieves and unmarshals parsed content.
 func (s *ObjectStorageService) GetParsedContent(ctx context.Context, interfaceID, messageID string) (map[string]interface{}, error) {
-	key := parsedKey(interfaceID, messageID)
+	key := parsedKey(interfaceID, messageID, time.Now().UTC())
 	data, _, err := s.driver.GetObjectBytes(ctx, s.bucket, key)
 	if err != nil {
 		return nil, fmt.Errorf("storage: get parsed content %s: %w", messageID, err)
@@ -242,6 +246,25 @@ func (s *ObjectStorageService) GetParsedContent(ctx context.Context, interfaceID
 	var result map[string]interface{}
 	if err := json.Unmarshal(data, &result); err != nil {
 		return nil, fmt.Errorf("storage: unmarshal parsed content %s: %w", messageID, err)
+	}
+	return result, nil
+}
+
+// GetParsedContentByURI retrieves and unmarshals parsed content using a stored URI
+// (parsed_content_uri column) — works across day boundaries, unlike GetParsedContent's
+// date-reconstructed key.
+func (s *ObjectStorageService) GetParsedContentByURI(ctx context.Context, uri string) (map[string]interface{}, error) {
+	bucket, key, err := ParseKeyFromURI(uri)
+	if err != nil {
+		return nil, err
+	}
+	data, _, err := s.driver.GetObjectBytes(ctx, bucket, key)
+	if err != nil {
+		return nil, fmt.Errorf("storage: get parsed content by uri: %w", err)
+	}
+	var result map[string]interface{}
+	if err := json.Unmarshal(data, &result); err != nil {
+		return nil, fmt.Errorf("storage: unmarshal parsed content by uri: %w", err)
 	}
 	return result, nil
 }
@@ -255,7 +278,7 @@ func (s *ObjectStorageService) StoreTransformedContent(ctx context.Context, inte
 	if err != nil {
 		return "", fmt.Errorf("storage: marshal transformed content for %s: %w", messageID, err)
 	}
-	key := transformedKey(interfaceID, messageID)
+	key := transformedKey(interfaceID, messageID, time.Now().UTC())
 	uri, err := s.driver.PutObject(ctx, s.bucket, key, bytes.NewReader(data), int64(len(data)), "application/json")
 	if err != nil {
 		return "", fmt.Errorf("storage: store transformed content %s: %w", messageID, err)
@@ -265,7 +288,7 @@ func (s *ObjectStorageService) StoreTransformedContent(ctx context.Context, inte
 
 // GetTransformedContent retrieves and unmarshals transformed content.
 func (s *ObjectStorageService) GetTransformedContent(ctx context.Context, interfaceID, messageID string) (map[string]interface{}, error) {
-	key := transformedKey(interfaceID, messageID)
+	key := transformedKey(interfaceID, messageID, time.Now().UTC())
 	data, _, err := s.driver.GetObjectBytes(ctx, s.bucket, key)
 	if err != nil {
 		return nil, fmt.Errorf("storage: get transformed content %s: %w", messageID, err)
@@ -292,7 +315,7 @@ func (s *ObjectStorageService) AppendLog(ctx context.Context, interfaceID, messa
 	}
 	line = append(line, '\n')
 
-	key := logKey(interfaceID, messageID)
+	key := logKey(interfaceID, messageID, time.Now().UTC())
 	_, err = s.driver.AppendObject(ctx, s.bucket, key, line)
 	if err != nil {
 		return fmt.Errorf("storage: append log for %s: %w", messageID, err)
@@ -302,7 +325,7 @@ func (s *ObjectStorageService) AppendLog(ctx context.Context, interfaceID, messa
 
 // GetLogs retrieves all NDJSON log lines for a message and parses them.
 func (s *ObjectStorageService) GetLogs(ctx context.Context, interfaceID, messageID string) ([]LogEntry, error) {
-	key := logKey(interfaceID, messageID)
+	key := logKey(interfaceID, messageID, time.Now().UTC())
 	data, _, err := s.driver.GetObjectBytes(ctx, s.bucket, key)
 	if err != nil {
 		return nil, fmt.Errorf("storage: get logs for %s: %w", messageID, err)
@@ -343,19 +366,59 @@ func (s *ObjectStorageService) GetLogsByURI(ctx context.Context, uri string) ([]
 	return entries, nil
 }
 
+// ─── Mapping log storage ────────────────────────────────────────────────────
+
+// StoreMappingLog persists the CDA→FHIR MappingLog produced by document_mapper.go.
+// Keyed by the pipeline messageID (not the CDA document's own ID) so it can be
+// looked up the same way as raw/parsed/transformed content and NDJSON logs.
+// Returns the storage URI for diagnostics.
+func (s *ObjectStorageService) StoreMappingLog(ctx context.Context, interfaceID, messageID string, mappingLog interface{}) (string, error) {
+	data, err := json.Marshal(mappingLog)
+	if err != nil {
+		return "", fmt.Errorf("storage: marshal mapping log for %s: %w", messageID, err)
+	}
+	key := mappingLogKey(interfaceID, messageID, time.Now().UTC())
+	uri, err := s.driver.PutObject(ctx, s.bucket, key, bytes.NewReader(data), int64(len(data)), "application/json")
+	if err != nil {
+		return "", fmt.Errorf("storage: store mapping log %s: %w", messageID, err)
+	}
+	return uri, nil
+}
+
+// GetMappingLog retrieves and unmarshals the mapping log for a message.
+// Same-day-only lookup (key is reconstructed from the current date), matching
+// GetParsedContent/GetTransformedContent.
+func (s *ObjectStorageService) GetMappingLog(ctx context.Context, interfaceID, messageID string) (map[string]interface{}, error) {
+	key := mappingLogKey(interfaceID, messageID, time.Now().UTC())
+	data, _, err := s.driver.GetObjectBytes(ctx, s.bucket, key)
+	if err != nil {
+		return nil, fmt.Errorf("storage: get mapping log %s: %w", messageID, err)
+	}
+	var result map[string]interface{}
+	if err := json.Unmarshal(data, &result); err != nil {
+		return nil, fmt.Errorf("storage: unmarshal mapping log %s: %w", messageID, err)
+	}
+	return result, nil
+}
+
 // ─── Bulk delete ────────────────────────────────────────────────────────────
 
-// DeleteMessageObjects removes all objects associated with a message (raw, parsed, transformed, logs).
-func (s *ObjectStorageService) DeleteMessageObjects(ctx context.Context, interfaceID, messageID string) error {
+// DeleteMessageObjects removes all objects associated with a message (raw, parsed,
+// transformed, outbound, logs, mapping log). receivedAt must be the message's
+// original received_at timestamp — objects are date-partitioned by the date they
+// were written, so reconstructing keys from time.Now() would silently miss every
+// object older than today.
+func (s *ObjectStorageService) DeleteMessageObjects(ctx context.Context, interfaceID, messageID string, receivedAt time.Time) error {
 	keys := []string{
-		rawKey(interfaceID, messageID),
-		parsedKey(interfaceID, messageID),
-		transformedKey(interfaceID, messageID),
-		logKey(interfaceID, messageID),
+		rawKey(interfaceID, messageID, receivedAt),
+		parsedKey(interfaceID, messageID, receivedAt),
+		transformedKey(interfaceID, messageID, receivedAt),
+		logKey(interfaceID, messageID, receivedAt),
+		mappingLogKey(interfaceID, messageID, receivedAt),
 	}
 	// Outbound payload — try all known extensions
 	for _, ext := range []string{"json", "hl7", "xml", "csv", "txt"} {
-		keys = append(keys, outboundKey(interfaceID, messageID, ext))
+		keys = append(keys, outboundKey(interfaceID, messageID, ext, receivedAt))
 	}
 	for _, key := range keys {
 		if err := s.driver.DeleteObject(ctx, s.bucket, key); err != nil {

@@ -27,6 +27,8 @@ import (
 
 	cdaSchema "ezhealthkonnect/cda"
 	cdadocument "ezhealthkonnect/cda/document"
+	"ezhealthkonnect/services/cda_fhir/assembly"
+	mappinglog "ezhealthkonnect/services/cda_fhir/mapping_log"
 	cdaterminology "ezhealthkonnect/services/cda_terminology"
 	fhirnarrative "ezhealthkonnect/services/fhir_narrative"
 )
@@ -93,6 +95,10 @@ type CDAToFHIRConfig struct {
 	LogLevel              string   // "error" | "warning" | "info" (default) | "debug"
 	TerminologyValidation bool
 	MergeMode             string // "append" | "replace"
+
+	// Assembly controls the post-mapping assembly layer (deduplication, panel synthesis).
+	// Zero value = assembly enabled with all default rules active.
+	Assembly assembly.AssemblyConfig
 }
 
 // ProcessingResult is the structured outcome written to _stepOutput.processingResult.
@@ -117,10 +123,13 @@ type SectionError struct {
 	Severity   string `json:"severity"` // "error" | "warning"
 }
 
-// MapOutput is the combined return value of Map().
+// MapOutput is the combined return value of Map() and MapDocument().
 type MapOutput struct {
 	FHIRBundle       map[string]interface{}
 	ProcessingResult ProcessingResult
+	// MappingLog carries the per-document transformation trace.
+	// Summary is returned in HTTP responses; the full log is persisted async.
+	MappingLog mappinglog.MappingLog
 }
 
 // =========================================================

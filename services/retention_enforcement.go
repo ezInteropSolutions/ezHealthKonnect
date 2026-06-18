@@ -25,21 +25,26 @@ import (
 	"fmt"
 	"log"
 	"time"
+
+	"ezhealthkonnect/services/storage"
 )
 
 // RetentionEnforcementService enforces per-table data retention policies.
 type RetentionEnforcementService struct {
-	db       *sql.DB
-	interval time.Duration
+	db         *sql.DB
+	interval   time.Duration
+	objStorage *storage.ObjectStorageService // optional; nil = DB-only retention (no object storage cleanup)
 }
 
 // NewRetentionEnforcementService creates a service that runs every interval.
-// Pass 0 to use the default (1 hour).
-func NewRetentionEnforcementService(db *sql.DB, interval time.Duration) *RetentionEnforcementService {
+// Pass 0 to use the default (1 hour). objStorage may be nil — when set, object
+// storage artifacts (raw/parsed/transformed/logs/mapping_log) for purged messages
+// are deleted alongside the DB row so they don't accumulate indefinitely.
+func NewRetentionEnforcementService(db *sql.DB, interval time.Duration, objStorage *storage.ObjectStorageService) *RetentionEnforcementService {
 	if interval <= 0 {
 		interval = time.Hour
 	}
-	return &RetentionEnforcementService{db: db, interval: interval}
+	return &RetentionEnforcementService{db: db, interval: interval, objStorage: objStorage}
 }
 
 // Start launches the enforcement loop in a background goroutine. The loop
@@ -78,13 +83,14 @@ func (r *RetentionEnforcementService) enforce(ctx context.Context) {
 }
 
 // enforceMessageTables purges rows older than retentionDays from every
-// messages_intf_* table registered in interface_table_metadata.
+// messages_intf_* table registered in interface_table_metadata, deleting any
+// associated object storage artifacts first (best-effort).
 func (r *RetentionEnforcementService) enforceMessageTables(ctx context.Context, retentionDays int) {
 	if retentionDays <= 0 {
 		retentionDays = 90
 	}
 
-	rows, err := r.db.QueryContext(ctx, `SELECT table_name FROM interface_table_metadata`)
+	rows, err := r.db.QueryContext(ctx, `SELECT interface_id, table_name FROM interface_table_metadata`)
 	if err != nil {
 		log.Printf("⚠️  [Retention] Failed to list interface tables: %v", err)
 		return
@@ -92,25 +98,35 @@ func (r *RetentionEnforcementService) enforceMessageTables(ctx context.Context, 
 	defer rows.Close()
 
 	cutoff := fmt.Sprintf("%d days", retentionDays)
-	var tables []string
+	type tableInfo struct {
+		interfaceID string
+		tableName   string
+	}
+	var tables []tableInfo
 	for rows.Next() {
-		var t string
-		if rows.Scan(&t) == nil {
+		var t tableInfo
+		if rows.Scan(&t.interfaceID, &t.tableName) == nil {
 			tables = append(tables, t)
 		}
 	}
 
 	total := int64(0)
-	for _, table := range tables {
+	for _, t := range tables {
 		// Table name comes from our own metadata table — safe to interpolate.
 		// The table name format is always messages_intf_<uuid> (enforced by InterfaceTableManager).
-		q := fmt.Sprintf(
-			`DELETE FROM %s WHERE received_at < NOW() - $1::INTERVAL`,
-			sanitizeTableName(table),
-		)
+		safe := sanitizeTableName(t.tableName)
+		if safe == "" {
+			continue
+		}
+
+		if r.objStorage != nil {
+			r.deleteExpiredObjectStorage(ctx, t.interfaceID, safe, cutoff)
+		}
+
+		q := fmt.Sprintf(`DELETE FROM %s WHERE received_at < NOW() - $1::INTERVAL`, safe)
 		res, err := r.db.ExecContext(ctx, q, cutoff)
 		if err != nil {
-			log.Printf("⚠️  [Retention] Error purging %s: %v", table, err)
+			log.Printf("⚠️  [Retention] Error purging %s: %v", t.tableName, err)
 			continue
 		}
 		n, _ := res.RowsAffected()
@@ -120,6 +136,46 @@ func (r *RetentionEnforcementService) enforceMessageTables(ctx context.Context, 
 	if total > 0 {
 		log.Printf("🗑️  [Retention] Purged %d messages older than %d days from %d interface tables",
 			total, retentionDays, len(tables))
+	}
+}
+
+// deleteExpiredObjectStorage removes object storage artifacts (raw, parsed,
+// transformed, outbound, logs, mapping_log) for every row about to be purged
+// from tableName. Runs before the DB DELETE so message_id/received_at are still
+// available to reconstruct the date-partitioned storage keys. Best-effort —
+// failures are logged, not fatal, since the DB row purge proceeds regardless.
+func (r *RetentionEnforcementService) deleteExpiredObjectStorage(ctx context.Context, interfaceID, tableName, cutoff string) {
+	rows, err := r.db.QueryContext(ctx,
+		fmt.Sprintf(`SELECT message_id, received_at FROM %s WHERE received_at < NOW() - $1::INTERVAL`, tableName),
+		cutoff)
+	if err != nil {
+		log.Printf("⚠️  [Retention] Failed to list expired rows in %s for object storage cleanup: %v", tableName, err)
+		return
+	}
+	defer rows.Close()
+
+	type expiredRow struct {
+		messageID  string
+		receivedAt time.Time
+	}
+	var expired []expiredRow
+	for rows.Next() {
+		var row expiredRow
+		if rows.Scan(&row.messageID, &row.receivedAt) == nil {
+			expired = append(expired, row)
+		}
+	}
+
+	count := 0
+	for _, row := range expired {
+		if err := r.objStorage.DeleteMessageObjects(ctx, interfaceID, row.messageID, row.receivedAt); err != nil {
+			log.Printf("⚠️  [Retention] Failed to delete object storage for message %s: %v", row.messageID, err)
+			continue
+		}
+		count++
+	}
+	if count > 0 {
+		log.Printf("🗑️  [Retention] Deleted object storage artifacts for %d expired messages in %s", count, tableName)
 	}
 }
 

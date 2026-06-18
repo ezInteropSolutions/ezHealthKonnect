@@ -199,14 +199,16 @@ class FhirInterfaceHandler extends BaseInterfaceHandler {
     }
 
     /**
-     * Validate FHIR-specific configuration
-     * Updated for shared components field IDs
+     * Validate FHIR-specific configuration.
+     * Reads from this.interfaceData.targetConfig (the live config collected from
+     * ConnectorConfigBuilder for http_outbound/http_fhir_outbound) rather than DOM
+     * fields — the old shared-components edit form ('edittargetEndpoint' etc.) is
+     * no longer rendered by the Edit Interface modal.
      */
     validateConfiguration() {
         const errors = [];
-
-        // Shared components use 'edittargetEndpoint' for FHIR Base URL
-        const targetEndpoint = this.getFieldValue('edittargetEndpoint');
+        const targetConfig = this.interfaceData.targetConfig || {};
+        const targetEndpoint = targetConfig.endpoint;
 
         if (!targetEndpoint || !targetEndpoint.trim()) {
             errors.push('FHIR Base URL is required');
@@ -219,7 +221,7 @@ class FhirInterfaceHandler extends BaseInterfaceHandler {
         }
 
         // Optional: Validate delivery mode if present
-        const deliveryMode = this.getFieldValue('editfhirDeliveryMode');
+        const deliveryMode = targetConfig.deliveryMode;
         if (deliveryMode && !['immediate', 'batch', 'queued'].includes(deliveryMode)) {
             errors.push('Invalid delivery mode selected');
         }
@@ -266,12 +268,15 @@ class Hl7InterfaceHandler extends BaseInterfaceHandler {
         console.log('✅ HL7 Handler: Fields populated successfully');
     }
 
+    // Reads from this.interfaceData.targetConfig (live config from ConnectorConfigBuilder
+    // for tcp_mllp_outbound: host/port), not DOM fields (see FhirInterfaceHandler note above).
     validateConfiguration() {
         const errors = [];
-        const host = this.getFieldValue('editTargetHost');
-        const port = this.getFieldValue('editTargetPort');
+        const targetConfig = this.interfaceData.targetConfig || {};
+        const host = targetConfig.host;
+        const port = targetConfig.port;
 
-        if (!host.trim()) {
+        if (!host || !String(host).trim()) {
             errors.push('Target host is required for HL7 interfaces');
         }
 
@@ -326,17 +331,20 @@ class DatabaseInterfaceHandler extends BaseInterfaceHandler {
         console.log('✅ Database Handler: Fields populated successfully');
     }
 
+    // Reads from this.interfaceData.targetConfig (live config from ConnectorConfigBuilder
+    // for postgresql_outbound/mysql_outbound/etc.: host/database — see DatabaseOutboundConfig
+    // in services/connectors/database_base.go), not DOM fields (see FhirInterfaceHandler note above).
     validateConfiguration() {
         const errors = [];
-        const connectionString = this.getFieldValue('editDatabaseConnectionString');
-        const host = this.getFieldValue('editDatabaseHost');
-        const database = this.getFieldValue('editDatabaseName');
+        const targetConfig = this.interfaceData.targetConfig || {};
+        const host = targetConfig.host;
+        const database = targetConfig.database;
 
-        if (!connectionString.trim() && !host.trim()) {
-            errors.push('Either connection string or host is required for database interfaces');
+        if (!host || !String(host).trim()) {
+            errors.push('Target host is required for database interfaces');
         }
 
-        if (!database.trim()) {
+        if (!database || !String(database).trim()) {
             errors.push('Database name is required');
         }
 
@@ -383,11 +391,15 @@ class FileInterfaceHandler extends BaseInterfaceHandler {
         console.log('✅ File Handler: Fields populated successfully');
     }
 
+    // Reads from this.interfaceData.targetConfig (live config from ConnectorConfigBuilder
+    // for file_writer: directory_path/directoryPath — see services/connectors/file_writer.go),
+    // not DOM fields (see FhirInterfaceHandler note above).
     validateConfiguration() {
         const errors = [];
-        const outputDirectory = this.getFieldValue('editFileOutputDirectory');
+        const targetConfig = this.interfaceData.targetConfig || {};
+        const outputDirectory = targetConfig.directory_path || targetConfig.directoryPath;
 
-        if (!outputDirectory.trim()) {
+        if (!outputDirectory || !String(outputDirectory).trim()) {
             errors.push('Output directory is required for file interfaces');
         }
 

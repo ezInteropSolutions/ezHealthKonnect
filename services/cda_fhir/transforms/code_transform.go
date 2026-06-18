@@ -49,6 +49,21 @@ func normalizeSystem(raw string) string {
 	}
 }
 
+// terminologyValidatedSystems lists FHIR canonical system URIs whose display values
+// are verified by the FHIR validator against the official terminology server.
+// For these systems we omit the source CDA's displayName from codings — the source
+// may carry a short/alias form that differs from the canonical display and would
+// produce a hard validation error. The CodeableConcept.text field carries the
+// human-readable text instead (set in CDACodeToCodeableConcept).
+var terminologyValidatedSystems = map[string]bool{
+	"http://loinc.org":                     true,
+	"http://hl7.org/fhir/sid/icd-10-cm":   true,
+	"http://snomed.info/sct":               true,
+	"http://hl7.org/fhir/sid/cvx":         true,
+	"http://hl7.org/fhir/sid/ndc":         true,
+	"http://www.nlm.nih.gov/research/umls/rxnorm": true,
+}
+
 // CDACodeToCoding converts a typed CDACode to a FHIR Coding map.
 // Returns nil when the code carries no meaningful data.
 func CDACodeToCoding(code cdadocument.CDACode) map[string]interface{} {
@@ -56,13 +71,19 @@ func CDACodeToCoding(code cdadocument.CDACode) map[string]interface{} {
 		return nil
 	}
 	c := map[string]interface{}{}
+	sys := ""
 	if code.CodeSystem != "" {
-		c["system"] = normalizeSystem(code.CodeSystem)
+		sys = normalizeSystem(code.CodeSystem)
+		c["system"] = sys
 	}
 	if code.Code != "" {
 		c["code"] = code.Code
 	}
-	if code.DisplayName != "" {
+	// Omit display for standard systems whose canonical text is validated by the
+	// FHIR terminology server — the source CDA's displayName may be a short/alias
+	// form and would produce a hard "Wrong Display Name" validation error.
+	// display-only codings (no code) are kept so human-readable text is preserved.
+	if code.DisplayName != "" && (code.Code == "" || !terminologyValidatedSystems[sys]) {
 		c["display"] = code.DisplayName
 	}
 	if len(c) == 0 {

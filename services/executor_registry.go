@@ -20,6 +20,7 @@ import (
 	"ezhealthkonnect/services/executors/transform"
 	"ezhealthkonnect/services/executors/validation"
 	"ezhealthkonnect/services/hl7assembly"
+	"ezhealthkonnect/services/storage"
 )
 
 // StepExecutor interface - all executors must implement this
@@ -82,11 +83,30 @@ func (er *ExecutorRegistry) SetDLQService(dlqSvc *connectors.DLQService) {
 }
 
 // SetCDADocumentStore upgrades the cda.parse executor with a document store so that
-// every successfully parsed CDA document is persisted asynchronously.
+// every successfully parsed CDA document is persisted asynchronously. Also wires the
+// same store into cda.to_fhir so its auto-parse path (used when a pipeline has no
+// separate cda.parse step) persists its parsed content too — cda.to_fhir's Execute()
+// only actually saves when it took the auto-parse path, so this never double-saves
+// a document a cda.parse step already persisted.
 // Call this after NewExecutorRegistry once the CDADocumentStore is ready.
 func (er *ExecutorRegistry) SetCDADocumentStore(store cdastorage.CDADocumentStore) {
 	er.executors["cda.parse"] = transform.NewCDAParseExecutorWithStore(store)
 	log.Printf("📄 [CDA Storage] cda.parse executor upgraded with document storage")
+
+	if exec, ok := er.executors["cda.to_fhir"].(*transform.CDAToFHIRExecutor); ok {
+		exec.SetCDADocumentStore(store)
+		log.Printf("📄 [CDA Storage] cda.to_fhir executor upgraded with document storage (auto-parse persistence)")
+	}
+}
+
+// SetCDAToFHIRObjectStorage wires the ObjectStorageService into the cda.to_fhir executor
+// so that the MappingLog produced by each document conversion is persisted asynchronously.
+// Call this after NewExecutorRegistry once the ObjectStorageService is ready.
+func (er *ExecutorRegistry) SetCDAToFHIRObjectStorage(svc *storage.ObjectStorageService) {
+	if exec, ok := er.executors["cda.to_fhir"].(*transform.CDAToFHIRExecutor); ok {
+		exec.SetObjectStorageService(svc)
+		log.Printf("📋 [MappingLog] cda.to_fhir executor upgraded with object storage for mapping logs")
+	}
 }
 
 // autoRegisterExecutors registers all built-in executors (OOB pattern)

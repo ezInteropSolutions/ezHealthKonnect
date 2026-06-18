@@ -53,6 +53,51 @@ func AssembleEntries(resources []map[string]interface{}) []interface{} {
 	return entries
 }
 
+// AssembleEntriesWithRedirects is identical to AssembleEntries but pre-seeds the
+// shortToUUID lookup with dedup redirects produced by the assembly layer before
+// reference rewriting occurs. This collapses deduplication and reference rewriting
+// into a single O(n×depth) tree walk instead of two.
+//
+// dedupRedirects maps "ResourceType/dup-id" → "ResourceType/survivor-id". Resources
+// that were marked as duplicates should have been removed from the input slice before
+// this call; any that weren't will still have their outbound references rewritten to
+// the survivor.
+func AssembleEntriesWithRedirects(resources []map[string]interface{}, dedupRedirects map[string]string) []interface{} {
+	shortToUUID := make(map[string]string, len(resources)+len(dedupRedirects))
+	entries := make([]interface{}, len(resources))
+	built := make([]map[string]interface{}, len(resources))
+
+	for i, resource := range resources {
+		fullURL := "urn:uuid:" + uuid.New().String()
+		rt, _ := resource["resourceType"].(string)
+		id, _ := resource["id"].(string)
+		if rt != "" && id != "" {
+			shortToUUID[rt+"/"+id] = fullURL
+		}
+		built[i] = map[string]interface{}{
+			"fullUrl":  fullURL,
+			"resource": resource,
+		}
+	}
+
+	// Pre-seed dedup redirects: "ResourceType/dup-id" maps to the same urn:uuid
+	// as the survivor so that any reference to the duplicate resolves correctly.
+	for oldRef, newRef := range dedupRedirects {
+		if survivorUUID, ok := shortToUUID[newRef]; ok {
+			shortToUUID[oldRef] = survivorUUID
+		}
+	}
+
+	for i, entry := range built {
+		if res, ok := entry["resource"].(map[string]interface{}); ok {
+			RewriteReferences(res, shortToUUID)
+		}
+		entries[i] = entry
+	}
+
+	return entries
+}
+
 // RewriteReferences walks any FHIR resource map/slice and replaces "reference"
 // values of the form "ResourceType/id" with their urn:uuid: equivalents from the
 // lookup. Values not present in the lookup are left untouched. Safe to call on

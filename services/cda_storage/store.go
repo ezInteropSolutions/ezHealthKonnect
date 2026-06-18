@@ -70,6 +70,7 @@ type StoredDocument struct {
 // ListFilter supports pagination and field-based filtering for the list endpoint.
 type ListFilter struct {
 	InterfaceID string
+	MessageID   string
 	DateFrom    *time.Time
 	DateTo      *time.Time
 	Status      string

@@ -221,6 +221,11 @@ func main() {
 				processingEngine.SetCDADocumentStore(cdaDocumentStore)
 			}
 
+			// CDA→FHIR MAPPING LOGS: wire object storage so mapping logs are persisted asynchronously.
+			if objectStorageService != nil {
+				processingEngine.SetCDAToFHIRObjectStorage(objectStorageService)
+			}
+
 			// CODE TEMPLATES: wire the service into the pipeline executor
 			codeTemplateSvc = services.NewCodeTemplateService(db)
 			services.SeedSystemTemplates(db)
@@ -244,8 +249,10 @@ func main() {
 
 			// RETENTION ENFORCEMENT: mandatory HIPAA data retention — purges old messages,
 			// DLQ rows, quality scores, and pipeline history on a 1-hour schedule.
+			// Also purges object storage artifacts (raw/parsed/transformed/logs/mapping_log)
+			// for purged messages when objectStorageService is configured.
 			// Retention periods are configured in Admin > Settings > Message Queue.
-			retentionSvc := services.NewRetentionEnforcementService(db, 0)
+			retentionSvc := services.NewRetentionEnforcementService(db, 0, objectStorageService)
 			retentionSvc.Start(context.Background())
 
 			// Rebuild HL7→FHIR OOB templates for all IG-covered message types.
@@ -1701,7 +1708,7 @@ func main() {
 		log.Printf("✅ ZSegment Controller initialized (enterprise Z-segment mapping)")
 
 		// MESSAGE CONTENT CONTROLLER — raw content and processing logs from object storage
-		msgContentCtrl := controllers.NewMessageContentController(db, objectStorageService)
+		msgContentCtrl := controllers.NewMessageContentController(db, objectStorageService, cdaDocumentStore)
 		msgContentCtrl.RegisterRoutes(api)
 		log.Printf("✅ Message Content Controller initialized (driver=%s)", func() string {
 			if objectStorageService != nil {

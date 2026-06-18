@@ -329,6 +329,14 @@ func (pe *ProcessingEngine) SetCDADocumentStore(store cdastorage.CDADocumentStor
 	}
 }
 
+// SetCDAToFHIRObjectStorage wires the ObjectStorageService into the cda.to_fhir executor
+// so that MappingLog documents are persisted asynchronously after each CDA→FHIR conversion.
+func (pe *ProcessingEngine) SetCDAToFHIRObjectStorage(svc *storage.ObjectStorageService) {
+	if pe.transformationService != nil {
+		pe.transformationService.GetExecutorRegistry().SetCDAToFHIRObjectStorage(svc)
+	}
+}
+
 // GetPipelineRedriver returns the TransformationPipelineService as a PipelineRedriver
 // (connectors.PipelineRedriver, accessible without qualification due to the dot import).
 // Used by DLQService.StartPoller to redrive messages through the full pipeline path.

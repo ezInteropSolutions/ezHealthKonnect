@@ -21,7 +21,7 @@ import (
 func MapCareTeam(entries []cdadocument.CDAEntry, patientRef string) []map[string]interface{} {
 	var resources []map[string]interface{}
 	for _, entry := range entries {
-		practitioners, participants := buildCareTeamParticipants(entry.Participants)
+		practitioners, participants := buildCareTeamParticipants(entry.Participants, entry.Components)
 		resources = append(resources, practitioners...)
 
 		if ct := buildCareTeamResource(len(resources)+1, entry, participants, patientRef); ct != nil {
@@ -33,7 +33,27 @@ func MapCareTeam(entries []cdadocument.CDAEntry, patientRef string) []map[string
 
 // buildCareTeamParticipants builds one Practitioner per care team member
 // participant and the corresponding CareTeam.participant entries referencing them.
-func buildCareTeamParticipants(cdaParticipants []cdadocument.CDAParticipant) (practitioners []map[string]interface{}, ctParticipants []interface{}) {
+//
+// In C-CDA care team organizers the outer participant[PPRF] carries only the NPI
+// identifier; the person's full name (and specialty) is in the nested component
+// act's performer. We build a NPI → name map from the components to enrich the
+// Practitioner resources so they satisfy us-core-practitioner.name requirements.
+func buildCareTeamParticipants(cdaParticipants []cdadocument.CDAParticipant, components []cdadocument.CDAEntry) (practitioners []map[string]interface{}, ctParticipants []interface{}) {
+	// Build NPI → name lookup from component performers.
+	npiNames := map[string][]cdadocument.CDAName{}
+	for _, comp := range components {
+		for _, perf := range comp.Performers {
+			if perf.AssignedEntity.AssignedPerson == nil {
+				continue
+			}
+			for _, id := range perf.AssignedEntity.Ids {
+				if id.Root == "2.16.840.1.113883.4.6" && id.Extension != "" {
+					npiNames[id.Extension] = perf.AssignedEntity.AssignedPerson.Names
+				}
+			}
+		}
+	}
+
 	idx := 1
 	for _, p := range cdaParticipants {
 		if len(p.ParticipantRole.Ids) == 0 && p.ParticipantRole.PlayingEntity == nil {
@@ -44,6 +64,20 @@ func buildCareTeamParticipants(cdaParticipants []cdadocument.CDAParticipant) (pr
 		if len(pr) <= 2 {
 			continue
 		}
+
+		// Enrich Practitioner.name from the component performer lookup when the
+		// outer participant only carried the NPI (no name from buildPractitionerResource).
+		if _, hasName := pr["name"]; !hasName {
+			for _, id := range p.ParticipantRole.Ids {
+				if names, ok := npiNames[id.Extension]; ok && len(names) > 0 {
+					if hn := transforms.CDANameToFHIR(names[0]); hn != nil {
+						pr["name"] = []interface{}{hn}
+					}
+					break
+				}
+			}
+		}
+
 		practitioners = append(practitioners, pr)
 		idx++
 
