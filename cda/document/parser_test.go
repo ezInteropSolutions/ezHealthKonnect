@@ -631,3 +631,282 @@ func TestNormalizeTitleToKey_Empty(t *testing.T) {
 	_ = doc.ReadFromString(rawXML)
 	assert.Equal(t, "", normalizeTitleToKey(doc.Root()))
 }
+
+// ========================
+// Phase 1 fidelity gaps: negationInd, entry templateIds, multiple
+// effectiveTime elements, repeatNumber
+// ========================
+
+func TestNegationIndParsed(t *testing.T) {
+	p := newParser(t)
+	raw, root := loadXML(t, "negation_and_frequency.xml")
+	doc := p.ParseDocument(root, raw)
+
+	sec := doc.SectionsByKey["allergiesAndIntolerances"]
+	require.NotNil(t, sec)
+	require.NotEmpty(t, sec.Entries)
+
+	allergyAct := sec.Entries[0]
+	assert.False(t, allergyAct.NegationInd, "outer concern act is not itself negated")
+
+	require.NotEmpty(t, allergyAct.EntryRelationships)
+	subjRel := allergyAct.EntryRelationships[0]
+	assert.Equal(t, "SUBJ", subjRel.TypeCode)
+	obs := subjRel.Entry
+	assert.True(t, obs.NegationInd,
+		"nested assertion observation has negationInd=true (no known allergies)")
+}
+
+func TestEntryTemplateIdsParsed(t *testing.T) {
+	p := newParser(t)
+	raw, root := loadXML(t, "negation_and_frequency.xml")
+	doc := p.ParseDocument(root, raw)
+
+	sec := doc.SectionsByKey["allergiesAndIntolerances"]
+	require.NotNil(t, sec)
+	require.NotEmpty(t, sec.Entries)
+
+	allergyAct := sec.Entries[0]
+	assert.Contains(t, allergyAct.TemplateIds, "2.16.840.1.113883.10.20.22.4.30")
+
+	obs := allergyAct.EntryRelationships[0].Entry
+	assert.Contains(t, obs.TemplateIds, "2.16.840.1.113883.10.20.22.4.7")
+	assert.Contains(t, obs.TemplateIds, "2.16.840.1.113883.10.20.24.3.90")
+}
+
+func TestMultipleEffectiveTimesParsed(t *testing.T) {
+	p := newParser(t)
+	raw, root := loadXML(t, "negation_and_frequency.xml")
+	doc := p.ParseDocument(root, raw)
+
+	sec := doc.SectionsByKey["medications"]
+	require.NotNil(t, sec)
+	require.NotEmpty(t, sec.Entries)
+
+	med := sec.Entries[0]
+	assert.Equal(t, "substanceAdministration", med.EntryType)
+	require.Len(t, med.EffectiveTimes, 2,
+		"both the duration and frequency effectiveTime elements should be captured")
+
+	duration := med.EffectiveTimes[0]
+	assert.Equal(t, "IVL_TS", duration.XSIType)
+	assert.Equal(t, "20240101", duration.Range.Low.Value)
+
+	frequency := med.EffectiveTimes[1]
+	assert.Equal(t, "PIVL_TS", frequency.XSIType)
+	require.NotNil(t, frequency.Period, "PIVL_TS period (the actual frequency interval) should be captured")
+	assert.Equal(t, "12", frequency.Period.Value)
+	assert.Equal(t, "h", frequency.Period.Unit)
+
+	// Backward compatibility: the singular EffectiveTime field still mirrors
+	// the first (duration) entry, unchanged for existing callers.
+	assert.Equal(t, "20240101", med.EffectiveTime.Low.Value)
+}
+
+func TestRepeatNumberParsed(t *testing.T) {
+	p := newParser(t)
+	raw, root := loadXML(t, "negation_and_frequency.xml")
+	doc := p.ParseDocument(root, raw)
+
+	sec := doc.SectionsByKey["medications"]
+	require.NotNil(t, sec)
+	require.NotEmpty(t, sec.Entries)
+
+	med := sec.Entries[0]
+	assert.Equal(t, "2", med.RepeatNumber)
+}
+
+// ========================
+// Real-world fidelity gaps found by diffing ParsedJSON against a live Epic
+// CCD export: nullFlavor on <id>/<doseQuantity>, repeatNumber with no value
+// attribute, and a <supply> entryRelationship's own quantity/product.
+// ========================
+
+func TestDoseQuantityNullFlavorParsed(t *testing.T) {
+	p := newParser(t)
+	raw, root := loadXML(t, "supply_and_nullflavors.xml")
+	doc := p.ParseDocument(root, raw)
+
+	sec := doc.SectionsByKey["medications"]
+	require.NotNil(t, sec)
+	require.NotEmpty(t, sec.Entries)
+
+	med := sec.Entries[0]
+	require.NotNil(t, med.DoseQuantity)
+	assert.Equal(t, "UNK", med.DoseQuantity.NullFlavor,
+		"doseQuantity nullFlavor must survive even though value/unit are absent")
+}
+
+func TestAuthorIdNullFlavorParsed(t *testing.T) {
+	p := newParser(t)
+	raw, root := loadXML(t, "supply_and_nullflavors.xml")
+	doc := p.ParseDocument(root, raw)
+
+	sec := doc.SectionsByKey["medications"]
+	require.NotNil(t, sec)
+	require.NotEmpty(t, sec.Entries)
+
+	med := sec.Entries[0]
+	require.NotEmpty(t, med.Authors)
+	require.NotEmpty(t, med.Authors[0].AssignedAuthor.Ids)
+	assert.Equal(t, "UNK", med.Authors[0].AssignedAuthor.Ids[0].NullFlavor,
+		"id nullFlavor must survive even when root/extension are absent")
+}
+
+func TestSupplyEntryRelationship_RepeatNumberQuantityAndProductParsed(t *testing.T) {
+	p := newParser(t)
+	raw, root := loadXML(t, "supply_and_nullflavors.xml")
+	doc := p.ParseDocument(root, raw)
+
+	sec := doc.SectionsByKey["medications"]
+	require.NotNil(t, sec)
+	require.NotEmpty(t, sec.Entries)
+
+	med := sec.Entries[0]
+	require.NotEmpty(t, med.EntryRelationships)
+	refr := med.EntryRelationships[0]
+	assert.Equal(t, "REFR", refr.TypeCode)
+	supply := refr.Entry
+	assert.Equal(t, "supply", supply.EntryType)
+
+	assert.Equal(t, "OTH", supply.RepeatNumber,
+		"repeatNumber with no value attribute should fall back to nullFlavor, not be dropped")
+
+	require.NotNil(t, supply.Quantity, "supply's own <quantity> (dispensed amount) must be captured")
+	assert.Equal(t, "15", supply.Quantity.Value)
+	assert.Equal(t, "g", supply.Quantity.Unit)
+
+	require.NotNil(t, supply.Product, "supply's <product><manufacturedProduct> must be captured")
+	require.NotNil(t, supply.Product.ManufacturedMaterial)
+	assert.Equal(t, "1053697", supply.Product.ManufacturedMaterial.Code.Code)
+}
+
+// ========================
+// Entry-level <text> resolution (Medication Free Text Sig / Instruction (V2))
+// ========================
+
+func TestEntryTextResolved_MedicationFreeTextSig(t *testing.T) {
+	p := newParser(t)
+	raw, root := loadXML(t, "medication_sig_instruction.xml")
+	doc := p.ParseDocument(root, raw)
+
+	sec := doc.SectionsByKey["medications"]
+	require.NotNil(t, sec)
+	require.NotEmpty(t, sec.Entries)
+
+	med := sec.Entries[0]
+	require.NotEmpty(t, med.EntryRelationships)
+
+	var sigEntry *CDAEntry
+	for i := range med.EntryRelationships {
+		rel := med.EntryRelationships[i]
+		if rel.TypeCode == "COMP" {
+			sigEntry = &med.EntryRelationships[i].Entry
+		}
+	}
+	require.NotNil(t, sigEntry, "expected a COMP entryRelationship (Medication Free Text Sig)")
+	assert.Contains(t, sigEntry.TemplateIds, "2.16.840.1.113883.10.20.22.4.147")
+	assert.Equal(t, "Take one tablet by mouth every morning", sigEntry.Text,
+		"the '#sig1' reference anchor should resolve to the narrative text, not stay as a raw anchor")
+}
+
+func TestEntryTextResolved_InstructionV2(t *testing.T) {
+	p := newParser(t)
+	raw, root := loadXML(t, "medication_sig_instruction.xml")
+	doc := p.ParseDocument(root, raw)
+
+	sec := doc.SectionsByKey["medications"]
+	require.NotNil(t, sec)
+	require.NotEmpty(t, sec.Entries)
+
+	med := sec.Entries[0]
+
+	var instrEntry *CDAEntry
+	for i := range med.EntryRelationships {
+		rel := med.EntryRelationships[i]
+		if rel.TypeCode == "SUBJ" && rel.InversionInd {
+			instrEntry = &med.EntryRelationships[i].Entry
+		}
+	}
+	require.NotNil(t, instrEntry, "expected a SUBJ/inversionInd=true entryRelationship (Instruction (V2))")
+	assert.Contains(t, instrEntry.TemplateIds, "2.16.840.1.113883.10.20.22.4.20")
+	assert.Equal(t, "Take with food", instrEntry.Text,
+		"the '#instr1' reference anchor should resolve to the narrative text, not stay as a raw anchor")
+}
+
+// ========================
+// targetSiteCode: direct child of <procedure>, not a COMP entryRelationship.
+// Confirmed against the real practicefusion_sample.xml corpus shape (the
+// element sits alongside <code>/<statusCode>/<effectiveTime>, not nested).
+// ========================
+
+func TestTargetSiteCodeParsed_DirectChildOfProcedure(t *testing.T) {
+	raw := `<?xml version="1.0" encoding="UTF-8"?>
+<ClinicalDocument xmlns="urn:hl7-org:v3" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <id root="2.16.840.1.113883.19.5.99999.1" extension="TSC-TEST"/>
+  <effectiveTime value="20240101"/>
+  <confidentialityCode code="N" codeSystem="2.16.840.1.113883.5.25"/>
+  <recordTarget>
+    <patientRole>
+      <id root="2.16.840.1.113883.19" extension="TSC-PT"/>
+      <patient>
+        <name use="L"><given>Test</given><family>Patient</family></name>
+        <administrativeGenderCode nullFlavor="UNK"/>
+        <birthTime nullFlavor="UNK"/>
+      </patient>
+    </patientRole>
+  </recordTarget>
+  <component>
+    <structuredBody>
+      <component>
+        <section>
+          <templateId root="2.16.840.1.113883.10.20.22.2.7.1"/>
+          <code code="47519-4" codeSystem="2.16.840.1.113883.6.1"/>
+          <title>Procedures</title>
+          <entry>
+            <procedure classCode="PROC" moodCode="EVN">
+              <templateId root="2.16.840.1.113883.10.20.22.4.14"/>
+              <code code="44950" codeSystem="2.16.840.1.113883.6.12" displayName="Appendectomy"/>
+              <statusCode code="completed"/>
+              <effectiveTime value="20230615"/>
+              <targetSiteCode code="66754008" codeSystem="2.16.840.1.113883.6.96" displayName="Appendix structure"/>
+            </procedure>
+          </entry>
+        </section>
+      </component>
+    </structuredBody>
+  </component>
+</ClinicalDocument>`
+
+	doc := etree.NewDocument()
+	require.NoError(t, doc.ReadFromString(raw))
+
+	_, filename, _, _ := runtime.Caller(0)
+	root := filepath.Join(filepath.Dir(filename), "..", "..")
+	loader, err := cdaSchema.NewCDASchemaLoader(filepath.Join(root, "cda", "schemas"))
+	require.NoError(t, err)
+
+	p := NewCDAParser(loader)
+	cdaDoc := p.ParseDocument(doc.Root(), raw)
+
+	sec := cdaDoc.SectionsByKey["procedures"]
+	require.NotNil(t, sec)
+	require.NotEmpty(t, sec.Entries)
+
+	proc := sec.Entries[0]
+	assert.Equal(t, "procedure", proc.EntryType)
+	require.NotNil(t, proc.TargetSiteCode, "targetSiteCode must be parsed as a direct field, not require a COMP entryRelationship")
+	assert.Equal(t, "66754008", proc.TargetSiteCode.Code)
+	assert.Equal(t, "Appendix structure", proc.TargetSiteCode.DisplayName)
+	assert.Empty(t, proc.EntryRelationships, "this fixture has no entryRelationships at all -- targetSiteCode never lived there")
+}
+
+func TestTargetSiteCodeAbsent_ObservationVariant_NilNotPanic(t *testing.T) {
+	// Procedure Activity Observation (.4.13) uses an <observation> element,
+	// which has no targetSiteCode in the base CDA R2 schema -- this must
+	// stay nil, not be inferred from anywhere else.
+	entries := []CDAEntry{
+		{EntryType: "observation", StatusCode: "completed", Code: CDACode{Code: "44950"}},
+	}
+	assert.Nil(t, entries[0].TargetSiteCode)
+}

@@ -1,0 +1,138 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Minimal CCD fixture for Phase 1 fidelity tests.
+     Verifies: negationInd="true" on a nested allergy assertion observation,
+               entry-level templateId capture, multiple <effectiveTime>
+               elements (IVL_TS duration + PIVL_TS frequency) on a
+               substanceAdministration, and repeatNumber capture. -->
+<ClinicalDocument xmlns="urn:hl7-org:v3"
+                  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <realmCode code="US"/>
+  <typeId root="2.16.840.1.113883.1.3" extension="POCD_HD000040"/>
+  <templateId root="2.16.840.1.113883.10.20.22.1.1"/>
+  <templateId root="2.16.840.1.113883.10.20.22.1.2"/>
+  <id root="2.16.840.1.113883.19.5.99999.1" extension="NEGFREQ001"/>
+  <code code="34133-9" codeSystem="2.16.840.1.113883.6.1"
+        codeSystemName="LOINC" displayName="Summarization of Episode Note"/>
+  <title>Continuity of Care Document</title>
+  <effectiveTime value="20240101120000"/>
+  <confidentialityCode code="N" codeSystem="2.16.840.1.113883.5.25"/>
+  <recordTarget>
+    <patientRole>
+      <id root="2.16.840.1.113883.19.5.99999.2" extension="MRN-002"/>
+      <addr use="HP">
+        <streetAddressLine>200 Main Street</streetAddressLine>
+        <city>Portland</city>
+        <state>OR</state>
+        <postalCode>97201</postalCode>
+        <country>US</country>
+      </addr>
+      <telecom use="HP" value="tel:+1(503)555-0200"/>
+      <patient>
+        <name use="L">
+          <given>John</given>
+          <family>Roe</family>
+        </name>
+        <administrativeGenderCode code="M" codeSystem="2.16.840.1.113883.5.1"
+                                  displayName="Male"/>
+        <birthTime value="19750601"/>
+      </patient>
+    </patientRole>
+  </recordTarget>
+  <author>
+    <time value="20240101120000"/>
+    <assignedAuthor>
+      <id root="2.16.840.1.113883.4.6" extension="99999002"/>
+      <assignedPerson>
+        <name>
+          <given>Carol</given>
+          <family>Jones</family>
+        </name>
+      </assignedPerson>
+    </assignedAuthor>
+  </author>
+  <custodian>
+    <assignedCustodian>
+      <representedCustodianOrganization>
+        <id root="2.16.840.1.113883.19.5.9999.1"/>
+        <name>Community Health and Hospitals</name>
+      </representedCustodianOrganization>
+    </assignedCustodian>
+  </custodian>
+  <component>
+    <structuredBody>
+      <component>
+        <!-- Allergies section: negated "no known allergies" assertion. -->
+        <section>
+          <templateId root="2.16.840.1.113883.10.20.22.2.6.1"/>
+          <code code="48765-2" codeSystem="2.16.840.1.113883.6.1"
+                displayName="Allergies and Adverse Reactions"/>
+          <title>Allergies</title>
+          <text><list><item>No known active allergies</item></list></text>
+          <entry typeCode="DRIV">
+            <act classCode="ACT" moodCode="EVN">
+              <templateId root="2.16.840.1.113883.10.20.22.4.30"/>
+              <id root="36e3e930-7b14-11db-9fe1-0800200c9a66"/>
+              <code code="CONC" codeSystem="2.16.840.1.113883.5.6"
+                    displayName="Concern"/>
+              <statusCode code="active"/>
+              <effectiveTime>
+                <low value="20240101"/>
+              </effectiveTime>
+              <entryRelationship typeCode="SUBJ" inversionInd="false">
+                <observation classCode="OBS" moodCode="EVN" negationInd="true">
+                  <templateId root="2.16.840.1.113883.10.20.22.4.7"/>
+                  <templateId root="2.16.840.1.113883.10.20.24.3.90"/>
+                  <id root="4adc1020-7b14-11db-9fe1-0800200c9a66"/>
+                  <code code="ASSERTION" codeSystem="2.16.840.1.113883.5.4"/>
+                  <statusCode code="completed"/>
+                  <value xsi:type="CD" code="419199007"
+                         displayName="Allergy to substance (disorder)"
+                         codeSystem="2.16.840.1.113883.6.96"
+                         codeSystemName="SNOMED CT"/>
+                </observation>
+              </entryRelationship>
+            </act>
+          </entry>
+        </section>
+      </component>
+      <component>
+        <!-- Medications section: substanceAdministration with two
+             effectiveTime elements (duration + frequency) and repeatNumber. -->
+        <section>
+          <templateId root="2.16.840.1.113883.10.20.22.2.1.1"/>
+          <code code="10160-0" codeSystem="2.16.840.1.113883.6.1"
+                displayName="History of Medication use"/>
+          <title>Medications</title>
+          <text><list><item>Atenolol 25mg oral, twice daily</item></list></text>
+          <entry typeCode="DRIV">
+            <substanceAdministration classCode="SBADM" moodCode="EVN">
+              <templateId root="2.16.840.1.113883.10.20.22.4.16" extension="2014-06-09"/>
+              <id root="6c844c75-aa34-411c-b7bd-5e4a9f206e29"/>
+              <statusCode code="active"/>
+              <effectiveTime xsi:type="IVL_TS">
+                <low value="20240101"/>
+              </effectiveTime>
+              <effectiveTime xsi:type="PIVL_TS" institutionSpecified="true" operator="A">
+                <period value="12" unit="h"/>
+              </effectiveTime>
+              <repeatNumber value="2"/>
+              <routeCode code="C38288" codeSystem="2.16.840.1.113883.3.26.1.1"
+                         codeSystemName="NCI Thesaurus" displayName="ORAL"/>
+              <doseQuantity value="1"/>
+              <consumable>
+                <manufacturedProduct classCode="MANU">
+                  <templateId root="2.16.840.1.113883.10.20.22.4.23" extension="2014-06-09"/>
+                  <id root="2a620155-9d11-439e-92b3-5d9815ff4ee8"/>
+                  <manufacturedMaterial>
+                    <code code="197380" displayName="Atenolol 25 MG Oral Tablet"
+                          codeSystem="2.16.840.1.113883.6.88" codeSystemName="RxNorm"/>
+                  </manufacturedMaterial>
+                </manufacturedProduct>
+              </consumable>
+            </substanceAdministration>
+          </entry>
+        </section>
+      </component>
+    </structuredBody>
+  </component>
+</ClinicalDocument>

@@ -412,8 +412,10 @@ func TestParseErrorHandlingConfig_Defaults(t *testing.T) {
 	if result == nil {
 		t.Fatal("Expected non-nil config")
 	}
-	if result.OnError != "catch" {
-		t.Errorf("Expected OnError=catch, got %s", result.OnError)
+	// Default is "suppress" — "catch" was removed from the UI (P2) and is now
+	// only accepted as a legacy input alias (see normalization below).
+	if result.OnError != "suppress" {
+		t.Errorf("Expected OnError=suppress, got %s", result.OnError)
 	}
 }
 

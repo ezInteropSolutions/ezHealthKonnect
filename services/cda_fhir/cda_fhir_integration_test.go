@@ -83,7 +83,7 @@ func TestCDATransformRegistry_GenderToFHIR(t *testing.T) {
 	}
 	for _, tc := range cases {
 		entry := map[string]interface{}{"sex": tc.in}
-		got, err := reg.ApplyTransform("gender_to_fhir", entry, "sex", nil)
+		got, err := reg.ApplyTransform("cda_gender_to_fhir", entry, "sex", nil)
 		if err != nil {
 			t.Fatalf("gender_to_fhir(%q): unexpected error: %v", tc.in, err)
 		}
@@ -97,7 +97,7 @@ func TestCDATransformRegistry_ValueMapOverride(t *testing.T) {
 	reg := cdafhir.NewCDATransformRegistry()
 	entry := map[string]interface{}{"status": "active"}
 	vm := map[string]string{"active": "final", "completed": "final"}
-	got, err := reg.ApplyTransform("allergy_status_to_fhir", entry, "status", vm)
+	got, err := reg.ApplyTransform("cda_allergy_status_to_fhir", entry, "status", vm)
 	if err != nil {
 		t.Fatalf("allergy_status_to_fhir with valueMap: unexpected error: %v", err)
 	}
@@ -169,7 +169,10 @@ func TestUSCoreProfileBuilder_KnownResources(t *testing.T) {
 		{"AllergyIntolerance", "us-core-allergyintolerance"},
 		{"Condition", "us-core-condition"},
 		{"Observation", "us-core-observation"},
-		{"MedicationStatement", "us-core-medicationstatement"},
+		// MedicationStatement intentionally has no entry: US Core dropped that
+		// profile in 5.0+ in favor of MedicationRequest (see
+		// resourceTypeToProfile's comment in us_core_profile_builder.go).
+		{"MedicationRequest", "us-core-medicationrequest"},
 		{"Immunization", "us-core-immunization"},
 		{"Procedure", "us-core-procedure"},
 		{"Encounter", "us-core-encounter"},

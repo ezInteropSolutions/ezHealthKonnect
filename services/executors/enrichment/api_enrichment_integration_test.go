@@ -235,7 +235,7 @@ func TestAPIEnrichment_RealWorld_EMPI_Lookup(t *testing.T) {
 
 	step := &models.TransformationStep{
 		StepName: "EMPI Patient Lookup",
-		StepType: "pre.enrichment.api",
+		StepType: "enrichment.api",
 		Enabled:  true,
 		Config: map[string]interface{}{
 			"endpoint": mockEpicServer.URL + "/api/FHIR/R4/Patient/{patientId}",
@@ -383,7 +383,7 @@ func TestAPIEnrichment_AuthenticationFailure_GracefulFallback(t *testing.T) {
 
 	step := &models.TransformationStep{
 		StepName: "EMPI with Bad Token",
-		StepType: "pre.enrichment.api",
+		StepType: "enrichment.api",
 		Enabled:  true,
 		Config: map[string]interface{}{
 			"endpoint":    mockServer.URL + "/patients/12345",
@@ -401,9 +401,14 @@ func TestAPIEnrichment_AuthenticationFailure_GracefulFallback(t *testing.T) {
 
 	inputData := map[string]interface{}{}
 
+	// The executor always returns the underlying error (see its own comment:
+	// "Always return error — pipeline service decides retry/catch behavior").
+	// defaultValue populates fallback *data* in _stepOutput; it does not
+	// suppress the error itself — that's the pipeline-level errorHandling
+	// config's job.
 	output, err := executor.Execute(context.Background(), step, inputData)
-	if err != nil {
-		t.Fatalf("Expected graceful fallback, got error: %v", err)
+	if err == nil {
+		t.Fatal("Expected the 401 to be returned as an error")
 	}
 
 	// P7: default value is in _stepOutput["value"], not enriched.empi
@@ -414,7 +419,7 @@ func TestAPIEnrichment_AuthenticationFailure_GracefulFallback(t *testing.T) {
 		t.Errorf("Expected default value after auth failure, got %v", result)
 	}
 
-	t.Log("✅ Authentication failure handled gracefully with default value")
+	t.Log("✅ Authentication failure surfaced with fallback data populated")
 }
 
 // ===============================================================
@@ -448,7 +453,7 @@ func TestAPIEnrichment_NetworkTimeout_RetrySuccess(t *testing.T) {
 
 	step := &models.TransformationStep{
 		StepName: "Retry Test",
-		StepType: "pre.enrichment.api",
+		StepType: "enrichment.api",
 		Enabled:  true,
 		Config: map[string]interface{}{
 			"endpoint":     mockServer.URL + "/flaky",

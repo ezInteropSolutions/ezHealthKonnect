@@ -248,8 +248,11 @@ func TestUSCore_Patient_HasProfile(t *testing.T) {
 	assertProfileContains(t, "Patient", "us-core-patient")
 }
 
-func TestUSCore_MedicationStatement_HasProfile(t *testing.T) {
-	assertProfileContains(t, "MedicationStatement", "us-core-medicationstatement")
+// MedicationStatement intentionally has no US Core 6.1.0 profile — it was
+// dropped from US Core 5.0+ in favor of MedicationRequest (see
+// resourceTypeToProfile's comment in us_core_profile_builder.go).
+func TestUSCore_MedicationRequest_HasProfile(t *testing.T) {
+	assertProfileContains(t, "MedicationRequest", "us-core-medicationrequest")
 }
 
 func TestUSCore_Immunization_HasProfile(t *testing.T) {

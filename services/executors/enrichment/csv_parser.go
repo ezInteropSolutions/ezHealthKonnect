@@ -259,11 +259,14 @@ func ParseCSVFromReaderChunked(
 			continue
 		}
 
-		// Chunk boundary: collected MaxRecords rows.
-		// Peek at the next row to determine hasMore without consuming it for output.
+		// Chunk boundary: already collected MaxRecords rows. `row` (read at the
+		// top of this iteration) was read successfully, so its own existence
+		// is proof a next row exists — break without consuming or appending
+		// it, leaving it as the first row of the next chunk. (A prior version
+		// called reader.Read() again here to "peek", which silently discarded
+		// this row instead of leaving it pending — off-by-one in hasMore.)
 		if config.MaxRecords > 0 && len(records) >= config.MaxRecords {
-			_, peekErr := reader.Read()
-			hasMore = (peekErr == nil) // nil means another row exists
+			hasMore = true
 			break
 		}
 

@@ -62,3 +62,49 @@ func TestCDACodeToCoding_UnmappedOID_ProducesAbsoluteSystem(t *testing.T) {
 		t.Errorf("coding[system] = %q, want urn:oid: form (absolute URI)", system)
 	}
 }
+
+// ---- IIToIdentifier: malformed NPI id (root, no extension) must not fall back to
+// root-as-value -- confirmed against real-world PracticeFusion corpus data, where 3
+// authors carry exactly this shape. ----
+
+func TestIIToIdentifier_NPIRootWithNoExtension_ReturnsNil(t *testing.T) {
+	id := cdadocument.CDAII{Root: "2.16.840.1.113883.4.6"} // NPI system OID, no @extension
+	if got := IIToIdentifier(id); got != nil {
+		t.Errorf("IIToIdentifier(NPI root, no extension) = %v, want nil (root is the system OID, not an NPI value)", got)
+	}
+}
+
+func TestIIToIdentifier_SSNRootWithNoExtension_ReturnsNil(t *testing.T) {
+	id := cdadocument.CDAII{Root: "2.16.840.1.113883.4.1"} // SSN system OID, no @extension
+	if got := IIToIdentifier(id); got != nil {
+		t.Errorf("IIToIdentifier(SSN root, no extension) = %v, want nil", got)
+	}
+}
+
+func TestIIToIdentifier_NPIWithExtension_StillWorks(t *testing.T) {
+	id := cdadocument.CDAII{Root: "2.16.840.1.113883.4.6", Extension: "1234567890"}
+	got := IIToIdentifier(id)
+	if got == nil {
+		t.Fatal("IIToIdentifier(NPI root, real extension) returned nil, want a populated Identifier")
+	}
+	if got["value"] != "1234567890" {
+		t.Errorf("Identifier.value = %v, want the actual NPI digits", got["value"])
+	}
+	if got["system"] != "http://hl7.org/fhir/sid/us-npi" {
+		t.Errorf("Identifier.system = %v, want the NPI system URI", got["system"])
+	}
+}
+
+func TestIIToIdentifier_GenericFacilityOID_RootAsValueFallbackStillWorks(t *testing.T) {
+	// Generic/facility-specific OIDs have no fixed national meaning -- some
+	// real-world implementations legitimately encode the identifier value only
+	// in root. This fallback must remain for those, unlike the fixed-system case.
+	id := cdadocument.CDAII{Root: "2.16.840.1.113883.19.5.99999.1"}
+	got := IIToIdentifier(id)
+	if got == nil {
+		t.Fatal("IIToIdentifier(generic facility OID, no extension) returned nil, want root-as-value fallback")
+	}
+	if got["value"] != "2.16.840.1.113883.19.5.99999.1" {
+		t.Errorf("Identifier.value = %v, want root as the fallback value", got["value"])
+	}
+}

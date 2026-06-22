@@ -34,12 +34,18 @@ func buildDeviceUseResource(idx int, entry cdadocument.CDAEntry, patientRef stri
 		r["subject"] = ref(patientRef)
 	}
 
-	r["status"] = deviceStatus(entry.StatusCode)
+	r["status"] = transforms.DeviceUseStatementStatusToFHIR(entry.StatusCode)
 
-	// Device code from CSM participant playingDevice or direct entry code
+	// Device code from PRD participant playingDevice or direct entry code.
+	// Non-Medicinal Supply Activity (.4.50) fixes the product-identifying
+	// participant's typeCode to "PRD" (CONF:1098-8754, verified against
+	// build.fhir.org/ig/HL7/CDA-ccda-2.2's definitions page 2026-06-22) --
+	// "DEV"/"CSM" (the prior check) match neither real value, so this path
+	// was dead code in every conformant document, always silently falling
+	// back to entry.Code instead.
 	deviceCode := entry.Code
 	for _, p := range entry.Participants {
-		if p.TypeCode == "DEV" || p.TypeCode == "CSM" {
+		if p.TypeCode == "PRD" {
 			if p.ParticipantRole.PlayingEntity != nil {
 				deviceCode = p.ParticipantRole.PlayingEntity.Code
 			}
@@ -58,15 +64,4 @@ func buildDeviceUseResource(idx int, entry cdadocument.CDAEntry, patientRef stri
 	}
 
 	return r
-}
-
-func deviceStatus(statusCode string) string {
-	switch statusCode {
-	case "active":
-		return "active"
-	case "completed":
-		return "completed"
-	default:
-		return "active"
-	}
 }

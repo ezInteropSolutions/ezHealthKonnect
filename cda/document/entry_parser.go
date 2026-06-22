@@ -59,10 +59,11 @@ func (ep *entryParser) extractAct(wrapper *etree.Element) (CDAEntry, bool) {
 // in the switch block.
 func (ep *entryParser) parseClinicalAct(el *etree.Element, entryType string) CDAEntry {
 	entry := CDAEntry{
-		EntryType:  entryType,
-		ClassCode:  el.SelectAttrValue("classCode", ""),
-		MoodCode:   el.SelectAttrValue("moodCode", ""),
-		NullFlavor: el.SelectAttrValue("nullFlavor", ""),
+		EntryType:   entryType,
+		ClassCode:   el.SelectAttrValue("classCode", ""),
+		MoodCode:    el.SelectAttrValue("moodCode", ""),
+		NullFlavor:  el.SelectAttrValue("nullFlavor", ""),
+		NegationInd: el.SelectAttrValue("negationInd", "false") == "true",
 	}
 
 	// ALL <id> elements — entries can carry multiple identifiers.
@@ -70,14 +71,44 @@ func (ep *entryParser) parseClinicalAct(el *etree.Element, entryType string) CDA
 		entry.Id = append(entry.Id, parseII(idEl))
 	}
 
+	// ALL <templateId> elements on this act itself (entry-level conformance,
+	// distinct from the enclosing section's templateIds).
+	for _, tidEl := range el.SelectElements("templateId") {
+		if root := tidEl.SelectAttrValue("root", ""); root != "" {
+			entry.TemplateIds = append(entry.TemplateIds, root)
+		}
+	}
+
 	if codeEl := el.SelectElement("code"); codeEl != nil {
 		entry.Code = parseCD(codeEl)
+	}
+	if textEl := el.SelectElement("text"); textEl != nil {
+		entry.Text = parseEntryText(textEl)
 	}
 	if scEl := el.SelectElement("statusCode"); scEl != nil {
 		entry.StatusCode = scEl.SelectAttrValue("code", "")
 	}
-	if etEl := el.SelectElement("effectiveTime"); etEl != nil {
-		entry.EffectiveTime = parseIVL_TS(etEl)
+	// ALL <effectiveTime> elements — substanceAdministration commonly carries
+	// two: an IVL_TS duration and a PIVL_TS/EIVL_TS dosing frequency.
+	for _, etEl := range el.SelectElements("effectiveTime") {
+		xsiType := etEl.SelectAttrValue("xsi:type", "")
+		if xsiType == "" {
+			xsiType = etEl.SelectAttrValue("type", "")
+		}
+		etEntry := CDAEffectiveTimeEntry{
+			XSIType: xsiType,
+			Range:   parseIVL_TS(etEl),
+		}
+		// PIVL_TS/EIVL_TS carry the dosing-frequency interval in <period>,
+		// not in low/high/value — parseIVL_TS doesn't read it.
+		if periodEl := etEl.SelectElement("period"); periodEl != nil {
+			period := parsePQ(periodEl)
+			etEntry.Period = &period
+		}
+		entry.EffectiveTimes = append(entry.EffectiveTimes, etEntry)
+	}
+	if len(entry.EffectiveTimes) > 0 {
+		entry.EffectiveTime = entry.EffectiveTimes[0].Range
 	}
 	if valEl := el.SelectElement("value"); valEl != nil {
 		entry.Value = parseValue(valEl)
@@ -94,6 +125,17 @@ func (ep *entryParser) parseClinicalAct(el *etree.Element, entryType string) CDA
 		entry.DoseQuantity = ep.parsePQField(el, "doseQuantity")
 		entry.RateQuantity = ep.parsePQField(el, "rateQuantity")
 		entry.Consumable = ep.parseConsumable(el)
+		entry.RepeatNumber = parseRepeatNumber(el)
+	case "procedure":
+		entry.TargetSiteCode = ep.parseTargetSiteCode(el)
+	case "supply":
+		// Medication Supply Order/Dispense (e.g. entryRelationship typeCode="REFR"
+		// off a substanceAdministration) — refill count, dispensed quantity, and
+		// the product being supplied (mirrors substanceAdministration's
+		// Consumable/DoseQuantity but under <quantity>/<product> instead).
+		entry.RepeatNumber = parseRepeatNumber(el)
+		entry.Quantity = ep.parsePQField(el, "quantity")
+		entry.Product = ep.parseProduct(el)
 	case "organizer":
 		entry.Components = ep.parseComponents(el)
 	}
@@ -262,6 +304,21 @@ func (ep *entryParser) parseRouteCode(el *etree.Element) *CDACode {
 	return nil
 }
 
+// ========================
+// procedure-specific fields
+// ========================
+
+// parseTargetSiteCode reads <targetSiteCode> — a direct child of <procedure>
+// in the base CDA R2 schema, not an entryRelationship. See the doc comment on
+// CDAEntry.TargetSiteCode for why this is procedure-only.
+func (ep *entryParser) parseTargetSiteCode(el *etree.Element) *CDACode {
+	if tsEl := el.SelectElement("targetSiteCode"); tsEl != nil {
+		c := parseCD(tsEl)
+		return &c
+	}
+	return nil
+}
+
 func (ep *entryParser) parsePQField(el *etree.Element, tag string) *CDAQuantity {
 	if pqEl := el.SelectElement(tag); pqEl != nil {
 		q := parsePQ(pqEl)
@@ -275,6 +332,25 @@ func (ep *entryParser) parseConsumable(el *etree.Element) *CDAConsumable {
 	if mpEl == nil {
 		return nil
 	}
+	mp := ep.parseManufacturedProduct(mpEl)
+	cons := CDAConsumable{ManufacturedProduct: mp}
+	return &cons
+}
+
+// parseProduct extracts <supply><product><manufacturedProduct> — the same
+// shape as substanceAdministration's <consumable><manufacturedProduct>, but
+// reached via a different wrapper element per the Medication Supply Order
+// template (C-CDA 2.1 §4.43).
+func (ep *entryParser) parseProduct(el *etree.Element) *CDAManufacturedProduct {
+	mpEl := nav(el, "product", "manufacturedProduct")
+	if mpEl == nil {
+		return nil
+	}
+	mp := ep.parseManufacturedProduct(mpEl)
+	return &mp
+}
+
+func (ep *entryParser) parseManufacturedProduct(mpEl *etree.Element) CDAManufacturedProduct {
 	mp := CDAManufacturedProduct{}
 	for _, idEl := range mpEl.SelectElements("id") {
 		mp.Ids = append(mp.Ids, parseII(idEl))
@@ -296,6 +372,20 @@ func (ep *entryParser) parseConsumable(el *etree.Element) *CDAConsumable {
 		org := parseOrganization(orgEl)
 		mp.ManufacturerOrganization = &org
 	}
-	cons := CDAConsumable{ManufacturedProduct: mp}
-	return &cons
+	return mp
+}
+
+// parseRepeatNumber reads <repeatNumber value="..."/> (refill/occurrence count)
+// or, when no value is present, its IVL_INT nullFlavor (e.g. nullFlavor="OTH"
+// when the count is genuinely not documented as a number) — same fallback
+// pattern as every other CDA datatype parser in this package.
+func parseRepeatNumber(el *etree.Element) string {
+	rnEl := el.SelectElement("repeatNumber")
+	if rnEl == nil {
+		return ""
+	}
+	if v := rnEl.SelectAttrValue("value", ""); v != "" {
+		return v
+	}
+	return rnEl.SelectAttrValue("nullFlavor", "")
 }

@@ -40,7 +40,7 @@ func TestAPIEnrichmentExecutor_BasicGET(t *testing.T) {
 	// Create test step configuration
 	step := &models.TransformationStep{
 		StepName: "Test API Enrichment",
-		StepType: "pre.enrichment.api",
+		StepType: "enrichment.api",
 		Enabled:  true,
 		Config: map[string]interface{}{
 			"endpoint":   mockServer.URL + "/patients/12345",
@@ -97,7 +97,7 @@ func TestAPIEnrichmentExecutor_FieldMapping(t *testing.T) {
 
 	step := &models.TransformationStep{
 		StepName: "Patient Lookup",
-		StepType: "pre.enrichment.api",
+		StepType: "enrichment.api",
 		Enabled:  true,
 		Config: map[string]interface{}{
 			"endpoint": mockServer.URL + "/patients/{patientId}",
@@ -156,7 +156,7 @@ func TestAPIEnrichmentExecutor_BasicAuth(t *testing.T) {
 
 	step := &models.TransformationStep{
 		StepName: "Authenticated API Call",
-		StepType: "pre.enrichment.api",
+		StepType: "enrichment.api",
 		Enabled:  true,
 		Config: map[string]interface{}{
 			"endpoint":   mockServer.URL + "/secure",
@@ -203,7 +203,7 @@ func TestAPIEnrichmentExecutor_BearerToken(t *testing.T) {
 
 	step := &models.TransformationStep{
 		StepName: "Bearer Token API",
-		StepType: "pre.enrichment.api",
+		StepType: "enrichment.api",
 		Enabled:  true,
 		Config: map[string]interface{}{
 			"endpoint":    mockServer.URL + "/api",
@@ -249,7 +249,7 @@ func TestAPIEnrichmentExecutor_RetryOnFailure(t *testing.T) {
 
 	step := &models.TransformationStep{
 		StepName: "Retry Test",
-		StepType: "pre.enrichment.api",
+		StepType: "enrichment.api",
 		Enabled:  true,
 		Config: map[string]interface{}{
 			"endpoint":      mockServer.URL + "/flaky",
@@ -290,7 +290,7 @@ func TestAPIEnrichmentExecutor_FailOnError(t *testing.T) {
 
 	step := &models.TransformationStep{
 		StepName: "Fail Test",
-		StepType: "pre.enrichment.api",
+		StepType: "enrichment.api",
 		Enabled:  true,
 		Config: map[string]interface{}{
 			"endpoint":    mockServer.URL + "/missing",
@@ -323,7 +323,7 @@ func TestAPIEnrichmentExecutor_DefaultValue(t *testing.T) {
 
 	step := &models.TransformationStep{
 		StepName: "Default Value Test",
-		StepType: "pre.enrichment.api",
+		StepType: "enrichment.api",
 		Enabled:  true,
 		Config: map[string]interface{}{
 			"endpoint":     mockServer.URL + "/missing",
@@ -336,9 +336,13 @@ func TestAPIEnrichmentExecutor_DefaultValue(t *testing.T) {
 
 	inputData := map[string]interface{}{}
 
+	// The executor always returns the underlying error (see its own comment:
+	// "Always return error — pipeline service decides retry/catch behavior").
+	// defaultValue's role is to populate fallback *data* in _stepOutput for a
+	// pipeline-level errorHandling config to use, not to suppress the error.
 	output, err := executor.Execute(context.Background(), step, inputData)
-	if err != nil {
-		t.Fatalf("Execute failed: %v", err)
+	if err == nil {
+		t.Fatal("Expected the 404 to be returned as an error")
 	}
 
 	// P7: default value is in _stepOutput["value"], not enriched.default
@@ -362,7 +366,7 @@ func TestAPIEnrichmentExecutor_Timeout(t *testing.T) {
 
 	step := &models.TransformationStep{
 		StepName: "Timeout Test",
-		StepType: "pre.enrichment.api",
+		StepType: "enrichment.api",
 		Enabled:  true,
 		Config: map[string]interface{}{
 			"endpoint":    mockServer.URL + "/slow",
@@ -400,7 +404,7 @@ func TestAPIEnrichmentExecutor_CustomHeaders(t *testing.T) {
 
 	step := &models.TransformationStep{
 		StepName: "Custom Headers Test",
-		StepType: "pre.enrichment.api",
+		StepType: "enrichment.api",
 		Enabled:  true,
 		Config: map[string]interface{}{
 			"endpoint": mockServer.URL + "/headers",
@@ -451,7 +455,7 @@ func TestAPIEnrichmentExecutor_POST_WithBody(t *testing.T) {
 
 	step := &models.TransformationStep{
 		StepName: "POST Test",
-		StepType: "pre.enrichment.api",
+		StepType: "enrichment.api",
 		Enabled:  true,
 		Config: map[string]interface{}{
 			"endpoint": mockServer.URL + "/search",
@@ -485,7 +489,7 @@ func TestAPIEnrichmentExecutor_ConfigValidation(t *testing.T) {
 	// Test missing endpoint
 	step := &models.TransformationStep{
 		StepName: "Invalid Config",
-		StepType: "pre.enrichment.api",
+		StepType: "enrichment.api",
 		Enabled:  true,
 		Config: map[string]interface{}{
 			"method": "GET",

@@ -26,9 +26,34 @@ const (
 	PathTypeHL7     FieldPathType = "hl7"     // e.g., PID.3, MSH.9.1
 	PathTypeFHIR    FieldPathType = "fhir"    // e.g., Patient.name[0].given
 	PathTypeCDA     FieldPathType = "cda"     // e.g., allergiesAndIntolerances.medicationAllergyCode
-	PathTypeJSON    FieldPathType = "json"    // e.g., data.patient.name
-	PathTypeUnknown FieldPathType = "unknown"
+	// PathTypeCDADocument addresses the full typed CDA tree exposed under
+	// ParsedJSON["document"] (see cda_parser_service.go) — e.g.
+	// "document.sectionsByKey.allergiesAndIntolerances.entries[0].negationInd".
+	// Unlike PathTypeCDA's fixed sectionKey.fieldKey short-path (limited to the
+	// curated USCDI field whitelist), this reaches any field the typed model
+	// captures: classCode, moodCode, negationInd, entryRelationship nesting, etc.
+	PathTypeCDADocument FieldPathType = "cda_document"
+	// PathTypeCDAXMLMirror addresses the generic, schema-agnostic XML->JSON
+	// mirror exposed under ParsedJSON["xml"] (see cda/document/generic_xml.go
+	// and cda_parser_service.go) — e.g. "xml.component.structuredBody...".
+	// Unlike PathTypeCDADocument's curated typed tree, this mirror has zero
+	// CDA/RIM knowledge and is guaranteed lossless, at the cost of a
+	// different attribute/repetition shape (see cda_path_resolver.go).
+	PathTypeCDAXMLMirror FieldPathType = "cda_xml_mirror"
+	PathTypeJSON         FieldPathType = "json" // e.g., data.patient.name
+	PathTypeUnknown      FieldPathType = "unknown"
 )
+
+// cdaDocumentPathPrefix is the path prefix routing to the full typed CDA tree
+// (see PathTypeCDADocument). Stripping this prefix leaves a plain dot/bracket/
+// wildcard/predicate path, resolved via cda_path_resolver.go's ResolveCDAPath.
+const cdaDocumentPathPrefix = "document."
+
+// cdaXMLMirrorPathPrefix is the path prefix routing to the generic XML->JSON
+// mirror (see PathTypeCDAXMLMirror). Stripping this prefix leaves the same
+// dot/bracket/wildcard/predicate grammar as cdaDocumentPathPrefix, resolved
+// against the mirror's "@attr"/auto-array-on-repeat shape instead.
+const cdaXMLMirrorPathPrefix = "xml."
 
 // cdaSectionKeys is the set of USCDI-keyed section names emitted by CDAParserService.
 // A dot-separated path whose first segment matches one of these is a CDA short path.
@@ -52,6 +77,12 @@ func DetectPathType(path string) FieldPathType {
 	if IsFHIRPath(path) {
 		return PathTypeFHIR
 	}
+	if IsCDADocumentPath(path) {
+		return PathTypeCDADocument
+	}
+	if IsCDAXMLMirrorPath(path) {
+		return PathTypeCDAXMLMirror
+	}
 	if IsCDAPath(path) {
 		return PathTypeCDA
 	}
@@ -68,6 +99,19 @@ func IsCDAPath(path string) bool {
 	}
 	_, ok := cdaSectionKeys[path[:dot]]
 	return ok
+}
+
+// IsCDADocumentPath returns true when the path addresses the full typed CDA
+// tree under ParsedJSON["document"] rather than the curated sections.* short-path.
+func IsCDADocumentPath(path string) bool {
+	return strings.HasPrefix(path, cdaDocumentPathPrefix)
+}
+
+// IsCDAXMLMirrorPath returns true when the path addresses the generic
+// XML->JSON mirror under ParsedJSON["xml"] rather than the typed
+// "document.*" tree or the curated "sections.*" short-path.
+func IsCDAXMLMirrorPath(path string) bool {
+	return strings.HasPrefix(path, cdaXMLMirrorPathPrefix)
 }
 
 // IsHL7FieldPath checks if path is HL7 field notation (e.g., PID.3, MSH.9.1)
@@ -144,11 +188,47 @@ func GetFieldValue(data map[string]interface{}, path string) interface{} {
 		return resolveHL7FieldValue(data, path)
 	case PathTypeFHIR:
 		return resolveFHIRFieldValue(data, path)
+	case PathTypeCDADocument:
+		return resolveCDADocumentFieldValue(data, path)
+	case PathTypeCDAXMLMirror:
+		return resolveCDAXMLMirrorFieldValue(data, path)
 	case PathTypeCDA:
 		return resolveCDAFieldValue(data, path)
 	default:
 		return resolveJSONPathValue(data, path)
 	}
+}
+
+// resolveCDADocumentFieldValue resolves a "document.*" path against
+// ParsedJSON["document"] (the full typed CDA tree, see cda_parser_service.go).
+// Once the "document." prefix is stripped, the remainder is walked via
+// cda_path_resolver.go's ResolveCDAPath, which understands plain/numeric-index
+// segments (pre-existing behaviour, unchanged) plus Phase 1's wildcard ("[*]")
+// and predicate ("[typeCode=X]") segments. Only handles the case where
+// "document" has already round-tripped through JSON (a map[string]interface{});
+// a live *cdadocument.CDADocument Go object (the in-process handoff used by the
+// cda.to_fhir step alone) is not addressable this way.
+func resolveCDADocumentFieldValue(data map[string]interface{}, path string) interface{} {
+	docMap, ok := data["document"].(map[string]interface{})
+	if !ok {
+		return nil
+	}
+	rest := strings.TrimPrefix(path, cdaDocumentPathPrefix)
+	return ResolveCDAPath(docMap, rest, false)
+}
+
+// resolveCDAXMLMirrorFieldValue resolves an "xml.*" path against
+// ParsedJSON["xml"] (the generic, schema-agnostic XML->JSON mirror — see
+// cda/document/generic_xml.go). Same grammar as resolveCDADocumentFieldValue,
+// resolved against the mirror's "@attr"/auto-array-on-repeat shape instead of
+// the typed tree's.
+func resolveCDAXMLMirrorFieldValue(data map[string]interface{}, path string) interface{} {
+	xmlMap, ok := data["xml"].(map[string]interface{})
+	if !ok {
+		return nil
+	}
+	rest := strings.TrimPrefix(path, cdaXMLMirrorPathPrefix)
+	return ResolveCDAPath(xmlMap, rest, true)
 }
 
 // resolveCDAFieldValue reads a USCDI short-path (sectionKey.fieldKey) from CDA
@@ -559,11 +639,32 @@ func UpdateFieldValue(data map[string]interface{}, path string, newValue interfa
 		return modifyHL7FieldValue(data, path, newValue)
 	case PathTypeFHIR:
 		return modifyFHIRFieldValue(data, path, newValue)
+	case PathTypeCDADocument:
+		return modifyCDADocumentFieldValue(data, path, newValue)
+	case PathTypeCDAXMLMirror:
+		// The generic XML->JSON mirror is documented as a read-only
+		// audit/fallback layer (see cda/document/generic_xml.go) — nothing in
+		// the pipeline writes through it, and wildcard/predicate paths are
+		// inherently ambiguous write targets (which of N matches?). Reject
+		// explicitly rather than silently no-oping via modifyJSONPathValue.
+		return false
 	case PathTypeCDA:
 		return modifyCDAFieldValue(data, path, newValue)
 	default:
 		return modifyJSONPathValue(data, path, newValue)
 	}
+}
+
+// modifyCDADocumentFieldValue is the setter counterpart of
+// resolveCDADocumentFieldValue — see that function for the prefix/JSON-path
+// reuse rationale and the live-Go-object limitation.
+func modifyCDADocumentFieldValue(data map[string]interface{}, path string, newValue interface{}) bool {
+	docMap, ok := data["document"].(map[string]interface{})
+	if !ok {
+		return false
+	}
+	rest := strings.TrimPrefix(path, cdaDocumentPathPrefix)
+	return modifyJSONPathValue(docMap, rest, newValue)
 }
 
 // modifyCDAFieldValue updates a field in the first entry of a CDA ParsedJSON section.

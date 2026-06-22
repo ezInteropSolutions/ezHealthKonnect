@@ -170,7 +170,9 @@ func TestMapMedications_OrderIntent_RequesterFallback_NeverEmpty(t *testing.T) {
 
 func TestMapAllergies_NoKnownAllergies_CodeFallsBackToAssertionValue(t *testing.T) {
 	// Mirrors the real-world "No Known Allergies" idiom: the SUBJ-related
-	// observation has no CSM substance participant, only its own assertion value.
+	// observation has no CSM substance participant, only its own assertion
+	// value, and is negated (negationInd="true" — this is an assertion of
+	// absence, not a confirmed allergy).
 	entries := []cdadocument.CDAEntry{
 		{
 			EntryType:  "act",
@@ -179,8 +181,9 @@ func TestMapAllergies_NoKnownAllergies_CodeFallsBackToAssertionValue(t *testing.
 				{
 					TypeCode: "SUBJ",
 					Entry: cdadocument.CDAEntry{
-						EntryType:  "observation",
-						StatusCode: "completed",
+						EntryType:   "observation",
+						StatusCode:  "completed",
+						NegationInd: true,
 						Value: &cdadocument.CDAValue{
 							Type: "CD",
 							Code: &cdadocument.CDACode{
@@ -200,6 +203,292 @@ func TestMapAllergies_NoKnownAllergies_CodeFallsBackToAssertionValue(t *testing.
 	}
 	if _, hasCode := resources[0]["code"]; !hasCode {
 		t.Error("AllergyIntolerance.code must be set (minimum required = 1) even with no CSM substance participant")
+	}
+	verification, _ := resources[0]["verificationStatus"].(map[string]interface{})
+	coding, _ := verification["coding"].([]interface{})
+	if len(coding) != 1 {
+		t.Fatalf("expected exactly one verificationStatus coding, got %d", len(coding))
+	}
+	if got := coding[0].(map[string]interface{})["code"]; got != "refuted" {
+		t.Errorf("verificationStatus.code = %v, want %q for a negated assertion", got, "refuted")
+	}
+}
+
+func TestMapAllergies_NotNegated_VerificationStatusConfirmed(t *testing.T) {
+	entries := []cdadocument.CDAEntry{
+		{
+			EntryType:  "act",
+			StatusCode: "active",
+			EntryRelationships: []cdadocument.CDAEntryRelationship{
+				{
+					TypeCode: "SUBJ",
+					Entry: cdadocument.CDAEntry{
+						EntryType:  "observation",
+						StatusCode: "completed",
+						Participants: []cdadocument.CDAParticipant{
+							{
+								TypeCode: "CSM",
+								ParticipantRole: cdadocument.CDAParticipantRole{
+									PlayingEntity: &cdadocument.CDAPlayingEntity{
+										Code: cdadocument.CDACode{Code: "7980", DisplayName: "Penicillin", CodeSystem: "2.16.840.1.113883.6.88"},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	resources := MapAllergies(entries, testPatientRef)
+	if len(resources) != 1 {
+		t.Fatalf("expected 1 AllergyIntolerance, got %d", len(resources))
+	}
+	verification, _ := resources[0]["verificationStatus"].(map[string]interface{})
+	coding, _ := verification["coding"].([]interface{})
+	if len(coding) != 1 || coding[0].(map[string]interface{})["code"] != "confirmed" {
+		t.Errorf("expected verificationStatus.code = confirmed for a non-negated allergy, got %v", coding)
+	}
+}
+
+// ---- Phase 2: Condition negation -> verificationStatus=refuted + severity ----
+
+func TestMapConditions_NegatedProblem_VerificationStatusRefuted(t *testing.T) {
+	entries := []cdadocument.CDAEntry{
+		{
+			EntryType:  "act",
+			StatusCode: "active",
+			EntryRelationships: []cdadocument.CDAEntryRelationship{
+				{
+					TypeCode: "SUBJ",
+					Entry: cdadocument.CDAEntry{
+						EntryType:   "observation",
+						StatusCode:  "completed",
+						NegationInd: true,
+						Value: &cdadocument.CDAValue{
+							Type: "CD",
+							Code: &cdadocument.CDACode{Code: "64572001", DisplayName: "No known problems", CodeSystem: "2.16.840.1.113883.6.96"},
+						},
+					},
+				},
+			},
+		},
+	}
+	resources := MapConditions(entries, testPatientRef, "problem-list-item")
+	if len(resources) != 1 {
+		t.Fatalf("expected 1 Condition, got %d", len(resources))
+	}
+	verification, _ := resources[0]["verificationStatus"].(map[string]interface{})
+	coding, _ := verification["coding"].([]interface{})
+	if len(coding) != 1 || coding[0].(map[string]interface{})["code"] != "refuted" {
+		t.Errorf("verificationStatus.code = %v, want refuted for a negated problem", coding)
+	}
+}
+
+func TestMapConditions_SeverityFromNestedSUBJObservation(t *testing.T) {
+	entries := []cdadocument.CDAEntry{
+		{
+			EntryType:  "act",
+			StatusCode: "active",
+			EntryRelationships: []cdadocument.CDAEntryRelationship{
+				{
+					TypeCode: "SUBJ",
+					Entry: cdadocument.CDAEntry{
+						EntryType:  "observation",
+						StatusCode: "active",
+						Value: &cdadocument.CDAValue{
+							Type: "CD",
+							Code: &cdadocument.CDACode{Code: "38341003", DisplayName: "Hypertension", CodeSystem: "2.16.840.1.113883.6.96"},
+						},
+						EntryRelationships: []cdadocument.CDAEntryRelationship{
+							{
+								TypeCode: "SUBJ",
+								Entry: cdadocument.CDAEntry{
+									EntryType: "observation",
+									Code:      cdadocument.CDACode{Code: "SEV"},
+									Value: &cdadocument.CDAValue{
+										Type: "CD",
+										Code: &cdadocument.CDACode{Code: "24484000", DisplayName: "Severe", CodeSystem: "2.16.840.1.113883.6.96"},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	resources := MapConditions(entries, testPatientRef, "problem-list-item")
+	if len(resources) != 1 {
+		t.Fatalf("expected 1 Condition, got %d", len(resources))
+	}
+	severity, ok := resources[0]["severity"].(map[string]interface{})
+	if !ok {
+		t.Fatal("expected Condition.severity to be set from the nested SEV observation")
+	}
+	coding, _ := severity["coding"].([]interface{})
+	if len(coding) != 1 || coding[0].(map[string]interface{})["code"] != "24484000" {
+		t.Errorf("severity coding = %v, want SNOMED 24484000 (Severe)", coding)
+	}
+}
+
+// ---- Condition.category: problems vs healthConcerns (US Core requires different
+// categories per section -- both previously got "problem-list-item" unconditionally) ----
+
+func TestMapConditions_ProblemListItem_UsesBaseCodeSystem(t *testing.T) {
+	entries := []cdadocument.CDAEntry{
+		{EntryType: "act", StatusCode: "active", Value: &cdadocument.CDAValue{Type: "CD", Code: &cdadocument.CDACode{Code: "38341003"}}},
+	}
+	resources := MapConditions(entries, testPatientRef, "problem-list-item")
+	if len(resources) != 1 {
+		t.Fatalf("expected 1 Condition, got %d", len(resources))
+	}
+	cat := categoryCodingSystem(t, resources[0])
+	const baseConditionCategorySystem = "http://terminology.hl7.org/CodeSystem/condition-category"
+	if cat != baseConditionCategorySystem {
+		t.Errorf("category coding system = %q, want %q for problem-list-item", cat, baseConditionCategorySystem)
+	}
+	coding, _ := resources[0]["category"].([]interface{})[0].(map[string]interface{})["coding"].([]interface{})
+	if coding[0].(map[string]interface{})["code"] != "problem-list-item" {
+		t.Errorf("category coding code = %v, want problem-list-item", coding[0])
+	}
+}
+
+func TestMapConditions_HealthConcern_UsesUSCoreCodeSystemAndCode(t *testing.T) {
+	// Regression guard for the latent bug found in Phase 0: MapConditions is
+	// shared by the "problems" and "healthConcerns" dispatch table entries
+	// (document_mapper.go), but used to hardcode category="problem-list-item"
+	// unconditionally -- a Health Concern entry would have been misclassified.
+	// Per the published US Core "US Core Problem or Health Concern" value set,
+	// "health-concern" lives in a DIFFERENT CodeSystem from "problem-list-item",
+	// not just a different code in the same one.
+	entries := []cdadocument.CDAEntry{
+		{EntryType: "act", StatusCode: "active", Value: &cdadocument.CDAValue{Type: "CD", Code: &cdadocument.CDACode{Code: "44261-6"}}},
+	}
+	resources := MapConditions(entries, testPatientRef, "health-concern")
+	if len(resources) != 1 {
+		t.Fatalf("expected 1 Condition, got %d", len(resources))
+	}
+	const usCoreConditionCategorySystem = "http://hl7.org/fhir/us/core/CodeSystem/condition-category"
+	cat := categoryCodingSystem(t, resources[0])
+	if cat != usCoreConditionCategorySystem {
+		t.Errorf("category coding system = %q, want %q for health-concern", cat, usCoreConditionCategorySystem)
+	}
+	coding, _ := resources[0]["category"].([]interface{})[0].(map[string]interface{})["coding"].([]interface{})
+	if coding[0].(map[string]interface{})["code"] != "health-concern" {
+		t.Errorf("category coding code = %v, want health-concern", coding[0])
+	}
+}
+
+// ---- Phase 2: Medication dosing frequency (PIVL_TS) + RSON indication ----
+
+func TestMapMedications_PIVLFrequency_SetsDosageTimingRepeat(t *testing.T) {
+	entries := []cdadocument.CDAEntry{
+		{
+			EntryType:  "substanceAdministration",
+			MoodCode:   "EVN",
+			StatusCode: "active",
+			RouteCode:  &cdadocument.CDACode{Code: "C38288", DisplayName: "ORAL"},
+			EffectiveTimes: []cdadocument.CDAEffectiveTimeEntry{
+				{XSIType: "IVL_TS", Range: cdadocument.CDATimeRange{Low: cdadocument.CDATime{Value: "20240101"}}},
+				{XSIType: "PIVL_TS", Period: &cdadocument.CDAQuantity{Value: "12", Unit: "h"}},
+			},
+		},
+	}
+	resources := MapMedications(entries, testPatientRef)
+	if len(resources) != 1 {
+		t.Fatalf("expected 1 MedicationStatement, got %d", len(resources))
+	}
+	dosages, _ := resources[0]["dosage"].([]interface{})
+	if len(dosages) != 1 {
+		t.Fatalf("expected 1 dosage entry, got %d", len(dosages))
+	}
+	dosage := dosages[0].(map[string]interface{})
+	timing, ok := dosage["timing"].(map[string]interface{})
+	if !ok {
+		t.Fatal("expected dosage.timing to be set from the PIVL_TS effectiveTime")
+	}
+	repeat := timing["repeat"].(map[string]interface{})
+	if repeat["period"] != "12" || repeat["periodUnit"] != "h" {
+		t.Errorf("repeat = %v, want period=12 periodUnit=h", repeat)
+	}
+}
+
+func TestMapMedications_RSONIndication_SetsReasonCode(t *testing.T) {
+	entries := []cdadocument.CDAEntry{
+		{
+			EntryType:  "substanceAdministration",
+			MoodCode:   "EVN",
+			StatusCode: "active",
+			EntryRelationships: []cdadocument.CDAEntryRelationship{
+				{
+					TypeCode: "RSON",
+					Entry: cdadocument.CDAEntry{
+						EntryType: "observation",
+						Value: &cdadocument.CDAValue{
+							Type: "CD",
+							Code: &cdadocument.CDACode{Code: "38341003", DisplayName: "Hypertension", CodeSystem: "2.16.840.1.113883.6.96"},
+						},
+					},
+				},
+			},
+		},
+	}
+	resources := MapMedications(entries, testPatientRef)
+	if len(resources) != 1 {
+		t.Fatalf("expected 1 MedicationStatement, got %d", len(resources))
+	}
+	reasons, ok := resources[0]["reasonCode"].([]interface{})
+	if !ok || len(reasons) != 1 {
+		t.Fatalf("expected 1 reasonCode from the RSON indication, got %v", resources[0]["reasonCode"])
+	}
+	coding, _ := reasons[0].(map[string]interface{})["coding"].([]interface{})
+	if len(coding) != 1 || coding[0].(map[string]interface{})["code"] != "38341003" {
+		t.Errorf("reasonCode coding = %v, want SNOMED 38341003 (Hypertension)", coding)
+	}
+}
+
+func TestMapMedications_FreeTextSigAndInstructionV2_SetDosageTextFields(t *testing.T) {
+	entries := []cdadocument.CDAEntry{
+		{
+			EntryType:  "substanceAdministration",
+			MoodCode:   "INT",
+			StatusCode: "active",
+			EntryRelationships: []cdadocument.CDAEntryRelationship{
+				{
+					TypeCode: "COMP",
+					Entry: cdadocument.CDAEntry{
+						EntryType:   "substanceAdministration",
+						TemplateIds: []string{"2.16.840.1.113883.10.20.22.4.147"},
+						Text:        "Take one tablet by mouth every morning",
+					},
+				},
+				{
+					TypeCode:     "SUBJ",
+					InversionInd: true,
+					Entry: cdadocument.CDAEntry{
+						EntryType:   "act",
+						TemplateIds: []string{"2.16.840.1.113883.10.20.22.4.20"},
+						Text:        "Take with food",
+					},
+				},
+			},
+		},
+	}
+	resources := MapMedications(entries, testPatientRef)
+	if len(resources) != 1 {
+		t.Fatalf("expected 1 MedicationRequest, got %d", len(resources))
+	}
+	dosages, _ := resources[0]["dosageInstruction"].([]interface{})
+	if len(dosages) != 1 {
+		t.Fatalf("expected 1 dosageInstruction entry, got %d", len(dosages))
+	}
+	dosage := dosages[0].(map[string]interface{})
+	if dosage["text"] != "Take one tablet by mouth every morning" {
+		t.Errorf("dosage.text = %v, want Medication Free Text Sig content", dosage["text"])
+	}
+	if dosage["patientInstruction"] != "Take with food" {
+		t.Errorf("dosage.patientInstruction = %v, want Instruction (V2) content", dosage["patientInstruction"])
 	}
 }
 
@@ -413,5 +702,248 @@ func TestMapCustodian_SetsActiveTrue(t *testing.T) {
 	}
 	if active, _ := org["active"].(bool); !active {
 		t.Error("Organization.active must be true (required by us-core-organization)")
+	}
+}
+
+// ---- Immunization negationInd -> status="not-done" + statusReason (CONF:1198-8985) ----
+
+func TestMapImmunizations_NotNegated_StatusCompleted(t *testing.T) {
+	entries := []cdadocument.CDAEntry{
+		{
+			EntryType:  "substanceAdministration",
+			StatusCode: "completed",
+			Consumable: &cdadocument.CDAConsumable{
+				ManufacturedProduct: cdadocument.CDAManufacturedProduct{
+					ManufacturedMaterial: &cdadocument.CDAMaterial{Code: cdadocument.CDACode{Code: "33", DisplayName: "Pneumococcal (PCV, PPSV)", CodeSystem: "2.16.840.1.113883.12.292"}},
+				},
+			},
+		},
+	}
+	resources := MapImmunizations(entries, testPatientRef)
+	if len(resources) != 1 {
+		t.Fatalf("expected 1 Immunization, got %d", len(resources))
+	}
+	if resources[0]["status"] != "completed" {
+		t.Errorf("status = %v, want completed for a non-negated immunization", resources[0]["status"])
+	}
+	if _, has := resources[0]["statusReason"]; has {
+		t.Error("statusReason must not be set for a non-negated immunization")
+	}
+}
+
+func TestMapImmunizations_NegationInd_StatusNotDone(t *testing.T) {
+	// Mirrors the real Kareo corpus pattern: statusCode="completed" (the recording
+	// act completed normally) but negationInd="true" (the vaccine itself was refused).
+	// Before this fix, ImmunizationStatusToFHIR ignored NegationInd entirely and
+	// reported "completed" -- i.e. asserted a vaccine was given when it was refused.
+	entries := []cdadocument.CDAEntry{
+		{
+			EntryType:   "substanceAdministration",
+			StatusCode:  "completed",
+			NegationInd: true,
+			Consumable: &cdadocument.CDAConsumable{
+				ManufacturedProduct: cdadocument.CDAManufacturedProduct{
+					ManufacturedMaterial: &cdadocument.CDAMaterial{Code: cdadocument.CDACode{Code: "33", DisplayName: "Pneumococcal (PCV, PPSV)", CodeSystem: "2.16.840.1.113883.12.292"}},
+				},
+			},
+		},
+	}
+	resources := MapImmunizations(entries, testPatientRef)
+	if len(resources) != 1 {
+		t.Fatalf("expected 1 Immunization, got %d", len(resources))
+	}
+	if resources[0]["status"] != "not-done" {
+		t.Errorf("status = %v, want not-done for a negated (refused) immunization", resources[0]["status"])
+	}
+}
+
+func TestMapImmunizations_NegationIndWithRefusalReason_SetsStatusReason(t *testing.T) {
+	entries := []cdadocument.CDAEntry{
+		{
+			EntryType:   "substanceAdministration",
+			StatusCode:  "completed",
+			NegationInd: true,
+			Consumable: &cdadocument.CDAConsumable{
+				ManufacturedProduct: cdadocument.CDAManufacturedProduct{
+					ManufacturedMaterial: &cdadocument.CDAMaterial{Code: cdadocument.CDACode{Code: "33", DisplayName: "Pneumococcal (PCV, PPSV)", CodeSystem: "2.16.840.1.113883.12.292"}},
+				},
+			},
+			EntryRelationships: []cdadocument.CDAEntryRelationship{
+				{
+					TypeCode: "RSON",
+					Entry: cdadocument.CDAEntry{
+						EntryType: "observation",
+						Code: cdadocument.CDACode{
+							Code: "PATOBJ", DisplayName: "Patient objection", CodeSystem: "2.16.840.1.113883.5.8",
+						},
+					},
+				},
+			},
+		},
+	}
+	resources := MapImmunizations(entries, testPatientRef)
+	if len(resources) != 1 {
+		t.Fatalf("expected 1 Immunization, got %d", len(resources))
+	}
+	if resources[0]["status"] != "not-done" {
+		t.Errorf("status = %v, want not-done", resources[0]["status"])
+	}
+	reason, ok := resources[0]["statusReason"].(map[string]interface{})
+	if !ok {
+		t.Fatal("expected statusReason to be set from the RSON refusal-reason relationship")
+	}
+	coding, _ := reason["coding"].([]interface{})
+	if len(coding) != 1 || coding[0].(map[string]interface{})["code"] != "PATOBJ" {
+		t.Errorf("statusReason coding = %v, want PATOBJ (Patient objection)", coding)
+	}
+}
+
+func TestMapImmunizations_NotNegated_RSONIgnored(t *testing.T) {
+	// An RSON relationship without NegationInd is not a refusal reason in this
+	// template family -- statusReason should only ever be populated alongside
+	// status="not-done".
+	entries := []cdadocument.CDAEntry{
+		{
+			EntryType:  "substanceAdministration",
+			StatusCode: "completed",
+			Consumable: &cdadocument.CDAConsumable{
+				ManufacturedProduct: cdadocument.CDAManufacturedProduct{
+					ManufacturedMaterial: &cdadocument.CDAMaterial{Code: cdadocument.CDACode{Code: "33", DisplayName: "Pneumococcal (PCV, PPSV)", CodeSystem: "2.16.840.1.113883.12.292"}},
+				},
+			},
+			EntryRelationships: []cdadocument.CDAEntryRelationship{
+				{
+					TypeCode: "RSON",
+					Entry: cdadocument.CDAEntry{
+						EntryType: "observation",
+						Code:      cdadocument.CDACode{Code: "PATOBJ", DisplayName: "Patient objection", CodeSystem: "2.16.840.1.113883.5.8"},
+					},
+				},
+			},
+		},
+	}
+	resources := MapImmunizations(entries, testPatientRef)
+	if len(resources) != 1 {
+		t.Fatalf("expected 1 Immunization, got %d", len(resources))
+	}
+	if _, has := resources[0]["statusReason"]; has {
+		t.Error("statusReason must not be set when the immunization was not negated")
+	}
+}
+
+// ---- Immunization performer: <performer>, not <participant> ----
+
+func TestMapImmunizations_Performer_ReadFromPerformersNotParticipants(t *testing.T) {
+	// Regression: this loop used to read entry.Participants[typeCode=PRF],
+	// which a real C-CDA Immunization Activity's <performer typeCode="PRF">
+	// element never populates (entry_parser.go's parsePerformers parses
+	// <performer> into entry.Performers, a completely different field from
+	// <participant>/entry.Participants) -- so performer could never be set
+	// from real data. Fixed to read entry.Performers, the same field
+	// medication_mapper.go's requesterReference already reads correctly.
+	entries := []cdadocument.CDAEntry{
+		{
+			EntryType:  "substanceAdministration",
+			StatusCode: "completed",
+			Consumable: &cdadocument.CDAConsumable{
+				ManufacturedProduct: cdadocument.CDAManufacturedProduct{
+					ManufacturedMaterial: &cdadocument.CDAMaterial{Code: cdadocument.CDACode{Code: "33", CodeSystem: "2.16.840.1.113883.12.292"}},
+				},
+			},
+			Performers: []cdadocument.CDAPerformer{
+				{
+					TypeCode: "PRF",
+					AssignedEntity: cdadocument.CDAAssignedEntity{
+						AssignedPerson: &cdadocument.CDAPerson{Names: []cdadocument.CDAName{{Given: []string{"Jane"}, Family: "Doe"}}},
+					},
+				},
+			},
+			// A Participant typed PRF (the OLD, wrong field) must NOT be the source.
+			Participants: []cdadocument.CDAParticipant{
+				{TypeCode: "PRF", ParticipantRole: cdadocument.CDAParticipantRole{PlayingEntity: &cdadocument.CDAPlayingEntity{Names: []cdadocument.CDAName{{Given: []string{"Wrong"}, Family: "Field"}}}}},
+			},
+		},
+	}
+	resources := MapImmunizations(entries, testPatientRef)
+	if len(resources) != 1 {
+		t.Fatalf("expected 1 Immunization, got %d", len(resources))
+	}
+	performers, ok := resources[0]["performer"].([]interface{})
+	if !ok || len(performers) != 1 {
+		t.Fatalf("performer = %v, want a 1-element array", resources[0]["performer"])
+	}
+	actor, _ := performers[0].(map[string]interface{})["actor"].(map[string]interface{})
+	if actor["display"] != "Jane Doe" {
+		t.Errorf("performer[0].actor.display = %v, want \"Jane Doe\" (from Performers, not the wrong Participants field)", actor["display"])
+	}
+}
+
+// ---- Procedure bodySite: read from <targetSiteCode> directly, not a COMP entryRelationship ----
+
+func TestMapProcedures_TargetSiteCode_SetsBodySite(t *testing.T) {
+	entries := []cdadocument.CDAEntry{
+		{
+			EntryType:      "procedure",
+			StatusCode:     "completed",
+			Code:           cdadocument.CDACode{Code: "44950", DisplayName: "Appendectomy", CodeSystem: "2.16.840.1.113883.6.12"},
+			TargetSiteCode: &cdadocument.CDACode{Code: "66754008", DisplayName: "Appendix structure", CodeSystem: "2.16.840.1.113883.6.96"},
+		},
+	}
+	resources := MapProcedures(entries, testPatientRef)
+	if len(resources) != 1 {
+		t.Fatalf("expected 1 Procedure, got %d", len(resources))
+	}
+	bodySite, ok := resources[0]["bodySite"].([]interface{})
+	if !ok || len(bodySite) != 1 {
+		t.Fatalf("expected Procedure.bodySite to be set from TargetSiteCode, got %v", resources[0]["bodySite"])
+	}
+	cc, _ := bodySite[0].(map[string]interface{})
+	coding, _ := cc["coding"].([]interface{})
+	if len(coding) != 1 || coding[0].(map[string]interface{})["code"] != "66754008" {
+		t.Errorf("bodySite coding = %v, want SNOMED 66754008 (Appendix structure)", coding)
+	}
+}
+
+func TestMapProcedures_NoTargetSiteCode_NoBodySiteEvenWithUnrelatedCOMP(t *testing.T) {
+	// Regression guard for the original bug: bodySite must come from
+	// TargetSiteCode only, never be inferred from an unrelated COMP
+	// entryRelationship (e.g. an indication or reason sub-act).
+	entries := []cdadocument.CDAEntry{
+		{
+			EntryType:  "procedure",
+			StatusCode: "completed",
+			Code:       cdadocument.CDACode{Code: "44950", DisplayName: "Appendectomy", CodeSystem: "2.16.840.1.113883.6.12"},
+			EntryRelationships: []cdadocument.CDAEntryRelationship{
+				{
+					TypeCode: "COMP",
+					Entry: cdadocument.CDAEntry{
+						EntryType: "observation",
+						Code:      cdadocument.CDACode{Code: "385536008", DisplayName: "Acute appendicitis", CodeSystem: "2.16.840.1.113883.6.96"},
+					},
+				},
+			},
+		},
+	}
+	resources := MapProcedures(entries, testPatientRef)
+	if len(resources) != 1 {
+		t.Fatalf("expected 1 Procedure, got %d", len(resources))
+	}
+	if _, has := resources[0]["bodySite"]; has {
+		t.Error("bodySite must not be inferred from an unrelated COMP entryRelationship")
+	}
+}
+
+func TestMapProcedures_ObservationVariant_NoTargetSiteCode_NoBodySite(t *testing.T) {
+	// Procedure Activity Observation (.4.13) uses an <observation> element,
+	// which has no targetSiteCode in the base CDA R2 schema.
+	entries := []cdadocument.CDAEntry{
+		{EntryType: "observation", StatusCode: "completed", Code: cdadocument.CDACode{Code: "44950"}},
+	}
+	resources := MapProcedures(entries, testPatientRef)
+	if len(resources) != 1 {
+		t.Fatalf("expected 1 Procedure, got %d", len(resources))
+	}
+	if _, has := resources[0]["bodySite"]; has {
+		t.Error("bodySite must not be set when TargetSiteCode is nil")
 	}
 }

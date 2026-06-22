@@ -69,13 +69,14 @@ func buildProcedureResource(idx int, entry cdadocument.CDAEntry, patientRef stri
 		r["performer"] = performers
 	}
 
-	// Body site from target site code in entry relationships
-	for _, rel := range entry.EntryRelationships {
-		if rel.TypeCode == "COMP" {
-			if cc := transforms.CDACodeToCodeableConcept(rel.Entry.Code); cc != nil {
-				r["bodySite"] = []interface{}{cc}
-			}
-			break
+	// Body site from <targetSiteCode> — a direct child of <procedure> in the
+	// base CDA R2 schema (a sibling of <code>/<statusCode>), not a nested
+	// entryRelationship. Only set for the Procedure Activity Procedure
+	// template variant (EntryType=="procedure"); the Observation/Act variants
+	// have no targetSiteCode in the base schema, so this is nil for those.
+	if entry.TargetSiteCode != nil {
+		if cc := transforms.CDACodeToCodeableConcept(*entry.TargetSiteCode); cc != nil {
+			r["bodySite"] = []interface{}{cc}
 		}
 	}
 

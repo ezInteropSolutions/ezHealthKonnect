@@ -54,13 +54,21 @@ func EncounterStatusToFHIR(statusCode string) string {
 }
 
 // ProcedureStatusToFHIR converts a CDA procedure statusCode to a FHIR Procedure.status code.
+// Verified against HL7's official C-CDA-on-FHIR ConceptMap (ConceptMap/CF-ProcedureStatus,
+// https://github.com/HL7/ccda-on-fhir/blob/master/input/maps/ConceptMap-CF-ProcedureStatus.xml):
+// aborted->stopped, active->in-progress, cancelled->not-done, completed->completed.
+// "aborted" and "cancelled" are NOT synonyms here even though both come from CDA's single
+// v3-ActStatus value set -- the IG maps them to two different Procedure.status codes.
+// held/suspended has no official mapping; on-hold is a reasonable, undocumented default.
 func ProcedureStatusToFHIR(statusCode string) string {
 	switch normStatus(statusCode) {
 	case "completed":
 		return "completed"
 	case "active":
 		return "in-progress"
-	case "aborted", "cancelled":
+	case "aborted":
+		return "stopped"
+	case "cancelled":
 		return "not-done"
 	case "held", "suspended":
 		return "on-hold"
@@ -69,16 +77,26 @@ func ProcedureStatusToFHIR(statusCode string) string {
 	}
 }
 
-// MedicationRequestStatusToFHIR converts a CDA medication statusCode (moodCode=INT) to
-// a FHIR MedicationRequest.status code.
+// MedicationRequestStatusToFHIR converts a CDA medication statusCode (moodCode="INT") to
+// a FHIR MedicationRequest.status code. Verified against HL7's official C-CDA-on-FHIR
+// ConceptMap (ConceptMap/CF-MedicationStatus, targetUri = ValueSet/medicationrequest-status,
+// https://github.com/HL7/ccda-on-fhir/blob/master/input/maps/ConceptMap-CF-MedicationStatus.xml):
+// active->active, suspended->on-hold, aborted->stopped, completed->completed,
+// nullified->entered-in-error. "cancelled" has no entry in the official table; mapped here
+// to FHIR's own "cancelled" code by direct name correspondence (a valid, distinct code in
+// MedicationRequest's value set, unlike MedicationStatement's -- see MedicationStatusToFHIR).
 func MedicationRequestStatusToFHIR(statusCode string) string {
 	switch normStatus(statusCode) {
 	case "active":
 		return "active"
 	case "completed":
 		return "completed"
-	case "aborted", "cancelled":
+	case "aborted":
+		return "stopped"
+	case "cancelled":
 		return "cancelled"
+	case "nullified":
+		return "entered-in-error"
 	case "held", "suspended":
 		return "on-hold"
 	default:
@@ -86,7 +104,20 @@ func MedicationRequestStatusToFHIR(statusCode string) string {
 	}
 }
 
-// MedicationStatusToFHIR converts a CDA medication statusCode to a FHIR MedicationStatement.status code.
+// MedicationStatusToFHIR converts a CDA medication statusCode (moodCode != "INT", i.e. a
+// historical/administered medication) to a FHIR MedicationStatement.status code.
+//
+// UNLIKE MedicationRequestStatusToFHIR above, HL7's C-CDA-on-FHIR IG explicitly has NO
+// consensus mapping for this direction: "For mapping histories of medication use from
+// CDA, no consensus was established. We welcome feedback on this topic." (CF-medications.md,
+// https://github.com/HL7/ccda-on-fhir/blob/master/input/pagecontent/CF-medications.md).
+// There is no official ConceptMap to verify against here -- this mirrors the officially-
+// specified Request-side source codes as closely as MedicationStatement's own value set
+// allows. MedicationStatement.status has no "cancelled" code at all (valid set: active,
+// completed, entered-in-error, intended, stopped, on-hold, unknown, not-taken — confirmed
+// against http://hl7.org/fhir/R4/valueset-medication-statement-status.html), so CDA
+// "cancelled" maps to "stopped" here, same bucket as "aborted" — not literally "cancelled"
+// as it does on the Request side.
 func MedicationStatusToFHIR(statusCode string) string {
 	switch normStatus(statusCode) {
 	case "active":
@@ -95,6 +126,8 @@ func MedicationStatusToFHIR(statusCode string) string {
 		return "completed"
 	case "aborted", "cancelled":
 		return "stopped"
+	case "nullified":
+		return "entered-in-error"
 	case "held", "suspended":
 		return "on-hold"
 	default:
@@ -119,11 +152,18 @@ func ObservationStatusToFHIR(statusCode string) string {
 }
 
 // ImmunizationStatusToFHIR converts a CDA substanceAdministration statusCode to a FHIR Immunization.status.
-func ImmunizationStatusToFHIR(statusCode string) string {
+// negationInd reflects the entry's @negationInd attribute (C-CDA R2.1 Immunization Activity,
+// CONF:1198-8985 — SHALL [1..1]): when true the vaccine was not administered (refused/not given)
+// regardless of what statusCode says about the documentation act itself, so it takes priority
+// over the statusCode-based mapping below.
+func ImmunizationStatusToFHIR(statusCode string, negationInd bool) string {
+	if negationInd {
+		return "not-done"
+	}
 	switch normStatus(statusCode) {
 	case "completed", "active":
 		return "completed"
-	case "aborted", "cancelled", "refused":
+	case "aborted", "cancelled":
 		return "not-done"
 	default:
 		return "completed"
@@ -252,6 +292,21 @@ func CareTeamStatusToFHIR(statusCode string) string {
 	}
 }
 
+// DeviceUseStatementStatusToFHIR converts a CDA Non-Medicinal Supply Activity
+// statusCode to a FHIR DeviceUseStatement.status code. CONF:1098-8758 fixes
+// this element 1..1, never nullFlavor -- an unrecognized value coerces to
+// "active" rather than erroring (device_mapper.go's original deviceStatus()).
+func DeviceUseStatementStatusToFHIR(statusCode string) string {
+	switch statusCode {
+	case "active":
+		return "active"
+	case "completed":
+		return "completed"
+	default:
+		return "active"
+	}
+}
+
 // ============================================================
 // Type/category helpers
 // ============================================================
@@ -265,6 +320,31 @@ func AllergyTypeToFHIR(snomedCode string) string {
 		return "intolerance"
 	default:
 		return "allergy"
+	}
+}
+
+// AllergyReactionSeverityToFHIR maps a SNOMED reaction-severity observation
+// value (Severity Observation V2, templateId 2.16.840.1.113883.10.20.22.4.8,
+// CONF:1098-19169 fixes the observation's own code to "SEV") to the FIXED
+// mild/moderate/severe enum AllergyIntolerance.reaction[].severity requires
+// — unlike Condition.severity, which is a full CodeableConcept (see
+// ConditionStatusToFHIR's siblings; that one stays a CodeableConcept on
+// purpose). Extracted from allergy_mapper.go's private allergySeverityCode
+// (zero behavior change, including the known, already-documented gap: SNOMED
+// 255604002 "Very Mild" is unmapped and falls through to the "moderate"
+// default — confirmed present in real Kareo corpus data per
+// architecture/CDA_FHIR_MAPPING_INVENTORY.md's cross-cutting finding #8;
+// fixing that needs its own IG verification, not bundled into this move).
+func AllergyReactionSeverityToFHIR(snomedCode string) string {
+	switch snomedCode {
+	case "371924009", "Mild":
+		return "mild"
+	case "6736007", "Moderate":
+		return "moderate"
+	case "24484000", "Severe":
+		return "severe"
+	default:
+		return "moderate"
 	}
 }
 
@@ -344,6 +424,16 @@ func IdentifierTypeCode(root string) string {
 		}
 		return "PI"
 	}
+}
+
+// isFixedIdentifierSystem reports whether root is one of the well-known national
+// identifier system OIDs handled explicitly by IdentifierSystem (NPI, SSN, Medicare,
+// MBI, DL) — i.e. root is always the system's own fixed OID, never a patient/provider-
+// specific identifier value. Used by IIToIdentifier to decide whether falling back to
+// root as the Identifier.value (when @extension is absent) is meaningful or garbage.
+func isFixedIdentifierSystem(root string) bool {
+	sys := IdentifierSystem(root)
+	return sys != "" && sys != "urn:oid:"+root
 }
 
 // ============================================================

@@ -276,31 +276,70 @@ func (e *ScriptEnrichmentExecutor) executeScript(
 			}
 		}
 
-		// Wrap user script in IIFE to allow return statements.
-		// Preamble is placed outside the IIFE so its functions are module-scoped.
+		// Two script styles must both keep working:
+		//   1. A bare trailing expression with no `return` (the original,
+		//      still-documented style — e.g. `({ result: 42 });`). Running
+		//      this *unwrapped* gives the natural JS completion-value
+		//      semantics: the value of the last expression statement.
+		//   2. An explicit `return ...;` statement (added later for control
+		//      flow / early exit). `return` outside a function body is a
+		//      compile-time SyntaxError, so these scripts can only run
+		//      wrapped in an IIFE.
+		// Try unwrapped first — it compiles for both plain-statement scripts
+		// AND scripts that only mutate `output` (e.g. `output.x = 1;`), so a
+		// successful unwrapped compile doesn't by itself mean "no return was
+		// used". The two styles are disambiguated by the *type* of the
+		// completion value below, not by which path compiled.
+		unwrappedScript := preamble + config.Script
 		wrappedScript := preamble + fmt.Sprintf("(function() {\n%s\n})()", config.Script)
 
-		// Compile and run script
-		script, err := goja.Compile("enrichment_script", wrappedScript, false)
-		if err != nil {
-			errorChan <- fmt.Errorf("failed to compile script: %w", err)
-			return
-		}
-
-		value, err := vm.RunProgram(script)
-		if err != nil {
-			errorChan <- fmt.Errorf("script execution error: %w", err)
-			return
+		var value goja.Value
+		var err error
+		usedWrapped := false
+		if script, compileErr := goja.Compile("enrichment_script", unwrappedScript, false); compileErr == nil {
+			value, err = vm.RunProgram(script)
+			if err != nil {
+				errorChan <- fmt.Errorf("script execution error: %w", err)
+				return
+			}
+		} else {
+			// Unwrapped compile failed — most commonly a top-level `return`.
+			// Fall back to the IIFE-wrapped form, which supports it.
+			usedWrapped = true
+			wrappedProgram, wrapCompileErr := goja.Compile("enrichment_script", wrappedScript, false)
+			if wrapCompileErr != nil {
+				errorChan <- fmt.Errorf("failed to compile script: %w", wrapCompileErr)
+				return
+			}
+			value, err = vm.RunProgram(wrappedProgram)
+			if err != nil {
+				errorChan <- fmt.Errorf("script execution error: %w", err)
+				return
+			}
 		}
 
 		// Determine the result:
-		//  1. If the script returned a non-undefined, non-null value → use it.
-		//  2. Otherwise fall back to the `output` variable the script may have
-		//     mutated (e.g. `output.patientId = "123"` without an explicit return).
+		//  1. Wrapped (explicit return) path: any non-nil returned value is
+		//     intentional — use it directly, even a bare scalar.
+		//  2. Unwrapped path: only a map/array completion value is treated as
+		//     an intentional result (covers the bare-object-literal style).
+		//     A bare scalar completion value (e.g. from a trailing assignment
+		//     statement like `output.status = "active";`) is incidental, not
+		//     an intended return — fall through to the `output` mutation
+		//     check instead, same as when there's no completion value at all.
 		var result interface{}
-		if exported := value.Export(); exported != nil {
+		exported := value.Export()
+		if usedWrapped {
 			result = exported
 		} else {
+			switch exported.(type) {
+			case map[string]interface{}, []interface{}:
+				result = exported
+			default:
+				result = nil
+			}
+		}
+		if result == nil {
 			outputVal := vm.Get("output")
 			if outputVal != nil && !goja.IsUndefined(outputVal) && !goja.IsNull(outputVal) {
 				result = outputVal.Export()
@@ -362,24 +401,32 @@ func (e *ScriptEnrichmentExecutor) addUtilityFunctions(vm *goja.Runtime, inputDa
 		return vm.ToValue(dateStr)
 	})
 
-	// Add getNestedValue helper - extracts nested values from input data
+	// Add getNestedValue helper - extracts nested values from input data.
+	// Documented/called as getNestedValue(input, "path") everywhere (see
+	// GetConfigExample below and every UsageExample across the codebase), but
+	// the lookup always runs against the closure's own inputData regardless
+	// of what's passed as the first argument — so the path is taken as the
+	// *last* argument, supporting that 2-arg convention.
 	vm.Set("getNestedValue", func(call goja.FunctionCall) goja.Value {
 		if len(call.Arguments) < 1 {
 			return goja.Null()
 		}
 
-		path := call.Arguments[0].String()
+		path := call.Arguments[len(call.Arguments)-1].String()
 		value := executors.GetNestedValue(inputData, path)
 		return vm.ToValue(value)
 	})
 
-	// Add getHL7Field helper - extracts HL7 field using short notation (e.g., PID.5.1)
+	// Add getHL7Field helper - extracts HL7 field using short notation (e.g., PID.5.1).
+	// Both getHL7Field("PID.5") and getHL7Field(input, "PID.5") are documented
+	// call conventions in the UI (ScriptEnrichmentEditor.js / PropertiesPanel.js
+	// respectively) — path is taken as the last argument to support both.
 	vm.Set("getHL7Field", func(call goja.FunctionCall) goja.Value {
 		if len(call.Arguments) < 1 {
 			return goja.Null()
 		}
 
-		fieldPath := call.Arguments[0].String()
+		fieldPath := call.Arguments[len(call.Arguments)-1].String()
 		value := executors.GetNestedValue(inputData, fieldPath)
 		return vm.ToValue(value)
 	})

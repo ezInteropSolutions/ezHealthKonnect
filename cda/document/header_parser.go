@@ -55,6 +55,7 @@ func (h *headerParser) parseHeader(root *etree.Element) CDAHeader {
 	hdr.Patient = h.parsePatient(root)
 	hdr.Authors = h.parseAuthors(root)
 	hdr.Custodian = h.parseCustodian(root)
+	hdr.LegalAuthenticator = h.parseLegalAuthenticator(root)
 	hdr.DocumentOf = h.parseDocumentOf(root)
 	hdr.EncompassingEncounter = h.parseComponentOf(root)
 	hdr.RelatedDocuments = h.parseRelatedDocuments(root)
@@ -210,6 +211,32 @@ func (h *headerParser) parseCustodian(root *etree.Element) CDACustodian {
 		cust.AssignedCustodian.RepresentedCustodianOrganization = parseOrganization(orgEl)
 	}
 	return cust
+}
+
+// ========================
+// legalAuthenticator → *CDALegalAuthenticator
+// ========================
+
+// parseLegalAuthenticator parses the optional (0..1) <legalAuthenticator>
+// element. Returns nil when absent — distinguishing "never signed" from a
+// present-but-empty struct matters for CompositionMapper, which only adds
+// Composition.attester when a real legal authentication exists.
+func (h *headerParser) parseLegalAuthenticator(root *etree.Element) *CDALegalAuthenticator {
+	laEl := root.SelectElement("legalAuthenticator")
+	if laEl == nil {
+		return nil
+	}
+	la := CDALegalAuthenticator{}
+	if t := laEl.SelectElement("time"); t != nil {
+		la.Time = parseTS(t)
+	}
+	if sc := laEl.SelectElement("signatureCode"); sc != nil {
+		la.SignatureCode = sc.SelectAttrValue("code", "")
+	}
+	if aeEl := laEl.SelectElement("assignedEntity"); aeEl != nil {
+		la.AssignedEntity = parseAssignedEntity(aeEl)
+	}
+	return &la
 }
 
 // ========================

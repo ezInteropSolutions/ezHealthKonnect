@@ -163,7 +163,10 @@ func TestTerminology_RequiredBindings(t *testing.T) {
 		{"http://hl7.org/fhir/ValueSet/observation-status", "final", true},
 		{"http://hl7.org/fhir/ValueSet/observation-status", "invalid-code", false},
 		{"http://hl7.org/fhir/ValueSet/administrative-gender", "male", true},
-		{"http://hl7.org/fhir/ValueSet/administrative-gender", "MALE", true}, // case-insensitive
+		// FHIR codes are case-sensitive by spec; the precompiled ValueSet file
+		// confirms caseInsensitive=false for administrative-gender, so "MALE"
+		// is not a recognized member of the set.
+		{"http://hl7.org/fhir/ValueSet/administrative-gender", "MALE", false},
 		{"http://hl7.org/fhir/ValueSet/administrative-gender", "unknown-gender", false},
 		{"http://hl7.org/fhir/ValueSet/encounter-status", "in-progress", true},
 		{"http://hl7.org/fhir/ValueSet/encounter-status", "bogus", false},

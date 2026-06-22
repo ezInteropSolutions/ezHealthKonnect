@@ -68,8 +68,15 @@ const validMirthXML = `<?xml version="1.0" encoding="UTF-8"?>
           <type>Mapper</type>
           <data class="map">
             <entry>
-              <string>Script</string>
-              <string>// mapper content</string>
+              <string>Mappings</string>
+              <list>
+                <com.mirth.connect.plugins.mapper.MapperStep>
+                  <variable>patientId</variable>
+                  <mapping>msg['PID']['PID.3']['PID.3.1'].toString()</mapping>
+                  <defaultValue></defaultValue>
+                  <scope>LOCAL</scope>
+                </com.mirth.connect.plugins.mapper.MapperStep>
+              </list>
             </entry>
           </data>
         </step>

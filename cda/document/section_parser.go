@@ -256,6 +256,20 @@ func narrativeInnerText(el *etree.Element) string {
 	return sb.String()
 }
 
+// resolveTextRef replaces a "#id" placeholder in *text (e.g. CDAEntry.Text)
+// with the resolved narrative text. No-op when text does not start with "#".
+func resolveTextRef(text *string, idx map[string]string) {
+	if !strings.HasPrefix(*text, "#") {
+		return
+	}
+	anchor := strings.TrimPrefix(*text, "#")
+	if resolved, ok := idx[anchor]; ok {
+		*text = resolved
+	} else {
+		*text = ""
+	}
+}
+
 // resolveCodeRef replaces a "#id" placeholder in code.OriginalText with the
 // resolved narrative text. No-op when OriginalText does not start with "#".
 func resolveCodeRef(code *CDACode, idx map[string]string) {
@@ -274,9 +288,11 @@ func resolveCodeRef(code *CDACode, idx map[string]string) {
 }
 
 // resolveEntryRefs resolves all "#id" reference placeholders in every CDACode
-// field within an entry, recursing into components and entryRelationships.
+// field (and the entry's own Text field) within an entry, recursing into
+// components and entryRelationships.
 func resolveEntryRefs(entry *CDAEntry, idx map[string]string) {
 	resolveCodeRef(&entry.Code, idx)
+	resolveTextRef(&entry.Text, idx)
 	if entry.Value != nil && entry.Value.Code != nil {
 		resolveCodeRef(entry.Value.Code, idx)
 	}

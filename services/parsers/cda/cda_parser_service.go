@@ -161,18 +161,46 @@ func (s *CDAParserService) Parse(raw string) *models.ParserResult {
 		root = doc.Root()
 	}
 
-	// 4. Build typed document model (Sprint B/D).
+	// 4. Build the generic, schema-agnostic XML->JSON mirror FIRST, directly
+	// off the raw etree root, before any CDA-specific interpretation happens.
+	// This has zero knowledge of CDA/RIM semantics — it cannot have a
+	// "missing field" bug because it enumerates nothing — making it the
+	// authoritative, guaranteed-complete representation of the source
+	// document. Everything below (the typed CDADocument tree, "sections",
+	// "header") is a curated VIEW built for semantic/FHIR-mapping
+	// convenience; it is best-effort, not the fidelity guarantee. See
+	// cda/document/generic_xml.go for the full rationale.
+	genericXML := cdadocument.GenericXMLToJSON(root)
+
+	// 5. Build typed document model (Sprint B/D).
 	// Moved before section processing so the typed header can produce the JSON header map.
 	typedDoc := s.typedParser.ParseDocument(root, workingXML)
 	result.TypedDocument = typedDoc
 
-	// 5. Process sections in parallel
+	// 6. Process sections in parallel
 	sectionResults := s.processSectionsParallel(root)
 
-	// 6. Assemble ParsedJSON — header map derived from typed CDADocument (Sprint D).
+	// 7. Assemble ParsedJSON — header map derived from typed CDADocument (Sprint D).
 	// This removes the XPath-based CDAHeaderParser dependency entirely.
 	headerMap := headerToJSON(typedDoc)
 	parsed := s.assembleJSON(raw, profile, normResult.Substitutions, headerMap, sectionResults)
+
+	// "xml" is the primary, complete representation (see step 4 above) —
+	// assigned first to reflect that it is the source of truth, not an
+	// afterthought alongside the curated views below.
+	parsed["xml"] = genericXML
+
+	// Phase 3: also expose the full typed tree under "document" — classCode,
+	// moodCode, negationInd, entryRelationship semantics, repeating elements,
+	// translations, etc. that the curated "sections"/"header" maps above never
+	// carry (they're driven by a fixed per-section field whitelist). This is
+	// what makes the document addressable by GetFieldValue's "document.*" CDA
+	// path form (services/executors/field_utils.go) and by any generic
+	// pipeline step, not just the cda.to_fhir mapper's privileged typed path.
+	// Like "sections"/"header", this remains a curated, best-effort VIEW —
+	// "xml" above is the one with a completeness guarantee.
+	parsed["document"] = typedDoc
+
 	result.ParsedJSON = parsed
 
 	// 7. Populate EnhancedFields for the field picker

@@ -25,19 +25,18 @@ func MapCoverage(entries []cdadocument.CDAEntry, patientRef string) []map[string
 	return resources
 }
 
-// payerTypeDisplay corrects known LOINC display names that differ from the FHIR
-// canonical value (the source CDA carries short display text, FHIR validator uses
-// the official LOINC long name).
-var payerTypeDisplay = map[string]string{
-	"48768-6": "Payment sources Document",
-}
-
 func buildCoverageResource(idx int, entry cdadocument.CDAEntry, patientRef string) map[string]interface{} {
 	r := map[string]interface{}{
 		"resourceType": "Coverage",
 		"id":           fmt.Sprintf("coverage-%d", idx),
 	}
 
+	// CDA's Coverage Activity statusCode is unconditionally fixed to
+	// "completed" (CONF:1198-19094, verified against build.fhir.org/ig/HL7/
+	// CDA-ccda-2.2's definitions page 2026-06-22) -- there is no CDA-side
+	// signal to derive a real-world active/inactive coverage status from
+	// (CDA act-status and FHIR Coverage.status are different axes
+	// entirely), so "active" is the only defensible default, not a gap.
 	r["status"] = "active"
 
 	if patientRef != "" {
@@ -46,17 +45,7 @@ func buildCoverageResource(idx int, entry cdadocument.CDAEntry, patientRef strin
 	}
 
 	// Coverage type from entry code; correct LOINC display when needed.
-	if cc := transforms.CDACodeToCodeableConcept(entry.Code); cc != nil {
-		if codings, ok := cc["coding"].([]interface{}); ok && len(codings) > 0 {
-			if c0, ok := codings[0].(map[string]interface{}); ok {
-				if code, _ := c0["code"].(string); code != "" {
-					if canonical, ok := payerTypeDisplay[code]; ok {
-						c0["display"] = canonical
-						cc["text"] = canonical
-					}
-				}
-			}
-		}
+	if cc := transforms.CoverageTypeToCodeableConcept(entry.Code); cc != nil {
 		r["type"] = cc
 	}
 

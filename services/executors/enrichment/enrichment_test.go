@@ -160,37 +160,31 @@ func TestScriptEnrichment_ContextVariables(t *testing.T) {
 func TestScriptEnrichment_ErrorHandling(t *testing.T) {
 	executor := NewScriptEnrichmentExecutor()
 
-	// Test with failOnError=false
+	// ScriptEnrichmentConfig has no failOnError field — a thrown script error
+	// is always surfaced (see Execute()'s own comment: "Always return error —
+	// pipeline service decides retry/catch behavior" via step.config.errorHandling).
 	step := &models.TransformationStep{
 		StepName: "Error Test",
 		StepType: "enrichment.script",
 		Enabled:  true,
 		Config: map[string]interface{}{
-			"script":      `throw new Error("Test error");`,
-			"failOnError": false,
+			"script": `throw new Error("Test error");`,
 		},
 	}
 
 	ctx := context.Background()
 	result, err := executor.Execute(ctx, step, map[string]interface{}{"original": "data"})
 
-	// Should NOT return error
-	if err != nil {
-		t.Errorf("Expected no error with failOnError=false, got: %v", err)
+	if err == nil {
+		t.Fatal("Expected a thrown script error to be returned")
 	}
 
-	// Original data should be preserved
+	// Original data should be preserved alongside the error
 	if original := result["original"].(string); original != "data" {
 		t.Error("Original data should be preserved")
 	}
-
-	// Test with failOnError=true
-	step.Config["failOnError"] = true
-	_, err = executor.Execute(ctx, step, map[string]interface{}{})
-
-	// Should return error
-	if err == nil {
-		t.Error("Expected error with failOnError=true")
+	if _, ok := result["_script_error"]; !ok {
+		t.Error("Expected _script_error to be set in the output for debugging")
 	}
 }
 
@@ -340,6 +334,39 @@ output.ageGroup = output.age < 18 ? "pediatric" : "adult";
 	}
 	if stepOutput["ageGroup"] != "adult" {
 		t.Errorf("Expected ageGroup=adult, got: %v", stepOutput["ageGroup"])
+	}
+}
+
+func TestScriptEnrichment_TopLevelReturnStatement(t *testing.T) {
+	executor := NewScriptEnrichmentExecutor()
+
+	step := &models.TransformationStep{
+		StepName: "Explicit Return Statement",
+		StepType: "enrichment.script",
+		Enabled:  true,
+		Config: map[string]interface{}{
+			// A bare top-level `return` is a SyntaxError outside a function —
+			// this can only run via the IIFE-wrapped fallback path.
+			"script": `
+if (input.skip) {
+	return { skipped: true };
+}
+return { value: 7 };
+`,
+		},
+	}
+
+	result, err := executor.Execute(context.Background(), step, map[string]interface{}{"skip": false})
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	stepOutput, ok := result["_stepOutput"].(map[string]interface{})
+	if !ok {
+		t.Fatal("Expected _stepOutput map")
+	}
+	if v, _ := stepOutput["value"].(int64); v != 7 {
+		t.Errorf("Expected value=7 from explicit return, got: %v", stepOutput["value"])
 	}
 }
 

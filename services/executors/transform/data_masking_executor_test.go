@@ -286,9 +286,10 @@ func TestDataMasking_MultipleStrategies(t *testing.T) {
 		},
 	}, input)
 
-	// ssn should be 64-char hex (SHA-256)
-	if h, _ := out["ssn"].(string); len(h) != 64 {
-		t.Errorf("expected 64-char hash for ssn, got %q (len=%d)", h, len(h))
+	// ssn should be a 16-char hex prefix of the SHA-256 hash — maskString
+	// deliberately truncates to 16 chars (see data_masking_executor.go).
+	if h, _ := out["ssn"].(string); len(h) != 16 {
+		t.Errorf("expected 16-char hash for ssn, got %q (len=%d)", h, len(h))
 	}
 	// name should be different from input
 	if out["name"] == "Jane Doe" {

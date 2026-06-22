@@ -56,11 +56,11 @@ func normalizeSystem(raw string) string {
 // produce a hard validation error. The CodeableConcept.text field carries the
 // human-readable text instead (set in CDACodeToCodeableConcept).
 var terminologyValidatedSystems = map[string]bool{
-	"http://loinc.org":                     true,
-	"http://hl7.org/fhir/sid/icd-10-cm":   true,
-	"http://snomed.info/sct":               true,
-	"http://hl7.org/fhir/sid/cvx":         true,
-	"http://hl7.org/fhir/sid/ndc":         true,
+	"http://loinc.org":                            true,
+	"http://hl7.org/fhir/sid/icd-10-cm":           true,
+	"http://snomed.info/sct":                      true,
+	"http://hl7.org/fhir/sid/cvx":                 true,
+	"http://hl7.org/fhir/sid/ndc":                 true,
 	"http://www.nlm.nih.gov/research/umls/rxnorm": true,
 }
 
@@ -132,12 +132,57 @@ func CDACodeToCodeableConcept(code cdadocument.CDACode) map[string]interface{} {
 	return cc
 }
 
+// coveragePayerTypeDisplay corrects known LOINC display names that differ
+// from the FHIR canonical value (the source CDA carries short display text,
+// FHIR validators use the official LOINC long name). 48768-6 "Payment
+// sources" is CONF:1198-19160's fixed code for Coverage Activity (verified
+// against the actual IG 2026-06-22, R2.1) -- the correction is purely
+// cosmetic/display, not a code change.
+var coveragePayerTypeDisplay = map[string]string{
+	"48768-6": "Payment sources Document",
+}
+
+// CoverageTypeToCodeableConcept converts a Coverage Activity's entry code to
+// a FHIR Coverage.type CodeableConcept, applying coveragePayerTypeDisplay's
+// LOINC display correction on top of CDACodeToCodeableConcept.
+func CoverageTypeToCodeableConcept(code cdadocument.CDACode) map[string]interface{} {
+	cc := CDACodeToCodeableConcept(code)
+	if cc == nil {
+		return nil
+	}
+	codings, ok := cc["coding"].([]interface{})
+	if !ok || len(codings) == 0 {
+		return cc
+	}
+	c0, ok := codings[0].(map[string]interface{})
+	if !ok {
+		return cc
+	}
+	if codeStr, _ := c0["code"].(string); codeStr != "" {
+		if canonical, ok := coveragePayerTypeDisplay[codeStr]; ok {
+			c0["display"] = canonical
+			cc["text"] = canonical
+		}
+	}
+	return cc
+}
+
 // IIToIdentifier converts a typed CDAII (HL7 Instance Identifier) to a FHIR Identifier.
-// Returns nil when both Root and Extension are empty.
+// Returns nil when both Root and Extension are empty, or when Extension is empty and
+// Root is a fixed national identifier system OID (see isFixedIdentifierSystem).
 func IIToIdentifier(id cdadocument.CDAII) map[string]interface{} {
 	value := id.Extension
-	if value == "" {
-		value = id.Root // some implementations encode the ID only in root
+	if value == "" && !isFixedIdentifierSystem(id.Root) {
+		// Some implementations legitimately encode the identifier value only in
+		// root for generic/facility-specific OIDs (no fixed national meaning) —
+		// keep that fallback. But for NPI/SSN/Medicare/MBI/DL, root is ALWAYS the
+		// system's own OID, never a patient-specific value: falling back here
+		// would produce a schema-valid but semantically garbage Identifier
+		// (e.g. value="2.16.840.1.113883.4.6", the NPI system OID itself, not an
+		// actual 10-digit NPI). Confirmed against real vendor data: PracticeFusion's
+		// corpus sample has 3 authors with exactly this malformed
+		// <id root="2.16.840.1.113883.4.6"/> (no @extension) shape.
+		value = id.Root
 	}
 	if value == "" {
 		return nil

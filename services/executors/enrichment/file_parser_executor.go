@@ -70,7 +70,12 @@ func (e *FileParserExecutor) Execute(
 ) (map[string]interface{}, error) {
 	start := time.Now()
 
-	if err := e.PreExecute(ctx, step); err != nil {
+	// Skip the inherited blanket context check here — the streaming CSV/TSV
+	// path below tolerates a cancelled context internally (returns partial
+	// results, not an error; see ParseCSVFromReaderChunked). The other paths
+	// (batch, full-file read) don't have that internal handling, so they get
+	// an explicit ctx.Err() check of their own further down.
+	if err := e.PreExecuteSkipContextCheck(step); err != nil {
 		return inputData, err
 	}
 
@@ -91,6 +96,14 @@ func (e *FileParserExecutor) Execute(
 		if isCSVTSV {
 			return e.executeStreamingLocalCSV(ctx, step, config, inputData, start)
 		}
+	}
+
+	// All non-streaming paths below don't tolerate cancellation gracefully —
+	// fail fast here, same as the inherited PreExecute would have.
+	if ctx.Err() != nil {
+		err := fmt.Errorf("context error: %w", ctx.Err())
+		e.PostExecute(ctx, step, err, time.Since(start))
+		return inputData, err
 	}
 
 	// Batch mode: list + process all matching local files, then return early
@@ -626,7 +639,13 @@ func (e *FileParserExecutor) parseConfig(step *models.TransformationStep) (*mode
 		}
 	}
 
-	if config.FileFormat == "" && !config.AutoDetect && !config.BatchMode {
+	// local_path with a recognized csv/tsv/tab extension is inferred later by
+	// the streaming path (see the isCSVTSV check in Execute) without needing
+	// autoDetect — the validation gate here must recognize that same case,
+	// otherwise it rejects the request before the streaming path ever runs.
+	extInferredCSVTSV := config.SourceType == "local_path" &&
+		map[string]bool{".csv": true, ".tsv": true, ".tab": true}[strings.ToLower(filepath.Ext(config.FilePath))]
+	if config.FileFormat == "" && !config.AutoDetect && !config.BatchMode && !extInferredCSVTSV {
 		return nil, fmt.Errorf("fileFormat is required (use 'auto' for auto-detection, or one of: %s)", strings.Join(GetRegisteredFormats(), ", "))
 	}
 

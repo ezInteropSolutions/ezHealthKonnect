@@ -277,4 +277,7 @@ var legacyCodes = map[string]map[string]bool{
 		"reflex-order": true, "filler-order": true, "instance-order": true,
 		"option": true,
 	},
+	"http://hl7.org/fhir/ValueSet/allergy-intolerance-category": {
+		"food": true, "medication": true, "environment": true, "biologic": true,
+	},
 }

@@ -28,8 +28,10 @@ func TestParseErrorHandlingConfig_Enabled(t *testing.T) {
 	if eh == nil {
 		t.Fatal("expected non-nil config")
 	}
-	if eh.OnError != "catch" {
-		t.Errorf("expected onError='catch', got '%s'", eh.OnError)
+	// "catch" is a legacy alias normalized to "suppress" (P2: removed from
+	// the UI; see retry_utils.go's ParseErrorHandlingConfig).
+	if eh.OnError != "suppress" {
+		t.Errorf("expected onError='suppress' (catch normalized), got '%s'", eh.OnError)
 	}
 	if eh.DefaultField != "patient_status" {
 		t.Errorf("expected defaultField='patient_status', got '%s'", eh.DefaultField)
@@ -64,11 +66,12 @@ func TestParseErrorHandlingConfig_Missing(t *testing.T) {
 	}
 }
 
-func TestParseErrorHandlingConfig_DefaultsToOnErrorCatch(t *testing.T) {
+func TestParseErrorHandlingConfig_DefaultsToOnErrorSuppress(t *testing.T) {
 	config := map[string]interface{}{
 		"errorHandling": map[string]interface{}{
 			"enabled": true,
-			// No onError specified — should default to "catch"
+			// No onError specified — should default to "suppress" (P2: "catch"
+			// was removed from the UI; see retry_utils.go).
 		},
 	}
 
@@ -76,8 +79,8 @@ func TestParseErrorHandlingConfig_DefaultsToOnErrorCatch(t *testing.T) {
 	if eh == nil {
 		t.Fatal("expected non-nil config")
 	}
-	if eh.OnError != "catch" {
-		t.Errorf("expected default onError='catch', got '%s'", eh.OnError)
+	if eh.OnError != "suppress" {
+		t.Errorf("expected default onError='suppress', got '%s'", eh.OnError)
 	}
 }
 

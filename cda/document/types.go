@@ -5,87 +5,147 @@ package cdadocument
 
 // CDADocument is the root typed representation of a parsed CDA/CCD document.
 type CDADocument struct {
-	Header        CDAHeader
-	Sections      []CDASection              // ordered as they appear in the document
-	SectionsByKey map[string]*CDASection    // keyed by section key from ccda_2_1.json
-	Raw           string                    // original XML preserved verbatim
+	Header        CDAHeader              `json:"header"`
+	Sections      []CDASection           `json:"sections,omitempty"`      // ordered as they appear in the document
+	SectionsByKey map[string]*CDASection `json:"sectionsByKey,omitempty"` // keyed by section key from ccda_2_1.json
+	Raw           string                 `json:"raw,omitempty"`           // original XML preserved verbatim
 }
 
 // CDAHeader contains all clinical document header elements.
 type CDAHeader struct {
-	DocumentId            CDAII
-	DocumentCode          CDACode
-	Title                 string
-	SetId                 CDAII
-	VersionNumber         string
-	EffectiveTime         CDATime
-	ConfidentialityCode   CDACode
-	Patient               CDAPatient
-	Authors               []CDAAuthor
-	Custodian             CDACustodian
-	DocumentOf            *CDAServiceEvent
-	EncompassingEncounter *CDAEncounter
-	RelatedDocuments      []CDARelatedDocument
+	DocumentId            CDAII                  `json:"documentId"`
+	DocumentCode          CDACode                `json:"documentCode"`
+	Title                 string                 `json:"title,omitempty"`
+	SetId                 CDAII                  `json:"setId"`
+	VersionNumber         string                 `json:"versionNumber,omitempty"`
+	EffectiveTime         CDATime                `json:"effectiveTime"`
+	ConfidentialityCode   CDACode                `json:"confidentialityCode"`
+	Patient               CDAPatient             `json:"patient"`
+	Authors               []CDAAuthor            `json:"authors,omitempty"`
+	Custodian             CDACustodian           `json:"custodian"`
+	LegalAuthenticator    *CDALegalAuthenticator `json:"legalAuthenticator,omitempty"`
+	DocumentOf            *CDAServiceEvent       `json:"documentOf,omitempty"`
+	EncompassingEncounter *CDAEncounter          `json:"encompassingEncounter,omitempty"`
+	RelatedDocuments      []CDARelatedDocument   `json:"relatedDocuments,omitempty"`
 }
 
 // CDAPatient holds all patient demographics extracted from recordTarget/patientRole.
 type CDAPatient struct {
-	Ids           []CDAII      // ALL <id> elements — SSN, MRN, Medicare, etc.
-	Names         []CDAName    // ALL <name> elements — legal, maiden, alias
-	Addresses     []CDAAddress // ALL <addr> elements — home, work, etc.
-	Telecoms      []CDATelecom // ALL <telecom> elements — phone, fax, email
-	BirthDate     CDATime
-	Gender        CDACode
-	MaritalStatus CDACode
-	Race          CDACode
-	Ethnicity     CDACode
-	Languages     []CDALanguage
+	Ids           []CDAII       `json:"ids,omitempty"`       // ALL <id> elements — SSN, MRN, Medicare, etc.
+	Names         []CDAName     `json:"names,omitempty"`     // ALL <name> elements — legal, maiden, alias
+	Addresses     []CDAAddress  `json:"addresses,omitempty"` // ALL <addr> elements — home, work, etc.
+	Telecoms      []CDATelecom  `json:"telecoms,omitempty"`  // ALL <telecom> elements — phone, fax, email
+	BirthDate     CDATime       `json:"birthDate"`
+	Gender        CDACode       `json:"gender"`
+	MaritalStatus CDACode       `json:"maritalStatus"`
+	Race          CDACode       `json:"race"`
+	Ethnicity     CDACode       `json:"ethnicity"`
+	Languages     []CDALanguage `json:"languages,omitempty"`
 }
 
 // CDASection represents one clinical section of a CDA document body.
 type CDASection struct {
-	TemplateIds   []string
-	Key           string // resolved from templateId via ccda_2_1.json, then LOINC, then title
-	LoincCode     string
-	Title         string
-	NarrativeText string // serialised <text> element XML
-	Entries       []CDAEntry
-	NullFlavor    string // "NI", "NA", etc. if section present but empty
+	TemplateIds   []string   `json:"templateIds,omitempty"`
+	Key           string     `json:"key,omitempty"` // resolved from templateId via ccda_2_1.json, then LOINC, then title
+	LoincCode     string     `json:"loincCode,omitempty"`
+	Title         string     `json:"title,omitempty"`
+	NarrativeText string     `json:"narrativeText,omitempty"` // serialised <text> element XML
+	Entries       []CDAEntry `json:"entries,omitempty"`
+	NullFlavor    string     `json:"nullFlavor,omitempty"` // "NI", "NA", etc. if section present but empty
 }
 
 // CDAEntry represents one clinical act extracted from a CDA section <entry> element.
 type CDAEntry struct {
-	Id                 []CDAII
-	Code               CDACode
-	StatusCode         string
-	EffectiveTime      CDATimeRange
-	Value              *CDAValue
-	Participants       []CDAParticipant
-	Components         []CDAEntry // nested organizer/component entries
-	EntryRelationships []CDAEntryRelationship
-	EntryType          string // "observation" | "act" | "procedure" | "substanceAdministration" | "encounter" | "organizer" | "supply"
-	ClassCode          string
-	MoodCode           string
-	NullFlavor         string
+	Id                 []CDAII                `json:"id,omitempty"`
+	Code               CDACode                `json:"code"`
+	StatusCode         string                 `json:"statusCode,omitempty"`
+	EffectiveTime      CDATimeRange           `json:"effectiveTime"` // first <effectiveTime> only — kept for backward compatibility
+	Value              *CDAValue              `json:"value,omitempty"`
+	Participants       []CDAParticipant       `json:"participants,omitempty"`
+	Components         []CDAEntry             `json:"components,omitempty"` // nested organizer/component entries
+	EntryRelationships []CDAEntryRelationship `json:"entryRelationships,omitempty"`
+	EntryType          string                 `json:"entryType,omitempty"` // "observation" | "act" | "procedure" | "substanceAdministration" | "encounter" | "organizer" | "supply"
+	ClassCode          string                 `json:"classCode,omitempty"`
+	MoodCode           string                 `json:"moodCode,omitempty"`
+	NullFlavor         string                 `json:"nullFlavor,omitempty"`
+
+	// NegationInd marks this act as negated, e.g. @negationInd="true" on an
+	// Immunization Activity ("not given") or an Allergy/Problem Observation
+	// ("no known X"). SHALL-conformance on some C-CDA entry templates,
+	// absent/false on most others — always safe to read regardless of template.
+	NegationInd bool `json:"negationInd"`
+
+	// TemplateIds holds every <templateId root="..."/> on this entry itself
+	// (distinct from CDASection.TemplateIds, which is section-level).
+	TemplateIds []string `json:"templateIds,omitempty"`
+
+	// RepeatNumber is the substanceAdministration <repeatNumber value="..."/>
+	// attribute — refill/allowed-administration count in INT mood, occurrence
+	// number in EVN mood.
+	RepeatNumber string `json:"repeatNumber,omitempty"`
+
+	// EffectiveTimes holds every <effectiveTime> child in document order.
+	// substanceAdministration entries commonly carry two: an IVL_TS for the
+	// administration duration (also mirrored into EffectiveTime above) and a
+	// PIVL_TS/EIVL_TS for the dosing frequency.
+	EffectiveTimes []CDAEffectiveTimeEntry `json:"effectiveTimes,omitempty"`
+
+	// Text holds this entry's own top-level <text> element (a sibling of
+	// <code>, distinct from Code.OriginalText which lives inside
+	// <code><originalText>). Used by templates that carry their content this
+	// way instead of via a coded value — e.g. Medication Free Text Sig
+	// (templateId 2.16.840.1.113883.10.20.22.4.147) and Instruction (V2)
+	// (templateId 2.16.840.1.113883.10.20.22.4.20), both IG-required to use
+	// <text><reference value="#id"/></text>. Resolved against the section's
+	// narrative index by resolveEntryRefs, same as Code.OriginalText.
+	Text string `json:"text,omitempty"`
 
 	// Authors/Performers recorded directly on this entry (distinct from the
 	// document-level header.Authors) — e.g. who ordered/recorded a medication.
 	// Used to populate fields like MedicationRequest.requester.
-	Authors    []CDAAuthor
-	Performers []CDAPerformer
+	Authors    []CDAAuthor    `json:"authors,omitempty"`
+	Performers []CDAPerformer `json:"performers,omitempty"`
 
 	// substanceAdministration-specific
-	Consumable   *CDAConsumable
-	RouteCode    *CDACode
-	DoseQuantity *CDAQuantity
-	RateQuantity *CDAQuantity
+	Consumable   *CDAConsumable `json:"consumable,omitempty"`
+	RouteCode    *CDACode       `json:"routeCode,omitempty"`
+	DoseQuantity *CDAQuantity   `json:"doseQuantity,omitempty"`
+	RateQuantity *CDAQuantity   `json:"rateQuantity,omitempty"`
+
+	// supply-specific: <supply><quantity>, <supply><product><manufacturedProduct>.
+	// Distinct from substanceAdministration's Consumable/DoseQuantity above —
+	// a supply act (e.g. medication dispense/refill, entryRelationship
+	// typeCode="REFR") restates the product and records the dispensed quantity
+	// rather than a dose.
+	Quantity *CDAQuantity            `json:"quantity,omitempty"`
+	Product  *CDAManufacturedProduct `json:"product,omitempty"`
+
+	// TargetSiteCode is procedure-specific: <targetSiteCode> is a direct child
+	// of the base CDA R2 <procedure> act class (POCD_MT000040.Procedure),
+	// a sibling of <code>/<statusCode>/<effectiveTime> — NOT a nested
+	// entryRelationship. Only populated when EntryType == "procedure"; the
+	// "Procedure Activity Observation"/"Procedure Activity Act" C-CDA template
+	// variants use <observation>/<act> elements, which have no targetSiteCode
+	// child in the base schema, so this is always nil for those.
+	TargetSiteCode *CDACode `json:"targetSiteCode,omitempty"`
+}
+
+// CDAEffectiveTimeEntry is one <effectiveTime> element preserved in document
+// order, tagged with its xsi:type so callers can distinguish the duration
+// (IVL_TS) entry from a frequency (PIVL_TS/EIVL_TS) entry without guessing.
+type CDAEffectiveTimeEntry struct {
+	XSIType string       `json:"xsiType,omitempty"` // "IVL_TS" | "PIVL_TS" | "EIVL_TS" | "TS" | "" (absent)
+	Range   CDATimeRange `json:"range"`
+	// Period holds the <period value="12" unit="h"/> child of a PIVL_TS
+	// element (the dosing-frequency interval) — not applicable to IVL_TS.
+	Period *CDAQuantity `json:"period,omitempty"`
 }
 
 // CDAEntryRelationship wraps a clinical act nested inside another entry.
 type CDAEntryRelationship struct {
-	TypeCode     string
-	InversionInd bool
-	Entry        CDAEntry
+	TypeCode     string   `json:"typeCode,omitempty"`
+	InversionInd bool     `json:"inversionInd"`
+	Entry        CDAEntry `json:"entry"`
 }
 
 // ========================
@@ -94,254 +154,267 @@ type CDAEntryRelationship struct {
 
 // CDAII is an HL7 II (Instance Identifier).
 type CDAII struct {
-	Root                   string
-	Extension              string
-	AssigningAuthorityName string
-	DisplayName            string
+	Root                   string `json:"root,omitempty"`
+	Extension              string `json:"extension,omitempty"`
+	AssigningAuthorityName string `json:"assigningAuthorityName,omitempty"`
+	DisplayName            string `json:"displayName,omitempty"`
+	NullFlavor             string `json:"nullFlavor,omitempty"`
 }
 
 // CDACode is an HL7 CD/CE/CS coded concept.
 type CDACode struct {
-	Code           string
-	DisplayName    string
-	CodeSystem     string    // OID
-	CodeSystemName string    // "SNOMED CT", "LOINC", "RxNorm", etc.
-	OriginalText   string
-	Translations   []CDACode // alternate codings for the same concept
-	NullFlavor     string
+	Code           string    `json:"code,omitempty"`
+	DisplayName    string    `json:"displayName,omitempty"`
+	CodeSystem     string    `json:"codeSystem,omitempty"`     // OID
+	CodeSystemName string    `json:"codeSystemName,omitempty"` // "SNOMED CT", "LOINC", "RxNorm", etc.
+	OriginalText   string    `json:"originalText,omitempty"`
+	Translations   []CDACode `json:"translations,omitempty"` // alternate codings for the same concept
+	NullFlavor     string    `json:"nullFlavor,omitempty"`
 }
 
 // CDATime is an HL7 TS (timestamp).
 type CDATime struct {
-	Value      string // raw HL7 timestamp: "20230101120000"
-	Operator   string // "=", "<", ">", etc.
-	NullFlavor string
+	Value      string `json:"value,omitempty"`    // raw HL7 timestamp: "20230101120000"
+	Operator   string `json:"operator,omitempty"` // "=", "<", ">", etc.
+	NullFlavor string `json:"nullFlavor,omitempty"`
 }
 
 // CDATimeRange is an HL7 IVL<TS> (interval of timestamps).
 type CDATimeRange struct {
-	Low        CDATime
-	High       CDATime
-	Value      CDATime // single-point time (when low/high not present)
-	NullFlavor string
+	Low        CDATime `json:"low"`
+	High       CDATime `json:"high"`
+	Value      CDATime `json:"value"` // single-point time (when low/high not present)
+	NullFlavor string  `json:"nullFlavor,omitempty"`
 }
 
 // CDAQuantity is an HL7 PQ (Physical Quantity).
 type CDAQuantity struct {
-	Value string
-	Unit  string
+	Value      string `json:"value,omitempty"`
+	Unit       string `json:"unit,omitempty"`
+	NullFlavor string `json:"nullFlavor,omitempty"`
 }
 
 // CDAName is an HL7 PN (Person Name).
 type CDAName struct {
-	Use       string   // "L" (legal), "A" (alias), "P" (pseudonym)
-	Prefix    string
-	Given     []string // multiple given names / initials
-	Family    string
-	Suffix    string
-	ValidTime CDATimeRange
+	Use       string       `json:"use,omitempty"`
+	Prefix    string       `json:"prefix,omitempty"`
+	Given     []string     `json:"given,omitempty"` // multiple given names / initials
+	Family    string       `json:"family,omitempty"`
+	Suffix    string       `json:"suffix,omitempty"`
+	ValidTime CDATimeRange `json:"validTime"`
 }
 
 // CDAAddress is an HL7 AD (Postal Address).
 type CDAAddress struct {
-	Use         string   // "HP" (home permanent), "WP" (work), "TMP" (temp)
-	StreetLines []string // multiple streetAddressLine elements
-	City        string
-	State       string
-	PostalCode  string
-	Country     string
-	County      string
-	ValidTime   CDATimeRange
-	NullFlavor  string
+	Use         string       `json:"use,omitempty"`
+	StreetLines []string     `json:"streetLines,omitempty"` // multiple streetAddressLine elements
+	City        string       `json:"city,omitempty"`
+	State       string       `json:"state,omitempty"`
+	PostalCode  string       `json:"postalCode,omitempty"`
+	Country     string       `json:"country,omitempty"`
+	County      string       `json:"county,omitempty"`
+	ValidTime   CDATimeRange `json:"validTime"`
+	NullFlavor  string       `json:"nullFlavor,omitempty"`
 }
 
 // CDATelecom is an HL7 TEL (Telecommunication Address).
 type CDATelecom struct {
-	Use   string // "HP", "WP", "MC" (mobile)
-	Value string // raw value: "tel:555-1234", "mailto:..."
-	Type  string // derived: "phone", "fax", "email", "url"
+	Use   string `json:"use,omitempty"`
+	Value string `json:"value,omitempty"` // raw value: "tel:555-1234", "mailto:..."
+	Type  string `json:"type,omitempty"`  // derived: "phone", "fax", "email", "url"
 }
 
 // CDAValue is a polymorphic CDA observation value.
 // The Type field identifies which concrete HL7 data type applies.
 type CDAValue struct {
-	Type       string // "PQ" | "CD" | "CE" | "CS" | "ST" | "BL" | "INT" | "REAL" | "TS" | "IVL_TS" | "ED"
-	Code       *CDACode
-	Quantity   *CDAQuantity
-	Text       string
-	Boolean    *bool
-	Integer    *int
-	Real       *float64
-	TimeRange  *CDATimeRange
-	NullFlavor string
+	Type       string        `json:"type,omitempty"` // "PQ" | "CD" | "CE" | "CS" | "ST" | "BL" | "INT" | "REAL" | "TS" | "IVL_TS" | "ED"
+	Code       *CDACode      `json:"code,omitempty"`
+	Quantity   *CDAQuantity  `json:"quantity,omitempty"`
+	Text       string        `json:"text,omitempty"`
+	Boolean    *bool         `json:"boolean,omitempty"`
+	Integer    *int          `json:"integer,omitempty"`
+	Real       *float64      `json:"real,omitempty"`
+	TimeRange  *CDATimeRange `json:"timeRange,omitempty"`
+	NullFlavor string        `json:"nullFlavor,omitempty"`
 }
 
 // CDALanguage is a patient language communication preference.
 type CDALanguage struct {
-	Code             string
-	PreferenceInd    bool
-	ModeCode         CDACode
-	ProficiencyLevel CDACode
+	Code             string  `json:"code,omitempty"`
+	PreferenceInd    bool    `json:"preferenceInd"`
+	ModeCode         CDACode `json:"modeCode"`
+	ProficiencyLevel CDACode `json:"proficiencyLevel"`
 }
 
 // CDAAuthor represents a document or section author.
 type CDAAuthor struct {
-	Time           CDATime
-	AssignedAuthor CDAAssignedAuthor
+	Time           CDATime           `json:"time"`
+	AssignedAuthor CDAAssignedAuthor `json:"assignedAuthor"`
 }
 
 // CDAAssignedAuthor contains details about the assigned author entity.
 type CDAAssignedAuthor struct {
-	Ids                     []CDAII
-	Addresses               []CDAAddress
-	Telecoms                []CDATelecom
-	AssignedPerson          *CDAPerson
-	AssignedAuthoringDevice *CDADevice
-	RepresentedOrganization *CDAOrganization
+	Ids                     []CDAII          `json:"ids,omitempty"`
+	Addresses               []CDAAddress     `json:"addresses,omitempty"`
+	Telecoms                []CDATelecom     `json:"telecoms,omitempty"`
+	AssignedPerson          *CDAPerson       `json:"assignedPerson,omitempty"`
+	AssignedAuthoringDevice *CDADevice       `json:"assignedAuthoringDevice,omitempty"`
+	RepresentedOrganization *CDAOrganization `json:"representedOrganization,omitempty"`
 }
 
 // CDAPerson is a named person (author, performer, etc.).
 type CDAPerson struct {
-	Names []CDAName
+	Names []CDAName `json:"names,omitempty"`
 }
 
 // CDADevice represents an authoring device.
 type CDADevice struct {
-	SoftwareName          string
-	ManufacturerModelName string
+	SoftwareName          string `json:"softwareName,omitempty"`
+	ManufacturerModelName string `json:"manufacturerModelName,omitempty"`
 }
 
 // CDAOrganization is a healthcare organization.
 type CDAOrganization struct {
-	Ids       []CDAII
-	Names     []string
-	Addresses []CDAAddress
-	Telecoms  []CDATelecom
+	Ids       []CDAII      `json:"ids,omitempty"`
+	Names     []string     `json:"names,omitempty"`
+	Addresses []CDAAddress `json:"addresses,omitempty"`
+	Telecoms  []CDATelecom `json:"telecoms,omitempty"`
 }
 
 // CDACustodian holds document custodian information.
 type CDACustodian struct {
-	AssignedCustodian CDAAssignedCustodian
+	AssignedCustodian CDAAssignedCustodian `json:"assignedCustodian"`
 }
 
 // CDAAssignedCustodian holds the custodian organization details.
 type CDAAssignedCustodian struct {
-	RepresentedCustodianOrganization CDAOrganization
+	RepresentedCustodianOrganization CDAOrganization `json:"representedCustodianOrganization"`
+}
+
+// CDALegalAuthenticator holds the document's legal authentication
+// (signature) participant, per base CDA's LegalAuthenticator class:
+// time (1..1) and signatureCode (1..1) are required whenever the element
+// itself is present; assignedEntity (1..1) reuses the same shape as every
+// other CDA performer/author participant in this package.
+type CDALegalAuthenticator struct {
+	Time           CDATime           `json:"time"`
+	SignatureCode  string            `json:"signatureCode,omitempty"`
+	AssignedEntity CDAAssignedEntity `json:"assignedEntity"`
 }
 
 // CDAServiceEvent is the clinical service documented (from documentationOf).
 type CDAServiceEvent struct {
-	ClassCode     string
-	EffectiveTime CDATimeRange
-	Performers    []CDAPerformer
+	ClassCode     string         `json:"classCode,omitempty"`
+	EffectiveTime CDATimeRange   `json:"effectiveTime"`
+	Performers    []CDAPerformer `json:"performers,omitempty"`
 }
 
 // CDAPerformer is a clinical performer in a service event or entry.
 type CDAPerformer struct {
-	TypeCode       string
-	FunctionCode   CDACode
-	Time           CDATimeRange
-	AssignedEntity CDAAssignedEntity
+	TypeCode       string            `json:"typeCode,omitempty"`
+	FunctionCode   CDACode           `json:"functionCode"`
+	Time           CDATimeRange      `json:"time"`
+	AssignedEntity CDAAssignedEntity `json:"assignedEntity"`
 }
 
 // CDAAssignedEntity is an entity assigned to perform a clinical role.
 type CDAAssignedEntity struct {
-	Ids                     []CDAII
-	Code                    CDACode
-	Addresses               []CDAAddress
-	Telecoms                []CDATelecom
-	AssignedPerson          *CDAPerson
-	RepresentedOrganization *CDAOrganization
+	Ids                     []CDAII          `json:"ids,omitempty"`
+	Code                    CDACode          `json:"code"`
+	Addresses               []CDAAddress     `json:"addresses,omitempty"`
+	Telecoms                []CDATelecom     `json:"telecoms,omitempty"`
+	AssignedPerson          *CDAPerson       `json:"assignedPerson,omitempty"`
+	RepresentedOrganization *CDAOrganization `json:"representedOrganization,omitempty"`
 }
 
 // CDAEncounter is the encompassing encounter from componentOf.
 type CDAEncounter struct {
-	Id                       CDAII
-	EffectiveTime            CDATimeRange
-	DischargeDispositionCode CDACode
-	Location                 *CDALocation
+	Id                       CDAII        `json:"id"`
+	EffectiveTime            CDATimeRange `json:"effectiveTime"`
+	DischargeDispositionCode CDACode      `json:"dischargeDispositionCode"`
+	Location                 *CDALocation `json:"location,omitempty"`
 }
 
 // CDALocation wraps a health care facility.
 type CDALocation struct {
-	HealthCareFacility CDAHealthCareFacility
+	HealthCareFacility CDAHealthCareFacility `json:"healthCareFacility"`
 }
 
 // CDAHealthCareFacility is the physical care location.
 type CDAHealthCareFacility struct {
-	Code                        CDACode
-	Location                    *CDAPlace
-	ServiceProviderOrganization *CDAOrganization
+	Code                        CDACode          `json:"code"`
+	Location                    *CDAPlace        `json:"location,omitempty"`
+	ServiceProviderOrganization *CDAOrganization `json:"serviceProviderOrganization,omitempty"`
 }
 
 // CDAPlace is a physical place with name and address.
 type CDAPlace struct {
-	Names     []CDAName
-	Addresses []CDAAddress
+	Names     []CDAName    `json:"names,omitempty"`
+	Addresses []CDAAddress `json:"addresses,omitempty"`
 }
 
 // CDARelatedDocument links to a parent document (replacement, addendum, etc.).
 type CDARelatedDocument struct {
-	TypeCode       string
-	ParentDocument CDAParentDocument
+	TypeCode       string            `json:"typeCode,omitempty"`
+	ParentDocument CDAParentDocument `json:"parentDocument"`
 }
 
 // CDAParentDocument holds the related parent document reference.
 type CDAParentDocument struct {
-	Ids           []CDAII
-	SetId         CDAII
-	VersionNumber string
+	Ids           []CDAII `json:"ids,omitempty"`
+	SetId         CDAII   `json:"setId"`
+	VersionNumber string  `json:"versionNumber,omitempty"`
 }
 
 // CDAParticipant is a clinical participant in an entry (e.g. the allergy substance).
 type CDAParticipant struct {
-	TypeCode        string
-	FunctionCode    CDACode
-	Time            CDATimeRange
-	ParticipantRole CDAParticipantRole
+	TypeCode        string             `json:"typeCode,omitempty"`
+	FunctionCode    CDACode            `json:"functionCode"`
+	Time            CDATimeRange       `json:"time"`
+	ParticipantRole CDAParticipantRole `json:"participantRole"`
 }
 
 // CDAParticipantRole is the role played by a participant.
 type CDAParticipantRole struct {
-	ClassCode     string
-	Ids           []CDAII
-	Code          CDACode
-	Addresses     []CDAAddress
-	Telecoms      []CDATelecom
-	PlayingEntity *CDAPlayingEntity
-	ScopingEntity *CDAEntity
+	ClassCode     string            `json:"classCode,omitempty"`
+	Ids           []CDAII           `json:"ids,omitempty"`
+	Code          CDACode           `json:"code"`
+	Addresses     []CDAAddress      `json:"addresses,omitempty"`
+	Telecoms      []CDATelecom      `json:"telecoms,omitempty"`
+	PlayingEntity *CDAPlayingEntity `json:"playingEntity,omitempty"`
+	ScopingEntity *CDAEntity        `json:"scopingEntity,omitempty"`
 }
 
 // CDAPlayingEntity is the entity playing the participant role (e.g. a drug or device).
 type CDAPlayingEntity struct {
-	ClassCode string
-	Code      CDACode
-	Names     []CDAName
-	Desc      string
+	ClassCode string    `json:"classCode,omitempty"`
+	Code      CDACode   `json:"code"`
+	Names     []CDAName `json:"names,omitempty"`
+	Desc      string    `json:"desc,omitempty"`
 }
 
 // CDAEntity is a scoping entity (e.g. an organisation that issued an identifier).
 type CDAEntity struct {
-	Ids  []CDAII
-	Code CDACode
-	Desc string
+	Ids  []CDAII `json:"ids,omitempty"`
+	Code CDACode `json:"code"`
+	Desc string  `json:"desc,omitempty"`
 }
 
 // CDAConsumable holds the manufactured product for a medication administration.
 type CDAConsumable struct {
-	ManufacturedProduct CDAManufacturedProduct
+	ManufacturedProduct CDAManufacturedProduct `json:"manufacturedProduct"`
 }
 
 // CDAManufacturedProduct is the manufactured medication.
 type CDAManufacturedProduct struct {
-	Ids                      []CDAII
-	ManufacturedMaterial     *CDAMaterial
-	ManufacturerOrganization *CDAOrganization
+	Ids                      []CDAII          `json:"ids,omitempty"`
+	ManufacturedMaterial     *CDAMaterial     `json:"manufacturedMaterial,omitempty"`
+	ManufacturerOrganization *CDAOrganization `json:"manufacturerOrganization,omitempty"`
 }
 
 // CDAMaterial is the drug or material substance.
 type CDAMaterial struct {
-	Code          CDACode
-	Name          string
-	LotNumberText string
+	Code          CDACode `json:"code"`
+	Name          string  `json:"name,omitempty"`
+	LotNumberText string  `json:"lotNumberText,omitempty"`
 }

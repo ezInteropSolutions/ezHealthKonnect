@@ -35,17 +35,6 @@ func buildAllergyResource(idx int, entry cdadocument.CDAEntry, patientRef string
 		r["patient"] = ref(patientRef)
 	}
 
-	// Verification status: defaulted to confirmed per US Core requirement
-	r["verificationStatus"] = map[string]interface{}{
-		"coding": []interface{}{
-			map[string]interface{}{
-				"system":  "http://terminology.hl7.org/CodeSystem/allergyintolerance-verification",
-				"code":    "confirmed",
-				"display": "Confirmed",
-			},
-		},
-	}
-
 	// Clinical status from outer act statusCode
 	r["clinicalStatus"] = transforms.AllergyStatusToFHIR(entry.StatusCode)
 
@@ -59,6 +48,23 @@ func buildAllergyResource(idx int, entry cdadocument.CDAEntry, patientRef string
 	if allergyObs == nil {
 		// Flat structure (no concern wrapper) — the entry itself is the observation
 		allergyObs = &entry
+	}
+
+	// Verification status: refuted when the allergy observation (or the outer
+	// concern act) is negated — e.g. a "No Known Allergies" assertion — confirmed
+	// per US Core requirement otherwise.
+	verificationCode, verificationDisplay := "confirmed", "Confirmed"
+	if entry.NegationInd || allergyObs.NegationInd {
+		verificationCode, verificationDisplay = "refuted", "Refuted"
+	}
+	r["verificationStatus"] = map[string]interface{}{
+		"coding": []interface{}{
+			map[string]interface{}{
+				"system":  "http://terminology.hl7.org/CodeSystem/allergyintolerance-verification",
+				"code":    verificationCode,
+				"display": verificationDisplay,
+			},
+		},
 	}
 
 	// Allergy type from observation value code
@@ -108,7 +114,7 @@ func buildAllergyResource(idx int, entry cdadocument.CDAEntry, patientRef string
 		sevObs := findRelByTypeCode(rel.Entry.EntryRelationships, "SUBJ")
 		if sevObs != nil && sevObs.Code.Code == "SEV" {
 			if sevObs.Value != nil && sevObs.Value.Code != nil {
-				rxn["severity"] = allergySeverityCode(sevObs.Value.Code.Code)
+				rxn["severity"] = transforms.AllergyReactionSeverityToFHIR(sevObs.Value.Code.Code)
 			}
 		}
 		if len(rxn) > 0 {
@@ -120,18 +126,4 @@ func buildAllergyResource(idx int, entry cdadocument.CDAEntry, patientRef string
 	}
 
 	return r
-}
-
-// allergySeverityCode maps SNOMED severity codes to FHIR severity strings.
-func allergySeverityCode(snomedCode string) string {
-	switch snomedCode {
-	case "371924009", "Mild":
-		return "mild"
-	case "6736007", "Moderate":
-		return "moderate"
-	case "24484000", "Severe":
-		return "severe"
-	default:
-		return "moderate"
-	}
 }

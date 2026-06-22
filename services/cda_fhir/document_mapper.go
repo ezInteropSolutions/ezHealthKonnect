@@ -36,9 +36,15 @@ var typedSectionDispatchers = map[string]sectionMapFn{
 	// Allergy & Intolerance
 	"allergiesAndIntolerances": mappers.MapAllergies,
 
-	// Problems / Health Concerns
-	"problems":       mappers.MapConditions,
-	"healthConcerns": mappers.MapConditions,
+	// Problems / Health Concerns. Same mapper, different Condition.category
+	// per US Core's us-core-condition-problems-health-concerns profile —
+	// see conditionCategoryCC in condition_mapper.go for the spec citation.
+	"problems": func(e []cdadocument.CDAEntry, p string) []map[string]interface{} {
+		return mappers.MapConditions(e, p, "problem-list-item")
+	},
+	"healthConcerns": func(e []cdadocument.CDAEntry, p string) []map[string]interface{} {
+		return mappers.MapConditions(e, p, "health-concern")
+	},
 
 	// Medications
 	"medications": mappers.MapMedications,

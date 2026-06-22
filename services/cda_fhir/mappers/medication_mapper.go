@@ -81,15 +81,14 @@ func buildMedicationRequestResource(idx int, entry cdadocument.CDAEntry, patient
 			}
 		}
 	}
-	if period := transforms.CDATimeRangeToPeriod(entry.EffectiveTime); period != nil {
-		dosage["timing"] = map[string]interface{}{
-			"repeat": map[string]interface{}{
-				"boundsPeriod": period,
-			},
-		}
-	}
+	applyDosageTiming(entry, dosage)
+	applyDosageText(entry, dosage)
 	if len(dosage) > 0 {
 		r["dosageInstruction"] = []interface{}{dosage}
+	}
+
+	if reasons := indicationReasonCodes(entry); len(reasons) > 0 {
+		r["reasonCode"] = reasons
 	}
 
 	return r
@@ -139,11 +138,116 @@ func buildMedicationStatementResource(idx int, entry cdadocument.CDAEntry, patie
 			}
 		}
 	}
+	applyDosageTiming(entry, dosage)
+	applyDosageText(entry, dosage)
 	if len(dosage) > 0 {
 		r["dosage"] = []interface{}{dosage}
 	}
 
+	if reasons := indicationReasonCodes(entry); len(reasons) > 0 {
+		r["reasonCode"] = reasons
+	}
+
 	return r
+}
+
+// applyDosageTiming sets dosage["timing"]["repeat"]["frequency"/"period"/"periodUnit"]
+// from the entry's PIVL_TS/EIVL_TS effectiveTime (C-CDA's dosing-frequency idiom,
+// e.g. "every 12 hours") — additive alongside any existing "boundsPeriod" already
+// set from the primary IVL_TS effectiveTime.
+func applyDosageTiming(entry cdadocument.CDAEntry, dosage map[string]interface{}) {
+	for _, et := range entry.EffectiveTimes {
+		if (et.XSIType != "PIVL_TS" && et.XSIType != "EIVL_TS") || et.Period == nil {
+			continue
+		}
+		timing, ok := dosage["timing"].(map[string]interface{})
+		if !ok {
+			timing = map[string]interface{}{}
+		}
+		repeat, ok := timing["repeat"].(map[string]interface{})
+		if !ok {
+			repeat = map[string]interface{}{}
+		}
+		repeat["frequency"] = 1
+		if et.Period.Value != "" {
+			repeat["period"] = et.Period.Value
+		}
+		if et.Period.Unit != "" {
+			repeat["periodUnit"] = et.Period.Unit
+		}
+		timing["repeat"] = repeat
+		dosage["timing"] = timing
+		return
+	}
+}
+
+// medicationFreeTextSigTemplateID and instructionV2TemplateID discriminate the
+// two distinct C-CDA templates that carry medication instruction text via an
+// entryRelationship's nested entry.Text (resolved against section narrative
+// by resolveEntryRefs) — see IG p.590-593 (Instruction (V2)) and p.624-625
+// (Medication Free Text Sig). Both use the identical
+// <text><reference value="#id"/></text> shape; templateId is the only
+// reliable discriminator between them.
+const (
+	medicationFreeTextSigTemplateID = "2.16.840.1.113883.10.20.22.4.147"
+	instructionV2TemplateID         = "2.16.840.1.113883.10.20.22.4.20"
+)
+
+func hasTemplateID(ids []string, target string) bool {
+	for _, id := range ids {
+		if id == target {
+			return true
+		}
+	}
+	return false
+}
+
+// applyDosageText sets dosage["text"] from a nested Medication Free Text Sig
+// (entryRelationship[@typeCode='COMP']) and dosage["patientInstruction"] from
+// a nested Instruction (V2) act (entryRelationship[@typeCode='SUBJ',
+// @inversionInd='true']) — both are additive alongside any structured
+// route/dose/timing already set on dosage.
+func applyDosageText(entry cdadocument.CDAEntry, dosage map[string]interface{}) {
+	for _, rel := range entry.EntryRelationships {
+		nested := rel.Entry
+		if nested.Text == "" {
+			continue
+		}
+		switch {
+		case rel.TypeCode == "COMP" && hasTemplateID(nested.TemplateIds, medicationFreeTextSigTemplateID):
+			dosage["text"] = nested.Text
+		case rel.TypeCode == "SUBJ" && rel.InversionInd && hasTemplateID(nested.TemplateIds, instructionV2TemplateID):
+			dosage["patientInstruction"] = nested.Text
+		}
+	}
+}
+
+// indicationReasonCodes converts every entryRelationship[@typeCode='RSON']
+// (Indication (V2) observation) into a FHIR reasonCode CodeableConcept.
+// Unlike most relationship lookups in this package, RSON can repeat (multiple
+// indications for one medication), so this collects all matches rather than
+// using findRelByTypeCode (first-match only).
+func indicationReasonCodes(entry cdadocument.CDAEntry) []interface{} {
+	var reasons []interface{}
+	for _, rel := range entry.EntryRelationships {
+		if rel.TypeCode != "RSON" {
+			continue
+		}
+		indication := rel.Entry
+		var cc map[string]interface{}
+		if indication.Value != nil {
+			if v, ok := transforms.CDAValueToFHIR(*indication.Value).(map[string]interface{}); ok {
+				cc = v
+			}
+		}
+		if cc == nil {
+			cc = transforms.CDACodeToCodeableConcept(indication.Code)
+		}
+		if cc != nil {
+			reasons = append(reasons, cc)
+		}
+	}
+	return reasons
 }
 
 // requesterReference builds the FHIR Reference for MedicationRequest.requester

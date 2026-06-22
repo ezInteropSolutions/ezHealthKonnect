@@ -8,16 +8,20 @@ import (
 )
 
 // MapConditions converts typed CDA problem/health-concern section entries to FHIR
-// Condition resources. Both the problems and healthConcerns sections use this mapper.
+// Condition resources. Both the problems and healthConcerns sections use this mapper —
+// category distinguishes them (see conditionCategoryCC), since US Core's
+// us-core-condition-problems-health-concerns profile requires a different
+// Condition.category coding for each (verified against the published "US Core
+// Problem or Health Concern" value set, not assumed).
 //
 // C-CDA structure: outer concern act → SUBJ entryRelationship → problem observation
 //   - Problem code from observation value (ICD-10, SNOMED)
 //   - Clinical status from observation statusCode
 //   - Onset/abatement from observation effectiveTime
-func MapConditions(entries []cdadocument.CDAEntry, patientRef string) []map[string]interface{} {
+func MapConditions(entries []cdadocument.CDAEntry, patientRef string, category string) []map[string]interface{} {
 	var resources []map[string]interface{}
 	for i, entry := range entries {
-		r := buildConditionResource(i+1, entry, patientRef)
+		r := buildConditionResource(i+1, entry, patientRef, category)
 		if len(r) > 2 {
 			resources = append(resources, r)
 		}
@@ -25,7 +29,32 @@ func MapConditions(entries []cdadocument.CDAEntry, patientRef string) []map[stri
 	return resources
 }
 
-func buildConditionResource(idx int, entry cdadocument.CDAEntry, patientRef string) map[string]interface{} {
+// conditionCategoryCC builds Condition.category for the given section's category
+// code. Per the published US Core "US Core Problem or Health Concern" value set
+// (https://hl7.org/fhir/us/core/ValueSet-us-core-problem-or-health-concern.html):
+//   - "problem-list-item" -> base http://terminology.hl7.org/CodeSystem/condition-category
+//   - "health-concern"    -> US Core-specific http://hl7.org/fhir/us/core/CodeSystem/condition-category
+//
+// These are two DIFFERENT CodeSystems, not one CodeSystem with two codes —
+// "health-concern" does not exist in the base condition-category CodeSystem.
+func conditionCategoryCC(category string) map[string]interface{} {
+	system, display := "http://terminology.hl7.org/CodeSystem/condition-category", "Problem List Item"
+	code := "problem-list-item"
+	if category == "health-concern" {
+		system, code, display = "http://hl7.org/fhir/us/core/CodeSystem/condition-category", "health-concern", "Health Concern"
+	}
+	return map[string]interface{}{
+		"coding": []interface{}{
+			map[string]interface{}{
+				"system":  system,
+				"code":    code,
+				"display": display,
+			},
+		},
+	}
+}
+
+func buildConditionResource(idx int, entry cdadocument.CDAEntry, patientRef string, category string) map[string]interface{} {
 	r := map[string]interface{}{
 		"resourceType": "Condition",
 		"id":           fmt.Sprintf("condition-%d", idx),
@@ -64,29 +93,37 @@ func buildConditionResource(idx int, entry cdadocument.CDAEntry, patientRef stri
 	// Clinical status
 	r["clinicalStatus"] = transforms.ConditionStatusToFHIR(problemObs.StatusCode)
 
-	// Verification status: defaulted to confirmed
+	// Verification status: refuted when the problem observation (or the outer
+	// concern act) is negated — e.g. "no known problems" — confirmed otherwise.
+	verificationCode, verificationDisplay := "confirmed", "Confirmed"
+	if entry.NegationInd || problemObs.NegationInd {
+		verificationCode, verificationDisplay = "refuted", "Refuted"
+	}
 	r["verificationStatus"] = map[string]interface{}{
 		"coding": []interface{}{
 			map[string]interface{}{
 				"system":  "http://terminology.hl7.org/CodeSystem/condition-ver-status",
-				"code":    "confirmed",
-				"display": "Confirmed",
+				"code":    verificationCode,
+				"display": verificationDisplay,
 			},
 		},
 	}
 
-	// Category: problem-list-item
-	r["category"] = []interface{}{
-		map[string]interface{}{
-			"coding": []interface{}{
-				map[string]interface{}{
-					"system":  "http://terminology.hl7.org/CodeSystem/condition-category",
-					"code":    "problem-list-item",
-					"display": "Problem List Item",
-				},
-			},
-		},
+	// Severity from a nested SUBJ entryRelationship whose observation is coded
+	// "SEV" — same C-CDA idiom allergy_mapper.go already handles for reactions.
+	// Condition.severity is a CodeableConcept (unlike AllergyIntolerance.reaction.severity,
+	// which is a fixed mild|moderate|severe string), so this reuses
+	// CDACodeToCodeableConcept directly rather than a string-mapping helper.
+	if sevObs := findRelByTypeCode(problemObs.EntryRelationships, "SUBJ"); sevObs != nil &&
+		sevObs.Code.Code == "SEV" && sevObs.Value != nil && sevObs.Value.Code != nil {
+		if cc := transforms.CDACodeToCodeableConcept(*sevObs.Value.Code); cc != nil {
+			r["severity"] = cc
+		}
 	}
+
+	// Category: distinguishes the problems section from the healthConcerns
+	// section (see conditionCategoryCC doc comment for the spec citation).
+	r["category"] = []interface{}{conditionCategoryCC(category)}
 
 	// Onset from observation effectiveTime.low
 	if onset := transforms.CDATimeRangeToOnset(problemObs.EffectiveTime); onset != "" {

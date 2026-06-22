@@ -46,6 +46,7 @@ func parseII(el *etree.Element) CDAII {
 		Extension:              el.SelectAttrValue("extension", ""),
 		AssigningAuthorityName: el.SelectAttrValue("assigningAuthorityName", ""),
 		DisplayName:            el.SelectAttrValue("displayName", ""),
+		NullFlavor:             el.SelectAttrValue("nullFlavor", ""),
 	}
 }
 
@@ -80,6 +81,25 @@ func parseCD(el *etree.Element) CDACode {
 	return c
 }
 
+// parseEntryText extracts an entry's own top-level <text> element (a sibling
+// of <code>, e.g. Medication Free Text Sig and Instruction (V2)). The
+// reference takes priority over any inline text per CDA Release 2 §4.3.5.1 —
+// it is the authoritative pointer to the section's narrative; inline text
+// next to it (as in the Instruction (V2) example) is a redundant copy, not
+// the source of truth. Mirrors parseCD's reference-anchor handling: the
+// "#id" anchor is stored as-is for resolveCodeRef-style resolution later.
+func parseEntryText(el *etree.Element) string {
+	if el == nil {
+		return ""
+	}
+	if ref := el.SelectElement("reference"); ref != nil {
+		if val := ref.SelectAttrValue("value", ""); strings.HasPrefix(val, "#") {
+			return val
+		}
+	}
+	return strings.TrimSpace(el.Text())
+}
+
 // parseTS extracts an HL7 TS (timestamp) from an element.
 func parseTS(el *etree.Element) CDATime {
 	if el == nil {
@@ -98,8 +118,9 @@ func parsePQ(el *etree.Element) CDAQuantity {
 		return CDAQuantity{}
 	}
 	return CDAQuantity{
-		Value: el.SelectAttrValue("value", ""),
-		Unit:  el.SelectAttrValue("unit", ""),
+		Value:      el.SelectAttrValue("value", ""),
+		Unit:       el.SelectAttrValue("unit", ""),
+		NullFlavor: el.SelectAttrValue("nullFlavor", ""),
 	}
 }
 

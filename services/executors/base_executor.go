@@ -61,6 +61,25 @@ func (b *BaseExecutor) PreExecute(ctx context.Context, step *models.Transformati
 	return nil
 }
 
+// PreExecuteSkipContextCheck performs the same step-enabled/step-type
+// validation as PreExecute, but omits the context-cancellation check. For
+// executors whose own internal logic already handles a cancelled context
+// gracefully (e.g. a streaming reader that returns partial results instead
+// of erroring) — calling PreExecute instead would fail fast before that
+// internal handling ever runs.
+func (b *BaseExecutor) PreExecuteSkipContextCheck(step *models.TransformationStep) error {
+	if !step.Enabled {
+		return fmt.Errorf("step is disabled")
+	}
+
+	if step.StepType != b.stepType {
+		return fmt.Errorf("step type mismatch: expected %s, got %s", b.stepType, step.StepType)
+	}
+
+	log.Printf("🔄 [%s] Starting execution: %s", b.stepType, step.StepName)
+	return nil
+}
+
 // PostExecute performs common post-execution logging (Template Method)
 func (b *BaseExecutor) PostExecute(ctx context.Context, step *models.TransformationStep, err error, duration time.Duration) {
 	if err != nil {
