@@ -238,20 +238,14 @@ func buildObservationResource(idx int, entry cdadocument.CDAEntry, patientRef st
 		setObservationValue(r, *entry.Value)
 	}
 
-	// Interpretation from entry relationships (typeCode=COMP with interpretation code,
-	// when the COMP child has NOT already been used to substitute code/value above).
-	if _, alreadyHasValue := r["valueCodeableConcept"]; !alreadyHasValue {
-		for _, rel := range entry.EntryRelationships {
-			if rel.TypeCode != "COMP" {
-				continue
-			}
-			if rel.Entry.Value != nil && rel.Entry.Value.Code != nil {
-				if cc := transforms.CDACodeToCodeableConcept(*rel.Entry.Value.Code); cc != nil {
-					r["interpretation"] = []interface{}{cc}
-				}
-			}
-			break
-		}
+	// Interpretation: Result Observation's <interpretationCode>, a direct
+	// child of the observation (CONF:1198-7147, verified against the actual
+	// IG 2026-06-22) — NOT a COMP-nested child's value, which is what this
+	// previously read. Real Kareo corpus data carries interpretationCode as
+	// a direct sibling, confirming the IG-correct shape over the prior
+	// structural assumption.
+	if cc := transforms.CDACodeToCodeableConcept(entry.InterpretationCode); cc != nil {
+		r["interpretation"] = []interface{}{cc}
 	}
 
 	// us-core-2: must have value[x], component, hasMember, or dataAbsentReason.

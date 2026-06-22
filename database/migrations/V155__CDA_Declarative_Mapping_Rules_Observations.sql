@@ -42,6 +42,7 @@ VALUES
   {"scope": "value[type=INT]", "sourcePath": "integer", "targetPath": "valueInteger"},
   {"scope": "value[type=REAL]", "sourcePath": "real", "transform": "cda_real_to_bare_quantity", "targetPath": "valueQuantity"},
   {"scope": "value[type=IVL_TS]", "sourcePath": "timeRange", "transform": "cda_timerange_to_period", "targetPath": "valuePeriod"},
+  {"sourcePath": "interpretationCode", "transform": "cda_code_to_codeable_concept", "targetPath": "interpretation[0]"},
   {
     "literalValue": "unknown",
     "transform": "observation_data_absent_reason_to_fhir",
@@ -78,6 +79,7 @@ VALUES
   {"scope": "value[type=INT]", "sourcePath": "integer", "targetPath": "valueInteger"},
   {"scope": "value[type=REAL]", "sourcePath": "real", "transform": "cda_real_to_bare_quantity", "targetPath": "valueQuantity"},
   {"scope": "value[type=IVL_TS]", "sourcePath": "timeRange", "transform": "cda_timerange_to_period", "targetPath": "valuePeriod"},
+  {"sourcePath": "interpretationCode", "transform": "cda_code_to_codeable_concept", "targetPath": "interpretation[0]"},
   {
     "literalValue": "unknown",
     "transform": "observation_data_absent_reason_to_fhir",
@@ -114,6 +116,7 @@ VALUES
   {"scope": "value[type=INT]", "sourcePath": "integer", "targetPath": "valueInteger"},
   {"scope": "value[type=REAL]", "sourcePath": "real", "transform": "cda_real_to_bare_quantity", "targetPath": "valueQuantity"},
   {"scope": "value[type=IVL_TS]", "sourcePath": "timeRange", "transform": "cda_timerange_to_period", "targetPath": "valuePeriod"},
+  {"sourcePath": "interpretationCode", "transform": "cda_code_to_codeable_concept", "targetPath": "interpretation[0]"},
   {
     "literalValue": "unknown",
     "transform": "observation_data_absent_reason_to_fhir",

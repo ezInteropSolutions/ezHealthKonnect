@@ -825,11 +825,71 @@ unrelated formatting drift in `cda/document/types.go` fixed in passing —
 caused by gofmt's struct-tag column alignment recalculating once a longer
 field name was added, not by a content change).
 
-**Remaining for Phase 3**: the two small items already flagged and
-deferred from slice 1 (Medication's `effectiveDateTime` fallback) and
-slice 3 (shell-entry substitution and `interpretationCode`; BP-panel
-combination is resolved via the assembly layer, not deferred). Neither
-needs a new engine primitive. Otherwise, Phase 3 is done — Phase 4
+**Closing the deferred items — done** (2026-06-22). Two of the three
+sub-items closed; one stays deliberately deferred after a closer look
+changed its risk profile:
+
+- **Medication's `effectiveDateTime` fallback — closed.** Turned out to
+  need no new primitive at all: `SkipIfResourceHasAnyOf` (proven by
+  `DeviceMappingRules()`'s `timingPeriod`/`timingDateTime` pair) is the
+  exact same "transform A into path A, else transform B into path B"
+  shape this was waiting on — the original note was simply written before
+  that pattern existed. One row added to `medicationStatementRule()`.
+  **Notable finding while verifying it**: given `transforms
+  .CDATimeRangeToPeriod`/`CDATimeRangeToOnset`'s actual implementations,
+  the fallback is structurally unreachable in **Go's own code today
+  too** — both functions are gated by the exact same three fields
+  (Low/High/Value) being empty, so if Period returns nil, Onset
+  necessarily returns "" for the same input. Ported anyway for
+  byte-for-byte fidelity and as a defensive guard against a future
+  `transforms.go` change; the new test instead verifies the `Skip` itself
+  (a period-bearing entry never also gets `effectiveDateTime`).
+- **`interpretationCode` → `Observation.interpretation` — closed, with a
+  real Go-level bug fix.** Verified via WebFetch against
+  `build.fhir.org/ig/HL7/CDA-ccda-2.1-sd` (CONF:1198-7147, 2026-06-22):
+  `interpretationCode` is a **direct child** of the observation, a sibling
+  of `code`/`statusCode`/`value` — confirming the inventory's suspicion
+  that Go's COMP-nested read was structurally wrong, not just a
+  declarative-porting gap. Fixed at three layers: added `CDAEntry
+  .InterpretationCode` (`cda/document/types.go`) +
+  `entry_parser.go`'s direct-sibling parse; fixed
+  `observation_mapper.go`'s interpretation logic to read it instead of a
+  COMP child's value (the actual Go bug fix — same "find it, fix it in Go,
+  not just declaratively" precedent as Device's typeCode fix); added the
+  matching declarative row to `observationFields()`. Verified against real
+  data, not just synthetic tests: Kareo's 5 vital-signs entries all carry
+  a direct-sibling `interpretationCode` and now correctly produce
+  `interpretation` end-to-end (confirmed via the existing
+  `TestDeclarativeEngine_Corpus_VitalSignsEndToEnd`, no new corpus test
+  needed since the existing one already logs full resource JSON).
+  `database/migrations/V155__CDA_Declarative_Mapping_Rules_Observations.sql`
+  updated (one row added to all three section seeds); drift-guard test
+  passed without modification (the existing regex/comparison needed no
+  changes, only the JSON content).
+- **Shell-entry substitution — stays deferred, on purpose.** Re-examined
+  the original "needs a new primitive" conclusion and found it's actually
+  *closer* to expressible than first thought — `RowCondition` (checking
+  `code.code == ""` as a proxy for "nullFlavor is set," since CDA's CD
+  datatype rules mean a well-formed `<code>` always has @code XOR
+  @nullFlavor) combined with `SkipIfResourceHasAnyOf` *could* drive the
+  per-field substitution. What changed the call: Go's actual logic gates
+  THREE fields (code/value/effectiveTime) off ONE outer condition with
+  field-specific inner refinements, then drops the entire resource if no
+  good COMP child is found (`return nil`) — replicating the drop
+  declaratively would mean adding `RequiredPaths: ["code"]` to all three
+  *already-working, already-tested* Vital Signs/Results/Social History
+  rules, for a pattern with **zero corpus evidence** in any of those three
+  sections (it's an SDOH/AUDIT-C-assessment idiom, a section not yet
+  ported). That's a real risk to proven rules for a benefit nothing in the
+  current corpus or scope actually needs — the same "don't design for
+  hypothetical requirements" call this project has made elsewhere, applied
+  here deliberately rather than by default. Revisit when a section with
+  real evidence for this pattern (functionalStatus/mentalStatus/
+  assessment) is actually ported.
+
+All verified via Docker: `go build ./...`, `go vet ./...`, full
+`go test ./...` (including `fhir/r4`, schemas mounted) green, `gofmt`-clean
+on every touched file. Phase 3 is now fully done — Phase 4
 (cutover/shadow-mode design) is the next real decision point.
 
 **Phase 2 — Unified Mapping Schema + Execution Engine — done** (same day,

@@ -259,6 +259,12 @@ VALUES
     "targetPath": "effectivePeriod"
   },
   {
+    "sourcePath": "effectiveTime",
+    "transform": "cda_timerange_to_onset",
+    "targetPath": "effectiveDateTime",
+    "skipIfResourceHasAnyOf": ["effectivePeriod"]
+  },
+  {
     "sourcePath": "consumable.manufacturedProduct.manufacturedMaterial.code",
     "transform": "cda_code_to_codeable_concept",
     "targetPath": "medicationCodeableConcept"

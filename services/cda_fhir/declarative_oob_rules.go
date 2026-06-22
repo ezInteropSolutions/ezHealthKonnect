@@ -256,13 +256,23 @@ func medicationStatementRule() MappingRule {
 			Conformance: "SHALL",
 		},
 		{
-			// medication_mapper.go:121-125 — period preferred; the
-			// single-value-onset fallback (effectiveDateTime, a DIFFERENT
-			// target path) isn't ported in this slice — see this file's top
-			// doc comment.
+			// medication_mapper.go:121-122 — period preferred.
 			SourcePath: "effectiveTime",
 			Transform:  "cda_timerange_to_period",
 			TargetPath: "effectivePeriod",
+		},
+		{
+			// medication_mapper.go:123-124 — single-value-onset fallback when
+			// effectiveTime has no high/low range, only a bare value (period
+			// resolves to nothing in that case). Same SkipIfResourceHasAnyOf
+			// "transform A into path A, else transform B into path B" shape
+			// DeviceMappingRules' timingPeriod/timingDateTime pair already
+			// proved out — this was deferred in the original slice only
+			// because that pattern hadn't been established yet.
+			SourcePath:             "effectiveTime",
+			Transform:              "cda_timerange_to_onset",
+			TargetPath:             "effectiveDateTime",
+			SkipIfResourceHasAnyOf: []string{"effectivePeriod"},
 		},
 	}
 	fields = append(fields, medicationCommonRows("dosage[0]")...)
@@ -508,17 +518,13 @@ func conditionRule(sectionKey, categoryCode string) MappingRule {
 //     resolved CDACode struct has an empty .code AND a set .nullFlavor", a
 //     content check on a resolved struct, not an unresolved-path check) --
 //     revisit when a section with real evidence for this pattern is ported.
-//   - interpretationCode -> Observation.interpretation. The typed
-//     cda/document parser doesn't even capture an InterpretationCode field
-//     on CDAEntry today (confirmed: no such field in cda/document/types.go)
-//     -- Go's own implementation actually reads a COMP child's VALUE as a
-//     stand-in for interpretation, which architecture/CDA_FHIR_MAPPING_INVENTORY.md
-//     itself flags as a likely structural-assumption gap (real Kareo data
-//     has interpretationCode as a direct sibling element, not COMP-nested).
-//     Porting this faithfully needs a parser-layer change (capturing the
-//     real element) before it can be ported correctly -- out of scope for a
-//     declarative-rules-only slice; replicating Go's questionable COMP-
-//     nested-value reading wouldn't be a real fidelity gain.
+//   - interpretationCode -> Observation.interpretation -- RESOLVED
+//     2026-06-22. Added CDAEntry.InterpretationCode + entry_parser.go's
+//     direct-sibling parse (CONF:1198-7147, verified against the actual IG)
+//     and fixed observation_mapper.go's interpretation logic to read it
+//     instead of a COMP child's value -- a genuine bug fix in Go, not just
+//     a declarative-only addition, matching real Kareo data's actual shape.
+//     See this rule's "interpretationCode" row below.
 //   - referenceRange / performer -- Go has zero implementation for either
 //     (referenceRange is "registered but never called from the mapper" per
 //     the inventory; performer is "NOT implemented" for both sections) --
@@ -645,6 +651,17 @@ func observationRule(sectionKey, categoryCode string) MappingRule {
 				TargetPath: "valuePeriod",
 			},
 
+			{
+				// observation_mapper.go's interpretation row (CONF:1198-7147,
+				// verified 2026-06-22) -- a direct child of the observation,
+				// a sibling of code/statusCode/value, not COMP-nested (the
+				// prior, IG-incorrect read this section used to replicate;
+				// fixed in Go itself, not just here -- see this section's
+				// top doc comment).
+				SourcePath: "interpretationCode",
+				Transform:  "cda_code_to_codeable_concept",
+				TargetPath: "interpretation[0]",
+			},
 			{
 				// observation_mapper.go:257-260,265-276 — us-core-2: must
 				// have value[x]/component/hasMember/dataAbsentReason. Fires

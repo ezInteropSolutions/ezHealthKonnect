@@ -485,6 +485,39 @@ func TestDeclarativeEngine_Medication_FreeTextSigAndInstructionV2_SetDosageTextF
 	}
 }
 
+func TestDeclarativeEngine_MedicationStatement_EffectivePeriod_SuppressesEffectiveDateTime(t *testing.T) {
+	// medication_mapper.go:121-124's period-preferred-else-onset shape. Note:
+	// given transforms.CDATimeRangeToPeriod/CDATimeRangeToOnset's actual
+	// implementations, both are gated by the exact same three fields
+	// (Low/High/Value) being empty -- so the "else" branch is structurally
+	// unreachable in Go today too (proven, not assumed: if Period returns
+	// nil, Onset necessarily returns "" for the same input). This row is
+	// ported for byte-for-byte fidelity and as a defensive guard against a
+	// future transforms.go change, not because a real input exercises it.
+	// What IS verifiable here is the skip itself: a period-bearing entry
+	// must never also get effectiveDateTime.
+	entries := []cdadocument.CDAEntry{
+		{
+			EntryType:  "substanceAdministration",
+			MoodCode:   "EVN",
+			StatusCode: "completed",
+			EffectiveTime: cdadocument.CDATimeRange{
+				Low: cdadocument.CDATime{Value: "20230101"},
+			},
+		},
+	}
+	resources := buildMedicationResources(t, entries)
+	if len(resources) != 1 || resources[0]["resourceType"] != "MedicationStatement" {
+		t.Fatalf("expected 1 MedicationStatement, got %v", resources)
+	}
+	if _, has := resources[0]["effectivePeriod"]; !has {
+		t.Fatal("expected effectivePeriod to be set")
+	}
+	if _, has := resources[0]["effectiveDateTime"]; has {
+		t.Error("effectiveDateTime must not be set when effectivePeriod is already present (SkipIfResourceHasAnyOf)")
+	}
+}
+
 // ---- Conditions ----
 // Ports TestMapConditions_NegatedProblem_VerificationStatusRefuted,
 // TestMapConditions_SeverityFromNestedSUBJObservation,
@@ -786,6 +819,38 @@ func TestDeclarativeEngine_Results_NullFlavorValue_ProducesDataAbsentReason(t *t
 	coding := firstCoding(t, dar)
 	if coding["code"] != "unknown" {
 		t.Errorf("dataAbsentReason coding = %v, want code=unknown", coding)
+	}
+}
+
+func TestDeclarativeEngine_Results_InterpretationCode_DirectChild_SetsInterpretation(t *testing.T) {
+	// CONF:1198-7147 -- direct sibling of code/statusCode/value, matching
+	// real Kareo corpus data's actual shape (not COMP-nested, the prior
+	// IG-incorrect assumption this row replaces).
+	entries := []cdadocument.CDAEntry{
+		{
+			EntryType:          "observation",
+			StatusCode:         "completed",
+			Code:               cdadocument.CDACode{Code: "2345-7", CodeSystem: "2.16.840.1.113883.6.1"},
+			Value:              &cdadocument.CDAValue{Type: "PQ", Quantity: &cdadocument.CDAQuantity{Value: "180", Unit: "mg/dL"}},
+			InterpretationCode: cdadocument.CDACode{Code: "H", CodeSystem: "2.16.840.1.113883.5.83", DisplayName: "High"},
+		},
+	}
+	documentMap := documentMapForEntries(t, "results", entries)
+	engine := cdafhir.NewDeclarativeEngine()
+	resources, errs := engine.BuildResources(documentMap, cdafhir.ResultsMappingRules()[0])
+	if len(errs) != 0 {
+		t.Fatalf("unexpected errors: %+v", errs)
+	}
+	if len(resources) != 1 {
+		t.Fatalf("expected 1 Observation, got %d", len(resources))
+	}
+	interp, _ := resources[0]["interpretation"].([]interface{})
+	if len(interp) != 1 {
+		t.Fatalf("expected 1 interpretation entry, got %d", len(interp))
+	}
+	coding := firstCoding(t, interp[0])
+	if coding["code"] != "H" {
+		t.Errorf("interpretation[0].coding[0].code = %v, want H", coding["code"])
 	}
 }
 

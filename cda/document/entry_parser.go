@@ -88,6 +88,13 @@ func (ep *entryParser) parseClinicalAct(el *etree.Element, entryType string) CDA
 	if scEl := el.SelectElement("statusCode"); scEl != nil {
 		entry.StatusCode = scEl.SelectAttrValue("code", "")
 	}
+	// Result Observation's <interpretationCode> (CONF:1198-7147) is a direct
+	// child, a sibling of <code>/<statusCode>/<value> — not nested under an
+	// entryRelationship. 0..*; only the first is captured (see CDAEntry's
+	// InterpretationCode doc comment).
+	if icEl := el.SelectElement("interpretationCode"); icEl != nil {
+		entry.InterpretationCode = parseCD(icEl)
+	}
 	// ALL <effectiveTime> elements — substanceAdministration commonly carries
 	// two: an IVL_TS duration and a PIVL_TS/EIVL_TS dosing frequency.
 	for _, etEl := range el.SelectElements("effectiveTime") {

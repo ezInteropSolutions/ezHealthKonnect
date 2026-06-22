@@ -56,11 +56,18 @@ type CDASection struct {
 
 // CDAEntry represents one clinical act extracted from a CDA section <entry> element.
 type CDAEntry struct {
-	Id                 []CDAII                `json:"id,omitempty"`
-	Code               CDACode                `json:"code"`
-	StatusCode         string                 `json:"statusCode,omitempty"`
-	EffectiveTime      CDATimeRange           `json:"effectiveTime"` // first <effectiveTime> only — kept for backward compatibility
-	Value              *CDAValue              `json:"value,omitempty"`
+	Id            []CDAII      `json:"id,omitempty"`
+	Code          CDACode      `json:"code"`
+	StatusCode    string       `json:"statusCode,omitempty"`
+	EffectiveTime CDATimeRange `json:"effectiveTime"` // first <effectiveTime> only — kept for backward compatibility
+	Value         *CDAValue    `json:"value,omitempty"`
+	// InterpretationCode is the Result Observation's <interpretationCode>
+	// (CONF:1198-7147, confirmed via WebFetch against build.fhir.org/ig/HL7/
+	// CDA-ccda-2.1-sd 2026-06-22): a direct child of the observation element,
+	// a sibling of <code>/<statusCode>/<value> — NOT nested under an
+	// entryRelationship. 0..* per the IG; only the first is captured here,
+	// matching every other single-value CDACode field on this struct.
+	InterpretationCode CDACode                `json:"interpretationCode,omitempty"`
 	Participants       []CDAParticipant       `json:"participants,omitempty"`
 	Components         []CDAEntry             `json:"components,omitempty"` // nested organizer/component entries
 	EntryRelationships []CDAEntryRelationship `json:"entryRelationships,omitempty"`

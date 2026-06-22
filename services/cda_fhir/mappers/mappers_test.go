@@ -40,6 +40,50 @@ func TestMapObservations_FunctionalStatusCategory_UsesUSCoreCodeSystem(t *testin
 	}
 }
 
+func TestMapObservations_InterpretationCode_DirectChild_SetsInterpretation(t *testing.T) {
+	// CONF:1198-7147 -- interpretationCode is a direct child of the
+	// observation, a sibling of code/statusCode/value, not nested under a
+	// COMP entryRelationship (the prior, IG-incorrect assumption). Real
+	// Kareo corpus data has this direct-sibling shape.
+	entries := []cdadocument.CDAEntry{
+		{
+			EntryType:  "observation",
+			StatusCode: "completed",
+			Value:      &cdadocument.CDAValue{Type: "ST", Text: "7.2"},
+			InterpretationCode: cdadocument.CDACode{
+				Code: "L", CodeSystem: "2.16.840.1.113883.5.83", DisplayName: "Low",
+			},
+		},
+	}
+	resources := MapObservations(entries, testPatientRef, "laboratory")
+	if len(resources) != 1 {
+		t.Fatalf("expected 1 Observation, got %d", len(resources))
+	}
+	interp, _ := resources[0]["interpretation"].([]interface{})
+	if len(interp) != 1 {
+		t.Fatalf("expected 1 interpretation entry, got %d", len(interp))
+	}
+	cc, _ := interp[0].(map[string]interface{})
+	codings, _ := cc["coding"].([]interface{})
+	coding, _ := codings[0].(map[string]interface{})
+	if coding["code"] != "L" {
+		t.Errorf("interpretation[0].coding[0].code = %v, want L", coding["code"])
+	}
+}
+
+func TestMapObservations_NoInterpretationCode_NoInterpretation(t *testing.T) {
+	entries := []cdadocument.CDAEntry{
+		{EntryType: "observation", StatusCode: "completed", Value: &cdadocument.CDAValue{Type: "ST", Text: "98.6"}},
+	}
+	resources := MapObservations(entries, testPatientRef, "vital-signs")
+	if len(resources) != 1 {
+		t.Fatalf("expected 1 Observation, got %d", len(resources))
+	}
+	if _, has := resources[0]["interpretation"]; has {
+		t.Error("expected no interpretation when interpretationCode is absent")
+	}
+}
+
 func categoryCodingSystem(t *testing.T, r map[string]interface{}) string {
 	t.Helper()
 	cats, _ := r["category"].([]interface{})
