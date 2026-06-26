@@ -10,6 +10,17 @@ import (
 // entity. Duplicates are identified by matching HL7 CDAII keys (root + extension)
 // embedded in the "_cdaIds" internal field by the individual mappers.
 //
+// When a duplicate is found, whichever resource has MORE top-level FHIR fields
+// populated (len(map) — the same "is this resource non-empty" proxy
+// buildOneResource/buildEmittedSubResource already use elsewhere in this
+// codebase) becomes the survivor, regardless of which one was registered first.
+// Plain first-wins (this rule's original behavior) silently kept whichever
+// resource happened to be built first even when a later one was strictly more
+// complete -- found via Care Team: a sparse, nameless Practitioner built from a
+// <participant>'s bare NPI registered before a richer one (name, specialty,
+// address, phone) built from a sibling <component>'s <performer> for the SAME
+// person, and the sparse one won purely by being processed first.
+//
 // When a duplicate is found:
 //   - ctx.DedupRedirects["ResourceType/dup-id"] = "ResourceType/survivor-id"
 //   - ctx.Removed["ResourceType/dup-id"] = true
@@ -51,6 +62,39 @@ func (r *DeduplicationRule) Apply(ctx *assembly.AssemblyContext) error {
 			survivorRT, _ := existing["resourceType"].(string)
 			survivorID, _ := existing["id"].(string)
 			survivorRef := survivorRT + "/" + survivorID
+
+			if len(res) > len(existing) {
+				// res is the more complete resource -- swap it in as the
+				// survivor instead of discarding it. Re-point any earlier
+				// redirect that already targeted the old survivor: this
+				// rule's own DedupRedirects map is later consumed by
+				// AssembleEntriesWithRedirects as a single-hop lookup (no
+				// chain resolution -- see that function's own doc comment),
+				// so leaving an old redirect pointing at survivorRef after
+				// survivorRef itself becomes a removed duplicate would
+				// produce an unresolved/broken reference.
+				for oldRef, redirectTarget := range ctx.DedupRedirects {
+					if redirectTarget == survivorRef {
+						ctx.DedupRedirects[oldRef] = thisRef
+					}
+				}
+				reg.Replace(rt, existing, res)
+				ctx.DedupRedirects[survivorRef] = thisRef
+				ctx.Removed[survivorRef] = true
+				delete(ctx.Removed, thisRef)
+
+				if ctx.Log != nil {
+					ctx.Log.AddAssemblyEvent(mappinglog.AssemblyEvent{
+						Rule:         r.Name(),
+						Action:       "deduplicated",
+						ResourceType: rt,
+						IDs:          []string{survivorID, id},
+						SurvivorID:   id,
+						Detail:       "matched on " + matchKey + " (later, more complete resource kept)",
+					})
+				}
+				continue
+			}
 
 			ctx.DedupRedirects[thisRef] = survivorRef
 			ctx.Removed[thisRef] = true

@@ -42,6 +42,15 @@ func NormalizeSystem(raw string) string {
 	// HL7 AdministrativeGender
 	case "ADMINGENDER", "2.16.840.1.113883.5.1":
 		return "http://terminology.hl7.org/CodeSystem/v3-AdministrativeGender"
+	// HL7 MaritalStatus
+	case "MARITALSTATUS", "2.16.840.1.113883.5.2":
+		return "http://terminology.hl7.org/CodeSystem/v3-MaritalStatus"
+	// HL7 RoleCode
+	case "ROLECODE", "2.16.840.1.113883.5.88":
+		return "http://terminology.hl7.org/CodeSystem/v3-RoleCode"
+	// HL7 ReligiousAffiliation
+	case "RELIGIOUSAFFILIATION", "2.16.840.1.113883.5.1076":
+		return "http://terminology.hl7.org/CodeSystem/v3-ReligiousAffiliation"
 	default:
 		return raw
 	}

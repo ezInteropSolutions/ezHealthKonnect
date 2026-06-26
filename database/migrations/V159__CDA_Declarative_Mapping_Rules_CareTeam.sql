@@ -10,6 +10,11 @@
 -- first OOB rule to use EmitAsResource (MappingRow.EmitAsResource) — each
 -- participants[*] match builds both a CareTeam.participant entry AND an
 -- independent, cross-referenced Practitioner resource.
+--
+-- Phase 4 Slice A update: the emitted Practitioner's identifier row now
+-- carries "embedCDAIdentity": true, matching MappingRow.EmbedCDAIdentity
+-- added to the Go literal (mirrors practitioner_mapper.go's embedCDAIds
+-- call).
 
 ALTER TABLE cda_declarative_mapping_rules
     ADD COLUMN IF NOT EXISTS required_paths TEXT[] NOT NULL DEFAULT '{}';
@@ -41,12 +46,29 @@ VALUES
         "targetPath": "member",
         "fields": [
           {"scope": "participantRole.playingEntity.names[*]", "transform": "cda_name_to_fhir", "collectAll": true, "targetPath": "name"},
-          {"scope": "participantRole.ids[*]", "transform": "cda_ii_to_identifier", "collectAll": true, "targetPath": "identifier"},
+          {"scope": "participantRole.ids[*]", "transform": "cda_ii_to_identifier", "collectAll": true, "targetPath": "identifier", "embedCDAIdentity": true},
           {"sourcePath": "participantRole.code", "transform": "cda_code_to_codeable_concept", "targetPath": "qualification[0].code"},
           {"scope": "participantRole.telecoms[*]", "transform": "cda_telecom_to_fhir", "collectAll": true, "targetPath": "telecom"}
         ]
       },
       {"sourcePath": "functionCode", "transform": "cda_code_to_codeable_concept", "targetPath": "role[0]"}
+    ]
+  },
+  {
+    "scope": "components[*]",
+    "collectAll": true,
+    "targetPath": "_emitOnly",
+    "fields": [
+      {
+        "emitAsResource": "Practitioner",
+        "targetPath": "ref",
+        "fields": [
+          {"scope": "performers[0].assignedEntity.assignedPerson.names[*]", "transform": "cda_name_to_fhir", "collectAll": true, "targetPath": "name"},
+          {"scope": "performers[0].assignedEntity.ids[*]", "transform": "cda_ii_to_identifier", "collectAll": true, "targetPath": "identifier", "embedCDAIdentity": true},
+          {"sourcePath": "performers[0].assignedEntity.code", "transform": "cda_code_to_codeable_concept", "targetPath": "qualification[0].code"},
+          {"scope": "performers[0].assignedEntity.telecoms[*]", "transform": "cda_telecom_to_fhir", "collectAll": true, "targetPath": "telecom"}
+        ]
+      }
     ]
   }
 ]
@@ -81,12 +103,29 @@ VALUES
         "targetPath": "member",
         "fields": [
           {"scope": "participantRole.playingEntity.names[*]", "transform": "cda_name_to_fhir", "collectAll": true, "targetPath": "name"},
-          {"scope": "participantRole.ids[*]", "transform": "cda_ii_to_identifier", "collectAll": true, "targetPath": "identifier"},
+          {"scope": "participantRole.ids[*]", "transform": "cda_ii_to_identifier", "collectAll": true, "targetPath": "identifier", "embedCDAIdentity": true},
           {"sourcePath": "participantRole.code", "transform": "cda_code_to_codeable_concept", "targetPath": "qualification[0].code"},
           {"scope": "participantRole.telecoms[*]", "transform": "cda_telecom_to_fhir", "collectAll": true, "targetPath": "telecom"}
         ]
       },
       {"sourcePath": "functionCode", "transform": "cda_code_to_codeable_concept", "targetPath": "role[0]"}
+    ]
+  },
+  {
+    "scope": "components[*]",
+    "collectAll": true,
+    "targetPath": "_emitOnly",
+    "fields": [
+      {
+        "emitAsResource": "Practitioner",
+        "targetPath": "ref",
+        "fields": [
+          {"scope": "performers[0].assignedEntity.assignedPerson.names[*]", "transform": "cda_name_to_fhir", "collectAll": true, "targetPath": "name"},
+          {"scope": "performers[0].assignedEntity.ids[*]", "transform": "cda_ii_to_identifier", "collectAll": true, "targetPath": "identifier", "embedCDAIdentity": true},
+          {"sourcePath": "performers[0].assignedEntity.code", "transform": "cda_code_to_codeable_concept", "targetPath": "qualification[0].code"},
+          {"scope": "performers[0].assignedEntity.telecoms[*]", "transform": "cda_telecom_to_fhir", "collectAll": true, "targetPath": "telecom"}
+        ]
+      }
     ]
   }
 ]

@@ -1,87 +1,33 @@
--- V155__CDA_Declarative_Mapping_Rules_Observations.sql
--- Phase 3 (OOB Template Migration) of the CDA→FHIR Declarative Mapping Engine.
+-- V163__CDA_Declarative_Mapping_Rules_FunctionalMentalStatus_LabResults.sql
+-- Phase 4 Slice D (Cutover) of the CDA→FHIR Declarative Mapping Engine.
 --
--- Adds the Vital Signs / Results (Laboratory) / Social History slice on top
--- of V154's cda_declarative_mapping_rules table (NOT a new table -- same
--- shape, same drift-guard discipline). See
--- services/cda_fhir/declarative_oob_rules.go's observationRule() for the
--- single source of truth this JSON is hand-synced to, and that file's own
--- top doc comment for what this slice deliberately does NOT port (BP-panel
--- combination, shell-entry substitution, interpretationCode) and why.
+-- Closes 2 real section-coverage gaps found while preparing to delete the
+-- hardcoded Go mapper path: "functionalStatus" and "mentalStatus" had no
+-- declarative rule at all (declarative_transform_registry.go's own doc
+-- comment flagged this explicitly), and "labResults" -- the alias
+-- document_mapper.go's typedSectionDispatchers mapped to the same mapper/
+-- category as "results" -- had no declarative rule either. Without these,
+-- cutting the executor over to the declarative engine would silently drop
+-- any real document carrying one of these 3 sections. See
+-- services/cda_fhir/declarative_oob_rules.go's FunctionalStatusMappingRules()/
+-- MentalStatusMappingRules()/ResultsMappingRules() for the single source of
+-- truth this JSON is hand-synced to.
 --
--- New column: flatten_organizers. MappingRule-level fields get dedicated
--- columns (see entry_match in V154), not JSONB, so MappingRule.FlattenOrganizers
--- (declarative_schema.go) needs one too -- defaults to false, so V154's
--- existing 5 rows are unaffected.
-
-ALTER TABLE cda_declarative_mapping_rules
-    ADD COLUMN IF NOT EXISTS flatten_organizers BOOLEAN NOT NULL DEFAULT false;
-
-COMMENT ON COLUMN cda_declarative_mapping_rules.flatten_organizers IS
-    'MappingRule.FlattenOrganizers (declarative_schema.go) -- expand organizer entries into their Components instead of treating the organizer as one resource. See observationRule() in declarative_oob_rules.go.';
-
--- Phase 4 Slice B update: building the document-level orchestrator found
--- practicefusion_sample.xml's "results" section has a Results Organizer
--- whose one Component is fully nullFlavor (code, value, AND effectiveTime
--- all NI) -- observation_mapper.go:195-198 explicitly skips emitting a
--- resource for this ("no useful clinical data to emit"), so
--- observationRule() now sets the new MappingRule.SkipIfCodeNullFlavor,
--- requiring its own dedicated column (same convention as
--- flatten_organizers above).
-
-ALTER TABLE cda_declarative_mapping_rules
-    ADD COLUMN IF NOT EXISTS skip_if_code_null_flavor BOOLEAN NOT NULL DEFAULT false;
-
-COMMENT ON COLUMN cda_declarative_mapping_rules.skip_if_code_null_flavor IS
-    'MappingRule.SkipIfCodeNullFlavor (declarative_schema.go) -- skip building a resource entirely when the entry''s top-level code is a bare nullFlavor with no real code. See observationRule() in declarative_oob_rules.go.';
+-- Net-new section coverage, not an edit to an already-seeded row -- follows
+-- the original Phase 3 pattern of one migration per new section (unlike
+-- Slice B's V155/V157/V161 in-place edits to rows that already existed).
+-- No new columns: flatten_organizers/skip_if_code_null_flavor already exist
+-- from V155.
 
 -- =========================================================
--- SEED: vitalSigns -> Observation (category=vital-signs)
+-- SEED: labResults -> Observation (category=laboratory, alias of "results")
 -- =========================================================
 
 INSERT INTO cda_declarative_mapping_rules
     (document_type, ccda_version, fhir_version, section_key, fhir_resource, entry_match, rule_order, fields, flatten_organizers, skip_if_code_null_flavor, is_system, is_public)
 VALUES
 (
-    'CCD', '2.1', 'R4', 'vitalSigns', 'Observation', '', 0,
-    $rules$
-[
-  {"sourcePath": "code", "transform": "cda_code_to_codeable_concept", "targetPath": "code"},
-  {"sourcePath": "statusCode", "transform": "observation_status_to_fhir", "targetPath": "status"},
-  {"sourcePath": "effectiveTime", "transform": "cda_timerange_to_onset", "targetPath": "effectiveDateTime"},
-  {"literalValue": "vital-signs", "transform": "observation_category_to_fhir", "targetPath": "category[0]"},
-  {"scope": "authors[0].assignedAuthor.assignedPerson.names[0]", "scopeFallbacks": ["authors[0].assignedAuthor.representedOrganization.names[0]"], "transform": "cda_name_or_literal_to_display_ref", "targetPath": "performer[0]"},
-  {"scope": "value[type=PQ]", "sourcePath": "quantity", "transform": "cda_quantity_to_fhir", "targetPath": "valueQuantity"},
-  {"scope": "value[type=CD]", "scopeFallbacks": ["value[type=CE]", "value[type=CS]"], "sourcePath": "code", "transform": "cda_code_to_codeable_concept", "targetPath": "valueCodeableConcept"},
-  {"scope": "value[type=ST]", "scopeFallbacks": ["value[type=ED]"], "sourcePath": "text", "targetPath": "valueString"},
-  {"scope": "value[type=BL]", "sourcePath": "boolean", "targetPath": "valueBoolean"},
-  {"scope": "value[type=INT]", "sourcePath": "integer", "targetPath": "valueInteger"},
-  {"scope": "value[type=REAL]", "sourcePath": "real", "transform": "cda_real_to_bare_quantity", "targetPath": "valueQuantity"},
-  {"scope": "value[type=IVL_TS]", "sourcePath": "timeRange", "transform": "cda_timerange_to_period", "targetPath": "valuePeriod"},
-  {"sourcePath": "interpretationCode", "transform": "cda_code_to_codeable_concept", "targetPath": "interpretation[0]"},
-  {
-    "literalValue": "unknown",
-    "transform": "observation_data_absent_reason_to_fhir",
-    "targetPath": "dataAbsentReason",
-    "skipIfResourceHasAnyOf": ["valueQuantity", "valueCodeableConcept", "valueString", "valueBoolean", "valueInteger", "valuePeriod"]
-  }
-]
-    $rules$::jsonb,
-    true, true, true, true
-)
-ON CONFLICT (document_type, ccda_version, fhir_version, section_key, fhir_resource) DO UPDATE SET
-    entry_match = EXCLUDED.entry_match, rule_order = EXCLUDED.rule_order, fields = EXCLUDED.fields,
-    flatten_organizers = EXCLUDED.flatten_organizers, skip_if_code_null_flavor = EXCLUDED.skip_if_code_null_flavor, updated_at = NOW();
-
--- =========================================================
--- SEED: results -> Observation (category=laboratory)
--- =========================================================
-
-INSERT INTO cda_declarative_mapping_rules
-    (document_type, ccda_version, fhir_version, section_key, fhir_resource, entry_match, rule_order, fields, flatten_organizers, skip_if_code_null_flavor, is_system, is_public)
-VALUES
-(
-    'CCD', '2.1', 'R4', 'results', 'Observation', '', 0,
+    'CCD', '2.1', 'R4', 'labResults', 'Observation', '', 0,
     $rules$
 [
   {"sourcePath": "code", "transform": "cda_code_to_codeable_concept", "targetPath": "code"},
@@ -112,20 +58,58 @@ ON CONFLICT (document_type, ccda_version, fhir_version, section_key, fhir_resour
     flatten_organizers = EXCLUDED.flatten_organizers, skip_if_code_null_flavor = EXCLUDED.skip_if_code_null_flavor, updated_at = NOW();
 
 -- =========================================================
--- SEED: socialHistory -> Observation (category=social-history)
+-- SEED: functionalStatus -> Observation (category=functional-status)
 -- =========================================================
 
 INSERT INTO cda_declarative_mapping_rules
     (document_type, ccda_version, fhir_version, section_key, fhir_resource, entry_match, rule_order, fields, flatten_organizers, skip_if_code_null_flavor, is_system, is_public)
 VALUES
 (
-    'CCD', '2.1', 'R4', 'socialHistory', 'Observation', '', 0,
+    'CCD', '2.1', 'R4', 'functionalStatus', 'Observation', '', 0,
     $rules$
 [
   {"sourcePath": "code", "transform": "cda_code_to_codeable_concept", "targetPath": "code"},
   {"sourcePath": "statusCode", "transform": "observation_status_to_fhir", "targetPath": "status"},
   {"sourcePath": "effectiveTime", "transform": "cda_timerange_to_onset", "targetPath": "effectiveDateTime"},
-  {"literalValue": "social-history", "transform": "observation_category_to_fhir", "targetPath": "category[0]"},
+  {"literalValue": "functional-status", "transform": "observation_category_to_fhir", "targetPath": "category[0]"},
+  {"scope": "authors[0].assignedAuthor.assignedPerson.names[0]", "scopeFallbacks": ["authors[0].assignedAuthor.representedOrganization.names[0]"], "transform": "cda_name_or_literal_to_display_ref", "targetPath": "performer[0]"},
+  {"scope": "value[type=PQ]", "sourcePath": "quantity", "transform": "cda_quantity_to_fhir", "targetPath": "valueQuantity"},
+  {"scope": "value[type=CD]", "scopeFallbacks": ["value[type=CE]", "value[type=CS]"], "sourcePath": "code", "transform": "cda_code_to_codeable_concept", "targetPath": "valueCodeableConcept"},
+  {"scope": "value[type=ST]", "scopeFallbacks": ["value[type=ED]"], "sourcePath": "text", "targetPath": "valueString"},
+  {"scope": "value[type=BL]", "sourcePath": "boolean", "targetPath": "valueBoolean"},
+  {"scope": "value[type=INT]", "sourcePath": "integer", "targetPath": "valueInteger"},
+  {"scope": "value[type=REAL]", "sourcePath": "real", "transform": "cda_real_to_bare_quantity", "targetPath": "valueQuantity"},
+  {"scope": "value[type=IVL_TS]", "sourcePath": "timeRange", "transform": "cda_timerange_to_period", "targetPath": "valuePeriod"},
+  {"sourcePath": "interpretationCode", "transform": "cda_code_to_codeable_concept", "targetPath": "interpretation[0]"},
+  {
+    "literalValue": "unknown",
+    "transform": "observation_data_absent_reason_to_fhir",
+    "targetPath": "dataAbsentReason",
+    "skipIfResourceHasAnyOf": ["valueQuantity", "valueCodeableConcept", "valueString", "valueBoolean", "valueInteger", "valuePeriod"]
+  }
+]
+    $rules$::jsonb,
+    true, true, true, true
+)
+ON CONFLICT (document_type, ccda_version, fhir_version, section_key, fhir_resource) DO UPDATE SET
+    entry_match = EXCLUDED.entry_match, rule_order = EXCLUDED.rule_order, fields = EXCLUDED.fields,
+    flatten_organizers = EXCLUDED.flatten_organizers, skip_if_code_null_flavor = EXCLUDED.skip_if_code_null_flavor, updated_at = NOW();
+
+-- =========================================================
+-- SEED: mentalStatus -> Observation (category=cognitive-status)
+-- =========================================================
+
+INSERT INTO cda_declarative_mapping_rules
+    (document_type, ccda_version, fhir_version, section_key, fhir_resource, entry_match, rule_order, fields, flatten_organizers, skip_if_code_null_flavor, is_system, is_public)
+VALUES
+(
+    'CCD', '2.1', 'R4', 'mentalStatus', 'Observation', '', 0,
+    $rules$
+[
+  {"sourcePath": "code", "transform": "cda_code_to_codeable_concept", "targetPath": "code"},
+  {"sourcePath": "statusCode", "transform": "observation_status_to_fhir", "targetPath": "status"},
+  {"sourcePath": "effectiveTime", "transform": "cda_timerange_to_onset", "targetPath": "effectiveDateTime"},
+  {"literalValue": "cognitive-status", "transform": "observation_category_to_fhir", "targetPath": "category[0]"},
   {"scope": "authors[0].assignedAuthor.assignedPerson.names[0]", "scopeFallbacks": ["authors[0].assignedAuthor.representedOrganization.names[0]"], "transform": "cda_name_or_literal_to_display_ref", "targetPath": "performer[0]"},
   {"scope": "value[type=PQ]", "sourcePath": "quantity", "transform": "cda_quantity_to_fhir", "targetPath": "valueQuantity"},
   {"scope": "value[type=CD]", "scopeFallbacks": ["value[type=CE]", "value[type=CS]"], "sourcePath": "code", "transform": "cda_code_to_codeable_concept", "targetPath": "valueCodeableConcept"},

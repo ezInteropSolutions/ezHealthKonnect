@@ -23,11 +23,19 @@ func TestNormalizeSystem_UnmappedOID_GetsURNOIDPrefix(t *testing.T) {
 	}
 }
 
-func TestNormalizeSystem_HL7MaritalStatusOID_GetsURNOIDPrefix(t *testing.T) {
+func TestNormalizeSystem_HL7MaritalStatusOID_GetsCanonicalURL(t *testing.T) {
 	got := normalizeSystem("2.16.840.1.113883.5.2")
-	want := "urn:oid:2.16.840.1.113883.5.2"
+	want := "http://terminology.hl7.org/CodeSystem/v3-MaritalStatus"
 	if got != want {
 		t.Errorf("normalizeSystem(MaritalStatus OID) = %q, want %q", got, want)
+	}
+}
+
+func TestNormalizeSystem_HL7RoleCodeOID_GetsCanonicalURL(t *testing.T) {
+	got := normalizeSystem("2.16.840.1.113883.5.88")
+	want := "http://terminology.hl7.org/CodeSystem/v3-RoleCode"
+	if got != want {
+		t.Errorf("normalizeSystem(RoleCode OID) = %q, want %q", got, want)
 	}
 }
 

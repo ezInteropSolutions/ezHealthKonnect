@@ -18,6 +18,28 @@
 --   problems                 -> Condition (category=problem-list-item)
 --   healthConcerns           -> Condition (category=health-concern)
 --
+-- Phase 4 Slice D post-cutover fix: running the real-world sample_ccdas
+-- corpus (github.com/chb/sample_ccdas, 747 files) through
+-- DeclarativeMapDocument() + the project's FHIR R4 validator found
+-- MedicationRequest.intent (1..1 required) was never written at all. The
+-- MedicationRequest row's own entry_match ('moodCode=INT') already
+-- guarantees every matched entry is an order, so a literal "order" is sound,
+-- not a guess. See declarative_oob_rules.go's medicationRequestFields() for
+-- the single source of truth this JSON is hand-synced to.
+--
+-- Post-cutover fix (Allergy verificationStatus/code): the original
+-- negationInd=true -> verificationStatus="refuted" row was an unsourced
+-- heuristic, not an IG requirement -- confirmed against the live HL7 C-CDA
+-- on FHIR IG (CF-allergies.md + ConceptMap-CF-NoKnownAllergies), which has
+-- NO verificationStatus row for allergy negation at all. The IG's only
+-- prescribed effect of negationInd is on .code: invert the generic "Allergy
+-- to X" assertion value into its negated "No known X" SNOMED concept via
+-- ConceptMap-CF-NoKnownAllergies when no real substance (CSM participant)
+-- is named -- the actual "No Known Allergies"/NKDA idiom. See
+-- declarative_oob_rules.go's AllergyMappingRules() and
+-- declarative_transform_registry.go's declarativeAllergySubstanceOrNoKnownAllergy
+-- for the single source of truth this JSON is hand-synced to.
+--
 -- The JSON in each "fields" column is hand-synced to match
 -- services/cda_fhir/declarative_oob_rules.go's Go literals EXACTLY.
 -- declarative_oob_rules_test.go's round-trip test reads this file back,
@@ -92,13 +114,7 @@ VALUES
   {
     "literalValue": "confirmed",
     "transform": "allergy_verification_status_to_fhir",
-    "targetPath": "verificationStatus",
-    "condition": {
-      "whenPath": "negationInd",
-      "whenPaths": ["entryRelationships[typeCode=SUBJ].entry.negationInd"],
-      "equals": "true",
-      "thenLiteralValue": "refuted"
-    }
+    "targetPath": "verificationStatus"
   },
   {
     "scope": "entryRelationships[typeCode=SUBJ].entry",
@@ -110,9 +126,7 @@ VALUES
   {
     "scope": "entryRelationships[typeCode=SUBJ].entry",
     "scopeFallbacks": [""],
-    "sourcePath": "participants[typeCode=CSM].participantRole.playingEntity.code",
-    "fallbackPaths": ["value.code"],
-    "transform": "cda_code_to_codeable_concept",
+    "transform": "allergy_substance_or_no_known_allergy_to_fhir",
     "targetPath": "code",
     "required": true,
     "conformance": "SHALL"
@@ -123,6 +137,13 @@ VALUES
     "sourcePath": "participantRole.playingEntity.code.codeSystem",
     "transform": "allergy_category_from_substance_system",
     "targetPath": "category"
+  },
+  {
+    "scope": "entryRelationships[typeCode=SUBJ].entry.entryRelationships[typeCode=SUBJ,inversionInd=true].entry[code=82606-5]",
+    "scopeFallbacks": ["entryRelationships[typeCode=SUBJ,inversionInd=true].entry[code=82606-5]"],
+    "sourcePath": "value.code.code",
+    "transform": "allergy_criticality_to_fhir",
+    "targetPath": "criticality"
   },
   {
     "scope": "entryRelationships[typeCode=SUBJ].entry.entryRelationships[typeCode=MFST,inversionInd=true].entry[templateId=2.16.840.1.113883.10.20.22.4.9]",
@@ -173,6 +194,12 @@ VALUES
     "conformance": "SHALL"
   },
   {
+    "literalValue": "order",
+    "targetPath": "intent",
+    "required": true,
+    "conformance": "SHALL"
+  },
+  {
     "sourcePath": "performers[0].assignedEntity.assignedPerson.names[0]",
     "fallbackPaths": ["authors[0].assignedAuthor.assignedPerson.names[0]"],
     "literalValue": "Ordering Provider",
@@ -185,6 +212,18 @@ VALUES
     "sourcePath": "effectiveTime",
     "transform": "cda_timerange_to_onset",
     "targetPath": "authoredOn"
+  },
+  {
+    "scope": "entryRelationships[typeCode=REFR].entry[entryType=supply]",
+    "sourcePath": "quantity",
+    "transform": "cda_quantity_to_fhir",
+    "targetPath": "dispenseRequest.quantity"
+  },
+  {
+    "scope": "entryRelationships[typeCode=REFR].entry[entryType=supply]",
+    "sourcePath": "repeatNumber",
+    "transform": "cda_decimal_string_to_number",
+    "targetPath": "dispenseRequest.numberOfRepeatsAllowed"
   },
   {
     "sourcePath": "consumable.manufacturedProduct.manufacturedMaterial.code",
@@ -209,6 +248,7 @@ VALUES
   {
     "scope": "effectiveTimes[xsiType=PIVL_TS].period",
     "sourcePath": "value",
+    "transform": "cda_decimal_string_to_number",
     "targetPath": "dosageInstruction[0].timing.repeat.period"
   },
   {
@@ -287,6 +327,7 @@ VALUES
   {
     "scope": "effectiveTimes[xsiType=PIVL_TS].period",
     "sourcePath": "value",
+    "transform": "cda_decimal_string_to_number",
     "targetPath": "dosage[0].timing.repeat.period"
   },
   {

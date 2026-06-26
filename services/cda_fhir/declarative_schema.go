@@ -80,6 +80,75 @@ type MappingRule struct {
 	// declaratively instead of as a hardcoded post-hoc Go check.
 	RequiredPaths []string `json:"requiredPaths,omitempty"`
 
+	// SkipIfCodeNullFlavor skips building a resource for this entry entirely
+	// — before any Fields row runs, same as never having matched at all —
+	// when the entry's top-level "code" is a bare nullFlavor with no real
+	// code (code.nullFlavor != "" && code.code == ""). Mirrors
+	// observation_mapper.go:195-198's explicit early return ("If no
+	// substitution resolved the code, skip — no useful clinical data to
+	// emit"), found via real corpus data: practicefusion_sample.xml's
+	// "results" section has exactly this shape (a Results Organizer whose
+	// one Component is fully nullFlavor — code, value, and effectiveTime all
+	// NI), and without this check the engine's generic "set dataAbsentReason
+	// when no value[x] exists" row (us-core-2) turns that placeholder into a
+	// spurious Observation Go deliberately never emits.
+	//
+	// Deliberately NOT ported: observation_mapper.go:178-194's COMP-
+	// entryRelationship substitution, which looks for a nested child entry
+	// with a real code/value/time and swaps it in before this same check
+	// (the AUDIT-C/SDOH shell-entry pattern its own comment describes). No
+	// file in this 4-vendor corpus exercises that nested shape — a narrow,
+	// documented gap, not a guessed-at one.
+	SkipIfCodeNullFlavor bool `json:"skipIfCodeNullFlavor,omitempty"`
+
+	// SkipEmptyCheck bypasses the "len(resource) <= 1" discard check in
+	// buildOneResource, keeping the resource even when zero Fields rows
+	// produced any value. Exists for exactly one case found while building
+	// Phase 4's document-level orchestrator: patient_mapper.go's MapAuthor
+	// pre-populates its resource map with resourceType+id BEFORE running any
+	// field logic, then returns it unconditionally once
+	// `len(person.Names) > 0` (a length check on the SOURCE data, not a
+	// content or emptiness check on the BUILT resource) — unlike
+	// practitioner_mapper.go's MapPractitioners (CareTeam's emitted
+	// Practitioner), which DOES gate on `len(r) > 2` and so needs no such
+	// bypass. Real corpus data exercises this: kareo_sample.xml's one
+	// document author has a structurally-present but textually-empty name
+	// (no given/family/text) and a nullFlavor identifier — Go still emits a
+	// placeholder Practitioner for it; without this flag the declarative
+	// engine's (stricter, content-based) empty check would correctly-by-its-
+	// own-logic-but-incorrectly-for-parity discard it, producing 0 resources
+	// where MapDocument() produces 1.
+	SkipEmptyCheck bool `json:"skipEmptyCheck,omitempty"`
+
+	// PatientRefPath lists the FHIR field name(s) this resource type uses to
+	// link back to the patient — grepped from every typed Go mapper's own
+	// `if patientRef != "" { r[...] = ref(patientRef) }` to get the exact
+	// field name per resource type, not assumed from memory: "subject"
+	// (Condition/Encounter/Observation/Procedure/Goal/ServiceRequest/
+	// MedicationRequest/MedicationStatement/CareTeam/DeviceUseStatement),
+	// "patient" (AllergyIntolerance/Immunization/FamilyMemberHistory),
+	// "deliverFor" (SupplyRequest), or both "beneficiary" AND "subscriber"
+	// (Coverage — coverage_mapper.go:43-44 sets both to the same patientRef,
+	// the reason this is a slice and not a single string). Empty/nil for
+	// resources with no patient link at all (Practitioner, Organization,
+	// CareTeam's emitted Practitioner). Every typed Go mapper takes a
+	// patientRef parameter and sets the right-named field itself; no
+	// MappingRule did anything equivalent before this field existed — every
+	// *MappingRules() function explicitly documented this as a deliberate,
+	// deferred gap ("patientRef-dependent, consistent with every prior
+	// rule"). When set and a non-empty patientRef is assigned to
+	// DeclarativeEngine.PatientRef, the engine sets
+	// resource[path] = {"reference": patientRef} for every path here, on
+	// every kept resource — generic, not authored per-row, since the value
+	// is always the same external string, never derived from CDA data.
+	//
+	// Not used by Appointment (plan_of_care_mapper.go's
+	// buildPlannedAppointmentResource writes patientRef into
+	// participant[0].actor, a nested array element this single-path
+	// primitive can't express) — deliberately left as a documented gap, not
+	// a silently-dropped one; see PlanOfCareMappingRules' doc comment.
+	PatientRefPath []string `json:"patientRefPath,omitempty"`
+
 	Fields []MappingRow `json:"fields"`
 }
 
@@ -184,6 +253,16 @@ type MappingRow struct {
 	// section needs and is not supported.
 	EmitAsResource string `json:"emitAsResource,omitempty"`
 
+	// EmitAsResourcePatientRefPath mirrors MappingRule.PatientRefPath but for
+	// the resource EmitAsResource builds: the engine's main per-rule
+	// PatientRefPath application (buildOneResource) never sees this emitted
+	// resource, since it's returned as a sibling "extra" resource, not the
+	// rule's own — so a resource type that genuinely needs a subject/patient
+	// reference (e.g. Condition, unlike CareTeam's emitted Practitioner,
+	// which needs none) must say so here instead. Empty/nil for emitted
+	// resources with no patient link.
+	EmitAsResourcePatientRefPath []string `json:"emitAsResourcePatientRefPath,omitempty"`
+
 	// TargetPath is the FHIR-side path within the resource (passed to
 	// setFHIRPath), e.g. "verificationStatus.coding[0].code".
 	TargetPath string `json:"targetPath"`
@@ -225,6 +304,30 @@ type MappingRow struct {
 	// net effect as Go's `if !hasObservationValue(r) { r["dataAbsentReason"]
 	// = ... }`, expressed as data instead of a post-hoc Go check.
 	SkipIfResourceHasAnyOf []string `json:"skipIfResourceHasAnyOf,omitempty"`
+
+	// EmbedCDAIdentity: when true on a CollectAll row (no Fields), the raw
+	// {root, extension} pairs this row's Scope resolves -- BEFORE Transform
+	// is applied -- are also written to resource["_cdaIds"], in addition to
+	// this row's normal TargetPath write. Mirrors mappers/cda_ids.go's
+	// embedCDAIds(resource, ids) exactly (same {"root":..., "extension":...}
+	// shape, same "skip zero-value ids" filtering), reusing this row's
+	// already-resolved Scope nodes instead of re-deriving the CDA II list a
+	// second time.
+	//
+	// Added for Phase 4 Slice A: grepping every Go mapper found embedCDAIds
+	// is called from exactly 3 places -- patient_mapper.go's MapAuthor
+	// (assignedAuthor.Ids) and MapCustodian (org.Ids), and
+	// practitioner_mapper.go's buildPractitionerResource (ParticipantRole.Ids,
+	// reused live by careteam_mapper.go for CareTeam's emitted Practitioner).
+	// Every other section's mapper (Allergy/Condition/Medication/Observation/
+	// etc.) never calls it -- _cdaIds-based cross-section dedup has never
+	// applied to clinical resources, only to Practitioner/Organization
+	// resources built from document-header/CareTeam-participant data. This
+	// field is therefore only ever set on AuthorMappingRules/
+	// CustodianMappingRules/CareTeamMappingRules' identifier rows -- adding
+	// it anywhere else would make declarative output dedup MORE than Go ever
+	// did, a real behavior change beyond parity, not a gap fix.
+	EmbedCDAIdentity bool `json:"embedCDAIdentity,omitempty"`
 }
 
 // RowCondition evaluates WhenPath (relative to the row's own Scope root)

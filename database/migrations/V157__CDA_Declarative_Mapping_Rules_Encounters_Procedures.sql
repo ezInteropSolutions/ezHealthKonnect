@@ -8,6 +8,15 @@
 -- hand-synced to, and those functions' own top doc comments for what's
 -- deliberately out of scope (document-header-level fields for Encounters;
 -- the Procedure-Activity-template-uniform treatment matching Go's own).
+--
+-- Phase 4 Slice B update: building the document-level orchestrator
+-- (DeclarativeMapDocument) and comparing it against MapDocument() on real
+-- corpus data found a real divergence (kareo_sample.xml/
+-- practicefusion_sample.xml both have a nullFlavor="NI" "no information"
+-- encounter) -- encounter_mapper.go:37 calls EncounterStatusToFHIR
+-- UNCONDITIONALLY, defaulting to "unknown" rather than omitting status, so
+-- the status row below now carries fallbackPaths+literalValue to reach that
+-- same default when statusCode is absent.
 
 -- =========================================================
 -- SEED: encounters -> Encounter
@@ -20,7 +29,7 @@ VALUES
     'CCD', '2.1', 'R4', 'encounters', 'Encounter', '', 0,
     $rules$
 [
-  {"sourcePath": "statusCode", "transform": "encounter_status_to_fhir", "targetPath": "status"},
+  {"sourcePath": "statusCode", "fallbackPaths": ["statusCode"], "literalValue": "", "transform": "encounter_status_to_fhir", "targetPath": "status"},
   {"sourcePath": "code", "transform": "encounter_class_coding", "targetPath": "class"},
   {"sourcePath": "code", "transform": "cda_code_to_codeable_concept", "targetPath": "type[0]"},
   {"sourcePath": "effectiveTime", "transform": "cda_timerange_to_period", "targetPath": "period"},
@@ -39,6 +48,100 @@ VALUES
     "fallbackPaths": ["participantRole.playingEntity.code.displayName"],
     "transform": "cda_name_or_literal_to_display_ref",
     "targetPath": "location[0].location"
+  },
+  {
+    "scope": "id[*]",
+    "collectAll": true,
+    "targetPath": "identifier",
+    "transform": "cda_ii_to_identifier"
+  },
+  {
+    "scope": "performers[*]",
+    "collectAll": true,
+    "targetPath": "participant",
+    "fields": [
+      {"sourcePath": "typeCode", "transform": "encounter_participant_type_coding", "targetPath": "type[0]"},
+      {
+        "emitAsResource": "Practitioner",
+        "targetPath": "individual",
+        "fields": [
+          {"scope": "assignedEntity.assignedPerson.names[*]", "collectAll": true, "transform": "cda_name_to_fhir", "targetPath": "name"},
+          {"scope": "assignedEntity.ids[*]", "collectAll": true, "transform": "cda_ii_to_identifier", "embedCDAIdentity": true, "targetPath": "identifier"},
+          {"sourcePath": "assignedEntity.code", "transform": "cda_code_to_codeable_concept", "targetPath": "qualification[0].code"},
+          {"scope": "assignedEntity.telecoms[*]", "collectAll": true, "transform": "cda_telecom_to_fhir", "targetPath": "telecom"}
+        ]
+      }
+    ]
+  },
+  {
+    "scope": "entryRelationships[typeCode=SUBJ].entry",
+    "collectAll": true,
+    "targetPath": "diagnosis",
+    "fields": [
+      {
+        "emitAsResource": "Condition",
+        "emitAsResourcePatientRefPath": ["subject"],
+        "targetPath": "condition",
+        "fields": [
+          {
+            "scope": "entryRelationships[typeCode=SUBJ].entry",
+            "scopeFallbacks": ["entryRelationships[typeCode=REFR].entry", ""],
+            "transform": "cda_value_or_code_to_codeable_concept",
+            "targetPath": "code",
+            "required": true,
+            "conformance": "SHALL"
+          },
+          {
+            "scope": "entryRelationships[typeCode=SUBJ].entry",
+            "scopeFallbacks": ["entryRelationships[typeCode=REFR].entry", ""],
+            "sourcePath": "statusCode",
+            "transform": "condition_status_to_fhir",
+            "targetPath": "clinicalStatus",
+            "required": true,
+            "conformance": "SHALL"
+          },
+          {
+            "literalValue": "confirmed",
+            "transform": "condition_verification_status_to_fhir",
+            "targetPath": "verificationStatus",
+            "condition": {
+              "whenPath": "negationInd",
+              "whenPaths": [
+                "entryRelationships[typeCode=SUBJ].entry.negationInd",
+                "entryRelationships[typeCode=REFR].entry.negationInd"
+              ],
+              "equals": "true",
+              "thenLiteralValue": "refuted"
+            }
+          },
+          {
+            "scope": "entryRelationships[typeCode=SUBJ].entry.entryRelationships[typeCode=SUBJ].entry[code=SEV]",
+            "scopeFallbacks": [
+              "entryRelationships[typeCode=REFR].entry.entryRelationships[typeCode=SUBJ].entry[code=SEV]",
+              "entryRelationships[typeCode=SUBJ].entry[code=SEV]"
+            ],
+            "sourcePath": "value.code",
+            "transform": "cda_code_to_codeable_concept",
+            "targetPath": "severity"
+          },
+          {"literalValue": "encounter-diagnosis", "transform": "condition_category_to_fhir", "targetPath": "category[0]"},
+          {
+            "scope": "entryRelationships[typeCode=SUBJ].entry",
+            "scopeFallbacks": ["entryRelationships[typeCode=REFR].entry", ""],
+            "sourcePath": "effectiveTime",
+            "transform": "cda_timerange_to_onset",
+            "targetPath": "onsetDateTime"
+          },
+          {
+            "scope": "entryRelationships[typeCode=SUBJ].entry",
+            "scopeFallbacks": ["entryRelationships[typeCode=REFR].entry", ""],
+            "sourcePath": "effectiveTime.high",
+            "transform": "cda_time_to_fhir_datetime",
+            "targetPath": "abatementDateTime"
+          }
+        ]
+      }
+    ]
   }
 ]
     $rules$::jsonb,

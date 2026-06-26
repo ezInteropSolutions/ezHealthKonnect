@@ -2,10 +2,11 @@
 //
 // Guards against the exact bug class found in production: section resolution
 // (cda/document/section_parser.go) correctly resolves a section to its schema
-// key via templateId/LOINC, but document_mapper.go's typedSectionDispatchers
-// map — a second, independently-maintained key list — has a typo'd or missing
-// key, so the section is silently dropped even though it was resolved
-// correctly. (This happened to "planOfTreatment" and "payersInsurance": both
+// key via templateId/LOINC, but declarative_document_mapper.go's
+// declarativeSectionRuleGroupsCache map — a second, independently-maintained
+// key list — has a typo'd or missing key, so the section is silently dropped
+// even though it was resolved correctly. (This happened to "planOfTreatment"
+// and "payersInsurance" in the predecessor Go-mapper dispatch table: both
 // already had templateId+LOINC registered and resolved correctly; the
 // dispatch table simply never had matching keys.)
 //
@@ -54,7 +55,7 @@ func TestDispatchedSectionKeys_AllResolveToARealSchemaSectionOrDocumentedAlias(t
 		knownKeys[sec.Key] = true
 	}
 
-	for _, dispatchKey := range cdafhir.DispatchedSectionKeys() {
+	for _, dispatchKey := range cdafhir.DeclarativeDispatchedSectionKeys() {
 		if knownKeys[dispatchKey] {
 			continue
 		}

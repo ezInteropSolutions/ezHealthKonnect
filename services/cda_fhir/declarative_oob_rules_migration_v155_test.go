@@ -104,9 +104,9 @@ func TestV155Migration_MatchesGoLiteralRules_NoDrift(t *testing.T) {
 	for _, rule := range cdafhir.VitalSignsMappingRules() {
 		assertObservationRuleMatchesSeed(t, seeded, rule)
 	}
-	for _, rule := range cdafhir.ResultsMappingRules() {
-		assertObservationRuleMatchesSeed(t, seeded, rule)
-	}
+	// ResultsMappingRules()[0] only -- index [1] ("labResults", Phase 4 Slice D)
+	// is seeded in V163, not here; see declarative_oob_rules_migration_v163_test.go.
+	assertObservationRuleMatchesSeed(t, seeded, cdafhir.ResultsMappingRules()[0])
 	for _, rule := range cdafhir.SocialHistoryMappingRules() {
 		assertObservationRuleMatchesSeed(t, seeded, rule)
 	}

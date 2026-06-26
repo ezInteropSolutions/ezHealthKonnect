@@ -85,6 +85,7 @@ VALUES
     $rules$
 [
   {"sourcePath": "statusCode", "transform": "medication_request_status_to_fhir", "targetPath": "status", "required": true, "conformance": "SHALL"},
+  {"literalValue": "order", "targetPath": "intent", "required": true, "conformance": "SHALL"},
   {
     "sourcePath": "performers[0].assignedEntity.assignedPerson.names[0]",
     "fallbackPaths": ["authors[0].assignedAuthor.assignedPerson.names[0]"],
@@ -95,6 +96,18 @@ VALUES
     "conformance": "SHALL"
   },
   {"sourcePath": "effectiveTime", "transform": "cda_timerange_to_onset", "targetPath": "authoredOn"},
+  {
+    "scope": "entryRelationships[typeCode=REFR].entry[entryType=supply]",
+    "sourcePath": "quantity",
+    "transform": "cda_quantity_to_fhir",
+    "targetPath": "dispenseRequest.quantity"
+  },
+  {
+    "scope": "entryRelationships[typeCode=REFR].entry[entryType=supply]",
+    "sourcePath": "repeatNumber",
+    "transform": "cda_decimal_string_to_number",
+    "targetPath": "dispenseRequest.numberOfRepeatsAllowed"
+  },
   {"sourcePath": "consumable.manufacturedProduct.manufacturedMaterial.code", "transform": "cda_code_to_codeable_concept", "targetPath": "medicationCodeableConcept"},
   {"sourcePath": "routeCode", "transform": "cda_code_to_codeable_concept", "targetPath": "dosageInstruction[0].route"},
   {"sourcePath": "doseQuantity", "transform": "cda_quantity_to_fhir", "targetPath": "dosageInstruction[0].doseAndRate[0].doseQuantity"},
@@ -106,6 +119,7 @@ VALUES
   {
     "scope": "effectiveTimes[xsiType=PIVL_TS].period",
     "sourcePath": "value",
+    "transform": "cda_decimal_string_to_number",
     "targetPath": "dosageInstruction[0].timing.repeat.period"
   },
   {
@@ -188,7 +202,8 @@ VALUES
   {"literalValue": {"text": "Unknown"}, "targetPath": "code", "skipIfResourceHasAnyOf": ["code"]},
   {"sourcePath": "effectiveTime", "transform": "cda_timerange_to_period", "targetPath": "occurrencePeriod"},
   {"sourcePath": "effectiveTime", "transform": "cda_timerange_to_onset", "targetPath": "occurrenceDateTime", "skipIfResourceHasAnyOf": ["occurrencePeriod"]},
-  {"scope": "entryRelationships[typeCode=RSON].entry.code", "transform": "cda_code_to_codeable_concept", "targetPath": "reasonCode[0]"}
+  {"scope": "entryRelationships[typeCode=RSON].entry", "transform": "cda_value_or_code_to_codeable_concept", "targetPath": "reasonCode[0]"},
+  {"scope": "authors[0].assignedAuthor.assignedPerson.names[0]", "transform": "cda_name_or_literal_to_display_ref", "targetPath": "requester"}
 ]
     $rules$::jsonb,
     true, true, true
@@ -236,6 +251,7 @@ VALUES
     $rules$
 [
   {"sourcePath": "statusCode", "transform": "medication_request_status_to_fhir", "targetPath": "status", "required": true, "conformance": "SHALL"},
+  {"literalValue": "order", "targetPath": "intent", "required": true, "conformance": "SHALL"},
   {
     "sourcePath": "performers[0].assignedEntity.assignedPerson.names[0]",
     "fallbackPaths": ["authors[0].assignedAuthor.assignedPerson.names[0]"],
@@ -246,6 +262,18 @@ VALUES
     "conformance": "SHALL"
   },
   {"sourcePath": "effectiveTime", "transform": "cda_timerange_to_onset", "targetPath": "authoredOn"},
+  {
+    "scope": "entryRelationships[typeCode=REFR].entry[entryType=supply]",
+    "sourcePath": "quantity",
+    "transform": "cda_quantity_to_fhir",
+    "targetPath": "dispenseRequest.quantity"
+  },
+  {
+    "scope": "entryRelationships[typeCode=REFR].entry[entryType=supply]",
+    "sourcePath": "repeatNumber",
+    "transform": "cda_decimal_string_to_number",
+    "targetPath": "dispenseRequest.numberOfRepeatsAllowed"
+  },
   {"sourcePath": "consumable.manufacturedProduct.manufacturedMaterial.code", "transform": "cda_code_to_codeable_concept", "targetPath": "medicationCodeableConcept"},
   {"sourcePath": "routeCode", "transform": "cda_code_to_codeable_concept", "targetPath": "dosageInstruction[0].route"},
   {"sourcePath": "doseQuantity", "transform": "cda_quantity_to_fhir", "targetPath": "dosageInstruction[0].doseAndRate[0].doseQuantity"},
@@ -257,6 +285,7 @@ VALUES
   {
     "scope": "effectiveTimes[xsiType=PIVL_TS].period",
     "sourcePath": "value",
+    "transform": "cda_decimal_string_to_number",
     "targetPath": "dosageInstruction[0].timing.repeat.period"
   },
   {
@@ -339,7 +368,8 @@ VALUES
   {"literalValue": {"text": "Unknown"}, "targetPath": "code", "skipIfResourceHasAnyOf": ["code"]},
   {"sourcePath": "effectiveTime", "transform": "cda_timerange_to_period", "targetPath": "occurrencePeriod"},
   {"sourcePath": "effectiveTime", "transform": "cda_timerange_to_onset", "targetPath": "occurrenceDateTime", "skipIfResourceHasAnyOf": ["occurrencePeriod"]},
-  {"scope": "entryRelationships[typeCode=RSON].entry.code", "transform": "cda_code_to_codeable_concept", "targetPath": "reasonCode[0]"}
+  {"scope": "entryRelationships[typeCode=RSON].entry", "transform": "cda_value_or_code_to_codeable_concept", "targetPath": "reasonCode[0]"},
+  {"scope": "authors[0].assignedAuthor.assignedPerson.names[0]", "transform": "cda_name_or_literal_to_display_ref", "targetPath": "requester"}
 ]
     $rules$::jsonb,
     true, true, true
@@ -387,6 +417,7 @@ VALUES
     $rules$
 [
   {"sourcePath": "statusCode", "transform": "medication_request_status_to_fhir", "targetPath": "status", "required": true, "conformance": "SHALL"},
+  {"literalValue": "order", "targetPath": "intent", "required": true, "conformance": "SHALL"},
   {
     "sourcePath": "performers[0].assignedEntity.assignedPerson.names[0]",
     "fallbackPaths": ["authors[0].assignedAuthor.assignedPerson.names[0]"],
@@ -397,6 +428,18 @@ VALUES
     "conformance": "SHALL"
   },
   {"sourcePath": "effectiveTime", "transform": "cda_timerange_to_onset", "targetPath": "authoredOn"},
+  {
+    "scope": "entryRelationships[typeCode=REFR].entry[entryType=supply]",
+    "sourcePath": "quantity",
+    "transform": "cda_quantity_to_fhir",
+    "targetPath": "dispenseRequest.quantity"
+  },
+  {
+    "scope": "entryRelationships[typeCode=REFR].entry[entryType=supply]",
+    "sourcePath": "repeatNumber",
+    "transform": "cda_decimal_string_to_number",
+    "targetPath": "dispenseRequest.numberOfRepeatsAllowed"
+  },
   {"sourcePath": "consumable.manufacturedProduct.manufacturedMaterial.code", "transform": "cda_code_to_codeable_concept", "targetPath": "medicationCodeableConcept"},
   {"sourcePath": "routeCode", "transform": "cda_code_to_codeable_concept", "targetPath": "dosageInstruction[0].route"},
   {"sourcePath": "doseQuantity", "transform": "cda_quantity_to_fhir", "targetPath": "dosageInstruction[0].doseAndRate[0].doseQuantity"},
@@ -408,6 +451,7 @@ VALUES
   {
     "scope": "effectiveTimes[xsiType=PIVL_TS].period",
     "sourcePath": "value",
+    "transform": "cda_decimal_string_to_number",
     "targetPath": "dosageInstruction[0].timing.repeat.period"
   },
   {
@@ -490,7 +534,8 @@ VALUES
   {"literalValue": {"text": "Unknown"}, "targetPath": "code", "skipIfResourceHasAnyOf": ["code"]},
   {"sourcePath": "effectiveTime", "transform": "cda_timerange_to_period", "targetPath": "occurrencePeriod"},
   {"sourcePath": "effectiveTime", "transform": "cda_timerange_to_onset", "targetPath": "occurrenceDateTime", "skipIfResourceHasAnyOf": ["occurrencePeriod"]},
-  {"scope": "entryRelationships[typeCode=RSON].entry.code", "transform": "cda_code_to_codeable_concept", "targetPath": "reasonCode[0]"}
+  {"scope": "entryRelationships[typeCode=RSON].entry", "transform": "cda_value_or_code_to_codeable_concept", "targetPath": "reasonCode[0]"},
+  {"scope": "authors[0].assignedAuthor.assignedPerson.names[0]", "transform": "cda_name_or_literal_to_display_ref", "targetPath": "requester"}
 ]
     $rules$::jsonb,
     true, true, true
@@ -538,6 +583,7 @@ VALUES
     $rules$
 [
   {"sourcePath": "statusCode", "transform": "medication_request_status_to_fhir", "targetPath": "status", "required": true, "conformance": "SHALL"},
+  {"literalValue": "order", "targetPath": "intent", "required": true, "conformance": "SHALL"},
   {
     "sourcePath": "performers[0].assignedEntity.assignedPerson.names[0]",
     "fallbackPaths": ["authors[0].assignedAuthor.assignedPerson.names[0]"],
@@ -548,6 +594,18 @@ VALUES
     "conformance": "SHALL"
   },
   {"sourcePath": "effectiveTime", "transform": "cda_timerange_to_onset", "targetPath": "authoredOn"},
+  {
+    "scope": "entryRelationships[typeCode=REFR].entry[entryType=supply]",
+    "sourcePath": "quantity",
+    "transform": "cda_quantity_to_fhir",
+    "targetPath": "dispenseRequest.quantity"
+  },
+  {
+    "scope": "entryRelationships[typeCode=REFR].entry[entryType=supply]",
+    "sourcePath": "repeatNumber",
+    "transform": "cda_decimal_string_to_number",
+    "targetPath": "dispenseRequest.numberOfRepeatsAllowed"
+  },
   {"sourcePath": "consumable.manufacturedProduct.manufacturedMaterial.code", "transform": "cda_code_to_codeable_concept", "targetPath": "medicationCodeableConcept"},
   {"sourcePath": "routeCode", "transform": "cda_code_to_codeable_concept", "targetPath": "dosageInstruction[0].route"},
   {"sourcePath": "doseQuantity", "transform": "cda_quantity_to_fhir", "targetPath": "dosageInstruction[0].doseAndRate[0].doseQuantity"},
@@ -559,6 +617,7 @@ VALUES
   {
     "scope": "effectiveTimes[xsiType=PIVL_TS].period",
     "sourcePath": "value",
+    "transform": "cda_decimal_string_to_number",
     "targetPath": "dosageInstruction[0].timing.repeat.period"
   },
   {
@@ -641,7 +700,8 @@ VALUES
   {"literalValue": {"text": "Unknown"}, "targetPath": "code", "skipIfResourceHasAnyOf": ["code"]},
   {"sourcePath": "effectiveTime", "transform": "cda_timerange_to_period", "targetPath": "occurrencePeriod"},
   {"sourcePath": "effectiveTime", "transform": "cda_timerange_to_onset", "targetPath": "occurrenceDateTime", "skipIfResourceHasAnyOf": ["occurrencePeriod"]},
-  {"scope": "entryRelationships[typeCode=RSON].entry.code", "transform": "cda_code_to_codeable_concept", "targetPath": "reasonCode[0]"}
+  {"scope": "entryRelationships[typeCode=RSON].entry", "transform": "cda_value_or_code_to_codeable_concept", "targetPath": "reasonCode[0]"},
+  {"scope": "authors[0].assignedAuthor.assignedPerson.names[0]", "transform": "cda_name_or_literal_to_display_ref", "targetPath": "requester"}
 ]
     $rules$::jsonb,
     true, true, true

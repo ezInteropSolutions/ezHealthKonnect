@@ -75,8 +75,9 @@ const (
 func AllergyMappingRules() []MappingRule {
 	return []MappingRule{
 		{
-			SectionKey:   "allergiesAndIntolerances",
-			FHIRResource: "AllergyIntolerance",
+			SectionKey:     "allergiesAndIntolerances",
+			FHIRResource:   "AllergyIntolerance",
+			PatientRefPath: []string{"patient"}, // allergy_mapper.go:35: r["patient"] = ref(patientRef)
 			Fields: []MappingRow{
 				{
 					// allergy_mapper.go:39 — outer Concern Act statusCode.
@@ -93,20 +94,24 @@ func AllergyMappingRules() []MappingRule {
 					TargetPath: "onsetDateTime",
 				},
 				{
-					// allergy_mapper.go:56-68 — confirmed unless EITHER the outer
-					// act or the SUBJ-nested observation is negated. Scope=""
-					// (the entry itself) so WhenPath/WhenPaths can each
-					// independently reach a different candidate from one shared
-					// root — see RowCondition.WhenPaths' doc comment.
+					// Deliberately NOT allergy_mapper.go:56-68's negation→refuted
+					// parity port. Verified against the HL7 C-CDA on FHIR IG
+					// (CF-allergies.md, github.com/HL7/ccda-on-fhir): the allergy
+					// mapping table has NO verificationStatus row at all, for
+					// negationInd=true or otherwise — the IG's only prescribed
+					// effect of negation is on .code (the row below), via
+					// ConceptMap-CF-NoKnownAllergies. Confirmed independently
+					// against base FHIR: AllergyIntolerance verificationStatus
+					// "refuted" is defined as disputing "a propensity for a
+					// reaction to the identified substance"
+					// (hl7.org/fhir/valueset-allergyintolerance-verification.html)
+					// — it presupposes an identified substance, which the real
+					// "No Known Allergies" idiom (negated, no CSM participant,
+					// generic value code) never has. Go's "refuted" port was an
+					// unsourced heuristic, not an IG requirement.
 					LiteralValue: "confirmed",
 					Transform:    "allergy_verification_status_to_fhir",
 					TargetPath:   "verificationStatus",
-					Condition: &RowCondition{
-						WhenPath:         "negationInd",
-						WhenPaths:        []string{"entryRelationships[typeCode=SUBJ].entry.negationInd"},
-						Equals:           "true",
-						ThenLiteralValue: "refuted",
-					},
 				},
 				{
 					// allergy_mapper.go:71-73 — allergy type from the SUBJ
@@ -121,17 +126,20 @@ func AllergyMappingRules() []MappingRule {
 					TargetPath:     "type",
 				},
 				{
-					// allergy_mapper.go:76-97 — CSM substance code, falling back
-					// to the assertion observation's own value when no CSM
-					// participant carries a usable code (the "No Known Allergies"
-					// idiom). FallbackPaths is the "field A, else field B"
-					// primitive named for exactly this case in the inventory's
-					// cross-cutting finding #1.
+					// IG-sourced (CF-allergies.md's two /participant rows), not an
+					// allergy_mapper.go:76-97 parity port: that Go code's
+					// CSM-else-value fallback had the right shape but the wrong
+					// substance code for the "No Known Allergies" idiom — it used
+					// the raw negated value as-is (e.g. "Allergy to substance"),
+					// where the IG's own ConceptMap-CF-NoKnownAllergies requires
+					// inverting it to the negated concept (e.g. "No known
+					// allergy"). SourcePath=="" so the whole matched entry (not
+					// one field) reaches the transform — the CSM-vs-negation
+					// branch needs participants, value, AND negationInd together.
+					// See declarativeAllergySubstanceOrNoKnownAllergy's doc comment.
 					Scope:          "entryRelationships[typeCode=SUBJ].entry",
 					ScopeFallbacks: []string{""},
-					SourcePath:     "participants[typeCode=CSM].participantRole.playingEntity.code",
-					FallbackPaths:  []string{"value.code"},
-					Transform:      "cda_code_to_codeable_concept",
+					Transform:      "allergy_substance_or_no_known_allergy_to_fhir",
 					TargetPath:     "code",
 					Required:       true,
 					Conformance:    "SHALL",
@@ -146,6 +154,26 @@ func AllergyMappingRules() []MappingRule {
 					SourcePath:     "participantRole.playingEntity.code.codeSystem",
 					Transform:      "allergy_category_from_substance_system",
 					TargetPath:     "category",
+				},
+				{
+					// IG-sourced (CF-allergies.md's Criticality row), not an
+					// allergy_mapper.go parity port -- confirmed via grep that
+					// "criticality" had ZERO occurrences anywhere in
+					// services/cda_fhir before this row: never ported by the
+					// legacy Go mapper either, a genuine gap rather than a
+					// deliberate omission. CDA Criticality Observation
+					// (templateId .4.145, code 82606-5) nests one level deeper
+					// than Reaction/Severity -- directly under the SUBJ
+					// allergy-assertion observation, inverted (SUBJ,
+					// inversionInd=true), identified by code rather than
+					// templateId since that's what the IG's own XPath keys on.
+					Scope: "entryRelationships[typeCode=SUBJ].entry.entryRelationships[typeCode=SUBJ,inversionInd=true].entry[code=82606-5]",
+					ScopeFallbacks: []string{
+						"entryRelationships[typeCode=SUBJ,inversionInd=true].entry[code=82606-5]",
+					},
+					SourcePath: "value.code.code",
+					Transform:  "allergy_criticality_to_fhir",
+					TargetPath: "criticality",
 				},
 				{
 					// allergy_mapper.go:99-123 — every MFST relationship on
@@ -213,6 +241,21 @@ func medicationRequestFields() []MappingRow {
 			Conformance: "SHALL",
 		},
 		{
+			// FHIR MedicationRequest.intent is 1..1 required and has no CDA
+			// source concept of its own -- but medicationRequestRule()'s own
+			// EntryMatch ("moodCode=INT") already guarantees every entry this
+			// rule matches is an order, so "order" is a sound literal, not a
+			// guess. Found via a 747-file real-world corpus run (35 files had
+			// MedicationRequest.intent missing -- this rule never wrote it at
+			// all, unlike the Go mapper's equivalent which never set it
+			// either, so this also closes a pre-existing gap, not a
+			// regression introduced by the declarative port).
+			LiteralValue: "order",
+			TargetPath:   "intent",
+			Required:     true,
+			Conformance:  "SHALL",
+		},
+		{
 			// medication_mapper.go:262-280 (requesterReference) — us-core-21
 			// requires this field is never empty: performer, else author, else
 			// a literal placeholder display. The 3-tier
@@ -232,16 +275,48 @@ func medicationRequestFields() []MappingRow {
 			Transform:  "cda_timerange_to_onset",
 			TargetPath: "authoredOn",
 		},
+		{
+			// MedicationRequest.dispenseRequest.quantity -- the dispense/refill
+			// <supply> entryRelationship (REFR-typed, entryType="supply") is
+			// already parsed onto CDAEntry.Quantity/RepeatNumber
+			// (entry_parser.go's "supply" case) but no row read it: the
+			// narrative table's own "Dispense Quantity"/"Refills" columns (real
+			// corpus evidence -- EPIC-sourced encounter, every one of its 10
+			// medication entries has a sibling supply act) confirm this is real,
+			// present data, not a hypothetical field. MedicationStatement has no
+			// dispenseRequest concept at all in FHIR, so these two rows are
+			// request-only -- NOT added to medicationCommonRows, unlike every
+			// other row in this function.
+			Scope:      "entryRelationships[typeCode=REFR].entry[entryType=supply]",
+			SourcePath: "quantity",
+			Transform:  "cda_quantity_to_fhir",
+			TargetPath: "dispenseRequest.quantity",
+		},
+		{
+			// MedicationRequest.dispenseRequest.numberOfRepeatsAllowed.
+			// parseRepeatNumber's own doc comment: a documented nullFlavor
+			// (e.g. "OTH" -- this corpus's own first medication entry) lands in
+			// this same string field verbatim, not as "" -- relying on
+			// cda_decimal_string_to_number's existing strconv.ParseFloat failure
+			// path (returns (nil, nil), so the row simply doesn't fire) instead
+			// of a new transform, since that's already this engine's standard
+			// "non-numeric -> omit" behavior, not a hack one-off for this field.
+			Scope:      "entryRelationships[typeCode=REFR].entry[entryType=supply]",
+			SourcePath: "repeatNumber",
+			Transform:  "cda_decimal_string_to_number",
+			TargetPath: "dispenseRequest.numberOfRepeatsAllowed",
+		},
 	}
 	return append(fields, medicationCommonRows("dosageInstruction[0]")...)
 }
 
 func medicationRequestRule() MappingRule {
 	return MappingRule{
-		SectionKey:   "medications",
-		FHIRResource: "MedicationRequest",
-		EntryMatch:   "moodCode=INT",
-		Fields:       medicationRequestFields(),
+		SectionKey:     "medications",
+		FHIRResource:   "MedicationRequest",
+		EntryMatch:     "moodCode=INT",
+		PatientRefPath: []string{"subject"}, // medication_mapper.go:47: r["subject"] = ref(patientRef)
+		Fields:         medicationRequestFields(),
 	}
 }
 
@@ -277,10 +352,11 @@ func medicationStatementRule() MappingRule {
 	}
 	fields = append(fields, medicationCommonRows("dosage[0]")...)
 	return MappingRule{
-		SectionKey:   "medications",
-		FHIRResource: "MedicationStatement",
-		EntryMatch:   "",
-		Fields:       fields,
+		SectionKey:     "medications",
+		FHIRResource:   "MedicationStatement",
+		EntryMatch:     "",
+		PatientRefPath: []string{"subject"}, // medication_mapper.go:105: r["subject"] = ref(patientRef)
+		Fields:         fields,
 	}
 }
 
@@ -327,8 +403,12 @@ func medicationCommonRows(dosagePrefix string) []MappingRow {
 			TargetPath:   dosagePrefix + ".timing.repeat.frequency",
 		},
 		{
+			// FHIR decimal requires a numeric JSON value -- the CDA <period
+			// value="..."/> attribute is a string (e.g. ".5"), which fails
+			// validation unless parsed.
 			Scope:      pivlPeriodScope,
 			SourcePath: "value",
+			Transform:  "cda_decimal_string_to_number",
 			TargetPath: dosagePrefix + ".timing.repeat.period",
 		},
 		{
@@ -389,10 +469,29 @@ func HealthConcernsMappingRules() []MappingRule {
 
 func conditionRule(sectionKey, categoryCode string) MappingRule {
 	return MappingRule{
-		SectionKey:   sectionKey,
-		FHIRResource: "Condition",
-		Fields: []MappingRow{
-			{
+		SectionKey:     sectionKey,
+		FHIRResource:   "Condition",
+		PatientRefPath: []string{"subject"}, // condition_mapper.go:63: r["subject"] = ref(patientRef)
+		Fields:         conditionFields(categoryCode),
+	}
+}
+
+// conditionFields is conditionRule's field list, extracted so
+// EncounterMappingRules' nested-diagnosis row (an EmitAsResource Condition,
+// not a top-level Condition rule) can reuse the exact same Problem-
+// Observation field logic instead of a hand-copied duplicate — the source
+// CDA shape is identical (a Problem Concern Act .4.80 wrapping a Problem
+// Observation .4.4 via entryRelationship[typeCode=SUBJ]) whether that act
+// sits at the top of a Problems-section entry or nested inside an
+// Encounter's own entryRelationships. Every row's Scope here is relative to
+// "the matched Concern Act," which is true in both callers: conditionRule's
+// own matched section entry IS the Concern Act; EncounterMappingRules'
+// EmitAsResource row builds against the same scoped node its parent
+// CollectAll row resolved to (entryRelationships[typeCode=SUBJ].entry on the
+// Encounter), which is also the Concern Act.
+func conditionFields(categoryCode string) []MappingRow {
+	return []MappingRow{
+		{
 				// condition_mapper.go:77-91 — value preferred, code as fallback;
 				// shared with Medication's RSON via the same transform (see that
 				// function's doc comment).
@@ -471,8 +570,7 @@ func conditionRule(sectionKey, categoryCode string) MappingRule {
 				Transform:      "cda_time_to_fhir_datetime",
 				TargetPath:     "abatementDateTime",
 			},
-		},
-	}
+		}
 }
 
 // =========================================================
@@ -536,10 +634,15 @@ func VitalSignsMappingRules() []MappingRule {
 	return []MappingRule{observationRule("vitalSigns", "vital-signs")}
 }
 
-// ResultsMappingRules returns the OOB declarative rule for the "results"
-// section (category="laboratory").
+// ResultsMappingRules returns the OOB declarative rules for the "results"
+// section (category="laboratory") and its "labResults" alias --
+// typedSectionDispatchers in the now-deleted document_mapper.go mapped both
+// keys to the same mapper/category; both must resolve identically here too.
 func ResultsMappingRules() []MappingRule {
-	return []MappingRule{observationRule("results", "laboratory")}
+	return []MappingRule{
+		observationRule("results", "laboratory"),
+		observationRule("labResults", "laboratory"),
+	}
 }
 
 // SocialHistoryMappingRules returns the OOB declarative rule for the
@@ -548,6 +651,27 @@ func ResultsMappingRules() []MappingRule {
 // generic path handles it; see that file's own doc comment).
 func SocialHistoryMappingRules() []MappingRule {
 	return []MappingRule{observationRule("socialHistory", "social-history")}
+}
+
+// FunctionalStatusMappingRules returns the OOB declarative rule for the
+// "functionalStatus" section (category="functional-status"). Phase 4 Slice D
+// closes the gap declarativeObservationCategoryToFHIR's own doc comment
+// used to flag: this section had no declarative rule at all (Go's
+// MapDocument() covered it via mappers.MapObservations(e, p,
+// "functional-status")). No corpus file exercises this section --
+// synthetic-data unit test only, same convention as other unexercised
+// sections elsewhere in this file.
+func FunctionalStatusMappingRules() []MappingRule {
+	return []MappingRule{observationRule("functionalStatus", "functional-status")}
+}
+
+// MentalStatusMappingRules returns the OOB declarative rule for the
+// "mentalStatus" section (category="cognitive-status"). Same gap-closure and
+// no-corpus-coverage situation as FunctionalStatusMappingRules above; Go's
+// MapDocument() covered it via mappers.MapObservations(e, p,
+// "cognitive-status").
+func MentalStatusMappingRules() []MappingRule {
+	return []MappingRule{observationRule("mentalStatus", "cognitive-status")}
 }
 
 // observationValueXFHIRKeys lists every Observation.value[x] TargetPath the
@@ -560,9 +684,11 @@ var observationValueXFHIRKeys = []string{
 
 func observationRule(sectionKey, categoryCode string) MappingRule {
 	rule := MappingRule{
-		SectionKey:        sectionKey,
-		FHIRResource:      "Observation",
-		FlattenOrganizers: true,
+		SectionKey:           sectionKey,
+		FHIRResource:         "Observation",
+		FlattenOrganizers:    true,
+		PatientRefPath:       []string{"subject"}, // observation_mapper.go:120/205: r["subject"] = ref(patientRef)
+		SkipIfCodeNullFlavor: true,                // observation_mapper.go:195-198 -- see that field's own doc comment
 		Fields: []MappingRow{
 			{
 				// observation_mapper.go:227-229 — Obs code (LOINC).
@@ -589,6 +715,20 @@ func observationRule(sectionKey, categoryCode string) MappingRule {
 				LiteralValue: categoryCode,
 				Transform:    "observation_category_to_fhir",
 				TargetPath:   "category[0]",
+			},
+			{
+				// observation_mapper.go never mapped performer -- a longstanding
+				// gap, not a migration regression. Source <author> is present on
+				// most Vital Signs/Results/Social History observations and
+				// usually carries at least a recording organization name (often
+				// no named person), even when nothing else identifies who
+				// recorded it. Mapping it closes the FHIR validator's recurring
+				// "all observations should have a performer" Best Practice
+				// warning. Person name preferred over org name when both exist.
+				Scope:          "authors[0].assignedAuthor.assignedPerson.names[0]",
+				ScopeFallbacks: []string{"authors[0].assignedAuthor.representedOrganization.names[0]"},
+				Transform:      "cda_name_or_literal_to_display_ref",
+				TargetPath:     "performer[0]",
 			},
 
 			// Observation.value[x] — polymorphic dispatch mirroring
@@ -723,8 +863,9 @@ func observationRule(sectionKey, categoryCode string) MappingRule {
 func ImmunizationMappingRules() []MappingRule {
 	return []MappingRule{
 		{
-			SectionKey:   "immunizations",
-			FHIRResource: "Immunization",
+			SectionKey:     "immunizations",
+			FHIRResource:   "Immunization",
+			PatientRefPath: []string{"patient"}, // immunization_mapper.go:41: r["patient"] = ref(patientRef)
 			Fields: []MappingRow{
 				{
 					// immunization_mapper.go:42 — negationInd takes priority
@@ -795,6 +936,29 @@ func ImmunizationMappingRules() []MappingRule {
 					Transform:  "cda_name_or_literal_to_display_ref",
 					TargetPath: "performer[0].actor",
 				},
+				{
+					// Immunization.identifier -- entry.Id, never read by
+					// immunization_mapper.go (confirmed absent there too --
+					// same documented-gap shape as Encounter's identifier row).
+					Scope:      "id[*]",
+					Transform:  "cda_ii_to_identifier",
+					CollectAll: true,
+					TargetPath: "identifier",
+				},
+				{
+					// Immunization.manufacturer -- manufacturerOrganization is
+					// already parsed (CDAOrganization, entry_parser.go's
+					// parseProduct) but never read; real corpus evidence (this
+					// EPIC-sourced document) has a plain <name> with no id on
+					// every one of its 13 immunization entries, so a display-
+					// only reference (the same "string" case
+					// cda_name_or_literal_to_display_ref already handles for
+					// Encounter's location row) is the right level of effort --
+					// no id exists to justify an emitted Organization resource.
+					SourcePath: "consumable.manufacturedProduct.manufacturerOrganization.names[0]",
+					Transform:  "cda_name_or_literal_to_display_ref",
+					TargetPath: "manufacturer",
+				},
 			},
 		},
 	}
@@ -823,14 +987,34 @@ func ImmunizationMappingRules() []MappingRule {
 func EncounterMappingRules() []MappingRule {
 	return []MappingRule{
 		{
-			SectionKey:   "encounters",
-			FHIRResource: "Encounter",
+			SectionKey:     "encounters",
+			FHIRResource:   "Encounter",
+			PatientRefPath: []string{"subject"}, // encounter_mapper.go:34: r["subject"] = ref(patientRef)
 			Fields: []MappingRow{
 				{
-					// encounter_mapper.go:37.
-					SourcePath: "statusCode",
-					Transform:  "encounter_status_to_fhir",
-					TargetPath: "status",
+					// encounter_mapper.go:37 calls EncounterStatusToFHIR
+					// (entry.StatusCode) UNCONDITIONALLY -- even a
+					// nullFlavor="NI" "no information" encounter (real
+					// corpus data: kareo_sample.xml, practicefusion_sample.xml
+					// both have one) gets a status, because the function's
+					// default case maps anything unrecognized/empty to
+					// "unknown" rather than omitting the field, and FHIR R4's
+					// Encounter.status is a required 1..1 element. Without
+					// this row reaching the transform on a missing
+					// statusCode, the resource ends up empty (no other field
+					// on a null-flavor entry resolves either) and gets
+					// silently discarded by buildOneResource's empty check --
+					// a real document-level divergence (1 resource vs 0),
+					// not a hypothetical one. FallbackPaths repeats
+					// SourcePath (not a real second path) purely to reach
+					// resolveRowSourceValue's LiteralValue fallback tier --
+					// see that function's own doc comment for why
+					// LiteralValue alone isn't consulted without it.
+					SourcePath:    "statusCode",
+					FallbackPaths: []string{"statusCode"},
+					LiteralValue:  "",
+					Transform:     "encounter_status_to_fhir",
+					TargetPath:    "status",
 				},
 				{
 					// encounter_mapper.go:40-50 — class. Inherits Go's own
@@ -900,6 +1084,92 @@ func EncounterMappingRules() []MappingRule {
 					Transform:     "cda_name_or_literal_to_display_ref",
 					TargetPath:    "location[0].location",
 				},
+				{
+					// Encounter.identifier -- entry.Id (CDAEntry.Id, the
+					// encounter's own <id> elements), never read by Go's
+					// encounter_mapper.go at all (confirmed: no Id reference
+					// anywhere in that file) -- a genuine gap, not a ported
+					// Go limitation, same shape PatientMappingRules'
+					// "ids[*]" row already establishes for entry.Id ->
+					// identifier (the json tag is singular "id" here because
+					// CDAEntry's own struct field is "Id", unlike CDAPatient's
+					// "Ids").
+					Scope:      "id[*]",
+					Transform:  "cda_ii_to_identifier",
+					CollectAll: true,
+					TargetPath: "identifier",
+				},
+				{
+					// Encounter.participant (performer) -- the <performer>
+					// element (CDAEntry.Performers/CDAAssignedEntity) is
+					// structurally distinct from <participant>
+					// (CDAEntry.Participants/CDAParticipantRole) and was never
+					// read by Go's encounter_mapper.go either (also confirmed
+					// absent). Mirrors CareTeamMappingRules' emitted-
+					// Practitioner pattern exactly, just sourced from
+					// assignedEntity.* instead of participantRole.* -- the
+					// performing clinician becomes a real, referenceable
+					// Practitioner resource instead of being silently dropped.
+					Scope:      "performers[*]",
+					CollectAll: true,
+					TargetPath: "participant",
+					Fields: []MappingRow{
+						{SourcePath: "typeCode", Transform: "encounter_participant_type_coding", TargetPath: "type[0]"},
+						{
+							EmitAsResource: "Practitioner",
+							TargetPath:     "individual",
+							Fields: []MappingRow{
+								{Scope: "assignedEntity.assignedPerson.names[*]", Transform: "cda_name_to_fhir", CollectAll: true, TargetPath: "name"},
+								{
+									Scope:            "assignedEntity.ids[*]",
+									Transform:        "cda_ii_to_identifier",
+									CollectAll:       true,
+									TargetPath:       "identifier",
+									EmbedCDAIdentity: true,
+								},
+								{SourcePath: "assignedEntity.code", Transform: "cda_code_to_codeable_concept", TargetPath: "qualification[0].code"},
+								{Scope: "assignedEntity.telecoms[*]", Transform: "cda_telecom_to_fhir", CollectAll: true, TargetPath: "telecom"},
+							},
+						},
+					},
+				},
+				{
+					// Encounter.diagnosis -- the nested SUBJ-typed
+					// entryRelationship on an Encounter entry is the C-CDA
+					// "Encounter Diagnosis" idiom: a Problem Concern Act
+					// (.4.80) wrapping a Problem Observation (.4.4), the
+					// EXACT same shape as a standalone Problems-section entry
+					// (see conditionFields' own doc comment) -- just scoped
+					// to this one visit instead of the patient's whole
+					// problem list. encounter_mapper.go never reads
+					// entryRelationships at all, so these visit-specific
+					// diagnoses were silently dropped entirely: no Condition
+					// resource, no Encounter.diagnosis link, even though the
+					// data is fully parsed and available (CDAEntry.
+					// EntryRelationships). Confirmed via real corpus data
+					// (EPIC-sourced encounter with 4 nested diagnosis acts)
+					// that these are NOT duplicated in the document's own
+					// standalone Problems section -- this is the only path
+					// that captures them.
+					//
+					// EmitAsResourcePatientRefPath:["subject"] is required
+					// here (unlike CareTeam's emitted Practitioner, which
+					// needs none) -- buildOneResource's PatientRefPath
+					// application never reaches an EmitAsResource-built
+					// resource, since it's returned as a sibling "extra"
+					// resource, not the rule's own.
+					Scope:      "entryRelationships[typeCode=SUBJ].entry",
+					CollectAll: true,
+					TargetPath: "diagnosis",
+					Fields: []MappingRow{
+						{
+							EmitAsResource:               "Condition",
+							EmitAsResourcePatientRefPath: []string{"subject"},
+							TargetPath:                   "condition",
+							Fields:                        conditionFields("encounter-diagnosis"),
+						},
+					},
+				},
 			},
 		},
 	}
@@ -937,8 +1207,9 @@ func EncounterMappingRules() []MappingRule {
 func ProcedureMappingRules() []MappingRule {
 	return []MappingRule{
 		{
-			SectionKey:   "procedures",
-			FHIRResource: "Procedure",
+			SectionKey:     "procedures",
+			FHIRResource:   "Procedure",
+			PatientRefPath: []string{"subject"}, // procedure_mapper.go:34: r["subject"] = ref(patientRef)
 			Fields: []MappingRow{
 				{
 					// procedure_mapper.go:37.
@@ -1069,9 +1340,10 @@ func goalFields() []MappingRow {
 func GoalMappingRules() []MappingRule {
 	return []MappingRule{
 		{
-			SectionKey:   "goals",
-			FHIRResource: "Goal",
-			Fields:       goalFields(),
+			SectionKey:     "goals",
+			FHIRResource:   "Goal",
+			PatientRefPath: []string{"subject"}, // goal_mapper.go:33: r["subject"] = ref(patientRef)
+			Fields:         goalFields(),
 		},
 	}
 }
@@ -1146,6 +1418,7 @@ func planOfCareRulesForSectionKey(sectionKey string) []MappingRule {
 			FHIRResource:      "Goal",
 			EntryMatch:        "moodCode=GOL",
 			FlattenOrganizers: true,
+			PatientRefPath:    []string{"subject"}, // goal_mapper.go:33: r["subject"] = ref(patientRef)
 			Fields:            goalFields(),
 		},
 		{
@@ -1156,10 +1429,19 @@ func planOfCareRulesForSectionKey(sectionKey string) []MappingRule {
 			FHIRResource:      "MedicationRequest",
 			EntryMatch:        "entryType=substanceAdministration",
 			FlattenOrganizers: true,
+			PatientRefPath:    []string{"subject"}, // medication_mapper.go:47: r["subject"] = ref(patientRef)
 			Fields:            medicationRequestFields(),
 		},
 		{
-			// plan_of_care_mapper.go:74-75,127-153.
+			// plan_of_care_mapper.go:74-75,127-153. PatientRefPath
+			// deliberately NOT set: buildPlannedAppointmentResource writes
+			// patientRef into participant[0].actor (a nested array element,
+			// not a bare reference field), which PatientRefPath's
+			// single-level resource[path]={"reference":...} write can't
+			// express. 0/4 corpus has Plan of Treatment entries (already
+			// documented elsewhere in this file), so there's no real data to
+			// validate a new primitive against — left as a documented gap,
+			// not silently dropped.
 			SectionKey:        sectionKey,
 			FHIRResource:      "Appointment",
 			EntryMatch:        "entryType=encounter",
@@ -1177,6 +1459,7 @@ func planOfCareRulesForSectionKey(sectionKey string) []MappingRule {
 			FHIRResource:      "SupplyRequest",
 			EntryMatch:        "entryType=supply",
 			FlattenOrganizers: true,
+			PatientRefPath:    []string{"deliverFor"}, // plan_of_care_mapper.go:171: r["deliverFor"] = ref(patientRef)
 			Fields: []MappingRow{
 				{SourcePath: "statusCode", Transform: "supply_request_status_to_fhir", TargetPath: "status"},
 				{
@@ -1199,6 +1482,7 @@ func planOfCareRulesForSectionKey(sectionKey string) []MappingRule {
 			FHIRResource:      "ServiceRequest",
 			EntryMatch:        "entryType=procedure|observation|act",
 			FlattenOrganizers: true,
+			PatientRefPath:    []string{"subject"}, // plan_of_care_mapper.go:95: r["subject"] = ref(patientRef)
 			Fields: []MappingRow{
 				{SourcePath: "statusCode", Transform: "service_request_status_to_fhir", TargetPath: "status"},
 				{SourcePath: "moodCode", Transform: "service_request_intent_from_mood", TargetPath: "intent"},
@@ -1223,9 +1507,36 @@ func planOfCareRulesForSectionKey(sectionKey string) []MappingRule {
 					// only (Go's loop breaks after the first, even if that
 					// one's code is empty); the non-CollectAll Scope's own
 					// scopedNodes[0]-only semantics already match this.
-					Scope:      "entryRelationships[typeCode=RSON].entry.code",
-					Transform:  "cda_code_to_codeable_concept",
+					//
+					// Reads the RSON entry's OWN value first, code as fallback
+					// (cda_value_or_code_to_codeable_concept) -- NOT just
+					// ".code" like Go's original implementation did. Real
+					// corpus evidence (this EPIC-sourced document) shows why
+					// that was wrong: the RSON-linked observation is a Problem
+					// Observation (.4.19, the SAME template Condition's own
+					// code row reads), whose "code" is the IG-fixed wrapper
+					// code (29308-4 "Diagnosis" -- a label, not a diagnosis)
+					// and whose "value" carries the real SNOMED diagnosis
+					// (e.g. 305058001 "Screening for malignant neoplasm of
+					// cervix"). Go's own behavior here predates Condition's
+					// value-preferred row and was never reconciled with it --
+					// this fix brings ServiceRequest.reasonCode in line with
+					// the same idiom every other RSON/value-or-code row in
+					// this file already uses.
+					Scope:      "entryRelationships[typeCode=RSON].entry",
+					Transform:  "cda_value_or_code_to_codeable_concept",
 					TargetPath: "reasonCode[0]",
+				},
+				{
+					// ServiceRequest.requester -- the ordering provider's
+					// <author> (NPI, name, address, telecom,
+					// representedOrganization -- real, rich data in this
+					// corpus) was never read by plan_of_care_mapper.go at all;
+					// same documented-gap shape as Medication's analogous
+					// requester row, reused here via the identical transform.
+					Scope:      "authors[0].assignedAuthor.assignedPerson.names[0]",
+					Transform:  "cda_name_or_literal_to_display_ref",
+					TargetPath: "requester",
 				},
 			},
 		},
@@ -1261,22 +1572,20 @@ var careTeamSectionKeys = []string{"careTeam", "careTeams"}
 //     this session. A Practitioner whose only identifying data is an NPI
 //     (no playingEntity name) is built with identifier only, matching
 //     buildPractitionerResource's own behavior before enrichment.
-//   - subject (patientRef-dependent) — consistent with every prior Phase 3
-//     rule; a cross-cutting Phase 4 cutover concern, not specific to this
-//     section.
-//   - The emitted Practitioner does not carry "_cdaIds" (the assembly
-//     layer's cross-resource dedup marker every mapper-built Practitioner
-//     gets via embedCDAIds) — CareTeam is the first declarative rule to
-//     emit a Practitioner at all, so there's no existing multi-section
-//     dedup scenario this gap could break today; a worthwhile follow-up if
-//     a future Practitioner/Custodian slice also emits Practitioners.
+//
+// `subject`/`_cdaIds` (Phase 4 Slice A, closed): PatientRefPath="subject"
+// below sets CareTeam's own patient link; the emitted Practitioner's
+// identifier row sets EmbedCDAIdentity, mirroring
+// practitioner_mapper.go:76's embedCDAIds(r, p.ParticipantRole.Ids) — the
+// same dedup marker every other mapper-built Practitioner already gets.
 func CareTeamMappingRules() []MappingRule {
 	rules := make([]MappingRule, 0, len(careTeamSectionKeys))
 	for _, sectionKey := range careTeamSectionKeys {
 		rules = append(rules, MappingRule{
-			SectionKey:    sectionKey,
-			FHIRResource:  "CareTeam",
-			RequiredPaths: []string{"participant"},
+			SectionKey:     sectionKey,
+			FHIRResource:   "CareTeam",
+			RequiredPaths:  []string{"participant"},
+			PatientRefPath: []string{"subject"}, // careteam_mapper.go:111: r["subject"] = ref(patientRef)
 			Fields: []MappingRow{
 				{SourcePath: "statusCode", Transform: "care_team_status_to_fhir", TargetPath: "status"},
 				{SourcePath: "code", Transform: "cda_code_to_codeable_concept", TargetPath: "category[0]"},
@@ -1305,10 +1614,11 @@ func CareTeamMappingRules() []MappingRule {
 									TargetPath: "name",
 								},
 								{
-									Scope:      "participantRole.ids[*]",
-									Transform:  "cda_ii_to_identifier",
-									CollectAll: true,
-									TargetPath: "identifier",
+									Scope:            "participantRole.ids[*]",
+									Transform:        "cda_ii_to_identifier",
+									CollectAll:       true,
+									TargetPath:       "identifier",
+									EmbedCDAIdentity: true, // mirrors practitioner_mapper.go:76's embedCDAIds(r, p.ParticipantRole.Ids)
 								},
 								{
 									SourcePath: "participantRole.code",
@@ -1327,6 +1637,68 @@ func CareTeamMappingRules() []MappingRule {
 							SourcePath: "functionCode",
 							Transform:  "cda_code_to_codeable_concept",
 							TargetPath: "role[0]",
+						},
+					},
+				},
+				{
+					// Enriches the SAME Practitioner identity emitted above,
+					// not CareTeam.* itself -- the merge happens later, via
+					// DeduplicationRule's "richer resource wins" rule (see
+					// that rule's own doc comment), not here. Real corpus
+					// evidence (this EPIC-sourced document): the
+					// <participant>'s participantRole carries only a bare
+					// NPI -- no name, specialty, address, or telecom -- while
+					// the SAME person's full identity (name, specialty,
+					// address, phone/fax) sits on a sibling
+					// <component><act><performer>, which is structurally
+					// unreachable from inside the participant-derived
+					// Practitioner's own EmitAsResource Fields (those resolve
+					// relative to the matched participant node, never a
+					// sibling field on the entry itself -- see
+					// applyCollectAllWithFields's own doc comment on why
+					// EmitAsResource is "only meaningful one level deep").
+					//
+					// This row is a CollectAll+Fields wrapper used ONLY as a
+					// vehicle to reach EmitAsResource processing (which
+					// applyRow only honors inside such a wrapper, never at a
+					// rule's own top level) -- its own sub-object output
+					// ("_emitOnly") carries nothing meaningful and is
+					// discarded before the bundle ships, the same convention
+					// "_cdaIds"/"_emitted" already establish for internal-
+					// only fields.
+					Scope:      "components[*]",
+					CollectAll: true,
+					TargetPath: "_emitOnly",
+					Fields: []MappingRow{
+						{
+							EmitAsResource: "Practitioner",
+							TargetPath:     "ref",
+							Fields: []MappingRow{
+								{
+									Scope:      "performers[0].assignedEntity.assignedPerson.names[*]",
+									Transform:  "cda_name_to_fhir",
+									CollectAll: true,
+									TargetPath: "name",
+								},
+								{
+									Scope:            "performers[0].assignedEntity.ids[*]",
+									Transform:        "cda_ii_to_identifier",
+									CollectAll:       true,
+									TargetPath:       "identifier",
+									EmbedCDAIdentity: true,
+								},
+								{
+									SourcePath: "performers[0].assignedEntity.code",
+									Transform:  "cda_code_to_codeable_concept",
+									TargetPath: "qualification[0].code",
+								},
+								{
+									Scope:      "performers[0].assignedEntity.telecoms[*]",
+									Transform:  "cda_telecom_to_fhir",
+									CollectAll: true,
+									TargetPath: "telecom",
+								},
+							},
 						},
 					},
 				},
@@ -1353,17 +1725,22 @@ var coverageSectionKeys = []string{"payersInsurance", "payors"}
 // CDA-side signal `status` could be derived from instead of the hardcoded
 // "active" Go already uses.
 //
-// Deliberately NOT ported: `beneficiary`/`subscriber` (always = patientRef,
-// consistent with every prior rule); an actual subscriber-relationship code
-// even when one might be present (coverage_mapper.go never reads one
-// either — hardcodes "self" unconditionally, a candidate gap the inventory
-// flags but doesn't fix here, since fixing it isn't this slice's job).
+// `beneficiary`/`subscriber` (Phase 4 Slice A, closed): both set via
+// PatientRefPath below — coverage_mapper.go:43-44 assigns the SAME
+// patientRef to both fields, the reason PatientRefPath is a slice rather
+// than a single string.
+//
+// Deliberately NOT ported: an actual subscriber-relationship code even when
+// one might be present (coverage_mapper.go never reads one either —
+// hardcodes "self" unconditionally, a candidate gap the inventory flags but
+// doesn't fix here, since fixing it isn't this slice's job).
 func CoverageMappingRules() []MappingRule {
 	rules := make([]MappingRule, 0, len(coverageSectionKeys))
 	for _, sectionKey := range coverageSectionKeys {
 		rules = append(rules, MappingRule{
-			SectionKey:   sectionKey,
-			FHIRResource: "Coverage",
+			SectionKey:     sectionKey,
+			FHIRResource:   "Coverage",
+			PatientRefPath: []string{"beneficiary", "subscriber"},
 			Fields: []MappingRow{
 				{LiteralValue: "active", TargetPath: "status"},
 				{
@@ -1433,18 +1810,22 @@ func CoverageMappingRules() []MappingRule {
 //
 // Deliberately NOT ported (documented, not silently dropped — all
 // confirmed gaps in Go itself per the inventory's section 14, not
-// disagreements with Go's behavior): `patient` (patientRef-dependent);
-// `administrativeGenderCode` → `FamilyMemberHistory.sex`; birthTime-vs-
-// effectiveTime age derivation (CONF:1198-15983, a directly-cited CONF#
-// describing exactly this derivation, never implemented in Go); the Death
-// Observation (CAUS) → `deceasedBoolean`/`deceasedAge`; the Age Observation
-// (SUBJ, inversionInd) → `condition[].onsetAge`. None of these exist in Go
-// today — porting them would be new functionality, not a port.
+// disagreements with Go's behavior): `administrativeGenderCode` →
+// `FamilyMemberHistory.sex`; birthTime-vs-effectiveTime age derivation
+// (CONF:1198-15983, a directly-cited CONF# describing exactly this
+// derivation, never implemented in Go); the Death Observation (CAUS) →
+// `deceasedBoolean`/`deceasedAge`; the Age Observation (SUBJ, inversionInd)
+// → `condition[].onsetAge`. None of these exist in Go today — porting them
+// would be new functionality, not a port.
+//
+// `patient` (Phase 4 Slice A, closed): set via PatientRefPath below —
+// family_history_mapper.go:34: r["patient"] = ref(patientRef).
 func FamilyMemberHistoryMappingRules() []MappingRule {
 	return []MappingRule{
 		{
-			SectionKey:   "familyHistory",
-			FHIRResource: "FamilyMemberHistory",
+			SectionKey:     "familyHistory",
+			FHIRResource:   "FamilyMemberHistory",
+			PatientRefPath: []string{"patient"},
 			Fields: []MappingRow{
 				{LiteralValue: "completed", TargetPath: "status"},
 				{
@@ -1504,8 +1885,9 @@ func FamilyMemberHistoryMappingRules() []MappingRule {
 func DeviceMappingRules() []MappingRule {
 	return []MappingRule{
 		{
-			SectionKey:   "medicalEquipment",
-			FHIRResource: "DeviceUseStatement",
+			SectionKey:     "medicalEquipment",
+			FHIRResource:   "DeviceUseStatement",
+			PatientRefPath: []string{"subject"}, // device_mapper.go:34: r["subject"] = ref(patientRef)
 			Fields: []MappingRow{
 				{
 					SourcePath: "statusCode",
@@ -1544,6 +1926,124 @@ func DeviceMappingRules() []MappingRule {
 	}
 }
 
+// =========================================================
+// Patient (document header)
+// =========================================================
+//
+// PatientMappingRules returns the OOB declarative rule for the document
+// header's patient (documentMap["header"]["patient"]), producing the FHIR
+// Patient resource every other section's resources link back to via
+// MappingRule.PatientRefPath. Direct port of patient_mapper.go's MapPatient
+// — "collect every element" for identifier/name/address/telecom (no Go-side
+// branching to replicate) plus a handful of scalar demographics fields.
+//
+// Phase 4 Slice A (the cutover's prerequisite gap-closing slice — see
+// architecture/CDA_FHIR_MAPPING_ENGINE_SPRINT_PLAN.md's Phase 4 section):
+// this is the FIRST declarative rule to map Patient at all. No PatientRefPath
+// here — a Patient resource doesn't reference itself; its own "id" (always
+// "patient-1") is assigned by the document-level orchestrator (Phase 4
+// Slice B), the same way Custodian/Author's ids are, not by this rule.
+//
+// Deliberately NOT ported, documented not silently dropped:
+//   - sortNamesByUse's "legal name first" reordering (patient_mapper.go:36-38)
+//     — CollectAll has no sort primitive; names are written in source-document
+//     order instead. Zero corpus evidence of a Patient with multiple
+//     differently-`use`d names to validate a new primitive against (check
+//     before assuming this matters for a real document).
+//   - languageCommunication/modeCode ("Expressed Written" etc.) — parsed
+//     into CDALanguage.ModeCode but never read by
+//     declarativeLanguageCommunicationToFHIR; base FHIR R4's
+//     Patient.communication has no field or known extension for
+//     spoken-vs-written mode, so there is no FHIR target to map it onto.
+//
+// Race/Ethnicity/Religion extensions are NOT Fields rows here — they need
+// the document-header CDACode object's nested {code, displayName} shape
+// rather than a scalar SourcePath/Transform write, so they're injected as a
+// separate post-processing step (USCoreProfileBuilder.InjectPatientExtensions,
+// called from DeclarativeMapDocument right after this rule builds the
+// Patient resource) instead of a plain field mapping here.
+func PatientMappingRules() []MappingRule {
+	return []MappingRule{
+		{
+			HeaderPath:   "patient",
+			FHIRResource: "Patient",
+			Fields: []MappingRow{
+				{
+					// patient_mapper.go:23-33.
+					Scope:      "ids[*]",
+					Transform:  "cda_ii_to_identifier",
+					CollectAll: true,
+					TargetPath: "identifier",
+				},
+				{
+					// patient_mapper.go:36-48 -- source-document order; see
+					// this function's own doc comment on sortNamesByUse.
+					Scope:      "names[*]",
+					Transform:  "cda_name_to_fhir",
+					CollectAll: true,
+					TargetPath: "name",
+				},
+				{
+					// patient_mapper.go:51-61.
+					Scope:      "addresses[*]",
+					Transform:  "cda_address_to_fhir",
+					CollectAll: true,
+					TargetPath: "address",
+				},
+				{
+					// patient_mapper.go:64-74.
+					Scope:      "telecoms[*]",
+					Transform:  "cda_telecom_to_fhir",
+					CollectAll: true,
+					TargetPath: "telecom",
+				},
+				{
+					// patient_mapper.go:77-79.
+					SourcePath: "birthDate",
+					Transform:  "cda_time_to_fhir_date",
+					TargetPath: "birthDate",
+				},
+				{
+					// patient_mapper.go:80-84 -- whole gender CDACode object,
+					// not just its bare code, because the guard this mirrors
+					// needs both Code and NullFlavor (see
+					// declarativeGenderToFHIR's doc comment).
+					SourcePath: "gender",
+					Transform:  "cda_gender_to_fhir",
+					TargetPath: "gender",
+				},
+				{
+					// sdtc:deceasedInd → Patient.deceasedBoolean. No
+					// Transform needed: CDAPatient.DeceasedInd is *bool, so
+					// ResolveCDAPath returns a real Go bool (true or false)
+					// when the element was present, or nil (row no-ops) when
+					// it was absent — explicit value="false" is preserved,
+					// not treated as "no data" the way a bare bool zero-value
+					// would be.
+					SourcePath: "deceasedInd",
+					TargetPath: "deceasedBoolean",
+				},
+				{
+					// patient_mapper.go:85-89 -- cda_code_to_codeable_concept
+					// already returns nil for an all-empty CDACode (see
+					// CDACodeToCodeableConcept's own empty-input guard), so
+					// this row needs no extra Code!="" check duplicated here.
+					SourcePath: "maritalStatus",
+					Transform:  "cda_code_to_codeable_concept",
+					TargetPath: "maritalStatus",
+				},
+				{
+					// patient_mapper.go:92-116.
+					Scope:      "languages[*]",
+					Transform:  "cda_language_communication_to_fhir",
+					CollectAll: true,
+					TargetPath: "communication",
+				},
+			},
+		},
+	}
+}
+
 // AuthorMappingRules returns the OOB declarative rule for the document
 // header's author[] list, producing one Practitioner from the first author
 // with a usable assignedPerson — see MappingRule.HeaderPath's doc comment
@@ -1556,20 +2056,27 @@ func DeviceMappingRules() []MappingRule {
 // in the typed struct but patient_mapper.go's MapAuthor never reads it — a
 // confirmed gap in Go itself, not a disagreement with it; adding
 // Practitioner.address[] here would be new functionality, not a port);
-// `_cdaIds` assembly-layer dedup marker (same deferred-not-forgotten
-// reasoning as CareTeam's emitted Practitioners — this is the SECOND
-// declarative rule to build a Practitioner, after CareTeam's, and neither
-// embeds it yet); `AssignedAuthoringDevice` (device-authored entries,
-// explicitly skipped by Go too — `if AssignedPerson == nil { continue }`
-// already excludes them via firstAuthorWithPerson's identical check);
-// `RepresentedOrganization` (no Organization/PractitionerRole link is
-// produced anywhere in this codebase for authors — a confirmed,
-// well-evidenced gap, not fixed here either).
+// `AssignedAuthoringDevice` (device-authored entries, explicitly skipped by
+// Go too — `if AssignedPerson == nil { continue }` already excludes them via
+// firstAuthorWithPerson's identical check); `RepresentedOrganization` (no
+// Organization/PractitionerRole link is produced anywhere in this codebase
+// for authors — a confirmed, well-evidenced gap, not fixed here either).
+//
+// `_cdaIds` (Phase 4 Slice A, closed): the identifier row below now sets
+// EmbedCDAIdentity, mirroring patient_mapper.go:160's
+// embedCDAIds(p, a.AssignedAuthor.Ids) exactly.
 func AuthorMappingRules() []MappingRule {
 	return []MappingRule{
 		{
 			HeaderPath:   "authors",
 			FHIRResource: "Practitioner",
+			// patient_mapper.go's MapAuthor never checks whether any field
+			// beyond resourceType+id actually got set -- it returns the
+			// resource unconditionally once an author with >=1 (possibly
+			// content-empty) name is found. See SkipEmptyCheck's doc comment
+			// in declarative_schema.go for the real corpus case (kareo) this
+			// closes a document-level parity gap for.
+			SkipEmptyCheck: true,
 			Fields: []MappingRow{
 				{
 					Scope:      "assignedAuthor.assignedPerson.names[*]",
@@ -1578,10 +2085,11 @@ func AuthorMappingRules() []MappingRule {
 					TargetPath: "name",
 				},
 				{
-					Scope:      "assignedAuthor.ids[*]",
-					Transform:  "cda_ii_to_identifier",
-					CollectAll: true,
-					TargetPath: "identifier",
+					Scope:            "assignedAuthor.ids[*]",
+					Transform:        "cda_ii_to_identifier",
+					CollectAll:       true,
+					TargetPath:       "identifier",
+					EmbedCDAIdentity: true, // mirrors patient_mapper.go:160's embedCDAIds(p, a.AssignedAuthor.Ids)
 				},
 				{
 					Scope:      "assignedAuthor.telecoms[*]",
@@ -1597,8 +2105,9 @@ func AuthorMappingRules() []MappingRule {
 // CustodianMappingRules returns the OOB declarative rule for the document
 // header's custodian, producing one Organization.
 //
-// Deliberately NOT ported: `_cdaIds` (same deferred reasoning as Author's
-// emitted Practitioner above).
+// `_cdaIds` (Phase 4 Slice A, closed): the identifier row below sets
+// EmbedCDAIdentity, mirroring patient_mapper.go:207's
+// embedCDAIds(r, org.Ids) exactly.
 func CustodianMappingRules() []MappingRule {
 	return []MappingRule{
 		{
@@ -1621,10 +2130,11 @@ func CustodianMappingRules() []MappingRule {
 					TargetPath:   "active",
 				},
 				{
-					Scope:      "assignedCustodian.representedCustodianOrganization.ids[*]",
-					Transform:  "cda_ii_to_identifier",
-					CollectAll: true,
-					TargetPath: "identifier",
+					Scope:            "assignedCustodian.representedCustodianOrganization.ids[*]",
+					Transform:        "cda_ii_to_identifier",
+					CollectAll:       true,
+					TargetPath:       "identifier",
+					EmbedCDAIdentity: true,
 				},
 				{
 					Scope:      "assignedCustodian.representedCustodianOrganization.addresses[*]",

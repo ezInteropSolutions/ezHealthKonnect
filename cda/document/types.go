@@ -37,9 +37,19 @@ type CDAPatient struct {
 	Telecoms      []CDATelecom  `json:"telecoms,omitempty"`  // ALL <telecom> elements — phone, fax, email
 	BirthDate     CDATime       `json:"birthDate"`
 	Gender        CDACode       `json:"gender"`
+	// DeceasedInd is sdtc:deceasedInd's value attribute. A pointer (not a
+	// bare bool) because CDA can explicitly assert value="false" — that's
+	// real data (FHIR Patient.deceasedBoolean=false), distinct from the
+	// element being absent entirely (no deceased field on the FHIR side at
+	// all). nil means absent.
+	DeceasedInd   *bool         `json:"deceasedInd,omitempty"`
 	MaritalStatus CDACode       `json:"maritalStatus"`
 	Race          CDACode       `json:"race"`
 	Ethnicity     CDACode       `json:"ethnicity"`
+	// Religion is religiousAffiliationCode — codeSystem
+	// 2.16.840.1.113883.5.1076 (HL7 ReligiousAffiliation), mapped to the
+	// base FHIR patient-religion extension (no US Core equivalent exists).
+	Religion      CDACode       `json:"religion"`
 	Languages     []CDALanguage `json:"languages,omitempty"`
 }
 

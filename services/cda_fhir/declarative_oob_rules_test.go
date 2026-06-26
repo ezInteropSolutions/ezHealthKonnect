@@ -67,7 +67,20 @@ func firstCoding(t testing.TB, cc interface{}) map[string]interface{} {
 // Ports mappers_test.go's TestMapAllergies_NoKnownAllergies_CodeFallsBackToAssertionValue
 // and TestMapAllergies_NotNegated_VerificationStatusConfirmed.
 
-func TestDeclarativeEngine_Allergy_NoKnownAllergies_CodeFallsBackToAssertionValue(t *testing.T) {
+// TestDeclarativeEngine_Allergy_NoKnownAllergies_CodeInvertedViaConceptMap
+// covers the real "No Known Allergies" idiom as it actually appears in C-CDA
+// documents (confirmed against HL7's own C-CDA-Examples "No Known Medication
+// Allergies" sample and a real Epic-generated CCD): a CSM participant IS
+// present, but its playingEntity/code is nullFlavor="NA" (no real substance
+// named) -- distinct from no CSM participant at all, which is the OTHER test
+// below. Verified against the HL7 C-CDA on FHIR IG (CF-allergies.md +
+// ConceptMap-CF-NoKnownAllergies): code must invert 419199007 "Allergy to
+// substance" -> 716186003 "No known allergy", and verificationStatus must
+// stay "confirmed" -- the IG's allergy table has no verificationStatus row
+// for negation at all, so "refuted" (Go's old behavior) is never correct
+// here: FHIR's own "refuted" definition requires "the identified substance",
+// which a generic, substance-less NKDA assertion never has.
+func TestDeclarativeEngine_Allergy_NoKnownAllergies_CodeInvertedViaConceptMap(t *testing.T) {
 	entries := []cdadocument.CDAEntry{
 		{
 			EntryType:  "act",
@@ -79,6 +92,16 @@ func TestDeclarativeEngine_Allergy_NoKnownAllergies_CodeFallsBackToAssertionValu
 						EntryType:   "observation",
 						StatusCode:  "completed",
 						NegationInd: true,
+						Participants: []cdadocument.CDAParticipant{
+							{
+								TypeCode: "CSM",
+								ParticipantRole: cdadocument.CDAParticipantRole{
+									PlayingEntity: &cdadocument.CDAPlayingEntity{
+										Code: cdadocument.CDACode{NullFlavor: "NA"},
+									},
+								},
+							},
+						},
 						Value: &cdadocument.CDAValue{
 							Type: "CD",
 							Code: &cdadocument.CDACode{
@@ -102,12 +125,61 @@ func TestDeclarativeEngine_Allergy_NoKnownAllergies_CodeFallsBackToAssertionValu
 	if len(resources) != 1 {
 		t.Fatalf("expected 1 AllergyIntolerance, got %d", len(resources))
 	}
-	if _, hasCode := resources[0]["code"]; !hasCode {
-		t.Error("AllergyIntolerance.code must be set even with no CSM substance participant")
+	codeCoding := firstCoding(t, resources[0]["code"])
+	if codeCoding["code"] != "716186003" {
+		t.Errorf("code.coding[0].code = %v, want 716186003 (No known allergy, via ConceptMap-CF-NoKnownAllergies)", codeCoding["code"])
 	}
-	coding := firstCoding(t, resources[0]["verificationStatus"])
-	if coding["code"] != "refuted" {
-		t.Errorf("verificationStatus.code = %v, want \"refuted\" for a negated assertion", coding["code"])
+	if codeCoding["system"] != "http://snomed.info/sct" {
+		t.Errorf("code.coding[0].system = %v, want http://snomed.info/sct", codeCoding["system"])
+	}
+	verCoding := firstCoding(t, resources[0]["verificationStatus"])
+	if verCoding["code"] != "confirmed" {
+		t.Errorf("verificationStatus.code = %v, want \"confirmed\" -- the IG has no verificationStatus row for negation; refuted requires an identified substance this entry doesn't have", verCoding["code"])
+	}
+}
+
+// TestDeclarativeEngine_Allergy_NoCSMParticipantAtAll_CodeFallsBackToAssertionValue
+// covers the OTHER no-substance shape: no CSM participant in the document at
+// all (vs. nullFlavor'd, covered above). Without a negationInd=true the IG's
+// ConceptMap doesn't apply (nothing to invert), so .code keeps the raw
+// assertion value as-is.
+func TestDeclarativeEngine_Allergy_NoCSMParticipantAtAll_CodeFallsBackToAssertionValue(t *testing.T) {
+	entries := []cdadocument.CDAEntry{
+		{
+			EntryType:  "act",
+			StatusCode: "active",
+			EntryRelationships: []cdadocument.CDAEntryRelationship{
+				{
+					TypeCode: "SUBJ",
+					Entry: cdadocument.CDAEntry{
+						EntryType:  "observation",
+						StatusCode: "completed",
+						Value: &cdadocument.CDAValue{
+							Type: "CD",
+							Code: &cdadocument.CDACode{
+								Code:        "419199007",
+								CodeSystem:  "2.16.840.1.113883.6.96",
+								DisplayName: "Allergy to substance (disorder)",
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	documentMap := documentMapForEntries(t, "allergiesAndIntolerances", entries)
+	engine := cdafhir.NewDeclarativeEngine()
+
+	resources, errs := engine.BuildResources(documentMap, cdafhir.AllergyMappingRules()[0])
+	if len(errs) != 0 {
+		t.Fatalf("unexpected errors: %+v", errs)
+	}
+	if len(resources) != 1 {
+		t.Fatalf("expected 1 AllergyIntolerance, got %d", len(resources))
+	}
+	codeCoding := firstCoding(t, resources[0]["code"])
+	if codeCoding["code"] != "419199007" {
+		t.Errorf("code.coding[0].code = %v, want 419199007 (raw assertion value, not negated)", codeCoding["code"])
 	}
 }
 
@@ -151,6 +223,111 @@ func TestDeclarativeEngine_Allergy_NotNegated_VerificationStatusConfirmed(t *tes
 	if coding["code"] != "confirmed" {
 		t.Errorf("verificationStatus.code = %v, want \"confirmed\" for a non-negated allergy", coding["code"])
 	}
+}
+
+// TestDeclarativeEngine_Allergy_Criticality covers the previously-missing
+// Criticality row (see declarative_oob_rules.go's doc comment on it --
+// "criticality" had zero references anywhere in services/cda_fhir before
+// this fix). Mirrors the real CDA shape: a Criticality Observation
+// (code 82606-5) nested under the SUBJ allergy-assertion observation via an
+// inverted SUBJ entryRelationship, sibling to the CSM participant.
+func TestDeclarativeEngine_Allergy_Criticality(t *testing.T) {
+	criticalityEntry := func(valueCode, nullFlavor string) cdadocument.CDAEntry {
+		return cdadocument.CDAEntry{
+			EntryType: "observation",
+			Code:      cdadocument.CDACode{Code: "82606-5", CodeSystem: "2.16.840.1.113883.6.1"},
+			Value: &cdadocument.CDAValue{
+				Type: "CD",
+				Code: &cdadocument.CDACode{Code: valueCode, NullFlavor: nullFlavor},
+			},
+		}
+	}
+
+	t.Run("CRITH maps to high", func(t *testing.T) {
+		entries := []cdadocument.CDAEntry{
+			{
+				EntryType:  "act",
+				StatusCode: "active",
+				EntryRelationships: []cdadocument.CDAEntryRelationship{
+					{
+						TypeCode: "SUBJ",
+						Entry: cdadocument.CDAEntry{
+							EntryType:  "observation",
+							StatusCode: "completed",
+							Participants: []cdadocument.CDAParticipant{
+								{
+									TypeCode: "CSM",
+									ParticipantRole: cdadocument.CDAParticipantRole{
+										PlayingEntity: &cdadocument.CDAPlayingEntity{
+											Code: cdadocument.CDACode{Code: "7980", DisplayName: "Penicillin", CodeSystem: "2.16.840.1.113883.6.88"},
+										},
+									},
+								},
+							},
+							EntryRelationships: []cdadocument.CDAEntryRelationship{
+								{
+									TypeCode:     "SUBJ",
+									InversionInd: true,
+									Entry:        criticalityEntry("CRITH", ""),
+								},
+							},
+						},
+					},
+				},
+			},
+		}
+		documentMap := documentMapForEntries(t, "allergiesAndIntolerances", entries)
+		engine := cdafhir.NewDeclarativeEngine()
+		resources, errs := engine.BuildResources(documentMap, cdafhir.AllergyMappingRules()[0])
+		if len(errs) != 0 {
+			t.Fatalf("unexpected errors: %+v", errs)
+		}
+		if resources[0]["criticality"] != "high" {
+			t.Errorf("criticality = %v, want \"high\" (CRITH via ConceptMap-CF-Criticality)", resources[0]["criticality"])
+		}
+	})
+
+	t.Run("nullFlavor=UNK produces no criticality field", func(t *testing.T) {
+		// The real document this fix was found against: Criticality value
+		// is nullFlavor="UNK", not a real CRITH/CRITL/CRITU code -- must
+		// stay absent, not default to any value.
+		entries := []cdadocument.CDAEntry{
+			{
+				EntryType:  "act",
+				StatusCode: "active",
+				EntryRelationships: []cdadocument.CDAEntryRelationship{
+					{
+						TypeCode: "SUBJ",
+						Entry: cdadocument.CDAEntry{
+							EntryType:   "observation",
+							StatusCode:  "completed",
+							NegationInd: true,
+							Value: &cdadocument.CDAValue{
+								Type: "CD",
+								Code: &cdadocument.CDACode{Code: "419199007", CodeSystem: "2.16.840.1.113883.6.96"},
+							},
+							EntryRelationships: []cdadocument.CDAEntryRelationship{
+								{
+									TypeCode:     "SUBJ",
+									InversionInd: true,
+									Entry:        criticalityEntry("", "UNK"),
+								},
+							},
+						},
+					},
+				},
+			},
+		}
+		documentMap := documentMapForEntries(t, "allergiesAndIntolerances", entries)
+		engine := cdafhir.NewDeclarativeEngine()
+		resources, errs := engine.BuildResources(documentMap, cdafhir.AllergyMappingRules()[0])
+		if len(errs) != 0 {
+			t.Fatalf("unexpected errors: %+v", errs)
+		}
+		if _, ok := resources[0]["criticality"]; ok {
+			t.Errorf("expected no criticality field for nullFlavor=UNK, got %v", resources[0]["criticality"])
+		}
+	})
 }
 
 // TestDeclarativeEngine_Allergy_ReactionsWithAndWithoutSeverity proves
@@ -358,6 +535,30 @@ func TestDeclarativeEngine_Medication_OrderIntent_RequesterFromPerformer(t *test
 	}
 }
 
+// TestDeclarativeEngine_Medication_OrderIntent_SetsIntentOrder is a
+// regression test for a real gap a 747-file sample_ccdas corpus run found:
+// medicationRequestFields() never wrote MedicationRequest.intent (1..1
+// required in FHIR) at all. medicationRequestRule()'s own EntryMatch
+// ("moodCode=INT") already guarantees every matched entry is an order, so
+// "order" is the correct literal value for every MedicationRequest this
+// rule ever produces.
+func TestDeclarativeEngine_Medication_OrderIntent_SetsIntentOrder(t *testing.T) {
+	entries := []cdadocument.CDAEntry{
+		{
+			EntryType:  "substanceAdministration",
+			MoodCode:   "INT",
+			StatusCode: "active",
+		},
+	}
+	resources := buildMedicationResources(t, entries)
+	if len(resources) != 1 || resources[0]["resourceType"] != "MedicationRequest" {
+		t.Fatalf("expected 1 MedicationRequest, got %v", resources)
+	}
+	if resources[0]["intent"] != "order" {
+		t.Errorf("MedicationRequest.intent = %v, want %q", resources[0]["intent"], "order")
+	}
+}
+
 func TestDeclarativeEngine_Medication_OrderIntent_RequesterFallback_NeverEmpty(t *testing.T) {
 	entries := []cdadocument.CDAEntry{
 		{EntryType: "substanceAdministration", MoodCode: "INT", StatusCode: "active"},
@@ -402,8 +603,11 @@ func TestDeclarativeEngine_Medication_PIVLFrequency_SetsDosageTimingRepeat(t *te
 		t.Fatal("expected dosage.timing to be set from the PIVL_TS effectiveTime")
 	}
 	repeat := timing["repeat"].(map[string]interface{})
-	if repeat["period"] != "12" || repeat["periodUnit"] != "h" {
-		t.Errorf("repeat = %v, want period=12 periodUnit=h", repeat)
+	// period must be a FHIR decimal (JSON number), not the raw CDA attribute
+	// string -- a bare string here fails FHIR validation ("the primitive
+	// value must be a number").
+	if repeat["period"] != float64(12) || repeat["periodUnit"] != "h" {
+		t.Errorf("repeat = %v, want period=12 (float64) periodUnit=h", repeat)
 	}
 }
 
@@ -889,6 +1093,126 @@ func TestDeclarativeEngine_SocialHistory_SmokingStatus_ValueCodeableConcept(t *t
 	catCoding := firstCoding(t, cats[0])
 	if catCoding["code"] != "social-history" {
 		t.Errorf("category coding = %v, want code=social-history", catCoding)
+	}
+}
+
+// ---- Functional Status / Mental Status / labResults alias ----
+//
+// Phase 4 Slice D gap closure: these 3 had no declarative rule at all before
+// this session (see FunctionalStatusMappingRules'/MentalStatusMappingRules'/
+// ResultsMappingRules' own doc comments). No corpus file has either section
+// — synthetic data only, same convention used elsewhere in this file for
+// sections the 4-vendor corpus doesn't exercise.
+
+func TestDeclarativeEngine_FunctionalStatus_UsesUSCoreCategorySystem(t *testing.T) {
+	entries := []cdadocument.CDAEntry{
+		{
+			EntryType:  "observation",
+			StatusCode: "completed",
+			Code:       cdadocument.CDACode{Code: "54521-1", CodeSystem: "2.16.840.1.113883.6.1", DisplayName: "Functional status"},
+			Value: &cdadocument.CDAValue{
+				Type: "CD",
+				Code: &cdadocument.CDACode{Code: "445528004", DisplayName: "Independent", CodeSystem: "2.16.840.1.113883.6.96"},
+			},
+		},
+	}
+	documentMap := documentMapForEntries(t, "functionalStatus", entries)
+	engine := cdafhir.NewDeclarativeEngine()
+	resources, errs := engine.BuildResources(documentMap, cdafhir.FunctionalStatusMappingRules()[0])
+	if len(errs) != 0 {
+		t.Fatalf("unexpected errors: %+v", errs)
+	}
+	if len(resources) != 1 {
+		t.Fatalf("expected 1 Observation, got %d", len(resources))
+	}
+	cats, _ := resources[0]["category"].([]interface{})
+	catCoding := firstCoding(t, cats[0])
+	if catCoding["code"] != "functional-status" {
+		t.Errorf("category coding = %v, want code=functional-status", catCoding)
+	}
+	if catCoding["system"] != "http://hl7.org/fhir/us/core/CodeSystem/us-core-category" {
+		t.Errorf("category coding system = %v, want the US Core category system", catCoding["system"])
+	}
+	if catCoding["display"] != "Functional Status" {
+		t.Errorf("category coding display = %v, want 'Functional Status'", catCoding["display"])
+	}
+}
+
+func TestDeclarativeEngine_MentalStatus_UsesUSCoreCategorySystem(t *testing.T) {
+	entries := []cdadocument.CDAEntry{
+		{
+			EntryType:  "observation",
+			StatusCode: "completed",
+			Code:       cdadocument.CDACode{Code: "58144-5", CodeSystem: "2.16.840.1.113883.6.1", DisplayName: "Mental status"},
+			Value: &cdadocument.CDAValue{
+				Type: "CD",
+				Code: &cdadocument.CDACode{Code: "248234008", DisplayName: "Alert", CodeSystem: "2.16.840.1.113883.6.96"},
+			},
+		},
+	}
+	documentMap := documentMapForEntries(t, "mentalStatus", entries)
+	engine := cdafhir.NewDeclarativeEngine()
+	resources, errs := engine.BuildResources(documentMap, cdafhir.MentalStatusMappingRules()[0])
+	if len(errs) != 0 {
+		t.Fatalf("unexpected errors: %+v", errs)
+	}
+	if len(resources) != 1 {
+		t.Fatalf("expected 1 Observation, got %d", len(resources))
+	}
+	cats, _ := resources[0]["category"].([]interface{})
+	catCoding := firstCoding(t, cats[0])
+	if catCoding["code"] != "cognitive-status" {
+		t.Errorf("category coding = %v, want code=cognitive-status", catCoding)
+	}
+	if catCoding["system"] != "http://hl7.org/fhir/us/core/CodeSystem/us-core-category" {
+		t.Errorf("category coding system = %v, want the US Core category system", catCoding["system"])
+	}
+	if catCoding["display"] != "Cognitive Status" {
+		t.Errorf("category coding display = %v, want 'Cognitive Status'", catCoding["display"])
+	}
+}
+
+func TestDeclarativeEngine_ResultsMappingRules_LabResultsAlias_MatchesResults(t *testing.T) {
+	rules := cdafhir.ResultsMappingRules()
+	if len(rules) != 2 {
+		t.Fatalf("ResultsMappingRules(): got %d rules, want 2 (results + labResults)", len(rules))
+	}
+	if rules[0].SectionKey != "results" {
+		t.Errorf("rules[0].SectionKey = %q, want \"results\"", rules[0].SectionKey)
+	}
+	if rules[1].SectionKey != "labResults" {
+		t.Errorf("rules[1].SectionKey = %q, want \"labResults\"", rules[1].SectionKey)
+	}
+	if rules[0].FHIRResource != rules[1].FHIRResource {
+		t.Errorf("FHIRResource differs between results (%q) and labResults (%q)", rules[0].FHIRResource, rules[1].FHIRResource)
+	}
+
+	entries := []cdadocument.CDAEntry{
+		{
+			EntryType:  "observation",
+			StatusCode: "completed",
+			Code:       cdadocument.CDACode{Code: "2345-7", CodeSystem: "2.16.840.1.113883.6.1", DisplayName: "Glucose"},
+			Value: &cdadocument.CDAValue{
+				Type:     "PQ",
+				Quantity: &cdadocument.CDAQuantity{Value: "95", Unit: "mg/dL"},
+			},
+		},
+	}
+	documentMap := documentMapForEntries(t, "labResults", entries)
+	engine := cdafhir.NewDeclarativeEngine()
+	resources, errs := engine.BuildResources(documentMap, rules[1])
+	if len(errs) != 0 {
+		t.Fatalf("unexpected errors: %+v", errs)
+	}
+	if len(resources) != 1 {
+		t.Fatalf("expected 1 Observation from labResults, got %d", len(resources))
+	}
+	qty, ok := resources[0]["valueQuantity"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected valueQuantity, got %v", resources[0]["valueQuantity"])
+	}
+	if qty["value"] != 95.0 {
+		t.Errorf("valueQuantity.value = %v, want 95", qty["value"])
 	}
 }
 
@@ -2311,5 +2635,242 @@ func TestDeclarativeEngine_LegalAuthenticator_NoAssignedPersonName_NoResource(t 
 	}
 	if resource != nil {
 		t.Errorf("expected no resource (RequiredPaths:[name] gate, no assignedPerson), got %v", resource)
+	}
+}
+
+// ---- Patient (header-level, Phase 4 Slice A) ----
+// No mappers_test.go precedent exists for MapPatient (zero dedicated Go
+// tests per the inventory) -- these are new, not ported.
+
+func TestDeclarativeEngine_Patient_AllFieldsMapped(t *testing.T) {
+	deceased := false
+	header := cdadocument.CDAHeader{
+		Patient: cdadocument.CDAPatient{
+			Ids:         []cdadocument.CDAII{{Root: "2.16.840.1.113883.4.1", Extension: "999-99-9999"}},
+			Names:       []cdadocument.CDAName{{Family: "Doe", Given: []string{"Jane"}, Use: "L"}},
+			Addresses:   []cdadocument.CDAAddress{{StreetLines: []string{"1 Main St"}, City: "Boulder", State: "CO", PostalCode: "80301"}},
+			Telecoms:    []cdadocument.CDATelecom{{Value: "tel:+1-555-0123"}},
+			BirthDate:   cdadocument.CDATime{Value: "19800615"},
+			Gender:      cdadocument.CDACode{Code: "F"},
+			DeceasedInd: &deceased,
+			MaritalStatus: cdadocument.CDACode{
+				Code: "M", CodeSystem: "2.16.840.1.113883.5.2", DisplayName: "Married",
+			},
+			Languages: []cdadocument.CDALanguage{{Code: "en", PreferenceInd: true}},
+		},
+	}
+	documentMap := documentMapForHeader(t, header)
+	engine := cdafhir.NewDeclarativeEngine()
+	resource, extra, errs := engine.BuildHeaderResource(documentMap, cdafhir.PatientMappingRules()[0])
+	if len(errs) != 0 {
+		t.Fatalf("unexpected errors: %+v", errs)
+	}
+	if len(extra) != 0 {
+		t.Fatalf("expected no extra resources, got %d", len(extra))
+	}
+	if resource == nil {
+		t.Fatal("expected a Patient resource")
+	}
+	if resource["resourceType"] != "Patient" {
+		t.Errorf("resourceType = %v, want Patient", resource["resourceType"])
+	}
+	ident := firstElement(t, resource["identifier"]).(map[string]interface{})
+	if ident["value"] != "999-99-9999" {
+		t.Errorf("identifier[0].value = %v, want 999-99-9999", ident["value"])
+	}
+	name := firstElement(t, resource["name"]).(map[string]interface{})
+	if name["family"] != "Doe" {
+		t.Errorf("name[0].family = %v, want Doe", name["family"])
+	}
+	addr := firstElement(t, resource["address"]).(map[string]interface{})
+	if addr["city"] != "Boulder" {
+		t.Errorf("address[0].city = %v, want Boulder", addr["city"])
+	}
+	if resource["birthDate"] != "1980-06-15" {
+		t.Errorf("birthDate = %v, want 1980-06-15", resource["birthDate"])
+	}
+	if resource["gender"] != "female" {
+		t.Errorf("gender = %v, want female", resource["gender"])
+	}
+	if resource["deceasedBoolean"] != false {
+		t.Errorf("deceasedBoolean = %v, want false (explicit sdtc:deceasedInd value=\"false\" must be preserved, not omitted)", resource["deceasedBoolean"])
+	}
+	marital := resource["maritalStatus"].(map[string]interface{})
+	if marital["text"] != "Married" {
+		t.Errorf("maritalStatus.text = %v, want Married", marital["text"])
+	}
+	comm := firstElement(t, resource["communication"]).(map[string]interface{})
+	if comm["preferred"] != true {
+		t.Errorf("communication[0].preferred = %v, want true", comm["preferred"])
+	}
+	lang := comm["language"].(map[string]interface{})
+	if firstCoding(t, lang)["code"] != "en" {
+		t.Errorf("communication[0].language.coding[0].code = %v, want en", firstCoding(t, lang)["code"])
+	}
+}
+
+func TestDeclarativeEngine_Patient_NoDeceasedInd_NoDeceasedBooleanField(t *testing.T) {
+	// sdtc:deceasedInd absent entirely (not even value="false") must leave
+	// deceasedBoolean unset, not default it to false -- "no data" and
+	// "explicitly alive" are different facts.
+	header := cdadocument.CDAHeader{
+		Patient: cdadocument.CDAPatient{
+			Names: []cdadocument.CDAName{{Family: "Doe"}},
+		},
+	}
+	documentMap := documentMapForHeader(t, header)
+	engine := cdafhir.NewDeclarativeEngine()
+	resource, _, errs := engine.BuildHeaderResource(documentMap, cdafhir.PatientMappingRules()[0])
+	if len(errs) != 0 {
+		t.Fatalf("unexpected errors: %+v", errs)
+	}
+	if _, ok := resource["deceasedBoolean"]; ok {
+		t.Errorf("expected no deceasedBoolean field (sdtc:deceasedInd absent), got %v", resource["deceasedBoolean"])
+	}
+}
+
+func TestDeclarativeEngine_Patient_NullFlavorGender_NoGenderField(t *testing.T) {
+	// Mirrors patient_mapper.go:80-84's exact guard: an explicit nullFlavor
+	// with no code means Go skips writing "gender" entirely (the one case
+	// the guard changes behavior for -- see declarativeGenderToFHIR's doc
+	// comment).
+	header := cdadocument.CDAHeader{
+		Patient: cdadocument.CDAPatient{
+			Names:  []cdadocument.CDAName{{Family: "Doe"}},
+			Gender: cdadocument.CDACode{NullFlavor: "UNK"},
+		},
+	}
+	documentMap := documentMapForHeader(t, header)
+	engine := cdafhir.NewDeclarativeEngine()
+	resource, _, errs := engine.BuildHeaderResource(documentMap, cdafhir.PatientMappingRules()[0])
+	if len(errs) != 0 {
+		t.Fatalf("unexpected errors: %+v", errs)
+	}
+	if _, ok := resource["gender"]; ok {
+		t.Errorf("expected no gender field (explicit nullFlavor, no code), got %v", resource["gender"])
+	}
+}
+
+func TestDeclarativeEngine_Patient_EmptyGender_DefaultsUnknown(t *testing.T) {
+	// An all-empty CDACode (no code, no nullFlavor) still resolves to
+	// "unknown" -- transforms.GenderToFHIR("") defaults there, and Go's own
+	// guard (Code!="" || NullFlavor=="") passes for this input too.
+	header := cdadocument.CDAHeader{
+		Patient: cdadocument.CDAPatient{
+			Names: []cdadocument.CDAName{{Family: "Doe"}},
+		},
+	}
+	documentMap := documentMapForHeader(t, header)
+	engine := cdafhir.NewDeclarativeEngine()
+	resource, _, errs := engine.BuildHeaderResource(documentMap, cdafhir.PatientMappingRules()[0])
+	if len(errs) != 0 {
+		t.Fatalf("unexpected errors: %+v", errs)
+	}
+	if resource["gender"] != "unknown" {
+		t.Errorf("gender = %v, want unknown", resource["gender"])
+	}
+}
+
+// ---- PatientRefPath / EmbedCDAIdentity (Phase 4 Slice A engine mechanics) ----
+
+func TestDeclarativeEngine_PatientRef_SetsCorrectFieldPerResourceType(t *testing.T) {
+	entries := []cdadocument.CDAEntry{{EntryType: "act", StatusCode: "active"}}
+	documentMap := documentMapForEntries(t, "immunizations", entries)
+	engine := cdafhir.NewDeclarativeEngine()
+	engine.PatientRef = "Patient/patient-1"
+	resources, errs := engine.BuildResources(documentMap, cdafhir.ImmunizationMappingRules()[0])
+	if len(errs) != 0 {
+		t.Fatalf("unexpected errors: %+v", errs)
+	}
+	if len(resources) != 1 {
+		t.Fatalf("expected 1 resource, got %d", len(resources))
+	}
+	patient, ok := resources[0]["patient"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected resource[\"patient\"] to be a reference map, got %v", resources[0]["patient"])
+	}
+	if patient["reference"] != "Patient/patient-1" {
+		t.Errorf("patient.reference = %v, want Patient/patient-1", patient["reference"])
+	}
+}
+
+func TestDeclarativeEngine_PatientRef_EmptyIsNoOp(t *testing.T) {
+	// Zero-value PatientRef (every existing call site before this field
+	// existed) must behave exactly as before -- no patient field written.
+	entries := []cdadocument.CDAEntry{{EntryType: "act", StatusCode: "active"}}
+	documentMap := documentMapForEntries(t, "immunizations", entries)
+	engine := cdafhir.NewDeclarativeEngine()
+	resources, errs := engine.BuildResources(documentMap, cdafhir.ImmunizationMappingRules()[0])
+	if len(errs) != 0 {
+		t.Fatalf("unexpected errors: %+v", errs)
+	}
+	if _, ok := resources[0]["patient"]; ok {
+		t.Errorf("expected no patient field when PatientRef is empty, got %v", resources[0]["patient"])
+	}
+}
+
+func TestDeclarativeEngine_PatientRef_CoverageSetsBeneficiaryAndSubscriber(t *testing.T) {
+	entries := []cdadocument.CDAEntry{{EntryType: "act", StatusCode: "completed", EntryRelationships: []cdadocument.CDAEntryRelationship{
+		{TypeCode: "COMP", Entry: cdadocument.CDAEntry{Id: []cdadocument.CDAII{{Root: "1.2.3", Extension: "POL1"}}}},
+	}}}
+	documentMap := documentMapForEntries(t, "payersInsurance", entries)
+	engine := cdafhir.NewDeclarativeEngine()
+	engine.PatientRef = "Patient/patient-1"
+	resources, errs := engine.BuildResources(documentMap, cdafhir.CoverageMappingRules()[0])
+	if len(errs) != 0 {
+		t.Fatalf("unexpected errors: %+v", errs)
+	}
+	beneficiary := resources[0]["beneficiary"].(map[string]interface{})
+	subscriber := resources[0]["subscriber"].(map[string]interface{})
+	if beneficiary["reference"] != "Patient/patient-1" || subscriber["reference"] != "Patient/patient-1" {
+		t.Errorf("beneficiary=%v subscriber=%v, want both Patient/patient-1", beneficiary, subscriber)
+	}
+}
+
+func TestDeclarativeEngine_EmbedCDAIdentity_AuthorPractitionerGetsCdaIds(t *testing.T) {
+	header := cdadocument.CDAHeader{
+		Authors: []cdadocument.CDAAuthor{
+			{AssignedAuthor: cdadocument.CDAAssignedAuthor{
+				Ids:            []cdadocument.CDAII{{Root: "2.16.840.1.113883.4.6", Extension: "1234567890"}},
+				AssignedPerson: &cdadocument.CDAPerson{Names: []cdadocument.CDAName{{Family: "Smith"}}},
+			}},
+		},
+	}
+	documentMap := documentMapForHeader(t, header)
+	engine := cdafhir.NewDeclarativeEngine()
+	resource, _, errs := engine.BuildHeaderResource(documentMap, cdafhir.AuthorMappingRules()[0])
+	if len(errs) != 0 {
+		t.Fatalf("unexpected errors: %+v", errs)
+	}
+	cdaIds, ok := resource["_cdaIds"].([]interface{})
+	if !ok || len(cdaIds) != 1 {
+		t.Fatalf("expected one _cdaIds entry, got %v", resource["_cdaIds"])
+	}
+	entry := cdaIds[0].(map[string]interface{})
+	if entry["root"] != "2.16.840.1.113883.4.6" || entry["extension"] != "1234567890" {
+		t.Errorf("_cdaIds[0] = %v, want root=2.16.840.1.113883.4.6 extension=1234567890", entry)
+	}
+}
+
+func TestDeclarativeEngine_EmbedCDAIdentity_SectionResourceNeverGetsCdaIds(t *testing.T) {
+	// Parity guard: Go's section-level mappers (Allergy/Condition/Medication/
+	// etc.) never call embedCDAIds -- only Author/Custodian/CareTeam's
+	// emitted Practitioner do (see MappingRow.EmbedCDAIdentity's doc
+	// comment). A section-level resource must NOT get _cdaIds even when its
+	// entry carries a top-level "id" -- that would dedup more than Go ever
+	// did.
+	entries := []cdadocument.CDAEntry{{
+		EntryType:  "act",
+		StatusCode: "active",
+		Id:         []cdadocument.CDAII{{Root: "1.2.3", Extension: "ENTRY1"}},
+	}}
+	documentMap := documentMapForEntries(t, "immunizations", entries)
+	engine := cdafhir.NewDeclarativeEngine()
+	resources, errs := engine.BuildResources(documentMap, cdafhir.ImmunizationMappingRules()[0])
+	if len(errs) != 0 {
+		t.Fatalf("unexpected errors: %+v", errs)
+	}
+	if _, ok := resources[0]["_cdaIds"]; ok {
+		t.Errorf("expected no _cdaIds on a section-level resource, got %v", resources[0]["_cdaIds"])
 	}
 }

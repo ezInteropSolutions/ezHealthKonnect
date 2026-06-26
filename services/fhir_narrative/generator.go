@@ -62,6 +62,10 @@ func (g *FHIRNarrativeGenerator) Generate(resource map[string]interface{}) strin
 		return GeneratePractitionerNarrative(resource)
 	case "Organization":
 		return GenerateOrganizationNarrative(resource)
+	case "CareTeam":
+		return GenerateCareTeamNarrative(resource)
+	case "ServiceRequest":
+		return GenerateServiceRequestNarrative(resource)
 	default:
 		return ""
 	}

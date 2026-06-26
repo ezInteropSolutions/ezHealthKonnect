@@ -1,16 +1,31 @@
 // services/cda_fhir/generic_mapper.go
-// GenericCDAFHIRMapper — schema-driven CDA→FHIR transformation engine.
+// GenericCDAFHIRMapper — CDA→FHIR mapper struct, template/delta management.
 //
-// Mirrors the HL7→FHIR v3 engine (HL7FHIRTransformServiceV3) exactly:
-//   Template lookup:  getCDAFieldMappings() → interface_cda_mappings priority, then OOB
-//   Field resolution: []CDAFieldMapping flat list keyed by sectionKey + cdaField
-//   Delta merging:    mergeCDAMappings() applies CDAMappingOverride list to OOB base
+// The actual document-to-Bundle conversion lives in
+// declarative_document_mapper.go (DeclarativeMapDocument, the OOB
+// declarative-rules engine — see Phase 4 of
+// architecture/CDA_FHIR_MAPPING_ENGINE_SPRINT_PLAN.md). This file now holds:
+//   - The GenericCDAFHIRMapper struct + constructor (dependency injection
+//     for both DeclarativeMapDocument and the config-management API below).
+//   - CDA mapping *configuration* management (getCDAFieldMappings,
+//     loadFromCDAOOBTemplates, mergeCDAMappings, ComputeCDADelta,
+//     GetCDAFieldMappingsPublic) — used by controllers/cda_schema_controller.go's
+//     schema-browser/wizard endpoints to manage interface_cda_mappings/
+//     cda_fhir_templates rows. This is config *management*, never execution —
+//     confirmed via grep that controller never calls a Map/MapDocument-style
+//     conversion method.
+//   - Shared utilities used by DeclarativeMapDocument: writeTransformAuditLog,
+//     isSectionEnabled, resourceIDPrefix.
 //
-// Sprint B: type definitions + DB template lookup (getCDAFieldMappings,
-//   loadFromCDAOOBTemplates, mergeCDAMappings).
-// Sprint C: full Map() execution — createFHIRResourceFromSection(), transform dispatch,
-//   US Core profile injection, FHIRNarrativeGenerator, section-failure isolation,
-//   processingResult structured output.
+// Phase 4 Slice D decommissioned the hardcoded Go path this file used to also
+// contain: Map() (the V9-style DB-driven field-mapping executor),
+// createFHIRResourceFromSection(), the legacy map-based header builders
+// (buildLegacyPatient/Author/Custodian), and their now-orphaned helpers
+// (mapGenderCode, isCoded, systemURIForField, oidToSystemURI,
+// buildPatientIdentifier, buildAddressFromMap, oidToFHIRSystem,
+// oidToTypeCode) — confirmed via grep to have had exactly 2 live callers
+// (the executor's now-removed legacy fallback, and a test file), neither of
+// which depended on the config-management code kept here.
 
 package cdafhir
 
@@ -22,10 +37,8 @@ import (
 	"log"
 	"strings"
 	"sync"
-	"time"
 
 	cdaSchema "ezhealthkonnect/cda"
-	cdadocument "ezhealthkonnect/cda/document"
 	"ezhealthkonnect/services/cda_fhir/assembly"
 	mappinglog "ezhealthkonnect/services/cda_fhir/mapping_log"
 	cdaterminology "ezhealthkonnect/services/cda_terminology"
@@ -45,7 +58,8 @@ type CDAFieldMapping struct {
 	Repeating     bool              // one FHIR resource per CDA entry
 	USCoreProfile string            // US Core profile URL for meta.profile
 	ContextLinks  map[string]string // cross-resource refs: {"patient":"patient"}
-	CDAField      string            // "medicationAllergyCode"  (key from ccda_2_1.json)
+	CDAField      string            // e.g. "code", "reaction.manifestation[0]" — the FlattenSectionRules
+	                                  // TargetPath-based key (declarative_rules_flatten.go), NOT a ccda_2_1.json schema key.
 	FHIRPath      string            // "AllergyIntolerance.code.coding[0].code"
 	CDADataType   string            // "CD", "CE", "PQ", "TS", "CS"
 	FHIRDataType  string            // "code", "string", "dateTime", "decimal"
@@ -81,7 +95,8 @@ type CDAMappingDelta struct {
 	Overrides      []CDAMappingOverride `json:"overrides"`
 }
 
-// CDAToFHIRConfig parameterises a Map() call; mirrors the step builder config tabs.
+// CDAToFHIRConfig parameterises a DeclarativeMapDocument() call; mirrors the
+// step builder config tabs.
 type CDAToFHIRConfig struct {
 	DocType               string   // "CCD", "Discharge Summary", etc.
 	CCDAVersion           string   // "2.1" (default)
@@ -122,7 +137,7 @@ type SectionError struct {
 	Severity   string `json:"severity"` // "error" | "warning"
 }
 
-// MapOutput is the combined return value of Map() and MapDocument().
+// MapOutput is the combined return value of DeclarativeMapDocument().
 type MapOutput struct {
 	FHIRBundle       map[string]interface{}
 	ProcessingResult ProcessingResult
@@ -138,13 +153,12 @@ type MapOutput struct {
 // GenericCDAFHIRMapper is the schema-driven CDA→FHIR engine.
 // Equivalent to HL7FHIRTransformServiceV3 in the HL7 pipeline.
 type GenericCDAFHIRMapper struct {
-	db                *sql.DB
-	schemaLoader      *cdaSchema.CDASchemaLoader
-	transformReg      *CDATransformRegistry
-	profileBuilder    *USCoreProfileBuilder
-	narrativeGen      *fhirnarrative.FHIRNarrativeGenerator
-	terminologySvc    *cdaterminology.TerminologyService // optional; nil = skip validation
-	compositionMapper *CompositionMapper                 // for bundleType=document
+	db             *sql.DB
+	schemaLoader   *cdaSchema.CDASchemaLoader
+	transformReg   *CDATransformRegistry
+	profileBuilder *USCoreProfileBuilder
+	narrativeGen   *fhirnarrative.FHIRNarrativeGenerator
+	terminologySvc *cdaterminology.TerminologyService // optional; nil = skip validation
 
 	// templateCache keys: "<docType>|<ccdaVersion>|<fhirVersion>"
 	templateCache map[string][]CDAFieldMapping
@@ -154,19 +168,18 @@ type GenericCDAFHIRMapper struct {
 // NewGenericCDAFHIRMapper constructs a mapper with all dependencies injected.
 func NewGenericCDAFHIRMapper(db *sql.DB, loader *cdaSchema.CDASchemaLoader) *GenericCDAFHIRMapper {
 	return &GenericCDAFHIRMapper{
-		db:                db,
-		schemaLoader:      loader,
-		transformReg:      NewCDATransformRegistry(),
-		profileBuilder:    NewUSCoreProfileBuilder(),
-		narrativeGen:      fhirnarrative.NewFHIRNarrativeGenerator(),
-		compositionMapper: NewCompositionMapper(),
-		templateCache:     make(map[string][]CDAFieldMapping),
+		db:             db,
+		schemaLoader:   loader,
+		transformReg:   NewCDATransformRegistry(),
+		profileBuilder: NewUSCoreProfileBuilder(),
+		narrativeGen:   fhirnarrative.NewFHIRNarrativeGenerator(),
+		templateCache:  make(map[string][]CDAFieldMapping),
 	}
 }
 
 // WithTerminologyService wires an optional TerminologyService for code validation
 // and translation. When set and CDAToFHIRConfig.TerminologyValidation=true,
-// coded fields are validated during createFHIRResourceFromSection().
+// coded fields are validated during conversion.
 func (m *GenericCDAFHIRMapper) WithTerminologyService(svc *cdaterminology.TerminologyService) *GenericCDAFHIRMapper {
 	m.terminologySvc = svc
 	return m
@@ -240,68 +253,92 @@ func (m *GenericCDAFHIRMapper) getCDAFieldMappings(
 	return mergeCDAMappings(oob, delta.Overrides), nil
 }
 
+// loadCDAMappingOverrides returns the raw []CDAMappingOverride stored for one
+// interface+docType — the runtime counterpart to getCDAFieldMappings, used by
+// DeclarativeMapDocument (declarative_document_mapper.go) to patch a cloned
+// []MappingRule before execution. Returns nil (meaning "no patch — use OOB
+// as-is") on any of: no DB, no interfaceID, no row, a full-custom row
+// (uses_standard_template=false — that tier is handled entirely by
+// getCDAFieldMappings/the config-browsing API, never by runtime rule
+// patching), a NULL/empty overrides column, or a JSON parse error (logged,
+// not fatal, mirroring writeTransformAuditLog's own non-fatal logging style).
+func (m *GenericCDAFHIRMapper) loadCDAMappingOverrides(ctx context.Context, interfaceID, docType string) []CDAMappingOverride {
+	if m.db == nil || interfaceID == "" {
+		return nil
+	}
+
+	var (
+		usesStandard  bool
+		overridesJSON sql.NullString
+	)
+	err := m.db.QueryRowContext(ctx, `
+		SELECT uses_standard_template, mapping_overrides
+		FROM interface_cda_mappings
+		WHERE interface_id = $1 AND document_type = $2
+	`, interfaceID, docType).Scan(&usesStandard, &overridesJSON)
+	if err != nil {
+		if err != sql.ErrNoRows {
+			log.Printf("[cda.to_fhir] loadCDAMappingOverrides query error (interface=%s, docType=%s): %v", interfaceID, docType, err)
+		}
+		return nil
+	}
+	if !usesStandard || !overridesJSON.Valid || overridesJSON.String == "" || overridesJSON.String == "null" {
+		return nil
+	}
+
+	var delta CDAMappingDelta
+	if err := json.Unmarshal([]byte(overridesJSON.String), &delta); err != nil {
+		log.Printf("[cda.to_fhir] loadCDAMappingOverrides delta parse error (interface=%s, docType=%s): %v", interfaceID, docType, err)
+		return nil
+	}
+	return delta.Overrides
+}
+
+// CountDeclarativeFields returns how many addressable fields
+// FlattenSectionRules produces for sectionKey — used by GetSections'
+// fieldCount, replacing the static ccda_2_1.json schema's stale count.
+func (m *GenericCDAFHIRMapper) CountDeclarativeFields(sectionKey string) int {
+	return len(FlattenSectionRules(declarativeSectionRuleGroupsCache[sectionKey]))
+}
+
 // =========================================================
 // OOB template loading (mirror of HL7 loadFromV9OOBTemplates)
 // =========================================================
+
+// loadFromDeclarativeRules derives the effective OOB []CDAFieldMapping
+// directly from declarativeSectionRuleGroupsCache — the same rule set
+// DeclarativeMapDocument actually executes — instead of the orphaned
+// cda_fhir_templates.template_config content (see this file's header
+// comment / Phase 4 Slice D note). docType is accepted but currently unused
+// for filtering: every *MappingRules() section applies regardless of CDA
+// document type, matching DeclarativeMapDocument's own behavior of
+// dispatching purely by sectionKey presence in the parsed document. Kept as
+// a parameter for signature parity with the function this replaces, so a
+// future doc-type-scoped rule set is a non-breaking addition later.
+func loadFromDeclarativeRules(docType string) []CDAFieldMapping {
+	var result []CDAFieldMapping
+	for sectionKey, rules := range declarativeSectionRuleGroupsCache {
+		for _, ff := range FlattenSectionRules(rules) {
+			result = append(result, CDAFieldMapping{
+				SectionKey:   sectionKey,
+				FHIRResource: ff.FHIRResource,
+				CDAField:     ff.Key,
+				FHIRPath:     ff.TargetPath,
+				Transform:    ff.Transform,
+				ValueMap:     ff.ValueMap,
+				Conformance:  ff.Conformance,
+				Required:     ff.Required,
+			})
+		}
+	}
+	return result
+}
 
 func (m *GenericCDAFHIRMapper) loadFromCDAOOBTemplates(
 	ctx context.Context,
 	docType, ccdaVersion, fhirVersion string,
 ) ([]CDAFieldMapping, error) {
-
-	if m.db == nil {
-		return nil, fmt.Errorf("cda_fhir: no DB connection — OOB template lookup unavailable")
-	}
-
-	cacheKey := docType + "|" + ccdaVersion + "|" + fhirVersion
-
-	m.templateMu.RLock()
-	if cached, ok := m.templateCache[cacheKey]; ok {
-		m.templateMu.RUnlock()
-		return cached, nil
-	}
-	m.templateMu.RUnlock()
-
-	var configJSON string
-	err := m.db.QueryRowContext(ctx, `
-		SELECT template_config::text
-		FROM cda_fhir_templates
-		WHERE document_type = $1
-		  AND ccda_version   = $2
-		  AND fhir_version   = $3
-		  AND is_default     = true
-		ORDER BY us_core_version DESC
-		LIMIT 1
-	`, docType, ccdaVersion, fhirVersion).Scan(&configJSON)
-
-	if err == sql.ErrNoRows {
-		fallbackErr := m.db.QueryRowContext(ctx, `
-			SELECT template_config::text
-			FROM cda_fhir_templates
-			WHERE document_type = $1 AND is_default = true
-			ORDER BY ccda_version DESC, us_core_version DESC
-			LIMIT 1
-		`, docType).Scan(&configJSON)
-		if fallbackErr == sql.ErrNoRows {
-			return nil, fmt.Errorf("cda_fhir: no OOB template for document_type=%q", docType)
-		}
-		if fallbackErr != nil {
-			return nil, fmt.Errorf("cda_fhir: OOB template fallback query: %w", fallbackErr)
-		}
-	} else if err != nil {
-		return nil, fmt.Errorf("cda_fhir: OOB template query: %w", err)
-	}
-
-	mappings, err := m.parseMappingConfig([]byte(configJSON))
-	if err != nil {
-		return nil, err
-	}
-
-	m.templateMu.Lock()
-	m.templateCache[cacheKey] = mappings
-	m.templateMu.Unlock()
-
-	return mappings, nil
+	return loadFromDeclarativeRules(docType), nil
 }
 
 // =========================================================
@@ -456,236 +493,7 @@ func mergeCDAMappings(base []CDAFieldMapping, overrides []CDAMappingOverride) []
 	return filtered
 }
 
-// =========================================================
-// Map — full Sprint C implementation
-// =========================================================
-
-// Map converts a parsed CDA document (USCDI-keyed JSON from CDAParserService)
-// to a FHIR R4 Bundle using the DB-driven field mappings.
-//
-// parsedCDA is the ParsedJSON field from models.ParserResult — a map with:
-//   - "_format": "ccda"
-//   - "header": { "patient": {...}, "author": {...}, "custodian": {...} }
-//   - "sections": { sectionKey: { "entries": [...], "narrativeHTML": "..." }, ... }
-func (m *GenericCDAFHIRMapper) Map(
-	ctx context.Context,
-	parsedCDA map[string]interface{},
-	config CDAToFHIRConfig,
-) (*MapOutput, error) {
-	start := time.Now()
-
-	// Apply config defaults
-	if config.CCDAVersion == "" {
-		config.CCDAVersion = "2.1"
-	}
-	if config.FHIRVersion == "" {
-		config.FHIRVersion = "R4"
-	}
-	if config.BundleType == "" {
-		config.BundleType = "collection"
-	}
-	if config.OnSectionFailure == "" {
-		config.OnSectionFailure = "continue"
-	}
-	if config.DocType == "" {
-		if dt, ok := parsedCDA["documentType"].(string); ok && dt != "" {
-			config.DocType = dt
-		} else {
-			config.DocType = "CCD"
-		}
-	}
-
-	// Prefer typed path (Sprint D) — if the CDA parse executor stored a typed
-	// *CDADocument in parsedCDA, delegate to MapDocument() which uses zero XPath.
-	if typed, ok := parsedCDA["_cdaDocument"]; ok {
-		if doc, ok := typed.(*cdadocument.CDADocument); ok {
-			return m.MapDocument(ctx, doc, config)
-		}
-	}
-
-	// Load field mappings
-	mappings, err := m.getCDAFieldMappings(ctx, config.DocType, config.CCDAVersion, config.FHIRVersion, config.InterfaceID)
-	if err != nil {
-		return nil, fmt.Errorf("cda_fhir: Map: %w", err)
-	}
-
-	// Warn at startup if any mapping has an unresolvable transform
-	if warnings := m.transformReg.ValidateOOBMappings(mappings); len(warnings) > 0 {
-		for _, w := range warnings {
-			log.Printf("⚠️  [cda.to_fhir] mapping warning: %s", w)
-		}
-	}
-
-	// Group mappings by sectionKey
-	groups := buildSectionGroups(mappings)
-
-	// Prepare result tracking
-	pr := ProcessingResult{
-		DocumentType: config.DocType,
-		CCDAVersion:  config.CCDAVersion,
-	}
-
-	var (
-		allResources []map[string]interface{}
-		mu           sync.Mutex
-		wg           sync.WaitGroup
-
-		sectionErrors []SectionError
-		failedSects   []string
-		successSects  []string
-	)
-
-	// Extract data maps from parsedCDA
-	headerMap, _ := parsedCDA["header"].(map[string]interface{})
-	sectionsMap, _ := parsedCDA["sections"].(map[string]interface{})
-
-	// Legacy map-based header resources (typed path delegates to MapDocument above).
-	// patientHeader is kept so injectPatientExtensions receives race/ethnicity data.
-	patientHeader := extractHeaderPatient(headerMap)
-	patientRef := ""
-	if pr := buildLegacyPatient(patientHeader); pr != nil {
-		patientRef = "Patient/patient-1"
-		allResources = append(allResources, pr)
-	}
-	if ar := buildLegacyAuthor(headerMap); ar != nil {
-		allResources = append(allResources, ar)
-	}
-	if cr := buildLegacyCustodian(headerMap); cr != nil {
-		allResources = append(allResources, cr)
-	}
-
-	// Process clinical sections in parallel (section failure isolation)
-	for sectionKey, group := range groups {
-		if isHeaderSection(sectionKey) {
-			continue // header sections handled above
-		}
-		if !m.isSectionEnabled(sectionKey, config.EnabledSections) {
-			continue
-		}
-
-		wg.Add(1)
-		go func(sk string, grp sectionGroup) {
-			defer wg.Done()
-
-			entries := extractSectionEntries(sk, sectionsMap)
-			if len(entries) == 0 {
-				return
-			}
-
-			resources, errs := m.createFHIRResourceFromSection(sk, grp, entries, config)
-
-			mu.Lock()
-			defer mu.Unlock()
-
-			if len(errs) > 0 && config.OnSectionFailure == "fail-fast" {
-				failedSects = append(failedSects, sk)
-				sectionErrors = append(sectionErrors, errs...)
-			} else {
-				if len(errs) > 0 {
-					failedSects = append(failedSects, sk)
-					sectionErrors = append(sectionErrors, errs...)
-				} else {
-					successSects = append(successSects, sk)
-				}
-				allResources = append(allResources, resources...)
-			}
-		}(sectionKey, group)
-	}
-	wg.Wait()
-
-	// Inject US Core profiles and narratives
-	for i, r := range allResources {
-		rt := strField(r, "resourceType")
-
-		// Profile injection
-		templateProfile := ""
-		if sg, ok := groups[sectionKeyForResource(rt, groups)]; ok {
-			templateProfile = sg.USCoreProfile
-		}
-		if config.ProfileMode != "base" {
-			m.profileBuilder.InjectProfile(r, templateProfile)
-			if rt == "Patient" {
-				m.profileBuilder.injectPatientExtensions(r, patientHeader)
-			}
-		}
-
-		// Narrative generation
-		narrative := m.narrativeGen.Generate(r)
-		if narrative != "" {
-			r["text"] = map[string]interface{}{
-				"status": "generated",
-				"div":    narrative,
-			}
-		}
-
-		allResources[i] = r
-	}
-
-	// Apply context links: inject patient reference on all clinical resources
-	if patientRef != "" {
-		for _, r := range allResources {
-			m.injectPatientReference(r, patientRef, groups)
-		}
-	}
-
-	// Build FHIR bundle entries
-	entries := make([]interface{}, 0, len(allResources)+1)
-
-	// For document bundles, Composition MUST be the first entry (FHIR R4 §3.1.3)
-	if config.BundleType == "document" && m.compositionMapper != nil {
-		comp := m.compositionMapper.BuildComposition(headerMap, allResources, config)
-		compID := strField(comp, "id")
-		entries = append(entries, map[string]interface{}{
-			"fullUrl":  "urn:uuid:Composition/" + compID,
-			"resource": comp,
-		})
-	}
-
-	for _, r := range allResources {
-		rt := strField(r, "resourceType")
-		id := strField(r, "id")
-		fullURL := "urn:uuid:" + rt + "/" + id
-		entries = append(entries, map[string]interface{}{
-			"fullUrl":  fullURL,
-			"resource": r,
-		})
-	}
-
-	bundle := map[string]interface{}{
-		"resourceType": "Bundle",
-		"type":         config.BundleType,
-		"timestamp":    time.Now().UTC().Format(time.RFC3339),
-		"entry":        entries,
-	}
-	if config.ProfileMode != "base" {
-		bundle["meta"] = map[string]interface{}{
-			"profile": []interface{}{profileDocumentReference},
-			"source":  "CDA/" + config.DocType,
-		}
-	}
-
-	// Build processingResult
-	pr.SuccessfulSections = successSects
-	pr.FailedSections = failedSects
-	pr.SectionErrors = sectionErrors
-	pr.ResourcesProduced = len(allResources)
-	pr.SectionsProcessed = len(successSects) + len(failedSects)
-	pr.PartialSuccess = len(failedSects) > 0 && len(successSects) > 0
-
-	durationMs := time.Since(start).Milliseconds()
-
-	log.Printf("  ✅ [cda.to_fhir] %s → %d resources (%d sections ok, %d failed) in %dms",
-		config.DocType, len(allResources), len(successSects), len(failedSects), durationMs)
-
-	// Audit log — non-fatal, written in background goroutine.
-	if m.db != nil {
-		go m.writeTransformAuditLog(ctx, config, pr, durationMs)
-	}
-
-	return &MapOutput{FHIRBundle: bundle, ProcessingResult: pr}, nil
-}
-
-// writeTransformAuditLog inserts one audit_logs row per cda.to_fhir Map() call.
+// writeTransformAuditLog inserts one audit_logs row per CDA→FHIR conversion call.
 // Non-fatal — errors are logged but do not affect the transform result.
 func (m *GenericCDAFHIRMapper) writeTransformAuditLog(
 	ctx context.Context,
@@ -740,355 +548,8 @@ func (m *GenericCDAFHIRMapper) InvalidateCache() {
 }
 
 // =========================================================
-// Section group construction
-// =========================================================
-
-type sectionGroup struct {
-	FHIRResource  string
-	Repeating     bool
-	USCoreProfile string
-	ContextLinks  map[string]string
-	Mappings      []CDAFieldMapping
-}
-
-func buildSectionGroups(mappings []CDAFieldMapping) map[string]sectionGroup {
-	groups := make(map[string]sectionGroup)
-	for _, mf := range mappings {
-		sg := groups[mf.SectionKey]
-		if sg.FHIRResource == "" {
-			sg.FHIRResource = mf.FHIRResource
-			sg.Repeating = mf.Repeating
-			sg.USCoreProfile = mf.USCoreProfile
-			sg.ContextLinks = mf.ContextLinks
-		}
-		sg.Mappings = append(sg.Mappings, mf)
-		groups[mf.SectionKey] = sg
-	}
-	return groups
-}
-
-// =========================================================
-// Resource creation from section entries
-// =========================================================
-
-func (m *GenericCDAFHIRMapper) createFHIRResourceFromSection(
-	sectionKey string,
-	group sectionGroup,
-	entries []map[string]interface{},
-	config CDAToFHIRConfig,
-) ([]map[string]interface{}, []SectionError) {
-	var (
-		resources []map[string]interface{}
-		errs      []SectionError
-	)
-
-	for entryIdx, entry := range entries {
-		resource := map[string]interface{}{
-			"resourceType": group.FHIRResource,
-			"id":           fmt.Sprintf("%s-%d", resourceIDPrefix(group.FHIRResource), entryIdx+1),
-		}
-
-		for _, mf := range group.Mappings {
-			transformName := mf.Transform
-			if transformName == "" {
-				var inferErr error
-				transformName, inferErr = m.transformReg.InferTransform(mf.CDADataType, mf.FHIRDataType)
-				if inferErr != nil {
-					if mf.Required || mf.Conformance == "SHALL" {
-						errs = append(errs, SectionError{
-							SectionKey: sectionKey,
-							EntryIndex: entryIdx,
-							FieldKey:   mf.CDAField,
-							Transform:  "(infer)",
-							Error:      inferErr.Error(),
-							Severity:   "warning",
-						})
-					}
-					continue
-				}
-			}
-
-			value, transformErr := m.transformReg.ApplyTransform(transformName, entry, mf.CDAField, mf.ValueMap)
-			if transformErr != nil {
-				severity := "warning"
-				if mf.Required || mf.Conformance == "SHALL" {
-					severity = "error"
-				}
-				errs = append(errs, SectionError{
-					SectionKey: sectionKey,
-					EntryIndex: entryIdx,
-					FieldKey:   mf.CDAField,
-					Transform:  transformName,
-					Error:      transformErr.Error(),
-					Severity:   severity,
-				})
-				continue
-			}
-
-			if value == nil {
-				if mf.Required || mf.Conformance == "SHALL" {
-					errs = append(errs, SectionError{
-						SectionKey: sectionKey,
-						EntryIndex: entryIdx,
-						FieldKey:   mf.CDAField,
-						Transform:  transformName,
-						Error:      "empty value for SHALL-conformance field",
-						Severity:   "warning",
-					})
-				}
-				continue
-			}
-
-			// Optional terminology validation for coded fields (CD/CE/CS/UID).
-			if config.TerminologyValidation && m.terminologySvc != nil {
-				if isCoded(mf.CDADataType) {
-					if codeStr, ok := value.(string); ok && codeStr != "" {
-						systemURI := systemURIForField(entry, mf.CDAField, mf.ValueMap)
-						if systemURI != "" {
-							vr := m.terminologySvc.Validate(systemURI, codeStr)
-							if !vr.Valid {
-								severity := "warning"
-								if mf.Conformance == "SHALL" {
-									severity = "error"
-								}
-								errs = append(errs, SectionError{
-									SectionKey: sectionKey,
-									EntryIndex: entryIdx,
-									FieldKey:   mf.CDAField,
-									Transform:  transformName,
-									Error:      fmt.Sprintf("terminology validation: %s", vr.Message),
-									Severity:   severity,
-								})
-							}
-						}
-					}
-				}
-			}
-
-			// Strip resource type prefix from FHIR path: "AllergyIntolerance.code" → "code"
-			fhirPath := stripResourcePrefix(mf.FHIRPath, group.FHIRResource)
-			setFHIRPath(resource, fhirPath, value)
-		}
-
-		// Only include non-empty resources (at least one field was set beyond id/resourceType)
-		if len(resource) > 2 {
-			resources = append(resources, resource)
-		}
-	}
-
-	return resources, errs
-}
-
-// =========================================================
-// Legacy header resource builders (map-based fallback path)
-// Used by Map() when parsedCDA["_cdaDocument"] is absent.
-// The typed path (MapDocument / Sprint D) supersedes these.
-// =========================================================
-
-// buildLegacyPatient builds a FHIR Patient from the headerParser-produced map.
-func buildLegacyPatient(patientData map[string]interface{}) map[string]interface{} {
-	p := map[string]interface{}{
-		"resourceType": "Patient",
-		"id":           "patient-1",
-	}
-	if len(patientData) == 0 {
-		return p
-	}
-
-	family := strField(patientData, "lastName")
-	given := strField(patientData, "firstName")
-	middle := strField(patientData, "middleName")
-	if family != "" || given != "" {
-		nameEntry := map[string]interface{}{"use": "official"}
-		if family != "" {
-			nameEntry["family"] = family
-		}
-		var givenList []interface{}
-		if given != "" {
-			givenList = append(givenList, given)
-		}
-		if middle != "" {
-			givenList = append(givenList, middle)
-		}
-		if len(givenList) > 0 {
-			nameEntry["given"] = givenList
-		}
-		p["name"] = []interface{}{nameEntry}
-	}
-	if dob := strField(patientData, "dateOfBirth"); dob != "" {
-		p["birthDate"] = FormatDate(dob)
-	}
-	if sex := strField(patientData, "sex"); sex != "" {
-		p["gender"] = mapGenderCode(sex)
-	}
-	if phone := strField(patientData, "phone"); phone != "" {
-		p["telecom"] = []interface{}{
-			map[string]interface{}{"system": "phone", "value": phone, "use": "home"},
-		}
-	}
-	if addrRaw, ok := patientData["address"].(map[string]interface{}); ok {
-		if addr := buildAddressFromMap(addrRaw); len(addr) > 0 {
-			p["address"] = []interface{}{addr}
-		}
-	}
-	if idsRaw, ok := patientData["ids"].([]interface{}); ok {
-		var identifiers []interface{}
-		for _, raw := range idsRaw {
-			idMap, ok := raw.(map[string]interface{})
-			if !ok {
-				continue
-			}
-			root := strField(idMap, "root")
-			ext := strField(idMap, "extension")
-			if ident := buildPatientIdentifier(root, ext); ident != nil {
-				identifiers = append(identifiers, ident)
-			}
-		}
-		if len(identifiers) > 0 {
-			p["identifier"] = identifiers
-		}
-	}
-	return p
-}
-
-// buildLegacyAuthor builds a FHIR Practitioner from the header author map.
-func buildLegacyAuthor(header map[string]interface{}) map[string]interface{} {
-	if header == nil {
-		return nil
-	}
-	author, _ := header["author"].(map[string]interface{})
-	given := strField(author, "given")
-	family := strField(author, "family")
-	if given == "" && family == "" {
-		return nil
-	}
-	p := map[string]interface{}{
-		"resourceType": "Practitioner",
-		"id":           "author-1",
-	}
-	nameEntry := map[string]interface{}{"use": "official"}
-	if family != "" {
-		nameEntry["family"] = family
-	}
-	if given != "" {
-		nameEntry["given"] = []interface{}{given}
-	}
-	p["name"] = []interface{}{nameEntry}
-	if npi := strField(author, "npi"); npi != "" {
-		p["identifier"] = []interface{}{
-			map[string]interface{}{"system": "http://hl7.org/fhir/sid/us-npi", "value": npi},
-		}
-	}
-	return p
-}
-
-// buildLegacyCustodian builds a FHIR Organization from the header custodian map.
-func buildLegacyCustodian(header map[string]interface{}) map[string]interface{} {
-	if header == nil {
-		return nil
-	}
-	custodian, _ := header["custodian"].(map[string]interface{})
-	name := strField(custodian, "name")
-	if name == "" {
-		return nil
-	}
-	org := map[string]interface{}{
-		"resourceType": "Organization",
-		"id":           "custodian-1",
-		"name":         name,
-	}
-	if addrRaw, ok := custodian["address"].(map[string]interface{}); ok {
-		if addr := buildAddressFromMap(addrRaw); len(addr) > 0 {
-			org["address"] = []interface{}{addr}
-		}
-	}
-	return org
-}
-
-// =========================================================
-// Context link injection
-// =========================================================
-
-// injectPatientReference sets the patient/subject reference on any resource
-// whose section declares a patient context link.
-func (m *GenericCDAFHIRMapper) injectPatientReference(
-	resource map[string]interface{},
-	patientRef string,
-	groups map[string]sectionGroup,
-) {
-	rt := strField(resource, "resourceType")
-	if rt == "Patient" {
-		return // Patient doesn't reference itself
-	}
-
-	// Find the section group for this resource type
-	for _, sg := range groups {
-		if sg.FHIRResource != rt {
-			continue
-		}
-		for linkKey := range sg.ContextLinks {
-			ref := map[string]interface{}{"reference": patientRef}
-			switch linkKey {
-			case "patient":
-				if _, exists := resource["patient"]; !exists {
-					resource["patient"] = ref
-				}
-			case "subject":
-				if _, exists := resource["subject"]; !exists {
-					resource["subject"] = ref
-				}
-			}
-		}
-		return
-	}
-}
-
-// =========================================================
 // Utility helpers
 // =========================================================
-
-func extractHeaderPatient(header map[string]interface{}) map[string]interface{} {
-	if header == nil {
-		return nil
-	}
-	p, _ := header["patient"].(map[string]interface{})
-	return p
-}
-
-func extractSectionEntries(sectionKey string, sectionsMap map[string]interface{}) []map[string]interface{} {
-	if sectionsMap == nil {
-		return nil
-	}
-	raw, ok := sectionsMap[sectionKey]
-	if !ok {
-		return nil
-	}
-	section, ok := raw.(map[string]interface{})
-	if !ok {
-		return nil
-	}
-	return sectionEntriesToSlice(section["entries"])
-}
-
-func sectionEntriesToSlice(raw interface{}) []map[string]interface{} {
-	switch v := raw.(type) {
-	case []map[string]interface{}:
-		return v
-	case []interface{}:
-		result := make([]map[string]interface{}, 0, len(v))
-		for _, item := range v {
-			if m, ok := item.(map[string]interface{}); ok {
-				result = append(result, m)
-			}
-		}
-		return result
-	}
-	return nil
-}
-
-func isHeaderSection(key string) bool {
-	return strings.HasPrefix(key, "header.")
-}
 
 func (m *GenericCDAFHIRMapper) isSectionEnabled(key string, enabled []string) bool {
 	if len(enabled) == 0 {
@@ -1102,170 +563,8 @@ func (m *GenericCDAFHIRMapper) isSectionEnabled(key string, enabled []string) bo
 	return false
 }
 
-func sectionKeyForResource(resourceType string, groups map[string]sectionGroup) string {
-	for k, sg := range groups {
-		if sg.FHIRResource == resourceType {
-			return k
-		}
-	}
-	return ""
-}
-
 func resourceIDPrefix(resourceType string) string {
 	return strings.ToLower(resourceType[:1]) + resourceType[1:]
-}
-
-func mapGenderCode(code string) string {
-	switch strings.ToUpper(code) {
-	case "M", "MALE":
-		return "male"
-	case "F", "FEMALE":
-		return "female"
-	case "UN", "UNK":
-		return "unknown"
-	case "O", "OTHER":
-		return "other"
-	default:
-		return "unknown"
-	}
-}
-
-// isCoded returns true when the CDA data type carries a coded value that
-// can be validated against a terminology system.
-func isCoded(cdaDataType string) bool {
-	switch cdaDataType {
-	case "CD", "CE", "CS", "CV", "UID":
-		return true
-	}
-	return false
-}
-
-// systemURIForField extracts the FHIR system URI for a coded field.
-// It checks for a companion "fieldKeySystem" entry in the entry map first
-// (populated by GenericSectionProcessor from xpathSystem), then falls back
-// to the first key in the valueMap (OID → URI pattern from the mapping).
-func systemURIForField(entry map[string]interface{}, fieldKey string, vm map[string]string) string {
-	// GenericSectionProcessor stores the system OID as fieldKey+"System"
-	if sysVal, ok := entry[fieldKey+"System"].(string); ok && sysVal != "" {
-		// The value might be an OID — try the common OID→URI mappings
-		if uri := oidToSystemURI(sysVal); uri != "" {
-			return uri
-		}
-		// Already a URI
-		if strings.HasPrefix(sysVal, "http") {
-			return sysVal
-		}
-	}
-	// Fall back: if valueMap keys look like URIs, infer the system
-	for k := range vm {
-		if strings.HasPrefix(k, "http") {
-			return k
-		}
-	}
-	return ""
-}
-
-// oidToSystemURI maps common healthcare OIDs to FHIR system URIs.
-func oidToSystemURI(oid string) string {
-	switch oid {
-	case "2.16.840.1.113883.6.96":
-		return "http://snomed.info/sct"
-	case "2.16.840.1.113883.6.88":
-		return "http://www.nlm.nih.gov/research/umls/rxnorm"
-	case "2.16.840.1.113883.6.1":
-		return "http://loinc.org"
-	case "2.16.840.1.113883.12.292":
-		return "http://hl7.org/fhir/sid/cvx"
-	case "2.16.840.1.113883.6.69":
-		return "http://hl7.org/fhir/sid/ndc"
-	case "2.16.840.1.113883.6.90":
-		return "http://hl7.org/fhir/sid/icd-10-cm"
-	case "2.16.840.1.113883.6.12":
-		return "http://www.ama-assn.org/go/cpt"
-	case "2.16.840.1.113883.3.26.1.1":
-		return "http://ncithesaurus.nci.nih.gov"
-	}
-	return ""
-}
-
-// oidToFHIRSystem maps well-known CDA OID roots to canonical FHIR system URIs.
-var oidToFHIRSystem = map[string]string{
-	"2.16.840.1.113883.4.1":   "http://hl7.org/fhir/sid/us-ssn",
-	"2.16.840.1.113883.4.6":   "http://hl7.org/fhir/sid/us-npi",
-	"2.16.840.1.113883.4.572": "http://hl7.org/fhir/sid/us-medicare",
-	"2.16.840.1.113883.4.927": "http://hl7.org/fhir/sid/us-mbi",
-	"2.16.840.1.113883.4.3":   "http://hl7.org/fhir/sid/us-dl",
-}
-
-// oidToTypeCode maps well-known OID roots to HL7 v2 table 0203 identifier type codes.
-var oidToTypeCode = map[string]string{
-	"2.16.840.1.113883.4.1":   "SS",
-	"2.16.840.1.113883.4.6":   "NPI",
-	"2.16.840.1.113883.4.572": "MC",
-	"2.16.840.1.113883.4.927": "MA",
-	"2.16.840.1.113883.4.3":   "DL",
-}
-
-// buildPatientIdentifier converts a CDA <id root="..." extension="..."> pair into a
-// FHIR Identifier with system, value, and type.  Returns nil for empty inputs.
-func buildPatientIdentifier(root, extension string) map[string]interface{} {
-	value := extension
-	if value == "" {
-		value = root // some systems put the ID in root with no extension
-	}
-	if value == "" {
-		return nil
-	}
-
-	ident := map[string]interface{}{"value": value}
-
-	// System URI
-	if sys, ok := oidToFHIRSystem[root]; ok {
-		ident["system"] = sys
-	} else if root != "" {
-		ident["system"] = "urn:oid:" + root
-	}
-
-	// Identifier type code (table 0203)
-	typeCode := "PI" // Patient Internal Identifier — default for unknown OIDs
-	if tc, ok := oidToTypeCode[root]; ok {
-		typeCode = tc
-	} else if strings.HasPrefix(root, "2.16.840.1.113883.3.") {
-		typeCode = "MR" // facility-specific OID subtree → treat as MRN
-	}
-	ident["type"] = map[string]interface{}{
-		"coding": []interface{}{
-			map[string]interface{}{
-				"system": "http://terminology.hl7.org/CodeSystem/v2-0203",
-				"code":   typeCode,
-			},
-		},
-	}
-
-	return ident
-}
-
-func buildAddressFromMap(addr map[string]interface{}) map[string]interface{} {
-	result := map[string]interface{}{"use": "home"}
-	if street := strField(addr, "street"); street != "" {
-		result["line"] = []interface{}{street}
-	}
-	if city := strField(addr, "city"); city != "" {
-		result["city"] = city
-	}
-	if state := strField(addr, "state"); state != "" {
-		result["state"] = state
-	}
-	if postal := strField(addr, "postalCode"); postal != "" {
-		result["postalCode"] = postal
-	}
-	if country := strField(addr, "country"); country != "" {
-		result["country"] = country
-	}
-	if len(result) == 1 { // only "use"
-		return nil
-	}
-	return result
 }
 
 // =========================================================
@@ -1351,16 +650,16 @@ func (m *GenericCDAFHIRMapper) ComputeCDADelta(
 		}
 	}
 
-	// Walk OOB: fields present in OOB but absent from incoming are explicit removals.
-	for k, oobFM := range oobIndex {
-		if _, present := incomingIndex[k]; !present {
-			overrides = append(overrides, CDAMappingOverride{
-				Action:     "remove",
-				SectionKey: oobFM.SectionKey,
-				CDAField:   oobFM.CDAField,
-			})
-		}
-	}
+	// Deliberately NOT walking "OOB fields absent from incoming ⇒ remove":
+	// incoming is, by the Section Field Editor's actual design
+	// (CDAStepBuilder.js's _buildAtomicMappings), a SPARSE list containing
+	// only fields the user explicitly touched in the currently-open section
+	// — never a full inventory of every field across every section. Treating
+	// absence as removal here previously meant editing ONE field produced a
+	// delta with a "remove" entry for every OTHER field in every OTHER
+	// section (confirmed live: 276 spurious removals from a single-field
+	// edit) — the UI has no "delete this field's mapping" affordance at all,
+	// so there is no user intent to interpret absence as removal against.
 
 	// No overrides → pure OOB, no need to store a delta.
 	if len(overrides) == 0 {
@@ -1422,10 +721,7 @@ func (m *GenericCDAFHIRMapper) loadOOBTemplateWithMeta(
 		version = cfgMeta.Version
 	}
 
-	mappings, err = m.parseMappingConfig([]byte(configJSON))
-	if err != nil {
-		return "", "", nil, err
-	}
+	mappings = loadFromDeclarativeRules(docType)
 
 	return templateID, version, mappings, nil
 }

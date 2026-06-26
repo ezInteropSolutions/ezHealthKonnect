@@ -183,6 +183,24 @@ class CdaToFhirStepBuilder {
         });
         step.config.sectionOverrides = sectionOverrides;
 
+        // The executor (cda_to_fhir_executor.go) reads a flat
+        // step.config.enabledSections: string[] — sectionOverrides above is
+        // this builder's own UI-state bookkeeping only and is never read by
+        // the engine. Derive the flat list the engine actually consumes.
+        // Only set it when at least one section is explicitly disabled —
+        // an empty/absent enabledSections means "all sections enabled" to
+        // the executor, matching a freshly-created step where no checkbox
+        // has been touched yet.
+        if (this._sections && this._sections.length > 0) {
+            const allKeys = this._sections.map(s => s.key);
+            const enabledKeys = allKeys.filter(key => (sectionOverrides[key] || {}).enabled !== false);
+            if (enabledKeys.length < allKeys.length) {
+                step.config.enabledSections = enabledKeys;
+            } else {
+                delete step.config.enabledSections;
+            }
+        }
+
         // Terminology tab
         if (check('cda2fhirTermValidation') !== null) step.config.terminologyValidation = check('cda2fhirTermValidation');
         if (check('cda2fhirCodeTranslation') !== null) step.config.codeTranslation = check('cda2fhirCodeTranslation');
@@ -830,8 +848,13 @@ class CdaToFhirStepBuilder {
             return;
         }
 
+        const interfaceId = window.pipelineBuilder?.pipeline?.interfaceId;
+        const docType = (this._step.config.documentType !== 'auto' && this._step.config.documentType) || 'CCD';
+        const params = new URLSearchParams({ documentType: docType });
+        if (interfaceId) params.set('interfaceId', interfaceId);
+
         const sig = this._ac.signal;
-        fetch(`/api/cda/schema/sections/${encodeURIComponent(sectionKey)}/fields`, { signal: sig })
+        fetch(`/api/cda/schema/sections/${encodeURIComponent(sectionKey)}/fields?${params.toString()}`, { signal: sig })
             .then(r => r.ok ? r.json() : null)
             .then(data => {
                 if (!data || !data.fields) {
@@ -852,40 +875,45 @@ class CdaToFhirStepBuilder {
 
     _renderFieldEditor(sectionKey, fields, container) {
         if (!this._step) return;
-        const overrides    = this._step.config.sectionOverrides || {};
-        const secOverride  = overrides[sectionKey] || {};
-        const fieldOverrides = secOverride.fieldOverrides || {};
 
         const esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
+        let lastNestedUnder = null;
         const rows = fields.map(f => {
-            const fo = fieldOverrides[f.key] || {};
-            const modified = Object.keys(fo).length > 0;
-            const badge = modified
+            let caption = '';
+            if (f.nestedUnder && f.nestedUnder !== lastNestedUnder) {
+                caption = `
+                <tr><td colspan="5" style="padding:0.3rem 0.4rem 0.1rem;font-size:0.7rem;color:#94a3b8;font-style:italic;">
+                    ↳ ${esc(f.nestedUnder)}[] (repeating)
+                </td></tr>`;
+            }
+            lastNestedUnder = f.nestedUnder || null;
+
+            const badge = f.isModified
                 ? `<span style="font-size:0.65rem;background:#fef3c7;color:#92400e;border:1px solid #fde68a;border-radius:3px;padding:1px 4px;">modified</span>`
                 : `<span style="font-size:0.65rem;background:#f0fdf4;color:#166534;border:1px solid #bbf7d0;border-radius:3px;padding:1px 4px;">OOB</span>`;
 
-            const fhirPath = esc(fo.fhirPath || '');
-            const transform = esc(fo.transform || '');
-            return `
+            const fhirPath = esc(f.fhirPath || '');
+            const transform = esc(f.transform || '');
+            const indent = f.nestedUnder ? 'padding-left:1.1rem;' : '';
+            return `${caption}
             <tr style="border-bottom:1px solid #f1f5f9;vertical-align:top;" data-field-key="${esc(f.key)}">
-                <td style="padding:0.35rem 0.4rem;font-family:monospace;font-size:0.75rem;color:#334155;">
+                <td style="padding:0.35rem 0.4rem;font-family:monospace;font-size:0.75rem;color:#334155;${indent}">
                     ${esc(f.key)} ${badge}
                 </td>
-                <td style="padding:0.35rem 0.4rem;font-size:0.73rem;color:#6b7280;">${esc(f.dataType || '')}</td>
+                <td style="padding:0.35rem 0.4rem;font-size:0.72rem;color:#6b7280;font-style:italic;">${esc(f.cdaSource || '')}</td>
                 <td style="padding:0.35rem 0.4rem;">
                     <input type="text" class="cda-field-fhir-path form-control form-control-sm"
                         data-field-key="${esc(f.key)}" data-section-key="${esc(sectionKey)}"
-                        value="${fhirPath}" placeholder="Auto (from OOB template)"
+                        value="${fhirPath}"
                         style="font-size:0.75rem;font-family:monospace;"
                         onchange="window._cdaToFhirBuilder && window._cdaToFhirBuilder.onFieldPathChange('${esc(sectionKey)}','${esc(f.key)}',this.value)">
                 </td>
                 <td style="padding:0.35rem 0.4rem;">
                     <input type="text" class="cda-field-transform form-control form-control-sm"
                         data-field-key="${esc(f.key)}" data-section-key="${esc(sectionKey)}"
-                        value="${transform}" placeholder="Inferred from type pair"
+                        value="${transform}"
                         style="font-size:0.75rem;font-family:monospace;"
-                        onfocus="window._cdaToFhirBuilder && window._cdaToFhirBuilder.onTransformFocus('${esc(sectionKey)}','${esc(f.key)}','${esc(f.dataType || '')}')"
                         onchange="window._cdaToFhirBuilder && window._cdaToFhirBuilder.onFieldTransformChange('${esc(sectionKey)}','${esc(f.key)}',this.value)">
                 </td>
                 <td style="padding:0.35rem 0.4rem;white-space:nowrap;">
@@ -903,10 +931,10 @@ class CdaToFhirStepBuilder {
         <table style="width:100%;border-collapse:collapse;font-size:0.78rem;">
             <thead>
                 <tr style="background:#f8fafc;border-bottom:1px solid #e2e8f0;">
-                    <th style="padding:0.3rem 0.4rem;text-align:left;font-weight:600;color:#475569;width:25%;">CDA Field</th>
-                    <th style="padding:0.3rem 0.4rem;text-align:left;font-weight:600;color:#475569;width:10%;">Type</th>
-                    <th style="padding:0.3rem 0.4rem;text-align:left;font-weight:600;color:#475569;width:35%;">FHIR Path</th>
-                    <th style="padding:0.3rem 0.4rem;text-align:left;font-weight:600;color:#475569;width:25%;">Transform</th>
+                    <th style="padding:0.3rem 0.4rem;text-align:left;font-weight:600;color:#475569;width:22%;">CDA Field</th>
+                    <th style="padding:0.3rem 0.4rem;text-align:left;font-weight:600;color:#475569;width:28%;">CDA Source</th>
+                    <th style="padding:0.3rem 0.4rem;text-align:left;font-weight:600;color:#475569;width:25%;">FHIR Path</th>
+                    <th style="padding:0.3rem 0.4rem;text-align:left;font-weight:600;color:#475569;width:20%;">Transform</th>
                     <th style="padding:0.3rem 0.4rem;width:5%;"></th>
                 </tr>
             </thead>
@@ -1011,11 +1039,11 @@ class CdaToFhirStepBuilder {
         }
         this._step.config.sectionOverrides = overrides;
 
-        // Re-render the field editor
-        if (this._sectionFields[sectionKey]) {
-            const content = document.getElementById('cdaSectionEditorContent');
-            if (content) this._renderFieldEditor(sectionKey, this._sectionFields[sectionKey], content);
-        }
+        // Invalidate the cached field list — it still has the pre-reset
+        // fhirPath/transform baked in from the original fetch. Deleting it
+        // forces openSectionEditor's next call to re-fetch true OOB values.
+        delete this._sectionFields[sectionKey];
+        this.openSectionEditor(sectionKey);
         this._refreshSectionBadge(sectionKey);
     }
 
@@ -1073,6 +1101,10 @@ class CdaToFhirStepBuilder {
             // Update config with new anchor
             if (data.templateId) this._step.config.standardTemplateId = data.templateId;
             if (data.version)    this._step.config.basedOnVersion    = data.version;
+            // Invalidate cached field lists so the NEXT openSectionEditor call
+            // re-fetches fresh isModified/fhirPath/transform state from the
+            // server instead of replaying a stale pre-save snapshot.
+            this._sectionFields = {};
             console.log('[CdaToFhirStepBuilder] Delta saved:', data.overridesStored, 'overrides.');
         })
         .catch(() => {});

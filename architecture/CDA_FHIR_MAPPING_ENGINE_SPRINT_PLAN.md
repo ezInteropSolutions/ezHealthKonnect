@@ -1,8 +1,8 @@
 # CDA→FHIR Declarative Mapping Engine — Sprint Plan
 
-**Status**: Phase 0 complete (inventory + performance baseline + 5 production bug fixes; 1 more confirmed bug fixed 2026-06-22, see below). Phase 1 complete (wildcard/predicate path resolver, +OR-list predicate values and +"entryType" predicate key 2026-06-22). Phase 2 complete (unified mapping schema + execution engine, synthetic-proof only; BuildResourcesForRules gained FlattenOrganizers support 2026-06-22; engine gained EmitAsResource + RequiredPaths, its first multi-resource-per-entry primitive, same day; engine gained HeaderPath + BuildHeaderResource, its first non-section-entry primitive, same day). Phase 3 **all 15 inventoried sections complete** (2026-06-22): Allergies/Medications/Conditions slice (2026-06-21), Allergy reactions (CollectAll+Fields) follow-up same day, Vital Signs/Results/Social History, Immunizations, Encounters/Procedures, CarePlan/Goal, CareTeam/Practitioner, Coverage/FamilyMemberHistory/Device, and Practitioner/Custodian's document-header half (Author/Custodian/legalAuthenticator) all complete. Two small deferred items remain (Medication's `effectiveDateTime` fallback, Condition's shell-entry substitution/`interpretationCode`) — see "Remaining for Phase 3" below. Next up: Phase 4 cutover planning (shadow-mode mechanics) whenever the user wants to start it.
+**Status**: Phase 0 complete (inventory + performance baseline + 5 production bug fixes; 1 more confirmed bug fixed 2026-06-22, see below). Phase 1 complete (wildcard/predicate path resolver, +OR-list predicate values and +"entryType" predicate key 2026-06-22). Phase 2 complete (unified mapping schema + execution engine, synthetic-proof only; BuildResourcesForRules gained FlattenOrganizers support 2026-06-22; engine gained EmitAsResource + RequiredPaths, its first multi-resource-per-entry primitive, same day; engine gained HeaderPath + BuildHeaderResource, its first non-section-entry primitive, same day). Phase 3 **all 15 inventoried sections complete** (2026-06-22): Allergies/Medications/Conditions slice (2026-06-21), Allergy reactions (CollectAll+Fields) follow-up same day, Vital Signs/Results/Social History, Immunizations, Encounters/Procedures, CarePlan/Goal, CareTeam/Practitioner, Coverage/FamilyMemberHistory/Device, and Practitioner/Custodian's document-header half (Author/Custodian/legalAuthenticator) all complete. Two small deferred items remain (Medication's `effectiveDateTime` fallback, Condition's shell-entry substitution/`interpretationCode`) — see "Remaining for Phase 3" below. **Phase 4, Slice A complete (2026-06-23)**: closed the 3 correctness gaps blocking cutover (patient-reference linkage via `MappingRule.PatientRefPath`, `_cdaIds` parity via `MappingRow.EmbedCDAIdentity`, and the missing `PatientMappingRules()`) — see "Current State" below. Slices B (document-level orchestrator), C (shadow mode), D (cutover/decommission) remain, scoped but not started.
 **Owner**: Integration Team
-**Last updated**: 2026-06-21
+**Last updated**: 2026-06-23
 **Execution model**: Multiple sessions. Each phase below is a self-contained
 sprint with its own exit criteria — read "Current State" at the top before
 starting a session, update it before ending one.
@@ -892,6 +892,121 @@ All verified via Docker: `go build ./...`, `go vet ./...`, full
 on every touched file. Phase 3 is now fully done — Phase 4
 (cutover/shadow-mode design) is the next real decision point.
 
+**Phase 4, Slice A — close the declarative engine's correctness gaps — done**
+(2026-06-23). Before scoping any cutover work, investigating the actual
+executor call site (`cda_to_fhir_executor.go` → `GenericCDAFHIRMapper
+.MapDocument()`, `document_mapper.go`) found three real gaps between what
+Phase 3's rules can do today (build resources for one rule-group at a time,
+proven only in tests) and what a real cutover needs:
+
+- **No declarative resource was ever linked to the patient.** Every
+  `*MappingRules()` function explicitly skipped `subject`/`patient`/
+  `beneficiary` (documented inline, repeatedly, as "patientRef-dependent,
+  consistent with every prior rule"). Closed via a new
+  `MappingRule.PatientRefPath []string` field (`declarative_schema.go`) and
+  a new `DeclarativeEngine.PatientRef` state field (`declarative_engine.go`)
+  — deliberately engine state, not a `Build*` parameter, so none of the
+  ~80 existing call sites across `declarative_engine_test.go`/
+  `declarative_oob_rules_test.go`/`declarative_oob_rules_corpus_test.go`
+  needed touching (empty `PatientRef` is a no-op, identical to today's
+  behavior). `buildOneResource` writes `resource[path] = {"reference":
+  PatientRef}` for every path once the resource is kept. Every typed Go
+  mapper's own `if patientRef != "" { r[...] = ref(patientRef) }` was
+  grepped to get the exact field name per resource type, not assumed:
+  `"patient"` (AllergyIntolerance/Immunization/FamilyMemberHistory),
+  `"subject"` (Condition/Encounter/Observation/Procedure/Goal/
+  ServiceRequest/MedicationRequest/MedicationStatement/CareTeam/
+  DeviceUseStatement), `"deliverFor"` (SupplyRequest), or BOTH
+  `"beneficiary"` AND `"subscriber"` (Coverage — the reason this field is a
+  slice, not a single string). Appointment (Plan of Care) is a deliberate,
+  documented exception: `buildPlannedAppointmentResource` writes patientRef
+  into `participant[0].actor`, a nested array element this single-level
+  primitive can't express, and 0/4 corpus has Plan of Treatment entries to
+  validate a new primitive against — left as a named gap, not silently
+  dropped.
+- **No declarative resource carried `_cdaIds`** (the assembly layer's
+  cross-resource dedup marker). Initial assumption was wrong: grepping every
+  Go mapper for `embedCDAIds(` found only 3 call sites total — Author,
+  Custodian, and CareTeam's emitted Practitioner (via
+  `practitioner_mapper.go`'s shared `buildPractitionerResource`) — every
+  other section (Allergy/Condition/Medication/Observation/etc.) never calls
+  it. A generic "copy every entry's `id` into `_cdaIds`" engine change would
+  have made declarative output dedup MORE than Go ever did — a real
+  behavior change, not a gap fix. Closed correctly instead via a new
+  `MappingRow.EmbedCDAIdentity bool` field: set only on the 3 rows that
+  actually need it (Author/Custodian/CareTeam's identifier rows in
+  `declarative_oob_rules.go`), engine support added to `applyRow`'s
+  CollectAll branch (collects the raw, pre-transform `{root, extension}`
+  pairs the row's own Scope already resolves). V159/V161 migrations updated
+  to match (drift-guard tests `TestV159Migration_MatchesGoLiteralRules_NoDrift`/
+  `TestV161Migration_MatchesGoLiteralRules_NoDrift` caught the mismatch
+  immediately, exactly as designed).
+- **No declarative rule mapped Patient itself.** Added
+  `PatientMappingRules()` — a direct port of `patient_mapper.go`'s
+  `MapPatient` (pure "collect every element" for identifier/name/address/
+  telecom, plus birthDate/gender/maritalStatus/communication scalars), using
+  only primitives Phase 3 already proved (`HeaderPath`, `CollectAll`).
+  3 new transforms: `cda_time_to_fhir_date` (date-only, distinct from
+  `cda_time_to_fhir_datetime`), `cda_gender_to_fhir` (mirrors Go's exact
+  `Code!="" || NullFlavor==""` guard — needs the whole `gender` CDACode
+  object, not just its bare code string), `cda_language_communication_to_fhir`
+  (one `communication[]` entry per language). Deliberately NOT ported:
+  `sortNamesByUse`'s "legal name first" reordering (no sort primitive exists;
+  zero corpus evidence of a Patient with multiple differently-`use`d names);
+  Race/Ethnicity extensions (need US Core profile injection, not a plain
+  field mapping — out of scope for a `MappingRow`-only rule). Patient's own
+  `id` ("patient-1") is deliberately NOT set by this rule — assigned by the
+  document-level orchestrator (Slice B), the same way Custodian/Author's ids
+  are today.
+- **Migrations**: V159/V161 hand-edited in place (this project's established
+  precedent for seed-only, not-yet-live migrations — see V155's
+  `interpretationCode` addition above) rather than a new ALTER+UPDATE
+  migration. `PatientRefPath`/`PatientMappingRules()` are NOT yet seeded to
+  any migration — deliberately deferred: the DB-backed rule table has no
+  runtime reader at all yet (confirmed by grep — only the drift-guard tests
+  parse it), and Slice B's cutover plan is to call the Go literal
+  `*MappingRules()` functions directly, not read from the table. Wiring a
+  `patient_ref_path` column is Phase 5's (DB-editable rules) problem, not
+  this slice's.
+- **Tests**: 3 new `PatientMappingRules()` production-rule tests (no
+  `mappers_test.go` precedent exists for `MapPatient` — zero dedicated Go
+  tests, confirmed by grep), 4 new engine-mechanics tests (`PatientRefPath`
+  sets the right field and is a no-op when empty; Coverage's two-path case;
+  `EmbedCDAIdentity` round-trips; a parity guard proving section-level
+  resources never get `_cdaIds`), 1 new corpus end-to-end test
+  (`TestDeclarativeEngine_Corpus_PatientEndToEnd` — unlike Author/Custodian/
+  LegalAuthenticator, a real C-CDA document always has a patient, so this
+  asserts a resource is produced for all 4 vendor files, not just that IF
+  one exists it's well-formed) and 1 new cross-section corpus proof
+  (`TestDeclarativeEngine_Corpus_PatientLinkage_AllSectionsReferencePatient`
+  — every resource 8 representative already-shipped section rules produce,
+  across all 4 vendor files, carries a non-empty patient-link field once
+  given a real `PatientRef`).
+- All verified via Docker: `go build ./...` (full multi-stage
+  `docker-compose build app`), `go vet ./...`, full `go test ./...`
+  (`cda_fhir`, `cda`, `services/executors`, `fhir/r4` with schemas mounted,
+  and the rest of the repo) green.
+
+**Phase 4, Slices B (document-level orchestrator), C (shadow mode), D
+(cutover/decommission) — not started.** Investigating `document_mapper.go`
+for Slice A surfaced the real shape of Slice B's work, worth recording now
+so it isn't rediscovered cold: `MapDocument()` does far more than per-section
+dispatch — parallel per-section processing with panic isolation, per-entry
+Mapping Log tracing, cross-section resource-ID renumbering, the assembly
+layer (dedup + BP-panel synthesis), US Core profile injection, narrative
+generation, bundle assembly, and an async audit-log write — and NONE of this
+orchestration has a declarative equivalent yet (`BuildResources`/
+`BuildResourcesForRules`/`BuildHeaderResource` only ever build resources for
+one rule-group at a time). Slice B is a new `DeclarativeMapDocument()`
+method mirroring `MapDocument()`'s shell exactly, swapping only the
+per-section dispatch (a new `declarativeSectionDispatchers map[string]
+[]MappingRule`, mirroring `typedSectionDispatchers`) — reusing the assembly
+layer, profile builder, and narrative generator unchanged. One new,
+previously-hidden cost to benchmark explicitly: `DeclarativeMapDocument()`
+needs `documentMap` (`json.Marshal(doc)` → `json.Unmarshal`), a pass
+`MapDocument()` never pays today operating on the typed struct directly —
+relevant given the user's explicit speed requirement for CCD parsing.
+
 **Phase 2 — Unified Mapping Schema + Execution Engine — done** (same day,
 2026-06-21). Design note is inline under "Phase 2" below — read it before
 touching this code; it documents two corrections to this doc's own earlier
@@ -1599,20 +1714,52 @@ corpus spot checks.
 
 ## Phase 4 — Cutover & Decommission
 
-**Goal**: make the new engine the only engine.
+**Goal**: make the new engine the only engine. Run as 4 slices, same
+session-per-slice convention as Phase 3 (see "Current State" above for what
+each slice found/delivered as it lands).
 
-**Tasks**:
-- Recommended: **shadow-mode** cutover, not a hard switch. Run both engines
-  in parallel for a defined window, diff outputs per message, alert on any
-  mismatch. Given HIPAA-grade correctness stakes, prefer this over a
-  flag-and-pray cutover.
-- Once shadow-mode shows zero unexplained discrepancies over N runs, switch
-  `cda_to_fhir_executor.go` to call only the new engine.
-- Delete `MapDocument()`, the 16 files under `services/cda_fhir/mappers/`,
-  and the old `Map()`/dormant interpreter in `generic_mapper.go`.
+**Slice A — close the declarative engine's correctness gaps — done
+(2026-06-23)**: `MappingRule.PatientRefPath`, `MappingRow.EmbedCDAIdentity`,
+`PatientMappingRules()`. See "Current State" for full detail.
 
-**Exit criteria**: old code removed from the codebase, shadow-mode diff
-report attached to the PR as evidence, full `go test ./...` green.
+**Slice B — document-level orchestrator — not started.** A new
+`DeclarativeMapDocument()` method (sibling to `MapDocument()`) that does
+everything `MapDocument()` does EXCEPT per-section dispatch: build
+`documentMap` once (`json.Marshal`/`Unmarshal` the typed `*CDADocument` —
+benchmark this explicitly, it's a cost the typed path never pays today),
+build Patient/Author/Custodian/LegalAuthenticator via the header rules,
+dispatch every section through a new `declarativeSectionDispatchers
+map[string][]MappingRule` (mirroring `typedSectionDispatchers`) instead of a
+Go func, then reuse — unchanged — the parallel-per-section-with-panic-
+recovery shape, per-entry Mapping Log tracing, cross-section ID renumbering,
+the assembly layer, profile injection, narrative generation, bundle
+assembly, `ProcessingResult`, and the async audit-log write.
+**Exit criteria**: `DeclarativeMapDocument()` produces a `*MapOutput`
+identical in shape to `MapDocument()`'s for the same input; full corpus
+end-to-end run; benchmark recorded against the Phase 0 baseline table.
+
+**Slice C — shadow mode — not started.** Run `DeclarativeMapDocument()`
+alongside the live `MapDocument()` call inside `cda_to_fhir_executor.go`
+(non-blocking, same goroutine pattern as `writeMappingLog`), diff bundles
+resource-by-resource (ignoring synthesized `id`/`fullUrl`/timestamps,
+comparing by resourceType + identity), persist a diff report. 100% of
+traffic for a fixed window per interface, not sampled — small known corpus,
+HIPAA-grade correctness bar, sampling buys nothing here. Exact reporting
+granularity (every message vs. mismatches only) needs a product decision
+before this slice starts, not an improvised one mid-cutover.
+
+**Slice D — cutover & decommission — not started.** Once shadow-mode shows
+zero unexplained discrepancies over the agreed window, switch
+`cda_to_fhir_executor.go` to call `DeclarativeMapDocument()` directly. Delete
+`MapDocument()`, the 16 files under `services/cda_fhir/mappers/`, and the
+old `Map()`/dormant interpreter in `generic_mapper.go` — confirmed via grep
+that `Map()` has exactly two callers today (the executor's tier-3 fallback,
+and `cda_fhir_integration_test.go`), so deletion is contained; that test
+file needs retiring/migrating alongside.
+
+**Exit criteria (whole phase)**: old code removed from the codebase,
+shadow-mode diff report attached to the PR as evidence, full
+`go test ./...` green.
 
 ---
 

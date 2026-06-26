@@ -12,6 +12,14 @@ class MessageManager {
         this.currentInterfaceId = null; // NEW: Track current interface
         this.isInterfaceSpecific = false; // NEW: Flag for interface-specific mode
 
+        // Lazy JSON tree viewer state (see _renderJsonTree). Nodes are keyed by an
+        // incrementing id; each node's children are only materialized into the DOM
+        // the first time the user expands it, so a multi-MB parsed CCD/FHIR document
+        // never gets fully stringified/laid-out up front (was causing the UI to freeze).
+        this._jsonTreeSeq = 0;
+        this._jsonTreeNodes = {};
+        this._jsonTreeRaw = {};
+
         console.log('🚨🚨🚨 About to call init()');
         this.init();
     }
@@ -2028,7 +2036,10 @@ class MessageManager {
                                 <span style="font-size:0.8rem;font-weight:700;color:#374151;">Clinical Document</span>
                                 <div style="margin-left:auto;display:flex;gap:0.4rem;align-items:center;">
                                     <span data-cda-btnbar>${this._cdaButtonBar('parsed')}</span>
-                                    <button onclick="messageManager._copyContentById('cdaParsedMount')"
+                                    <button onclick="messageManager._downloadJsonTree('cdaParsedMount','parsed-ccd-${messageId}.json')"
+                                        style="background:#f1f5f9;color:#475569;border:1px solid #cbd5e1;padding:0.25rem 0.6rem;border-radius:4px;cursor:pointer;font-size:0.75rem;">
+                                        <i class="fas fa-download"></i> Download</button>
+                                    <button onclick="messageManager._copyJsonTree('cdaParsedMount')"
                                         style="background:#2563eb;color:white;border:none;padding:0.25rem 0.6rem;border-radius:4px;cursor:pointer;font-size:0.75rem;">
                                         <i class="fas fa-copy"></i> Copy</button>
                                 </div>
@@ -2148,8 +2159,7 @@ class MessageManager {
                         '/parsed-content?interfaceId=' + encodeURIComponent(interfaceId));
                     const data = await resp.json();
                     if (resp.ok && data.success && data.parsedContent) {
-                        mountEl.style.cssText = 'flex:1;min-height:0;overflow:auto;padding:1rem;background:#0f172a;color:#e2e8f0;font-family:\'Courier New\',monospace;font-size:0.78rem;line-height:1.6;white-space:pre-wrap;word-break:break-all;';
-                        mountEl.textContent = JSON.stringify(data.parsedContent, null, 2);
+                        this._renderJsonTree(mountEl, data.parsedContent);
                     } else {
                         mountEl.innerHTML = `<div style="padding:1rem;color:#94a3b8;font-size:0.85rem;">${this._escapeHtml(data.error || 'Parsed CCD JSON not available for this message')}</div>`;
                     }
@@ -2252,7 +2262,10 @@ class MessageManager {
                         <button onclick="messageManager._toggleParsedJSON(false,'${idSuffix}')"
                             style="background:#f1f5f9;color:#475569;border:1px solid #cbd5e1;padding:0.2rem 0.5rem;border-radius:4px;cursor:pointer;font-size:0.72rem;">
                             <i class="fas fa-arrow-left"></i> Back</button>
-                        <button onclick="messageManager._copyContentById('parsedJsonMount-${idSuffix}')"
+                        <button onclick="messageManager._downloadJsonTree('parsedJsonMount-${idSuffix}','parsed-content-${messageId}.json')"
+                            style="background:#f1f5f9;color:#475569;border:1px solid #cbd5e1;padding:0.2rem 0.5rem;border-radius:4px;cursor:pointer;font-size:0.72rem;">
+                            <i class="fas fa-download"></i> Download</button>
+                        <button onclick="messageManager._copyJsonTree('parsedJsonMount-${idSuffix}')"
                             style="background:#2563eb;color:white;border:none;padding:0.25rem 0.6rem;border-radius:4px;cursor:pointer;font-size:0.75rem;">
                             <i class="fas fa-copy"></i> Copy</button>
                     </div>
@@ -2288,7 +2301,7 @@ class MessageManager {
                 '/parsed-content?interfaceId=' + encodeURIComponent(interfaceId));
             const data = await resp.json();
             if (resp.ok && data.success && data.parsedContent) {
-                mountEl.textContent = JSON.stringify(data.parsedContent, null, 2);
+                this._renderJsonTree(mountEl, data.parsedContent);
             } else {
                 mountEl.innerHTML = `<div style="color:#94a3b8;">${this._escapeHtml(data.error || 'Parsed JSON not available for this message')}</div>`;
             }
@@ -2392,6 +2405,142 @@ class MessageManager {
             btn.innerHTML = '<i class="fas fa-check"></i> Copied!';
             setTimeout(() => { btn.innerHTML = orig; }, 2000);
         });
+    }
+
+    // ---- Lazy JSON tree viewer --------------------------------------------------
+    // Renders a parsed CCD/FHIR/HL7 JSON document as a collapsible tree instead of
+    // dumping the whole JSON.stringify() output into one pre-wrap text block. Only
+    // the root level is built/expanded eagerly; every nested object/array starts
+    // collapsed as a one-line "{n keys}" / "[n items]" summary and its rows are only
+    // built into the DOM the first time it's expanded. Wide arrays/objects page in
+    // batches of 200 via a "Show more" row. This keeps render cost proportional to
+    // what the user actually opens, regardless of total document size — avoids the
+    // full-document JSON.stringify + giant pre-wrap textContent that froze the tab.
+    _renderJsonTree(mountEl, rawValue) {
+        mountEl.dataset.loaded = '1';
+        // Only one tree is ever mounted per message-detail view, so it's safe (and
+        // necessary to avoid leaking every previously-viewed document's full parsed
+        // tree in memory) to drop the previous tree's node registry here.
+        this._jsonTreeNodes = {};
+        this._jsonTreeSeq = 0;
+        this._jsonTreeRaw[mountEl.id] = rawValue;
+        mountEl.style.cssText = "flex:1;min-height:0;overflow:auto;padding:0.85rem 1rem;background:#0f172a;color:#e2e8f0;font-family:'Courier New',monospace;font-size:0.78rem;line-height:1.6;";
+        mountEl.innerHTML = this._renderJsonValue(rawValue, 0);
+    }
+
+    _renderJsonValue(value, depth) {
+        if (value === null || value === undefined) return `<span style="color:#64748b;">null</span>`;
+        const t = typeof value;
+        if (t === 'string') return `<span style="color:#86efac;">"${this._escapeHtml(value)}"</span>`;
+        if (t === 'number') return `<span style="color:#93c5fd;">${value}</span>`;
+        if (t === 'boolean') return `<span style="color:#fca5a5;">${value}</span>`;
+        if (Array.isArray(value)) return this._renderJsonContainer(value, true, depth);
+        if (t === 'object') return this._renderJsonContainer(value, false, depth);
+        return this._escapeHtml(String(value));
+    }
+
+    _renderJsonContainer(value, isArray, depth) {
+        const entries = isArray ? value.map((v, i) => [i, v]) : Object.entries(value);
+        if (entries.length === 0) return isArray ? '[]' : '{}';
+
+        const id = 'jt' + (++this._jsonTreeSeq);
+        this._jsonTreeNodes[id] = { entries, isArray, depth };
+        const expanded = depth === 0;
+        const noun = isArray ? (entries.length === 1 ? 'item' : 'items') : (entries.length === 1 ? 'key' : 'keys');
+        const summary = `${entries.length} ${noun}`;
+
+        const head = `<span data-jt-toggle="${id}" onclick="messageManager._toggleJsonNode('${id}')" style="cursor:pointer;user-select:none;">` +
+            `<i class="fas fa-caret-${expanded ? 'down' : 'right'}" style="width:0.85em;display:inline-block;color:#64748b;"></i>` +
+            `${isArray ? '[' : '{'}` +
+            `<span data-jt-summary="${id}" style="display:${expanded ? 'none' : 'inline'};color:#64748b;font-style:italic;"> ${summary} ${isArray ? ']' : '}'}</span>` +
+            `</span>`;
+
+        const body = `<div data-jt-body="${id}" style="display:${expanded ? 'block' : 'none'};margin-left:1.2rem;border-left:1px dashed #334155;padding-left:0.7rem;">` +
+            (expanded ? this._buildJsonChildrenHtml(id, 0, 200) : '') +
+            `</div>`;
+        const closeBracket = `<span data-jt-close="${id}" style="display:${expanded ? 'inline' : 'none'};">${isArray ? ']' : '}'}</span>`;
+
+        return head + body + closeBracket;
+    }
+
+    _buildJsonChildrenHtml(id, offset, limit) {
+        const node = this._jsonTreeNodes[id];
+        if (!node) return '';
+        const { entries, isArray, depth } = node;
+        const slice = entries.slice(offset, offset + limit);
+        let html = slice.map(([key, val], i) => {
+            const isLast = (offset + i) === entries.length - 1;
+            const keyHtml = isArray ? '' : `<span style="color:#7dd3fc;">"${this._escapeHtml(String(key))}"</span><span style="color:#64748b;">: </span>`;
+            return `<div>${keyHtml}${this._renderJsonValue(val, depth + 1)}${isLast ? '' : '<span style="color:#64748b;">,</span>'}</div>`;
+        }).join('');
+
+        const remaining = entries.length - (offset + limit);
+        if (remaining > 0) {
+            const nextOffset = offset + limit;
+            html += `<div data-jt-more><button onclick="messageManager._loadMoreJsonNode('${id}', ${nextOffset})" ` +
+                `style="background:#1e293b;color:#94a3b8;border:1px solid #334155;padding:0.15rem 0.5rem;border-radius:4px;cursor:pointer;font-size:0.72rem;margin:0.2rem 0;">` +
+                `Show ${Math.min(200, remaining)} more (${remaining} remaining)</button></div>`;
+        }
+        return html;
+    }
+
+    _toggleJsonNode(id) {
+        const body = document.querySelector(`[data-jt-body="${id}"]`);
+        const toggle = document.querySelector(`[data-jt-toggle="${id}"]`);
+        const summary = document.querySelector(`[data-jt-summary="${id}"]`);
+        const close = document.querySelector(`[data-jt-close="${id}"]`);
+        if (!body || !toggle) return;
+
+        const isExpanded = body.style.display !== 'none';
+        if (isExpanded) {
+            body.style.display = 'none';
+            if (summary) summary.style.display = 'inline';
+            if (close) close.style.display = 'none';
+            toggle.querySelector('i').className = 'fas fa-caret-right';
+        } else {
+            if (!body.dataset.built) {
+                body.innerHTML = this._buildJsonChildrenHtml(id, 0, 200);
+                body.dataset.built = '1';
+            }
+            body.style.display = 'block';
+            if (summary) summary.style.display = 'none';
+            if (close) close.style.display = 'inline';
+            toggle.querySelector('i').className = 'fas fa-caret-down';
+        }
+    }
+
+    _loadMoreJsonNode(id, offset) {
+        const body = document.querySelector(`[data-jt-body="${id}"]`);
+        if (!body) return;
+        const moreRow = body.querySelector('[data-jt-more]');
+        if (moreRow) moreRow.remove();
+        body.insertAdjacentHTML('beforeend', this._buildJsonChildrenHtml(id, offset, 200));
+    }
+
+    // Copies the full raw JSON document, independent of what's currently expanded
+    // in the tree — the parsed object is kept in _jsonTreeRaw, not derived from DOM.
+    _copyJsonTree(mountId) {
+        const raw = this._jsonTreeRaw[mountId];
+        if (raw === undefined) return;
+        navigator.clipboard.writeText(JSON.stringify(raw, null, 2)).then(() => {
+            const btn = event.target.closest('button');
+            if (!btn) return;
+            const orig = btn.innerHTML;
+            btn.innerHTML = '<i class="fas fa-check"></i> Copied!';
+            setTimeout(() => { btn.innerHTML = orig; }, 2000);
+        });
+    }
+
+    _downloadJsonTree(mountId, filename) {
+        const raw = this._jsonTreeRaw[mountId];
+        if (raw === undefined) return;
+        const blob = new Blob([JSON.stringify(raw, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename || 'parsed-content.json';
+        a.click();
+        URL.revokeObjectURL(url);
     }
 
     formatContent(content, contentType) {

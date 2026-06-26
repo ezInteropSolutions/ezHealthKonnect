@@ -2,8 +2,8 @@
 // CDASchemaController — REST API for the CDA step-builder wizard.
 //
 // Endpoints:
-//   GET  /api/cda/schema/sections                          → all sections from ccda_2_1.json
-//   GET  /api/cda/schema/sections/:sectionKey/fields       → fields for one section
+//   GET  /api/cda/schema/sections                          → sections the live declarative engine dispatches (ccda_2_1.json used only for cosmetic metadata)
+//   GET  /api/cda/schema/sections/:sectionKey/fields       → real declarative MappingRow fields for one section, optionally merged with an interface's saved override
 //   POST /api/cda/type-pair/infer                          → infer transform from (cdaDataType, fhirDataType)
 //   GET  /api/cda/mappings/:interfaceId/:documentType      → merged OOB + interface delta
 //   POST /api/cda/mappings/:interfaceId/:documentType/delta → save delta (wizard save path)
@@ -77,7 +77,13 @@ type sectionSummary struct {
 	FieldCount   int    `json:"fieldCount"`
 }
 
-// GetSections returns a summary list of all sections defined in ccda_2_1.json.
+// GetSections returns a summary list of every section the live declarative
+// engine actually dispatches (cdafhir.DeclarativeDispatchedSectionKeys()),
+// cross-referenced against ccda_2_1.json for cosmetic metadata only
+// (displayName/LOINC code/conformance) — never for field content. A section
+// present in ccda_2_1.json but with no declarative rule group registered is
+// deliberately excluded: it can't be edited here because the engine
+// wouldn't apply the edit anyway.
 func (cc *CDASchemaController) GetSections(c *gin.Context) {
 	if cc.schemaLoader == nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{
@@ -87,16 +93,28 @@ func (cc *CDASchemaController) GetSections(c *gin.Context) {
 		return
 	}
 
+	dispatched := make(map[string]bool)
+	for _, k := range cdafhir.DeclarativeDispatchedSectionKeys() {
+		dispatched[k] = true
+	}
+
 	sections := cc.schemaLoader.AllSections()
 	result := make([]sectionSummary, 0, len(sections))
 	for _, s := range sections {
+		if !dispatched[s.Key] {
+			continue
+		}
+		fieldCount := len(s.Fields)
+		if cc.mapper != nil {
+			fieldCount = cc.mapper.CountDeclarativeFields(s.Key)
+		}
 		result = append(result, sectionSummary{
 			Key:         s.Key,
 			DisplayName: s.DisplayName,
 			LOINCCode:   s.LOINCCode,
 			Conformance: s.Conformance,
 			IsHeader:    s.IsHeader,
-			FieldCount:  len(s.Fields),
+			FieldCount:  fieldCount,
 		})
 	}
 
@@ -111,6 +129,11 @@ func (cc *CDASchemaController) GetSections(c *gin.Context) {
 // GET /api/cda/schema/sections/:sectionKey/fields
 // =========================================================
 
+// fieldSummary was the old ccda_2_1.json-backed response shape for
+// GetSectionFields. Superseded by flattenedFieldResponse (real declarative
+// rule fields, not static USCDI schema fields) — left in place as it's
+// otherwise-unused dead code, not deleted, since this static schema is
+// still legitimately read elsewhere (GetSections' cosmetic metadata).
 type fieldSummary struct {
 	Key          string `json:"key"`
 	USCDIElement string `json:"uscdiElement"`
@@ -120,46 +143,108 @@ type fieldSummary struct {
 	XPath        string `json:"xpath"`
 }
 
-// GetSectionFields returns all field definitions for a given section key.
+// flattenedFieldResponse is one row of the Section Field Editor table —
+// sourced from cdafhir.FlattenSectionRules (the real declarative MappingRow
+// set), merged with any saved interface-level override.
+type flattenedFieldResponse struct {
+	Key         string            `json:"key"`
+	CDASource   string            `json:"cdaSource"`
+	FHIRPath    string            `json:"fhirPath"`
+	Transform   string            `json:"transform"`
+	ValueMap    map[string]string `json:"valueMap,omitempty"`
+	Conformance string            `json:"conformance,omitempty"`
+	Required    bool              `json:"required,omitempty"`
+	NestedUnder string            `json:"nestedUnder,omitempty"`
+	IsModified  bool              `json:"isModified"`
+}
+
+// GetSectionFields returns every real, addressable field for a section,
+// sourced live from the declarative engine's own MappingRule set (NOT
+// ccda_2_1.json — see this file's header comment / Phase reconciliation
+// note). Optional query params:
+//
+//	documentType — defaults to "CCD"
+//	interfaceId  — when set, each field's fhirPath/transform/etc. reflect
+//	               that interface's saved override (if any), and isModified
+//	               is set accordingly. Omitted means pure OOB.
 func (cc *CDASchemaController) GetSectionFields(c *gin.Context) {
 	sectionKey := c.Param("sectionKey")
+	documentType := c.DefaultQuery("documentType", "CCD")
+	interfaceID := c.Query("interfaceId")
 
-	if cc.schemaLoader == nil {
+	if cc.mapper == nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{
 			"success": false,
-			"error":   "CDA schema not loaded",
+			"error":   "CDA mapper not initialised",
 		})
 		return
 	}
 
-	section := cc.schemaLoader.GetSection(sectionKey)
-	if section == nil {
+	rules := cdafhir.DeclarativeSectionRules(sectionKey)
+	if len(rules) == 0 {
 		c.JSON(http.StatusNotFound, gin.H{
 			"success": false,
-			"error":   fmt.Sprintf("section %q not found in CDA schema", sectionKey),
+			"error":   fmt.Sprintf("section %q has no live declarative rule group", sectionKey),
 		})
 		return
 	}
+	flattened := cdafhir.FlattenSectionRules(rules)
 
-	fields := make([]fieldSummary, 0, len(section.Fields))
-	for _, f := range section.Fields {
-		fields = append(fields, fieldSummary{
-			Key:          f.Key,
-			USCDIElement: f.USCDIElement,
-			DataType:     f.DataType,
-			Conformance:  f.Conformance,
-			ValueSet:     f.ValueSet,
-			XPath:        f.XPath,
-		})
+	var displayName, loincCode string
+	if cc.schemaLoader != nil {
+		if section := cc.schemaLoader.GetSection(sectionKey); section != nil {
+			displayName = section.DisplayName
+			loincCode = section.LOINCCode
+		}
+	}
+
+	overridesByKey := make(map[string]cdafhir.CDAFieldMapping)
+	if interfaceID != "" {
+		mappings, err := cc.mapper.GetCDAFieldMappingsPublic(c.Request.Context(), documentType, "2.1", "R4", interfaceID)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"success": false,
+				"error":   err.Error(),
+			})
+			return
+		}
+		for _, fm := range mappings {
+			if fm.SectionKey == sectionKey {
+				overridesByKey[fm.CDAField] = fm
+			}
+		}
+	}
+
+	fields := make([]flattenedFieldResponse, 0, len(flattened))
+	for _, ff := range flattened {
+		resp := flattenedFieldResponse{
+			Key:         ff.Key,
+			CDASource:   ff.CDASourceDisplay,
+			FHIRPath:    ff.TargetPath,
+			Transform:   ff.Transform,
+			ValueMap:    ff.ValueMap,
+			Conformance: ff.Conformance,
+			Required:    ff.Required,
+			NestedUnder: ff.NestedUnder,
+		}
+		if fm, ok := overridesByKey[ff.Key]; ok {
+			resp.FHIRPath = fm.FHIRPath
+			resp.Transform = fm.Transform
+			resp.ValueMap = fm.ValueMap
+			resp.Conformance = fm.Conformance
+			resp.Required = fm.Required
+			resp.IsModified = fm.FHIRPath != ff.TargetPath || fm.Transform != ff.Transform
+		}
+		fields = append(fields, resp)
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"success":    true,
-		"sectionKey": sectionKey,
-		"displayName": section.DisplayName,
-		"loincCode":  section.LOINCCode,
-		"fields":     fields,
-		"count":      len(fields),
+		"success":     true,
+		"sectionKey":  sectionKey,
+		"displayName": displayName,
+		"loincCode":   loincCode,
+		"fields":      fields,
+		"count":       len(fields),
 	})
 }
 
@@ -394,8 +479,26 @@ func (cc *CDASchemaController) ComputeDelta(c *gin.Context) {
 		return
 	}
 
-	// Pure OOB — nothing to persist.
+	// Pure OOB — clear any previously-stored override (this is what makes
+	// "reset every field back to OOB, then save" actually take effect: a
+	// nil delta here means the incoming list now matches OOB exactly, so any
+	// prior interface_cda_mappings row's mapping_overrides must be cleared,
+	// not silently left in place — leaving it would mean the OLD override
+	// keeps applying at runtime even after the user reset every field).
 	if delta == nil {
+		if cc.db != nil {
+			if _, err := cc.db.ExecContext(c.Request.Context(), `
+				UPDATE interface_cda_mappings
+				SET mapping_overrides = NULL, updated_at = NOW()
+				WHERE interface_id = $1 AND document_type = $2
+			`, interfaceID, documentType); err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{
+					"success": false,
+					"error":   fmt.Sprintf("clearing stale overrides: %v", err),
+				})
+				return
+			}
+		}
 		c.JSON(http.StatusOK, gin.H{
 			"success":         true,
 			"interfaceId":     interfaceID,

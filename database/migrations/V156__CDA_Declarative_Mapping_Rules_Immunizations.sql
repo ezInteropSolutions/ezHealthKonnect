@@ -67,6 +67,17 @@ VALUES
     "scope": "performers[0].assignedEntity.assignedPerson.names[0]",
     "transform": "cda_name_or_literal_to_display_ref",
     "targetPath": "performer[0].actor"
+  },
+  {
+    "scope": "id[*]",
+    "collectAll": true,
+    "transform": "cda_ii_to_identifier",
+    "targetPath": "identifier"
+  },
+  {
+    "sourcePath": "consumable.manufacturedProduct.manufacturerOrganization.names[0]",
+    "transform": "cda_name_or_literal_to_display_ref",
+    "targetPath": "manufacturer"
   }
 ]
     $rules$::jsonb,

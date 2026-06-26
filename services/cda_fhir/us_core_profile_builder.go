@@ -39,8 +39,16 @@ const (
 	extEthnicity = usCoreBase + "us-core-ethnicity"
 	extBirthSex  = usCoreBase + "us-core-birthsex"
 
+	// Base FHIR extension URI (no US Core equivalent exists for religion).
+	extReligion = "http://hl7.org/fhir/StructureDefinition/patient-religion"
+
 	// OMB race/ethnicity code system OID
 	ombRaceEthnicitySys = "urn:oid:2.16.840.1.113883.6.238"
+
+	// HL7 ReligiousAffiliation code system OID — run through NormalizeSystem
+	// (code_mapper.go) rather than hardcoded as a urn:oid, unlike
+	// ombRaceEthnicitySys, since that mapping already exists there.
+	religiousAffiliationSys = "2.16.840.1.113883.5.1076"
 )
 
 // resourceTypeToProfile maps a FHIR resource type to its primary US Core R4 profile.
@@ -130,8 +138,29 @@ func (b *USCoreProfileBuilder) injectProfile(r map[string]interface{}, templateP
 	r["meta"] = meta
 }
 
-// injectPatientExtensions adds US Core race, ethnicity, and birthsex extensions
-// to a Patient resource from the CDA document header demographics.
+// InjectPatientExtensions adds US Core race/ethnicity and base-FHIR religion
+// extensions to a single Patient resource. Exposed separately from
+// InjectProfiles (which loops a whole resource slice — the shape the now-
+// deleted legacy document_mapper.go pipeline produced) because
+// DeclarativeMapDocument builds the Patient resource on its own, before any
+// other resource exists to loop over.
+func (b *USCoreProfileBuilder) InjectPatientExtensions(
+	patient map[string]interface{},
+	header map[string]interface{},
+) {
+	b.injectPatientExtensions(patient, header)
+}
+
+// injectPatientExtensions adds US Core race/ethnicity and base-FHIR religion
+// extensions to a Patient resource from the CDA document header demographics.
+//
+// header is documentMap["header"]["patient"] — produced by
+// json.Marshal(cdadocument.CDAPatient), so "race"/"ethnicity"/"religion" are
+// each a nested CDACode-shaped object ({"code":..., "displayName":...}), NOT
+// a flat string. codeField extracts both in one step; strField (which only
+// ever matches a plain string value) would silently return "" against this
+// shape and never fire — exactly the bug that left these three extensions
+// unwired before this fix.
 func (b *USCoreProfileBuilder) injectPatientExtensions(
 	patient map[string]interface{},
 	header map[string]interface{},
@@ -143,36 +172,32 @@ func (b *USCoreProfileBuilder) injectPatientExtensions(
 	existing, _ := patient["extension"].([]interface{})
 	var newExts []interface{}
 
-	// Race extension
-	if race := strField(header, "race"); race != "" {
-		raceDisplay := strField(header, "raceDisplay")
-		if raceDisplay == "" {
-			raceDisplay = race
-		}
-		raceExt := buildRaceExtension(race, raceDisplay)
+	if code, display := codeField(header, "race"); code != "" {
 		if !hasExtension(existing, extRace) {
-			newExts = append(newExts, raceExt)
+			newExts = append(newExts, buildRaceExtension(code, display))
 		}
 	}
 
-	// Ethnicity extension
-	if eth := strField(header, "ethnicity"); eth != "" {
-		ethDisplay := strField(header, "ethnicityDisplay")
-		if ethDisplay == "" {
-			ethDisplay = eth
-		}
-		ethExt := buildEthnicityExtension(eth, ethDisplay)
+	if code, display := codeField(header, "ethnicity"); code != "" {
 		if !hasExtension(existing, extEthnicity) {
-			newExts = append(newExts, ethExt)
+			newExts = append(newExts, buildEthnicityExtension(code, display))
 		}
 	}
 
-	// Birth sex extension (administrative gender at birth, distinct from gender identity)
+	if code, display := codeField(header, "religion"); code != "" {
+		if !hasExtension(existing, extReligion) {
+			newExts = append(newExts, buildReligionExtension(code, display))
+		}
+	}
+
+	// Birth sex extension (administrative gender at birth, distinct from
+	// gender identity). No corresponding field exists on CDAPatient today —
+	// this stays a plain strField lookup, ready for whenever that gap closes.
 	if birthSex := strField(header, "birthSex"); birthSex != "" {
 		if !hasExtension(existing, extBirthSex) {
 			newExts = append(newExts, map[string]interface{}{
-				"url":         extBirthSex,
-				"valueCode":   birthSex,
+				"url":       extBirthSex,
+				"valueCode": birthSex,
 			})
 		}
 	}
@@ -180,6 +205,27 @@ func (b *USCoreProfileBuilder) injectPatientExtensions(
 	if len(newExts) > 0 {
 		patient["extension"] = append(existing, newExts...)
 	}
+}
+
+// codeField extracts {code, displayName} from a nested CDACode-shaped map at
+// key, falling back display to code when displayName was absent in the
+// source CDA (e.g. religiousAffiliationCode commonly has no displayName
+// attribute). Returns ("", "") when key is absent or not an object — e.g. an
+// all-nullFlavor CDACode marshals to {} (every CDACode field is omitempty).
+func codeField(m map[string]interface{}, key string) (code, display string) {
+	obj, ok := m[key].(map[string]interface{})
+	if !ok {
+		return "", ""
+	}
+	code, _ = obj["code"].(string)
+	if code == "" {
+		return "", ""
+	}
+	display, _ = obj["displayName"].(string)
+	if display == "" {
+		display = code
+	}
+	return code, display
 }
 
 // =========================================================
@@ -215,6 +261,17 @@ func buildEthnicityExtension(code, display string) map[string]interface{} {
 				"valueString": display,
 			},
 		},
+	}
+}
+
+// buildReligionExtension builds the base-FHIR patient-religion extension
+// (valueCodeableConcept) — no US Core profile defines a race/ethnicity-style
+// extension for religion, so this uses the plain hl7.org/fhir extension
+// instead of the usCoreBase family the other two builders use.
+func buildReligionExtension(code, display string) map[string]interface{} {
+	return map[string]interface{}{
+		"url":                  extReligion,
+		"valueCodeableConcept": NewCodeableConcept(code, display, religiousAffiliationSys),
 	}
 }
 

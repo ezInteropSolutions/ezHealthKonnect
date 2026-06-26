@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"reflect"
 	"strings"
+	"sync"
 
 	"ezhealthkonnect/fhir/r4"
 	"ezhealthkonnect/services/executors"
@@ -24,6 +25,47 @@ import (
 // dispatching to a hardcoded per-section Go mapper function.
 type DeclarativeEngine struct {
 	transformReg *DeclarativeTransformRegistry
+
+	// PatientRef is the FHIR reference string (e.g. "Patient/patient-1") the
+	// document-level orchestrator (Phase 4 Slice B) computes once per
+	// document and assigns here before calling BuildResources/
+	// BuildResourcesForRules/BuildHeaderResource. Deliberately engine state,
+	// not a Build* parameter: ~80 existing call sites across
+	// declarative_engine_test.go/declarative_oob_rules_test.go/
+	// declarative_oob_rules_corpus_test.go never exercise patient linkage, so
+	// threading a new parameter through every signature would force touching
+	// all of them for no behavioral reason. Zero value "" means every Build*
+	// call behaves exactly as it did before this field existed -- see
+	// MappingRule.PatientRefPath's doc comment for how this is applied.
+	PatientRef string
+
+	// emittedIDMu/emittedIDCounters give every EmitAsResource-built resource
+	// a document-wide-unique id (e.g. "condition-1", "condition-2") at
+	// emission time, independent of the section-level per-entry idx the
+	// caller happens to be looping over. Needed because multiple matched
+	// entries (e.g. two Encounters, each with their own nested-diagnosis
+	// CollectAll loop) each restart their own loop's idx at 0 — without a
+	// shared counter, two unrelated emitted Conditions could both compute
+	// "condition-1" and collide. Mutex-protected because
+	// BuildResourcesForRules' per-section dispatch in
+	// declarative_document_mapper.go runs one goroutine per section, all
+	// sharing this one engine instance.
+	emittedIDMu       sync.Mutex
+	emittedIDCounters map[string]int
+}
+
+// nextEmittedID returns a document-wide-unique, 1-based sequence number for
+// resourceType, scoped to this one engine instance (one per document — see
+// DeclarativeMapDocument). See emittedIDCounters' doc comment for why this
+// can't just be the caller's own loop index.
+func (e *DeclarativeEngine) nextEmittedID(resourceType string) int {
+	e.emittedIDMu.Lock()
+	defer e.emittedIDMu.Unlock()
+	if e.emittedIDCounters == nil {
+		e.emittedIDCounters = make(map[string]int)
+	}
+	e.emittedIDCounters[resourceType]++
+	return e.emittedIDCounters[resourceType]
 }
 
 // NewDeclarativeEngine constructs an engine with its own transform registry.
@@ -206,6 +248,16 @@ func (e *DeclarativeEngine) buildOneResource(
 	rule MappingRule,
 	entryIdx int,
 ) (map[string]interface{}, []map[string]interface{}, []SectionError) {
+	if rule.SkipIfCodeNullFlavor {
+		if code, ok := entryMap["code"].(map[string]interface{}); ok {
+			nullFlavor, _ := code["nullFlavor"].(string)
+			realCode, _ := code["code"].(string)
+			if nullFlavor != "" && realCode == "" {
+				return nil, nil, nil
+			}
+		}
+	}
+
 	resource := map[string]interface{}{"resourceType": rule.FHIRResource}
 	var errs []SectionError
 	var extra []map[string]interface{}
@@ -229,12 +281,24 @@ func (e *DeclarativeEngine) buildOneResource(
 
 	// Only include non-empty resources (at least one field was set beyond
 	// resourceType) — same convention as createFHIRResourceFromSection.
-	if len(resource) <= 1 {
+	// SkipEmptyCheck bypasses this for the one rule (Author) whose Go
+	// counterpart never had an equivalent check — see that field's doc
+	// comment in declarative_schema.go.
+	if len(resource) <= 1 && !rule.SkipEmptyCheck {
 		return nil, extra, errs
 	}
 	if !resourceHasAllPaths(resource, rule.RequiredPaths) {
 		return nil, extra, errs
 	}
+
+	if e.PatientRef != "" {
+		for _, path := range rule.PatientRefPath {
+			if path != "" {
+				resource[path] = map[string]interface{}{"reference": e.PatientRef}
+			}
+		}
+	}
+
 	return resource, extra, errs
 }
 
@@ -356,7 +420,17 @@ func (e *DeclarativeEngine) applyRow(resource map[string]interface{}, entryMap m
 		}
 
 		idx := 0
+		var cdaIds []interface{}
 		for _, scoped := range scopedNodes {
+			if row.EmbedCDAIdentity {
+				if m, ok := scoped.(map[string]interface{}); ok {
+					root, _ := m["root"].(string)
+					ext, _ := m["extension"].(string)
+					if root != "" || ext != "" {
+						cdaIds = append(cdaIds, map[string]interface{}{"root": root, "extension": ext})
+					}
+				}
+			}
 			resolved := e.resolveWithCondition(scoped, row)
 			transformed, err := e.transformReg.Apply(resolved.transform, resolved.value, resolved.valueMap)
 			if err != nil {
@@ -370,6 +444,9 @@ func (e *DeclarativeEngine) applyRow(resource map[string]interface{}, entryMap m
 			}
 			setFHIRPath(resource, indexedPath(resolved.targetPath, idx), transformed)
 			idx++
+		}
+		if len(cdaIds) > 0 {
+			resource["_cdaIds"] = cdaIds
 		}
 		return nil
 	}
@@ -404,7 +481,21 @@ func (e *DeclarativeEngine) applyRow(resource map[string]interface{}, entryMap m
 // just a fresh subObj as the "resource" and the matched node as the
 // "entryMap" for that one recursive call.
 func (e *DeclarativeEngine) applyCollectAllWithFields(resource map[string]interface{}, scopedNodes []interface{}, row MappingRow, extraOut *[]map[string]interface{}) error {
+	// Seed idx from row.TargetPath's CURRENT length rather than always 0:
+	// EncounterMappingRules has two independent CollectAll+Fields rows
+	// (Scope="participants[*]", then Scope="performers[*]") both writing
+	// into TargetPath="participant" — without this, the second row's own
+	// idx restarting at 0 would call setFHIRPath("participant[0]", ...) and
+	// silently overwrite the first row's already-written participant[0]
+	// (ensureArray preserves existing elements, but arr[idx]=value still
+	// replaces whichever one is already sitting at that index). Confirmed
+	// via real corpus data: the LOC participant a prior row had written
+	// disappeared, replaced by the new performer-derived PRF participant,
+	// before this fix.
 	idx := 0
+	if existing, ok := resource[row.TargetPath].([]interface{}); ok {
+		idx = len(existing)
+	}
 	for _, scoped := range scopedNodes {
 		scopedMap, ok := scoped.(map[string]interface{})
 		if !ok {
@@ -417,7 +508,7 @@ func (e *DeclarativeEngine) applyCollectAllWithFields(resource map[string]interf
 				// builds an INDEPENDENT resource (e.g. CareTeam's per-
 				// participant Practitioner), not a value inside subObj —
 				// subObj only gets a Reference to it.
-				if sub, refVal := e.buildEmittedSubResource(scopedMap, childRow, idx); sub != nil {
+				if sub, refVal := e.buildEmittedSubResource(scopedMap, childRow); sub != nil {
 					if extraOut != nil {
 						*extraOut = append(*extraOut, sub)
 					}
@@ -446,13 +537,21 @@ func (e *DeclarativeEngine) applyCollectAllWithFields(resource map[string]interf
 // row.Fields against scopedMap — see MappingRow.EmitAsResource's doc
 // comment. Returns (nil, nil) when nothing usable was built, the same
 // "len(resource) <= 1" convention buildOneResource uses for top-level
-// resources. idx (the position of scopedMap within the enclosing
-// CollectAll loop) makes the synthesized id unique across sibling matches
-// within one entry — e.g. "practitioner-1", "practitioner-2" for a
-// two-member care team. Resource ids are not final/global at this layer
-// (no section ported so far treats them as such — see the BP-panel
-// synthesis precedent); only uniqueness within this one build matters.
-func (e *DeclarativeEngine) buildEmittedSubResource(scopedMap map[string]interface{}, row MappingRow, idx int) (map[string]interface{}, map[string]interface{}) {
+// resources. The id comes from nextEmittedID, not the caller's own loop
+// index — see emittedIDCounters' doc comment for why a per-call idx isn't
+// document-wide-unique on its own.
+//
+// "_emitted": true is a marker the document-level orchestrator's resource-id
+// renumbering pass (declarative_document_mapper.go) checks: that pass
+// otherwise unconditionally overwrites every non-Patient/Practitioner/
+// Organization resource's "id" with a fresh sequential number, which would
+// silently invalidate the reference this function already wrote into the
+// parent sub-object at emission time. Practitioner dodges this by being on
+// that pass's exclusion list already; Condition (this function's first
+// non-excluded-type caller, via EncounterMappingRules' nested-diagnosis row)
+// needs the explicit marker instead. Stripped before the bundle ships,
+// alongside "_cdaIds".
+func (e *DeclarativeEngine) buildEmittedSubResource(scopedMap map[string]interface{}, row MappingRow) (map[string]interface{}, map[string]interface{}) {
 	sub := map[string]interface{}{"resourceType": row.EmitAsResource}
 	for _, childRow := range row.Fields {
 		_ = e.applyRow(sub, scopedMap, childRow, nil)
@@ -460,8 +559,16 @@ func (e *DeclarativeEngine) buildEmittedSubResource(scopedMap map[string]interfa
 	if len(sub) <= 1 {
 		return nil, nil
 	}
-	id := fmt.Sprintf("%s-%d", strings.ToLower(row.EmitAsResource), idx+1)
+	if e.PatientRef != "" {
+		for _, path := range row.EmitAsResourcePatientRefPath {
+			if path != "" {
+				sub[path] = map[string]interface{}{"reference": e.PatientRef}
+			}
+		}
+	}
+	id := fmt.Sprintf("%s-%d", strings.ToLower(row.EmitAsResource), e.nextEmittedID(row.EmitAsResource))
 	sub["id"] = id
+	sub["_emitted"] = true
 	return sub, map[string]interface{}{"reference": row.EmitAsResource + "/" + id}
 }
 

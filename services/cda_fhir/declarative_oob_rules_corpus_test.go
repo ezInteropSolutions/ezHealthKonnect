@@ -549,3 +549,82 @@ func TestDeclarativeEngine_Corpus_CustodianEndToEnd(t *testing.T) {
 		})
 	}
 }
+
+// TestDeclarativeEngine_Corpus_PatientEndToEnd is Phase 4 Slice A's corpus
+// proof: PatientMappingRules() against all 4 real vendor documents. A real
+// C-CDA document always has a patient (unlike Author/Custodian/
+// LegalAuthenticator, which are genuinely optional per the corpus results
+// above), so this asserts a resource is actually produced for every file,
+// not just that IF one is produced it's well-formed.
+func TestDeclarativeEngine_Corpus_PatientEndToEnd(t *testing.T) {
+	engine := cdafhir.NewDeclarativeEngine()
+	rule := cdafhir.PatientMappingRules()[0]
+
+	for _, file := range corpusFiles {
+		t.Run(file, func(t *testing.T) {
+			documentMap := loadCorpusDocumentMap(t, file)
+			resource, extra, errs := engine.BuildHeaderResource(documentMap, rule)
+			t.Logf("%s: patient resource present=%v, %d extra, %d field-level notices", file, resource != nil, len(extra), len(errs))
+			for _, e := range errs {
+				t.Logf("  notice: entry=%d field=%s severity=%s err=%s", e.EntryIndex, e.FieldKey, e.Severity, e.Error)
+			}
+			if resource == nil {
+				t.Fatalf("%s: expected a Patient resource (every real C-CDA document has one)", file)
+			}
+			assertWellFormedResource(t, resource, "Patient")
+			pretty, _ := json.MarshalIndent(resource, "    ", "  ")
+			t.Logf("  resource:\n    %s", pretty)
+		})
+	}
+}
+
+// TestDeclarativeEngine_Corpus_PatientLinkage_AllSectionsReferencePatient is
+// Phase 4 Slice A's PatientRefPath end-to-end proof: every resource every
+// already-shipped section rule produces, when given a real engine.PatientRef,
+// carries a non-empty patient-link field -- the gap this slice closes (every
+// *MappingRules() function used to skip this entirely). Runs against every
+// section that has BuildResources/BuildResourcesForRules wiring AND real
+// corpus data for at least one vendor (skips silently otherwise, same
+// "evidence of prevalence, not correctness" convention every other corpus
+// test in this file already follows).
+func TestDeclarativeEngine_Corpus_PatientLinkage_AllSectionsReferencePatient(t *testing.T) {
+	const patientRef = "Patient/patient-1"
+
+	type linkedRule struct {
+		name  string
+		path  string // the field expected to carry the reference
+		rules []cdafhir.MappingRule
+		multi bool // true => use BuildResourcesForRules
+	}
+	cases := []linkedRule{
+		{"Allergy", "patient", cdafhir.AllergyMappingRules(), false},
+		{"Medication", "subject", cdafhir.MedicationMappingRules(), true},
+		{"Problems", "subject", cdafhir.ProblemsMappingRules(), false},
+		{"VitalSigns", "subject", cdafhir.VitalSignsMappingRules(), false},
+		{"Immunization", "patient", cdafhir.ImmunizationMappingRules(), false},
+		{"Procedure", "subject", cdafhir.ProcedureMappingRules(), false},
+		{"CareTeam", "subject", cdafhir.CareTeamMappingRules(), false},
+		{"Device", "subject", cdafhir.DeviceMappingRules(), false},
+	}
+
+	for _, file := range corpusFiles {
+		documentMap := loadCorpusDocumentMap(t, file)
+		for _, c := range cases {
+			engine := cdafhir.NewDeclarativeEngine()
+			engine.PatientRef = patientRef
+
+			var resources []map[string]interface{}
+			if c.multi {
+				resources, _ = engine.BuildResourcesForRules(documentMap, c.rules)
+			} else {
+				resources, _ = engine.BuildResources(documentMap, c.rules[0])
+			}
+			for i, r := range resources {
+				ref, ok := r[c.path].(map[string]interface{})
+				if !ok || ref["reference"] != patientRef {
+					t.Errorf("%s/%s[%d]: %s = %v, want {reference: %s}", file, c.name, i, c.path, r[c.path], patientRef)
+				}
+			}
+		}
+	}
+}

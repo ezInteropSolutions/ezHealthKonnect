@@ -107,6 +107,13 @@ func (h *headerParser) parsePatient(root *etree.Element) CDAPatient {
 	if gcEl := patEl.SelectElement("administrativeGenderCode"); gcEl != nil {
 		patient.Gender = parseCD(gcEl)
 	}
+	// sdtc:deceasedInd — SelectElement matches by local tag name only
+	// (ignores the sdtc namespace prefix), same as every other element
+	// lookup in this file.
+	if diEl := patEl.SelectElement("deceasedInd"); diEl != nil {
+		v := diEl.SelectAttrValue("value", "") == "true"
+		patient.DeceasedInd = &v
+	}
 	if msEl := patEl.SelectElement("maritalStatusCode"); msEl != nil {
 		patient.MaritalStatus = parseCD(msEl)
 	}
@@ -115,6 +122,9 @@ func (h *headerParser) parsePatient(root *etree.Element) CDAPatient {
 	}
 	if ecEl := patEl.SelectElement("ethnicGroupCode"); ecEl != nil {
 		patient.Ethnicity = parseCD(ecEl)
+	}
+	if raEl := patEl.SelectElement("religiousAffiliationCode"); raEl != nil {
+		patient.Religion = parseCD(raEl)
 	}
 
 	// ALL <languageCommunication> elements

@@ -15,6 +15,7 @@ package cdafhir
 import (
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 
 	cdadocument "ezhealthkonnect/cda/document"
@@ -66,6 +67,7 @@ func (r *DeclarativeTransformRegistry) register(name string, fn DeclarativeTrans
 
 func (r *DeclarativeTransformRegistry) registerBuiltins() {
 	r.register("string_direct", declarativeStringDirect)
+	r.register("cda_decimal_string_to_number", declarativeCDADecimalStringToNumber)
 	r.register("cda_code_to_codeable_concept", declarativeCodeToCodeableConcept)
 	r.register("cda_quantity_to_fhir", declarativeQuantityToFHIR)
 	r.register("cda_timerange_to_onset", declarativeTimeRangeToOnset)
@@ -81,6 +83,8 @@ func (r *DeclarativeTransformRegistry) registerBuiltins() {
 	r.register("allergy_status_to_fhir", declarativeAllergyStatusToFHIR)
 	r.register("allergy_type_to_fhir", declarativeAllergyTypeToFHIR)
 	r.register("allergy_category_from_substance_system", declarativeAllergyCategoryFromSubstanceSystem)
+	r.register("allergy_substance_or_no_known_allergy_to_fhir", declarativeAllergySubstanceOrNoKnownAllergy)
+	r.register("allergy_criticality_to_fhir", declarativeAllergyCriticalityToFHIR)
 	r.register("allergy_reaction_severity_to_fhir", declarativeAllergyReactionSeverityToFHIR)
 	r.register("condition_status_to_fhir", declarativeConditionStatusToFHIR)
 	r.register("condition_verification_status_to_fhir", declarativeConditionVerificationStatus)
@@ -144,6 +148,13 @@ func (r *DeclarativeTransformRegistry) registerBuiltins() {
 	// Phase 3 additions — Author / Custodian (header-level)
 	// =====================================================
 	r.register("cda_address_to_fhir", declarativeCDAAddressToFHIR)
+
+	// =====================================================
+	// Phase 4 Slice A additions — Patient
+	// =====================================================
+	r.register("cda_time_to_fhir_date", declarativeCDATimeToFHIRDate)
+	r.register("cda_gender_to_fhir", declarativeGenderToFHIR)
+	r.register("cda_language_communication_to_fhir", declarativeLanguageCommunicationToFHIR)
 }
 
 // remarshalInto re-marshals a Phase-1-resolved value (already JSON-shaped:
@@ -182,6 +193,24 @@ func declarativeStringDirect(value interface{}, vm map[string]string) (interface
 		}
 	}
 	return s, nil
+}
+
+// declarativeCDADecimalStringToNumber parses a CDA decimal-as-string field
+// (e.g. a PIVL_TS <period value="..."/> attribute) into a JSON number. FHIR
+// decimal elements -- dosageInstruction.timing.repeat.period included --
+// require a numeric JSON value; passing the raw CDA attribute string through
+// unchanged (e.g. ".5") produces a hard FHIR validation error ("the primitive
+// value must be a number").
+func declarativeCDADecimalStringToNumber(value interface{}, _ map[string]string) (interface{}, error) {
+	s, ok := value.(string)
+	if !ok || s == "" {
+		return nil, nil
+	}
+	f, err := strconv.ParseFloat(s, 64)
+	if err != nil {
+		return nil, nil
+	}
+	return f, nil
 }
 
 func declarativeCodeToCodeableConcept(value interface{}, _ map[string]string) (interface{}, error) {
@@ -274,6 +303,110 @@ func declarativeAllergyCategoryFromSubstanceSystem(value interface{}, _ map[stri
 	return transforms.AllergyCategoryFromSubstanceSystem(s), nil
 }
 
+// criticalityConceptMap mirrors the HL7 C-CDA on FHIR IG's own
+// ConceptMap-CF-Criticality verbatim (source codeSystem
+// http://terminology.hl7.org/CodeSystem/v3-ObservationValue ->
+// FHIR AllergyIntolerance.criticality):
+// https://github.com/HL7/ccda-on-fhir/blob/master/input/maps/ConceptMap-CF-Criticality.xml
+var criticalityConceptMap = map[string]string{
+	"CRITH": "high",
+	"CRITL": "low",
+	"CRITU": "unable-to-assess",
+}
+
+// declarativeAllergyCriticalityToFHIR maps the CDA Criticality Observation's
+// value code to AllergyIntolerance.criticality. A previously-undocumented
+// gap: zero references to "criticality" existed anywhere in
+// services/cda_fhir before this -- never ported by the legacy Go mapper or
+// any declarative rule, not a deliberate omission.
+func declarativeAllergyCriticalityToFHIR(value interface{}, _ map[string]string) (interface{}, error) {
+	s, ok := value.(string)
+	if !ok || s == "" {
+		return nil, nil
+	}
+	mapped, ok := criticalityConceptMap[s]
+	if !ok {
+		return nil, nil
+	}
+	return mapped, nil
+}
+
+// noKnownAllergyConceptMap mirrors the HL7 C-CDA on FHIR IG's own
+// ConceptMap-CF-NoKnownAllergies verbatim (source codes -> negated target
+// codes, both SNOMED CT):
+// https://github.com/HL7/ccda-on-fhir/blob/master/input/maps/ConceptMap-CF-NoKnownAllergies.xml
+// Only 3 of the source ConceptMap's 8 source codes have a target at all --
+// the other 5 (Intolerance to food, Propensity to adverse reactions to
+// substance/food/drug, Propensity to adverse reaction) are explicitly
+// equivalence="unmatched" in the IG's own map, with the comment "Best
+// practices from CDA are not to have this as the negated value" -- omitted
+// here for the same reason the IG omits them, not an oversight.
+var noKnownAllergyConceptMap = map[string]struct{ code, display string }{
+	"414285001": {"429625007", "No known food allergy"},
+	"416098002": {"409137002", "No known drug allergy"},
+	"419199007": {"716186003", "No known allergy"},
+}
+
+// declarativeAllergySubstanceOrNoKnownAllergy builds AllergyIntolerance.code
+// per the C-CDA on FHIR IG's two /participant rows (CF-allergies.md):
+//   - CSM participant names a real substance (playingEntity/code has a real
+//     code) -> that code, regardless of negation.
+//   - No real substance (CSM absent, or nullFlavor'd) AND negationInd=true on
+//     the assertion observation -> invert the observation's own generic
+//     "Allergy to X" value through ConceptMap-CF-NoKnownAllergies into its
+//     negated "No known X" target. This is the real "No Known Allergies"
+//     idiom (e.g. HL7's own C-CDA-Examples "No Known Medication Allergies").
+//   - Anything else -> the raw value code, unchanged (matches prior
+//     behavior for entries this rule doesn't have IG-specific guidance for).
+//
+// Takes the WHOLE matched SUBJ-nested entry (the row's SourcePath=="") --
+// not one field -- because the branch needs participants, value, AND
+// negationInd together; same "whole object, not a bare field" shape
+// declarativeGenderToFHIR already uses for its own multi-field guard.
+//
+// Returns a real error (not nil,nil) when no usable code can be built at
+// all: this row is Required/SHALL (AllergyIntolerance.code is 1..1 per US
+// Core), and applyRow's pre-transform empty check can't catch that for this
+// row anymore -- SourcePath=="" means the "raw" resolved value is always the
+// whole (non-nil) scoped entry, never nil, even when every field inside it
+// is empty. Erroring here is what now carries that SHALL guarantee instead.
+func declarativeAllergySubstanceOrNoKnownAllergy(value interface{}, _ map[string]string) (interface{}, error) {
+	if value == nil {
+		return nil, fmt.Errorf("allergy_substance_or_no_known_allergy_to_fhir: no substance participant and no assertion value")
+	}
+	var entry cdadocument.CDAEntry
+	if err := remarshalInto(value, &entry); err != nil {
+		return nil, fmt.Errorf("allergy_substance_or_no_known_allergy_to_fhir: %w", err)
+	}
+
+	for _, p := range entry.Participants {
+		if p.TypeCode != "CSM" || p.ParticipantRole.PlayingEntity == nil {
+			continue
+		}
+		if code := p.ParticipantRole.PlayingEntity.Code; code.Code != "" {
+			return transforms.CDACodeToCodeableConcept(code), nil
+		}
+		break // CSM participant present but nullFlavor'd -- the NKDA idiom.
+	}
+
+	if entry.Value == nil || entry.Value.Code == nil {
+		return nil, fmt.Errorf("allergy_substance_or_no_known_allergy_to_fhir: no substance participant and no assertion value")
+	}
+	valueCode := *entry.Value.Code
+
+	if entry.NegationInd {
+		if negated, ok := noKnownAllergyConceptMap[valueCode.Code]; ok {
+			return NewCodeableConcept(negated.code, negated.display, "2.16.840.1.113883.6.96"), nil
+		}
+	}
+
+	cc := transforms.CDACodeToCodeableConcept(valueCode)
+	if cc == nil {
+		return nil, fmt.Errorf("allergy_substance_or_no_known_allergy_to_fhir: assertion value resolved to an empty code")
+	}
+	return cc, nil
+}
+
 func declarativeAllergyReactionSeverityToFHIR(value interface{}, _ map[string]string) (interface{}, error) {
 	s, ok := value.(string)
 	if !ok || s == "" {
@@ -328,9 +461,15 @@ func declarativeConditionVerificationStatus(value interface{}, vm map[string]str
 func declarativeConditionCategory(value interface{}, _ map[string]string) (interface{}, error) {
 	code, _ := value.(string)
 	system, display := "http://terminology.hl7.org/CodeSystem/condition-category", "Problem List Item"
-	if code == "health-concern" {
+	switch code {
+	case "health-concern":
 		system, display = "http://hl7.org/fhir/us/core/CodeSystem/condition-category", "Health Concern"
-	} else {
+	case "encounter-diagnosis":
+		// Same core HL7 system as problem-list-item, unlike health-concern's
+		// US-Core-specific one — see EncounterMappingRules' nested-diagnosis
+		// row for why this category exists.
+		display = "Encounter Diagnosis"
+	default:
 		code = "problem-list-item"
 	}
 	return map[string]interface{}{
@@ -476,16 +615,19 @@ func declarativeRealToBareQuantity(value interface{}, _ map[string]string) (inte
 // mirror (not an extracted transforms.* call) the same way
 // declarativeConditionCategory already mirrors conditionCategoryCC: this is
 // the row's own LiteralValue (the category code, constant per rule) flowing
-// through a Transform, not a re-marshal of resolved CDA data. Trimmed to the
-// 3 categories this phase ports (vital-signs, laboratory, social-history) —
-// not the full switch's functional-status/cognitive-status/etc., which
-// belong to sections not yet ported; extend this switch when those are.
+// through a Transform, not a re-marshal of resolved CDA data. Now covers all
+// 5 categories Phase 4 Slice D ports (vital-signs, laboratory,
+// social-history, functional-status, cognitive-status) — functional-status/
+// cognitive-status use the US Core category system, not the base FHIR one,
+// matching categorySystem()'s own switch in observation_mapper.go:343-351
+// exactly (the other 3 fall into that function's default case).
 func declarativeObservationCategoryToFHIR(value interface{}, _ map[string]string) (interface{}, error) {
 	code, _ := value.(string)
 	if code == "" {
 		return nil, nil
 	}
 	display := code
+	system := "http://terminology.hl7.org/CodeSystem/observation-category"
 	switch code {
 	case "vital-signs":
 		display = "Vital Signs"
@@ -493,11 +635,17 @@ func declarativeObservationCategoryToFHIR(value interface{}, _ map[string]string
 		display = "Laboratory"
 	case "social-history":
 		display = "Social History"
+	case "functional-status":
+		display = "Functional Status"
+		system = "http://hl7.org/fhir/us/core/CodeSystem/us-core-category"
+	case "cognitive-status":
+		display = "Cognitive Status"
+		system = "http://hl7.org/fhir/us/core/CodeSystem/us-core-category"
 	}
 	return map[string]interface{}{
 		"coding": []interface{}{
 			map[string]interface{}{
-				"system":  "http://terminology.hl7.org/CodeSystem/observation-category",
+				"system":  system,
 				"code":    code,
 				"display": display,
 			},
@@ -541,17 +689,32 @@ func declarativeEncounterStatusToFHIR(value interface{}, _ map[string]string) (i
 	return transforms.EncounterStatusToFHIR(s), nil
 }
 
-// declarativeEncounterClassCoding mirrors encounter_mapper.go:40-50's inline
-// construction exactly, not a re-marshal-and-call-an-existing-transforms.*
-// adapter -- there is no shared transforms.* function to wrap, since Go
-// builds this Coding inline too. FHIR R4's Encounter.class is a single
-// Coding (0..1), not a CodeableConcept/array (that change is R5-only).
-// system is HARD-CODED to v3-ActCode regardless of entry.Code's own
-// CodeSystem -- an inherited, documented architectural inconsistency (see
-// architecture/CDA_FHIR_MAPPING_INVENTORY.md section 8: raw CDA Encounter
-// Activity codes are often CPT/SNOMED, not ActEncounterCode), not something
-// this port fixes. The corpus has near-zero real codes here (mostly
-// nullFlavor) to verify a "correct" alternative against.
+// actEncounterCodeSystemOID is the HL7 v3 ActCode table OID -- the vocabulary
+// FHIR's base Encounter.class element actually expects (ActEncounterCode is a
+// subset of ActCode: AMB, EMER, IMP, ACUTE, NONAC, OBSENC, PRENC, SS, VR, HH).
+const actEncounterCodeSystemOID = "2.16.840.1.113883.5.4"
+
+// declarativeEncounterClassCoding builds Encounter.class (FHIR R4: a single
+// Coding, 0..1 -- the CodeableConcept/array change is R5-only).
+//
+// architecture/CDA_FHIR_MAPPING_INVENTORY.md section 8 documents the
+// inherited bug this fixes: the raw CDA Encounter Activity <code> is often
+// CPT/SNOMED (the visit type), not an ActEncounterCode value, and blindly
+// dual-mapping that same code into both class AND type fails strict FHIR
+// terminology validation on class. The fix only kicks in when the primary
+// code is explicitly tagged with a DIFFERENT codeSystem (e.g. CPT) -- it
+// then searches the code's own translations (C-CDA commonly carries the
+// ActEncounterCode value there, e.g. <translation code="AMB"
+// codeSystem="2.16.840.1.113883.5.4"> alongside a CPT primary) for one
+// already in the ActCode system, and uses that for class. When the primary
+// code carries no codeSystem at all (or already IS the ActCode system), it
+// is used as-is -- unchanged from the original behavior. type[] is
+// unaffected either way -- it has its own separate mapping row and still
+// carries the full original code + every translation. Default to "AMB"
+// (ambulatory) when the primary code is from another system and no
+// ActCode-system translation exists: CCDs are overwhelmingly outpatient
+// documents, and Encounter.class is 1..1 required by US Core, so an empty
+// class is a worse outcome than a sensible default.
 func declarativeEncounterClassCoding(value interface{}, _ map[string]string) (interface{}, error) {
 	if value == nil {
 		return nil, nil
@@ -560,17 +723,38 @@ func declarativeEncounterClassCoding(value interface{}, _ map[string]string) (in
 	if err := remarshalInto(value, &c); err != nil {
 		return nil, fmt.Errorf("encounter_class_coding: %w", err)
 	}
-	if c.Code == "" {
+	if c.Code == "" && len(c.Translations) == 0 {
 		return nil, nil
 	}
-	coding := map[string]interface{}{
+
+	if c.CodeSystem == "" || c.CodeSystem == actEncounterCodeSystemOID {
+		coding := map[string]interface{}{
+			"system": "http://terminology.hl7.org/CodeSystem/v3-ActCode",
+			"code":   c.Code,
+		}
+		if c.DisplayName != "" {
+			coding["display"] = c.DisplayName
+		}
+		return coding, nil
+	}
+
+	for _, cand := range c.Translations {
+		if cand.CodeSystem == actEncounterCodeSystemOID && cand.Code != "" {
+			coding := map[string]interface{}{
+				"system": "http://terminology.hl7.org/CodeSystem/v3-ActCode",
+				"code":   cand.Code,
+			}
+			if cand.DisplayName != "" {
+				coding["display"] = cand.DisplayName
+			}
+			return coding, nil
+		}
+	}
+
+	return map[string]interface{}{
 		"system": "http://terminology.hl7.org/CodeSystem/v3-ActCode",
-		"code":   c.Code,
-	}
-	if c.DisplayName != "" {
-		coding["display"] = c.DisplayName
-	}
-	return coding, nil
+		"code":   "AMB",
+	}, nil
 }
 
 // declarativeEncounterParticipantTypeCoding mirrors
@@ -805,4 +989,91 @@ func declarativeCDAAddressToFHIR(value interface{}, _ map[string]string) (interf
 		return nil, fmt.Errorf("cda_address_to_fhir: %w", err)
 	}
 	return transforms.CDAAddressToFHIR(addr), nil
+}
+
+// =====================================================
+// Phase 4 Slice A additions — Patient
+// =====================================================
+
+// declarativeCDATimeToFHIRDate wraps transforms.CDATimeToFHIRDate — a
+// date-only (YYYY-MM-DD) format, distinct from cda_time_to_fhir_datetime's
+// full timestamp. Used for Patient.birthDate (patient_mapper.go:77-79).
+func declarativeCDATimeToFHIRDate(value interface{}, _ map[string]string) (interface{}, error) {
+	if value == nil {
+		return nil, nil
+	}
+	var t cdadocument.CDATime
+	if err := remarshalInto(value, &t); err != nil {
+		return nil, fmt.Errorf("cda_time_to_fhir_date: %w", err)
+	}
+	dob := transforms.CDATimeToFHIRDate(t)
+	if dob == "" {
+		return nil, nil
+	}
+	return dob, nil
+}
+
+// declarativeGenderToFHIR mirrors patient_mapper.go:80-84's exact guard —
+// `if p.Gender.Code != "" || p.Gender.NullFlavor == ""` — before calling
+// transforms.GenderToFHIR(p.Gender.Code). Takes the whole gender CDACode
+// object (not just its bare code string) because the guard needs BOTH
+// fields: GenderToFHIR("") already defaults to "unknown" on its own, so the
+// one case this guard actually changes behavior for is an EXPLICIT
+// nullFlavor with no code, where Go skips writing "gender" at all.
+func declarativeGenderToFHIR(value interface{}, _ map[string]string) (interface{}, error) {
+	if value == nil {
+		return nil, nil
+	}
+	var code cdadocument.CDACode
+	if err := remarshalInto(value, &code); err != nil {
+		return nil, fmt.Errorf("cda_gender_to_fhir: %w", err)
+	}
+	if code.Code == "" && code.NullFlavor != "" {
+		return nil, nil
+	}
+	gender := transforms.GenderToFHIR(code.Code)
+	if gender == "" {
+		return nil, nil
+	}
+	return gender, nil
+}
+
+// declarativeLanguageCommunicationToFHIR mirrors patient_mapper.go:92-116's
+// inline construction of one Patient.communication[] entry from a single
+// CDALanguage element — system is hardcoded "urn:ietf:bcp:47" (BCP-47), the
+// FHIR-mandated system for human language codes, exactly as Go does; the
+// "preferred" key is set only when PreferenceInd is true (Go never writes a
+// literal false), not omitted vs. present-but-false being a meaningful FHIR
+// distinction either way for this optional boolean field.
+//
+// lang.ModeCode (CDA's languageCommunication/modeCode, e.g. "Expressed
+// Written") is deliberately never read here: base FHIR R4's
+// Patient.communication has no field, and no known US Core or base-FHIR
+// extension exists, for spoken-vs-written mode — there is no FHIR target to
+// map it onto, not an oversight.
+func declarativeLanguageCommunicationToFHIR(value interface{}, _ map[string]string) (interface{}, error) {
+	if value == nil {
+		return nil, nil
+	}
+	var lang cdadocument.CDALanguage
+	if err := remarshalInto(value, &lang); err != nil {
+		return nil, fmt.Errorf("cda_language_communication_to_fhir: %w", err)
+	}
+	if lang.Code == "" {
+		return nil, nil
+	}
+	comm := map[string]interface{}{
+		"language": map[string]interface{}{
+			"coding": []interface{}{
+				map[string]interface{}{
+					"system": "urn:ietf:bcp:47",
+					"code":   lang.Code,
+				},
+			},
+		},
+	}
+	if lang.PreferenceInd {
+		comm["preferred"] = true
+	}
+	return comm, nil
 }

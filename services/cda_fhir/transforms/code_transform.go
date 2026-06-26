@@ -35,13 +35,21 @@ func normalizeSystem(raw string) string {
 		return "http://ncithesaurus.nci.nih.gov"
 	case "ACTCODE", "2.16.840.1.113883.5.4":
 		return "http://terminology.hl7.org/CodeSystem/v3-ActCode"
+	case "MARITALSTATUS", "2.16.840.1.113883.5.2":
+		return "http://terminology.hl7.org/CodeSystem/v3-MaritalStatus"
+	case "ROLECODE", "2.16.840.1.113883.5.88":
+		return "http://terminology.hl7.org/CodeSystem/v3-RoleCode"
 	default:
-		// Unmapped OID (e.g. ICD-9-CM 2.16.840.1.113883.6.103, a local payer code
-		// system, HL7's MaritalStatus table 2.16.840.1.113883.5.2, ...). FHIR
-		// requires Coding.system to be an absolute URI — bare OIDs are not — so
-		// fall back to the standard "urn:oid:" form rather than passing the raw
-		// OID through unprefixed. Values that aren't OID-shaped (already a URI,
-		// or a free-text system name we don't recognize) are returned unchanged.
+		// Unmapped OID (e.g. ICD-9-CM 2.16.840.1.113883.6.103, a vendor-internal
+		// proprietary code system, ...). FHIR requires Coding.system to be an
+		// absolute URI — bare OIDs are not — so fall back to the standard
+		// "urn:oid:" form rather than passing the raw OID through unprefixed.
+		// This is the correct outcome for non-standard/vendor OIDs: there is no
+		// universal canonical URL to guess at, and resolving vendor-specific
+		// systems is an interface-builder/pipeline-configuration concern, not
+		// something this generic mapper should hardcode. Values that aren't
+		// OID-shaped (already a URI, or a free-text system name we don't
+		// recognize) are returned unchanged.
 		if oidPattern.MatchString(raw) {
 			return "urn:oid:" + raw
 		}
@@ -96,7 +104,15 @@ func CDACodeToCoding(code cdadocument.CDACode) map[string]interface{} {
 // Includes all Translations as additional codings.
 // Returns nil for null-flavored or completely empty codes.
 func CDACodeToCodeableConcept(code cdadocument.CDACode) map[string]interface{} {
-	if code.NullFlavor != "" && code.Code == "" && code.DisplayName == "" && code.OriginalText == "" {
+	// Translations must gate this early return too -- a 747-file real-world
+	// corpus run (github.com/chb/sample_ccdas) found the common idiom of a
+	// nullFlavor'd primary code (Code/DisplayName/OriginalText all empty)
+	// paired with a <translation> child carrying the actual usable code
+	// (e.g. a vendor-internal code marked nullFlavor, SNOMED supplied only
+	// as a translation). Bailing here before len(code.Translations) is even
+	// checked silently dropped that data -- the single largest cause of
+	// Condition.code coming back completely empty across the corpus.
+	if code.NullFlavor != "" && code.Code == "" && code.DisplayName == "" && code.OriginalText == "" && len(code.Translations) == 0 {
 		return nil
 	}
 

@@ -153,26 +153,28 @@ func (e *CDAToFHIRExecutor) Execute(
 		TerminologyValidation: cfg.TerminologyValidation,
 	}
 
-	// Prefer typed path (Sprint D): cda.parse stores *CDADocument at _cdaDocument.
-	// MapDocument() uses zero XPath and operates on fully-typed Go structs.
+	// Prefer typed path: cda.parse stores *CDADocument at _cdaDocument.
+	// DeclarativeMapDocument() uses zero XPath and operates on a documentMap
+	// built from the fully-typed Go structs, driven by OOB declarative rules.
 	var output *cdafhir.MapOutput
 	if typed, ok := inputData["_cdaDocument"]; ok {
 		if doc, ok := typed.(*cdadocument.CDADocument); ok {
-			log.Printf("  📄 [cda.to_fhir] Using typed CDADocument path (Sprint D)")
-			out, err := e.mapper.MapDocument(ctx, doc, mapConfig)
+			log.Printf("  📄 [cda.to_fhir] Using typed CDADocument path (declarative)")
+			out, err := e.mapper.DeclarativeMapDocument(ctx, doc, mapConfig)
 			if err != nil {
-				return nil, fmt.Errorf("cda.to_fhir: MapDocument failed: %w", err)
+				return nil, fmt.Errorf("cda.to_fhir: DeclarativeMapDocument failed: %w", err)
 			}
 			output = out
 		}
 	}
 
 	// Auto-parse path: extract raw XML from parsedCDA["raw"] and run the typed
-	// MapDocument() path without requiring a separate cda.parse pipeline step.
-	// Uses the same CDAParserService the cda.parse executor uses (not just the bare
-	// typed parser) so the ParsedJSON it produces can also be persisted below —
-	// giving every CDA interface structured parsed-content storage even when its
-	// pipeline has no separate cda.parse step.
+	// DeclarativeMapDocument() path without requiring a separate cda.parse
+	// pipeline step. Uses the same CDAParserService the cda.parse executor
+	// uses (not just the bare typed parser) so the ParsedJSON it produces can
+	// also be persisted below — giving every CDA interface structured
+	// parsed-content storage even when its pipeline has no separate cda.parse
+	// step.
 	var autoParseResult *models.ParserResult
 	var autoParseRawXML string
 	if output == nil && e.parserService != nil {
@@ -189,14 +191,14 @@ func (e *CDAToFHIRExecutor) Execute(
 			if !result.Success {
 				log.Printf("  ⚠️  [cda.to_fhir] XML auto-parse failed: %v", result.Error)
 			} else if doc, ok := result.TypedDocument.(*cdadocument.CDADocument); ok {
-				log.Printf("  📄 [cda.to_fhir] Auto-parsed raw CDA XML → typed MapDocument path")
-				out, err := e.mapper.MapDocument(ctx, doc, mapConfig)
+				log.Printf("  📄 [cda.to_fhir] Auto-parsed raw CDA XML → typed DeclarativeMapDocument path")
+				out, err := e.mapper.DeclarativeMapDocument(ctx, doc, mapConfig)
 				if err == nil {
 					output = out
 					autoParseResult = result
 					autoParseRawXML = rawXML
 				} else {
-					log.Printf("  ⚠️  [cda.to_fhir] MapDocument failed after auto-parse: %v", err)
+					log.Printf("  ⚠️  [cda.to_fhir] DeclarativeMapDocument failed after auto-parse: %v", err)
 				}
 			} else {
 				log.Printf("  ⚠️  [cda.to_fhir] auto-parse produced no typed document")
@@ -204,18 +206,8 @@ func (e *CDAToFHIRExecutor) Execute(
 		}
 	}
 
-	// Final fallback: legacy schema-driven map path
 	if output == nil {
-		parsedCDA := e.resolveParsedCDA(inputData, cfg.SourceField)
-		if parsedCDA == nil {
-			return nil, fmt.Errorf("cda.to_fhir: no parsed CDA data found in input (expected _format=ccda or sourceField=%q)", cfg.SourceField)
-		}
-		log.Printf("  📄 [cda.to_fhir] Using legacy map path (profile: %v)", parsedCDA["cdaProfile"])
-		out, err := e.mapper.Map(ctx, parsedCDA, mapConfig)
-		if err != nil {
-			return nil, fmt.Errorf("cda.to_fhir: mapping failed: %w", err)
-		}
-		output = out
+		return nil, fmt.Errorf("cda.to_fhir: no typed CDA document available for conversion (expected _cdaDocument or parseable raw XML)")
 	}
 
 	resourceCount := 0
