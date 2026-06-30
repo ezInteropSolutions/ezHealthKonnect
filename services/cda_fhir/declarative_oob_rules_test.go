@@ -14,6 +14,8 @@
 package cdafhir_test
 
 import (
+	"context"
+	"encoding/base64"
 	"encoding/json"
 	"testing"
 
@@ -535,6 +537,161 @@ func TestDeclarativeEngine_Medication_OrderIntent_RequesterFromPerformer(t *test
 	}
 }
 
+// TestDeclarativeEngine_Medication_RequesterFromAuthor_RichData_EmitsPractitionerRole
+// proves a real production gap found in the same 99397 CCD sample: the
+// substanceAdministration's own <author><assignedAuthor> carries an NPI, a
+// NUCC specialty code, a work address/phone, AND a representedOrganization
+// (id at minimum) -- none of which requesterFromPerformer/requesterFromAuthor
+// existed to capture before this fix; only the bare name reached the output.
+// Per explicit product decision: build the full PractitionerRole when the
+// source has enough structured data to justify it (organization present),
+// fall back to display-only when it doesn't (see the sibling
+// _NeverEmpty/_RequesterFromPerformer tests above, whose fixtures have no
+// organization and must keep resolving to a bare display reference).
+func TestDeclarativeEngine_Medication_RequesterFromAuthor_RichData_EmitsPractitionerRole(t *testing.T) {
+	entries := []cdadocument.CDAEntry{
+		{
+			EntryType:  "substanceAdministration",
+			MoodCode:   "INT",
+			StatusCode: "active",
+			Authors: []cdadocument.CDAAuthor{
+				{
+					AssignedAuthor: cdadocument.CDAAssignedAuthor{
+						Ids: []cdadocument.CDAII{{Root: "2.16.840.1.113883.4.6", Extension: "1013027903"}},
+						Addresses: []cdadocument.CDAAddress{
+							{StreetLines: []string{"1000 W SOUTH RD SUITE 110"}, City: "LAFAYETTE", State: "CO", PostalCode: "80026", Country: "USA"},
+						},
+						Telecoms:       []cdadocument.CDATelecom{{Value: "tel:+1-303-415-4355"}},
+						AssignedPerson: &cdadocument.CDAPerson{Names: []cdadocument.CDAName{{Given: []string{"Herman"}, Family: "Damek"}}},
+						RepresentedOrganization: &cdadocument.CDAOrganization{
+							Ids: []cdadocument.CDAII{{Root: "1.2.840.114350.1.13.549.2.7.2.688879", Extension: "41800"}},
+						},
+					},
+				},
+			},
+		},
+	}
+	resources := buildMedicationResources(t, entries)
+
+	var medReq, practitionerRole map[string]interface{}
+	for _, r := range resources {
+		switch r["resourceType"] {
+		case "MedicationRequest":
+			medReq = r
+		case "PractitionerRole":
+			practitionerRole = r
+		}
+	}
+	if medReq == nil {
+		t.Fatalf("expected a MedicationRequest among resources, got %+v", resources)
+	}
+	if practitionerRole == nil {
+		t.Fatalf("expected an emitted PractitionerRole among resources (rich author data should produce one), got %+v", resources)
+	}
+	requesterRef, ok := medReq["requester"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("MedicationRequest.requester not set: %v", medReq["requester"])
+	}
+	if _, hasDisplay := requesterRef["display"]; hasDisplay {
+		t.Errorf("requester = %v, want a PractitionerRole reference, not a display-only fallback", requesterRef)
+	}
+	if ref, _ := requesterRef["reference"].(string); ref == "" {
+		t.Error("requester.reference must point at the emitted PractitionerRole")
+	}
+}
+
+// TestDeclarativeEngine_Medication_RequesterPriority_AuthorOverPerformer
+// proves the priority swap found by checking HL7's C-CDA on FHIR IG
+// directly (CF-medications.html's Medication Activity mapping table lists
+// "/author -> .requester", not /performer) -- this codebase originally
+// inherited "performer, else author" from medication_mapper.go, which this
+// fix reverses. Both performer and author are present here with only a
+// name (no organization data, so neither rich PractitionerRole tier fires
+// -- see TestDeclarativeEngine_Medication_RequesterFromAuthor_RichData_
+// EmitsPractitionerRole above for that case), isolating the display-only
+// fallback row's own SourcePath/FallbackPaths order as what this test
+// actually exercises.
+func TestDeclarativeEngine_Medication_RequesterPriority_AuthorOverPerformer(t *testing.T) {
+	entries := []cdadocument.CDAEntry{
+		{
+			EntryType:  "substanceAdministration",
+			MoodCode:   "INT",
+			StatusCode: "active",
+			Performers: []cdadocument.CDAPerformer{
+				{
+					AssignedEntity: cdadocument.CDAAssignedEntity{
+						AssignedPerson: &cdadocument.CDAPerson{
+							Names: []cdadocument.CDAName{{Given: []string{"Performer"}, Family: "Person"}},
+						},
+					},
+				},
+			},
+			Authors: []cdadocument.CDAAuthor{
+				{
+					AssignedAuthor: cdadocument.CDAAssignedAuthor{
+						AssignedPerson: &cdadocument.CDAPerson{
+							Names: []cdadocument.CDAName{{Given: []string{"Author"}, Family: "Person"}},
+						},
+					},
+				},
+			},
+		},
+	}
+	resources := buildMedicationResources(t, entries)
+	if len(resources) != 1 {
+		t.Fatalf("expected 1 MedicationRequest, got %d", len(resources))
+	}
+	requester, ok := resources[0]["requester"].(map[string]interface{})
+	if !ok {
+		t.Fatal("MedicationRequest.requester not set")
+	}
+	if requester["display"] != "Author Person" {
+		t.Errorf("requester.display = %v, want %q (author must win over performer per the IG)", requester["display"], "Author Person")
+	}
+}
+
+// TestDeclarativeEngine_Medication_CommentActivity_SetsNote proves the
+// MedicationRequest.note / MedicationStatement.note mapping HL7's C-CDA on
+// FHIR IG specifies (CF-medications.html: Comment Activity, code 48767-8,
+// via entryRelationship -> .note as an Annotation) but this codebase had no
+// row for at all. typeCode="COMP" matches this exact 99397 CCD sample's own
+// real (non-medication) Comment Activity usage -- see
+// commentActivityTemplateID's doc comment.
+func TestDeclarativeEngine_Medication_CommentActivity_SetsNote(t *testing.T) {
+	entries := []cdadocument.CDAEntry{
+		{
+			EntryType:  "substanceAdministration",
+			MoodCode:   "INT",
+			StatusCode: "active",
+			EntryRelationships: []cdadocument.CDAEntryRelationship{
+				{
+					TypeCode: "COMP",
+					Entry: cdadocument.CDAEntry{
+						EntryType:   "act",
+						TemplateIds: []string{"2.16.840.1.113883.10.20.22.4.64"},
+						Text:        "Patient reports occasional nausea after dosing.",
+					},
+				},
+			},
+		},
+	}
+	resources := buildMedicationResources(t, entries)
+	if len(resources) != 1 {
+		t.Fatalf("expected 1 MedicationRequest, got %d", len(resources))
+	}
+	notes, ok := resources[0]["note"].([]interface{})
+	if !ok || len(notes) != 1 {
+		t.Fatalf("expected 1 note, got %v", resources[0]["note"])
+	}
+	note, ok := notes[0].(map[string]interface{})
+	if !ok {
+		t.Fatalf("note[0] not a map: %v", notes[0])
+	}
+	if note["text"] != "Patient reports occasional nausea after dosing." {
+		t.Errorf("note[0].text = %v, want %q", note["text"], "Patient reports occasional nausea after dosing.")
+	}
+}
+
 // TestDeclarativeEngine_Medication_OrderIntent_SetsIntentOrder is a
 // regression test for a real gap a 747-file sample_ccdas corpus run found:
 // medicationRequestFields() never wrote MedicationRequest.intent (1..1
@@ -573,6 +730,37 @@ func TestDeclarativeEngine_Medication_OrderIntent_RequesterFallback_NeverEmpty(t
 	}
 	if display, _ := requester["display"].(string); display == "" {
 		t.Error("requester.display must not be empty")
+	}
+}
+
+// TestDeclarativeEngine_Medication_IdFromEntry_SetsIdentifier proves a real
+// production gap found in a 99397 CCD sample (Epic source): every one of
+// its 10 medication entries has its own substanceAdministration <id>, but
+// neither MedicationRequest nor MedicationStatement ever carried an
+// identifier in the output before medicationCommonRows() gained this row.
+func TestDeclarativeEngine_Medication_IdFromEntry_SetsIdentifier(t *testing.T) {
+	entries := []cdadocument.CDAEntry{
+		{
+			EntryType:  "substanceAdministration",
+			MoodCode:   "INT",
+			StatusCode: "active",
+			Id:         []cdadocument.CDAII{{Root: "1.2.840.114350.1.13.549.2.7.2.798268", Extension: "57530535"}},
+		},
+	}
+	resources := buildMedicationResources(t, entries)
+	if len(resources) != 1 {
+		t.Fatalf("expected 1 MedicationRequest, got %d", len(resources))
+	}
+	idents, ok := resources[0]["identifier"].([]interface{})
+	if !ok || len(idents) != 1 {
+		t.Fatalf("expected 1 identifier, got %v", resources[0]["identifier"])
+	}
+	ident, ok := idents[0].(map[string]interface{})
+	if !ok {
+		t.Fatalf("identifier[0] not a map: %v", idents[0])
+	}
+	if ident["value"] != "57530535" {
+		t.Errorf("identifier[0].value = %v, want 57530535", ident["value"])
 	}
 }
 
@@ -642,6 +830,59 @@ func TestDeclarativeEngine_Medication_RSONIndication_SetsReasonCode(t *testing.T
 	coding := firstCoding(t, reasons[0])
 	if coding["code"] != "38341003" {
 		t.Errorf("reasonCode coding = %v, want SNOMED 38341003 (Hypertension)", coding)
+	}
+}
+
+// TestDeclarativeEngine_Medication_RSONIndication_TextFallbackFromEntryText
+// proves a real production gap found in a 99397 CCD sample (Epic source):
+// the RSON indication observation's own <value code="67882000"
+// codeSystem="2.16.840.1.113883.6.96".../> carried no displayName/
+// originalText at all (neither did the entry's own <code>), so
+// CDAValueToFHIR's CodeableConcept came back as a bare code with no .text
+// -- but the SAME entry's own <text>Vulvar itching<reference
+// value="#indication10"/></text> resolves to "Vulvar itching" via the
+// standard "#id" reference mechanism (cda/document/section_parser.go),
+// sitting unused. declarativeValueOrCodeToCodeableConcept now falls back to
+// entry.Text when the value/code branch produced no .text of its own.
+func TestDeclarativeEngine_Medication_RSONIndication_TextFallbackFromEntryText(t *testing.T) {
+	entries := []cdadocument.CDAEntry{
+		{
+			EntryType:  "substanceAdministration",
+			MoodCode:   "INT",
+			StatusCode: "active",
+			EntryRelationships: []cdadocument.CDAEntryRelationship{
+				{
+					TypeCode: "RSON",
+					Entry: cdadocument.CDAEntry{
+						EntryType: "observation",
+						Text:      "Vulvar itching", // simulates the post-resolution state; section_parser.go's own resolution is tested separately.
+						Value: &cdadocument.CDAValue{
+							Type: "CD",
+							Code: &cdadocument.CDACode{Code: "67882000", CodeSystem: "2.16.840.1.113883.6.96"}, // no DisplayName/OriginalText, matching the real source.
+						},
+					},
+				},
+			},
+		},
+	}
+	resources := buildMedicationResources(t, entries)
+	if len(resources) != 1 {
+		t.Fatalf("expected 1 MedicationRequest, got %d", len(resources))
+	}
+	reasons, ok := resources[0]["reasonCode"].([]interface{})
+	if !ok || len(reasons) != 1 {
+		t.Fatalf("expected 1 reasonCode from the RSON indication, got %v", resources[0]["reasonCode"])
+	}
+	cc, ok := reasons[0].(map[string]interface{})
+	if !ok {
+		t.Fatalf("reasonCode[0] not a CodeableConcept-shaped map: %v", reasons[0])
+	}
+	if cc["text"] != "Vulvar itching" {
+		t.Errorf("reasonCode[0].text = %v, want %q (fallback from entry.Text)", cc["text"], "Vulvar itching")
+	}
+	coding := firstCoding(t, cc)
+	if coding["code"] != "67882000" {
+		t.Errorf("coding[0].code = %v, want 67882000 unchanged", coding["code"])
 	}
 }
 
@@ -816,6 +1057,283 @@ func TestDeclarativeEngine_Condition_SeverityFromNestedSUBJObservation(t *testin
 	}
 }
 
+// TestDeclarativeEngine_Condition_RecorderFromProblemObservationAuthor proves
+// the Problem Observation's own <author> (entry.Authors, parsed generically
+// for every CDA entry by entry_parser.go, distinct from header.Authors)
+// reaches Condition.recorder. Per the HL7 C-CDA on FHIR IG's Problems mapping
+// page: "/entryRelationship[@typeCode='SUBJ']/observation/author" ->
+// ".recorder" -- the nested observation's author, not the outer Concern
+// Act's, which is why Authors is set on the SUBJ-nested entry below, not the
+// outer act.
+func TestDeclarativeEngine_Condition_RecorderFromProblemObservationAuthor(t *testing.T) {
+	entries := []cdadocument.CDAEntry{
+		{
+			EntryType:  "act",
+			StatusCode: "active",
+			EntryRelationships: []cdadocument.CDAEntryRelationship{
+				{
+					TypeCode: "SUBJ",
+					Entry: cdadocument.CDAEntry{
+						EntryType:  "observation",
+						StatusCode: "active",
+						Value: &cdadocument.CDAValue{
+							Type: "CD",
+							Code: &cdadocument.CDACode{Code: "38341003", DisplayName: "Hypertension", CodeSystem: "2.16.840.1.113883.6.96"},
+						},
+						Authors: []cdadocument.CDAAuthor{
+							{
+								AssignedAuthor: cdadocument.CDAAssignedAuthor{
+									Ids: []cdadocument.CDAII{{Root: "1.2.840.114350.1.13.549.2.7.1.1133", Extension: "534704989"}},
+									AssignedPerson: &cdadocument.CDAPerson{
+										Names: []cdadocument.CDAName{{Given: []string{"Chloe"}, Family: "Herbst"}},
+									},
+									RepresentedOrganization: &cdadocument.CDAOrganization{
+										Names: []string{"Mumbai Community Health and Affiliates"},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	documentMap := documentMapForEntries(t, "problems", entries)
+	engine := cdafhir.NewDeclarativeEngine()
+	resources, errs := engine.BuildResources(documentMap, cdafhir.ProblemsMappingRules()[0])
+	if len(errs) != 0 {
+		t.Fatalf("unexpected errors: %+v", errs)
+	}
+
+	// assignedEntityRoleRow emits PractitionerRole+Practitioner+Organization
+	// alongside Condition itself (same multi-resource shape
+	// TestDeclarativeEngine_CareTeam_BuildsCareTeamAndPractitioner already
+	// exercises for an identical EmitAsResource nesting) -- find each by
+	// resourceType rather than asserting a single-element slice.
+	var condition, practitionerRole, practitioner, organization map[string]interface{}
+	for _, r := range resources {
+		switch r["resourceType"] {
+		case "Condition":
+			condition = r
+		case "PractitionerRole":
+			practitionerRole = r
+		case "Practitioner":
+			practitioner = r
+		case "Organization":
+			organization = r
+		}
+	}
+	if condition == nil {
+		t.Fatalf("expected a Condition resource, got %d resources: %v", len(resources), resources)
+	}
+	if practitioner == nil {
+		t.Fatal("expected a Practitioner resource built from the Problem Observation's author")
+	}
+	if organization == nil {
+		t.Fatal("expected an Organization resource built from the author's representedOrganization")
+	}
+	if practitionerRole == nil {
+		t.Fatal("expected a PractitionerRole resource linking the Practitioner and Organization")
+	}
+
+	recorderRef, ok := condition["recorder"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected Condition.recorder to be set, got %v", condition["recorder"])
+	}
+	wantRef := "PractitionerRole/" + practitionerRole["id"].(string)
+	if recorderRef["reference"] != wantRef {
+		t.Errorf("Condition.recorder.reference = %v, want %v", recorderRef["reference"], wantRef)
+	}
+
+	name := firstElement(t, practitioner["name"]).(map[string]interface{})
+	if name["family"] != "Herbst" {
+		t.Errorf("Practitioner.name[0].family = %v, want Herbst", name["family"])
+	}
+	if organization["name"] != "Mumbai Community Health and Affiliates" {
+		t.Errorf("Organization.name = %v, want %q", organization["name"], "Mumbai Community Health and Affiliates")
+	}
+}
+
+// TestDeclarativeEngine_Condition_RecorderFallback_BarePractitioner_NoOrganization
+// proves a real production gap: a 99397 CCD sample (Epic source) has, on
+// every one of its 5 Active Problems' Problem Observation <author>, an NPI
+// id and NO representedOrganization at all -- assignedEntityRoleRow's own
+// EmitAsResourceRequiredPaths=["organization"] gate discarded the WHOLE
+// recorder reference (PractitionerRole and its nested Practitioner) for
+// all 5, with no fallback before barePractitionerRow existed. This fixture
+// mirrors that exact shape (NPI present, RepresentedOrganization absent).
+func TestDeclarativeEngine_Condition_RecorderFallback_BarePractitioner_NoOrganization(t *testing.T) {
+	entries := []cdadocument.CDAEntry{
+		{
+			EntryType:  "act",
+			StatusCode: "active",
+			EntryRelationships: []cdadocument.CDAEntryRelationship{
+				{
+					TypeCode: "SUBJ",
+					Entry: cdadocument.CDAEntry{
+						EntryType:  "observation",
+						StatusCode: "active",
+						Value: &cdadocument.CDAValue{
+							Type: "CD",
+							Code: &cdadocument.CDACode{Code: "40930008", DisplayName: "Hypothyroidism", CodeSystem: "2.16.840.1.113883.6.96"},
+						},
+						Authors: []cdadocument.CDAAuthor{
+							{
+								AssignedAuthor: cdadocument.CDAAssignedAuthor{
+									Ids: []cdadocument.CDAII{{Root: "2.16.840.1.113883.4.6", Extension: "1013027903"}},
+									AssignedPerson: &cdadocument.CDAPerson{
+										Names: []cdadocument.CDAName{{Given: []string{"Herman"}, Family: "Damek"}},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	documentMap := documentMapForEntries(t, "problems", entries)
+	engine := cdafhir.NewDeclarativeEngine()
+	resources, errs := engine.BuildResources(documentMap, cdafhir.ProblemsMappingRules()[0])
+	if len(errs) != 0 {
+		t.Fatalf("unexpected errors: %+v", errs)
+	}
+
+	var condition, practitioner map[string]interface{}
+	for _, r := range resources {
+		switch r["resourceType"] {
+		case "Condition":
+			condition = r
+		case "Practitioner":
+			practitioner = r
+		case "PractitionerRole":
+			t.Fatalf("expected NO PractitionerRole (no organization data) -- got one: %v", r)
+		}
+	}
+	if condition == nil {
+		t.Fatalf("expected a Condition resource, got %d resources: %v", len(resources), resources)
+	}
+	if practitioner == nil {
+		t.Fatal("expected a bare Practitioner resource built from the author despite no representedOrganization")
+	}
+
+	recorderRef, ok := condition["recorder"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected Condition.recorder to be set via the fallback tier, got %v", condition["recorder"])
+	}
+	wantRef := "Practitioner/" + practitioner["id"].(string)
+	if recorderRef["reference"] != wantRef {
+		t.Errorf("Condition.recorder.reference = %v, want %v", recorderRef["reference"], wantRef)
+	}
+	ident := firstElement(t, practitioner["identifier"]).(map[string]interface{})
+	if ident["value"] != "1013027903" {
+		t.Errorf("Practitioner.identifier[0].value = %v, want the NPI 1013027903", ident["value"])
+	}
+}
+
+// TestDeclarativeEngine_Condition_RecordedDate_FromAuthorTime proves the
+// Condition.recordedDate mapping HL7's C-CDA on FHIR IG specifies
+// (CF-problems.html: "/author/time -> .recordedDate") but this codebase
+// never implemented at all, despite every one of the 99397 sample's 5
+// Active Problems carrying a real <author><time .../></author>.
+func TestDeclarativeEngine_Condition_RecordedDate_FromAuthorTime(t *testing.T) {
+	entries := []cdadocument.CDAEntry{
+		{
+			EntryType:  "act",
+			StatusCode: "active",
+			EntryRelationships: []cdadocument.CDAEntryRelationship{
+				{
+					TypeCode: "SUBJ",
+					Entry: cdadocument.CDAEntry{
+						EntryType:  "observation",
+						StatusCode: "active",
+						Value: &cdadocument.CDAValue{
+							Type: "CD",
+							Code: &cdadocument.CDACode{Code: "40930008", DisplayName: "Hypothyroidism", CodeSystem: "2.16.840.1.113883.6.96"},
+						},
+						Authors: []cdadocument.CDAAuthor{
+							{
+								Time:           cdadocument.CDATime{Value: "20240109124916-0700"},
+								AssignedAuthor: cdadocument.CDAAssignedAuthor{},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	documentMap := documentMapForEntries(t, "problems", entries)
+	engine := cdafhir.NewDeclarativeEngine()
+	resources, errs := engine.BuildResources(documentMap, cdafhir.ProblemsMappingRules()[0])
+	if len(errs) != 0 {
+		t.Fatalf("unexpected errors: %+v", errs)
+	}
+	if len(resources) != 1 {
+		t.Fatalf("expected 1 Condition, got %d", len(resources))
+	}
+	recordedDate, _ := resources[0]["recordedDate"].(string)
+	if recordedDate == "" {
+		t.Fatal("expected Condition.recordedDate to be set from the Problem Observation author's <time>")
+	}
+}
+
+// TestDeclarativeEngine_Condition_NoteActivity_SetsNote proves the
+// Condition.note mapping for C-CDA's Note Activity (templateId
+// 2.16.840.1.113883.10.20.22.4.202, code 34109-9 "Note"), attached to the
+// Concern Act (not the Problem Observation) via entryRelationship
+// typeCode=COMP -- a real gap found in the 99397 sample, where 4 of its 5
+// Active Problems carry a substantive provider overview note never
+// captured anywhere before this row existed.
+func TestDeclarativeEngine_Condition_NoteActivity_SetsNote(t *testing.T) {
+	entries := []cdadocument.CDAEntry{
+		{
+			EntryType:  "act",
+			StatusCode: "active",
+			EntryRelationships: []cdadocument.CDAEntryRelationship{
+				{
+					TypeCode: "SUBJ",
+					Entry: cdadocument.CDAEntry{
+						EntryType:  "observation",
+						StatusCode: "active",
+						Value: &cdadocument.CDAValue{
+							Type: "CD",
+							Code: &cdadocument.CDACode{Code: "40930008", DisplayName: "Hypothyroidism", CodeSystem: "2.16.840.1.113883.6.96"},
+						},
+					},
+				},
+				{
+					TypeCode: "COMP",
+					Entry: cdadocument.CDAEntry{
+						EntryType:   "act",
+						TemplateIds: []string{"2.16.840.1.113883.10.20.22.4.202"},
+						Text:        "last labs looked good, refilled current dosing.",
+					},
+				},
+			},
+		},
+	}
+	documentMap := documentMapForEntries(t, "problems", entries)
+	engine := cdafhir.NewDeclarativeEngine()
+	resources, errs := engine.BuildResources(documentMap, cdafhir.ProblemsMappingRules()[0])
+	if len(errs) != 0 {
+		t.Fatalf("unexpected errors: %+v", errs)
+	}
+	if len(resources) != 1 {
+		t.Fatalf("expected 1 Condition, got %d", len(resources))
+	}
+	notes, ok := resources[0]["note"].([]interface{})
+	if !ok || len(notes) != 1 {
+		t.Fatalf("expected 1 note, got %v", resources[0]["note"])
+	}
+	note, ok := notes[0].(map[string]interface{})
+	if !ok {
+		t.Fatalf("note[0] not a map: %v", notes[0])
+	}
+	if note["text"] != "last labs looked good, refilled current dosing." {
+		t.Errorf("note[0].text = %v, want %q", note["text"], "last labs looked good, refilled current dosing.")
+	}
+}
+
 func TestDeclarativeEngine_Condition_ProblemListItem_UsesBaseCodeSystem(t *testing.T) {
 	entries := []cdadocument.CDAEntry{
 		{EntryType: "act", StatusCode: "active", Value: &cdadocument.CDAValue{Type: "CD", Code: &cdadocument.CDACode{Code: "38341003"}}},
@@ -850,7 +1368,8 @@ func TestDeclarativeEngine_Condition_HealthConcern_UsesUSCoreCodeSystemAndCode(t
 	}
 	documentMap := documentMapForEntries(t, "healthConcerns", entries)
 	engine := cdafhir.NewDeclarativeEngine()
-	resources, errs := engine.BuildResources(documentMap, cdafhir.HealthConcernsMappingRules()[0])
+	// [1] is conditionRule — [0] is the new assessment scale Observation rule.
+	resources, errs := engine.BuildResources(documentMap, cdafhir.HealthConcernsMappingRules()[1])
 	if len(errs) != 0 {
 		t.Fatalf("unexpected errors: %+v", errs)
 	}
@@ -910,6 +1429,83 @@ func TestDeclarativeEngine_VitalSigns_NonBPValue_SetCorrectly(t *testing.T) {
 	coding := firstCoding(t, cats[0])
 	if coding["code"] != "vital-signs" {
 		t.Errorf("category coding = %v, want code=vital-signs", coding)
+	}
+}
+
+func TestDeclarativeEngine_VitalSigns_Performer_OrganizationOnly_EmitsPractitionerRole(t *testing.T) {
+	// Real gap found auditing the 99397 sample's Vital Signs section
+	// (LOINC 8716-3): every author there has a representedOrganization
+	// with a real name + address + id and NO assignedPerson. The old row
+	// (cda_name_or_literal_to_display_ref) produced only a bare display
+	// string, discarding the organization's identifier/address data.
+	entries := []cdadocument.CDAEntry{
+		{
+			EntryType:  "observation",
+			StatusCode: "completed",
+			Code:       cdadocument.CDACode{Code: "8302-2", CodeSystem: "2.16.840.1.113883.6.1", DisplayName: "Body height"},
+			Value:      &cdadocument.CDAValue{Type: "PQ", Quantity: &cdadocument.CDAQuantity{Value: "162.6", Unit: "cm"}},
+			Authors: []cdadocument.CDAAuthor{
+				{
+					AssignedAuthor: cdadocument.CDAAssignedAuthor{
+						RepresentedOrganization: &cdadocument.CDAOrganization{
+							Ids:   []cdadocument.CDAII{{Root: "1.2.840.114350.1.13.549.2.7.2.688879", Extension: "41800"}},
+							Names: []string{"mumbai Community Health and Affiliates"},
+						},
+					},
+				},
+			},
+		},
+	}
+	documentMap := documentMapForEntries(t, "vitalSigns", entries)
+	engine := cdafhir.NewDeclarativeEngine()
+	resources, errs := engine.BuildResources(documentMap, cdafhir.VitalSignsMappingRules()[0])
+	if len(errs) != 0 {
+		t.Fatalf("unexpected errors: %+v", errs)
+	}
+	if len(resources) != 3 {
+		t.Fatalf("expected 3 resources (Observation + emitted PractitionerRole + emitted Organization), got %d: %+v", len(resources), resources)
+	}
+
+	var obs, role, org map[string]interface{}
+	for _, r := range resources {
+		switch r["resourceType"] {
+		case "Observation":
+			obs = r
+		case "PractitionerRole":
+			role = r
+		case "Organization":
+			org = r
+		}
+	}
+	if obs == nil {
+		t.Fatalf("expected an Observation resource, got: %+v", resources)
+	}
+	if org == nil {
+		t.Fatalf("expected an emitted Organization, got: %+v", resources)
+	}
+	if org["name"] != "mumbai Community Health and Affiliates" {
+		t.Errorf("organization.name = %v, want mumbai Community Health and Affiliates", org["name"])
+	}
+	if role == nil {
+		t.Fatalf("expected an emitted PractitionerRole (organization-only degrade), got: %+v", resources)
+	}
+	if _, hasPractitioner := role["practitioner"]; hasPractitioner {
+		t.Errorf("expected NO practitioner field on an organization-only PractitionerRole, got %v", role["practitioner"])
+	}
+	orgRef, _ := role["organization"].(map[string]interface{})
+	wantOrgRef := "Organization/" + org["id"].(string)
+	if orgRef["reference"] != wantOrgRef {
+		t.Errorf("PractitionerRole.organization.reference = %v, want %v", orgRef, wantOrgRef)
+	}
+
+	performer, _ := obs["performer"].([]interface{})
+	if len(performer) != 1 {
+		t.Fatalf("expected 1 performer, got %v", obs["performer"])
+	}
+	perfRef, _ := performer[0].(map[string]interface{})
+	wantRef := "PractitionerRole/" + role["id"].(string)
+	if perfRef["reference"] != wantRef {
+		t.Errorf("performer[0].reference = %v, want %v (a real PractitionerRole reference, not a display string)", perfRef, wantRef)
 	}
 }
 
@@ -1058,6 +1654,100 @@ func TestDeclarativeEngine_Results_InterpretationCode_DirectChild_SetsInterpreta
 	}
 }
 
+func TestDeclarativeEngine_Results_ReferenceRangeText_SetsReferenceRange(t *testing.T) {
+	// Real gap found auditing Results (Ascension Wisconsin sample,
+	// CCD_06_24_20267.xml): every one of its 46 lab Observations carries a
+	// real free-text reference range (e.g. "4.0 - 10.0 Thou/uL") via
+	// <referenceRange><observationRange><text>, parsed nowhere before this.
+	entries := []cdadocument.CDAEntry{
+		{
+			EntryType:          "observation",
+			StatusCode:         "completed",
+			Code:               cdadocument.CDACode{Code: "6690-2", CodeSystem: "2.16.840.1.113883.6.1", DisplayName: "WBC"},
+			Value:              &cdadocument.CDAValue{Type: "PQ", Quantity: &cdadocument.CDAQuantity{Value: "1.5", Unit: "Thou/uL"}},
+			InterpretationCode: cdadocument.CDACode{Code: "L"},
+			ReferenceRangeText: "4.0 - 10.0 Thou/uL",
+		},
+	}
+	documentMap := documentMapForEntries(t, "results", entries)
+	engine := cdafhir.NewDeclarativeEngine()
+	resources, errs := engine.BuildResources(documentMap, cdafhir.ResultsMappingRules()[0])
+	if len(errs) != 0 {
+		t.Fatalf("unexpected errors: %+v", errs)
+	}
+	if len(resources) != 1 {
+		t.Fatalf("expected 1 Observation, got %d", len(resources))
+	}
+	rr, _ := resources[0]["referenceRange"].([]interface{})
+	if len(rr) != 1 {
+		t.Fatalf("expected 1 referenceRange entry, got %d (%v)", len(rr), resources[0]["referenceRange"])
+	}
+	rrMap, _ := rr[0].(map[string]interface{})
+	if rrMap["text"] != "4.0 - 10.0 Thou/uL" {
+		t.Errorf("referenceRange[0].text = %v, want %q", rrMap["text"], "4.0 - 10.0 Thou/uL")
+	}
+}
+
+func TestDeclarativeEngine_Results_NullFlavorCodeWithOriginalText_StillEmitted(t *testing.T) {
+	// Real gap found auditing Results (Marshfield sample, CCD_05_15_2026.xml):
+	// a full cytology/pathology report (real diagnosis text, signing
+	// pathologist, date) has code.nullFlavor="UNK" with no LOINC code, but a
+	// real <originalText> label -- was being discarded entirely by
+	// SkipIfCodeNullFlavor before this fix. Confirmed via a real engine run
+	// that this exact shape produced 0 Observations from that file's Results
+	// section.
+	entries := []cdadocument.CDAEntry{
+		{
+			EntryType:  "observation",
+			StatusCode: "completed",
+			Code: cdadocument.CDACode{
+				NullFlavor:   "UNK",
+				OriginalText: "Thin Prep, PAP and HPV if ASCUS",
+			},
+			Value: &cdadocument.CDAValue{Type: "ST", Text: "Heading: CYTOLOGY REPORT..."},
+		},
+	}
+	documentMap := documentMapForEntries(t, "results", entries)
+	engine := cdafhir.NewDeclarativeEngine()
+	resources, errs := engine.BuildResources(documentMap, cdafhir.ResultsMappingRules()[0])
+	if len(errs) != 0 {
+		t.Fatalf("unexpected errors: %+v", errs)
+	}
+	if len(resources) != 1 {
+		t.Fatalf("expected 1 Observation to survive (real content, just no LOINC code), got %d", len(resources))
+	}
+	code, _ := resources[0]["code"].(map[string]interface{})
+	if code["text"] != "Thin Prep, PAP and HPV if ASCUS" {
+		t.Errorf("code.text = %v, want the originalText label", code["text"])
+	}
+}
+
+func TestDeclarativeEngine_Results_NullFlavorCodeNoOriginalText_StillDiscarded(t *testing.T) {
+	// Regression guard for the fix above: a genuinely-empty placeholder shell
+	// (real shape: Dignity Health's "No data available for this section"
+	// Results entry -- bare <code nullFlavor="NI"/>, no originalText at all)
+	// must still be discarded, same as the Functional Status .4.69
+	// Assessment Scale shells this guard was originally written for (also a
+	// bare <code nullFlavor="UNK"/> with no originalText).
+	entries := []cdadocument.CDAEntry{
+		{
+			EntryType:  "observation",
+			StatusCode: "completed",
+			Code:       cdadocument.CDACode{NullFlavor: "NI"},
+			Value:      &cdadocument.CDAValue{NullFlavor: "NI"},
+		},
+	}
+	documentMap := documentMapForEntries(t, "results", entries)
+	engine := cdafhir.NewDeclarativeEngine()
+	resources, errs := engine.BuildResources(documentMap, cdafhir.ResultsMappingRules()[0])
+	if len(errs) != 0 {
+		t.Fatalf("unexpected errors: %+v", errs)
+	}
+	if len(resources) != 0 {
+		t.Fatalf("expected the code-less, content-less shell to still be discarded, got %d resources", len(resources))
+	}
+}
+
 func TestDeclarativeEngine_SocialHistory_SmokingStatus_ValueCodeableConcept(t *testing.T) {
 	// Mirrors Kareo's real smoking-status entry: SNOMED 266927001 "Unknown
 	// if ever smoked" via a CD value.
@@ -1093,6 +1783,179 @@ func TestDeclarativeEngine_SocialHistory_SmokingStatus_ValueCodeableConcept(t *t
 	catCoding := firstCoding(t, cats[0])
 	if catCoding["code"] != "social-history" {
 		t.Errorf("category coding = %v, want code=social-history", catCoding)
+	}
+}
+
+// TestDeclarativeEngine_SocialHistory_SDOH_AssessmentScaleFanOut mirrors the
+// 99397 sample's real HARK domestic-violence screening shape: a Social
+// History Observation shell (templateId .4.38, generic code "8689-2") with
+// NO value of its own, SPRT-nesting an Assessment Scale Observation
+// (templateId .4.69, "HARK questionnaire", interpretationCode "Low Risk")
+// which COMP-nests two Assessment Scale Supporting Observations (templateId
+// .4.86, the actual question/answer pairs with their own author). Before
+// this fix, only the shell was read -- 14 of 24 real Social History entries
+// in that document produced an identical, valueless Observation each. This
+// proves all three tiers now emit as independent Observation resources
+// linked via hasMember[], per the spec-conformant SPRT/COMP nesting
+// confirmed against HL7's C-CDA on FHIR IG and the local CDAR2_IG_CCDA_CLINNOTES
+// spec PDF.
+//
+// The first supporting observation's author (person name, no
+// representedOrganization) also exercises the performer tiered upgrade
+// applied alongside the Vital Signs performer fix: barePractitionerRow's
+// fallback tier fires (assignedEntityRoleRow's own organization-required
+// gate has nothing to match), emitting a real Practitioner sub-resource
+// instead of the old bare display string -- hence 5 resources, not 4.
+func TestDeclarativeEngine_SocialHistory_SDOH_AssessmentScaleFanOut(t *testing.T) {
+	entries := []cdadocument.CDAEntry{
+		{
+			EntryType:  "observation",
+			StatusCode: "completed",
+			Code:       cdadocument.CDACode{Code: "8689-2", DisplayName: "History of Social function", CodeSystem: "2.16.840.1.113883.6.1"},
+			EntryRelationships: []cdadocument.CDAEntryRelationship{
+				{
+					TypeCode: "SPRT",
+					Entry: cdadocument.CDAEntry{
+						EntryType:         "observation",
+						TemplateIds:       []string{"2.16.840.1.113883.10.20.22.4.69"},
+						StatusCode:        "completed",
+						Code:              cdadocument.CDACode{Code: "76499-3", DisplayName: "Humiliation, Afraid, Rape, and Kick questionnaire [HARK]"},
+						Value:             &cdadocument.CDAValue{Type: "CD", Code: &cdadocument.CDACode{NullFlavor: "UNK"}},
+						InterpretationCode: cdadocument.CDACode{NullFlavor: "OTH", OriginalText: "Not At Risk"},
+						EntryRelationships: []cdadocument.CDAEntryRelationship{
+							{
+								TypeCode: "COMP",
+								Entry: cdadocument.CDAEntry{
+									EntryType:   "observation",
+									TemplateIds: []string{"2.16.840.1.113883.10.20.22.4.86"},
+									StatusCode:  "completed",
+									Code:        cdadocument.CDACode{Code: "76501-6", DisplayName: "Within the last year, have you been afraid of your partner or ex-partner?"},
+									Value:       &cdadocument.CDAValue{Type: "CD", Code: &cdadocument.CDACode{Code: "LA32-8", DisplayName: "No", CodeSystem: "2.16.840.1.113883.6.1"}},
+									Authors: []cdadocument.CDAAuthor{
+										{AssignedAuthor: cdadocument.CDAAssignedAuthor{AssignedPerson: &cdadocument.CDAPerson{Names: []cdadocument.CDAName{{Given: []string{"Generic"}, Family: "Mychart"}}}}},
+									},
+								},
+							},
+							{
+								TypeCode: "COMP",
+								Entry: cdadocument.CDAEntry{
+									EntryType:   "observation",
+									TemplateIds: []string{"2.16.840.1.113883.10.20.22.4.86"},
+									StatusCode:  "completed",
+									Code:        cdadocument.CDACode{Code: "76500-8", DisplayName: "Within the last year, have you been humiliated or emotionally abused in other ways by your partner or ex-partner?"},
+									Value:       &cdadocument.CDAValue{Type: "CD", Code: &cdadocument.CDACode{Code: "LA32-8", DisplayName: "No", CodeSystem: "2.16.840.1.113883.6.1"}},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	documentMap := documentMapForEntries(t, "socialHistory", entries)
+	engine := cdafhir.NewDeclarativeEngine()
+	resources, errs := engine.BuildResources(documentMap, cdafhir.SocialHistoryMappingRules()[0])
+	if len(errs) != 0 {
+		t.Fatalf("unexpected errors: %+v", errs)
+	}
+	if len(resources) != 5 {
+		t.Fatalf("expected 5 resources (shell + assessment scale + 2 supporting + 1 emitted Practitioner), got %d: %+v", len(resources), resources)
+	}
+
+	var practitioners []map[string]interface{}
+	for _, r := range resources {
+		if r["resourceType"] == "Practitioner" {
+			practitioners = append(practitioners, r)
+		}
+	}
+	if len(practitioners) != 1 {
+		t.Fatalf("expected exactly 1 emitted Practitioner (from the first supporting observation's author), got %d: %+v", len(practitioners), practitioners)
+	}
+
+	// Identify Observation resources by their code's coding[0].code --
+	// robust regardless of emission order.
+	byCode := map[string]map[string]interface{}{}
+	for _, r := range resources {
+		if r["resourceType"] != "Observation" {
+			continue
+		}
+		cc, _ := r["code"].(map[string]interface{})
+		coding, _ := cc["coding"].([]interface{})
+		if len(coding) == 0 {
+			continue
+		}
+		first, _ := coding[0].(map[string]interface{})
+		code, _ := first["code"].(string)
+		byCode[code] = r
+	}
+
+	shellObs, ok := byCode["8689-2"]
+	if !ok {
+		t.Fatalf("expected the shell Observation (code 8689-2), got resources: %+v", resources)
+	}
+	shellMembers, ok := shellObs["hasMember"].([]interface{})
+	if !ok || len(shellMembers) != 1 {
+		t.Fatalf("shell hasMember = %v, want a 1-element array", shellObs["hasMember"])
+	}
+
+	scaleObs, ok := byCode["76499-3"]
+	if !ok {
+		t.Fatalf("expected the Assessment Scale Observation (code 76499-3, HARK questionnaire), got resources: %+v", resources)
+	}
+	wantShellRef := "Observation/" + scaleObs["id"].(string)
+	shellRef, _ := shellMembers[0].(map[string]interface{})
+	if shellRef["reference"] != wantShellRef {
+		t.Errorf("shell hasMember[0].reference = %v, want %v", shellRef["reference"], wantShellRef)
+	}
+	interp, _ := scaleObs["interpretation"].([]interface{})
+	if len(interp) == 0 {
+		t.Error("expected Assessment Scale Observation.interpretation to be set from interpretationCode")
+	}
+	if _, hasValue := scaleObs["valueCodeableConcept"]; hasValue {
+		t.Errorf("expected NO valueCodeableConcept (source value is nullFlavor=UNK), got %v", scaleObs["valueCodeableConcept"])
+	}
+
+	scaleMembers, ok := scaleObs["hasMember"].([]interface{})
+	if !ok || len(scaleMembers) != 2 {
+		t.Fatalf("Assessment Scale Observation hasMember = %v, want a 2-element array", scaleObs["hasMember"])
+	}
+
+	q1, ok := byCode["76501-6"]
+	if !ok {
+		t.Fatalf("expected the first Assessment Scale Supporting Observation (code 76501-6), got resources: %+v", resources)
+	}
+	answer, _ := q1["valueCodeableConcept"].(map[string]interface{})
+	answerCoding := firstCoding(t, answer)
+	if answerCoding["code"] != "LA32-8" {
+		t.Errorf("first question's answer coding = %v, want code=LA32-8", answerCoding)
+	}
+	performer, _ := q1["performer"].([]interface{})
+	if len(performer) == 0 {
+		t.Fatal("expected the first Assessment Scale Supporting Observation to have a performer from its author")
+	}
+	perfRef, _ := performer[0].(map[string]interface{})
+	wantPerfRef := "Practitioner/" + practitioners[0]["id"].(string)
+	if perfRef["reference"] != wantPerfRef {
+		t.Errorf("first question's performer[0].reference = %v, want %v (a real Practitioner reference, not a display string)", perfRef, wantPerfRef)
+	}
+
+	q2, ok := byCode["76500-8"]
+	if !ok {
+		t.Fatalf("expected the second Assessment Scale Supporting Observation (code 76500-8), got resources: %+v", resources)
+	}
+	if q2["category"] == nil {
+		t.Error("expected the second question's category to be set")
+	}
+
+	wantScaleMember0 := "Observation/" + q1["id"].(string)
+	wantScaleMember1 := "Observation/" + q2["id"].(string)
+	gotRefs := map[string]bool{}
+	for _, m := range scaleMembers {
+		ref, _ := m.(map[string]interface{})
+		gotRefs[ref["reference"].(string)] = true
+	}
+	if !gotRefs[wantScaleMember0] || !gotRefs[wantScaleMember1] {
+		t.Errorf("Assessment Scale Observation hasMember refs = %v, want both %v and %v", scaleMembers, wantScaleMember0, wantScaleMember1)
 	}
 }
 
@@ -1138,6 +2001,222 @@ func TestDeclarativeEngine_FunctionalStatus_UsesUSCoreCategorySystem(t *testing.
 	}
 }
 
+// TestDeclarativeEngine_FunctionalStatus_CodeTextFromNarrativeOverridesGenericCode
+// proves observationRule()'s code.text row fixes a real production gap:
+// some EHR vendors (Epic, this session's 99397 CCD corpus) repeat one
+// generic LOINC code (54522-8 "Functional status") across many unrelated
+// Functional Status entries, so cda_code_to_codeable_concept's own code.text
+// (the code's DisplayName) gives no way to tell entries apart. entry.Text
+// (resolved by cda/document/section_parser.go's resolveEntryRefs/walkForIDs
+// to exactly the text at the referenced "#id" -- the standard, reliable
+// part of CDA narrative reference resolution, no inference about narrative
+// structure layered on top, deliberately, since that structure isn't
+// standardized across vendors) is set here directly to simulate a
+// successful resolution; section_parser.go's own resolution mechanics are
+// tested separately in that package. Without this row, every such
+// Observation's code.text reads "Functional status" regardless of what the
+// value actually means.
+func TestDeclarativeEngine_FunctionalStatus_CodeTextFromNarrativeOverridesGenericCode(t *testing.T) {
+	entries := []cdadocument.CDAEntry{
+		{
+			EntryType:  "observation",
+			StatusCode: "completed",
+			Code:       cdadocument.CDACode{Code: "54522-8", CodeSystem: "2.16.840.1.113883.6.1", DisplayName: "Functional status"},
+			Text:       "Height", // simulates the post-resolution state; section_parser.go's own resolution is tested separately.
+			Value: &cdadocument.CDAValue{
+				Type: "ST",
+				Text: "64",
+			},
+		},
+	}
+	documentMap := documentMapForEntries(t, "functionalStatus", entries)
+	engine := cdafhir.NewDeclarativeEngine()
+	resources, errs := engine.BuildResources(documentMap, cdafhir.FunctionalStatusMappingRules()[0])
+	if len(errs) != 0 {
+		t.Fatalf("unexpected errors: %+v", errs)
+	}
+	if len(resources) != 1 {
+		t.Fatalf("expected 1 Observation, got %d", len(resources))
+	}
+	code, ok := resources[0]["code"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected Observation.code to be set, got %v", resources[0]["code"])
+	}
+	if code["text"] != "Height" {
+		t.Errorf("code.text = %v, want %q (the resolved narrative reference, not the generic LOINC display)", code["text"], "Height")
+	}
+	coding := firstCoding(t, code)
+	if coding["code"] != "54522-8" {
+		t.Errorf("coding[0].code = %v, want 54522-8 unchanged (only .text should be overridden)", coding["code"])
+	}
+	if resources[0]["valueString"] != "64" {
+		t.Errorf("valueString = %v, want 64", resources[0]["valueString"])
+	}
+}
+
+// TestDeclarativeEngine_FunctionalStatus_NoNarrativeText_KeepsCodeDisplay
+// proves the new row is a no-op (never blanks code.text) when entry.Text is
+// empty -- declarative_engine.go's applyRow skips writing anything when
+// SourcePath resolves to nothing.
+func TestDeclarativeEngine_FunctionalStatus_NoNarrativeText_KeepsCodeDisplay(t *testing.T) {
+	entries := []cdadocument.CDAEntry{
+		{
+			EntryType:  "observation",
+			StatusCode: "completed",
+			Code:       cdadocument.CDACode{Code: "75626-2", CodeSystem: "2.16.840.1.113883.6.1", DisplayName: "Total score [AUDIT-C]"},
+			Value: &cdadocument.CDAValue{
+				Type: "INT",
+				Integer: func() *int { v := 1; return &v }(),
+			},
+		},
+	}
+	documentMap := documentMapForEntries(t, "functionalStatus", entries)
+	engine := cdafhir.NewDeclarativeEngine()
+	resources, errs := engine.BuildResources(documentMap, cdafhir.FunctionalStatusMappingRules()[0])
+	if len(errs) != 0 {
+		t.Fatalf("unexpected errors: %+v", errs)
+	}
+	if len(resources) != 1 {
+		t.Fatalf("expected 1 Observation, got %d", len(resources))
+	}
+	code, ok := resources[0]["code"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected Observation.code to be set, got %v", resources[0]["code"])
+	}
+	if code["text"] != "Total score [AUDIT-C]" {
+		t.Errorf("code.text = %v, want the original display unchanged (no narrative text to override with)", code["text"])
+	}
+}
+
+// TestDeclarativeEngine_FunctionalStatus_AssessmentScaleCompChildren_SurviveNullFlavorShell
+// reproduces the real gap found auditing the 99397 sample's Functional
+// Status section: its "Alcohol Use" entry is an Assessment Scale Observation
+// (templateId .4.69) sitting DIRECTLY as a top-level section entry (unlike
+// Social History, where this template nests one level deeper under a
+// SPRT-linked shell) with code.nullFlavor="UNK" (non-conformant -- the IG
+// requires code+value both [1..1] here) and THREE COMP-nested Assessment
+// Scale Supporting Observations (templateId .4.86, AUDIT-C Q1/Q2/Q3) that
+// each carry a real LOINC code + value. Before the fix (buildOneResource
+// checking SkipIfCodeNullFlavor before Fields ran at all), the entire entry
+// -- shell AND all 3 real question/answer children -- was silently
+// discarded. confirmed in the actual parsed FHIR output, which had zero
+// trace of any AUDIT-C question.
+func TestDeclarativeEngine_FunctionalStatus_AssessmentScaleCompChildren_SurviveNullFlavorShell(t *testing.T) {
+	entries := []cdadocument.CDAEntry{
+		{
+			EntryType:  "observation",
+			StatusCode: "completed",
+			TemplateIds: []string{"2.16.840.1.113883.10.20.22.4.69"},
+			Code:       cdadocument.CDACode{NullFlavor: "UNK"},
+			Value:      &cdadocument.CDAValue{Type: "CD", Code: &cdadocument.CDACode{NullFlavor: "UNK"}},
+			EntryRelationships: []cdadocument.CDAEntryRelationship{
+				{
+					TypeCode: "COMP",
+					Entry: cdadocument.CDAEntry{
+						EntryType:   "observation",
+						TemplateIds: []string{"2.16.840.1.113883.10.20.22.4.86"},
+						StatusCode:  "completed",
+						Code:        cdadocument.CDACode{Code: "68518-0", DisplayName: "How often do you have a drink containing alcohol?", CodeSystem: "2.16.840.1.113883.6.1"},
+						Value:       &cdadocument.CDAValue{Type: "CD", Code: &cdadocument.CDACode{Code: "LA18926-8", DisplayName: "Monthly or less", CodeSystem: "2.16.840.1.113883.6.1"}},
+					},
+				},
+				{
+					TypeCode: "COMP",
+					Entry: cdadocument.CDAEntry{
+						EntryType:   "observation",
+						TemplateIds: []string{"2.16.840.1.113883.10.20.22.4.86"},
+						StatusCode:  "completed",
+						Code:        cdadocument.CDACode{Code: "68519-8", DisplayName: "How many standard drinks containing alcohol do you have on a typical day?", CodeSystem: "2.16.840.1.113883.6.1"},
+						Value:       &cdadocument.CDAValue{Type: "CD", Code: &cdadocument.CDACode{Code: "LA15694-5", DisplayName: "1 or 2", CodeSystem: "2.16.840.1.113883.6.1"}},
+					},
+				},
+				{
+					TypeCode: "COMP",
+					Entry: cdadocument.CDAEntry{
+						EntryType:   "observation",
+						TemplateIds: []string{"2.16.840.1.113883.10.20.22.4.86"},
+						StatusCode:  "completed",
+						Code:        cdadocument.CDACode{Code: "68520-6", DisplayName: "How often do you have 6 or more drinks on 1 occasion?", CodeSystem: "2.16.840.1.113883.6.1"},
+						Value:       &cdadocument.CDAValue{Type: "CD", Code: &cdadocument.CDACode{Code: "LA6270-8", DisplayName: "Never", CodeSystem: "2.16.840.1.113883.6.1"}},
+					},
+				},
+			},
+		},
+		// A sibling Functional Status Observation (.4.67, real fixed code
+		// 54522-8) in the same section -- proves the fix doesn't disturb
+		// the normal, already-working case alongside the null-coded shell.
+		{
+			EntryType:  "observation",
+			StatusCode: "completed",
+			Code:       cdadocument.CDACode{Code: "54522-8", CodeSystem: "2.16.840.1.113883.6.1", DisplayName: "Functional status"},
+			Value:      &cdadocument.CDAValue{Type: "ST", Text: "64"},
+		},
+	}
+	documentMap := documentMapForEntries(t, "functionalStatus", entries)
+	engine := cdafhir.NewDeclarativeEngine()
+	resources, errs := engine.BuildResources(documentMap, cdafhir.FunctionalStatusMappingRules()[0])
+	if len(errs) != 0 {
+		t.Fatalf("unexpected errors: %+v", errs)
+	}
+	// 3 AUDIT-C question Observations + 1 Functional Status Observation (the
+	// sibling). The null-coded "Alcohol Use" shell itself must NOT appear.
+	if len(resources) != 4 {
+		t.Fatalf("expected 4 resources (3 AUDIT-C questions + 1 sibling Height entry, shell excluded), got %d: %+v", len(resources), resources)
+	}
+
+	byCode := map[string]map[string]interface{}{}
+	for _, r := range resources {
+		if r["resourceType"] != "Observation" {
+			t.Errorf("unexpected non-Observation resource: %+v", r)
+			continue
+		}
+		cc, _ := r["code"].(map[string]interface{})
+		if cc == nil {
+			t.Errorf("expected every surviving Observation to carry a real code (the null-coded shell must be excluded), got %+v", r)
+			continue
+		}
+		coding, _ := cc["coding"].([]interface{})
+		if len(coding) == 0 {
+			continue
+		}
+		first, _ := coding[0].(map[string]interface{})
+		code, _ := first["code"].(string)
+		byCode[code] = r
+	}
+
+	for wantCode, wantAnswerCode := range map[string]string{
+		"68518-0": "LA18926-8",
+		"68519-8": "LA15694-5",
+		"68520-6": "LA6270-8",
+	} {
+		q, ok := byCode[wantCode]
+		if !ok {
+			t.Fatalf("expected AUDIT-C question Observation code=%s to survive, got resources: %+v", wantCode, resources)
+		}
+		answer, _ := q["valueCodeableConcept"].(map[string]interface{})
+		answerCoding := firstCoding(t, answer)
+		if answerCoding["code"] != wantAnswerCode {
+			t.Errorf("question %s answer coding = %v, want code=%s", wantCode, answerCoding, wantAnswerCode)
+		}
+		cats, _ := q["category"].([]interface{})
+		if len(cats) == 0 {
+			t.Errorf("question %s: expected category to be set to functional-status, got none", wantCode)
+		} else {
+			catCoding := firstCoding(t, cats[0])
+			if catCoding["code"] != "functional-status" {
+				t.Errorf("question %s category coding = %v, want code=functional-status (not social-history)", wantCode, catCoding)
+			}
+		}
+	}
+
+	if _, stillThere := byCode[""]; stillThere {
+		t.Error("the null-coded 'Alcohol Use' shell observation must not survive as its own resource")
+	}
+	if _, ok := byCode["54522-8"]; !ok {
+		t.Errorf("expected the sibling Functional Status Observation (54522-8) to still be mapped, got resources: %+v", resources)
+	}
+}
+
 func TestDeclarativeEngine_MentalStatus_UsesUSCoreCategorySystem(t *testing.T) {
 	entries := []cdadocument.CDAEntry{
 		{
@@ -1169,6 +2248,121 @@ func TestDeclarativeEngine_MentalStatus_UsesUSCoreCategorySystem(t *testing.T) {
 	}
 	if catCoding["display"] != "Cognitive Status" {
 		t.Errorf("category coding display = %v, want 'Cognitive Status'", catCoding["display"])
+	}
+}
+
+// TestDeclarativeEngine_MentalStatus_AssessmentScaleCompChildren_SurviveNullFlavorShell
+// mirrors TestDeclarativeEngine_FunctionalStatus_AssessmentScaleCompChildren_
+// SurviveNullFlavorShell exactly (same templateIds, same COMP nesting), using
+// an MMSE-style shape -- the IG's own named example for this template
+// (CDAR2_IG_CCDA_CLINNOTES_R1_DSTU2.1_2015AUG_Vol2, Table 232: "Mini-Mental
+// Status Exam (assesses cognitive function)"). Unlike the Functional Status
+// version, this is NOT reproducing a real corpus finding (no real Mental
+// Status sample available this session uses Assessment Scale Observation at
+// all) -- it's IG-evidence-only, added after explicit user sign-off; see
+// MentalStatusMappingRules' own doc comment for the full IG citation.
+func TestDeclarativeEngine_MentalStatus_AssessmentScaleCompChildren_SurviveNullFlavorShell(t *testing.T) {
+	q1Answer := 5
+	q2Answer := 4
+	entries := []cdadocument.CDAEntry{
+		{
+			EntryType:   "observation",
+			StatusCode:  "completed",
+			TemplateIds: []string{"2.16.840.1.113883.10.20.22.4.69"},
+			Code:        cdadocument.CDACode{NullFlavor: "UNK"},
+			Value:       &cdadocument.CDAValue{Type: "CD", Code: &cdadocument.CDACode{NullFlavor: "UNK"}},
+			EntryRelationships: []cdadocument.CDAEntryRelationship{
+				{
+					TypeCode: "COMP",
+					Entry: cdadocument.CDAEntry{
+						EntryType:   "observation",
+						TemplateIds: []string{"2.16.840.1.113883.10.20.22.4.86"},
+						StatusCode:  "completed",
+						Code:        cdadocument.CDACode{Code: "71492-3", DisplayName: "What is the year, season, date, day, month? [MMSE]", CodeSystem: "2.16.840.1.113883.6.1"},
+						Value:       &cdadocument.CDAValue{Type: "INT", Integer: &q1Answer},
+					},
+				},
+				{
+					TypeCode: "COMP",
+					Entry: cdadocument.CDAEntry{
+						EntryType:   "observation",
+						TemplateIds: []string{"2.16.840.1.113883.10.20.22.4.86"},
+						StatusCode:  "completed",
+						Code:        cdadocument.CDACode{Code: "71493-1", DisplayName: "What is the state, county, town, hospital, floor? [MMSE]", CodeSystem: "2.16.840.1.113883.6.1"},
+						Value:       &cdadocument.CDAValue{Type: "INT", Integer: &q2Answer},
+					},
+				},
+			},
+		},
+		// A sibling plain Mental Status Observation (.4.74) in the same
+		// section -- proves the fix doesn't disturb the normal,
+		// already-working case alongside the null-coded shell.
+		{
+			EntryType:  "observation",
+			StatusCode: "completed",
+			Code:       cdadocument.CDACode{Code: "58144-5", CodeSystem: "2.16.840.1.113883.6.1", DisplayName: "Mental status"},
+			Value:      &cdadocument.CDAValue{Type: "CD", Code: &cdadocument.CDACode{Code: "248234008", DisplayName: "Alert", CodeSystem: "2.16.840.1.113883.6.96"}},
+		},
+	}
+	documentMap := documentMapForEntries(t, "mentalStatus", entries)
+	engine := cdafhir.NewDeclarativeEngine()
+	resources, errs := engine.BuildResources(documentMap, cdafhir.MentalStatusMappingRules()[0])
+	if len(errs) != 0 {
+		t.Fatalf("unexpected errors: %+v", errs)
+	}
+	// 2 MMSE question Observations + 1 sibling Mental Status Observation.
+	// The null-coded shell itself must NOT appear.
+	if len(resources) != 3 {
+		t.Fatalf("expected 3 resources (2 MMSE questions + 1 sibling, shell excluded), got %d: %+v", len(resources), resources)
+	}
+
+	byCode := map[string]map[string]interface{}{}
+	for _, r := range resources {
+		if r["resourceType"] != "Observation" {
+			t.Errorf("unexpected non-Observation resource: %+v", r)
+			continue
+		}
+		cc, _ := r["code"].(map[string]interface{})
+		if cc == nil {
+			t.Errorf("expected every surviving Observation to carry a real code (the null-coded shell must be excluded), got %+v", r)
+			continue
+		}
+		coding, _ := cc["coding"].([]interface{})
+		if len(coding) == 0 {
+			continue
+		}
+		first, _ := coding[0].(map[string]interface{})
+		code, _ := first["code"].(string)
+		byCode[code] = r
+	}
+
+	for wantCode, wantAnswer := range map[string]float64{
+		"71492-3": 5,
+		"71493-1": 4,
+	} {
+		q, ok := byCode[wantCode]
+		if !ok {
+			t.Fatalf("expected MMSE question Observation code=%s to survive, got resources: %+v", wantCode, resources)
+		}
+		if q["valueInteger"] != wantAnswer {
+			t.Errorf("question %s valueInteger = %v, want %v", wantCode, q["valueInteger"], wantAnswer)
+		}
+		cats, _ := q["category"].([]interface{})
+		if len(cats) == 0 {
+			t.Errorf("question %s: expected category to be set to cognitive-status, got none", wantCode)
+		} else {
+			catCoding := firstCoding(t, cats[0])
+			if catCoding["code"] != "cognitive-status" {
+				t.Errorf("question %s category coding = %v, want code=cognitive-status (not functional-status/social-history)", wantCode, catCoding)
+			}
+		}
+	}
+
+	if _, stillThere := byCode[""]; stillThere {
+		t.Error("the null-coded Assessment Scale shell observation must not survive as its own resource")
+	}
+	if _, ok := byCode["58144-5"]; !ok {
+		t.Errorf("expected the sibling Mental Status Observation (58144-5) to still be mapped, got resources: %+v", resources)
 	}
 }
 
@@ -1326,6 +2520,11 @@ func TestDeclarativeEngine_Immunization_NegationIndWithRefusalReason_SetsStatusR
 }
 
 func TestDeclarativeEngine_Immunization_Performer_ReadFromPerformersField(t *testing.T) {
+	// Updated for the performer PractitionerRole/Practitioner upgrade: a
+	// performer with a person name but NO representedOrganization now
+	// falls back to a bare Practitioner reference (not a display-only
+	// string) -- see ImmunizationMappingRules' barePractitionerRow fallback
+	// tier doc comment.
 	entries := []cdadocument.CDAEntry{
 		{
 			EntryType:  "substanceAdministration",
@@ -1351,16 +2550,216 @@ func TestDeclarativeEngine_Immunization_Performer_ReadFromPerformersField(t *tes
 	if len(errs) != 0 {
 		t.Fatalf("unexpected errors: %+v", errs)
 	}
+
+	var immunization, practitioner map[string]interface{}
+	for _, r := range resources {
+		switch r["resourceType"] {
+		case "Immunization":
+			immunization = r
+		case "Practitioner":
+			practitioner = r
+		case "PractitionerRole":
+			t.Fatalf("expected NO PractitionerRole (no organization data) -- got one: %v", r)
+		}
+	}
+	if immunization == nil {
+		t.Fatalf("expected an Immunization resource, got %d resources: %v", len(resources), resources)
+	}
+	if practitioner == nil {
+		t.Fatal("expected a bare Practitioner resource built from the performer despite no representedOrganization")
+	}
+
+	performers, ok := immunization["performer"].([]interface{})
+	if !ok || len(performers) != 1 {
+		t.Fatalf("performer = %v, want a 1-element array", immunization["performer"])
+	}
+	performer0, _ := performers[0].(map[string]interface{})
+	actor, _ := performer0["actor"].(map[string]interface{})
+	wantRef := "Practitioner/" + practitioner["id"].(string)
+	if actor["reference"] != wantRef {
+		t.Errorf("performer[0].actor.reference = %v, want %v", actor["reference"], wantRef)
+	}
+	name := firstElement(t, practitioner["name"]).(map[string]interface{})
+	if name["family"] != "Doe" {
+		t.Errorf("Practitioner.name[0].family = %v, want %q", name["family"], "Doe")
+	}
+
+	function, _ := performer0["function"].(map[string]interface{})
+	coding := firstCoding(t, function)
+	if coding["code"] != "AP" {
+		t.Errorf("performer[0].function coding = %v, want code AP", coding)
+	}
+}
+
+// TestDeclarativeEngine_Immunization_Performer_OrganizationOnly_EmitsPractitionerRole
+// mirrors the COMMON real shape found in 11 of the 99397 sample's 13
+// Immunization Activity entries: a /performer/assignedEntity with a
+// representedOrganization carrying only a plain <name> (e.g. "COSWI58") and
+// NO assignedPerson at all. Per buildEmittedSubResource's len<=1 gate, the
+// nested Practitioner sub-resource never gets enough fields set to survive,
+// so the PractitionerRole ends up referencing JUST the Organization -- this
+// proves that degrade-gracefully path actually produces a usable resource
+// (not nothing), which the OLD display-only row would have produced
+// nothing for (its Scope required an assignedPerson name to resolve at
+// all).
+func TestDeclarativeEngine_Immunization_Performer_OrganizationOnly_EmitsPractitionerRole(t *testing.T) {
+	entries := []cdadocument.CDAEntry{
+		{
+			EntryType:  "substanceAdministration",
+			StatusCode: "completed",
+			Consumable: &cdadocument.CDAConsumable{
+				ManufacturedProduct: cdadocument.CDAManufacturedProduct{
+					ManufacturedMaterial: &cdadocument.CDAMaterial{Code: cdadocument.CDACode{Code: "150", CodeSystem: "2.16.840.1.113883.12.292"}},
+				},
+			},
+			Performers: []cdadocument.CDAPerformer{
+				{
+					TypeCode: "PRF",
+					AssignedEntity: cdadocument.CDAAssignedEntity{
+						RepresentedOrganization: &cdadocument.CDAOrganization{Names: []string{"COSWI58"}},
+					},
+				},
+			},
+		},
+	}
+	documentMap := documentMapForEntries(t, "immunizations", entries)
+	engine := cdafhir.NewDeclarativeEngine()
+	resources, errs := engine.BuildResources(documentMap, cdafhir.ImmunizationMappingRules()[0])
+	if len(errs) != 0 {
+		t.Fatalf("unexpected errors: %+v", errs)
+	}
+
+	var immunization, practitionerRole, organization map[string]interface{}
+	for _, r := range resources {
+		switch r["resourceType"] {
+		case "Immunization":
+			immunization = r
+		case "PractitionerRole":
+			practitionerRole = r
+		case "Organization":
+			organization = r
+		case "Practitioner":
+			t.Fatalf("expected NO Practitioner (no assignedPerson) -- got one: %v", r)
+		}
+	}
+	if immunization == nil {
+		t.Fatalf("expected an Immunization resource, got %d resources: %v", len(resources), resources)
+	}
+	if practitionerRole == nil {
+		t.Fatal("expected a PractitionerRole referencing the organization despite no assignedPerson")
+	}
+	if organization == nil {
+		t.Fatal("expected an Organization resource for the representedOrganization")
+	}
+	if practitionerRole["practitioner"] != nil {
+		t.Errorf("PractitionerRole.practitioner = %v, want absent (no assignedPerson)", practitionerRole["practitioner"])
+	}
+	orgRef, _ := practitionerRole["organization"].(map[string]interface{})
+	wantRef := "Organization/" + organization["id"].(string)
+	if orgRef["reference"] != wantRef {
+		t.Errorf("PractitionerRole.organization.reference = %v, want %v", orgRef["reference"], wantRef)
+	}
+	if organization["name"] != "COSWI58" {
+		t.Errorf("Organization.name = %v, want %q", organization["name"], "COSWI58")
+	}
+
+	performers, ok := immunization["performer"].([]interface{})
+	if !ok || len(performers) != 1 {
+		t.Fatalf("performer = %v, want a 1-element array", immunization["performer"])
+	}
+	performer0, _ := performers[0].(map[string]interface{})
+	actor, _ := performer0["actor"].(map[string]interface{})
+	wantActorRef := "PractitionerRole/" + practitionerRole["id"].(string)
+	if actor["reference"] != wantActorRef {
+		t.Errorf("performer[0].actor.reference = %v, want %v", actor["reference"], wantActorRef)
+	}
+}
+
+// TestDeclarativeEngine_Immunization_Recorded_FromAuthorTime proves the
+// Immunization.recorded mapping HL7's C-CDA on FHIR IG specifies
+// (CF-immunizations.md: "/author/time -> .recorded") but this codebase
+// never implemented at all, despite every one of the 99397 sample's 13
+// Immunization Activity entries carrying a real <author><time .../></author>.
+func TestDeclarativeEngine_Immunization_Recorded_FromAuthorTime(t *testing.T) {
+	entries := []cdadocument.CDAEntry{
+		{
+			EntryType:  "substanceAdministration",
+			StatusCode: "completed",
+			Consumable: &cdadocument.CDAConsumable{
+				ManufacturedProduct: cdadocument.CDAManufacturedProduct{
+					ManufacturedMaterial: &cdadocument.CDAMaterial{Code: cdadocument.CDACode{Code: "150", CodeSystem: "2.16.840.1.113883.12.292"}},
+				},
+			},
+			Authors: []cdadocument.CDAAuthor{
+				{Time: cdadocument.CDATime{Value: "20240109094729-0700"}},
+			},
+		},
+	}
+	documentMap := documentMapForEntries(t, "immunizations", entries)
+	engine := cdafhir.NewDeclarativeEngine()
+	resources, errs := engine.BuildResources(documentMap, cdafhir.ImmunizationMappingRules()[0])
+	if len(errs) != 0 {
+		t.Fatalf("unexpected errors: %+v", errs)
+	}
 	if len(resources) != 1 {
 		t.Fatalf("expected 1 Immunization, got %d", len(resources))
 	}
-	performers, ok := resources[0]["performer"].([]interface{})
-	if !ok || len(performers) != 1 {
-		t.Fatalf("performer = %v, want a 1-element array", resources[0]["performer"])
+	recorded, _ := resources[0]["recorded"].(string)
+	if recorded == "" {
+		t.Fatal("expected Immunization.recorded to be set from the author's <time>")
 	}
-	actor, _ := performers[0].(map[string]interface{})["actor"].(map[string]interface{})
-	if actor["display"] != "Jane Doe" {
-		t.Errorf("performer[0].actor.display = %v, want \"Jane Doe\"", actor["display"])
+}
+
+// TestDeclarativeEngine_Immunization_CommentActivity_SetsNote proves the
+// Immunization.note mapping for C-CDA's Comment Activity (templateId
+// 2.16.840.1.113883.10.20.22.4.64, code 48767-8), attached via
+// entryRelationship typeCode=COMP -- an IG-specified mapping
+// (CF-immunizations.md) added here with NO real-data evidence in the 99397
+// sample (all 13 Immunization Activity entries there have zero
+// entryRelationships), unlike Medication.note/Condition.note which were
+// both evidenced. This test proves the row works structurally per the IG
+// citation alone.
+func TestDeclarativeEngine_Immunization_CommentActivity_SetsNote(t *testing.T) {
+	entries := []cdadocument.CDAEntry{
+		{
+			EntryType:  "substanceAdministration",
+			StatusCode: "completed",
+			Consumable: &cdadocument.CDAConsumable{
+				ManufacturedProduct: cdadocument.CDAManufacturedProduct{
+					ManufacturedMaterial: &cdadocument.CDAMaterial{Code: cdadocument.CDACode{Code: "150", CodeSystem: "2.16.840.1.113883.12.292"}},
+				},
+			},
+			EntryRelationships: []cdadocument.CDAEntryRelationship{
+				{
+					TypeCode: "COMP",
+					Entry: cdadocument.CDAEntry{
+						EntryType:   "act",
+						TemplateIds: []string{"2.16.840.1.113883.10.20.22.4.64"},
+						Text:        "Vaccine administered without incident.",
+					},
+				},
+			},
+		},
+	}
+	documentMap := documentMapForEntries(t, "immunizations", entries)
+	engine := cdafhir.NewDeclarativeEngine()
+	resources, errs := engine.BuildResources(documentMap, cdafhir.ImmunizationMappingRules()[0])
+	if len(errs) != 0 {
+		t.Fatalf("unexpected errors: %+v", errs)
+	}
+	if len(resources) != 1 {
+		t.Fatalf("expected 1 Immunization, got %d", len(resources))
+	}
+	notes, ok := resources[0]["note"].([]interface{})
+	if !ok || len(notes) != 1 {
+		t.Fatalf("expected 1 note, got %v", resources[0]["note"])
+	}
+	note, ok := notes[0].(map[string]interface{})
+	if !ok {
+		t.Fatalf("note[0] not a map: %v", notes[0])
+	}
+	if note["text"] != "Vaccine administered without incident." {
+		t.Errorf("note[0].text = %v, want %q", note["text"], "Vaccine administered without incident.")
 	}
 }
 
@@ -1543,6 +2942,83 @@ func TestDeclarativeEngine_Encounter_Location_FromCOMPParticipantLOC(t *testing.
 	display, _ := loc["location"].(map[string]interface{})
 	if display["display"] != "Main Street Clinic" {
 		t.Errorf("location[0].location.display = %v, want \"Main Street Clinic\"", display["display"])
+	}
+}
+
+// TestDeclarativeEngine_Encounter_Location_FromDirectParticipantLOC covers
+// the real gap found auditing a real Ascension Wisconsin CCD's Plan-of-Care
+// section: a LOC participant directly on the entry, NOT wrapped in a COMP
+// entryRelationship -- the ScopeFallbacks added in V183 must also match
+// this shape.
+func TestDeclarativeEngine_Encounter_Location_FromDirectParticipantLOC(t *testing.T) {
+	entries := []cdadocument.CDAEntry{
+		{
+			EntryType:  "encounter",
+			StatusCode: "active",
+			Code:       cdadocument.CDACode{Code: "AMB"},
+			Participants: []cdadocument.CDAParticipant{
+				{
+					TypeCode: "LOC",
+					ParticipantRole: cdadocument.CDAParticipantRole{
+						PlayingEntity: &cdadocument.CDAPlayingEntity{Names: []cdadocument.CDAName{{Family: "Ascension Wisconsin Southeast"}}},
+					},
+				},
+			},
+		},
+	}
+	documentMap := documentMapForEntries(t, "encounters", entries)
+	engine := cdafhir.NewDeclarativeEngine()
+	resources, errs := engine.BuildResources(documentMap, cdafhir.EncounterMappingRules()[0])
+	if len(errs) != 0 {
+		t.Fatalf("unexpected errors: %+v", errs)
+	}
+	locArr, ok := resources[0]["location"].([]interface{})
+	if !ok || len(locArr) != 1 {
+		t.Fatalf("location = %v, want a 1-element array", resources[0]["location"])
+	}
+	loc, _ := locArr[0].(map[string]interface{})
+	display, _ := loc["location"].(map[string]interface{})
+	if display["display"] != "Ascension Wisconsin Southeast" {
+		t.Errorf("location[0].location.display = %v, want \"Ascension Wisconsin Southeast\"", display["display"])
+	}
+}
+
+// TestDeclarativeEngine_Encounter_PlannedMood_StatusIsPlanned covers the
+// real gap found in the same Ascension file: a moodCode=APT (booked future
+// visit) entry with statusCode="active" -- the same statusCode a completed
+// encounter would carry -- must resolve to FHIR status="planned", not the
+// "in-progress" encounter_status_to_fhir alone would produce.
+func TestDeclarativeEngine_Encounter_PlannedMood_StatusIsPlanned(t *testing.T) {
+	entries := []cdadocument.CDAEntry{
+		{EntryType: "encounter", MoodCode: "APT", StatusCode: "active", Code: cdadocument.CDACode{Code: "AMB"}},
+	}
+	documentMap := documentMapForEntries(t, "encounters", entries)
+	engine := cdafhir.NewDeclarativeEngine()
+	resources, errs := engine.BuildResources(documentMap, cdafhir.EncounterMappingRules()[0])
+	if len(errs) != 0 {
+		t.Fatalf("unexpected errors: %+v", errs)
+	}
+	if resources[0]["status"] != "planned" {
+		t.Errorf("status = %v, want \"planned\" (from moodCode=APT, not statusCode=active)", resources[0]["status"])
+	}
+}
+
+// TestDeclarativeEngine_Encounter_EventMood_StatusUnchangedFromStatusCode
+// confirms the EVN (completed) case is untouched by the new moodCode row --
+// it must fall through to the existing statusCode-based mapping exactly as
+// before V183.
+func TestDeclarativeEngine_Encounter_EventMood_StatusUnchangedFromStatusCode(t *testing.T) {
+	entries := []cdadocument.CDAEntry{
+		{EntryType: "encounter", MoodCode: "EVN", StatusCode: "active", Code: cdadocument.CDACode{Code: "AMB"}},
+	}
+	documentMap := documentMapForEntries(t, "encounters", entries)
+	engine := cdafhir.NewDeclarativeEngine()
+	resources, errs := engine.BuildResources(documentMap, cdafhir.EncounterMappingRules()[0])
+	if len(errs) != 0 {
+		t.Fatalf("unexpected errors: %+v", errs)
+	}
+	if resources[0]["status"] != "in-progress" {
+		t.Errorf("status = %v, want \"in-progress\" (statusCode=active, moodCode=EVN -- unchanged behavior)", resources[0]["status"])
 	}
 }
 
@@ -1781,6 +3257,70 @@ func TestDeclarativeEngine_PlanOfCare_ProposedObservation_BecomesServiceRequestW
 	}
 	if resources[0]["intent"] != "proposal" {
 		t.Errorf("intent = %v, want proposal (from moodCode=PRP)", resources[0]["intent"])
+	}
+}
+
+// TestDeclarativeEngine_PlanOfCare_PlannedAct_NullFlavorCode_FallsBackToEntryText
+// covers the real gap found auditing 2 independently-sourced real CCDs
+// (Marshfield Clinic, Dignity Health): a Planned Act (.4.39) entry's own
+// <code> is a bare nullFlavor="UNK" with no <originalText> at all -- the
+// real content lives in the entry's own sibling <text><reference .../></text>
+// instead, already resolved to plain text by the time the declarative
+// engine sees it. Before this fix, every one of these fell through to the
+// generic "Unknown" placeholder, discarding real narrative content.
+func TestDeclarativeEngine_PlanOfCare_PlannedAct_NullFlavorCode_FallsBackToEntryText(t *testing.T) {
+	entries := []cdadocument.CDAEntry{
+		{
+			EntryType:  "act",
+			MoodCode:   "INT",
+			StatusCode: "active",
+			Code:       cdadocument.CDACode{NullFlavor: "UNK"},
+			Text:       "Return to Clinic - Endocrinology 6/17/26",
+		},
+	}
+	documentMap := documentMapForEntries(t, "planOfTreatment", entries)
+	engine := cdafhir.NewDeclarativeEngine()
+	resources, errs := engine.BuildResourcesForRules(documentMap, cdafhir.PlanOfCareMappingRules())
+	if len(errs) != 0 {
+		t.Fatalf("unexpected errors: %+v", errs)
+	}
+	if len(resources) != 1 {
+		t.Fatalf("expected 1 resource, got %d", len(resources))
+	}
+	if resources[0]["resourceType"] != "ServiceRequest" {
+		t.Errorf("resourceType = %v, want ServiceRequest", resources[0]["resourceType"])
+	}
+	code, _ := resources[0]["code"].(map[string]interface{})
+	if code["text"] != "Return to Clinic - Endocrinology 6/17/26" {
+		t.Errorf("code.text = %v, want the resolved entry text, not the generic \"Unknown\" placeholder", code["text"])
+	}
+}
+
+// TestDeclarativeEngine_PlanOfCare_NullFlavorCode_NoEntryText_StillFallsBackToUnknown
+// confirms the "Unknown" placeholder still applies when there's truly
+// nothing else to use -- the new entry.text row must not turn a genuinely
+// empty code into a spurious empty code.text.
+func TestDeclarativeEngine_PlanOfCare_NullFlavorCode_NoEntryText_StillFallsBackToUnknown(t *testing.T) {
+	entries := []cdadocument.CDAEntry{
+		{
+			EntryType:  "act",
+			MoodCode:   "INT",
+			StatusCode: "active",
+			Code:       cdadocument.CDACode{NullFlavor: "UNK"},
+		},
+	}
+	documentMap := documentMapForEntries(t, "planOfTreatment", entries)
+	engine := cdafhir.NewDeclarativeEngine()
+	resources, errs := engine.BuildResourcesForRules(documentMap, cdafhir.PlanOfCareMappingRules())
+	if len(errs) != 0 {
+		t.Fatalf("unexpected errors: %+v", errs)
+	}
+	if len(resources) != 1 {
+		t.Fatalf("expected 1 resource, got %d", len(resources))
+	}
+	code, _ := resources[0]["code"].(map[string]interface{})
+	if code["text"] != "Unknown" {
+		t.Errorf("code.text = %v, want Unknown (no entry text available either)", code["text"])
 	}
 }
 
@@ -2638,6 +4178,224 @@ func TestDeclarativeEngine_LegalAuthenticator_NoAssignedPersonName_NoResource(t 
 	}
 }
 
+// ---- EncompassingEncounter Location (header-level) ----
+// No corpus fixture exercises componentOf/encompassingEncounter at all
+// (0/4 of cerner/kareo/mtuitive/practicefusion) -- same situation as
+// LegalAuthenticator/Patient, hand-built synthetic data only.
+
+func TestDeclarativeEngine_EncompassingEncounterLocation_BuildsLocation(t *testing.T) {
+	header := cdadocument.CDAHeader{
+		EncompassingEncounter: &cdadocument.CDAEncounter{
+			Location: &cdadocument.CDALocation{
+				HealthCareFacility: cdadocument.CDAHealthCareFacility{
+					Code: cdadocument.CDACode{
+						NullFlavor:  "UNK",
+						OriginalText: "Obstetrics and Gynecology",
+						Translations: []cdadocument.CDACode{
+							{Code: "42", CodeSystem: "1.2.840.114350.1.72.1.7.7.10.688867.4150", CodeSystemName: "Epic.DepartmentSpecialty", DisplayName: "Obstetrics & Gynecology"},
+						},
+					},
+					Location: &cdadocument.CDAPlace{
+						Names: []cdadocument.CDAName{{Family: "mumbai Women's Care mira road"}},
+						Addresses: []cdadocument.CDAAddress{{
+							Use:          "WP",
+							StreetLines:  []string{"101 mira road Parkway Ste 201B"},
+							City:         "mira road",
+							State:        "CO",
+							PostalCode:   "80511-4072",
+							Country:      "USA",
+						}},
+					},
+					ServiceProviderOrganization: &cdadocument.CDAOrganization{
+						Names: []string{"mumbai Women's Care"},
+						Ids:   []cdadocument.CDAII{{Root: "1.2.840.114350.1.13.549.2.7.2.696570", Extension: "103001002"}},
+					},
+				},
+			},
+		},
+	}
+	documentMap := documentMapForHeader(t, header)
+	engine := cdafhir.NewDeclarativeEngine()
+	resource, extra, errs := engine.BuildHeaderResource(documentMap, cdafhir.EncompassingEncounterLocationMappingRules()[0])
+	if len(errs) != 0 {
+		t.Fatalf("unexpected errors: %+v", errs)
+	}
+	if resource == nil {
+		t.Fatal("expected a Location resource")
+	}
+	if resource["resourceType"] != "Location" {
+		t.Errorf("resourceType = %v, want Location", resource["resourceType"])
+	}
+	// CDAPlace.Names is []CDAName (the HL7 PN datatype), not []string -- the
+	// row reads .family directly (see EncompassingEncounterLocationMappingRules'
+	// own row comment for why: parsePN lands unstructured facility-name text
+	// there, datatypes.go's own fallback comment).
+	if resource["name"] != "mumbai Women's Care mira road" {
+		t.Errorf("name = %v, want %q", resource["name"], "mumbai Women's Care mira road")
+	}
+	typeCC := firstElement(t, resource["type"]).(map[string]interface{})
+	codings := typeCC["coding"].([]interface{})
+	if len(codings) != 1 {
+		t.Fatalf("type[0].coding length = %d, want 1", len(codings))
+	}
+	coding := codings[0].(map[string]interface{})
+	if coding["display"] != "Obstetrics & Gynecology" {
+		t.Errorf("type[0].coding[0].display = %v, want %q", coding["display"], "Obstetrics & Gynecology")
+	}
+	addr, ok := resource["address"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("address = %v, want a single object (Location.address is 0..1, not an array)", resource["address"])
+	}
+	if addr["city"] != "mira road" {
+		t.Errorf("address.city = %v, want %q", addr["city"], "mira road")
+	}
+	if len(extra) != 1 {
+		t.Fatalf("expected exactly 1 extra resource (the emitted managingOrganization), got %d: %+v", len(extra), extra)
+	}
+	org := extra[0]
+	if org["resourceType"] != "Organization" {
+		t.Errorf("extra[0].resourceType = %v, want Organization", org["resourceType"])
+	}
+	if org["name"] != "mumbai Women's Care" {
+		t.Errorf("extra[0].name = %v, want %q", org["name"], "mumbai Women's Care")
+	}
+	managingOrg, ok := resource["managingOrganization"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("managingOrganization = %v, want a reference object", resource["managingOrganization"])
+	}
+	orgRef, _ := managingOrg["reference"].(string)
+	orgID, _ := org["id"].(string)
+	if orgRef != "Organization/"+orgID {
+		t.Errorf("managingOrganization.reference = %q, want %q", orgRef, "Organization/"+orgID)
+	}
+}
+
+func TestDeclarativeEngine_EncompassingEncounterLocation_Absent_NoResource(t *testing.T) {
+	documentMap := documentMapForHeader(t, cdadocument.CDAHeader{})
+	engine := cdafhir.NewDeclarativeEngine()
+	resource, _, errs := engine.BuildHeaderResource(documentMap, cdafhir.EncompassingEncounterLocationMappingRules()[0])
+	if len(errs) != 0 {
+		t.Fatalf("unexpected errors: %+v", errs)
+	}
+	if resource != nil {
+		t.Errorf("expected no resource (no encompassingEncounter present), got %v", resource)
+	}
+}
+
+func TestDeclarativeEngine_EncompassingEncounterLocation_NoName_NoResource(t *testing.T) {
+	header := cdadocument.CDAHeader{
+		EncompassingEncounter: &cdadocument.CDAEncounter{
+			Location: &cdadocument.CDALocation{
+				HealthCareFacility: cdadocument.CDAHealthCareFacility{
+					Code: cdadocument.CDACode{Code: "42"},
+				},
+			},
+		},
+	}
+	documentMap := documentMapForHeader(t, header)
+	engine := cdafhir.NewDeclarativeEngine()
+	resource, _, errs := engine.BuildHeaderResource(documentMap, cdafhir.EncompassingEncounterLocationMappingRules()[0])
+	if len(errs) != 0 {
+		t.Fatalf("unexpected errors: %+v", errs)
+	}
+	if resource != nil {
+		t.Errorf("expected no resource (RequiredPaths:[name] gate, no location.names), got %v", resource)
+	}
+}
+
+// ---- EncompassingEncounter -> Encounter (header-level) ----
+// Per the HL7 C-CDA on FHIR IG (verified via WebFetch 2026-06-27):
+// componentOf/encompassingEncounter always converts to a FHIR Encounter --
+// no RequiredPaths gate, unlike most other header rules. Consolidation with
+// a matching in-section Encounter is declarative_document_mapper.go's job
+// (see EncompassingEncounterMappingRules' own doc comment); these tests
+// cover only the per-rule engine mechanics.
+
+func TestDeclarativeEngine_EncompassingEncounter_AllFieldsMapped(t *testing.T) {
+	header := cdadocument.CDAHeader{
+		EncompassingEncounter: &cdadocument.CDAEncounter{
+			Id:                       cdadocument.CDAII{Root: "2.16.840.1.113883.19", Extension: "ENC-1"},
+			EffectiveTime:            cdadocument.CDATimeRange{Low: cdadocument.CDATime{Value: "20240101"}, High: cdadocument.CDATime{Value: "20240105"}},
+			DischargeDispositionCode: cdadocument.CDACode{Code: "01", DisplayName: "Discharged to home", CodeSystem: "2.16.840.1.113883.6.301.5"},
+		},
+	}
+	documentMap := documentMapForHeader(t, header)
+	engine := cdafhir.NewDeclarativeEngine()
+	resource, extra, errs := engine.BuildHeaderResource(documentMap, cdafhir.EncompassingEncounterMappingRules()[0])
+	if len(errs) != 0 {
+		t.Fatalf("unexpected errors: %+v", errs)
+	}
+	if len(extra) != 0 {
+		t.Fatalf("expected no extra resources, got %d", len(extra))
+	}
+	if resource == nil {
+		t.Fatal("expected an Encounter resource")
+	}
+	if resource["resourceType"] != "Encounter" {
+		t.Errorf("resourceType = %v, want Encounter", resource["resourceType"])
+	}
+	// No statusCode exists on CDAEncounter at all -- always falls through to
+	// the transform's own "unknown" default, same as EncounterMappingRules'
+	// own row for a nullFlavor entry.
+	if resource["status"] != "unknown" {
+		t.Errorf("status = %v, want unknown", resource["status"])
+	}
+	ident := firstElement(t, resource["identifier"]).(map[string]interface{})
+	if ident["value"] != "ENC-1" {
+		t.Errorf("identifier[0].value = %v, want ENC-1", ident["value"])
+	}
+	period, ok := resource["period"].(map[string]interface{})
+	if !ok || period["start"] == nil {
+		t.Errorf("period = %v, want a populated period", resource["period"])
+	}
+	hosp, ok := resource["hospitalization"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("hospitalization = %v, want an object", resource["hospitalization"])
+	}
+	dd, ok := hosp["dischargeDisposition"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("hospitalization.dischargeDisposition = %v, want a CodeableConcept", hosp["dischargeDisposition"])
+	}
+	coding := firstElement(t, dd["coding"]).(map[string]interface{})
+	if coding["display"] != "Discharged to home" {
+		t.Errorf("hospitalization.dischargeDisposition.coding[0].display = %v, want %q", coding["display"], "Discharged to home")
+	}
+}
+
+func TestDeclarativeEngine_EncompassingEncounter_Absent_NoResource(t *testing.T) {
+	documentMap := documentMapForHeader(t, cdadocument.CDAHeader{})
+	engine := cdafhir.NewDeclarativeEngine()
+	resource, _, errs := engine.BuildHeaderResource(documentMap, cdafhir.EncompassingEncounterMappingRules()[0])
+	if len(errs) != 0 {
+		t.Fatalf("unexpected errors: %+v", errs)
+	}
+	if resource != nil {
+		t.Errorf("expected no resource (no encompassingEncounter present), got %v", resource)
+	}
+}
+
+func TestDeclarativeEngine_EncompassingEncounter_EmptyElement_StillConvertedPerIG(t *testing.T) {
+	// A bare componentOf/encompassingEncounter with no id/effectiveTime/
+	// dischargeDispositionCode still produces an Encounter -- the IG's own
+	// instruction has no qualifier ("if the document itself contains a
+	// componentOf/encompassingEncounter, this should also be converted to a
+	// FHIR Encounter resource"), and status always resolves to "unknown"
+	// regardless, so the resource is never empty enough to be discarded.
+	header := cdadocument.CDAHeader{EncompassingEncounter: &cdadocument.CDAEncounter{}}
+	documentMap := documentMapForHeader(t, header)
+	engine := cdafhir.NewDeclarativeEngine()
+	resource, _, errs := engine.BuildHeaderResource(documentMap, cdafhir.EncompassingEncounterMappingRules()[0])
+	if len(errs) != 0 {
+		t.Fatalf("unexpected errors: %+v", errs)
+	}
+	if resource == nil {
+		t.Fatal("expected an Encounter resource even for a bare encompassingEncounter element")
+	}
+	if resource["status"] != "unknown" {
+		t.Errorf("status = %v, want unknown", resource["status"])
+	}
+}
+
 // ---- Patient (header-level, Phase 4 Slice A) ----
 // No mappers_test.go precedent exists for MapPatient (zero dedicated Go
 // tests per the inventory) -- these are new, not ported.
@@ -2872,5 +4630,313 @@ func TestDeclarativeEngine_EmbedCDAIdentity_SectionResourceNeverGetsCdaIds(t *te
 	}
 	if _, ok := resources[0]["_cdaIds"]; ok {
 		t.Errorf("expected no _cdaIds on a section-level resource, got %v", resources[0]["_cdaIds"])
+	}
+}
+
+// ---- Clinical Note (Note Activity, .4.202) ----
+// Real shape found auditing the "historyOfPresentIllness" section (LOINC
+// 10164-2, Epic-titled "Progress Notes") of the 99397 sample -- see
+// ClinicalNoteMappingRules' own doc comment for the full provenance of every
+// field below.
+
+func TestDeclarativeEngine_ClinicalNote_NoteActivity_MapsToDocumentReference(t *testing.T) {
+	entries := []cdadocument.CDAEntry{
+		{
+			EntryType:   "act",
+			ClassCode:   "ACT",
+			MoodCode:    "EVN",
+			TemplateIds: []string{"2.16.840.1.113883.10.20.22.4.202"},
+			Id: []cdadocument.CDAII{
+				{Root: "1.2.840.114350.1.13.549.2.7.2.727879", Extension: "457663568"},
+			},
+			Code: cdadocument.CDACode{
+				Code:           "34109-9",
+				CodeSystem:     "2.16.840.1.113883.6.1",
+				CodeSystemName: "LOINC",
+				DisplayName:    "Note",
+				OriginalText:   "Progress Notes",
+				Translations: []cdadocument.CDACode{
+					{Code: "11506-3", CodeSystem: "2.16.840.1.113883.6.1", CodeSystemName: "LOINC", DisplayName: "Progress note"},
+				},
+			},
+			// Already-resolved plain text -- the real entry carries
+			// <text><reference value="#Note67"/></text>, resolved against the
+			// section's own narrative index by resolveEntryRefs before the
+			// declarative engine ever sees this entry. Tests at this layer
+			// start from the post-resolution value, same as every other
+			// ported test in this file.
+			Text:       "RETURN ANNUAL GYNECOLOGY VISIT. Mary is a 66 y.o. female who presents for routine care.",
+			StatusCode: "completed",
+			EffectiveTime: cdadocument.CDATimeRange{
+				Value: cdadocument.CDATime{Value: "20260106093000-0700"},
+			},
+			Authors: []cdadocument.CDAAuthor{
+				{
+					AssignedAuthor: cdadocument.CDAAssignedAuthor{
+						Ids: []cdadocument.CDAII{{Root: "2.16.840.1.113883.4.6", Extension: "1952640419"}},
+						AssignedPerson: &cdadocument.CDAPerson{
+							Names: []cdadocument.CDAName{{Given: []string{"Diane"}, Family: "Utz"}},
+						},
+					},
+				},
+			},
+			Informants: []cdadocument.CDAInformant{
+				{
+					AssignedEntity: cdadocument.CDAAssignedEntity{
+						RepresentedOrganization: &cdadocument.CDAOrganization{
+							Names: []string{"mumbai Community Health and Affiliates"},
+						},
+					},
+				},
+			},
+		},
+	}
+	documentMap := documentMapForEntries(t, "historyOfPresentIllness", entries)
+	engine := cdafhir.NewDeclarativeEngine()
+	engine.PatientRef = "Patient/patient-1"
+
+	resources, errs := engine.BuildResources(documentMap, cdafhir.ClinicalNoteMappingRules()[0])
+	if len(errs) != 0 {
+		t.Fatalf("unexpected errors: %+v", errs)
+	}
+	if len(resources) != 3 {
+		t.Fatalf("expected 3 resources (DocumentReference + emitted author Practitioner + emitted custodian Organization), got %d: %+v", len(resources), resources)
+	}
+
+	var doc map[string]interface{}
+	for _, r := range resources {
+		if r["resourceType"] == "DocumentReference" {
+			doc = r
+		}
+	}
+	if doc == nil {
+		t.Fatalf("no DocumentReference among returned resources: %+v", resources)
+	}
+
+	if got := doc["subject"].(map[string]interface{})["reference"]; got != "Patient/patient-1" {
+		t.Errorf("subject.reference = %v, want Patient/patient-1", got)
+	}
+	if doc["status"] != "current" {
+		t.Errorf("status = %v, want current", doc["status"])
+	}
+	if doc["date"] != "2026-01-06T09:30:00-07:00" {
+		t.Errorf("date = %v, want 2026-01-06T09:30:00-07:00", doc["date"])
+	}
+
+	typeCC, ok := doc["type"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("type is not a CodeableConcept-shaped map: %v", doc["type"])
+	}
+	typeCodings, _ := typeCC["coding"].([]interface{})
+	if len(typeCodings) != 2 {
+		t.Fatalf("type.coding length = %d, want 2 (primary 34109-9 + translation 11506-3)", len(typeCodings))
+	}
+	if got := typeCodings[1].(map[string]interface{})["code"]; got != "11506-3" {
+		t.Errorf("type.coding[1].code = %v, want 11506-3 (the standards-based Progress Note code, via the translation fold)", got)
+	}
+
+	catCoding := firstCoding(t, doc["category"].([]interface{})[0])
+	if catCoding["code"] != "clinical-note" {
+		t.Errorf("category[0].coding[0].code = %v, want clinical-note", catCoding["code"])
+	}
+
+	attachment, ok := doc["content"].([]interface{})[0].(map[string]interface{})["attachment"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("content[0].attachment is not a map: %v", doc["content"])
+	}
+	if attachment["contentType"] != "text/plain" {
+		t.Errorf("content[0].attachment.contentType = %v, want text/plain", attachment["contentType"])
+	}
+	decoded, err := base64.StdEncoding.DecodeString(attachment["data"].(string))
+	if err != nil {
+		t.Fatalf("content[0].attachment.data is not valid base64: %v", err)
+	}
+	if string(decoded) != "RETURN ANNUAL GYNECOLOGY VISIT. Mary is a 66 y.o. female who presents for routine care." {
+		t.Errorf("decoded attachment data = %q, want the resolved note text", string(decoded))
+	}
+
+	idCoding, _ := doc["identifier"].([]interface{})
+	if len(idCoding) != 1 {
+		t.Fatalf("identifier length = %d, want 1", len(idCoding))
+	}
+
+	authorRef, ok := doc["author"].([]interface{})[0].(map[string]interface{})["reference"].(string)
+	if !ok || authorRef == "" {
+		t.Fatalf("author[0].reference missing: %v", doc["author"])
+	}
+
+	custodianRef, ok := doc["custodian"].(map[string]interface{})["reference"].(string)
+	if !ok || custodianRef == "" {
+		t.Fatalf("custodian.reference missing: %v", doc["custodian"])
+	}
+}
+
+// TestDeclarativeEngine_ClinicalNote_OtherEntryTypes_NotClaimed confirms
+// EntryMatch keeps this rule scoped to ONLY Note Activity (.4.202) entries
+// -- a plain entry with no matching templateId in the same section must
+// produce zero DocumentReference resources, not a malformed one.
+func TestDeclarativeEngine_ClinicalNote_OtherEntryTypes_NotClaimed(t *testing.T) {
+	entries := []cdadocument.CDAEntry{
+		{
+			EntryType:  "observation",
+			StatusCode: "completed",
+			Code:       cdadocument.CDACode{Code: "10164-2", CodeSystem: "2.16.840.1.113883.6.1"},
+		},
+	}
+	documentMap := documentMapForEntries(t, "historyOfPresentIllness", entries)
+	engine := cdafhir.NewDeclarativeEngine()
+
+	resources, errs := engine.BuildResources(documentMap, cdafhir.ClinicalNoteMappingRules()[0])
+	if len(errs) != 0 {
+		t.Fatalf("unexpected errors: %+v", errs)
+	}
+	if len(resources) != 0 {
+		t.Fatalf("expected 0 DocumentReference (no Note Activity templateId present), got %d", len(resources))
+	}
+}
+
+// ── Section-level narrative tests ────────────────────────────────────────────
+// These exercise DeclarativeMapDocument's second dispatch pass for CDA sections
+// that have no structured entries and carry content only in their <text>
+// narrative block. Unlike the engine-level tests above, these call the full
+// mapper so the narrative dispatch pass in the orchestration shell is exercised.
+
+// narrativeDocForSection builds a minimal *cdadocument.CDADocument with one
+// narrative-only section (empty Entries) suitable for testing the section-level
+// DocumentReference dispatch.
+func narrativeDocForSection(sectionKey, loincCode, title, narrativeText string, withEntries bool) *cdadocument.CDADocument {
+	section := &cdadocument.CDASection{
+		Key:           sectionKey,
+		LoincCode:     loincCode,
+		Title:         title,
+		NarrativeText: narrativeText,
+	}
+	if withEntries {
+		section.Entries = []cdadocument.CDAEntry{
+			{EntryType: "observation", StatusCode: "completed",
+				Code: cdadocument.CDACode{Code: "55607006", CodeSystem: "2.16.840.1.113883.6.96"}},
+		}
+	}
+	return &cdadocument.CDADocument{
+		SectionsByKey: map[string]*cdadocument.CDASection{sectionKey: section},
+	}
+}
+
+func TestNarrativeSection_AssessmentWithNarrative_ProducesDocumentReference(t *testing.T) {
+	// Real gap found auditing Epic 99397 + Ascension: "Visit Diagnoses" section
+	// (LOINC 51848-0) is narrative-only in both files. Before this fix the
+	// section produced nothing; now it must produce one DocumentReference.
+	doc := narrativeDocForSection("assessment", "51848-0", "Visit Diagnoses",
+		"<text><table><tbody><tr><td>Osteopenia</td></tr></tbody></table></text>", false)
+
+	mapper := cdafhir.NewGenericCDAFHIRMapper(nil, nil)
+	out, err := mapper.DeclarativeMapDocument(context.Background(), doc, cdafhir.CDAToFHIRConfig{})
+	if err != nil {
+		t.Fatalf("DeclarativeMapDocument: %v", err)
+	}
+
+	var docRefs []map[string]interface{}
+	entries, _ := out.FHIRBundle["entry"].([]interface{})
+	for _, e := range entries {
+		entry, _ := e.(map[string]interface{})
+		r, _ := entry["resource"].(map[string]interface{})
+		if r["resourceType"] == "DocumentReference" {
+			docRefs = append(docRefs, r)
+		}
+	}
+	if len(docRefs) != 1 {
+		t.Fatalf("expected 1 DocumentReference for narrative assessment section, got %d", len(docRefs))
+	}
+
+	dr := docRefs[0]
+	typeCC, _ := dr["type"].(map[string]interface{})
+	codings, _ := typeCC["coding"].([]interface{})
+	if len(codings) == 0 {
+		t.Fatal("DocumentReference.type.coding is empty")
+	}
+	c0, _ := codings[0].(map[string]interface{})
+	if c0["code"] != "51848-0" {
+		t.Errorf("type.coding[0].code = %v, want 51848-0", c0["code"])
+	}
+	if c0["display"] != "Visit Diagnoses" {
+		t.Errorf("type.coding[0].display = %v, want Visit Diagnoses (section title wins over fallback)", c0["display"])
+	}
+	content, _ := dr["content"].([]interface{})
+	if len(content) == 0 {
+		t.Fatal("DocumentReference.content is empty")
+	}
+	att, _ := content[0].(map[string]interface{})["attachment"].(map[string]interface{})
+	if att["contentType"] != "text/html" {
+		t.Errorf("attachment.contentType = %v, want text/html", att["contentType"])
+	}
+	if att["data"] == "" || att["data"] == nil {
+		t.Error("attachment.data must not be empty (base64 of the narrative HTML)")
+	}
+}
+
+func TestNarrativeSection_AssessmentWithEntries_NoDocumentReference(t *testing.T) {
+	// When a section has structured entries, the entry-dispatch loop handles it
+	// and the narrative pass must stay silent -- no redundant DocumentReference.
+	doc := narrativeDocForSection("assessment", "51848-0", "Visit Diagnoses",
+		"<text>narrative</text>", true /* withEntries */)
+
+	mapper := cdafhir.NewGenericCDAFHIRMapper(nil, nil)
+	out, err := mapper.DeclarativeMapDocument(context.Background(), doc, cdafhir.CDAToFHIRConfig{})
+	if err != nil {
+		t.Fatalf("DeclarativeMapDocument: %v", err)
+	}
+
+	entries, _ := out.FHIRBundle["entry"].([]interface{})
+	for _, e := range entries {
+		entry, _ := e.(map[string]interface{})
+		r, _ := entry["resource"].(map[string]interface{})
+		if r["resourceType"] == "DocumentReference" {
+			t.Fatalf("expected no DocumentReference when section has entries, got one")
+		}
+	}
+}
+
+func TestNarrativeSection_EmptyNarrativeText_NoDocumentReference(t *testing.T) {
+	// Sections with NullFlavor-NI or empty narrative must not produce a
+	// DocumentReference (nothing to attach as content).
+	doc := narrativeDocForSection("assessment", "51848-0", "Visit Diagnoses",
+		"" /* empty narrative */, false)
+
+	mapper := cdafhir.NewGenericCDAFHIRMapper(nil, nil)
+	out, err := mapper.DeclarativeMapDocument(context.Background(), doc, cdafhir.CDAToFHIRConfig{})
+	if err != nil {
+		t.Fatalf("DeclarativeMapDocument: %v", err)
+	}
+
+	entries, _ := out.FHIRBundle["entry"].([]interface{})
+	for _, e := range entries {
+		entry, _ := e.(map[string]interface{})
+		r, _ := entry["resource"].(map[string]interface{})
+		if r["resourceType"] == "DocumentReference" {
+			t.Fatal("expected no DocumentReference for empty narrative, got one")
+		}
+	}
+}
+
+func TestNarrativeSection_DefaultDefsHaveCorrectLOINCCodes(t *testing.T) {
+	// Regression guard: confirms all 6 keys and their LOINC fallback codes
+	// match the evidence-backed values chosen at implementation time.
+	expected := map[string]string{
+		"assessment":            "51848-0",
+		"hospitalCourse":        "8648-8",
+		"dischargeInstructions": "18776-5",
+		"reasonForReferral":     "42349-1",
+		"reasonForVisit":        "29299-5",
+		"clinicalNote":          "34109-9",
+	}
+	for key, wantCode := range expected {
+		def, ok := cdafhir.DefaultNarrativeSectionDefs[key]
+		if !ok {
+			t.Errorf("DefaultNarrativeSectionDefs missing key %q", key)
+			continue
+		}
+		if def.LoincCode != wantCode {
+			t.Errorf("DefaultNarrativeSectionDefs[%q].LoincCode = %q, want %q", key, def.LoincCode, wantCode)
+		}
 	}
 }

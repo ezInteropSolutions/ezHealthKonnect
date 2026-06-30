@@ -69,15 +69,23 @@ import "strings"
 //     loudly broken. Also a bare string field on the node itself — no
 //     special-casing, same generic attribute-equality branch.
 var cdaPredicateKeys = map[string]struct{}{
-	"typeCode":     {},
-	"inversionInd": {},
-	"templateId":   {},
-	"classCode":    {},
-	"moodCode":     {},
-	"code":         {},
-	"xsiType":      {},
-	"type":         {},
-	"entryType":    {},
+	"typeCode":       {},
+	"inversionInd":   {},
+	"templateId":     {},
+	"classCode":      {},
+	"moodCode":       {},
+	"code":           {},
+	"xsiType":        {},
+	"type":           {},
+	"entryType":      {},
+	// refrTemplateId checks whether any entryRelationship[typeCode=REFR].entry
+	// carries the given templateId -- used by HealthConcernsMappingRules to
+	// distinguish Assessment Scale Observations from Problem Observations when
+	// both appear as REFR-linked entries inside a Health Concern Act, since
+	// the outer act itself always carries the same .4.132 templateId regardless
+	// of what's inside. A plain [templateId=X] predicate only checks the
+	// CURRENT entry node's own templateIds and cannot reach nested entries.
+	"refrTemplateId": {},
 }
 
 // cdaSegmentKind identifies how a path segment's optional "[...]" suffix
@@ -344,6 +352,9 @@ func matchesCDAPredicate(node map[string]interface{}, p cdaPredicate, isXMLMirro
 	if p.key == "templateId" {
 		return matchesCDATemplateID(node, p.value, isXMLMirror)
 	}
+	if p.key == "refrTemplateId" {
+		return matchesCDAREFRTemplateID(node, p.value, isXMLMirror)
+	}
 	if p.key == "code" {
 		return matchesCDACodeField(node, p.value, isXMLMirror)
 	}
@@ -385,6 +396,32 @@ func matchesCDATemplateID(node map[string]interface{}, want string, isXMLMirror 
 	ids, _ := node["templateIds"].([]interface{})
 	for _, id := range ids {
 		if s, ok := id.(string); ok && s == want {
+			return true
+		}
+	}
+	return false
+}
+
+// matchesCDAREFRTemplateID checks whether any entryRelationship with
+// typeCode="REFR" on the node contains an entry whose templateIds include want.
+// This is the implementation backing the "refrTemplateId" predicate key —
+// see cdaPredicateKeys' own doc comment for why a plain "templateId" predicate
+// can't reach nested entries.
+func matchesCDAREFRTemplateID(node map[string]interface{}, want string, isXMLMirror bool) bool {
+	rels, _ := node["entryRelationships"].([]interface{})
+	for _, rel := range rels {
+		relMap, _ := rel.(map[string]interface{})
+		if isXMLMirror {
+			if tc, _ := relMap["@typeCode"].(string); tc != "REFR" {
+				continue
+			}
+		} else {
+			if tc, _ := relMap["typeCode"].(string); tc != "REFR" {
+				continue
+			}
+		}
+		entry, _ := relMap["entry"].(map[string]interface{})
+		if entry != nil && matchesCDATemplateID(entry, want, isXMLMirror) {
 			return true
 		}
 	}

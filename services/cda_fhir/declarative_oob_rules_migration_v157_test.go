@@ -8,6 +8,13 @@
 // tuples -- a multi-tuple single VALUES clause would only have "VALUES"
 // before the FIRST tuple, which this regex can't find a second match
 // after).
+//
+// Encounters' own seed was retargeted to V166 (see that migration's doc
+// comment and declarative_oob_rules_migration_v166_test.go): V157's
+// "encounters" row never gained assignedEntityRoleRow's PractitionerRole on
+// performers[*], the same gap CareTeam/Author/LegalAuthenticator already
+// closed elsewhere. This test now only checks "procedures" against V157,
+// which V166 doesn't touch and remains the authoritative seed for.
 package cdafhir_test
 
 import (
@@ -64,14 +71,18 @@ func TestV157Migration_MatchesGoLiteralRules_NoDrift(t *testing.T) {
 		t.Fatalf("got %d seeded rules, want 2 (encounters, procedures)", len(seeded))
 	}
 
+	// "encounters" deliberately excluded here -- see this file's own top
+	// doc comment: that row's drift check moved to V166.
 	wantRules := map[string]cdafhir.MappingRule{
-		"encounters": cdafhir.EncounterMappingRules()[0],
 		"procedures": cdafhir.ProcedureMappingRules()[0],
 	}
 
 	for _, got := range seeded {
 		want, ok := wantRules[got.sectionKey]
 		if !ok {
+			if got.sectionKey == "encounters" {
+				continue
+			}
 			t.Errorf("seeded an unexpected sectionKey %q", got.sectionKey)
 			continue
 		}

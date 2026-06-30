@@ -458,6 +458,88 @@ func TestFullCCD_DocumentationOf(t *testing.T) {
 }
 
 // ========================
+// componentOf/encompassingEncounter + HL7 PN plain-text fallback
+// ========================
+
+func TestParsePN_PlainTextFallback(t *testing.T) {
+	doc := etree.NewDocument()
+	require.NoError(t, doc.ReadFromString(`<name>mumbai Women's Care mira road</name>`))
+	n := parsePN(doc.Root())
+	assert.Equal(t, "mumbai Women's Care mira road", n.Family)
+	assert.Empty(t, n.Given)
+	assert.Empty(t, n.Prefix)
+	assert.Empty(t, n.Suffix)
+}
+
+func TestParsePN_StructuredNameUnaffected(t *testing.T) {
+	doc := etree.NewDocument()
+	require.NoError(t, doc.ReadFromString(`<name use="L"><given>Jane</given><family>Doe</family></name>`))
+	n := parsePN(doc.Root())
+	assert.Equal(t, "Doe", n.Family)
+	assert.Equal(t, []string{"Jane"}, n.Given)
+}
+
+func TestParseComponentOf_HealthCareFacility(t *testing.T) {
+	raw := `<ClinicalDocument xmlns="urn:hl7-org:v3">
+  <componentOf>
+    <encompassingEncounter>
+      <id root="2.16.840.1.113883.19" extension="ENC-1"/>
+      <effectiveTime value="20240101"/>
+      <location>
+        <healthCareFacility>
+          <id root="1.2.840.114350.1.13.549.2.7.2.686980" extension="103001002"/>
+          <code nullFlavor="UNK">
+            <originalText>Obstetrics and Gynecology</originalText>
+            <translation code="42" codeSystem="1.2.840.114350.1.72.1.7.7.10.688867.4150" codeSystemName="Epic.DepartmentSpecialty" displayName="Obstetrics &amp; Gynecology"/>
+          </code>
+          <location>
+            <name>mumbai Women's Care mira road</name>
+            <addr use="WP">
+              <streetAddressLine>101 mira road Parkway Ste 201B</streetAddressLine>
+              <county>mumbai</county>
+              <city>mira road</city>
+              <state>CO</state>
+              <postalCode>80511-4072</postalCode>
+              <country>USA</country>
+            </addr>
+          </location>
+        </healthCareFacility>
+      </location>
+    </encompassingEncounter>
+  </componentOf>
+</ClinicalDocument>`
+
+	doc := etree.NewDocument()
+	require.NoError(t, doc.ReadFromString(raw))
+
+	enc := (&headerParser{}).parseComponentOf(doc.Root())
+	require.NotNil(t, enc)
+	require.NotNil(t, enc.Location)
+
+	hcf := enc.Location.HealthCareFacility
+	assert.Equal(t, "UNK", hcf.Code.NullFlavor)
+	assert.Equal(t, "Obstetrics and Gynecology", hcf.Code.OriginalText)
+	require.Len(t, hcf.Code.Translations, 1)
+	assert.Equal(t, "Obstetrics & Gynecology", hcf.Code.Translations[0].DisplayName)
+
+	require.NotNil(t, hcf.Location)
+	require.NotEmpty(t, hcf.Location.Names)
+	// parsePN's plain-text fallback (see TestParsePN_PlainTextFallback) is
+	// what makes this resolve at all -- <name> here has no <family>/<given>
+	// sub-elements, only direct text.
+	assert.Equal(t, "mumbai Women's Care mira road", hcf.Location.Names[0].Family)
+	require.NotEmpty(t, hcf.Location.Addresses)
+	assert.Equal(t, "mira road", hcf.Location.Addresses[0].City)
+	assert.Equal(t, "80511-4072", hcf.Location.Addresses[0].PostalCode)
+
+	// healthCareFacility's own <id> is a documented, deliberate gap (see
+	// EncompassingEncounterLocationMappingRules' doc comment in
+	// services/cda_fhir/declarative_oob_rules.go) -- CDAHealthCareFacility
+	// has no Id field to parse it into yet.
+	assert.Nil(t, hcf.ServiceProviderOrganization)
+}
+
+// ========================
 // Missing optional sections
 // ========================
 
@@ -909,4 +991,69 @@ func TestTargetSiteCodeAbsent_ObservationVariant_NilNotPanic(t *testing.T) {
 		{EntryType: "observation", StatusCode: "completed", Code: CDACode{Code: "44950"}},
 	}
 	assert.Nil(t, entries[0].TargetSiteCode)
+}
+
+// TestParseValue_INT_PopulatesIntegerField is a regression test for a real
+// gap found auditing the Functional Status section of the 99397 CCD sample:
+// a PHQ-2 total-score Assessment Scale Supporting Observation carries
+// <value xsi:type="INT" value="0"/>, but parseValue's INT case only ever set
+// CDAValue.Text, never CDAValue.Integer -- the field
+// observationValueXDispatchRows' Scope="value[type=INT]" row
+// (declarative_oob_rules.go) actually reads via SourcePath="integer". Every
+// CDA INT value silently produced neither valueInteger NOR dataAbsentReason
+// on the mapped FHIR Observation, confirmed end-to-end against the real
+// 99397 sample before this fix (the PHQ-2 total score Observation had no
+// value[x] at all).
+func TestParseValue_INT_PopulatesIntegerField(t *testing.T) {
+	el := mustParseElement(t, `<value xsi:type="INT" value="0"/>`)
+	v := parseValue(el)
+	require.NotNil(t, v)
+	assert.Equal(t, "INT", v.Type)
+	require.NotNil(t, v.Integer, "Integer field must be populated for xsi:type=INT")
+	assert.Equal(t, 0, *v.Integer)
+	// Text is kept too -- cda/validator's hasValue-style checks only ever
+	// look at Text as a generic presence check, unrelated to this fix.
+	assert.Equal(t, "0", v.Text)
+}
+
+func TestParseValue_INT_NegativeAndNonZero(t *testing.T) {
+	el := mustParseElement(t, `<value xsi:type="INT" value="42"/>`)
+	v := parseValue(el)
+	require.NotNil(t, v.Integer)
+	assert.Equal(t, 42, *v.Integer)
+}
+
+// TestParseValue_REAL_PopulatesRealField mirrors the INT fix above for the
+// REAL data type -- declarativeRealToBareQuantity
+// (declarative_transform_registry.go) reads CDAValue.Real, which parseValue's
+// REAL case never populated either, same root cause as INT.
+func TestParseValue_REAL_PopulatesRealField(t *testing.T) {
+	el := mustParseElement(t, `<value xsi:type="REAL" value="3.5"/>`)
+	v := parseValue(el)
+	require.NotNil(t, v)
+	assert.Equal(t, "REAL", v.Type)
+	require.NotNil(t, v.Real, "Real field must be populated for xsi:type=REAL")
+	assert.Equal(t, 3.5, *v.Real)
+}
+
+func TestParseValue_INT_NonNumericText_IntegerStaysNil(t *testing.T) {
+	// Defensive: a non-conformant document with a non-numeric INT value
+	// string must not panic, and must leave Integer nil rather than
+	// silently mapping to 0 (which would be indistinguishable from a real
+	// zero score).
+	el := mustParseElement(t, `<value xsi:type="INT" value="not-a-number"/>`)
+	v := parseValue(el)
+	require.NotNil(t, v)
+	assert.Nil(t, v.Integer)
+	assert.Equal(t, "not-a-number", v.Text)
+}
+
+// mustParseElement parses a single standalone XML element for direct
+// parseValue/parseCD-style unit tests, distinct from loadXML's full-document
+// fixture loading above.
+func mustParseElement(t *testing.T, xml string) *etree.Element {
+	t.Helper()
+	doc := etree.NewDocument()
+	require.NoError(t, doc.ReadFromString(xml))
+	return doc.Root()
 }

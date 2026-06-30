@@ -84,14 +84,24 @@ func (r *DeduplicationRule) Apply(ctx *assembly.AssemblyContext) error {
 				delete(ctx.Removed, thisRef)
 
 				if ctx.Log != nil {
-					ctx.Log.AddAssemblyEvent(mappinglog.AssemblyEvent{
+					ev := mappinglog.AssemblyEvent{
 						Rule:         r.Name(),
 						Action:       "deduplicated",
 						ResourceType: rt,
 						IDs:          []string{survivorID, id},
 						SurvivorID:   id,
 						Detail:       "matched on " + matchKey + " (later, more complete resource kept)",
-					})
+					}
+					if ctx.Config.DeepLineage {
+						ev.Lineage = map[string]mappinglog.ResourceLineage{}
+						if l, ok := assembly.ExtractLineage(res); ok {
+							ev.Lineage[id] = l
+						}
+						if l, ok := assembly.ExtractLineage(existing); ok {
+							ev.Lineage[survivorID] = l
+						}
+					}
+					ctx.Log.AddAssemblyEvent(ev)
 				}
 				continue
 			}
@@ -100,14 +110,24 @@ func (r *DeduplicationRule) Apply(ctx *assembly.AssemblyContext) error {
 			ctx.Removed[thisRef] = true
 
 			if ctx.Log != nil {
-				ctx.Log.AddAssemblyEvent(mappinglog.AssemblyEvent{
+				ev := mappinglog.AssemblyEvent{
 					Rule:         r.Name(),
 					Action:       "deduplicated",
 					ResourceType: rt,
 					IDs:          []string{id, survivorID},
 					SurvivorID:   survivorID,
 					Detail:       "matched on " + matchKey,
-				})
+				}
+				if ctx.Config.DeepLineage {
+					ev.Lineage = map[string]mappinglog.ResourceLineage{}
+					if l, ok := assembly.ExtractLineage(res); ok {
+						ev.Lineage[id] = l
+					}
+					if l, ok := assembly.ExtractLineage(existing); ok {
+						ev.Lineage[survivorID] = l
+					}
+				}
+				ctx.Log.AddAssemblyEvent(ev)
 			}
 		} else {
 			// First occurrence — register as survivor.

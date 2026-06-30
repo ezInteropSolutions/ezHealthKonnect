@@ -95,6 +95,14 @@ func assertRuleMatchesSeed(t *testing.T, seeded []seededRule, want cdafhir.Mappi
 	}
 }
 
+// TestV154Migration_MatchesGoLiteralRules_NoDrift only checks the row V154
+// still owns (allergy). V154's own "problems"/"healthConcerns" rows were
+// superseded by V168 (Condition.recorder added to conditionFields() -- see
+// declarative_oob_rules_migration_v168_test.go) and its "medications" rows
+// were superseded by V170 (identifier added to medicationCommonRows() --
+// see declarative_oob_rules_migration_v170_test.go), so this file's on-disk
+// content for those sections is now stale BY DESIGN and is deliberately not
+// asserted against the Go literal here.
 func TestV154Migration_MatchesGoLiteralRules_NoDrift(t *testing.T) {
 	seeded := parseSeededRules(t)
 	if len(seeded) != 5 {
@@ -102,15 +110,6 @@ func TestV154Migration_MatchesGoLiteralRules_NoDrift(t *testing.T) {
 	}
 
 	for _, rule := range cdafhir.AllergyMappingRules() {
-		assertRuleMatchesSeed(t, seeded, rule)
-	}
-	for _, rule := range cdafhir.MedicationMappingRules() {
-		assertRuleMatchesSeed(t, seeded, rule)
-	}
-	for _, rule := range cdafhir.ProblemsMappingRules() {
-		assertRuleMatchesSeed(t, seeded, rule)
-	}
-	for _, rule := range cdafhir.HealthConcernsMappingRules() {
 		assertRuleMatchesSeed(t, seeded, rule)
 	}
 }

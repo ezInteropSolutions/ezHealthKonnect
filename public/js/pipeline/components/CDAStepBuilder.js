@@ -212,6 +212,17 @@ class CdaToFhirStepBuilder {
         });
         step.config.assemblyRules = assemblyRules;
 
+        // Plan-of-Care encounter target -- a 3-way string choice, not a
+        // boolean, so it's its own top-level key (matching
+        // cda_to_fhir_executor.go's cdaToFHIRConfig.PlanOfCareEncounterTarget
+        // JSON tag exactly), not folded into assemblyRules.
+        const poCarTarget = pick('cda2fhirPlanOfCareEncounterTarget');
+        if (poCarTarget) {
+            step.config.planOfCareEncounterTarget = poCarTarget;
+        } else {
+            delete step.config.planOfCareEncounterTarget;
+        }
+
         // Advanced tab
         if (pick('cda2fhirMergeMode')       !== null) step.config.mergeMode          = pick('cda2fhirMergeMode');
         if (pick('cda2fhirOnSectionFail')   !== null) step.config.onSectionFailure   = pick('cda2fhirOnSectionFail');
@@ -636,12 +647,30 @@ class CdaToFhirStepBuilder {
             </div>
         </div>`;
 
+        const poCarTarget = cfg.planOfCareEncounterTarget || '';
+
         return `
         <div style="font-size:0.79rem;color:#475569;margin-bottom:0.9rem;
                     background:linear-gradient(135deg,#eff6ff 0%,#fdf2f8 100%);
                     border:1px solid #dbeafe;border-radius:6px;padding:0.6rem 0.75rem;">
             Assembly rules control structural transformation decisions during CDA→FHIR conversion.
             <span style="color:#f472b6;font-style:italic;">Disable only if a downstream enrichment step overrides that behaviour.</span>
+        </div>
+        <div style="margin-bottom:1rem;">
+            <div style="font-size:0.69rem;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;
+                        color:#1e3a8a;margin-bottom:0.45rem;
+                        border-left:3px solid #f472b6;padding-left:0.45rem;">Plan-of-Care Encounter Target</div>
+            <div style="border:1px solid #dbeafe;border-radius:6px;padding:0.6rem 0.75rem;
+                        box-shadow:0 1px 3px rgba(30,58,138,0.06);">
+                <select id="cda2fhirPlanOfCareEncounterTarget" style="width:100%;padding:0.4rem;font-size:0.82rem;border:1px solid #cbd5e1;border-radius:4px;">
+                    <option value="" ${poCarTarget === '' ? 'selected' : ''}>Use interface default</option>
+                    <option value="Encounter" ${poCarTarget === 'Encounter' ? 'selected' : ''}>Encounter</option>
+                    <option value="Appointment" ${poCarTarget === 'Appointment' ? 'selected' : ''}>Appointment</option>
+                </select>
+                <div style="font-size:0.69rem;color:#64748b;margin-top:0.35rem;">
+                    How planned/future visit entries in a Plan-of-Care section map. Overrides this interface's own Settings-tab default for this pipeline only.
+                </div>
+            </div>
         </div>
         ${group('Data Type Dispatch', DATATYPE_RULES)}
         ${group('Code System OID → URI', OID_RULES)}

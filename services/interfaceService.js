@@ -142,6 +142,12 @@ class InterfaceService {
                 // REMOVED: Legacy columns source_config/target_config - use *_connectivity only
                 // FIXED: Handle both wizard formats - transformationMapping (object with atomicMappings) or mappings (array)
                 transformation_mapping: interfaceData.transformationMapping || interfaceData.mappings || {},
+                // CDA-specific interface-level defaults (e.g. Plan-of-Care
+                // encounter target resource -- Appointment vs Encounter, see
+                // services/cda_fhir/generic_mapper.go's CDAToFHIRConfig).
+                // Read by the Go backend via processing_rules->'cda'->>'...'
+                // (declarative_document_mapper.go), never by Node.js itself.
+                processing_rules: interfaceData.processingRules || {},
                 status: interfaceData.status || 'draft',
                 // V32: Deployment configuration fields
                 deployment_mode: interfaceData.deployment_mode || 'manual',

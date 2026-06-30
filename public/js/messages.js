@@ -1525,6 +1525,15 @@ class MessageManager {
             const errorBadge = hasErrors
                 ? `<span style="background:#fee2e2;color:#991b1b;padding:0.1rem 0.45rem;border-radius:3px;font-size:0.72rem;font-weight:600;">${s.errors.length} error${s.errors.length > 1 ? 's' : ''}</span>`
                 : `<span style="color:#94a3b8;font-size:0.78rem;">—</span>`;
+            // Warnings are informational, non-blocking notices (e.g. a CDA
+            // entry with more than one <value> -- only the first was
+            // mapped) -- distinct from errors, never implies the section
+            // failed. See SectionLog.Warnings' doc comment (mapping_log/
+            // section_log.go) for what populates this.
+            const hasWarnings = s.warnings && s.warnings.length > 0;
+            const warningBadge = hasWarnings
+                ? `<span title="${this.escapeHtml(s.warnings.join('\n'))}" style="background:#fef3c7;color:#92400e;padding:0.1rem 0.45rem;border-radius:3px;font-size:0.72rem;font-weight:600;cursor:help;">${s.warnings.length} warning${s.warnings.length > 1 ? 's' : ''}</span>`
+                : `<span style="color:#94a3b8;font-size:0.78rem;">—</span>`;
             const hasEntries = s.entries && s.entries.length > 0;
             const chevron = hasEntries
                 ? `<i class="fas fa-chevron-right mlog-chevron" style="font-size:0.65rem;color:#94a3b8;margin-right:0.4rem;display:inline-block;transition:transform 0.15s;"></i>`
@@ -1535,9 +1544,10 @@ class MessageManager {
                 <td style="padding:0.25rem 0.5rem;color:#6b7280;font-size:0.78rem;text-align:right;">${s.resourcesOut ?? 0}</td>
                 <td style="padding:0.25rem 0.5rem;color:#6b7280;font-size:0.78rem;text-align:right;">${s.processingTimeMs ?? 0}ms</td>
                 <td style="padding:0.25rem 0.5rem;">${errorBadge}</td>
+                <td style="padding:0.25rem 0.5rem;">${warningBadge}</td>
             </tr>`;
             const detailRow = hasEntries
-                ? `<tr style="display:none;"><td colspan="5" style="padding:0.4rem 0.5rem 0.6rem 1.5rem;">${entriesDetailTable(s.entries)}</td></tr>`
+                ? `<tr style="display:none;"><td colspan="6" style="padding:0.4rem 0.5rem 0.6rem 1.5rem;">${entriesDetailTable(s.entries)}</td></tr>`
                 : '';
             return mainRow + detailRow;
         }).join('');
@@ -1552,21 +1562,55 @@ class MessageManager {
                         <th style="padding:0.25rem 0.5rem;text-align:right;font-size:0.72rem;color:#9ca3af;font-weight:500;">Resources Out</th>
                         <th style="padding:0.25rem 0.5rem;text-align:right;font-size:0.72rem;color:#9ca3af;font-weight:500;">Time</th>
                         <th style="padding:0.25rem 0.5rem;text-align:left;font-size:0.72rem;color:#9ca3af;font-weight:500;">Errors</th>
+                        <th style="padding:0.25rem 0.5rem;text-align:left;font-size:0.72rem;color:#9ca3af;font-weight:500;">Warnings</th>
                     </tr></thead>
                     <tbody>${sectionRows}</tbody>
                 </table>
             </div>` : '';
 
+        // The "Source" sub-list only appears when the interface has deep debug
+        // logging enabled; only show the explanatory help line when at least one
+        // event actually has it, so messages without deep lineage don't show a
+        // help line that doesn't apply to anything on screen.
+        const hasAnyLineage = assembly.some(e => e.lineage && Object.keys(e.lineage).length > 0);
+        const assemblyHelpHTML = hasAnyLineage ? `
+            <div style="font-size:0.72rem;color:#94a3b8;margin-bottom:0.4rem;margin-top:-0.1rem;">
+                "Source" shows which CDA section + entry (and matching identifier) produced each resource.
+                <code style="background:#f1f5f9;padding:0 0.2rem;border-radius:2px;">section[entryIndex]</code>
+                identifies the entry within that section, not the exact XML field — for entries with several
+                nested participants/components, you may still need to open that one entry to find the specific match.
+            </div>` : '';
+
         const assemblyHTML = assembly.length > 0 ? `
             <div style="margin-top:1rem;">
                 <div style="font-size:0.7rem;font-weight:700;text-transform:uppercase;color:#94a3b8;margin-bottom:0.4rem;">Assembly Events (${assembly.length})</div>
-                ${assembly.map(e => `
+                ${assemblyHelpHTML}
+                ${assembly.map(e => {
+                    // Lineage is only present when the interface has deep debug
+                    // logging enabled (debug_logging/log_level=debug) — absent
+                    // for every other mapping log, so this block renders nothing
+                    // extra in that case.
+                    const lineageEntries = e.lineage ? Object.entries(e.lineage) : [];
+                    const sourceHTML = lineageEntries.length > 0 ? `
+                        <div style="margin-top:0.35rem;padding-top:0.35rem;border-top:1px solid #ede9fe;font-size:0.74rem;color:#6d28d9;">
+                            <div style="font-weight:600;color:#5b21b6;margin-bottom:0.15rem;">Source</div>
+                            ${lineageEntries.map(([resId, l]) => `
+                                <div style="color:#475569;">
+                                    <span style="font-family:monospace;">${this.escapeHtml(resId)}</span>
+                                    ← ${this.escapeHtml(l.sectionKey || 'unknown section')}[${l.entryIndex ?? '?'}]
+                                    ${l.cdaIds && l.cdaIds.length > 0 ? `(${this.escapeHtml(l.cdaIds.join(', '))})` : ''}
+                                </div>
+                            `).join('')}
+                        </div>` : '';
+                    return `
                     <div style="background:#faf5ff;border-left:3px solid #a78bfa;padding:0.5rem 0.75rem;margin-bottom:0.4rem;border-radius:4px;font-size:0.8rem;">
                         <strong style="color:#5b21b6;">${this.escapeHtml(e.action || '')}</strong>
                         <span style="color:#64748b;"> · ${this.escapeHtml(e.rule || '')} · ${this.escapeHtml(e.resourceType || '')}</span>
                         <div style="color:#475569;margin-top:0.2rem;">${this.escapeHtml(e.detail || '')}</div>
+                        ${sourceHTML}
                     </div>
-                `).join('')}
+                `;
+                }).join('')}
             </div>` : '';
 
         if (sections.length === 0 && assembly.length === 0) {

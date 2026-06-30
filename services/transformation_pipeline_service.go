@@ -262,6 +262,12 @@ func (tps *TransformationPipelineService) ExecuteTransformation(
 
 	sl.Info("GetPipeline success", "steps", len(pipeline.Steps))
 
+	// Resolve the interface's debug flag once per run (not per step) so CDA assembly
+	// rules can capture deep lineage (CDA section/entry provenance) when an operator
+	// has debug logging enabled for this interface. Best-effort: errors never block
+	// the pipeline, deep lineage simply stays off.
+	_, deepLineage, _ := ResolveInterfaceDebugLevel(tps.db, interfaceID)
+
 	// Inject runtime context into each step's config (OOB: auto-configure steps)
 	for i := range pipeline.Steps {
 		if pipeline.Steps[i].Config == nil {
@@ -270,6 +276,7 @@ func (tps *TransformationPipelineService) ExecuteTransformation(
 		pipeline.Steps[i].Config["interface_id"] = interfaceID
 		pipeline.Steps[i].Config["message_type"] = messageType
 		pipeline.Steps[i].Config["message_id"] = messageID
+		pipeline.Steps[i].Config["_cdaDeepLineage"] = deepLineage
 		if corrID, _ := ctx.Value("correlation_id").(string); corrID != "" {
 			pipeline.Steps[i].Config["correlation_id"] = corrID
 		}

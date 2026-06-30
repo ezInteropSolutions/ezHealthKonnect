@@ -6,6 +6,18 @@
 // INSERT...VALUES(...) statement, same shape as V155/V157, specifically so
 // this regex (which requires a literal "VALUES" immediately before each
 // tuple) finds all 25.
+//
+// The 4 MedicationRequest rows (one per alias) were superseded by V171
+// (identifier added to medicationCommonRows(), which
+// PlanOfCareMappingRules()'s substanceAdministration branch reuses verbatim
+// -- see declarative_oob_rules_migration_v171_test.go) and are
+// deliberately skipped below; this file's on-disk content for them is now
+// stale BY DESIGN.
+//
+// The 4 ServiceRequest rows (one per alias) were THEN superseded by V182
+// (entry.text -> code.text fallback row -- see
+// declarative_oob_rules_migration_v182_test.go) and are deliberately
+// skipped below too, the same way.
 package cdafhir_test
 
 import (
@@ -81,6 +93,9 @@ func TestV158Migration_MatchesGoLiteralRules_NoDrift(t *testing.T) {
 		}
 		if got.flattenOrganizers != w.FlattenOrganizers {
 			t.Errorf("rule[%d] (%s/%s): flatten_organizers = %v, want %v", i, got.sectionKey, got.fhirResource, got.flattenOrganizers, w.FlattenOrganizers)
+		}
+		if w.FHIRResource == "MedicationRequest" || w.FHIRResource == "ServiceRequest" {
+			continue // superseded by V171/V182 respectively -- see this file's own top doc comment.
 		}
 		if !reflect.DeepEqual(got.fields, w.Fields) {
 			t.Errorf("rule[%d] (%s/%s): seeded fields drifted from declarative_oob_rules.go's Go literal.\nseeded: %+v\nwant:   %+v", i, got.sectionKey, got.fhirResource, got.fields, w.Fields)

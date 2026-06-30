@@ -21,10 +21,12 @@ const (
 	profileObservation         = usCoreBase + "us-core-observation-clinical-result"
 	profileObservationVitals = usCoreBase + "us-core-vital-signs"
 	profileObservationLab    = usCoreBase + "us-core-observation-lab"
+	profileObservationScreeningAssessment = usCoreBase + "us-core-observation-screening-assessment"
 	profileImmunization      = usCoreBase + "us-core-immunization"
 	profileProcedure         = usCoreBase + "us-core-procedure"
 	profileEncounter         = usCoreBase + "us-core-encounter"
 	profilePractitioner      = usCoreBase + "us-core-practitioner"
+	profilePractitionerRole  = usCoreBase + "us-core-practitionerrole"
 	profileOrganization      = usCoreBase + "us-core-organization"
 	profileCoverage          = usCoreBase + "us-core-coverage"
 	profileGoal              = usCoreBase + "us-core-goal"
@@ -33,6 +35,7 @@ const (
 	profileServiceRequest    = usCoreBase + "us-core-servicerequest"
 	profileMedicationRequest = usCoreBase + "us-core-medicationrequest"
 	profileDocumentReference = usCoreBase + "us-core-documentreference"
+	profileLocation          = usCoreBase + "us-core-location"
 
 	// US Core extension URIs
 	extRace      = usCoreBase + "us-core-race"
@@ -65,12 +68,89 @@ var resourceTypeToProfile = map[string]string{
 	"Procedure":           profileProcedure,
 	"Encounter":           profileEncounter,
 	"Practitioner":        profilePractitioner,
+	"PractitionerRole":    profilePractitionerRole,
 	"Organization":        profileOrganization,
 	"Coverage":            profileCoverage,
 	"Goal":                profileGoal,
 	"FamilyMemberHistory": profileFamilyMemberHistory,
 	"CarePlan":            profileCarePlan,
 	"ServiceRequest":      profileServiceRequest,
+	"Location":            profileLocation,
+}
+
+// conditionCategoryToProfile overrides resourceTypeToProfile's single
+// generic "Condition" entry (profileCondition) when Condition.category names
+// a category with its own, more specific US Core profile. profileCondition
+// (us-core-condition-problems-health-concerns) covers problem-list-item and
+// health-concern; encounter-diagnosis (EncounterMappingRules' nested-
+// diagnosis row, declarative_oob_rules.go) has a distinct one that was
+// defined (profileEncounterDiagnosis) but never wired into any lookup table
+// until now -- every Condition, regardless of category, was getting
+// profileCondition.
+var conditionCategoryToProfile = map[string]string{
+	"encounter-diagnosis": profileEncounterDiagnosis,
+}
+
+// conditionProfileForCategory returns conditionCategoryToProfile's entry for
+// r's first matching category coding, or "" if none match (the normal case
+// for problem-list-item/health-concern, which fall through to
+// resourceTypeToProfile's generic default).
+func conditionProfileForCategory(r map[string]interface{}) string {
+	categories, _ := r["category"].([]interface{})
+	for _, c := range categories {
+		cc, _ := c.(map[string]interface{})
+		codings, _ := cc["coding"].([]interface{})
+		for _, co := range codings {
+			coding, _ := co.(map[string]interface{})
+			code, _ := coding["code"].(string)
+			if profile, ok := conditionCategoryToProfile[code]; ok {
+				return profile
+			}
+		}
+	}
+	return ""
+}
+
+// observationCategoryToProfile overrides resourceTypeToProfile's single
+// generic "Observation" entry (profileObservation, us-core-observation-
+// clinical-result) when Observation.category names a category with its own,
+// more specific US Core profile. profileObservationVitals/Lab were declared
+// alongside profileObservation from the start but never referenced anywhere
+// -- dead code -- so vitalSigns/results/labResults observations were
+// getting clinical-result instead of vital-signs/observation-lab.
+// social-history/functional-status/cognitive-status are not "clinical
+// results" at all -- US Core's own Observation Screening Assessment Profile
+// description covers exactly this: "questions and responses to surveys and
+// screening and assessment tools, such as a social history status like
+// education or food insecurity or an assessment of cognitive, functional,
+// or disability status" -- so those three also get the wrong profile today.
+// profileObservation remains the correct fallback for any Observation with
+// no category or a category none of these cover.
+var observationCategoryToProfile = map[string]string{
+	"vital-signs":       profileObservationVitals,
+	"laboratory":        profileObservationLab,
+	"social-history":    profileObservationScreeningAssessment,
+	"functional-status": profileObservationScreeningAssessment,
+	"cognitive-status":  profileObservationScreeningAssessment,
+}
+
+// observationProfileForCategory returns observationCategoryToProfile's entry
+// for r's first matching category coding, or "" if none match (falls
+// through to resourceTypeToProfile's generic profileObservation default).
+func observationProfileForCategory(r map[string]interface{}) string {
+	categories, _ := r["category"].([]interface{})
+	for _, c := range categories {
+		cc, _ := c.(map[string]interface{})
+		codings, _ := cc["coding"].([]interface{})
+		for _, co := range codings {
+			coding, _ := co.(map[string]interface{})
+			code, _ := coding["code"].(string)
+			if profile, ok := observationCategoryToProfile[code]; ok {
+				return profile
+			}
+		}
+	}
+	return ""
 }
 
 // =========================================================
@@ -115,7 +195,15 @@ func (b *USCoreProfileBuilder) injectProfile(r map[string]interface{}, templateP
 	profile := templateProfile
 	if profile == "" {
 		rt := strField(r, "resourceType")
-		profile = resourceTypeToProfile[rt]
+		switch rt {
+		case "Condition":
+			profile = conditionProfileForCategory(r)
+		case "Observation":
+			profile = observationProfileForCategory(r)
+		}
+		if profile == "" {
+			profile = resourceTypeToProfile[rt]
+		}
 	}
 	if profile == "" {
 		return

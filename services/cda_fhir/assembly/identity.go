@@ -5,7 +5,11 @@
 // designed to be used exclusively in the serial post-processing phase.
 package assembly
 
-import "fmt"
+import (
+	"fmt"
+
+	mappinglog "ezhealthkonnect/services/cda_fhir/mapping_log"
+)
 
 // IdentityKey is the HL7 CDAII deduplication key: root OID (the identifier system,
 // e.g. "2.16.840.1.113883.4.6" for NPI) + extension (the actual value). Together
@@ -89,4 +93,27 @@ func ExtractIdentityKeys(r map[string]interface{}) []IdentityKey {
 		}
 	}
 	return keys
+}
+
+// ExtractLineage reads the "_cdaSection"/"_cdaEntryIndex" internal fields (set by
+// declarative_document_mapper.go's per-entry loop when deep lineage is enabled)
+// together with the existing "_cdaIds" field, returning a populated
+// mappinglog.ResourceLineage. ok is false when neither _cdaSection nor _cdaIds is
+// present — deep lineage was off for this run, or this resource never carried CDA
+// provenance (e.g. a synthesized resource with no CDA origin of its own).
+func ExtractLineage(r map[string]interface{}) (lineage mappinglog.ResourceLineage, ok bool) {
+	section, hasSection := r["_cdaSection"].(string)
+	entryIdx, _ := r["_cdaEntryIndex"].(int)
+	ids := ExtractIdentityKeys(r)
+
+	if !hasSection && len(ids) == 0 {
+		return mappinglog.ResourceLineage{}, false
+	}
+
+	lineage.SectionKey = section
+	lineage.EntryIndex = entryIdx
+	for _, id := range ids {
+		lineage.CDAIds = append(lineage.CDAIds, id.String())
+	}
+	return lineage, true
 }

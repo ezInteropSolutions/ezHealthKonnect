@@ -87,6 +87,23 @@ func (tps *TransformationPipelineService) ExecutePipeline(
 
 	log.Printf("🚀 [Pipeline] Initialized execution context for pipeline: %s", pipeline.PipelineName)
 
+	// Resolve the interface's debug flag once per run and inject it into every
+	// step's Config, mirroring ExecuteTransformation's own injection
+	// (transformation_pipeline_service.go) — ExecutePipeline is a SEPARATE entry
+	// point (used by ProcessingEngine.ReprocessMessage, i.e. the UI's "Re-run"
+	// button) that never touches step.Config otherwise, so without this, CDA
+	// deep-lineage capture silently stays off on every re-run even when the
+	// interface has debug logging enabled. Best-effort: errors never block the
+	// pipeline, deep lineage simply stays off.
+	if _, deepLineage, _ := ResolveInterfaceDebugLevel(tps.db, pipeline.InterfaceID); deepLineage {
+		for i := range pipeline.Steps {
+			if pipeline.Steps[i].Config == nil {
+				pipeline.Steps[i].Config = make(map[string]interface{})
+			}
+			pipeline.Steps[i].Config["_cdaDeepLineage"] = true
+		}
+	}
+
 	// PHASE 2: Enrich message envelope with _semantic_index + _sensitivity_map.
 	// enrichMessageEnvelope is idempotent — safe to call on already-enriched messages.
 	enrichMessageEnvelope(execCtx.Message)

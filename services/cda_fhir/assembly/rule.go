@@ -46,6 +46,15 @@ type AssemblyConfig struct {
 
 	// Rules carries per-rule overrides keyed by AssemblyRule.Name().
 	Rules map[string]RuleConfig `json:"rules,omitempty"`
+
+	// DeepLineage instructs assembly rules to capture per-resource CDA provenance
+	// (section + entry index + HL7 II identity) for every participant resource —
+	// survivor and discarded/merged alike — into AssemblyEvent.Lineage. Identical
+	// for every rule, so it is a direct flag rather than a per-rule RuleConfig
+	// parameter. Set once per pipeline run from the interface's debug_logging/
+	// log_level flag (see services.ResolveInterfaceDebugLevel). False by default —
+	// zero extra work/storage when off.
+	DeepLineage bool `json:"deepLineage,omitempty"`
 }
 
 // RuleConfig is the per-rule user override.

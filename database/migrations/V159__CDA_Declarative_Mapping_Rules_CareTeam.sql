@@ -48,7 +48,8 @@ VALUES
           {"scope": "participantRole.playingEntity.names[*]", "transform": "cda_name_to_fhir", "collectAll": true, "targetPath": "name"},
           {"scope": "participantRole.ids[*]", "transform": "cda_ii_to_identifier", "collectAll": true, "targetPath": "identifier", "embedCDAIdentity": true},
           {"sourcePath": "participantRole.code", "transform": "cda_code_to_codeable_concept", "targetPath": "qualification[0].code"},
-          {"scope": "participantRole.telecoms[*]", "transform": "cda_telecom_to_fhir", "collectAll": true, "targetPath": "telecom"}
+          {"scope": "participantRole.telecoms[*]", "transform": "cda_telecom_to_fhir", "collectAll": true, "targetPath": "telecom"},
+          {"scope": "participantRole.addresses[*]", "transform": "cda_address_to_fhir", "collectAll": true, "targetPath": "address"}
         ]
       },
       {"sourcePath": "functionCode", "transform": "cda_code_to_codeable_concept", "targetPath": "role[0]"}
@@ -66,7 +67,8 @@ VALUES
           {"scope": "performers[0].assignedEntity.assignedPerson.names[*]", "transform": "cda_name_to_fhir", "collectAll": true, "targetPath": "name"},
           {"scope": "performers[0].assignedEntity.ids[*]", "transform": "cda_ii_to_identifier", "collectAll": true, "targetPath": "identifier", "embedCDAIdentity": true},
           {"sourcePath": "performers[0].assignedEntity.code", "transform": "cda_code_to_codeable_concept", "targetPath": "qualification[0].code"},
-          {"scope": "performers[0].assignedEntity.telecoms[*]", "transform": "cda_telecom_to_fhir", "collectAll": true, "targetPath": "telecom"}
+          {"scope": "performers[0].assignedEntity.telecoms[*]", "transform": "cda_telecom_to_fhir", "collectAll": true, "targetPath": "telecom"},
+          {"scope": "performers[0].assignedEntity.addresses[*]", "transform": "cda_address_to_fhir", "collectAll": true, "targetPath": "address"}
         ]
       }
     ]
@@ -105,7 +107,8 @@ VALUES
           {"scope": "participantRole.playingEntity.names[*]", "transform": "cda_name_to_fhir", "collectAll": true, "targetPath": "name"},
           {"scope": "participantRole.ids[*]", "transform": "cda_ii_to_identifier", "collectAll": true, "targetPath": "identifier", "embedCDAIdentity": true},
           {"sourcePath": "participantRole.code", "transform": "cda_code_to_codeable_concept", "targetPath": "qualification[0].code"},
-          {"scope": "participantRole.telecoms[*]", "transform": "cda_telecom_to_fhir", "collectAll": true, "targetPath": "telecom"}
+          {"scope": "participantRole.telecoms[*]", "transform": "cda_telecom_to_fhir", "collectAll": true, "targetPath": "telecom"},
+          {"scope": "participantRole.addresses[*]", "transform": "cda_address_to_fhir", "collectAll": true, "targetPath": "address"}
         ]
       },
       {"sourcePath": "functionCode", "transform": "cda_code_to_codeable_concept", "targetPath": "role[0]"}
@@ -123,7 +126,8 @@ VALUES
           {"scope": "performers[0].assignedEntity.assignedPerson.names[*]", "transform": "cda_name_to_fhir", "collectAll": true, "targetPath": "name"},
           {"scope": "performers[0].assignedEntity.ids[*]", "transform": "cda_ii_to_identifier", "collectAll": true, "targetPath": "identifier", "embedCDAIdentity": true},
           {"sourcePath": "performers[0].assignedEntity.code", "transform": "cda_code_to_codeable_concept", "targetPath": "qualification[0].code"},
-          {"scope": "performers[0].assignedEntity.telecoms[*]", "transform": "cda_telecom_to_fhir", "collectAll": true, "targetPath": "telecom"}
+          {"scope": "performers[0].assignedEntity.telecoms[*]", "transform": "cda_telecom_to_fhir", "collectAll": true, "targetPath": "telecom"},
+          {"scope": "performers[0].assignedEntity.addresses[*]", "transform": "cda_address_to_fhir", "collectAll": true, "targetPath": "address"}
         ]
       }
     ]

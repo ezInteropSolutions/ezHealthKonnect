@@ -661,7 +661,28 @@ class PipelineBuilder {
         const finalOutput = result.output?.payload || result.output || {};
 
         const validationErrors = result.error ? [result.error] : [];
+
+        // Per-step "warnings" (generic step_metadata.warnings[] -- any
+        // executor can populate this via SetStepOutputWithDetails; the
+        // cda.to_fhir executor is the first real producer, surfacing CDA
+        // entries with more than one <value> sibling that only had its
+        // first value mapped). Collected here, keyed by step, both for the
+        // per-step badge below and the top-level "Validation Warnings"
+        // panel (previously always empty -- this is the same array, just
+        // now actually fed).
+        const warningsByStep = {};
         const validationWarnings = [];
+        if (result.steps) {
+            for (const [stepName, stepData] of Object.entries(result.steps)) {
+                const stepWarnings = stepData?.step_metadata?.warnings;
+                if (Array.isArray(stepWarnings) && stepWarnings.length > 0) {
+                    warningsByStep[stepName] = stepWarnings;
+                    for (const w of stepWarnings) {
+                        validationWarnings.push(`[${stepName}] ${w}`);
+                    }
+                }
+            }
+        }
 
         // Find FHIR bundle from steps
         let fhirBundle = null;
@@ -747,7 +768,8 @@ class PipelineBuilder {
             const getSuccess = (s) => s.step_metadata?.success ?? s.success ?? true;
             const failedCount = stepEntries.filter(([name, s]) => !getSuccess(s) || (errorsByStep[name] && !errorsByStep[name].caught)).length;
             const caughtCount = stepEntries.filter(([name]) => errorsByStep[name]?.caught === true).length;
-            const passedCount = stepEntries.length - failedCount - caughtCount;
+            const warningOnlyCount = stepEntries.filter(([name]) => warningsByStep[name] && !errorsByStep[name]).length;
+            const passedCount = stepEntries.length - failedCount - caughtCount - warningOnlyCount;
 
             html += `
                 <div class="step-results-section">
@@ -756,6 +778,7 @@ class PipelineBuilder {
                         <span class="step-results-summary">
                             <span class="step-count-pass">${passedCount} passed</span>
                             ${caughtCount > 0 ? `<span style="color:var(--warning-color);font-weight:600;">${caughtCount} caught</span>` : ''}
+                            ${warningOnlyCount > 0 ? `<span style="color:var(--warning-color);font-weight:600;">${warningOnlyCount} with warnings</span>` : ''}
                             ${failedCount > 0 ? `<span class="step-count-fail">${failedCount} failed</span>` : ''}
                         </span>
                     </h4>
@@ -769,8 +792,10 @@ class PipelineBuilder {
                 const stepError = errorsByStep[stepName];
                 const isCaughtError = stepError?.caught === true;
                 const isFailedError = stepError && !stepError.caught;
-                const statusClass = isFailedError ? 'step-fail' : (isCaughtError ? 'step-caught' : 'step-pass');
-                const statusIcon = isFailedError ? 'fa-times-circle' : (isCaughtError ? 'fa-shield-alt' : 'fa-check-circle');
+                const stepWarnings = !stepError ? warningsByStep[stepName] : null;
+                const hasWarningsOnly = Array.isArray(stepWarnings) && stepWarnings.length > 0;
+                const statusClass = isFailedError ? 'step-fail' : (isCaughtError ? 'step-caught' : (hasWarningsOnly ? 'step-warning' : 'step-pass'));
+                const statusIcon = isFailedError ? 'fa-times-circle' : (isCaughtError ? 'fa-shield-alt' : (hasWarningsOnly ? 'fa-exclamation-triangle' : 'fa-check-circle'));
 
                 html += `
                     <div class="step-result-item ${statusClass}">
@@ -778,6 +803,7 @@ class PipelineBuilder {
                             <i class="fas ${statusIcon} step-result-icon"></i>
                             <span class="step-result-name">${this.escapeHtml(stepName)}</span>
                             ${isCaughtError ? '<span style="font-size:11px;background:var(--warning-color);color:#fff;padding:1px 6px;border-radius:4px;margin-left:6px;">CAUGHT</span>' : ''}
+                            ${hasWarningsOnly ? `<span style="font-size:11px;background:var(--warning-color);color:#fff;padding:1px 6px;border-radius:4px;margin-left:6px;">${stepWarnings.length} WARNING${stepWarnings.length > 1 ? 'S' : ''}</span>` : ''}
                             ${duration ? `<span class="step-result-duration">${duration}</span>` : ''}
                         </div>
                         ${isFailedError ? `
@@ -789,6 +815,11 @@ class PipelineBuilder {
                             <div class="step-result-error" style="color:var(--warning-color);background:rgba(245,158,11,0.08);border-left-color:var(--warning-color);">
                                 <i class="fas fa-shield-alt"></i> ${this.escapeHtml(stepError.error)}
                                 ${stepError.default_applied ? `<br><i class="fas fa-edit" style="margin-left:2px;"></i> Default: <code>${this.escapeHtml(stepError.default_applied.field)} = ${this.escapeHtml(String(stepError.default_applied.value))}</code>` : ''}
+                            </div>
+                        ` : ''}
+                        ${hasWarningsOnly ? `
+                            <div class="step-result-error" style="color:var(--warning-color);background:rgba(245,158,11,0.08);border-left-color:var(--warning-color);">
+                                ${stepWarnings.map(w => `<div><i class="fas fa-exclamation-triangle"></i> ${this.escapeHtml(w)}</div>`).join('')}
                             </div>
                         ` : ''}
                     </div>

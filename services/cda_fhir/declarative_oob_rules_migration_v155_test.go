@@ -1,18 +1,19 @@
 // services/cda_fhir/declarative_oob_rules_migration_v155_test.go
 //
-// Drift guard for V155 (Vital Signs/Results/Social History), mirroring
-// declarative_oob_rules_migration_test.go's V154 guard exactly -- kept as a
-// SEPARATE test/regex rather than generalizing the V154 one, since V155's
-// INSERT column list is genuinely different (adds flatten_organizers before
-// is_system/is_public) and the two migrations' drift guards are independent,
-// single-purpose checks, not a shared parsing framework.
+// V155's own drift-CHECKING test (vitalSigns/results/socialHistory) was
+// superseded by V169 (code.text-from-narrative row added to
+// observationRule(), the one Go helper feeding all of V155's and V163's
+// sections at once -- see declarative_oob_rules_migration_v169_test.go) and
+// removed from this file. migrationV155InsertPattern/seededObservationRule/
+// parseSeededV155Rules are KEPT here -- V156/V157/V158/V160/V163's own
+// drift tests still import these shared package-level symbols for their own
+// migrations, unrelated to V155's now-superseded content.
 package cdafhir_test
 
 import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"reflect"
 	"regexp"
 	"runtime"
 	"testing"
@@ -69,45 +70,3 @@ func parseSeededV155Rules(t testing.TB) []seededObservationRule {
 	return rules
 }
 
-func findSeededV155(t testing.TB, seeded []seededObservationRule, sectionKey, fhirResource string) seededObservationRule {
-	t.Helper()
-	for _, s := range seeded {
-		if s.sectionKey == sectionKey && s.fhirResource == fhirResource {
-			return s
-		}
-	}
-	t.Fatalf("no seeded rule found in V155 for sectionKey=%q fhirResource=%q", sectionKey, fhirResource)
-	return seededObservationRule{}
-}
-
-func assertObservationRuleMatchesSeed(t *testing.T, seeded []seededObservationRule, want cdafhir.MappingRule) {
-	t.Helper()
-	got := findSeededV155(t, seeded, want.SectionKey, want.FHIRResource)
-	if got.entryMatch != want.EntryMatch {
-		t.Errorf("%s/%s: entry_match = %q, want %q", want.SectionKey, want.FHIRResource, got.entryMatch, want.EntryMatch)
-	}
-	if got.flattenOrganizers != want.FlattenOrganizers {
-		t.Errorf("%s/%s: flatten_organizers = %v, want %v", want.SectionKey, want.FHIRResource, got.flattenOrganizers, want.FlattenOrganizers)
-	}
-	if !reflect.DeepEqual(got.fields, want.Fields) {
-		t.Errorf("%s/%s: seeded fields drifted from declarative_oob_rules.go's Go literal.\nseeded: %+v\nwant:   %+v",
-			want.SectionKey, want.FHIRResource, got.fields, want.Fields)
-	}
-}
-
-func TestV155Migration_MatchesGoLiteralRules_NoDrift(t *testing.T) {
-	seeded := parseSeededV155Rules(t)
-	if len(seeded) != 3 {
-		t.Fatalf("got %d seeded rules, want 3 (vitalSigns + results + socialHistory)", len(seeded))
-	}
-
-	for _, rule := range cdafhir.VitalSignsMappingRules() {
-		assertObservationRuleMatchesSeed(t, seeded, rule)
-	}
-	// ResultsMappingRules()[0] only -- index [1] ("labResults", Phase 4 Slice D)
-	// is seeded in V163, not here; see declarative_oob_rules_migration_v163_test.go.
-	assertObservationRuleMatchesSeed(t, seeded, cdafhir.ResultsMappingRules()[0])
-	for _, rule := range cdafhir.SocialHistoryMappingRules() {
-		assertObservationRuleMatchesSeed(t, seeded, rule)
-	}
-}

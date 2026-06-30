@@ -6,13 +6,17 @@
 // is_public) -- no point recompiling the same regex under a new name. The
 // parsing/comparison helpers are still separate per migration file, per
 // that file's own doc comment on why these guards stay independent.
+//
+// V156 itself was then entirely superseded by V176 (performer upgraded to
+// PractitionerRole/Practitioner tiers + function, plus new recorded and
+// note rows -- see declarative_oob_rules_migration_v176_test.go); only
+// structural facts are still checked here.
 package cdafhir_test
 
 import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"reflect"
 	"runtime"
 	"testing"
 
@@ -73,7 +77,6 @@ func TestV156Migration_MatchesGoLiteralRules_NoDrift(t *testing.T) {
 	if got.flattenOrganizers != want.FlattenOrganizers {
 		t.Errorf("flatten_organizers = %v, want %v", got.flattenOrganizers, want.FlattenOrganizers)
 	}
-	if !reflect.DeepEqual(got.fields, want.Fields) {
-		t.Errorf("seeded fields drifted from declarative_oob_rules.go's Go literal.\nseeded: %+v\nwant:   %+v", got.fields, want.Fields)
-	}
+	// Fields comparison deliberately omitted -- superseded by V176, see
+	// this file's own top doc comment.
 }

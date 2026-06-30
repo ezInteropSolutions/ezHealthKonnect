@@ -31,6 +31,7 @@ import (
 	cdadocument "ezhealthkonnect/cda/document"
 	"ezhealthkonnect/models"
 	cdafhir "ezhealthkonnect/services/cda_fhir"
+	"ezhealthkonnect/services/cda_fhir/assembly"
 	cdastorage "ezhealthkonnect/services/cda_storage"
 	"ezhealthkonnect/services/executors"
 	cdaparser "ezhealthkonnect/services/parsers/cda"
@@ -104,6 +105,12 @@ type cdaToFHIRConfig struct {
 	EnabledSections       []string `json:"enabledSections"`
 	TerminologyValidation bool     `json:"terminologyValidation"`
 	MappingLogEnabled     *bool    `json:"mappingLogEnabled"` // nil = default true
+	DeepLineage           bool     `json:"_cdaDeepLineage"`   // system-injected, see transformation_pipeline_service.go
+	// PlanOfCareEncounterTarget: "" (unset, default) | "Appointment" | "Encounter".
+	// Per-step override for Plan-of-Care "entryType=encounter" entries' target
+	// resource -- see CDAToFHIRConfig.PlanOfCareEncounterTarget's own doc comment
+	// for the full precedence chain (step config > interface default > "Encounter").
+	PlanOfCareEncounterTarget string `json:"planOfCareEncounterTarget"`
 }
 
 // Execute resolves the parsed CDA map, drives GenericCDAFHIRMapper.Map(), and
@@ -151,6 +158,10 @@ func (e *CDAToFHIRExecutor) Execute(
 		EnabledSections:       cfg.EnabledSections,
 		OnSectionFailure:      cfg.OnSectionFailure,
 		TerminologyValidation: cfg.TerminologyValidation,
+		PlanOfCareEncounterTarget: cfg.PlanOfCareEncounterTarget,
+		Assembly: assembly.AssemblyConfig{
+			DeepLineage: cfg.DeepLineage,
+		},
 	}
 
 	// Prefer typed path: cda.parse stores *CDADocument at _cdaDocument.
@@ -233,6 +244,8 @@ func (e *CDAToFHIRExecutor) Execute(
 		msg["fhirBundle"] = output.FHIRBundle
 	}
 
+	warnings := formatSectionErrorWarnings(output.ProcessingResult.SectionErrors)
+
 	e.SetStepOutputWithDetails(outputData,
 		map[string]interface{}{
 			"fhirBundle":       output.FHIRBundle,
@@ -248,6 +261,7 @@ func (e *CDAToFHIRExecutor) Execute(
 			"sections_successful": len(output.ProcessingResult.SuccessfulSections),
 			"sections_failed":     len(output.ProcessingResult.FailedSections),
 			"partial_success":     output.ProcessingResult.PartialSuccess,
+			"warnings":            warnings,
 		},
 	)
 
@@ -372,6 +386,28 @@ func isCDAData(m map[string]interface{}) bool {
 	}
 	format, _ := m["_format"].(string)
 	return format == "ccda"
+}
+
+// formatSectionErrorWarnings promotes warning-severity SectionErrors into
+// the generic "warnings" execution-detail key transformation_test_controller.go
+// already merges into step_metadata for every executor (no CDA-specific
+// wiring needed there) -- the pipeline-builder UI's per-step warning badge
+// and top-level "Validation Warnings" panel both already render from this
+// same generic shape, previously just fed an empty array. Real example this
+// surfaces: declarative_engine.go's additionalValues check (a CDA entry with
+// more than one <value> sibling -- only the first is ever mapped to
+// Observation.value[x], the rest were silently dropped before that fix).
+// Extracted from Execute() so the formatting itself is unit-testable
+// without standing up a full executor.
+func formatSectionErrorWarnings(sectionErrors []cdafhir.SectionError) []string {
+	var warnings []string
+	for _, se := range sectionErrors {
+		if se.Severity != "warning" {
+			continue
+		}
+		warnings = append(warnings, fmt.Sprintf("[%s] entry %d, %s: %s", se.SectionKey, se.EntryIndex, se.FieldKey, se.Error))
+	}
+	return warnings
 }
 
 // Validate checks step configuration.

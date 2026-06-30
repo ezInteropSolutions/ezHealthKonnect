@@ -110,6 +110,18 @@ type CDAToFHIRConfig struct {
 	TerminologyValidation bool
 	MergeMode             string // "append" | "replace"
 
+	// PlanOfCareEncounterTarget overrides which FHIR resource Plan-of-Care
+	// section "entryType=encounter" entries (CDA classCode=ENC, typically
+	// moodCode=APT -- a planned/future visit) map to: "Appointment" (the
+	// Go-literal PlanOfCareMappingRules() default) or "Encounter" (reuses
+	// encounterFields() -- richer participant/location/identifier support,
+	// see declarative_oob_rules.go). Empty string means "not set by this
+	// pipeline step" -- DeclarativeMapDocument then falls back to the
+	// interface's own processing_rules.cda.planOfCareEncounterTarget
+	// default, and finally to "Encounter" if neither is set. Set by
+	// cda_to_fhir_executor.go from the step's own config JSON.
+	PlanOfCareEncounterTarget string
+
 	// Assembly controls the post-mapping assembly layer (deduplication, panel synthesis).
 	// Zero value = assembly enabled with all default rules active.
 	Assembly assembly.AssemblyConfig
@@ -292,6 +304,34 @@ func (m *GenericCDAFHIRMapper) loadCDAMappingOverrides(ctx context.Context, inte
 		return nil
 	}
 	return delta.Overrides
+}
+
+// loadPlanOfCareEncounterTargetDefault returns the interface-level default
+// for Plan-of-Care "entryType=encounter" entries' target FHIR resource
+// ("Appointment" | "Encounter"), read from interfaces.processing_rules ->
+// 'cda' ->> 'planOfCareEncounterTarget'. Returns "" (no interface-level
+// default set) on any of: no DB, no interfaceID, no row, NULL
+// processing_rules, or the key simply absent -- DeclarativeMapDocument
+// falls back to a hardcoded "Encounter" default in that case, mirroring
+// loadCDAMappingOverrides' own "nil means use OOB as-is" convention. Reuses
+// m.db the same way loadCDAMappingOverrides does -- no new DB infra.
+func (m *GenericCDAFHIRMapper) loadPlanOfCareEncounterTargetDefault(ctx context.Context, interfaceID string) string {
+	if m.db == nil || interfaceID == "" {
+		return ""
+	}
+	var target sql.NullString
+	err := m.db.QueryRowContext(ctx, `
+		SELECT processing_rules -> 'cda' ->> 'planOfCareEncounterTarget'
+		FROM interfaces
+		WHERE id = $1
+	`, interfaceID).Scan(&target)
+	if err != nil {
+		if err != sql.ErrNoRows {
+			log.Printf("[cda.to_fhir] loadPlanOfCareEncounterTargetDefault query error (interface=%s): %v", interfaceID, err)
+		}
+		return ""
+	}
+	return target.String
 }
 
 // CountDeclarativeFields returns how many addressable fields

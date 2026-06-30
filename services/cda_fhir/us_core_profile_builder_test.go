@@ -127,3 +127,167 @@ func TestInjectPatientExtensions_AlreadyPresent_NotDuplicated(t *testing.T) {
 		t.Errorf("extension count = %d, want 1 (no duplicate us-core-race)", len(exts))
 	}
 }
+
+// ---- Condition category-aware profile selection ----
+// Regression coverage for the bug found while auditing Encounter/Condition
+// linkage: profileEncounterDiagnosis (us-core-condition-encounter-diagnosis)
+// was defined but never wired into any lookup, so every Condition --
+// including encounter-diagnosis ones -- got the generic
+// us-core-condition-problems-health-concerns profile regardless of category.
+
+func conditionWithCategory(code string) map[string]interface{} {
+	return map[string]interface{}{
+		"resourceType": "Condition",
+		"category": []interface{}{
+			map[string]interface{}{
+				"coding": []interface{}{
+					map[string]interface{}{
+						"system": "http://terminology.hl7.org/CodeSystem/condition-category",
+						"code":   code,
+					},
+				},
+			},
+		},
+	}
+}
+
+func profileURLs(t *testing.T, r map[string]interface{}) []string {
+	t.Helper()
+	meta, _ := r["meta"].(map[string]interface{})
+	profiles, _ := meta["profile"].([]interface{})
+	var urls []string
+	for _, p := range profiles {
+		if s, ok := p.(string); ok {
+			urls = append(urls, s)
+		}
+	}
+	return urls
+}
+
+func TestInjectProfile_Condition_EncounterDiagnosis_GetsItsOwnProfile(t *testing.T) {
+	cond := conditionWithCategory("encounter-diagnosis")
+	cdafhir.NewUSCoreProfileBuilder().InjectProfile(cond, "")
+
+	urls := profileURLs(t, cond)
+	if len(urls) != 1 || urls[0] != "http://hl7.org/fhir/us/core/StructureDefinition/us-core-condition-encounter-diagnosis" {
+		t.Errorf("profile = %v, want exactly [us-core-condition-encounter-diagnosis]", urls)
+	}
+}
+
+func TestInjectProfile_Condition_ProblemListItem_GetsGenericProfile(t *testing.T) {
+	cond := conditionWithCategory("problem-list-item")
+	cdafhir.NewUSCoreProfileBuilder().InjectProfile(cond, "")
+
+	urls := profileURLs(t, cond)
+	if len(urls) != 1 || urls[0] != "http://hl7.org/fhir/us/core/StructureDefinition/us-core-condition-problems-health-concerns" {
+		t.Errorf("profile = %v, want exactly [us-core-condition-problems-health-concerns] (no category override for this category)", urls)
+	}
+}
+
+func TestInjectProfile_Condition_NoCategory_GetsGenericProfile(t *testing.T) {
+	cond := map[string]interface{}{"resourceType": "Condition"}
+	cdafhir.NewUSCoreProfileBuilder().InjectProfile(cond, "")
+
+	urls := profileURLs(t, cond)
+	if len(urls) != 1 || urls[0] != "http://hl7.org/fhir/us/core/StructureDefinition/us-core-condition-problems-health-concerns" {
+		t.Errorf("profile = %v, want exactly [us-core-condition-problems-health-concerns]", urls)
+	}
+}
+
+func TestInjectProfile_Condition_TemplateOverride_TakesPrecedence(t *testing.T) {
+	cond := conditionWithCategory("encounter-diagnosis")
+	cdafhir.NewUSCoreProfileBuilder().InjectProfile(cond, "http://example.org/custom-profile")
+
+	urls := profileURLs(t, cond)
+	if len(urls) != 1 || urls[0] != "http://example.org/custom-profile" {
+		t.Errorf("profile = %v, want exactly [http://example.org/custom-profile] (explicit templateProfile must win over category inference)", urls)
+	}
+}
+
+// ---- Observation category-aware profile selection ----
+// Regression coverage for the bug found while auditing Mental Status:
+// profileObservationVitals/profileObservationLab (us-core-vital-signs /
+// us-core-observation-lab) were declared from the start but never wired
+// into any lookup, so EVERY Observation -- vitals, labs, social history,
+// functional status, cognitive status alike -- got the generic
+// us-core-observation-clinical-result profile regardless of category.
+
+func observationWithCategoryCode(code string) map[string]interface{} {
+	return map[string]interface{}{
+		"resourceType": "Observation",
+		"category": []interface{}{
+			map[string]interface{}{
+				"coding": []interface{}{
+					map[string]interface{}{
+						"system": "http://terminology.hl7.org/CodeSystem/observation-category",
+						"code":   code,
+					},
+				},
+			},
+		},
+	}
+}
+
+func TestInjectProfile_Observation_VitalSigns_GetsVitalSignsProfile(t *testing.T) {
+	obs := observationWithCategoryCode("vital-signs")
+	cdafhir.NewUSCoreProfileBuilder().InjectProfile(obs, "")
+
+	urls := profileURLs(t, obs)
+	if len(urls) != 1 || urls[0] != "http://hl7.org/fhir/us/core/StructureDefinition/us-core-vital-signs" {
+		t.Errorf("profile = %v, want exactly [us-core-vital-signs]", urls)
+	}
+}
+
+func TestInjectProfile_Observation_Laboratory_GetsLabProfile(t *testing.T) {
+	obs := observationWithCategoryCode("laboratory")
+	cdafhir.NewUSCoreProfileBuilder().InjectProfile(obs, "")
+
+	urls := profileURLs(t, obs)
+	if len(urls) != 1 || urls[0] != "http://hl7.org/fhir/us/core/StructureDefinition/us-core-observation-lab" {
+		t.Errorf("profile = %v, want exactly [us-core-observation-lab]", urls)
+	}
+}
+
+func TestInjectProfile_Observation_ScreeningAssessmentCategories_GetScreeningAssessmentProfile(t *testing.T) {
+	for _, code := range []string{"social-history", "functional-status", "cognitive-status"} {
+		t.Run(code, func(t *testing.T) {
+			obs := observationWithCategoryCode(code)
+			cdafhir.NewUSCoreProfileBuilder().InjectProfile(obs, "")
+
+			urls := profileURLs(t, obs)
+			if len(urls) != 1 || urls[0] != "http://hl7.org/fhir/us/core/StructureDefinition/us-core-observation-screening-assessment" {
+				t.Errorf("category=%s: profile = %v, want exactly [us-core-observation-screening-assessment]", code, urls)
+			}
+		})
+	}
+}
+
+func TestInjectProfile_Observation_NoCategory_GetsGenericClinicalResultProfile(t *testing.T) {
+	obs := map[string]interface{}{"resourceType": "Observation"}
+	cdafhir.NewUSCoreProfileBuilder().InjectProfile(obs, "")
+
+	urls := profileURLs(t, obs)
+	if len(urls) != 1 || urls[0] != "http://hl7.org/fhir/us/core/StructureDefinition/us-core-observation-clinical-result" {
+		t.Errorf("profile = %v, want exactly [us-core-observation-clinical-result] (fallback for an uncategorized Observation)", urls)
+	}
+}
+
+func TestInjectProfile_Observation_UnrecognizedCategory_GetsGenericClinicalResultProfile(t *testing.T) {
+	obs := observationWithCategoryCode("exam")
+	cdafhir.NewUSCoreProfileBuilder().InjectProfile(obs, "")
+
+	urls := profileURLs(t, obs)
+	if len(urls) != 1 || urls[0] != "http://hl7.org/fhir/us/core/StructureDefinition/us-core-observation-clinical-result" {
+		t.Errorf("profile = %v, want exactly [us-core-observation-clinical-result] (no override defined for this category)", urls)
+	}
+}
+
+func TestInjectProfile_Observation_TemplateOverride_TakesPrecedence(t *testing.T) {
+	obs := observationWithCategoryCode("vital-signs")
+	cdafhir.NewUSCoreProfileBuilder().InjectProfile(obs, "http://example.org/custom-profile")
+
+	urls := profileURLs(t, obs)
+	if len(urls) != 1 || urls[0] != "http://example.org/custom-profile" {
+		t.Errorf("profile = %v, want exactly [http://example.org/custom-profile] (explicit templateProfile must win over category inference)", urls)
+	}
+}

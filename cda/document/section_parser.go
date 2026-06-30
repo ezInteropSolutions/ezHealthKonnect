@@ -210,6 +210,14 @@ func normalizeTitleToKey(el *etree.Element) string {
 // map from each element's ID attribute value to its plain-text content. This
 // allows <reference value="#id"/> anchors in structured entries to be resolved
 // to the human-readable text displayed to the clinician.
+//
+// Deliberately does NOT infer anything from surrounding narrative structure
+// (e.g. a sibling <caption> on an ancestor <item>) -- narrative <text> layout
+// is not standardized across EHR vendors, so any rule built on top of one
+// vendor's particular convention is a bet that won't generalize. Resolving
+// "#id" to exactly the text at that id is the one standard, reliable part of
+// this mechanism (CDA Release 2 narrative block §4.3.5.1); anything beyond
+// that is per-vendor guesswork this codebase does not take on.
 func buildNarrativeIndex(el *etree.Element) map[string]string {
 	idx := make(map[string]string)
 	walkForIDs(el, idx)

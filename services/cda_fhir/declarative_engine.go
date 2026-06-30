@@ -248,16 +248,6 @@ func (e *DeclarativeEngine) buildOneResource(
 	rule MappingRule,
 	entryIdx int,
 ) (map[string]interface{}, []map[string]interface{}, []SectionError) {
-	if rule.SkipIfCodeNullFlavor {
-		if code, ok := entryMap["code"].(map[string]interface{}); ok {
-			nullFlavor, _ := code["nullFlavor"].(string)
-			realCode, _ := code["code"].(string)
-			if nullFlavor != "" && realCode == "" {
-				return nil, nil, nil
-			}
-		}
-	}
-
 	resource := map[string]interface{}{"resourceType": rule.FHIRResource}
 	var errs []SectionError
 	var extra []map[string]interface{}
@@ -279,12 +269,77 @@ func (e *DeclarativeEngine) buildOneResource(
 		}
 	}
 
+	// additionalValues surfaces (never silently drops) any CDA <value>
+	// sibling beyond the first -- see additionalValuesWarningMessages' own
+	// doc comment. Attributable directly to a SectionError here (SectionKey/
+	// EntryIndex are both in scope) since this is the rule's own top-level
+	// entry; buildEmittedSubResource's analogous check (a nested
+	// EmitAsResource resource, e.g. an Assessment Scale Supporting
+	// Observation COMP child) has no such context available at that depth
+	// and stamps a temporary "_warnings" marker instead -- see that
+	// function's own doc comment for why, and declarative_document_mapper.go
+	// for where that marker is read back into a SectionError (with the
+	// section/entry context ITS caller has) and stripped before the bundle
+	// ships.
+	for _, msg := range additionalValuesWarningMessages(entryMap) {
+		errs = append(errs, SectionError{
+			SectionKey: rule.SectionKey,
+			EntryIndex: entryIdx,
+			FieldKey:   "value",
+			Error:      msg,
+			Severity:   "warning",
+		})
+	}
+
+	// SkipIfCodeNullFlavor discards only THIS entry's own main resource --
+	// checked AFTER Fields already ran (not before, as a short-circuit)
+	// specifically so any EmitAsResource child built by one of the Fields
+	// above (already collected into extra) survives even when the entry
+	// itself has no real code to build a conformant Observation from. Real
+	// gap found auditing Functional Status (99397 sample): its "Alcohol Use"
+	// and PHQ-2 Assessment Scale Observation (.4.69) shells carry
+	// code.nullFlavor="UNK" (non-conformant -- the IG's own
+	// AssessmentScaleObservation StructureDefinition requires code+value
+	// both [1..1]), but their COMP-nested Assessment Scale Supporting
+	// Observation children (.4.86, which DOES mandate code [1..1] LOINC) are
+	// fully conformant, real clinical data (e.g. AUDIT-C/PHQ-2 question/
+	// answer pairs) -- the early-return this check used to do (before any
+	// Field ran) discarded those children too, silently losing real data
+	// instead of just the code-less, FHIR-non-conformant shell. See
+	// FunctionalStatusMappingRules' own doc comment for the fix this enabled.
+	if rule.SkipIfCodeNullFlavor {
+		if code, ok := entryMap["code"].(map[string]interface{}); ok {
+			nullFlavor, _ := code["nullFlavor"].(string)
+			realCode, _ := code["code"].(string)
+			// A null-flavor code with no structured coding can still carry a
+			// real, code-specific label via <code><originalText> -- a valid,
+			// non-empty Observation.code (CodeableConcept.text alone is
+			// FHIR-conformant). Real gap found auditing Results (Marshfield
+			// sample): a full cytology/pathology report (real diagnosis text,
+			// signing pathologist, date) has exactly this shape
+			// (code.nullFlavor="UNK", code.originalText="Thin Prep, PAP and
+			// HPV if ASCUS") and was being discarded entirely just because it
+			// has no LOINC code -- losing genuinely substantive clinical
+			// content, not a conformance-incomplete shell like the Functional
+			// Status .4.69 case this guard was written for (confirmed via the
+			// 99397 sample: those shells are a BARE <code nullFlavor="UNK"/>
+			// with no originalText at all, so they keep discarding correctly
+			// here). A section's own genuinely-empty placeholder shell (e.g.
+			// Dignity Health's "No data available" Results entry) also has no
+			// originalText on its code element, so it isn't affected either.
+			originalText, _ := code["originalText"].(string)
+			if nullFlavor != "" && realCode == "" && originalText == "" {
+				return nil, extra, errs
+			}
+		}
+	}
+
 	// Only include non-empty resources (at least one field was set beyond
 	// resourceType) — same convention as createFHIRResourceFromSection.
 	// SkipEmptyCheck bypasses this for the one rule (Author) whose Go
 	// counterpart never had an equivalent check — see that field's doc
 	// comment in declarative_schema.go.
-	if len(resource) <= 1 && !rule.SkipEmptyCheck {
+	if countRealKeys(resource) <= 1 && !rule.SkipEmptyCheck {
 		return nil, extra, errs
 	}
 	if !resourceHasAllPaths(resource, rule.RequiredPaths) {
@@ -300,6 +355,78 @@ func (e *DeclarativeEngine) buildOneResource(
 	}
 
 	return resource, extra, errs
+}
+
+// describeCDAValueForWarning renders a JSON-shaped CDAValue node (the "value"
+// or one "additionalValues[i]" entry) as a short human-readable string for
+// the additionalValues warning above -- code+display when coded, else the
+// raw text/boolean/integer/real, else "(no value)" for a bare nullFlavor.
+// Deliberately tolerant of any shape (every field is a best-effort type
+// assertion) since this only feeds a warning message, never a written FHIR
+// field -- a malformed node here must never itself produce an error.
+func describeCDAValueForWarning(v interface{}) string {
+	m, ok := v.(map[string]interface{})
+	if !ok {
+		return "(no value)"
+	}
+	if code, ok := m["code"].(map[string]interface{}); ok {
+		codeStr, _ := code["code"].(string)
+		display, _ := code["displayName"].(string)
+		switch {
+		case codeStr != "" && display != "":
+			return codeStr + " " + display
+		case codeStr != "":
+			return codeStr
+		}
+	}
+	if text, ok := m["text"].(string); ok && text != "" {
+		return text
+	}
+	if b, ok := m["boolean"]; ok {
+		return fmt.Sprintf("%v", b)
+	}
+	if i, ok := m["integer"]; ok {
+		return fmt.Sprintf("%v", i)
+	}
+	if r, ok := m["real"]; ok {
+		return fmt.Sprintf("%v", r)
+	}
+	return "(no value)"
+}
+
+// additionalValuesWarningMessages returns one human-readable message per CDA
+// <value> sibling beyond the first present on entryMap (cda/document's
+// entry_parser.go keeps the first in "value" -- the one
+// observationValueXDispatchRows-style rows actually map -- and the rest in
+// "additionalValues", since C-CDA allows [1..*] <value> on some templates
+// (e.g. Assessment Scale Supporting Observation) but FHIR R4's
+// Observation.value[x] can only ever hold one). Returns nil when there's
+// nothing extra -- the overwhelmingly common case, so callers can append
+// the result unconditionally with no extra branching.
+//
+// Used by both buildOneResource (the rule's own top-level entry, where
+// SectionKey/EntryIndex are already in scope to attach directly to a
+// SectionError) and buildEmittedSubResource (a nested EmitAsResource
+// resource, where they are not -- see that function's own doc comment for
+// how it surfaces this instead). Real gap found auditing Functional Status
+// (99397 sample): a PHQ-2 total-score entry's second <value> (a SNOMED
+// interpretation, alongside the INT score already mapped) was silently
+// discarded with no trace anywhere. Deliberately produces warnings, not
+// errors -- per user direction, the engine's mapping behavior is unchanged
+// (first value always wins); this only makes sure a human can see that a
+// second value existed and was not mapped.
+func additionalValuesWarningMessages(entryMap map[string]interface{}) []string {
+	extras, ok := entryMap["additionalValues"].([]interface{})
+	if !ok || len(extras) == 0 {
+		return nil
+	}
+	kept := describeCDAValueForWarning(entryMap["value"])
+	messages := make([]string, 0, len(extras))
+	for _, ev := range extras {
+		extraMap, _ := ev.(map[string]interface{})
+		messages = append(messages, "entry has more than one <value>; only the first was mapped (kept: "+kept+") -- not mapped: "+describeCDAValueForWarning(extraMap))
+	}
+	return messages
 }
 
 // entryMatchesPredicate evaluates an EntryMatch predicate clause against an
@@ -345,6 +472,32 @@ func flattenOrganizerEntries(nodes []interface{}) []interface{} {
 		flat = append(flat, node)
 	}
 	return flat
+}
+
+// countRealKeys counts resource's top-level keys excluding "_cdaIds" — the
+// internal lineage/debug marker EmbedCDAIdentity rows attach (declarative_
+// engine.go's CollectAll branch, ~line 457). Both "did anything real get
+// set" survival gates (buildOneResource and buildEmittedSubResource) need
+// this instead of a bare len(): a real gap found auditing Vital Signs
+// against the 99397 sample -- every author there has
+// <id root="2.16.840.1.113883.4.6" nullFlavor="UNK"/> (no @extension, the
+// bare NPI system OID with no actual NPI value), which
+// transforms.IIToIdentifier correctly recognizes as not a real identifier
+// (see that function's own doc comment) and never writes to "identifier" --
+// but EmbedCDAIdentity's own check only looks at root/extension being
+// non-empty, not nullFlavor, so it still recorded a useless "_cdaIds" entry.
+// That alone was enough to push len(sub) from 1 to 2, defeating the gate and
+// letting an otherwise completely content-free Practitioner (no name, no
+// identifier, no telecom, no address — just resourceType + the phantom
+// debug key) survive into the bundle as a real, emitted resource.
+// "_emitted" (buildEmittedSubResource's own marker) doesn't need the same
+// exclusion: it's added AFTER that function's gate check, never before.
+func countRealKeys(resource map[string]interface{}) int {
+	n := len(resource)
+	if _, ok := resource["_cdaIds"]; ok {
+		n--
+	}
+	return n
 }
 
 // resourceHasAnyKey reports whether resource already has any of keys set —
@@ -401,10 +554,16 @@ func isNilValue(v interface{}) bool {
 // applies" falls out for free (see declarative_schema.go's doc comment).
 //
 // extraOut, when non-nil, accumulates any resources emitted by a nested
-// EmitAsResource row reached while applying this row (only possible via the
-// row.CollectAll+Fields branch below — a non-Fields row never recurses).
-// Most callers pass nil: only buildOneResource (the top of the recursion)
-// needs to actually collect these.
+// EmitAsResource row reached while applying this row — via the
+// row.CollectAll+Fields branch below (one EmitAsResource per matched node),
+// or via row.EmitAsResource itself on a singular (non-CollectAll) row, which
+// recurses into buildEmittedSubResource the same way and lets that emitted
+// resource's OWN Fields contain further EmitAsResource rows (e.g.
+// PractitionerRole.practitioner/.organization, each its own emitted
+// resource) — extraOut is threaded all the way down so those land as
+// independent top-level resources too, not nested values. Most callers pass
+// nil: only buildOneResource (the top of the recursion) needs to actually
+// collect these.
 func (e *DeclarativeEngine) applyRow(resource map[string]interface{}, entryMap map[string]interface{}, row MappingRow, extraOut *[]map[string]interface{}) error {
 	if resourceHasAnyKey(resource, row.SkipIfResourceHasAnyOf) {
 		return nil
@@ -415,6 +574,9 @@ func (e *DeclarativeEngine) applyRow(resource map[string]interface{}, entryMap m
 	}
 
 	if row.CollectAll {
+		if row.EmitAsResource != "" {
+			return e.applyCollectAllEmitAsResource(resource, scopedNodes, row, extraOut)
+		}
 		if len(row.Fields) > 0 {
 			return e.applyCollectAllWithFields(resource, scopedNodes, row, extraOut)
 		}
@@ -448,6 +610,22 @@ func (e *DeclarativeEngine) applyRow(resource map[string]interface{}, entryMap m
 		if len(cdaIds) > 0 {
 			resource["_cdaIds"] = cdaIds
 		}
+		return nil
+	}
+
+	if row.EmitAsResource != "" {
+		scopedMap, ok := scopedNodes[0].(map[string]interface{})
+		if !ok {
+			return nil
+		}
+		sub, refVal := e.buildEmittedSubResource(scopedMap, row, extraOut)
+		if sub == nil {
+			return nil
+		}
+		if extraOut != nil {
+			*extraOut = append(*extraOut, sub)
+		}
+		setFHIRPath(resource, row.TargetPath, refVal)
 		return nil
 	}
 
@@ -508,7 +686,7 @@ func (e *DeclarativeEngine) applyCollectAllWithFields(resource map[string]interf
 				// builds an INDEPENDENT resource (e.g. CareTeam's per-
 				// participant Practitioner), not a value inside subObj —
 				// subObj only gets a Reference to it.
-				if sub, refVal := e.buildEmittedSubResource(scopedMap, childRow); sub != nil {
+				if sub, refVal := e.buildEmittedSubResource(scopedMap, childRow, extraOut); sub != nil {
 					if extraOut != nil {
 						*extraOut = append(*extraOut, sub)
 					}
@@ -533,6 +711,47 @@ func (e *DeclarativeEngine) applyCollectAllWithFields(resource map[string]interf
 	return nil
 }
 
+// applyCollectAllEmitAsResource implements MappingRow.CollectAll combined
+// DIRECTLY with EmitAsResource (row.Fields describing the EMITTED
+// resource's own fields, not a wrapping subObj's fields): each Scope match
+// becomes its own independent resource via buildEmittedSubResource, pushed
+// to extraOut, with a bare {"reference": ...} appended to
+// resource[row.TargetPath] per match. Deliberately a separate code path
+// from applyCollectAllWithFields (CollectAll+Fields with NO EmitAsResource
+// on the outer row) rather than a variant of it -- that function wraps
+// each match's result in a multi-field subObj, which doesn't compose with a
+// bare Reference without nesting it under a spurious extra key.
+//
+// First real use: SocialHistoryMappingRules' SDOH Assessment Scale ->
+// Assessment Scale Supporting Observation fan-out (C-CDA's
+// entryRelationship typeCode=COMP, templateId
+// 2.16.840.1.113883.10.20.22.4.86) -- a variable number (1 to 6+ in real
+// 99397 sample data) of sibling question/answer observations, each
+// becoming its own Observation resource referenced from the parent's
+// hasMember[].
+func (e *DeclarativeEngine) applyCollectAllEmitAsResource(resource map[string]interface{}, scopedNodes []interface{}, row MappingRow, extraOut *[]map[string]interface{}) error {
+	idx := 0
+	if existing, ok := resource[row.TargetPath].([]interface{}); ok {
+		idx = len(existing)
+	}
+	for _, scoped := range scopedNodes {
+		scopedMap, ok := scoped.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		sub, refVal := e.buildEmittedSubResource(scopedMap, row, extraOut)
+		if sub == nil {
+			continue
+		}
+		if extraOut != nil {
+			*extraOut = append(*extraOut, sub)
+		}
+		setFHIRPath(resource, indexedPath(row.TargetPath, idx), refVal)
+		idx++
+	}
+	return nil
+}
+
 // buildEmittedSubResource builds a brand new, independent resource from
 // row.Fields against scopedMap — see MappingRow.EmitAsResource's doc
 // comment. Returns (nil, nil) when nothing usable was built, the same
@@ -540,6 +759,20 @@ func (e *DeclarativeEngine) applyCollectAllWithFields(resource map[string]interf
 // resources. The id comes from nextEmittedID, not the caller's own loop
 // index — see emittedIDCounters' doc comment for why a per-call idx isn't
 // document-wide-unique on its own.
+//
+// extraOut is NOT forwarded directly into childRow's own applyRow calls —
+// they're given a local buffer instead (see localExtra below), so a
+// childRow that itself sets EmitAsResource — e.g. a PractitionerRole row
+// whose Fields contain a singular "practitioner" row and a singular
+// "organization" row, each EmitAsResource on its own — has ITS sub resource
+// land in that local buffer first. Only once THIS resource (sub) survives
+// its own len()/EmitAsResourceRequiredPaths gate does localExtra get merged
+// into the real extraOut; if sub is discarded, every resource nested inside
+// it is discarded right along with it, atomically, instead of leaking into
+// the bundle as orphaned clutter with nothing left referencing them. This
+// is what makes EmitAsResource nest (PractitionerRole -> Practitioner +
+// Organization, each landing as its own independent top-level resource —
+// but only when PractitionerRole itself is worth keeping).
 //
 // "_emitted": true is a marker the document-level orchestrator's resource-id
 // renumbering pass (declarative_document_mapper.go) checks: that pass
@@ -551,12 +784,16 @@ func (e *DeclarativeEngine) applyCollectAllWithFields(resource map[string]interf
 // non-excluded-type caller, via EncounterMappingRules' nested-diagnosis row)
 // needs the explicit marker instead. Stripped before the bundle ships,
 // alongside "_cdaIds".
-func (e *DeclarativeEngine) buildEmittedSubResource(scopedMap map[string]interface{}, row MappingRow) (map[string]interface{}, map[string]interface{}) {
+func (e *DeclarativeEngine) buildEmittedSubResource(scopedMap map[string]interface{}, row MappingRow, extraOut *[]map[string]interface{}) (map[string]interface{}, map[string]interface{}) {
 	sub := map[string]interface{}{"resourceType": row.EmitAsResource}
+	var localExtra []map[string]interface{}
 	for _, childRow := range row.Fields {
-		_ = e.applyRow(sub, scopedMap, childRow, nil)
+		_ = e.applyRow(sub, scopedMap, childRow, &localExtra)
 	}
-	if len(sub) <= 1 {
+	if countRealKeys(sub) <= 1 {
+		return nil, nil
+	}
+	if !resourceHasAllPaths(sub, row.EmitAsResourceRequiredPaths) {
 		return nil, nil
 	}
 	if e.PatientRef != "" {
@@ -569,6 +806,24 @@ func (e *DeclarativeEngine) buildEmittedSubResource(scopedMap map[string]interfa
 	id := fmt.Sprintf("%s-%d", strings.ToLower(row.EmitAsResource), e.nextEmittedID(row.EmitAsResource))
 	sub["id"] = id
 	sub["_emitted"] = true
+	// "_warnings" is a temporary marker, the EmitAsResource analogue of
+	// buildOneResource's direct-to-errs additionalValues check above: this
+	// function has no SectionError channel of its own (applyRow/
+	// applyCollectAllEmitAsResource/applyCollectAllWithFields, every caller
+	// in the chain back to buildOneResource, only ever thread resources, not
+	// errors, through EmitAsResource -- a real, pre-existing limitation this
+	// doesn't attempt to fix wholesale, see applyCollectAllWithFields'
+	// "errors are intentionally swallowed" doc comment for the established
+	// precedent). declarative_document_mapper.go's per-entry loop (which DOES
+	// have the SectionKey/EntryIndex this resource's own entry belongs to)
+	// reads this back into a real SectionError and strips it before the
+	// resource ships, the same way it already strips "_emitted"/"_cdaIds".
+	if msgs := additionalValuesWarningMessages(scopedMap); len(msgs) > 0 {
+		sub["_warnings"] = msgs
+	}
+	if extraOut != nil {
+		*extraOut = append(*extraOut, localExtra...)
+	}
 	return sub, map[string]interface{}{"reference": row.EmitAsResource + "/" + id}
 }
 

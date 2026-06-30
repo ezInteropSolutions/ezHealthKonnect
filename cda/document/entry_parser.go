@@ -15,6 +15,8 @@
 package cdadocument
 
 import (
+	"strings"
+
 	"github.com/beevik/etree"
 )
 
@@ -95,6 +97,16 @@ func (ep *entryParser) parseClinicalAct(el *etree.Element, entryType string) CDA
 	if icEl := el.SelectElement("interpretationCode"); icEl != nil {
 		entry.InterpretationCode = parseCD(icEl)
 	}
+	// <referenceRange><observationRange><text> -- only the free-text shape is
+	// evidenced in the corpus (see CDAEntry.ReferenceRangeText's doc comment);
+	// only the first <referenceRange> is captured.
+	if rrEl := el.SelectElement("referenceRange"); rrEl != nil {
+		if orEl := rrEl.SelectElement("observationRange"); orEl != nil {
+			if textEl := orEl.SelectElement("text"); textEl != nil {
+				entry.ReferenceRangeText = strings.TrimSpace(textEl.Text())
+			}
+		}
+	}
 	// ALL <effectiveTime> elements — substanceAdministration commonly carries
 	// two: an IVL_TS duration and a PIVL_TS/EIVL_TS dosing frequency.
 	for _, etEl := range el.SelectElements("effectiveTime") {
@@ -117,14 +129,20 @@ func (ep *entryParser) parseClinicalAct(el *etree.Element, entryType string) CDA
 	if len(entry.EffectiveTimes) > 0 {
 		entry.EffectiveTime = entry.EffectiveTimes[0].Range
 	}
-	if valEl := el.SelectElement("value"); valEl != nil {
-		entry.Value = parseValue(valEl)
+	if valEls := el.SelectElements("value"); len(valEls) > 0 {
+		entry.Value = parseValue(valEls[0])
+		for _, extra := range valEls[1:] {
+			if v := parseValue(extra); v != nil {
+				entry.AdditionalValues = append(entry.AdditionalValues, *v)
+			}
+		}
 	}
 
 	entry.Participants = ep.parseParticipants(el)
 	entry.EntryRelationships = ep.parseEntryRelationships(el)
 	entry.Authors = ep.parseAuthors(el)
 	entry.Performers = ep.parsePerformers(el)
+	entry.Informants = ep.parseInformants(el)
 
 	switch entryType {
 	case "substanceAdministration":
@@ -264,6 +282,19 @@ func (ep *entryParser) parsePerformers(el *etree.Element) []CDAPerformer {
 		performers = append(performers, perf)
 	}
 	return performers
+}
+
+// parseInformants extracts <informant><assignedEntity> children of el. The
+// base CDA R2 schema also allows <informant><relatedEntity> — not parsed
+// here, no real entry seen using it.
+func (ep *entryParser) parseInformants(el *etree.Element) []CDAInformant {
+	var informants []CDAInformant
+	for _, infEl := range el.SelectElements("informant") {
+		if aeEl := infEl.SelectElement("assignedEntity"); aeEl != nil {
+			informants = append(informants, CDAInformant{AssignedEntity: parseAssignedEntity(aeEl)})
+		}
+	}
+	return informants
 }
 
 // ========================

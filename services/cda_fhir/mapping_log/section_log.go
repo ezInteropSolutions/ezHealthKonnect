@@ -11,7 +11,18 @@ type SectionLog struct {
 	ResourcesOut     int          `json:"resourcesOut"`
 	ProcessingTimeMs int64        `json:"processingTimeMs"`
 	Errors           []string     `json:"errors,omitempty"`
-	Entries          []EntryTrace `json:"entries,omitempty"`
+	// Warnings holds informational, non-blocking notices -- e.g. a CDA entry
+	// with more than one <value> sibling (FHIR Observation.value[x] only
+	// holds one; the engine keeps the first and warns about the rest, see
+	// declarative_engine.go's additionalValuesWarningMessages). Distinct from
+	// Errors: a warning never marks the section failed and never drops data,
+	// it is purely "a human should know this happened". Populated from
+	// MappingRule/MappingRow-level SectionError entries with
+	// Severity=="warning" (declarative_document_mapper.go's per-entry loop),
+	// not just additionalValues -- any future warning-severity SectionError
+	// surfaces here for free.
+	Warnings []string     `json:"warnings,omitempty"`
+	Entries  []EntryTrace `json:"entries,omitempty"`
 }
 
 // EntryTrace records which FHIR resource(s) a single CDA entry produced —
@@ -57,6 +68,7 @@ type SectionBuilder struct {
 	title      string
 	startedAt  time.Time
 	errors     []string
+	warnings   []string
 	entriesIn  int
 	entries    []EntryTrace
 }
@@ -76,6 +88,12 @@ func (b *SectionBuilder) AddError(err string) {
 	b.errors = append(b.errors, err)
 }
 
+// AddWarning records a section-level informational warning -- see
+// SectionLog.Warnings' doc comment for how this differs from AddError.
+func (b *SectionBuilder) AddWarning(msg string) {
+	b.warnings = append(b.warnings, msg)
+}
+
 // AddEntry records the entry-to-resource trace for one CDA entry in this section.
 func (b *SectionBuilder) AddEntry(trace EntryTrace) {
 	b.entries = append(b.entries, trace)
@@ -93,6 +111,9 @@ func (b *SectionBuilder) Build(resourcesOut int) SectionLog {
 	}
 	if len(b.errors) > 0 {
 		sl.Errors = b.errors
+	}
+	if len(b.warnings) > 0 {
+		sl.Warnings = b.warnings
 	}
 	if len(b.entries) > 0 {
 		sl.Entries = b.entries

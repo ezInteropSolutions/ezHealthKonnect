@@ -1,11 +1,10 @@
-// services/cda_fhir/declarative_oob_rules_migration_v163_test.go
+// services/cda_fhir/declarative_oob_rules_migration_v181_test.go
 //
-// Drift guard for V163 (labResults / functionalStatus / mentalStatus, the 3
-// section-coverage gaps closed in Phase 4 Slice D). Reuses
-// migrationV155InsertPattern -- same INSERT...VALUES(...) column shape
-// (section_key, fhir_resource, entry_match, rule_order, fields,
-// flatten_organizers, then skip_if_code_null_flavor/is_system/is_public,
-// none of which the regex needs to capture).
+// Drift guard for V181 (first-time OOB seed for ClinicalNoteMappingRules()
+// -- a Note Activity entry, templateId 2.16.840.1.113883.10.20.22.4.202,
+// mapped to one US Core DocumentReference; see declarative_oob_rules.go's
+// ClinicalNoteMappingRules() own doc comment for the real "historyOfPresentIllness"/
+// Epic "Progress Notes" gap this closes).
 package cdafhir_test
 
 import (
@@ -19,7 +18,7 @@ import (
 	cdafhir "ezhealthkonnect/services/cda_fhir"
 )
 
-func parseSeededV163Rules(t testing.TB) []seededObservationRule {
+func parseSeededV181Rules(t testing.TB) []seededObservationRule {
 	t.Helper()
 
 	_, thisFile, _, ok := runtime.Caller(0)
@@ -27,7 +26,7 @@ func parseSeededV163Rules(t testing.TB) []seededObservationRule {
 		t.Fatal("runtime.Caller failed")
 	}
 	repoRoot := filepath.Join(filepath.Dir(thisFile), "..", "..")
-	path := filepath.Join(repoRoot, "database", "migrations", "V163__CDA_Declarative_Mapping_Rules_FunctionalMentalStatus_LabResults.sql")
+	path := filepath.Join(repoRoot, "database", "migrations", "V181__CDA_Declarative_Mapping_Rules_ClinicalNote.sql")
 
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -56,20 +55,25 @@ func parseSeededV163Rules(t testing.TB) []seededObservationRule {
 	return rules
 }
 
-func findSeededV163(t testing.TB, seeded []seededObservationRule, sectionKey, fhirResource string) seededObservationRule {
+func findSeededV181(t testing.TB, seeded []seededObservationRule, sectionKey, fhirResource string) seededObservationRule {
 	t.Helper()
 	for _, s := range seeded {
 		if s.sectionKey == sectionKey && s.fhirResource == fhirResource {
 			return s
 		}
 	}
-	t.Fatalf("no seeded rule found in V163 for sectionKey=%q fhirResource=%q", sectionKey, fhirResource)
+	t.Fatalf("no seeded rule found in V181 for sectionKey=%q fhirResource=%q", sectionKey, fhirResource)
 	return seededObservationRule{}
 }
 
-func assertV163RuleMatchesSeed(t *testing.T, seeded []seededObservationRule, want cdafhir.MappingRule) {
-	t.Helper()
-	got := findSeededV163(t, seeded, want.SectionKey, want.FHIRResource)
+func TestV181Migration_MatchesGoLiteralRules_NoDrift(t *testing.T) {
+	seeded := parseSeededV181Rules(t)
+	if len(seeded) != 1 {
+		t.Fatalf("got %d seeded rules, want 1 (historyOfPresentIllness/DocumentReference)", len(seeded))
+	}
+
+	want := cdafhir.ClinicalNoteMappingRules()[0]
+	got := findSeededV181(t, seeded, want.SectionKey, want.FHIRResource)
 	if got.entryMatch != want.EntryMatch {
 		t.Errorf("%s/%s: entry_match = %q, want %q", want.SectionKey, want.FHIRResource, got.entryMatch, want.EntryMatch)
 	}
@@ -79,22 +83,5 @@ func assertV163RuleMatchesSeed(t *testing.T, seeded []seededObservationRule, wan
 	if !reflect.DeepEqual(got.fields, want.Fields) {
 		t.Errorf("%s/%s: seeded fields drifted from declarative_oob_rules.go's Go literal.\nseeded: %+v\nwant:   %+v",
 			want.SectionKey, want.FHIRResource, got.fields, want.Fields)
-	}
-}
-
-func TestV163Migration_MatchesGoLiteralRules_NoDrift(t *testing.T) {
-	seeded := parseSeededV163Rules(t)
-	if len(seeded) != 3 {
-		t.Fatalf("got %d seeded rules, want 3 (labResults + functionalStatus + mentalStatus)", len(seeded))
-	}
-
-	// ResultsMappingRules()[1] is "labResults" -- see that function's own doc
-	// comment for why it's index 1, not 0.
-	assertV163RuleMatchesSeed(t, seeded, cdafhir.ResultsMappingRules()[1])
-	for _, rule := range cdafhir.FunctionalStatusMappingRules() {
-		assertV163RuleMatchesSeed(t, seeded, rule)
-	}
-	for _, rule := range cdafhir.MentalStatusMappingRules() {
-		assertV163RuleMatchesSeed(t, seeded, rule)
 	}
 }

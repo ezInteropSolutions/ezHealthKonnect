@@ -444,6 +444,10 @@ class WizardController extends EventTarget {
         if (data.transformationFlow == null && this.model.data.transformationFlow) {
             delete data.transformationFlow;
         }
+        if (data.sourceType == null && this.model.data.sourceType) {
+            console.log('⚠️ Skipping empty sourceType update, keeping existing:', this.model.data.sourceType);
+            delete data.sourceType;
+        }
 
         // Update the model's data
         Object.assign(this.model.data, data);
@@ -1247,7 +1251,8 @@ PV1|1|I|ICU^101^1|||DOC123^Smith^Jane|||EMERGENCY|||`
                     name: payload.name,
                     status: status,
                     messageType: messageType,
-                    autoStart: payload.auto_start || false
+                    autoStart: payload.auto_start || false,
+                    sourceType: payload.sourceType
                 });
 
                 // If Z-segment templates were applied, show a follow-up notification

@@ -1157,20 +1157,11 @@ func (pe *ProcessingEngine) createLogger(interfaceID, messageID, correlationID, 
 	}
 
 	// Resolve effective level: log_level column takes precedence; fall back to debug_logging bool
-	level := logLevel.String
-	if level == "" {
-		if debugLogging {
-			level = "debug"
-		} else {
-			level = "debug" // default: log everything per user preference
-		}
-	}
+	level, debugMode := services.ResolveEffectiveLogLevel(logLevel, debugLogging)
 
 	if level == "off" {
 		return nil // explicitly disabled
 	}
-
-	debugMode := level == "debug" // controls whether Info/Debug entries are written
 
 	return services.NewProcessingLogger(
 		interfaceID,

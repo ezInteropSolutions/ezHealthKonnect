@@ -111,14 +111,26 @@ func (r *BPPanelSynthesisRule) Apply(ctx *assembly.AssemblyContext) error {
 			ctx.DedupRedirects[fmt.Sprintf("Observation/%s", diaID)] = fmt.Sprintf("Observation/%s", panelID)
 
 			if ctx.Log != nil {
-				ctx.Log.AddAssemblyEvent(mappinglog.AssemblyEvent{
+				ev := mappinglog.AssemblyEvent{
 					Rule:         r.Name(),
 					Action:       "synthesized",
 					ResourceType: "Observation",
 					IDs:          []string{sysID, diaID, panelID},
 					SurvivorID:   panelID,
 					Detail:       "synthesized BP panel 85354-9 from 8480-6 + 8462-4",
-				})
+				}
+				if ctx.Config.DeepLineage {
+					ev.Lineage = map[string]mappinglog.ResourceLineage{}
+					if l, ok := assembly.ExtractLineage(sys.resource); ok {
+						ev.Lineage[sysID] = l
+					}
+					if l, ok := assembly.ExtractLineage(dia.resource); ok {
+						ev.Lineage[diaID] = l
+					}
+					// panelID has no CDA lineage of its own — it is synthesized,
+					// not CDA-sourced — so it is intentionally absent from Lineage.
+				}
+				ctx.Log.AddAssemblyEvent(ev)
 			}
 			break
 		}
@@ -158,6 +170,19 @@ func buildBPPanel(id string, systolic, diastolic map[string]interface{}, subject
 	}
 	if effective != "" {
 		r["effectiveDateTime"] = effective
+	}
+	// Systolic and Diastolic share the same /author in C-CDA (both
+	// components of one Vital Signs Organizer), so either source carries
+	// the same performer. Previously dropped entirely: extractComponent
+	// only ever copies code+value[x], and nothing else in this function set
+	// performer on the synthesized panel -- real data loss found auditing
+	// the 99397 sample's Vital Signs section, where both components had an
+	// identical, non-trivial performer reference that vanished once the
+	// two were merged into the 85354-9 panel.
+	if perf, ok := systolic["performer"]; ok {
+		r["performer"] = perf
+	} else if perf, ok := diastolic["performer"]; ok {
+		r["performer"] = perf
 	}
 
 	var components []interface{}

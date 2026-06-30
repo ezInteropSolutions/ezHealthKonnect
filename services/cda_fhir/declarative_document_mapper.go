@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"log"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -55,6 +56,7 @@ func buildDeclarativeSectionRuleGroups() map[string][]MappingRule {
 	all = append(all, SocialHistoryMappingRules()...)
 	all = append(all, FunctionalStatusMappingRules()...)
 	all = append(all, MentalStatusMappingRules()...)
+	all = append(all, ClinicalNoteMappingRules()...)
 	all = append(all, ImmunizationMappingRules()...)
 	all = append(all, EncounterMappingRules()...)
 	all = append(all, ProcedureMappingRules()...)
@@ -191,7 +193,7 @@ func (m *GenericCDAFHIRMapper) DeclarativeMapDocument(
 	// below are race-free.
 	engine.PatientRef = patientRef
 
-	if authorResource, _, _ := engine.BuildHeaderResource(documentMap, AuthorMappingRules()[0]); authorResource != nil {
+	if authorResource, authorExtra, _ := engine.BuildHeaderResource(documentMap, AuthorMappingRules()[0]); authorResource != nil {
 		// Go's MapAuthor numbers the id by the matched author's ORIGINAL
 		// index in doc.Header.Authors (author-1, author-2, ...);
 		// firstAuthorWithPerson only returns the matched map, not its
@@ -205,11 +207,42 @@ func (m *GenericCDAFHIRMapper) DeclarativeMapDocument(
 			m.profileBuilder.InjectProfile(authorResource, "")
 		}
 		allResources = append(allResources, authorResource)
+		// authorExtra carries AuthorMappingRules' assignedEntityRoleRow
+		// emission (PractitionerRole + a second, richer Practitioner +
+		// Organization) -- previously discarded here via "_", silently
+		// dropping the author's RepresentedOrganization the same way
+		// patient_mapper.go's MapAuthor always did. DeduplicationRule
+		// merges the richer Practitioner into authorResource's own
+		// (sparser) one downstream; profile injection happens generically
+		// below for every member of allResources, so these don't need
+		// InjectProfile called on them here too.
+		allResources = append(allResources, authorExtra...)
 	}
 	if custodianResource, _, _ := engine.BuildHeaderResource(documentMap, CustodianMappingRules()[0]); custodianResource != nil {
 		custodianResource["id"] = "custodian-1"
 		allResources = append(allResources, custodianResource)
 	}
+	encompassingLocationBuilt := false
+	if locationResource, locationExtra, _ := engine.BuildHeaderResource(documentMap, EncompassingEncounterLocationMappingRules()[0]); locationResource != nil {
+		// componentOf/encompassingEncounter describes at most ONE facility for
+		// the whole document -- same singular-per-document reasoning as
+		// author-1/custodian-1, hardcoded here rather than going through the
+		// id-renumbering loop below (which "Location" is excluded from for
+		// exactly this reason).
+		locationResource["id"] = "location-1"
+		if config.ProfileMode != "base" {
+			m.profileBuilder.InjectProfile(locationResource, "")
+		}
+		allResources = append(allResources, locationResource)
+		allResources = append(allResources, locationExtra...)
+		encompassingLocationBuilt = true
+	}
+	// Built but deliberately NOT appended to allResources yet -- whether
+	// this becomes its own standalone Encounter or gets merged into a
+	// matching in-section one (by shared CDA <id>, per the IG) can only be
+	// decided once section dispatch has produced that in-section Encounter,
+	// below. See EncompassingEncounterMappingRules' own doc comment for why.
+	encompassingEncounterCandidate, _, _ := engine.BuildHeaderResource(documentMap, EncompassingEncounterMappingRules()[0])
 
 	// ── Section resources (parallel, section-failure isolated) ───────────────
 	var sectionKeys []string
@@ -240,22 +273,61 @@ func (m *GenericCDAFHIRMapper) DeclarativeMapDocument(
 		}
 	}
 
+	// Plan-of-Care "entryType=encounter" entries' target resource
+	// (Appointment | Encounter) — resolved ONCE per document, same
+	// precedence/DB-round-trip-sharing rationale as overridesBySection
+	// above. PlanOfCareMappingRules()'s own Go literal still hardcodes
+	// "Appointment" (unchanged, so it stays the literal every
+	// migration/drift-guard test compares against) — the RUNTIME default
+	// here is "Encounter" instead: pipeline step config
+	// (config.PlanOfCareEncounterTarget, set by cda_to_fhir_executor.go)
+	// wins if non-empty; else the interface's own
+	// processing_rules.cda.planOfCareEncounterTarget default; else
+	// "Encounter", the richer, better-evidenced mapping (see
+	// encounterFields()'s own doc comment) — so even a document with no
+	// interface/step context at all gets the improved default, not the
+	// thinner Appointment rule.
+	planOfCareEncounterTarget := config.PlanOfCareEncounterTarget
+	if planOfCareEncounterTarget == "" && config.InterfaceID != "" {
+		planOfCareEncounterTarget = m.loadPlanOfCareEncounterTargetDefault(ctx, config.InterfaceID)
+	}
+	if planOfCareEncounterTarget == "" {
+		planOfCareEncounterTarget = "Encounter"
+	}
+
 	sectionResults := make([][]map[string]interface{}, len(sectionKeys))
 	sectionErrs := make([][]SectionError, len(sectionKeys))
 	sectionLogs := make([]mappinglog.SectionLog, len(sectionKeys))
+
+	// When enabled (interface debug_logging/log_level=debug — see
+	// services.ResolveInterfaceDebugLevel), every resource is tagged with its
+	// originating CDA section + entry index so dedup/synthesis assembly rules
+	// can record per-resource provenance (see assembly.ExtractLineage). Tags are
+	// stripped before bundle emission (below) regardless of this flag.
+	deepLineage := config.Assembly.DeepLineage
 
 	mappingStart := time.Now()
 	for idx, sectionKey := range sectionKeys {
 		section := doc.SectionsByKey[sectionKey]
 		sectionRules := declarativeSectionRuleGroupsCache[sectionKey]
-		if ovs := overridesBySection[sectionKey]; len(ovs) > 0 {
+		ovs := overridesBySection[sectionKey]
+		swapToEncounter := planOfCareEncounterTarget == "Encounter" && isPlanOfCareSectionKey(sectionKey)
+		if len(ovs) > 0 || swapToEncounter {
 			// Clone before patching — declarativeSectionRuleGroupsCache is a
 			// package-level singleton read concurrently by every section
 			// goroutine across every in-flight DeclarativeMapDocument call;
 			// mutating it in place would corrupt every OTHER interface's
-			// "pure OOB" output too.
+			// "pure OOB" output too. Swap BEFORE applying field overrides:
+			// ApplyFieldOverrides patches by TargetPath key and is a no-op
+			// when ovs is empty, so running it after the swap is always
+			// safe, never stale.
 			sectionRules = CloneMappingRules(sectionRules)
-			ApplyFieldOverrides(sectionRules, ovs)
+			if swapToEncounter {
+				sectionRules = applyPlanOfCareEncounterTarget(sectionRules)
+			}
+			if len(ovs) > 0 {
+				ApplyFieldOverrides(sectionRules, ovs)
+			}
 		}
 
 		// JSON-shaped entries array for this section, aligned by index with
@@ -310,16 +382,73 @@ func (m *GenericCDAFHIRMapper) DeclarativeMapDocument(
 						},
 					}
 					entryResources, entryErrs := engine.BuildResourcesForRules(perEntryDoc, rules)
+					if deepLineage {
+						for _, res := range entryResources {
+							res["_cdaSection"] = sk
+							res["_cdaEntryIndex"] = entryIdx
+						}
+					}
+
+					// "_warnings" is buildEmittedSubResource's marker for an
+					// additionalValues drop on a NESTED EmitAsResource
+					// resource (e.g. an Assessment Scale Supporting
+					// Observation COMP child) -- that function has no
+					// SectionKey/EntryIndex of its own to attach a
+					// SectionError directly (see its own doc comment), but
+					// this loop does, unconditionally (unlike
+					// "_cdaSection"/"_cdaEntryIndex" above, gated behind
+					// deepLineage). Read back into a real SectionError here
+					// and strip immediately so it never reaches the entry
+					// trace below or the shipped bundle.
+					for _, res := range entryResources {
+						msgs, ok := res["_warnings"].([]string)
+						if !ok {
+							continue
+						}
+						delete(res, "_warnings")
+						for _, msg := range msgs {
+							entryErrs = append(entryErrs, SectionError{
+								SectionKey: sk,
+								EntryIndex: entryIdx,
+								FieldKey:   "value",
+								Error:      msg,
+								Severity:   "warning",
+							})
+						}
+					}
+
 					resources = append(resources, entryResources...)
 
 					// entryErrs' own EntryIndex is relative to the synthetic
 					// single-entry call above (always 0) -- overwrite with
 					// the real index in this section's full entry list
 					// before it's surfaced in ProcessingResult/the Mapping Log.
+					// The "_warnings"-derived entries above already carry the
+					// correct entryIdx, but this loop runs unconditionally
+					// over every entryErrs element regardless of origin, so
+					// it's a no-op for them, not a double-correction bug.
 					for i := range entryErrs {
 						entryErrs[i].EntryIndex = entryIdx
 					}
 					errs = append(errs, entryErrs...)
+
+					// Mirror warning-severity entries into the Mapping Log
+					// (object-storage-persisted for every real message, not
+					// just Test Pipeline runs -- see SectionLog.Warnings'
+					// doc comment) so a live production message's "more than
+					// one <value>" notice is visible on the message detail
+					// screen's Mapping Log tab, not only in a manual test.
+					// Deliberately generic over every warning-severity
+					// SectionError, not just additionalValues -- any
+					// optional field's transform warning already produced
+					// one of these before this feature existed, it just had
+					// nowhere to surface.
+					for _, se := range entryErrs {
+						if se.Severity != "warning" {
+							continue
+						}
+						sb.AddWarning(fmt.Sprintf("entry %d, %s: %s", se.EntryIndex, se.FieldKey, se.Error))
+					}
 
 					trace := mappinglog.EntryTrace{
 						EntryIndex:  entryIdx,
@@ -348,10 +477,34 @@ func (m *GenericCDAFHIRMapper) DeclarativeMapDocument(
 	mappingMs := time.Since(mappingStart).Milliseconds()
 
 	// Serial merge of section results.
+	//
+	// failedSects/OnSectionFailure react to error-severity entries only --
+	// NOT warning-severity ones (e.g. additionalValuesWarningMessages' "more
+	// than one <value>" notice). A warning means the engine fully handled
+	// the entry and made an explicit, intentional choice (keep the first
+	// value); it is not a conformance failure, just something worth a
+	// human's attention. Before this section-level distinction existed,
+	// EVERY SectionError of either severity marked the whole section
+	// "failed" -- harmless while warnings were rare (only an optional
+	// field's transform genuinely erroring), but additionalValues turned
+	// "more than one <value>" into a common, fully-expected occurrence
+	// across real corpora (found while cross-checking three more real CCDs:
+	// a section with nothing wrong beyond one informational warning was
+	// landing in FailedSections, and would have had its resources silently
+	// dropped under any interface configured with OnSectionFailure:
+	// "fail-fast" -- exactly the outcome additionalValues warnings exist to
+	// avoid).
 	for idx, sectionKey := range sectionKeys {
 		errs := sectionErrs[idx]
 		resources := sectionResults[idx]
-		if len(errs) > 0 {
+		hasError := false
+		for _, se := range errs {
+			if se.Severity != "warning" {
+				hasError = true
+				break
+			}
+		}
+		if hasError {
 			failedSects = append(failedSects, sectionKey)
 			sectionErrors = append(sectionErrors, errs...)
 			if config.OnSectionFailure != "fail-fast" {
@@ -359,7 +512,109 @@ func (m *GenericCDAFHIRMapper) DeclarativeMapDocument(
 			}
 		} else {
 			successSects = append(successSects, sectionKey)
+			sectionErrors = append(sectionErrors, errs...)
 			allResources = append(allResources, resources...)
+		}
+	}
+
+	// componentOf/encompassingEncounter consolidation (HL7 C-CDA on FHIR IG:
+	// "when the same encounter is referenced multiple times ... it should be
+	// converted to a single FHIR resource") — match encompassingEncounterCandidate
+	// against every in-section Encounter by shared CDA <id> (EncounterMappingRules'
+	// own id[*] row, EmbedCDAIdentity:true), copy the candidate's
+	// hospitalization across (the one field with no in-section source at
+	// all), merge identifier, and fill period only if the in-section side
+	// is somehow missing one. If no in-section Encounter shares the
+	// candidate's id, it survives as its own standalone Encounter resource —
+	// the IG's other explicit instruction ("this should also be converted
+	// to a FHIR Encounter resource"). See EncompassingEncounterMappingRules'
+	// doc comment for why this is an explicit field-level merge rather than
+	// a DeduplicationRule registration (that rule's whole-resource
+	// winner-take-all merge would discard hospitalization whenever the
+	// richer in-section Encounter — which is every real case — wins).
+	// Only proceed when the candidate carries SOMETHING beyond what the
+	// Location-donor step above already covers generically (every Encounter
+	// lacking its own location gets Location/location-1 regardless) --
+	// status alone (always "unknown", since base CDA's EncompassingEncounter
+	// class has no statusCode at all) doesn't count. Without this gate, a
+	// componentOf/encompassingEncounter that carries ONLY a
+	// location/healthCareFacility (real, common case: id and
+	// effectiveTime/dischargeDispositionCode are frequently omitted even
+	// when location is populated) would spawn a near-duplicate, no-new-
+	// information standalone Encounter next to the real one whenever no
+	// matching <id> happens to exist to consolidate against -- worse for
+	// data quality than just leaving location-donation as the only effect,
+	// which is exactly what this engine already did correctly before this
+	// rule existed.
+	candidateHasIdentifyingData := len(assembly.ExtractIdentityKeys(encompassingEncounterCandidate)) > 0
+	if !candidateHasIdentifyingData && encompassingEncounterCandidate != nil {
+		_, hasPeriod := encompassingEncounterCandidate["period"]
+		_, hasHosp := encompassingEncounterCandidate["hospitalization"]
+		candidateHasIdentifyingData = hasPeriod || hasHosp
+	}
+	if encompassingEncounterCandidate != nil && candidateHasIdentifyingData {
+		candidateKeys := assembly.ExtractIdentityKeys(encompassingEncounterCandidate)
+		var matched map[string]interface{}
+		if len(candidateKeys) > 0 {
+			for _, r := range allResources {
+				if strField(r, "resourceType") != "Encounter" {
+					continue
+				}
+				if identityKeysOverlap(candidateKeys, assembly.ExtractIdentityKeys(r)) {
+					matched = r
+					break
+				}
+			}
+		}
+		if matched != nil {
+			if hosp, ok := encompassingEncounterCandidate["hospitalization"]; ok {
+				if _, already := matched["hospitalization"]; !already {
+					matched["hospitalization"] = hosp
+				}
+			}
+			if _, already := matched["period"]; !already {
+				if period, ok := encompassingEncounterCandidate["period"]; ok {
+					matched["period"] = period
+				}
+			}
+			if candidateIdent, ok := encompassingEncounterCandidate["identifier"].([]interface{}); ok {
+				matchedIdent, _ := matched["identifier"].([]interface{})
+				for _, ci := range candidateIdent {
+					if !identifierPresent(matchedIdent, ci) {
+						matchedIdent = append(matchedIdent, ci)
+					}
+				}
+				matched["identifier"] = matchedIdent
+			}
+		} else {
+			allResources = append(allResources, encompassingEncounterCandidate)
+		}
+	}
+
+	// componentOf/encompassingEncounter describes ONE overarching visit for
+	// the whole document, not a specific section entry — applying it
+	// document-wide to every Encounter resource that doesn't already carry
+	// its own (more specific) location is the correct interpretation, not a
+	// per-rule reference EncounterMappingRules itself could resolve (it has
+	// no visibility into a header resource built outside its own section
+	// dispatch). Skips any Encounter whose own
+	// "entryRelationships[typeCode=COMP].entry.participants[typeCode=LOC]"
+	// row (EncounterMappingRules, see that row's doc comment) already
+	// resolved a location — that section-entry-level data is more specific
+	// and takes priority.
+	if encompassingLocationBuilt {
+		for _, r := range allResources {
+			if strField(r, "resourceType") != "Encounter" {
+				continue
+			}
+			if _, hasLocation := r["location"]; hasLocation {
+				continue
+			}
+			r["location"] = []interface{}{
+				map[string]interface{}{
+					"location": map[string]interface{}{"reference": "Location/location-1"},
+				},
+			}
 		}
 	}
 
@@ -388,7 +643,7 @@ func (m *GenericCDAFHIRMapper) DeclarativeMapDocument(
 	for _, r := range allResources {
 		rt := strField(r, "resourceType")
 		switch rt {
-		case "", "Patient", "Practitioner", "Organization":
+		case "", "Patient", "Practitioner", "Organization", "Location":
 			continue
 		}
 		if emitted, _ := r["_emitted"].(bool); emitted {
@@ -398,6 +653,44 @@ func (m *GenericCDAFHIRMapper) DeclarativeMapDocument(
 		r["id"] = fmt.Sprintf("%s-%d", resourceIDPrefix(rt), idCounters[rt])
 	}
 
+	// Condition.encounter back-reference -- EncounterMappingRules' nested-
+	// diagnosis row (declarative_oob_rules.go) already writes
+	// Encounter.diagnosis[].condition as a Reference(Condition); this is the
+	// reverse link, set here (not as a conditionFields() row) because
+	// conditionFields is shared with the standalone Problems/Health Concerns
+	// sections, which have no Encounter to link to — only encounter-diagnosis
+	// Conditions, identified by following the Encounter's own diagnosis[]
+	// array forward, get this. Must run AFTER the renumbering loop above:
+	// Encounter ids aren't final until then (Condition's own emitted id
+	// already was, at build time, which is why diagnosis[].condition.reference
+	// could be resolved earlier without this ordering constraint).
+	conditionsByRef := make(map[string]map[string]interface{}, len(allResources))
+	for _, r := range allResources {
+		if strField(r, "resourceType") == "Condition" {
+			conditionsByRef["Condition/"+strField(r, "id")] = r
+		}
+	}
+	for _, r := range allResources {
+		if strField(r, "resourceType") != "Encounter" {
+			continue
+		}
+		diagnoses, _ := r["diagnosis"].([]interface{})
+		if len(diagnoses) == 0 {
+			continue
+		}
+		encounterRef := map[string]interface{}{"reference": "Encounter/" + strField(r, "id")}
+		for _, d := range diagnoses {
+			dMap, _ := d.(map[string]interface{})
+			condRef, _ := dMap["condition"].(map[string]interface{})
+			ref, _ := condRef["reference"].(string)
+			if cond, ok := conditionsByRef[ref]; ok {
+				if _, hasEncounter := cond["encounter"]; !hasEncounter {
+					cond["encounter"] = encounterRef
+				}
+			}
+		}
+	}
+
 	for i := range sectionLogs {
 		for j := range sectionLogs[i].Entries {
 			sectionLogs[i].Entries[j].ResolveRefs()
@@ -405,6 +698,32 @@ func (m *GenericCDAFHIRMapper) DeclarativeMapDocument(
 	}
 	for _, sl := range sectionLogs {
 		logBuilder.AddSection(sl)
+	}
+
+	// ── Section-level narrative DocumentReferences ───────────────────────────
+	// A second pass, SEQUENTIAL (only ≤6 sections, each O(1)), for CDA sections
+	// that carry clinical content exclusively in their narrative <text> block
+	// and have no structured <entry> elements. These sections are silently
+	// skipped by the entry-dispatch loop above (len(entries)==0 guard); this
+	// pass captures the content they DO carry as FHIR DocumentReference
+	// resources instead of losing it entirely.
+	// US Core v9.0.0 + Argonaut consensus: DocumentReference is the right FHIR
+	// resource for "narrative broader than a specific clinical resource type".
+	// See DefaultNarrativeSectionDefs in declarative_oob_rules.go for evidence
+	// per section key.
+	for sectionKey, def := range DefaultNarrativeSectionDefs {
+		section := doc.SectionsByKey[sectionKey]
+		if section == nil || len(section.Entries) > 0 || strings.TrimSpace(section.NarrativeText) == "" {
+			continue
+		}
+		if !m.isSectionEnabled(sectionKey, config.EnabledSections) {
+			continue
+		}
+		docRef := m.buildNarrativeDocRef(section, def, patientRef)
+		if docRef != nil {
+			allResources = append(allResources, docRef)
+			successSects = append(successSects, sectionKey+"/narrative")
+		}
 	}
 
 	// ── Assembly layer ────────────────────────────────────────────────────────
@@ -459,6 +778,8 @@ func (m *GenericCDAFHIRMapper) DeclarativeMapDocument(
 		delete(r, "_cdaIds")
 		delete(r, "_emitted")
 		delete(r, "_emitOnly")
+		delete(r, "_cdaSection")
+		delete(r, "_cdaEntryIndex")
 	}
 
 	// ── US Core profiles + narratives ────────────────────────────────────────
@@ -575,4 +896,47 @@ func displayNameFromResources(resources []map[string]interface{}) string {
 		}
 	}
 	return ""
+}
+
+// identityKeysOverlap reports whether a and b share at least one
+// assembly.IdentityKey (root+extension) — the same equality DeduplicationRule's
+// registry uses internally, exposed here as a plain function since this
+// match is an explicit field-level merge, not a dedup registration (see
+// EncompassingEncounterMappingRules' doc comment for why).
+func identityKeysOverlap(a, b []assembly.IdentityKey) bool {
+	for _, ka := range a {
+		for _, kb := range b {
+			if ka == kb {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// identifierPresent reports whether existing already contains an Identifier
+// matching candidate's system+value -- a real, not just theoretical, case:
+// encompassingEncounter and a matching in-section Encounter Activity sharing
+// the same CDA <id> (the whole basis of the match this guards) produce
+// IIToIdentifier output for the SAME root+extension on both sides, so a
+// naive append would duplicate it verbatim in Encounter.identifier.
+func identifierPresent(existing []interface{}, candidate interface{}) bool {
+	cm, ok := candidate.(map[string]interface{})
+	if !ok {
+		return false
+	}
+	cSystem, _ := cm["system"].(string)
+	cValue, _ := cm["value"].(string)
+	for _, e := range existing {
+		em, ok := e.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		eSystem, _ := em["system"].(string)
+		eValue, _ := em["value"].(string)
+		if eSystem == cSystem && eValue == cValue {
+			return true
+		}
+	}
+	return false
 }

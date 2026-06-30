@@ -2372,10 +2372,16 @@ class InterfaceConfigComponents {
      * Get source type from form
      * @param {HTMLElement} container - Container element
      * @param {string} idPrefix - ID prefix
-     * @returns {string} - Source type
+     * @returns {string|undefined} - Source type, or undefined if the field isn't
+     *   present on the current step (e.g. the wizard has already moved past
+     *   step 1, where #sourceType lives). Callers must not coerce a missing
+     *   field to a default here -- WizardController.updateModelData() relies
+     *   on undefined to know it should preserve the model's existing value
+     *   instead of clobbering it, same as it already does for
+     *   name/description/transformationFlow.
      */
     static getSourceType(container = document, idPrefix = '') {
-        return container.querySelector(`#${idPrefix}sourceType`)?.value || 'hl7v2';
+        return container.querySelector(`#${idPrefix}sourceType`)?.value || undefined;
     }
 
     /**

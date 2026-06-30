@@ -6980,7 +6980,26 @@ PV1|1|I|ICU^101^1|||DOC123^Smith^Jane|||EMERGENCY|||
      * Show wizard completion modal with action buttons
      */
     showCompletionModal(data) {
-        const { interfaceId, name, status, messageType, autoStart } = data;
+        const { interfaceId, name, status, messageType, autoStart, sourceType } = data;
+
+        // C-CDA interfaces have a Plan-of-Care encounter-mapping choice
+        // (Appointment vs Encounter) that lives on the CCD to FHIR step's
+        // Assembly tab, not in the wizard itself -- guide the user there
+        // instead of building a separate settings surface for it.
+        const cdaGuidanceHtml = (sourceType === 'ccda' || sourceType === 'cda') ? `
+                    <div style="
+                        background: #eff6ff;
+                        border: 1px solid #bfdbfe;
+                        border-radius: 8px;
+                        padding: 14px 16px;
+                        margin-bottom: 24px;
+                        font-size: 13px;
+                        color: #1e3a8a;
+                    ">
+                        <strong>📋 C-CDA interface:</strong> review the <strong>CCD to FHIR</strong> step's
+                        <strong>Assembly</strong> tab in Pipeline Builder to choose how Plan-of-Care visits map
+                        — <strong>Encounter</strong> (richer, recommended) or <strong>Appointment</strong>.
+                    </div>` : '';
 
         // Create completion modal overlay
         const completionModal = document.createElement('div');
@@ -7064,7 +7083,7 @@ PV1|1|I|ICU^101^1|||DOC123^Smith^Jane|||EMERGENCY|||
                             </div>
                         </div>
                     </div>
-
+                    ${cdaGuidanceHtml}
                     <!-- Action Buttons -->
                     <div style="
                         display: grid;

@@ -71,6 +71,16 @@ type CDAEntry struct {
 	StatusCode    string       `json:"statusCode,omitempty"`
 	EffectiveTime CDATimeRange `json:"effectiveTime"` // first <effectiveTime> only — kept for backward compatibility
 	Value         *CDAValue    `json:"value,omitempty"`
+	// AdditionalValues holds every <value> sibling beyond the first.
+	// C-CDA allows [1..*] <value> on some templates (e.g. Assessment Scale
+	// Supporting Observation), but FHIR R4's Observation.value[x] can only
+	// ever hold one — Value keeps the first (the one the declarative engine
+	// maps), and this slice keeps the rest so the engine can surface a
+	// warning instead of silently losing them. Real gap found auditing the
+	// 99397 sample's Functional Status section: a PHQ-2 total-score entry
+	// carries an INT raw score AND a CO/SNOMED interpretation as two
+	// sibling <value> elements.
+	AdditionalValues []CDAValue `json:"additionalValues,omitempty"`
 	// InterpretationCode is the Result Observation's <interpretationCode>
 	// (CONF:1198-7147, confirmed via WebFetch against build.fhir.org/ig/HL7/
 	// CDA-ccda-2.1-sd 2026-06-22): a direct child of the observation element,
@@ -78,6 +88,18 @@ type CDAEntry struct {
 	// entryRelationship. 0..* per the IG; only the first is captured here,
 	// matching every other single-value CDACode field on this struct.
 	InterpretationCode CDACode                `json:"interpretationCode,omitempty"`
+	// ReferenceRangeText is the Result Observation's <referenceRange>
+	// <observationRange><text> — a direct child of the observation, sibling
+	// of <interpretationCode>. Real gap found auditing Results (Ascension
+	// Wisconsin sample): every one of its 46 lab Observations (CBC, Chem
+	// panel, differential) carries a real free-text range (e.g. "4.0 - 10.0
+	// Thou/uL"), parsed nowhere before this — there was a registered FHIR
+	// transform (cda_reference_range_to_fhir) but it expects a STRUCTURED
+	// <observationRange><value><low/high> shape, which 0/4 corpus files
+	// actually use; only the free-text <observationRange><text> shape is
+	// evidenced, so only that is captured. Only the first <referenceRange>
+	// is kept (C-CDA allows 0..*, but no corpus entry has more than one).
+	ReferenceRangeText string `json:"referenceRangeText,omitempty"`
 	Participants       []CDAParticipant       `json:"participants,omitempty"`
 	Components         []CDAEntry             `json:"components,omitempty"` // nested organizer/component entries
 	EntryRelationships []CDAEntryRelationship `json:"entryRelationships,omitempty"`
@@ -122,6 +144,16 @@ type CDAEntry struct {
 	// Used to populate fields like MedicationRequest.requester.
 	Authors    []CDAAuthor    `json:"authors,omitempty"`
 	Performers []CDAPerformer `json:"performers,omitempty"`
+
+	// Informants recorded directly on this entry: <informant><assignedEntity>,
+	// the act's own source of information, distinct from Authors (who
+	// recorded the act) and Performers (who carried it out). Real example:
+	// a Note Activity (.4.202)'s <informant><assignedEntity>
+	// <representedOrganization> names the facility the note was written at
+	// — used for DocumentReference.custodian. Only the assignedEntity choice
+	// is parsed (not the base CDA schema's relatedEntity alternative); no
+	// real entry seen yet uses it.
+	Informants []CDAInformant `json:"informants,omitempty"`
 
 	// substanceAdministration-specific
 	Consumable   *CDAConsumable `json:"consumable,omitempty"`
@@ -331,6 +363,12 @@ type CDAPerformer struct {
 	TypeCode       string            `json:"typeCode,omitempty"`
 	FunctionCode   CDACode           `json:"functionCode"`
 	Time           CDATimeRange      `json:"time"`
+	AssignedEntity CDAAssignedEntity `json:"assignedEntity"`
+}
+
+// CDAInformant is an entry's <informant><assignedEntity> — the source of
+// information for the act, distinct from CDAPerformer/CDAAuthor.
+type CDAInformant struct {
 	AssignedEntity CDAAssignedEntity `json:"assignedEntity"`
 }
 

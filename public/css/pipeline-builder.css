@@ -1118,6 +1118,20 @@ body {
     color: var(--warning-color);
 }
 
+/* step-warning: a step that succeeded but flagged data it couldn't fully
+   map (e.g. a CDA entry with more than one <value> -- only the first was
+   used). Same amber treatment as step-caught (both are non-blocking), kept
+   as a distinct class since the underlying cause is different (informational
+   data-quality notice, not an error suppressed by step error-handling config). */
+.step-result-item.step-warning {
+    border-left-color: var(--warning-color);
+    background: #fffcf5;
+}
+
+.step-warning .step-result-icon {
+    color: var(--warning-color);
+}
+
 .step-result-main {
     display: flex;
     align-items: center;

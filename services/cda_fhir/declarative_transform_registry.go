@@ -13,6 +13,7 @@
 package cdafhir
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"strconv"
@@ -71,6 +72,7 @@ func (r *DeclarativeTransformRegistry) registerBuiltins() {
 	r.register("cda_code_to_codeable_concept", declarativeCodeToCodeableConcept)
 	r.register("cda_quantity_to_fhir", declarativeQuantityToFHIR)
 	r.register("cda_timerange_to_onset", declarativeTimeRangeToOnset)
+	r.register("cda_text_to_attachment", declarativeTextToAttachment)
 	// Not a re-marshal adapter — allergy_mapper.go builds this CodeableConcept
 	// inline today (buildAllergyResource), so there is no existing
 	// transforms.* function to wrap. A reasonable Phase 3 candidate for
@@ -108,11 +110,13 @@ func (r *DeclarativeTransformRegistry) registerBuiltins() {
 	// Phase 3 additions — Immunizations
 	// =====================================================
 	r.register("immunization_status_to_fhir", declarativeImmunizationStatusToFHIR)
+	r.register("immunization_performer_function_to_fhir", declarativeImmunizationPerformerFunction)
 
 	// =====================================================
 	// Phase 3 additions — Encounters / Procedures
 	// =====================================================
 	r.register("encounter_status_to_fhir", declarativeEncounterStatusToFHIR)
+	r.register("encounter_status_from_planned_mood", declarativeEncounterStatusFromPlannedMood)
 	r.register("encounter_class_coding", declarativeEncounterClassCoding)
 	r.register("encounter_participant_type_coding", declarativeEncounterParticipantTypeCoding)
 	r.register("procedure_status_to_fhir", declarativeProcedureStatusToFHIR)
@@ -222,6 +226,23 @@ func declarativeCodeToCodeableConcept(value interface{}, _ map[string]string) (i
 		return nil, fmt.Errorf("cda_code_to_codeable_concept: %w", err)
 	}
 	return transforms.CDACodeToCodeableConcept(code), nil
+}
+
+// declarativeTextToAttachment builds a FHIR Attachment from a plain-text
+// string — the resolved entry.Text of a Note Activity (.4.202), already
+// plain text by the time it reaches here (resolveEntryRefs/
+// narrativeInnerText strip the source <content> element's markup). Returns
+// nil for an empty/unresolved string so DocumentReference.content never gets
+// a content[0].attachment with no data.
+func declarativeTextToAttachment(value interface{}, _ map[string]string) (interface{}, error) {
+	text, _ := value.(string)
+	if text == "" || strings.HasPrefix(text, "#") {
+		return nil, nil
+	}
+	return map[string]interface{}{
+		"contentType": "text/plain",
+		"data":        base64.StdEncoding.EncodeToString([]byte(text)),
+	}, nil
 }
 
 func declarativeQuantityToFHIR(value interface{}, _ map[string]string) (interface{}, error) {
@@ -534,12 +555,35 @@ func declarativeValueOrCodeToCodeableConcept(value interface{}, _ map[string]str
 	if err := remarshalInto(value, &entry); err != nil {
 		return nil, fmt.Errorf("cda_value_or_code_to_codeable_concept: %w", err)
 	}
+
+	var cc map[string]interface{}
 	if entry.Value != nil {
-		if cc, ok := transforms.CDAValueToFHIR(*entry.Value).(map[string]interface{}); ok {
-			return cc, nil
+		cc, _ = transforms.CDAValueToFHIR(*entry.Value).(map[string]interface{})
+	}
+	if cc == nil {
+		cc = transforms.CDACodeToCodeableConcept(entry.Code)
+	}
+
+	// .text fallback from entry.Text (the entry's own <text>, already
+	// resolved by cda/document/section_parser.go's standard "#id" reference
+	// resolution -- no narrative-structure inference, just the reliable
+	// part of that mechanism). Real gap found in production data: a Medication
+	// RSON indication observation's own <value code="67882000"
+	// codeSystem="2.16.840.1.113883.6.96".../> and <code code="282291009"
+	// .../> both carry no displayName/originalText at all, so
+	// CDAValueToFHIR/CDACodeToCodeableConcept return a bare code with no
+	// .text -- but the SAME entry's own <text>Vulvar itching<reference
+	// value="#indication10"/></text> resolves to "Vulvar itching" via the
+	// standard mechanism, sitting unused one level up from where this
+	// transform was looking. Never overwrites an existing .text (DisplayName/
+	// OriginalText on the value or code itself stay authoritative when
+	// present); a no-op when entry.Text is empty.
+	if cc != nil {
+		if _, hasText := cc["text"]; !hasText && entry.Text != "" {
+			cc["text"] = entry.Text
 		}
 	}
-	return transforms.CDACodeToCodeableConcept(entry.Code), nil
+	return cc, nil
 }
 
 // declarativeNameOrLiteralToDisplayRef builds a display-only FHIR Reference
@@ -683,10 +727,50 @@ func declarativeObservationDataAbsentReasonToFHIR(_ interface{}, _ map[string]st
 	}, nil
 }
 
+// declarativeImmunizationPerformerFunction mirrors
+// declarativeObservationDataAbsentReasonToFHIR's "fixed literal, gated by
+// row Scope" pattern. HL7's C-CDA on FHIR IG (CF-immunizations.md) sets
+// Immunization.performer.function="AP" (Administering Provider) on every
+// /performer mapping -- there is only one function code C-CDA's
+// Immunization Activity ever uses, so this is a fixed constant, not a
+// per-document choice.
+func declarativeImmunizationPerformerFunction(_ interface{}, _ map[string]string) (interface{}, error) {
+	return map[string]interface{}{
+		"coding": []interface{}{
+			map[string]interface{}{
+				"system":  "http://terminology.hl7.org/CodeSystem/v2-0443",
+				"code":    "AP",
+				"display": "Administering Provider",
+			},
+		},
+	}, nil
+}
+
 // declarativeEncounterStatusToFHIR wraps transforms.EncounterStatusToFHIR.
 func declarativeEncounterStatusToFHIR(value interface{}, _ map[string]string) (interface{}, error) {
 	s, _ := value.(string)
 	return transforms.EncounterStatusToFHIR(s), nil
+}
+
+// declarativeEncounterStatusFromPlannedMood reads an entry's moodCode -- not
+// statusCode -- to set Encounter.status="planned" for a future/anticipated
+// visit. Real gap found auditing a real Ascension Wisconsin CCD's
+// Plan-of-Care section: 18 "Encounter Activity"-shaped entries with
+// moodCode="APT" (a booked future visit) all carry statusCode="active", the
+// SAME value a completed (moodCode=EVN) encounter would carry --
+// encounter_status_to_fhir alone would misreport these as "in-progress".
+// Mirrors how ServiceRequest.intent is derived from moodCode via
+// service_request_intent_from_mood, kept independent of statusCode-derived
+// fields. Returns nil (no value) for EVN -- and anything else unrecognized --
+// so the SkipIfResourceHasAnyOf-gated statusCode row below it is the one that
+// actually sets status for completed encounters, unchanged from today.
+func declarativeEncounterStatusFromPlannedMood(value interface{}, _ map[string]string) (interface{}, error) {
+	switch strings.ToUpper(fmt.Sprint(value)) {
+	case "APT", "INT", "PRP", "RQO", "ARQ":
+		return "planned", nil
+	default:
+		return nil, nil
+	}
 }
 
 // actEncounterCodeSystemOID is the HL7 v3 ActCode table OID -- the vocabulary

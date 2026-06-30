@@ -19,6 +19,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
 	cdaSchema "ezhealthkonnect/cda"
@@ -749,6 +750,91 @@ func TestDeclarativeEngine_RequiredFieldEmpty_ReturnsErrorSeverity(t *testing.T)
 	}
 	if len(errs) != 1 || errs[0].Severity != "error" {
 		t.Fatalf("errs = %+v, want exactly 1 error-severity entry", errs)
+	}
+}
+
+// TestDeclarativeEngine_AdditionalValues_SurfacesWarning_KeepsFirstValue is a
+// regression test for the real gap found auditing Functional Status (99397
+// sample): a PHQ-2 total-score entry carries TWO sibling <value> elements
+// (an INT raw score, mapped, plus a CO/SNOMED interpretation, silently
+// dropped before this fix). Per explicit user direction, the engine's
+// behavior is unchanged -- the first value still wins -- this only adds a
+// warning so the drop is visible instead of silent.
+func TestDeclarativeEngine_AdditionalValues_SurfacesWarning_KeepsFirstValue(t *testing.T) {
+	documentMap := map[string]interface{}{
+		"sectionsByKey": map[string]interface{}{
+			"functionalStatus": map[string]interface{}{
+				"entries": []interface{}{
+					map[string]interface{}{
+						"statusCode": "completed",
+						"value":      map[string]interface{}{"type": "INT", "integer": float64(0)},
+						"additionalValues": []interface{}{
+							map[string]interface{}{
+								"type": "CO",
+								"code": map[string]interface{}{"code": "428171000124102", "displayName": "Depression screening negative (finding)"},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	engine := cdafhir.NewDeclarativeEngine()
+	rule := cdafhir.MappingRule{
+		SectionKey:   "functionalStatus",
+		FHIRResource: "Observation",
+		Fields: []cdafhir.MappingRow{
+			{Scope: "value[type=INT]", SourcePath: "integer", TargetPath: "valueInteger"},
+		},
+	}
+
+	resources, errs := engine.BuildResources(documentMap, rule)
+	if len(resources) != 1 {
+		t.Fatalf("got %d resources, want 1", len(resources))
+	}
+	if resources[0]["valueInteger"] != float64(0) {
+		t.Errorf("valueInteger = %v, want 0 (the first value, unchanged behavior)", resources[0]["valueInteger"])
+	}
+
+	if len(errs) != 1 {
+		t.Fatalf("errs = %+v, want exactly 1 warning for the dropped second value", errs)
+	}
+	if errs[0].Severity != "warning" {
+		t.Errorf("severity = %q, want %q (informational only -- behavior must not change)", errs[0].Severity, "warning")
+	}
+	if errs[0].FieldKey != "value" {
+		t.Errorf("fieldKey = %q, want %q", errs[0].FieldKey, "value")
+	}
+	if !strings.Contains(errs[0].Error, "428171000124102") || !strings.Contains(errs[0].Error, "Depression screening negative") {
+		t.Errorf("error message = %q, want it to name the dropped value's code+display so a reviewer can see what was lost", errs[0].Error)
+	}
+}
+
+func TestDeclarativeEngine_NoAdditionalValues_NoWarning(t *testing.T) {
+	documentMap := map[string]interface{}{
+		"sectionsByKey": map[string]interface{}{
+			"functionalStatus": map[string]interface{}{
+				"entries": []interface{}{
+					map[string]interface{}{
+						"statusCode": "completed",
+						"value":      map[string]interface{}{"type": "ST", "text": "64"},
+					},
+				},
+			},
+		},
+	}
+	engine := cdafhir.NewDeclarativeEngine()
+	rule := cdafhir.MappingRule{
+		SectionKey:   "functionalStatus",
+		FHIRResource: "Observation",
+		Fields: []cdafhir.MappingRow{
+			{Scope: "value[type=ST]", SourcePath: "text", TargetPath: "valueString"},
+		},
+	}
+
+	_, errs := engine.BuildResources(documentMap, rule)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected errors for a single-value entry: %+v", errs)
 	}
 }
 

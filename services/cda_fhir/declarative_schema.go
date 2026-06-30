@@ -80,25 +80,33 @@ type MappingRule struct {
 	// declaratively instead of as a hardcoded post-hoc Go check.
 	RequiredPaths []string `json:"requiredPaths,omitempty"`
 
-	// SkipIfCodeNullFlavor skips building a resource for this entry entirely
-	// — before any Fields row runs, same as never having matched at all —
-	// when the entry's top-level "code" is a bare nullFlavor with no real
-	// code (code.nullFlavor != "" && code.code == ""). Mirrors
-	// observation_mapper.go:195-198's explicit early return ("If no
+	// SkipIfCodeNullFlavor discards this entry's own main resource — after
+	// Fields has already run, NOT as an upfront short-circuit — when the
+	// entry's top-level "code" is a bare nullFlavor with no real code
+	// (code.nullFlavor != "" && code.code == ""). Mirrors the deleted
+	// observation_mapper.go's buildObservationResource early return ("If no
 	// substitution resolved the code, skip — no useful clinical data to
 	// emit"), found via real corpus data: practicefusion_sample.xml's
 	// "results" section has exactly this shape (a Results Organizer whose
 	// one Component is fully nullFlavor — code, value, and effectiveTime all
 	// NI), and without this check the engine's generic "set dataAbsentReason
 	// when no value[x] exists" row (us-core-2) turns that placeholder into a
-	// spurious Observation Go deliberately never emits.
+	// spurious Observation Go deliberately never emitted.
 	//
-	// Deliberately NOT ported: observation_mapper.go:178-194's COMP-
-	// entryRelationship substitution, which looks for a nested child entry
-	// with a real code/value/time and swaps it in before this same check
-	// (the AUDIT-C/SDOH shell-entry pattern its own comment describes). No
-	// file in this 4-vendor corpus exercises that nested shape — a narrow,
-	// documented gap, not a guessed-at one.
+	// Checked in buildOneResource AFTER the Fields loop (not before) so any
+	// EmitAsResource child a Field already wrote into `extra` survives even
+	// though the entry's own main resource gets discarded. Added for
+	// FunctionalStatusMappingRules: the deleted observation_mapper.go had a
+	// narrower version of this (COMP-entryRelationship substitution — swap
+	// the FIRST matching COMP child's code/value into the shell, found via
+	// auditing the 99397 sample's "Alcohol Use"/PHQ-2 Assessment Scale
+	// Observation (.4.69) shells, both code.nullFlavor="UNK") that was never
+	// ported here because no corpus file exercised the shape at the time.
+	// That substitution was itself lossy (only the first of N COMP siblings
+	// survived); the real fix — reusing
+	// sdohAssessmentScaleSupportingObservationRow's CollectAll+EmitAsResource
+	// primitive to emit EVERY COMP child as its own independent Observation —
+	// needed Fields to still run on a code-null entry, hence this reordering.
 	SkipIfCodeNullFlavor bool `json:"skipIfCodeNullFlavor,omitempty"`
 
 	// SkipEmptyCheck bypasses the "len(resource) <= 1" discard check in
@@ -247,10 +255,18 @@ type MappingRow struct {
 	// — a "one matched entry produces multiple, cross-referenced top-level
 	// resources" shape no row in this engine could express before (every
 	// prior row either writes one value or one sub-object, always staying
-	// inside the ONE resource the matched entry is building). Only
-	// meaningful one level deep — a child row using EmitAsResource whose own
-	// Fields contains another EmitAsResource row is not a case any current
-	// section needs and is not supported.
+	// inside the ONE resource the matched entry is building).
+	//
+	// Also settable on a row's own Fields rows when THIS row already has
+	// EmitAsResource set (e.g. a PractitionerRole row whose Fields contains a
+	// singular "practitioner" row and a singular "organization" row, each
+	// EmitAsResource on its own) — DeclarativeEngine.applyRow's singular
+	// branch and buildEmittedSubResource thread extraOut through each other
+	// for exactly this, so the nested resource lands as its own independent
+	// top-level resource (PractitionerRole/practitioner-N,
+	// PractitionerRole/organization-N), not a value buried inside the outer
+	// one. Two levels deep (e.g. a third resource emitted from inside one of
+	// those two) is untested and not a case any current rule needs.
 	EmitAsResource string `json:"emitAsResource,omitempty"`
 
 	// EmitAsResourcePatientRefPath mirrors MappingRule.PatientRefPath but for
@@ -262,6 +278,26 @@ type MappingRow struct {
 	// which needs none) must say so here instead. Empty/nil for emitted
 	// resources with no patient link.
 	EmitAsResourcePatientRefPath []string `json:"emitAsResourcePatientRefPath,omitempty"`
+
+	// EmitAsResourceRequiredPaths mirrors MappingRule.RequiredPaths but for
+	// the resource EmitAsResource builds: discard it (and, critically, every
+	// resource ITS OWN Fields nested-emitted — see buildEmittedSubResource's
+	// localExtra) unless every one of these top-level keys ended up present,
+	// the same all-or-nothing semantics RequiredPaths already has for a
+	// rule's main resource.
+	//
+	// Added for assignedEntityRoleRow's PractitionerRole row: without this,
+	// a person with a name/id but NO representedOrganization (the common
+	// case — real corpus evidence: cerner_sample.xml's author) still got a
+	// second, duplicate Practitioner emitted (driven by name/id alone) plus
+	// a near-empty PractitionerRole carrying only that duplicate's
+	// reference — pure clutter no representedOrganization data justified,
+	// and a duplicate FHIR.org never asked for. EmitAsResourceRequiredPaths:
+	// []string{"organization"} means the whole PractitionerRole (and the
+	// Practitioner/Organization nested inside it) is discarded together
+	// when there's no organization to link, leaving the rule's own
+	// directly-built Practitioner as the only one.
+	EmitAsResourceRequiredPaths []string `json:"emitAsResourceRequiredPaths,omitempty"`
 
 	// TargetPath is the FHIR-side path within the resource (passed to
 	// setFHIRPath), e.g. "verificationStatus.coding[0].code".

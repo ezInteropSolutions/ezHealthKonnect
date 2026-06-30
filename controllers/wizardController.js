@@ -274,7 +274,13 @@ class WizardController {
                 // Clean, separated configs
                 sourceConfig: sourceConfig,
                 targetConfig: targetConfig,
-                transformationMapping: transformationMapping
+                transformationMapping: transformationMapping,
+                // CDA-only wizard step (sourceType === 'ccda') -- see new
+                // step in interface-wizard.html. wizardData.cda_config is
+                // absent for every non-CDA flow.
+                processingRules: wizardData.cda_config
+                    ? { cda: { planOfCareEncounterTarget: wizardData.cda_config.planOfCareEncounterTarget } }
+                    : null
             };
 
             // Create interface with clean separation of concerns
@@ -374,6 +380,7 @@ class WizardController {
                 acceptedMessageFamilies: interfaceData.acceptedMessageFamilies || null,
                 sourceConfig: interfaceData.sourceConfig,
                 targetConfig: interfaceData.targetConfig,
+                processingRules: interfaceData.processingRules,
                 transformationMapping: null  // DEPRECATED - using pipeline architecture
             };
 
@@ -1076,6 +1083,12 @@ class WizardController {
                 targetConfig: wizardData.targetConfig || {},
                 messageType: wizardData.messageType || 'ADT^A01',
                 mappings: wizardData.mappings || wizardData.customMappings || [],
+                // CDA-only wizard step (sourceType === 'ccda') -- see new
+                // step in interface-wizard.html. wizardData.cda_config is
+                // absent for every non-CDA flow.
+                processingRules: wizardData.cda_config
+                    ? { cda: { planOfCareEncounterTarget: wizardData.cda_config.planOfCareEncounterTarget } }
+                    : null,
                 status: wizardData.status || 'active',
                 // Deployment settings from wizard Step 5
                 auto_start: wizardData.auto_start || false,

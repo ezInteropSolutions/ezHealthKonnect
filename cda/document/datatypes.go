@@ -9,6 +9,7 @@
 package cdadocument
 
 import (
+	"strconv"
 	"strings"
 
 	"github.com/beevik/etree"
@@ -149,6 +150,21 @@ func parsePN(el *etree.Element) CDAName {
 	if vt := el.SelectElement("validTime"); vt != nil {
 		n.ValidTime = parseIVL_TS(vt)
 	}
+	// HL7 PN allows pure unstructured text instead of <family>/<given>/etc.
+	// sub-elements -- the common real-world case for a facility/place name
+	// (header_parser.go's healthCareFacility location: <name>Mumbai Women's
+	// Care</name>, no structured parts at all). Without this fallback such a
+	// name is silently dropped entirely (every CDAName field stays empty).
+	// Stored in Family, not a new field: EncounterMappingRules' own
+	// in-section LOC participant row already reads a plain facility name via
+	// SourcePath "...names[0].family" (declarative_oob_rules.go) -- that
+	// row's fallback design already assumed this is where unstructured text
+	// would land, the parser just never delivered it until now.
+	if n.Prefix == "" && len(n.Given) == 0 && n.Family == "" && n.Suffix == "" {
+		if text := strings.TrimSpace(el.Text()); text != "" {
+			n.Family = text
+		}
+	}
 	return n
 }
 
@@ -263,9 +279,27 @@ func parseValue(el *etree.Element) *CDAValue {
 		b := boolStr == "true"
 		v.Boolean = &b
 	case xsiType == "INT":
-		v.Text = el.SelectAttrValue("value", "")
+		// v.Text is kept (some callers, e.g. cda/validator's hasValue check,
+		// only ever look at Text as a generic presence check) but the
+		// declarative engine's value[x] dispatch
+		// (observationValueXDispatchRows' Scope="value[type=INT]") reads
+		// v.Integer specifically -- never populated before, so every
+		// CDA INT value silently produced neither valueInteger NOR
+		// dataAbsentReason on the mapped FHIR Observation. Real gap found
+		// auditing Functional Status (99397 sample): the PHQ-2 total-score
+		// Supporting Observation's <value xsi:type="INT" value="0"/> mapped
+		// to an Observation with no value[x] at all.
+		raw := el.SelectAttrValue("value", "")
+		v.Text = raw
+		if n, err := strconv.Atoi(raw); err == nil {
+			v.Integer = &n
+		}
 	case xsiType == "REAL":
-		v.Text = el.SelectAttrValue("value", "")
+		raw := el.SelectAttrValue("value", "")
+		v.Text = raw
+		if f, err := strconv.ParseFloat(raw, 64); err == nil {
+			v.Real = &f
+		}
 	case xsiType == "TS":
 		t := parseTS(el)
 		tr := CDATimeRange{Value: t}
