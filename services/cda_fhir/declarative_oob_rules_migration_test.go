@@ -95,15 +95,18 @@ func assertRuleMatchesSeed(t *testing.T, seeded []seededRule, want cdafhir.Mappi
 	}
 }
 
-// TestV154Migration_MatchesGoLiteralRules_NoDrift only checks the row V154
-// still owns (allergy). V154's own "problems"/"healthConcerns" rows were
-// superseded by V168 (Condition.recorder added to conditionFields() -- see
-// declarative_oob_rules_migration_v168_test.go) and its "medications" rows
-// were superseded by V170 (identifier added to medicationCommonRows() --
-// see declarative_oob_rules_migration_v170_test.go), so this file's on-disk
-// content for those sections is now stale BY DESIGN and is deliberately not
-// asserted against the Go literal here.
+// TestV154Migration_MatchesGoLiteralRules_NoDrift: V154's allergy row was
+// superseded by V188 (recorder, recordedDate, asserter added -- see
+// declarative_oob_rules_migration_v188_test.go). V154's "problems"/
+// "healthConcerns" rows were superseded by V168 then V175 then V188.
+// V154's "medications" rows were superseded by V170. All rows are stale
+// BY DESIGN -- the drift guards for rows V154 still logically owns have
+// each been moved to the migration file that last modified them.
 func TestV154Migration_MatchesGoLiteralRules_NoDrift(t *testing.T) {
+	// allergiesAndIntolerances/AllergyIntolerance superseded by V188 --
+	// drift guard moved to declarative_oob_rules_migration_v188_test.go.
+	t.Skip("allergy row superseded by V188 -- drift guard moved to declarative_oob_rules_migration_v188_test.go")
+
 	seeded := parseSeededRules(t)
 	if len(seeded) != 5 {
 		t.Fatalf("got %d seeded rules, want 5 (1 allergy + 2 medication + 2 condition)", len(seeded))

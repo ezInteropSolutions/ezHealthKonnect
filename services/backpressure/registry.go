@@ -37,7 +37,7 @@ func (r *Registry) GetOrCreate(interfaceID string) *WorkerPool {
 	if p, ok := r.pools[interfaceID]; ok {
 		return p
 	}
-	p := NewWorkerPool(r.defaultMaxWorkers, r.defaultMaxQueue)
+	p := NewWorkerPool(interfaceID, r.defaultMaxWorkers, r.defaultMaxQueue)
 	r.pools[interfaceID] = p
 	return p
 }
@@ -57,7 +57,7 @@ func (r *Registry) GetOrCreateWith(interfaceID string, maxWorkers, maxQueue int)
 	if p, ok := r.pools[interfaceID]; ok {
 		return p
 	}
-	p := NewWorkerPool(maxWorkers, maxQueue)
+	p := NewWorkerPool(interfaceID, maxWorkers, maxQueue)
 	r.pools[interfaceID] = p
 	return p
 }

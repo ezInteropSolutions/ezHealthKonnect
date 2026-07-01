@@ -28,7 +28,7 @@ func TestMain(m *testing.M) {
 
 // freshCB creates an isolated circuit breaker that does not touch the global registry.
 func freshCB(threshold, openSecs int) *CircuitBreaker {
-	return newCircuitBreaker(threshold, openSecs)
+	return newCircuitBreaker("test-step", threshold, openSecs)
 }
 
 // ─── Circuit Breaker State Machine ──────────────────────────────────────────

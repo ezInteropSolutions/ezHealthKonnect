@@ -11,15 +11,21 @@
 //
 // The encounters/Encounter row was THEN superseded by V183 (moodCode-aware
 // status row + location ScopeFallbacks fix -- see
-// declarative_oob_rules_migration_v183_test.go) and is deliberately skipped
-// below too, the same way V158's test skips MedicationRequest/ServiceRequest.
+// declarative_oob_rules_migration_v183_test.go), and subsequently V183 itself
+// was superseded by V188 for encounters/Encounter.
+//
+// The problems/Condition and healthConcerns/Condition rows were superseded by
+// V188 (added Condition.asserter + Condition.onsetAge -- see
+// declarative_oob_rules_migration_v188_test.go).
+//
+// All three rows are deliberately skipped below -- the canonical drift guards
+// live in their respective superseding test files.
 package cdafhir_test
 
 import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"reflect"
 	"runtime"
 	"testing"
 
@@ -74,6 +80,13 @@ func findSeededV175(t testing.TB, seeded []seededRule, sectionKey, fhirResource 
 }
 
 func TestV175Migration_MatchesGoLiteralRules_NoDrift(t *testing.T) {
+	// All three rows seeded in V175 have been superseded:
+	//   problems/Condition      → superseded by V188 (asserter + onsetAge added)
+	//   healthConcerns/Condition → superseded by V188
+	//   encounters/Encounter    → superseded by V183 then V188
+	// Canonical drift guards live in declarative_oob_rules_migration_v188_test.go.
+	t.Skip("all rows superseded by V188 -- drift guards moved to declarative_oob_rules_migration_v188_test.go")
+
 	seeded := parseSeededV175Rules(t)
 	if len(seeded) != 3 {
 		t.Fatalf("got %d seeded rules, want 3 (problems + healthConcerns + encounters)", len(seeded))
@@ -84,19 +97,12 @@ func TestV175Migration_MatchesGoLiteralRules_NoDrift(t *testing.T) {
 		want                     cdafhir.MappingRule
 	}{
 		{"problems", "Condition", cdafhir.ProblemsMappingRules()[0]},
-		{"healthConcerns", "Condition", cdafhir.HealthConcernsMappingRules()[1]}, // [0] is now the assessment-scale Observation rule (V186)
+		{"healthConcerns", "Condition", cdafhir.HealthConcernsMappingRules()[1]},
 		{"encounters", "Encounter", cdafhir.EncounterMappingRules()[0]},
 	} {
 		got := findSeededV175(t, seeded, tc.sectionKey, tc.fhirResource)
 		if got.entryMatch != tc.want.EntryMatch {
 			t.Errorf("%s/%s: entry_match = %q, want %q", tc.sectionKey, tc.fhirResource, got.entryMatch, tc.want.EntryMatch)
-		}
-		if tc.sectionKey == "encounters" && tc.fhirResource == "Encounter" {
-			continue // superseded by V183 -- see this file's own top doc comment.
-		}
-		if !reflect.DeepEqual(got.fields, tc.want.Fields) {
-			t.Errorf("%s/%s: seeded fields drifted from declarative_oob_rules.go's Go literal.\nseeded: %+v\nwant:   %+v",
-				tc.sectionKey, tc.fhirResource, got.fields, tc.want.Fields)
 		}
 	}
 }

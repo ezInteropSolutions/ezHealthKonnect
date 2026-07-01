@@ -7,6 +7,13 @@
 // Fields content only -- V175 remains the owner of the problems/Condition
 // and healthConcerns/Condition rows seeded alongside it.
 //
+// NOTE: V183 is itself superseded by V188 for the encounters/Encounter
+// Fields content only: V188 adds Condition.asserter (PractitionerRole +
+// bare Practitioner) and Condition.onsetAge to the nested conditionFields
+// block.  The reflect.DeepEqual check below is therefore SKIPPED with
+// t.Skip() -- the canonical drift guard is in
+// declarative_oob_rules_migration_v188_test.go.
+//
 // No parallel row is seeded anywhere for PlanOfCareMappingRules() itself:
 // the Appointment->Encounter swap for Plan-of-Care's entryType=encounter
 // branch is a per-document RUNTIME decision (declarative_document_mapper.go's
@@ -20,7 +27,6 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"reflect"
 	"runtime"
 	"testing"
 
@@ -64,6 +70,11 @@ func parseSeededV183Rules(t testing.TB) []seededRule {
 }
 
 func TestV183Migration_MatchesGoLiteralRules_NoDrift(t *testing.T) {
+	// V183 is superseded by V188 for encounters/Encounter Fields content.
+	// V188 adds asserter + onsetAge to the nested conditionFields block.
+	// The canonical drift guard lives in declarative_oob_rules_migration_v188_test.go.
+	t.Skip("superseded by V188 -- drift guard moved to declarative_oob_rules_migration_v188_test.go")
+
 	seeded := parseSeededV183Rules(t)
 	if len(seeded) != 1 {
 		t.Fatalf("got %d seeded rules, want 1 (encounters/Encounter)", len(seeded))
@@ -76,8 +87,5 @@ func TestV183Migration_MatchesGoLiteralRules_NoDrift(t *testing.T) {
 	}
 	if got.entryMatch != want.EntryMatch {
 		t.Errorf("entry_match = %q, want %q", got.entryMatch, want.EntryMatch)
-	}
-	if !reflect.DeepEqual(got.fields, want.Fields) {
-		t.Errorf("seeded fields drifted from declarative_oob_rules.go's Go literal.\nseeded: %+v\nwant:   %+v", got.fields, want.Fields)
 	}
 }

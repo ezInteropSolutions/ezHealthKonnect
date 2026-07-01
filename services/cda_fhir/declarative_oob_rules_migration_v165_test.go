@@ -192,6 +192,10 @@ func TestV165Migration_HeaderRules_MatchGoLiteral_NoDrift(t *testing.T) {
 }
 
 func TestV165Migration_CareTeamRules_MatchGoLiteral_NoDrift(t *testing.T) {
+	// CareTeam rows superseded by V189 (managingOrganization added) --
+	// drift guard moved to declarative_oob_rules_migration_v189_test.go.
+	t.Skip("CareTeam rows superseded by V189 -- drift guard moved to declarative_oob_rules_migration_v189_test.go")
+
 	seeded := parseSeededV165CareTeamRules(t)
 	want := cdafhir.CareTeamMappingRules()
 

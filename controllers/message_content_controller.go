@@ -502,6 +502,89 @@ func (mc *MessageContentController) resolveInterfaceID(messageID string) string 
 	return ""
 }
 
+// resolveByCorrelationID scans every interface message table for a row with the
+// given correlation_id (populated on every inbound message — see
+// models.InboundMessage.CorrelationID) and returns its (interface_id, message_id).
+// Returns ("", "") if the correlation_id isn't found in any table. Mirrors
+// resolveInterfaceID's cross-table scan pattern, keyed by correlation_id instead
+// of message_id since GetMessageTrace's caller only has the correlation_id.
+func (mc *MessageContentController) resolveByCorrelationID(correlationID string) (interfaceID, messageID string) {
+	if mc.db == nil {
+		return "", ""
+	}
+
+	rows, err := mc.db.Query(`SELECT interface_id, table_name FROM interface_table_metadata WHERE table_name IS NOT NULL`)
+	if err != nil {
+		return "", ""
+	}
+	defer rows.Close()
+
+	type tableInfo struct {
+		interfaceID string
+		tableName   string
+	}
+	var tables []tableInfo
+	for rows.Next() {
+		var t tableInfo
+		if err := rows.Scan(&t.interfaceID, &t.tableName); err == nil {
+			tables = append(tables, t)
+		}
+	}
+
+	for _, t := range tables {
+		query := fmt.Sprintf(`SELECT message_id FROM %s WHERE correlation_id = $1 LIMIT 1`, t.tableName)
+		var msgID string
+		if err := mc.db.QueryRow(query, correlationID).Scan(&msgID); err == nil {
+			return t.interfaceID, msgID
+		}
+	}
+	return "", ""
+}
+
+// GetMessageTrace resolves a correlation_id to its message across every interface
+// and returns the full per-message lifecycle log timeline — the same NDJSON entries
+// GetProcessingLogs returns, but reachable from just the correlation_id (e.g. pasted
+// from an error email or alert) without knowing which interface the message came
+// from or its internal message_id.
+// GET /api/system/message-trace/:correlationId
+func (mc *MessageContentController) GetMessageTrace(c *gin.Context) {
+	correlationID := c.Param("correlationId")
+	if correlationID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"error":   "correlationId path parameter is required",
+		})
+		return
+	}
+
+	interfaceID, messageID := mc.resolveByCorrelationID(correlationID)
+	if interfaceID == "" || messageID == "" {
+		c.JSON(http.StatusNotFound, gin.H{
+			"success": false,
+			"error":   "no message found for this correlation_id",
+		})
+		return
+	}
+
+	var entries []storage.LogEntry
+	if mc.objStorage != nil {
+		var err error
+		entries, err = mc.objStorage.GetLogs(c.Request.Context(), interfaceID, messageID)
+		if err != nil && !isNotFound(err) {
+			log.Printf("⚠️  GetMessageTrace: %v", err)
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success":        true,
+		"correlation_id": correlationID,
+		"interface_id":   interfaceID,
+		"message_id":     messageID,
+		"timeline":       entries,
+		"count":          len(entries),
+	})
+}
+
 // isNotFound returns true when the error indicates a missing object.
 func isNotFound(err error) bool {
 	if err == nil {

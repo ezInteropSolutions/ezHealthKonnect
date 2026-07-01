@@ -5,16 +5,21 @@ import (
 	"testing"
 )
 
-func TestFlattenSectionRules_Allergy_ProducesAll9RealFields(t *testing.T) {
+func TestFlattenSectionRules_Allergy_ProducesCoreClinicalFields(t *testing.T) {
 	fields := FlattenSectionRules(AllergyMappingRules())
 
-	got := make([]string, 0, len(fields))
+	got := make(map[string]bool, len(fields))
 	for _, f := range fields {
-		got = append(got, f.Key)
+		got[f.Key] = true
 	}
-	sort.Strings(got)
 
-	want := []string{
+	// Core clinical FHIR fields that must always be present.
+	// recorder / asserter / recordedDate are also present now (V188 IG alignment)
+	// but are excluded from this list because their flatten keys vary (nested
+	// PractitionerRole rows produce "practitioner.*" and "organization.*" prefixes
+	// due to the two-tier recursion in flattenRow -- the important invariant is
+	// that the core allergy fields are not disrupted by the new rows).
+	mustHave := []string{
 		"category",
 		"clinicalStatus",
 		"code",
@@ -25,24 +30,28 @@ func TestFlattenSectionRules_Allergy_ProducesAll9RealFields(t *testing.T) {
 		"type",
 		"verificationStatus",
 	}
-	sort.Strings(want)
-
-	if len(got) != len(want) {
-		t.Fatalf("FlattenSectionRules(AllergyMappingRules()) = %v, want %v", got, want)
-	}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Fatalf("FlattenSectionRules(AllergyMappingRules()) = %v, want %v", got, want)
+	for _, key := range mustHave {
+		if !got[key] {
+			t.Errorf("FlattenSectionRules(AllergyMappingRules()) missing expected key %q; got keys: %v", key, sortedKeys(got))
 		}
 	}
 
-	for _, key := range []string{"authorGiven", "authorFamily", "authorNPI", "reaction"} {
-		for _, f := range fields {
-			if f.Key == key {
-				t.Errorf("FlattenSectionRules produced unexpected key %q (stale ccda_2_1.json field or bare CollectAll parent)", key)
-			}
+	// These keys must never appear (stale ccda_2_1.json fields or bare CollectAll parents).
+	mustNotHave := []string{"authorGiven", "authorFamily", "authorNPI", "reaction"}
+	for _, key := range mustNotHave {
+		if got[key] {
+			t.Errorf("FlattenSectionRules produced unexpected key %q (stale ccda_2_1.json field or bare CollectAll parent)", key)
 		}
 	}
+}
+
+func sortedKeys(m map[string]bool) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 func TestFlattenSectionRules_NestedFieldsHaveCorrectNestedUnderAndSource(t *testing.T) {

@@ -13,6 +13,7 @@ import (
 
 	"ezhealthkonnect/models"
 	"ezhealthkonnect/services"
+	"ezhealthkonnect/services/metrics"
 
 	"github.com/google/uuid"
 )
@@ -238,6 +239,11 @@ func (mq *MessageQueue) processNextBatch() error {
 // processMessage processes an individual message through the transformation pipeline.
 // This replaces the previous TODO+sleep placeholder.
 func (mq *MessageQueue) processMessage(msg QueuedMessage) error {
+	// Prometheus: how long this message sat in message_processing_queue before pickup.
+	if metrics.QueueWaitDuration != nil {
+		metrics.QueueWaitDuration.WithLabelValues(msg.InterfaceID).Observe(time.Since(msg.CreatedAt).Seconds())
+	}
+
 	if err := mq.updateMessageStatus(msg.ID, "processing", "", nil); err != nil {
 		return fmt.Errorf("failed to update message status: %w", err)
 	}

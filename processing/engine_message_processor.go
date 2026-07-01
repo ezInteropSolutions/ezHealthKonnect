@@ -146,7 +146,7 @@ func (pe *ProcessingEngine) processSingleMessage(interfaceID string, msg *models
 	msgCopy := msg // capture for closure
 	ifID := interfaceID
 	submitted := pool.Submit(func() {
-		pe.storeAndParseWithRecovery(ifID, msgCopy)
+		pe.storeAndParseWithRecovery(ifID, msgCopy, pool.QueueDepth())
 	})
 	if !submitted {
 		// Queue full — send NACK via ValidationAwareConnector (e.g. MLLP NAK)
@@ -281,12 +281,14 @@ func (pe *ProcessingEngine) updateInterfaceError(interfaceID string) {
 	}
 }
 
-// storeAndParseWithRecovery wraps storeAndParse with panic recovery (V23 - Error Handling Enhancement)
-func (pe *ProcessingEngine) storeAndParseWithRecovery(interfaceID string, msg *models.InboundMessage) {
+// storeAndParseWithRecovery wraps storeAndParse with panic recovery (V23 - Error Handling Enhancement).
+// queueDepth is the backpressure worker pool depth observed when this job was picked up —
+// threaded through to storeAndParse purely for the QUEUE lifecycle log entry.
+func (pe *ProcessingEngine) storeAndParseWithRecovery(interfaceID string, msg *models.InboundMessage, queueDepth int) {
 	// Use error handler if available for panic recovery
 	if pe.errorHandler != nil {
 		pe.errorHandler.SafeExecuteAsync(msg.MessageID, interfaceID, models.StageJSONConversion, func() error {
-			pe.storeAndParse(interfaceID, msg)
+			pe.storeAndParse(interfaceID, msg, queueDepth)
 			return nil
 		})
 	} else {
@@ -308,12 +310,14 @@ func (pe *ProcessingEngine) storeAndParseWithRecovery(interfaceID string, msg *m
 				}
 			}
 		}()
-		pe.storeAndParse(interfaceID, msg)
+		pe.storeAndParse(interfaceID, msg, queueDepth)
 	}
 }
 
-// storeAndParse stores raw message in MongoDB and triggers JSON parsing
-func (pe *ProcessingEngine) storeAndParse(interfaceID string, msg *models.InboundMessage) {
+// storeAndParse stores raw message in MongoDB and triggers JSON parsing.
+// queueDepth is the backpressure worker pool depth observed at pickup — logged as
+// part of the initial "Message received" entry (QUEUE lifecycle point).
+func (pe *ProcessingEngine) storeAndParse(interfaceID string, msg *models.InboundMessage, queueDepth int) {
 	ctx := context.Background()
 
 	// Inject ProcessingEngine into context for validation feedback
@@ -337,9 +341,10 @@ func (pe *ProcessingEngine) storeAndParse(interfaceID string, msg *models.Inboun
 	logger := pe.createLogger(interfaceID, msg.MessageID, msg.CorrelationID, messageType)
 	if logger != nil {
 		logger.Info(services.LogCategoryConnection, "Message received", map[string]interface{}{
-			"source_type": sourceType,
-			"message_size": len(msg.Content),
+			"source_type":     sourceType,
+			"message_size":    len(msg.Content),
 			"source_endpoint": msg.SourceType,
+			"queue_depth":     queueDepth,
 		})
 	}
 
@@ -544,7 +549,7 @@ func (pe *ProcessingEngine) executeTransformationPipelineWithLogger(
 	}
 
 	// Call existing implementation
-	pe.executeTransformationPipeline(ctx, interfaceID, messageID, messageType, parseResult)
+	pe.executeTransformationPipeline(ctx, interfaceID, messageID, messageType, parseResult, logger)
 }
 
 // executeTransformationPipeline executes the transformation pipeline (MVC + OOB)
@@ -555,6 +560,7 @@ func (pe *ProcessingEngine) executeTransformationPipeline(
 	messageID string,
 	messageType string,
 	parseResult *models.ParserResult,
+	procLogger *services.ProcessingLogger, // named to avoid shadowing the services/logger package used below
 ) {
 	log.Printf("🔄 [MVC PIPELINE] FUNCTION ENTERED - message: %s", messageID)
 	startTime := time.Now()
@@ -665,6 +671,27 @@ func (pe *ProcessingEngine) executeTransformationPipeline(
 			pe.updateStorageURI(ifaceID, msgID, "outbound_content_uri", uri)
 			return uri
 		}))
+	}
+	// Inject lifecycle event callback so executors deep in services/executors/* (which
+	// cannot import package services — see models.LogLifecycleEventFn's doc comment)
+	// can still write STEP EXEC / CDA SECTION / DELIVER / DLQ entries into this message's
+	// per-message log stream (the same one GET /api/messages/:messageId/logs reads).
+	if procLogger != nil {
+		ctx = context.WithValue(ctx, "log_lifecycle_event_fn", models.LogLifecycleEventFn(
+			func(level, category, message string, details map[string]interface{}) {
+				cat := services.LogCategory(category)
+				switch level {
+				case "error":
+					procLogger.Error(cat, message, details)
+				case "warning":
+					procLogger.Warning(cat, message, details)
+				case "debug":
+					procLogger.Debug(cat, message, details)
+				default:
+					procLogger.Info(cat, message, details)
+				}
+			},
+		))
 	}
 
 	result, err := pe.transformationService.ExecutePipeline(ctx, pipeline, parseResult.ParsedJSON)

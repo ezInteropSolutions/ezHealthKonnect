@@ -5,11 +5,14 @@ package backpressure
 import (
 	"sync"
 	"sync/atomic"
+
+	"ezhealthkonnect/services/metrics"
 )
 
 // WorkerPool is a bounded concurrency pool backed by a semaphore channel and
 // a buffered job queue. Each interface gets its own pool via the Registry.
 type WorkerPool struct {
+	interfaceID string
 	semaphore   chan struct{}
 	jobs        chan func()
 	maxWorkers  int
@@ -21,7 +24,8 @@ type WorkerPool struct {
 
 // NewWorkerPool creates a pool that runs up to maxWorkers goroutines concurrently
 // and buffers up to maxQueueDepth pending jobs before rejecting new submissions.
-func NewWorkerPool(maxWorkers, maxQueueDepth int) *WorkerPool {
+// interfaceID labels the WorkerQueueDepth Prometheus gauge for this pool.
+func NewWorkerPool(interfaceID string, maxWorkers, maxQueueDepth int) *WorkerPool {
 	if maxWorkers <= 0 {
 		maxWorkers = 10
 	}
@@ -29,11 +33,12 @@ func NewWorkerPool(maxWorkers, maxQueueDepth int) *WorkerPool {
 		maxQueueDepth = 100
 	}
 	p := &WorkerPool{
-		semaphore:  make(chan struct{}, maxWorkers),
-		jobs:       make(chan func(), maxQueueDepth),
-		maxWorkers: maxWorkers,
-		maxQueue:   maxQueueDepth,
-		done:       make(chan struct{}),
+		interfaceID: interfaceID,
+		semaphore:   make(chan struct{}, maxWorkers),
+		jobs:        make(chan func(), maxQueueDepth),
+		maxWorkers:  maxWorkers,
+		maxQueue:    maxQueueDepth,
+		done:        make(chan struct{}),
 	}
 	// Pre-fill semaphore slots
 	for i := 0; i < maxWorkers; i++ {
@@ -43,12 +48,22 @@ func NewWorkerPool(maxWorkers, maxQueueDepth int) *WorkerPool {
 	return p
 }
 
+// reportQueueDepth publishes the current jobs channel length to the
+// WorkerQueueDepth gauge. Called after every enqueue/dequeue so the gauge
+// reflects backpressure in near-real-time rather than only on scrape.
+func (p *WorkerPool) reportQueueDepth() {
+	if metrics.WorkerQueueDepth != nil {
+		metrics.WorkerQueueDepth.WithLabelValues(p.interfaceID).Set(float64(len(p.jobs)))
+	}
+}
+
 // Submit enqueues fn for execution. Returns false if the queue is full (caller
 // should NACK or drop the message). Non-blocking.
 func (p *WorkerPool) Submit(fn func()) bool {
 	select {
 	case p.jobs <- fn:
 		p.queued.Add(1)
+		p.reportQueueDepth()
 		return true
 	default:
 		return false // queue full → backpressure signal
@@ -92,6 +107,7 @@ func (p *WorkerPool) dispatch() {
 			if !ok {
 				return
 			}
+			p.reportQueueDepth()
 			// Acquire a semaphore slot (blocks if maxWorkers are busy)
 			<-p.semaphore
 			p.wg.Add(1)
@@ -107,6 +123,7 @@ func (p *WorkerPool) dispatch() {
 			for {
 				select {
 				case fn := <-p.jobs:
+					p.reportQueueDepth()
 					<-p.semaphore
 					p.wg.Add(1)
 					go func(job func()) {

@@ -23,6 +23,8 @@ import (
 	"fmt"
 	"log"
 	"time"
+
+	"ezhealthkonnect/services/metrics"
 )
 
 // MetricsCollector collects per-interface transformation metrics on a schedule.
@@ -124,6 +126,15 @@ func (mc *MetricsCollector) collect(ctx context.Context) {
 
 	// DLQ depth snapshots per interface
 	dlqDepths := mc.dlqDepths(ctx)
+
+	// Prometheus: total unresolved DLQ depth across all interfaces.
+	if metrics.DLQDepth != nil {
+		total := 0
+		for _, d := range dlqDepths {
+			total += d
+		}
+		metrics.DLQDepth.Set(float64(total))
+	}
 
 	inserted := 0
 	for _, a := range aggs {

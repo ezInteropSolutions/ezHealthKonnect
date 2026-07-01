@@ -21,6 +21,7 @@ import (
 	cdastorage "ezhealthkonnect/services/cda_storage"
 	. "ezhealthkonnect/services/connectors" // Import connectors package for factory
 	"ezhealthkonnect/services/logger"
+	"ezhealthkonnect/services/metrics"
 	"ezhealthkonnect/services/parsers"
 	"ezhealthkonnect/services/storage"
 )
@@ -257,6 +258,9 @@ func (pe *ProcessingEngine) Stop() error {
 		if stopErr := connector.Stop(); stopErr != nil {
 			log.Printf("⚠️  Error stopping connector %s during engine stop: %v", key, stopErr)
 		}
+		if metrics.ActiveConnectors != nil {
+			metrics.ActiveConnectors.WithLabelValues(connector.GetMetadata().TypeName).Dec()
+		}
 	}
 	pe.activeConnectors = make(map[string]InputConnector)
 
@@ -266,6 +270,9 @@ func (pe *ProcessingEngine) Stop() error {
 	}
 	pe.messageChan = make(map[string]chan *models.InboundMessage)
 	pe.activeInterfaces = make(map[string]*InterfaceStatus)
+	if metrics.ActiveInterfaces != nil {
+		metrics.ActiveInterfaces.Set(0)
+	}
 	pe.running = false
 	pe.mutex.Unlock()
 
@@ -498,6 +505,10 @@ func (pe *ProcessingEngine) ActivateInterface(interfaceID string) error {
 			pe.inFlight.Add(1)
 			go pe.processMessages(interfaceID, msgChan)
 
+			if metrics.ActiveConnectors != nil {
+				metrics.ActiveConnectors.WithLabelValues(connector.GetMetadata().TypeName).Inc()
+			}
+
 			log.Printf("✅ Started %s connector for interface %s (step: '%s')", oobType, interfaceID, step.stepName)
 		}
 	} else {
@@ -598,6 +609,10 @@ func (pe *ProcessingEngine) ActivateInterface(interfaceID string) error {
 		pe.messageChan[interfaceID] = messageChan
 		pe.inFlight.Add(1)
 		go pe.processMessages(interfaceID, messageChan)
+
+		if metrics.ActiveConnectors != nil {
+			metrics.ActiveConnectors.WithLabelValues(connector.GetMetadata().TypeName).Inc()
+		}
 	}
 
 	// Update interface status in database (both columns so page-load initial state is correct)
@@ -614,6 +629,9 @@ func (pe *ProcessingEngine) ActivateInterface(interfaceID string) error {
 		MessagesProcessed: 0,
 		LastActivity:      time.Now(),
 		Errors:            0,
+	}
+	if metrics.ActiveInterfaces != nil {
+		metrics.ActiveInterfaces.Set(float64(len(pe.activeInterfaces)))
 	}
 
 	pe.stats.LastActivity = time.Now()
@@ -657,6 +675,9 @@ func (pe *ProcessingEngine) DeactivateInterface(interfaceID string) error {
 			if stopErr := connector.Stop(); stopErr != nil {
 				log.Printf("⚠️  Error stopping connector for interface %s (key %s): %v", interfaceID, key, stopErr)
 			}
+			if metrics.ActiveConnectors != nil {
+				metrics.ActiveConnectors.WithLabelValues(connector.GetMetadata().TypeName).Dec()
+			}
 			delete(pe.activeConnectors, key)
 			delete(pe.messageChan, key)
 		}
@@ -664,6 +685,9 @@ func (pe *ProcessingEngine) DeactivateInterface(interfaceID string) error {
 
 	// Remove from active tracking
 	delete(pe.activeInterfaces, interfaceID)
+	if metrics.ActiveInterfaces != nil {
+		metrics.ActiveInterfaces.Set(float64(len(pe.activeInterfaces)))
+	}
 
 	pe.stats.LastActivity = time.Now()
 	return nil
@@ -761,6 +785,9 @@ func (pe *ProcessingEngine) GetStats() *EngineStats {
 	defer pe.mutex.RUnlock()
 
 	pe.stats.ActiveInterfaces = len(pe.activeInterfaces)
+	if metrics.ActiveInterfaces != nil {
+		metrics.ActiveInterfaces.Set(float64(pe.stats.ActiveInterfaces))
+	}
 
 	// Calculate totals from active interfaces
 	var totalMessages, totalErrors int64
@@ -841,6 +868,9 @@ func (pe *ProcessingEngine) haltOnPortConflictLocked(newInterfaceID string, port
 		for key, conn := range pe.activeConnectors {
 			if strings.HasPrefix(key, id+":") || key == id {
 				_ = conn.Stop()
+				if metrics.ActiveConnectors != nil {
+					metrics.ActiveConnectors.WithLabelValues(conn.GetMetadata().TypeName).Dec()
+				}
 				if ch, ok := pe.messageChan[key]; ok {
 					close(ch)
 					delete(pe.messageChan, key)
@@ -849,6 +879,9 @@ func (pe *ProcessingEngine) haltOnPortConflictLocked(newInterfaceID string, port
 			}
 		}
 		delete(pe.activeInterfaces, id)
+	}
+	if metrics.ActiveInterfaces != nil {
+		metrics.ActiveInterfaces.Set(float64(len(pe.activeInterfaces)))
 	}
 
 	// DB updates and HIPAA audit are I/O-bound — run asynchronously so we don't
@@ -1335,6 +1368,9 @@ func (pe *ProcessingEngine) recoverUnprocessedMessages(ctx context.Context) {
 
 	if totalRecovered > 0 {
 		log.Printf("✅ [Recovery] Startup recovery complete — %d message(s) re-enqueued", totalRecovered)
+		if metrics.RecoveryMessagesRequeued != nil {
+			metrics.RecoveryMessagesRequeued.Add(float64(totalRecovered))
+		}
 	} else {
 		log.Printf("✅ [Recovery] Startup recovery complete — no stale messages found")
 	}

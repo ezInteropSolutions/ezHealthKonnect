@@ -18,7 +18,22 @@ import (
 	"fmt"
 	"sync"
 	"time"
+
+	"ezhealthkonnect/services/metrics"
 )
+
+// cbStateMetricValue maps a cbState to the CircuitBreakerState gauge value
+// documented in services/metrics/metrics.go: 0=closed, 1=half-open, 2=open.
+func cbStateMetricValue(s cbState) float64 {
+	switch s {
+	case cbOpen:
+		return 2
+	case cbHalfOpen:
+		return 1
+	default:
+		return 0
+	}
+}
 
 // ===============================================================
 // STATE MACHINE
@@ -42,20 +57,26 @@ type CircuitBreaker struct {
 	openDuration     time.Duration
 	openedAt         time.Time
 	testInFlight     bool // prevents double probe in half-open
+	stepID           string // labels the CircuitBreakerState gauge (executor_id)
 }
 
-func newCircuitBreaker(threshold int, openSecs int) *CircuitBreaker {
+func newCircuitBreaker(stepID string, threshold int, openSecs int) *CircuitBreaker {
 	if threshold <= 0 {
 		threshold = 5
 	}
 	if openSecs <= 0 {
 		openSecs = 60
 	}
-	return &CircuitBreaker{
+	cb := &CircuitBreaker{
 		state:            cbClosed,
 		failureThreshold: threshold,
 		openDuration:     time.Duration(openSecs) * time.Second,
+		stepID:           stepID,
 	}
+	if metrics.CircuitBreakerState != nil {
+		metrics.CircuitBreakerState.WithLabelValues(stepID).Set(cbStateMetricValue(cbClosed))
+	}
+	return cb
 }
 
 // Allow reports whether the caller is permitted to attempt the operation.
@@ -78,6 +99,9 @@ func (cb *CircuitBreaker) Allow() (allowed bool, stateName string) {
 		// Transition to half-open; allow one probe request.
 		cb.state = cbHalfOpen
 		cb.testInFlight = true
+		if metrics.CircuitBreakerState != nil {
+			metrics.CircuitBreakerState.WithLabelValues(cb.stepID).Set(cbStateMetricValue(cbHalfOpen))
+		}
 		return true, "half-open"
 
 	case cbHalfOpen:
@@ -102,6 +126,9 @@ func (cb *CircuitBreaker) RecordSuccess() {
 	cb.failureCount = 0
 	cb.testInFlight = false
 	cb.state = cbClosed
+	if metrics.CircuitBreakerState != nil {
+		metrics.CircuitBreakerState.WithLabelValues(cb.stepID).Set(cbStateMetricValue(cbClosed))
+	}
 }
 
 // RecordFailure records a failed operation and may trip or re-open the breaker.
@@ -127,6 +154,10 @@ func (cb *CircuitBreaker) RecordFailure() {
 	// If already open, a failure cannot arrive (Allow returns false),
 	// so this case is a no-op guard.
 	case cbOpen:
+	}
+
+	if metrics.CircuitBreakerState != nil {
+		metrics.CircuitBreakerState.WithLabelValues(cb.stepID).Set(cbStateMetricValue(cb.state))
 	}
 }
 
@@ -186,7 +217,7 @@ func GetCircuitBreaker(stepID string, threshold int, openSecs int) *CircuitBreak
 		return cb
 	}
 
-	cb := newCircuitBreaker(threshold, openSecs)
+	cb := newCircuitBreaker(stepID, threshold, openSecs)
 	globalCBRegistry.breakers[key] = cb
 	return cb
 }

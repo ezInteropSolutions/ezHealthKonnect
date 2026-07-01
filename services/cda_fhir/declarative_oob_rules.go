@@ -123,24 +123,46 @@ type NarrativeSectionDef struct {
 	DisplayName string
 }
 
-// DefaultNarrativeSectionDefs maps the 6 section keys confirmed as
-// narrative-only in the real 4-file corpus to their LOINC fallback codes.
+// DefaultNarrativeSectionDefs maps section keys that are commonly encountered
+// as narrative-only (no <entry> elements) in real-world CDA files to their
+// LOINC fallback codes. The fallback fires only when the section's own
+// <code>/@code is absent; most files include the LOINC directly.
+//
 // US Core v9.0.0 + Argonaut consensus: DocumentReference is the right FHIR
 // resource for narrative broader than a specific clinical resource type.
-// Real evidence:
+//
+// Original 6 keys — corpus evidence:
 //   - assessment (51848-0): Epic 99397 + Ascension -- "Visit Diagnoses", narrative table only
 //   - hospitalCourse (8648-8): Dignity Health
 //   - dischargeInstructions (18776-5): Marshfield + Dignity Health
 //   - reasonForReferral (42349-1): Marshfield + Dignity Health
 //   - reasonForVisit (29299-5): Ascension
 //   - clinicalNote (34109-9): Dignity Health
+//
+// Standard C-CDA sections commonly narrative-only in real EHR exports:
+//   - chiefComplaint, historyOfPresentIllness, physicalExamination,
+//     reviewOfSystems, pastMedicalHistory
+//
+// Operative note sections — mtuitive corpus evidence (only operationsPerformed
+// has a non-empty <text> block; the LOINC 10223-6 is already in the file so
+// the def's code fires only as a fallback for title-keyed variants):
+//   - operationsPerformed (10223-6)
 var DefaultNarrativeSectionDefs = map[string]NarrativeSectionDef{
+	// ── Original 6 (corpus-confirmed) ────────────────────────────────────────
 	"assessment":            {LoincCode: "51848-0", DisplayName: "Evaluation note"},
 	"hospitalCourse":        {LoincCode: "8648-8", DisplayName: "Hospital course Discharge note"},
 	"dischargeInstructions": {LoincCode: "18776-5", DisplayName: "Plan of treatment note"},
 	"reasonForReferral":     {LoincCode: "42349-1", DisplayName: "Reason for referral"},
 	"reasonForVisit":        {LoincCode: "29299-5", DisplayName: "Reason for visit"},
 	"clinicalNote":          {LoincCode: "34109-9", DisplayName: "Note"},
+	// ── Standard C-CDA sections (narrative-only in many EHR exports) ─────────
+	"chiefComplaint":          {LoincCode: "10154-3", DisplayName: "Chief complaint"},
+	"historyOfPresentIllness": {LoincCode: "10164-2", DisplayName: "History of present illness"},
+	"physicalExamination":     {LoincCode: "29545-1", DisplayName: "Physical findings"},
+	"reviewOfSystems":         {LoincCode: "10187-3", DisplayName: "Review of systems"},
+	"pastMedicalHistory":      {LoincCode: "11348-0", DisplayName: "History of past illness"},
+	// ── Operative note sections (mtuitive corpus) ─────────────────────────────
+	"operationsPerformed": {LoincCode: "10223-6", DisplayName: "Operative note Surgical procedure"},
 }
 
 // AllergyMappingRules returns the OOB declarative rule for the
@@ -283,6 +305,40 @@ func AllergyMappingRules() []MappingRule {
 						},
 					},
 				},
+			// AllergyIntolerance.recorder -- the allergy observation own
+			// <author> (HL7 C-CDA on FHIR IG CF-allergies.html: "/author" ->
+			// ".recorder"). Scope walks into the allergy observation (SUBJ tier);
+			// barePractitionerRow fallback carries ScopeFallbacks for flat
+			// structure (no Concern Act wrapper).
+			assignedEntityRoleRow("entryRelationships[typeCode=SUBJ].entry.authors[0].assignedAuthor", "recorder"),
+			func() MappingRow {
+				row := barePractitionerRow("entryRelationships[typeCode=SUBJ].entry.authors[0].assignedAuthor", "recorder")
+				row.ScopeFallbacks = []string{"authors[0].assignedAuthor"}
+				row.SkipIfResourceHasAnyOf = []string{"recorder"}
+				return row
+			}(),
+			// AllergyIntolerance.recordedDate -- allergy observation own
+			// <author><time> (same IG source as recorder above; mirrors
+			// Condition.recordedDate pattern).
+			{
+				Scope:          "entryRelationships[typeCode=SUBJ].entry",
+				ScopeFallbacks: []string{""},
+				SourcePath:     "authors[0].time",
+				Transform:      "cda_time_to_fhir_datetime",
+				TargetPath:     "recordedDate",
+			},
+			// AllergyIntolerance.asserter -- allergy observation own <performer>
+			// (HL7 C-CDA on FHIR IG: "/performer" -> ".asserter", the clinician
+			// who asserts/verifies the allergy, distinct from .recorder).
+			// PracticeFusion corpus evidence: performer "Samir Khan" with full
+			// NPI + address+telecom on both allergy entries.
+			assignedEntityRoleRow("entryRelationships[typeCode=SUBJ].entry.performers[0].assignedEntity", "asserter"),
+			func() MappingRow {
+				row := barePractitionerRow("entryRelationships[typeCode=SUBJ].entry.performers[0].assignedEntity", "asserter")
+				row.ScopeFallbacks = []string{"performers[0].assignedEntity"}
+				row.SkipIfResourceHasAnyOf = []string{"asserter"}
+				return row
+			}(),
 			},
 		},
 	}
@@ -909,6 +965,38 @@ func conditionFields(categoryCode string) []MappingRow {
 				Scope:      "entryRelationships[typeCode=COMP].entry[templateId=" + noteActivityTemplateID + "]",
 				SourcePath: "text",
 				TargetPath: "note[0].text",
+			},
+			// Condition.asserter -- the Problem Observation's own <performer>
+			// (C-CDA HL7 on FHIR IG CF-problems.html: "/performer" -> ".asserter",
+			// the clinician who asserts the diagnosis, distinct from .recorder
+			// above which comes from /author). Same two-tier idiom as recorder:
+			// rich PractitionerRole when representedOrganization is present,
+			// bare Practitioner fallback otherwise.
+			// PracticeFusion corpus evidence: performer "Samir Khan" with full
+			// NPI + address+telecom on both Asthma and Costal chondritis entries.
+			assignedEntityRoleRow(problemObsScope+".performers[0].assignedEntity", "asserter"),
+			func() MappingRow {
+				row := barePractitionerRow(problemObsScope+".performers[0].assignedEntity", "asserter")
+				row.SkipIfResourceHasAnyOf = []string{"asserter"}
+				return row
+			}(),
+			// Condition.onsetAge -- Age At Onset Observation (C-CDA templateId
+			// 2.16.840.1.113883.10.20.22.4.31, SNOMED code 445518008), nested
+			// inside the Problem Observation via entryRelationship
+			// typeCode=SUBJ,inversionInd=true. cda_value_to_fhir on a PQ input
+			// produces {value, unit, system:"http://unitsofmeasure.org", code} --
+			// exactly the FHIR Age profiled-Quantity shape (no additional
+			// transform needed). Identified by SNOMED code rather than templateId,
+			// matching the SEV severity row's own precedent. PracticeFusion corpus
+			// evidence: value="51" unit="a" (years) on the Asthma entry.
+			{
+				Scope: problemObsScope + ".entryRelationships[typeCode=SUBJ,inversionInd=true].entry[code=445518008]",
+				ScopeFallbacks: []string{
+					"entryRelationships[typeCode=REFR].entry.entryRelationships[typeCode=SUBJ,inversionInd=true].entry[code=445518008]",
+				},
+				SourcePath: "value",
+				Transform:  "cda_value_to_fhir",
+				TargetPath: "onsetAge",
 			},
 		}
 }
@@ -2936,6 +3024,29 @@ func CareTeamMappingRules() []MappingRule {
 					TargetPath: "_emitOnly",
 					Fields: []MappingRow{
 						assignedEntityRoleRow("performers[0].assignedEntity", "ref"),
+					},
+				},
+				{
+					// CareTeam.managingOrganization ← Care Team Organizer's
+					// own <author>/<assignedAuthor>/<representedOrganization>.
+					// C-CDA on FHIR IG alignment: the organizer author's org
+					// is the entity responsible for the care team — separate
+					// from any individual member's organization (which lives on
+					// PractitionerRole.organization via components[*] above).
+					// Real corpus evidence: Epic 99397 organizer has an author
+					// with representedOrganization "Boulder Community Health and
+					// Affiliates" but no id on the assignedAuthor itself; the
+					// org-name-only case is correctly handled by
+					// buildEmittedSubResource's len(sub)>1 guard (name produces
+					// 1 key → len with resourceType = 2 → survives).
+					Scope:          "authors[0].assignedAuthor.representedOrganization",
+					EmitAsResource: "Organization",
+					TargetPath:     "managingOrganization",
+					Fields: []MappingRow{
+						{SourcePath: "names[0]", TargetPath: "name"},
+						{Scope: "ids[*]", Transform: "cda_ii_to_identifier", CollectAll: true, TargetPath: "identifier", EmbedCDAIdentity: true},
+						{Scope: "telecoms[*]", Transform: "cda_telecom_to_fhir", CollectAll: true, TargetPath: "telecom"},
+						{Scope: "addresses[*]", Transform: "cda_address_to_fhir", CollectAll: true, TargetPath: "address"},
 					},
 				},
 			},

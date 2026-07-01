@@ -7,10 +7,35 @@ import (
 	"ezhealthkonnect/services/connectors"
 	"ezhealthkonnect/services/executors"
 	"ezhealthkonnect/services/executors/format"
+	"ezhealthkonnect/services/metrics"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 )
+
+// classifyDeliveryErrorType maps a connector delivery error to a bounded
+// error_type label for the DLQEnqueued Prometheus counter — using the raw
+// error string directly would blow up metric cardinality (unique messages,
+// hostnames, etc. embedded in error text). Reuses the same coarse taxonomy
+// as models.ErrorType* (error_models.go) so this stays consistent with the
+// error categories already recorded in error_captures.
+func classifyDeliveryErrorType(err error) string {
+	if err == nil {
+		return models.ErrorTypeUnknown
+	}
+	msg := strings.ToLower(err.Error())
+	switch {
+	case strings.Contains(msg, "timeout"), strings.Contains(msg, "deadline exceeded"):
+		return models.ErrorTypeTimeout
+	case strings.Contains(msg, "connection refused"), strings.Contains(msg, "no such host"),
+		strings.Contains(msg, "no route to host"), strings.Contains(msg, "broken pipe"),
+		strings.Contains(msg, "dial tcp"), strings.Contains(msg, "eof"):
+		return models.ErrorTypeNetwork
+	default:
+		return models.ErrorTypeUnknown
+	}
+}
 
 // DLQWriter is the narrow interface the executor uses to write to the dead-letter queue.
 // Satisfied by *connectors.DLQService; interface form aids testability.
@@ -180,6 +205,15 @@ func (e *OutboundConnectorExecutor) Execute(
 		},
 	}
 
+	// DELIVER lifecycle log point — see models.LogLifecycleEventFn's doc comment.
+	if logFn := models.GetLogLifecycleEventFn(ctx); logFn != nil {
+		logFn("info", "delivery", fmt.Sprintf("Delivering via %s", config.ConnectorType), map[string]interface{}{
+			"connector_type": config.ConnectorType,
+			"content_type":   resolvedContentType,
+			"bytes":          len(content),
+		})
+	}
+
 	// Send
 	result, err := connector.Send(ctx, outMsg)
 
@@ -194,6 +228,16 @@ func (e *OutboundConnectorExecutor) Execute(
 		// Notify engine of delivery failure so it can update delivery_status in PostgreSQL
 		if fn := models.GetDeliveryStatusFn(ctx); fn != nil {
 			fn(interfaceID, messageID, "failed", err.Error())
+		}
+
+		// DELIVER RESULT (failure) lifecycle log point.
+		if logFn := models.GetLogLifecycleEventFn(ctx); logFn != nil {
+			logFn("error", "delivery", "Delivery failed", map[string]interface{}{
+				"connector_type": config.ConnectorType,
+				"status":         "failed",
+				"duration_ms":    durationMs,
+				"error":          err.Error(),
+			})
 		}
 
 		// Write to dead-letter queue for async redrive
@@ -217,6 +261,18 @@ func (e *OutboundConnectorExecutor) Execute(
 				log.Printf("  ⚠️  DLQ write failed (message not durably queued): %v", dlqErr)
 			} else {
 				log.Printf("  📥 Delivery failure written to DLQ: msg=%s step=%s", messageID, step.StepName)
+				errType := classifyDeliveryErrorType(err)
+				if metrics.DLQEnqueued != nil {
+					metrics.DLQEnqueued.WithLabelValues(interfaceID, errType).Inc()
+				}
+				// DLQ lifecycle log point.
+				if logFn := models.GetLogLifecycleEventFn(ctx); logFn != nil {
+					logFn("warning", "delivery", "Message sent to dead-letter queue", map[string]interface{}{
+						"connector_type": config.ConnectorType,
+						"error_type":     errType,
+						"retry_count":    1, // matches AttemptCount in the WriteDLQParams call above
+					})
+				}
 			}
 		}
 
@@ -324,6 +380,16 @@ func (e *OutboundConnectorExecutor) Execute(
 			deliveryStatus = "failed"
 		}
 		fn(interfaceID, messageID, deliveryStatus, ack)
+
+		// DELIVER RESULT (success) lifecycle log point.
+		if logFn := models.GetLogLifecycleEventFn(ctx); logFn != nil {
+			logFn("info", "delivery", "Delivery successful", map[string]interface{}{
+				"connector_type": config.ConnectorType,
+				"status":         deliveryStatus,
+				"duration_ms":    durationMs,
+				"attempt":        1,
+			})
+		}
 	}
 
 	log.Printf("  ✅ Outbound Connector delivery complete: %s (%d bytes)", config.ConnectorType, len(content))

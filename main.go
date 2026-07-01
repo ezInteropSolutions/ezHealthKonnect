@@ -560,6 +560,10 @@ func main() {
 
 		// SYSTEM ROUTES
 		systemCtrl := controllers.NewSystemController(cfg, db)
+		// Constructed here (rather than at its other call sites below) so the message-trace
+		// route below can use it; msgContentCtrl.RegisterRoutes(api) still runs later in its
+		// original location — Gin route registration order doesn't affect matching.
+		msgContentCtrl := controllers.NewMessageContentController(db, objectStorageService, cdaDocumentStore)
 		systemGroup := api.Group("/system")
 		{
 			systemGroup.GET("/health", systemCtrl.HealthCheck)
@@ -583,6 +587,11 @@ func main() {
 				depths := backpressure.Get().QueueDepths()
 				c.JSON(200, gin.H{"success": true, "data": depths, "count": len(depths)})
 			})
+
+			// MESSAGE LIFECYCLE TRACE — resolves a correlation_id (e.g. pasted from an error
+			// email/alert) to its message across every interface and returns the full
+			// per-message log timeline (RECEIVE/QUEUE/TRANSFORM/STEP EXEC/DELIVER/DLQ/…).
+			systemGroup.GET("/message-trace/:correlationId", msgContentCtrl.GetMessageTrace)
 
 			// DLQ management moved to /api/fhir/dlq (registered below with the DLQService)
 
@@ -1708,7 +1717,7 @@ func main() {
 		log.Printf("✅ ZSegment Controller initialized (enterprise Z-segment mapping)")
 
 		// MESSAGE CONTENT CONTROLLER — raw content and processing logs from object storage
-		msgContentCtrl := controllers.NewMessageContentController(db, objectStorageService, cdaDocumentStore)
+		// (constructed earlier alongside systemGroup so /system/message-trace can use it)
 		msgContentCtrl.RegisterRoutes(api)
 		log.Printf("✅ Message Content Controller initialized (driver=%s)", func() string {
 			if objectStorageService != nil {

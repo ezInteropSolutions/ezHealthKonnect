@@ -232,6 +232,28 @@ func (e *CDAToFHIRExecutor) Execute(
 		len(output.ProcessingResult.SuccessfulSections),
 		len(output.ProcessingResult.FailedSections))
 
+	// CDA SECTION lifecycle log points — one entry per section processed. Per-section
+	// entry_count/resource_count aren't tracked by GenericCDAFHIRMapper today (only the
+	// bundle-wide resourceCount above), so these carry section_key + outcome only.
+	if logFn := models.GetLogLifecycleEventFn(ctx); logFn != nil {
+		for _, sectionKey := range output.ProcessingResult.SuccessfulSections {
+			logFn("debug", "transformation", "CDA section mapped", map[string]interface{}{
+				"section_key":   sectionKey,
+				"fhir_resource": "fhir-r4",
+				"status":        "success",
+			})
+		}
+		for _, secErr := range output.ProcessingResult.SectionErrors {
+			logFn("warning", "transformation", "CDA section mapping error", map[string]interface{}{
+				"section_key": secErr.SectionKey,
+				"field_key":   secErr.FieldKey,
+				"transform":   secErr.Transform,
+				"error":       secErr.Error,
+				"severity":    secErr.Severity,
+			})
+		}
+	}
+
 	// Build output
 	outputData := make(map[string]interface{}, len(inputData)+4)
 	for k, v := range inputData {

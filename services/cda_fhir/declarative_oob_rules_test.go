@@ -489,6 +489,223 @@ func TestDeclarativeEngine_Allergy_DocumentLevelCount(t *testing.T) {
 	}
 }
 
+// TestDeclarativeEngine_Allergy_Recorder_FromAllergyObservationAuthor proves
+// AllergyIntolerance.recorder is populated from the allergy observation's own
+// <author><assignedAuthor>. PracticeFusion corpus evidence: both allergy
+// entries have an <author> with NPI + full name on the observation itself
+// (distinct from the header's author). The scope walks into the SUBJ-nested
+// observation from the outer Concern Act.
+func TestDeclarativeEngine_Allergy_Recorder_FromAllergyObservationAuthor(t *testing.T) {
+	entries := []cdadocument.CDAEntry{
+		{
+			EntryType:  "act",
+			StatusCode: "active",
+			EntryRelationships: []cdadocument.CDAEntryRelationship{
+				{
+					TypeCode: "SUBJ",
+					Entry: cdadocument.CDAEntry{
+						EntryType:  "observation",
+						StatusCode: "completed",
+						Participants: []cdadocument.CDAParticipant{
+							{
+								TypeCode: "CSM",
+								ParticipantRole: cdadocument.CDAParticipantRole{
+									PlayingEntity: &cdadocument.CDAPlayingEntity{
+										Code: cdadocument.CDACode{Code: "7980", DisplayName: "Penicillin", CodeSystem: "2.16.840.1.113883.6.88"},
+									},
+								},
+							},
+						},
+						Authors: []cdadocument.CDAAuthor{
+							{
+								AssignedAuthor: cdadocument.CDAAssignedAuthor{
+									Ids: []cdadocument.CDAII{{Root: "2.16.840.1.113883.4.6", Extension: "1356133083"}},
+									AssignedPerson: &cdadocument.CDAPerson{
+										Names: []cdadocument.CDAName{{Given: []string{"Samir"}, Family: "Khan"}},
+									},
+									RepresentedOrganization: &cdadocument.CDAOrganization{
+										Names: []string{"PracticeFusion Medical Group"},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	documentMap := documentMapForEntries(t, "allergiesAndIntolerances", entries)
+	engine := cdafhir.NewDeclarativeEngine()
+	resources, errs := engine.BuildResources(documentMap, cdafhir.AllergyMappingRules()[0])
+	if len(errs) != 0 {
+		t.Fatalf("unexpected errors: %+v", errs)
+	}
+
+	var allergy, practitionerRole, practitioner, organization map[string]interface{}
+	for _, r := range resources {
+		switch r["resourceType"] {
+		case "AllergyIntolerance":
+			allergy = r
+		case "PractitionerRole":
+			practitionerRole = r
+		case "Practitioner":
+			practitioner = r
+		case "Organization":
+			organization = r
+		}
+	}
+	if allergy == nil {
+		t.Fatalf("expected an AllergyIntolerance, got %d resources: %v", len(resources), resources)
+	}
+	if practitioner == nil {
+		t.Fatal("expected Practitioner built from allergy observation author")
+	}
+	if organization == nil {
+		t.Fatal("expected Organization built from author's representedOrganization")
+	}
+	if practitionerRole == nil {
+		t.Fatal("expected PractitionerRole linking Practitioner and Organization")
+	}
+	recorderRef, ok := allergy["recorder"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("AllergyIntolerance.recorder not set; got %v", allergy["recorder"])
+	}
+	wantRef := "PractitionerRole/" + practitionerRole["id"].(string)
+	if recorderRef["reference"] != wantRef {
+		t.Errorf("recorder.reference = %v, want %v", recorderRef["reference"], wantRef)
+	}
+	name := firstElement(t, practitioner["name"]).(map[string]interface{})
+	if name["family"] != "Khan" {
+		t.Errorf("Practitioner.name[0].family = %v, want Khan", name["family"])
+	}
+}
+
+// TestDeclarativeEngine_Allergy_RecordedDate_FromAllergyObservationAuthorTime
+// proves AllergyIntolerance.recordedDate is populated from the allergy
+// observation's own <author><time>. Same source as recorder above.
+func TestDeclarativeEngine_Allergy_RecordedDate_FromAllergyObservationAuthorTime(t *testing.T) {
+	entries := []cdadocument.CDAEntry{
+		{
+			EntryType:  "act",
+			StatusCode: "active",
+			EntryRelationships: []cdadocument.CDAEntryRelationship{
+				{
+					TypeCode: "SUBJ",
+					Entry: cdadocument.CDAEntry{
+						EntryType:  "observation",
+						StatusCode: "completed",
+						Participants: []cdadocument.CDAParticipant{
+							{
+								TypeCode: "CSM",
+								ParticipantRole: cdadocument.CDAParticipantRole{
+									PlayingEntity: &cdadocument.CDAPlayingEntity{
+										Code: cdadocument.CDACode{Code: "7980", DisplayName: "Penicillin", CodeSystem: "2.16.840.1.113883.6.88"},
+									},
+								},
+							},
+						},
+						Authors: []cdadocument.CDAAuthor{
+							{
+								Time:           cdadocument.CDATime{Value: "20231005143000-0500"},
+								AssignedAuthor: cdadocument.CDAAssignedAuthor{},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	documentMap := documentMapForEntries(t, "allergiesAndIntolerances", entries)
+	engine := cdafhir.NewDeclarativeEngine()
+	resources, errs := engine.BuildResources(documentMap, cdafhir.AllergyMappingRules()[0])
+	if len(errs) != 0 {
+		t.Fatalf("unexpected errors: %+v", errs)
+	}
+	if len(resources) != 1 {
+		t.Fatalf("expected 1 AllergyIntolerance, got %d", len(resources))
+	}
+	rd, _ := resources[0]["recordedDate"].(string)
+	if rd == "" {
+		t.Fatal("AllergyIntolerance.recordedDate not set from allergy observation author <time>")
+	}
+}
+
+// TestDeclarativeEngine_Allergy_Asserter_FromAllergyObservationPerformer proves
+// AllergyIntolerance.asserter is populated from the allergy observation's own
+// <performer><assignedEntity>. PracticeFusion corpus evidence: "Samir Khan"
+// with full NPI, address, and telecom appears as performer on both allergy
+// entries.
+func TestDeclarativeEngine_Allergy_Asserter_FromAllergyObservationPerformer(t *testing.T) {
+	entries := []cdadocument.CDAEntry{
+		{
+			EntryType:  "act",
+			StatusCode: "active",
+			EntryRelationships: []cdadocument.CDAEntryRelationship{
+				{
+					TypeCode: "SUBJ",
+					Entry: cdadocument.CDAEntry{
+						EntryType:  "observation",
+						StatusCode: "completed",
+						Participants: []cdadocument.CDAParticipant{
+							{
+								TypeCode: "CSM",
+								ParticipantRole: cdadocument.CDAParticipantRole{
+									PlayingEntity: &cdadocument.CDAPlayingEntity{
+										Code: cdadocument.CDACode{Code: "7980", DisplayName: "Penicillin", CodeSystem: "2.16.840.1.113883.6.88"},
+									},
+								},
+							},
+						},
+						Performers: []cdadocument.CDAPerformer{
+							{
+								AssignedEntity: cdadocument.CDAAssignedEntity{
+									Ids: []cdadocument.CDAII{{Root: "2.16.840.1.113883.4.6", Extension: "1356133083"}},
+									AssignedPerson: &cdadocument.CDAPerson{
+										Names: []cdadocument.CDAName{{Given: []string{"Samir"}, Family: "Khan"}},
+									},
+									RepresentedOrganization: &cdadocument.CDAOrganization{
+										Names: []string{"PracticeFusion Medical Group"},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	documentMap := documentMapForEntries(t, "allergiesAndIntolerances", entries)
+	engine := cdafhir.NewDeclarativeEngine()
+	resources, errs := engine.BuildResources(documentMap, cdafhir.AllergyMappingRules()[0])
+	if len(errs) != 0 {
+		t.Fatalf("unexpected errors: %+v", errs)
+	}
+
+	var allergy, practitionerRole map[string]interface{}
+	for _, r := range resources {
+		switch r["resourceType"] {
+		case "AllergyIntolerance":
+			allergy = r
+		case "PractitionerRole":
+			practitionerRole = r
+		}
+	}
+	if allergy == nil {
+		t.Fatalf("expected an AllergyIntolerance, got %v", resources)
+	}
+	if practitionerRole == nil {
+		t.Fatal("expected PractitionerRole from allergy observation performer")
+	}
+	asserterRef, ok := allergy["asserter"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("AllergyIntolerance.asserter not set; got %v", allergy["asserter"])
+	}
+	wantRef := "PractitionerRole/" + practitionerRole["id"].(string)
+	if asserterRef["reference"] != wantRef {
+		t.Errorf("asserter.reference = %v, want %v", asserterRef["reference"], wantRef)
+	}
+}
+
 // ---- Medications ----
 // Ports TestMapMedications_OrderIntent_RequesterFromPerformer,
 // TestMapMedications_OrderIntent_RequesterFallback_NeverEmpty,
@@ -1331,6 +1548,140 @@ func TestDeclarativeEngine_Condition_NoteActivity_SetsNote(t *testing.T) {
 	}
 	if note["text"] != "last labs looked good, refilled current dosing." {
 		t.Errorf("note[0].text = %v, want %q", note["text"], "last labs looked good, refilled current dosing.")
+	}
+}
+
+// TestDeclarativeEngine_Condition_Asserter_FromProblemObservationPerformer proves
+// Condition.asserter is populated from the Problem Observation's own
+// <performer><assignedEntity> (C-CDA on FHIR IG: "/performer -> .asserter",
+// the clinician asserting/verifying the diagnosis). Distinct from .recorder
+// which comes from <author>. Uses the same two-tier idiom (PractitionerRole
+// first, bare Practitioner fallback).
+func TestDeclarativeEngine_Condition_Asserter_FromProblemObservationPerformer(t *testing.T) {
+	entries := []cdadocument.CDAEntry{
+		{
+			EntryType:  "act",
+			StatusCode: "active",
+			EntryRelationships: []cdadocument.CDAEntryRelationship{
+				{
+					TypeCode: "SUBJ",
+					Entry: cdadocument.CDAEntry{
+						EntryType:  "observation",
+						StatusCode: "active",
+						Value: &cdadocument.CDAValue{
+							Type: "CD",
+							Code: &cdadocument.CDACode{Code: "44054006", DisplayName: "Type 2 diabetes mellitus", CodeSystem: "2.16.840.1.113883.6.96"},
+						},
+						Performers: []cdadocument.CDAPerformer{
+							{
+								AssignedEntity: cdadocument.CDAAssignedEntity{
+									Ids: []cdadocument.CDAII{{Root: "2.16.840.1.113883.4.6", Extension: "9001234567"}},
+									AssignedPerson: &cdadocument.CDAPerson{
+										Names: []cdadocument.CDAName{{Given: []string{"Laura"}, Family: "Torres"}},
+									},
+									RepresentedOrganization: &cdadocument.CDAOrganization{
+										Names: []string{"Metro Health Associates"},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	documentMap := documentMapForEntries(t, "problems", entries)
+	engine := cdafhir.NewDeclarativeEngine()
+	resources, errs := engine.BuildResources(documentMap, cdafhir.ProblemsMappingRules()[0])
+	if len(errs) != 0 {
+		t.Fatalf("unexpected errors: %+v", errs)
+	}
+
+	var condition, practitionerRole map[string]interface{}
+	for _, r := range resources {
+		switch r["resourceType"] {
+		case "Condition":
+			condition = r
+		case "PractitionerRole":
+			practitionerRole = r
+		}
+	}
+	if condition == nil {
+		t.Fatalf("expected a Condition resource, got %v", resources)
+	}
+	if practitionerRole == nil {
+		t.Fatal("expected PractitionerRole built from Problem Observation performer")
+	}
+	asserterRef, ok := condition["asserter"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("Condition.asserter not set; got %v", condition["asserter"])
+	}
+	wantRef := "PractitionerRole/" + practitionerRole["id"].(string)
+	if asserterRef["reference"] != wantRef {
+		t.Errorf("Condition.asserter.reference = %v, want %v", asserterRef["reference"], wantRef)
+	}
+}
+
+// TestDeclarativeEngine_Condition_OnsetAge_FromAgeAtOnsetObservation proves
+// Condition.onsetAge is populated from the Age At Onset Observation (C-CDA
+// templateId 2.16.840.1.113883.10.20.22.4.31, SNOMED 445518008) nested inside
+// the Problem Observation via entryRelationship typeCode=SUBJ,inversionInd=true.
+// PracticeFusion corpus evidence: Asthma entry carries this observation with
+// value PQ 5 years old. cda_value_to_fhir on a PQ value produces the FHIR
+// Age (profiled Quantity) shape.
+func TestDeclarativeEngine_Condition_OnsetAge_FromAgeAtOnsetObservation(t *testing.T) {
+	entries := []cdadocument.CDAEntry{
+		{
+			EntryType:  "act",
+			StatusCode: "active",
+			EntryRelationships: []cdadocument.CDAEntryRelationship{
+				{
+					TypeCode: "SUBJ",
+					Entry: cdadocument.CDAEntry{
+						EntryType:  "observation",
+						StatusCode: "active",
+						Value: &cdadocument.CDAValue{
+							Type: "CD",
+							Code: &cdadocument.CDACode{Code: "195967001", DisplayName: "Asthma", CodeSystem: "2.16.840.1.113883.6.96"},
+						},
+						EntryRelationships: []cdadocument.CDAEntryRelationship{
+							{
+								TypeCode:     "SUBJ",
+								InversionInd: true,
+								Entry: cdadocument.CDAEntry{
+									EntryType:   "observation",
+									TemplateIds: []string{"2.16.840.1.113883.10.20.22.4.31"},
+									Code:        cdadocument.CDACode{Code: "445518008", CodeSystem: "2.16.840.1.113883.6.96"},
+									Value: &cdadocument.CDAValue{
+										Type:     "PQ",
+										Quantity: &cdadocument.CDAQuantity{Value: "5", Unit: "a"},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	documentMap := documentMapForEntries(t, "problems", entries)
+	engine := cdafhir.NewDeclarativeEngine()
+	resources, errs := engine.BuildResources(documentMap, cdafhir.ProblemsMappingRules()[0])
+	if len(errs) != 0 {
+		t.Fatalf("unexpected errors: %+v", errs)
+	}
+	if len(resources) != 1 {
+		t.Fatalf("expected 1 Condition, got %d", len(resources))
+	}
+	onsetAge, ok := resources[0]["onsetAge"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("Condition.onsetAge not set; got %v", resources[0]["onsetAge"])
+	}
+	if onsetAge["value"] != float64(5) {
+		t.Errorf("onsetAge.value = %v, want 5", onsetAge["value"])
+	}
+	if onsetAge["unit"] != "a" {
+		t.Errorf("onsetAge.unit = %v, want \"a\" (UCUM years)", onsetAge["unit"])
 	}
 }
 
@@ -5065,15 +5416,24 @@ func TestNarrativeSection_EmptyNarrativeText_NoDocumentReference(t *testing.T) {
 }
 
 func TestNarrativeSection_DefaultDefsHaveCorrectLOINCCodes(t *testing.T) {
-	// Regression guard: confirms all 6 keys and their LOINC fallback codes
+	// Regression guard: confirms all keys and their LOINC fallback codes
 	// match the evidence-backed values chosen at implementation time.
 	expected := map[string]string{
+		// Original 6 (corpus-confirmed)
 		"assessment":            "51848-0",
 		"hospitalCourse":        "8648-8",
 		"dischargeInstructions": "18776-5",
 		"reasonForReferral":     "42349-1",
 		"reasonForVisit":        "29299-5",
 		"clinicalNote":          "34109-9",
+		// Standard C-CDA sections commonly narrative-only in real EHR exports
+		"chiefComplaint":          "10154-3",
+		"historyOfPresentIllness": "10164-2",
+		"physicalExamination":     "29545-1",
+		"reviewOfSystems":         "10187-3",
+		"pastMedicalHistory":      "11348-0",
+		// Operative note (mtuitive corpus)
+		"operationsPerformed": "10223-6",
 	}
 	for key, wantCode := range expected {
 		def, ok := cdafhir.DefaultNarrativeSectionDefs[key]
@@ -5084,5 +5444,84 @@ func TestNarrativeSection_DefaultDefsHaveCorrectLOINCCodes(t *testing.T) {
 		if def.LoincCode != wantCode {
 			t.Errorf("DefaultNarrativeSectionDefs[%q].LoincCode = %q, want %q", key, def.LoincCode, wantCode)
 		}
+	}
+}
+
+// TestNarrativeSection_UnknownSectionKey_UsesOwnLOINC confirms the narrative
+// dispatch pass in DeclarativeMapDocument is no longer gated on
+// DefaultNarrativeSectionDefs membership: a section key the registry has
+// never heard of, but whose own <code>/@code and <title> ARE present, still
+// produces a DocumentReference built from that section's own values.
+func TestNarrativeSection_UnknownSectionKey_UsesOwnLOINC(t *testing.T) {
+	doc := narrativeDocForSection("someVendorSpecificSection", "99999-9", "Vendor Custom Note",
+		"<text>vendor-specific narrative content</text>", false)
+
+	mapper := cdafhir.NewGenericCDAFHIRMapper(nil, nil)
+	out, err := mapper.DeclarativeMapDocument(context.Background(), doc, cdafhir.CDAToFHIRConfig{})
+	if err != nil {
+		t.Fatalf("DeclarativeMapDocument: %v", err)
+	}
+
+	var docRefs []map[string]interface{}
+	entries, _ := out.FHIRBundle["entry"].([]interface{})
+	for _, e := range entries {
+		entry, _ := e.(map[string]interface{})
+		r, _ := entry["resource"].(map[string]interface{})
+		if r["resourceType"] == "DocumentReference" {
+			docRefs = append(docRefs, r)
+		}
+	}
+	if len(docRefs) != 1 {
+		t.Fatalf("expected 1 DocumentReference for unregistered section key with its own LOINC, got %d", len(docRefs))
+	}
+
+	dr := docRefs[0]
+	typeCC, _ := dr["type"].(map[string]interface{})
+	codings, _ := typeCC["coding"].([]interface{})
+	c0, _ := codings[0].(map[string]interface{})
+	if c0["code"] != "99999-9" {
+		t.Errorf("type.coding[0].code = %v, want 99999-9 (section's own LOINC, no registry entry exists)", c0["code"])
+	}
+	if c0["display"] != "Vendor Custom Note" {
+		t.Errorf("type.coding[0].display = %v, want Vendor Custom Note", c0["display"])
+	}
+}
+
+// TestNarrativeSection_KnownStructuredSection_NoEntries_ProducesDocumentReference
+// confirms a normally entry-driven section (e.g. medications, mapped via
+// MedicationMappingRules through the entry-dispatch loop) still gets a
+// narrative-fallback DocumentReference when THIS document's instance of that
+// section carries zero structured entries but does carry narrative text --
+// content that used to be silently dropped because "medications" was never a
+// DefaultNarrativeSectionDefs key.
+func TestNarrativeSection_KnownStructuredSection_NoEntries_ProducesDocumentReference(t *testing.T) {
+	doc := narrativeDocForSection("medications", "10160-0", "Medications",
+		"<text><table><tbody><tr><td>Lisinopril 10mg daily</td></tr></tbody></table></text>", false)
+
+	mapper := cdafhir.NewGenericCDAFHIRMapper(nil, nil)
+	out, err := mapper.DeclarativeMapDocument(context.Background(), doc, cdafhir.CDAToFHIRConfig{})
+	if err != nil {
+		t.Fatalf("DeclarativeMapDocument: %v", err)
+	}
+
+	var docRefs []map[string]interface{}
+	entries, _ := out.FHIRBundle["entry"].([]interface{})
+	for _, e := range entries {
+		entry, _ := e.(map[string]interface{})
+		r, _ := entry["resource"].(map[string]interface{})
+		if r["resourceType"] == "DocumentReference" {
+			docRefs = append(docRefs, r)
+		}
+	}
+	if len(docRefs) != 1 {
+		t.Fatalf("expected 1 narrative-fallback DocumentReference for medications section with no entries, got %d", len(docRefs))
+	}
+
+	dr := docRefs[0]
+	typeCC, _ := dr["type"].(map[string]interface{})
+	codings, _ := typeCC["coding"].([]interface{})
+	c0, _ := codings[0].(map[string]interface{})
+	if c0["code"] != "10160-0" {
+		t.Errorf("type.coding[0].code = %v, want 10160-0 (section's own LOINC)", c0["code"])
 	}
 }

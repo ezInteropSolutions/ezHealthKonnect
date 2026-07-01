@@ -9,6 +9,7 @@ import (
 	"log"
 	"strconv"
 	"strings"
+	"time"
 
 	"ezhealthkonnect/hl7"
 	"ezhealthkonnect/models"
@@ -16,6 +17,7 @@ import (
 	cdastorage "ezhealthkonnect/services/cda_storage"
 	"ezhealthkonnect/services/executors/control"
 	"ezhealthkonnect/services/executors/enrichment"
+	"ezhealthkonnect/services/metrics"
 	payloadexecutor "ezhealthkonnect/services/executors/payload"
 	"ezhealthkonnect/services/executors/transform"
 	"ezhealthkonnect/services/executors/validation"
@@ -245,8 +247,41 @@ func (er *ExecutorRegistry) ExecuteStep(
 		return nil, fmt.Errorf("step validation failed: %w", err)
 	}
 
-	// Execute the step
-	return executor.Execute(ctx, &step, inputData)
+	// Execute the step, timing it and recording outcome for Prometheus.
+	start := time.Now()
+	result, err := executor.Execute(ctx, &step, inputData)
+	elapsed := time.Since(start)
+
+	status := "success"
+	if err != nil {
+		status = "error"
+	}
+	if metrics.StepExecutions != nil {
+		metrics.StepExecutions.WithLabelValues(step.StepType, status).Inc()
+	}
+	if metrics.StepDuration != nil {
+		metrics.StepDuration.WithLabelValues(step.StepType).Observe(elapsed.Seconds())
+	}
+
+	// STEP EXEC lifecycle log point — see models.LogLifecycleEventFn's doc comment
+	// for why this goes through a context callback instead of an import.
+	if logFn := models.GetLogLifecycleEventFn(ctx); logFn != nil {
+		details := map[string]interface{}{
+			"step_type": step.StepType,
+			"step_name": step.StepName,
+			"step_seq":  step.Sequence,
+			"duration_ms": elapsed.Milliseconds(),
+			"status":    status,
+		}
+		if err != nil {
+			details["error"] = err.Error()
+			logFn("error", string(LogCategoryTransformation), fmt.Sprintf("Step failed: %s", step.StepName), details)
+		} else {
+			logFn("debug", string(LogCategoryTransformation), fmt.Sprintf("Step executed: %s", step.StepName), details)
+		}
+	}
+
+	return result, err
 }
 
 // ListExecutors returns all registered executor types

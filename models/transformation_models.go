@@ -43,6 +43,25 @@ func GetStoreOutboundFn(ctx context.Context) StoreOutboundFn {
 	return nil
 }
 
+// LogLifecycleEventFn is injected into the pipeline context by the processing engine
+// so executors deep in services/executors/* can emit structured per-message lifecycle
+// log entries (STEP EXEC, CDA SECTION, DELIVER, DLQ, …) through the existing
+// *services.ProcessingLogger without importing package services — which would create
+// an import cycle (services already imports services/executors/*). Mirrors the
+// DeliveryStatusFn / StoreOutboundFn pattern above.
+// Signature: (level, category, message string, details map[string]interface{})
+// level is one of "debug"|"info"|"warning"|"error"; category is a ProcessingLogger
+// LogCategory string (e.g. "transformation", "delivery").
+type LogLifecycleEventFn func(level, category, message string, details map[string]interface{})
+
+// GetLogLifecycleEventFn reads the LogLifecycleEventFn from context. Returns nil if not set.
+func GetLogLifecycleEventFn(ctx context.Context) LogLifecycleEventFn {
+	if fn, ok := ctx.Value("log_lifecycle_event_fn").(LogLifecycleEventFn); ok {
+		return fn
+	}
+	return nil
+}
+
 // IsTestMode checks if the context indicates test mode execution
 func IsTestMode(ctx context.Context) bool {
 	if val, ok := ctx.Value(ContextKeyTestMode).(bool); ok {

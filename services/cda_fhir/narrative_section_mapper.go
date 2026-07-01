@@ -19,9 +19,24 @@ import (
 	cdadocument "ezhealthkonnect/cda/document"
 )
 
+// genericNoteLoincCode and genericNoteDisplayName are the last-resort fallback
+// used when a narrative-only section has neither its own <code>/@code nor a
+// DefaultNarrativeSectionDefs entry to fall back to (an unrecognized section
+// key in a document that also omits the LOINC on the <code> element itself —
+// rare, but the section's narrative content must not be silently dropped just
+// because it can't be classified more specifically). Same code C-CDA's own
+// Note Activity template uses for a generic clinical note — see
+// noteActivityTemplateID's doc comment in declarative_oob_rules.go.
+const (
+	genericNoteLoincCode   = "34109-9"
+	genericNoteDisplayName = "Note"
+)
+
 // buildNarrativeDocRef builds a FHIR R4 DocumentReference from a CDA section's
 // own narrative text block. Called once per matched narrative-only section (no
-// entries, non-empty NarrativeText) from DeclarativeMapDocument.
+// entries, non-empty NarrativeText) from DeclarativeMapDocument, for EVERY
+// section in the document — not just ones with a DefaultNarrativeSectionDefs
+// entry; def is the zero value for unregistered section keys.
 //
 // FHIR shape (US Core v9.0.0 / Argonaut clinical notes guidance):
 //
@@ -48,6 +63,14 @@ func (m *GenericCDAFHIRMapper) buildNarrativeDocRef(
 	display := section.Title
 	if display == "" {
 		display = def.DisplayName
+	}
+	// Final fallback: neither the section nor the registry has a LOINC code
+	// (unrecognized section key + source document omitted <code>/@code).
+	if loinc == "" {
+		loinc = genericNoteLoincCode
+	}
+	if display == "" {
+		display = genericNoteDisplayName
 	}
 
 	docRef := map[string]interface{}{

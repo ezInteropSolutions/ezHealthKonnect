@@ -701,24 +701,30 @@ func (m *GenericCDAFHIRMapper) DeclarativeMapDocument(
 	}
 
 	// ── Section-level narrative DocumentReferences ───────────────────────────
-	// A second pass, SEQUENTIAL (only ≤6 sections, each O(1)), for CDA sections
-	// that carry clinical content exclusively in their narrative <text> block
-	// and have no structured <entry> elements. These sections are silently
-	// skipped by the entry-dispatch loop above (len(entries)==0 guard); this
-	// pass captures the content they DO carry as FHIR DocumentReference
-	// resources instead of losing it entirely.
+	// A second pass, SEQUENTIAL (only a handful of sections, each O(1)), over
+	// EVERY section in the document that carries clinical content exclusively
+	// in its narrative <text> block and has no structured <entry> elements.
+	// These sections are silently skipped by the entry-dispatch loop above
+	// (len(entries)==0 guard); this pass captures the content they DO carry
+	// as FHIR DocumentReference resources instead of losing it entirely.
 	// US Core v9.0.0 + Argonaut consensus: DocumentReference is the right FHIR
 	// resource for "narrative broader than a specific clinical resource type".
-	// See DefaultNarrativeSectionDefs in declarative_oob_rules.go for evidence
-	// per section key.
-	for sectionKey, def := range DefaultNarrativeSectionDefs {
-		section := doc.SectionsByKey[sectionKey]
+	//
+	// DefaultNarrativeSectionDefs (declarative_oob_rules.go) is consulted only
+	// as a LOINC/display FALLBACK, not a gatekeeper — a section not present in
+	// that registry (an unrecognized key, or a normally-structured section
+	// like "medications" that happens to carry no entries in this document)
+	// still gets a DocumentReference, built from the section's own LoincCode
+	// and Title. buildNarrativeDocRef applies a final generic-Note fallback
+	// (34109-9) if neither the section nor the registry has a LOINC code.
+	for sectionKey, section := range doc.SectionsByKey {
 		if section == nil || len(section.Entries) > 0 || strings.TrimSpace(section.NarrativeText) == "" {
 			continue
 		}
 		if !m.isSectionEnabled(sectionKey, config.EnabledSections) {
 			continue
 		}
+		def := DefaultNarrativeSectionDefs[sectionKey] // zero value for unregistered keys — buildNarrativeDocRef falls back further
 		docRef := m.buildNarrativeDocRef(section, def, patientRef)
 		if docRef != nil {
 			allResources = append(allResources, docRef)
