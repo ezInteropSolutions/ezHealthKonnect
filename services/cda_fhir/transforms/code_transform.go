@@ -158,9 +158,70 @@ var coveragePayerTypeDisplay = map[string]string{
 	"48768-6": "Payment sources Document",
 }
 
-// CoverageTypeToCodeableConcept converts a Coverage Activity's entry code to
-// a FHIR Coverage.type CodeableConcept, applying coveragePayerTypeDisplay's
-// LOINC display correction on top of CDACodeToCodeableConcept.
+// cdaToFHIRRelationship maps HL7 RoleCode values (system
+// 2.16.840.1.113883.5.111) from participant[COV].participantRole.code to
+// FHIR subscriber-relationship ValueSet codes.
+// Unmapped codes fall back to "other" per FHIR binding guidance.
+var cdaToFHIRRelationship = map[string]string{
+	"SELF":      "self",
+	"SPOUSE":    "spouse",
+	"SPS":       "spouse",
+	"CHILD":     "child",
+	"CHLDADOPT": "child",
+	"NCHILD":    "child",
+	"MTH":       "parent",
+	"FTH":       "parent",
+	"PRNT":      "parent",
+	"NPRNT":     "parent",
+	"NMTH":      "parent",
+	"NFTH":      "parent",
+	"SIGOTHR":   "other",
+	"DEP":       "other",
+	"WARD":      "other",
+	"HBRO":      "other",
+	"HSIB":      "other",
+	"HSIS":      "other",
+	"NBRO":      "other",
+	"NSIB":      "other",
+	"NSIS":      "other",
+	"SIB":       "other",
+	"SIS":       "other",
+}
+
+var cdaRelationshipDisplay = map[string]string{
+	"self":   "Self",
+	"spouse": "Spouse",
+	"child":  "Child",
+	"parent": "Parent",
+	"other":  "Other",
+}
+
+// CoverageRelationshipToFHIR converts a C-CDA participant[COV].participantRole.code
+// (HL7 RoleCode system 2.16.840.1.113883.5.111 — SELF, SPOUSE, CHILD, etc.)
+// to a FHIR Coverage.relationship CodeableConcept using the
+// http://terminology.hl7.org/CodeSystem/subscriber-relationship system.
+// Unmapped codes produce "other".
+func CoverageRelationshipToFHIR(code cdadocument.CDACode) map[string]interface{} {
+	fhirCode := cdaToFHIRRelationship[strings.ToUpper(code.Code)]
+	if fhirCode == "" {
+		fhirCode = "other"
+	}
+	display := cdaRelationshipDisplay[fhirCode]
+	return map[string]interface{}{
+		"coding": []interface{}{
+			map[string]interface{}{
+				"system":  "http://terminology.hl7.org/CodeSystem/subscriber-relationship",
+				"code":    fhirCode,
+				"display": display,
+			},
+		},
+	}
+}
+
+// CoverageTypeToCodeableConcept converts a Policy Activity's SOP code to a
+// FHIR Coverage.type CodeableConcept (CDACodeToCodeableConcept +
+// coveragePayerTypeDisplay LOINC display correction for any stale callers
+// still passing the outer 48768-6 code).
 func CoverageTypeToCodeableConcept(code cdadocument.CDACode) map[string]interface{} {
 	cc := CDACodeToCodeableConcept(code)
 	if cc == nil {

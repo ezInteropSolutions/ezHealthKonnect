@@ -3663,20 +3663,46 @@ func TestDeclarativeEngine_CareTeam_MultipleParticipants_EachGetsDistinctCrossRe
 
 // ---- Coverage ----
 
-func TestDeclarativeEngine_Coverage_PayorFromOuterParticipant(t *testing.T) {
+// covPolicyEntry builds a realistic Policy Activity COMP entry with
+// the given SOP code, payer org name, and COV participant details.
+func covPolicyEntry(sopCode, payorOrg, memberID, relationship string) cdadocument.CDAEntryRelationship {
+	covParticipant := cdadocument.CDAParticipant{
+		TypeCode: "COV",
+		Time: cdadocument.CDATimeRange{
+			Low:  cdadocument.CDATime{Value: "20240101"},
+			High: cdadocument.CDATime{NullFlavor: "NA"},
+		},
+		ParticipantRole: cdadocument.CDAParticipantRole{
+			Code: cdadocument.CDACode{Code: relationship},
+			Ids:  []cdadocument.CDAII{{Root: "1.2.3.99", Extension: memberID}},
+		},
+	}
+	perf := cdadocument.CDAPerformer{
+		AssignedEntity: cdadocument.CDAAssignedEntity{
+			Code: cdadocument.CDACode{Code: "PAYOR"},
+			RepresentedOrganization: &cdadocument.CDAOrganization{
+				Names: []string{payorOrg},
+			},
+		},
+	}
+	return cdadocument.CDAEntryRelationship{
+		TypeCode: "COMP",
+		Entry: cdadocument.CDAEntry{
+			Code:         cdadocument.CDACode{Code: sopCode, CodeSystem: "2.16.840.1.113883.3.221.5"},
+			Performers:   []cdadocument.CDAPerformer{perf},
+			Participants: []cdadocument.CDAParticipant{covParticipant},
+		},
+	}
+}
+
+func TestDeclarativeEngine_Coverage_FullEntry_MedicareEpicPattern(t *testing.T) {
+	// Mirrors Epic 99397 corpus structure: SOP code "1" = Medicare, member
+	// in COV participant, PAYOR performer with representedOrganization.
 	entries := []cdadocument.CDAEntry{
 		{
-			EntryType:  "act",
-			Code:       cdadocument.CDACode{Code: "48768-6", DisplayName: "Payment sources"},
-			StatusCode: "completed",
-			Participants: []cdadocument.CDAParticipant{
-				{
-					TypeCode: "HLD",
-					ParticipantRole: cdadocument.CDAParticipantRole{
-						ScopingEntity: &cdadocument.CDAEntity{Desc: "Acme Health Plan"},
-					},
-				},
-			},
+			EntryType:          "act",
+			Code:               cdadocument.CDACode{Code: "48768-6"},
+			EntryRelationships: []cdadocument.CDAEntryRelationship{covPolicyEntry("1", "MEDICARE", "MBRID001", "SELF")},
 		},
 	}
 	documentMap := documentMapForEntries(t, "payersInsurance", entries)
@@ -3689,24 +3715,133 @@ func TestDeclarativeEngine_Coverage_PayorFromOuterParticipant(t *testing.T) {
 		t.Fatalf("expected 1 resource, got %d", len(resources))
 	}
 	r := resources[0]
+
 	if r["status"] != "active" {
 		t.Errorf("status = %v, want active", r["status"])
 	}
-	typ := r["type"].(map[string]interface{})
-	if typ["text"] != "Payment sources Document" {
-		t.Errorf("type.text = %v, want corrected display 'Payment sources Document'", typ["text"])
+
+	// type from SOP code "1" (Medicare), NOT from outer 48768-6
+	typ, _ := r["type"].(map[string]interface{})
+	if typ == nil {
+		t.Fatal("type field absent")
 	}
+	c0 := firstCoding(t, typ)
+	if c0["code"] != "1" {
+		t.Errorf("type.coding[0].code = %v, want 1 (Medicare SOP)", c0["code"])
+	}
+	if c0["codeSystem"] == "http://loinc.org" {
+		t.Errorf("type.coding[0].system must not be LOINC — should be SOP system, got %v", c0["codeSystem"])
+	}
+
+	// payor from PAYOR performer's org name
 	payor := firstElement(t, r["payor"]).(map[string]interface{})
-	if payor["display"] != "Acme Health Plan" {
-		t.Errorf("payor[0].display = %v, want Acme Health Plan", payor["display"])
+	if payor["display"] != "MEDICARE" {
+		t.Errorf("payor[0].display = %v, want MEDICARE", payor["display"])
 	}
-	rel := r["relationship"].(map[string]interface{})
+
+	// period from COV participant.time
+	period, _ := r["period"].(map[string]interface{})
+	if period == nil {
+		t.Fatal("period field absent")
+	}
+	if period["start"] != "2024-01-01" {
+		t.Errorf("period.start = %v, want 2024-01-01", period["start"])
+	}
+
+	// relationship from COV participant code SELF -> "self"
+	rel, _ := r["relationship"].(map[string]interface{})
+	if rel == nil {
+		t.Fatal("relationship field absent")
+	}
 	if firstCoding(t, rel)["code"] != "self" {
-		t.Errorf("relationship coding = %v, want code=self", firstCoding(t, rel))
+		t.Errorf("relationship.coding[0].code = %v, want self", firstCoding(t, rel)["code"])
+	}
+
+	// subscriberId from COV participant.participantRole.ids[0].extension
+	if r["subscriberId"] != "MBRID001" {
+		t.Errorf("subscriberId = %v, want MBRID001", r["subscriberId"])
 	}
 }
 
-func TestDeclarativeEngine_Coverage_PayorFallsBackToCOMPPerformerOrg(t *testing.T) {
+func TestDeclarativeEngine_Coverage_RelationshipMapping(t *testing.T) {
+	// Verify multiple relationship codes map correctly.
+	for _, tc := range []struct{ cda, fhir string }{
+		{"SELF", "self"},
+		{"SPOUSE", "spouse"},
+		{"SPS", "spouse"},
+		{"CHILD", "child"},
+		{"CHLDADOPT", "child"},
+		{"MTH", "parent"},
+		{"FTH", "parent"},
+		{"SIGOTHR", "other"},
+		{"DEP", "other"},
+		{"UNKNOWN_CODE", "other"},
+	} {
+		tc := tc
+		t.Run(tc.cda, func(t *testing.T) {
+			entries := []cdadocument.CDAEntry{
+				{
+					EntryType: "act",
+					Code:      cdadocument.CDACode{Code: "48768-6"},
+					EntryRelationships: []cdadocument.CDAEntryRelationship{{
+						TypeCode: "COMP",
+						Entry: cdadocument.CDAEntry{
+							Participants: []cdadocument.CDAParticipant{{
+								TypeCode: "COV",
+								ParticipantRole: cdadocument.CDAParticipantRole{
+									Code: cdadocument.CDACode{Code: tc.cda},
+								},
+							}},
+						},
+					}},
+				},
+			}
+			documentMap := documentMapForEntries(t, "payersInsurance", entries)
+			resources, errs := cdafhir.NewDeclarativeEngine().BuildResources(documentMap, cdafhir.CoverageMappingRules()[0])
+			if len(errs) != 0 {
+				t.Fatalf("unexpected errors: %+v", errs)
+			}
+			rel, _ := resources[0]["relationship"].(map[string]interface{})
+			if rel == nil {
+				t.Fatal("relationship absent")
+			}
+			got := firstCoding(t, rel)["code"]
+			if got != tc.fhir {
+				t.Errorf("cda=%s: relationship.code = %v, want %v", tc.cda, got, tc.fhir)
+			}
+		})
+	}
+}
+
+func TestDeclarativeEngine_Coverage_RelationshipFallsBackToSelf_WhenNoCOVParticipant(t *testing.T) {
+	// No COV participant -> relationship transform skipped -> fallback literal "self" fires.
+	entries := []cdadocument.CDAEntry{
+		{
+			EntryType: "act",
+			Code:      cdadocument.CDACode{Code: "48768-6"},
+			EntryRelationships: []cdadocument.CDAEntryRelationship{{
+				TypeCode: "COMP",
+				Entry:    cdadocument.CDAEntry{Code: cdadocument.CDACode{Code: "1", CodeSystem: "2.16.840.1.113883.3.221.5"}},
+			}},
+		},
+	}
+	documentMap := documentMapForEntries(t, "payersInsurance", entries)
+	resources, errs := cdafhir.NewDeclarativeEngine().BuildResources(documentMap, cdafhir.CoverageMappingRules()[0])
+	if len(errs) != 0 {
+		t.Fatalf("unexpected errors: %+v", errs)
+	}
+	rel, _ := resources[0]["relationship"].(map[string]interface{})
+	if rel == nil {
+		t.Fatal("relationship absent (even fallback literal failed)")
+	}
+	if firstCoding(t, rel)["code"] != "self" {
+		t.Errorf("relationship.code = %v, want self (fallback)", firstCoding(t, rel)["code"])
+	}
+}
+
+func TestDeclarativeEngine_Coverage_PayorFromCOMPPerformerOrg(t *testing.T) {
+	// Payer org name comes from Policy Activity's performers[0].assignedEntity
+	// .representedOrganization.names[0] — the primary path, not a fallback.
 	entries := []cdadocument.CDAEntry{
 		{
 			EntryType: "act",
@@ -3715,7 +3850,6 @@ func TestDeclarativeEngine_Coverage_PayorFallsBackToCOMPPerformerOrg(t *testing.
 				{
 					TypeCode: "COMP",
 					Entry: cdadocument.CDAEntry{
-						Id: []cdadocument.CDAII{{Root: "1.2.3", Extension: "MEMBER123"}},
 						Performers: []cdadocument.CDAPerformer{
 							{AssignedEntity: cdadocument.CDAAssignedEntity{
 								RepresentedOrganization: &cdadocument.CDAOrganization{Names: []string{"Beta Insurance Co"}},
@@ -3735,13 +3869,9 @@ func TestDeclarativeEngine_Coverage_PayorFallsBackToCOMPPerformerOrg(t *testing.
 	if len(resources) != 1 {
 		t.Fatalf("expected 1 resource, got %d", len(resources))
 	}
-	r := resources[0]
-	payor := firstElement(t, r["payor"]).(map[string]interface{})
+	payor := firstElement(t, resources[0]["payor"]).(map[string]interface{})
 	if payor["display"] != "Beta Insurance Co" {
-		t.Errorf("payor[0].display = %v, want Beta Insurance Co (fallback tier)", payor["display"])
-	}
-	if r["subscriberId"] != "MEMBER123" {
-		t.Errorf("subscriberId = %v, want MEMBER123 (extension preferred over root)", r["subscriberId"])
+		t.Errorf("payor[0].display = %v, want Beta Insurance Co", payor["display"])
 	}
 }
 
@@ -3764,29 +3894,45 @@ func TestDeclarativeEngine_Coverage_NoPayorInfo_UsesUnknownPlaceholder(t *testin
 	}
 }
 
-func TestDeclarativeEngine_Coverage_SubscriberId_RootFallbackWhenNoExtension(t *testing.T) {
-	entries := []cdadocument.CDAEntry{
-		{
-			EntryType: "act",
-			Code:      cdadocument.CDACode{Code: "48768-6"},
-			EntryRelationships: []cdadocument.CDAEntryRelationship{
+func TestDeclarativeEngine_Coverage_SubscriberId_FromCOVParticipantRole(t *testing.T) {
+	// subscriberId comes from COV participant.participantRole.ids[0] (member ID).
+	// Extension preferred; root used as fallback when no extension.
+	for _, tc := range []struct {
+		name        string
+		ids         []cdadocument.CDAII
+		wantSubID   string
+	}{
+		{"extension preferred", []cdadocument.CDAII{{Root: "1.2.3", Extension: "MEMBER123"}}, "MEMBER123"},
+		{"root fallback",       []cdadocument.CDAII{{Root: "1.2.3.4.5"}},                    "1.2.3.4.5"},
+	} {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			entries := []cdadocument.CDAEntry{
 				{
-					TypeCode: "COMP",
-					Entry: cdadocument.CDAEntry{
-						Id: []cdadocument.CDAII{{Root: "1.2.3.4.5"}},
-					},
+					EntryType: "act",
+					Code:      cdadocument.CDACode{Code: "48768-6"},
+					EntryRelationships: []cdadocument.CDAEntryRelationship{{
+						TypeCode: "COMP",
+						Entry: cdadocument.CDAEntry{
+							Participants: []cdadocument.CDAParticipant{{
+								TypeCode: "COV",
+								ParticipantRole: cdadocument.CDAParticipantRole{
+									Ids: tc.ids,
+								},
+							}},
+						},
+					}},
 				},
-			},
-		},
-	}
-	documentMap := documentMapForEntries(t, "payersInsurance", entries)
-	engine := cdafhir.NewDeclarativeEngine()
-	resources, errs := engine.BuildResources(documentMap, cdafhir.CoverageMappingRules()[0])
-	if len(errs) != 0 {
-		t.Fatalf("unexpected errors: %+v", errs)
-	}
-	if resources[0]["subscriberId"] != "1.2.3.4.5" {
-		t.Errorf("subscriberId = %v, want root fallback 1.2.3.4.5", resources[0]["subscriberId"])
+			}
+			documentMap := documentMapForEntries(t, "payersInsurance", entries)
+			resources, errs := cdafhir.NewDeclarativeEngine().BuildResources(documentMap, cdafhir.CoverageMappingRules()[0])
+			if len(errs) != 0 {
+				t.Fatalf("unexpected errors: %+v", errs)
+			}
+			if resources[0]["subscriberId"] != tc.wantSubID {
+				t.Errorf("subscriberId = %v, want %v", resources[0]["subscriberId"], tc.wantSubID)
+			}
+		})
 	}
 }
 

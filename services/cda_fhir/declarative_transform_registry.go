@@ -144,6 +144,7 @@ func (r *DeclarativeTransformRegistry) registerBuiltins() {
 	// Phase 3 additions — Coverage / FamilyMemberHistory / Device
 	// =====================================================
 	r.register("coverage_type_to_codeable_concept", declarativeCoverageTypeToCodeableConcept)
+	r.register("coverage_relationship_to_fhir", declarativeCoverageRelationshipToFHIR)
 	r.register("device_use_statement_status_to_fhir", declarativeDeviceUseStatementStatusToFHIR)
 	r.register("cda_value_to_fhir", declarativeCDAValueToFHIR)
 	r.register("cda_name_to_family_string", declarativeCDANameToFamilyString)
@@ -980,8 +981,8 @@ func declarativeCDATelecomToFHIR(value interface{}, _ map[string]string) (interf
 // =====================================================
 
 // declarativeCoverageTypeToCodeableConcept wraps
-// transforms.CoverageTypeToCodeableConcept (CDACodeToCodeableConcept +
-// coveragePayerTypeDisplay's LOINC display correction).
+// transforms.CoverageTypeToCodeableConcept — maps the Policy Activity's SOP
+// code (2.16.840.1.113883.3.221.5) to a FHIR CodeableConcept.
 func declarativeCoverageTypeToCodeableConcept(value interface{}, _ map[string]string) (interface{}, error) {
 	if value == nil {
 		return nil, nil
@@ -991,6 +992,20 @@ func declarativeCoverageTypeToCodeableConcept(value interface{}, _ map[string]st
 		return nil, fmt.Errorf("coverage_type_to_codeable_concept: %w", err)
 	}
 	return transforms.CoverageTypeToCodeableConcept(code), nil
+}
+
+// declarativeCoverageRelationshipToFHIR wraps transforms.CoverageRelationshipToFHIR —
+// maps HL7 RoleCode (SELF/SPOUSE/CHILD etc.) from participant[COV].participantRole.code
+// to FHIR Coverage.relationship subscriber-relationship CodeableConcept.
+func declarativeCoverageRelationshipToFHIR(value interface{}, _ map[string]string) (interface{}, error) {
+	if value == nil {
+		return nil, nil
+	}
+	var code cdadocument.CDACode
+	if err := remarshalInto(value, &code); err != nil {
+		return nil, fmt.Errorf("coverage_relationship_to_fhir: %w", err)
+	}
+	return transforms.CoverageRelationshipToFHIR(code), nil
 }
 
 // declarativeDeviceUseStatementStatusToFHIR wraps transforms.DeviceUseStatementStatusToFHIR.

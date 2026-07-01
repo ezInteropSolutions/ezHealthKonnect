@@ -2952,24 +2952,18 @@ var coverageSectionKeys = []string{"payersInsurance", "payors"}
 // CoverageMappingRules returns the OOB declarative rule for both of
 // document_mapper.go's Coverage/Payers section-key aliases.
 //
-// 2026-06-22 IG verification (architecture/CDA_FHIR_MAPPING_INVENTORY.md
-// section 13) resolved both previously-flagged discrepancies as non-bugs:
-// the LOINC code `48768-6` is correct for this project's R2.1 target
-// (CONF:1198-19160; `52556-8` belongs to a 2024+ companion-guide revision),
-// and CDA's statusCode is unconditionally fixed to "completed"
-// (CONF:1198-19094) regardless of real coverage status, so there is no
-// CDA-side signal `status` could be derived from instead of the hardcoded
-// "active" Go already uses.
+// C-CDA on FHIR IG alignment (V187 re-seed): the Coverage Activity is a
+// container only; all real insurance data lives in the COMP-nested Policy
+// Activity (CONF:1198-8939). Field sources corrected per IG:
 //
-// `beneficiary`/`subscriber` (Phase 4 Slice A, closed): both set via
-// PatientRefPath below — coverage_mapper.go:43-44 assigns the SAME
-// patientRef to both fields, the reason PatientRefPath is a slice rather
-// than a single string.
+//   - type         <- Policy Activity code (SOP 2.16.840.1.113883.3.221.5)
+//   - period       <- participant[COV].time low/high (coverage window)
+//   - relationship <- participant[COV].participantRole.code (SELF/SPOUSE/...)
+//   - subscriberId <- participant[COV].participantRole.ids[0] (member ID)
+//   - payor        <- COMP performers[0].assignedEntity.representedOrg.names[0]
 //
-// Deliberately NOT ported: an actual subscriber-relationship code even when
-// one might be present (coverage_mapper.go never reads one either —
-// hardcodes "self" unconditionally, a candidate gap the inventory flags but
-// doesn't fix here, since fixing it isn't this slice's job).
+// beneficiary/subscriber: both via PatientRefPath (same patientRef).
+// status: "active" hardcoded -- CDA statusCode always "completed" (CONF:1198-19094).
 func CoverageMappingRules() []MappingRule {
 	rules := make([]MappingRule, 0, len(coverageSectionKeys))
 	for _, sectionKey := range coverageSectionKeys {
@@ -2980,39 +2974,43 @@ func CoverageMappingRules() []MappingRule {
 			Fields: []MappingRow{
 				{LiteralValue: "active", TargetPath: "status"},
 				{
+					// IG: Coverage.type = Policy Activity SOP code, not
+					// the outer Coverage Activity's fixed 48768-6 (section code).
+					Scope:      "entryRelationships[typeCode=COMP].entry",
 					SourcePath: "code",
 					Transform:  "coverage_type_to_codeable_concept",
 					TargetPath: "type",
 				},
 				{
-					SourcePath: "effectiveTime",
+					// IG: Coverage.period = participant[COV].time (coverage window).
+					// Outer effectiveTime is the record creation date, not coverage dates.
+					Scope:      "entryRelationships[typeCode=COMP].entry.participants[typeCode=COV]",
+					SourcePath: "time",
 					Transform:  "cda_timerange_to_period",
 					TargetPath: "period",
 				},
 				{
-					// coverage_mapper.go:68-98 -- payer org display, two
-					// tiers: outer HLD/PRF participant's scoping-entity
-					// description, else the COMP policy-activity's nested
-					// performer's organization name. Simplification: Go's
-					// second tier scans ALL performers for the first with a
-					// non-empty org name; this uses performers[0] only --
-					// 0/4 corpus evidence either way.
-					Scope: "participants[typeCode=HLD|PRF].participantRole.scopingEntity.desc",
-					ScopeFallbacks: []string{
-						"entryRelationships[typeCode=COMP].entry.performers[0].assignedEntity.representedOrganization.names[0]",
-					},
+					// IG: payor from PAYOR performer's representedOrganization.
+					// PAYOR performer listed first in Policy Activity per C-CDA conformance.
+					Scope:      "entryRelationships[typeCode=COMP].entry.performers[0].assignedEntity.representedOrganization.names[0]",
 					TargetPath: "payor[0].display",
 				},
 				{
-					// us-core-coverage requires payor (1..1) -- same
-					// SkipIfResourceHasAnyOf placeholder idiom used
-					// throughout this session (coverage_mapper.go:100-102).
+					// US Core Coverage requires payor (1..1) -- "Unknown" fallback.
 					LiteralValue:           "Unknown",
 					TargetPath:             "payor[0].display",
 					SkipIfResourceHasAnyOf: []string{"payor"},
 				},
 				{
-					// coverage_mapper.go:104-114 -- always hardcoded "self".
+					// IG: Coverage.relationship = participant[COV].participantRole.code
+					// (HL7 RoleCode SELF/SPOUSE/CHILD/etc. -> FHIR subscriber-relationship VS).
+					Scope:      "entryRelationships[typeCode=COMP].entry.participants[typeCode=COV].participantRole",
+					SourcePath: "code",
+					Transform:  "coverage_relationship_to_fhir",
+					TargetPath: "relationship",
+				},
+				{
+					// Fallback "self" when COV participant has no relationship code.
 					LiteralValue: map[string]interface{}{
 						"coding": []interface{}{
 							map[string]interface{}{
@@ -3022,17 +3020,15 @@ func CoverageMappingRules() []MappingRule {
 							},
 						},
 					},
-					TargetPath: "relationship",
+					TargetPath:             "relationship",
+					SkipIfResourceHasAnyOf: []string{"relationship"},
 				},
 				{
-					// coverage_mapper.go:117-131 -- COMP policy-activity
-					// entry's first identifier, Extension preferred over
-					// Root. Simplification: Go scans ALL ids for the first
-					// with a non-empty Root or Extension; this uses id[0]
-					// only -- 0/4 corpus evidence either way.
-					Scope:         "entryRelationships[typeCode=COMP].entry",
-					SourcePath:    "id[0].extension",
-					FallbackPaths: []string{"id[0].root"},
+					// IG: Coverage.subscriberId = participant[COV].participantRole.ids (member ID).
+					// Policy Activity's own id is the contract ID (often nullFlavor=UNK).
+					Scope:         "entryRelationships[typeCode=COMP].entry.participants[typeCode=COV].participantRole",
+					SourcePath:    "ids[0].extension",
+					FallbackPaths: []string{"ids[0].root"},
 					TargetPath:    "subscriberId",
 				},
 			},
@@ -3666,3 +3662,5 @@ func EncompassingEncounterMappingRules() []MappingRule {
 		},
 	}
 }
+
+
