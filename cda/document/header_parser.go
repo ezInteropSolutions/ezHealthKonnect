@@ -59,6 +59,7 @@ func (h *headerParser) parseHeader(root *etree.Element) CDAHeader {
 	hdr.DocumentOf = h.parseDocumentOf(root)
 	hdr.EncompassingEncounter = h.parseComponentOf(root)
 	hdr.RelatedDocuments = h.parseRelatedDocuments(root)
+	hdr.Informants = h.parseInformants(root)
 
 	return hdr
 }
@@ -327,6 +328,22 @@ func (h *headerParser) parseComponentOf(root *etree.Element) *CDAEncounter {
 		enc.Location = loc
 	}
 	return enc
+}
+
+// ========================
+// informant[] → []CDAInformant (document-level)
+// ========================
+
+func (h *headerParser) parseInformants(root *etree.Element) []CDAInformant {
+	var informants []CDAInformant
+	for _, infEl := range root.SelectElements("informant") {
+		aeEl := infEl.SelectElement("assignedEntity")
+		if aeEl == nil {
+			continue // relatedEntity-shaped informants are not modeled (see CDAInformant doc comment)
+		}
+		informants = append(informants, CDAInformant{AssignedEntity: parseAssignedEntity(aeEl)})
+	}
+	return informants
 }
 
 // ========================

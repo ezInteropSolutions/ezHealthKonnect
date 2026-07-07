@@ -1070,6 +1070,36 @@ func (tps *TransformationPipelineService) CreateStep(ctx context.Context, step *
 	return err
 }
 
+// UpdateStepScript persists a new script body into an existing step's
+// config.script field, updating only that one JSON key. Scoped narrowly to
+// this single field — not a general-purpose step config PATCH — because the
+// only caller today is Agent Mode's verify_pipeline_script tool applying a
+// script it has already generated and dry-run tested.
+func (tps *TransformationPipelineService) UpdateStepScript(ctx context.Context, stepID, script string) error {
+	scriptJSON, err := json.Marshal(script)
+	if err != nil {
+		return fmt.Errorf("failed to marshal script: %w", err)
+	}
+
+	result, err := tps.db.ExecContext(ctx, `
+		UPDATE transformation_steps
+		SET config = jsonb_set(COALESCE(config, '{}'::jsonb), '{script}', $1::jsonb),
+		    updated_at = $2
+		WHERE id = $3
+	`, scriptJSON, time.Now(), stepID)
+	if err != nil {
+		return fmt.Errorf("failed to update step script: %w", err)
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return fmt.Errorf("step %s not found", stepID)
+	}
+	return nil
+}
+
 // ExecuteTransformationFromInput satisfies the PipelineRedriver interface.
 // It is a thin wrapper around ExecuteTransformation used by DLQ redrive (from_start mode).
 // messageType may be empty — GetPipeline's fallback chain will find the right pipeline.

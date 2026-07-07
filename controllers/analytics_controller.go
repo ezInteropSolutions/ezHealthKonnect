@@ -26,6 +26,12 @@ func (ctrl *AnalyticsController) InjectAlertRuleService(svc *services.AlertRuleS
 	ctrl.svc.SetAlertRuleService(svc)
 }
 
+// Service returns the underlying AnalyticsService (mirrors AlertRuleController.Service())
+// so other parts of main.go can wire it into other subsystems, e.g. Agent Mode.
+func (ctrl *AnalyticsController) Service() *services.AnalyticsService {
+	return ctrl.svc
+}
+
 // RegisterRoutes mounts all /api/analytics/* routes onto the provided group.
 func (ctrl *AnalyticsController) RegisterRoutes(rg *gin.RouterGroup) {
 	mon := rg.Group("/monitoring")

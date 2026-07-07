@@ -26,9 +26,10 @@
         {
             title: 'Analytics',
             items: [
-                { label: 'Monitoring', href: 'monitoring.html', icon: 'far fa-chart-bar' },
-                { label: 'Reports',    href: 'reports.html',    icon: 'fas fa-chart-line' },
-                { label: 'Alerts',     href: 'alerts.html',     icon: 'fas fa-bell', badgeId: 'alertsNavBadge' }
+                { label: 'Monitoring',     href: 'monitoring.html',      icon: 'far fa-chart-bar' },
+                { label: 'Engine Metrics', href: 'engine-metrics.html',  icon: 'fas fa-gauge-high' },
+                { label: 'Reports',        href: 'reports.html',         icon: 'fas fa-chart-line' },
+                { label: 'Alerts',         href: 'alerts.html',          icon: 'fas fa-bell', badgeId: 'alertsNavBadge' }
             ]
         },
         {
@@ -46,7 +47,8 @@
             sectionId: 'opsSection',
             roles: ['engineer', 'admin', 'superadmin', 'super_admin'],
             items: [
-                { label: 'Dead-Letter Q',  href: 'admin-dlq.html',           icon: 'fas fa-exclamation-triangle', badgeId: 'dlqBadge' }
+                { label: 'Dead-Letter Q',  href: 'admin-dlq.html',           icon: 'fas fa-exclamation-triangle', badgeId: 'dlqBadge' },
+                { label: 'Message Trace',  href: 'message-trace.html',      icon: 'fas fa-route' }
             ]
         },
         {

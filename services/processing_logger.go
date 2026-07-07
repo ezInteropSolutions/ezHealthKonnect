@@ -11,6 +11,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"ezhealthkonnect/services/storage"
@@ -61,6 +62,11 @@ type ProcessingLogger struct {
 	debugMode     bool
 	objStorage    *storage.ObjectStorageService
 	context       map[string]interface{}
+
+	// bufMu guards buffer. Entries accumulate here instead of each triggering its
+	// own object-storage round trip — see Flush's doc comment for why.
+	bufMu  sync.Mutex
+	buffer []storage.LogEntry
 }
 
 // NewProcessingLogger creates a new logger instance backed by object storage.
@@ -110,7 +116,9 @@ func (l *ProcessingLogger) Debug(category LogCategory, message string, details m
 	}
 }
 
-// log writes a log entry to object storage as NDJSON (async) and to console.
+// log prints to the console immediately and buffers the entry for object storage.
+// It does NOT write to object storage itself — call Flush to persist buffered
+// entries. See Flush's doc comment for why buffering replaced a direct write here.
 func (l *ProcessingLogger) log(level LogLevel, category LogCategory, message string, details map[string]interface{}) {
 	// Always print to console for immediate visibility
 	fmt.Printf("[%s] %s: %s - %s\n", level, category, l.messageID, message)
@@ -138,10 +146,48 @@ func (l *ProcessingLogger) log(level LogLevel, category LogCategory, message str
 		entry.Fields = fields
 	}
 
+	l.bufMu.Lock()
+	l.buffer = append(l.buffer, entry)
+	l.bufMu.Unlock()
+}
+
+// Flush persists all buffered log entries in a single object-storage round trip
+// and clears the buffer. Safe to call multiple times (a no-op when nothing is
+// buffered) and safe for concurrent use. Runs the actual write asynchronously
+// (matching the previous fire-and-forget behavior) so callers never block on it.
+//
+// This replaces the original design of one AppendLog call — and one goroutine —
+// per log line. A 2026-07 load test found that design couldn't keep up under
+// sustained traffic: S3Driver.AppendObject has no native append primitive to
+// build on (S3/MinIO don't support one), so every line required a full
+// download-concat-upload round trip, and thousands of these piling up
+// concurrently under load drove goroutine count from a baseline of ~60 to over
+// 13,000. Buffering collapses one message's entire lifecycle (RECEIVE, QUEUE,
+// STEP EXEC per pipeline step, DELIVER, DLQ, ...) into one or two round trips
+// instead of one per log line. Callers: engine_message_processor.go defers a
+// Flush at the end of both storeAndParse (covers early-return paths where the
+// pipeline is never reached) and executeTransformationPipeline (covers the
+// pipeline's own execution logs).
+func (l *ProcessingLogger) Flush() {
+	if l.objStorage == nil {
+		return
+	}
+
+	l.bufMu.Lock()
+	if len(l.buffer) == 0 {
+		l.bufMu.Unlock()
+		return
+	}
+	pending := l.buffer
+	l.buffer = nil
+	l.bufMu.Unlock()
+
+	objStorage := l.objStorage
+	interfaceID := l.interfaceID
+	messageID := l.messageID
 	go func() {
-		ctx := context.Background()
-		if err := l.objStorage.AppendLog(ctx, l.interfaceID, l.messageID, entry); err != nil {
-			fmt.Printf("❌ Failed to write log to object storage: %v\n", err)
+		if err := objStorage.AppendLogBatch(context.Background(), interfaceID, messageID, pending); err != nil {
+			fmt.Printf("❌ Failed to write log batch to object storage: %v\n", err)
 		}
 	}()
 }

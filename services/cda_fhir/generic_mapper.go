@@ -84,6 +84,38 @@ type CDAMappingOverride struct {
 	Confidence  float64           `json:"confidence,omitempty"`
 	// Used for action="add_section": full new section definition
 	SectionConfig map[string]interface{} `json:"sectionConfig,omitempty"`
+
+	// The following four fields are only meaningful for Action=="add" — a
+	// genuinely new field with no existing MappingRow to inherit Scope/
+	// SourcePath from (unlike "replace"/"remove", which only ever touch an
+	// EXISTING row's own properties). See ApplyFieldOverrides/applyAddOverride
+	// in declarative_rules_flatten.go for how these are consumed.
+
+	// Scope is a Phase 1 path (MappingRow.Scope's own grammar), relative to
+	// the matched entry (top-level add) or to the NestedUnder parent's own
+	// matched node (nested add). Empty means "the entry/parent node itself".
+	Scope string `json:"scope,omitempty"`
+	// SourcePath is a Phase 1 path relative to Scope (MappingRow.SourcePath).
+	SourcePath string `json:"sourcePath,omitempty"`
+	// NestedUnder is the TargetPath of an EXISTING CollectAll+Fields parent
+	// row (e.g. "reaction") this new field nests under. Empty = top-level.
+	NestedUnder string `json:"nestedUnder,omitempty"`
+	// TargetFHIRResources narrows which MappingRule variant(s) sharing this
+	// SectionKey (matched by their own FHIRResource) the new row is inserted
+	// into. Empty means every rule variant in the section — the same
+	// indiscriminate fan-out "replace"/"remove" already have; only "add"
+	// needs the ability to narrow this, since a resource-specific new field
+	// (e.g. one that only makes sense on MedicationRequest, not
+	// MedicationStatement) has no existing row to imply that scoping.
+	TargetFHIRResources []string `json:"targetFhirResources,omitempty"`
+	// CollectAll mirrors MappingRow.CollectAll — when true, the new row
+	// captures EVERY node Scope matches as one FHIR array element each,
+	// instead of only the first. Only meaningful (and only ever produced by
+	// the UI) for a top-level add: applyAddOverride appends straight to
+	// rule.Fields with no Fields of its own, the same "plain CollectAll"
+	// shape as e.g. Medication's "entryRelationships[typeCode=RSON].entry" ->
+	// reasonCode row.
+	CollectAll bool `json:"collectAll,omitempty"`
 }
 
 // CDAMappingDelta is the full delta stored in interface_cda_mappings.mapping_overrides.
@@ -275,6 +307,22 @@ func (m *GenericCDAFHIRMapper) getCDAFieldMappings(
 // patching), a NULL/empty overrides column, or a JSON parse error (logged,
 // not fatal, mirroring writeTransformAuditLog's own non-fatal logging style).
 func (m *GenericCDAFHIRMapper) loadCDAMappingOverrides(ctx context.Context, interfaceID, docType string) []CDAMappingOverride {
+	delta := m.loadCDAMappingDelta(ctx, interfaceID, docType)
+	if delta == nil {
+		return nil
+	}
+	return delta.Overrides
+}
+
+// loadCDAMappingDelta is the same lookup as loadCDAMappingOverrides but
+// returns the FULL CDAMappingDelta envelope (version/base_template_id/
+// based_on_version, not just the bare Overrides slice) -- needed by
+// LoadCDAMappingDeltaPublic so an exported delta can be POSTed straight back
+// to SaveMappingDelta (which expects the whole envelope) without losing
+// those fields. Same nil-on-any-of-these-conditions contract as
+// loadCDAMappingOverrides (see that function's doc comment); the two share
+// this one query so they can never observe a different row.
+func (m *GenericCDAFHIRMapper) loadCDAMappingDelta(ctx context.Context, interfaceID, docType string) *CDAMappingDelta {
 	if m.db == nil || interfaceID == "" {
 		return nil
 	}
@@ -290,7 +338,7 @@ func (m *GenericCDAFHIRMapper) loadCDAMappingOverrides(ctx context.Context, inte
 	`, interfaceID, docType).Scan(&usesStandard, &overridesJSON)
 	if err != nil {
 		if err != sql.ErrNoRows {
-			log.Printf("[cda.to_fhir] loadCDAMappingOverrides query error (interface=%s, docType=%s): %v", interfaceID, docType, err)
+			log.Printf("[cda.to_fhir] loadCDAMappingDelta query error (interface=%s, docType=%s): %v", interfaceID, docType, err)
 		}
 		return nil
 	}
@@ -300,10 +348,21 @@ func (m *GenericCDAFHIRMapper) loadCDAMappingOverrides(ctx context.Context, inte
 
 	var delta CDAMappingDelta
 	if err := json.Unmarshal([]byte(overridesJSON.String), &delta); err != nil {
-		log.Printf("[cda.to_fhir] loadCDAMappingOverrides delta parse error (interface=%s, docType=%s): %v", interfaceID, docType, err)
+		log.Printf("[cda.to_fhir] loadCDAMappingDelta parse error (interface=%s, docType=%s): %v", interfaceID, docType, err)
 		return nil
 	}
-	return delta.Overrides
+	return &delta
+}
+
+// LoadCDAMappingDeltaPublic exposes loadCDAMappingDelta to callers outside
+// this package (controllers/cda_schema_controller.go's new GET raw-delta
+// endpoint, which lets the pipeline builder's JSON Export carry an
+// interface's actual field-mapping overrides along with the step config --
+// see PropertiesPanel.js's EXTERNAL_MAPPING_STORES). Returns nil under the
+// exact same conditions as loadCDAMappingDelta (no DB, no interfaceID, no
+// row, full-custom row, empty/NULL overrides, or a parse error).
+func (m *GenericCDAFHIRMapper) LoadCDAMappingDeltaPublic(ctx context.Context, interfaceID, docType string) *CDAMappingDelta {
+	return m.loadCDAMappingDelta(ctx, interfaceID, docType)
 }
 
 // loadPlanOfCareEncounterTargetDefault returns the interface-level default
@@ -580,6 +639,18 @@ func (m *GenericCDAFHIRMapper) GetCDAFieldMappingsPublic(
 	return m.getCDAFieldMappings(ctx, docType, ccdaVersion, fhirVersion, interfaceID)
 }
 
+// LoadCDAMappingOverridesPublic exposes loadCDAMappingOverrides (the RAW,
+// unmerged []CDAMappingOverride — the same list ApplyFieldOverrides patches
+// rules with at document-processing time) to callers outside this package.
+// GetSectionFields needs this specifically because mergeCDAMappings'
+// "remove" handling drops a removed field from its merged []CDAFieldMapping
+// output entirely — indistinguishable there from "never had an override" —
+// so the Section Field Editor must check the raw Action itself to render a
+// removed field as removed instead of silently showing its OOB default.
+func (m *GenericCDAFHIRMapper) LoadCDAMappingOverridesPublic(ctx context.Context, interfaceID, docType string) []CDAMappingOverride {
+	return m.loadCDAMappingOverrides(ctx, interfaceID, docType)
+}
+
 // InvalidateCache clears the in-process template cache.
 func (m *GenericCDAFHIRMapper) InvalidateCache() {
 	m.templateMu.Lock()
@@ -620,6 +691,24 @@ type CDAAtomicMapping struct {
 	CDAField   string `json:"cdaField"`
 	FHIRPath   string `json:"fhirPath"`
 	Transform  string `json:"transform"`
+	// Disabled marks this field as explicitly removed by the user (the
+	// Section Field Editor's "Remove" action) — an EXPLICIT per-field
+	// signal, deliberately never inferred from a field's absence from
+	// incoming: incoming is a sparse list of only the fields the user
+	// touched in the currently-open section (see _buildAtomicMappings in
+	// CDAStepBuilder.js), and treating absence as removal previously
+	// produced 276 spurious removals from a single-field edit (see the
+	// comment below on the deliberately-not-walking-absence loop).
+	Disabled bool `json:"disabled,omitempty"`
+
+	// The following mirror CDAMappingOverride's own "add"-only fields
+	// (same names/shapes) so ComputeCDADelta's "field not found in OOB"
+	// branch can copy them straight through when building the resulting
+	// Action=="add" override. Empty/unused for every other field.
+	Scope               string   `json:"scope,omitempty"`
+	SourcePath          string   `json:"sourcePath,omitempty"`
+	NestedUnder         string   `json:"nestedUnder,omitempty"`
+	TargetFHIRResources []string `json:"targetFhirResources,omitempty"`
 }
 
 // ComputeCDADelta compares the incoming wizard mappings against the current OOB
@@ -664,17 +753,40 @@ func (m *GenericCDAFHIRMapper) ComputeCDADelta(
 
 	var overrides []CDAMappingOverride
 
-	// Walk incoming: detect replacements and additions.
+	// Walk incoming: detect removals, replacements, and additions.
 	for k, am := range incomingIndex {
-		oobFM, exists := oobIndex[k]
-		if !exists {
-			// New field added by the user — not in OOB.
+		// Disabled is an explicit per-field signal from the UI's "Remove"
+		// button — checked before the replace/add branches below, and
+		// unconditionally, regardless of whether the field exists in OOB:
+		// its FHIRPath/Transform are irrelevant once removed (applyRow skips
+		// the row before ever reading them), so nothing else about this
+		// field needs to be diffed.
+		if am.Disabled {
 			overrides = append(overrides, CDAMappingOverride{
-				Action:     "add",
+				Action:     "remove",
 				SectionKey: am.SectionKey,
 				CDAField:   am.CDAField,
-				FHIRPath:   am.FHIRPath,
-				Transform:  am.Transform,
+			})
+			continue
+		}
+
+		oobFM, exists := oobIndex[k]
+		if !exists {
+			// New field added by the user — not in OOB. Scope/SourcePath/
+			// NestedUnder/TargetFHIRResources carry the new field's actual
+			// definition through to ApplyFieldOverrides/applyAddOverride at
+			// runtime — without these, "add" would have a FHIR-side target
+			// but no way to ever produce a value for it.
+			overrides = append(overrides, CDAMappingOverride{
+				Action:              "add",
+				SectionKey:          am.SectionKey,
+				CDAField:            am.CDAField,
+				FHIRPath:            am.FHIRPath,
+				Transform:           am.Transform,
+				Scope:               am.Scope,
+				SourcePath:          am.SourcePath,
+				NestedUnder:         am.NestedUnder,
+				TargetFHIRResources: am.TargetFHIRResources,
 			})
 			continue
 		}

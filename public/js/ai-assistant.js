@@ -26,6 +26,20 @@
     let _userId   = '';
     let _userName = '';
 
+    // Agent Mode — set from /api/system/settings/ai on init. When on, chat
+    // messages go through /agent/ask instead of /ask/stream and the model may
+    // propose a tool call that renders as an Approve/Reject card.
+    let _agentModeEnabled = false;
+
+    async function checkAgentMode() {
+        try {
+            const resp = await fetch('/api/system/settings/ai', { credentials: 'include' });
+            if (!resp.ok) return;
+            const body = await resp.json();
+            _agentModeEnabled = !!(body && body.data && body.data.agent_mode_enabled);
+        } catch { /* default false — plain chat still works */ }
+    }
+
     function sessionKey() {
         return _userId ? `ezc_sid_${_userId}` : 'ezc_sid_anon';
     }
@@ -173,6 +187,37 @@
             history:    []
         };
         return streamIntoEl('/ask/stream', body, targetEl);
+    }
+
+    // askAgent sends a question through Agent Mode (non-streaming — the model
+    // may return a tool call instead of text). Returns { answer, proposed_action? }.
+    async function askAgent(question) {
+        const body = await apiPost('/agent/ask', { question, session_id: getSessionId() });
+        if (!body.success) throw new Error(body.error || 'Agent Mode request failed');
+        return body.data;
+    }
+
+    async function approveAgentAction(actionId, gitRepoId) {
+        const body = await apiPost(`/agent-actions/${encodeURIComponent(actionId)}/approve`,
+            { git_repo_id: gitRepoId || '' });
+        if (!body.data) throw new Error(body.error || 'Approve failed');
+        return body.data;
+    }
+
+    async function rejectAgentAction(actionId) {
+        const body = await apiPost(`/agent-actions/${encodeURIComponent(actionId)}/reject`, {});
+        if (!body.success) throw new Error(body.error || 'Reject failed');
+    }
+
+    // Lists configured git repos for the commit-on-approve picker. Talks to
+    // /api/git directly (not /api/ai) — reuses the same list GitPanel.js shows.
+    async function listGitRepos() {
+        try {
+            const resp = await fetch('/api/git', { credentials: 'include' });
+            if (!resp.ok) return [];
+            const body = await resp.json();
+            return (body.success && Array.isArray(body.data)) ? body.data : [];
+        } catch { return []; }
     }
 
     async function detectFormat(message) {
@@ -443,6 +488,35 @@
 .ai-msg code { background: #f1f5f9; padding: 1px 5px; border-radius: 4px; font-size: 12px; color: #1e3a8a; }
 .ai-sources { font-size: 11px; color: #94a3b8; margin-top: 8px; border-top: 1px solid #f1f5f9; padding-top: 6px; }
 
+/* ── Agent Mode proposal card ─────────────────────────────────────── */
+.ai-proposal-card {
+    align-self: flex-start;
+    max-width: 88%;
+    background: #fff7ed;
+    border: 1px solid #fdba74;
+    border-radius: 10px;
+    padding: 10px 12px;
+    font-size: 13px;
+    color: #1a202c;
+}
+.ai-proposal-label { margin-bottom: 8px; line-height: 1.4; }
+.ai-proposal-label code { background: rgba(0,0,0,0.06); padding: 1px 5px; border-radius: 4px; font-size: 12px; }
+.ai-proposal-actions { display: flex; gap: 8px; }
+.ai-proposal-actions button {
+    font-size: 12px;
+    font-weight: 600;
+    padding: 5px 12px;
+    border-radius: 6px;
+    cursor: pointer;
+    border: 1px solid transparent;
+}
+.ai-proposal-approve { background: #16a34a; color: #fff; }
+.ai-proposal-approve:hover { background: #15803d; }
+.ai-proposal-reject { background: #fff; color: #b91c1c; border-color: #fca5a5 !important; }
+.ai-proposal-reject:hover { background: #fef2f2; }
+.ai-proposal-actions button:disabled { opacity: 0.5; cursor: default; }
+.ai-proposal-result { margin-top: 8px; font-size: 12px; color: #78350f; }
+
 /* ── Typing indicator ─────────────────────────────────────────────── */
 .ai-typing { display: flex; gap: 5px; align-items: center; padding: 11px 15px; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 14px; border-bottom-left-radius: 4px; align-self: flex-start; }
 .ai-typing span { width: 7px; height: 7px; background: #f472b6; border-radius: 50%; animation: ai-bounce 1s infinite; }
@@ -697,6 +771,108 @@
         });
     }
 
+    // ── Agent Mode proposal card ───────────────────────────────────────────────
+    const AGENT_TOOL_LABELS = {
+        retry_message: args => `Retry message <code>${escapeHtml(args.dlq_id || '')}</code>` +
+            (args.mode ? ` (${escapeHtml(args.mode)})` : ''),
+        activate_interface: args => `Activate interface <code>${escapeHtml(args.interface_id || '')}</code>`,
+        deactivate_interface: args => `Deactivate interface <code>${escapeHtml(args.interface_id || '')}</code>`,
+        propose_pipeline_script: args => `Insert a generated script into step <code>${escapeHtml(args.step_id || '')}</code> — review it in the editor before saving`,
+        verify_pipeline_script: args => {
+            const status = args.verified
+                ? `✅ verified in ${args.attempts || 1} attempt(s)`
+                : `⚠️ could not self-verify after ${args.attempts || '?'} attempt(s)${args.last_error ? ' — last error: ' + escapeHtml(String(args.last_error).slice(0, 200)) : ''}`;
+            const scriptPreview = args.script
+                ? `<pre style="max-height:160px;overflow:auto;margin-top:6px">${escapeHtml(args.script)}</pre>` : '';
+            return `Apply a script to step <code>${escapeHtml(args.step_id || '')}</code> (${status})${scriptPreview}`;
+        },
+    };
+
+    // Renders an Approve/Reject card for a tool call the model proposed.
+    // Nothing executes until Approve is clicked — see controllers/ai_controller.go ApproveAgentAction.
+    function renderProposedAction(proposal) {
+        const msgs = document.getElementById('ai-messages');
+        const div = document.createElement('div');
+        div.className = 'ai-proposal-card';
+
+        const args = proposal.arguments || {};
+        const labelFn = AGENT_TOOL_LABELS[proposal.tool_name];
+        const label = labelFn ? labelFn(args) : `Run <code>${escapeHtml(proposal.tool_name)}</code>`;
+        // verify_pipeline_script persists to the DB on approve — offer a git
+        // repo picker so the change can be auto-committed (see GitCommitter).
+        const showGitPicker = proposal.tool_name === 'verify_pipeline_script';
+
+        div.innerHTML = `
+            <div class="ai-proposal-label">🤖 ezCompanion wants to: ${label}</div>
+            ${showGitPicker ? `
+            <div class="ai-proposal-git-row" style="margin:8px 0">
+                <label style="font-size:12px;color:#78350f">Commit to git repo:</label>
+                <select class="ai-proposal-git-select" style="font-size:12px;margin-left:6px;max-width:100%">
+                    <option value="">(don't commit)</option>
+                </select>
+            </div>` : ''}
+            <div class="ai-proposal-actions">
+                <button class="ai-proposal-approve">Approve</button>
+                <button class="ai-proposal-reject">Reject</button>
+            </div>
+            <div class="ai-proposal-result"></div>
+        `;
+
+        const resultEl   = div.querySelector('.ai-proposal-result');
+        const approveBtn = div.querySelector('.ai-proposal-approve');
+        const rejectBtn  = div.querySelector('.ai-proposal-reject');
+        const gitSelect  = div.querySelector('.ai-proposal-git-select');
+
+        if (showGitPicker && gitSelect) {
+            listGitRepos().then(repos => {
+                for (const r of repos) {
+                    const opt = document.createElement('option');
+                    opt.value = r.id;
+                    opt.textContent = r.name;
+                    gitSelect.appendChild(opt);
+                }
+            });
+        }
+
+        approveBtn.addEventListener('click', async () => {
+            approveBtn.disabled = true;
+            rejectBtn.disabled = true;
+            resultEl.textContent = 'Executing…';
+            try {
+                const gitRepoId = gitSelect ? gitSelect.value : '';
+                const outcome = await approveAgentAction(proposal.id, gitRepoId);
+                if (outcome && outcome.status === 'executed') {
+                    resultEl.innerHTML = '✅ Done — ' + escapeHtml(JSON.stringify(outcome.result || {}));
+                    if (outcome.git_commit_error) {
+                        resultEl.innerHTML += `<br>⚠️ Applied, but git commit failed: ${escapeHtml(outcome.git_commit_error)}`;
+                    } else if (gitRepoId) {
+                        resultEl.innerHTML += '<br>📦 Committed to git.';
+                    }
+                } else {
+                    resultEl.innerHTML = '⚠️ Failed — ' + escapeHtml((outcome && outcome.error_message) || 'unknown error');
+                }
+            } catch (e) {
+                resultEl.textContent = '⚠️ ' + e.message;
+            }
+        });
+
+        rejectBtn.addEventListener('click', async () => {
+            approveBtn.disabled = true;
+            rejectBtn.disabled = true;
+            resultEl.textContent = 'Rejecting…';
+            try {
+                await rejectAgentAction(proposal.id);
+                resultEl.textContent = '✖️ Rejected — no action taken.';
+            } catch (e) {
+                resultEl.textContent = '⚠️ ' + e.message;
+            }
+        });
+
+        msgs.appendChild(div);
+        msgs.scrollTop = msgs.scrollHeight;
+        return div;
+    }
+
     // ── Event wiring ───────────────────────────────────────────────────────────
     let isThinking = false;
 
@@ -788,6 +964,24 @@
 
         try {
             hideTyping();
+
+            if (_agentModeEnabled) {
+                // Non-streaming: the model may return a tool call instead of text.
+                const turn = await askAgent(question);
+                const bubble = renderMessage('assistant', turn.answer || '(no response — see proposed action below)');
+                const ctx = detectContext();
+                appendFeedbackWidget(bubble, {
+                    endpoint:        'agent-ask',
+                    promptPreview:   question,
+                    responsePreview: turn.answer || '',
+                    sessionId:       getSessionId(),
+                    interfaceId:     ctx.interface_id || '',
+                    pipelineId:      ctx.pipeline_id  || '',
+                });
+                if (turn.proposed_action) renderProposedAction(turn.proposed_action);
+                return;
+            }
+
             // Create the assistant message bubble now so tokens stream into it
             const msgs = document.getElementById('ai-messages');
             const bubble = document.createElement('div');
@@ -919,6 +1113,7 @@
 
         // Resolve user identity so session keys are user-scoped
         await resolveCurrentUser();
+        checkAgentMode(); // non-blocking — defaults to plain chat until it resolves
         if (_userName) {
             const sub = document.getElementById('ai-user-subtitle');
             if (sub) sub.textContent = `Signed in as ${_userName}`;

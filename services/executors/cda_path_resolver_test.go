@@ -281,6 +281,50 @@ func TestResolveCDAPath_DocumentTree_CodePredicate_SeverityDiscriminator(t *test
 	}
 }
 
+// TestResolveCDAPath_DocumentTree_ChainedPredicate_NarrowsAmongCollidingSiblings
+// proves the guarantee CDAStepBuilder.js's Add Field "Browse Test Data" leaf
+// disambiguation depends on: when TWO entryRelationships share the SAME
+// typeCode (a real, common shape — e.g. two Reaction Observations each linked
+// via typeCode=MFST, one per manifestation), a chained
+// "entryRelationships[typeCode=X].entry[code=Y]" path resolves the WHOLE
+// multi-segment chain together, correctly narrowing to whichever sibling's
+// nested entry actually has code=Y — NOT just the first typeCode=X match. If
+// this ever regressed to "collapse to the first bracket match before
+// evaluating the next", the frontend's disambiguation would silently start
+// resolving to the wrong sibling instead of a genuinely narrowed one.
+func TestResolveCDAPath_DocumentTree_ChainedPredicate_NarrowsAmongCollidingSiblings(t *testing.T) {
+	root := map[string]interface{}{
+		"entryRelationships": []interface{}{
+			map[string]interface{}{
+				"typeCode": "MFST",
+				"entry": map[string]interface{}{
+					"code":  map[string]interface{}{"code": "39579001"},
+					"value": map[string]interface{}{"code": map[string]interface{}{"code": "111"}},
+				},
+			},
+			map[string]interface{}{
+				"typeCode": "MFST",
+				"entry": map[string]interface{}{
+					"code":  map[string]interface{}{"code": "247472004"},
+					"value": map[string]interface{}{"code": map[string]interface{}{"code": "222"}},
+				},
+			},
+		},
+	}
+
+	got := ResolveCDAPath(root, "entryRelationships[typeCode=MFST].entry[code=247472004].value.code.code", false)
+	if got != "222" {
+		t.Fatalf("got %v, want \"222\" (the SECOND MFST sibling's value, selected by its own nested code) — got the wrong sibling or collapsed to the first typeCode match before applying the code predicate", got)
+	}
+
+	// Same chain, targeting the FIRST sibling's code, to confirm this isn't
+	// coincidentally always resolving to whichever happens to be last/first.
+	got = ResolveCDAPath(root, "entryRelationships[typeCode=MFST].entry[code=39579001].value.code.code", false)
+	if got != "111" {
+		t.Fatalf("got %v, want \"111\" (the FIRST MFST sibling's value)", got)
+	}
+}
+
 func TestResolveCDAPath_DocumentTree_CodePredicate_WrongCodeNoMatch(t *testing.T) {
 	root := map[string]interface{}{
 		"entry": map[string]interface{}{

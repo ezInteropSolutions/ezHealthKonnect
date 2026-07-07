@@ -38,6 +38,14 @@ jobs:
       - name: Vet
         run: go vet $(go list ./... | grep -v '/tests')
 
+      - name: govulncheck
+        # Scans for known vulnerabilities in the module graph AND reports whether
+        # this codebase's own call graph actually reaches the vulnerable code path
+        # (not just "a dependency somewhere has a CVE"). Security audit (2026-07)
+        # found 8 real, reachable vulnerabilities in golang.org/x/crypto and
+        # github.com/redis/go-redis/v9 this way — both fixed by dependency bumps.
+        run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+
   # ── Go installer ──────────────────────────────────────────────────────────────
   check-installer:
     name: Installer build check
@@ -82,6 +90,9 @@ jobs:
       - name: Install dependencies
         run: npm ci --prefer-offline
 
+      - name: npm audit
+        run: npm audit --audit-level=moderate
+
       - name: Check for secrets accidentally staged
         run: |
           if git show HEAD:.env 2>/dev/null; then
@@ -89,6 +100,23 @@ jobs:
             exit 1
           fi
           echo "OK: .env is not in the repository"
+
+  # ── Secret scanning ──────────────────────────────────────────────────────────
+  # Scans commits since the last successful scan (not full history — see
+  # .gitleaks.toml's comment for why a full-history scan isn't useful as an
+  # ongoing gate: it re-flags old, already-reviewed example values in docs).
+  scan-secrets:
+    name: Secret scan (gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   # ── FHIR US Core profile validation ──────────────────────────────────────────
   validate-fhir:

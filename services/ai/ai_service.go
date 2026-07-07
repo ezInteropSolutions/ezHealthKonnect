@@ -40,6 +40,7 @@ type AIService struct {
 	ScriptGen   *ScriptGeneratorService     // JS script generation with step context
 	Tracer      *MessageTracerService       // step execution trace + LLM failure analysis
 	Feedback    *FeedbackService            // user feedback storage + KB improvement loop
+	Agent       *AgentService               // propose/approve/reject tool-calling loop (nil unless provider supports tools)
 }
 
 // NewAIServiceWithProvider constructs an AIService with injected providers.
@@ -49,7 +50,7 @@ type AIService struct {
 func NewAIServiceWithProvider(db *sql.DB, chatProvider LLMProvider, embedProvider LLMProvider) *AIService {
 	embedding := newEmbeddingServiceWithProvider(db, embedProvider)
 	operational := NewOperationalIngestionService(db, embedding)
-	return &AIService{
+	svc := &AIService{
 		llm:         chatProvider,
 		embedder:    embedProvider,
 		db:          db,
@@ -63,6 +64,12 @@ func NewAIServiceWithProvider(db *sql.DB, chatProvider LLMProvider, embedProvide
 		Tracer:      newMessageTracerService(db),
 		Feedback:    newFeedbackService(db, operational),
 	}
+	// Agent Mode is only available when the chat provider supports tool calling
+	// (e.g. Ollama with a tool-calling-capable model). Left nil otherwise.
+	if tp, ok := chatProvider.(ToolCallingProvider); ok {
+		svc.Agent = newAgentService(db, tp, svc.ScriptGen)
+	}
+	return svc
 }
 
 // NewAIService wires together all AI sub-services using Ollama from env vars.
@@ -895,7 +902,8 @@ func (s *AIService) ExplainError(ctx context.Context, errorMsg, messageContext s
 Explain the error in plain English, identify the root cause, and list actionable fix steps.
 Output ONLY valid JSON: {"summary":"","root_cause":"","suggestions":[],"severity":"critical|warning|info"}`
 
-	answer, chunks, err := s.rag.Query(ctx, question, systemPrompt, 6, []string{"operational"})
+	filters := dedup(append([]string{"operational"}, filterSourceTypesForContext(reqCtx)...))
+	answer, chunks, err := s.rag.Query(ctx, question, systemPrompt, 6, filters)
 	if err != nil {
 		return ErrorExplanation{}, chunks, err
 	}
@@ -957,7 +965,8 @@ func (s *AIService) AskQuestion(ctx context.Context, input AskInput) (string, []
 	// topK=4 and maxTokens=400 keep total round-trip within 600s on CPU-only hardware.
 	// On CPU, llama3.2:3b evaluates ~6 input tokens/sec and generates ~1 token/sec;
 	// 400-token output cap + reduced history/RAG keeps total time to ~450s worst-case.
-	answer, chunks, err := s.rag.QueryCapped(ctx, input.Question, systemPrompt, 4, 400, nil)
+	filters := filterSourceTypesForContext(input.RequestContext)
+	answer, chunks, err := s.rag.QueryCapped(ctx, input.Question, systemPrompt, 4, 400, filters)
 	if err != nil {
 		return "", chunks, err
 	}
@@ -1005,11 +1014,12 @@ func (s *AIService) AskQuestionStream(ctx context.Context, input AskInput, onTok
 		return nil, nil
 	}
 
-	// Fast RAG: topK=3, no filter — gives operational KB hits (confirmed mappings,
-	// interface configs) without full-scale retrieval latency.
+	// Fast RAG: topK=3. Filtered to the relevant skill (e.g. hl7_v2 + IG docs)
+	// when the request context gives a confident signal; nil (no filter) — the
+	// same broad search as before — otherwise. See filterSourceTypesForContext.
 	var chunks []RetrievedChunk
 	if s.rag != nil && s.rag.db != nil {
-		chunks, _ = s.rag.Retrieve(ctx, input.Question, 3, nil) // non-fatal
+		chunks, _ = s.rag.Retrieve(ctx, input.Question, 3, filterSourceTypesForContext(input.RequestContext)) // non-fatal
 	}
 
 	// Confidence signal: stream a caveat first when no KB context was found.
@@ -1179,6 +1189,20 @@ func truncate(s string, maxLen int) string {
 		return s
 	}
 	return s[:maxLen] + "..."
+}
+
+// filterSourceTypesForContext derives a RAG source_type filter from a
+// request's context, but only when the signal is strong enough to be
+// confident — otherwise returns nil (no filter, search everything), so
+// general questions asked with no interface/message-type context never
+// regress. Today the only reliable signal is an HL7-shaped MessageType
+// (e.g. "ADT^A01"); FHIR/X12/CDA contexts don't populate this field the
+// same way, so we don't guess for them.
+func filterSourceTypesForContext(reqCtx RequestContext) []string {
+	if strings.Contains(reqCtx.MessageType, "^") {
+		return []string{"hl7_v2", "ig_anchors", "ig_assemblyrules", "ig_valuesets", "operational", "app_docs"}
+	}
+	return nil
 }
 
 func sourceTypeFromFormat(format string) string {

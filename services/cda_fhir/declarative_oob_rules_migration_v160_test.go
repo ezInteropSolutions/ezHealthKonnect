@@ -81,6 +81,19 @@ func TestV160Migration_MatchesGoLiteralRules_NoDrift(t *testing.T) {
 		if got.flattenOrganizers != w.FlattenOrganizers {
 			t.Errorf("rule[%d] (%s/%s): flatten_organizers = %v, want %v", i, got.sectionKey, got.fhirResource, got.flattenOrganizers, w.FlattenOrganizers)
 		}
+		if w.FHIRResource == "Coverage" {
+			// V160's Coverage rows were superseded for field content by
+			// V187__..._Coverage_IG_Alignment.sql (an ON CONFLICT...DO UPDATE
+			// upsert, commit a334223 aligned CoverageMappingRules() with the
+			// C-CDA on FHIR IG). V160 itself is immutable per this repo's
+			// Flyway convention and still correctly seeds its *original*
+			// fields, so comparing them against the *current* Go literal here
+			// would fail forever without indicating real drift.
+			// TestV187Migration_MatchesGoLiteralRules_NoDrift now owns this
+			// comparison for Coverage; sectionKey/fhirResource/entryMatch/
+			// flattenOrganizers above are still fully checked.
+			continue
+		}
 		if !reflect.DeepEqual(got.fields, w.Fields) {
 			t.Errorf("rule[%d] (%s/%s): seeded fields drifted from declarative_oob_rules.go's Go literal.\nseeded: %+v\nwant:   %+v", i, got.sectionKey, got.fhirResource, got.fields, w.Fields)
 		}

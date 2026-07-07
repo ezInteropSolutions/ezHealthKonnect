@@ -1,0 +1,151 @@
+{
+  "summary": {
+    "timestamp": "2026-07-04T04:13:06.206Z",
+    "config": {
+      "requests": 18,
+      "concurrent": 18,
+      "sample": "C:\\Projects\\ezHealthKonnect\\cda\\document\\testdata\\full_ccd_nist.xml",
+      "sampleSizeBytes": 17769
+    },
+    "duration_ms": 147,
+    "throughput_rps": 122.45,
+    "total": 18,
+    "passed": 18,
+    "failed": 0,
+    "latency": {
+      "avg": 108,
+      "p50": 109,
+      "p90": 135,
+      "p95": 136,
+      "p99": 136
+    }
+  },
+  "results": [
+    {
+      "statusCode": 200,
+      "latencyMs": 51,
+      "error": null,
+      "sectionCount": 9,
+      "pass": true
+    },
+    {
+      "statusCode": 200,
+      "latencyMs": 60,
+      "error": null,
+      "sectionCount": 9,
+      "pass": true
+    },
+    {
+      "statusCode": 200,
+      "latencyMs": 92,
+      "error": null,
+      "sectionCount": 9,
+      "pass": true
+    },
+    {
+      "statusCode": 200,
+      "latencyMs": 94,
+      "error": null,
+      "sectionCount": 9,
+      "pass": true
+    },
+    {
+      "statusCode": 200,
+      "latencyMs": 93,
+      "error": null,
+      "sectionCount": 9,
+      "pass": true
+    },
+    {
+      "statusCode": 200,
+      "latencyMs": 101,
+      "error": null,
+      "sectionCount": 9,
+      "pass": true
+    },
+    {
+      "statusCode": 200,
+      "latencyMs": 104,
+      "error": null,
+      "sectionCount": 9,
+      "pass": true
+    },
+    {
+      "statusCode": 200,
+      "latencyMs": 107,
+      "error": null,
+      "sectionCount": 9,
+      "pass": true
+    },
+    {
+      "statusCode": 200,
+      "latencyMs": 111,
+      "error": null,
+      "sectionCount": 9,
+      "pass": true
+    },
+    {
+      "statusCode": 200,
+      "latencyMs": 109,
+      "error": null,
+      "sectionCount": 9,
+      "pass": true
+    },
+    {
+      "statusCode": 200,
+      "latencyMs": 115,
+      "error": null,
+      "sectionCount": 9,
+      "pass": true
+    },
+    {
+      "statusCode": 200,
+      "latencyMs": 114,
+      "error": null,
+      "sectionCount": 9,
+      "pass": true
+    },
+    {
+      "statusCode": 200,
+      "latencyMs": 127,
+      "error": null,
+      "sectionCount": 9,
+      "pass": true
+    },
+    {
+      "statusCode": 200,
+      "latencyMs": 129,
+      "error": null,
+      "sectionCount": 9,
+      "pass": true
+    },
+    {
+      "statusCode": 200,
+      "latencyMs": 132,
+      "error": null,
+      "sectionCount": 9,
+      "pass": true
+    },
+    {
+      "statusCode": 200,
+      "latencyMs": 133,
+      "error": null,
+      "sectionCount": 9,
+      "pass": true
+    },
+    {
+      "statusCode": 200,
+      "latencyMs": 135,
+      "error": null,
+      "sectionCount": 9,
+      "pass": true
+    },
+    {
+      "statusCode": 200,
+      "latencyMs": 136,
+      "error": null,
+      "sectionCount": 9,
+      "pass": true
+    }
+  ]
+}

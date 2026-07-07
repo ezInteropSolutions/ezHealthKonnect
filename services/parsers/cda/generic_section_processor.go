@@ -186,6 +186,16 @@ func isEtreeSafePredicate(pred string) bool {
 	if pred == "" {
 		return false
 	}
+	// [@a='x',@b='y'] — cda/builder's multi-condition write-side grammar
+	// (needed there to disambiguate same-predicate siblings like Allergy's
+	// Severity vs Status Observation — see cda/builder/xpath_writer.go).
+	// etree's own path compiler has no comma-condition syntax at all and
+	// panics ("mismatched filter quotes") if handed one raw, so this is
+	// unsafe here the same way child-element filters already are below —
+	// strip it and degrade to a first-match read, don't crash.
+	if strings.Contains(pred, ",") {
+		return false
+	}
 	// [N] — positional integer.
 	allDigits := true
 	for _, c := range pred {

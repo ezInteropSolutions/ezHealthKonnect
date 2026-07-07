@@ -113,6 +113,37 @@ type cdaToFHIRConfig struct {
 	PlanOfCareEncounterTarget string `json:"planOfCareEncounterTarget"`
 }
 
+// resolveCDAToFHIRConfig builds a cdaToFHIRConfig from a step's raw config
+// map, applying defaults and the documentType/docType alias fallback.
+// Extracted from Execute() so this logic is unit-testable without a full
+// executor + DB (same rationale as formatSectionErrorWarnings below).
+func resolveCDAToFHIRConfig(stepConfig map[string]interface{}) cdaToFHIRConfig {
+	cfg := cdaToFHIRConfig{
+		BundleType:       "collection",
+		ProfileMode:      "us-core",
+		OnSectionFailure: "continue",
+	}
+	if stepConfig == nil {
+		return cfg
+	}
+	raw, _ := json.Marshal(stepConfig)
+	json.Unmarshal(raw, &cfg) //nolint:errcheck
+
+	// CDAStepBuilder.js's General tab writes the Document Type dropdown to
+	// step.config.documentType (its own established key -- also used for OOB
+	// template-version and delta-compute lookups elsewhere in that file), not
+	// "docType". Accept it as an alias so the dropdown's value actually
+	// reaches the mapper instead of silently never being read. "auto" is the
+	// UI's own sentinel for "not set" (CDAStepBuilder.js defaults
+	// cfg.documentType to "auto" when empty) -- treat it the same as absent.
+	if cfg.DocType == "" {
+		if dt, ok := stepConfig["documentType"].(string); ok && dt != "" && dt != "auto" {
+			cfg.DocType = dt
+		}
+	}
+	return cfg
+}
+
 // Execute resolves the parsed CDA map, drives GenericCDAFHIRMapper.Map(), and
 // writes the FHIR bundle + processingResult to _stepOutput and the root data map.
 func (e *CDAToFHIRExecutor) Execute(
@@ -126,15 +157,7 @@ func (e *CDAToFHIRExecutor) Execute(
 		return nil, err
 	}
 
-	cfg := cdaToFHIRConfig{
-		BundleType:       "collection",
-		ProfileMode:      "us-core",
-		OnSectionFailure: "continue",
-	}
-	if step.Config != nil {
-		raw, _ := json.Marshal(step.Config)
-		json.Unmarshal(raw, &cfg) //nolint:errcheck
-	}
+	cfg := resolveCDAToFHIRConfig(step.Config)
 
 	// Extract interfaceID for three-tier template lookup and mapping-log storage keys.
 	// inputData carries it only in ad-hoc/test invocations; real pipeline runs set it
@@ -164,19 +187,19 @@ func (e *CDAToFHIRExecutor) Execute(
 		},
 	}
 
-	// Prefer typed path: cda.parse stores *CDADocument at _cdaDocument.
-	// DeclarativeMapDocument() uses zero XPath and operates on a documentMap
-	// built from the fully-typed Go structs, driven by OOB declarative rules.
+	// Prefer typed path: an earlier cda.parse/cda.dedupe step leaves
+	// *CDADocument inside the shared message object (findCDADocument,
+	// cda_document_resolution.go). DeclarativeMapDocument() uses zero XPath
+	// and operates on a documentMap built from the fully-typed Go structs,
+	// driven by OOB declarative rules.
 	var output *cdafhir.MapOutput
-	if typed, ok := inputData["_cdaDocument"]; ok {
-		if doc, ok := typed.(*cdadocument.CDADocument); ok {
-			log.Printf("  📄 [cda.to_fhir] Using typed CDADocument path (declarative)")
-			out, err := e.mapper.DeclarativeMapDocument(ctx, doc, mapConfig)
-			if err != nil {
-				return nil, fmt.Errorf("cda.to_fhir: DeclarativeMapDocument failed: %w", err)
-			}
-			output = out
+	if doc, ok := findCDADocument(inputData); ok {
+		log.Printf("  📄 [cda.to_fhir] Using typed CDADocument path (declarative)")
+		out, err := e.mapper.DeclarativeMapDocument(ctx, doc, mapConfig)
+		if err != nil {
+			return nil, fmt.Errorf("cda.to_fhir: DeclarativeMapDocument failed: %w", err)
 		}
+		output = out
 	}
 
 	// Auto-parse path: extract raw XML from parsedCDA["raw"] and run the typed
@@ -268,12 +291,35 @@ func (e *CDAToFHIRExecutor) Execute(
 
 	warnings := formatSectionErrorWarnings(output.ProcessingResult.SectionErrors)
 
+	// step_output variables — everything here is what Browse Test Data /
+	// StepVariablesProvider / the field picker can actually see (see
+	// SetStepOutputWithDetails's own doc comment: this map is what reaches
+	// step_output, NOT outputData above).
+	stepOutVars := map[string]interface{}{
+		"fhirBundle":       output.FHIRBundle,
+		"processingResult": output.ProcessingResult,
+		"mappingLog":       output.MappingLog,
+	}
+	// Expose the auto-parsed typed document the SAME way cda.parse already
+	// does (stepOut["cdaDocument"] in cda_parse_executor.go) — but only when
+	// THIS step is the one that had to parse it (autoParseResult != nil; the
+	// "typed path" branch above already received _cdaDocument from an
+	// upstream cda.parse step, which exposes it in ITS OWN output already, so
+	// re-exposing it here would just double it in every real message's
+	// persisted step output for no reason). Gated to test mode: unlike
+	// cda.parse (which always had a dedicated step a user chose to add),
+	// auto-parse runs for EVERY pipeline shaped like
+	// connector.inbound -> cda.to_fhir -> connector.outbound, so doing this
+	// unconditionally would silently grow storage for every real message on
+	// every such interface, forever, purely to support a test-time UI
+	// feature (Browse Test Data) that only ever needs it during a Test
+	// Pipeline run.
+	if models.IsTestMode(ctx) && autoParseResult != nil {
+		stepOutVars["cdaDocument"] = autoParseResult.TypedDocument
+	}
+
 	e.SetStepOutputWithDetails(outputData,
-		map[string]interface{}{
-			"fhirBundle":       output.FHIRBundle,
-			"processingResult": output.ProcessingResult,
-			"mappingLog":       output.MappingLog,
-		},
+		stepOutVars,
 		map[string]interface{}{
 			"duration_ms":         durationMs,
 			"success":             true,
@@ -452,5 +498,7 @@ func (e *CDAToFHIRExecutor) GetOutputVariables(step *models.TransformationStep) 
 			Description: "Per-section timing, resource counts, dedup/synthesis events from CDA→FHIR assembly", Category: "CDA Transform"},
 		{Name: "Mapping log summary", Path: "_stepOutput.mappingLog.summary", DataType: "object",
 			Description: "Totals: resources, timing, deduplicated/synthesized counts", Category: "CDA Transform"},
+		{Name: "Typed CDA document (auto-parsed)", Path: "_stepOutput.cdaDocument", DataType: "object",
+			Description: "Typed *CDADocument this step parsed itself, test-run only, when no separate cda.parse step precedes it in the pipeline", Category: "CDA Transform"},
 	}
 }

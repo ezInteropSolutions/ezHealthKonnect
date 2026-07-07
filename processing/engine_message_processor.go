@@ -218,16 +218,22 @@ func (pe *ProcessingEngine) storeMessage(interfaceID string, msg *models.Inbound
 	// Raw bytes are written to object storage in storeAndParse() and the URI
 	// is stored in raw_content_uri.  Keeping it NULL avoids duplicating
 	// potentially large payloads inside PostgreSQL.
+	//
+	// correlation_id was previously omitted here entirely — msg.CorrelationID is
+	// extracted correctly upstream (e.g. from MSH-10 by the MLLP connector) but
+	// was silently dropped on the way to the database, so GET
+	// /api/system/message-trace/:correlationId had nothing to ever find. Found
+	// while end-to-end testing that endpoint (2026-07).
 	query := fmt.Sprintf(`
 		INSERT INTO %s (
-			message_id, interface_id, status,
+			message_id, interface_id, status, correlation_id,
 			received_at, source_type, source_endpoint, source_ip,
 			message_type, message_size, message_encoding,
 			created_at, updated_at
 		) VALUES (
-			$1, $2, 'received',
-			$3, $4, $5, $6,
-			$7, $8, $9,
+			$1, $2, 'received', $3,
+			$4, $5, $6, $7,
+			$8, $9, $10,
 			NOW(), NOW()
 		)
 	`, tableName)
@@ -240,6 +246,7 @@ func (pe *ProcessingEngine) storeMessage(interfaceID string, msg *models.Inbound
 	_, err := pe.db.Exec(query,
 		msg.MessageID,
 		interfaceID,
+		msg.CorrelationID,
 		msg.ReceivedAt,
 		sourceType,
 		sourceEndpoint,
@@ -339,6 +346,16 @@ func (pe *ProcessingEngine) storeAndParse(interfaceID string, msg *models.Inboun
 
 	// Create processing logger if debug logging enabled
 	logger := pe.createLogger(interfaceID, msg.MessageID, msg.CorrelationID, messageType)
+	// Flush whatever this function itself logs (covers every early-return path
+	// below — empty content, parse errors, etc. — where the async pipeline stage
+	// is never reached). The pipeline's own execution logs get a second, separate
+	// flush at the end of executeTransformationPipeline, since that runs in its
+	// own goroutine and typically outlives this function. See
+	// ProcessingLogger.Flush's doc comment for why buffering + flush replaced
+	// one object-storage round trip per log line.
+	if logger != nil {
+		defer logger.Flush()
+	}
 	if logger != nil {
 		logger.Info(services.LogCategoryConnection, "Message received", map[string]interface{}{
 			"source_type":     sourceType,
@@ -567,6 +584,17 @@ func (pe *ProcessingEngine) executeTransformationPipeline(
 	log.Printf("🔄 [MVC PIPELINE] Starting transformation pipeline for message: %s (type: %s)", messageID, messageType)
 	log.Printf("🔍 [MVC PIPELINE] Interface: %s, MessageType: %s", interfaceID, messageType)
 	log.Printf("🔍 [MVC PIPELINE] About to set up defer for panic recovery...")
+
+	// Flush this function's log entries (STEP EXEC, CDA SECTION, DELIVER, DLQ, ...)
+	// in one batched write when this goroutine finishes — success, error return, or
+	// panic-recovered. Registered before the panic-recovery defer so it runs LAST
+	// (defers execute LIFO), after any log entries the panic path itself might add
+	// in the future. storeAndParse's own defer already flushed whatever it logged
+	// before spawning this goroutine; this is the second, larger flush covering
+	// everything the pipeline itself logs.
+	if procLogger != nil {
+		defer procLogger.Flush()
+	}
 
 	// Defer panic recovery for transformation pipeline.
 	// MUST update status to 'failed' here so the message never stays stuck

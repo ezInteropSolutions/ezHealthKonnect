@@ -241,6 +241,10 @@ type AIConfig struct {
 	// Only counts + admin comments are sent — never prompt/response content or PHI.
 	// Leave empty to disable the "Submit to Team" button.
 	FeedbackWebhookURL string            `json:"feedback_webhook_url"`
+	// AgentModeEnabled turns on tool-calling ("Agent Mode") in ezCompanion — the
+	// model may propose actions (retry a message, activate/deactivate an interface)
+	// that a human must approve before they execute. Off by default.
+	AgentModeEnabled bool `json:"agent_mode_enabled"`
 }
 
 // OllamaProviderCfg configures the local Ollama instance.

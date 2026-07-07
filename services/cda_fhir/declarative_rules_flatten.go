@@ -115,6 +115,22 @@ func describeCDASource(row MappingRow, inheritedScope string) string {
 	return scope
 }
 
+// DescribeAddedSource renders a CDA-source display string for a saved
+// Action=="add" override — the config-browsing API's equivalent of
+// describeCDASource for a field that has no MappingRow at all (only the
+// override's own raw Scope/SourcePath; an "add" override has no Condition or
+// LiteralValue in its schema, so this doesn't need describeCDASource's fuller
+// logic, just its same "scope.sourcePath" display convention).
+func DescribeAddedSource(scope, sourcePath string) string {
+	if sourcePath != "" {
+		if scope != "" {
+			return scope + "." + sourcePath
+		}
+		return sourcePath
+	}
+	return scope
+}
+
 // CloneMappingRules deep-copies rules (and recursively their Fields,
 // Condition, ValueMap, RequiredPaths, PatientRefPath) so callers can patch
 // the copy without mutating declarativeSectionRuleGroupsCache, which is read
@@ -182,31 +198,37 @@ func cloneMappingRows(rows []MappingRow) []MappingRow {
 // CloneMappingRules result, never a slice obtained directly from
 // declarativeSectionRuleGroupsCache/DeclarativeSectionRules.
 //
-// Only Action=="replace" overrides are honored here. "add"/"remove"/
-// "add_section"/"remove_section" remain meaningful for the flat-
-// CDAFieldMapping config-browsing API (getCDAFieldMappings/mergeCDAMappings)
-// only — the declarative engine's Fields[] rows are the unit of execution,
-// not independently addable atoms, so adding a brand-new row at runtime
-// would need Scope/SourcePath/Transform semantics with no existing row to
-// inherit defaults from. This is out of scope: the override surface this
-// function implements is exactly FHIRPath/Transform/ValueMap/Conformance/
-// Required on EXISTING fields, matching the Section Field Editor's actual UI.
+// Action=="replace" and Action=="remove" are matched-by-key against EXISTING
+// rows via applyOverridesToRows (FHIRPath/Transform/ValueMap/Conformance/
+// Required/Disabled — matching the Section Field Editor's Reset/Remove UI).
+// Action=="add" is different in kind, not just degree: there is no existing
+// row to match, so applyAddOverride below builds a brand-new MappingRow from
+// the override's own Scope/SourcePath/TargetPath/Transform and inserts it —
+// see that function's doc comment for exactly where. "add_section"/
+// "remove_section" remain meaningful only for the flat-CDAFieldMapping
+// config-browsing API (getCDAFieldMappings/mergeCDAMappings), not here —
+// section-level add/remove has no MappingRow-insertion analogue.
 func ApplyFieldOverrides(rules []MappingRule, overrides []CDAMappingOverride) {
 	if len(overrides) == 0 {
 		return
 	}
 	byKey := make(map[string]CDAMappingOverride, len(overrides))
+	var addOverrides []CDAMappingOverride
 	for _, ov := range overrides {
-		if ov.Action != "replace" {
-			continue
+		switch ov.Action {
+		case "replace", "remove":
+			byKey[ov.CDAField] = ov
+		case "add":
+			addOverrides = append(addOverrides, ov)
 		}
-		byKey[ov.CDAField] = ov
 	}
-	if len(byKey) == 0 {
-		return
+	if len(byKey) > 0 {
+		for i := range rules {
+			applyOverridesToRows(rules[i].Fields, "", byKey)
+		}
 	}
-	for i := range rules {
-		applyOverridesToRows(rules[i].Fields, "", byKey)
+	for _, ov := range addOverrides {
+		applyAddOverride(rules, ov)
 	}
 }
 
@@ -225,6 +247,12 @@ func applyOverridesToRows(rows []MappingRow, nestedUnder string, byKey map[strin
 		if !ok {
 			continue
 		}
+		if ov.Action == "remove" {
+			// A removed field's FHIRPath/Transform/etc. are moot — applyRow
+			// skips the row entirely before ever reading them.
+			row.Disabled = true
+			continue
+		}
 		if ov.FHIRPath != "" {
 			row.TargetPath = ov.FHIRPath
 		}
@@ -241,4 +269,151 @@ func applyOverridesToRows(rows []MappingRow, nestedUnder string, byKey map[strin
 			row.Required = ov.IsRequired
 		}
 	}
+}
+
+// applyAddOverride inserts one brand-new MappingRow (built from ov's own
+// Scope/SourcePath/TargetPath/Transform/ValueMap/Conformance/IsRequired)
+// into every rule variant ov.TargetFHIRResources targets (all variants when
+// unset — the same indiscriminate fan-out replace/remove already have).
+// newRow.TargetPath is always the BARE property name (e.g. "onset", never
+// "reaction.onset") — matching how every existing nested row already works;
+// the dotted lookup key only exists at FlattenSectionRules' flattened-key
+// layer (nestedUnder + "." + row.TargetPath), never on the row itself.
+//
+// Defensive, not fatal, throughout: a rule this override doesn't target, or
+// a NestedUnder parent that doesn't exist on some targeted rule, is a silent
+// no-op for that rule — this engine's existing convention is that a Scope/
+// target resolving to nothing is normal, not an error (see MappingRow's own
+// doc comment on Scope). Real misconfiguration is caught earlier, at
+// save time, by ValidateAddOverride — this function never needs to error.
+func applyAddOverride(rules []MappingRule, ov CDAMappingOverride) {
+	newRow := MappingRow{
+		Scope:       ov.Scope,
+		SourcePath:  ov.SourcePath,
+		TargetPath:  ov.FHIRPath,
+		Transform:   ov.Transform,
+		ValueMap:    ov.ValueMap,
+		Conformance: ov.Conformance,
+		Required:    ov.IsRequired,
+		CollectAll:  ov.CollectAll,
+	}
+	for i := range rules {
+		rule := &rules[i]
+		if !ruleIsTargeted(ov.TargetFHIRResources, rule.FHIRResource) {
+			continue
+		}
+		if ov.NestedUnder == "" {
+			if rowKeyExists(rule.Fields, newRow.TargetPath) {
+				continue // idempotent — already present, don't duplicate
+			}
+			rule.Fields = append(rule.Fields, newRow)
+			continue
+		}
+		parent := findCollectAllParent(rule.Fields, ov.NestedUnder)
+		if parent == nil {
+			continue // this rule variant has no such nested group — no-op
+		}
+		if rowKeyExists(parent.Fields, newRow.TargetPath) {
+			continue
+		}
+		parent.Fields = append(parent.Fields, newRow)
+	}
+}
+
+// ruleIsTargeted reports whether fhirResource is one of targets, or targets
+// is empty (meaning "every rule variant in the section").
+func ruleIsTargeted(targets []string, fhirResource string) bool {
+	if len(targets) == 0 {
+		return true
+	}
+	for _, t := range targets {
+		if t == fhirResource {
+			return true
+		}
+	}
+	return false
+}
+
+// findCollectAllParent locates an existing nested-group parent row by its
+// TargetPath — a row counts as a "parent" only when it has its own Fields
+// (a CollectAll+Fields row), matching flattenRow's own definition of one.
+func findCollectAllParent(rows []MappingRow, targetPath string) *MappingRow {
+	for i := range rows {
+		if rows[i].TargetPath == targetPath && len(rows[i].Fields) > 0 {
+			return &rows[i]
+		}
+	}
+	return nil
+}
+
+// rowKeyExists reports whether a LEAF row (no Fields of its own) with this
+// bare TargetPath already exists among rows — the idempotency guard so
+// re-applying the same "add" override twice never duplicates a row.
+func rowKeyExists(rows []MappingRow, targetPath string) bool {
+	for _, r := range rows {
+		if len(r.Fields) == 0 && r.TargetPath == targetPath {
+			return true
+		}
+	}
+	return false
+}
+
+// ValidateAddOverride checks an Action=="add" override against the section's
+// real rule shape BEFORE it's persisted — called from
+// CDASchemaController.ComputeDelta, never from the runtime engine (which
+// stays purely defensive — see applyAddOverride's own doc comment). Returns
+// nil for non-"add" overrides.
+//
+// Nested adds are validated strictly: the named group must exist in EVERY
+// targeted resource, or this returns an error naming the gap. Top-level adds
+// are NOT held to that same strictness — no per-resource existence check —
+// because "replace"/"remove" already apply indiscriminately across every
+// rule variant in a section today, and a top-level field resolving to
+// nothing on some variant is this engine's normal "Scope matched nothing"
+// behavior, not a configuration error. Forcing strict validation there too
+// would be inconsistent with existing behavior and needlessly naggy for the
+// common case (most sections have exactly one rule variant).
+func ValidateAddOverride(ov CDAMappingOverride) error {
+	if ov.Action != "add" {
+		return nil
+	}
+	if ov.FHIRPath == "" {
+		return fmt.Errorf("cda mapping add: %q: fhirPath is required", ov.CDAField)
+	}
+	// CollectAll is only ever exercised, in the whole OOB rule set, as a
+	// top-level row (services/cda_fhir/declarative_oob_rules.go's plain-loop
+	// CollectAll rows — e.g. reasonCode — have no parent group). Nesting a
+	// CollectAll row under an existing CollectAll+Fields group is
+	// unprecedented and applyAddOverride's Fields-append logic doesn't
+	// special-case it, so reject it explicitly rather than silently produce
+	// an unproven shape. The frontend already enforces this via mutual
+	// exclusivity in the UI; this is the defensive server-side backstop.
+	if ov.CollectAll && ov.NestedUnder != "" {
+		return fmt.Errorf("cda mapping add: %q: collectAll is only supported for a top-level field, not nested under %q", ov.CDAField, ov.NestedUnder)
+	}
+	rules := DeclarativeSectionRules(ov.SectionKey)
+	if len(rules) == 0 {
+		return fmt.Errorf("cda mapping add: unknown sectionKey %q", ov.SectionKey)
+	}
+
+	targets := ov.TargetFHIRResources
+	if len(targets) == 0 {
+		for _, r := range rules {
+			targets = append(targets, r.FHIRResource)
+		}
+	}
+	byResource := make(map[string]MappingRule, len(rules))
+	for _, r := range rules {
+		byResource[r.FHIRResource] = r
+	}
+	for _, t := range targets {
+		rule, ok := byResource[t]
+		if !ok {
+			return fmt.Errorf("cda mapping add: %q: unknown FHIR resource %q for section %q", ov.CDAField, t, ov.SectionKey)
+		}
+		if ov.NestedUnder != "" && findCollectAllParent(rule.Fields, ov.NestedUnder) == nil {
+			return fmt.Errorf("cda mapping add: %q: resource %q has no nested group %q", ov.CDAField, t, ov.NestedUnder)
+		}
+	}
+	return nil
 }

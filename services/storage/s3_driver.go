@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"sync"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
@@ -32,6 +33,61 @@ type S3DriverConfig struct {
 type S3Driver struct {
 	cfg    S3DriverConfig
 	client *s3.Client
+
+	// appendLocks serializes AppendObject calls per (bucket, key). S3 has no native
+	// append primitive — AppendObject emulates one via download-concat-upload (see
+	// its own doc comment) — so without per-key serialization, concurrent appends to
+	// the SAME object race: both read identical "existing" content, each appends its
+	// own data, and whichever PutObject lands last silently overwrites the other's
+	// write. This is the common case here, not an edge case: one in-flight message
+	// produces many lifecycle log lines in quick succession (RECEIVE, QUEUE, STEP
+	// EXEC per pipeline step, DELIVER, ...), each appended from its own goroutine
+	// (see ProcessingLogger.log's `go func() { ... AppendLog ... }()`). Found via a
+	// 2026-07 load test: sustained MLLP traffic produced thousands of goroutines
+	// piled up in this exact call path.
+	//
+	// Reference-counted rather than a plain sync.Map so entries are removed once no
+	// goroutine is using them — an unbounded map keyed by every message ID ever
+	// logged for the life of the process would itself be a slow memory leak.
+	appendLocksMu sync.Mutex
+	appendLocks   map[string]*refCountedMutex
+}
+
+// refCountedMutex is a mutex plus a count of how many callers currently hold a
+// reference to it, so S3Driver.appendLocks can remove entries once unused instead
+// of growing forever.
+type refCountedMutex struct {
+	mu       sync.Mutex
+	refCount int
+}
+
+// acquireAppendLock returns the (possibly newly created) mutex for bucket/key and
+// increments its reference count. Always pair with releaseAppendLock.
+func (d *S3Driver) acquireAppendLock(bucket, key string) *refCountedMutex {
+	lockKey := bucket + "/" + key
+	d.appendLocksMu.Lock()
+	defer d.appendLocksMu.Unlock()
+	if d.appendLocks == nil {
+		d.appendLocks = make(map[string]*refCountedMutex)
+	}
+	rcm, ok := d.appendLocks[lockKey]
+	if !ok {
+		rcm = &refCountedMutex{}
+		d.appendLocks[lockKey] = rcm
+	}
+	rcm.refCount++
+	return rcm
+}
+
+// releaseAppendLock decrements rcm's reference count and removes it from the map
+// once no other caller holds a reference.
+func (d *S3Driver) releaseAppendLock(bucket, key string, rcm *refCountedMutex) {
+	d.appendLocksMu.Lock()
+	defer d.appendLocksMu.Unlock()
+	rcm.refCount--
+	if rcm.refCount == 0 {
+		delete(d.appendLocks, bucket+"/"+key)
+	}
 }
 
 // NewS3Driver creates and initialises an S3Driver from config.
@@ -210,7 +266,16 @@ var _ ObjectStorageDriver = (*S3Driver)(nil)
 
 // AppendObject implements append-by-download-concat-upload for log files.
 // For large log files consider switching to S3 multipart upload in the future.
+// Serialized per (bucket, key) — see appendLocks' doc comment for why this is
+// required, not optional, for correctness under concurrent appends to one key.
 func (d *S3Driver) AppendObject(ctx context.Context, bucket, key string, data []byte) (string, error) {
+	rcm := d.acquireAppendLock(bucket, key)
+	rcm.mu.Lock()
+	defer func() {
+		rcm.mu.Unlock()
+		d.releaseAppendLock(bucket, key, rcm)
+	}()
+
 	// Try to read existing content
 	existing, _, err := d.GetObjectBytes(ctx, bucket, key)
 	if err != nil {

@@ -1,0 +1,1028 @@
+{
+  "summary": {
+    "timestamp": "2026-07-04T04:47:21.532Z",
+    "config": {
+      "messages": 100,
+      "concurrent": 10,
+      "targetTps": 0,
+      "chaos": false,
+      "chaosRate": 0.2
+    },
+    "duration_ms": 167,
+    "throughput_tps": 598.8,
+    "normal": {
+      "total": 100,
+      "passed": 100,
+      "failed": 0,
+      "latency": {
+        "avg": 15,
+        "p50": 14,
+        "p90": 21,
+        "p99": 25
+      }
+    },
+    "chaos": null
+  },
+  "results": [
+    {
+      "idx": 0,
+      "scenario": "normal",
+      "isChaos": false,
+      "expectNack": false,
+      "ackCode": "AA",
+      "latencyMs": 28,
+      "error": "",
+      "pass": true
+    },
+    {
+      "idx": 2,
+      "scenario": "normal",
+      "isChaos": false,
+      "expectNack": false,
+      "ackCode": "AA",
+      "latencyMs": 15,
+      "error": "",
+      "pass": true
+    },
+    {
+      "idx": 3,
+      "scenario": "normal",
+      "isChaos": false,
+      "expectNack": false,
+      "ackCode": "AA",
+      "latencyMs": 16,
+      "error": "",
+      "pass": true
+    },
+    {
+      "idx": 4,
+      "scenario": "normal",
+      "isChaos": false,
+      "expectNack": false,
+      "ackCode": "AA",
+      "latencyMs": 16,
+      "error": "",
+      "pass": true
+    },
+    {
+      "idx": 1,
+      "scenario": "normal",
+      "isChaos": false,
+      "expectNack": false,
+      "ackCode": "AA",
+      "latencyMs": 17,
+      "error": "",
+      "pass": true
+    },
+    {
+      "idx": 6,
+      "scenario": "normal",
+      "isChaos": false,
+      "expectNack": false,
+      "ackCode": "AA",
+      "latencyMs": 18,
+      "error": "",
+      "pass": true
+    },
+    {
+      "idx": 7,
+      "scenario": "normal",
+      "isChaos": false,
+      "expectNack": false,
+      "ackCode": "AA",
+      "latencyMs": 23,
+      "error": "",
+      "pass": true
+    },
+    {
+      "idx": 5,
+      "scenario": "normal",
+      "isChaos": false,
+      "expectNack": false,
+      "ackCode": "AA",
+      "latencyMs": 23,
+      "error": "",
+      "pass": true
+    },
+    {
+      "idx": 8,
+      "scenario": "normal",
+      "isChaos": false,
+      "expectNack": false,
+      "ackCode": "AA",
+      "latencyMs": 24,
+      "error": "",
+      "pass": true
+    },
+    {
+      "idx": 9,
+      "scenario": "normal",
+      "isChaos": false,
+      "expectNack": false,
+      "ackCode": "AA",
+      "latencyMs": 24,
+      "error": "",
+      "pass": true
+    },
+    {
+      "idx": 13,
+      "scenario": "normal",
+      "isChaos": false,
+      "expectNack": false,
+      "ackCode": "AA",
+      "latencyMs": 17,
+      "error": "",
+      "pass": true
+    },
+    {
+      "idx": 12,
+      "scenario": "normal",
+      "isChaos": false,
+      "expectNack": false,
+      "ackCode": "AA",
+      "latencyMs": 18,
+      "error": "",
+      "pass": true
+    },
+    {
+      "idx": 10,
+      "scenario": "normal",
+      "isChaos": false,
+      "expectNack": false,
+      "ackCode": "AA",
+      "latencyMs": 20,
+      "error": "",
+      "pass": true
+    },
+    {
+      "idx": 11,
+      "scenario": "normal",
+      "isChaos": false,
+      "expectNack": false,
+      "ackCode": "AA",
+      "latencyMs": 19,
+      "error": "",
+      "pass": true
+    },
+    {
+      "idx": 16,
+      "scenario": "normal",
+      "isChaos": false,
+      "expectNack": false,
+      "ackCode": "AA",
+      "latencyMs": 13,
+      "error": "",
+      "pass": true
+    },
+    {
+      "idx": 14,
+      "scenario": "normal",
+      "isChaos": false,
+      "expectNack": false,
+      "ackCode": "AA",
+      "latencyMs": 20,
+      "error": "",
+      "pass": true
+    },
+    {
+      "idx": 18,
+      "scenario": "normal",
+      "isChaos": false,
+      "expectNack": false,
+      "ackCode": "AA",
+      "latencyMs": 14,
+      "error": "",
+      "pass": true
+    },
+    {
+      "idx": 15,
+      "scenario": "normal",
+      "isChaos": false,
+      "expectNack": false,
+      "ackCode": "AA",
+      "latencyMs": 20,
+      "error": "",
+      "pass": true
+    },
+    {
+      "idx": 19,
+      "scenario": "normal",
+      "isChaos": false,
+      "expectNack": false,
+      "ackCode": "AA",
+      "latencyMs": 14,
+      "error": "",
+      "pass": true
+    },
+    {
+      "idx": 17,
+      "scenario": "normal",
+      "isChaos": false,
+      "expectNack": false,
+      "ackCode": "AA",
+      "latencyMs": 21,
+      "error": "",
+      "pass": true
+    },
+    {
+      "idx": 20,
+      "scenario": "normal",
+      "isChaos": false,
+      "expectNack": false,
+      "ackCode": "AA",
+      "latencyMs": 13,
+      "error": "",
+      "pass": true
+    },
+    {
+      "idx": 23,
+      "scenario": "normal",
+      "isChaos": false,
+      "expectNack": false,
+      "ackCode": "AA",
+      "latencyMs": 12,
+      "error": "",
+      "pass": true
+    },
+    {
+      "idx": 22,
+      "scenario": "normal",
+      "isChaos": false,
+      "expectNack": false,
+      "ackCode": "AA",
+      "latencyMs": 13,
+      "error": "",
+      "pass": true
+    },
+    {
+      "idx": 21,
+      "scenario": "normal",
+      "isChaos": false,
+      "expectNack": false,
+      "ackCode": "AA",
+      "latencyMs": 13,
+      "error": "",
+      "pass": true
+    },
+    {
+      "idx": 24,
+      "scenario": "normal",
+      "isChaos": false,
+      "expectNack": false,
+      "ackCode": "AA",
+      "latencyMs": 10,
+      "error": "",
+      "pass": true
+    },
+    {
+      "idx": 26,
+      "scenario": "normal",
+      "isChaos": false,
+      "expectNack": false,
+      "ackCode": "AA",
+      "latencyMs": 15,
+      "error": "",
+      "pass": true
+    },
+    {
+      "idx": 28,
+      "scenario": "normal",
+      "isChaos": false,
+      "expectNack": false,
+      "ackCode": "AA",
+      "latencyMs": 15,
+      "error": "",
+      "pass": true
+    },
+    {
+      "idx": 25,
+      "scenario": "normal",
+      "isChaos": false,
+      "expectNack": false,
+      "ackCode": "AA",
+      "latencyMs": 17,
+      "error": "",
+      "pass": true
+    },
+    {
+      "idx": 29,
+      "scenario": "normal",
+      "isChaos": false,
+      "expectNack": false,
+      "ackCode": "AA",
+      "latencyMs": 10,
+      "error": "",
+      "pass": true
+    },
+    {
+      "idx": 27,
+      "scenario": "normal",
+      "isChaos": false,
+      "expectNack": false,
+      "ackCode": "AA",
+      "latencyMs": 17,
+      "error": "",
+      "pass": true
+    },
+    {
+      "idx": 30,
+      "scenario": "normal",
+      "isChaos": false,
+      "expectNack": false,
+      "ackCode": "AA",
+      "latencyMs": 9,
+      "error": "",
+      "pass": true
+    },
+    {
+      "idx": 32,
+      "scenario": "normal",
+      "isChaos": false,
+      "expectNack": false,
+      "ackCode": "AA",
+      "latencyMs": 8,
+      "error": "",
+      "pass": true
+    },
+    {
+      "idx": 34,
+      "scenario": "normal",
+      "isChaos": false,
+      "expectNack": false,
+      "ackCode": "AA",
+      "latencyMs": 9,
+      "error": "",
+      "pass": true
+    },
+    {
+      "idx": 31,
+      "scenario": "normal",
+      "isChaos": false,
+      "expectNack": false,
+      "ackCode": "AA",
+      "latencyMs": 13,
+      "error": "",
+      "pass": true
+    },
+    {
+      "idx": 33,
+      "scenario": "normal",
+      "isChaos": false,
+      "expectNack": false,
+      "ackCode": "AA",
+      "latencyMs": 17,
+      "error": "",
+      "pass": true
+    },
+    {
+      "idx": 37,
+      "scenario": "normal",
+      "isChaos": false,
+      "expectNack": false,
+      "ackCode": "AA",
+      "latencyMs": 18,
+      "error": "",
+      "pass": true
+    },
+    {
+      "idx": 39,
+      "scenario": "normal",
+      "isChaos": false,
+      "expectNack": false,
+      "ackCode": "AA",
+      "latencyMs": 17,
+      "error": "",
+      "pass": true
+    },
+    {
+      "idx": 35,
+      "scenario": "normal",
+      "isChaos": false,
+      "expectNack": false,
+      "ackCode": "AA",
+      "latencyMs": 19,
+      "error": "",
+      "pass": true
+    },
+    {
+      "idx": 36,
+      "scenario": "normal",
+      "isChaos": false,
+      "expectNack": false,
+      "ackCode": "AA",
+      "latencyMs": 18,
+      "error": "",
+      "pass": true
+    },
+    {
+      "idx": 38,
+      "scenario": "normal",
+      "isChaos": false,
+      "expectNack": false,
+      "ackCode": "AA",
+      "latencyMs": 19,
+      "error": "",
+      "pass": true
+    },
+    {
+      "idx": 41,
+      "scenario": "normal",
+      "isChaos": false,
+      "expectNack": false,
+      "ackCode": "AA",
+      "latencyMs": 18,
+      "error": "",
+      "pass": true
+    },
+    {
+      "idx": 42,
+      "scenario": "normal",
+      "isChaos": false,
+      "expectNack": false,
+      "ackCode": "AA",
+      "latencyMs": 21,
+      "error": "",
+      "pass": true
+    },
+    {
+      "idx": 40,
+      "scenario": "normal",
+      "isChaos": false,
+      "expectNack": false,
+      "ackCode": "AA",
+      "latencyMs": 22,
+      "error": "",
+      "pass": true
+    },
+    {
+      "idx": 43,
+      "scenario": "normal",
+      "isChaos": false,
+      "expectNack": false,
+      "ackCode": "AA",
+      "latencyMs": 18,
+      "error": "",
+      "pass": true
+    },
+    {
+      "idx": 44,
+      "scenario": "normal",
+      "isChaos": false,
+      "expectNack": false,
+      "ackCode": "AA",
+      "latencyMs": 21,
+      "error": "",
+      "pass": true
+    },
+    {
+      "idx": 48,
+      "scenario": "normal",
+      "isChaos": false,
+      "expectNack": false,
+      "ackCode": "AA",
+      "latencyMs": 14,
+      "error": "",
+      "pass": true
+    },
+    {
+      "idx": 45,
+      "scenario": "normal",
+      "isChaos": false,
+      "expectNack": false,
+      "ackCode": "AA",
+      "latencyMs": 14,
+      "error": "",
+      "pass": true
+    },
+    {
+      "idx": 46,
+      "scenario": "normal",
+      "isChaos": false,
+      "expectNack": false,
+      "ackCode": "AA",
+      "latencyMs": 15,
+      "error": "",
+      "pass": true
+    },
+    {
+      "idx": 50,
+      "scenario": "normal",
+      "isChaos": false,
+      "expectNack": false,
+      "ackCode": "AA",
+      "latencyMs": 18,
+      "error": "",
+      "pass": true
+    },
+    {
+      "idx": 51,
+      "scenario": "normal",
+      "isChaos": false,
+      "expectNack": false,
+      "ackCode": "AA",
+      "latencyMs": 15,
+      "error": "",
+      "pass": true
+    },
+    {
+      "idx": 56,
+      "scenario": "normal",
+      "isChaos": false,
+      "expectNack": false,
+      "ackCode": "AA",
+      "latencyMs": 9,
+      "error": "",
+      "pass": true
+    },
+    {
+      "idx": 54,
+      "scenario": "normal",
+      "isChaos": false,
+      "expectNack": false,
+      "ackCode": "AA",
+      "latencyMs": 11,
+      "error": "",
+      "pass": true
+    },
+    {
+      "idx": 55,
+      "scenario": "normal",
+      "isChaos": false,
+      "expectNack": false,
+      "ackCode": "AA",
+      "latencyMs": 10,
+      "error": "",
+      "pass": true
+    },
+    {
+      "idx": 52,
+      "scenario": "normal",
+      "isChaos": false,
+      "expectNack": false,
+      "ackCode": "AA",
+      "latencyMs": 19,
+      "error": "",
+      "pass": true
+    },
+    {
+      "idx": 49,
+      "scenario": "normal",
+      "isChaos": false,
+      "expectNack": false,
+      "ackCode": "AA",
+      "latencyMs": 23,
+      "error": "",
+      "pass": true
+    },
+    {
+      "idx": 57,
+      "scenario": "normal",
+      "isChaos": false,
+      "expectNack": false,
+      "ackCode": "AA",
+      "latencyMs": 9,
+      "error": "",
+      "pass": true
+    },
+    {
+      "idx": 53,
+      "scenario": "normal",
+      "isChaos": false,
+      "expectNack": false,
+      "ackCode": "AA",
+      "latencyMs": 19,
+      "error": "",
+      "pass": true
+    },
+    {
+      "idx": 47,
+      "scenario": "normal",
+      "isChaos": false,
+      "expectNack": false,
+      "ackCode": "AA",
+      "latencyMs": 25,
+      "error": "",
+      "pass": true
+    },
+    {
+      "idx": 58,
+      "scenario": "normal",
+      "isChaos": false,
+      "expectNack": false,
+      "ackCode": "AA",
+      "latencyMs": 7,
+      "error": "",
+      "pass": true
+    },
+    {
+      "idx": 59,
+      "scenario": "normal",
+      "isChaos": false,
+      "expectNack": false,
+      "ackCode": "AA",
+      "latencyMs": 10,
+      "error": "",
+      "pass": true
+    },
+    {
+      "idx": 61,
+      "scenario": "normal",
+      "isChaos": false,
+      "expectNack": false,
+      "ackCode": "AA",
+      "latencyMs": 11,
+      "error": "",
+      "pass": true
+    },
+    {
+      "idx": 60,
+      "scenario": "normal",
+      "isChaos": false,
+      "expectNack": false,
+      "ackCode": "AA",
+      "latencyMs": 13,
+      "error": "",
+      "pass": true
+    },
+    {
+      "idx": 62,
+      "scenario": "normal",
+      "isChaos": false,
+      "expectNack": false,
+      "ackCode": "AA",
+      "latencyMs": 12,
+      "error": "",
+      "pass": true
+    },
+    {
+      "idx": 64,
+      "scenario": "normal",
+      "isChaos": false,
+      "expectNack": false,
+      "ackCode": "AA",
+      "latencyMs": 12,
+      "error": "",
+      "pass": true
+    },
+    {
+      "idx": 65,
+      "scenario": "normal",
+      "isChaos": false,
+      "expectNack": false,
+      "ackCode": "AA",
+      "latencyMs": 12,
+      "error": "",
+      "pass": true
+    },
+    {
+      "idx": 63,
+      "scenario": "normal",
+      "isChaos": false,
+      "expectNack": false,
+      "ackCode": "AA",
+      "latencyMs": 13,
+      "error": "",
+      "pass": true
+    },
+    {
+      "idx": 66,
+      "scenario": "normal",
+      "isChaos": false,
+      "expectNack": false,
+      "ackCode": "AA",
+      "latencyMs": 16,
+      "error": "",
+      "pass": true
+    },
+    {
+      "idx": 68,
+      "scenario": "normal",
+      "isChaos": false,
+      "expectNack": false,
+      "ackCode": "AA",
+      "latencyMs": 15,
+      "error": "",
+      "pass": true
+    },
+    {
+      "idx": 67,
+      "scenario": "normal",
+      "isChaos": false,
+      "expectNack": false,
+      "ackCode": "AA",
+      "latencyMs": 17,
+      "error": "",
+      "pass": true
+    },
+    {
+      "idx": 69,
+      "scenario": "normal",
+      "isChaos": false,
+      "expectNack": false,
+      "ackCode": "AA",
+      "latencyMs": 15,
+      "error": "",
+      "pass": true
+    },
+    {
+      "idx": 72,
+      "scenario": "normal",
+      "isChaos": false,
+      "expectNack": false,
+      "ackCode": "AA",
+      "latencyMs": 10,
+      "error": "",
+      "pass": true
+    },
+    {
+      "idx": 71,
+      "scenario": "normal",
+      "isChaos": false,
+      "expectNack": false,
+      "ackCode": "AA",
+      "latencyMs": 10,
+      "error": "",
+      "pass": true
+    },
+    {
+      "idx": 74,
+      "scenario": "normal",
+      "isChaos": false,
+      "expectNack": false,
+      "ackCode": "AA",
+      "latencyMs": 10,
+      "error": "",
+      "pass": true
+    },
+    {
+      "idx": 75,
+      "scenario": "normal",
+      "isChaos": false,
+      "expectNack": false,
+      "ackCode": "AA",
+      "latencyMs": 9,
+      "error": "",
+      "pass": true
+    },
+    {
+      "idx": 73,
+      "scenario": "normal",
+      "isChaos": false,
+      "expectNack": false,
+      "ackCode": "AA",
+      "latencyMs": 15,
+      "error": "",
+      "pass": true
+    },
+    {
+      "idx": 70,
+      "scenario": "normal",
+      "isChaos": false,
+      "expectNack": false,
+      "ackCode": "AA",
+      "latencyMs": 17,
+      "error": "",
+      "pass": true
+    },
+    {
+      "idx": 77,
+      "scenario": "normal",
+      "isChaos": false,
+      "expectNack": false,
+      "ackCode": "AA",
+      "latencyMs": 11,
+      "error": "",
+      "pass": true
+    },
+    {
+      "idx": 76,
+      "scenario": "normal",
+      "isChaos": false,
+      "expectNack": false,
+      "ackCode": "AA",
+      "latencyMs": 13,
+      "error": "",
+      "pass": true
+    },
+    {
+      "idx": 81,
+      "scenario": "normal",
+      "isChaos": false,
+      "expectNack": false,
+      "ackCode": "AA",
+      "latencyMs": 10,
+      "error": "",
+      "pass": true
+    },
+    {
+      "idx": 78,
+      "scenario": "normal",
+      "isChaos": false,
+      "expectNack": false,
+      "ackCode": "AA",
+      "latencyMs": 14,
+      "error": "",
+      "pass": true
+    },
+    {
+      "idx": 79,
+      "scenario": "normal",
+      "isChaos": false,
+      "expectNack": false,
+      "ackCode": "AA",
+      "latencyMs": 11,
+      "error": "",
+      "pass": true
+    },
+    {
+      "idx": 80,
+      "scenario": "normal",
+      "isChaos": false,
+      "expectNack": false,
+      "ackCode": "AA",
+      "latencyMs": 12,
+      "error": "",
+      "pass": true
+    },
+    {
+      "idx": 83,
+      "scenario": "normal",
+      "isChaos": false,
+      "expectNack": false,
+      "ackCode": "AA",
+      "latencyMs": 13,
+      "error": "",
+      "pass": true
+    },
+    {
+      "idx": 82,
+      "scenario": "normal",
+      "isChaos": false,
+      "expectNack": false,
+      "ackCode": "AA",
+      "latencyMs": 13,
+      "error": "",
+      "pass": true
+    },
+    {
+      "idx": 84,
+      "scenario": "normal",
+      "isChaos": false,
+      "expectNack": false,
+      "ackCode": "AA",
+      "latencyMs": 15,
+      "error": "",
+      "pass": true
+    },
+    {
+      "idx": 85,
+      "scenario": "normal",
+      "isChaos": false,
+      "expectNack": false,
+      "ackCode": "AA",
+      "latencyMs": 14,
+      "error": "",
+      "pass": true
+    },
+    {
+      "idx": 86,
+      "scenario": "normal",
+      "isChaos": false,
+      "expectNack": false,
+      "ackCode": "AA",
+      "latencyMs": 13,
+      "error": "",
+      "pass": true
+    },
+    {
+      "idx": 87,
+      "scenario": "normal",
+      "isChaos": false,
+      "expectNack": false,
+      "ackCode": "AA",
+      "latencyMs": 16,
+      "error": "",
+      "pass": true
+    },
+    {
+      "idx": 89,
+      "scenario": "normal",
+      "isChaos": false,
+      "expectNack": false,
+      "ackCode": "AA",
+      "latencyMs": 14,
+      "error": "",
+      "pass": true
+    },
+    {
+      "idx": 93,
+      "scenario": "normal",
+      "isChaos": false,
+      "expectNack": false,
+      "ackCode": "AA",
+      "latencyMs": 14,
+      "error": "",
+      "pass": true
+    },
+    {
+      "idx": 88,
+      "scenario": "normal",
+      "isChaos": false,
+      "expectNack": false,
+      "ackCode": "AA",
+      "latencyMs": 17,
+      "error": "",
+      "pass": true
+    },
+    {
+      "idx": 92,
+      "scenario": "normal",
+      "isChaos": false,
+      "expectNack": false,
+      "ackCode": "AA",
+      "latencyMs": 14,
+      "error": "",
+      "pass": true
+    },
+    {
+      "idx": 90,
+      "scenario": "normal",
+      "isChaos": false,
+      "expectNack": false,
+      "ackCode": "AA",
+      "latencyMs": 17,
+      "error": "",
+      "pass": true
+    },
+    {
+      "idx": 91,
+      "scenario": "normal",
+      "isChaos": false,
+      "expectNack": false,
+      "ackCode": "AA",
+      "latencyMs": 16,
+      "error": "",
+      "pass": true
+    },
+    {
+      "idx": 94,
+      "scenario": "normal",
+      "isChaos": false,
+      "expectNack": false,
+      "ackCode": "AA",
+      "latencyMs": 8,
+      "error": "",
+      "pass": true
+    },
+    {
+      "idx": 96,
+      "scenario": "normal",
+      "isChaos": false,
+      "expectNack": false,
+      "ackCode": "AA",
+      "latencyMs": 9,
+      "error": "",
+      "pass": true
+    },
+    {
+      "idx": 95,
+      "scenario": "normal",
+      "isChaos": false,
+      "expectNack": false,
+      "ackCode": "AA",
+      "latencyMs": 9,
+      "error": "",
+      "pass": true
+    },
+    {
+      "idx": 97,
+      "scenario": "normal",
+      "isChaos": false,
+      "expectNack": false,
+      "ackCode": "AA",
+      "latencyMs": 6,
+      "error": "",
+      "pass": true
+    },
+    {
+      "idx": 98,
+      "scenario": "normal",
+      "isChaos": false,
+      "expectNack": false,
+      "ackCode": "AA",
+      "latencyMs": 7,
+      "error": "",
+      "pass": true
+    },
+    {
+      "idx": 99,
+      "scenario": "normal",
+      "isChaos": false,
+      "expectNack": false,
+      "ackCode": "AA",
+      "latencyMs": 7,
+      "error": "",
+      "pass": true
+    }
+  ]
+}

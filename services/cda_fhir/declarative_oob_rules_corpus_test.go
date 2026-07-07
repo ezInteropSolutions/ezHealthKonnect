@@ -146,6 +146,17 @@ func TestDeclarativeEngine_Corpus_AllergiesEndToEnd(t *testing.T) {
 				t.Logf("  notice: entry=%d field=%s severity=%s err=%s", e.EntryIndex, e.FieldKey, e.Severity, e.Error)
 			}
 			for i, r := range resources {
+				// AllergyMappingRules' recorder/asserter rows emit sub-resources
+				// (Practitioner/PractitionerRole/Organization) via EmitAsResource,
+				// concatenated into this SAME slice by BuildResources (see its
+				// own doc comment) -- the identical mixed-type slice the
+				// production Bundle assembler consumes. Skip anything that
+				// isn't this section's own AllergyIntolerance, same convention
+				// TestDeclarativeEngine_CareTeam_BuildsCareTeamAndPractitioner
+				// (declarative_oob_rules_test.go) already established.
+				if rt, _ := r["resourceType"].(string); rt != "AllergyIntolerance" {
+					continue
+				}
 				assertWellFormedResource(t, r, "AllergyIntolerance")
 				if reactions, has := r["reaction"]; has {
 					assertWellFormedReactions(t, i, reactions)
@@ -171,8 +182,13 @@ func TestDeclarativeEngine_Corpus_MedicationsEndToEnd(t *testing.T) {
 			}
 			for i, r := range resources {
 				rt, _ := r["resourceType"].(string)
+				// MedicationMappingRules' requester-tier rows emit sub-resources
+				// (Practitioner/Organization) via EmitAsResource, concatenated
+				// into this same slice by BuildResourcesForRules (see its doc
+				// comment) -- skip anything that isn't this section's own
+				// Medication* resource.
 				if rt != "MedicationRequest" && rt != "MedicationStatement" {
-					t.Errorf("resource[%d].resourceType = %v, want MedicationRequest or MedicationStatement", i, r["resourceType"])
+					continue
 				}
 				pretty, _ := json.MarshalIndent(r, "    ", "  ")
 				t.Logf("  resource[%d] (%s):\n    %s", i, rt, pretty)
@@ -193,6 +209,14 @@ func TestDeclarativeEngine_Corpus_ConditionsEndToEnd(t *testing.T) {
 			resources, errs := engine.BuildResources(documentMap, problemsRule)
 			t.Logf("%s: %d Condition resources from \"problems\", %d field-level notices", file, len(resources), len(errs))
 			for i, r := range resources {
+				// ProblemsMappingRules' recorder/asserter rows emit sub-resources
+				// (Practitioner/PractitionerRole/Organization) via EmitAsResource,
+				// concatenated into this same slice by BuildResources (see its
+				// own doc comment) -- skip anything that isn't this section's
+				// own Condition resource.
+				if rt, _ := r["resourceType"].(string); rt != "Condition" {
+					continue
+				}
 				assertWellFormedResource(t, r, "Condition")
 				pretty, _ := json.MarshalIndent(r, "    ", "  ")
 				t.Logf("  problems[%d]:\n    %s", i, pretty)
@@ -201,6 +225,9 @@ func TestDeclarativeEngine_Corpus_ConditionsEndToEnd(t *testing.T) {
 			hcResources, hcErrs := engine.BuildResources(documentMap, healthConcernsRule)
 			t.Logf("%s: %d Condition resources from \"healthConcerns\", %d field-level notices", file, len(hcResources), len(hcErrs))
 			for i, r := range hcResources {
+				if rt, _ := r["resourceType"].(string); rt != "Condition" {
+					continue
+				}
 				assertWellFormedResource(t, r, "Condition")
 				pretty, _ := json.MarshalIndent(r, "    ", "  ")
 				t.Logf("  healthConcerns[%d]:\n    %s", i, pretty)
@@ -591,20 +618,24 @@ func TestDeclarativeEngine_Corpus_PatientLinkage_AllSectionsReferencePatient(t *
 	const patientRef = "Patient/patient-1"
 
 	type linkedRule struct {
-		name  string
-		path  string // the field expected to carry the reference
-		rules []cdafhir.MappingRule
-		multi bool // true => use BuildResourcesForRules
+		name          string
+		path          string // the field expected to carry the reference
+		rules         []cdafhir.MappingRule
+		multi         bool     // true => use BuildResourcesForRules
+		resourceTypes []string // allow-list: BuildResources/BuildResourcesForRules
+		// may also emit EmitAsResource sub-resources (Practitioner, etc.) into
+		// this same slice -- see BuildResources' doc comment. Only the section's
+		// own resource type(s) are expected to carry the patient/subject link.
 	}
 	cases := []linkedRule{
-		{"Allergy", "patient", cdafhir.AllergyMappingRules(), false},
-		{"Medication", "subject", cdafhir.MedicationMappingRules(), true},
-		{"Problems", "subject", cdafhir.ProblemsMappingRules(), false},
-		{"VitalSigns", "subject", cdafhir.VitalSignsMappingRules(), false},
-		{"Immunization", "patient", cdafhir.ImmunizationMappingRules(), false},
-		{"Procedure", "subject", cdafhir.ProcedureMappingRules(), false},
-		{"CareTeam", "subject", cdafhir.CareTeamMappingRules(), false},
-		{"Device", "subject", cdafhir.DeviceMappingRules(), false},
+		{"Allergy", "patient", cdafhir.AllergyMappingRules(), false, []string{"AllergyIntolerance"}},
+		{"Medication", "subject", cdafhir.MedicationMappingRules(), true, []string{"MedicationRequest", "MedicationStatement"}},
+		{"Problems", "subject", cdafhir.ProblemsMappingRules(), false, []string{"Condition"}},
+		{"VitalSigns", "subject", cdafhir.VitalSignsMappingRules(), false, []string{"Observation"}},
+		{"Immunization", "patient", cdafhir.ImmunizationMappingRules(), false, []string{"Immunization"}},
+		{"Procedure", "subject", cdafhir.ProcedureMappingRules(), false, []string{"Procedure"}},
+		{"CareTeam", "subject", cdafhir.CareTeamMappingRules(), false, []string{"CareTeam"}},
+		{"Device", "subject", cdafhir.DeviceMappingRules(), false, []string{"DeviceUseStatement"}},
 	}
 
 	for _, file := range corpusFiles {
@@ -620,6 +651,9 @@ func TestDeclarativeEngine_Corpus_PatientLinkage_AllSectionsReferencePatient(t *
 				resources, _ = engine.BuildResources(documentMap, c.rules[0])
 			}
 			for i, r := range resources {
+				if rt, _ := r["resourceType"].(string); !containsStr(c.resourceTypes, rt) {
+					continue
+				}
 				ref, ok := r[c.path].(map[string]interface{})
 				if !ok || ref["reference"] != patientRef {
 					t.Errorf("%s/%s[%d]: %s = %v, want {reference: %s}", file, c.name, i, c.path, r[c.path], patientRef)

@@ -29,17 +29,74 @@ import (
 // not an error.
 type DeclarativeTransformFn func(value interface{}, vm map[string]string) (interface{}, error)
 
+// declarativeTransformEntry pairs a transform function with the one-line,
+// plain-language description surfaced to UI consumers (the CDA Section field
+// editor's Transform column) — the same information already sitting in each
+// function's Go doc comment below, just not readable at runtime.
+type declarativeTransformEntry struct {
+	fn          DeclarativeTransformFn
+	description string
+}
+
 // DeclarativeTransformRegistry holds all named transforms Phase 2's engine
 // can dispatch to by name. Safe for concurrent use (read-only after construction).
 type DeclarativeTransformRegistry struct {
-	transforms map[string]DeclarativeTransformFn
+	transforms  map[string]declarativeTransformEntry
+	typePairIdx map[string]string // "CDAType|FHIRType" → transformName
 }
 
 // NewDeclarativeTransformRegistry creates and populates the registry.
 func NewDeclarativeTransformRegistry() *DeclarativeTransformRegistry {
-	r := &DeclarativeTransformRegistry{transforms: make(map[string]DeclarativeTransformFn)}
+	r := &DeclarativeTransformRegistry{
+		transforms:  make(map[string]declarativeTransformEntry),
+		typePairIdx: make(map[string]string),
+	}
 	r.registerBuiltins()
+	r.buildTypePairIndex()
 	return r
+}
+
+// declarativeTypePairDefaults maps a (CDA data type, FHIR data type) pair to
+// its default transform — the Add Field modal's type-pair inference table
+// (POST /api/cda/type-pair/infer). Deliberately a SEPARATE, smaller table
+// from cda_transform_registry.go's typePairDefaults, not a reuse of it: that
+// older table names 10 of its 16 transforms (e.g. "cda_cd_to_code",
+// "cda_ivl_ts_to_period", "boolean_direct") that do not exist under those
+// names in THIS registry's registerBuiltins() below — every entry here has
+// been individually verified against that list (see
+// TestDeclarativeTypePairDefaults_AllResolve), so InferTransform never
+// returns a transform name Apply() can't actually dispatch.
+var declarativeTypePairDefaults = []TypePairDefault{
+	{"TS", "dateTime", "cda_time_to_fhir_datetime"},
+	{"TS", "date", "cda_time_to_fhir_date"},
+	{"CD", "CodeableConcept", "cda_code_to_codeable_concept"},
+	{"CE", "CodeableConcept", "cda_code_to_codeable_concept"},
+	{"PQ", "Quantity", "cda_quantity_to_fhir"},
+	{"IVL_TS", "Period", "cda_timerange_to_period"},
+	{"PN", "HumanName", "cda_name_to_fhir"},
+	{"AD", "Address", "cda_address_to_fhir"},
+	{"TEL", "ContactPoint", "cda_telecom_to_fhir"},
+	{"ED", "Attachment", "cda_text_to_attachment"},
+	{"ST", "string", "string_direct"},
+	{"CS", "code", "string_direct"},
+}
+
+func (r *DeclarativeTransformRegistry) buildTypePairIndex() {
+	for _, tp := range declarativeTypePairDefaults {
+		r.typePairIdx[tp.CDADataType+"|"+tp.FHIRDataType] = tp.DefaultTransform
+	}
+}
+
+// InferTransform looks up the default transform for a (cdaDataType,
+// fhirDataType) pair. Returns an error when no default exists — the caller
+// (the Add Field modal, or a manual /type-pair/infer call) must let the user
+// pick a transform explicitly in that case, same as today.
+func (r *DeclarativeTransformRegistry) InferTransform(cdaDataType, fhirDataType string) (string, error) {
+	key := cdaDataType + "|" + fhirDataType
+	if t, ok := r.typePairIdx[key]; ok {
+		return t, nil
+	}
+	return "", fmt.Errorf("declarative_transform: no default for %s→%s; specify transform explicitly", cdaDataType, fhirDataType)
 }
 
 // Apply dispatches to the named transform. An empty name is passthrough
@@ -49,11 +106,11 @@ func (r *DeclarativeTransformRegistry) Apply(name string, value interface{}, vm 
 	if name == "" {
 		return value, nil
 	}
-	fn, ok := r.transforms[name]
+	entry, ok := r.transforms[name]
 	if !ok {
 		return nil, fmt.Errorf("declarative_transform: unknown transform %q", name)
 	}
-	return fn(value, vm)
+	return entry.fn(value, vm)
 }
 
 // HasTransform returns whether a transform name is registered.
@@ -62,104 +119,121 @@ func (r *DeclarativeTransformRegistry) HasTransform(name string) bool {
 	return ok
 }
 
-func (r *DeclarativeTransformRegistry) register(name string, fn DeclarativeTransformFn) {
-	r.transforms[name] = fn
+// Describe returns the human-readable description for a registered
+// transform, or "" when name is unknown.
+func (r *DeclarativeTransformRegistry) Describe(name string) string {
+	return r.transforms[name].description
+}
+
+// AllDescriptions returns every registered transform name mapped to its
+// description, for bulk UI consumption (e.g. populating a lookup cache
+// client-side instead of one request per field).
+func (r *DeclarativeTransformRegistry) AllDescriptions() map[string]string {
+	out := make(map[string]string, len(r.transforms))
+	for name, entry := range r.transforms {
+		out[name] = entry.description
+	}
+	return out
+}
+
+func (r *DeclarativeTransformRegistry) register(name, description string, fn DeclarativeTransformFn) {
+	r.transforms[name] = declarativeTransformEntry{fn: fn, description: description}
 }
 
 func (r *DeclarativeTransformRegistry) registerBuiltins() {
-	r.register("string_direct", declarativeStringDirect)
-	r.register("cda_decimal_string_to_number", declarativeCDADecimalStringToNumber)
-	r.register("cda_code_to_codeable_concept", declarativeCodeToCodeableConcept)
-	r.register("cda_quantity_to_fhir", declarativeQuantityToFHIR)
-	r.register("cda_timerange_to_onset", declarativeTimeRangeToOnset)
-	r.register("cda_text_to_attachment", declarativeTextToAttachment)
+	r.register("string_direct", "Passes the value straight through unchanged, applying the row's value map (if any) first.", declarativeStringDirect)
+	r.register("cda_decimal_string_to_number", "Converts a CDA decimal attribute string (e.g. \".5\") into a real JSON number, since FHIR decimal fields reject a bare string.", declarativeCDADecimalStringToNumber)
+	r.register("cda_code_to_codeable_concept", "Converts a CDA coded element (code, display name, code system) into a structured FHIR CodeableConcept.", declarativeCodeToCodeableConcept)
+	r.register("cda_quantity_to_fhir", "Converts a CDA physical quantity (value + unit) into a FHIR Quantity.", declarativeQuantityToFHIR)
+	r.register("cda_timerange_to_onset", "Converts a CDA effectiveTime low/high range into a single FHIR onsetDateTime or onsetPeriod.", declarativeTimeRangeToOnset)
+	r.register("cda_text_to_attachment", "Wraps plain narrative text as a base64-encoded FHIR Attachment (text/plain).", declarativeTextToAttachment)
 	// Not a re-marshal adapter — allergy_mapper.go builds this CodeableConcept
 	// inline today (buildAllergyResource), so there is no existing
 	// transforms.* function to wrap. A reasonable Phase 3 candidate for
 	// extraction into transforms/status_transforms.go alongside its siblings.
-	r.register("allergy_verification_status_to_fhir", declarativeAllergyVerificationStatus)
+	r.register("allergy_verification_status_to_fhir", "Maps the CDA allergy assertion's status code to AllergyIntolerance.verificationStatus (e.g. confirmed, refuted).", declarativeAllergyVerificationStatus)
 
 	// =====================================================
 	// Phase 3 additions — Allergies, Medications, Conditions
 	// =====================================================
-	r.register("allergy_status_to_fhir", declarativeAllergyStatusToFHIR)
-	r.register("allergy_type_to_fhir", declarativeAllergyTypeToFHIR)
-	r.register("allergy_category_from_substance_system", declarativeAllergyCategoryFromSubstanceSystem)
-	r.register("allergy_substance_or_no_known_allergy_to_fhir", declarativeAllergySubstanceOrNoKnownAllergy)
-	r.register("allergy_criticality_to_fhir", declarativeAllergyCriticalityToFHIR)
-	r.register("allergy_reaction_severity_to_fhir", declarativeAllergyReactionSeverityToFHIR)
-	r.register("condition_status_to_fhir", declarativeConditionStatusToFHIR)
-	r.register("condition_verification_status_to_fhir", declarativeConditionVerificationStatus)
-	r.register("condition_category_to_fhir", declarativeConditionCategory)
-	r.register("medication_request_status_to_fhir", declarativeMedicationRequestStatusToFHIR)
-	r.register("medication_status_to_fhir", declarativeMedicationStatusToFHIR)
-	r.register("cda_timerange_to_period", declarativeTimeRangeToPeriod)
-	r.register("cda_time_to_fhir_datetime", declarativeTimeToFHIRDateTime)
-	r.register("cda_value_or_code_to_codeable_concept", declarativeValueOrCodeToCodeableConcept)
-	r.register("cda_name_or_literal_to_display_ref", declarativeNameOrLiteralToDisplayRef)
+	r.register("allergy_status_to_fhir", "Maps the CDA allergy act's status code to AllergyIntolerance.clinicalStatus (active/resolved/inactive).", declarativeAllergyStatusToFHIR)
+	r.register("allergy_type_to_fhir", "Maps the CDA allergy observation's type code to AllergyIntolerance.type (allergy vs. intolerance).", declarativeAllergyTypeToFHIR)
+	r.register("allergy_category_from_substance_system", "Infers AllergyIntolerance.category (food/medication/environment/biologic) from the allergen's code system.", declarativeAllergyCategoryFromSubstanceSystem)
+	r.register("allergy_substance_or_no_known_allergy_to_fhir", "Builds AllergyIntolerance.code from the named allergen, or — for a \"no known allergy\" assertion — maps to the matching negated SNOMED code per the C-CDA-on-FHIR IG.", declarativeAllergySubstanceOrNoKnownAllergy)
+	r.register("allergy_criticality_to_fhir", "Maps the CDA Criticality Observation's value code (CRITH/CRITL/CRITU) to AllergyIntolerance.criticality (high/low/unable-to-assess).", declarativeAllergyCriticalityToFHIR)
+	r.register("allergy_reaction_severity_to_fhir", "Maps a CDA reaction severity code to AllergyIntolerance.reaction[].severity (mild/moderate/severe).", declarativeAllergyReactionSeverityToFHIR)
+	r.register("condition_status_to_fhir", "Maps the CDA problem observation's status code to Condition.clinicalStatus.", declarativeConditionStatusToFHIR)
+	r.register("condition_verification_status_to_fhir", "Maps the CDA problem's confirmation status to Condition.verificationStatus.", declarativeConditionVerificationStatus)
+	r.register("condition_category_to_fhir", "Sets Condition.category (Problem List Item, Health Concern, or Encounter Diagnosis) based on which C-CDA section the entry came from.", declarativeConditionCategory)
+	r.register("medication_request_status_to_fhir", "Maps CDA medication order status to MedicationRequest.status.", declarativeMedicationRequestStatusToFHIR)
+	r.register("medication_status_to_fhir", "Maps CDA medication administration status to MedicationStatement.status.", declarativeMedicationStatusToFHIR)
+	r.register("cda_timerange_to_period", "Converts a CDA effectiveTime low/high range into a FHIR Period (start/end).", declarativeTimeRangeToPeriod)
+	r.register("cda_time_to_fhir_datetime", "Converts a single CDA timestamp into a full FHIR dateTime.", declarativeTimeToFHIRDateTime)
+	r.register("cda_value_or_code_to_codeable_concept", "Builds a CodeableConcept from the entry's own value if present, otherwise falls back to its code, with a narrative-text fallback when neither has a display name.", declarativeValueOrCodeToCodeableConcept)
+	r.register("cda_name_or_literal_to_display_ref", "Builds a display-only FHIR Reference from a CDA person name, or from a plain literal string when no name is available.", declarativeNameOrLiteralToDisplayRef)
 
 	// =====================================================
 	// Phase 3 additions — Vital Signs, Results, Social History
 	// =====================================================
-	r.register("observation_status_to_fhir", declarativeObservationStatusToFHIR)
-	r.register("cda_real_to_bare_quantity", declarativeRealToBareQuantity)
-	r.register("observation_category_to_fhir", declarativeObservationCategoryToFHIR)
-	r.register("observation_data_absent_reason_to_fhir", declarativeObservationDataAbsentReasonToFHIR)
+	r.register("observation_status_to_fhir", "Maps CDA result/observation status to Observation.status (final/preliminary/etc.).", declarativeObservationStatusToFHIR)
+	r.register("cda_real_to_bare_quantity", "Wraps a bare numeric value as a minimal FHIR Quantity with no unit, for CDA values that carry no unit of measure.", declarativeRealToBareQuantity)
+	r.register("observation_category_to_fhir", "Sets Observation.category (vital-signs, laboratory, social-history, functional-status, or cognitive-status) based on the section.", declarativeObservationCategoryToFHIR)
+	r.register("observation_data_absent_reason_to_fhir", "Sets a fixed \"unknown\" Observation.dataAbsentReason when the observation's value is missing.", declarativeObservationDataAbsentReasonToFHIR)
 
 	// =====================================================
 	// Phase 3 additions — Immunizations
 	// =====================================================
-	r.register("immunization_status_to_fhir", declarativeImmunizationStatusToFHIR)
-	r.register("immunization_performer_function_to_fhir", declarativeImmunizationPerformerFunction)
+	r.register("immunization_status_to_fhir", "Maps CDA immunization act status to Immunization.status (completed/not-done).", declarativeImmunizationStatusToFHIR)
+	r.register("immunization_performer_function_to_fhir", "Sets a fixed \"Administering Provider\" function code on every Immunization performer.", declarativeImmunizationPerformerFunction)
 
 	// =====================================================
 	// Phase 3 additions — Encounters / Procedures
 	// =====================================================
-	r.register("encounter_status_to_fhir", declarativeEncounterStatusToFHIR)
-	r.register("encounter_status_from_planned_mood", declarativeEncounterStatusFromPlannedMood)
-	r.register("encounter_class_coding", declarativeEncounterClassCoding)
-	r.register("encounter_participant_type_coding", declarativeEncounterParticipantTypeCoding)
-	r.register("procedure_status_to_fhir", declarativeProcedureStatusToFHIR)
+	r.register("encounter_status_to_fhir", "Maps CDA encounter status code to Encounter.status.", declarativeEncounterStatusToFHIR)
+	r.register("encounter_status_from_planned_mood", "Sets Encounter.status to \"planned\" for a future/anticipated visit based on the entry's moodCode, catching planned visits CDA otherwise marks with a misleading \"active\" statusCode.", declarativeEncounterStatusFromPlannedMood)
+	r.register("encounter_class_coding", "Builds Encounter.class from the visit-type code, preferring a proper ActEncounterCode translation over a CPT/SNOMED visit-type code, defaulting to ambulatory (AMB) when neither is available.", declarativeEncounterClassCoding)
+	r.register("encounter_participant_type_coding", "Converts a bare CDA participant type code into a structured Encounter.participant[].type CodeableConcept.", declarativeEncounterParticipantTypeCoding)
+	r.register("procedure_status_to_fhir", "Maps CDA procedure status code to Procedure.status.", declarativeProcedureStatusToFHIR)
 
 	// =====================================================
 	// Phase 3 additions — CarePlan / Goal (Plan of Care)
 	// =====================================================
-	r.register("goal_status_to_fhir", declarativeGoalStatusToFHIR)
-	r.register("service_request_status_to_fhir", declarativeServiceRequestStatusToFHIR)
-	r.register("service_request_intent_from_mood", declarativeServiceRequestIntentFromMood)
-	r.register("appointment_status_to_fhir", declarativeAppointmentStatusToFHIR)
-	r.register("supply_request_status_to_fhir", declarativeSupplyRequestStatusToFHIR)
-	r.register("cda_timerange_to_period_start", declarativeTimeRangeToPeriodStart)
-	r.register("cda_timerange_to_period_end", declarativeTimeRangeToPeriodEnd)
+	r.register("goal_status_to_fhir", "Maps CDA goal observation status to Goal.lifecycleStatus.", declarativeGoalStatusToFHIR)
+	r.register("service_request_status_to_fhir", "Maps CDA planned-service status to ServiceRequest.status.", declarativeServiceRequestStatusToFHIR)
+	r.register("service_request_intent_from_mood", "Derives ServiceRequest.intent (order/plan/proposal) from the CDA entry's moodCode.", declarativeServiceRequestIntentFromMood)
+	r.register("appointment_status_to_fhir", "Maps CDA planned-encounter status to Appointment.status.", declarativeAppointmentStatusToFHIR)
+	r.register("supply_request_status_to_fhir", "Maps CDA supply order status to SupplyRequest.status.", declarativeSupplyRequestStatusToFHIR)
+	r.register("cda_timerange_to_period_start", "Extracts just the start date/time from a CDA effectiveTime range, for fields needing a flat value instead of a nested Period.", declarativeTimeRangeToPeriodStart)
+	r.register("cda_timerange_to_period_end", "Extracts just the end date/time from a CDA effectiveTime range, for fields needing a flat value instead of a nested Period.", declarativeTimeRangeToPeriodEnd)
 
 	// =====================================================
 	// Phase 3 additions — CareTeam / Practitioner
 	// =====================================================
-	r.register("care_team_status_to_fhir", declarativeCareTeamStatusToFHIR)
-	r.register("cda_name_to_fhir", declarativeCDANameToFHIR)
-	r.register("cda_ii_to_identifier", declarativeIIToIdentifier)
-	r.register("cda_telecom_to_fhir", declarativeCDATelecomToFHIR)
+	r.register("care_team_status_to_fhir", "Maps CDA care team status code to CareTeam.status.", declarativeCareTeamStatusToFHIR)
+	r.register("cda_name_to_fhir", "Converts a CDA person name (given/family/prefix/suffix) into a structured FHIR HumanName.", declarativeCDANameToFHIR)
+	r.register("cda_ii_to_identifier", "Converts a CDA Instance Identifier (root OID + extension) into a FHIR Identifier.", declarativeIIToIdentifier)
+	r.register("cda_telecom_to_fhir", "Converts a CDA telecom URI (tel:/mailto:/fax:) into a FHIR ContactPoint with system and use.", declarativeCDATelecomToFHIR)
 
 	// =====================================================
 	// Phase 3 additions — Coverage / FamilyMemberHistory / Device
 	// =====================================================
-	r.register("coverage_type_to_codeable_concept", declarativeCoverageTypeToCodeableConcept)
-	r.register("coverage_relationship_to_fhir", declarativeCoverageRelationshipToFHIR)
-	r.register("device_use_statement_status_to_fhir", declarativeDeviceUseStatementStatusToFHIR)
-	r.register("cda_value_to_fhir", declarativeCDAValueToFHIR)
-	r.register("cda_name_to_family_string", declarativeCDANameToFamilyString)
+	r.register("coverage_type_to_codeable_concept", "Maps the insurance policy's Source of Payment code to a Coverage.type CodeableConcept.", declarativeCoverageTypeToCodeableConcept)
+	r.register("coverage_relationship_to_fhir", "Maps the subscriber's relationship code (self/spouse/child/etc.) to Coverage.relationship.", declarativeCoverageRelationshipToFHIR)
+	r.register("device_use_statement_status_to_fhir", "Maps CDA device use status to DeviceUseStatement.status.", declarativeDeviceUseStatementStatusToFHIR)
+	r.register("cda_value_to_fhir", "Converts a bare CDA observation value into its FHIR-typed equivalent (CodeableConcept, quantity, etc.), without falling back to a code the way cda_value_or_code_to_codeable_concept does.", declarativeCDAValueToFHIR)
+	r.register("cda_name_to_family_string", "Extracts only the family (last) name from a CDA person name as a plain string, for fields like FamilyMemberHistory.name that take text, not a structured name.", declarativeCDANameToFamilyString)
 
 	// =====================================================
 	// Phase 3 additions — Author / Custodian (header-level)
 	// =====================================================
-	r.register("cda_address_to_fhir", declarativeCDAAddressToFHIR)
+	r.register("cda_address_to_fhir", "Converts a CDA postal address into a structured FHIR Address.", declarativeCDAAddressToFHIR)
 
 	// =====================================================
 	// Phase 4 Slice A additions — Patient
 	// =====================================================
-	r.register("cda_time_to_fhir_date", declarativeCDATimeToFHIRDate)
-	r.register("cda_gender_to_fhir", declarativeGenderToFHIR)
-	r.register("cda_language_communication_to_fhir", declarativeLanguageCommunicationToFHIR)
+	r.register("cda_time_to_fhir_date", "Converts a CDA timestamp into a date-only (YYYY-MM-DD) FHIR date, e.g. for a birth date.", declarativeCDATimeToFHIRDate)
+	r.register("cda_gender_to_fhir", "Maps CDA administrative gender code to the FHIR gender value set (male/female/other/unknown).", declarativeGenderToFHIR)
+	r.register("cda_language_communication_to_fhir", "Converts a CDA preferred-language entry into a Patient.communication entry with a BCP-47 language code.", declarativeLanguageCommunicationToFHIR)
 }
 
 // remarshalInto re-marshals a Phase-1-resolved value (already JSON-shaped:

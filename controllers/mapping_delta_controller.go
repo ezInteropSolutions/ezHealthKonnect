@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -34,6 +35,8 @@ func NewMappingDeltaController(db *sql.DB, svc *services.HL7FHIRTransformService
 func (mc *MappingDeltaController) RegisterRoutes(rg *gin.RouterGroup) {
 	rg.PUT("/interfaces/:interfaceId/mapping-delta/:messageType", mc.SaveMappingDelta)
 	rg.DELETE("/interfaces/:interfaceId/mapping-delta/:messageType", mc.ResetToOOB)
+	rg.GET("/interfaces/:interfaceId/mapping-delta/:messageType/raw", mc.GetRawMappingDelta)
+	rg.PUT("/interfaces/:interfaceId/mapping-delta/:messageType/raw", mc.SaveRawMappingDelta)
 	rg.GET("/interfaces/:interfaceId/effective-mapping/:messageType", mc.GetEffectiveMapping)
 	rg.DELETE("/interfaces/:interfaceId/mapping-update-notice/:messageType", mc.DismissUpdateNotice)
 	rg.GET("/mapping-updates", mc.ListPendingMappingUpdates)
@@ -135,6 +138,114 @@ func (mc *MappingDeltaController) SaveMappingDelta(c *gin.Context) {
 		"templateId":      templateID,
 		"overrideCount":   overrideCount,
 		"isPureOOB":       delta == nil,
+	})
+}
+
+// GetRawMappingDelta returns the RAW, unmerged MappingDelta stored for one
+// interface+messageType (as opposed to GetEffectiveMapping's merged
+// OOB+delta view) -- the exact shape SaveRawMappingDelta expects as its PUT
+// body, so the pipeline builder's JSON Export/Import can round-trip an
+// interface's actual custom field mappings alongside the step config.
+// "delta": null (with success: true) means the interface has no custom
+// overrides for this message type -- not an error, just nothing to carry.
+func (mc *MappingDeltaController) GetRawMappingDelta(c *gin.Context) {
+	interfaceID := c.Param("interfaceId")
+	messageType := c.Param("messageType")
+
+	if interfaceID == "" || messageType == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "interfaceId and messageType are required"})
+		return
+	}
+
+	var (
+		usesStandard  bool
+		overridesJSON sql.NullString
+	)
+	err := mc.db.QueryRowContext(c.Request.Context(), `
+		SELECT uses_standard_template, mapping_overrides
+		FROM interface_message_mappings
+		WHERE interface_id = $1 AND message_type = $2
+	`, interfaceID, messageType).Scan(&usesStandard, &overridesJSON)
+
+	var delta *services.MappingDelta
+	switch {
+	case err == nil && usesStandard && overridesJSON.Valid && overridesJSON.String != "" && overridesJSON.String != "null":
+		var d services.MappingDelta
+		if jsonErr := json.Unmarshal([]byte(overridesJSON.String), &d); jsonErr == nil {
+			delta = &d
+		} else {
+			log.Printf("[mapping-delta] GetRawMappingDelta parse error (interface=%s, messageType=%s): %v", interfaceID, messageType, jsonErr)
+		}
+	case err != nil && err != sql.ErrNoRows:
+		log.Printf("[mapping-delta] GetRawMappingDelta query error (interface=%s, messageType=%s): %v", interfaceID, messageType, err)
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success":     true,
+		"interfaceId": interfaceID,
+		"messageType": messageType,
+		"delta":       delta,
+	})
+}
+
+// SaveRawMappingDelta upserts an interface_message_mappings row with an
+// ALREADY-COMPUTED delta, skipping ComputeDelta entirely -- unlike
+// SaveMappingDelta (which takes atomicMappings and diffs them against OOB
+// itself), this is for a delta obtained verbatim from GetRawMappingDelta
+// (e.g. the pipeline builder's JSON Import re-applying an exported delta to
+// a DIFFERENT interface), where recomputing would be redundant and could
+// silently produce a different result than the original if the OOB template
+// has drifted since export.
+func (mc *MappingDeltaController) SaveRawMappingDelta(c *gin.Context) {
+	interfaceID := c.Param("interfaceId")
+	messageType := c.Param("messageType")
+
+	if interfaceID == "" || messageType == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "interfaceId and messageType are required"})
+		return
+	}
+
+	var delta services.MappingDelta
+	if err := c.ShouldBindJSON(&delta); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "invalid delta payload: " + err.Error()})
+		return
+	}
+
+	deltaJSON, err := json.Marshal(delta)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "failed to serialise delta"})
+		return
+	}
+
+	var standardTemplateID *string
+	if delta.BaseTemplateID != "" {
+		standardTemplateID = &delta.BaseTemplateID
+	}
+
+	_, err = mc.db.ExecContext(c.Request.Context(), `
+		INSERT INTO interface_message_mappings
+			(interface_id, message_type, uses_standard_template, standard_template_id,
+			 mapping_overrides, template_update_available, available_template_id, available_template_version)
+		VALUES ($1, $2, true, $3, $4, false, NULL, NULL)
+		ON CONFLICT (interface_id, message_type) DO UPDATE SET
+			uses_standard_template     = true,
+			standard_template_id       = EXCLUDED.standard_template_id,
+			mapping_overrides          = EXCLUDED.mapping_overrides,
+			template_update_available  = false,
+			available_template_id     = NULL,
+			available_template_version = NULL,
+			updated_at                 = CURRENT_TIMESTAMP
+	`, interfaceID, messageType, standardTemplateID, deltaJSON)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "failed to save delta: " + err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success":       true,
+		"interfaceId":   interfaceID,
+		"messageType":   messageType,
+		"overrideCount": len(delta.Overrides),
 	})
 }
 

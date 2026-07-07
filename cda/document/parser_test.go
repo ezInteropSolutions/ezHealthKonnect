@@ -1057,3 +1057,89 @@ func mustParseElement(t *testing.T, xml string) *etree.Element {
 	require.NoError(t, doc.ReadFromString(xml))
 	return doc.Root()
 }
+
+// TestParseClinicalAct_MultipleValues_FiltersBlankAndMergesCodedSiblings is a
+// regression test for a real vendor Smoking Status entry (Social History):
+// 3 sibling <value> elements where the first is a blank nullFlavor
+// placeholder and the other two carry alternate codes (LOINC + SNOMED) for
+// the same "never smoked" concept. Before this fix, entry.Value always took
+// the structurally-first <value> regardless of content, so this entry mapped
+// to a FHIR Observation with NO value at all -- both real codes were
+// silently dropped. Now: the blank placeholder is filtered out, and the two
+// real codes are merged into one CodeableConcept via Code.Translations (the
+// same relationship CDACodeToCodeableConcept already renders for a genuine
+// <translation> child) instead of being dropped.
+func TestParseClinicalAct_MultipleValues_FiltersBlankAndMergesCodedSiblings(t *testing.T) {
+	el := mustParseElement(t, `<observation classCode="OBS" moodCode="EVN">
+		<code code="72166-2" codeSystem="2.16.840.1.113883.6.1" codeSystemName="LOINC"/>
+		<statusCode code="completed"/>
+		<value xsi:type="CD" nullFlavor="NI"/>
+		<value xsi:type="CD" code="LA18978-9" codeSystem="2.16.840.1.113883.6.1" codeSystemName="LOINC" displayName="Never smoker"/>
+		<value xsi:type="CD" code="266919005" codeSystem="2.16.840.1.113883.6.96" codeSystemName="SNOMED CT" displayName="Never smoked tobacco"/>
+	</observation>`)
+
+	ep := &entryParser{}
+	entry := ep.parseClinicalAct(el, "observation")
+
+	require.NotNil(t, entry.Value, "the blank first <value> must not win by default -- a real code must be kept")
+	require.NotNil(t, entry.Value.Code)
+	assert.Equal(t, "LA18978-9", entry.Value.Code.Code, "first NON-EMPTY value becomes primary")
+	require.Len(t, entry.Value.Code.Translations, 1, "the second real code must be merged as a translation, not dropped")
+	assert.Equal(t, "266919005", entry.Value.Code.Translations[0].Code)
+	assert.Empty(t, entry.AdditionalValues, "both real values were mergeable -- nothing should be left over to warn about")
+}
+
+// TestParseClinicalAct_MultipleValues_UnmergeableTypeStillWarns proves the
+// PHQ-2 case (99397 sample, see AdditionalValues' doc comment) still behaves
+// exactly as before this fix: an INT score and a CD interpretation are
+// different value[x] shapes and cannot be merged into one FHIR field, so the
+// CD sibling must still land in AdditionalValues for the engine to warn
+// about, not be silently folded in anywhere.
+func TestParseClinicalAct_MultipleValues_UnmergeableTypeStillWarns(t *testing.T) {
+	el := mustParseElement(t, `<observation classCode="OBS" moodCode="EVN">
+		<code code="12345-6" codeSystem="2.16.840.1.113883.6.1"/>
+		<statusCode code="completed"/>
+		<value xsi:type="INT" value="0"/>
+		<value xsi:type="CD" code="428171000124102" codeSystem="2.16.840.1.113883.6.96" displayName="Depression screening negative (finding)"/>
+	</observation>`)
+
+	ep := &entryParser{}
+	entry := ep.parseClinicalAct(el, "observation")
+
+	require.NotNil(t, entry.Value)
+	require.NotNil(t, entry.Value.Integer)
+	assert.Equal(t, 0, *entry.Value.Integer)
+	require.Len(t, entry.AdditionalValues, 1, "an INT primary and a CD sibling cannot be merged -- the CD must still be surfaced as a warning candidate")
+	assert.Equal(t, "428171000124102", entry.AdditionalValues[0].Code.Code)
+}
+
+// TestParseClinicalAct_SingleValue_BlankStillKept proves the overwhelmingly
+// common single-<value> path is completely unaffected by the multi-value
+// filtering logic above -- even a blank/nullFlavor-only value is still
+// assigned to entry.Value exactly as before, since there is nothing to
+// filter or merge against with only one sibling.
+func TestParseClinicalAct_SingleValue_BlankStillKept(t *testing.T) {
+	el := mustParseElement(t, `<observation classCode="OBS" moodCode="EVN">
+		<code code="8716-3" codeSystem="2.16.840.1.113883.6.1"/>
+		<statusCode code="completed"/>
+		<value xsi:type="PQ" nullFlavor="NI"/>
+	</observation>`)
+
+	ep := &entryParser{}
+	entry := ep.parseClinicalAct(el, "observation")
+
+	require.NotNil(t, entry.Value, "single <value> is always kept, blank or not -- unchanged pre-existing behavior")
+	assert.Equal(t, "NI", entry.Value.NullFlavor)
+	assert.Empty(t, entry.AdditionalValues)
+}
+
+// TestIsEmptyCDAValue covers the helper's own truth table directly.
+func TestIsEmptyCDAValue(t *testing.T) {
+	assert.True(t, isEmptyCDAValue(nil))
+	assert.True(t, isEmptyCDAValue(&CDAValue{Type: "CD", NullFlavor: "NI", Code: &CDACode{NullFlavor: "NI"}}))
+	assert.True(t, isEmptyCDAValue(&CDAValue{Type: "PQ", Quantity: &CDAQuantity{NullFlavor: "NI"}}))
+	assert.False(t, isEmptyCDAValue(&CDAValue{Type: "CD", Code: &CDACode{Code: "266919005"}}))
+	assert.False(t, isEmptyCDAValue(&CDAValue{Type: "ST", Text: "some text"}))
+	n := 0
+	assert.False(t, isEmptyCDAValue(&CDAValue{Type: "INT", Integer: &n}), "an explicit zero is still a real value, not empty")
+}

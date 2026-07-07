@@ -7,6 +7,7 @@ import (
 	"bufio"
 	"context"
 	"crypto/tls"
+	"errors"
 	"ezhealthkonnect/models"
 	"fmt"
 	"io"
@@ -24,7 +25,21 @@ const (
 	MLLPStartByte byte = 0x0B // Vertical Tab (VT)
 	MLLPEndByte1  byte = 0x1C // File Separator (FS)
 	MLLPEndByte2  byte = 0x0D // Carriage Return (CR)
+
+	// defaultMaxMLLPMessageBytes bounds a single MLLP frame's size. HL7 v2 messages are
+	// almost always a few KB, even with embedded base64 (e.g. OBX image data) staying
+	// under a few MB; 10 MB gives generous headroom while still bounding memory use
+	// against a sender that never emits the end-of-frame marker.
+	defaultMaxMLLPMessageBytes = 10 * 1024 * 1024
+	// hardCapMaxMLLPMessageBytes is the ceiling max_message_size_mb can be configured to.
+	hardCapMaxMLLPMessageBytes = 100 * 1024 * 1024
 )
+
+// errMLLPFrameTooLarge is returned by readMLLPFrame when a frame exceeds the configured
+// size limit before the end-of-frame marker is found. handleConnection treats this as
+// fatal for the connection (not merely a bad message) because the reader's position is
+// left mid-frame with no way to safely resynchronise to the next start byte.
+var errMLLPFrameTooLarge = errors.New("mllp frame exceeds configured maximum message size")
 
 // ConnectionInfo stores connection details for validation feedback
 type ConnectionInfo struct {
@@ -62,6 +77,7 @@ type TCPMLLPInboundConnector struct {
 	connectionCount  int
 	connectionMutex  sync.RWMutex
 	activeConns      map[string]net.Conn
+	maxMessageBytes  int
 	readTimeout      time.Duration
 	writeTimeout     time.Duration
 	keepAlive        bool
@@ -127,6 +143,17 @@ func (c *TCPMLLPInboundConnector) Initialize(config []byte) error {
 	c.maxConnections = cfg.GetInt("max_connections")
 	if c.maxConnections == 0 {
 		c.maxConnections = 100
+	}
+
+	// Max MLLP frame size — bounds memory when a sender never emits the end-of-frame
+	// marker (DoS via unbounded stream). Configurable in MB; 0/unset uses the default.
+	maxMessageSizeMB := cfg.GetInt("max_message_size_mb")
+	if maxMessageSizeMB <= 0 {
+		c.maxMessageBytes = defaultMaxMLLPMessageBytes
+	} else if maxMessageSizeMB*1024*1024 > hardCapMaxMLLPMessageBytes {
+		c.maxMessageBytes = hardCapMaxMLLPMessageBytes
+	} else {
+		c.maxMessageBytes = maxMessageSizeMB * 1024 * 1024
 	}
 
 	// Timeout configurations
@@ -408,6 +435,16 @@ func (c *TCPMLLPInboundConnector) handleConnection(conn net.Conn, connID string,
 				log.Printf("⏱️ TCP/MLLP Inbound: Read timeout for %s", connID)
 				return
 			}
+			if errors.Is(err, errMLLPFrameTooLarge) {
+				// Reader position is now mid-frame with no safe way to resynchronise
+				// to the next start byte — close the connection rather than risk
+				// misinterpreting the remaining bytes of the oversized frame as a
+				// new message.
+				log.Printf("🚨 TCP/MLLP Inbound: Frame from %s exceeded max size (%d bytes) — closing connection",
+					connID, c.maxMessageBytes)
+				c.sendNACK(conn, "Message exceeds maximum allowed size")
+				return
+			}
 			log.Printf("❌ TCP/MLLP Inbound: Read error from %s: %v", connID, err)
 			c.sendNACK(conn, "Error reading message")
 			continue
@@ -469,6 +506,10 @@ func (c *TCPMLLPInboundConnector) readMLLPFrame(reader *bufio.Reader) (string, e
 	// Read until end bytes
 	var message strings.Builder
 	for {
+		if message.Len() >= c.maxMessageBytes {
+			return "", errMLLPFrameTooLarge
+		}
+
 		b, err := reader.ReadByte()
 		if err != nil {
 			return "", err

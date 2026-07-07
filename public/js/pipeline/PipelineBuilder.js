@@ -696,6 +696,25 @@ class PipelineBuilder {
                 fhirBundle = transformStep.step_output.fhir_bundle;
             }
 
+            // Fallback: scan every step's output for a bundle. The CDA→FHIR
+            // step (step type "cda.to_fhir") is keyed by the user's own step
+            // name (e.g. "cda_fhir_transform"), not a fixed constant, so it
+            // can never be matched by name like the legacy HL7 step above.
+            // Its output key is "fhirBundle" (camelCase) too -- unlike other
+            // step_output fields, NormalizeStepOutput deliberately leaves
+            // this one un-snake_cased (models/output_normalizer.go) so the
+            // FHIR resource tree's own field names (resourceType,
+            // birthDate, ...) aren't mangled.
+            if (!fhirBundle) {
+                for (const stepData of Object.values(result.steps)) {
+                    const bundle = stepData?.step_output?.fhirBundle || stepData?.step_output?.fhir_bundle;
+                    if (bundle) {
+                        fhirBundle = bundle;
+                        break;
+                    }
+                }
+            }
+
             // Check Field Mapping step - using STANDARDIZED structure
             const mappingStep = result.steps['field_mapping'];
             if (mappingStep?.step_output) {
@@ -704,9 +723,11 @@ class PipelineBuilder {
             }
         }
 
-        // Also check final output for bundle
-        if (!fhirBundle && finalOutput.fhir_bundle) {
-            fhirBundle = finalOutput.fhir_bundle;
+        // Also check final output for bundle (camelCase "fhirBundle" is what
+        // cda_to_fhir_executor.go and hl7_fhir_transform_executor actually
+        // write at the outputData root; "fhir_bundle" kept for safety).
+        if (!fhirBundle && (finalOutput.fhirBundle || finalOutput.fhir_bundle)) {
+            fhirBundle = finalOutput.fhirBundle || finalOutput.fhir_bundle;
         }
 
         // Also check if finalOutput IS a FHIR bundle

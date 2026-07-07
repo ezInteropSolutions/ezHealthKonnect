@@ -109,34 +109,48 @@ var corpusExpectedShapes = map[string]corpusExpectedShape{
 		successfulCount:   2,
 	},
 	"kareo_sample.xml": {
+		// +3 DocumentReference (chiefComplaint/functionalStatus/planOfTreatment
+		// narrative, +3 resources, +3 sections) -- the section-level narrative
+		// dispatch pass now produces a DocumentReference for every section
+		// with narrative text and no entries, not just a fixed registry;
+		// kareo_sample.xml has three such sections. Regenerated from a real
+		// run (see TestDeclarativeMapDocument_Corpus_MatchesKnownShape's doc
+		// comment); cerner_sample.xml is unaffected (no qualifying sections)
+		// and was left untouched as proof of zero drift elsewhere.
 		resourceCounts: map[string]int{
-			"AllergyIntolerance": 1, "Condition": 2, "Encounter": 1, "Immunization": 1,
+			"AllergyIntolerance": 1, "Condition": 2, "DocumentReference": 3, "Encounter": 1, "Immunization": 1,
 			"MedicationStatement": 2, "Observation": 6, "Organization": 1, "Patient": 1,
 			"Practitioner": 1, "Procedure": 1,
 		},
-		resourcesProduced: 17,
-		successfulCount:   9,
+		resourcesProduced: 20,
+		successfulCount:   12,
 	},
 	"mtuitive_sample.xml": {
+		// +5 DocumentReference (assistants/dateOfSurgery/operationsPerformed/
+		// signature/surgeon narrative sections), same section-level narrative
+		// dispatch broadening as kareo_sample.xml above -- mtuitive_sample.xml
+		// has no entry-bearing sections at all, so every one of its 5
+		// narrative sections now qualifies.
 		resourceCounts: map[string]int{
-			"Organization": 1, "Patient": 1, "Practitioner": 1,
+			"DocumentReference": 5, "Organization": 1, "Patient": 1, "Practitioner": 1,
 		},
-		resourcesProduced: 3,
-		successfulCount:   0,
+		resourcesProduced: 8,
+		successfulCount:   5,
 	},
 	"practicefusion_sample.xml": {
-		// +1 DocumentReference (reasonForReferral/narrative), +1 resource, +1
-		// section -- the new section-level narrative dispatch pass (V186 design)
-		// now produces a DocumentReference for sections with narrative but no
-		// entries; practicefusion_sample.xml has a reasonForReferral section
-		// with exactly that shape.
+		// +5 DocumentReference (assessmentAndPlan/chiefComplaint/
+		// functionalStatus/instructions/reasonForReferral/vitalSigns narrative
+		// sections -- same broadening as above) and +2 Practitioner
+		// (ProblemsMappingRules' asserter rows now emit a Practitioner
+		// sub-resource per distinct asserter, via EmitAsResource -- see
+		// BuildResources' doc comment) relative to this map's last freeze.
 		resourceCounts: map[string]int{
-			"AllergyIntolerance": 2, "Condition": 2, "DocumentReference": 1, "Encounter": 1, "Immunization": 1,
+			"AllergyIntolerance": 2, "Condition": 2, "DocumentReference": 6, "Encounter": 1, "Immunization": 1,
 			"MedicationStatement": 1, "Observation": 1, "Organization": 2, "Patient": 1,
-			"Practitioner": 1, "PractitionerRole": 1, "Procedure": 1,
+			"Practitioner": 3, "PractitionerRole": 1, "Procedure": 1,
 		},
-		resourcesProduced: 15,
-		successfulCount:   9,
+		resourcesProduced: 22,
+		successfulCount:   14,
 	},
 }
 
@@ -278,14 +292,22 @@ func TestDeclarativeMapDocument_EnabledSectionsSkipsDisabledSection(t *testing.T
 	ctx := context.Background()
 
 	const disabled = "allergiesAndIntolerances"
+
+	cdaDoc := loadTypedCDADocument(t, filepath.Join("corpus", "kareo_sample.xml"))
+
+	// Built from this fixture's own SectionsByKey (not
+	// DeclarativeDispatchedSectionKeys, which only lists entry-rule-registered
+	// sections) because DeclarativeMapDocument's narrative-DocumentReference
+	// pass runs for every section with narrative text and no entries too --
+	// including sections with no MappingRule at all (e.g. kareo_sample.xml's
+	// narrative-only chiefComplaint). Restricting EnabledSections must only
+	// exclude the one section this test targets, not silently disable those too.
 	var enabled []string
-	for _, k := range cdafhir.DeclarativeDispatchedSectionKeys() {
+	for k := range cdaDoc.SectionsByKey {
 		if k != disabled {
 			enabled = append(enabled, k)
 		}
 	}
-
-	cdaDoc := loadTypedCDADocument(t, filepath.Join("corpus", "kareo_sample.xml"))
 
 	baseline, err := mapper.DeclarativeMapDocument(ctx, cdaDoc, cdafhir.CDAToFHIRConfig{})
 	if err != nil {

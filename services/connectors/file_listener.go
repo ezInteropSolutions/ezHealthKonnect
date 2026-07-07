@@ -32,6 +32,7 @@ type FileListenerConnector struct {
 	stopChan         chan struct{}
 	mu               sync.RWMutex
 	processedFiles   map[string]time.Time // track processed files to avoid duplicates
+	pendingSizes     map[string]int64     // path -> size observed on the previous poll, for stability checks
 }
 
 // NewFileListenerConnector creates a new file listener connector
@@ -56,6 +57,7 @@ func NewFileListenerConnector() InboundConnector {
 		encoding:             "UTF-8",
 		recursive:            false,
 		processedFiles:       make(map[string]time.Time),
+		pendingSizes:         make(map[string]int64),
 		stopChan:             make(chan struct{}),
 	}
 }
@@ -242,9 +244,15 @@ func (f *FileListenerConnector) scanDirectory() {
 	var err error
 
 	if f.recursive {
+		// filepath.Walk uses Lstat internally, so info here already reflects
+		// symlinks without following them — safe to check ModeSymlink directly.
 		err = filepath.Walk(f.directoryPath, func(path string, info os.FileInfo, err error) error {
 			if err != nil {
 				return err
+			}
+			if info.Mode()&os.ModeSymlink != 0 {
+				log.Printf("⚠️  File Listener: Skipping symlink %s (not followed — see path traversal note in afterProcessFile)", path)
+				return nil
 			}
 			if !info.IsDir() {
 				matched, _ := filepath.Match(f.filePattern, info.Name())
@@ -256,7 +264,22 @@ func (f *FileListenerConnector) scanDirectory() {
 		})
 	} else {
 		pattern := filepath.Join(f.directoryPath, f.filePattern)
-		files, err = filepath.Glob(pattern)
+		var globbed []string
+		globbed, err = filepath.Glob(pattern)
+		if err == nil {
+			// filepath.Glob doesn't report file mode — Lstat each match explicitly
+			// so a symlink dropped into the watched directory (e.g. by an SFTP
+			// upload) can't be used to read an arbitrary file outside the tree.
+			for _, path := range globbed {
+				if info, statErr := os.Lstat(path); statErr == nil {
+					if info.Mode()&os.ModeSymlink != 0 {
+						log.Printf("⚠️  File Listener: Skipping symlink %s", path)
+						continue
+					}
+				}
+				files = append(files, path)
+			}
+		}
 	}
 
 	if err != nil {
@@ -267,8 +290,59 @@ func (f *FileListenerConnector) scanDirectory() {
 	log.Printf("📂 File Listener: Found %d matching files", len(files))
 
 	for _, filePath := range files {
-		f.processFile(filePath)
+		if f.isFileStable(filePath) {
+			f.processFile(filePath)
+		}
 	}
+}
+
+// isFileStable reports whether filePath's size is unchanged since the
+// previous poll cycle, requiring two consecutive polls to observe the SAME
+// size before a file is ever handed to processFile. Closes a real race
+// condition: a file dropped by an upstream writer (e.g. an EHR export job,
+// or an atomic-rename-from-a-"_tmp"-name pattern) can be picked up by
+// scanDirectory mid-write, before the writer has finished. Confirmed against
+// a real incident: a file named "..._tmp.xml" was read at 0 bytes on first
+// sight and sent downstream, where it failed with "no parser available for
+// format: xml" since there was nothing in it to detect a format from.
+//
+// A file that stabilizes at 0 bytes is still skipped (logged, not silently
+// dropped) and marked processed so it isn't re-checked forever -- a genuinely
+// empty file has nothing useful to send downstream either way.
+func (f *FileListenerConnector) isFileStable(filePath string) bool {
+	info, err := os.Stat(filePath)
+	if err != nil {
+		// Vanished between scan and stat (e.g. already consumed by another
+		// process) -- forget any prior size record so a future file at this
+		// same path starts its own stability check from scratch.
+		f.mu.Lock()
+		delete(f.pendingSizes, filePath)
+		f.mu.Unlock()
+		return false
+	}
+	size := info.Size()
+
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	lastSize, seen := f.pendingSizes[filePath]
+	if !seen {
+		f.pendingSizes[filePath] = size
+		log.Printf("⏳ File Listener: %s detected (%d bytes), waiting for size to stabilize before reading", filePath, size)
+		return false
+	}
+	if lastSize != size {
+		f.pendingSizes[filePath] = size
+		log.Printf("⏳ File Listener: %s still being written (%d -> %d bytes), waiting for next poll", filePath, lastSize, size)
+		return false
+	}
+	delete(f.pendingSizes, filePath)
+	if size == 0 {
+		log.Printf("⚠️  File Listener: %s is stable but 0 bytes -- skipping (never populated or write failed)", filePath)
+		f.processedFiles[filePath] = time.Now()
+		return false
+	}
+	return true
 }
 
 // processFile reads and processes a single file
@@ -285,6 +359,14 @@ func (f *FileListenerConnector) processFile(filePath string) {
 	}
 	f.processedFiles[filePath] = time.Now()
 	f.mu.Unlock()
+
+	// Re-check for a symlink right before reading — closes the TOCTOU window between
+	// scanDirectory's check and this read (e.g. a regular file swapped for a symlink
+	// pointing outside the watched directory between scan and processing).
+	if info, statErr := os.Lstat(filePath); statErr == nil && info.Mode()&os.ModeSymlink != 0 {
+		log.Printf("🚨 File Listener: Refusing to read %s — became a symlink after being queued", filePath)
+		return
+	}
 
 	// Read file content
 	content, err := ioutil.ReadFile(filePath)
@@ -337,8 +419,15 @@ func (f *FileListenerConnector) afterProcessFile(filePath string) error {
 		if f.archivePath == "" {
 			return fmt.Errorf("archive path not configured")
 		}
+		// filepath.Base already strips directory components from fileName, but an
+		// unusual on-disk name (e.g. literally "..") could still resolve outside
+		// archivePath once joined — verify containment before ever calling Rename.
 		fileName := filepath.Base(filePath)
 		destPath := filepath.Join(f.archivePath, fileName)
+		if !isWithinDir(f.archivePath, destPath) {
+			return fmt.Errorf("refusing to move %q: resolved destination %q escapes archive_path %q",
+				filePath, destPath, f.archivePath)
+		}
 
 		// Handle duplicate filenames by adding timestamp
 		if _, err := os.Stat(destPath); err == nil {
@@ -358,6 +447,25 @@ func (f *FileListenerConnector) afterProcessFile(filePath string) error {
 	default:
 		return fmt.Errorf("unknown after_processing action: %s", f.afterProcessing)
 	}
+}
+
+// isWithinDir reports whether target resolves to a path inside dir (or dir itself),
+// after cleaning both to absolute paths. Used to verify a joined destination path
+// hasn't escaped its intended parent directory before a move/rename touches disk.
+func isWithinDir(dir, target string) bool {
+	absDir, err := filepath.Abs(dir)
+	if err != nil {
+		return false
+	}
+	absTarget, err := filepath.Abs(target)
+	if err != nil {
+		return false
+	}
+	rel, err := filepath.Rel(absDir, absTarget)
+	if err != nil {
+		return false
+	}
+	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)))
 }
 
 // generateFileMessageID creates a unique message ID for the file

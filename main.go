@@ -31,6 +31,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"net/http/pprof"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -59,6 +60,10 @@ var processingEngine *processing.ProcessingEngine
 
 // Global DLQ Service (wired into outbound connector executor and DLQController)
 var dlqSvc *connectors.DLQService
+
+// Global Analytics + Alert Rule Services (wired into Agent Mode's read-only tools)
+var analyticsSvc *services.AnalyticsService
+var alertRuleSvc *services.AlertRuleService
 
 // Global Code Template Service (wired into script executor via processingEngine)
 var codeTemplateSvc *services.CodeTemplateService
@@ -383,6 +388,30 @@ func main() {
 	// GET /metrics  — Prometheus scrape endpoint (P3-2)
 	router.GET("/metrics", gin.WrapH(promhttp.Handler()))
 
+	// GET /debug/pprof/*  — Go runtime profiling (heap, goroutine, CPU profile, trace).
+	// Not gated behind requireProxiedAdmin(): that middleware only accepts requests
+	// carrying an X-User-Role header, which the Node.js proxy sets from an
+	// authenticated session — but pprof is an ops tool meant for direct access to
+	// this port (docker exec + curl, kubectl port-forward, SSH tunnel), same as any
+	// other Go pprof deployment. It relies on the same trust boundary already
+	// documented in admin_auth.go: port 8080 (API_PORT) is not meant to be exposed
+	// on public network interfaces in production.
+	pprofGroup := router.Group("/debug/pprof")
+	{
+		pprofGroup.GET("/", gin.WrapF(pprof.Index))
+		pprofGroup.GET("/cmdline", gin.WrapF(pprof.Cmdline))
+		pprofGroup.GET("/profile", gin.WrapF(pprof.Profile))
+		pprofGroup.POST("/symbol", gin.WrapF(pprof.Symbol))
+		pprofGroup.GET("/symbol", gin.WrapF(pprof.Symbol))
+		pprofGroup.GET("/trace", gin.WrapF(pprof.Trace))
+		pprofGroup.GET("/allocs", gin.WrapH(pprof.Handler("allocs")))
+		pprofGroup.GET("/block", gin.WrapH(pprof.Handler("block")))
+		pprofGroup.GET("/goroutine", gin.WrapH(pprof.Handler("goroutine")))
+		pprofGroup.GET("/heap", gin.WrapH(pprof.Handler("heap")))
+		pprofGroup.GET("/mutex", gin.WrapH(pprof.Handler("mutex")))
+		pprofGroup.GET("/threadcreate", gin.WrapH(pprof.Handler("threadcreate")))
+	}
+
 	// ── Kubernetes / Docker health probes ─────────────────────────────────────
 	// GET /healthz  — liveness:  returns 200 as long as the process is alive
 	// GET /readyz   — readiness: returns 503 until all critical dependencies are up.
@@ -593,6 +622,14 @@ func main() {
 			// per-message log timeline (RECEIVE/QUEUE/TRANSFORM/STEP EXEC/DELIVER/DLQ/…).
 			systemGroup.GET("/message-trace/:correlationId", msgContentCtrl.GetMessageTrace)
 
+			// ENGINE METRICS: current-value cards for the 13 ezhk_* Prometheus metrics,
+			// read directly from the in-process registry (no Prometheus server needed —
+			// replaced the earlier Prometheus+Grafana stack so everything stays native).
+			// db is only used to resolve interface_id/step_id labels into names for
+			// drill-down detail (worst offender, tripped circuit breaker owner).
+			engineMetricsCtrl := controllers.NewEngineMetricsController(db)
+			engineMetricsCtrl.RegisterRoutes(systemGroup)
+
 			// DLQ management moved to /api/fhir/dlq (registered below with the DLQService)
 
 			// Admin settings (storage, SMTP, security, HL7/FHIR, queue, connectors, alerts, performance)
@@ -603,8 +640,12 @@ func main() {
 				log.Printf("✅ AppSettingsCache initialized")
 
 				settingsCtrl := controllers.NewSettingsController(db, credStore)
-				settingsCtrl.RegisterRoutes(systemGroup.Group("/settings"))
-				log.Printf("✅ Settings Controller initialized (8 sections)")
+				// requireProxiedAdmin(): settings (SMTP credentials, security policy,
+				// connector/alert defaults, docker-ports/restart) must be admin-only —
+				// requireProxiedRequest() alone (the /api group default) only checks the
+				// proxy secret, not the caller's role.
+				settingsCtrl.RegisterRoutes(systemGroup.Group("/settings", requireProxiedAdmin()))
+				log.Printf("✅ Settings Controller initialized (8 sections, admin-only)")
 			}
 		}
 
@@ -657,7 +698,9 @@ func main() {
 			fhirGroup.POST("/pipeline/validate-script", transformTestCtrl.ValidateScript)    // Validate JavaScript script
 			fhirGroup.GET("/pipeline/:interfaceId/:messageType", transformTestCtrl.GetPipeline)
 			fhirGroup.GET("/field-search", transformTestCtrl.SearchFields)   // USCDI smart search for CDA field picker
-			fhirGroup.POST("/cda/parse", transformTestCtrl.ParseCDA)          // CDA document parse + section summary (wizard preview)
+			// Rate-limited: CDA parsing is CPU-heavy XML processing — cap at 100 req/min
+			// per authenticated user (falls back to per-IP for unauthenticated callers).
+			fhirGroup.POST("/cda/parse", rateLimitMiddleware(100, 20, rateLimitByUserOrIP), transformTestCtrl.ParseCDA) // CDA document parse + section summary (wizard preview)
 
 			// FHIR Narrative Generator
 			// Accepts a FHIR resource as JSON body and returns XHTML narrative.
@@ -1866,6 +1909,9 @@ func main() {
 		alertRuleCtrl.RegisterRoutes(api.Group("/alerts"))
 		analyticsCtrl.InjectAlertRuleService(alertRuleCtrl.Service())
 		log.Printf("✅ Alert Rule Controller initialized")
+
+		analyticsSvc = analyticsCtrl.Service()
+		alertRuleSvc = alertRuleCtrl.Service()
 	}
 
 	// ── LOCAL AI SERVICE ─────────────────────────────────────────────────────
@@ -1877,6 +1923,30 @@ func main() {
 		schemaDir := cfg.GetSchemaDirectory()
 		aiCtrl := controllers.NewAIController(aiSvc, schemaDir)
 		aiCtrl.RegisterRoutes(api.Group("/ai"))
+
+		// Agent Mode: wire the mutating tools now that DLQService and ProcessingEngine
+		// exist. Agent is nil unless the configured provider supports tool calling.
+		if aiSvc.Agent != nil && dlqSvc != nil && processingEngine != nil {
+			aiSvc.Agent.SetDependencies(ai.NewDLQRedriverAdapter(dlqSvc), processingEngine)
+			log.Printf("🤖 Agent Mode tools wired (retry_message, activate/deactivate_interface)")
+		}
+		if aiSvc.Agent != nil && analyticsSvc != nil && dlqSvc != nil && alertRuleSvc != nil {
+			aiSvc.Agent.SetAnalyticsDependencies(analyticsSvc, dlqSvc, alertRuleSvc)
+			log.Printf("🤖 Agent Mode analytics tools wired (run_analytics_report, get_monitoring_summary, get_interface_health, get_dlq_stats, get_fired_alerts)")
+		}
+		if aiSvc.Agent != nil && db != nil {
+			// Dedicated instance for dry-run script verification — mirrors the
+			// same pattern TransformationTestController already uses.
+			scriptVerifyPipelineSvc := services.NewTransformationPipelineService(db, credStore)
+			aiSvc.Agent.SetScriptVerificationDependencies(scriptVerifyPipelineSvc)
+			log.Printf("🤖 Agent Mode script verification tool wired (verify_pipeline_script)")
+
+			// Git-commit-on-approve: auto-commits an interface after an approved
+			// action updates its git-tracked definition, if the caller supplies a
+			// git_repo_id. Optional — approval still works without a repo picked.
+			aiSvc.Agent.SetGitCommitter(services.NewGitRepoService(db, credStore))
+			log.Printf("🤖 Agent Mode git-commit-on-approve wired")
+		}
 
 		log.Printf("✅ AI Service initialized (chat: %s, embed: %s, db: %v)",
 			aiSvc.OllamaClient().ChatModel, aiSvc.OllamaClient().EmbedModel, db != nil)

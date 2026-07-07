@@ -324,6 +324,40 @@ func parseValue(el *etree.Element) *CDAValue {
 	return v
 }
 
+// isEmptyCDAValue reports whether v carries no real clinical information --
+// only a bare nullFlavor placeholder (e.g. <value xsi:type="CD"
+// nullFlavor="NI"/>) with no code, quantity, text, boolean, integer, real, or
+// time content. Used by entry_parser.go when an act has more than one
+// sibling <value> element, to skip blank placeholders before picking which
+// one is primary.
+func isEmptyCDAValue(v *CDAValue) bool {
+	if v == nil {
+		return true
+	}
+	if v.Code != nil && (v.Code.Code != "" || v.Code.DisplayName != "" || v.Code.OriginalText != "" || len(v.Code.Translations) > 0) {
+		return false
+	}
+	if v.Quantity != nil && v.Quantity.Value != "" {
+		return false
+	}
+	if v.Text != "" {
+		return false
+	}
+	if v.Boolean != nil {
+		return false
+	}
+	if v.Integer != nil {
+		return false
+	}
+	if v.Real != nil {
+		return false
+	}
+	if v.TimeRange != nil && (v.TimeRange.Value.Value != "" || v.TimeRange.Low.Value != "" || v.TimeRange.High.Value != "") {
+		return false
+	}
+	return true
+}
+
 // ========================
 // Shared composite parsers
 // ========================

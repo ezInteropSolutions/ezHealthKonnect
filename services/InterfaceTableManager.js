@@ -1,14 +1,16 @@
 // services/InterfaceTableManager.js
 // Interface-specific table-per-interface management for ultimate performance isolation
 
+const crypto = require('crypto');
+
 class InterfaceTableManager {
     constructor() {
         this.database = require('../config/database');
         this.tableCache = new Map(); // Cache of existing interface tables
         this.schemaTemplate = this.getMessageTableSchema();
-        this.CURRENT_SCHEMA_VERSION = '1.1'; // Increment when schema changes
+        this.CURRENT_SCHEMA_VERSION = '1.2'; // Increment when schema changes
         this.REQUIRED_COLUMNS = [
-            'id', 'message_id', 'interface_id', 'status',
+            'id', 'message_id', 'correlation_id', 'interface_id', 'status', 'priority',
             'received_at', 'source_type', 'source_endpoint', 'source_ip',
             'message_type', 'message_size', 'message_encoding',
             'processing_started_at', 'processing_completed_at', 'transformation_applied',
@@ -20,7 +22,7 @@ class InterfaceTableManager {
             // Delivery
             'target_endpoint', 'delivery_status', 'delivery_attempts', 'last_delivery_attempt_at',
             // Object storage URIs
-            'raw_content_uri', 'parsed_content_uri', 'transformed_content_uri', 'log_uri',
+            'raw_content_uri', 'parsed_content_uri', 'transformed_content_uri', 'outbound_content_uri', 'log_uri',
             // Audit
             'created_at', 'updated_at'
         ];
@@ -129,6 +131,8 @@ class InterfaceTableManager {
         console.log(`🔧 Migrating table ${tableName}: Adding ${missingColumns.length} missing columns`);
 
         const columnDefinitions = {
+            'correlation_id': 'VARCHAR(255)',
+            'priority': 'INTEGER DEFAULT 5',
             // V19 JSON Parsing columns
             'parsed_at': 'TIMESTAMP WITH TIME ZONE',
             'parsing_status': 'VARCHAR(50)',
@@ -145,10 +149,11 @@ class InterfaceTableManager {
             // Delivery
             'target_endpoint': 'VARCHAR(500)',
             'last_delivery_attempt_at': 'TIMESTAMP WITH TIME ZONE',
-            // Object storage URIs (V56)
+            // Object storage URIs (V56, outbound_content_uri added V61)
             'raw_content_uri': 'TEXT',
             'parsed_content_uri': 'TEXT',
             'transformed_content_uri': 'TEXT',
+            'outbound_content_uri': 'TEXT',
             'log_uri': 'TEXT'
         };
 
@@ -212,11 +217,13 @@ class InterfaceTableManager {
             CREATE TABLE {table_name} (
                 id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
                 message_id VARCHAR(255) NOT NULL,
+                correlation_id VARCHAR(255),
                 interface_id UUID NOT NULL,
 
                 -- Message status and processing
                 status VARCHAR(50) NOT NULL DEFAULT 'received'
                     CHECK (status IN ('received', 'processing', 'transformed', 'sent', 'delivered', 'failed', 'error', 'reprocessing', 'processed')),
+                priority INTEGER DEFAULT 5,
 
                 -- Timing information
                 received_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -226,7 +233,11 @@ class InterfaceTableManager {
                 -- Source information
                 source_type VARCHAR(100) NOT NULL,
                 source_endpoint VARCHAR(500),
-                source_ip INET,
+                -- VARCHAR, not INET: file/script-sourced messages have no real
+                -- network peer and pass an empty string, which INET rejects
+                -- outright (confirmed against V53__Partition_Messages_Table.sql's
+                -- canonical parent-table definition, which also uses VARCHAR(45)).
+                source_ip VARCHAR(45),
 
                 -- Message metadata
                 message_type VARCHAR(100),
@@ -255,10 +266,11 @@ class InterfaceTableManager {
                 delivery_attempts INTEGER DEFAULT 0,
                 last_delivery_attempt_at TIMESTAMP WITH TIME ZONE,
 
-                -- Object storage URIs (V56)
+                -- Object storage URIs (V56, outbound_content_uri added V61)
                 raw_content_uri TEXT,
                 parsed_content_uri TEXT,
                 transformed_content_uri TEXT,
+                outbound_content_uri TEXT,
                 log_uri TEXT,
 
                 -- Audit fields
@@ -269,15 +281,44 @@ class InterfaceTableManager {
     }
 
     /**
+     * Builds a valid Postgres index name, guaranteed <= 63 bytes (Postgres's
+     * NAMEDATALEN limit) and unique per (tableName, suffix) pair.
+     *
+     * tableName is always "messages_intf_<36-char-uuid>" (50 chars), which
+     * alone leaves only ~9 bytes of budget after "idx_" + tableName + "_" —
+     * not enough room for suffixes like "message_id"/"message_type", which
+     * Postgres silently truncates to the SAME 63-byte prefix, so the second
+     * CREATE INDEX collides with the first and rolls back the whole
+     * table-creation transaction. Found while manually creating a test
+     * interface's table and hitting "relation ... already exists" on an
+     * index that had never actually been created (the real error was hidden
+     * by the transaction rollback).
+     *
+     * Fix: when the natural name would overflow, replace the long tableName
+     * segment with a short, stable hash of it instead of truncating blindly
+     * — every index for the same table shares the same compact prefix, and
+     * the full (untruncated) suffix keeps different indexes distinguishable.
+     */
+    buildIndexName(tableName, suffix) {
+        const natural = `idx_${tableName}_${suffix}`;
+        if (natural.length <= 63) {
+            return natural;
+        }
+        const tableHash = crypto.createHash('sha1').update(tableName).digest('hex').slice(0, 12);
+        const candidate = `idx_${tableHash}_${suffix}`;
+        return candidate.length <= 63 ? candidate : candidate.slice(0, 63);
+    }
+
+    /**
      * Get performance indexes for interface table
      */
     getIndexSQL(tableName) {
         return [
-            `CREATE INDEX idx_${tableName}_received_at ON ${tableName}(received_at DESC)`,
-            `CREATE INDEX idx_${tableName}_status ON ${tableName}(status, received_at DESC)`,
-            `CREATE INDEX idx_${tableName}_message_id ON ${tableName}(message_id)`,
-            `CREATE INDEX idx_${tableName}_message_type ON ${tableName}(message_type) WHERE message_type IS NOT NULL`,
-            `CREATE INDEX idx_${tableName}_processing_time ON ${tableName}(processing_started_at, processing_completed_at) WHERE processing_completed_at IS NOT NULL`
+            `CREATE INDEX ${this.buildIndexName(tableName, 'received_at')} ON ${tableName}(received_at DESC)`,
+            `CREATE INDEX ${this.buildIndexName(tableName, 'status')} ON ${tableName}(status, received_at DESC)`,
+            `CREATE INDEX ${this.buildIndexName(tableName, 'message_id')} ON ${tableName}(message_id)`,
+            `CREATE INDEX ${this.buildIndexName(tableName, 'message_type')} ON ${tableName}(message_type) WHERE message_type IS NOT NULL`,
+            `CREATE INDEX ${this.buildIndexName(tableName, 'processing_time')} ON ${tableName}(processing_started_at, processing_completed_at) WHERE processing_completed_at IS NOT NULL`
         ];
     }
 

@@ -21,12 +21,46 @@ console.log(`Go Backend Port: ${GO_BACKEND_PORT}`);
 console.log(`Go Backend URL: ${GO_BACKEND_URL}`);
 console.log(`Node Environment: ${process.env.NODE_ENV || 'development'}`);
 
+// SECURITY HEADERS — helmet was already a declared dependency but never wired in.
+// contentSecurityPolicy is disabled: the server-rendered public/ pages use inline
+// scripts/styles throughout, and helmet's default CSP would break them without a
+// full page-by-page audit. crossOriginEmbedderPolicy is disabled too: several pages
+// (interface-builder.html, messages.html, test-xpath-autocomplete.html) load Bootstrap/
+// Font Awesome/leader-line from jsdelivr/cloudflare CDNs, and this app doesn't use
+// SharedArrayBuffer or other features COEP exists to gate — no upside, real breakage
+// risk. The other headers (X-Frame-Options, X-Content-Type-Options, HSTS,
+// Referrer-Policy, X-Powered-By removal, etc.) carry no such risk.
+const helmet = require('helmet');
+app.use(helmet({ contentSecurityPolicy: false, crossOriginEmbedderPolicy: false }));
+
+// CORS — same-origin by default (the frontend and API already share one origin, so
+// no CORS grant is needed for normal browser use). ADDITIONAL_CORS_ORIGINS was already
+// documented in .env as a planned override but never actually read anywhere; wiring it
+// here lets operators allow specific extra origins (e.g. a separately-hosted SPA)
+// without opening access to every origin.
+const cors = require('cors');
+const additionalCorsOrigins = (process.env.ADDITIONAL_CORS_ORIGINS || '')
+    .split(',')
+    .map((o) => o.trim())
+    .filter(Boolean);
+if (additionalCorsOrigins.length > 0) {
+    app.use(cors({ origin: additionalCorsOrigins, credentials: true }));
+    console.log(`CORS: allowing additional origins: ${additionalCorsOrigins.join(', ')}`);
+}
+
 // Basic middleware FIRST
 //app.use(express.json());
 //app.use(express.urlencoded({ extended: true }));
 // Basic middleware FIRST - Updated for HL7-FHIR mapping payloads
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ limit: '10mb', extended: true }));
+// Raw-bytes parser for content types the proxy must forward to the Go backend
+// verbatim (e.g. CDA/CCD XML posted to /api/fhir/cda/parse). Without this,
+// req.body stayed undefined for non-JSON/non-form bodies and forwardToGo's
+// `req.body &&` check silently skipped forwarding any body at all — found while
+// load-testing that endpoint (2026-07): every request reached Go with an empty
+// body ("cda: empty document") despite the client sending real XML.
+app.use(express.raw({ type: ['application/xml', 'text/xml', 'application/octet-stream'], limit: '10mb' }));
 // Monitor large requests for debugging
 app.use((req, res, next) => {
     if (req.headers['content-length']) {
@@ -177,9 +211,14 @@ const forwardToGo = async (req, res) => {
             if (req.session.user.email) options.headers['X-User-Email'] = String(req.session.user.email);
         }
         
-        // Add body for POST/PUT/PATCH requests
-        if (['POST', 'PUT', 'PATCH'].includes(req.method) && req.body) {
-            options.body = JSON.stringify(req.body);
+        // Add body for POST/PUT/PATCH requests. req.body is one of:
+        //   - a Buffer (raw content types like application/xml — forward verbatim,
+        //     do NOT JSON.stringify it, that would corrupt binary/XML content), or
+        //   - a parsed object (JSON or url-encoded — re-serialize as JSON, existing
+        //     behavior), or
+        //   - undefined (no body-parser matched this request's content-type).
+        if (['POST', 'PUT', 'PATCH'].includes(req.method) && req.body !== undefined) {
+            options.body = Buffer.isBuffer(req.body) ? req.body : JSON.stringify(req.body);
         }
         
         // Make the request to Go backend
@@ -240,6 +279,61 @@ const forwardToGo = async (req, res) => {
     }
 };
 
+// Session configuration
+// SESSION_TIMEOUT_MINUTES can be set by server.js after reading system_settings at startup.
+// Default: 1440 minutes (24 h).  Admin can change via Settings → Security.
+// Registered here (before the admin/DLQ/quality/monitoring/settings routes below) —
+// those routes rely on verifyToken()'s req.session.user fallback for browser
+// (cookie-only) requests, so req.session must already exist by the time they run.
+// It previously sat after all of these `app.use()` calls, which meant Express's
+// middleware stack reached the routes before the session middleware ever populated
+// req.session — every session-cookie (non-Bearer) request to those routes was
+// silently rejected with 401 "Access token required", breaking monitoring.html,
+// admin-dlq.html, admin-mapping-review.html, and settings.html for real browser users.
+const _sessionTimeoutMinutes = parseInt(process.env.SESSION_TIMEOUT_MINUTES || '1440', 10);
+
+// Persist sessions to PostgreSQL so they survive service restarts and reboots.
+// Falls back to in-memory store if the pg pool fails (dev/test environments).
+let _sessionStore;
+try {
+    const PgSession = require('connect-pg-simple')(session);
+    const { Pool } = require('pg');
+    const _pgPool = new Pool({
+        host:     process.env.DB_HOST     || 'localhost',
+        port:     parseInt(process.env.DB_PORT || '5432', 10),
+        database: process.env.DB_NAME     || 'ezhealthkonnect',
+        user:     process.env.DB_USER     || 'ezhealth_user',
+        password: process.env.DB_PASSWORD || '',
+        ssl:      process.env.DB_SSL === 'true' ? { rejectUnauthorized: false } : false,
+        max: 3,
+    });
+    _sessionStore = new PgSession({
+        pool: _pgPool,
+        tableName: 'user_sessions',
+        createTableIfMissing: true,
+        pruneSessionInterval: 60 * 15,
+    });
+    console.log('✅ PostgreSQL session store initialised');
+} catch (err) {
+    console.warn('⚠️  PostgreSQL session store unavailable, using memory store:', err.message);
+}
+
+const sessionConfig = {
+    store: _sessionStore,
+    secret: process.env.SESSION_SECRET || 'your-session-secret',
+    resave: false,
+    saveUninitialized: false,
+    name: 'ezhealth.sid',
+    cookie: {
+        secure: process.env.SESSION_COOKIE_SECURE === 'true',
+        httpOnly: true,
+        maxAge: _sessionTimeoutMinutes * 60 * 1000,
+        sameSite: 'lax'
+    }
+};
+
+app.use(session(sessionConfig));
+
 // Admin-only fhir routes — must be registered BEFORE the catch-all /api/fhir proxy.
 // verifyToken accepts JWT Bearer from both browser and API callers.
 // requireAdminUser checks that the decoded user has role === 'admin'.
@@ -285,6 +379,15 @@ app.use('/api/fhir/quality', _verifyToken, _requireSuperAdminUser, forwardToGo);
 // Monitoring dashboard — live KPIs, alerts, message feed, per-interface health
 app.use('/api/monitoring', _verifyToken, forwardToGo);
 
+// Settings routes — admin-only. Must be registered BEFORE the catch-all /api/system
+// proxy below, same reasoning as the DLQ/quality carve-outs above: Go's
+// requireProxiedRequest() (applied to the whole /api group) only checks the shared
+// proxy secret, not the caller's role, so without this Node-side check any request
+// that reaches this route — authenticated or not — would be forwarded with only an
+// optional X-User-Role header. This closes that gap in defense; the Go side also now
+// requires requireProxiedAdmin() on this route group (see main.go's settingsGroup).
+app.use('/api/system/settings', _verifyToken, _requireAdminUser, forwardToGo);
+
 // Apply explicit route handlers for Go backend routes
 app.use('/api/fhir', forwardToGo);
 app.use('/api/hl7', forwardToGo);
@@ -310,53 +413,6 @@ app.use('/api/file-parser', forwardToGo);           // file-parser/preview + fil
 console.log('✅ File parser routes registered (preview + templates + browse)');
 
 console.log('Simple proxy configured successfully');
-
-// Session configuration
-// SESSION_TIMEOUT_MINUTES can be set by server.js after reading system_settings at startup.
-// Default: 1440 minutes (24 h).  Admin can change via Settings → Security.
-const _sessionTimeoutMinutes = parseInt(process.env.SESSION_TIMEOUT_MINUTES || '1440', 10);
-
-// Persist sessions to PostgreSQL so they survive service restarts and reboots.
-// Falls back to in-memory store if the pg pool fails (dev/test environments).
-let _sessionStore;
-try {
-    const PgSession = require('connect-pg-simple')(session);
-    const { Pool } = require('pg');
-    const _pgPool = new Pool({
-        host:     process.env.DB_HOST     || 'localhost',
-        port:     parseInt(process.env.DB_PORT || '5432', 10),
-        database: process.env.DB_NAME     || 'ezhealthkonnect',
-        user:     process.env.DB_USER     || 'ezhealth_user',
-        password: process.env.DB_PASSWORD || '',
-        ssl:      process.env.DB_SSL === 'true' ? { rejectUnauthorized: false } : false,
-        max: 3,
-    });
-    _sessionStore = new PgSession({
-        pool: _pgPool,
-        tableName: 'user_sessions',
-        createTableIfMissing: true,
-        pruneSessionInterval: 60 * 15,
-    });
-    console.log('✅ PostgreSQL session store initialised');
-} catch (err) {
-    console.warn('⚠️  PostgreSQL session store unavailable, using memory store:', err.message);
-}
-
-const sessionConfig = {
-    store: _sessionStore,
-    secret: process.env.SESSION_SECRET || 'your-session-secret',
-    resave: false,
-    saveUninitialized: false,
-    name: 'ezhealth.sid',
-    cookie: {
-        secure: process.env.SESSION_COOKIE_SECURE === 'true',
-        httpOnly: true,
-        maxAge: _sessionTimeoutMinutes * 60 * 1000,
-        sameSite: 'lax'
-    }
-};
-
-app.use(session(sessionConfig));
 
 // ── First-run setup ──────────────────────────────────────────────────────────
 // Mount the public /api/setup/* endpoints BEFORE the setup-check middleware so

@@ -11,6 +11,13 @@
 -- "Boulder Community Health and Affiliates" (no id on the assignedAuthor).
 --
 -- Drift guard: services/cda_fhir/declarative_oob_rules_migration_v189_test.go
+--
+-- Fix (2026-07-02): ON CONFLICT below was missing header_path, which V165
+-- added to the table's unique constraint (originally just document_type,
+-- ccda_version, fhir_version, section_key, fhir_resource). Every migration
+-- since V165 (V166, V180, V188, ...) already includes header_path in its
+-- ON CONFLICT column list; this one didn't, so Postgres rejected it with
+-- "no unique or exclusion constraint matching the ON CONFLICT specification".
 
 -- =========================================================
 -- SEED: careTeam -> CareTeam (+ managingOrganization from organizer author)
@@ -99,7 +106,7 @@ VALUES
     $rules$::jsonb,
     false, ARRAY['participant'], true, true
 )
-ON CONFLICT (document_type, ccda_version, fhir_version, section_key, fhir_resource) DO UPDATE SET
+ON CONFLICT (document_type, ccda_version, fhir_version, section_key, fhir_resource, header_path) DO UPDATE SET
     entry_match = EXCLUDED.entry_match, rule_order = EXCLUDED.rule_order, fields = EXCLUDED.fields,
     flatten_organizers = EXCLUDED.flatten_organizers, required_paths = EXCLUDED.required_paths, updated_at = NOW();
 
@@ -190,6 +197,6 @@ VALUES
     $rules$::jsonb,
     false, ARRAY['participant'], true, true
 )
-ON CONFLICT (document_type, ccda_version, fhir_version, section_key, fhir_resource) DO UPDATE SET
+ON CONFLICT (document_type, ccda_version, fhir_version, section_key, fhir_resource, header_path) DO UPDATE SET
     entry_match = EXCLUDED.entry_match, rule_order = EXCLUDED.rule_order, fields = EXCLUDED.fields,
     flatten_organizers = EXCLUDED.flatten_organizers, required_paths = EXCLUDED.required_paths, updated_at = NOW();

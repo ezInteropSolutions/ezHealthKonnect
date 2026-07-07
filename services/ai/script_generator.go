@@ -1,7 +1,8 @@
 // services/ai/script_generator.go
-// Generates JavaScript transform(input) scripts for pipeline script steps.
-// Fetches live step + pipeline context so the LLM knows exactly what data
-// is available at that point in the pipeline.
+// Generates plain top-level JavaScript for pipeline script steps (no function
+// wrapper — see scriptSystemPrompt's Script Contract). Fetches live step +
+// pipeline context so the LLM knows exactly what data is available at that
+// point in the pipeline.
 package ai
 
 import (
@@ -37,41 +38,51 @@ type ScriptGenInput struct {
 const scriptSystemPrompt = `You are ezCompanion — a JavaScript pipeline script expert for ezHealthKonnect.
 
 ## Script Contract
-Every pipeline script MUST export a function named ` + "`transform`" + `:
+Pipeline scripts are plain top-level statements — NOT wrapped in a function. There is no
+` + "`transform`" + ` function to declare. The executor never calls a function named
+` + "`transform`" + `, so a script containing only ` + "`function transform(input) { ... }`" + `
+with no top-level call does nothing at all — it will run with no error and no effect.
+
+Produce your result one of two ways:
 ` + "```javascript" + `
-function transform(input) {
-    // input is the parsed message envelope (see Structure below)
-    // Modify input fields, add metadata, return the modified object.
-    // Throw an Error to fail the step intentionally.
-    return input;
-}
+// Style A — mutate the pre-injected output object (no return needed)
+output.patientName = getField(input.message.enhancedSegments, "PID", "PID.5");
 ` + "```" + `
+` + "```javascript" + `
+// Style B — a top-level return statement (the executor auto-wraps scripts that use
+// a top-level return in an IIFE, so this is valid even outside a function body)
+return { patientName: getField(input.message.enhancedSegments, "PID", "PID.5") };
+` + "```" + `
+Use only one style per script. Throw an Error (` + "`throw new Error('...')`" + `) to fail the step intentionally.
 
 ## Input Structure (available fields)
 ` + "```" + `
 input
-├── enhancedSegments          // HL7 segments (if HL7 message)
-│   ├── MSH.fields[]          // Message Header fields
-│   ├── PID.fields[]          // Patient Identification
-│   ├── PV1.fields[]          // Patient Visit
-│   ├── OBX.fields[]          // Observation Results
-│   └── ...                   // Any segment present in the message
-│       └── field.key         // e.g. "PID.5" – patient name
-│       └── field.value       // string value
-│       └── field.subfields[] // for composite fields
-├── _metadata                 // Pipeline metadata you can read/write
+├── message                    // The parsed message — segment/resource data lives here
+│   ├── enhancedSegments       // HL7 segments (if HL7 message)
+│   │   ├── MSH.fields[]       // Message Header fields
+│   │   ├── PID.fields[]       // Patient Identification
+│   │   ├── PV1.fields[]       // Patient Visit
+│   │   ├── OBX.fields[]       // Observation Results
+│   │   └── ...                // Any segment present in the message
+│   │       └── field.key          // e.g. "PID.5" – patient name
+│   │       └── field.value        // string value
+│   │       └── field.subfields[]  // for composite fields
+│   └── _format                // detected format, e.g. "hl7_v2"
+├── _metadata                  // Pipeline metadata you can read/write
 │   ├── messageId
 │   ├── interfaceId
-│   ├── messageType           // e.g. "ADT^A01"
+│   ├── messageType            // e.g. "ADT^A01"
 │   ├── receivedAt
-│   └── priority              // "normal" | "high" | "low"
-├── _routing                  // Set nextStep/nextSteps to redirect flow
-└── [any key you add]         // You can add arbitrary fields to output
+│   └── priority               // "normal" | "high" | "low"
+├── steps                      // Prior steps' output, if any ran before this one
+│   └── <step_name>.step_output.<field>
+└── output                     // Pre-injected empty object — write your result fields here
 ` + "```" + `
 
 ## Helper Patterns
 ` + "```javascript" + `
-// Read an HL7 field safely
+// Read an HL7 field safely — call as getField(input.message.enhancedSegments, "PID", "PID.5")
 function getField(segments, segName, fieldKey) {
     const seg = segments[segName];
     if (!seg || !seg.fields) return '';
@@ -91,10 +102,10 @@ function getSubfield(segments, segName, fieldKey, subfieldKey) {
 ` + "```" + `
 
 ## Rules
-- Always return the modified ` + "`input`" + ` object (never return null/undefined).
+- Do NOT declare or call a function named ` + "`transform`" + ` — write top-level statements directly.
+- Produce your result via ` + "`output.field = ...`" + ` OR a top-level ` + "`return {...}`" + ` — never both in the same script.
 - Wrap risky logic in try/catch if failure should be non-fatal.
 - Use ` + "`input._metadata.priority = 'high'`" + ` to escalate a message.
-- Use ` + "`input._routing = { nextStep: 'step-id' }`" + ` for conditional routing.
 - Never use ` + "`fetch`" + `, ` + "`require`" + `, or ` + "`import`" + ` — the script runs in a sandboxed goja VM.
 - Prefer ` + "`const`" + ` / ` + "`let`" + ` over ` + "`var`" + `.` +
 `
@@ -119,13 +130,12 @@ Scripts that build FHIR resources must return the resource object:
 Decision codes in parse_response step output:
   AA = approved, AD = denied, CP = partial approval, PE = pended (pending review).`
 
-// GenerateScriptStream generates a JS script and streams tokens to onToken.
-func (s *ScriptGeneratorService) GenerateScriptStream(
-	ctx context.Context,
-	input ScriptGenInput,
-	ollama LLMProvider,
-	onToken func(string) error,
-) error {
+// BuildScriptPrompt assembles the full prompt (system persona + live step/
+// pipeline/interface context + the request) for a script generation call.
+// Shared by GenerateScriptStream (streamed UI generation) and Agent Mode's
+// verify_pipeline_script tool (blocking, generate-then-test loop) so both
+// paths see identical context.
+func (s *ScriptGeneratorService) BuildScriptPrompt(ctx context.Context, input ScriptGenInput) string {
 	var parts []string
 
 	// 1. Live step context from DB
@@ -164,12 +174,20 @@ func (s *ScriptGeneratorService) GenerateScriptStream(
 		sysPrompt += "\n\n" + liveCtx
 	}
 
-	prompt := buildRAGPrompt(sysPrompt,
+	return buildRAGPrompt(sysPrompt,
 		"Write a complete JavaScript transform(input) function that does the following:\n\n"+input.Description+
 			"\n\nReturn ONLY the JavaScript code, no explanation before or after.",
 		nil)
+}
 
-	return ollama.GenerateStream(ctx, prompt, onToken)
+// GenerateScriptStream generates a JS script and streams tokens to onToken.
+func (s *ScriptGeneratorService) GenerateScriptStream(
+	ctx context.Context,
+	input ScriptGenInput,
+	ollama LLMProvider,
+	onToken func(string) error,
+) error {
+	return ollama.GenerateStream(ctx, s.BuildScriptPrompt(ctx, input), onToken)
 }
 
 // ─── Private helpers ──────────────────────────────────────────────────────────

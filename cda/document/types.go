@@ -27,6 +27,12 @@ type CDAHeader struct {
 	DocumentOf            *CDAServiceEvent       `json:"documentOf,omitempty"`
 	EncompassingEncounter *CDAEncounter          `json:"encompassingEncounter,omitempty"`
 	RelatedDocuments      []CDARelatedDocument   `json:"relatedDocuments,omitempty"`
+	// Informants are document-level <informant><assignedEntity> elements —
+	// distinct from an entry's own Informants (see CDASection) and from
+	// Authors: a source of information for the WHOLE document (e.g. a
+	// referring provider) who did not author it. Reuses CDAInformant, whose
+	// <assignedEntity> shape is identical at header and entry level.
+	Informants []CDAInformant `json:"informants,omitempty"`
 }
 
 // CDAPatient holds all patient demographics extracted from recordTarget/patientRole.
@@ -71,15 +77,22 @@ type CDAEntry struct {
 	StatusCode    string       `json:"statusCode,omitempty"`
 	EffectiveTime CDATimeRange `json:"effectiveTime"` // first <effectiveTime> only — kept for backward compatibility
 	Value         *CDAValue    `json:"value,omitempty"`
-	// AdditionalValues holds every <value> sibling beyond the first.
-	// C-CDA allows [1..*] <value> on some templates (e.g. Assessment Scale
-	// Supporting Observation), but FHIR R4's Observation.value[x] can only
-	// ever hold one — Value keeps the first (the one the declarative engine
-	// maps), and this slice keeps the rest so the engine can surface a
-	// warning instead of silently losing them. Real gap found auditing the
-	// 99397 sample's Functional Status section: a PHQ-2 total-score entry
-	// carries an INT raw score AND a CO/SNOMED interpretation as two
-	// sibling <value> elements.
+	// AdditionalValues holds sibling <value> elements beyond the primary one
+	// (Value) that could NOT be merged into it. C-CDA allows [1..*] <value>
+	// on some templates (e.g. Assessment Scale Supporting Observation), but
+	// FHIR R4's Observation.value[x] can only ever hold one shape at a time.
+	// entry_parser.go's multi-<value> handling (see its own comment) already:
+	//   1. drops blank/nullFlavor-only siblings entirely (pure noise), and
+	//   2. folds any sibling that is ALSO coded into Value.Code.Translations
+	//      (same "alternate coding, same concept" relationship a genuine
+	//      <translation> child already has — CDACodeToCodeableConcept
+	//      renders both the same way).
+	// Only a sibling with a genuinely different value[x] shape than Value
+	// (e.g. Value is an INT score, the sibling is a CD interpretation) ends
+	// up here, where the declarative engine surfaces it as a warning instead
+	// of silently losing it. Real gap found auditing the 99397 sample's
+	// Functional Status section: a PHQ-2 total-score entry carries an INT raw
+	// score AND a CD/SNOMED interpretation as two sibling <value> elements.
 	AdditionalValues []CDAValue `json:"additionalValues,omitempty"`
 	// InterpretationCode is the Result Observation's <interpretationCode>
 	// (CONF:1198-7147, confirmed via WebFetch against build.fhir.org/ig/HL7/

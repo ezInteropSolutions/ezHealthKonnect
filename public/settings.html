@@ -1567,6 +1567,24 @@
                         </div>
                     </div>
 
+                    <!-- Agent Mode -->
+                    <div class="settings-card">
+                        <div class="settings-card-header">
+                            <i class="fas fa-robot" style="color:#f97316"></i>
+                            <div><h3>Agent Mode <span style="font-size:11px;font-weight:600;color:#f97316;border:1px solid #f97316;border-radius:10px;padding:1px 8px;margin-left:4px">BETA</span></h3><p>Lets ezCompanion propose actions (retry a message, activate/deactivate an interface) directly in chat. Nothing executes until an admin clicks Approve. Requires a tool-calling-capable chat model (llama3.2 and newer support this).</p></div>
+                        </div>
+                        <div class="settings-card-body">
+                            <div class="toggle-row">
+                                <label class="toggle-switch">
+                                    <input type="checkbox" id="aiAgentModeEnabled">
+                                    <span class="toggle-track"></span>
+                                </label>
+                                <span class="toggle-label">Enable Agent Mode</span>
+                            </div>
+                            <div class="doc-tip" style="margin-top:10px"><i class="fas fa-triangle-exclamation" style="color:#f97316"></i> <span>Approved actions execute for real (e.g. an interface is actually deactivated). Every proposal and its outcome is recorded in the <code>ai_agent_actions</code> audit table.</span></div>
+                        </div>
+                    </div>
+
                     <!-- Ollama Config -->
                     <div class="settings-card">
                         <div class="settings-card-header">
@@ -2908,6 +2926,7 @@ async function loadAISettings() {
         document.getElementById('aiQueueTimeout').value      = d.queue?.queue_timeout_seconds || 30;
         document.getElementById('aiFeedbackWebhookURL').value = d.feedback_webhook_url || '';
         _updateSubmitTeamBtn(d.feedback_webhook_url || '');
+        document.getElementById('aiAgentModeEnabled').checked = !!d.agent_mode_enabled;
 
         if (d.catalog) {
             _aiCatalog = d.catalog;
@@ -3340,6 +3359,8 @@ async function ezcActivateModel(modelName) {
                 max_concurrent:        current.queue?.max_concurrent        || 2,
                 queue_timeout_seconds: current.queue?.queue_timeout_seconds || 30,
             },
+            feedback_webhook_url: current.feedback_webhook_url || '',
+            agent_mode_enabled: !!current.agent_mode_enabled,
         });
         if (statusEl) statusEl.innerHTML = `<span style="color:#059669">✅ Switched to <strong>${esc(modelName)}</strong> — takes effect on next request.</span>`;
         await loadEZCompanionSection();
@@ -3365,6 +3386,7 @@ async function saveAISettings() {
                 queue_timeout_seconds: parseInt(document.getElementById('aiQueueTimeout').value, 10)  || 30,
             },
             feedback_webhook_url: webhookURL,
+            agent_mode_enabled: document.getElementById('aiAgentModeEnabled').checked,
         });
         _updateSubmitTeamBtn(webhookURL);
         resetBtn('aiSaveBtn');

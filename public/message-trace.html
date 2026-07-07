@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Message Trace – ezHealthKonnect</title>
+    <link rel="stylesheet" href="css/dashboard.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        /* ── Design tokens (same palette as monitoring.html) ─────────────────── */
+        :root {
+            --pink:        #db2777;
+            --pink-dark:   #9d174d;
+            --pink-light:  #fce7f3;
+            --pink-mid:    #f9a8d4;
+            --navy:        #1e3a8a;
+            --navy-light:  #eff6ff;
+            --white:       #ffffff;
+            --page-bg:     #ffffff;
+            --card-border: #f0e4ef;
+            --row-hover:   #f9fafb;
+            --text:        #1a202c;
+            --muted:       #6b7280;
+        }
+
+        body { background: var(--page-bg); }
+        .main-content {
+            flex: 1; display: flex; flex-direction: column; overflow: hidden;
+            background: var(--page-bg);
+        }
+
+        .page-header {
+            padding: 20px 28px 16px;
+            background: var(--white);
+            border-bottom: 1px solid var(--card-border);
+            display: flex; align-items: center; justify-content: space-between;
+            flex-shrink: 0;
+        }
+        .page-header h1 { font-size: 18px; font-weight: 700; color: var(--text); }
+        .page-header h1 i { color: var(--pink); margin-right: 8px; }
+        .page-header p  { font-size: 13px; color: var(--muted); margin-top: 2px; }
+
+        .trace-body {
+            flex: 1; overflow-y: auto; padding: 20px 28px 32px;
+            display: flex; flex-direction: column; gap: 20px;
+        }
+
+        /* ── Search box ───────────────────────────────────────────────────────── */
+        .search-panel {
+            background: var(--white); border: 1px solid var(--card-border); border-radius: 12px;
+            padding: 18px; display: flex; gap: 10px; align-items: center;
+        }
+        .search-panel input {
+            flex: 1; padding: 10px 14px; border: 1px solid var(--card-border); border-radius: 8px;
+            font-size: 13px; font-family: 'SFMono-Regular', Consolas, monospace;
+        }
+        .search-panel input:focus { outline: none; border-color: var(--pink-mid); }
+        .search-btn {
+            padding: 10px 20px; border-radius: 8px; border: none;
+            background: var(--pink); color: #fff; font-size: 13px; font-weight: 600; cursor: pointer;
+        }
+        .search-btn:hover { background: var(--pink-dark); }
+        .search-btn:disabled { background: var(--pink-mid); cursor: not-allowed; }
+
+        /* ── Result header ────────────────────────────────────────────────────── */
+        .card-panel {
+            background: var(--white); border: 1px solid var(--card-border); border-radius: 12px; overflow: hidden;
+        }
+        .card-top {
+            padding: 13px 18px; border-bottom: 1px solid #f0f0f0;
+            display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px;
+        }
+        .card-top h3 { font-size: 13px; font-weight: 700; color: var(--text); }
+        .card-meta { font-size: 11px; color: var(--muted); }
+        .meta-pill {
+            display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 10px;
+            font-weight: 700; background: var(--pink-light); color: var(--pink-dark); margin-left: 6px;
+        }
+
+        /* ── Timeline ─────────────────────────────────────────────────────────── */
+        .timeline { padding: 6px 0; }
+        .timeline-row {
+            display: flex; align-items: flex-start; gap: 12px;
+            padding: 12px 18px; border-bottom: 1px solid #f3f4f6;
+        }
+        .timeline-row:last-child { border-bottom: none; }
+        .timeline-row:hover { background: var(--row-hover); }
+        .timeline-icon {
+            width: 26px; height: 26px; border-radius: 6px; flex-shrink: 0;
+            display: flex; align-items: center; justify-content: center; font-size: 12px;
+        }
+        .timeline-icon.level-info    { background: var(--navy-light); color: var(--navy); }
+        .timeline-icon.level-warning { background: #fef3c7; color: #b45309; }
+        .timeline-icon.level-error   { background: #fee2e2; color: #dc2626; }
+        .timeline-icon.level-debug   { background: #f1f5f9; color: #64748b; }
+        .timeline-main { flex: 1; min-width: 0; }
+        .timeline-top { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+        .timeline-stage {
+            font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em;
+            color: var(--muted);
+        }
+        .timeline-message { font-size: 13px; color: var(--text); margin-top: 2px; }
+        .timeline-fields {
+            font-size: 11px; color: var(--muted); margin-top: 4px; font-family: Consolas, monospace;
+            word-break: break-all;
+        }
+        .timeline-ts { font-size: 11px; color: #a0aec0; flex-shrink: 0; white-space: nowrap; }
+
+        /* ── Empty / loading / error states ──────────────────────────────────── */
+        .empty { padding: 48px 24px; text-align: center; color: #a0aec0; }
+        .empty i { font-size: 30px; margin-bottom: 10px; display: block; }
+        .empty p { font-size: 13px; }
+        .empty.error i, .empty.error strong { color: #dc2626; }
+    </style>
+</head>
+<body>
+<div class="dashboard-container">
+
+<!-- ── Sidebar (rebuilt at runtime by sidebar-nav.js) ─────────────────────── -->
+<nav class="sidebar" id="sidebar"></nav>
+
+<!-- ── Main content ────────────────────────────────────────────────────────── -->
+<div class="main-content">
+
+    <div class="page-header">
+        <div>
+            <h1><i class="fas fa-route"></i>Message Trace</h1>
+            <p>Paste a correlation ID (from an error email or alert) to see a message's full processing timeline</p>
+        </div>
+    </div>
+
+    <div class="trace-body">
+
+        <div class="search-panel">
+            <input type="text" id="correlationInput" placeholder="e.g. tcp_abc123def456..." autocomplete="off">
+            <button class="search-btn" id="traceBtn"><i class="fas fa-magnifying-glass"></i> Trace</button>
+        </div>
+
+        <div class="card-panel" id="resultPanel" style="display:none">
+            <div class="card-top">
+                <h3>Timeline<span class="meta-pill" id="countPill"></span></h3>
+                <span class="card-meta" id="idsMeta"></span>
+            </div>
+            <div id="resultBody"></div>
+        </div>
+
+    </div>
+</div>
+
+</div><!-- /dashboard-container -->
+
+<script src="/js/core/app-dialogs.js"></script>
+<script src="/js/services/AuthService.js"></script>
+<script src="js/components/sidebar-nav.js?v=3"></script>
+<script>
+document.addEventListener('DOMContentLoaded', async () => {
+    const ok = await window.AuthService.initialize();
+    if (!ok) return;
+
+    const input = document.getElementById('correlationInput');
+    const btn = document.getElementById('traceBtn');
+
+    btn.addEventListener('click', runTrace);
+    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') runTrace(); });
+
+    // Support deep-linking: message-trace.html?correlationId=xyz
+    const params = new URLSearchParams(window.location.search);
+    const preset = params.get('correlationId');
+    if (preset) {
+        input.value = preset;
+        runTrace();
+    }
+});
+
+const levelIcons = {
+    error:   'fa-circle-exclamation',
+    warning: 'fa-triangle-exclamation',
+    info:    'fa-circle-info',
+    debug:   'fa-bug',
+};
+
+function esc(s) {
+    return String(s ?? '').replace(/[&<>"']/g, (c) => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+    }[c]));
+}
+
+async function runTrace() {
+    const input = document.getElementById('correlationInput');
+    const btn = document.getElementById('traceBtn');
+    const panel = document.getElementById('resultPanel');
+    const body = document.getElementById('resultBody');
+    const countPill = document.getElementById('countPill');
+    const idsMeta = document.getElementById('idsMeta');
+
+    const correlationId = input.value.trim();
+    if (!correlationId) return;
+
+    btn.disabled = true;
+    panel.style.display = '';
+    countPill.textContent = '';
+    idsMeta.textContent = '';
+    body.innerHTML = '<div class="empty"><i class="fas fa-spinner fa-spin"></i><p>Tracing...</p></div>';
+
+    try {
+        const res = await fetch('/api/system/message-trace/' + encodeURIComponent(correlationId), {
+            credentials: 'include',
+        });
+
+        if (res.status === 404) {
+            body.innerHTML = '<div class="empty error"><i class="fas fa-magnifying-glass"></i>' +
+                '<p><strong>No message found</strong> for this correlation ID.<br>Double-check the ID and try again.</p></div>';
+            return;
+        }
+        if (!res.ok) {
+            const errText = await res.text();
+            body.innerHTML = '<div class="empty error"><i class="fas fa-triangle-exclamation"></i>' +
+                '<p><strong>Request failed</strong> (' + esc(res.status) + ')<br>' + esc(errText) + '</p></div>';
+            return;
+        }
+
+        const data = await res.json();
+        if (!data.success) {
+            body.innerHTML = '<div class="empty error"><i class="fas fa-triangle-exclamation"></i><p>' + esc(data.error || 'Unknown error') + '</p></div>';
+            return;
+        }
+
+        idsMeta.textContent = 'interface: ' + data.interface_id + '  ·  message: ' + data.message_id;
+        countPill.textContent = data.count + ' event' + (data.count === 1 ? '' : 's');
+
+        const timeline = data.timeline || [];
+        if (timeline.length === 0) {
+            body.innerHTML = '<div class="empty"><i class="fas fa-inbox"></i><p>No log entries recorded for this message.</p></div>';
+            return;
+        }
+
+        body.innerHTML = '<div class="timeline">' + timeline.map(renderEntry).join('') + '</div>';
+    } catch (err) {
+        body.innerHTML = '<div class="empty error"><i class="fas fa-plug-circle-xmark"></i><p><strong>Could not reach the server.</strong><br>' + esc(err.message) + '</p></div>';
+    } finally {
+        btn.disabled = false;
+    }
+}
+
+function renderEntry(entry) {
+    const level = (entry.level || 'info').toLowerCase();
+    const icon = levelIcons[level] || levelIcons.info;
+    const ts = entry.ts ? new Date(entry.ts).toLocaleString() : '';
+    const fields = entry.fields && Object.keys(entry.fields).length
+        ? '<div class="timeline-fields">' + esc(JSON.stringify(entry.fields)) + '</div>'
+        : '';
+
+    return '<div class="timeline-row">' +
+        '<div class="timeline-icon level-' + esc(level) + '"><i class="fas ' + icon + '"></i></div>' +
+        '<div class="timeline-main">' +
+            '<div class="timeline-top"><span class="timeline-stage">' + esc(entry.stage || 'event') + '</span></div>' +
+            '<div class="timeline-message">' + esc(entry.message) + '</div>' +
+            fields +
+        '</div>' +
+        '<div class="timeline-ts">' + esc(ts) + '</div>' +
+    '</div>';
+}
+</script>
+</body>
+</html>

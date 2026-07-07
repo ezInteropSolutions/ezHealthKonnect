@@ -93,6 +93,23 @@ func (e *CDANormalizerExecutor) Execute(
 			rawXML = v
 		}
 	}
+	// ExecutePipeline (Test Pipeline and real message processing both route
+	// through it) wraps the actual message under inputData["message"] on
+	// every step call — the two top-level lookups above never see it there.
+	// Mirrors cda_to_fhir_executor.go's own message-unwrapping fallback so
+	// cda.normalize works whether it's the pipeline's first step or a later one.
+	if rawXML == "" {
+		if msg, ok := inputData["message"].(map[string]interface{}); ok {
+			if v := executors.GetFieldValue(msg, cfg.SourceField); v != nil {
+				rawXML, _ = v.(string)
+			}
+			if rawXML == "" {
+				if v, ok := msg["raw"].(string); ok {
+					rawXML = v
+				}
+			}
+		}
+	}
 	if rawXML == "" {
 		return nil, fmt.Errorf("cda.normalize: source field %q is empty or not a string", cfg.SourceField)
 	}

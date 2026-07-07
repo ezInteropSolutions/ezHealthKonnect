@@ -130,10 +130,41 @@ func (ep *entryParser) parseClinicalAct(el *etree.Element, entryType string) CDA
 		entry.EffectiveTime = entry.EffectiveTimes[0].Range
 	}
 	if valEls := el.SelectElements("value"); len(valEls) > 0 {
-		entry.Value = parseValue(valEls[0])
-		for _, extra := range valEls[1:] {
-			if v := parseValue(extra); v != nil {
-				entry.AdditionalValues = append(entry.AdditionalValues, *v)
+		if len(valEls) == 1 {
+			entry.Value = parseValue(valEls[0])
+		} else {
+			// Multiple sibling <value> elements on one act (non-conformant per
+			// C-CDA's own templates, which allow at most one -- but real vendor
+			// documents do this). Blank/nullFlavor-only siblings are filtered
+			// out first (pure noise), then any remaining sibling that is ALSO
+			// coded (CD/CE/CS/CV) is folded into the primary value's
+			// Code.Translations -- the same "alternate coding for the same
+			// concept" relationship CDACodeToCodeableConcept already renders as
+			// extra FHIR codings for a genuine <translation> child. A sibling
+			// that isn't coded (a different value[x] shape than the primary,
+			// e.g. an INT score alongside a CD interpretation) can't be merged
+			// this way and still lands in AdditionalValues, surfaced by
+			// additionalValuesWarningMessages (declarative_engine.go). Real gap
+			// found on a vendor Smoking Status entry: 3 sibling <value>
+			// elements, the first a blank nullFlavor placeholder and the other
+			// two carrying alternate codes for the same "never smoked" concept
+			// -- the old first-element-wins logic kept the blank one and
+			// silently dropped both real codes.
+			var nonEmpty []*CDAValue
+			for _, valEl := range valEls {
+				if v := parseValue(valEl); v != nil && !isEmptyCDAValue(v) {
+					nonEmpty = append(nonEmpty, v)
+				}
+			}
+			if len(nonEmpty) > 0 {
+				entry.Value = nonEmpty[0]
+				for _, extra := range nonEmpty[1:] {
+					if entry.Value.Code != nil && extra.Code != nil {
+						entry.Value.Code.Translations = append(entry.Value.Code.Translations, *extra.Code)
+						continue
+					}
+					entry.AdditionalValues = append(entry.AdditionalValues, *extra)
+				}
 			}
 		}
 	}

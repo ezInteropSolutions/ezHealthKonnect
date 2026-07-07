@@ -20,6 +20,7 @@ import (
 	"log"
 	"time"
 
+	cdadocument "ezhealthkonnect/cda/document"
 	"ezhealthkonnect/models"
 	cdastorage "ezhealthkonnect/services/cda_storage"
 	cdaparser "ezhealthkonnect/services/parsers/cda"
@@ -124,6 +125,23 @@ func (e *CDAParseExecutor) Execute(
 			rawXML = v
 		}
 	}
+	// ExecutePipeline (Test Pipeline and real message processing both route
+	// through it) wraps the actual message under inputData["message"] on
+	// every step call — the two top-level lookups above never see it there.
+	// Mirrors cda_to_fhir_executor.go's own message-unwrapping fallback so
+	// cda.parse works whether it's the pipeline's first step or a later one.
+	if rawXML == "" {
+		if msg, ok := inputData["message"].(map[string]interface{}); ok {
+			if v := executors.GetFieldValue(msg, cfg.SourceField); v != nil {
+				rawXML, _ = v.(string)
+			}
+			if rawXML == "" {
+				if v, ok := msg["raw"].(string); ok {
+					rawXML = v
+				}
+			}
+		}
+	}
 	if rawXML == "" {
 		return nil, fmt.Errorf("cda.parse: source field %q is empty or not a string", cfg.SourceField)
 	}
@@ -193,10 +211,11 @@ func (e *CDAParseExecutor) Execute(
 	}
 
 	// Attach the Sprint B typed CDADocument for use by Sprint C/D validators and mappers.
-	// Stored under "_cdaDocument" as interface{} so downstream steps can type-assert to
-	// *cdadocument.CDADocument without this package importing cda/document directly.
-	if result.TypedDocument != nil {
-		outputData["_cdaDocument"] = result.TypedDocument
+	// setCDADocument stores it inside the shared message object (not a sibling
+	// key on this step's own outputData) — the only form ExecutePipeline
+	// actually carries forward to the next step; see cda_document_resolution.go.
+	if typedDoc, ok := result.TypedDocument.(*cdadocument.CDADocument); ok {
+		setCDADocument(outputData, typedDoc)
 	}
 
 	stepOut := map[string]interface{}{
@@ -236,7 +255,7 @@ func (e *CDAParseExecutor) GetOutputVariables(step *models.TransformationStep) [
 			Description: "Number of CDA sections parsed", Category: "CDA Transform"},
 		{Name: "Patient header", Path: "_stepOutput.parsedCDA.header.patient", DataType: "object",
 			Description: "Patient demographics extracted from CDA document header", Category: "CDA Transform"},
-		{Name: "Typed CDA document", Path: "_cdaDocument", DataType: "object",
-			Description: "Sprint B typed *CDADocument with full struct fidelity (for Sprint C/D validators)", Category: "CDA Transform"},
+		{Name: "Typed CDA document", Path: "message._cdaDocument", DataType: "object",
+			Description: "Typed *CDADocument with full struct fidelity, consumed automatically by a following cda.to_fhir/cda.section_to_csv/cda.dedupe step — not directly reference-able as a field value", Category: "CDA Transform"},
 	}
 }

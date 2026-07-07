@@ -608,6 +608,169 @@ func TestDeclarativeEngine_SkipIfResourceHasAnyOf_GatesDataAbsentReasonRow(t *te
 }
 
 // ===============================================================
+// Disabled: a row with Disabled=true is skipped entirely, same as a Scope
+// matching nothing — the runtime effect of a Section Field Editor "Remove"
+// action (ApplyFieldOverrides sets this flag; see
+// TestApplyFieldOverrides_RemoveActionDisablesRow for that half).
+// ===============================================================
+
+func TestDeclarativeEngine_DisabledRow_SkipsEntirely(t *testing.T) {
+	documentMap := map[string]interface{}{
+		"sectionsByKey": map[string]interface{}{
+			"allergiesAndIntolerances": map[string]interface{}{
+				"entries": []interface{}{
+					map[string]interface{}{
+						"entryType":   "allergy",
+						"criticality": "CRITH",
+						"status":      "active",
+					},
+				},
+			},
+		},
+	}
+
+	engine := cdafhir.NewDeclarativeEngine()
+	rule := cdafhir.MappingRule{
+		SectionKey:   "allergiesAndIntolerances",
+		FHIRResource: "AllergyIntolerance",
+		Fields: []cdafhir.MappingRow{
+			{SourcePath: "criticality", Transform: "allergy_criticality_to_fhir", TargetPath: "criticality", Disabled: true},
+			{SourcePath: "status", Transform: "allergy_status_to_fhir", TargetPath: "clinicalStatus"},
+		},
+	}
+
+	resources, errs := engine.BuildResources(documentMap, rule)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected errors: %+v", errs)
+	}
+	if len(resources) != 1 {
+		t.Fatalf("got %d resources, want 1", len(resources))
+	}
+
+	if _, has := resources[0]["criticality"]; has {
+		t.Errorf("criticality row is Disabled — should not appear in output, got %v", resources[0]["criticality"])
+	}
+	if _, has := resources[0]["clinicalStatus"]; !has {
+		t.Error("clinicalStatus row is NOT disabled — should still be written")
+	}
+}
+
+// TestDeclarativeEngine_AddedRow_ProducesOutput proves the engine treats a
+// row built the way applyAddOverride builds one (declarative_rules_flatten.go)
+// identically to an OOB-literal row — applyRow has no notion of "this row was
+// inserted at runtime vs. always present in Go source", so a hand-built
+// MappingRow with the same shape an "add" override would produce is a valid
+// stand-in for testing the engine side of this feature without needing the
+// full override-application machinery in this test.
+func TestDeclarativeEngine_AddedRow_ProducesOutput(t *testing.T) {
+	documentMap := map[string]interface{}{
+		"sectionsByKey": map[string]interface{}{
+			"allergiesAndIntolerances": map[string]interface{}{
+				"entries": []interface{}{
+					map[string]interface{}{
+						"entryType": "allergy",
+						"status":    "active",
+						"note":      "Patient reports mild reaction only in spring.",
+					},
+				},
+			},
+		},
+	}
+
+	engine := cdafhir.NewDeclarativeEngine()
+	rule := cdafhir.MappingRule{
+		SectionKey:   "allergiesAndIntolerances",
+		FHIRResource: "AllergyIntolerance",
+		Fields: []cdafhir.MappingRow{
+			{SourcePath: "status", Transform: "allergy_status_to_fhir", TargetPath: "clinicalStatus"},
+			// Shaped exactly as applyAddOverride would build it from a saved
+			// Action=="add" override — Scope "" (entry-level), SourcePath
+			// "note", TargetPath "note[0]", no transform (plain string passthrough).
+			{SourcePath: "note", TargetPath: "note[0]"},
+		},
+	}
+
+	resources, errs := engine.BuildResources(documentMap, rule)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected errors: %+v", errs)
+	}
+	if len(resources) != 1 {
+		t.Fatalf("got %d resources, want 1", len(resources))
+	}
+
+	// setFHIRPath writes an "x[0]" TargetPath as resource["x"][0], not a
+	// literal "x[0]" map key.
+	noteArr, ok := resources[0]["note"].([]interface{})
+	if !ok || len(noteArr) != 1 || noteArr[0] != "Patient reports mild reaction only in spring." {
+		t.Errorf("note = %#v, want [\"Patient reports mild reaction only in spring.\"] — the added row's value should have been written like any other row", resources[0]["note"])
+	}
+	if _, has := resources[0]["clinicalStatus"]; !has {
+		t.Error("clinicalStatus (the pre-existing row) should still be written alongside the added one")
+	}
+}
+
+// TestDeclarativeEngine_AddedRow_ExtensionWrite_ProducesNestedExtensionElement
+// proves an "add" override targeting extension[url=...].valueXxx — the Add
+// Field modal's Extension mode — actually produces a real, correctly-shaped
+// FHIR extension element in the output resource, not just a config-time
+// pass-through. This is the end-to-end proof that resolveBracketIndex's
+// find-or-create predicate matching (fhir_path_writer_test.go covers it in
+// isolation) is wired all the way through applyRow/setFHIRPath at document
+// -processing time.
+func TestDeclarativeEngine_AddedRow_ExtensionWrite_ProducesNestedExtensionElement(t *testing.T) {
+	documentMap := map[string]interface{}{
+		"sectionsByKey": map[string]interface{}{
+			"allergiesAndIntolerances": map[string]interface{}{
+				"entries": []interface{}{
+					map[string]interface{}{
+						"entryType": "allergy",
+						"status":    "active",
+						"raceText":  "Asian",
+					},
+				},
+			},
+		},
+	}
+
+	engine := cdafhir.NewDeclarativeEngine()
+	extensionURL := "http://hl7.org/fhir/us/core/StructureDefinition/us-core-race"
+	rule := cdafhir.MappingRule{
+		SectionKey:   "allergiesAndIntolerances",
+		FHIRResource: "AllergyIntolerance",
+		Fields: []cdafhir.MappingRow{
+			{SourcePath: "status", Transform: "allergy_status_to_fhir", TargetPath: "clinicalStatus"},
+			// Shaped exactly as the Add Field modal's Extension mode builds
+			// it: no Transform (plain string passthrough), TargetPath
+			// composed as "extension[url=<url>].value<Type>".
+			{SourcePath: "raceText", TargetPath: "extension[url=" + extensionURL + "].valueString"},
+		},
+	}
+
+	resources, errs := engine.BuildResources(documentMap, rule)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected errors: %+v", errs)
+	}
+	if len(resources) != 1 {
+		t.Fatalf("got %d resources, want 1", len(resources))
+	}
+
+	ext, ok := resources[0]["extension"].([]interface{})
+	if !ok || len(ext) != 1 {
+		t.Fatalf("extension = %#v, want a single-element array", resources[0]["extension"])
+	}
+	elem, _ := ext[0].(map[string]interface{})
+	if elem["url"] != extensionURL {
+		t.Errorf("extension[0].url = %v, want %q", elem["url"], extensionURL)
+	}
+	if elem["valueString"] != "Asian" {
+		t.Errorf("extension[0].valueString = %v, want \"Asian\"", elem["valueString"])
+	}
+	if _, has := resources[0]["clinicalStatus"]; !has {
+		t.Error("clinicalStatus (the pre-existing row) should still be written alongside the extension add")
+	}
+}
+
+// ===============================================================
 // Typed-nil regression: a transform returning a nil map[string]interface{}
 // (transforms.CDACodeToCodeableConcept does this for a fully nullFlavor
 // code, e.g. PracticeFusion's fully-null Results organizer) must be treated

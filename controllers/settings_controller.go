@@ -996,6 +996,7 @@ func (sc *SettingsController) GetAISettings(c *gin.Context) {
 			"ollama":               cfg.Ollama,
 			"queue":                cfg.Queue,
 			"feedback_webhook_url": cfg.FeedbackWebhookURL,
+			"agent_mode_enabled":   cfg.AgentModeEnabled,
 			"catalog":              services.OllamaModelCatalog(),
 		},
 	})

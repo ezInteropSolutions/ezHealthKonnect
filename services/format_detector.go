@@ -5,9 +5,11 @@ package services
 
 import (
 	"encoding/json"
+	"log"
 	"strings"
 
 	"ezhealthkonnect/models"
+	"ezhealthkonnect/services/parsers"
 )
 
 // FormatDetector automatically detects message format (OOB principle)
@@ -18,6 +20,44 @@ type FormatDetector struct {
 // NewFormatDetector creates a new format detector (OOB pattern)
 func NewFormatDetector() *FormatDetector {
 	return &FormatDetector{}
+}
+
+// ParseSampleMessage auto-detects a raw message's format and parses it into
+// the same JSON envelope shape production pipelines consume — no DB access,
+// no persistence, safe to call against a hand-written or synthetic sample.
+// Extracted from controllers/transformation_test_controller.go's private
+// parseTestMessage so dry-run tooling outside the controller layer (e.g. the
+// Agent Mode script-verification tool) can reuse it instead of duplicating it.
+func ParseSampleMessage(message string) map[string]interface{} {
+	fd := NewFormatDetector()
+	detection := fd.DetectFormat(message)
+	detectedFormat := string(detection.DetectedFormat)
+
+	registry := parsers.NewParserRegistry()
+	parseResult := registry.Get(detectedFormat).Parse(message)
+
+	result := parseResult.ParsedJSON
+	if result == nil {
+		result = map[string]interface{}{"raw": message}
+	}
+
+	// _format drives enrichMessageEnvelope (semantic index, sensitivity map).
+	result["_format"] = detectedFormat
+
+	// Format-agnostic enhanced fields for new consumers (schema-annotated view).
+	if len(parseResult.EnhancedFields) > 0 {
+		result["enhancedFields"] = parseResult.EnhancedFields
+		result["fieldOrder"] = parseResult.FieldOrder
+	}
+	if parseResult.TypeName != "" {
+		result["typeName"] = parseResult.TypeName
+		result["typeDescription"] = parseResult.TypeDescription
+	}
+
+	log.Printf("✅ [ParseSampleMessage] Parsed %s message: type=%s fields=%d schemaLoaded=%v",
+		detectedFormat, parseResult.Metadata.MessageType,
+		len(parseResult.EnhancedFields), parseResult.TypeName != "")
+	return result
 }
 
 // DetectFormat automatically detects message format (OOB principle)

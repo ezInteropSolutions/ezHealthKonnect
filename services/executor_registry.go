@@ -148,10 +148,13 @@ func (er *ExecutorRegistry) autoRegisterExecutors() {
 	er.Register(transform.NewDeidentifyExecutor())           // deidentify (HIPAA P1)
 
 	// CDA transform executors
-	er.Register(transform.NewCDAToFHIRExecutor(er.db))  // cda.to_fhir
-	er.Register(transform.NewFHIRToCDAExecutor())       // fhir.to_cda
-	er.Register(transform.NewCDANormalizerExecutor())   // cda.normalize
-	er.Register(transform.NewCDAParseExecutor())        // cda.parse
+	er.Register(transform.NewCDAToFHIRExecutor(er.db))     // cda.to_fhir
+	er.Register(transform.NewFHIRToCDAExecutor())          // fhir.to_cda
+	er.Register(transform.NewCDABuildExecutor())           // cda.build
+	er.Register(transform.NewCDANormalizerExecutor())      // cda.normalize
+	er.Register(transform.NewCDAParseExecutor())           // cda.parse
+	er.Register(transform.NewCDASectionToCSVExecutor())    // cda.section_to_csv
+	er.Register(transform.NewCDADedupeExecutor(er.db))     // cda.dedupe
 
 	// Connector bridge executors (DLQ service wired later via SetDLQService)
 	er.Register(transform.NewOutboundConnectorExecutor())    // connector.outbound

@@ -1,0 +1,78 @@
+{
+  "summary": {
+    "timestamp": "2026-07-04T04:55:52.282Z",
+    "config": {
+      "messages": 5,
+      "concurrent": 1,
+      "targetTps": 0,
+      "chaos": false,
+      "chaosRate": 0.2
+    },
+    "duration_ms": 90,
+    "throughput_tps": 55.6,
+    "normal": {
+      "total": 5,
+      "passed": 5,
+      "failed": 0,
+      "latency": {
+        "avg": 17,
+        "p50": 9,
+        "p90": 54,
+        "p99": 54
+      }
+    },
+    "chaos": null
+  },
+  "results": [
+    {
+      "idx": 0,
+      "scenario": "normal",
+      "isChaos": false,
+      "expectNack": false,
+      "ackCode": "AA",
+      "latencyMs": 54,
+      "error": "",
+      "pass": true
+    },
+    {
+      "idx": 1,
+      "scenario": "normal",
+      "isChaos": false,
+      "expectNack": false,
+      "ackCode": "AA",
+      "latencyMs": 9,
+      "error": "",
+      "pass": true
+    },
+    {
+      "idx": 2,
+      "scenario": "normal",
+      "isChaos": false,
+      "expectNack": false,
+      "ackCode": "AA",
+      "latencyMs": 7,
+      "error": "",
+      "pass": true
+    },
+    {
+      "idx": 3,
+      "scenario": "normal",
+      "isChaos": false,
+      "expectNack": false,
+      "ackCode": "AA",
+      "latencyMs": 7,
+      "error": "",
+      "pass": true
+    },
+    {
+      "idx": 4,
+      "scenario": "normal",
+      "isChaos": false,
+      "expectNack": false,
+      "ackCode": "AA",
+      "latencyMs": 9,
+      "error": "",
+      "pass": true
+    }
+  ]
+}

@@ -575,7 +575,7 @@ class VisualStep {
     }
 
     /**
-     * Check if a step is any CDA-family step (parse, transform, normalize, or fhir.to_cda)
+     * Check if a step is any CDA-family step (parse, transform, normalize, fhir.to_cda, build, or dedupe)
      * @param {VisualStep|Object} step
      * @returns {boolean}
      */
@@ -583,7 +583,8 @@ class VisualStep {
         if (!step) return false;
         const type = step.stepType || step.step_type || '';
         return type === 'cda.parse' || type === 'cda.to_fhir' ||
-               type === 'cda.normalize' || type === 'fhir.to_cda';
+               type === 'cda.normalize' || type === 'fhir.to_cda' ||
+               type === 'cda.build' || type === 'cda.dedupe';
     }
 
     /**

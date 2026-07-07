@@ -78,11 +78,23 @@ func NewDeclarativeEngine() *DeclarativeEngine {
 // entry, plus any field-level errors/warnings — the same SectionError shape
 // MapOutput/ProcessingResult already use elsewhere in this package.
 //
+// The returned slice may contain MIXED resource types: any row with
+// EmitAsResource set (e.g. a recorder/asserter Practitioner/PractitionerRole/
+// Organization) has its sub-resource appended into this same slice alongside
+// the section's primary resource (AllergyIntolerance, Condition, etc.), via
+// the `extra` return of buildOneResource above. This is intentional —
+// declarative_document_mapper.go appends this exact mixed-type slice straight
+// into the FHIR Bundle, where mixed resource types are normal. Callers that
+// need only the primary resource type must filter by resourceType first; see
+// TestDeclarativeEngine_CareTeam_BuildsCareTeamAndPractitioner
+// (declarative_oob_rules_test.go) for the established pattern.
+//
 // Use BuildResourcesForRules instead when more than one rule targets the
 // same SectionKey (e.g. Medications' moodCode-driven MedicationRequest vs
 // MedicationStatement split) — calling BuildResources separately per rule
 // would let a later rule's EntryMatch re-claim entries an earlier rule
-// already matched.
+// already matched. BuildResourcesForRules has the identical mixed-resource-
+// type caveat at its own concatenation point.
 func (e *DeclarativeEngine) BuildResources(
 	documentMap map[string]interface{},
 	rule MappingRule,
@@ -132,6 +144,10 @@ func (e *DeclarativeEngine) BuildResources(
 // allEntries slice*, and flattening changes that slice's length/order, so
 // mixing flattened and unflattened rules for the same SectionKey would
 // silently misalign claims across rules.
+//
+// See BuildResources' doc comment above: the returned slice may likewise
+// contain EmitAsResource sub-resources mixed in with each rule's primary
+// resource type.
 func (e *DeclarativeEngine) BuildResourcesForRules(
 	documentMap map[string]interface{},
 	rules []MappingRule,
@@ -565,6 +581,9 @@ func isNilValue(v interface{}) bool {
 // nil: only buildOneResource (the top of the recursion) needs to actually
 // collect these.
 func (e *DeclarativeEngine) applyRow(resource map[string]interface{}, entryMap map[string]interface{}, row MappingRow, extraOut *[]map[string]interface{}) error {
+	if row.Disabled {
+		return nil
+	}
 	if resourceHasAnyKey(resource, row.SkipIfResourceHasAnyOf) {
 		return nil
 	}

@@ -364,6 +364,17 @@ type MappingRow struct {
 	// it anywhere else would make declarative output dedup MORE than Go ever
 	// did, a real behavior change beyond parity, not a gap fix.
 	EmbedCDAIdentity bool `json:"embedCDAIdentity,omitempty"`
+
+	// Disabled, when true, skips this row entirely — the same no-op as a
+	// Scope that matches nothing. Never true in an OOB MappingRule literal;
+	// set only by ApplyFieldOverrides when a per-field
+	// CDAMappingOverride.Action=="remove" targets this row's key, i.e. a
+	// user explicitly removed this field's mapping via the Section Field
+	// Editor. Checked first in applyRow so it applies uniformly to
+	// top-level rows, rows nested under a CollectAll+Fields parent, and
+	// EmitAsResource sub-resource rows — every call site routes through
+	// applyRow (see its own doc comment).
+	Disabled bool `json:"disabled,omitempty"`
 }
 
 // RowCondition evaluates WhenPath (relative to the row's own Scope root)

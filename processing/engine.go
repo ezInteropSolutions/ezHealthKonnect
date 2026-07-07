@@ -1078,6 +1078,12 @@ func (pe *ProcessingEngine) ReprocessMessage(interfaceID, messageID string) erro
 
 		// Create a logger so re-run activity is visible in the message logs tab.
 		logger := pe.createLogger(interfaceID, messageID, "", msgType)
+		// Flush whatever this goroutine itself logs (covers every early-return path
+		// below where the pipeline is never reached — same pattern and rationale as
+		// storeAndParse's own defer; see ProcessingLogger.Flush's doc comment).
+		if logger != nil {
+			defer logger.Flush()
+		}
 		if logger != nil {
 			logger.Info(services.LogCategoryConnection, "Reprocess started", map[string]interface{}{
 				"message_type": msgType,

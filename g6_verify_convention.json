@@ -1,0 +1,23 @@
+{
+  "pipeline": {
+    "interfaceId": "762aebb9-0408-4a42-82c5-202f13f28315",
+    "messageType": "ADT^A01",
+    "execution_groups": [
+      {
+        "steps": [
+          {
+            "stepId": "9df1186f-13ea-41dc-a2ee-64ff9598c5d2",
+            "stepName": "verify",
+            "stepType": "enrichment.script",
+            "sequence": 10,
+            "enabled": true,
+            "config": {
+              "script": "var topKeys = Object.keys(input); var hasEnhancedTop = !!input.enhancedSegments; var hasEnhancedNested = !!(input.message && input.message.enhancedSegments); output.topKeys = topKeys; output.hasEnhancedTop = hasEnhancedTop; output.hasEnhancedNested = hasEnhancedNested;"
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "test_message": "MSH|^~\\&|SENDER|FAC|RECEIVER|FAC|20260706120000||ADT^A01|MSG00001|P|2.5\rPID|1||123456^^^MRN||Doe^John^Middle||19800101|M\rPV1|1|I||||||||||||||||||VISIT001"
+}

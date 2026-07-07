@@ -232,6 +232,116 @@ func (c *OllamaClient) Embed(ctx context.Context, text string) ([]float32, error
 	return result.Embeddings[0], nil
 }
 
+// ─── Chat with tools ──────────────────────────────────────────────────────────
+
+type chatMessageWire struct {
+	Role      string         `json:"role"`
+	Content   string         `json:"content"`
+	ToolCalls []toolCallWire `json:"tool_calls,omitempty"`
+}
+
+type toolFunctionWire struct {
+	Name        string                 `json:"name"`
+	Description string                 `json:"description"`
+	Parameters  map[string]interface{} `json:"parameters"`
+}
+
+type toolWire struct {
+	Type     string           `json:"type"`
+	Function toolFunctionWire `json:"function"`
+}
+
+type chatRequest struct {
+	Model    string            `json:"model"`
+	Messages []chatMessageWire `json:"messages"`
+	Tools    []toolWire        `json:"tools,omitempty"`
+	Stream   bool              `json:"stream"`
+}
+
+type toolCallWire struct {
+	Function struct {
+		Name      string                 `json:"name"`
+		Arguments map[string]interface{} `json:"arguments"`
+	} `json:"function"`
+}
+
+type chatResponse struct {
+	Message struct {
+		Role      string         `json:"role"`
+		Content   string         `json:"content"`
+		ToolCalls []toolCallWire `json:"tool_calls,omitempty"`
+	} `json:"message"`
+	Done bool `json:"done"`
+}
+
+// ChatWithTools sends a multi-turn chat request with an optional tool list via
+// Ollama's /api/chat endpoint. Satisfies ToolCallingProvider for models that
+// support tool calling (e.g. llama3.1+, llama3.2, qwen2.5).
+func (c *OllamaClient) ChatWithTools(ctx context.Context, messages []ChatMessage, tools []ToolSpec) (ChatResult, error) {
+	wireMessages := make([]chatMessageWire, len(messages))
+	for i, m := range messages {
+		wire := chatMessageWire{Role: m.Role, Content: m.Content}
+		if len(m.ToolCalls) > 0 {
+			wire.ToolCalls = make([]toolCallWire, len(m.ToolCalls))
+			for j, tc := range m.ToolCalls {
+				var args map[string]interface{}
+				_ = json.Unmarshal(tc.Arguments, &args)
+				wire.ToolCalls[j].Function.Name = tc.Name
+				wire.ToolCalls[j].Function.Arguments = args
+			}
+		}
+		wireMessages[i] = wire
+	}
+
+	wireTools := make([]toolWire, len(tools))
+	for i, t := range tools {
+		wireTools[i] = toolWire{
+			Type: "function",
+			Function: toolFunctionWire{
+				Name:        t.Name,
+				Description: t.Description,
+				Parameters:  t.Parameters,
+			},
+		}
+	}
+
+	body, _ := json.Marshal(chatRequest{
+		Model:    c.chatModel(),
+		Messages: wireMessages,
+		Tools:    wireTools,
+		Stream:   false,
+	})
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/api/chat", bytes.NewReader(body))
+	if err != nil {
+		return ChatResult{}, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return ChatResult{}, fmt.Errorf("ollama chat: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		return ChatResult{}, fmt.Errorf("ollama chat HTTP %d: %s", resp.StatusCode, string(b))
+	}
+
+	var result chatResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return ChatResult{}, fmt.Errorf("ollama chat decode: %w", err)
+	}
+
+	toolCalls := make([]ToolCall, 0, len(result.Message.ToolCalls))
+	for _, tc := range result.Message.ToolCalls {
+		argsJSON, _ := json.Marshal(tc.Function.Arguments)
+		toolCalls = append(toolCalls, ToolCall{Name: tc.Function.Name, Arguments: argsJSON})
+	}
+
+	return ChatResult{Content: result.Message.Content, ToolCalls: toolCalls}, nil
+}
+
 // ─── Health ───────────────────────────────────────────────────────────────────
 
 type tagsResponse struct {

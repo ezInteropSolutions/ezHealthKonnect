@@ -83,6 +83,11 @@ func (c *AIController) RegisterRoutes(group *gin.RouterGroup) {
 	gated.POST("/ask", c.Ask)
 	gated.POST("/ask/stream", c.AskStream)
 
+	// Agent Mode — propose/approve/reject tool-calling loop
+	gated.POST("/agent/ask", c.AgentAsk)
+	gated.POST("/agent-actions/:id/approve", c.requireAdminRole(), c.ApproveAgentAction)
+	gated.POST("/agent-actions/:id/reject", c.requireAdminRole(), c.RejectAgentAction)
+
 	// Inline developer tools (all stream)
 	gated.POST("/generate-script/stream", c.GenerateScriptStream)
 	gated.POST("/trace-message", c.TraceMessage)
@@ -280,6 +285,95 @@ func (c *AIController) AskStream(ctx *gin.Context) {
 		writeSSE("[ERROR] " + err.Error())
 	}
 	writeSSE("[DONE]")
+}
+
+// ─── POST /api/ai/agent/ask ───────────────────────────────────────────────────
+
+type agentAskRequest struct {
+	Question  string `json:"question" binding:"required"`
+	SessionID string `json:"session_id" binding:"required"`
+}
+
+// AgentAsk asks ezCompanion in Agent Mode: the model may answer directly, or
+// propose exactly one tool call that the frontend must render for approval.
+// Nothing is executed by this endpoint — see ApproveAgentAction.
+func (c *AIController) AgentAsk(ctx *gin.Context) {
+	var req agentAskRequest
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"success": false, "error": err.Error()})
+		return
+	}
+	if c.svc.Agent == nil {
+		ctx.JSON(http.StatusServiceUnavailable, gin.H{
+			"success": false,
+			"error":   "Agent Mode is not available — the configured AI provider does not support tool calling.",
+			"code":    "agent_unavailable",
+		})
+		return
+	}
+
+	// 600s to match /ask's own budget — verify_pipeline_script's Prepare can run
+	// up to maxScriptVerifyAttempts full LLM generate+dry-run round trips before
+	// a proposal is even recorded, on top of the bounded read-only tool loop.
+	reqCtx, cancel := context.WithTimeout(ctx.Request.Context(), 600*time.Second)
+	defer cancel()
+
+	turn, err := c.svc.Agent.ProposeAction(reqCtx, req.SessionID, ctx.GetHeader("X-User-ID"), req.Question)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": err.Error()})
+		return
+	}
+	ctx.JSON(http.StatusOK, gin.H{"success": true, "data": turn})
+}
+
+// ─── POST /api/ai/agent-actions/:id/approve ───────────────────────────────────
+
+type approveAgentActionRequest struct {
+	// GitRepoID is optional — when set and the approved tool's EntityType is
+	// "pipeline_step", the owning interface is auto-committed to this repo.
+	GitRepoID string `json:"git_repo_id"`
+}
+
+// ApproveAgentAction executes a previously proposed tool call. Admin-only.
+func (c *AIController) ApproveAgentAction(ctx *gin.Context) {
+	if c.svc.Agent == nil {
+		ctx.JSON(http.StatusServiceUnavailable, gin.H{"success": false, "error": "Agent Mode is not available"})
+		return
+	}
+	actionID := ctx.Param("id")
+
+	var req approveAgentActionRequest
+	_ = ctx.ShouldBindJSON(&req) // body is optional — git_repo_id may be omitted
+
+	reqCtx, cancel := context.WithTimeout(ctx.Request.Context(), 120*time.Second)
+	defer cancel()
+
+	result, err := c.svc.Agent.ApproveAction(reqCtx, actionID, ctx.GetHeader("X-User-ID"), req.GitRepoID)
+	if err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"success": false, "error": err.Error()})
+		return
+	}
+	ctx.JSON(http.StatusOK, gin.H{"success": result.Status == "executed", "data": result})
+}
+
+// ─── POST /api/ai/agent-actions/:id/reject ────────────────────────────────────
+
+// RejectAgentAction marks a proposed tool call as rejected. Admin-only.
+func (c *AIController) RejectAgentAction(ctx *gin.Context) {
+	if c.svc.Agent == nil {
+		ctx.JSON(http.StatusServiceUnavailable, gin.H{"success": false, "error": "Agent Mode is not available"})
+		return
+	}
+	actionID := ctx.Param("id")
+
+	reqCtx, cancel := context.WithTimeout(ctx.Request.Context(), 10*time.Second)
+	defer cancel()
+
+	if err := c.svc.Agent.RejectAction(reqCtx, actionID, ctx.GetHeader("X-User-ID")); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"success": false, "error": err.Error()})
+		return
+	}
+	ctx.JSON(http.StatusOK, gin.H{"success": true})
 }
 
 // ─── POST /api/ai/ingest ──────────────────────────────────────────────────────

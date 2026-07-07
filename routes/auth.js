@@ -8,9 +8,16 @@ const userService = require('../services/userService');
 const auditService = require('../services/auditService');
 const { requireAuth } = require('../middleware/auth');
 const settingsService = require('../services/settingsService');
+const RateLimiter = require('../middleware/rateLimiter');
+
+// Per-IP throttle on login attempts — separate from the existing per-account
+// lockout below (which only kicks in after repeated failures against ONE email).
+// Without this, credential stuffing across many usernames from a single IP was
+// entirely unthrottled. 10 req/min per IP.
+const loginRateLimiter = new RateLimiter({ windowMs: 60 * 1000, max: 10 });
 
 // POST /api/auth/login - User login
-router.post('/login', async (req, res) => {
+router.post('/login', loginRateLimiter.middleware(), async (req, res) => {
     try {
         const { email, password } = req.body;
         

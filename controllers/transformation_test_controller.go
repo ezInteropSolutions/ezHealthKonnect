@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -13,7 +14,6 @@ import (
 	"ezhealthkonnect/models"
 	"ezhealthkonnect/services"
 	"ezhealthkonnect/services/executors"
-	"ezhealthkonnect/services/parsers"
 	cdaparser "ezhealthkonnect/services/parsers/cda"
 
 	"github.com/dop251/goja"
@@ -24,7 +24,6 @@ type TransformationTestController struct {
 	db               *sql.DB
 	executorRegistry *services.ExecutorRegistry
 	pipelineService  *services.TransformationPipelineService
-	parserRegistry   *parsers.ParserRegistry
 	cdaParser        *cdaparser.CDAParserService // nil when schema files unavailable
 }
 
@@ -33,7 +32,6 @@ func NewTransformationTestController(db *sql.DB, credStore *services.CredentialS
 		db:               db,
 		executorRegistry: services.NewExecutorRegistry(db, credStore),
 		pipelineService:  services.NewTransformationPipelineService(db, credStore),
-		parserRegistry:   parsers.NewParserRegistry(),
 	}
 	if svc, err := cdaparser.NewFromSchemaDir("./cda/schemas"); err != nil {
 		log.Printf("⚠️  CDA smart search unavailable: %v", err)
@@ -357,40 +355,11 @@ func (c *TransformationTestController) TestPipeline(ctx *gin.Context) {
 	ctx.Data(http.StatusOK, "application/json; charset=utf-8", jsonBytes)
 }
 
+// parseTestMessage delegates to services.ParseSampleMessage (auto-detect +
+// format-agnostic parse), shared with Agent Mode's script-verification tool
+// so both code paths run the exact same dry-run parsing logic.
 func (c *TransformationTestController) parseTestMessage(message string) map[string]interface{} {
-	// Auto-detect format then delegate to the format-agnostic parser registry.
-	// HL7: parsedJSON carries enhancedSegments/segmentGroups for backward compat.
-	// FHIR: parsedJSON carries resourceType/entry/etc. at root.
-	// Other formats: passthrough with raw preserved.
-	fd := services.NewFormatDetector()
-	detection := fd.DetectFormat(message)
-	detectedFormat := string(detection.DetectedFormat)
-	log.Printf("🔍 [Test] Auto-detected format: %s (confidence: %.2f)", detectedFormat, detection.Confidence)
-
-	parseResult := c.parserRegistry.Get(detectedFormat).Parse(message)
-
-	result := parseResult.ParsedJSON
-	if result == nil {
-		result = map[string]interface{}{"raw": message}
-	}
-
-	// _format drives enrichMessageEnvelope (semantic index, sensitivity map).
-	result["_format"] = detectedFormat
-
-	// Format-agnostic enhanced fields for new consumers (schema-annotated view).
-	if len(parseResult.EnhancedFields) > 0 {
-		result["enhancedFields"] = parseResult.EnhancedFields
-		result["fieldOrder"] = parseResult.FieldOrder
-	}
-	if parseResult.TypeName != "" {
-		result["typeName"] = parseResult.TypeName
-		result["typeDescription"] = parseResult.TypeDescription
-	}
-
-	log.Printf("✅ [Test] Parsed %s message: type=%s fields=%d schemaLoaded=%v",
-		detectedFormat, parseResult.Metadata.MessageType,
-		len(parseResult.EnhancedFields), parseResult.TypeName != "")
-	return result
+	return services.ParseSampleMessage(message)
 }
 
 // convertFrontendPipeline converts the frontend pipeline JSON to a TransformationPipeline model
@@ -1571,8 +1540,29 @@ func (c *TransformationTestController) SearchFields(ctx *gin.Context) {
 // (sections, header, profile detection).  Used by the wizard preview step
 // and the POST /api/cda/preview Node.js proxy.
 func (c *TransformationTestController) ParseCDA(ctx *gin.Context) {
+	// Cap the request body BEFORE reading it fully into memory. CDAParserService.Parse()
+	// already rejects documents over its own hard cap (hardCapDocSizeMB, 200 MB — see
+	// services/parsers/cda/cda_parser_service.go), but that check only runs AFTER
+	// ctx.GetRawData() has buffered the entire body — an unbounded POST could exhaust
+	// memory before the parser ever sees it. Matches the parser's own hard cap so no
+	// document the parser would otherwise accept gets rejected here first.
+	const maxCDABodyBytes = 200 * 1024 * 1024
+	ctx.Request.Body = http.MaxBytesReader(ctx.Writer, ctx.Request.Body, maxCDABodyBytes)
+
 	body, err := ctx.GetRawData()
-	if err != nil || len(body) == 0 {
+	if err != nil {
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			ctx.JSON(http.StatusRequestEntityTooLarge, gin.H{
+				"success": false,
+				"error":   fmt.Sprintf("request body exceeds maximum allowed size of %d MB", maxCDABodyBytes/(1024*1024)),
+			})
+			return
+		}
+		ctx.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "request body (raw CDA/CCD XML) required"})
+		return
+	}
+	if len(body) == 0 {
 		ctx.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "request body (raw CDA/CCD XML) required"})
 		return
 	}

@@ -17,8 +17,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"sort"
+	"strings"
 
 	cdaSchema "ezhealthkonnect/cda"
+	"ezhealthkonnect/fhir"
 	cdafhir "ezhealthkonnect/services/cda_fhir"
 
 	"github.com/gin-gonic/gin"
@@ -30,6 +33,23 @@ type CDASchemaController struct {
 	schemaLoader *cdaSchema.CDASchemaLoader
 	mapper       *cdafhir.GenericCDAFHIRMapper
 	transformReg *cdafhir.CDATransformRegistry
+	// declarativeTransformReg is the registry the live declarative engine
+	// actually dispatches Fields[].Transform names to (see
+	// declarative_rules_flatten.go) — distinct from transformReg above.
+	// Also now the source for /type-pair/infer (see InferTypePair): the
+	// older transformReg's own typePairDefaults table named 10 of 16
+	// transforms that don't exist under those names in THIS registry, so
+	// wiring its output into a saved Transform would silently produce an
+	// unresolvable config for most type pairs — see
+	// DeclarativeTransformRegistry.InferTransform's own doc comment.
+	declarativeTransformReg *cdafhir.DeclarativeTransformRegistry
+	// fhirSchemaLoader gives GetResourceFields access to real FHIR R4
+	// StructureDefinition-derived data (name/description/dataType per
+	// property) — used by the Add Field modal's "what to capture" search,
+	// which needs official clinical-language descriptions the much thinner
+	// USCDI vocabulary (uscdi/vocabulary.go, ~36 elements, no Medications
+	// coverage at all) can't provide.
+	fhirSchemaLoader *fhir.FHIRSchemaLoader
 }
 
 // NewCDASchemaController constructs the controller.
@@ -41,10 +61,12 @@ func NewCDASchemaController(
 	mapper *cdafhir.GenericCDAFHIRMapper,
 ) *CDASchemaController {
 	return &CDASchemaController{
-		db:           db,
-		schemaLoader: loader,
-		mapper:       mapper,
-		transformReg: cdafhir.NewCDATransformRegistry(),
+		db:                      db,
+		schemaLoader:            loader,
+		mapper:                  mapper,
+		transformReg:            cdafhir.NewCDATransformRegistry(),
+		declarativeTransformReg: cdafhir.NewDeclarativeTransformRegistry(),
+		fhirSchemaLoader:        fhir.GetFHIRSchemaLoader(),
 	}
 }
 
@@ -55,9 +77,13 @@ func (cc *CDASchemaController) RegisterRoutes(rg *gin.RouterGroup) {
 	{
 		schema.GET("/sections", cc.GetSections)
 		schema.GET("/sections/:sectionKey/fields", cc.GetSectionFields)
+		schema.GET("/resource-fields/:resourceType", cc.GetResourceFields)
+		schema.GET("/entry-fields", cc.GetEntryFields)
 	}
+	rg.GET("/transforms", cc.GetTransforms)
 	rg.POST("/type-pair/infer", cc.InferTypePair)
 	rg.GET("/mappings/:interfaceId/:documentType", cc.GetMappings)
+	rg.GET("/mappings/:interfaceId/:documentType/raw", cc.GetRawMappingDelta)
 	rg.POST("/mappings/:interfaceId/:documentType/delta", cc.SaveMappingDelta)
 	rg.POST("/mappings/:interfaceId/:documentType/compute-delta", cc.ComputeDelta)
 	rg.GET("/templates/:documentType/version", cc.GetTemplateVersion)
@@ -149,13 +175,41 @@ type fieldSummary struct {
 type flattenedFieldResponse struct {
 	Key         string            `json:"key"`
 	CDASource   string            `json:"cdaSource"`
-	FHIRPath    string            `json:"fhirPath"`
-	Transform   string            `json:"transform"`
-	ValueMap    map[string]string `json:"valueMap,omitempty"`
-	Conformance string            `json:"conformance,omitempty"`
-	Required    bool              `json:"required,omitempty"`
-	NestedUnder string            `json:"nestedUnder,omitempty"`
-	IsModified  bool              `json:"isModified"`
+	// FHIRResource identifies which of the section's MappingRule variant(s)
+	// this field belongs to (e.g. "MedicationRequest" vs "MedicationStatement"
+	// for the "medications" section) — was silently dropped here before even
+	// though cdafhir.FlattenedField already carried it correctly. Needed now
+	// because the Add Field UI's "applies to" picker, and a saved add's own
+	// display, both depend on it; for a saved multi-resource add this is a
+	// "+"-joined display string, not a single resource name.
+	FHIRResource string            `json:"fhirResource,omitempty"`
+	FHIRPath     string            `json:"fhirPath"`
+	Transform    string            `json:"transform"`
+	ValueMap     map[string]string `json:"valueMap,omitempty"`
+	Conformance  string            `json:"conformance,omitempty"`
+	Required     bool              `json:"required,omitempty"`
+	NestedUnder  string            `json:"nestedUnder,omitempty"`
+	IsModified   bool              `json:"isModified"`
+	// Disabled is true when this field has an Action=="remove" override —
+	// computed from the RAW override list (LoadCDAMappingOverridesPublic),
+	// not the merged mappings map[ff.Key] lookup below, because
+	// mergeCDAMappings' "remove" handling drops the field from that merged
+	// list entirely, making it indistinguishable from "never overridden."
+	Disabled bool `json:"disabled,omitempty"`
+	// IsNew marks a field that exists ONLY as a saved Action=="add" override
+	// — it has no cdafhir.FlattenedField counterpart at all, since it was
+	// never a MappingRow literal to begin with.
+	IsNew bool `json:"isNew,omitempty"`
+}
+
+// ruleVariantResponse describes one MappingRule sharing this section's
+// SectionKey — most sections have exactly one; a few (Medications confirmed)
+// have several, distinguished by FHIRResource (+ EntryMatch). Powers the Add
+// Field modal's "applies to" and "nest under" pickers.
+type ruleVariantResponse struct {
+	FHIRResource   string   `json:"fhirResource"`
+	EntryMatch     string   `json:"entryMatch,omitempty"`
+	NestableGroups []string `json:"nestableGroups,omitempty"`
 }
 
 // GetSectionFields returns every real, addressable field for a section,
@@ -198,7 +252,35 @@ func (cc *CDASchemaController) GetSectionFields(c *gin.Context) {
 		}
 	}
 
+	// ruleVariants surfaces every MappingRule sharing this SectionKey (most
+	// sections have exactly one) — the Add Field modal's "applies to" and
+	// "nest under" pickers consume this directly, so no separate endpoint
+	// is needed for it.
+	ruleVariants := make([]ruleVariantResponse, 0, len(rules))
+	for _, r := range rules {
+		// Deduplicated: some rules deliberately carry TWO rows sharing one
+		// TargetPath (e.g. "recorder" — a primary PractitionerRole-based row
+		// plus a SkipIfResourceHasAnyOf-guarded bare-practitioner fallback,
+		// see declarative_oob_rules.go). Real, intentional data — but for a
+		// "nest under" picker the user only cares about the group NAME once.
+		seenGroups := make(map[string]bool)
+		var groups []string
+		for _, row := range r.Fields {
+			if len(row.Fields) > 0 && !seenGroups[row.TargetPath] {
+				seenGroups[row.TargetPath] = true
+				groups = append(groups, row.TargetPath)
+			}
+		}
+		ruleVariants = append(ruleVariants, ruleVariantResponse{
+			FHIRResource:   r.FHIRResource,
+			EntryMatch:     r.EntryMatch,
+			NestableGroups: groups,
+		})
+	}
+
 	overridesByKey := make(map[string]cdafhir.CDAFieldMapping)
+	disabledKeys := make(map[string]bool)
+	var addOverrides []cdafhir.CDAMappingOverride
 	if interfaceID != "" {
 		mappings, err := cc.mapper.GetCDAFieldMappingsPublic(c.Request.Context(), documentType, "2.1", "R4", interfaceID)
 		if err != nil {
@@ -213,19 +295,36 @@ func (cc *CDASchemaController) GetSectionFields(c *gin.Context) {
 				overridesByKey[fm.CDAField] = fm
 			}
 		}
+
+		// mergeCDAMappings drops a removed field from `mappings` entirely,
+		// so the raw override list is the only place "this field was
+		// removed" — or "add"ed — is still visible; see
+		// flattenedFieldResponse.Disabled/.IsNew's own doc comments.
+		for _, ov := range cc.mapper.LoadCDAMappingOverridesPublic(c.Request.Context(), interfaceID, documentType) {
+			if ov.SectionKey != sectionKey {
+				continue
+			}
+			switch ov.Action {
+			case "remove":
+				disabledKeys[ov.CDAField] = true
+			case "add":
+				addOverrides = append(addOverrides, ov)
+			}
+		}
 	}
 
-	fields := make([]flattenedFieldResponse, 0, len(flattened))
+	fields := make([]flattenedFieldResponse, 0, len(flattened)+len(addOverrides))
 	for _, ff := range flattened {
 		resp := flattenedFieldResponse{
-			Key:         ff.Key,
-			CDASource:   ff.CDASourceDisplay,
-			FHIRPath:    ff.TargetPath,
-			Transform:   ff.Transform,
-			ValueMap:    ff.ValueMap,
-			Conformance: ff.Conformance,
-			Required:    ff.Required,
-			NestedUnder: ff.NestedUnder,
+			Key:          ff.Key,
+			CDASource:    ff.CDASourceDisplay,
+			FHIRResource: ff.FHIRResource,
+			FHIRPath:     ff.TargetPath,
+			Transform:    ff.Transform,
+			ValueMap:     ff.ValueMap,
+			Conformance:  ff.Conformance,
+			Required:     ff.Required,
+			NestedUnder:  ff.NestedUnder,
 		}
 		if fm, ok := overridesByKey[ff.Key]; ok {
 			resp.FHIRPath = fm.FHIRPath
@@ -235,11 +334,32 @@ func (cc *CDASchemaController) GetSectionFields(c *gin.Context) {
 			resp.Required = fm.Required
 			resp.IsModified = fm.FHIRPath != ff.TargetPath || fm.Transform != ff.Transform
 		}
+		if disabledKeys[ff.Key] {
+			resp.Disabled = true
+			resp.IsModified = true
+		}
 		fields = append(fields, resp)
 	}
 
+	// A saved Action=="add" override has no cdafhir.FlattenedField
+	// counterpart at all — without this, a saved custom field would vanish
+	// from the table on reload, since the loop above only ever walks the
+	// OOB-derived `flattened` list.
+	for _, ov := range addOverrides {
+		fields = append(fields, flattenedFieldResponse{
+			Key:          ov.CDAField,
+			CDASource:    cdafhir.DescribeAddedSource(ov.Scope, ov.SourcePath),
+			FHIRResource: strings.Join(ov.TargetFHIRResources, "+"),
+			FHIRPath:     ov.FHIRPath,
+			Transform:    ov.Transform,
+			NestedUnder:  ov.NestedUnder,
+			IsNew:        true,
+		})
+	}
+
 	c.JSON(http.StatusOK, gin.H{
-		"success":     true,
+		"success":      true,
+		"ruleVariants": ruleVariants,
 		"sectionKey":  sectionKey,
 		"displayName": displayName,
 		"loincCode":   loincCode,
@@ -249,10 +369,167 @@ func (cc *CDASchemaController) GetSectionFields(c *gin.Context) {
 }
 
 // =========================================================
+// GET /api/cda/schema/resource-fields/:resourceType
+// =========================================================
+
+// resourceFieldResponse is one property of a FHIR resource type, sourced from
+// a real R4 StructureDefinition (via fhir.FHIRSchemaLoader) — official name/
+// description/dataType text, not the much thinner USCDI vocabulary used by
+// /api/fhir/field-search elsewhere in the app (uscdi/vocabulary.go covers
+// ~36 hand-picked elements total with zero Medications coverage; this
+// endpoint covers every property HL7 actually defines on the resource).
+type resourceFieldResponse struct {
+	Path        string `json:"path"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	DataType    string `json:"dataType"`
+	Cardinality string `json:"cardinality"`
+	Required    bool   `json:"required"`
+	ValueSet    string `json:"valueSet,omitempty"`
+}
+
+// GetResourceFields returns every element of a FHIR R4 resource type (e.g.
+// "AllergyIntolerance") from its real StructureDefinition, for the Add Field
+// modal's "what to capture" search — matching against Name+Description text
+// lets a user search in clinical language ("criticality", "reaction
+// severity") instead of needing to already know CDA structure.
+//
+// Known limitation, inherited from cmd/build-fhir-schemas/build_fhir_schemas.py's
+// get_element_type() (keeps only the first type.code): a choice-type element
+// like "onset[x]" exposes ONE guessed DataType, not the full union
+// (dateTime|Age|Period|Range|string) — not fixable without re-running that
+// build script against the vendored FHIR package.
+func (cc *CDASchemaController) GetResourceFields(c *gin.Context) {
+	resourceType := c.Param("resourceType")
+
+	if cc.fhirSchemaLoader == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{
+			"success": false,
+			"error":   "FHIR schema loader not initialised",
+		})
+		return
+	}
+
+	schema, err := cc.fhirSchemaLoader.LoadFHIRSchema(resourceType, "us-core", "R4")
+	if err != nil {
+		schema, err = cc.fhirSchemaLoader.LoadFHIRSchema(resourceType, "base", "R4")
+	}
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{
+			"success": false,
+			"error":   fmt.Sprintf("no FHIR R4 schema found for resource type %q", resourceType),
+		})
+		return
+	}
+
+	elements := make([]resourceFieldResponse, 0, len(schema.Elements))
+	for _, el := range schema.Elements {
+		elements = append(elements, resourceFieldResponse{
+			Path:        el.Path,
+			Name:        el.Name,
+			Description: el.Description,
+			DataType:    el.DataType,
+			Cardinality: el.Cardinality,
+			Required:    el.Required,
+			ValueSet:    el.ValueSet,
+		})
+	}
+	sort.Slice(elements, func(i, j int) bool { return elements[i].Path < elements[j].Path })
+
+	c.JSON(http.StatusOK, gin.H{
+		"success":      true,
+		"resourceType": resourceType,
+		"elements":     elements,
+		"count":        len(elements),
+	})
+}
+
+// cdaDirectEntryFields is a hand-authored catalog of the direct, top-level
+// fields available on any CDA <entry> act (cda/document/types.go's CDAEntry
+// struct) — the fields the "Direct field on this entry" Add Field pattern
+// lets a user reach without any relationship traversal. Descriptions are
+// paraphrased from CDAEntry's own doc comments (the real clinical meaning
+// already documented there), not invented — there is no vendored/generated
+// CDA schema equivalent to FHIR's StructureDefinition .gz files (CDAFieldDef
+// in cda/schema_loader.go only carries a short USCDI label, no description),
+// so unlike GetResourceFields this list is maintained by hand and should be
+// extended if CDAEntry gains new direct fields.
+var cdaDirectEntryFields = []resourceFieldResponse{
+	{Path: "code", Name: "Code", Description: "The coded clinical concept for this entry — e.g. the allergy substance, problem, or procedure code.", DataType: "CD"},
+	{Path: "statusCode", Name: "Status Code", Description: "The act's current status, e.g. \"active\", \"completed\", \"aborted\".", DataType: "CS"},
+	{Path: "effectiveTime", Name: "Effective Time", Description: "When this act was or is effective — a single date/time or a date range (low/high).", DataType: "TS / IVL_TS"},
+	{Path: "value", Name: "Value", Description: "The observation's result value — a coded value, quantity, or text depending on the entry template.", DataType: "ANY (CD/PQ/ST/…)"},
+	{Path: "text", Name: "Text", Description: "This entry's own free-text content — used by templates that carry content as narrative rather than a coded value (e.g. Medication Free Text Sig, Instruction).", DataType: "ST"},
+	{Path: "negationInd", Name: "Negation Indicator", Description: "Marks this act as negated — e.g. \"not given\" on an Immunization, or \"no known allergy\" on an Allergy Observation.", DataType: "BL"},
+	{Path: "interpretationCode", Name: "Interpretation Code", Description: "The Result Observation's interpretation, e.g. High/Low/Normal/Abnormal.", DataType: "CD"},
+	{Path: "referenceRangeText", Name: "Reference Range Text", Description: "The free-text normal reference range for a lab result, e.g. \"4.0 - 10.0 Thou/uL\".", DataType: "ST"},
+	{Path: "repeatNumber", Name: "Repeat Number", Description: "Refill/allowed-administration count, or occurrence number, for a medication administration.", DataType: "INT"},
+	{Path: "routeCode", Name: "Route Code", Description: "How a medication is administered, e.g. oral, intravenous, topical.", DataType: "CD"},
+	{Path: "doseQuantity", Name: "Dose Quantity", Description: "The amount of medication given per administration.", DataType: "PQ"},
+	{Path: "rateQuantity", Name: "Rate Quantity", Description: "The rate of administration for an infusion or continuous medication.", DataType: "PQ"},
+	{Path: "quantity", Name: "Quantity (Supply)", Description: "The quantity dispensed or supplied — e.g. a medication refill/dispense amount.", DataType: "PQ"},
+	{Path: "targetSiteCode", Name: "Target Site Code", Description: "The anatomical site a procedure was performed on.", DataType: "CD"},
+	{Path: "classCode", Name: "Class Code", Description: "The HL7 act class for this entry, e.g. observation, act, procedure, substance administration.", DataType: "CS"},
+	{Path: "moodCode", Name: "Mood Code", Description: "Whether this act already happened, is ordered, or is intended.", DataType: "CS"},
+	{Path: "nullFlavor", Name: "Null Flavor", Description: "Why a value is absent, e.g. \"no information\", \"unknown\", \"not applicable\".", DataType: "CS"},
+	{Path: "id", Name: "Id", Description: "The entry's own unique instance identifier(s).", DataType: "II"},
+}
+
+// GetEntryFields returns the hand-authored cdaDirectEntryFields catalog, in
+// the same response shape as GetResourceFields so the Add Field modal's
+// search-result renderer can be reused for both the FHIR-side "what to
+// capture" search and the CDA-side "Direct field on this entry" search.
+func (cc *CDASchemaController) GetEntryFields(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{
+		"success":  true,
+		"elements": cdaDirectEntryFields,
+		"count":    len(cdaDirectEntryFields),
+	})
+}
+
+// =========================================================
+// GET /api/cda/transforms
+// =========================================================
+
+type transformSummary struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+}
+
+// GetTransforms returns every registered CDA→FHIR transform name with its
+// human-readable description. The Section Field Editor fetches this once per
+// step-builder instance and caches it client-side, so hovering/focusing a
+// Transform cell can show what the named function actually does instead of
+// just repeating its (often cryptic) name.
+func (cc *CDASchemaController) GetTransforms(c *gin.Context) {
+	if cc.declarativeTransformReg == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{
+			"success": false,
+			"error":   "transform registry not initialised",
+		})
+		return
+	}
+
+	descriptions := cc.declarativeTransformReg.AllDescriptions()
+	transforms := make([]transformSummary, 0, len(descriptions))
+	for name, desc := range descriptions {
+		transforms = append(transforms, transformSummary{Name: name, Description: desc})
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success":    true,
+		"transforms": transforms,
+		"count":      len(transforms),
+	})
+}
+
+// =========================================================
 // POST /api/cda/type-pair/infer
 // =========================================================
 
 // InferTypePair returns the default transform name for a (cdaDataType, fhirDataType) pair.
+// Uses declarativeTransformReg (the runtime engine's own registry), not the
+// older transformReg — see this struct's own field doc comment for why.
 func (cc *CDASchemaController) InferTypePair(c *gin.Context) {
 	var body struct {
 		CDADataType  string `json:"cdaDataType"`
@@ -273,7 +550,7 @@ func (cc *CDASchemaController) InferTypePair(c *gin.Context) {
 		return
 	}
 
-	transform, err := cc.transformReg.InferTransform(body.CDADataType, body.FHIRDataType)
+	transform, err := cc.declarativeTransformReg.InferTransform(body.CDADataType, body.FHIRDataType)
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{
 			"success":   true,
@@ -327,6 +604,39 @@ func (cc *CDASchemaController) GetMappings(c *gin.Context) {
 		"documentType": documentType,
 		"mappings":     mappings,
 		"count":        len(mappings),
+	})
+}
+
+// =========================================================
+// GET /api/cda/mappings/:interfaceId/:documentType/raw
+// =========================================================
+
+// GetRawMappingDelta returns the RAW, unmerged CDAMappingDelta stored for one
+// interface+docType (as opposed to GetMappings' merged OOB+delta view) --
+// the exact shape SaveMappingDelta expects as its POST body, so the pipeline
+// builder's JSON Export/Import can round-trip an interface's actual custom
+// field mappings alongside the step config. "delta": null (with success:
+// true) means the interface has no custom overrides for this doc type --
+// not an error, just nothing to carry.
+func (cc *CDASchemaController) GetRawMappingDelta(c *gin.Context) {
+	interfaceID := c.Param("interfaceId")
+	documentType := c.Param("documentType")
+
+	if cc.mapper == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{
+			"success": false,
+			"error":   "CDA mapper not initialised",
+		})
+		return
+	}
+
+	delta := cc.mapper.LoadCDAMappingDeltaPublic(c.Request.Context(), interfaceID, documentType)
+
+	c.JSON(http.StatusOK, gin.H{
+		"success":      true,
+		"interfaceId":  interfaceID,
+		"documentType": documentType,
+		"delta":        delta, // null when no custom overrides exist
 	})
 }
 
@@ -477,6 +787,22 @@ func (cc *CDASchemaController) ComputeDelta(c *gin.Context) {
 			"error":   err.Error(),
 		})
 		return
+	}
+
+	// Reject a bad "add" override (unknown resource, unknown nested group,
+	// missing fhirPath) before it's ever persisted — the runtime engine
+	// (applyAddOverride) stays purely defensive/silent about these same
+	// cases by design, so this is the only place they're actually caught.
+	if delta != nil {
+		for _, ov := range delta.Overrides {
+			if err := cdafhir.ValidateAddOverride(ov); err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{
+					"success": false,
+					"error":   err.Error(),
+				})
+				return
+			}
+		}
 	}
 
 	// Pure OOB — clear any previously-stored override (this is what makes

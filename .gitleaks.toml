@@ -1,0 +1,15 @@
+title = "ezHealthKonnect gitleaks config"
+
+[extend]
+useDefault = true
+
+# Known non-secret matches at the time this config was written — a sentinel
+# constant and a word that happens to look like a client-ID pattern. Real
+# findings should never be added here; if gitleaks flags something new,
+# investigate it (see the Task 4 security audit) rather than silencing it.
+[allowlist]
+description = "Known false positives, not real secrets"
+regexes = [
+  '''nullKeyMarker uint64 = 0xB8E7_4CE2_3E93_D0D7''', # services/executors/transform/remove_duplicates_executor.go — sentinel constant, not a key
+  '''conversational''',                                # marketing/make_daily_prompt_template.md — matched "linkedin-client-id" rule on an ordinary word
+]

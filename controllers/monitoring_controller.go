@@ -18,6 +18,7 @@ package controllers
 
 import (
 	"database/sql"
+	"log"
 	"net/http"
 	"strconv"
 	"time"
@@ -277,22 +278,23 @@ func (mc *MonitoringController) ConnectorHealth(c *gin.Context) {
 	rows, err := mc.db.QueryContext(ctx, `
 		SELECT
 			i.name                                     AS interface_name,
-			COALESCE(ic.connectivity_type, '')         AS connector_type,
+			COALESCE(conn.connector_type, '')          AS connector_type,
 			i.status,
 			i.last_processed_at,
 			COALESCE(i.successful_processed, 0)        AS messages_last_run
 		FROM interfaces i
 		LEFT JOIN LATERAL (
-			SELECT ct.name AS connectivity_type
-			FROM interface_connectivity ic2
-			JOIN connectivity_types ct ON ct.id = ic2.connectivity_type_id
-			WHERE ic2.interface_id = i.id AND ic2.direction = 'inbound'
+			SELECT ts.config->>'connectorType' AS connector_type
+			FROM transformation_pipelines tp
+			JOIN transformation_steps ts ON ts.pipeline_id = tp.id
+			WHERE tp.interface_id = i.id AND ts.step_type = 'connector.inbound'
 			LIMIT 1
-		) ic ON true
+		) conn ON true
 		WHERE i.is_active = true
 		ORDER BY i.last_processed_at DESC NULLS LAST
 		LIMIT 50`)
 	if err != nil {
+		log.Printf("MonitoringController.ConnectorHealth query failed: %v", err)
 		c.JSON(http.StatusOK, gin.H{"success": true, "data": []gin.H{}})
 		return
 	}
@@ -344,11 +346,10 @@ func (mc *MonitoringController) InterfaceHealth(c *gin.Context) {
 			COALESCE(dlq.depth, 0)                             AS dlq_depth
 		FROM interfaces i
 		LEFT JOIN LATERAL (
-			SELECT ct.name AS connector_type
-			FROM interface_connectivity ic
-			JOIN connectivity_types ct ON ct.id = ic.connectivity_type_id
-			WHERE ic.interface_id = i.id AND ic.direction = 'inbound'
-			ORDER BY ic.created_at
+			SELECT ts.config->>'connectorType' AS connector_type
+			FROM transformation_pipelines tp
+			JOIN transformation_steps ts ON ts.pipeline_id = tp.id
+			WHERE tp.interface_id = i.id AND ts.step_type = 'connector.inbound'
 			LIMIT 1
 		) conn ON true
 		LEFT JOIN LATERAL (
@@ -366,6 +367,7 @@ func (mc *MonitoringController) InterfaceHealth(c *gin.Context) {
 		WHERE i.is_active = true
 		ORDER BY i.name`, midnight)
 	if err != nil {
+		log.Printf("MonitoringController.InterfaceHealth query failed: %v", err)
 		c.JSON(http.StatusOK, gin.H{"success": true, "data": []gin.H{}})
 		return
 	}

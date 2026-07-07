@@ -87,6 +87,20 @@ func (tps *TransformationPipelineService) ExecutePipeline(
 
 	log.Printf("🚀 [Pipeline] Initialized execution context for pipeline: %s", pipeline.PipelineName)
 
+	// Mirror processing/engine_message_processor.go's ctx.WithValue("interface_id", ...)
+	// injection for REAL message processing — ExecutePipeline is a SEPARATE entry
+	// point (used by TestPipeline's ad-hoc test runs AND ProcessingEngine.ReprocessMessage,
+	// i.e. the UI's "Re-run" button) that never set this on ctx at all before, so any
+	// executor resolving its own interface ID via ctx.Value("interface_id") (e.g.
+	// cda_to_fhir_executor.go's three-tier CDA mapping-override lookup) silently fell
+	// back to pure-OOB behavior for every Test Pipeline run and every Re-run, even on an
+	// interface with real custom mapping overrides saved. inputData can't carry this
+	// instead here — executeStepWithContext wraps it as inputData["message"], not a
+	// top-level "interfaceId"/"interface_id" key, which is exactly the shape
+	// cda_to_fhir_executor.go's own comment already documents checking ctx as the
+	// fallback for.
+	ctx = context.WithValue(ctx, "interface_id", pipeline.InterfaceID)
+
 	// Resolve the interface's debug flag once per run and inject it into every
 	// step's Config, mirroring ExecuteTransformation's own injection
 	// (transformation_pipeline_service.go) — ExecutePipeline is a SEPARATE entry

@@ -14,6 +14,17 @@ const (
 	ProfileBase   CDAProfile = "CDA R2"
 )
 
+// DocumentTypeMetadata is the document-level templateId/LOINC code/title
+// needed to construct a valid ClinicalDocument root for a given document
+// type (e.g. "CCD") — used by cda/builder, the construction-direction
+// counterpart to DocumentTemplates (which only maps OID -> display name).
+type DocumentTypeMetadata struct {
+	TemplateID    string `json:"templateId"`
+	TemplateIDExt string `json:"templateIdExtension,omitempty"`
+	LOINCCode     string `json:"loincCode"`
+	Title         string `json:"title"`
+}
+
 // DocumentTypeSectionInfo lists which sections a document type SHALL, SHOULD, or MAY include.
 type DocumentTypeSectionInfo struct {
 	SHALL  []string `json:"SHALL"`
@@ -26,9 +37,10 @@ type CDAProfileDef struct {
 	Profile              string                              `json:"profile"`
 	Version              string                              `json:"version"`
 	HL7Version           string                              `json:"hl7Version"`
-	DocumentTemplates    map[string]string                   `json:"documentTemplates"`    // OID → display name
-	DocumentTypeSections map[string]DocumentTypeSectionInfo  `json:"documentTypeSections"` // doc type → section conformance lists
-	Sections             []*CDASectionDef                    `json:"sections"`
+	DocumentTemplates     map[string]string                  `json:"documentTemplates"`     // OID → display name
+	DocumentTypeMetadata  map[string]DocumentTypeMetadata     `json:"documentTypeMetadata"`  // doc type → templateId/LOINC/title, for document construction
+	DocumentTypeSections  map[string]DocumentTypeSectionInfo  `json:"documentTypeSections"`  // doc type → section conformance lists
+	Sections              []*CDASectionDef                    `json:"sections"`
 
 	// Built at load time — not in JSON.
 	sectionByKey        map[string]*CDASectionDef
@@ -43,15 +55,76 @@ type CDASectionDef struct {
 	DisplayName        string         `json:"displayName"`                // Human-readable name
 	LOINCCode          string         `json:"loincCode"`                  // Section LOINC code
 	TemplateID         string         `json:"templateId"`                 // C-CDA 2.1 SHALL template OID
+	TemplateIDExt      string         `json:"templateIdExtension,omitempty"` // @extension for TemplateID, e.g. "2015-08-01"
 	TemplateIDOptional string         `json:"templateIdOptional"`         // C-CDA 2.1 MAY template OID
 	Conformance        string         `json:"conformance"`                // SHALL / SHOULD / MAY
 	EntryTemplateID    string         `json:"entryTemplateId,omitempty"`
+	EntryTemplateIDExt string         `json:"entryTemplateIdExtension,omitempty"` // @extension for EntryTemplateID
 	ObsTemplateID      string         `json:"observationTemplateId,omitempty"`
+	ObsTemplateIDExt   string         `json:"observationTemplateIdExtension,omitempty"` // @extension for ObsTemplateID
 	IsHeader           bool           `json:"isHeader,omitempty"`         // true for header pseudo-sections
 	Fields             []*CDAFieldDef `json:"fields"`
 
+	// EntryElementPath is the path (relative to "entry/") to this section's
+	// root entry element (act/substanceAdministration/organizer/observation/
+	// encounter/procedure/supply) — where EntryTemplateID gets injected as a
+	// <templateId> child during CDA construction (cda/builder). Empty for
+	// narrative-only sections (no discrete entries, e.g. "hospitalCourse").
+	EntryElementPath string `json:"entryElementPath,omitempty"`
+
+	// ObservationElementPath is the path (relative to "entry/") to this
+	// section's nested sub-element — where ObsTemplateID gets injected.
+	// Despite the name, this isn't always an <observation>: e.g.
+	// payersInsurance's nested element is itself an <act> (COMP-typed
+	// entryRelationship). Empty when a section has no second anchor
+	// (substanceAdministration/encounter/procedure/supply archetypes, and
+	// plain-observation sections with no further nesting).
+	ObservationElementPath string `json:"observationElementPath,omitempty"`
+
+	// StructuralTemplateIDs are third-level-and-deeper nested observations
+	// (Reaction, Severity, Age, Problem Status, etc.) that need their own
+	// <templateId> but aren't reachable via the two-anchor Entry/Observation
+	// mechanism above — typically because two DIFFERENT nested observations
+	// share the exact same entryRelationship predicate (e.g. Allergy's
+	// Severity and Status observations both nest under
+	// entryRelationship[@typeCode='SUBJ',@inversionInd='true'], distinguished
+	// only by their OWN nested templateId — see StructuralTemplateAnchor.Path
+	// for how that disambiguation is expressed). Applied AFTER every field is
+	// written, and only when Path already resolves to a node a real field
+	// write created (see cda/builder.TryFindAtXPath) — never force-creates an
+	// empty container just to hold a templateId with no data.
+	StructuralTemplateIDs []StructuralTemplateAnchor `json:"structuralTemplateIds,omitempty"`
+
+	// EntryStatusCodeOverride replaces the generic per-tag statusCode default
+	// (see cda/builder's tagBoilerplate table, e.g. "completed" for a plain
+	// observation) on this section's ROOT entry element specifically. Needed
+	// because a handful of entry archetypes assert a business-fixed
+	// statusCode that differs from the tag's usual default — e.g. Plan of
+	// Treatment's Planned Observation (moodCode SHALL be a "planned" value
+	// like INT, not EVN) is itself SHALL statusCode="active"
+	// (CONF:1098-32032), never "completed" — a discrete observation like
+	// Allergy/Problem's own assertion observation is.
+	EntryStatusCodeOverride string `json:"entryStatusCodeOverride,omitempty"`
+
 	// Built at load time.
 	fieldByKey map[string]*CDAFieldDef
+}
+
+// StructuralTemplateAnchor names one nested element (by path, relative to
+// "entry/") that needs a <templateId> injected once any of the section's
+// fields has already caused it to exist. Path may itself use the
+// "[childTag/@attr='value']" predicate form to both locate AND (on the field
+// write that first creates it) construct the disambiguating child — e.g.
+// "act/entryRelationship[@typeCode='SUBJ']/observation/entryRelationship[@typeCode='SUBJ',@inversionInd='true']/observation[templateId/@root='2.16.840.1.113883.10.20.22.4.8']"
+// for Allergy's Severity Observation, where the predicate's own templateId/@root
+// is what BuildEntry, in effect, uses twice: once (implicitly, via a field's
+// own SourcePath ending inside that node) to create the node with the
+// correct root already set, and once here to also add the @extension no
+// predicate can express.
+type StructuralTemplateAnchor struct {
+	Path          string `json:"path"`
+	TemplateID    string `json:"templateId"`
+	TemplateIDExt string `json:"templateIdExtension,omitempty"`
 }
 
 // CDAFieldDef defines one extractable field within a CDA section.

@@ -130,23 +130,36 @@ func stripComponentByTemplateID(rawXML, templateOID string) string {
 
 // ─── Section-Level Tests ─────────────────────────────────────────────────────
 
-// TestNISTFullCCD_ShallScoreIsOne verifies that the NIST reference CCD (full_ccd_nist.xml)
-// produces ShallScore = 1.0. The XML contains all 7 CCD SHALL sections:
-// allergiesAndIntolerances, medications, problems, results, vitalSigns, immunizations, socialHistory.
-func TestNISTFullCCD_ShallScoreIsOne(t *testing.T) {
+// TestNISTFullCCD_ShallScoreReflectsRealSections verifies the NIST reference
+// CCD (full_ccd_nist.xml) scores 6/7 on the CORRECT CCD SHALL list per the
+// C-CDA 2.1 IG, Table 30 (2018 errata, CONF:1198-30659..30690): Allergies,
+// Medications, Problem, Results, Plan of Treatment, Social History, Vital
+// Signs. (Immunizations — which this fixture DOES have — is actually MAY
+// per that table, not SHALL; this was previously miscounted.) The fixture
+// itself doesn't include a Plan of Treatment section, so it's short by
+// exactly one real SHALL section under the corrected list — this test
+// documents that gap rather than asserting a false 1.0.
+func TestNISTFullCCD_ShallScoreReflectsRealSections(t *testing.T) {
 	raw := loadXML(t, "full_ccd_nist.xml")
 	doc := parseCDA(t, raw)
 	v := newValidator(t)
 
 	report := v.Validate(doc)
 
-	if report.ShallScore != 1.0 {
-		t.Errorf("expected ShallScore=1.0 for NIST full CCD, got %.4f", report.ShallScore)
-		for _, sr := range report.SectionReports {
-			if sr.Conformance == "SHALL" && sr.Status == "missing" {
-				t.Logf("  missing SHALL section: %s", sr.SectionKey)
-			}
+	const expected = 6.0 / 7.0
+	const eps = 0.001
+	if report.ShallScore < expected-eps || report.ShallScore > expected+eps {
+		t.Errorf("expected ShallScore≈%.4f (6/7 — fixture lacks Plan of Treatment), got %.4f", expected, report.ShallScore)
+	}
+
+	var missing []string
+	for _, sr := range report.SectionReports {
+		if sr.Conformance == "SHALL" && sr.Status == "missing" {
+			missing = append(missing, sr.SectionKey)
 		}
+	}
+	if len(missing) != 1 || missing[0] != "planOfTreatment" {
+		t.Errorf("expected exactly 1 missing SHALL section (planOfTreatment), got %v", missing)
 	}
 }
 
@@ -177,16 +190,20 @@ func TestCCDShallSectionCount(t *testing.T) {
 			shallRules++
 		}
 	}
-	// CCD SHALL: allergiesAndIntolerances, medications, problems,
-	//            results, vitalSigns, immunizations, socialHistory = 7
+	// CCD SHALL (C-CDA 2.1 IG Table 30, 2018 errata): allergiesAndIntolerances,
+	//            medications, problems, results, planOfTreatment,
+	//            socialHistory, vitalSigns = 7
 	if shallRules != 7 {
 		t.Errorf("expected 7 CCD SHALL section rules, got %d", shallRules)
 	}
 }
 
-// TestStrippedCCD_MissingAllergy_OneShallViolation removes the allergiesAndIntolerances
-// section from the NIST reference CCD and verifies exactly one SHALL violation is reported.
-func TestStrippedCCD_MissingAllergy_OneShallViolation(t *testing.T) {
+// TestStrippedCCD_MissingAllergy_TwoShallViolations removes the
+// allergiesAndIntolerances section from the NIST reference CCD and verifies
+// exactly two SHALL violations are reported: the section just stripped, plus
+// planOfTreatment, which this fixture never had to begin with (see
+// TestNISTFullCCD_ShallScoreReflectsRealSections).
+func TestStrippedCCD_MissingAllergy_TwoShallViolations(t *testing.T) {
 	raw := loadXML(t, "full_ccd_nist.xml")
 	raw = stripComponentByTemplateID(raw, "2.16.840.1.113883.10.20.22.2.6.1")
 
@@ -205,16 +222,21 @@ func TestStrippedCCD_MissingAllergy_OneShallViolation(t *testing.T) {
 			missing = append(missing, sr.SectionKey)
 		}
 	}
-	if len(missing) != 1 {
-		t.Errorf("expected exactly 1 missing SHALL section, got %d: %v", len(missing), missing)
+	if len(missing) != 2 {
+		t.Errorf("expected exactly 2 missing SHALL sections (allergiesAndIntolerances, planOfTreatment), got %d: %v", len(missing), missing)
 	}
-	if len(missing) == 1 && missing[0] != "allergiesAndIntolerances" {
-		t.Errorf("expected missing section=allergiesAndIntolerances, got %q", missing[0])
+	wantMissing := map[string]bool{"allergiesAndIntolerances": true, "planOfTreatment": true}
+	for _, key := range missing {
+		if !wantMissing[key] {
+			t.Errorf("unexpected missing SHALL section %q", key)
+		}
 	}
 }
 
-// TestStrippedCCD_ShallScoreIs6of7 verifies the score numerics after stripping one section.
-func TestStrippedCCD_ShallScoreIs6of7(t *testing.T) {
+// TestStrippedCCD_ShallScoreIs5of7 verifies the score numerics after
+// stripping one section from a base that was already 6/7 (missing
+// planOfTreatment — see TestNISTFullCCD_ShallScoreReflectsRealSections).
+func TestStrippedCCD_ShallScoreIs5of7(t *testing.T) {
 	raw := loadXML(t, "full_ccd_nist.xml")
 	raw = stripComponentByTemplateID(raw, "2.16.840.1.113883.10.20.22.2.6.1")
 
@@ -223,10 +245,10 @@ func TestStrippedCCD_ShallScoreIs6of7(t *testing.T) {
 
 	report := v.Validate(doc)
 
-	const expected = 6.0 / 7.0
+	const expected = 5.0 / 7.0
 	const eps = 0.001
 	if report.ShallScore < expected-eps || report.ShallScore > expected+eps {
-		t.Errorf("expected ShallScore≈%.4f (6/7) after stripping allergy, got %.4f", expected, report.ShallScore)
+		t.Errorf("expected ShallScore≈%.4f (5/7) after stripping allergy, got %.4f", expected, report.ShallScore)
 	}
 }
 

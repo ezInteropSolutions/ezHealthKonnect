@@ -129,6 +129,21 @@ func (l *CDASchemaLoader) GetDocumentTypeSections(docType string) *DocumentTypeS
 	return &info
 }
 
+// GetDocumentTypeMetadata returns the templateId/LOINC code/title needed to
+// construct a document of the given type (e.g. "CCD"). Returns nil if not defined.
+func (l *CDASchemaLoader) GetDocumentTypeMetadata(docType string) *DocumentTypeMetadata {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	if l.profile.DocumentTypeMetadata == nil {
+		return nil
+	}
+	meta, ok := l.profile.DocumentTypeMetadata[docType]
+	if !ok {
+		return nil
+	}
+	return &meta
+}
+
 // AllDocumentTypes returns the document types defined in documentTypeSections.
 func (l *CDASchemaLoader) AllDocumentTypes() []string {
 	l.mu.RLock()

@@ -12,11 +12,19 @@
     "2.16.840.1.113883.10.20.22.1.9": "Progress Note",
     "2.16.840.1.113883.10.20.22.1.14": "Referral Note"
   },
+  "documentTypeMetadata": {
+    "CCD": {"templateId": "2.16.840.1.113883.10.20.22.1.2", "templateIdExtension": "2015-08-01", "loincCode": "34133-9", "title": "Continuity of Care Document"},
+    "History and Physical": {"templateId": "2.16.840.1.113883.10.20.22.1.3", "templateIdExtension": "2015-08-01", "loincCode": "34117-2", "title": "History and Physical"},
+    "Consultation Note": {"templateId": "2.16.840.1.113883.10.20.22.1.4", "templateIdExtension": "2015-08-01", "loincCode": "11488-4", "title": "Consultation Note"},
+    "Discharge Summary": {"templateId": "2.16.840.1.113883.10.20.22.1.7", "templateIdExtension": "2015-08-01", "loincCode": "18842-5", "title": "Discharge Summary"},
+    "Progress Note": {"templateId": "2.16.840.1.113883.10.20.22.1.9", "templateIdExtension": "2015-08-01", "loincCode": "11506-3", "title": "Progress Note"},
+    "Referral Note": {"templateId": "2.16.840.1.113883.10.20.22.1.14", "templateIdExtension": "2015-08-01", "loincCode": "57133-1", "title": "Referral Note"}
+  },
   "documentTypeSections": {
     "CCD": {
-      "SHALL": ["allergiesAndIntolerances", "medications", "problems", "results", "vitalSigns", "immunizations", "socialHistory"],
-      "SHOULD": ["encounters", "procedures", "functionalStatus", "familyHistory", "assessmentAndPlan", "payersInsurance"],
-      "MAY": ["mentalStatus", "medicalEquipment", "advanceDirectives", "healthConcerns", "goals"]
+      "SHALL": ["allergiesAndIntolerances", "medications", "problems", "results", "planOfTreatment", "socialHistory", "vitalSigns"],
+      "SHOULD": ["procedures", "payersInsurance"],
+      "MAY": ["advanceDirectives", "encounters", "familyHistory", "functionalStatus", "immunizations", "medicalEquipment", "mentalStatus", "nutrition"]
     },
     "Discharge Summary": {
       "SHALL": ["dischargeDiagnosis", "dischargeMedications", "hospitalCourse", "allergiesAndIntolerances", "problems"],
@@ -51,10 +59,35 @@
       "displayName": "Allergies and Adverse Reactions",
       "loincCode": "48765-2",
       "templateId": "2.16.840.1.113883.10.20.22.2.6.1",
+      "templateIdExtension": "2015-08-01",
       "templateIdOptional": "2.16.840.1.113883.10.20.22.2.6",
       "conformance": "SHALL",
       "entryTemplateId": "2.16.840.1.113883.10.20.22.4.30",
+      "entryTemplateIdExtension": "2015-08-01",
       "observationTemplateId": "2.16.840.1.113883.10.20.22.4.7",
+      "observationTemplateIdExtension": "2014-06-09",
+      "entryElementPath": "entry/act",
+      "observationElementPath": "entry/act/entryRelationship[@typeCode='SUBJ']/observation",
+      "structuralTemplateIds": [
+        {
+          "path": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/entryRelationship[@typeCode='MFST',@inversionInd='true']/observation[templateId/@root='2.16.840.1.113883.10.20.22.4.9']",
+          "templateId": "2.16.840.1.113883.10.20.22.4.9",
+          "templateIdExtension": "2014-06-09"
+        },
+        {
+          "path": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/entryRelationship[@typeCode='SUBJ',@inversionInd='true']/observation[templateId/@root='2.16.840.1.113883.10.20.22.4.8']",
+          "templateId": "2.16.840.1.113883.10.20.22.4.8",
+          "templateIdExtension": "2014-06-09"
+        },
+        {
+          "path": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/entryRelationship[@typeCode='SUBJ',@inversionInd='true']/observation[templateId/@root='2.16.840.1.113883.10.20.22.4.28']",
+          "templateId": "2.16.840.1.113883.10.20.22.4.28"
+        },
+        {
+          "path": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/entryRelationship[@typeCode='SUBJ',@inversionInd='true']/observation[templateId/@root='2.16.840.1.113883.10.20.22.4.145']",
+          "templateId": "2.16.840.1.113883.10.20.22.4.145"
+        }
+      ],
       "fields": [
         {
           "key": "medicationAllergyCode",
@@ -72,8 +105,8 @@
           "conformance": "SHOULD",
           "dataType": "CD",
           "valueSet": "SNOMED CT",
-          "xpath": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/entryRelationship[@typeCode='MFST']/observation/value/@code",
-          "xpathDisplay": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/entryRelationship[@typeCode='MFST']/observation/value/@displayName"
+          "xpath": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/entryRelationship[@typeCode='MFST',@inversionInd='true']/observation[templateId/@root='2.16.840.1.113883.10.20.22.4.9']/value/@code",
+          "xpathDisplay": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/entryRelationship[@typeCode='MFST',@inversionInd='true']/observation[templateId/@root='2.16.840.1.113883.10.20.22.4.9']/value/@displayName"
         },
         {
           "key": "severity",
@@ -81,16 +114,25 @@
           "conformance": "SHOULD",
           "dataType": "CD",
           "valueSet": "SNOMED CT",
-          "xpath": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/entryRelationship/observation[@templateId='2.16.840.1.113883.10.20.22.4.8']/value/@code",
-          "xpathDisplay": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/entryRelationship/observation[@templateId='2.16.840.1.113883.10.20.22.4.8']/value/@displayName"
+          "xpath": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/entryRelationship[@typeCode='SUBJ',@inversionInd='true']/observation[templateId/@root='2.16.840.1.113883.10.20.22.4.8']/value/@code",
+          "xpathDisplay": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/entryRelationship[@typeCode='SUBJ',@inversionInd='true']/observation[templateId/@root='2.16.840.1.113883.10.20.22.4.8']/value/@displayName"
         },
         {
           "key": "status",
           "uscdiElement": "Clinical Status",
           "conformance": "SHALL",
           "dataType": "CD",
-          "xpath": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/entryRelationship/observation[@templateId='2.16.840.1.113883.10.20.22.4.28']/value/@code",
-          "xpathDisplay": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/entryRelationship/observation[@templateId='2.16.840.1.113883.10.20.22.4.28']/value/@displayName"
+          "xpath": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/entryRelationship[@typeCode='SUBJ',@inversionInd='true']/observation[templateId/@root='2.16.840.1.113883.10.20.22.4.28']/value/@code",
+          "xpathDisplay": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/entryRelationship[@typeCode='SUBJ',@inversionInd='true']/observation[templateId/@root='2.16.840.1.113883.10.20.22.4.28']/value/@displayName"
+        },
+        {
+          "key": "criticality",
+          "uscdiElement": "Criticality",
+          "conformance": "MAY",
+          "dataType": "CD",
+          "valueSet": "SNOMED CT",
+          "xpath": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/entryRelationship[@typeCode='SUBJ',@inversionInd='true']/observation[templateId/@root='2.16.840.1.113883.10.20.22.4.145']/value/@code",
+          "xpathDisplay": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/entryRelationship[@typeCode='SUBJ',@inversionInd='true']/observation[templateId/@root='2.16.840.1.113883.10.20.22.4.145']/value/@displayName"
         },
         {
           "key": "onsetDate",
@@ -128,9 +170,19 @@
       "displayName": "Medications",
       "loincCode": "10160-0",
       "templateId": "2.16.840.1.113883.10.20.22.2.1.1",
+      "templateIdExtension": "2014-06-09",
       "templateIdOptional": "2.16.840.1.113883.10.20.22.2.1",
       "conformance": "SHALL",
       "entryTemplateId": "2.16.840.1.113883.10.20.22.4.16",
+      "entryTemplateIdExtension": "2014-06-09",
+      "entryElementPath": "entry/substanceAdministration",
+      "structuralTemplateIds": [
+        {
+          "path": "entry/substanceAdministration/consumable/manufacturedProduct",
+          "templateId": "2.16.840.1.113883.10.20.22.4.23",
+          "templateIdExtension": "2014-06-09"
+        }
+      ],
       "fields": [
         {
           "key": "drugCode",
@@ -207,10 +259,25 @@
       "displayName": "Problem List",
       "loincCode": "11450-4",
       "templateId": "2.16.840.1.113883.10.20.22.2.5.1",
+      "templateIdExtension": "2015-08-01",
       "templateIdOptional": "2.16.840.1.113883.10.20.22.2.5",
       "conformance": "SHALL",
       "entryTemplateId": "2.16.840.1.113883.10.20.22.4.3",
+      "entryTemplateIdExtension": "2015-08-01",
       "observationTemplateId": "2.16.840.1.113883.10.20.22.4.4",
+      "observationTemplateIdExtension": "2015-08-01",
+      "entryElementPath": "entry/act",
+      "observationElementPath": "entry/act/entryRelationship[@typeCode='SUBJ']/observation",
+      "structuralTemplateIds": [
+        {
+          "path": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/entryRelationship[@typeCode='SUBJ',@inversionInd='true']/observation[templateId/@root='2.16.840.1.113883.10.20.22.4.31']",
+          "templateId": "2.16.840.1.113883.10.20.22.4.31"
+        },
+        {
+          "path": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/entryRelationship[@typeCode='REFR']/observation[templateId/@root='2.16.840.1.113883.10.20.22.4.6']",
+          "templateId": "2.16.840.1.113883.10.20.22.4.6"
+        }
+      ],
       "fields": [
         {
           "key": "conditionCode",
@@ -227,8 +294,16 @@
           "uscdiElement": "Problem Status",
           "conformance": "SHALL",
           "dataType": "CS",
-          "xpath": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/entryRelationship/observation[@templateId='2.16.840.1.113883.10.20.22.4.6']/value/@code",
-          "xpathDisplay": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/entryRelationship/observation[@templateId='2.16.840.1.113883.10.20.22.4.6']/value/@displayName"
+          "xpath": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/entryRelationship[@typeCode='REFR']/observation[templateId/@root='2.16.840.1.113883.10.20.22.4.6']/value/@code",
+          "xpathDisplay": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/entryRelationship[@typeCode='REFR']/observation[templateId/@root='2.16.840.1.113883.10.20.22.4.6']/value/@displayName"
+        },
+        {
+          "key": "ageAtOnset",
+          "uscdiElement": "Age at Onset",
+          "conformance": "MAY",
+          "dataType": "PQ",
+          "xpath": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/entryRelationship[@typeCode='SUBJ',@inversionInd='true']/observation[templateId/@root='2.16.840.1.113883.10.20.22.4.31']/value/@value",
+          "xpathUnit": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/entryRelationship[@typeCode='SUBJ',@inversionInd='true']/observation[templateId/@root='2.16.840.1.113883.10.20.22.4.31']/value/@unit"
         },
         {
           "key": "onsetDate",
@@ -266,10 +341,15 @@
       "displayName": "Vital Signs",
       "loincCode": "8716-3",
       "templateId": "2.16.840.1.113883.10.20.22.2.4.1",
+      "templateIdExtension": "2015-08-01",
       "templateIdOptional": "2.16.840.1.113883.10.20.22.2.4",
       "conformance": "SHALL",
       "entryTemplateId": "2.16.840.1.113883.10.20.22.4.26",
+      "entryTemplateIdExtension": "2015-08-01",
       "observationTemplateId": "2.16.840.1.113883.10.20.22.4.27",
+      "observationTemplateIdExtension": "2014-06-09",
+      "entryElementPath": "entry/organizer",
+      "observationElementPath": "entry/organizer/component/observation",
       "fields": [
         {
           "key": "vitalCode",
@@ -303,10 +383,15 @@
       "displayName": "Results",
       "loincCode": "30954-2",
       "templateId": "2.16.840.1.113883.10.20.22.2.3.1",
+      "templateIdExtension": "2015-08-01",
       "templateIdOptional": "2.16.840.1.113883.10.20.22.2.3",
       "conformance": "SHALL",
       "entryTemplateId": "2.16.840.1.113883.10.20.22.4.1",
+      "entryTemplateIdExtension": "2015-08-01",
       "observationTemplateId": "2.16.840.1.113883.10.20.22.4.2",
+      "observationTemplateIdExtension": "2015-08-01",
+      "entryElementPath": "entry/organizer",
+      "observationElementPath": "entry/organizer/component/observation",
       "fields": [
         {
           "key": "testCode",
@@ -368,10 +453,13 @@
       "uscdiClass": "Encounters",
       "displayName": "Encounters",
       "loincCode": "46240-8",
-      "templateId": "2.16.840.1.113883.10.20.22.2.22.1",
-      "templateIdOptional": "2.16.840.1.113883.10.20.22.2.22",
-      "conformance": "SHOULD",
+      "templateId": "2.16.840.1.113883.10.20.22.2.22",
+      "templateIdExtension": "2015-08-01",
+      "templateIdOptional": "2.16.840.1.113883.10.20.22.2.22.1",
+      "conformance": "MAY",
       "entryTemplateId": "2.16.840.1.113883.10.20.22.4.49",
+      "entryTemplateIdExtension": "2015-08-01",
+      "entryElementPath": "entry/encounter",
       "fields": [
         {
           "key": "encounterCode",
@@ -424,9 +512,12 @@
       "displayName": "Procedures",
       "loincCode": "47519-4",
       "templateId": "2.16.840.1.113883.10.20.22.2.7.1",
+      "templateIdExtension": "2014-06-09",
       "templateIdOptional": "2.16.840.1.113883.10.20.22.2.7",
       "conformance": "SHOULD",
       "entryTemplateId": "2.16.840.1.113883.10.20.22.4.14",
+      "entryTemplateIdExtension": "2014-06-09",
+      "entryElementPath": "entry/procedure",
       "fields": [
         {
           "key": "procedureCode",
@@ -481,9 +572,12 @@
       "displayName": "Immunizations",
       "loincCode": "11369-6",
       "templateId": "2.16.840.1.113883.10.20.22.2.2.1",
+      "templateIdExtension": "2015-08-01",
       "templateIdOptional": "2.16.840.1.113883.10.20.22.2.2",
-      "conformance": "SHALL",
+      "conformance": "MAY",
       "entryTemplateId": "2.16.840.1.113883.10.20.22.4.52",
+      "entryTemplateIdExtension": "2015-08-01",
+      "entryElementPath": "entry/substanceAdministration",
       "fields": [
         {
           "key": "vaccineCode",
@@ -545,8 +639,11 @@
       "displayName": "Social History",
       "loincCode": "29762-2",
       "templateId": "2.16.840.1.113883.10.20.22.2.17",
+      "templateIdExtension": "2015-08-01",
       "conformance": "SHALL",
       "entryTemplateId": "2.16.840.1.113883.10.20.22.4.38",
+      "entryTemplateIdExtension": "2015-08-01",
+      "entryElementPath": "entry/observation",
       "fields": [
         {
           "key": "observationCode",
@@ -604,10 +701,13 @@
       "uscdiClass": "Functional Status",
       "displayName": "Functional Status",
       "loincCode": "47420-5",
-      "templateId": "2.16.840.1.113883.10.20.22.2.14.1",
-      "templateIdOptional": "2.16.840.1.113883.10.20.22.2.14",
-      "conformance": "SHOULD",
+      "templateId": "2.16.840.1.113883.10.20.22.2.14",
+      "templateIdExtension": "2014-06-09",
+      "templateIdOptional": "2.16.840.1.113883.10.20.22.2.14.1",
+      "conformance": "MAY",
       "entryTemplateId": "2.16.840.1.113883.10.20.22.4.67",
+      "entryTemplateIdExtension": "2014-06-09",
+      "entryElementPath": "entry/observation",
       "fields": [
         {
           "key": "observationCode",
@@ -641,8 +741,11 @@
       "displayName": "Mental Status",
       "loincCode": "10190-7",
       "templateId": "2.16.840.1.113883.10.20.22.2.56",
+      "templateIdExtension": "2015-08-01",
       "conformance": "MAY",
       "entryTemplateId": "2.16.840.1.113883.10.20.22.4.74",
+      "entryTemplateIdExtension": "2015-08-01",
+      "entryElementPath": "entry/observation",
       "fields": [
         {
           "key": "observationCode",
@@ -676,8 +779,12 @@
       "displayName": "Family History",
       "loincCode": "10157-6",
       "templateId": "2.16.840.1.113883.10.20.22.2.15",
-      "conformance": "SHOULD",
+      "templateIdExtension": "2015-08-01",
+      "conformance": "MAY",
       "entryTemplateId": "2.16.840.1.113883.10.20.22.4.45",
+      "entryTemplateIdExtension": "2015-08-01",
+      "entryElementPath": "entry/organizer",
+      "observationElementPath": "entry/organizer/component/observation",
       "fields": [
         {
           "key": "relationship",
@@ -724,6 +831,7 @@
       "templateIdOptional": "2.16.840.1.113883.10.20.22.2.9",
       "conformance": "SHOULD",
       "entryTemplateId": "2.16.840.1.113883.10.20.22.4.146",
+      "entryElementPath": "entry/observation",
       "fields": [
         {
           "key": "activityCode",
@@ -755,8 +863,12 @@
       "displayName": "Plan of Treatment",
       "loincCode": "18776-5",
       "templateId": "2.16.840.1.113883.10.20.22.2.10",
-      "conformance": "SHOULD",
-      "entryTemplateId": "2.16.840.1.113883.10.20.22.4.40",
+      "templateIdExtension": "2014-06-09",
+      "conformance": "SHALL",
+      "entryTemplateId": "2.16.840.1.113883.10.20.22.4.44",
+      "entryTemplateIdExtension": "2014-06-09",
+      "entryStatusCodeOverride": "active",
+      "entryElementPath": "entry/observation",
       "fields": [
         {
           "key": "activityCode",
@@ -779,7 +891,7 @@
           "uscdiElement": "Activity Intent",
           "conformance": "SHALL",
           "dataType": "CS",
-          "xpath": "entry/observation/moodCode"
+          "xpath": "entry/observation/@moodCode"
         }
       ]
     },
@@ -788,10 +900,13 @@
       "uscdiClass": "Medical Equipment",
       "displayName": "Medical Equipment",
       "loincCode": "46264-8",
-      "templateId": "2.16.840.1.113883.10.20.22.2.23.1",
-      "templateIdOptional": "2.16.840.1.113883.10.20.22.2.23",
+      "templateId": "2.16.840.1.113883.10.20.22.2.23",
+      "templateIdExtension": "2014-06-09",
+      "templateIdOptional": "2.16.840.1.113883.10.20.22.2.23.1",
       "conformance": "MAY",
       "entryTemplateId": "2.16.840.1.113883.10.20.22.4.50",
+      "entryTemplateIdExtension": "2014-06-09",
+      "entryElementPath": "entry/supply",
       "fields": [
         {
           "key": "equipmentCode",
@@ -829,10 +944,13 @@
       "uscdiClass": "Advance Directives",
       "displayName": "Advance Directives",
       "loincCode": "42348-3",
-      "templateId": "2.16.840.1.113883.10.20.22.2.21.1",
-      "templateIdOptional": "2.16.840.1.113883.10.20.22.2.21",
-      "conformance": "SHOULD",
+      "templateId": "2.16.840.1.113883.10.20.22.2.21",
+      "templateIdExtension": "2015-08-01",
+      "templateIdOptional": "2.16.840.1.113883.10.20.22.2.21.1",
+      "conformance": "MAY",
       "entryTemplateId": "2.16.840.1.113883.10.20.22.4.61",
+      "entryTemplateIdExtension": "2015-08-01",
+      "entryElementPath": "entry/observation",
       "fields": [
         {
           "key": "directiveCode",
@@ -948,8 +1066,12 @@
       "displayName": "Payers",
       "loincCode": "48768-6",
       "templateId": "2.16.840.1.113883.10.20.22.2.18",
+      "templateIdExtension": "2015-08-01",
       "conformance": "SHOULD",
       "entryTemplateId": "2.16.840.1.113883.10.20.22.4.60",
+      "entryTemplateIdExtension": "2015-08-01",
+      "entryElementPath": "entry/act",
+      "observationElementPath": "entry/act/entryRelationship[@typeCode='COMP']/act",
       "fields": [
         {
           "key": "coverageType",
@@ -986,6 +1108,43 @@
           "conformance": "SHOULD",
           "dataType": "ST",
           "xpath": "entry/act/entryRelationship[@typeCode='COMP']/act/participant[@typeCode='HLD']/participantRole/playingEntity/name/given"
+        }
+      ]
+    },
+    {
+      "key": "nutrition",
+      "uscdiClass": "Nutrition",
+      "displayName": "Diet and Nutrition",
+      "loincCode": "61144-2",
+      "templateId": "2.16.840.1.113883.10.20.22.2.57",
+      "conformance": "MAY",
+      "entryTemplateId": "2.16.840.1.113883.10.20.22.4.124",
+      "observationTemplateId": "2.16.840.1.113883.10.20.22.4.138",
+      "entryElementPath": "entry/observation",
+      "observationElementPath": "entry/observation/entryRelationship[@typeCode='SUBJ']/observation",
+      "fields": [
+        {
+          "key": "observationCode",
+          "uscdiElement": "Nutritional Status Type",
+          "conformance": "SHOULD",
+          "dataType": "CD",
+          "xpath": "entry/observation/code/@code",
+          "xpathDisplay": "entry/observation/code/@displayName"
+        },
+        {
+          "key": "status",
+          "uscdiElement": "Nutritional Assessment Finding",
+          "conformance": "SHOULD",
+          "dataType": "CD",
+          "xpath": "entry/observation/entryRelationship[@typeCode='SUBJ']/observation/value/@code",
+          "xpathDisplay": "entry/observation/entryRelationship[@typeCode='SUBJ']/observation/value/@displayName"
+        },
+        {
+          "key": "effectiveTime",
+          "uscdiElement": "Observation Date",
+          "conformance": "SHOULD",
+          "dataType": "TS",
+          "xpath": "entry/observation/effectiveTime/@value"
         }
       ]
     },

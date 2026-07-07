@@ -548,9 +548,12 @@ func headerToJSON(doc *cdadocument.CDADocument) map[string]interface{} {
 	}
 	h := doc.Header
 	return map[string]interface{}{
-		"patient":  patientToLegacyJSON(h.Patient),
-		"document": documentToJSON(h),
-		"author":   authorToJSON(h),
+		"patient":              patientToLegacyJSON(h.Patient),
+		"document":             documentToJSON(h),
+		"author":               authorToJSON(h),
+		"informants":           informantsToJSON(h),
+		"documentationOf":      documentOfToJSON(h),
+		"encompassingEncounter": encompassingEncounterToJSON(h),
 	}
 }
 
@@ -663,6 +666,120 @@ func authorToJSON(h cdadocument.CDAHeader) map[string]interface{} {
 		if id.Root == "2.16.840.1.113883.4.6" { // NPI OID
 			m["npi"] = id.Extension
 			break
+		}
+	}
+	return m
+}
+
+// informantsToJSON maps document-level <informant> entries — sources of
+// information for the document who are not its author (e.g. a referring
+// provider) — to the same flat given/family/npi/orgName shape authorToJSON
+// uses, one map per informant.
+func informantsToJSON(h cdadocument.CDAHeader) []interface{} {
+	informants := make([]interface{}, 0, len(h.Informants))
+	for _, inf := range h.Informants {
+		m := make(map[string]interface{})
+		ae := inf.AssignedEntity
+		if ae.AssignedPerson != nil && len(ae.AssignedPerson.Names) > 0 {
+			n := ae.AssignedPerson.Names[0]
+			if len(n.Given) > 0 {
+				m["given"] = n.Given[0]
+			}
+			m["family"] = n.Family
+		}
+		for _, id := range ae.Ids {
+			if id.Root == "2.16.840.1.113883.4.6" {
+				m["npi"] = id.Extension
+				break
+			}
+		}
+		if ae.RepresentedOrganization != nil && len(ae.RepresentedOrganization.Names) > 0 {
+			m["orgName"] = ae.RepresentedOrganization.Names[0]
+		}
+		informants = append(informants, m)
+	}
+	return informants
+}
+
+// documentOfToJSON maps documentationOf/serviceEvent — the overall clinical
+// service this document documents, and who performed it — to a flat shape.
+// Only the first performer is exposed as top-level performerGiven/Family/NPI
+// (matching author's single-entity convention); the full list is also
+// included as "performers" for completeness.
+func documentOfToJSON(h cdadocument.CDAHeader) map[string]interface{} {
+	m := map[string]interface{}{}
+	se := h.DocumentOf
+	if se == nil {
+		return m
+	}
+	if se.EffectiveTime.Low.Value != "" {
+		m["effectiveTimeLow"] = se.EffectiveTime.Low.Value
+	}
+	if se.EffectiveTime.High.Value != "" {
+		m["effectiveTimeHigh"] = se.EffectiveTime.High.Value
+	}
+	performers := make([]interface{}, 0, len(se.Performers))
+	for i, p := range se.Performers {
+		pm := map[string]interface{}{}
+		if p.AssignedEntity.AssignedPerson != nil && len(p.AssignedEntity.AssignedPerson.Names) > 0 {
+			n := p.AssignedEntity.AssignedPerson.Names[0]
+			if len(n.Given) > 0 {
+				pm["given"] = n.Given[0]
+				if i == 0 {
+					m["performerGiven"] = n.Given[0]
+				}
+			}
+			pm["family"] = n.Family
+			if i == 0 {
+				m["performerFamily"] = n.Family
+			}
+		}
+		for _, id := range p.AssignedEntity.Ids {
+			if id.Root == "2.16.840.1.113883.4.6" {
+				pm["npi"] = id.Extension
+				if i == 0 {
+					m["performerNPI"] = id.Extension
+				}
+				break
+			}
+		}
+		performers = append(performers, pm)
+	}
+	m["performers"] = performers
+	return m
+}
+
+// encompassingEncounterToJSON maps componentOf/encompassingEncounter — the
+// specific encounter this document was generated for, distinct from the
+// "encounters" SECTION's historical encounter list — to a flat shape.
+func encompassingEncounterToJSON(h cdadocument.CDAHeader) map[string]interface{} {
+	m := map[string]interface{}{}
+	enc := h.EncompassingEncounter
+	if enc == nil {
+		return m
+	}
+	if enc.Id.Extension != "" {
+		m["id"] = enc.Id.Extension
+	}
+	if enc.EffectiveTime.Low.Value != "" {
+		m["effectiveTimeLow"] = enc.EffectiveTime.Low.Value
+	}
+	if enc.EffectiveTime.High.Value != "" {
+		m["effectiveTimeHigh"] = enc.EffectiveTime.High.Value
+	}
+	if enc.DischargeDispositionCode.Code != "" {
+		m["dischargeDispositionCode"] = enc.DischargeDispositionCode.Code
+	}
+	if enc.Location != nil {
+		hcf := enc.Location.HealthCareFacility
+		if hcf.Code.Code != "" {
+			m["facilityTypeCode"] = hcf.Code.Code
+		}
+		if hcf.Location != nil && len(hcf.Location.Names) > 0 {
+			m["facilityName"] = hcf.Location.Names[0].Family
+		}
+		if hcf.ServiceProviderOrganization != nil && len(hcf.ServiceProviderOrganization.Names) > 0 {
+			m["facilityOrgName"] = hcf.ServiceProviderOrganization.Names[0]
 		}
 	}
 	return m

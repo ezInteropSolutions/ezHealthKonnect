@@ -323,6 +323,38 @@ func (s *ObjectStorageService) AppendLog(ctx context.Context, interfaceID, messa
 	return nil
 }
 
+// AppendLogBatch appends multiple LogEntry values as NDJSON lines to the
+// message's log file in ONE object-storage round trip, instead of one round
+// trip per entry. See ProcessingLogger.Flush's doc comment for why this
+// matters — AppendObject has no native append primitive to build on, so each
+// round trip is a full download-concat-upload; batching is what keeps this
+// viable under sustained load.
+func (s *ObjectStorageService) AppendLogBatch(ctx context.Context, interfaceID, messageID string, entries []LogEntry) error {
+	if len(entries) == 0 {
+		return nil
+	}
+
+	var buf bytes.Buffer
+	for _, entry := range entries {
+		if entry.Timestamp.IsZero() {
+			entry.Timestamp = time.Now().UTC()
+		}
+		line, err := json.Marshal(entry)
+		if err != nil {
+			return fmt.Errorf("storage: marshal log entry: %w", err)
+		}
+		buf.Write(line)
+		buf.WriteByte('\n')
+	}
+
+	key := logKey(interfaceID, messageID, time.Now().UTC())
+	_, err := s.driver.AppendObject(ctx, s.bucket, key, buf.Bytes())
+	if err != nil {
+		return fmt.Errorf("storage: append log batch for %s: %w", messageID, err)
+	}
+	return nil
+}
+
 // GetLogs retrieves all NDJSON log lines for a message and parses them.
 func (s *ObjectStorageService) GetLogs(ctx context.Context, interfaceID, messageID string) ([]LogEntry, error) {
 	key := logKey(interfaceID, messageID, time.Now().UTC())

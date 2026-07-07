@@ -1,0 +1,585 @@
+{
+  "summary": {
+    "timestamp": "2026-07-04T04:12:53.509Z",
+    "config": {
+      "requests": 80,
+      "concurrent": 1,
+      "sample": "C:\\Projects\\ezHealthKonnect\\cda\\document\\testdata\\full_ccd_nist.xml",
+      "sampleSizeBytes": 17769
+    },
+    "duration_ms": 53342,
+    "throughput_rps": 1.5,
+    "total": 80,
+    "passed": 80,
+    "failed": 0,
+    "latency": {
+      "avg": 13,
+      "p50": 13,
+      "p90": 15,
+      "p95": 19,
+      "p99": 40
+    }
+  },
+  "results": [
+    {
+      "statusCode": 200,
+      "latencyMs": 18,
+      "error": null,
+      "sectionCount": 9,
+      "pass": true
+    },
+    {
+      "statusCode": 200,
+      "latencyMs": 13,
+      "error": null,
+      "sectionCount": 9,
+      "pass": true
+    },
+    {
+      "statusCode": 200,
+      "latencyMs": 12,
+      "error": null,
+      "sectionCount": 9,
+      "pass": true
+    },
+    {
+      "statusCode": 200,
+      "latencyMs": 13,
+      "error": null,
+      "sectionCount": 9,
+      "pass": true
+    },
+    {
+      "statusCode": 200,
+      "latencyMs": 21,
+      "error": null,
+      "sectionCount": 9,
+      "pass": true
+    },
+    {
+      "statusCode": 200,
+      "latencyMs": 11,
+      "error": null,
+      "sectionCount": 9,
+      "pass": true
+    },
+    {
+      "statusCode": 200,
+      "latencyMs": 20,
+      "error": null,
+      "sectionCount": 9,
+      "pass": true
+    },
+    {
+      "statusCode": 200,
+      "latencyMs": 13,
+      "error": null,
+      "sectionCount": 9,
+      "pass": true
+    },
+    {
+      "statusCode": 200,
+      "latencyMs": 19,
+      "error": null,
+      "sectionCount": 9,
+      "pass": true
+    },
+    {
+      "statusCode": 200,
+      "latencyMs": 14,
+      "error": null,
+      "sectionCount": 9,
+      "pass": true
+    },
+    {
+      "statusCode": 200,
+      "latencyMs": 12,
+      "error": null,
+      "sectionCount": 9,
+      "pass": true
+    },
+    {
+      "statusCode": 200,
+      "latencyMs": 15,
+      "error": null,
+      "sectionCount": 9,
+      "pass": true
+    },
+    {
+      "statusCode": 200,
+      "latencyMs": 13,
+      "error": null,
+      "sectionCount": 9,
+      "pass": true
+    },
+    {
+      "statusCode": 200,
+      "latencyMs": 20,
+      "error": null,
+      "sectionCount": 9,
+      "pass": true
+    },
+    {
+      "statusCode": 200,
+      "latencyMs": 13,
+      "error": null,
+      "sectionCount": 9,
+      "pass": true
+    },
+    {
+      "statusCode": 200,
+      "latencyMs": 16,
+      "error": null,
+      "sectionCount": 9,
+      "pass": true
+    },
+    {
+      "statusCode": 200,
+      "latencyMs": 12,
+      "error": null,
+      "sectionCount": 9,
+      "pass": true
+    },
+    {
+      "statusCode": 200,
+      "latencyMs": 14,
+      "error": null,
+      "sectionCount": 9,
+      "pass": true
+    },
+    {
+      "statusCode": 200,
+      "latencyMs": 12,
+      "error": null,
+      "sectionCount": 9,
+      "pass": true
+    },
+    {
+      "statusCode": 200,
+      "latencyMs": 12,
+      "error": null,
+      "sectionCount": 9,
+      "pass": true
+    },
+    {
+      "statusCode": 200,
+      "latencyMs": 40,
+      "error": null,
+      "sectionCount": 9,
+      "pass": true
+    },
+    {
+      "statusCode": 200,
+      "latencyMs": 13,
+      "error": null,
+      "sectionCount": 9,
+      "pass": true
+    },
+    {
+      "statusCode": 200,
+      "latencyMs": 13,
+      "error": null,
+      "sectionCount": 9,
+      "pass": true
+    },
+    {
+      "statusCode": 200,
+      "latencyMs": 16,
+      "error": null,
+      "sectionCount": 9,
+      "pass": true
+    },
+    {
+      "statusCode": 200,
+      "latencyMs": 13,
+      "error": null,
+      "sectionCount": 9,
+      "pass": true
+    },
+    {
+      "statusCode": 200,
+      "latencyMs": 12,
+      "error": null,
+      "sectionCount": 9,
+      "pass": true
+    },
+    {
+      "statusCode": 200,
+      "latencyMs": 11,
+      "error": null,
+      "sectionCount": 9,
+      "pass": true
+    },
+    {
+      "statusCode": 200,
+      "latencyMs": 11,
+      "error": null,
+      "sectionCount": 9,
+      "pass": true
+    },
+    {
+      "statusCode": 200,
+      "latencyMs": 13,
+      "error": null,
+      "sectionCount": 9,
+      "pass": true
+    },
+    {
+      "statusCode": 200,
+      "latencyMs": 14,
+      "error": null,
+      "sectionCount": 9,
+      "pass": true
+    },
+    {
+      "statusCode": 200,
+      "latencyMs": 13,
+      "error": null,
+      "sectionCount": 9,
+      "pass": true
+    },
+    {
+      "statusCode": 200,
+      "latencyMs": 15,
+      "error": null,
+      "sectionCount": 9,
+      "pass": true
+    },
+    {
+      "statusCode": 200,
+      "latencyMs": 11,
+      "error": null,
+      "sectionCount": 9,
+      "pass": true
+    },
+    {
+      "statusCode": 200,
+      "latencyMs": 11,
+      "error": null,
+      "sectionCount": 9,
+      "pass": true
+    },
+    {
+      "statusCode": 200,
+      "latencyMs": 12,
+      "error": null,
+      "sectionCount": 9,
+      "pass": true
+    },
+    {
+      "statusCode": 200,
+      "latencyMs": 13,
+      "error": null,
+      "sectionCount": 9,
+      "pass": true
+    },
+    {
+      "statusCode": 200,
+      "latencyMs": 12,
+      "error": null,
+      "sectionCount": 9,
+      "pass": true
+    },
+    {
+      "statusCode": 200,
+      "latencyMs": 13,
+      "error": null,
+      "sectionCount": 9,
+      "pass": true
+    },
+    {
+      "statusCode": 200,
+      "latencyMs": 12,
+      "error": null,
+      "sectionCount": 9,
+      "pass": true
+    },
+    {
+      "statusCode": 200,
+      "latencyMs": 11,
+      "error": null,
+      "sectionCount": 9,
+      "pass": true
+    },
+    {
+      "statusCode": 200,
+      "latencyMs": 12,
+      "error": null,
+      "sectionCount": 9,
+      "pass": true
+    },
+    {
+      "statusCode": 200,
+      "latencyMs": 13,
+      "error": null,
+      "sectionCount": 9,
+      "pass": true
+    },
+    {
+      "statusCode": 200,
+      "latencyMs": 11,
+      "error": null,
+      "sectionCount": 9,
+      "pass": true
+    },
+    {
+      "statusCode": 200,
+      "latencyMs": 14,
+      "error": null,
+      "sectionCount": 9,
+      "pass": true
+    },
+    {
+      "statusCode": 200,
+      "latencyMs": 13,
+      "error": null,
+      "sectionCount": 9,
+      "pass": true
+    },
+    {
+      "statusCode": 200,
+      "latencyMs": 13,
+      "error": null,
+      "sectionCount": 9,
+      "pass": true
+    },
+    {
+      "statusCode": 200,
+      "latencyMs": 12,
+      "error": null,
+      "sectionCount": 9,
+      "pass": true
+    },
+    {
+      "statusCode": 200,
+      "latencyMs": 13,
+      "error": null,
+      "sectionCount": 9,
+      "pass": true
+    },
+    {
+      "statusCode": 200,
+      "latencyMs": 12,
+      "error": null,
+      "sectionCount": 9,
+      "pass": true
+    },
+    {
+      "statusCode": 200,
+      "latencyMs": 13,
+      "error": null,
+      "sectionCount": 9,
+      "pass": true
+    },
+    {
+      "statusCode": 200,
+      "latencyMs": 13,
+      "error": null,
+      "sectionCount": 9,
+      "pass": true
+    },
+    {
+      "statusCode": 200,
+      "latencyMs": 12,
+      "error": null,
+      "sectionCount": 9,
+      "pass": true
+    },
+    {
+      "statusCode": 200,
+      "latencyMs": 13,
+      "error": null,
+      "sectionCount": 9,
+      "pass": true
+    },
+    {
+      "statusCode": 200,
+      "latencyMs": 12,
+      "error": null,
+      "sectionCount": 9,
+      "pass": true
+    },
+    {
+      "statusCode": 200,
+      "latencyMs": 10,
+      "error": null,
+      "sectionCount": 9,
+      "pass": true
+    },
+    {
+      "statusCode": 200,
+      "latencyMs": 13,
+      "error": null,
+      "sectionCount": 9,
+      "pass": true
+    },
+    {
+      "statusCode": 200,
+      "latencyMs": 14,
+      "error": null,
+      "sectionCount": 9,
+      "pass": true
+    },
+    {
+      "statusCode": 200,
+      "latencyMs": 12,
+      "error": null,
+      "sectionCount": 9,
+      "pass": true
+    },
+    {
+      "statusCode": 200,
+      "latencyMs": 13,
+      "error": null,
+      "sectionCount": 9,
+      "pass": true
+    },
+    {
+      "statusCode": 200,
+      "latencyMs": 13,
+      "error": null,
+      "sectionCount": 9,
+      "pass": true
+    },
+    {
+      "statusCode": 200,
+      "latencyMs": 15,
+      "error": null,
+      "sectionCount": 9,
+      "pass": true
+    },
+    {
+      "statusCode": 200,
+      "latencyMs": 12,
+      "error": null,
+      "sectionCount": 9,
+      "pass": true
+    },
+    {
+      "statusCode": 200,
+      "latencyMs": 12,
+      "error": null,
+      "sectionCount": 9,
+      "pass": true
+    },
+    {
+      "statusCode": 200,
+      "latencyMs": 13,
+      "error": null,
+      "sectionCount": 9,
+      "pass": true
+    },
+    {
+      "statusCode": 200,
+      "latencyMs": 14,
+      "error": null,
+      "sectionCount": 9,
+      "pass": true
+    },
+    {
+      "statusCode": 200,
+      "latencyMs": 13,
+      "error": null,
+      "sectionCount": 9,
+      "pass": true
+    },
+    {
+      "statusCode": 200,
+      "latencyMs": 14,
+      "error": null,
+      "sectionCount": 9,
+      "pass": true
+    },
+    {
+      "statusCode": 200,
+      "latencyMs": 12,
+      "error": null,
+      "sectionCount": 9,
+      "pass": true
+    },
+    {
+      "statusCode": 200,
+      "latencyMs": 13,
+      "error": null,
+      "sectionCount": 9,
+      "pass": true
+    },
+    {
+      "statusCode": 200,
+      "latencyMs": 13,
+      "error": null,
+      "sectionCount": 9,
+      "pass": true
+    },
+    {
+      "statusCode": 200,
+      "latencyMs": 11,
+      "error": null,
+      "sectionCount": 9,
+      "pass": true
+    },
+    {
+      "statusCode": 200,
+      "latencyMs": 13,
+      "error": null,
+      "sectionCount": 9,
+      "pass": true
+    },
+    {
+      "statusCode": 200,
+      "latencyMs": 13,
+      "error": null,
+      "sectionCount": 9,
+      "pass": true
+    },
+    {
+      "statusCode": 200,
+      "latencyMs": 12,
+      "error": null,
+      "sectionCount": 9,
+      "pass": true
+    },
+    {
+      "statusCode": 200,
+      "latencyMs": 14,
+      "error": null,
+      "sectionCount": 9,
+      "pass": true
+    },
+    {
+      "statusCode": 200,
+      "latencyMs": 13,
+      "error": null,
+      "sectionCount": 9,
+      "pass": true
+    },
+    {
+      "statusCode": 200,
+      "latencyMs": 12,
+      "error": null,
+      "sectionCount": 9,
+      "pass": true
+    },
+    {
+      "statusCode": 200,
+      "latencyMs": 12,
+      "error": null,
+      "sectionCount": 9,
+      "pass": true
+    },
+    {
+      "statusCode": 200,
+      "latencyMs": 13,
+      "error": null,
+      "sectionCount": 9,
+      "pass": true
+    },
+    {
+      "statusCode": 200,
+      "latencyMs": 12,
+      "error": null,
+      "sectionCount": 9,
+      "pass": true
+    }
+  ]
+}
