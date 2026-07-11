@@ -152,6 +152,23 @@ func ensureArray(obj map[string]interface{}, key string, minLen int) []interface
 	return existing
 }
 
+// SetFHIRPath is the exported entry point to setFHIRPath for callers outside
+// this package (e.g. services/executors/transform/fhir_build_executor.go)
+// that need to write a value into a FHIR resource map at a dot/bracket path,
+// growing arrays on demand exactly as the CDA→FHIR declarative engine already
+// does — see setFHIRPath's own doc comment for the path grammar.
+func SetFHIRPath(obj map[string]interface{}, path string, value interface{}) {
+	setFHIRPath(obj, path, value)
+}
+
+// IndexedPath is the exported entry point to indexedPath (declarative_engine.go)
+// for callers outside this package that need to rewrite a repeating field's
+// TargetPath into one array-element path per match, e.g. "identifier" ->
+// "identifier[0]", "identifier[1]", ... — see indexedPath's own doc comment.
+func IndexedPath(targetPath string, idx int) string {
+	return indexedPath(targetPath, idx)
+}
+
 func stripResourcePrefix(fhirPath, resourceType string) string {
 	prefix := resourceType + "."
 	if strings.HasPrefix(fhirPath, prefix) {

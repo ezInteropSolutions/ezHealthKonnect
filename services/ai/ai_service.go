@@ -41,6 +41,7 @@ type AIService struct {
 	Tracer      *MessageTracerService       // step execution trace + LLM failure analysis
 	Feedback    *FeedbackService            // user feedback storage + KB improvement loop
 	Agent       *AgentService               // propose/approve/reject tool-calling loop (nil unless provider supports tools)
+	MappingSuggester *MappingSuggesterService // design-time field-mapping suggestions for fhir.build/hl7.build/cda.map_to_canonical
 }
 
 // NewAIServiceWithProvider constructs an AIService with injected providers.
@@ -63,6 +64,7 @@ func NewAIServiceWithProvider(db *sql.DB, chatProvider LLMProvider, embedProvide
 		ScriptGen:   newScriptGeneratorService(db),
 		Tracer:      newMessageTracerService(db),
 		Feedback:    newFeedbackService(db, operational),
+		MappingSuggester: newMappingSuggesterService(),
 	}
 	// Agent Mode is only available when the chat provider supports tool calling
 	// (e.g. Ollama with a tool-calling-capable model). Left nil otherwise.

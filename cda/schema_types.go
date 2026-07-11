@@ -106,6 +106,20 @@ type CDASectionDef struct {
 	// Allergy/Problem's own assertion observation is.
 	EntryStatusCodeOverride string `json:"entryStatusCodeOverride,omitempty"`
 
+	// EntryFixedCode/EntryFixedCodeSystem/EntryFixedCodeDisplay write a
+	// static <code> child onto this section's ROOT entry element when no
+	// field already targets "entry/<rootTag>/code" itself — needed for
+	// archetypes whose OWN code is a business-fixed constant unrelated to
+	// any per-record data, e.g. Coverage Activity's code is always
+	// "48768-6" (Payment sources, matching the section's own LOINC code)
+	// even though the record's real, per-entry code (Policy Activity's own
+	// coverageType) lives one level deeper. EntryFixedCodeSystem defaults
+	// to LOINC (2.16.840.1.113883.6.1) when EntryFixedCode is set but this
+	// is empty, since that's true for every current use.
+	EntryFixedCode        string `json:"entryFixedCode,omitempty"`
+	EntryFixedCodeSystem  string `json:"entryFixedCodeSystem,omitempty"`
+	EntryFixedCodeDisplay string `json:"entryFixedCodeDisplay,omitempty"`
+
 	// Built at load time.
 	fieldByKey map[string]*CDAFieldDef
 }

@@ -584,7 +584,8 @@ class VisualStep {
         const type = step.stepType || step.step_type || '';
         return type === 'cda.parse' || type === 'cda.to_fhir' ||
                type === 'cda.normalize' || type === 'fhir.to_cda' ||
-               type === 'cda.build' || type === 'cda.dedupe';
+               type === 'cda.build' || type === 'cda.dedupe' ||
+               type === 'cda.map_to_canonical';
     }
 
     /**

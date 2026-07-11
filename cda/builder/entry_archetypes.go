@@ -49,8 +49,9 @@ func buildEntry(sectionEl *etree.Element, sec *cdaSchema.CDASectionDef, record m
 	entryEl := sectionEl.CreateElement("entry")
 	entryEl.CreateAttr("typeCode", "DRIV")
 
+	var rootEl *etree.Element
 	if sec.EntryElementPath != "" {
-		rootEl := WriteAtXPath(entryEl, stripEntryPrefix(sec.EntryElementPath), "")
+		rootEl = WriteAtXPath(entryEl, stripEntryPrefix(sec.EntryElementPath), "")
 		applyTagBoilerplate(rootEl, lastSegmentTag(sec.EntryElementPath))
 		if sec.EntryStatusCodeOverride != "" {
 			if sc := rootEl.SelectElement("statusCode"); sc != nil {
@@ -72,6 +73,19 @@ func buildEntry(sectionEl *etree.Element, sec *cdaSchema.CDASectionDef, record m
 
 	for _, field := range sec.Fields {
 		writeFieldValue(entryEl, field, record)
+	}
+
+	if sec.EntryFixedCode != "" && rootEl != nil && rootEl.SelectElement("code") == nil {
+		codeEl := rootEl.CreateElement("code")
+		codeEl.CreateAttr("code", sec.EntryFixedCode)
+		codeSystem := sec.EntryFixedCodeSystem
+		if codeSystem == "" {
+			codeSystem = "2.16.840.1.113883.6.1" // LOINC — true for every current use
+		}
+		codeEl.CreateAttr("codeSystem", codeSystem)
+		if sec.EntryFixedCodeDisplay != "" {
+			codeEl.CreateAttr("displayName", sec.EntryFixedCodeDisplay)
+		}
 	}
 
 	for _, anchor := range sec.StructuralTemplateIDs {

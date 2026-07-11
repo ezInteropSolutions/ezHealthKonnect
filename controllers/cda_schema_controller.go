@@ -21,8 +21,10 @@ import (
 	"strings"
 
 	cdaSchema "ezhealthkonnect/cda"
+	cdaBuilder "ezhealthkonnect/cda/builder"
 	"ezhealthkonnect/fhir"
 	cdafhir "ezhealthkonnect/services/cda_fhir"
+	cdaTransform "ezhealthkonnect/services/executors/transform"
 
 	"github.com/gin-gonic/gin"
 )
@@ -80,6 +82,10 @@ func (cc *CDASchemaController) RegisterRoutes(rg *gin.RouterGroup) {
 		schema.GET("/resource-fields/:resourceType", cc.GetResourceFields)
 		schema.GET("/entry-fields", cc.GetEntryFields)
 	}
+	rg.GET("/canonical-sections", cc.GetCanonicalSections)
+	rg.GET("/canonical-fields/section/:sectionKey", cc.GetCanonicalSectionFields)
+	rg.GET("/canonical-fields/header/:group", cc.GetCanonicalHeaderFields)
+	rg.GET("/canonical-transforms", cc.GetCanonicalTransforms)
 	rg.GET("/transforms", cc.GetTransforms)
 	rg.POST("/type-pair/infer", cc.InferTypePair)
 	rg.GET("/mappings/:interfaceId/:documentType", cc.GetMappings)
@@ -152,6 +158,93 @@ func (cc *CDASchemaController) GetSections(c *gin.Context) {
 }
 
 // =========================================================
+// GET /api/cda/canonical-sections
+// GET /api/cda/canonical-fields/section/:sectionKey
+// GET /api/cda/canonical-fields/header/:group
+// =========================================================
+
+// GetCanonicalSections returns every section cda.build/cda.map_to_canonical
+// can populate — sourced live from cda/builder.SectionCatalog (a thin
+// wrapper over CDASchemaLoader.AllSections()), the cda.map_to_canonical
+// step's section-key picker. Deliberately NOT the same list GetSections
+// (above) returns: that one is filtered to sections the CDA→FHIR
+// declarative engine dispatches, a different consumer with a different
+// (smaller) real capability set.
+func (cc *CDASchemaController) GetCanonicalSections(c *gin.Context) {
+	if cc.schemaLoader == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{
+			"success": false,
+			"error":   "CDA schema not loaded — check schema directory configuration",
+		})
+		return
+	}
+
+	sections := cdaBuilder.SectionCatalog(cc.schemaLoader)
+	c.JSON(http.StatusOK, gin.H{
+		"success":  true,
+		"sections": sections,
+		"count":    len(sections),
+	})
+}
+
+// GetCanonicalSectionFields returns the canonical field keys
+// cda.build/cda.map_to_canonical actually read/write for one section —
+// sourced live from cda/builder.SectionFieldCatalog (a thin wrapper over
+// CDASchemaLoader.GetSection(key).Fields), NOT the declarative CDA→FHIR
+// MappingRule set GetSectionFields (above) exposes — a deliberately
+// different dataset for a deliberately different consumer (the
+// cda.map_to_canonical step's no-code mapping UI), per the CDA/CCD builder
+// Phase 3 design.
+func (cc *CDASchemaController) GetCanonicalSectionFields(c *gin.Context) {
+	if cc.schemaLoader == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{
+			"success": false,
+			"error":   "CDA schema not loaded — check schema directory configuration",
+		})
+		return
+	}
+
+	sectionKey := c.Param("sectionKey")
+	fields := cdaBuilder.SectionFieldCatalog(cc.schemaLoader, sectionKey)
+	if fields == nil {
+		c.JSON(http.StatusNotFound, gin.H{
+			"success": false,
+			"error":   fmt.Sprintf("unknown section key %q", sectionKey),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"fields":  fields,
+		"count":   len(fields),
+	})
+}
+
+// GetCanonicalHeaderFields returns the canonical header field keys
+// cda.build actually reads for one header group ("patient" | "author" |
+// "informant" | "documentationOf" | "documentationOfPerformer" |
+// "encompassingEncounter") — sourced live from
+// cda/builder.HeaderFieldCatalog.
+func (cc *CDASchemaController) GetCanonicalHeaderFields(c *gin.Context) {
+	group := c.Param("group")
+	fields := cdaBuilder.HeaderFieldCatalog(group)
+	if fields == nil {
+		c.JSON(http.StatusNotFound, gin.H{
+			"success": false,
+			"error":   fmt.Sprintf("unknown header group %q", group),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"fields":  fields,
+		"count":   len(fields),
+	})
+}
+
+// =========================================================
 // GET /api/cda/schema/sections/:sectionKey/fields
 // =========================================================
 
@@ -173,8 +266,8 @@ type fieldSummary struct {
 // sourced from cdafhir.FlattenSectionRules (the real declarative MappingRow
 // set), merged with any saved interface-level override.
 type flattenedFieldResponse struct {
-	Key         string            `json:"key"`
-	CDASource   string            `json:"cdaSource"`
+	Key       string `json:"key"`
+	CDASource string `json:"cdaSource"`
 	// FHIRResource identifies which of the section's MappingRule variant(s)
 	// this field belongs to (e.g. "MedicationRequest" vs "MedicationStatement"
 	// for the "medications" section) — was silently dropped here before even
@@ -360,11 +453,11 @@ func (cc *CDASchemaController) GetSectionFields(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"success":      true,
 		"ruleVariants": ruleVariants,
-		"sectionKey":  sectionKey,
-		"displayName": displayName,
-		"loincCode":   loincCode,
-		"fields":      fields,
-		"count":       len(fields),
+		"sectionKey":   sectionKey,
+		"displayName":  displayName,
+		"loincCode":    loincCode,
+		"fields":       fields,
+		"count":        len(fields),
 	})
 }
 
@@ -511,6 +604,32 @@ func (cc *CDASchemaController) GetTransforms(c *gin.Context) {
 	}
 
 	descriptions := cc.declarativeTransformReg.AllDescriptions()
+	transforms := make([]transformSummary, 0, len(descriptions))
+	for name, desc := range descriptions {
+		transforms = append(transforms, transformSummary{Name: name, Description: desc})
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success":    true,
+		"transforms": transforms,
+		"count":      len(transforms),
+	})
+}
+
+// =========================================================
+// GET /api/cda/canonical-transforms
+// =========================================================
+
+// GetCanonicalTransforms returns every registered cda.map_to_canonical
+// value-transform name with its human-readable description — mirrors
+// GetTransforms above exactly, but sources from
+// transform.CanonicalTransformDescriptions() (services/executors/transform/
+// canonical_value_transforms.go), a deliberately separate, CDA-target-only
+// registry: see that file's doc comment for why declarativeTransformReg
+// above (FHIR-resource-shaped output) isn't reusable for this step's
+// Transform picker.
+func (cc *CDASchemaController) GetCanonicalTransforms(c *gin.Context) {
+	descriptions := cdaTransform.CanonicalTransformDescriptions()
 	transforms := make([]transformSummary, 0, len(descriptions))
 	for name, desc := range descriptions {
 		transforms = append(transforms, transformSummary{Name: name, Description: desc})
@@ -743,7 +862,7 @@ func upsertCDAMappingDelta(
 // upsertCDAMappingDelta and the versioning anchors are returned to the caller
 // so the step config can be updated (standardTemplateId, basedOnVersion).
 func (cc *CDASchemaController) ComputeDelta(c *gin.Context) {
-	interfaceID  := c.Param("interfaceId")
+	interfaceID := c.Param("interfaceId")
 	documentType := c.Param("documentType")
 
 	if cc.mapper == nil {
@@ -891,8 +1010,8 @@ func (cc *CDASchemaController) GetTemplateVersion(c *gin.Context) {
 	}
 
 	var (
-		templateID  string
-		configJSON  string
+		templateID string
+		configJSON string
 	)
 	err := cc.db.QueryRowContext(c.Request.Context(), `
 		SELECT id::text, template_config::text

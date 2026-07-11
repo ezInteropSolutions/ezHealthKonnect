@@ -79,6 +79,7 @@ func (c *AIController) RegisterRoutes(group *gin.RouterGroup) {
 	// Core AI features
 	gated.POST("/detect-format", c.DetectFormat)
 	gated.POST("/suggest-mappings", c.SuggestMappings)
+	gated.POST("/suggest-field-mappings", c.SuggestFieldMappings)
 	gated.POST("/explain-error", c.ExplainError)
 	gated.POST("/ask", c.Ask)
 	gated.POST("/ask/stream", c.AskStream)
@@ -185,6 +186,46 @@ func (c *AIController) SuggestMappings(ctx *gin.Context) {
 			"context_chunks": len(chunks),
 			"sources":        chunkSources(chunks),
 		},
+	})
+}
+
+// ─── POST /api/ai/suggest-field-mappings ──────────────────────────────────────
+// Design-time only: proposes sourcePath -> targetField mappings for the
+// fhir.build/hl7.build/cda.map_to_canonical step builders, given sample
+// source rows and the step's OWN live target-field catalog (the frontend
+// fetches this from /api/fhir/canonical-fields, /api/hl7/canonical-fields, or
+// /api/cda/canonical-fields and passes it straight through — no new catalog
+// logic lives here). Distinct from suggest-mappings above, whose contract is
+// "paste one whole raw message" — see ai.MappingSuggesterService's own doc
+// comment for why that endpoint isn't reused for this.
+
+type suggestFieldMappingsRequest struct {
+	StepType     string                   `json:"step_type"`
+	SampleRows   []map[string]interface{} `json:"sample_rows" binding:"required"`
+	TargetFields []ai.TargetFieldInfo     `json:"target_fields" binding:"required"`
+}
+
+func (c *AIController) SuggestFieldMappings(ctx *gin.Context) {
+	var req suggestFieldMappingsRequest
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"success": false, "error": err.Error()})
+		return
+	}
+	reqCtx, cancel := context.WithTimeout(ctx.Request.Context(), 180*time.Second)
+	defer cancel()
+
+	suggestions, err := c.svc.MappingSuggester.SuggestFieldMappings(reqCtx, c.svc.LLMProvider(), ai.FieldMappingSuggestInput{
+		StepType:     req.StepType,
+		SampleRows:   req.SampleRows,
+		TargetFields: req.TargetFields,
+	})
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": err.Error()})
+		return
+	}
+	ctx.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    gin.H{"suggestions": suggestions, "count": len(suggestions)},
 	})
 }
 

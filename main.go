@@ -771,6 +771,28 @@ func main() {
 				log.Printf("✅ CDA Document Controller registered (/api/cda/documents)")
 			}
 
+			// ADDED: FHIR Schema Browser API (/api/fhir/*) — backs the
+			// fhir.build step's no-code field-mapping UI. Holds no injected
+			// registry; fetches fhir/r4.GetRegistry() fresh per request since
+			// r4.InitRegistry() above may still be running in its background
+			// goroutine when this controller is constructed.
+			{
+				fhirSchemaCtrl := controllers.NewFHIRSchemaController()
+				fhirSchemaCtrl.RegisterRoutes(api.Group("/fhir"))
+				log.Printf("✅ FHIR Schema Controller registered (/api/fhir/resource-types, /api/fhir/canonical-fields, /api/fhir/transforms)")
+			}
+
+			// ADDED: HL7 Schema Browser API (/api/hl7/*) — backs the
+			// hl7.build step's no-code segment/field-mapping UI. Holds no
+			// cached *hl7.RealHL7Schema; fetches hl7.GetRealSchemaLoader()
+			// fresh per request, same lazy-fetch discipline as the FHIR
+			// controller above.
+			{
+				hl7SchemaCtrl := controllers.NewHL7SchemaController(filepath.Join(cfg.GetSchemaDirectory(), "hl7"))
+				hl7SchemaCtrl.RegisterRoutes(api.Group("/hl7"))
+				log.Printf("✅ HL7 Schema Controller registered (/api/hl7/message-types, /api/hl7/segments, /api/hl7/canonical-fields)")
+			}
+
 			// ── OOB template rebuild ─────────────────────────────────────────────
 			// Rebuild endpoints are admin-only and run asynchronously.
 			// POST returns 202 immediately; GET /rebuild-status polls progress.

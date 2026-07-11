@@ -948,7 +948,7 @@
       "templateIdExtension": "2015-08-01",
       "templateIdOptional": "2.16.840.1.113883.10.20.22.2.21.1",
       "conformance": "MAY",
-      "entryTemplateId": "2.16.840.1.113883.10.20.22.4.61",
+      "entryTemplateId": "2.16.840.1.113883.10.20.22.4.48",
       "entryTemplateIdExtension": "2015-08-01",
       "entryElementPath": "entry/observation",
       "fields": [
@@ -1070,6 +1070,11 @@
       "conformance": "SHOULD",
       "entryTemplateId": "2.16.840.1.113883.10.20.22.4.60",
       "entryTemplateIdExtension": "2015-08-01",
+      "entryStatusCodeOverride": "completed",
+      "entryFixedCode": "48768-6",
+      "entryFixedCodeDisplay": "Payment sources",
+      "observationTemplateId": "2.16.840.1.113883.10.20.22.4.61",
+      "observationTemplateIdExtension": "2015-08-01",
       "entryElementPath": "entry/act",
       "observationElementPath": "entry/act/entryRelationship[@typeCode='COMP']/act",
       "fields": [

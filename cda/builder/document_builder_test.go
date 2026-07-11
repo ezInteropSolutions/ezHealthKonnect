@@ -233,6 +233,16 @@ func TestBuildDocument_TemplateIdsIncludeExtension(t *testing.T) {
 		// fields actually target (confirmed against the C-CDA 2.1 IG's own
 		// Plan of Treatment Section chapter, Table 166).
 		{"Planned Observation", "2.16.840.1.113883.10.20.22.4.44", "2014-06-09"},
+		// Advance Directives: another real regression test for a pre-existing
+		// schema bug — entryTemplateId used .4.61, which actually belongs to
+		// Payers' Policy Activity (confirmed while reading Coverage Activity's
+		// entry template), not Advance Directive Observation (.4.48, confirmed
+		// directly against the Advance Directives Section chapter's own
+		// "Contains:" reference, Table 65).
+		{"Advance Directive Observation", "2.16.840.1.113883.10.20.22.4.48", "2015-08-01"},
+		{"Payers section", "2.16.840.1.113883.10.20.22.2.18", "2015-08-01"},
+		{"Coverage Activity", "2.16.840.1.113883.10.20.22.4.60", "2015-08-01"},
+		{"Policy Activity", "2.16.840.1.113883.10.20.22.4.61", "2015-08-01"},
 	}
 	for _, c := range cases {
 		want := `root="` + c.root + `" extension="` + c.extension + `"`
@@ -284,6 +294,43 @@ func TestBuildDocument_TemplateIdsIncludeExtension(t *testing.T) {
 	}
 	if !strings.Contains(tail, `<statusCode code="active"`) {
 		t.Errorf("expected Planned Observation's statusCode to be overridden to \"active\", got: %s", tail)
+	}
+}
+
+// TestBuildDocument_PayersFixedCodeAndStatus locks in Coverage Activity's two
+// EntryFixedCode/EntryStatusCodeOverride mechanisms (schema_types.go): its
+// own <code> is never populated by any field (coverageType maps to the
+// NESTED Policy Activity, one level deeper), and its statusCode default of
+// "active" (the generic "act" tag boilerplate) is wrong for Coverage
+// Activity specifically — SHALL be "completed" (CONF:1198-8875).
+func TestBuildDocument_PayersFixedCodeAndStatus(t *testing.T) {
+	loader := loadTestSchema(t)
+	xml, err := BuildDocument(loader, fullCanonicalDoc(), "CCD", BuildOptions{})
+	if err != nil {
+		t.Fatalf("BuildDocument failed: %v", err)
+	}
+
+	covIdx := strings.Index(xml, `root="2.16.840.1.113883.10.20.22.4.60"`)
+	if covIdx == -1 {
+		t.Fatal("expected Coverage Activity templateId in output")
+	}
+	entryStart := strings.LastIndex(xml[:covIdx], "<act")
+	if entryStart == -1 {
+		t.Fatal("expected an enclosing <act> before the Coverage Activity templateId")
+	}
+	tail := xml[entryStart:]
+	if end := strings.Index(tail, "</act>"); end != -1 {
+		// The FIRST </act> closes the nested Policy Activity, not Coverage
+		// Activity itself — find the outer close by counting past it.
+		if next := strings.Index(tail[end+len("</act>"):], "</act>"); next != -1 {
+			tail = tail[:end+len("</act>")+next]
+		}
+	}
+	if !strings.Contains(tail, `code code="48768-6"`) {
+		t.Errorf("expected Coverage Activity's fixed code=\"48768-6\", got: %s", tail)
+	}
+	if !strings.Contains(tail, `<statusCode code="completed"`) {
+		t.Errorf("expected Coverage Activity's statusCode overridden to \"completed\", got: %s", tail)
 	}
 }
 

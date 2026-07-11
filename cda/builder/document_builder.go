@@ -182,45 +182,24 @@ func writeDocumentBoilerplate(root *etree.Element, meta *cdaSchema.DocumentTypeM
 }
 
 // ─── Patient / Author / Custodian ───────────────────────────────────────────
+// Field-by-field construction is declarative (header_fields.go's mapping
+// tables + writeHeaderFields/writeCodedFields/writeRepeatingGroup); this
+// function is left doing only structural wiring (which element owns which
+// mapping table) and the one piece of real logic that isn't a flat
+// field-copy — the phone number's "tel:" prefix + fixed @use="HP".
+
+const npiOID = "2.16.840.1.113883.4.6"
 
 func writePatientHeader(root *etree.Element, header map[string]interface{}) {
 	patientData, _ := header["patient"].(map[string]interface{})
 
 	patientRole := root.CreateElement("recordTarget").CreateElement("patientRole")
 
-	if ids, ok := patientData["ids"].([]interface{}); ok {
-		for _, idRaw := range ids {
-			idMap, ok := idRaw.(map[string]interface{})
-			if !ok {
-				continue
-			}
-			idEl := patientRole.CreateElement("id")
-			if v, ok := stringValue(idMap["root"]); ok {
-				idEl.CreateAttr("root", v)
-			}
-			if v, ok := stringValue(idMap["extension"]); ok {
-				idEl.CreateAttr("extension", v)
-			}
-		}
-	}
+	writeRepeatingGroup(patientRole, patientData, "ids", "id", idItemFields)
 
 	if addr, ok := patientData["address"].(map[string]interface{}); ok {
 		addrEl := patientRole.CreateElement("addr")
-		if v, ok := stringValue(addr["street"]); ok {
-			addrEl.CreateElement("streetAddressLine").SetText(v)
-		}
-		if v, ok := stringValue(addr["city"]); ok {
-			addrEl.CreateElement("city").SetText(v)
-		}
-		if v, ok := stringValue(addr["state"]); ok {
-			addrEl.CreateElement("state").SetText(v)
-		}
-		if v, ok := stringValue(addr["postalCode"]); ok {
-			addrEl.CreateElement("postalCode").SetText(v)
-		}
-		if v, ok := stringValue(addr["country"]); ok {
-			addrEl.CreateElement("country").SetText(v)
-		}
+		writeHeaderFields(addrEl, addr, patientAddressFields)
 	}
 
 	if phone, ok := stringValue(patientData["phone"]); ok {
@@ -229,52 +208,8 @@ func writePatientHeader(root *etree.Element, header map[string]interface{}) {
 		tel.CreateAttr("use", "HP")
 	}
 
-	patient := patientRole.CreateElement("patient")
-	name := patient.CreateElement("name")
-	if v, ok := stringValue(patientData["firstName"]); ok {
-		name.CreateElement("given").SetText(v)
-	}
-	if v, ok := stringValue(patientData["middleName"]); ok {
-		name.CreateElement("given").SetText(v)
-	}
-	if v, ok := stringValue(patientData["lastName"]); ok {
-		name.CreateElement("family").SetText(v)
-	}
-
-	if v, ok := stringValue(patientData["dateOfBirth"]); ok {
-		patient.CreateElement("birthTime").CreateAttr("value", v)
-	}
-
-	if code, ok := stringValue(patientData["sex"]); ok {
-		g := patient.CreateElement("administrativeGenderCode")
-		g.CreateAttr("code", code)
-		g.CreateAttr("codeSystem", "2.16.840.1.113883.5.1")
-		if disp, ok := stringValue(patientData["sexDisplay"]); ok {
-			g.CreateAttr("displayName", disp)
-		}
-	}
-
-	if code, ok := stringValue(patientData["race"]); ok {
-		r := patient.CreateElement("raceCode")
-		r.CreateAttr("code", code)
-		r.CreateAttr("codeSystem", "2.16.840.1.113883.6.238")
-		if disp, ok := stringValue(patientData["raceDisplay"]); ok {
-			r.CreateAttr("displayName", disp)
-		}
-	}
-
-	if code, ok := stringValue(patientData["ethnicity"]); ok {
-		e := patient.CreateElement("ethnicGroupCode")
-		e.CreateAttr("code", code)
-		e.CreateAttr("codeSystem", "2.16.840.1.113883.6.238")
-		if disp, ok := stringValue(patientData["ethnicityDisplay"]); ok {
-			e.CreateAttr("displayName", disp)
-		}
-	}
-
-	if lang, ok := stringValue(patientData["preferredLanguage"]); ok {
-		patient.CreateElement("languageCommunication").CreateElement("languageCode").CreateAttr("code", lang)
-	}
+	writeHeaderFields(patientRole, patientData, patientScalarFields)
+	writeCodedFields(patientRole, patientData, patientCodedFields)
 }
 
 func writeAuthorHeader(root *etree.Element, header map[string]interface{}, opts BuildOptions) {
@@ -284,41 +219,58 @@ func writeAuthorHeader(root *etree.Element, header map[string]interface{}, opts 
 	author.CreateElement("time").CreateAttr("value", nowCDATimestamp())
 	assignedAuthor := author.CreateElement("assignedAuthor")
 
-	if npi, ok := stringValue(authorData["npi"]); ok {
-		id := assignedAuthor.CreateElement("id")
-		id.CreateAttr("root", "2.16.840.1.113883.4.6")
-		id.CreateAttr("extension", npi)
-	} else {
-		assignedAuthor.CreateElement("id").CreateAttr("root", "2.16.840.1.113883.4.6")
-	}
+	writeNPI(assignedAuthor, "id", authorData["npi"])
+	writeHeaderFields(assignedAuthor, authorData, authorScalarFields)
 
-	given, hasGiven := stringValue(authorData["given"])
-	family, hasFamily := stringValue(authorData["family"])
-	if hasGiven || hasFamily {
-		name := assignedAuthor.CreateElement("assignedPerson").CreateElement("name")
-		if hasGiven {
-			name.CreateElement("given").SetText(given)
-		}
-		if hasFamily {
-			name.CreateElement("family").SetText(family)
-		}
-	}
+	assignedAuthor.CreateElement("representedOrganization").CreateElement("name").SetText(resolveOrgName(opts))
+}
 
-	orgName := opts.OrgName
-	if orgName == "" {
-		orgName = "ezHealthKonnect"
+// writeNPI writes a fixed-root/data-driven-extension <id> at xpath — the
+// NPI shape every author/informant/performer identity uses. Always present
+// (a bare NPI-rooted id with no extension when npi data is absent) to match
+// the pre-refactor behavior exactly.
+func writeNPI(root *etree.Element, xpath string, npi interface{}) {
+	id := WriteAtXPath(root, xpath, "")
+	id.CreateAttr("root", npiOID)
+	if v, ok := stringValue(npi); ok {
+		id.CreateAttr("extension", v)
 	}
-	assignedAuthor.CreateElement("representedOrganization").CreateElement("name").SetText(orgName)
+}
+
+func resolveOrgName(opts BuildOptions) string {
+	if opts.OrgName != "" {
+		return opts.OrgName
+	}
+	return "ezHealthKonnect"
 }
 
 func writeCustodianHeader(root *etree.Element, opts BuildOptions) {
-	orgName := opts.OrgName
-	if orgName == "" {
-		orgName = "ezHealthKonnect"
-	}
 	org := root.CreateElement("custodian").CreateElement("assignedCustodian").CreateElement("representedCustodianOrganization")
-	org.CreateElement("id").CreateAttr("root", "2.16.840.1.113883.4.6")
-	org.CreateElement("name").SetText(orgName)
+	org.CreateElement("id").CreateAttr("root", npiOID)
+	org.CreateElement("name").SetText(resolveOrgName(opts))
+}
+
+// writePersonReference writes one <tag><assignedEntity>...</assignedEntity></tag>
+// element — the shape shared by document-level informants[] and
+// documentationOf performers[]: an optional NPI-rooted id (only when npi
+// data is present, unlike author's identity which always carries one),
+// optional name, and (informants only) an optional represented
+// organization. Returns the outer <tag> element so callers can add their
+// own tag-specific attributes (e.g. performer's fixed typeCode="PRF").
+func writePersonReference(root *etree.Element, tag string, person map[string]interface{}, includeOrg bool) *etree.Element {
+	el := root.CreateElement(tag)
+	assignedEntity := el.CreateElement("assignedEntity")
+
+	if npi, ok := stringValue(person["npi"]); ok {
+		writeNPI(assignedEntity, "id", npi)
+	}
+	writeHeaderFields(assignedEntity, person, personItemFields)
+	if includeOrg {
+		if orgName, ok := stringValue(person["orgName"]); ok {
+			assignedEntity.CreateElement("representedOrganization").CreateElement("name").SetText(orgName)
+		}
+	}
+	return el
 }
 
 // writeInformantsHeader writes zero or more <informant><assignedEntity>
@@ -335,27 +287,7 @@ func writeInformantsHeader(root *etree.Element, header map[string]interface{}) {
 		if !ok {
 			continue
 		}
-		assignedEntity := root.CreateElement("informant").CreateElement("assignedEntity")
-
-		if npi, ok := stringValue(inf["npi"]); ok {
-			id := assignedEntity.CreateElement("id")
-			id.CreateAttr("root", "2.16.840.1.113883.4.6")
-			id.CreateAttr("extension", npi)
-		}
-		given, hasGiven := stringValue(inf["given"])
-		family, hasFamily := stringValue(inf["family"])
-		if hasGiven || hasFamily {
-			name := assignedEntity.CreateElement("assignedPerson").CreateElement("name")
-			if hasGiven {
-				name.CreateElement("given").SetText(given)
-			}
-			if hasFamily {
-				name.CreateElement("family").SetText(family)
-			}
-		}
-		if orgName, ok := stringValue(inf["orgName"]); ok {
-			assignedEntity.CreateElement("representedOrganization").CreateElement("name").SetText(orgName)
-		}
+		writePersonReference(root, "informant", inf, true)
 	}
 }
 
@@ -393,26 +325,8 @@ func writeDocumentationOfHeader(root *etree.Element, header map[string]interface
 		if !ok {
 			continue
 		}
-		perf := serviceEvent.CreateElement("performer")
+		perf := writePersonReference(serviceEvent, "performer", p, false)
 		perf.CreateAttr("typeCode", "PRF")
-		assignedEntity := perf.CreateElement("assignedEntity")
-
-		if npi, ok := stringValue(p["npi"]); ok {
-			id := assignedEntity.CreateElement("id")
-			id.CreateAttr("root", "2.16.840.1.113883.4.6")
-			id.CreateAttr("extension", npi)
-		}
-		given, hasGiven := stringValue(p["given"])
-		family, hasFamily := stringValue(p["family"])
-		if hasGiven || hasFamily {
-			name := assignedEntity.CreateElement("assignedPerson").CreateElement("name")
-			if hasGiven {
-				name.CreateElement("given").SetText(given)
-			}
-			if hasFamily {
-				name.CreateElement("family").SetText(family)
-			}
-		}
 	}
 }
 
@@ -430,7 +344,7 @@ func writeEncompassingEncounterHeader(root *etree.Element, header map[string]int
 
 	if id, ok := stringValue(enc["id"]); ok {
 		idEl := ee.CreateElement("id")
-		idEl.CreateAttr("root", "2.16.840.1.113883.4.6")
+		idEl.CreateAttr("root", npiOID)
 		idEl.CreateAttr("extension", id)
 	}
 
@@ -450,19 +364,11 @@ func writeEncompassingEncounterHeader(root *etree.Element, header map[string]int
 		ee.CreateElement("dischargeDispositionCode").CreateAttr("code", code)
 	}
 
-	facilityName, hasFacilityName := stringValue(enc["facilityName"])
-	facilityOrgName, hasFacilityOrgName := stringValue(enc["facilityOrgName"])
-	facilityTypeCode, hasFacilityTypeCode := stringValue(enc["facilityTypeCode"])
+	_, hasFacilityName := stringValue(enc["facilityName"])
+	_, hasFacilityOrgName := stringValue(enc["facilityOrgName"])
+	_, hasFacilityTypeCode := stringValue(enc["facilityTypeCode"])
 	if hasFacilityName || hasFacilityOrgName || hasFacilityTypeCode {
 		hcf := ee.CreateElement("location").CreateElement("healthCareFacility")
-		if hasFacilityTypeCode {
-			hcf.CreateElement("code").CreateAttr("code", facilityTypeCode)
-		}
-		if hasFacilityName {
-			hcf.CreateElement("location").CreateElement("name").SetText(facilityName)
-		}
-		if hasFacilityOrgName {
-			hcf.CreateElement("serviceProviderOrganization").CreateElement("name").SetText(facilityOrgName)
-		}
+		writeHeaderFields(hcf, enc, healthCareFacilityFields)
 	}
 }
