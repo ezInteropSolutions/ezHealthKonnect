@@ -334,6 +334,65 @@ func TestBuildDocument_PayersFixedCodeAndStatus(t *testing.T) {
 	}
 }
 
+// TestBuildDocument_ProblemObservationFixedCode locks in ObsFixedCode
+// (schema_types.go): C-CDA 2.1's Problem Observation (templateId .4.4) SHALL
+// have exactly one <code> selected from the Problem Type value set (SNOMED
+// CT 55607006 "Problem") on the OBSERVATION itself — distinct from the real
+// diagnosis code a field write already puts on <value> one level deeper.
+// Found via /api/cda/validate flagging "Entry.Code" missing on a real
+// pipeline-built CCD even though the diagnosis <value> was fully populated.
+func TestBuildDocument_ProblemObservationFixedCode(t *testing.T) {
+	loader := loadTestSchema(t)
+	xml, err := BuildDocument(loader, fullCanonicalDoc(), "CCD", BuildOptions{})
+	if err != nil {
+		t.Fatalf("BuildDocument failed: %v", err)
+	}
+
+	obsIdx := strings.Index(xml, `root="2.16.840.1.113883.10.20.22.4.4"`)
+	if obsIdx == -1 {
+		t.Fatal("expected Problem Observation templateId in output")
+	}
+	entryStart := strings.LastIndex(xml[:obsIdx], "<observation")
+	if entryStart == -1 {
+		t.Fatal("expected an enclosing <observation> before the Problem Observation templateId")
+	}
+	// The Problem Observation nests its own child <observation> (Problem
+	// Status, templateId .4.6), so find the CLOSE tag matching THIS
+	// observation's own open tag by tracking nesting depth, rather than
+	// naively grabbing the first "</observation>" (which would be the
+	// nested child's, truncating before this observation's own <code>).
+	rest := xml[entryStart:]
+	depth := 0
+	tail := rest
+	for pos := 0; pos < len(rest); {
+		openIdx := strings.Index(rest[pos:], "<observation")
+		closeIdx := strings.Index(rest[pos:], "</observation>")
+		if closeIdx == -1 {
+			break
+		}
+		if openIdx != -1 && openIdx < closeIdx {
+			depth++
+			pos += openIdx + len("<observation")
+			continue
+		}
+		depth--
+		pos += closeIdx + len("</observation>")
+		if depth == 0 {
+			tail = rest[:pos]
+			break
+		}
+	}
+
+	if !strings.Contains(tail, `code="55607006"`) || !strings.Contains(tail, `codeSystem="2.16.840.1.113883.6.96"`) {
+		t.Errorf("expected Problem Observation's fixed code=\"55607006\" (SNOMED Problem), got: %s", tail)
+	}
+	// The real diagnosis code (from fullCanonicalDoc's conditionCode) must
+	// still be present on <value> — the fixed code must not replace it.
+	if !strings.Contains(tail, `<value code="44054006"`) {
+		t.Errorf("expected the real diagnosis code on <value> to still be present, got: %s", tail)
+	}
+}
+
 func TestBuildDocument_OmitsOptionalHeaderElementsWhenAbsent(t *testing.T) {
 	loader := loadTestSchema(t)
 	doc := fullCanonicalDoc()

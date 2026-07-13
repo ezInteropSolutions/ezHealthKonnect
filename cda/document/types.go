@@ -168,11 +168,36 @@ type CDAEntry struct {
 	// real entry seen yet uses it.
 	Informants []CDAInformant `json:"informants,omitempty"`
 
-	// substanceAdministration-specific
+	// substanceAdministration-specific (shared by Medication Activity AND
+	// Immunization Activity — both are <substanceAdministration>-based).
 	Consumable   *CDAConsumable `json:"consumable,omitempty"`
 	RouteCode    *CDACode       `json:"routeCode,omitempty"`
 	DoseQuantity *CDAQuantity   `json:"doseQuantity,omitempty"`
 	RateQuantity *CDAQuantity   `json:"rateQuantity,omitempty"`
+
+	// ApproachSiteCode is <approachSiteCode> — the anatomical site of
+	// administration (e.g. "Right Deltoid" for an injection). Real gap found
+	// auditing multiple real CCDs: present with genuine data (not just
+	// nullFlavor placeholders) on both medication and immunization entries.
+	ApproachSiteCode *CDACode `json:"approachSiteCode,omitempty"`
+
+	// AdministrationUnitCode is <administrationUnitCode> — the dosage
+	// form/unit (e.g. "CAPSULE, DELAYED RELEASE"), distinct from
+	// DoseQuantity's numeric amount+unit.
+	AdministrationUnitCode *CDACode `json:"administrationUnitCode,omitempty"`
+
+	// MaxDoseQuantity is <maxDoseQuantity> (RTO) — the maximum allowed dose
+	// per time period. Denominator is very commonly nullFlavor="NI" in real
+	// documents; the numerator (max single/daily dose amount) is usually
+	// what's actually populated.
+	MaxDoseQuantity *CDARatio `json:"maxDoseQuantity,omitempty"`
+
+	// Precondition is <precondition><criterion><value> — the clinical
+	// criterion that must be met before administering (PRN conditions).
+	// Real-world evidence across several audited documents: usually
+	// nullFlavor="NI" (criterion not actually specified), but parsed in case
+	// a document populates it meaningfully.
+	Precondition *CDACode `json:"precondition,omitempty"`
 
 	// supply-specific: <supply><quantity>, <supply><product><manufacturedProduct>.
 	// Distinct from substanceAdministration's Consumable/DoseQuantity above —
@@ -190,6 +215,14 @@ type CDAEntry struct {
 	// variants use <observation>/<act> elements, which have no targetSiteCode
 	// child in the base schema, so this is always nil for those.
 	TargetSiteCode *CDACode `json:"targetSiteCode,omitempty"`
+
+	// RelatedSubjectCode is the Family History Organizer's
+	// <subject><relatedSubject><code>: the family member's relationship to the
+	// patient (e.g. "mother", "father" — RoleCode system
+	// 2.16.840.1.113883.5.111). A sibling of Components (the actual family
+	// history observations), not itself a component — only populated when
+	// EntryType == "organizer" and a <subject> child is present.
+	RelatedSubjectCode *CDACode `json:"relatedSubjectCode,omitempty"`
 }
 
 // CDAEffectiveTimeEntry is one <effectiveTime> element preserved in document
@@ -254,6 +287,15 @@ type CDAQuantity struct {
 	Value      string `json:"value,omitempty"`
 	Unit       string `json:"unit,omitempty"`
 	NullFlavor string `json:"nullFlavor,omitempty"`
+}
+
+// CDARatio is an HL7 RTO (ratio of two quantities) — substanceAdministration's
+// <maxDoseQuantity> ("N units per M time period", e.g. "4 tablet per 1 d").
+// Denominator is very commonly nullFlavor="NI" in real documents (the
+// numerator alone — the max single/daily dose — is usually what's populated).
+type CDARatio struct {
+	Numerator   CDAQuantity `json:"numerator"`
+	Denominator CDAQuantity `json:"denominator"`
 }
 
 // CDAName is an HL7 PN (Person Name).

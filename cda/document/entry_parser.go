@@ -178,10 +178,14 @@ func (ep *entryParser) parseClinicalAct(el *etree.Element, entryType string) CDA
 	switch entryType {
 	case "substanceAdministration":
 		entry.RouteCode = ep.parseRouteCode(el)
+		entry.ApproachSiteCode = ep.parseChildCode(el, "approachSiteCode")
+		entry.AdministrationUnitCode = ep.parseChildCode(el, "administrationUnitCode")
 		entry.DoseQuantity = ep.parsePQField(el, "doseQuantity")
 		entry.RateQuantity = ep.parsePQField(el, "rateQuantity")
+		entry.MaxDoseQuantity = ep.parseMaxDoseQuantity(el)
 		entry.Consumable = ep.parseConsumable(el)
 		entry.RepeatNumber = parseRepeatNumber(el)
+		entry.Precondition = ep.parsePrecondition(el)
 	case "procedure":
 		entry.TargetSiteCode = ep.parseTargetSiteCode(el)
 	case "supply":
@@ -194,6 +198,7 @@ func (ep *entryParser) parseClinicalAct(el *etree.Element, entryType string) CDA
 		entry.Product = ep.parseProduct(el)
 	case "organizer":
 		entry.Components = ep.parseComponents(el)
+		entry.RelatedSubjectCode = ep.parseRelatedSubjectCode(el)
 	}
 
 	return entry
@@ -361,16 +366,53 @@ func (ep *entryParser) parseComponents(el *etree.Element) []CDAEntry {
 	return components
 }
 
+// parseRelatedSubjectCode extracts the Family History Organizer's
+// <subject><relatedSubject><code> (the family member's relationship to the
+// patient). Returns nil when no <subject> child is present — most organizers
+// (Vital Signs, Care Team, Results) don't have one.
+func (ep *entryParser) parseRelatedSubjectCode(el *etree.Element) *CDACode {
+	codeEl := nav(el, "subject", "relatedSubject", "code")
+	if codeEl == nil {
+		return nil
+	}
+	c := parseCD(codeEl)
+	return &c
+}
+
 // ========================
 // substanceAdministration-specific fields
 // ========================
 
 func (ep *entryParser) parseRouteCode(el *etree.Element) *CDACode {
-	if rcEl := el.SelectElement("routeCode"); rcEl != nil {
-		c := parseCD(rcEl)
-		return &c
+	return ep.parseChildCode(el, "routeCode")
+}
+
+// parseMaxDoseQuantity reads <maxDoseQuantity> (RTO) -- see CDAEntry.MaxDoseQuantity.
+func (ep *entryParser) parseMaxDoseQuantity(el *etree.Element) *CDARatio {
+	mdEl := el.SelectElement("maxDoseQuantity")
+	if mdEl == nil {
+		return nil
 	}
-	return nil
+	r := CDARatio{}
+	if numEl := mdEl.SelectElement("numerator"); numEl != nil {
+		r.Numerator = parsePQ(numEl)
+	}
+	if denEl := mdEl.SelectElement("denominator"); denEl != nil {
+		r.Denominator = parsePQ(denEl)
+	}
+	return &r
+}
+
+// parsePrecondition reads <precondition><criterion><value> -- see
+// CDAEntry.Precondition's doc comment for why <value>, not <criterion>'s own
+// (usually fixed "ASSERTION") <code>.
+func (ep *entryParser) parsePrecondition(el *etree.Element) *CDACode {
+	valEl := nav(el, "precondition", "criterion", "value")
+	if valEl == nil {
+		return nil
+	}
+	c := parseCD(valEl)
+	return &c
 }
 
 // ========================
@@ -381,8 +423,17 @@ func (ep *entryParser) parseRouteCode(el *etree.Element) *CDACode {
 // in the base CDA R2 schema, not an entryRelationship. See the doc comment on
 // CDAEntry.TargetSiteCode for why this is procedure-only.
 func (ep *entryParser) parseTargetSiteCode(el *etree.Element) *CDACode {
-	if tsEl := el.SelectElement("targetSiteCode"); tsEl != nil {
-		c := parseCD(tsEl)
+	return ep.parseChildCode(el, "targetSiteCode")
+}
+
+// parseChildCode reads a single direct-child coded element (routeCode,
+// targetSiteCode, approachSiteCode, administrationUnitCode, ...) — the
+// common "optional CD/CE child, parsed via parseCD" shape shared by several
+// entry fields. Returns nil when the child is absent, matching every
+// existing *CDACode field's own nil-when-absent contract.
+func (ep *entryParser) parseChildCode(el *etree.Element, tag string) *CDACode {
+	if childEl := el.SelectElement(tag); childEl != nil {
+		c := parseCD(childEl)
 		return &c
 	}
 	return nil

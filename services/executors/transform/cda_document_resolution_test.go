@@ -159,8 +159,14 @@ func TestFullChain_ParseDedupeCSV_DedupedEntryIsInvisibleToCSVWithoutFix_NowVisi
 	csvStepOut := step3Output["_stepOutput"].(map[string]interface{})
 	csvText := csvStepOut["csv_vitalSigns"].(string)
 	lines := strings.Split(strings.TrimRight(csvText, "\n"), "\n")
-	// header + 1 data row (was header + 2 before this fix)
-	if len(lines) != 2 {
-		t.Errorf("csv_vital_signs has %d lines (want 2: header + 1 deduped row), got:\n%s", len(lines), csvText)
+	// kareo_sample.xml's single Vital Signs organizer wraps 5 component
+	// observations (Height, Weight, BMI, BP Systolic, BP Diastolic), each
+	// now its own CSV row (buildRowsForEntry flattens organizer components —
+	// see cda_csv_templates.go's doc comment). Without the dedupe fix this
+	// test guards, the injected duplicate organizer would leave BOTH copies
+	// visible to cda.section_to_csv: 2 organizers x 5 components = 10 rows
+	// (11 lines) instead of the 5 rows (6 lines) asserted here.
+	if len(lines) != 6 {
+		t.Errorf("csv_vital_signs has %d lines (want 6: header + 5 component rows from the single deduped organizer), got:\n%s", len(lines), csvText)
 	}
 }

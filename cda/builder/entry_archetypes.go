@@ -49,7 +49,7 @@ func buildEntry(sectionEl *etree.Element, sec *cdaSchema.CDASectionDef, record m
 	entryEl := sectionEl.CreateElement("entry")
 	entryEl.CreateAttr("typeCode", "DRIV")
 
-	var rootEl *etree.Element
+	var rootEl, obsEl *etree.Element
 	if sec.EntryElementPath != "" {
 		rootEl = WriteAtXPath(entryEl, stripEntryPrefix(sec.EntryElementPath), "")
 		applyTagBoilerplate(rootEl, lastSegmentTag(sec.EntryElementPath))
@@ -63,7 +63,7 @@ func buildEntry(sectionEl *etree.Element, sec *cdaSchema.CDASectionDef, record m
 		}
 
 		if sec.ObservationElementPath != "" {
-			obsEl := WriteAtXPath(entryEl, stripEntryPrefix(sec.ObservationElementPath), "")
+			obsEl = WriteAtXPath(entryEl, stripEntryPrefix(sec.ObservationElementPath), "")
 			applyTagBoilerplate(obsEl, lastSegmentTag(sec.ObservationElementPath))
 			if sec.ObsTemplateID != "" {
 				injectTemplateID(obsEl, sec.ObsTemplateID, sec.ObsTemplateIDExt)
@@ -85,6 +85,17 @@ func buildEntry(sectionEl *etree.Element, sec *cdaSchema.CDASectionDef, record m
 		codeEl.CreateAttr("codeSystem", codeSystem)
 		if sec.EntryFixedCodeDisplay != "" {
 			codeEl.CreateAttr("displayName", sec.EntryFixedCodeDisplay)
+		}
+	}
+
+	if sec.ObsFixedCode != "" && obsEl != nil && obsEl.SelectElement("code") == nil {
+		codeEl := obsEl.CreateElement("code")
+		codeEl.CreateAttr("code", sec.ObsFixedCode)
+		if sec.ObsFixedCodeSystem != "" {
+			codeEl.CreateAttr("codeSystem", sec.ObsFixedCodeSystem)
+		}
+		if sec.ObsFixedCodeDisplay != "" {
+			codeEl.CreateAttr("displayName", sec.ObsFixedCodeDisplay)
 		}
 	}
 

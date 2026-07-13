@@ -120,6 +120,26 @@ type CDASectionDef struct {
 	EntryFixedCodeSystem  string `json:"entryFixedCodeSystem,omitempty"`
 	EntryFixedCodeDisplay string `json:"entryFixedCodeDisplay,omitempty"`
 
+	// ObsFixedCode/ObsFixedCodeSystem/ObsFixedCodeDisplay mirror
+	// EntryFixedCode/EntryFixedCodeSystem/EntryFixedCodeDisplay exactly, but
+	// write the static <code> child onto this section's NESTED OBSERVATION
+	// element (ObservationElementPath) instead of the root entry element —
+	// needed for archetypes whose observation carries its own business-fixed
+	// classifying code, distinct from the per-record value one level deeper.
+	// Motivating case: C-CDA 2.1's Problem Observation (templateId .4.4)
+	// SHALL have exactly one <code> selected from the Problem Type value set
+	// (ValueSet 2.16.840.1.113883.3.88.12.3221.7.2, e.g. SNOMED CT 55607006
+	// "Problem") — a fixed classifier, separate from the actual diagnosis
+	// code (e.g. ICD-10 "E11.9") that a real field write already puts on
+	// <value>. Only written when no field already targets
+	// "<observationElementPath>/code" itself, same "don't clobber real data"
+	// guard EntryFixedCode uses. No default codeSystem is assumed here
+	// (unlike EntryFixedCode's LOINC default) since there's no single system
+	// true for every current/future use of this nested-observation slot.
+	ObsFixedCode        string `json:"observationFixedCode,omitempty"`
+	ObsFixedCodeSystem  string `json:"observationFixedCodeSystem,omitempty"`
+	ObsFixedCodeDisplay string `json:"observationFixedCodeDisplay,omitempty"`
+
 	// Built at load time.
 	fieldByKey map[string]*CDAFieldDef
 }

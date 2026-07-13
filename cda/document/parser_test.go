@@ -479,6 +479,105 @@ func TestParsePN_StructuredNameUnaffected(t *testing.T) {
 	assert.Equal(t, []string{"Jane"}, n.Given)
 }
 
+// TestParseMaxDoseQuantity_NumeratorAndDenominator covers
+// substanceAdministration's <maxDoseQuantity> (RTO) -- real gap found
+// auditing a live CCD with 28 populated occurrences that entry_parser.go
+// had no field for at all.
+func TestParseMaxDoseQuantity_NumeratorAndDenominator(t *testing.T) {
+	ep := &entryParser{}
+	doc := etree.NewDocument()
+	require.NoError(t, doc.ReadFromString(`
+		<substanceAdministration classCode="SBADM" moodCode="EVN">
+			<maxDoseQuantity>
+				<numerator value="20.0" unit="MG"/>
+				<denominator nullFlavor="NI"/>
+			</maxDoseQuantity>
+		</substanceAdministration>`))
+	r := ep.parseMaxDoseQuantity(doc.Root())
+	require.NotNil(t, r)
+	assert.Equal(t, "20.0", r.Numerator.Value)
+	assert.Equal(t, "MG", r.Numerator.Unit)
+	assert.Equal(t, "NI", r.Denominator.NullFlavor)
+}
+
+func TestParseMaxDoseQuantity_Absent_ReturnsNil(t *testing.T) {
+	ep := &entryParser{}
+	doc := etree.NewDocument()
+	require.NoError(t, doc.ReadFromString(`<substanceAdministration classCode="SBADM" moodCode="EVN"></substanceAdministration>`))
+	assert.Nil(t, ep.parseMaxDoseQuantity(doc.Root()))
+}
+
+// TestParsePrecondition_ReadsCriterionValue covers
+// substanceAdministration's <precondition><criterion><value> -- the PRN
+// administration criterion, not the criterion's own (usually fixed
+// "ASSERTION") <code>.
+func TestParsePrecondition_ReadsCriterionValue(t *testing.T) {
+	ep := &entryParser{}
+	doc := etree.NewDocument()
+	require.NoError(t, doc.ReadFromString(`
+		<substanceAdministration classCode="SBADM" moodCode="EVN">
+			<precondition typeCode="PRCN">
+				<criterion>
+					<code code="ASSERTION" codeSystem="2.16.840.1.113883.5.4"/>
+					<value xsi:type="CD" code="386661006" codeSystem="2.16.840.1.113883.6.96" displayName="Fever"/>
+				</criterion>
+			</precondition>
+		</substanceAdministration>`))
+	c := ep.parsePrecondition(doc.Root())
+	require.NotNil(t, c)
+	assert.Equal(t, "386661006", c.Code)
+	assert.Equal(t, "Fever", c.DisplayName)
+}
+
+// TestParseChildCode_ApproachSiteAndAdministrationUnit covers the two new
+// substanceAdministration fields sharing parseChildCode with the
+// pre-existing RouteCode/TargetSiteCode.
+func TestParseChildCode_ApproachSiteAndAdministrationUnit(t *testing.T) {
+	ep := &entryParser{}
+	doc := etree.NewDocument()
+	require.NoError(t, doc.ReadFromString(`
+		<substanceAdministration classCode="SBADM" moodCode="EVN">
+			<approachSiteCode nullFlavor="UNK"><originalText>Right Deltoid</originalText></approachSiteCode>
+			<administrationUnitCode code="C42902" codeSystem="2.16.840.1.113883.3.26.1.1" displayName="CAPSULE, DELAYED RELEASE"/>
+		</substanceAdministration>`))
+	approach := ep.parseChildCode(doc.Root(), "approachSiteCode")
+	require.NotNil(t, approach)
+	assert.Equal(t, "Right Deltoid", approach.OriginalText)
+
+	unit := ep.parseChildCode(doc.Root(), "administrationUnitCode")
+	require.NotNil(t, unit)
+	assert.Equal(t, "CAPSULE, DELAYED RELEASE", unit.DisplayName)
+}
+
+// TestParseRelatedSubjectCode_FamilyHistoryRelationship covers the Family
+// History Organizer's <subject><relatedSubject><code> -- the family member's
+// relationship to the patient. Real gap found auditing a live CCD: entry_parser.go
+// had no field for <subject> at all, so "mother"/"father"/etc. was silently
+// dropped from every Family History row.
+func TestParseRelatedSubjectCode_FamilyHistoryRelationship(t *testing.T) {
+	ep := &entryParser{}
+	doc := etree.NewDocument()
+	require.NoError(t, doc.ReadFromString(`
+		<organizer moodCode="EVN" classCode="CLUSTER">
+			<subject>
+				<relatedSubject classCode="PRS">
+					<code code="MTH" codeSystemName="RoleCode" codeSystem="2.16.840.1.113883.5.111" displayName="mother"/>
+				</relatedSubject>
+			</subject>
+		</organizer>`))
+	code := ep.parseRelatedSubjectCode(doc.Root())
+	require.NotNil(t, code)
+	assert.Equal(t, "MTH", code.Code)
+	assert.Equal(t, "mother", code.DisplayName)
+}
+
+func TestParseRelatedSubjectCode_NoSubject_ReturnsNil(t *testing.T) {
+	ep := &entryParser{}
+	doc := etree.NewDocument()
+	require.NoError(t, doc.ReadFromString(`<organizer moodCode="EVN" classCode="CLUSTER"></organizer>`))
+	assert.Nil(t, ep.parseRelatedSubjectCode(doc.Root()))
+}
+
 func TestParseComponentOf_HealthCareFacility(t *testing.T) {
 	raw := `<ClinicalDocument xmlns="urn:hl7-org:v3">
   <componentOf>

@@ -466,7 +466,7 @@ func (pe *ProcessingEngine) storeAndParse(interfaceID string, msg *models.Inboun
 						ParsedAt:    time.Now(),
 					},
 				}
-				go pe.executeTransformationPipelineWithLogger(ctx, interfaceID, msg.MessageID, messageType, fhirResult, logger)
+				go pe.executeTransformationPipelineWithLogger(ctx, interfaceID, msg.MessageID, messageType, msg.Headers["File-Name"], fhirResult, logger)
 			} else {
 				log.Printf("⚠️  FHIR JSON parse failed for %s — skipping pipeline: %v", msg.MessageID, parseResult.Error)
 			}
@@ -542,7 +542,7 @@ func (pe *ProcessingEngine) storeAndParse(interfaceID string, msg *models.Inboun
 
 			// STEP 3: Trigger transformation pipeline (MVC + OOB pattern)
 			if pe.transformationService != nil {
-				go pe.executeTransformationPipelineWithLogger(ctx, interfaceID, msg.MessageID, messageType, result, logger)
+				go pe.executeTransformationPipelineWithLogger(ctx, interfaceID, msg.MessageID, messageType, msg.Headers["File-Name"], result, logger)
 			} else {
 				log.Printf("⚠️  Transformation service not available - skipping transformation")
 			}
@@ -556,6 +556,7 @@ func (pe *ProcessingEngine) executeTransformationPipelineWithLogger(
 	interfaceID string,
 	messageID string,
 	messageType string,
+	sourceFileName string,
 	parseResult *models.ParserResult,
 	logger *services.ProcessingLogger,
 ) {
@@ -566,7 +567,7 @@ func (pe *ProcessingEngine) executeTransformationPipelineWithLogger(
 	}
 
 	// Call existing implementation
-	pe.executeTransformationPipeline(ctx, interfaceID, messageID, messageType, parseResult, logger)
+	pe.executeTransformationPipeline(ctx, interfaceID, messageID, messageType, sourceFileName, parseResult, logger)
 }
 
 // executeTransformationPipeline executes the transformation pipeline (MVC + OOB)
@@ -576,6 +577,7 @@ func (pe *ProcessingEngine) executeTransformationPipeline(
 	interfaceID string,
 	messageID string,
 	messageType string,
+	sourceFileName string,
 	parseResult *models.ParserResult,
 	procLogger *services.ProcessingLogger, // named to avoid shadowing the services/logger package used below
 ) {
@@ -674,6 +676,12 @@ func (pe *ProcessingEngine) executeTransformationPipeline(
 	// enrichMessageEnvelope() in ExecutePipeline will build _semantic_index and _sensitivity_map.
 	if parseResult.ParsedJSON != nil && parseResult.Format != "" {
 		parseResult.ParsedJSON["_format"] = string(parseResult.Format)
+	}
+	// Carry the originating file/source name into the message envelope (e.g. so
+	// cda.section_to_csv can stamp every output row with the document it came
+	// from) — empty for non-file-based sources (TCP, HTTP, etc.), never an error.
+	if parseResult.ParsedJSON != nil && sourceFileName != "" {
+		parseResult.ParsedJSON["_sourceFile"] = sourceFileName
 	}
 
 	// Step 2: Execute pipeline (Model layer handles business logic)

@@ -307,6 +307,21 @@ func resolveEntryRefs(entry *CDAEntry, idx map[string]string) {
 	if entry.RouteCode != nil {
 		resolveCodeRef(entry.RouteCode, idx)
 	}
+	if entry.ApproachSiteCode != nil {
+		resolveCodeRef(entry.ApproachSiteCode, idx)
+	}
+	if entry.AdministrationUnitCode != nil {
+		resolveCodeRef(entry.AdministrationUnitCode, idx)
+	}
+	if entry.Precondition != nil {
+		resolveCodeRef(entry.Precondition, idx)
+	}
+	if entry.TargetSiteCode != nil {
+		resolveCodeRef(entry.TargetSiteCode, idx)
+	}
+	if entry.RelatedSubjectCode != nil {
+		resolveCodeRef(entry.RelatedSubjectCode, idx)
+	}
 	if entry.Consumable != nil {
 		if mat := entry.Consumable.ManufacturedProduct.ManufacturedMaterial; mat != nil {
 			resolveCodeRef(&mat.Code, idx)

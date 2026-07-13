@@ -1202,7 +1202,10 @@ func (pe *ProcessingEngine) ReprocessMessage(interfaceID, messageID string) erro
 		}
 
 		log.Printf("🔄 [reprocess] Re-running pipeline for message %s (type: %s, source: %s)", messageID, msgType, srcType)
-		pe.executeTransformationPipelineWithLogger(ctx, interfaceID, messageID, msgType, result, logger)
+		// No clean original filename stored for a reprocess (only the DB row's own
+		// messageID survives) -- messageID already embeds it for file-based sources
+		// (file_listener.go's generateFileMessageID), so it's a reasonable fallback.
+		pe.executeTransformationPipelineWithLogger(ctx, interfaceID, messageID, msgType, messageID, result, logger)
 	}()
 
 	return nil
