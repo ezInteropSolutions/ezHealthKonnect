@@ -65,10 +65,17 @@ function loadInterfaceHeader() {
             document.title = (iface.name || 'Interface') + ' – ezHealthKonnect';
 
             var pill = document.getElementById('statusPill');
-            var status = (iface.interface_status || iface.status || 'draft').toLowerCase();
+            // Runtime status (is it actually running right now) takes priority over
+            // interface_status (user intent) — otherwise a halted interface that's
+            // still "meant" to be active would show ACTIVE instead of the real ERROR.
+            var status = (iface.status || iface.interface_status || 'draft').toLowerCase();
             pill.textContent = status.toUpperCase();
             pill.className   = 'status-pill ' + status;
             pill.style.display = '';
+
+            var err = status === 'error' && iface.processingStats && iface.processingStats.error;
+            pill.title = err ? (err.reason || '') : '';
+            renderErrorBanner(err || null);
 
             var pipelineLink = document.getElementById('pipelineLink');
             pipelineLink.href = 'pipeline-builder.html?interfaceId=' + _interfaceId;
@@ -82,6 +89,36 @@ function loadInterfaceHeader() {
         .catch(function() {
             document.getElementById('interfaceName').textContent = 'Interface not found';
         });
+}
+
+// Surfaces the reason a halted interface actually shows ERROR (port/directory
+// conflict, HIPAA halt, etc.) — previously invisible anywhere on this page once
+// you clicked through from the interfaces list.
+function renderErrorBanner(err) {
+    var el = document.getElementById('interfaceErrorBanner');
+    if (!el) return;
+    if (!err) { el.style.display = 'none'; el.innerHTML = ''; return; }
+
+    var ts = err.timestamp ? new Date(err.timestamp).toLocaleString() : '';
+    var detail = [
+        err.port      != null ? 'port ' + esc(err.port)           : '',
+        err.directory ? 'directory ' + esc(err.directory) : '',
+        err.pattern   ? 'pattern '   + esc(err.pattern)   : ''
+    ].filter(Boolean).join(', ');
+
+    el.innerHTML =
+        '<div class="alert-card critical" style="margin-bottom:16px">' +
+            '<div class="alert-sev-dot critical"></div>' +
+            '<div class="alert-body">' +
+                '<div class="alert-title">Interface halted' + (ts ? ' — ' + esc(ts) : '') + '</div>' +
+                '<div class="alert-meta">' + esc(err.reason || 'Unknown error') +
+                    (detail ? ' (' + detail + ')' : '') + '</div>' +
+            '</div>' +
+            '<button onclick="document.getElementById(\'interfaceErrorBanner\').style.display=\'none\'" ' +
+                'style="border:none;background:none;cursor:pointer;color:var(--muted)" title="Dismiss">' +
+                '<i class="fas fa-xmark"></i></button>' +
+        '</div>';
+    el.style.display = '';
 }
 
 function loadDLQDepthBadge() {
@@ -109,6 +146,13 @@ function loadDLQDepthBadge() {
 }
 
 // ── Overview ──────────────────────────────────────────────────────────────────
+// Manual Refresh only re-fetched the KPI grid, so the header pill could sit on a
+// stale status while the KPI grid moved on — keep both in sync on every refresh.
+function refreshOverviewTab() {
+    loadInterfaceHeader();
+    loadOverview();
+}
+
 function loadOverview() {
     if (!_interfaceId) return;
 

@@ -53,8 +53,8 @@ func TestPortConflictHalt_HelperPipeline(t *testing.T) {
 
 	// ── Part 2: extractConnectorPort round-trip ──────────────────────────────
 	cfg := map[string]interface{}{"port": float64(conflictPort), "host": "0.0.0.0"}
-	if p := extractConnectorPort(cfg); p != conflictPort {
-		t.Errorf("extractConnectorPort = %d, want %d", p, conflictPort)
+	if p, ok := extractConnectorPort(cfg); !ok || p != conflictPort {
+		t.Errorf("extractConnectorPort = (%d, %v), want (%d, true)", p, ok, conflictPort)
 	}
 	t.Logf("✅ extractConnectorPort correctly returns %d", conflictPort)
 }

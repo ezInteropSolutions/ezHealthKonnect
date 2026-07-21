@@ -58,7 +58,8 @@
             items: [
                 { label: 'Users',          href: 'user-management.html',     icon: 'fas fa-users' },
                 { label: 'Settings',       href: 'settings.html',            icon: 'fas fa-sliders' },
-                { label: 'Mapping Review', href: 'admin-mapping-review.html', icon: 'fas fa-flag',             badgeId: 'mappingReviewBadge' }
+                { label: 'Mapping Review', href: 'admin-mapping-review.html', icon: 'fas fa-flag',             badgeId: 'mappingReviewBadge' },
+                { label: 'CDA Dedupe Registry', href: 'admin-cda-dedupe-registry.html', icon: 'fas fa-fingerprint' }
             ]
         }
     ];
@@ -208,7 +209,12 @@
     }
 
     // ── User profile loader ────────────────────────────────────────────────────
-    var ADMIN_ROLES = ['admin', 'superadmin'];
+    // 'super_admin' (underscore) is the spelling every real auth check in this
+    // codebase actually issues/verifies (app.js's _requireSuperAdminUser, Go's
+    // requireProxiedSuperAdmin()) — 'superadmin' alone was missing it, which
+    // meant a genuine super_admin user's sidebar would hide the whole Admin
+    // section (adminOnly) instead of showing it.
+    var ADMIN_ROLES = ['admin', 'superadmin', 'super_admin'];
 
     function applyUser(sidebar, user) {
         if (!user) return;
@@ -224,6 +230,15 @@
 
         var role = (user.role || '').toLowerCase();
         var activeSectionId = getSectionForPage();
+
+        // /api/fhir/quality (backing the Mapping Review badge) is super_admin-only
+        // by design — only start polling it once we've confirmed that's really the
+        // role, not merely "admin" (checked defensively against both spellings this
+        // codebase uses elsewhere: 'super_admin' is the one the actual auth
+        // middleware checks; 'superadmin' shows up in a couple of other places).
+        if (role === 'super_admin' || role === 'superadmin') {
+            startMappingReviewBadgePoller();
+        }
 
         // Show/hide each restricted section based on role
         NAV.forEach(function (section) {
@@ -294,8 +309,16 @@
     }
 
     // ── Mapping review badge poller ───────────────────────────────────────────
-    // Lightweight check every 2 minutes; only runs for admins (non-admins get 403).
+    // Lightweight check every 2 minutes. /api/fhir/quality is super_admin-only
+    // by design (main.go: requireProxiedSuperAdmin(), "integration team only")
+    // — this used to run for every admin and 403 for anyone who wasn't also
+    // super_admin (i.e. every real client admin). Gated below (see init) to
+    // only start once the resolved role is actually confirmed super_admin,
+    // instead of firing unconditionally on every page load.
+    var _mappingReviewPollerStarted = false;
     function startMappingReviewBadgePoller() {
+        if (_mappingReviewPollerStarted) return;
+        _mappingReviewPollerStarted = true;
         function updateBadge() {
             fetch('/api/fhir/quality/flagged?limit=1&offset=0', { credentials: 'include' })
                 .then(function (r) { return r.ok ? r.json() : null; })
@@ -344,7 +367,9 @@
         initLogoutBtn(sidebar);
         loadUser(sidebar);
         startAlertBadgePoller();
-        startMappingReviewBadgePoller();
+        // startMappingReviewBadgePoller() is NOT started here — it's super_admin-only
+        // and gets started from applyUser() below, once the resolved role is actually
+        // known to be super_admin (never fires at all for a plain admin).
         startDLQBadgePoller();
     }
 

@@ -65,12 +65,37 @@ func NewCDABuildExecutor() *CDABuildExecutor {
 	return exec
 }
 
-type cdaBuildConfig struct {
-	SourceField  string `json:"sourceField"`
-	InputFormat  string `json:"inputFormat"`
-	OutputField  string `json:"outputField"`
-	DocumentType string `json:"documentType"`
-	OrgName      string `json:"orgName"`
+// CdaBuildConfig is step.Config's decoded shape for the cda.build step.
+// Exported (not the package-private cdaBuildConfig this used to be) so
+// other packages (e.g. a future activation-gate service statically
+// inspecting saved pipeline step configs) can decode it the same way
+// Execute() does, without a second, drifting copy of this shape.
+type CdaBuildConfig struct {
+	SourceField  string              `json:"sourceField"`
+	InputFormat  string              `json:"inputFormat"`
+	OutputField  string              `json:"outputField"`
+	DocumentType string              `json:"documentType"`
+	OrgName      string              `json:"orgName"`
+	Custodian    CdaCustodianConfig  `json:"custodian,omitempty"`
+}
+
+// CdaCustodianConfig is the cda.build step's structured Custodian tab —
+// deployment-level constant config (who ezHealthKonnect is sending this
+// document on behalf of), not per-message source data, so it lives here
+// rather than being threaded through cda.map_to_canonical's canonical JSON
+// (see cda/builder/document_builder.go's CustodianOptions doc comment for
+// the full rationale, including why Street/City/State/PostalCode/Country/
+// Phone are optional data entry, not spec-required fields).
+type CdaCustodianConfig struct {
+	IdRoot      string `json:"idRoot,omitempty"`
+	IdExtension string `json:"idExtension,omitempty"`
+	OrgName     string `json:"orgName,omitempty"`
+	Street      string `json:"street,omitempty"`
+	City        string `json:"city,omitempty"`
+	State       string `json:"state,omitempty"`
+	PostalCode  string `json:"postalCode,omitempty"`
+	Country     string `json:"country,omitempty"`
+	Phone       string `json:"phone,omitempty"`
 }
 
 // Execute reads the configured source, converts it to the canonical shape
@@ -92,7 +117,7 @@ func (e *CDABuildExecutor) Execute(
 		return nil, fmt.Errorf("cda.build: CDA schema is not initialised (schema directory missing)")
 	}
 
-	cfg := cdaBuildConfig{
+	cfg := CdaBuildConfig{
 		SourceField:  "parsedCDA",
 		InputFormat:  "canonical",
 		OutputField:  "cdaXML",
@@ -122,7 +147,14 @@ func (e *CDABuildExecutor) Execute(
 		canonicalDoc = format.BundleToCanonicalDoc(source)
 	}
 
-	cdaXML, err := cdaBuilder.BuildDocument(e.schemaLoader, canonicalDoc, cfg.DocumentType, cdaBuilder.BuildOptions{OrgName: cfg.OrgName})
+	cdaXML, err := cdaBuilder.BuildDocument(e.schemaLoader, canonicalDoc, cfg.DocumentType, cdaBuilder.BuildOptions{
+		OrgName: cfg.OrgName,
+		Custodian: cdaBuilder.CustodianOptions{
+			IdRoot: cfg.Custodian.IdRoot, IdExtension: cfg.Custodian.IdExtension, OrgName: cfg.Custodian.OrgName,
+			Street: cfg.Custodian.Street, City: cfg.Custodian.City, State: cfg.Custodian.State,
+			PostalCode: cfg.Custodian.PostalCode, Country: cfg.Custodian.Country, Phone: cfg.Custodian.Phone,
+		},
+	})
 	if err != nil {
 		return nil, fmt.Errorf("cda.build: %w", err)
 	}

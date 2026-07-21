@@ -452,6 +452,20 @@ func (pe *ProcessingEngine) ActivateInterface(interfaceID string) error {
 			}
 			innerConfig["interface_id"] = interfaceID
 
+			// PHI safety: file_listener connectors never fail Start() on a directory
+			// overlap (Glob/Walk just silently sees whatever's in the directory), so
+			// this has to be a proactive pre-check rather than a reactive Start()-error
+			// path like the port-conflict check below.
+			if oobType == "file_listener" {
+				if dirPath, pattern, recursive, ok := ExtractFileListenerDirConfig(innerConfig); ok {
+					if conflictIDs, reason := pe.findFileListenerConflictsLocked(interfaceID, dirPath, pattern, recursive); len(conflictIDs) > 0 {
+						log.Printf("🚨 [PHI SAFETY] Directory conflict detected activating interface %s — halting conflicting interfaces", interfaceID)
+						pe.haltOnDirectoryConflictLocked(interfaceID, dirPath, pattern, reason, conflictIDs)
+						return fmt.Errorf("directory conflict on %s — activation blocked for PHI safety (see HIPAA audit log)", dirPath)
+					}
+				}
+			}
+
 			connector, connErr := CreateInputConnector(oobType, innerConfig)
 			if connErr != nil {
 				log.Printf("⚠️  Failed to create '%s' connector for step '%s': %v", oobType, step.stepName, connErr)
@@ -482,10 +496,13 @@ func (pe *ProcessingEngine) ActivateInterface(interfaceID string) error {
 			select {
 			case startErr := <-startErrCh:
 				if isPortConflictError(startErr) {
-					port := extractConnectorPort(innerConfig)
-					log.Printf("🚨 [PHI SAFETY] Port :%d conflict detected activating interface %s — halting both interfaces", port, interfaceID)
-					pe.haltOnPortConflictLocked(interfaceID, port, startErr)
-					return fmt.Errorf("port :%d conflict — both interfaces halted for PHI safety (see HIPAA audit log)", port)
+					if port, ok := extractConnectorPort(innerConfig); ok {
+						log.Printf("🚨 [PHI SAFETY] Port :%d conflict detected activating interface %s — halting both interfaces", port, interfaceID)
+						pe.haltOnPortConflictLocked(interfaceID, port, startErr)
+						return fmt.Errorf("port :%d conflict — both interfaces halted for PHI safety (see HIPAA audit log)", port)
+					}
+					log.Printf("⚠️  Bind-conflict-shaped error for step '%s' but connector has no configured port — treating as non-conflict: %v", step.stepName, startErr)
+					continue
 				}
 				// Non-conflict start error: log and skip this step
 				log.Printf("⚠️  Non-conflict connector error for step '%s': %v", step.stepName, startErr)
@@ -567,6 +584,16 @@ func (pe *ProcessingEngine) ActivateInterface(interfaceID string) error {
 		logger.Debug("creating connector (legacy fallback)",
 			"interface_id", interfaceID, "connector_type", oobTypeName)
 
+		if oobTypeName == "file_listener" {
+			if dirPath, pattern, recursive, ok := ExtractFileListenerDirConfig(sourceConfig); ok {
+				if conflictIDs, reason := pe.findFileListenerConflictsLocked(interfaceID, dirPath, pattern, recursive); len(conflictIDs) > 0 {
+					log.Printf("🚨 [PHI SAFETY] Directory conflict detected (legacy path) activating interface %s — halting conflicting interfaces", interfaceID)
+					pe.haltOnDirectoryConflictLocked(interfaceID, dirPath, pattern, reason, conflictIDs)
+					return fmt.Errorf("directory conflict on %s — activation blocked for PHI safety (see HIPAA audit log)", dirPath)
+				}
+			}
+		}
+
 		connector, connErr := CreateInputConnector(oobTypeName, sourceConfig)
 		if connErr != nil {
 			return fmt.Errorf("failed to create connector '%s': %v", oobTypeName, connErr)
@@ -590,10 +617,12 @@ func (pe *ProcessingEngine) ActivateInterface(interfaceID string) error {
 		select {
 		case startErr := <-legacyStartErrCh:
 			if isPortConflictError(startErr) {
-				port := extractConnectorPort(sourceConfig)
-				log.Printf("🚨 [PHI SAFETY] Port :%d conflict detected (legacy path) activating interface %s — halting both interfaces", port, interfaceID)
-				pe.haltOnPortConflictLocked(interfaceID, port, startErr)
-				return fmt.Errorf("port :%d conflict — both interfaces halted for PHI safety (see HIPAA audit log)", port)
+				if port, ok := extractConnectorPort(sourceConfig); ok {
+					log.Printf("🚨 [PHI SAFETY] Port :%d conflict detected (legacy path) activating interface %s — halting both interfaces", port, interfaceID)
+					pe.haltOnPortConflictLocked(interfaceID, port, startErr)
+					return fmt.Errorf("port :%d conflict — both interfaces halted for PHI safety (see HIPAA audit log)", port)
+				}
+				logger.Error("bind-conflict-shaped error but connector has no configured port — treating as non-conflict", "interface_id", interfaceID, "error", startErr)
 			}
 			logger.Error("non-conflict connector start error", "interface_id", interfaceID, "error", startErr)
 			return fmt.Errorf("connector failed to start: %v", startErr)
@@ -615,8 +644,17 @@ func (pe *ProcessingEngine) ActivateInterface(interfaceID string) error {
 		}
 	}
 
-	// Update interface status in database (both columns so page-load initial state is correct)
-	_, err = pe.db.Exec("UPDATE interfaces SET status = 'active', interface_status = 'active' WHERE id = $1", interfaceID)
+	// Update interface status in database (both columns so page-load initial state is correct).
+	// Also strips any stale processing_stats.error from a prior halt — otherwise a resolved
+	// interface keeps showing a historical (and possibly unrelated) error reason forever,
+	// since nothing else in the codebase ever clears that key.
+	_, err = pe.db.Exec(`
+		UPDATE interfaces
+		SET status = 'active',
+		    interface_status = 'active',
+		    processing_stats = COALESCE(processing_stats, '{}'::jsonb) - 'error'
+		WHERE id = $1
+	`, interfaceID)
 	if err != nil {
 		return fmt.Errorf("failed to activate interface: %v", err)
 	}
@@ -815,20 +853,30 @@ func isPortConflictError(err error) bool {
 		strings.Contains(msg, "EADDRINUSE")
 }
 
-// extractConnectorPort returns the "port" value from a connector config map, or 0.
-func extractConnectorPort(config map[string]interface{}) int {
+// extractConnectorPort returns the connector's configured port and whether one was
+// genuinely configured. Handles JSON number and quoted-string forms (mirrors
+// connectors.ConnectorConfig.GetInt's leniency, since tcp_mllp_inbound accepts a
+// string port like "6612") so a real string-typed port isn't misclassified as
+// "unconfigured". ok is false for connectors with no port key at all (e.g.
+// file_listener) or an unparseable value (e.g. the empty string) — such
+// connectors must never be treated as sharing a port with anything else.
+func extractConnectorPort(config map[string]interface{}) (port int, ok bool) {
 	if config == nil {
-		return 0
+		return 0, false
 	}
 	switch v := config["port"].(type) {
 	case float64:
-		return int(v)
+		return int(v), true
 	case int:
-		return v
+		return v, true
 	case int64:
-		return int(v)
+		return int(v), true
+	case string:
+		if n, err := strconv.Atoi(v); err == nil {
+			return n, true
+		}
 	}
-	return 0
+	return 0, false
 }
 
 // haltOnPortConflictLocked stops every connector involved in a port conflict and
@@ -863,7 +911,18 @@ func (pe *ProcessingEngine) haltOnPortConflictLocked(newInterfaceID string, port
 	}
 	log.Printf("🚨 [HIPAA] Halting %d interface(s) due to port :%d conflict: %v", len(affected), port, affectedList)
 
-	// Stop connectors and clean up engine maps (lock already held).
+	pe.stopAndClearInterfacesLocked(affected)
+
+	// DB updates and HIPAA audit are I/O-bound — run asynchronously so we don't
+	// hold the engine mutex during database writes.
+	go pe.persistPortConflictHalt(affectedList, port, reason)
+}
+
+// stopAndClearInterfacesLocked stops every connector belonging to each interface ID
+// in affected and removes it from the engine's in-memory maps. Shared by every
+// PHI-safety halt path (port conflict, directory conflict, ...). Must be called
+// while pe.mutex is already held.
+func (pe *ProcessingEngine) stopAndClearInterfacesLocked(affected map[string]bool) {
 	for id := range affected {
 		for key, conn := range pe.activeConnectors {
 			if strings.HasPrefix(key, id+":") || key == id {
@@ -883,10 +942,6 @@ func (pe *ProcessingEngine) haltOnPortConflictLocked(newInterfaceID string, port
 	if metrics.ActiveInterfaces != nil {
 		metrics.ActiveInterfaces.Set(float64(len(pe.activeInterfaces)))
 	}
-
-	// DB updates and HIPAA audit are I/O-bound — run asynchronously so we don't
-	// hold the engine mutex during database writes.
-	go pe.persistPortConflictHalt(affectedList, port, reason)
 }
 
 // findActiveInterfacesByPort returns the IDs of currently-active interfaces whose
@@ -920,7 +975,7 @@ func (pe *ProcessingEngine) findActiveInterfacesByPort(port int) []string {
 				Config map[string]interface{} `json:"config"`
 			}
 			if json.Unmarshal([]byte(cfgJSON), &wrapper) == nil {
-				if extractConnectorPort(wrapper.Config) == port {
+				if candPort, ok := extractConnectorPort(wrapper.Config); ok && candPort == port {
 					conflicting = append(conflicting, ifaceID)
 					break
 				}
@@ -935,16 +990,29 @@ func (pe *ProcessingEngine) findActiveInterfacesByPort(port int) []string {
 // for every interface that was halted due to a port conflict.
 // Called asynchronously — does NOT hold pe.mutex.
 func (pe *ProcessingEngine) persistPortConflictHalt(interfaceIDs []string, port int, reason string) {
-	errorStats, _ := json.Marshal(map[string]interface{}{
+	pe.persistConflictHalt(interfaceIDs, reason, "port_conflict_ambiguous_routing", map[string]interface{}{"port": port})
+}
+
+// persistConflictHalt updates the database and writes HIPAA audit log entries for
+// every interface that was halted by a PHI-safety conflict check (port conflict,
+// directory conflict, ...). extraDetails carries the check-specific identifying
+// data (e.g. {"port": 2575} or {"directory": "/data/ccd/inbox", "pattern": "*.*"})
+// and is merged into both the UI-facing processing_stats.error blob and the HIPAA
+// audit payload. Called asynchronously — does NOT hold pe.mutex.
+func (pe *ProcessingEngine) persistConflictHalt(interfaceIDs []string, reason string, phiRisk string, extraDetails map[string]interface{}) {
+	errorDetails := map[string]interface{}{
 		"reason":    reason,
-		"port":      port,
 		"timestamp": time.Now().UTC().Format(time.RFC3339),
-	})
+	}
+	for k, v := range extraDetails {
+		errorDetails[k] = v
+	}
+	errorStats, _ := json.Marshal(errorDetails)
 
 	for _, id := range interfaceIDs {
 		// Mark the runtime status as error and store the reason for the UI.
 		// interface_status (user intent) is deliberately left unchanged so the interface
-		// can be auto-resumed on the next engine start once the port conflict is resolved.
+		// can be auto-resumed on the next engine start once the conflict is resolved.
 		if _, err := pe.db.Exec(`
 			UPDATE interfaces
 			SET status = 'error',
@@ -957,15 +1025,17 @@ func (pe *ProcessingEngine) persistPortConflictHalt(interfaceIDs []string, port 
 
 		// Build HIPAA audit payload.
 		auditDetails := map[string]interface{}{
-			"port":      port,
 			"reason":    reason,
 			"action":    "PHI_SAFETY_HALT",
 			"timestamp": time.Now().UTC(),
 		}
+		for k, v := range extraDetails {
+			auditDetails[k] = v
+		}
 		detailsJSON, _ := json.Marshal(auditDetails)
 		complianceFlags := map[string]interface{}{
-			"hipaa_safety_halt": true,
-			"phi_risk":          "port_conflict_ambiguous_routing",
+			"hipaa_safety_halt":        true,
+			"phi_risk":                 phiRisk,
 			"requires_operator_review": true,
 		}
 		flagsJSON, _ := json.Marshal(complianceFlags)
@@ -994,8 +1064,8 @@ func (pe *ProcessingEngine) persistPortConflictHalt(interfaceIDs []string, port 
 			log.Printf("⚠️  [PHI SAFETY] Failed to write HIPAA audit log for interface %s: %v", id, err)
 		}
 
-		log.Printf("🚨 [HIPAA AUDIT] Interface %s halted — port :%d conflict. "+
-			"Risk: ambiguous PHI routing. Manual operator review required.", id, port)
+		log.Printf("🚨 [HIPAA AUDIT] Interface %s halted — %s. "+
+			"Risk: %s. Manual operator review required.", id, reason, phiRisk)
 	}
 }
 

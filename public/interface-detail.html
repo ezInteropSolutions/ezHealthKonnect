@@ -281,8 +281,9 @@
                 <div id="tab-overview" class="tab-section active">
                     <div class="section-header">
                         <h2>Overview</h2>
-                        <button class="btn-ghost" onclick="loadOverview()"><i class="fas fa-rotate"></i> Refresh</button>
+                        <button class="btn-ghost" onclick="refreshOverviewTab()"><i class="fas fa-rotate"></i> Refresh</button>
                     </div>
+                    <div id="interfaceErrorBanner" style="display:none"></div>
                     <div class="kpi-grid" id="kpiGrid">
                         <div class="loading-row" style="grid-column:1/-1"><i class="fas fa-spinner fa-spin"></i> Loading metrics…</div>
                     </div>

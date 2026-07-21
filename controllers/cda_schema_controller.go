@@ -8,6 +8,10 @@
 //   GET  /api/cda/mappings/:interfaceId/:documentType      → merged OOB + interface delta
 //   POST /api/cda/mappings/:interfaceId/:documentType/delta → save delta (wizard save path)
 //   GET  /api/cda/templates/:documentType/version          → current OOB template version
+//   GET  /api/cda/csv/sections                              → OOB cda.section_to_csv column catalog (name/path/fallbacks per section)
+//   GET  /api/cda/dedupe/sections                           → OOB cda.dedupe identity-field catalog (name/path/default per section)
+//   GET  /api/cda/dedupe/registry                           → admin-only: browse cda_dedupe_registry rows for one interface(+patient)
+//   DELETE /api/cda/dedupe/registry                         → admin-only: purge cda_dedupe_registry rows for one interface+patient (GDPR erasure)
 
 package controllers
 
@@ -86,6 +90,8 @@ func (cc *CDASchemaController) RegisterRoutes(rg *gin.RouterGroup) {
 	rg.GET("/canonical-fields/section/:sectionKey", cc.GetCanonicalSectionFields)
 	rg.GET("/canonical-fields/header/:group", cc.GetCanonicalHeaderFields)
 	rg.GET("/canonical-transforms", cc.GetCanonicalTransforms)
+	rg.GET("/document-types", cc.GetDocumentTypes)
+	rg.GET("/document-types/:documentType/requirements", cc.GetDocumentTypeRequirements)
 	rg.GET("/transforms", cc.GetTransforms)
 	rg.POST("/type-pair/infer", cc.InferTypePair)
 	rg.GET("/mappings/:interfaceId/:documentType", cc.GetMappings)
@@ -93,6 +99,10 @@ func (cc *CDASchemaController) RegisterRoutes(rg *gin.RouterGroup) {
 	rg.POST("/mappings/:interfaceId/:documentType/delta", cc.SaveMappingDelta)
 	rg.POST("/mappings/:interfaceId/:documentType/compute-delta", cc.ComputeDelta)
 	rg.GET("/templates/:documentType/version", cc.GetTemplateVersion)
+	rg.GET("/csv/sections", cc.GetCSVSections)
+	rg.GET("/dedupe/sections", cc.GetDedupeSections)
+	rg.GET("/dedupe/registry", cc.requireAdminRole(), cc.GetDedupeRegistry)
+	rg.DELETE("/dedupe/registry", cc.requireAdminRole(), cc.PurgeDedupeRegistry)
 }
 
 // =========================================================
@@ -241,6 +251,67 @@ func (cc *CDASchemaController) GetCanonicalHeaderFields(c *gin.Context) {
 		"success": true,
 		"fields":  fields,
 		"count":   len(fields),
+	})
+}
+
+// =========================================================
+// GET /api/cda/document-types
+// GET /api/cda/document-types/:documentType/requirements
+// =========================================================
+
+// GetDocumentTypes returns every document type the guided-configuration UIs
+// (cda.map_to_canonical, cda.build) can target, sourced from
+// CDASchemaLoader.AllDocumentTypes() (the same documentTypeSections map
+// cda/builder.BuildDocument itself reads at construction time — never a
+// separately-maintained list).
+func (cc *CDASchemaController) GetDocumentTypes(c *gin.Context) {
+	if cc.schemaLoader == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{
+			"success": false,
+			"error":   "CDA schema not loaded — check schema directory configuration",
+		})
+		return
+	}
+
+	docTypes := cc.schemaLoader.AllDocumentTypes()
+	c.JSON(http.StatusOK, gin.H{
+		"success":       true,
+		"documentTypes": docTypes,
+		"count":         len(docTypes),
+	})
+}
+
+// GetDocumentTypeRequirements returns the combined guided-configuration
+// catalog for one document type — every SHALL/SHOULD/MAY section plus every
+// SHALL/SHOULD header field (patient/author/custodian) — sourced live from
+// cda/builder.GetDocumentTypeRequirements. This is what
+// MapToCanonicalBuilder.js and CDABuildStepBuilder's Requirements tab both
+// consume to pre-populate and score completeness; see
+// cda/builder/requirements_catalog.go and header_requirements.go for why
+// this is a thin read over already-vetted schema data, not a second,
+// hand-guessed conformance judgment.
+func (cc *CDASchemaController) GetDocumentTypeRequirements(c *gin.Context) {
+	if cc.schemaLoader == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{
+			"success": false,
+			"error":   "CDA schema not loaded — check schema directory configuration",
+		})
+		return
+	}
+
+	documentType := c.Param("documentType")
+	requirements := cdaBuilder.GetDocumentTypeRequirements(cc.schemaLoader, documentType)
+	if requirements == nil {
+		c.JSON(http.StatusNotFound, gin.H{
+			"success": false,
+			"error":   fmt.Sprintf("unknown document type %q", documentType),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success":      true,
+		"requirements": requirements,
 	})
 }
 

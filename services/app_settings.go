@@ -208,6 +208,27 @@ func (c *AppSettingsCache) GetAlertDefaultSettings() AlertDefaultSettings {
 	return cfg
 }
 
+// ─── CDA Dedupe Settings ───────────────────────────────────────────────────────
+
+// CDADedupeSettings controls retention for cda_dedupe_registry, the persistent
+// identity table backing cda.dedupe's crossMessage mode. This table stores a
+// patient identifier plus clinical identity data (codes/dates) indefinitely
+// unless purged — GDPR Art. 5(1)(e) (storage limitation) requires a bounded,
+// documented retention policy for this kind of personal data, hence a
+// dedicated (not shared/borrowed) settings group rather than piggybacking on
+// AlertDefaultSettings' unrelated metrics/history retention fields.
+type CDADedupeSettings struct {
+	RegistryRetentionDays int `json:"registry_retention_days"`
+}
+
+func (c *AppSettingsCache) GetCDADedupeSettings() CDADedupeSettings {
+	cfg := CDADedupeSettings{
+		RegistryRetentionDays: 2555, // ~7 years — conservative healthcare-record retention norm; lower via admin settings for a stricter policy
+	}
+	_ = json.Unmarshal(c.get("cda_dedupe"), &cfg)
+	return cfg
+}
+
 // ─── Performance Settings ─────────────────────────────────────────────────────
 
 // PerformanceSettings controls log verbosity and DB pool sizes.

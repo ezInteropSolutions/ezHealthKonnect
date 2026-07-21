@@ -429,7 +429,8 @@ class InterfacesController {
                     i.source_config, i.target_config,
                     i.message_type, i.accepted_message_families,
                     i.processing_rules, i.transformation_mapping,
-                    i.status, i.total_processed, i.successful_processed, i.failed_processed,
+                    i.status, i.interface_status, i.processing_stats,
+                    i.total_processed, i.successful_processed, i.failed_processed,
                     i.last_processed_at, i.created_at, i.updated_at, i.version,
                     i.fhir_validation_policy,
                     i.dlq_config,
@@ -499,6 +500,8 @@ class InterfacesController {
                 processingRules: this.parseJsonField(item.processing_rules),
                 transformationMapping: this.parseJsonField(item.transformation_mapping),
                 status: item.status,
+                interface_status: item.interface_status,
+                processingStats: this.parseJsonField(item.processing_stats),
 
                 // FHIR Validation Policy (V66)
                 fhir_validation_policy: item.fhir_validation_policy || 'proceed',

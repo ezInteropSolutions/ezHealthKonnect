@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CDA Dedupe Registry - ezHealthKonnect</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="css/dashboard.css">
+    <link rel="stylesheet" href="css/layout/main-layout.css?v=5">
+    <style>
+        .page-topbar {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 10px 20px;
+            background: #fff;
+            border-bottom: 1px solid #e5e7eb;
+            height: 56px;
+            box-sizing: border-box;
+            flex-shrink: 0;
+        }
+        .page-topbar h1 { font-size: 15px; font-weight: 700; color: #111827; margin: 0; }
+        .page-topbar .breadcrumb { font-size: 12px; color: #9ca3af; margin-left: auto; }
+        .page-topbar .breadcrumb a { color: #6b7280; text-decoration: none; }
+
+        .registry-layout { padding: 20px; flex: 1; overflow-y: auto; }
+
+        .info-strip {
+            display: flex; align-items: center; gap: 8px;
+            background: #f0f9ff; border: 1px solid #bae6fd; border-radius: 7px;
+            padding: 8px 14px; font-size: 12px; color: #0369a1; margin-bottom: 14px;
+        }
+
+        .search-row {
+            display: flex; gap: 10px; margin-bottom: 14px; align-items: center; flex-wrap: wrap;
+        }
+        .search-row select, .search-row input {
+            border: 1px solid #d1d5db; border-radius: 6px; padding: 7px 10px; font-size: 13px; background: #fff;
+        }
+        .search-row select { min-width: 220px; }
+        .search-row input { min-width: 220px; font-family: 'Courier New', monospace; }
+
+        .registry-table-wrap {
+            background: #fff; border: 1px solid #e5e7eb; border-radius: 8px; overflow: auto;
+        }
+        .registry-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+        .registry-table thead th {
+            background: #f8fafc; padding: 10px 12px; text-align: left; font-weight: 600;
+            color: #374151; border-bottom: 1px solid #e5e7eb; white-space: nowrap;
+        }
+        .registry-table tbody tr:hover { background: #f0f9ff; }
+        .registry-table td { padding: 9px 12px; border-bottom: 1px solid #f1f5f9; vertical-align: middle; }
+        .mono { font-family: 'Courier New', monospace; font-size: 12px; color: #374151; word-break: break-all; }
+
+        .btn-sm { padding: 4px 10px; border-radius: 5px; font-size: 12px; font-weight: 500; cursor: pointer; border: 1px solid transparent; }
+        .btn-primary  { background: #1e3a8a; color: #fff; border-color: #1e3a8a; padding: 7px 16px; border-radius: 6px; }
+        .btn-primary:hover { background: #1e40af; }
+        .btn-secondary{ background: #fff; color: #374151; border-color: #d1d5db; padding: 7px 14px; border-radius: 6px; }
+        .btn-secondary:hover { background: #f9fafb; }
+        .btn-purge { background: #fff; color: #dc2626; border-color: #fca5a5; padding: 6px 14px; border-radius: 6px; font-size: 12px; font-weight: 500; cursor: pointer; }
+        .btn-purge:hover { background: #fee2e2; }
+        .btn-purge:disabled { opacity: 0.5; cursor: not-allowed; }
+
+        .empty-state { padding: 40px; text-align: center; color: #9ca3af; }
+        .empty-state i { font-size: 36px; margin-bottom: 10px; }
+        .loading-row td { text-align: center; padding: 30px; color: #9ca3af; }
+
+        .modal-overlay {
+            display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.45);
+            z-index: 900; align-items: center; justify-content: center;
+        }
+        .modal-overlay.open { display: flex; }
+        .modal-box { background: #fff; border-radius: 10px; width: 480px; max-width: 95vw; padding: 24px; box-shadow: 0 20px 60px rgba(0,0,0,0.25); }
+        .modal-box h3 { margin: 0 0 10px; font-size: 15px; color: #dc2626; }
+        .modal-box p { font-size: 13px; color: #374151; margin: 0 0 14px; }
+        .modal-box textarea {
+            width: 100%; box-sizing: border-box; border: 1px solid #d1d5db; border-radius: 6px;
+            padding: 8px 10px; font-size: 13px; min-height: 70px; resize: vertical;
+        }
+        .modal-footer { display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px; }
+    </style>
+</head>
+<body>
+<div class="dashboard-container">
+    <nav class="sidebar" id="sidebar"></nav>
+    <main class="main-content">
+        <div class="page-topbar">
+            <i class="fas fa-fingerprint" style="color:#1e3a8a; font-size:15px;"></i>
+            <h1>CDA Dedupe Registry</h1>
+            <span class="breadcrumb">
+                <a href="dashboard.html">Home</a> › Admin › CDA Dedupe Registry
+            </span>
+        </div>
+        <div class="registry-layout">
+
+            <div class="info-strip">
+                <i class="fas fa-info-circle"></i>
+                <span>Backs <code>cda.dedupe</code>'s crossMessage mode — one row per distinct clinical fact ever seen for a patient on an interface.
+                      Contains PHI (patient identifier + clinical codes/dates). Every search here is audit-logged; purging is permanent and audit-logged separately.
+                      Rows age out automatically after the configured retention window (Settings).</span>
+            </div>
+
+            <div class="search-row">
+                <select id="searchInterface">
+                    <option value="">Select an interface…</option>
+                </select>
+                <input type="text" id="searchPatientKey" placeholder="Patient key (optional) — narrows to one patient">
+                <button class="btn-primary" style="padding:7px 16px; font-size:12px;" onclick="window._dedupeRegistry.load()">
+                    <i class="fas fa-search"></i> Search
+                </button>
+                <button class="btn-purge" id="purgeBtn" disabled onclick="window._dedupeRegistry.openPurgeModal()">
+                    <i class="fas fa-trash-alt"></i> Purge this patient's registry
+                </button>
+            </div>
+
+            <div class="registry-table-wrap">
+                <table class="registry-table">
+                    <thead>
+                        <tr>
+                            <th>Section</th>
+                            <th>Identity Key</th>
+                            <th>First Seen</th>
+                            <th>Last Seen</th>
+                            <th>Seen Count</th>
+                            <th>First Message</th>
+                            <th>Last Message</th>
+                        </tr>
+                    </thead>
+                    <tbody id="registryTableBody">
+                        <tr><td colspan="7" class="empty-state"><i class="fas fa-fingerprint"></i><br>Select an interface and search to view registry entries.</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </main>
+</div>
+
+<!-- Purge confirmation modal -->
+<div class="modal-overlay" id="purgeModal">
+    <div class="modal-box">
+        <h3><i class="fas fa-exclamation-triangle"></i> Purge Patient Registry</h3>
+        <p>This permanently deletes every dedupe-registry row for <strong id="purgePatientLabel"></strong> on this interface.
+           Future documents for this patient will be treated as entirely new — previously-suppressed facts may be re-delivered.
+           This action is audit-logged and cannot be undone. A reason is required.</p>
+        <textarea id="purgeReason" placeholder="Reason for this erasure (e.g. GDPR data subject request, interface decommissioned)…"></textarea>
+        <div class="modal-footer">
+            <button class="btn-secondary" onclick="window._dedupeRegistry.closePurgeModal()">Cancel</button>
+            <button class="btn-purge" onclick="window._dedupeRegistry.confirmPurge()">
+                <i class="fas fa-trash-alt"></i> Purge Permanently
+            </button>
+        </div>
+    </div>
+</div>
+
+<script src="js/components/sidebar-nav.js"></script>
+<script src="js/admin-cda-dedupe-registry.js"></script>
+</body>
+</html>

@@ -608,6 +608,7 @@ class PipelineBuilder {
 
             // Display results with enhanced FHIR resource rendering
             resultsContent.innerHTML = this.renderTestResults(result);
+            this.loadCDAComplianceReport();
 
             // Check success field from test response
             const isSuccess = result.success === true;
@@ -733,6 +734,24 @@ class PipelineBuilder {
         // Also check if finalOutput IS a FHIR bundle
         if (!fhirBundle && finalOutput.resourceType === 'Bundle') {
             fhirBundle = finalOutput;
+        }
+
+        // Find a cda.build step's CDA XML output, for the live spec-compliance
+        // panel below. Step output keys are snake_cased server-side
+        // (models/output_normalizer.go), so — mirroring the fhirBundle
+        // fallback-scan directly above — this content-sniffs rather than
+        // assuming a literal "cdaXML" key.
+        this._lastTestCdaXML = null;
+        if (result.steps) {
+            outer:
+            for (const stepData of Object.values(result.steps)) {
+                for (const val of Object.values(stepData?.step_output || {})) {
+                    if (typeof val === 'string' && val.includes('<ClinicalDocument')) {
+                        this._lastTestCdaXML = val;
+                        break outer;
+                    }
+                }
+            }
         }
 
         // Check if test passed
@@ -916,6 +935,14 @@ class PipelineBuilder {
             html += this.renderTransformedMessage(fhirBundle);
         }
 
+        // Placeholder for the CDA spec-compliance report -- populated
+        // asynchronously by loadCDAComplianceReport() right after this HTML
+        // is inserted into the DOM (renderTestResults itself is synchronous
+        // and can't await the /api/cda/validate round trip inline).
+        if (this._lastTestCdaXML) {
+            html += `<div id="cdaComplianceReport" style="margin-top:1rem;"><p style="text-align:center;color:var(--text-tertiary);"><i class="fas fa-spinner fa-spin"></i> Checking C-CDA spec compliance...</p></div>`;
+        }
+
         // Render FHIR resources with narratives
         if (resourcesCreated && Array.isArray(resourcesCreated) && resourcesCreated.length > 0) {
             html += this.renderFHIRResources(resourcesCreated);
@@ -957,6 +984,78 @@ class PipelineBuilder {
         }, 100);
 
         return html;
+    }
+
+    /**
+     * Fetches a C-CDA 2.1 conformance report for the last test run's cda.build
+     * output (this._lastTestCdaXML, set by renderTestResults) and injects it
+     * into the #cdaComplianceReport placeholder. Reuses the existing, already-
+     * live POST /api/cda/validate endpoint (build -> parse -> validate round
+     * trip) -- zero new Go validation logic, pure UI composition.
+     */
+    async loadCDAComplianceReport() {
+        const container = document.getElementById('cdaComplianceReport');
+        if (!container || !this._lastTestCdaXML) return;
+
+        try {
+            const response = await fetch('/api/cda/validate', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ xml: this._lastTestCdaXML }),
+            });
+            const data = await response.json();
+            if (!response.ok || !data.success) {
+                container.innerHTML = `<p style="color:var(--text-tertiary);font-size:0.85rem;">Could not check C-CDA spec compliance: ${this.escapeHtml(data.error || response.statusText)}</p>`;
+                return;
+            }
+            container.innerHTML = this.renderComplianceReport(data.report);
+        } catch (err) {
+            container.innerHTML = `<p style="color:var(--text-tertiary);font-size:0.85rem;">Could not check C-CDA spec compliance: ${this.escapeHtml(err.message)}</p>`;
+        }
+    }
+
+    /**
+     * Renders a cda/validator.ComplianceReport (SHALL/SHOULD score, per-
+     * section, per-field status) as a collapsible panel — the guided-
+     * configuration UIs' (MapToCanonicalBuilder, CDABuildStepBuilder)
+     * static/pre-population checklist is about SAVED CONFIG; this is the
+     * same conformance rubric checked against a REAL built-and-reparsed
+     * document from actual test data, the strongest completeness signal
+     * available.
+     */
+    renderComplianceReport(report) {
+        if (!report) return '';
+        const pct = v => Math.round((v || 0) * 100);
+        const scoreColor = v => v >= 1 ? 'var(--success-color, #16a34a)' : (v >= 0.7 ? 'var(--warning-color, #d97706)' : 'var(--danger-color, #dc2626)');
+
+        const sectionRows = (report.sectionReports || []).map(sr => {
+            const statusIcon = sr.status === 'missing' ? 'fa-times-circle' : (sr.status === 'present_empty' ? 'fa-exclamation-triangle' : 'fa-check-circle');
+            const statusColor = sr.status === 'missing' ? 'var(--danger-color, #dc2626)' : (sr.status === 'present_empty' ? 'var(--warning-color, #d97706)' : 'var(--success-color, #16a34a)');
+            const fieldRows = (sr.fieldReports || []).filter(fr => fr.status !== 'populated').map(fr =>
+                `<div style="font-size:0.75rem;color:var(--text-tertiary);padding-left:1.5rem;">
+                    <i class="fas fa-circle" style="font-size:0.4rem;vertical-align:middle;"></i>
+                    ${this.escapeHtml(fr.fieldPath)} (${this.escapeHtml(fr.conformance)}) — ${this.escapeHtml(fr.status)}${fr.valueSummary ? ': ' + this.escapeHtml(fr.valueSummary) : ''}
+                </div>`).join('');
+            return `
+                <div style="padding:0.4rem 0;border-bottom:1px solid var(--border-color, #e2e8f0);">
+                    <div style="display:flex;align-items:center;gap:0.5rem;font-size:0.85rem;">
+                        <i class="fas ${statusIcon}" style="color:${statusColor};"></i>
+                        <strong>${this.escapeHtml(sr.title || sr.sectionKey)}</strong>
+                        <span style="font-size:0.7rem;color:var(--text-tertiary);">${this.escapeHtml(sr.conformance)} · ${this.escapeHtml(sr.status)}${sr.entryCount ? ` · ${sr.entryCount} entries` : ''}</span>
+                    </div>
+                    ${fieldRows}
+                </div>`;
+        }).join('');
+
+        return `
+            <details class="transformed-message-section" style="margin-top:1rem;">
+                <summary style="cursor:pointer;font-weight:600;display:flex;align-items:center;gap:0.5rem;">
+                    <i class="fas fa-file-medical-alt"></i> C-CDA Spec Compliance — ${this.escapeHtml(report.documentType)}
+                    <span style="font-size:0.8rem;font-weight:400;color:${scoreColor(report.shallScore)};">SHALL ${pct(report.shallScore)}%</span>
+                    <span style="font-size:0.8rem;font-weight:400;color:${scoreColor(report.shouldScore)};">SHOULD ${pct(report.shouldScore)}%</span>
+                </summary>
+                <div style="margin-top:0.75rem;">${sectionRows}</div>
+            </details>`;
     }
 
     /**

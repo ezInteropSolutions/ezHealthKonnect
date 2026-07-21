@@ -34,6 +34,8 @@ class MapToCanonicalBuilder {
         this._sectionFieldCatalog = {};    // sectionKey -> [{key, label, dataType}]
         this._transformCatalog = [];       // [{name, description}]
         this._fieldSearches = [];          // active FieldPathSearchComponent instances
+        this._requirements = null;         // GET /api/cda/document-types/:type/requirements response's "requirements" object
+        this._requirementsDocType = null;  // documentType this._requirements was fetched for — avoids redundant re-fetches
 
         window._mapToCanonicalBuilder = this;
     }
@@ -49,6 +51,7 @@ class MapToCanonicalBuilder {
         this._loadHeaderCatalog('patient');
         this._loadHeaderCatalog('author');
         this._loadTransformCatalog();
+        this._loadRequirements(step.config.documentType);
 
         const html = this._renderAll();
         setTimeout(() => this._attachFieldSearches(), 0);
@@ -57,13 +60,81 @@ class MapToCanonicalBuilder {
 
     _applyDefaultConfig(cfg) {
         if (!cfg.outputField) cfg.outputField = 'parsedCDA';
+        if (!cfg.documentType) cfg.documentType = 'CCD';
         if (!Array.isArray(cfg.header)) cfg.header = [];
         if (!Array.isArray(cfg.sections)) cfg.sections = [];
+    }
+
+    // ── Document Type + requirements-driven guidance ─────────────────────────
+
+    // Fetches the combined requirements catalog for documentType and, once
+    // loaded, pre-populates any still-missing SHALL sections/header rows —
+    // additive only (never removes or overwrites a row the user already
+    // configured, even one that isn't SHALL for the newly-selected document
+    // type) so switching Document Type mid-edit can't silently destroy work.
+    _loadRequirements(documentType) {
+        if (!documentType || this._requirementsDocType === documentType) return;
+        fetch(`/api/cda/document-types/${encodeURIComponent(documentType)}/requirements`, { signal: this._ac.signal })
+            .then(r => r.ok ? r.json() : null)
+            .then(data => {
+                if (!data || !data.requirements) return;
+                this._requirements = data.requirements;
+                this._requirementsDocType = documentType;
+                this._prepopulateShallRequirements();
+                this._rerender();
+            })
+            .catch(() => {}); // AbortError on destroy is expected
+    }
+
+    onDocumentTypeChange(newType) {
+        this._syncDOMToConfig();
+        this._step.config.documentType = newType;
+        this._requirements = null;
+        this._requirementsDocType = null;
+        this._loadRequirements(newType);
+        this._rerender();
+    }
+
+    // Auto-adds an empty section card for every SHALL section, and an empty
+    // header row for every SHALL patient/author field, not already present
+    // in the saved config — same "pre-seeded row, user still supplies the
+    // value" pattern CDADedupeStepBuilder already establishes for identity
+    // fields. A section/row already present (even unmapped) is left alone —
+    // this only ever adds, never removes.
+    _prepopulateShallRequirements() {
+        if (!this._requirements) return;
+        const cfg = this._step.config;
+
+        (this._requirements.sections || []).forEach(sec => {
+            if (sec.conformance !== 'SHALL') return;
+            if (cfg.sections.some(s => s.sectionKey === sec.key)) return;
+            cfg.sections.push({ sectionKey: sec.key, rowsPath: '', fields: [] });
+            if (!this._sectionFieldCatalog[sec.key]) {
+                // Same "load then rerender once resolved" pattern as
+                // onSectionKeyChange — without it the pre-populated card's
+                // field datalist would stay empty until an unrelated rerender.
+                this._loadSectionFieldCatalog(sec.key).then(() => this._rerender());
+            }
+        });
+
+        ['patient', 'author'].forEach(group => {
+            (this._requirements.headerGroups && this._requirements.headerGroups[group] || []).forEach(field => {
+                if (field.conformance !== 'SHALL') return;
+                if (cfg.header.some(h => h.group === group && h.target === field.key)) return;
+                cfg.header.push({ group, target: field.key, sourcePath: '' });
+            });
+        });
     }
 
     _renderAll() {
         const cfg = this._step.config;
         const esc = MapToCanonicalBuilder._esc;
+        const missing = (typeof CDARequirementsHelper !== 'undefined')
+            ? CDARequirementsHelper.computeMissingShall(this._requirements, cfg.header, cfg.sections)
+            : { shallTotal: 0 };
+
+        const docTypeOptions = ['CCD', 'Discharge Summary', 'Referral Note', 'History and Physical', 'Consultation Note', 'Progress Note']
+            .map(dt => `<option value="${esc(dt)}" ${cfg.documentType === dt ? 'selected' : ''}>${esc(dt)}</option>`).join('');
 
         return `
         <div id="mapToCanonicalBuilder" class="cda-step-config">
@@ -71,6 +142,17 @@ class MapToCanonicalBuilder {
                 <strong>Map to Canonical step.</strong> Maps CSV/DB/JSON fields onto the same canonical JSON shape
                 <code>cda.build</code> consumes. Pair the two steps to build a CCD from any source with no new code.
             </div>
+
+            <div class="config-group" style="margin-bottom:1.1rem;">
+                <label style="font-size:0.75rem;font-weight:600;text-transform:uppercase;color:#64748b;display:block;margin-bottom:0.4rem;">Document Type</label>
+                <select id="m2cDocumentType" class="form-select form-select-sm"
+                    onchange="window._mapToCanonicalBuilder && window._mapToCanonicalBuilder.onDocumentTypeChange(this.value)">
+                    ${docTypeOptions}
+                </select>
+                <div style="font-size:0.72rem;color:#94a3b8;margin-top:0.25rem;">Determines which sections and header fields are required (SHALL) — match this to the paired cda.build step's own Document Type.</div>
+            </div>
+
+            ${typeof CDARequirementsHelper !== 'undefined' ? CDARequirementsHelper.renderCompletenessBanner(missing) : ''}
 
             <div class="config-group" style="margin-bottom:1.1rem;">
                 <label style="font-size:0.75rem;font-weight:600;text-transform:uppercase;color:#64748b;display:block;margin-bottom:0.4rem;">Output Field</label>
@@ -123,9 +205,13 @@ class MapToCanonicalBuilder {
         const rows = cfg.header.filter(h => h.group === group);
         const catalog = this._headerCatalog[group] || [];
         const datalistId = `m2cHeaderTargets-${group}`;
+        const requirementByKey = {};
+        ((this._requirements && this._requirements.headerGroups && this._requirements.headerGroups[group]) || [])
+            .forEach(f => { requirementByKey[f.key] = f; });
 
         const rowsHtml = rows.map(h => {
             const globalIndex = cfg.header.indexOf(h);
+            const req = requirementByKey[h.target];
             return `
             <tr data-header-index="${globalIndex}">
                 <td>
@@ -141,6 +227,7 @@ class MapToCanonicalBuilder {
                         ${this._renderTransformOptions(h.transform)}
                     </select>
                 </td>
+                <td style="width:90px;">${req && typeof CDARequirementsHelper !== 'undefined' ? CDARequirementsHelper.renderConformanceBadge(req.conformance) : ''}</td>
                 <td style="width:44px;text-align:center;">
                     <button type="button" class="btn btn-sm btn-danger"
                         onclick="window._mapToCanonicalBuilder && window._mapToCanonicalBuilder.removeHeaderRow(${globalIndex})"
@@ -158,7 +245,11 @@ class MapToCanonicalBuilder {
                     style="font-size:0.72rem;padding:0.15rem 0.5rem;">+ Add Field</button>
             </div>
             <datalist id="${datalistId}">
-                ${catalog.map(f => `<option value="${esc(f.key)}">${esc(f.label || f.key)}</option>`).join('')}
+                ${catalog.map(f => {
+                    const req = requirementByKey[f.key];
+                    const suffix = req ? ` (${req.conformance === 'SHALL' ? 'required' : 'recommended'})` : '';
+                    return `<option value="${esc(f.key)}">${esc(f.label || f.key)}${esc(suffix)}</option>`;
+                }).join('')}
             </datalist>
             ${rows.length === 0
                 ? `<div style="font-size:0.74rem;color:#94a3b8;">No ${esc(label.toLowerCase())} fields mapped.</div>`
@@ -167,6 +258,7 @@ class MapToCanonicalBuilder {
                         <th style="font-size:0.7rem;color:#64748b;">Target Field</th>
                         <th style="font-size:0.7rem;color:#64748b;">Source Path</th>
                         <th style="font-size:0.7rem;color:#64748b;">Transform</th>
+                        <th style="font-size:0.7rem;color:#64748b;">Requirement</th>
                         <th></th>
                     </tr></thead>
                     <tbody>${rowsHtml}</tbody>
@@ -195,6 +287,9 @@ class MapToCanonicalBuilder {
             .join('');
         const fieldCatalog = this._sectionFieldCatalog[sec.sectionKey] || [];
         const fieldDatalistId = `m2cFieldTargets-${sectionIndex}`;
+        const docTypeSectionReq = (this._requirements && this._requirements.sections || []).find(s => s.key === sec.sectionKey);
+        const sectionBadge = docTypeSectionReq && typeof CDARequirementsHelper !== 'undefined'
+            ? CDARequirementsHelper.renderConformanceBadge(docTypeSectionReq.conformance) : '';
 
         const fieldsHtml = (sec.fields || []).map((f, fi) => `
             <tr data-field-index="${fi}">
@@ -246,6 +341,7 @@ class MapToCanonicalBuilder {
                 <input type="text" class="form-control form-control-sm m2c-rows-path" data-search-kind="rowspath" data-section-index="${sectionIndex}"
                     value="${esc(sec.rowsPath)}" placeholder="e.g. records or rows"
                     style="flex:1;font-family:monospace;font-size:0.8rem;">
+                ${sectionBadge}
                 <button type="button" class="btn btn-sm btn-outline-danger"
                     onclick="window._mapToCanonicalBuilder && window._mapToCanonicalBuilder.removeSection(${sectionIndex})"
                     title="Remove section"><i class="fas fa-trash"></i></button>

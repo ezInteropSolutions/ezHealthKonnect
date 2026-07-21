@@ -338,6 +338,18 @@
     <script src="/js/pipeline/managers/StepNodeManager.js?v=6.0"></script>
     <script src="/js/pipeline/managers/ToolboxManager.js?v=9.0"></script>
     <script src="/js/pipeline/managers/PropertiesPanel.js?v=29.0"></script>
+    <!-- Step documentation registry — per-category files self-register into StepDocumentationRegistry,
+         replacing what used to be one hardcoded ~3000-line object literal inside PropertiesPanel.js -->
+    <script src="/js/pipeline/documentation/StepDocumentationRegistry.js?v=1.0"></script>
+    <script src="/js/pipeline/documentation/CDAStepsDocs.js?v=1.0"></script>
+    <script src="/js/pipeline/documentation/FormatBuilderStepsDocs.js?v=1.0"></script>
+    <script src="/js/pipeline/documentation/PreProcessingStepsDocs.js?v=1.0"></script>
+    <script src="/js/pipeline/documentation/EnrichmentStepsDocs.js?v=1.0"></script>
+    <script src="/js/pipeline/documentation/PostProcessingStepsDocs.js?v=1.0"></script>
+    <script src="/js/pipeline/documentation/ControlFlowStepsDocs.js?v=1.0"></script>
+    <script src="/js/pipeline/documentation/CoreMappingStepsDocs.js?v=1.0"></script>
+    <script src="/js/pipeline/documentation/ConnectorStepsDocs.js?v=1.0"></script>
+    <script src="/js/pipeline/documentation/TransformMiscStepsDocs.js?v=1.0"></script>
     <!-- Modular OOP Components -->
     <script src="/js/pipeline/components/FieldPathSearchComponent.js?v=2.3"></script>
     <script src="/js/pipeline/components/FieldPathInputWithAutocomplete.js?v=2.4"></script>
@@ -357,6 +369,8 @@
     <script src="/js/pipeline/utils/DOMUtils.js?v=1.0"></script>
     <script src="/js/pipeline/utils/TransformUtils.js?v=1.0"></script>
     <script src="/js/pipeline/utils/StepVariablesProvider.js?v=1.0"></script>
+    <!-- CDA guided-configuration completeness helper (shared by MapToCanonicalBuilder + CDABuildStepBuilder's Requirements tab) -->
+    <script src="/js/pipeline/utils/CDARequirementsHelper.js?v=1.0"></script>
     <script src="/js/pipeline/components/BaseStepConfigBuilder.js?v=1.0"></script>
     <!-- Step Builder Registry — lightweight singleton for component-based step UIs -->
     <script src="/js/pipeline/components/StepBuilderRegistry.js?v=1.0"></script>
@@ -383,6 +397,7 @@
     <script src="/js/pipeline/components/FileParserBuilder.js?v=1.0"></script>
     <!-- CDA/CCD step builders (cda.to_fhir, fhir.to_cda, cda.normalize) -->
     <script src="/js/pipeline/components/CDAStepBuilder.js?v=1.0"></script>
+    <script src="/js/pipeline/components/CDASectionToCSVStepBuilder.js?v=1.0"></script>
     <script src="/js/pipeline/components/MapToCanonicalBuilder.js?v=1.0"></script>
     <script src="/js/pipeline/components/FHIRBuildBuilder.js?v=1.0"></script>
     <script src="/js/pipeline/components/HL7BuildBuilder.js?v=1.0"></script>

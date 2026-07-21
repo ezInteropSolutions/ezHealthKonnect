@@ -57,6 +57,19 @@ type CSVColumn struct {
 	// added so a coded field's system/narrative-reference-text is traceable
 	// without guessing, without hand-authoring 3 extra columns per site.
 	ExposeCodeMetadata bool
+	// Multiple marks a column whose Path can legitimately match more than one
+	// sibling entryRelationship on the same entry — e.g. Allergies' Reaction
+	// (C-CDA R2.1 IG, Section 3.103.1, CONF:1098-7447: "SHOULD contain zero
+	// or more [0..*]" Reaction Observations, one allergy can list several
+	// distinct reactions, e.g. both Hives and Anaphylaxis to the same
+	// allergen). Without this, resolveColumn's default (ResolveCDAPath,
+	// singular) silently keeps only the FIRST match and drops the rest —
+	// correct for the common 0..1 case, wrong for a genuine 0..* one. When
+	// true, resolveColumn instead resolves every match via
+	// executors.ResolveCDAPaths and joins them with "; ", the same
+	// separator cdaValueToCSVString already uses for any other array-shaped
+	// CDA value (e.g. a code's multiple <translation> entries).
+	Multiple bool
 }
 
 // CSVSectionTemplate is the OOB column list for one CDA section.
@@ -170,6 +183,10 @@ var cdaCSVSectionTemplates = map[string]CSVSectionTemplate{
 				Name:               "Reaction",
 				Path:               "entryRelationships[typeCode=MFST,inversionInd=true].entry[templateId=2.16.840.1.113883.10.20.22.4.9].value.code",
 				ExposeCodeMetadata: true,
+				// One allergy can list multiple distinct reactions (e.g. both
+				// Hives and Anaphylaxis to the same allergen) -- see
+				// CSVColumn.Multiple's own doc comment.
+				Multiple: true,
 			},
 			{
 				Name:               "Severity",

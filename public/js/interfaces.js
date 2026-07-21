@@ -1084,9 +1084,11 @@ function renderStatusBadge(iface) {
     const esc = s => String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
     const ts = err.timestamp ? new Date(err.timestamp).toLocaleString() : '';
     const tip = [
-        err.reason ? esc(err.reason) : 'Unknown error',
-        err.port   ? `Port: ${err.port}` : '',
-        ts         ? `At: ${ts}` : ''
+        err.reason    ? esc(err.reason) : 'Unknown error',
+        err.port      ? `Port: ${err.port}` : '',
+        err.directory ? `Directory: ${esc(err.directory)}` : '',
+        err.pattern   ? `Pattern: ${esc(err.pattern)}` : '',
+        ts            ? `At: ${ts}` : ''
     ].filter(Boolean).join('&#10;');
 
     return `<span class="interface-status status-error status-error-tip" title="${tip}">

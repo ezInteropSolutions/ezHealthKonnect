@@ -62,6 +62,34 @@ func NewFileListenerConnector() InboundConnector {
 	}
 }
 
+// ExtractFileListenerDirConfig pulls directory_path/file_pattern/recursive out of a
+// connector.inbound config map, applying the same snake_case/camelCase key fallback
+// as Initialize(). ok is false when no directory_path is configured. Pure and
+// side-effect-free (no logging, no I/O) so it can double as a read-only pre-check
+// (e.g. the engine's directory/pattern conflict scan) without side effects.
+func ExtractFileListenerDirConfig(cfg map[string]interface{}) (dirPath, pattern string, recursive bool, ok bool) {
+	if path, isOk := cfg["directory_path"].(string); isOk && path != "" {
+		dirPath = path
+	} else if path, isOk := cfg["directoryPath"].(string); isOk && path != "" {
+		dirPath = path
+	} else {
+		return "", "", false, false
+	}
+
+	pattern = "*"
+	if p, isOk := cfg["file_pattern"].(string); isOk && p != "" {
+		pattern = p
+	} else if p, isOk := cfg["filePattern"].(string); isOk && p != "" {
+		pattern = p
+	}
+
+	if r, isOk := cfg["recursive"].(bool); isOk {
+		recursive = r
+	}
+
+	return dirPath, pattern, recursive, true
+}
+
 // Initialize configures the file listener from JSON config
 func (f *FileListenerConnector) Initialize(config []byte) error {
 	f.mu.Lock()
@@ -74,25 +102,14 @@ func (f *FileListenerConnector) Initialize(config []byte) error {
 		return fmt.Errorf("failed to parse config: %w", err)
 	}
 
-	// Directory path (required)
-	if path, ok := cfg["directory_path"].(string); ok && path != "" {
-		f.directoryPath = path
-		log.Printf("🔍 Directory path set to: %s", f.directoryPath)
-	} else if path, ok := cfg["directoryPath"].(string); ok && path != "" {
-		f.directoryPath = path
-		log.Printf("🔍 Directory path set to: %s", f.directoryPath)
-	} else {
+	dirPath, pattern, recursive, ok := ExtractFileListenerDirConfig(cfg)
+	if !ok {
 		return fmt.Errorf("directory_path is required")
 	}
-
-	// File pattern (default: *)
-	if pattern, ok := cfg["file_pattern"].(string); ok && pattern != "" {
-		f.filePattern = pattern
-	} else if pattern, ok := cfg["filePattern"].(string); ok && pattern != "" {
-		f.filePattern = pattern
-	} else {
-		f.filePattern = "*" // all files
-	}
+	f.directoryPath = dirPath
+	f.filePattern = pattern
+	f.recursive = recursive
+	log.Printf("🔍 Directory path set to: %s", f.directoryPath)
 	log.Printf("🔍 File pattern set to: %s", f.filePattern)
 
 	// Polling interval (in seconds)
@@ -121,11 +138,6 @@ func (f *FileListenerConnector) Initialize(config []byte) error {
 	// Encoding
 	if enc, ok := cfg["encoding"].(string); ok && enc != "" {
 		f.encoding = enc
-	}
-
-	// Recursive scanning
-	if recursive, ok := cfg["recursive"].(bool); ok {
-		f.recursive = recursive
 	}
 
 	// Auto-create directory

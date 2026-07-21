@@ -887,6 +887,81 @@ func TestBuildCSVRows_Allergy_ReactionSeverityCriticality_AreSiblingRelationship
 	}
 }
 
+// TestBuildCSVRows_Allergy_MultipleReactions_JoinedWithSemicolon covers the
+// user-flagged gap where an Allergy - Intolerance Observation with TWO
+// distinct Reaction Observations (both Hives and Anaphylaxis to the same
+// allergen — legal per C-CDA R2.1 IG CONF:1098-7447, "0..*") previously lost
+// every reaction but the first, since resolveColumn defaulted to
+// ResolveCDAPath (singular, first-match-only). CSVColumn.Multiple fixes this
+// by resolving every match and joining with "; ".
+func TestBuildCSVRows_Allergy_MultipleReactions_JoinedWithSemicolon(t *testing.T) {
+	documentMap := map[string]interface{}{
+		"sectionsByKey": map[string]interface{}{
+			"allergiesAndIntolerances": map[string]interface{}{
+				"entries": []interface{}{
+					map[string]interface{}{
+						"entryRelationships": []interface{}{
+							map[string]interface{}{
+								"typeCode":     "MFST",
+								"inversionInd": true,
+								"entry": map[string]interface{}{
+									"templateIds": []interface{}{"2.16.840.1.113883.10.20.22.4.9"},
+									"value":       map[string]interface{}{"code": map[string]interface{}{"code": "247472004", "displayName": "Hives"}},
+								},
+							},
+							map[string]interface{}{
+								"typeCode":     "MFST",
+								"inversionInd": true,
+								"entry": map[string]interface{}{
+									"templateIds": []interface{}{"2.16.840.1.113883.10.20.22.4.9"},
+									"value":       map[string]interface{}{"code": map[string]interface{}{"code": "39579001", "displayName": "Anaphylaxis"}},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	rows := buildCSVRows(documentMap, cdaCSVSectionTemplates["allergiesAndIntolerances"], "")
+	if len(rows) != 1 {
+		t.Fatalf("got %d rows, want 1", len(rows))
+	}
+	if rows[0]["Reaction"] != "Hives; Anaphylaxis" {
+		t.Errorf("Reaction = %q, want %q (both reactions, not just the first)", rows[0]["Reaction"], "Hives; Anaphylaxis")
+	}
+}
+
+// TestResolveColumn_Multiple_SingleMatch_NoTrailingSeparator covers the
+// common 0..1 real-world case (one reaction) to guard against a Multiple
+// column accidentally introducing stray "; " artifacts when there's nothing
+// to join.
+func TestResolveColumn_Multiple_SingleMatch_NoTrailingSeparator(t *testing.T) {
+	node := map[string]interface{}{
+		"entryRelationships": []interface{}{
+			map[string]interface{}{
+				"typeCode": "MFST",
+				"entry":    map[string]interface{}{"value": map[string]interface{}{"code": map[string]interface{}{"displayName": "Hives"}}},
+			},
+		},
+	}
+	col := CSVColumn{Name: "Reaction", Path: "entryRelationships[typeCode=MFST].entry.value.code", Multiple: true}
+	got := resolveColumn(node, col)
+	if got != "Hives" {
+		t.Errorf("resolveColumn = %q, want %q", got, "Hives")
+	}
+}
+
+// TestResolveColumn_Multiple_NoMatch_ReturnsEmpty covers the zero-match case.
+func TestResolveColumn_Multiple_NoMatch_ReturnsEmpty(t *testing.T) {
+	node := map[string]interface{}{}
+	col := CSVColumn{Name: "Reaction", Path: "entryRelationships[typeCode=MFST].entry.value.code", Multiple: true}
+	got := resolveColumn(node, col)
+	if got != "" {
+		t.Errorf("resolveColumn = %q, want empty", got)
+	}
+}
+
 // TestBuildCSVRows_PayersInsurance_SubscriberId_PrefersHLDOverCOV covers the
 // PDF-spec-verified distinction (Section 3.70 "Policy Activity (V3)", Table
 // 398, CONF:1198-8916/8934) between the COV "Covered Party" participant
@@ -1089,6 +1164,155 @@ func TestBuildCSVRows_Problem_AgeAtOnset_UsesSUBJInversionIndTrue(t *testing.T) 
 	}
 	if rows[0]["AgeAtOnset"] != "45 a" {
 		t.Errorf("AgeAtOnset = %q, want %q", rows[0]["AgeAtOnset"], "45 a")
+	}
+}
+
+// ── mergeCustomColumns ───────────────────────────────────────────────────
+
+func TestMergeCustomColumns_NewName_AppendsAfterOOBColumns(t *testing.T) {
+	tmpl := CSVSectionTemplate{
+		SectionKey: "problems",
+		Columns:    []CSVColumn{{Name: "ProblemName", Path: "value.code"}},
+	}
+	merged := mergeCustomColumns(tmpl, []CSVColumn{{Name: "MyCustomField", Path: "someCustomPath"}})
+	if len(merged.Columns) != 2 {
+		t.Fatalf("got %d columns, want 2", len(merged.Columns))
+	}
+	if merged.Columns[0].Name != "ProblemName" || merged.Columns[1].Name != "MyCustomField" {
+		t.Errorf("columns = %+v, want OOB column first, custom column appended after", merged.Columns)
+	}
+}
+
+func TestMergeCustomColumns_MatchingName_OverridesInPlace(t *testing.T) {
+	tmpl := CSVSectionTemplate{
+		SectionKey: "problems",
+		Columns: []CSVColumn{
+			{Name: "ProblemName", Path: "value.code"},
+			{Name: "OnsetDate", Path: "effectiveTime.low.value"},
+		},
+	}
+	merged := mergeCustomColumns(tmpl, []CSVColumn{{Name: "ProblemName", Path: "myOverridePath"}})
+	if len(merged.Columns) != 2 {
+		t.Fatalf("got %d columns, want 2 (override in place, not appended)", len(merged.Columns))
+	}
+	if merged.Columns[0].Name != "ProblemName" || merged.Columns[0].Path != "myOverridePath" {
+		t.Errorf("ProblemName column = %+v, want Path overridden to %q in the SAME position", merged.Columns[0], "myOverridePath")
+	}
+	if merged.Columns[1].Name != "OnsetDate" {
+		t.Errorf("OnsetDate column should be untouched, got %+v", merged.Columns[1])
+	}
+}
+
+func TestMergeCustomColumns_Empty_ReturnsTemplateUnchanged(t *testing.T) {
+	tmpl := CSVSectionTemplate{SectionKey: "problems", Columns: []CSVColumn{{Name: "ProblemName", Path: "value.code"}}}
+	merged := mergeCustomColumns(tmpl, nil)
+	if len(merged.Columns) != 1 || merged.Columns[0].Name != "ProblemName" {
+		t.Errorf("expected template unchanged with no custom columns, got %+v", merged.Columns)
+	}
+}
+
+func TestMergeCustomColumns_NarrativeOnlySection_Ignored(t *testing.T) {
+	tmpl := CSVSectionTemplate{SectionKey: "assessment", NarrativeOnly: true}
+	merged := mergeCustomColumns(tmpl, []CSVColumn{{Name: "Extra", Path: "somePath"}})
+	if len(merged.Columns) != 0 {
+		t.Errorf("NarrativeOnly section should ignore custom columns, got %+v", merged.Columns)
+	}
+}
+
+func TestMergeCustomColumns_DoesNotMutateOriginalTemplate(t *testing.T) {
+	original := []CSVColumn{{Name: "ProblemName", Path: "value.code"}}
+	tmpl := CSVSectionTemplate{SectionKey: "problems", Columns: original}
+	mergeCustomColumns(tmpl, []CSVColumn{{Name: "ProblemName", Path: "overridden"}})
+	if original[0].Path != "value.code" {
+		t.Errorf("original template's backing array was mutated: %+v", original[0])
+	}
+}
+
+// TestBuildCSVRows_CustomColumnOverride_EndToEnd covers the full path: a
+// custom column reusing "ProblemName" changes what actually gets written to
+// a CSV row, via the same merge+resolve pipeline Execute() uses.
+func TestBuildCSVRows_CustomColumnOverride_EndToEnd(t *testing.T) {
+	documentMap := map[string]interface{}{
+		"sectionsByKey": map[string]interface{}{
+			"problems": map[string]interface{}{
+				"entries": []interface{}{
+					map[string]interface{}{
+						"entryRelationships": []interface{}{
+							map[string]interface{}{
+								"typeCode": "SUBJ",
+								"entry": map[string]interface{}{
+									"statusCode":  "completed",
+									"value":       map[string]interface{}{"code": map[string]interface{}{"code": "40930008", "displayName": "Hypothyroidism"}},
+									"customField": "custom-value-here",
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	tmpl := mergeCustomColumns(cdaCSVSectionTemplates["problems"], []CSVColumn{
+		{Name: "ProblemName", Path: "entryRelationships[typeCode=SUBJ].entry.customField"},
+	})
+	rows := buildCSVRows(documentMap, tmpl, "")
+	if len(rows) != 1 {
+		t.Fatalf("got %d rows, want 1", len(rows))
+	}
+	if rows[0]["ProblemName"] != "custom-value-here" {
+		t.Errorf("ProblemName = %q, want the custom override's resolved value %q", rows[0]["ProblemName"], "custom-value-here")
+	}
+}
+
+// ── CSVSectionCatalog ────────────────────────────────────────────────────
+
+func TestCSVSectionCatalog_CoversEverySupportedSection(t *testing.T) {
+	catalog := CSVSectionCatalog()
+	if len(catalog) != len(SupportedCDACSVSections()) {
+		t.Fatalf("got %d catalog entries, want %d (one per supported section)", len(catalog), len(SupportedCDACSVSections()))
+	}
+}
+
+func TestCSVSectionCatalog_NonNarrativeSection_IncludesUniversalAndExpandedColumns(t *testing.T) {
+	catalog := CSVSectionCatalog()
+	var problems *CSVSectionSummary
+	for i := range catalog {
+		if catalog[i].SectionKey == "problems" {
+			problems = &catalog[i]
+			break
+		}
+	}
+	if problems == nil {
+		t.Fatal("problems section not found in catalog")
+	}
+	names := make(map[string]bool, len(problems.Columns))
+	for _, c := range problems.Columns {
+		names[c.Name] = true
+	}
+	for _, want := range []string{"EntryId", "ProblemName", "ProblemNameCodeSystem", "ProblemNameOriginalText"} {
+		if !names[want] {
+			t.Errorf("problems catalog missing expected column %q; got %+v", want, names)
+		}
+	}
+}
+
+func TestCSVSectionCatalog_NarrativeOnlySection_ExposesFixedTwoColumnShape(t *testing.T) {
+	catalog := CSVSectionCatalog()
+	var assessment *CSVSectionSummary
+	for i := range catalog {
+		if catalog[i].SectionKey == "assessment" {
+			assessment = &catalog[i]
+			break
+		}
+	}
+	if assessment == nil {
+		t.Fatal("assessment section not found in catalog")
+	}
+	if !assessment.NarrativeOnly {
+		t.Error("assessment should be marked NarrativeOnly")
+	}
+	if len(assessment.Columns) != 2 || assessment.Columns[0].Name != "SourceFile" || assessment.Columns[1].Name != "NarrativeText" {
+		t.Errorf("assessment columns = %+v, want [SourceFile, NarrativeText]", assessment.Columns)
 	}
 }
 

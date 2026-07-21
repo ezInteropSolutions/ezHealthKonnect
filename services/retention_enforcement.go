@@ -22,6 +22,7 @@ package services
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"log"
 	"time"
@@ -74,12 +75,14 @@ func (r *RetentionEnforcementService) enforce(ctx context.Context) {
 	settings := GetAppSettings()
 	msgSettings := settings.GetMessageQueueSettings()
 	alertSettings := settings.GetAlertDefaultSettings()
+	cdaDedupeSettings := settings.GetCDADedupeSettings()
 
 	r.enforceMessageTables(ctx, msgSettings.MessageRetentionDays)
 	r.enforceDLQ(ctx, msgSettings.DLQRetentionDays)
 	r.enforceQualityScores(ctx, alertSettings.MetricsRetentionDays)
 	r.enforceMetrics(ctx, alertSettings.MetricsRetentionDays)
 	r.enforceTransformHistory(ctx, alertSettings.HistoryRetentionDays)
+	r.enforceCDADedupeRegistry(ctx, cdaDedupeSettings.RegistryRetentionDays)
 }
 
 // enforceMessageTables purges rows older than retentionDays from every
@@ -269,6 +272,46 @@ func (r *RetentionEnforcementService) enforceTransformHistory(ctx context.Contex
 	}
 	if n, _ := res.RowsAffected(); n > 0 {
 		log.Printf("🗑️  [Retention] Purged %d pipeline execution records (>%d days old)", n, retentionDays)
+	}
+}
+
+// enforceCDADedupeRegistry purges cda_dedupe_registry rows whose last_seen_at
+// (NOT first_seen_at — an actively-recurring chronic fact must never be
+// purged just because it was first registered long ago) has aged past
+// retentionDays. Unlike the other enforceX methods above, this table holds
+// PHI (a patient identifier plus clinical codes/dates), so — beyond the usual
+// log.Printf — every run also writes ONE summary row to audit_logs
+// (CDA_DEDUPE_REGISTRY_RETENTION_PURGED), satisfying HIPAA §164.310(d)(2)(i)'s
+// disposal-tracking requirement for ePHI. One row per RUN, not per deleted
+// row — logging per-row would reintroduce the same unbounded-growth problem
+// this purge exists to solve, just in a second table.
+func (r *RetentionEnforcementService) enforceCDADedupeRegistry(ctx context.Context, retentionDays int) {
+	if retentionDays <= 0 {
+		retentionDays = 2555 // ~7 years — mirrors CDADedupeSettings' own default
+	}
+
+	res, err := r.db.ExecContext(ctx, `
+		DELETE FROM cda_dedupe_registry
+		WHERE last_seen_at < NOW() - ($1 || ' days')::INTERVAL`, retentionDays)
+	if err != nil {
+		log.Printf("⚠️  [Retention] Error purging cda_dedupe_registry: %v", err)
+		return
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return
+	}
+	log.Printf("🗑️  [Retention] Purged %d cda_dedupe_registry rows (>%d days since last seen)", n, retentionDays)
+
+	metadata, _ := json.Marshal(map[string]interface{}{
+		"retention_days": retentionDays,
+		"rows_purged":    n,
+	})
+	if _, err := r.db.ExecContext(ctx, `
+		INSERT INTO audit_logs (id, action, entity_type, metadata, result, risk_level, created_at)
+		VALUES (gen_random_uuid(), 'CDA_DEDUPE_REGISTRY_RETENTION_PURGED', 'cda_dedupe_registry', $1::jsonb, 'success', 'low', NOW())
+	`, string(metadata)); err != nil {
+		log.Printf("⚠️  [Retention] Failed to write audit log for cda_dedupe_registry purge: %v", err)
 	}
 }
 

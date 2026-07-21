@@ -25,7 +25,30 @@ import (
 // itself — organization identity that has no canonical-JSON source (the
 // header's "author"/"custodian" org name isn't populated by cda.parse today).
 type BuildOptions struct {
-	OrgName string // custodian + fallback author organization name
+	OrgName   string           // custodian + fallback author organization name (legacy — see CustodianOptions.OrgName)
+	Custodian CustodianOptions // structured custodian fields — deployment-level constant config, not per-message source data (see cda.build step's own Custodian tab, not cda.map_to_canonical)
+}
+
+// CustodianOptions are the structured Custodian fields configurable
+// directly on the cda.build step (services/executors/transform/
+// cda_build_executor.go's CdaCustodianConfig). All-zero-value is
+// byte-for-byte backward compatible with the pre-existing hardcoded
+// writeCustodianHeader behavior (bare npiOID-rooted id, name from
+// resolveOrgName(opts)) — every saved pipeline predating this feature keeps
+// producing identical output.
+//
+// Address/Phone are accepted as useful, purely optional data entry:
+// cda/schemas/ccda_2_1.json's header.custodian section defines no
+// address/telecom fields at all (unlike header.patient), so this package
+// does not assert them as spec-required — see header_requirements.go's file
+// comment for why that's a deliberate, evidence-based omission rather than
+// an oversight.
+type CustodianOptions struct {
+	IdRoot      string // defaults to npiOID when empty — preserves current hardcoded behavior
+	IdExtension string // empty -> bare npiOID-rooted id, no extension (current behavior)
+	OrgName     string // falls back to resolveOrgName(opts) when empty (current behavior)
+	Street, City, State, PostalCode, Country string
+	Phone       string
 }
 
 // BuildDocument converts canonicalDoc into a C-CDA 2.1 XML string for the
@@ -244,10 +267,47 @@ func resolveOrgName(opts BuildOptions) string {
 	return "ezHealthKonnect"
 }
 
+// writeCustodianHeader writes <custodian><assignedCustodian>
+// <representedCustodianOrganization>. opts.Custodian's zero value reproduces
+// the pre-existing hardcoded shape exactly (bare npiOID-rooted id, name from
+// resolveOrgName(opts)) — every saved pipeline predating structured
+// Custodian config keeps producing byte-for-byte identical output.
 func writeCustodianHeader(root *etree.Element, opts BuildOptions) {
+	cust := opts.Custodian
 	org := root.CreateElement("custodian").CreateElement("assignedCustodian").CreateElement("representedCustodianOrganization")
-	org.CreateElement("id").CreateAttr("root", npiOID)
-	org.CreateElement("name").SetText(resolveOrgName(opts))
+
+	idRoot := cust.IdRoot
+	if idRoot == "" {
+		idRoot = npiOID
+	}
+	id := org.CreateElement("id")
+	id.CreateAttr("root", idRoot)
+	if cust.IdExtension != "" {
+		id.CreateAttr("extension", cust.IdExtension)
+	}
+
+	name := cust.OrgName
+	if name == "" {
+		name = resolveOrgName(opts)
+	}
+	org.CreateElement("name").SetText(name)
+
+	// Address/phone reuse patientAddressFields/writeHeaderFields verbatim —
+	// same helper, same convention, no new XML-writing mechanism. Optional
+	// data entry (see CustodianOptions' own doc comment for why these are
+	// not spec-asserted requirements).
+	if cust.Street != "" || cust.City != "" || cust.State != "" || cust.PostalCode != "" || cust.Country != "" {
+		addr := org.CreateElement("addr")
+		writeHeaderFields(addr, map[string]interface{}{
+			"street": cust.Street, "city": cust.City, "state": cust.State,
+			"postalCode": cust.PostalCode, "country": cust.Country,
+		}, patientAddressFields)
+	}
+	if cust.Phone != "" {
+		tel := org.CreateElement("telecom")
+		tel.CreateAttr("value", "tel:"+cust.Phone)
+		tel.CreateAttr("use", "WP")
+	}
 }
 
 // writePersonReference writes one <tag><assignedEntity>...</assignedEntity></tag>

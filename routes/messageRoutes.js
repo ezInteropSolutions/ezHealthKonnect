@@ -47,10 +47,11 @@ router.get('/stats', sessionAuth, canRead, (req, res) => {
 });
 
 // Message detail reads                                   — viewer+
-router.get('/:messageId',         sessionAuth, canRead,  (req, res) => MessageController.getMessageDetail(req, res));
-router.get('/:messageId/lineage', sessionAuth, canRead,  (req, res) => MessageController.getDataLineage(req, res));
-router.get('/:messageId/errors',  sessionAuth, canRead,  (req, res) => MessageController.getMessageErrors(req, res));
-router.get('/:messageId/logs',    sessionAuth, canRead,  (req, res) => MessageController.getMessageLogs(req, res));
+router.get('/:messageId',                     sessionAuth, canRead,  (req, res) => MessageController.getMessageDetail(req, res));
+router.get('/:messageId/lineage',             sessionAuth, canRead,  (req, res) => MessageController.getDataLineage(req, res));
+router.get('/:messageId/dedupe-suppressions', sessionAuth, canRead,  (req, res) => MessageController.getDedupeSuppressions(req, res));
+router.get('/:messageId/errors',              sessionAuth, canRead,  (req, res) => MessageController.getMessageErrors(req, res));
+router.get('/:messageId/logs',                sessionAuth, canRead,  (req, res) => MessageController.getMessageLogs(req, res));
 
 // Message flow status                                    — viewer+
 router.get('/flow/:sourceInterfaceId/:targetInterfaceId/status', sessionAuth, canRead, (req, res) => MessageController.getFlowStatus(req, res));

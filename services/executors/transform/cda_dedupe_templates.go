@@ -120,3 +120,61 @@ func SupportedCDADedupeSections() []string {
 	sort.Strings(keys)
 	return keys
 }
+
+// DedupeFieldOption is one selectable identity-matching field for a section in
+// the cda.dedupe step's no-code field picker — a friendly Name + the CDA Path
+// it resolves (same path a user would otherwise have had to type by hand into
+// overrides.<key>.keyPaths), plus whether it's part of the OOB identity rule.
+type DedupeFieldOption struct {
+	Name    string `json:"name"`
+	Path    string `json:"path"`
+	Default bool   `json:"default"`
+}
+
+// DedupeSectionOption is one section's full field-picker option list.
+type DedupeSectionOption struct {
+	SectionKey string               `json:"sectionKey"`
+	Fields     []DedupeFieldOption  `json:"fields"`
+}
+
+// DedupeSectionCatalog returns every section cda.dedupe can operate on, with
+// its available identity-matching fields and which are pre-selected by the OOB
+// rule (cdaDedupeIdentityRules) — for the step config UI's checkbox picker.
+//
+// Sourced live from CSVSectionCatalog() (services/executors/transform/
+// cda_section_to_csv_executor.go) for the field list, since that catalog
+// already carries a friendly Name + resolved CDA Path per field for every
+// section this codebase knows about — reusing it here means the picker can
+// never drift out of sync with a hand-maintained list, and it automatically
+// covers every section the CSV catalog ever gains in the future. Sections
+// marked NarrativeOnly are excluded: a narrative section has no repeatable
+// <entry> elements for cda.dedupe to compare, only one block of prose text.
+//
+// A field counts as "Default" (pre-checked) when its Path exactly matches one
+// of cdaDedupeIdentityRules[sectionKey].KeyPaths — verified by hand against
+// every OOB section that the two catalogs' path strings agree exactly.
+func DedupeSectionCatalog() []DedupeSectionOption {
+	csvSections := CSVSectionCatalog()
+	out := make([]DedupeSectionOption, 0, len(csvSections))
+	for _, sec := range csvSections {
+		if sec.NarrativeOnly {
+			continue
+		}
+		defaultPaths := map[string]bool{}
+		if rule, ok := cdaDedupeIdentityRules[sec.SectionKey]; ok {
+			for _, p := range rule.KeyPaths {
+				defaultPaths[p] = true
+			}
+		}
+		fields := make([]DedupeFieldOption, 0, len(sec.Columns))
+		for _, col := range sec.Columns {
+			fields = append(fields, DedupeFieldOption{
+				Name:    col.Name,
+				Path:    col.Path,
+				Default: defaultPaths[col.Path],
+			})
+		}
+		out = append(out, DedupeSectionOption{SectionKey: sec.SectionKey, Fields: fields})
+	}
+	return out
+}

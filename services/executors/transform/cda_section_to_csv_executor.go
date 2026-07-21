@@ -12,11 +12,17 @@
 //
 // Config keys (all optional):
 //
-//	sourceField  — dot-path to the parsed CDA map (default: looks for _format=ccda)
-//	sections     — []string of section keys to export (default: every section
-//	               with an OOB CSV template — see SupportedCDACSVSections())
-//	outputPrefix — prefix for each section's output field (default: "csv_",
-//	               producing e.g. "csv_medications", "csv_allergiesAndIntolerances")
+//	sourceField   — dot-path to the parsed CDA map (default: looks for _format=ccda)
+//	sections      — []string of section keys to export (default: every section
+//	                with an OOB CSV template — see SupportedCDACSVSections())
+//	outputPrefix  — prefix for each section's output field (default: "csv_",
+//	                producing e.g. "csv_medications", "csv_allergiesAndIntolerances")
+//	customColumns — map[sectionKey][]CSVColumn: extra columns a user adds via
+//	                the step config UI, or overrides of an OOB column by
+//	                reusing its exact Name — see mergeCustomColumns. The full
+//	                OOB catalog (section+column metadata, for the UI to show
+//	                what's already being captured) is exposed read-only via
+//	                CSVSectionCatalog() / GET /api/cda/csv/sections.
 package transform
 
 import (
@@ -67,6 +73,44 @@ type cdaSectionToCSVConfig struct {
 	SourceField  string   `json:"sourceField"`
 	Sections     []string `json:"sections"`
 	OutputPrefix string   `json:"outputPrefix"`
+	// CustomColumns lets a user add columns beyond the OOB set, or override
+	// an OOB column's Path/FallbackPaths/etc by reusing its exact Name —
+	// keyed by section key, matching the pipeline-builder step config UI's
+	// per-section custom column editor. See mergeCustomColumns.
+	CustomColumns map[string][]CSVColumn `json:"customColumns"`
+}
+
+// mergeCustomColumns applies a user's per-section custom columns onto the
+// OOB template's own Columns, by Name: a custom column whose Name matches an
+// existing OOB column REPLACES it (its Path/FallbackPaths/ExposeCodeMetadata/
+// Multiple all win, matching the step config UI's "override" mode — a user
+// removing the override in the UI simply drops it from CustomColumns, which
+// restores the OOB column on the next run); any other custom column is
+// appended after the OOB set. Does not touch universalEntryColumns (EntryId/
+// AuthorName/AuthorOrganization/Comment) — a custom column happening to reuse
+// one of those names is appended as a separate, duplicately-named column
+// rather than overriding it; NarrativeOnly sections have no per-entry Columns
+// to extend, so their custom columns (if any) are ignored.
+func mergeCustomColumns(tmpl CSVSectionTemplate, custom []CSVColumn) CSVSectionTemplate {
+	if len(custom) == 0 || tmpl.NarrativeOnly {
+		return tmpl
+	}
+	merged := make([]CSVColumn, len(tmpl.Columns))
+	copy(merged, tmpl.Columns)
+	byName := make(map[string]int, len(merged))
+	for i, c := range merged {
+		byName[c.Name] = i
+	}
+	for _, c := range custom {
+		if idx, ok := byName[c.Name]; ok {
+			merged[idx] = c
+		} else {
+			merged = append(merged, c)
+			byName[c.Name] = len(merged) - 1
+		}
+	}
+	tmpl.Columns = merged
+	return tmpl
 }
 
 // Execute resolves the typed CDA document, builds one CSV per requested
@@ -121,6 +165,9 @@ func (e *CDASectionToCSVExecutor) Execute(
 		tmpl, ok := cdaCSVSectionTemplates[sectionKey]
 		if !ok {
 			continue // no OOB template for this section key — silently skip, matches cda.to_fhir's "no rule" behavior
+		}
+		if custom := cfg.CustomColumns[sectionKey]; len(custom) > 0 {
+			tmpl = mergeCustomColumns(tmpl, custom)
 		}
 
 		var rows []map[string]string
@@ -291,9 +338,9 @@ func expandCodeMetadataColumns(columns []CSVColumn) []CSVColumn {
 			continue
 		}
 		out = append(out,
-			CSVColumn{Name: col.Name + "CodeSystem", Path: col.Path + ".codeSystem"},
-			CSVColumn{Name: col.Name + "CodeSystemName", Path: col.Path + ".codeSystemName"},
-			CSVColumn{Name: col.Name + "OriginalText", Path: col.Path + ".originalText"},
+			CSVColumn{Name: col.Name + "CodeSystem", Path: col.Path + ".codeSystem", Multiple: col.Multiple},
+			CSVColumn{Name: col.Name + "CodeSystemName", Path: col.Path + ".codeSystemName", Multiple: col.Multiple},
+			CSVColumn{Name: col.Name + "OriginalText", Path: col.Path + ".originalText", Multiple: col.Multiple},
 		)
 	}
 	return out
@@ -315,6 +362,61 @@ func resolvedSectionColumns(tmpl CSVSectionTemplate) []CSVColumn {
 // narrativeRowColumns is the fixed 2-column shape every NarrativeOnly
 // section produces — see buildNarrativeRow.
 var narrativeRowColumns = []CSVColumn{{Name: "SourceFile"}, {Name: "NarrativeText"}}
+
+// CSVColumnSummary is the wire shape of one OOB (or user-added custom)
+// column, for the pipeline-builder step config UI — lets a user SEE which
+// columns/paths a section produces before running anything, and compare a
+// custom column's path against the OOB ones. Mirrors CSVColumn field-for-field.
+type CSVColumnSummary struct {
+	Name               string   `json:"name"`
+	Path               string   `json:"path"`
+	FallbackPaths      []string `json:"fallbackPaths,omitempty"`
+	ExposeCodeMetadata bool     `json:"exposeCodeMetadata,omitempty"`
+	Multiple           bool     `json:"multiple,omitempty"`
+}
+
+// CSVSectionSummary is the wire shape of one section's OOB template, for the
+// same UI (GetCSVSections in controllers/cda_csv_schema_controller.go).
+type CSVSectionSummary struct {
+	SectionKey    string             `json:"sectionKey"`
+	NarrativeOnly bool               `json:"narrativeOnly"`
+	Columns       []CSVColumnSummary `json:"columns"`
+}
+
+// CSVSectionCatalog returns every registered CDA CSV section with its
+// resolved column list (universal columns + section-specific columns,
+// ExposeCodeMetadata already expanded into its 3 companion columns) — the
+// exact same shape buildCSVRows/Execute resolve rows and write CSV headers
+// from, so the config UI can never drift from what actually runs.
+func CSVSectionCatalog() []CSVSectionSummary {
+	keys := SupportedCDACSVSections()
+	out := make([]CSVSectionSummary, 0, len(keys))
+	for _, key := range keys {
+		tmpl := cdaCSVSectionTemplates[key]
+		var cols []CSVColumn
+		if tmpl.NarrativeOnly {
+			cols = narrativeRowColumns
+		} else {
+			cols = resolvedSectionColumns(tmpl)
+		}
+		colSummaries := make([]CSVColumnSummary, 0, len(cols))
+		for _, c := range cols {
+			colSummaries = append(colSummaries, CSVColumnSummary{
+				Name:               c.Name,
+				Path:               c.Path,
+				FallbackPaths:      c.FallbackPaths,
+				ExposeCodeMetadata: c.ExposeCodeMetadata,
+				Multiple:           c.Multiple,
+			})
+		}
+		out = append(out, CSVSectionSummary{
+			SectionKey:    key,
+			NarrativeOnly: tmpl.NarrativeOnly,
+			Columns:       colSummaries,
+		})
+	}
+	return out
+}
 
 // buildNarrativeRow handles sections that are narrative-only per C-CDA (no
 // structured <entry> data at all in real-world documents: Assessment,
@@ -467,6 +569,21 @@ func buildRow(entryMap map[string]interface{}, columns []CSVColumn) map[string]s
 // CSVColumn's own doc comment, and declarative_oob_rules.go's matching
 // Scope/ScopeFallbacks idiom on the FHIR side of these same fields).
 func resolveColumn(node map[string]interface{}, col CSVColumn) string {
+	if col.Multiple {
+		// Every sibling match, not just the first — see CSVColumn.Multiple's
+		// own doc comment. FallbackPaths is deliberately not combined with
+		// this mode: "collect every match of path A, else every match of
+		// path B" has no single sensible join semantics, and no OOB column
+		// needs both today.
+		matches := executors.ResolveCDAPaths(node, col.Path, false)
+		parts := make([]string, 0, len(matches))
+		for _, m := range matches {
+			if s := cdaValueToCSVString(m); s != "" {
+				parts = append(parts, s)
+			}
+		}
+		return strings.Join(parts, "; ")
+	}
 	if len(col.FallbackPaths) == 0 {
 		return cdaValueToCSVString(executors.ResolveCDAPath(node, col.Path, false))
 	}

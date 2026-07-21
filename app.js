@@ -211,13 +211,17 @@ const forwardToGo = async (req, res) => {
             if (req.session.user.email) options.headers['X-User-Email'] = String(req.session.user.email);
         }
         
-        // Add body for POST/PUT/PATCH requests. req.body is one of:
+        // Add body for POST/PUT/PATCH/DELETE requests. req.body is one of:
         //   - a Buffer (raw content types like application/xml — forward verbatim,
         //     do NOT JSON.stringify it, that would corrupt binary/XML content), or
         //   - a parsed object (JSON or url-encoded — re-serialize as JSON, existing
         //     behavior), or
         //   - undefined (no body-parser matched this request's content-type).
-        if (['POST', 'PUT', 'PATCH'].includes(req.method) && req.body !== undefined) {
+        // DELETE included: a DELETE-with-JSON-body (e.g. /api/cda/dedupe/registry's
+        // {interfaceId, patientKey, reason} erasure request) is a legitimate REST
+        // pattern — omitting it here silently dropped the body, and Go's
+        // ShouldBindJSON then failed with an empty-body error.
+        if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method) && req.body !== undefined) {
             options.body = Buffer.isBuffer(req.body) ? req.body : JSON.stringify(req.body);
         }
         
@@ -373,7 +377,15 @@ app.get('/api/fhir/templates/rebuild-status',        _verifyToken, _requireSuper
 // _verifyToken runs and populates req.user (needed for X-User-Role forwarding to Go).
 app.use('/api/fhir/dlq', _verifyToken, _requireDLQAccess, forwardToGo);
 
-// Quality review routes — same reason as DLQ
+// Quality review / Mapping Review routes — registered before the catch-all
+// /api/fhir route, same reason as DLQ above. super_admin-only by design — Go's
+// main.go independently wraps this whole route group in requireProxiedSuperAdmin()
+// with an explicit "(integration team only)" comment, so this Node-side check
+// must match, not loosen (confirmed: loosening this alone doesn't even grant
+// access, since Go's own gate still 403s a plain admin — it would just move
+// where the rejection happens). The actual bug was sidebar-nav.js's mapping
+// review badge poller assuming plain admins could reach this — fixed there
+// instead of here; see startMappingReviewBadgePoller's role check.
 app.use('/api/fhir/quality', _verifyToken, _requireSuperAdminUser, forwardToGo);
 
 // Monitoring dashboard — live KPIs, alerts, message feed, per-interface health
@@ -387,6 +399,13 @@ app.use('/api/monitoring', _verifyToken, forwardToGo);
 // optional X-User-Role header. This closes that gap in defense; the Go side also now
 // requires requireProxiedAdmin() on this route group (see main.go's settingsGroup).
 app.use('/api/system/settings', _verifyToken, _requireAdminUser, forwardToGo);
+
+// CDA dedupe registry — PHI-bearing (patient identifier + clinical codes/dates),
+// admin-only. Must be registered BEFORE the catch-all /api/cda proxy below, same
+// reasoning as the DLQ/quality/settings carve-outs above: Go's requireAdminRole()
+// on this route is defense-in-depth, not the only check — without this Node-side
+// gate the route would be reachable by any authenticated session, admin or not.
+app.use('/api/cda/dedupe/registry', _verifyToken, _requireAdminUser, forwardToGo);
 
 // Apply explicit route handlers for Go backend routes
 app.use('/api/fhir', forwardToGo);

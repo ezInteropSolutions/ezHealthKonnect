@@ -22,9 +22,10 @@ import cdaSchema "ezhealthkonnect/cda"
 // defines an XPath for), mirroring entry_archetypes.go's writeFieldValue
 // exactly.
 type CanonicalFieldInfo struct {
-	Key      string `json:"key"`
-	Label    string `json:"label"`
-	DataType string `json:"dataType,omitempty"`
+	Key         string `json:"key"`
+	Label       string `json:"label"`
+	DataType    string `json:"dataType,omitempty"`
+	Conformance string `json:"conformance,omitempty"` // SHALL | SHOULD | MAY, from CDAFieldDef.Conformance — empty for header-catalog entries (see header_requirements.go for header conformance)
 }
 
 // CanonicalSectionInfo describes one section cda.build can populate — every
@@ -67,18 +68,22 @@ func SectionFieldCatalog(loader *cdaSchema.CDASchemaLoader, sectionKey string) [
 
 	out := make([]CanonicalFieldInfo, 0, len(sec.Fields)*2)
 	for _, f := range sec.Fields {
-		out = append(out, CanonicalFieldInfo{Key: f.Key, Label: f.USCDIElement, DataType: f.DataType})
+		out = append(out, CanonicalFieldInfo{Key: f.Key, Label: f.USCDIElement, DataType: f.DataType, Conformance: f.Conformance})
+		// Display/System/Unit/Family companions inherit the parent field's
+		// conformance level — the schema doesn't level them independently
+		// (e.g. a SHALL code's display text isn't itself a separately-leveled
+		// SHALL/SHOULD field in ccda_2_1.json).
 		if f.XPathDisplay != "" {
-			out = append(out, CanonicalFieldInfo{Key: f.Key + "Display", Label: f.USCDIElement + " (display text)", DataType: "ST"})
+			out = append(out, CanonicalFieldInfo{Key: f.Key + "Display", Label: f.USCDIElement + " (display text)", DataType: "ST", Conformance: f.Conformance})
 		}
 		if f.XPathSystem != "" {
-			out = append(out, CanonicalFieldInfo{Key: f.Key + "System", Label: f.USCDIElement + " (code system OID)", DataType: "OID"})
+			out = append(out, CanonicalFieldInfo{Key: f.Key + "System", Label: f.USCDIElement + " (code system OID)", DataType: "OID", Conformance: f.Conformance})
 		}
 		if f.XPathUnit != "" {
-			out = append(out, CanonicalFieldInfo{Key: f.Key + "Unit", Label: f.USCDIElement + " (unit)", DataType: "ST"})
+			out = append(out, CanonicalFieldInfo{Key: f.Key + "Unit", Label: f.USCDIElement + " (unit)", DataType: "ST", Conformance: f.Conformance})
 		}
 		if f.XPathFamily != "" {
-			out = append(out, CanonicalFieldInfo{Key: f.Key + "Family", Label: f.USCDIElement + " (family/component)", DataType: "ST"})
+			out = append(out, CanonicalFieldInfo{Key: f.Key + "Family", Label: f.USCDIElement + " (family/component)", DataType: "ST", Conformance: f.Conformance})
 		}
 	}
 	return out

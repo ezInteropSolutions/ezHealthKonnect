@@ -65,7 +65,7 @@ func NewCDADedupeExecutor(db *sql.DB) *CDADedupeExecutor {
 	exec := &CDADedupeExecutor{
 		BaseExecutor: executors.NewBaseExecutor("cda.dedupe", models.ExecutorMetadata{
 			Name:        "CDA Deduplication",
-			Description: "Removes duplicate clinical entries within a single CDA/CCD document, matched by clinically-meaningful identity per section (not a generic full-record hash). Optionally also across separate documents for the same patient.",
+			Description: "Finds and removes duplicate clinical entries in a document, like the same allergy or medication listed twice — matched by the details that actually identify each entry (not just comparing raw text). Optionally also across separate documents for the same patient.",
 			Version:     "1.1.0",
 			Author:      "ezHealthKonnect",
 			Category:    "CDA Transform",
@@ -87,6 +87,13 @@ type cdaDedupeConfig struct {
 	Overrides             map[string]cdaDedupeOverride `json:"overrides"` // per-section identity-key override; see cdaDedupeOverride
 	CrossMessage          bool                         `json:"crossMessage"`
 	PatientIdentifierRoot string                       `json:"patientIdentifierRoot"` // required when crossMessage is true
+	// TrackSuppressionLineage controls whether a cross-message suppression
+	// attaches per-entry lineage (identity_key + first_seen_message_id/at) to
+	// this step's output, on top of the plain removed-count that's always
+	// present. Pointer so nil (key omitted) means "on" — the default — and
+	// only an explicit false opts out, e.g. for an org that wants to minimize
+	// what per-entry detail gets captured in step_executions.step_output.
+	TrackSuppressionLineage *bool `json:"trackSuppressionLineage"`
 }
 
 // cdaDedupeOverride replaces the OOB identity rule (cdaDedupeIdentityRules)
@@ -148,6 +155,7 @@ func (e *CDADedupeExecutor) Execute(ctx context.Context, step *models.Transforma
 	}
 	messageID := resolveMessageIDForDedupe(inputData, ctx)
 	crossMessageActive := cfg.CrossMessage && interfaceID != "" && patientKeyFound
+	trackLineage := cfg.TrackSuppressionLineage == nil || *cfg.TrackSuppressionLineage
 
 	sectionStats := make(map[string]interface{}, len(sectionKeys))
 	totalRemoved := 0
@@ -168,22 +176,30 @@ func (e *CDADedupeExecutor) Execute(ctx context.Context, step *models.Transforma
 		deduped, removed := dedupeSectionEntries(section.Entries, rule, cfg.Strategy)
 
 		crossRemoved := 0
+		var crossSuppressed []suppressedCrossMessageEntry
 		if crossMessageActive {
 			var crossErr error
-			deduped, crossRemoved, crossErr = e.applyCrossMessageDedupe(ctx, interfaceID, patientKey, sectionKey, messageID, deduped, rule)
+			deduped, crossRemoved, crossSuppressed, crossErr = e.applyCrossMessageDedupe(ctx, interfaceID, patientKey, sectionKey, messageID, deduped, rule, trackLineage)
 			if crossErr != nil {
 				return nil, fmt.Errorf("cda.dedupe: cross-message check failed for section %s: %w", sectionKey, crossErr)
 			}
 		}
 
 		section.Entries = deduped
-		sectionStats[sectionKey] = map[string]interface{}{
+		stats := map[string]interface{}{
 			"original_count":        originalCount,
 			"dedup_count":           len(deduped),
 			"removed_count":         removed + crossRemoved,
 			"in_document_removed":   removed,
 			"cross_message_removed": crossRemoved,
 		}
+		// Per-entry lineage — which identity was dropped and which earlier
+		// message first delivered it — only present when something was
+		// actually cross-message-suppressed for this section.
+		if len(crossSuppressed) > 0 {
+			stats["cross_message_suppressed"] = crossSuppressed
+		}
+		sectionStats[sectionKey] = stats
 		totalRemoved += removed + crossRemoved
 	}
 
@@ -252,18 +268,34 @@ func resolvePatientIdentifierKey(doc *cdadocument.CDADocument, patientIdentifier
 	return "", false
 }
 
+// suppressedCrossMessageEntry records why one entry was dropped by
+// crossMessage dedup — surfaced in step output (section_stats.<key>.
+// cross_message_suppressed) so a message's own processing trace answers
+// "what got dropped, and which earlier message first delivered it" directly,
+// without a separate lookup into cda_dedupe_registry.
+type suppressedCrossMessageEntry struct {
+	IdentityKey        string `json:"identity_key"`
+	FirstSeenMessageID string `json:"first_seen_message_id"`
+	FirstSeenAt        string `json:"first_seen_at"`
+}
+
 // applyCrossMessageDedupe checks each already-in-document-deduplicated entry
 // against the persistent registry (cda_dedupe_registry), atomically
 // registering new identities and dropping ones already seen in an earlier
 // message for the same patient. Entries whose identity key can't be resolved
 // are always kept, never checked against the registry — same "never dedupe
 // on missing data" rule as within-document matching.
+//
+// trackLineage controls only whether a suppressed entry's identity/lineage
+// detail is captured into the returned slice — the registry check and the
+// suppression decision itself happen identically either way.
 func (e *CDADedupeExecutor) applyCrossMessageDedupe(
 	ctx context.Context, interfaceID, patientKey, sectionKey, messageID string,
-	entries []cdadocument.CDAEntry, rule DedupeIdentityRule,
-) ([]cdadocument.CDAEntry, int, error) {
+	entries []cdadocument.CDAEntry, rule DedupeIdentityRule, trackLineage bool,
+) ([]cdadocument.CDAEntry, int, []suppressedCrossMessageEntry, error) {
 	result := make([]cdadocument.CDAEntry, 0, len(entries))
 	removed := 0
+	var suppressed []suppressedCrossMessageEntry
 	for _, entry := range entries {
 		entryMap, err := marshalEntryMap(entry)
 		if err != nil {
@@ -286,17 +318,24 @@ func (e *CDADedupeExecutor) applyCrossMessageDedupe(
 		}
 		identityKey := strings.Join(parts, "|")
 
-		isNew, err := e.checkAndRegisterCrossMessage(ctx, interfaceID, patientKey, sectionKey, identityKey, messageID)
+		isNew, firstSeenMessageID, firstSeenAt, err := e.checkAndRegisterCrossMessage(ctx, interfaceID, patientKey, sectionKey, identityKey, messageID)
 		if err != nil {
-			return nil, 0, err
+			return nil, 0, nil, err
 		}
 		if isNew {
 			result = append(result, entry)
 		} else {
 			removed++
+			if trackLineage {
+				suppressed = append(suppressed, suppressedCrossMessageEntry{
+					IdentityKey:        identityKey,
+					FirstSeenMessageID: firstSeenMessageID,
+					FirstSeenAt:        firstSeenAt.UTC().Format(time.RFC3339),
+				})
+			}
 		}
 	}
-	return result, removed, nil
+	return result, removed, suppressed, nil
 }
 
 // checkAndRegisterCrossMessage atomically checks whether
@@ -304,11 +343,17 @@ func (e *CDADedupeExecutor) applyCrossMessageDedupe(
 // inserting a new registry row if not. Uses Postgres's "xmax = 0" trick to
 // detect INSERT vs. UPDATE in a single round trip, avoiding a check-then-
 // insert race under concurrent message processing for the same patient.
+//
+// Also returns first_seen_message_id/first_seen_at in the SAME round trip —
+// on a suppression (isNew=false) this is the lineage data the caller needs to
+// answer "where did this fact first come from," surfaced in step output
+// (applyCrossMessageDedupe) instead of requiring a separate lookup into
+// cda_dedupe_registry to find out.
 func (e *CDADedupeExecutor) checkAndRegisterCrossMessage(
 	ctx context.Context, interfaceID, patientKey, sectionKey, identityKey, messageID string,
-) (isNew bool, err error) {
+) (isNew bool, firstSeenMessageID string, firstSeenAt time.Time, err error) {
 	if e.db == nil {
-		return false, fmt.Errorf("crossMessage requires a database connection, none configured")
+		return false, "", time.Time{}, fmt.Errorf("crossMessage requires a database connection, none configured")
 	}
 	const query = `
 		INSERT INTO cda_dedupe_registry
@@ -320,13 +365,13 @@ func (e *CDADedupeExecutor) checkAndRegisterCrossMessage(
 			last_seen_at = NOW(),
 			seen_count = cda_dedupe_registry.seen_count + 1,
 			updated_at = NOW()
-		RETURNING (xmax = 0) AS inserted
+		RETURNING (xmax = 0) AS inserted, COALESCE(first_seen_message_id, ''), first_seen_at
 	`
 	row := e.db.QueryRowContext(ctx, query, interfaceID, patientKey, sectionKey, identityKey, messageID)
-	if err := row.Scan(&isNew); err != nil {
-		return false, err
+	if err := row.Scan(&isNew, &firstSeenMessageID, &firstSeenAt); err != nil {
+		return false, "", time.Time{}, err
 	}
-	return isNew, nil
+	return isNew, firstSeenMessageID, firstSeenAt, nil
 }
 
 // resolveDocument prefers the typed *CDADocument left inside the shared
@@ -483,6 +528,11 @@ func (e *CDADedupeExecutor) Validate(step *models.TransformationStep) error {
 			return fmt.Errorf("cda.dedupe: patientIdentifierRoot is required when crossMessage is true — there is no automatic patient-identifier detection")
 		}
 	}
+	if raw, present := step.Config["trackSuppressionLineage"]; present {
+		if _, ok := raw.(bool); !ok {
+			return fmt.Errorf("cda.dedupe: trackSuppressionLineage must be a boolean")
+		}
+	}
 	return nil
 }
 
@@ -490,6 +540,8 @@ func (e *CDADedupeExecutor) GetOutputVariables(step *models.TransformationStep) 
 	return []models.VariableDefinition{
 		{Name: "Section dedup stats", Path: "_stepOutput.section_stats", DataType: "object",
 			Description: "Per-section original_count/dedup_count/removed_count/in_document_removed/cross_message_removed", Category: "CDA Transform"},
+		{Name: "Cross-message suppressed entries", Path: "_stepOutput.section_stats.<sectionKey>.cross_message_suppressed", DataType: "array",
+			Description: "Present only when crossMessage suppressed at least one entry for that section — one {identity_key, first_seen_message_id, first_seen_at} per dropped entry, so this message's own trace shows exactly what was removed and which earlier message first delivered it, without a separate lookup into cda_dedupe_registry.", Category: "CDA Transform"},
 		{Name: "Total removed", Path: "_stepOutput.total_removed", DataType: "integer",
 			Description: "Total duplicate entries removed across all processed sections (in-document + cross-message combined)", Category: "CDA Transform"},
 		{Name: "Cross-message active", Path: "_stepOutput.cross_message_active", DataType: "boolean",

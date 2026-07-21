@@ -1990,6 +1990,66 @@ class MessageController {
         }
     }
 
+    /**
+     * Returns cda.dedupe's cross-message suppression lineage for one message —
+     * which clinical facts were dropped as duplicates of an earlier message,
+     * and which earlier message first delivered each one. Sourced from
+     * step_executions.step_output (already persisted for every real message by
+     * TransformationPipelineService.persistExecutionRecords — no new
+     * persistence, this is a read-only projection over existing data).
+     *
+     * Scoped to interfaces the requesting user owns, same as getMessageDetail —
+     * viewing one message's own processing detail is a normal read, not the
+     * cross-patient browse the dedupe registry admin viewer gates separately.
+     *
+     * Empty array (not 404) when no cda.dedupe step ran for this message, or
+     * it ran but suppressed nothing — most messages fall in this bucket.
+     */
+    async getDedupeSuppressions(req, res) {
+        try {
+            await this.ensureDatabase();
+            const { messageId } = req.params;
+            const userId = req.session.user.id;
+
+            const rows = await this.database.sequelize.query(`
+                SELECT se.step_output
+                FROM step_executions se
+                JOIN transformation_executions te ON te.id = se.execution_id
+                JOIN interfaces i ON i.id = te.interface_id
+                WHERE te.message_id = :messageId
+                  AND se.step_type = 'cda.dedupe'
+                  AND i.user_id = :userId
+                ORDER BY se.started_at DESC
+            `, {
+                replacements: { messageId, userId },
+                type: this.database.sequelize.QueryTypes.SELECT
+            });
+
+            const suppressions = [];
+            for (const row of rows) {
+                const output = typeof row.step_output === 'string' ? JSON.parse(row.step_output) : row.step_output;
+                const sectionStats = output?.section_stats || {};
+                for (const [sectionKey, stats] of Object.entries(sectionStats)) {
+                    const entries = stats?.cross_message_suppressed;
+                    if (!Array.isArray(entries)) continue;
+                    for (const entry of entries) {
+                        suppressions.push({
+                            sectionKey,
+                            identityKey: entry.identity_key,
+                            firstSeenMessageId: entry.first_seen_message_id,
+                            firstSeenAt: entry.first_seen_at,
+                        });
+                    }
+                }
+            }
+
+            return res.json({ success: true, data: suppressions, count: suppressions.length });
+        } catch (error) {
+            console.warn(`⚠️ getDedupeSuppressions: ${error.message}`);
+            return res.status(500).json({ success: false, error: 'Failed to retrieve dedupe suppression lineage' });
+        }
+    }
+
     async getTableNameForMessage(messageId, userId) {
         // Helper to find which table a message belongs to
         if (!userId) return null;

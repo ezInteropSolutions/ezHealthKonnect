@@ -726,8 +726,15 @@ class MessageManager {
 
             container.innerHTML = '<div class="text-center"><i class="fas fa-spinner fa-spin"></i> Loading data lineage...</div>';
 
-            // Get lineage data from backend
-            const lineageResponse = await fetch(`/api/messages/${messageId}/lineage`);
+            // Get lineage data from backend. Dedupe suppression lineage is a
+            // separate, independent concept (cross-message dedup, not message
+            // flow) and fetched in parallel — its own failure/emptiness (the
+            // common case: most messages have no cda.dedupe step or nothing
+            // was suppressed) must never block the main lineage view.
+            const [lineageResponse, dedupeResponse] = await Promise.all([
+                fetch(`/api/messages/${messageId}/lineage`),
+                fetch(`/api/messages/${messageId}/dedupe-suppressions`).catch(() => null),
+            ]);
 
             if (!lineageResponse.ok) {
                 throw new Error('Failed to fetch lineage data');
@@ -739,7 +746,13 @@ class MessageManager {
                 throw new Error(lineageData.error || 'Failed to load lineage');
             }
 
-            this.renderDataLineage(lineageData.data);
+            let dedupeSuppressions = [];
+            if (dedupeResponse && dedupeResponse.ok) {
+                const dedupeData = await dedupeResponse.json().catch(() => null);
+                if (dedupeData && dedupeData.success) dedupeSuppressions = dedupeData.data || [];
+            }
+
+            this.renderDataLineage(lineageData.data, dedupeSuppressions);
         } catch (error) {
             console.error('Failed to load data lineage:', error);
             document.getElementById('messageLineageView').innerHTML =
@@ -780,7 +793,7 @@ class MessageManager {
         }
     }
 
-    renderDataLineage(lineage) {
+    renderDataLineage(lineage, dedupeSuppressions = []) {
         const container = document.getElementById('messageLineageView');
 
         if (!lineage.input) {
@@ -832,6 +845,46 @@ class MessageManager {
                         <tr><th style="color:#64748b;font-weight:500;">Result</th><td><span class="badge bg-success">Success</span></td></tr>
                     </table>
                     ${steps_html}`
+            });
+        }
+
+        // Cross-message dedup suppression lineage — only shown when this
+        // message's cda.dedupe step actually suppressed something (the
+        // common case has nothing here, since crossMessage suppression
+        // requires a prior message to have already delivered the same fact).
+        if (Array.isArray(dedupeSuppressions) && dedupeSuppressions.length > 0) {
+            const rows = dedupeSuppressions.map(s => `
+                <tr>
+                    <td style="color:#1e293b;">${this.escapeHtml(s.sectionKey)}</td>
+                    <td style="font-family:monospace;font-size:0.76rem;color:#475569;word-break:break-all;">${this.escapeHtml(s.identityKey)}</td>
+                    <td style="color:#1e293b;">${s.firstSeenAt ? this.formatDateTime(s.firstSeenAt) : '—'}</td>
+                    <td>${s.firstSeenMessageId
+                        ? `<a href="#" onclick="messageManager.showMessageDetail('${this.escapeHtml(s.firstSeenMessageId)}');return false;" style="color:#2563eb;font-family:monospace;font-size:0.76rem;">${this.escapeHtml(s.firstSeenMessageId)}</a>`
+                        : '—'}</td>
+                </tr>`).join('');
+            steps.push({
+                id: 'lj-dedupe',
+                color: '#f472b6',
+                icon: 'M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z',
+                label: 'Dedup Suppressions',
+                status: `${dedupeSuppressions.length} suppressed`,
+                statusOk: true,
+                time: '',
+                detail: `
+                    <div style="font-size:0.78rem;color:#64748b;margin-bottom:0.6rem;">
+                        These facts were dropped from this message because an earlier message already delivered them (cda.dedupe crossMessage). Click a message ID to jump to where it was first seen.
+                    </div>
+                    <table class="table table-sm table-borderless mb-0" style="font-size:0.83rem;">
+                        <thead>
+                            <tr style="color:#94a3b8;font-size:0.7rem;text-transform:uppercase;">
+                                <th style="font-weight:600;">Section</th>
+                                <th style="font-weight:600;">Identity</th>
+                                <th style="font-weight:600;">First Seen</th>
+                                <th style="font-weight:600;">First Message</th>
+                            </tr>
+                        </thead>
+                        <tbody>${rows}</tbody>
+                    </table>`
             });
         }
 

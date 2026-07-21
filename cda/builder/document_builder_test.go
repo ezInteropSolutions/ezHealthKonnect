@@ -517,3 +517,79 @@ func TestBuildDocument_UnknownDocumentType_Errors(t *testing.T) {
 		t.Fatal("expected an error for an unknown document type")
 	}
 }
+
+// TestBuildDocument_CustodianBackwardCompatible_OrgNameOnly locks in that
+// CustodianOptions' zero value (every pipeline saved before this feature)
+// still produces the exact pre-existing hardcoded shape: a bare
+// npiOID-rooted id with no extension, and name from resolveOrgName(opts).
+func TestBuildDocument_CustodianBackwardCompatible_OrgNameOnly(t *testing.T) {
+	loader := loadTestSchema(t)
+	xml, err := BuildDocument(loader, fullCanonicalDoc(), "CCD", BuildOptions{OrgName: "Legacy Health System"})
+	if err != nil {
+		t.Fatalf("BuildDocument failed: %v", err)
+	}
+
+	idx := strings.Index(xml, "<custodian>")
+	if idx == -1 {
+		t.Fatal("expected a <custodian> element")
+	}
+	end := strings.Index(xml[idx:], "</custodian>")
+	if end == -1 {
+		t.Fatal("expected a closing </custodian> element")
+	}
+	custodianXML := xml[idx : idx+end]
+
+	if !strings.Contains(custodianXML, `root="`+npiOID+`"`) {
+		t.Errorf("expected custodian id root=%q, got: %s", npiOID, custodianXML)
+	}
+	if strings.Contains(custodianXML, "extension=") {
+		t.Errorf("expected no id extension when Custodian is unset, got: %s", custodianXML)
+	}
+	if !strings.Contains(custodianXML, "<name>Legacy Health System</name>") {
+		t.Errorf("expected custodian name to fall back to OrgName, got: %s", custodianXML)
+	}
+	if strings.Contains(custodianXML, "<addr>") || strings.Contains(custodianXML, "<telecom") {
+		t.Errorf("expected no address/telecom when Custodian is unset, got: %s", custodianXML)
+	}
+}
+
+// TestBuildDocument_CustodianStructuredFields verifies the new structured
+// CustodianOptions (id/extension, own org name, address, phone) all reach
+// the built XML, and that a structured OrgName takes precedence over the
+// legacy top-level BuildOptions.OrgName fallback.
+func TestBuildDocument_CustodianStructuredFields(t *testing.T) {
+	loader := loadTestSchema(t)
+	opts := BuildOptions{
+		OrgName: "Fallback Org", // must be overridden by Custodian.OrgName below
+		Custodian: CustodianOptions{
+			IdRoot: "2.16.840.1.113883.19.5", IdExtension: "CUST-001",
+			OrgName: "Structured Health System",
+			Street:  "1 Care Way", City: "Springfield", State: "IL", PostalCode: "62704", Country: "US",
+			Phone: "5559876543",
+		},
+	}
+	xml, err := BuildDocument(loader, fullCanonicalDoc(), "CCD", opts)
+	if err != nil {
+		t.Fatalf("BuildDocument failed: %v", err)
+	}
+
+	idx := strings.Index(xml, "<custodian>")
+	if idx == -1 {
+		t.Fatal("expected a <custodian> element")
+	}
+	end := strings.Index(xml[idx:], "</custodian>")
+	custodianXML := xml[idx : idx+end]
+
+	if !strings.Contains(custodianXML, `root="2.16.840.1.113883.19.5"`) || !strings.Contains(custodianXML, `extension="CUST-001"`) {
+		t.Errorf("expected structured custodian id root/extension, got: %s", custodianXML)
+	}
+	if !strings.Contains(custodianXML, "<name>Structured Health System</name>") {
+		t.Errorf("expected Custodian.OrgName to take precedence over BuildOptions.OrgName, got: %s", custodianXML)
+	}
+	if !strings.Contains(custodianXML, "1 Care Way") || !strings.Contains(custodianXML, "Springfield") {
+		t.Errorf("expected custodian address in output, got: %s", custodianXML)
+	}
+	if !strings.Contains(custodianXML, `tel:5559876543`) {
+		t.Errorf("expected custodian phone in output, got: %s", custodianXML)
+	}
+}

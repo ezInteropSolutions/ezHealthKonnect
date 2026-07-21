@@ -3280,26 +3280,63 @@ class CDANormalizerBuilder {
 
 // ── CDADedupeStepBuilder ───────────────────────────────────────────────────────
 // Config: { sourceField, sections, strategy, overrides, crossMessage, patientIdentifierRoot }
-// OOB_DEDUPE_SECTIONS mirrors cdaDedupeIdentityRules (cda_dedupe_templates.go) —
-// hand-maintained in sync with the Go OOB rules, same convention already used
-// by this file's own Documentation-tab section lists elsewhere in this codebase.
+//
+// Sections + their available identity-matching fields are fetched live from
+// GET /api/cda/dedupe/sections (cdaTransform.DedupeSectionCatalog(), backend)
+// — never hand-duplicated, so this picker can't drift out of sync with what
+// cda.dedupe's Execute actually runs, and it automatically covers every
+// section that catalog ever gains in the future. Mirrors
+// CDASectionToCSVStepBuilder.js's own async-fetch + expand/collapse pattern.
+//
+// A user picks which fields make up a section's identity via checkboxes
+// (pre-checked per the OOB rule) instead of typing raw CDA paths. There is
+// deliberately no free-text "custom section" escape hatch: CDA sections are
+// identified by template ID / LOINC code, not invented by a user, and the
+// dedupe catalog already covers every section the schema knows. A genuinely
+// non-standard section can still be added via the step's raw JSON config
+// (config.sections / config.overrides) if ever needed — just not through
+// this UI.
 
-const OOB_DEDUPE_SECTIONS = [
-    { key: 'medications',              name: 'Medications',              hint: 'medication code + start date' },
-    { key: 'allergiesAndIntolerances',  name: 'Allergies',                 hint: 'substance code alone' },
-    { key: 'problems',                  name: 'Problems',                  hint: 'condition code + onset date' },
-    { key: 'vitalSigns',                name: 'Vital Signs',               hint: 'vital type code + timestamp' },
-    { key: 'immunizations',             name: 'Immunizations',             hint: 'vaccine code + date' },
-    { key: 'procedures',                name: 'Procedures',                hint: 'procedure code + date' },
-    { key: 'encounters',                name: 'Encounters',                hint: "encounter's own CDA <id>" },
-    { key: 'socialHistory',             name: 'Social History',            hint: 'observation type + recorded value' },
-    { key: 'results',                   name: 'Results',                   hint: 'test code + date' },
-];
+const CDA_DEDUPE_LBL = 'font-size:0.7rem;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;' +
+    'color:#1e3a8a;display:block;margin-bottom:0.35rem;border-left:3px solid #f472b6;padding-left:0.45rem;';
+const CDA_DEDUPE_HINT = 'font-size:0.7rem;color:#94a3b8;margin-top:0.25rem;';
 
 class CDADedupeStepBuilder {
     constructor(panel) {
         this._panel = panel;
         this._ac = new AbortController();
+        this._step = null;
+
+        // [{sectionKey, displayName, loincCode, fields:[{name,path,default}]}]
+        // populated async by _loadSections(); empty until then (renders a
+        // "Loading…" placeholder), same pattern as CDASectionToCSVStepBuilder.
+        this._sections = [];
+
+        // sectionKey → bool, whether the section is enabled at all — mirrors
+        // CDASectionToCSVStepBuilder's own _sectionEnabled/_explicitAllEnabled.
+        this._sectionEnabled = {};
+        this._explicitAllEnabled = true;
+
+        // sectionKey → bool, which sections' field list is expanded.
+        this._sectionExpanded = {};
+
+        // sectionKey → Set<path>, the checked identity fields for that
+        // section. Seeded once the catalog loads (_initCheckedFields): from
+        // step.config.overrides[key].keyPaths if a saved override exists,
+        // otherwise from the catalog's own field.default flags.
+        this._checkedFields = {};
+
+        // sectionKey → [{name, path}], user-added fields with a CDA path not
+        // in the known-fields catalog — the escape hatch for a genuinely
+        // custom/proprietary XPath the catalog doesn't know about. Seeded
+        // from any saved override path that doesn't match a catalog field
+        // (_initCheckedFields), so a previously-added custom field is still
+        // visible/editable, not silently dropped, when reopening the step.
+        // "name" has nowhere to persist (cdaDedupeOverride.KeyPaths is a bare
+        // []string, no name field) — it's a display-only convenience label,
+        // defaulting back to the path itself on reload.
+        this._customFields = {};
+
         window._cdaDedupeBuilder = this;
     }
 
@@ -3309,94 +3346,53 @@ class CDADedupeStepBuilder {
         this._step = step;
         const esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
-        const sourceField = esc(cfg.sourceField || 'raw');
+        const sourceField = esc(cfg.sourceField || '');
         const strategy = cfg.strategy === 'last' ? 'last' : 'first';
-        const overrides = cfg.overrides || {};
-        // Empty/absent sections means "all 9 OOB sections" (matches backend default).
-        const enabledSections = Array.isArray(cfg.sections) && cfg.sections.length > 0
-            ? cfg.sections
-            : OOB_DEDUPE_SECTIONS.map(s => s.key);
-        const oobKeys = new Set(OOB_DEDUPE_SECTIONS.map(s => s.key));
-        const customSections = enabledSections
-            .filter(key => !oobKeys.has(key))
-            .map(key => ({ key, keyPaths: (overrides[key]?.keyPaths || []).join(', ') }));
 
-        const sectionRows = OOB_DEDUPE_SECTIONS.map(sec => {
-            const checked = enabledSections.includes(sec.key);
-            const overridePaths = (overrides[sec.key]?.keyPaths || []).join(', ');
-            return `
-            <tr style="border-bottom:1px solid #f1f5f9;">
-                <td style="padding:0.4rem 0.5rem;width:28px;text-align:center;">
-                    <input type="checkbox" class="cda-dedupe-section-checkbox" data-section-key="${sec.key}"
-                        ${checked ? 'checked' : ''} style="accent-color:#1e3a8a;width:14px;height:14px;">
-                </td>
-                <td style="padding:0.4rem 0.5rem;white-space:nowrap;">
-                    <span style="font-weight:500;color:#1e293b;">${sec.name}</span>
-                    <div style="font-size:0.68rem;color:#94a3b8;">OOB: ${esc(sec.hint)}</div>
-                </td>
-                <td style="padding:0.4rem 0.5rem;width:100%;">
-                    <input type="text" class="cda-dedupe-override-input" data-section-key="${sec.key}"
-                        value="${esc(overridePaths)}" placeholder="Override CDA paths, comma-separated — leave blank to use OOB rule"
-                        style="width:100%;font-family:monospace;font-size:0.76rem;padding:0.25rem 0.4rem;border:1px solid #e2e8f0;border-radius:4px;">
-                </td>
-            </tr>`;
-        }).join('');
+        // Empty/absent config.sections means "every section enabled" — matches
+        // the executor's own SupportedCDADedupeSections() default.
+        const explicit = Array.isArray(cfg.sections) && cfg.sections.length > 0 ? new Set(cfg.sections) : null;
+        this._sectionEnabled = {};
+        if (explicit) explicit.forEach(k => { this._sectionEnabled[k] = true; });
+        this._explicitAllEnabled = !explicit;
 
-        const customChips = customSections.map(cs => `
-            <div class="cda-dedupe-custom-section" data-section-key="${esc(cs.key)}" data-key-paths="${esc(cs.keyPaths)}"
-                style="display:flex;align-items:center;gap:0.5rem;background:#f8fafc;border:1px solid #e2e8f0;border-radius:4px;padding:0.3rem 0.5rem;margin-bottom:0.35rem;">
-                <span style="font-weight:500;font-size:0.8rem;color:#1e293b;min-width:120px;">${esc(cs.key)}</span>
-                <span style="font-family:monospace;font-size:0.74rem;color:#64748b;flex:1;">${esc(cs.keyPaths)}</span>
-                <button type="button" onclick="window._cdaDedupeBuilder.removeCustomSection(this)"
-                    style="background:none;border:none;color:#ef4444;cursor:pointer;font-size:0.9rem;padding:0 0.3rem;">&times;</button>
-            </div>`).join('');
+        this._loadSections();
 
         const crossMessage = cfg.crossMessage === true;
         const patientRoot = esc(cfg.patientIdentifierRoot || '');
+        // nil/omitted (undefined here, since JSON round-trips absent keys as
+        // undefined) means "on" — matches the executor's own default; only an
+        // explicit false opts out.
+        const trackSuppressionLineage = cfg.trackSuppressionLineage !== false;
 
         return `
         <div class="cda-step-config">
-            <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:6px;padding:0.65rem 0.85rem;margin-bottom:1rem;font-size:0.8rem;color:#1e40af;">
-                <strong>Dedupe step.</strong> Removes duplicate clinical entries within a document, matched by clinically-meaningful identity per section (not a generic full-record hash). Mutates the document in place — place it between <code>cda.parse</code> and <code>cda.to_fhir</code>/<code>cda.section_to_csv</code>.
+            <div style="background:#fdf2f8;border:1px solid #fbcfe8;border-left:3px solid #f472b6;border-radius:6px;padding:0.65rem 0.85rem;margin-bottom:1rem;font-size:0.8rem;color:#1e3a8a;">
+                <strong>Dedupe step.</strong> Finds and removes duplicate clinical entries — like the same allergy or medication listed twice — by comparing the fields you check below, not the raw text. Place it after <code>cda.parse</code> (so there's a parsed document to clean up) and before <code>cda.to_fhir</code>/<code>cda.section_to_csv</code> (so they see the cleaned-up result instead of the duplicates).
             </div>
 
             <div class="config-group" style="margin-bottom:1.1rem;">
-                <label style="font-size:0.75rem;font-weight:600;text-transform:uppercase;color:#64748b;display:block;margin-bottom:0.4rem;">Source Field</label>
-                <input id="cdaDedupeSourceField" type="text" class="form-control form-control-sm" value="${sourceField}" placeholder="raw"
-                    style="font-family:monospace;font-size:0.82rem;">
-                <div style="font-size:0.72rem;color:#94a3b8;margin-top:0.25rem;">Raw CDA XML field, used only if no upstream cda.parse step already produced a typed document.</div>
+                <label style="${CDA_DEDUPE_LBL}">Source Field</label>
+                <input id="cdaDedupeSourceField" type="text" class="form-control form-control-sm" value="${sourceField}" placeholder="(auto-detect — only used with no upstream cda.parse)"
+                    style="width:100%;font-family:monospace;font-size:0.82rem;padding:0.38rem 0.55rem;border:1px solid #cbd5e1;border-radius:6px;">
+                <div style="${CDA_DEDUPE_HINT}">Only matters if no earlier cda.parse step ran — ignored otherwise. Pipeline field holding the raw CDA XML to parse directly.</div>
             </div>
 
             <div class="config-group" style="margin-bottom:1.1rem;">
-                <label style="font-size:0.75rem;font-weight:600;text-transform:uppercase;color:#64748b;display:block;margin-bottom:0.4rem;">Strategy</label>
-                <select id="cdaDedupeStrategy" class="form-select form-select-sm">
+                <label style="${CDA_DEDUPE_LBL}">Strategy</label>
+                <select id="cdaDedupeStrategy" class="form-select form-select-sm" style="width:100%;font-size:0.82rem;padding:0.38rem 0.55rem;border:1px solid #cbd5e1;border-radius:6px;">
                     <option value="first" ${strategy === 'first' ? 'selected' : ''}>First — keep the earliest occurrence</option>
                     <option value="last" ${strategy === 'last' ? 'selected' : ''}>Last — keep the most recent occurrence</option>
                 </select>
-                <div style="font-size:0.72rem;color:#94a3b8;margin-top:0.25rem;">No "merge" option — see the Documentation tab for why.</div>
+                <div style="${CDA_DEDUPE_HINT}">No "merge" option — see the Documentation tab for why.</div>
             </div>
 
             <div class="config-group" style="margin-bottom:1.1rem;">
-                <label style="font-size:0.75rem;font-weight:600;text-transform:uppercase;color:#64748b;display:block;margin-bottom:0.4rem;">Sections + Identity Rules</label>
-                <div style="overflow:auto;max-height:280px;border:1px solid #e2e8f0;border-radius:6px;">
-                    <table style="width:100%;border-collapse:collapse;">
-                        <tbody id="cdaDedupeSectionsList">${sectionRows}</tbody>
-                    </table>
+                <label style="${CDA_DEDUPE_LBL}">Sections + Identity Fields</label>
+                <div style="font-size:0.78rem;color:#64748b;margin-bottom:0.55rem;">
+                    Uncheck a section to skip deduping it. Click a section's name to see and change which fields determine a duplicate — a match requires every checked field to be equal, not just one.
                 </div>
-            </div>
-
-            <div class="config-group" style="margin-bottom:1.1rem;">
-                <label style="font-size:0.75rem;font-weight:600;text-transform:uppercase;color:#64748b;display:block;margin-bottom:0.4rem;">Custom Sections (no OOB rule)</label>
-                <div id="cdaDedupeCustomSectionsList">${customChips}</div>
-                <div style="display:flex;gap:0.4rem;align-items:center;margin-top:0.4rem;">
-                    <input id="cdaDedupeCustomSectionKey" type="text" placeholder="section key, e.g. functionalStatus"
-                        style="flex:1;font-size:0.78rem;padding:0.25rem 0.4rem;border:1px solid #e2e8f0;border-radius:4px;">
-                    <input id="cdaDedupeCustomSectionPaths" type="text" placeholder="CDA paths, comma-separated"
-                        style="flex:2;font-family:monospace;font-size:0.76rem;padding:0.25rem 0.4rem;border:1px solid #e2e8f0;border-radius:4px;">
-                    <button type="button" onclick="window._cdaDedupeBuilder.addCustomSection()"
-                        style="padding:0.25rem 0.7rem;font-size:0.75rem;background:#1e3a8a;color:white;border:none;border-radius:4px;cursor:pointer;">Add</button>
-                </div>
-                <div style="font-size:0.72rem;color:#94a3b8;margin-top:0.25rem;">A section not in the list above has no built-in identity rule — it only runs if you add it here with its own CDA paths.</div>
+                <div id="cdaDedupeSectionsList">${this._renderSectionsList()}</div>
             </div>
 
             <div class="config-group" style="border-top:1px solid #e2e8f0;padding-top:0.8rem;">
@@ -3407,46 +3403,249 @@ class CDADedupeStepBuilder {
                     Also dedupe across separate documents for the same patient
                 </label>
                 <div id="cdaDedupePatientRootWrapper" style="margin-top:0.6rem;margin-left:1.35rem;${crossMessage ? '' : 'display:none;'}">
-                    <label style="font-size:0.75rem;font-weight:600;text-transform:uppercase;color:#64748b;display:block;margin-bottom:0.4rem;">Patient Identifier Root (OID)</label>
+                    <label style="${CDA_DEDUPE_LBL}">Patient Identifier Root (OID)</label>
                     <input id="cdaDedupePatientRoot" type="text" value="${patientRoot}" placeholder="e.g. 2.16.840.1.113883.19"
-                        style="font-family:monospace;font-size:0.82rem;width:100%;padding:0.3rem 0.5rem;border:1px solid #e2e8f0;border-radius:4px;">
-                    <div style="font-size:0.72rem;color:#94a3b8;margin-top:0.25rem;">Which of the patient's CDA &lt;id&gt; roots identifies them for cross-message matching, scoped to this interface. Required — there's no automatic detection.</div>
+                        style="font-family:monospace;font-size:0.82rem;width:100%;padding:0.38rem 0.55rem;border:1px solid #cbd5e1;border-radius:6px;">
+                    <div style="${CDA_DEDUPE_HINT}">Which of the patient's CDA &lt;id&gt; roots identifies them for cross-message matching, scoped to this interface. Required — there's no automatic detection.</div>
+
+                    <label style="display:flex;align-items:center;gap:0.5rem;cursor:pointer;font-size:0.83rem;color:#1f2937;margin-top:0.75rem;">
+                        <input id="cdaDedupeTrackLineage" type="checkbox" ${trackSuppressionLineage ? 'checked' : ''}
+                            style="accent-color:#1e3a8a;width:14px;height:14px;">
+                        Track suppression lineage <span style="font-size:0.72rem;color:#94a3b8;font-weight:400;">(recommended)</span>
+                    </label>
+                    <div style="${CDA_DEDUPE_HINT}">When a fact is suppressed, records exactly which fact and which earlier message first delivered it (visible on that message's detail page), not just a count. Turn off only to minimize what per-entry detail gets captured — suppression itself is unaffected either way.</div>
                 </div>
             </div>
         </div>`;
     }
 
-    addCustomSection() {
-        const form = document.querySelector('.properties-form') || document;
-        const keyEl = form.querySelector('#cdaDedupeCustomSectionKey');
-        const pathsEl = form.querySelector('#cdaDedupeCustomSectionPaths');
-        const key = (keyEl?.value || '').trim();
-        const paths = (pathsEl?.value || '').trim();
-        if (!key || !paths) {
-            alert('Both a section key and at least one CDA path are required.');
-            return;
-        }
-        const esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-        const list = form.querySelector('#cdaDedupeCustomSectionsList');
-        if (list) {
-            const chip = document.createElement('div');
-            chip.className = 'cda-dedupe-custom-section';
-            chip.dataset.sectionKey = key;
-            chip.dataset.keyPaths = paths;
-            chip.style.cssText = 'display:flex;align-items:center;gap:0.5rem;background:#f8fafc;border:1px solid #e2e8f0;border-radius:4px;padding:0.3rem 0.5rem;margin-bottom:0.35rem;';
-            chip.innerHTML = `
-                <span style="font-weight:500;font-size:0.8rem;color:#1e293b;min-width:120px;">${esc(key)}</span>
-                <span style="font-family:monospace;font-size:0.74rem;color:#64748b;flex:1;">${esc(paths)}</span>
-                <button type="button" onclick="window._cdaDedupeBuilder.removeCustomSection(this)"
-                    style="background:none;border:none;color:#ef4444;cursor:pointer;font-size:0.9rem;padding:0 0.3rem;">&times;</button>`;
-            list.appendChild(chip);
-        }
-        if (keyEl) keyEl.value = '';
-        if (pathsEl) pathsEl.value = '';
+    // ── data loading ──────────────────────────────────────────────────────
+
+    _loadSections() {
+        const sig = this._ac.signal;
+        fetch('/api/cda/dedupe/sections', { signal: sig })
+            .then(r => r.ok ? r.json() : null)
+            .then(data => {
+                if (!data || !data.sections) return;
+                this._sections = data.sections;
+                this._initCheckedFields();
+                const list = document.getElementById('cdaDedupeSectionsList');
+                if (list) list.innerHTML = this._renderSectionsList();
+            })
+            .catch(() => {}); // AbortError on destroy is expected
     }
 
-    removeCustomSection(buttonEl) {
-        buttonEl.closest('.cda-dedupe-custom-section')?.remove();
+    // Seeds this._checkedFields for every section once the catalog is
+    // available: a saved override wins outright (exact CDA paths the user
+    // picked before), otherwise the catalog's own OOB defaults apply. Any
+    // saved path that doesn't match a catalog field is a previously-added
+    // custom field — synthesized back into this._customFields so it's still
+    // visible/editable instead of silently vanishing from the UI.
+    _initCheckedFields() {
+        const overrides = (this._step && this._step.config && this._step.config.overrides) || {};
+        this._sections.forEach(sec => {
+            const key = sec.sectionKey;
+            const override = overrides[key];
+            if (override && Array.isArray(override.keyPaths) && override.keyPaths.length > 0) {
+                this._checkedFields[key] = new Set(override.keyPaths);
+                const catalogPaths = new Set(sec.fields.map(f => f.path));
+                const customPaths = override.keyPaths.filter(p => !catalogPaths.has(p));
+                if (customPaths.length > 0) {
+                    this._customFields[key] = customPaths.map(p => ({ name: p, path: p }));
+                }
+            } else {
+                this._checkedFields[key] = new Set(sec.fields.filter(f => f.default).map(f => f.path));
+            }
+        });
+    }
+
+    // ── state helpers ─────────────────────────────────────────────────────
+
+    _isSectionEnabled(key) {
+        if (Object.prototype.hasOwnProperty.call(this._sectionEnabled, key)) {
+            return this._sectionEnabled[key];
+        }
+        return this._explicitAllEnabled !== false; // default: enabled
+    }
+
+    setSectionEnabled(key, checked) {
+        this._sectionEnabled[key] = checked;
+    }
+
+    toggleField(sectionKey, path, checked) {
+        const set = this._checkedFields[sectionKey];
+        if (!set) return;
+        if (checked) set.add(path); else set.delete(path);
+        this._refreshSectionRow(sectionKey);
+    }
+
+    // Adds a genuinely custom CDA path not in the known-fields catalog — the
+    // escape hatch for a proprietary/vendor-specific element the OOB catalog
+    // doesn't know about. Checked by default: adding a field only makes sense
+    // if you want it to count toward the identity match.
+    addCustomField(sectionKey) {
+        const form = document.querySelector('.properties-form') || document;
+        const nameEl = form.querySelector(`#cdaDedupeCustomFieldName-${sectionKey}`);
+        const pathEl = form.querySelector(`#cdaDedupeCustomFieldPath-${sectionKey}`);
+        const name = (nameEl?.value || '').trim();
+        const path = (pathEl?.value || '').trim();
+        if (!path) { alert('A CDA path is required.'); return; }
+
+        if (!this._customFields[sectionKey]) this._customFields[sectionKey] = [];
+        if (this._customFields[sectionKey].some(f => f.path === path)) { alert('That path is already added.'); return; }
+        this._customFields[sectionKey].push({ name: name || path, path });
+
+        if (!this._checkedFields[sectionKey]) this._checkedFields[sectionKey] = new Set();
+        this._checkedFields[sectionKey].add(path);
+
+        this._refreshSectionRow(sectionKey);
+    }
+
+    removeCustomField(sectionKey, path) {
+        const list = this._customFields[sectionKey];
+        if (list) this._customFields[sectionKey] = list.filter(f => f.path !== path);
+        const set = this._checkedFields[sectionKey];
+        if (set) set.delete(path);
+        this._refreshSectionRow(sectionKey);
+    }
+
+    // ── Sections list ─────────────────────────────────────────────────────
+
+    _renderSectionsList() {
+        if (!this._sections.length) {
+            return `<div style="text-align:center;padding:1.5rem;color:#6b7280;font-size:0.8rem;">Loading sections…</div>`;
+        }
+        return this._sections.map(sec => this._renderSectionRow(sec)).join('');
+    }
+
+    _renderSectionRow(sec) {
+        const esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+        const enabled = this._isSectionEnabled(sec.sectionKey);
+        const expanded = !!this._sectionExpanded[sec.sectionKey];
+        const checked = this._checkedFields[sec.sectionKey] || new Set();
+        const key = sec.sectionKey;
+        const defaultPaths = sec.fields.filter(f => f.default).map(f => f.path);
+        const isDefault = defaultPaths.length === checked.size && defaultPaths.every(p => checked.has(p));
+        // A section with zero checked fields is never actually deduplicated —
+        // the executor skips any section with no OOB rule and no override —
+        // so that case needs its own distinct (and slightly warning-toned)
+        // badge rather than "OOB default", which checked.size===defaultPaths.length===0
+        // would otherwise satisfy vacuously (e.g. a section like
+        // admissionMedications that has no OOB identity rule at all).
+        const badge = checked.size === 0
+            ? `<span style="font-size:0.65rem;background:#fee2e2;color:#b91c1c;border-radius:3px;padding:1px 5px;white-space:nowrap;">no fields — skipped</span>`
+            : isDefault
+                ? `<span style="font-size:0.65rem;background:#f1f5f9;color:#64748b;border-radius:3px;padding:1px 5px;white-space:nowrap;">OOB default</span>`
+                : `<span style="font-size:0.65rem;background:#fef3c7;color:#92400e;border-radius:3px;padding:1px 5px;white-space:nowrap;">${checked.size}/${sec.fields.length} custom</span>`;
+        return `
+        <div id="cdaDedupeSectionRow-${key}" style="border:1px solid #e2e8f0;border-radius:6px;margin-bottom:0.4rem;overflow:hidden;">
+            <div id="cdaDedupeSectionHeader-${key}" style="display:flex;align-items:center;gap:0.5rem;padding:0.45rem 0.6rem;background:${expanded ? '#fdf2f8' : '#fff'};cursor:pointer;"
+                onclick="window._cdaDedupeBuilder && window._cdaDedupeBuilder.toggleSection('${key}')">
+                <input type="checkbox" class="cda-dedupe-section-checkbox" data-section-key="${key}"
+                    ${enabled ? 'checked' : ''}
+                    onclick="event.stopPropagation()"
+                    onchange="window._cdaDedupeBuilder && window._cdaDedupeBuilder.setSectionEnabled('${key}', this.checked)"
+                    style="accent-color:#1e3a8a;width:14px;height:14px;flex-shrink:0;">
+                <span style="font-weight:${enabled ? '500' : '400'};color:${enabled ? '#1e293b' : '#94a3b8'};flex:1;">${esc(sec.displayName || key)}</span>
+                ${badge}
+                <span id="cdaDedupeSectionCaret-${key}" style="color:#94a3b8;">${expanded ? '▾' : '▸'}</span>
+            </div>
+            <div id="cdaDedupeSectionDetail-${key}" style="display:${expanded ? 'block' : 'none'};border-top:1px solid #e2e8f0;padding:0.65rem 0.75rem;background:#fafbfc;">
+                ${expanded ? this._renderSectionDetail(sec) : ''}
+            </div>
+        </div>`;
+    }
+
+    toggleSection(key) {
+        const sec = this._sections.find(s => s.sectionKey === key);
+        if (!sec) return;
+        this._sectionExpanded[key] = !this._sectionExpanded[key];
+        const detail = document.getElementById('cdaDedupeSectionDetail-' + key);
+        const caret  = document.getElementById('cdaDedupeSectionCaret-' + key);
+        if (!detail) return;
+        if (this._sectionExpanded[key]) {
+            detail.innerHTML = this._renderSectionDetail(sec);
+            detail.style.display = 'block';
+            if (caret) caret.textContent = '▾';
+        } else {
+            detail.style.display = 'none';
+            detail.innerHTML = '';
+            if (caret) caret.textContent = '▸';
+        }
+        const header = document.getElementById('cdaDedupeSectionHeader-' + key);
+        if (header) header.style.background = this._sectionExpanded[key] ? '#fdf2f8' : '#fff';
+    }
+
+    _refreshSectionRow(key) {
+        const sec = this._sections.find(s => s.sectionKey === key);
+        if (!sec) return;
+        // Replace the WHOLE row (header + detail) — the "N/M custom" badge
+        // lives in the header, outside the detail area that changed.
+        const row = document.getElementById('cdaDedupeSectionRow-' + key);
+        if (row) row.outerHTML = this._renderSectionRow(sec);
+    }
+
+    // ── Section detail: identity-field checkboxes ────────────────────────
+
+    _renderSectionDetail(sec) {
+        const esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+        const escAttr = s => esc(s).replace(/'/g, '&#39;');
+        const checked = this._checkedFields[sec.sectionKey] || new Set();
+        const rows = sec.fields.map(f => `
+            <tr style="border-bottom:1px solid #f1f5f9;">
+                <td style="padding:0.35rem 0.5rem;width:28px;text-align:center;">
+                    <input type="checkbox" class="cda-dedupe-field-checkbox" data-section-key="${sec.sectionKey}" data-path="${esc(f.path)}"
+                        ${checked.has(f.path) ? 'checked' : ''}
+                        onchange="window._cdaDedupeBuilder && window._cdaDedupeBuilder.toggleField('${sec.sectionKey}', '${escAttr(f.path)}', this.checked)"
+                        style="accent-color:#1e3a8a;width:14px;height:14px;">
+                </td>
+                <td style="padding:0.35rem 0.5rem;font-weight:500;color:#1e293b;white-space:nowrap;">${esc(f.name)}${f.default ? ' <span style="font-size:0.62rem;color:#94a3b8;">(OOB)</span>' : ''}</td>
+                <td style="padding:0.35rem 0.5rem;font-family:monospace;font-size:0.72rem;color:#475569;word-break:break-all;">${esc(f.path)}</td>
+                <td></td>
+            </tr>`).join('');
+
+        const customFields = this._customFields[sec.sectionKey] || [];
+        const customRows = customFields.map(f => `
+            <tr style="border-bottom:1px solid #f1f5f9;background:#fffbeb;">
+                <td style="padding:0.35rem 0.5rem;width:28px;text-align:center;">
+                    <input type="checkbox" class="cda-dedupe-field-checkbox" data-section-key="${sec.sectionKey}" data-path="${esc(f.path)}"
+                        ${checked.has(f.path) ? 'checked' : ''}
+                        onchange="window._cdaDedupeBuilder && window._cdaDedupeBuilder.toggleField('${sec.sectionKey}', '${escAttr(f.path)}', this.checked)"
+                        style="accent-color:#1e3a8a;width:14px;height:14px;">
+                </td>
+                <td style="padding:0.35rem 0.5rem;font-weight:500;color:#92400e;white-space:nowrap;">${esc(f.name)} <span style="font-size:0.62rem;background:#fef3c7;color:#92400e;border-radius:3px;padding:0 4px;">custom</span></td>
+                <td style="padding:0.35rem 0.5rem;font-family:monospace;font-size:0.72rem;color:#92400e;word-break:break-all;">${esc(f.path)}</td>
+                <td style="padding:0.35rem 0.5rem;text-align:right;white-space:nowrap;">
+                    <button type="button" onclick="window._cdaDedupeBuilder && window._cdaDedupeBuilder.removeCustomField('${sec.sectionKey}', '${escAttr(f.path)}')"
+                        style="padding:0.1rem 0.45rem;font-size:0.68rem;background:#fff;border:1px solid #fca5a5;color:#b91c1c;border-radius:4px;cursor:pointer;">Remove</button>
+                </td>
+            </tr>`).join('');
+
+        return `
+        <div style="overflow:auto;max-height:280px;border:1px solid #e2e8f0;border-radius:6px;margin-bottom:0.5rem;">
+            <table style="width:100%;border-collapse:collapse;">
+                <thead>
+                    <tr style="background:#f8fafc;">
+                        <th style="padding:0.35rem 0.5rem;"></th>
+                        <th style="text-align:left;padding:0.35rem 0.5rem;font-size:0.68rem;text-transform:uppercase;color:#64748b;">Field</th>
+                        <th style="text-align:left;padding:0.35rem 0.5rem;font-size:0.68rem;text-transform:uppercase;color:#64748b;">CDA Path</th>
+                        <th style="padding:0.35rem 0.5rem;"></th>
+                    </tr>
+                </thead>
+                <tbody>${rows}${customRows}</tbody>
+            </table>
+        </div>
+        <div style="font-size:0.72rem;color:#94a3b8;margin-bottom:0.6rem;">Two entries are duplicates only if they match on <strong>every</strong> checked field. Unchecking a field broadens the match (more aggressive); checking more fields narrows it (more precise).</div>
+
+        <div style="display:flex;gap:0.4rem;align-items:center;">
+            <input id="cdaDedupeCustomFieldName-${sec.sectionKey}" type="text" placeholder="Field name (optional)"
+                style="flex:1;font-size:0.78rem;padding:0.25rem 0.4rem;border:1px solid #e2e8f0;border-radius:4px;">
+            <input id="cdaDedupeCustomFieldPath-${sec.sectionKey}" type="text" placeholder="CDA path not in the list above, e.g. a vendor-specific extension"
+                style="flex:2;font-family:monospace;font-size:0.76rem;padding:0.25rem 0.4rem;border:1px solid #e2e8f0;border-radius:4px;">
+            <button type="button" onclick="window._cdaDedupeBuilder && window._cdaDedupeBuilder.addCustomField('${sec.sectionKey}')"
+                style="padding:0.25rem 0.7rem;font-size:0.75rem;background:#1e3a8a;color:white;border:none;border-radius:4px;cursor:pointer;white-space:nowrap;">Add field</button>
+        </div>
+        <div style="font-size:0.7rem;color:#94a3b8;margin-top:0.25rem;">Don't see the field you need? Add its CDA path directly — for a proprietary or vendor-specific element the standard catalog above doesn't cover.</div>`;
     }
 
     onCrossMessageToggle(checked) {
@@ -3463,31 +3662,44 @@ class CDADedupeStepBuilder {
         const strategyEl = form.querySelector('#cdaDedupeStrategy');
         const crossMessageEl = form.querySelector('#cdaDedupeCrossMessage');
         const patientRootEl = form.querySelector('#cdaDedupePatientRoot');
+        const trackLineageEl = form.querySelector('#cdaDedupeTrackLineage');
 
-        if (sourceEl) step.config.sourceField = sourceEl.value.trim() || 'raw';
+        if (sourceEl) step.config.sourceField = sourceEl.value.trim();
         if (strategyEl) step.config.strategy = strategyEl.value;
         step.config.crossMessage = crossMessageEl ? crossMessageEl.checked : false;
         if (patientRootEl) step.config.patientIdentifierRoot = patientRootEl.value.trim();
+        // Only emit an explicit false when unchecked — omit the key entirely
+        // when checked, matching the executor's nil-means-on default and
+        // keeping saved config minimal/diffable (same convention already used
+        // for section overrides above).
+        if (trackLineageEl && !trackLineageEl.checked) {
+            step.config.trackSuppressionLineage = false;
+        } else {
+            delete step.config.trackSuppressionLineage;
+        }
+
+        // Guard against collecting before the async catalog fetch resolves —
+        // an empty this._sections would otherwise wipe out a previously saved
+        // sections/overrides config (mirrors CDASectionToCSVStepBuilder's
+        // identical guard around its own async-loaded state).
+        if (this._sections.length === 0) return;
 
         const sections = [];
         const overrides = {};
+        this._sections.forEach(sec => {
+            const key = sec.sectionKey;
+            if (this._isSectionEnabled(key)) sections.push(key);
 
-        form.querySelectorAll('.cda-dedupe-section-checkbox').forEach(cb => {
-            const key = cb.dataset.sectionKey;
-            if (cb.checked) sections.push(key);
-            const overrideInput = form.querySelector(`.cda-dedupe-override-input[data-section-key="${key}"]`);
-            const raw = (overrideInput?.value || '').trim();
-            if (raw) {
-                overrides[key] = { keyPaths: raw.split(',').map(s => s.trim()).filter(Boolean) };
-            }
-        });
-
-        form.querySelectorAll('.cda-dedupe-custom-section').forEach(chip => {
-            const key = chip.dataset.sectionKey;
-            const paths = (chip.dataset.keyPaths || '').split(',').map(s => s.trim()).filter(Boolean);
-            if (key && paths.length > 0) {
-                sections.push(key);
-                overrides[key] = { keyPaths: paths };
+            const checked = this._checkedFields[key];
+            if (!checked || checked.size === 0) return;
+            const defaultPaths = sec.fields.filter(f => f.default).map(f => f.path);
+            const isDefault = defaultPaths.length === checked.size && defaultPaths.every(p => checked.has(p));
+            if (!isDefault) {
+                // Read straight from the checked Set, not filtered through
+                // sec.fields — a checked custom-field path (added via
+                // addCustomField) has no entry in sec.fields and would
+                // otherwise be silently dropped here.
+                overrides[key] = { keyPaths: Array.from(checked) };
             }
         });
 
@@ -3503,17 +3715,100 @@ class CDADedupeStepBuilder {
 
 
 // ── CDABuildStepBuilder ────────────────────────────────────────────────────────
-// Config: { sourceField, inputFormat, outputField, documentType, orgName }
+// Config: { sourceField, inputFormat, outputField, documentType, orgName, custodian }
 // Format-agnostic successor to fhir.to_cda — see cda_build_executor.go.
 // Document type list mirrors CdaToFhirStepBuilder's docTypeOpts above
 // (same fixed set from ccda_2_1.json's documentTypeSections keys).
+//
+// Tabbed layout (General / Requirements / Custodian) follows
+// CdaToFhirStepBuilder's established tab pattern exactly (_renderTabButton,
+// switchTab, per-tab display:none toggling) rather than inventing a new
+// visual language for a second CDA step builder in this same file.
+//
+// The Requirements tab reads this._panel.builder.pipeline.steps (already
+// available in-memory pipeline state — the panel is constructor-injected
+// exactly like every other builder) via CDARequirementsHelper.
+// findMapToCanonicalStep to show a REAL "N of M required items configured"
+// checklist against a sibling cda.map_to_canonical step's live config, not
+// just a static SHALL/SHOULD/MAY reference list.
 
 class CDABuildStepBuilder {
-    constructor(panel) { this._panel = panel; }
+    constructor(panel) {
+        this._panel = panel;
+        this._ac = new AbortController();
+        this._step = null;
+        this._activeTab = 'general';
+        this._requirements = null;
+        this._requirementsDocType = null;
+        window._cdaBuildBuilder = this;
+    }
 
     render(step) {
+        this._step = step;
         if (!step.config) step.config = {};
-        const cfg = step.config;
+        if (!step.config.documentType) step.config.documentType = 'CCD';
+        if (!step.config.custodian) step.config.custodian = {};
+
+        this._loadRequirements(step.config.documentType);
+
+        return `
+<div id="cdaBuildBuilder" style="font-size:0.84rem;">
+    <div style="display:flex;gap:0;background:#1e3a8a;border-radius:8px 8px 0 0;margin-bottom:1.1rem;padding:0 0.25rem;">
+        ${this._renderTabButton('general', 'General')}
+        ${this._renderTabButton('requirements', 'Requirements')}
+        ${this._renderTabButton('custodian', 'Custodian')}
+    </div>
+    <div id="cdaBuildTab-general" style="${this._activeTab === 'general' ? '' : 'display:none'}">
+        ${this._renderGeneralTab(step.config)}
+    </div>
+    <div id="cdaBuildTab-requirements" style="${this._activeTab === 'requirements' ? '' : 'display:none'}">
+        ${this._renderRequirementsTab(step.config)}
+    </div>
+    <div id="cdaBuildTab-custodian" style="${this._activeTab === 'custodian' ? '' : 'display:none'}">
+        ${this._renderCustodianTab(step.config)}
+    </div>
+</div>`;
+    }
+
+    // ── Tab navigation ────────────────────────────────────────────────────────
+
+    switchTab(tabName) {
+        this._activeTab = tabName;
+        ['general', 'requirements', 'custodian'].forEach(t => {
+            const panel = document.getElementById('cdaBuildTab-' + t);
+            const btn = document.getElementById('cdaBuildTabBtn-' + t);
+            if (panel) panel.style.display = (t === tabName) ? '' : 'none';
+            if (btn) {
+                if (t === tabName) {
+                    btn.style.borderBottom = '3px solid #f9a8d4';
+                    btn.style.background = 'rgba(255,255,255,0.12)';
+                    btn.style.color = '#ffffff';
+                    btn.style.fontWeight = '700';
+                } else {
+                    btn.style.borderBottom = '3px solid transparent';
+                    btn.style.background = 'transparent';
+                    btn.style.color = 'rgba(255,255,255,0.6)';
+                    btn.style.fontWeight = '400';
+                }
+            }
+        });
+    }
+
+    _renderTabButton(key, label) {
+        const active = this._activeTab === key;
+        return `<button id="cdaBuildTabBtn-${key}" type="button"
+            onclick="window._cdaBuildBuilder && window._cdaBuildBuilder.switchTab('${key}')"
+            style="padding:0.45rem 0.95rem;border:none;
+                   border-bottom:3px solid ${active ? '#f9a8d4' : 'transparent'};
+                   background:${active ? 'rgba(255,255,255,0.12)' : 'transparent'};
+                   cursor:pointer;font-size:0.78rem;
+                   color:${active ? '#ffffff' : 'rgba(255,255,255,0.6)'};
+                   font-weight:${active ? '700' : '400'};">${label}</button>`;
+    }
+
+    // ── General tab (unchanged fields, moved into its own tab) ───────────────
+
+    _renderGeneralTab(cfg) {
         const esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
         const sourceField  = esc(cfg.sourceField  || 'parsedCDA');
@@ -3537,6 +3832,7 @@ class CDABuildStepBuilder {
             <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:6px;padding:0.65rem 0.85rem;margin-bottom:1rem;font-size:0.8rem;color:#1e40af;">
                 <strong>Build step.</strong> Converts canonical JSON or a FHIR Bundle into a full C-CDA 2.1 document,
                 covering every SHALL and SHOULD section for the selected Document Type — not just Allergies/Medications/Problems/Immunizations.
+                See the Requirements tab for what this Document Type needs, and the Custodian tab to configure the sending organization.
             </div>
             <div class="config-group" style="margin-bottom:1.1rem;">
                 <label style="font-size:0.75rem;font-weight:600;text-transform:uppercase;color:#64748b;display:block;margin-bottom:0.4rem;">Input Format</label>
@@ -3555,38 +3851,191 @@ class CDABuildStepBuilder {
                     placeholder="cdaXML" style="font-family:monospace;font-size:0.82rem;">
                 <div style="font-size:0.72rem;color:#94a3b8;margin-top:0.25rem;">Pipeline field where the generated C-CDA 2.1 XML will be written.</div>
             </div>
-            <div class="config-group" style="margin-bottom:1.1rem;">
-                <label style="font-size:0.75rem;font-weight:600;text-transform:uppercase;color:#64748b;display:block;margin-bottom:0.4rem;">Document Type</label>
-                <select id="cdaBuildDocType" class="form-select form-select-sm">${docTypeOptions}</select>
-                <div style="font-size:0.72rem;color:#94a3b8;margin-top:0.25rem;">Determines which sections are SHALL/SHOULD and the document-level LOINC code/title.</div>
-            </div>
             <div class="config-group">
-                <label style="font-size:0.75rem;font-weight:600;text-transform:uppercase;color:#64748b;display:block;margin-bottom:0.4rem;">Organization Name</label>
-                <input id="cdaBuildOrgName" type="text" class="form-control form-control-sm" value="${orgName}"
-                    placeholder="ezHealthKonnect" style="font-size:0.82rem;">
-                <div style="font-size:0.72rem;color:#94a3b8;margin-top:0.25rem;">Custodian organization, and fallback author organization when the source has none.</div>
+                <label style="font-size:0.75rem;font-weight:600;text-transform:uppercase;color:#64748b;display:block;margin-bottom:0.4rem;">Document Type</label>
+                <select id="cdaBuildDocType" class="form-select form-select-sm"
+                    onchange="window._cdaBuildBuilder && window._cdaBuildBuilder.onDocTypeChange(this.value)">${docTypeOptions}</select>
+                <div style="font-size:0.72rem;color:#94a3b8;margin-top:0.25rem;">Determines which sections are SHALL/SHOULD and the document-level LOINC code/title — see the Requirements tab.</div>
             </div>
         </div>`;
     }
 
-    collectConfig(step) {
-        const form = document.querySelector('.properties-form') || document;
-        step.config = step.config || {};
-
-        const formatEl = form.querySelector('#cdaBuildInputFormat');
-        const sourceEl  = form.querySelector('#cdaBuildSourceField');
-        const outputEl  = form.querySelector('#cdaBuildOutputField');
-        const docTypeEl = form.querySelector('#cdaBuildDocType');
-        const orgNameEl = form.querySelector('#cdaBuildOrgName');
-
-        if (formatEl) step.config.inputFormat  = formatEl.value;
-        if (sourceEl) step.config.sourceField   = sourceEl.value.trim() || 'parsedCDA';
-        if (outputEl) step.config.outputField   = outputEl.value.trim() || 'cdaXML';
-        if (docTypeEl) step.config.documentType = docTypeEl.value;
-        if (orgNameEl) step.config.orgName      = orgNameEl.value.trim();
+    onDocTypeChange(newType) {
+        this._collectGeneralAndCustodianTabs();
+        this._step.config.documentType = newType;
+        this._requirements = null;
+        this._requirementsDocType = null;
+        this._loadRequirements(newType);
+        this._rerender();
     }
 
-    destroy() {}
+    // ── Requirements tab ──────────────────────────────────────────────────────
+
+    _loadRequirements(documentType) {
+        if (!documentType || this._requirementsDocType === documentType) return;
+        fetch(`/api/cda/document-types/${encodeURIComponent(documentType)}/requirements`, { signal: this._ac.signal })
+            .then(r => r.ok ? r.json() : null)
+            .then(data => {
+                if (!data || !data.requirements) return;
+                this._requirements = data.requirements;
+                this._requirementsDocType = documentType;
+                this._rerender();
+            })
+            .catch(() => {}); // AbortError on destroy is expected
+    }
+
+    _renderRequirementsTab(cfg) {
+        const esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+        if (!this._requirements) {
+            return `<div style="padding:1rem;color:#94a3b8;font-size:0.8rem;">Loading requirements for ${esc(cfg.documentType || 'CCD')}…</div>`;
+        }
+
+        const sourceStep = (typeof CDARequirementsHelper !== 'undefined') ? CDARequirementsHelper.findMapToCanonicalStep(this._panel) : null;
+        const badge = c => (typeof CDARequirementsHelper !== 'undefined') ? CDARequirementsHelper.renderConformanceBadge(c) : c;
+
+        if (!sourceStep) {
+            // No live cda.map_to_canonical sibling to score against (source is
+            // likely cda.parse, whose completeness depends on the runtime
+            // document, not static config) — show the static reference list.
+            const sectionRows = this._requirements.sections.map(s =>
+                `<tr><td>${esc(s.displayName || s.key)}</td><td>${badge(s.conformance)}</td></tr>`).join('');
+            return `
+            <div style="background:#fffbeb;border:1px solid #fde68a;border-radius:6px;padding:0.65rem 0.85rem;margin-bottom:1rem;font-size:0.8rem;color:#92400e;">
+                No <code>cda.map_to_canonical</code> step found in this pipeline to check live completeness against — showing the static requirements for ${esc(cfg.documentType || 'CCD')} instead. If your source is <code>cda.parse</code>, completeness depends on the parsed document itself; use Test Pipeline's compliance report to check a real message.
+            </div>
+            <table class="mapping-table" style="width:100%;">
+                <thead><tr><th style="font-size:0.7rem;color:#64748b;">Section</th><th style="font-size:0.7rem;color:#64748b;">Requirement</th></tr></thead>
+                <tbody>${sectionRows}</tbody>
+            </table>`;
+        }
+
+        const siblingCfg = sourceStep.config || {};
+        const missing = (typeof CDARequirementsHelper !== 'undefined')
+            ? CDARequirementsHelper.computeMissingShall(this._requirements, siblingCfg.header, siblingCfg.sections)
+            : { shallTotal: 0, shallSatisfied: 0, missingSections: [], missingHeaderFields: [] };
+        const banner = (typeof CDARequirementsHelper !== 'undefined') ? CDARequirementsHelper.renderCompletenessBanner(missing) : '';
+
+        const mappedSectionKeys = new Set((siblingCfg.sections || [])
+            .filter(s => Array.isArray(s.fields) && s.fields.some(f => f && f.canonicalField))
+            .map(s => s.sectionKey));
+        const sectionRows = this._requirements.sections.map(s => {
+            const configured = mappedSectionKeys.has(s.key);
+            return `<tr>
+                <td>${esc(s.displayName || s.key)}</td>
+                <td>${badge(s.conformance)}</td>
+                <td>${configured ? '<i class="fas fa-circle-check" style="color:#16a34a;"></i> Configured' : '<span style="color:#94a3b8;">Not configured</span>'}</td>
+            </tr>`;
+        }).join('');
+
+        return `
+        <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:6px;padding:0.65rem 0.85rem;margin-bottom:1rem;font-size:0.8rem;color:#1e40af;">
+            Live status of "<strong>${esc(CDARequirementsHelper.stepDisplayName(sourceStep) || 'Map to Canonical')}</strong>" — this pipeline's upstream <code>cda.map_to_canonical</code> step — against ${esc(cfg.documentType || 'CCD')}'s requirements.
+        </div>
+        ${banner}
+        <table class="mapping-table" style="width:100%;">
+            <thead><tr>
+                <th style="font-size:0.7rem;color:#64748b;">Section</th>
+                <th style="font-size:0.7rem;color:#64748b;">Requirement</th>
+                <th style="font-size:0.7rem;color:#64748b;">Status</th>
+            </tr></thead>
+            <tbody>${sectionRows}</tbody>
+        </table>`;
+    }
+
+    // ── Custodian tab ─────────────────────────────────────────────────────────
+
+    _renderCustodianTab(cfg) {
+        const esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+        const cust = cfg.custodian || {};
+        const custReq = (this._requirements && this._requirements.headerGroups && this._requirements.headerGroups.custodian) || [];
+        const reqByKey = {};
+        custReq.forEach(f => { reqByKey[f.key] = f; });
+        const badge = key => (reqByKey[key] && typeof CDARequirementsHelper !== 'undefined')
+            ? CDARequirementsHelper.renderConformanceBadge(reqByKey[key].conformance) : '';
+
+        const field = (id, label, value, key, placeholder) => `
+            <div class="config-group" style="margin-bottom:0.9rem;">
+                <label style="font-size:0.75rem;font-weight:600;text-transform:uppercase;color:#64748b;display:flex;align-items:center;gap:0.4rem;margin-bottom:0.4rem;">${esc(label)} ${badge(key)}</label>
+                <input id="${id}" type="text" class="form-control form-control-sm" value="${esc(value)}" placeholder="${esc(placeholder || '')}" style="font-size:0.82rem;">
+            </div>`;
+
+        return `
+        <div class="cda-step-config">
+            <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:6px;padding:0.65rem 0.85rem;margin-bottom:1rem;font-size:0.8rem;color:#1e40af;">
+                <strong>Custodian.</strong> The organization responsible for this document — deployment-level config (who ezHealthKonnect is sending on behalf of), not per-message source data. Address/Phone are optional — the C-CDA schema this app validates against only requires Name and ID.
+            </div>
+            ${field('cdaBuildCustOrgName', 'Organization Name', cust.orgName, 'name', cfg.orgName || 'ezHealthKonnect')}
+            ${!cust.orgName && cfg.orgName ? `<div style="font-size:0.72rem;color:#94a3b8;margin-top:-0.6rem;margin-bottom:0.9rem;">Not set here yet — currently falls back to this step's previously-saved Organization Name (<code>${esc(cfg.orgName)}</code>). Fill this in to take control of it explicitly.</div>` : ''}
+            <div style="display:flex;gap:0.6rem;">
+                <div style="flex:1;">${field('cdaBuildCustIdRoot', 'Organization ID Root (OID)', cust.idRoot, 'id', '2.16.840.1.113883.19.5')}</div>
+                <div style="flex:1;">${field('cdaBuildCustIdExtension', 'Organization ID Extension', cust.idExtension, 'id', 'e.g. NPI or internal org id')}</div>
+            </div>
+            ${field('cdaBuildCustStreet', 'Street Address', cust.street, null)}
+            <div style="display:flex;gap:0.6rem;">
+                <div style="flex:2;">${field('cdaBuildCustCity', 'City', cust.city, null)}</div>
+                <div style="flex:1;">${field('cdaBuildCustState', 'State', cust.state, null)}</div>
+                <div style="flex:1;">${field('cdaBuildCustPostalCode', 'Postal Code', cust.postalCode, null)}</div>
+            </div>
+            ${field('cdaBuildCustCountry', 'Country', cust.country, null, 'US')}
+            ${field('cdaBuildCustPhone', 'Phone', cust.phone, null)}
+        </div>`;
+    }
+
+    // ── collectConfig / destroy ──────────────────────────────────────────────
+
+    // Reads General + Custodian tab DOM values into step.config — split out
+    // from collectConfig() so onDocTypeChange can persist pending edits
+    // before switching document types without needing the full
+    // PropertiesPanel save flow.
+    _collectGeneralAndCustodianTabs() {
+        const root = document.getElementById('cdaBuildBuilder');
+        if (!root || !this._step) return;
+        const cfg = this._step.config;
+
+        const pick = id => { const el = root.querySelector('#' + id); return el ? el.value.trim() : null; };
+
+        if (pick('cdaBuildInputFormat') !== null) cfg.inputFormat = pick('cdaBuildInputFormat');
+        if (pick('cdaBuildSourceField') !== null) cfg.sourceField = pick('cdaBuildSourceField') || 'parsedCDA';
+        if (pick('cdaBuildOutputField') !== null) cfg.outputField = pick('cdaBuildOutputField') || 'cdaXML';
+        if (pick('cdaBuildDocType') !== null) cfg.documentType = pick('cdaBuildDocType');
+
+        cfg.custodian = cfg.custodian || {};
+        const custField = (domId, key) => { if (pick(domId) !== null) cfg.custodian[key] = pick(domId); };
+        custField('cdaBuildCustOrgName', 'orgName');
+        // Keep the legacy top-level orgName in sync with the Custodian tab's
+        // Organization Name — cda_build_executor.go's resolveOrgName() is
+        // used both as the custodian fallback AND as the document author's
+        // representedOrganization/name (which has no dedicated config field
+        // of its own), so this one field still needs to serve both roles now
+        // that Organization Name has moved into its own tab.
+        if (cfg.custodian.orgName) cfg.orgName = cfg.custodian.orgName;
+        custField('cdaBuildCustIdRoot', 'idRoot');
+        custField('cdaBuildCustIdExtension', 'idExtension');
+        custField('cdaBuildCustStreet', 'street');
+        custField('cdaBuildCustCity', 'city');
+        custField('cdaBuildCustState', 'state');
+        custField('cdaBuildCustPostalCode', 'postalCode');
+        custField('cdaBuildCustCountry', 'country');
+        custField('cdaBuildCustPhone', 'phone');
+    }
+
+    _rerender() {
+        const root = document.getElementById('cdaBuildBuilder');
+        if (!root || !root.parentElement) return;
+        root.outerHTML = this.render(this._step);
+    }
+
+    collectConfig(step) {
+        this._collectGeneralAndCustodianTabs();
+        step.config = this._step.config;
+    }
+
+    destroy() {
+        this._ac.abort();
+        if (window._cdaBuildBuilder === this) {
+            window._cdaBuildBuilder = null;
+        }
+    }
 }
 
 
