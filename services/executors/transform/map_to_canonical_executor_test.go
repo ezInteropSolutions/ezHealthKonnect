@@ -385,6 +385,66 @@ func TestMapToCanonical_HeaderPatientAndAuthor(t *testing.T) {
 	}
 }
 
+// TestMapToCanonical_HeaderField_IdsArrayPassthrough verifies the one
+// repeating-header-field exception: target "ids" whose SourcePath already
+// resolves to a []{root,extension} array is passed through untransformed
+// (patientRole's identifiers — e.g. MRN + SSN as two entries) rather than
+// silently dropped by stringifyValue's scalar-only type switch.
+func TestMapToCanonical_HeaderField_IdsArrayPassthrough(t *testing.T) {
+	config := map[string]interface{}{
+		"header": []interface{}{
+			map[string]interface{}{"group": "patient", "target": "ids", "sourcePath": "patientIdentifiers"},
+		},
+	}
+	inputData := map[string]interface{}{
+		"patientIdentifiers": []interface{}{
+			map[string]interface{}{"root": "2.16.840.1.113883.19.5", "extension": "MRN-00482"},
+			map[string]interface{}{"root": "2.16.840.1.113883.4.1", "extension": "521-08-4013"},
+		},
+	}
+
+	output := runMapToCanonical(t, config, inputData)
+	doc := canonicalDocFrom(t, output, "parsedCDA")
+	header := doc["header"].(map[string]interface{})
+	patient := header["patient"].(map[string]interface{})
+
+	ids, ok := patient["ids"].([]interface{})
+	if !ok || len(ids) != 2 {
+		t.Fatalf("expected header.patient.ids to be a 2-item array, got %T: %v", patient["ids"], patient["ids"])
+	}
+	first := ids[0].(map[string]interface{})
+	if first["root"] != "2.16.840.1.113883.19.5" || first["extension"] != "MRN-00482" {
+		t.Errorf("ids[0] = %v, want MRN entry", first)
+	}
+	second := ids[1].(map[string]interface{})
+	if second["root"] != "2.16.840.1.113883.4.1" || second["extension"] != "521-08-4013" {
+		t.Errorf("ids[1] = %v, want SSN entry", second)
+	}
+}
+
+// TestMapToCanonical_HeaderField_EmptyArraySourcePath_NoOp verifies an
+// empty array source (e.g. a row present but with no identifiers) writes
+// nothing, rather than an empty ids array that would still satisfy the
+// completeness banner's "row exists" check incorrectly.
+func TestMapToCanonical_HeaderField_EmptyArraySourcePath_NoOp(t *testing.T) {
+	config := map[string]interface{}{
+		"header": []interface{}{
+			map[string]interface{}{"group": "patient", "target": "ids", "sourcePath": "patientIdentifiers"},
+		},
+	}
+	inputData := map[string]interface{}{
+		"patientIdentifiers": []interface{}{},
+	}
+
+	output := runMapToCanonical(t, config, inputData)
+	doc := canonicalDocFrom(t, output, "parsedCDA")
+	header := doc["header"].(map[string]interface{})
+	patient, _ := header["patient"].(map[string]interface{})
+	if _, exists := patient["ids"]; exists {
+		t.Errorf("expected no ids key written for an empty source array, got %v", patient["ids"])
+	}
+}
+
 // TestMapToCanonical_EmptyConfig_ProducesEmptyCanonicalDoc verifies a step
 // with no header/sections configured is a safe no-op, matching cda.build/
 // cda.to_fhir's own permissive Validate.
@@ -394,6 +454,504 @@ func TestMapToCanonical_EmptyConfig_ProducesEmptyCanonicalDoc(t *testing.T) {
 	sections, ok := doc["sections"].(map[string]interface{})
 	if !ok || len(sections) != 0 {
 		t.Errorf("expected empty sections map, got %v", doc["sections"])
+	}
+}
+
+// TestMapToCanonical_Condition_MatchWritesThenLiteralValue verifies a field
+// with a Condition whose WhenPath/Equals matches the row writes
+// ThenLiteralValue (through ThenTransform + ValueMap) instead of resolving
+// SourcePath/FallbackPaths/LiteralValue normally.
+func TestMapToCanonical_Condition_MatchWritesThenLiteralValue(t *testing.T) {
+	config := map[string]interface{}{
+		"sections": []interface{}{
+			map[string]interface{}{
+				"sectionKey": "allergiesAndIntolerances",
+				"rowsPath":   "records",
+				"fields": []interface{}{
+					map[string]interface{}{
+						"canonicalField": "negationInd",
+						"sourcePath":     "shouldNeverBeUsed", // present but must be ignored — Condition wins
+						"condition": map[string]interface{}{
+							"whenPath":         "status_flag",
+							"equals":           "not-observed",
+							"thenLiteralValue": "true",
+						},
+					},
+				},
+			},
+		},
+	}
+	inputData := map[string]interface{}{
+		"records": []interface{}{
+			map[string]interface{}{"status_flag": "not-observed", "shouldNeverBeUsed": "WRONG"},
+		},
+	}
+
+	output := runMapToCanonical(t, config, inputData)
+	doc := canonicalDocFrom(t, output, "parsedCDA")
+	entries := sectionEntries(t, doc, "allergiesAndIntolerances")
+
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 entry, got %d", len(entries))
+	}
+	if got := entries[0]["negationInd"]; got != "true" {
+		t.Errorf("negationInd = %v, want true (from Condition.ThenLiteralValue, not SourcePath)", got)
+	}
+}
+
+// TestMapToCanonical_Condition_NoMatchFallsThroughToNormalResolution verifies
+// a Condition whose WhenPath/Equals does NOT match falls through to the
+// field's normal SourcePath resolution — Condition is a branch, not a filter.
+func TestMapToCanonical_Condition_NoMatchFallsThroughToNormalResolution(t *testing.T) {
+	config := map[string]interface{}{
+		"sections": []interface{}{
+			map[string]interface{}{
+				"sectionKey": "allergiesAndIntolerances",
+				"rowsPath":   "records",
+				"fields": []interface{}{
+					map[string]interface{}{
+						"canonicalField": "negationInd",
+						"sourcePath":     "explicitFlag",
+						"condition": map[string]interface{}{
+							"whenPath":         "status_flag",
+							"equals":           "not-observed",
+							"thenLiteralValue": "true",
+						},
+					},
+				},
+			},
+		},
+	}
+	inputData := map[string]interface{}{
+		"records": []interface{}{
+			map[string]interface{}{"status_flag": "active", "explicitFlag": "false"},
+		},
+	}
+
+	output := runMapToCanonical(t, config, inputData)
+	doc := canonicalDocFrom(t, output, "parsedCDA")
+	entries := sectionEntries(t, doc, "allergiesAndIntolerances")
+
+	if got := entries[0]["negationInd"]; got != "false" {
+		t.Errorf("negationInd = %v, want false (normal SourcePath resolution, Condition didn't match)", got)
+	}
+}
+
+// TestMapToCanonical_Condition_MatchWithEmptyThenLiteralValue_WritesNothing
+// verifies the documented "write nothing" branch: a matched Condition with no
+// ThenLiteralValue must NOT fall through to SourcePath either — the field is
+// simply absent from the entry.
+func TestMapToCanonical_Condition_MatchWithEmptyThenLiteralValue_WritesNothing(t *testing.T) {
+	config := map[string]interface{}{
+		"sections": []interface{}{
+			map[string]interface{}{
+				"sectionKey": "allergiesAndIntolerances",
+				"rowsPath":   "records",
+				"fields": []interface{}{
+					map[string]interface{}{"canonicalField": "medicationAllergyCode", "sourcePath": "code"},
+					map[string]interface{}{
+						"canonicalField": "negationInd",
+						"sourcePath":     "explicitFlag",
+						"condition": map[string]interface{}{
+							"whenPath": "status_flag",
+							"equals":   "not-observed",
+						},
+					},
+				},
+			},
+		},
+	}
+	inputData := map[string]interface{}{
+		"records": []interface{}{
+			map[string]interface{}{"code": "7980", "status_flag": "not-observed", "explicitFlag": "true"},
+		},
+	}
+
+	output := runMapToCanonical(t, config, inputData)
+	doc := canonicalDocFrom(t, output, "parsedCDA")
+	entries := sectionEntries(t, doc, "allergiesAndIntolerances")
+
+	if _, present := entries[0]["negationInd"]; present {
+		t.Errorf("expected negationInd to be absent (matched Condition with empty ThenLiteralValue), got %v", entries[0]["negationInd"])
+	}
+	if got := entries[0]["medicationAllergyCode"]; got != "7980" {
+		t.Errorf("medicationAllergyCode = %v, want 7980 (sibling field unaffected)", got)
+	}
+}
+
+// TestMapToCanonical_GroupBy_SingleColumn_BucketsRowsIntoSharedEntries
+// verifies rows sharing one GroupBy column's value are bucketed into ONE
+// canonical entry's GroupedItemsKey array, in first-seen bucket order — the
+// core Vital Signs "one organizer, N components" no-code producer.
+func TestMapToCanonical_GroupBy_SingleColumn_BucketsRowsIntoSharedEntries(t *testing.T) {
+	config := map[string]interface{}{
+		"sections": []interface{}{
+			map[string]interface{}{
+				"sectionKey":      "vitalSigns",
+				"rowsPath":        "records",
+				"groupBy":         []interface{}{"panelId"},
+				"groupedItemsKey": "components",
+				"fields": []interface{}{
+					map[string]interface{}{"canonicalField": "vitalCode", "sourcePath": "loincCode"},
+					map[string]interface{}{"canonicalField": "value", "sourcePath": "result"},
+				},
+			},
+		},
+	}
+	inputData := map[string]interface{}{
+		"records": []interface{}{
+			map[string]interface{}{"panelId": "P1", "loincCode": "8480-6", "result": "120"},
+			map[string]interface{}{"panelId": "P1", "loincCode": "8462-4", "result": "80"},
+			map[string]interface{}{"panelId": "P2", "loincCode": "8310-5", "result": "37.0"},
+		},
+	}
+
+	output := runMapToCanonical(t, config, inputData)
+	doc := canonicalDocFrom(t, output, "parsedCDA")
+	entries := sectionEntries(t, doc, "vitalSigns")
+
+	if len(entries) != 2 {
+		t.Fatalf("expected 2 grouped entries (P1, P2), got %d: %v", len(entries), entries)
+	}
+	p1Items, ok := entries[0]["components"].([]interface{})
+	if !ok || len(p1Items) != 2 {
+		t.Fatalf("expected entries[0].components to have 2 items, got %v", entries[0]["components"])
+	}
+	p2Items, ok := entries[1]["components"].([]interface{})
+	if !ok || len(p2Items) != 1 {
+		t.Fatalf("expected entries[1].components to have 1 item, got %v", entries[1]["components"])
+	}
+	first, ok := p1Items[0].(map[string]interface{})
+	if !ok || first["vitalCode"] != "8480-6" || first["value"] != "120" {
+		t.Errorf("p1Items[0] = %v, want vitalCode=8480-6 value=120", first)
+	}
+}
+
+// TestMapToCanonical_GroupBy_EntryFields_ResolvedOnceFromFirstRow verifies
+// EntryFields are applied ONCE per group (not once per item), sourced from
+// the group's first-seen row — the organizer-level effectiveTime producer
+// Vital Signs Organizer needs (CONF:1198-7288), distinct from each
+// component's own per-item fields.
+func TestMapToCanonical_GroupBy_EntryFields_ResolvedOnceFromFirstRow(t *testing.T) {
+	config := map[string]interface{}{
+		"sections": []interface{}{
+			map[string]interface{}{
+				"sectionKey":      "vitalSigns",
+				"rowsPath":        "records",
+				"groupBy":         []interface{}{"panelId"},
+				"groupedItemsKey": "components",
+				"entryFields": []interface{}{
+					map[string]interface{}{"canonicalField": "effectiveTime", "sourcePath": "panelTime"},
+				},
+				"fields": []interface{}{
+					map[string]interface{}{"canonicalField": "vitalCode", "sourcePath": "loincCode"},
+				},
+			},
+		},
+	}
+	inputData := map[string]interface{}{
+		"records": []interface{}{
+			map[string]interface{}{"panelId": "P1", "panelTime": "20240115120000", "loincCode": "8480-6"},
+			map[string]interface{}{"panelId": "P1", "panelTime": "20240115120500", "loincCode": "8462-4"}, // later time on 2nd row — first row wins
+		},
+	}
+
+	output := runMapToCanonical(t, config, inputData)
+	doc := canonicalDocFrom(t, output, "parsedCDA")
+	entries := sectionEntries(t, doc, "vitalSigns")
+
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 grouped entry, got %d", len(entries))
+	}
+	if got := entries[0]["effectiveTime"]; got != "20240115120000" {
+		t.Errorf("effectiveTime = %v, want 20240115120000 (from the group's first row, not the second)", got)
+	}
+	items, ok := entries[0]["components"].([]interface{})
+	if !ok || len(items) != 2 {
+		t.Fatalf("expected entry-level effectiveTime to coexist with 2 per-component items, got %v", entries[0])
+	}
+}
+
+// TestMapToCanonical_GroupBy_CompositeKey_TwoColumnsMustBothMatch verifies a
+// composite (multi-column) GroupBy only buckets rows together when EVERY
+// configured column matches — not just any one of them.
+func TestMapToCanonical_GroupBy_CompositeKey_TwoColumnsMustBothMatch(t *testing.T) {
+	config := map[string]interface{}{
+		"sections": []interface{}{
+			map[string]interface{}{
+				"sectionKey":      "vitalSigns",
+				"rowsPath":        "records",
+				"groupBy":         []interface{}{"encounterId", "panelId"},
+				"groupedItemsKey": "components",
+				"fields": []interface{}{
+					map[string]interface{}{"canonicalField": "vitalCode", "sourcePath": "loincCode"},
+				},
+			},
+		},
+	}
+	inputData := map[string]interface{}{
+		"records": []interface{}{
+			map[string]interface{}{"encounterId": "E1", "panelId": "P1", "loincCode": "8480-6"},
+			map[string]interface{}{"encounterId": "E2", "panelId": "P1", "loincCode": "8462-4"}, // same panelId, different encounter
+		},
+	}
+
+	output := runMapToCanonical(t, config, inputData)
+	doc := canonicalDocFrom(t, output, "parsedCDA")
+	entries := sectionEntries(t, doc, "vitalSigns")
+
+	if len(entries) != 2 {
+		t.Fatalf("expected 2 entries (composite key differs), got %d: %v", len(entries), entries)
+	}
+}
+
+// TestMapToCanonical_GroupBy_MissingValue_BecomesOwnSingletonGroup verifies a
+// row missing one of the configured GroupBy columns is never silently
+// dropped — it becomes its own single-item group instead.
+func TestMapToCanonical_GroupBy_MissingValue_BecomesOwnSingletonGroup(t *testing.T) {
+	config := map[string]interface{}{
+		"sections": []interface{}{
+			map[string]interface{}{
+				"sectionKey":      "vitalSigns",
+				"rowsPath":        "records",
+				"groupBy":         []interface{}{"panelId"},
+				"groupedItemsKey": "components",
+				"fields": []interface{}{
+					map[string]interface{}{"canonicalField": "vitalCode", "sourcePath": "loincCode"},
+				},
+			},
+		},
+	}
+	inputData := map[string]interface{}{
+		"records": []interface{}{
+			map[string]interface{}{"panelId": "P1", "loincCode": "8480-6"},
+			map[string]interface{}{"loincCode": "9999-9"}, // no panelId at all
+		},
+	}
+
+	output := runMapToCanonical(t, config, inputData)
+	doc := canonicalDocFrom(t, output, "parsedCDA")
+	entries := sectionEntries(t, doc, "vitalSigns")
+
+	if len(entries) != 2 {
+		t.Fatalf("expected 2 entries (P1 group + one singleton for the row missing panelId), got %d: %v", len(entries), entries)
+	}
+	foundSingleton := false
+	for _, e := range entries {
+		items, _ := e["components"].([]interface{})
+		if len(items) == 1 {
+			if m, ok := items[0].(map[string]interface{}); ok && m["vitalCode"] == "9999-9" {
+				foundSingleton = true
+			}
+		}
+	}
+	if !foundSingleton {
+		t.Errorf("expected the row missing panelId to appear as its own singleton group, entries=%v", entries)
+	}
+}
+
+// TestMapToCanonical_GroupBy_RowsProducingNoMappedFields_ExcludedFromGroup
+// verifies a row that maps to zero fields within its group doesn't produce a
+// junk empty item wedged into the bucket's items array.
+func TestMapToCanonical_GroupBy_RowsProducingNoMappedFields_ExcludedFromGroup(t *testing.T) {
+	config := map[string]interface{}{
+		"sections": []interface{}{
+			map[string]interface{}{
+				"sectionKey":      "vitalSigns",
+				"rowsPath":        "records",
+				"groupBy":         []interface{}{"panelId"},
+				"groupedItemsKey": "components",
+				"fields": []interface{}{
+					map[string]interface{}{"canonicalField": "vitalCode", "sourcePath": "loincCode"},
+				},
+			},
+		},
+	}
+	inputData := map[string]interface{}{
+		"records": []interface{}{
+			map[string]interface{}{"panelId": "P1", "loincCode": "8480-6"},
+			map[string]interface{}{"panelId": "P1", "unrelatedField": "x"}, // maps to nothing
+		},
+	}
+
+	output := runMapToCanonical(t, config, inputData)
+	doc := canonicalDocFrom(t, output, "parsedCDA")
+	entries := sectionEntries(t, doc, "vitalSigns")
+
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 entry, got %d", len(entries))
+	}
+	items, _ := entries[0]["components"].([]interface{})
+	if len(items) != 1 {
+		t.Errorf("expected 1 item in the group (unmapped row excluded), got %d: %v", len(items), items)
+	}
+}
+
+// TestMapToCanonical_RelatedRows_JoinsMatchingRowsFromDifferentArray is the
+// core Option C (cross-table join) proof: Medications' 0..* Indication
+// entryRelationship (CONF:1098-7536), joined from a SEPARATE
+// "indicationRecords" pipeline array via a shared medicationId column — not
+// the same rowset the medication row itself came from.
+func TestMapToCanonical_RelatedRows_JoinsMatchingRowsFromDifferentArray(t *testing.T) {
+	config := map[string]interface{}{
+		"sections": []interface{}{
+			map[string]interface{}{
+				"sectionKey": "medications",
+				"rowsPath":   "medicationRecords",
+				"fields": []interface{}{
+					map[string]interface{}{"canonicalField": "drugCode", "sourcePath": "ndc"},
+					map[string]interface{}{
+						"canonicalField": "indications",
+						"relatedRows": map[string]interface{}{
+							"relatedRowsPath": "indicationRecords",
+							"joinLocalKey":    "medId",
+							"joinRelatedKey":  "medId",
+							"fields": []interface{}{
+								map[string]interface{}{"canonicalField": "indicationCode", "sourcePath": "diagnosisCode"},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	inputData := map[string]interface{}{
+		"medicationRecords": []interface{}{
+			map[string]interface{}{"medId": "MED-1", "ndc": "0069-3150-83"},
+			map[string]interface{}{"medId": "MED-2", "ndc": "0069-9999-01"},
+		},
+		"indicationRecords": []interface{}{
+			map[string]interface{}{"medId": "MED-1", "diagnosisCode": "44054006"}, // matches MED-1
+			map[string]interface{}{"medId": "MED-1", "diagnosisCode": "38341003"}, // also matches MED-1
+			map[string]interface{}{"medId": "MED-9", "diagnosisCode": "99999999"}, // matches nothing
+		},
+	}
+
+	output := runMapToCanonical(t, config, inputData)
+	doc := canonicalDocFrom(t, output, "parsedCDA")
+	entries := sectionEntries(t, doc, "medications")
+
+	if len(entries) != 2 {
+		t.Fatalf("expected 2 medication entries, got %d", len(entries))
+	}
+
+	med1 := entries[0]
+	if med1["drugCode"] != "0069-3150-83" {
+		t.Fatalf("expected entries[0] to be MED-1, got %v", med1)
+	}
+	indications, ok := med1["indications"].([]interface{})
+	if !ok || len(indications) != 2 {
+		t.Fatalf("expected MED-1 to have 2 joined indications, got %v", med1["indications"])
+	}
+	first, _ := indications[0].(map[string]interface{})
+	if first["indicationCode"] != "44054006" {
+		t.Errorf("indications[0].indicationCode = %v, want 44054006", first["indicationCode"])
+	}
+
+	med2 := entries[1]
+	if _, present := med2["indications"]; present {
+		t.Errorf("expected MED-2 to have NO indications key (zero matches), got %v", med2["indications"])
+	}
+}
+
+// TestMapToCanonical_RelatedRows_NoLocalKeyValue_NoJoinAttempted verifies a
+// row missing its own JoinLocalKey value simply gets no related-rows field
+// (not an error, not a join against every related row).
+func TestMapToCanonical_RelatedRows_NoLocalKeyValue_NoJoinAttempted(t *testing.T) {
+	config := map[string]interface{}{
+		"sections": []interface{}{
+			map[string]interface{}{
+				"sectionKey": "medications",
+				"rowsPath":   "medicationRecords",
+				"fields": []interface{}{
+					map[string]interface{}{"canonicalField": "drugCode", "sourcePath": "ndc"},
+					map[string]interface{}{
+						"canonicalField": "indications",
+						"relatedRows": map[string]interface{}{
+							"relatedRowsPath": "indicationRecords",
+							"joinLocalKey":    "medId",
+							"joinRelatedKey":  "medId",
+							"fields": []interface{}{
+								map[string]interface{}{"canonicalField": "indicationCode", "sourcePath": "diagnosisCode"},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	inputData := map[string]interface{}{
+		"medicationRecords": []interface{}{
+			map[string]interface{}{"ndc": "0069-3150-83"}, // no medId at all
+		},
+		"indicationRecords": []interface{}{
+			map[string]interface{}{"medId": "MED-1", "diagnosisCode": "44054006"},
+		},
+	}
+
+	output := runMapToCanonical(t, config, inputData)
+	doc := canonicalDocFrom(t, output, "parsedCDA")
+	entries := sectionEntries(t, doc, "medications")
+
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 medication entry, got %d", len(entries))
+	}
+	if _, present := entries[0]["indications"]; present {
+		t.Errorf("expected no indications key when the row has no local join key value, got %v", entries[0]["indications"])
+	}
+}
+
+// TestMapToCanonical_RelatedRows_JoinedFieldsSupportTransformAndValueMap
+// verifies a joined row's own field mapping is the SAME applyFieldMapping
+// primitive as everywhere else — Transform/ValueMap keep working inside a
+// cross-table join, not just for top-level/grouped fields.
+func TestMapToCanonical_RelatedRows_JoinedFieldsSupportTransformAndValueMap(t *testing.T) {
+	config := map[string]interface{}{
+		"sections": []interface{}{
+			map[string]interface{}{
+				"sectionKey": "medications",
+				"rowsPath":   "medicationRecords",
+				"fields": []interface{}{
+					map[string]interface{}{
+						"canonicalField": "indications",
+						"relatedRows": map[string]interface{}{
+							"relatedRowsPath": "indicationRecords",
+							"joinLocalKey":    "medId",
+							"joinRelatedKey":  "medId",
+							"fields": []interface{}{
+								map[string]interface{}{
+									"canonicalField": "indicationCode",
+									"sourcePath":     "status_flag",
+									"transform":      "trim",
+									"valueMap":       map[string]interface{}{"A": "active"},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	inputData := map[string]interface{}{
+		"medicationRecords": []interface{}{
+			map[string]interface{}{"medId": "MED-1"},
+		},
+		"indicationRecords": []interface{}{
+			map[string]interface{}{"medId": "MED-1", "status_flag": "  A  "},
+		},
+	}
+
+	output := runMapToCanonical(t, config, inputData)
+	doc := canonicalDocFrom(t, output, "parsedCDA")
+	entries := sectionEntries(t, doc, "medications")
+
+	indications, ok := entries[0]["indications"].([]interface{})
+	if !ok || len(indications) != 1 {
+		t.Fatalf("expected 1 joined indication, got %v", entries[0]["indications"])
+	}
+	item, _ := indications[0].(map[string]interface{})
+	if item["indicationCode"] != "active" {
+		t.Errorf("indicationCode = %v, want active (trim then valueMap, same as any other field)", item["indicationCode"])
 	}
 }
 

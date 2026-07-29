@@ -227,4 +227,108 @@ test.describe('CDA-GC1 Pipeline Builder UI', () => {
         const streetLabel = page.locator('label:has-text("Street Address")');
         await expect(streetLabel).not.toContainText('Required');
     });
+
+    test('CDA-GC1-003 fresh render() shows Group By/Entry-Level Fields for a section that already has groupBy/entryFields set (regression)', async ({ page }) => {
+        test.skip(!state.interfaceId, 'Interface creation failed in beforeAll');
+
+        // showStepProperties() always destroys the previous activeStepBuilder
+        // and constructs a brand-new MapToCanonicalBuilder (see
+        // PropertiesPanel.js's generic StepBuilderRegistry dispatch) — so a
+        // config carrying a RepeatingGroup section's groupBy/entryFields
+        // BEFORE the panel is ever opened reproduces the exact bug: the
+        // builder's own _repeatingGroupCatalog cache starts empty and used to
+        // only ever get populated for sections added/changed via
+        // onSectionKeyChange or freshly pre-populated — never for one already
+        // sitting in the config, like a step loaded from a saved pipeline.
+        await page.goto(`${BASE_URL}/pipeline-builder.html?interfaceId=${state.interfaceId}`);
+        await page.waitForLoadState('load');
+        await page.waitForFunction(() => window.pipelineBuilder && window.pipelineBuilder.pipeline, { timeout: 8000 });
+
+        await page.evaluate(() => {
+            const pb = window.pipelineBuilder;
+            const findStep = t => (pb.pipeline.executionGroups || []).flatMap(g => g.steps || []).find(s => (s.stepType || s.step_type) === t);
+            if (!findStep('cda.map_to_canonical')) {
+                pb.addStep({
+                    stepType: 'cda.map_to_canonical', name: 'Map To Canonical',
+                    config: { outputField: 'parsedCDA', header: [], sections: [] },
+                });
+            }
+            const step = findStep('cda.map_to_canonical');
+            if (!step.config.sections.some(s => s.sectionKey === 'vitalSigns')) {
+                step.config.sections.push({
+                    sectionKey: 'vitalSigns', rowsPath: 'message.vitalRecords',
+                    fields: [{ canonicalField: 'vitalCode', sourcePath: 'vitalCode' }],
+                    groupBy: ['panelId'], groupedItemsKey: 'components',
+                    entryFields: [{ canonicalField: 'effectiveTime', sourcePath: 'obsTime' }],
+                });
+            }
+            pb.propertiesPanel.showStepProperties(step);
+        });
+        await expect(page.locator('#mapToCanonicalBuilder')).toBeVisible({ timeout: 3000 });
+        await page.waitForTimeout(2000);
+
+        const idx = await page.evaluate(() => {
+            const pb = window.pipelineBuilder;
+            const step = (pb.pipeline.executionGroups || []).flatMap(g => g.steps || []).find(s => (s.stepType || s.step_type) === 'cda.map_to_canonical');
+            return step.config.sections.findIndex(s => s.sectionKey === 'vitalSigns');
+        });
+        const card = page.locator(`.m2c-section-card[data-section-index="${idx}"]`);
+        await expect(card.locator('.m2c-section-groupby'), 'Group By input must render for an already-saved RepeatingGroup section').toBeVisible();
+        await expect(card.locator('.m2c-section-groupby')).toHaveValue('panelId');
+        await expect(card.getByText('Entry-Level Fields')).toBeVisible();
+        await expect(card.locator('tr[data-field-kind="entry"]')).toHaveCount(1);
+    });
+
+    test('CDA-GC1-004 Test Pipeline copy buttons match the actual output (no Copy FHIR Bundle for a CDA-only pipeline, Copy CCD/CDA XML present)', async ({ page, context }) => {
+        test.skip(!state.interfaceId, 'Interface creation failed in beforeAll');
+        await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+
+        await page.goto(`${BASE_URL}/pipeline-builder.html?interfaceId=${state.interfaceId}`);
+        await page.waitForLoadState('load');
+        await page.waitForFunction(() => window.pipelineBuilder && window.pipelineBuilder.pipeline, { timeout: 8000 });
+
+        // Ensure a minimal cda.map_to_canonical + cda.build pair exists (idempotent).
+        await page.evaluate(() => {
+            const pb = window.pipelineBuilder;
+            const findStep = t => (pb.pipeline.executionGroups || []).flatMap(g => g.steps || []).find(s => (s.stepType || s.step_type) === t);
+            if (!findStep('cda.map_to_canonical')) {
+                pb.addStep({
+                    stepType: 'cda.map_to_canonical', name: 'Map To Canonical',
+                    config: {
+                        outputField: 'message.parsedCDA', header: [],
+                        sections: [{ sectionKey: 'problems', rowsPath: 'message.records', fields: [{ canonicalField: 'conditionCode', sourcePath: 'icd10Code' }] }],
+                    },
+                });
+            }
+            if (!findStep('cda.build')) {
+                pb.addStep({ stepType: 'cda.build', name: 'Build CDA', config: { documentType: 'CCD', sourceField: 'message.parsedCDA', outputField: 'message.cdaXML' } });
+            }
+        });
+        await page.waitForTimeout(300);
+
+        // Test Pipeline resolves interface_id/message_type from a saved
+        // transformation_pipelines row when no pipeline_id is already known
+        // client-side — save once first so the test request can find it,
+        // same as how a real user would have a persisted pipeline by the
+        // time they run Test Pipeline.
+        await page.locator('#savePipelineBtn').click();
+        await page.waitForTimeout(1000);
+
+        await page.locator('#testPipelineBtn').click();
+        await page.locator('#testMessageInput').fill(JSON.stringify({ records: [{ icd10Code: 'E11.9', description: 'Type 2 diabetes mellitus' }] }));
+        await page.locator('#testMessageFormat').selectOption('json').catch(() => {});
+        await page.getByRole('button', { name: /Run Test/i }).first().click();
+        await expect(page.locator('#testResultsContent')).toContainText('Test Passed', { timeout: 15000 });
+
+        // The bug this guards against: "Copy FHIR Bundle" used to render
+        // unconditionally regardless of whether the pipeline ever produces a
+        // FHIR bundle — misleading for a CDA-only pipeline like this one.
+        await expect(page.locator('#copyBundleBtn')).toHaveCount(0);
+        await expect(page.locator('#copyCdaXmlBtn')).toBeVisible();
+        await expect(page.locator('#copyResultsBtn')).toBeVisible();
+
+        await page.locator('#copyCdaXmlBtn').click();
+        const clipboardText = await page.evaluate(() => navigator.clipboard.readText());
+        expect(clipboardText).toContain('<ClinicalDocument');
+    });
 });

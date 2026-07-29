@@ -106,6 +106,31 @@ type CDASectionDef struct {
 	// Allergy/Problem's own assertion observation is.
 	EntryStatusCodeOverride string `json:"entryStatusCodeOverride,omitempty"`
 
+	// EntryClassCodeOverride replaces the generic per-tag classCode default
+	// (see cda/builder's tagBoilerplate table) on this section's ROOT entry
+	// element specifically — the classCode counterpart to
+	// EntryStatusCodeOverride, needed for the exact same reason: tagBoilerplate
+	// is keyed purely by XML TAG NAME ("organizer"), but different C-CDA
+	// organizer archetypes assert different fixed classCode values. E.g.
+	// Vital Signs Organizer (V3) is SHALL classCode="CLUSTER" (the
+	// tagBoilerplate default, confirmed against its own spec chapter), but
+	// Result Organizer (V3) is classCode="BATTERY" (confirmed from that
+	// template's own Figure 213 worked example — the constraint table itself
+	// only says "SHALL contain exactly one classCode" without stating the
+	// value, same pattern as Indication's fixed <code> being only visible in
+	// its own worked example, not the constraint table).
+	EntryClassCodeOverride string `json:"entryClassCodeOverride,omitempty"`
+
+	// EntryMoodCodeOverride replaces the generic per-tag moodCode default
+	// (tagBoilerplate's "EVN" for every archetype) on this section's ROOT
+	// entry element — the moodCode counterpart to EntryStatusCodeOverride/
+	// EntryClassCodeOverride, for the same reason: some archetypes are
+	// SHALL a non-EVN moodCode. E.g. Instruction (V2) is SHALL
+	// moodCode="INT" (CONF:1098-7392, "The template's moodCode can only be
+	// INT") — confirmed directly against its own spec chapter, not assumed
+	// from the generic "act" default.
+	EntryMoodCodeOverride string `json:"entryMoodCodeOverride,omitempty"`
+
 	// EntryFixedCode/EntryFixedCodeSystem/EntryFixedCodeDisplay write a
 	// static <code> child onto this section's ROOT entry element when no
 	// field already targets "entry/<rootTag>/code" itself — needed for
@@ -119,6 +144,36 @@ type CDASectionDef struct {
 	EntryFixedCode        string `json:"entryFixedCode,omitempty"`
 	EntryFixedCodeSystem  string `json:"entryFixedCodeSystem,omitempty"`
 	EntryFixedCodeDisplay string `json:"entryFixedCodeDisplay,omitempty"`
+
+	// EntryCodeTranslationCode/System/Display write a static <translation>
+	// child under whatever <code> element ends up on this section's ROOT
+	// entry element — regardless of whether that <code> came from
+	// EntryFixedCode or from a real per-record field (e.g. Advance
+	// Directive's own directiveCode). Needed for archetypes whose C-CDA
+	// constraint is "code SHALL contain exactly one translation" with a
+	// business-fixed translation value — e.g. Advance Directive Observation
+	// (V3)'s code SHALL have a translation code="75320-2" (LOINC "Advance
+	// directive", CONF:1198-32842/32843/32844) regardless of what SNOMED/
+	// other code the user's own directiveCode data supplies. Applied once,
+	// after EntryFixedCode's own block, only when rootEl already has a
+	// <code> child with no existing <translation> — confirmed via a real
+	// schema validator run (2026-07) this is missing across every section
+	// that needs it.
+	EntryCodeTranslationCode    string `json:"entryCodeTranslationCode,omitempty"`
+	EntryCodeTranslationSystem  string `json:"entryCodeTranslationSystem,omitempty"`
+	EntryCodeTranslationDisplay string `json:"entryCodeTranslationDisplay,omitempty"`
+
+	// ObsCodeTranslationCode/System/Display mirror EntryCodeTranslationCode/
+	// System/Display exactly, but target the NESTED OBSERVATION element's
+	// own <code> (ObservationElementPath) instead of the root entry
+	// element's — e.g. Problem Observation (V3)'s own code (ObsFixedCode
+	// "55607006" SNOMED "Problem") SHALL have a translation code="75326-9"
+	// (LOINC "Problem") when its code is selected from the Problem Type
+	// (SNOMED CT) value set, which the fixed 55607006 discriminator always
+	// is (CONF:1098-32950).
+	ObsCodeTranslationCode    string `json:"obsCodeTranslationCode,omitempty"`
+	ObsCodeTranslationSystem  string `json:"obsCodeTranslationSystem,omitempty"`
+	ObsCodeTranslationDisplay string `json:"obsCodeTranslationDisplay,omitempty"`
 
 	// ObsFixedCode/ObsFixedCodeSystem/ObsFixedCodeDisplay mirror
 	// EntryFixedCode/EntryFixedCodeSystem/EntryFixedCodeDisplay exactly, but
@@ -140,8 +195,124 @@ type CDASectionDef struct {
 	ObsFixedCodeSystem  string `json:"observationFixedCodeSystem,omitempty"`
 	ObsFixedCodeDisplay string `json:"observationFixedCodeDisplay,omitempty"`
 
+	// RepeatingGroups declares the section's "loop" points — a canonical
+	// array field that repeats one XML element pattern once per item, as
+	// siblings (e.g. Vital Signs Organizer's 1..* <component> children, each
+	// sharing one effectiveTime). See RepeatingGroup's own doc comment for
+	// why this covers both the organizer/component shape and the
+	// entryRelationship-repeat shape with one mechanism. Absent/empty for
+	// every section that doesn't need it — zero effect on existing sections.
+	RepeatingGroups []RepeatingGroup `json:"repeatingGroups,omitempty"`
+
 	// Built at load time.
 	fieldByKey map[string]*CDAFieldDef
+}
+
+// RepeatingGroup is the schema-driven, data-only counterpart to hand-writing
+// a loop, for SECTION ENTRY content (clinical facts needing full boilerplate/
+// templateId/nested-observation support). Not to be confused with
+// cda/builder/header_fields.go's writeRepeatingGroup (singular) — a
+// deliberately much simpler, HEADER-only mechanism (patient ids[],
+// informants[], performers[]: one flat tag per item, no boilerplate or
+// templateId, since header elements don't carry classCode/moodCode the way
+// entries do). Different problem shapes, kept as two mechanisms rather than
+// forcing one to cover both.
+//
+// Mirrors this section's own EntryElementPath -> ObservationElementPath
+// -> Fields convention, just nested one level deeper and repeated once per
+// item in a canonical array:
+//
+//	record[Key] == []interface{}{item1, item2, ...}
+//	  -> a brand-new WrapperTag element created per item (always CREATE,
+//	       never find-or-reuse — every item is a genuinely new sibling, so
+//	       there's no XPath-predicate matching risk to reason about; see
+//	       writeRepeatingGroups' own doc comment for why this is direct
+//	       etree creation, not a WriteAtXPath positional predicate), with
+//	       WrapperAttr/WrapperAttrValue set if configured
+//	       -> each gets ObservationElementPath resolved relative to it
+//	            (boilerplate + TemplateID injected exactly like the
+//	            section-level ObservationElementPath already does)
+//	       -> Fields written relative to that resolved element, via the
+//	            SAME writeFieldValue every flat section already uses
+//
+// Two real C-CDA shapes both reduce to this: Vital Signs' "1..* <component>"
+// (WrapperTag="component", no WrapperAttr needed — nothing else creates
+// <component> under <organizer>) and Medication's "0..* <entryRelationship
+// typeCode='RSON'>" (WrapperTag="entryRelationship", WrapperAttr="typeCode",
+// WrapperAttrValue="RSON" — needed because OTHER unrelated entryRelationship
+// children, e.g. REFR/CAUS/SUBJ, can share the same parent) — the wrapper
+// tag/attribute differs, the repeat mechanism doesn't.
+type RepeatingGroup struct {
+	Key        string `json:"key"`
+	WrapperTag string `json:"wrapperTag"`
+
+	// WrapperAttr/WrapperAttrValue set ONE constant attribute directly on
+	// each newly-created WrapperTag element (e.g. WrapperAttr="typeCode",
+	// WrapperAttrValue="RSON" for Medication Activity's repeatable
+	// Indication entryRelationship, CONF:1098-7536/7537). Required whenever
+	// WrapperTag is a bare tag name that repeats under a parent ALSO used by
+	// other, unrelated same-tag children (e.g. medications' substanceAdministration
+	// root can carry entryRelationship siblings for Reaction/Supply/Dispense
+	// too, each with a different typeCode) — see writeRepeatingGroups' own
+	// doc comment for why plain positional creation is unsafe in that case.
+	// Empty for a WrapperTag that's already unambiguous on its own (e.g.
+	// Vital Signs' "component" — nothing else creates <component> under
+	// <organizer>).
+	WrapperAttr      string `json:"wrapperAttr,omitempty"`
+	WrapperAttrValue string `json:"wrapperAttrValue,omitempty"`
+
+	ObservationElementPath string         `json:"observationElementPath,omitempty"`
+	TemplateID             string         `json:"templateId,omitempty"`
+	TemplateIDExt          string         `json:"templateIdExtension,omitempty"`
+	Fields                 []*CDAFieldDef `json:"fields"`
+
+	// FixedCode/FixedCodeSystem/FixedCodeDisplay mirror ObsFixedCode exactly
+	// (same "don't clobber real data" guard — only written when no field
+	// already put a <code> under ObservationElementPath's resolved element),
+	// scoped to THIS repeating item instead of the section's one nested
+	// observation. Needed when the item's own classifying code is a
+	// business-fixed constant per the IG rather than per-record data — e.g.
+	// Indication (V2)'s own <code> is a generic "this is an assertion of
+	// fact" discriminator, SHALL code="ASSERTION"/codeSystem=2.16.840.1.113883.5.4
+	// (confirmed directly from the IG's own Figure 164 example — the
+	// constraint table only says "SHALL contain exactly one code", the fixed
+	// value itself is only visible in the worked example), never per-record
+	// data the way the item's <value> (the real referenced diagnosis) is.
+	FixedCode        string `json:"fixedCode,omitempty"`
+	FixedCodeSystem  string `json:"fixedCodeSystem,omitempty"`
+	FixedCodeDisplay string `json:"fixedCodeDisplay,omitempty"`
+
+	// AnchorRoot selects which of the section's two existing anchors
+	// WrapperTag attaches under: "" or "root" -> the section's
+	// EntryElementPath-resolved root (e.g. Vital Signs Organizer's
+	// <organizer> — the common case), "observation" -> the section's
+	// ObservationElementPath-resolved nested element (needed for sections
+	// where the repeating entryRelationship nests one level deeper, e.g.
+	// under Problem/Allergy's own SUBJ-observation rather than the wrapping
+	// act). Mirrors the section-level EntryElementPath/ObservationElementPath
+	// two-anchor convention rather than inventing a third addressing scheme.
+	AnchorRoot string `json:"anchorRoot,omitempty"`
+
+	// RequiredPaths: skip this array item entirely (don't create its
+	// wrapper element at all) unless the item's own record has a non-empty
+	// value at every one of these canonical keys — the "don't build an
+	// empty/junk instance" gate. Keys are relative to the item, same
+	// vocabulary as Fields[].Key.
+	RequiredPaths []string `json:"requiredPaths,omitempty"`
+
+	// AuthorTemplateID/AuthorTemplateIDExt, if set, stamp a <templateId>
+	// onto THIS item's own "author" child element once Fields has caused it
+	// to exist (e.g. an authorGiven/authorFamily field targeting
+	// "author/assignedAuthor/assignedPerson/name/given") — the
+	// RepeatingGroup-scoped counterpart to the section-level
+	// StructuralTemplateAnchor mechanism. Needed because Author
+	// Participation (templateId 2.16.840.1.113883.10.20.22.4.119) can repeat
+	// once per RepeatingGroup item (e.g. each Result/Vital Sign Observation
+	// has its own independent optional author) rather than once per
+	// section, so a single section-level StructuralTemplateAnchor can't
+	// reach every item's own <author>.
+	AuthorTemplateID    string `json:"authorTemplateId,omitempty"`
+	AuthorTemplateIDExt string `json:"authorTemplateIdExt,omitempty"`
 }
 
 // StructuralTemplateAnchor names one nested element (by path, relative to
@@ -159,6 +330,24 @@ type StructuralTemplateAnchor struct {
 	Path          string `json:"path"`
 	TemplateID    string `json:"templateId"`
 	TemplateIDExt string `json:"templateIdExtension,omitempty"`
+
+	// FixedCode/FixedCodeSystem/FixedCodeDisplay write a static <code> child
+	// onto this anchor's element when no field already targets
+	// "<path>/code" itself — the anchor-scoped counterpart to
+	// EntryFixedCode/ObsFixedCode (which only ever cover the section's ONE
+	// root/nested-observation element). Needed for entryRelationship
+	// sub-templates whose own classifying code is a business-fixed constant
+	// per the IG rather than per-record data — e.g. Problem Observation's
+	// Prognosis entryRelationship (templateId .4.113) SHALL have exactly one
+	// code="75328-5" (LOINC "Prognosis", CONF:1098-29039/29468/31349), and
+	// its Priority Preference entryRelationship (templateId .4.143) SHALL
+	// have exactly one code="225773000" (SNOMED CT "Preference",
+	// CONF:1098-30954/30955/30956) — same "don't clobber real data" guard
+	// EntryFixedCode uses (only written when no field write already put a
+	// <code> there).
+	FixedCode        string `json:"fixedCode,omitempty"`
+	FixedCodeSystem  string `json:"fixedCodeSystem,omitempty"`
+	FixedCodeDisplay string `json:"fixedCodeDisplay,omitempty"`
 }
 
 // CDAFieldDef defines one extractable field within a CDA section.
@@ -178,6 +367,15 @@ type CDAFieldDef struct {
 	XPathSystem  string `json:"xpathSystem,omitempty"`
 	XPathUnit    string `json:"xpathUnit,omitempty"`
 	XPathFamily  string `json:"xpathFamily,omitempty"`
+
+	// SkipIfXPathPresent: don't write this field if something else has
+	// already written a value at this OTHER xpath (relative to the same
+	// root writeFieldValue was called with) — the "don't clobber/duplicate"
+	// condition mechanism. E.g. a derived/default field that should only
+	// fill in when a more specific field didn't already supply a value.
+	// Checked via TryFindAtXPath, which already exists for exactly this
+	// kind of presence check (see StructuralTemplateIDs' own usage).
+	SkipIfXPathPresent string `json:"skipIfXPathPresent,omitempty"`
 }
 
 // C32MappingFile is the root of cda/schemas/c32_mapping.json.

@@ -88,6 +88,7 @@ func (cc *CDASchemaController) RegisterRoutes(rg *gin.RouterGroup) {
 	}
 	rg.GET("/canonical-sections", cc.GetCanonicalSections)
 	rg.GET("/canonical-fields/section/:sectionKey", cc.GetCanonicalSectionFields)
+	rg.GET("/canonical-fields/section/:sectionKey/repeating-group", cc.GetCanonicalSectionRepeatingGroup)
 	rg.GET("/canonical-fields/header/:group", cc.GetCanonicalHeaderFields)
 	rg.GET("/canonical-transforms", cc.GetCanonicalTransforms)
 	rg.GET("/document-types", cc.GetDocumentTypes)
@@ -228,6 +229,39 @@ func (cc *CDASchemaController) GetCanonicalSectionFields(c *gin.Context) {
 		"success": true,
 		"fields":  fields,
 		"count":   len(fields),
+	})
+}
+
+// GetCanonicalSectionRepeatingGroup returns sectionKey's declared
+// RepeatingGroup — its canonical groupedItemsKey plus per-item field
+// vocabulary (e.g. Vital Signs' "components": vitalCode/value/...) — for the
+// cda.map_to_canonical no-code Group By UI. Returns
+// {"success":true,"repeatingGroup":null} (200, not 404) for a section that
+// simply doesn't declare one — this is the common case (most sections never
+// will), not an error condition; 404 stays reserved for a genuinely unknown
+// sectionKey, matching GetCanonicalSectionFields' own not-found handling.
+func (cc *CDASchemaController) GetCanonicalSectionRepeatingGroup(c *gin.Context) {
+	if cc.schemaLoader == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{
+			"success": false,
+			"error":   "CDA schema not loaded — check schema directory configuration",
+		})
+		return
+	}
+
+	sectionKey := c.Param("sectionKey")
+	if cc.schemaLoader.GetSection(sectionKey) == nil {
+		c.JSON(http.StatusNotFound, gin.H{
+			"success": false,
+			"error":   fmt.Sprintf("unknown section key %q", sectionKey),
+		})
+		return
+	}
+
+	group := cdaBuilder.SectionRepeatingGroupCatalog(cc.schemaLoader, sectionKey)
+	c.JSON(http.StatusOK, gin.H{
+		"success":        true,
+		"repeatingGroup": group,
 	})
 }
 
@@ -637,6 +671,11 @@ var cdaDirectEntryFields = []resourceFieldResponse{
 	{Path: "moodCode", Name: "Mood Code", Description: "Whether this act already happened, is ordered, or is intended.", DataType: "CS"},
 	{Path: "nullFlavor", Name: "Null Flavor", Description: "Why a value is absent, e.g. \"no information\", \"unknown\", \"not applicable\".", DataType: "CS"},
 	{Path: "id", Name: "Id", Description: "The entry's own unique instance identifier(s).", DataType: "II"},
+	{Path: "approachSiteCode", Name: "Approach Site Code", Description: "The anatomical site of administration, e.g. \"Right Deltoid\" for an injection — used by medication and immunization entries.", DataType: "CD"},
+	{Path: "administrationUnitCode", Name: "Administration Unit Code", Description: "The dosage form/unit, e.g. \"CAPSULE, DELAYED RELEASE\" — distinct from Dose Quantity's numeric amount+unit.", DataType: "CD"},
+	{Path: "maxDoseQuantity", Name: "Max Dose Quantity", Description: "The maximum allowed dose per time period — usually only the numerator (max single/daily dose amount) is populated in real documents.", DataType: "RTO"},
+	{Path: "precondition", Name: "Precondition", Description: "The clinical criterion that must be met before administering (PRN conditions).", DataType: "CD"},
+	{Path: "relatedSubjectCode", Name: "Related Subject Code", Description: "The Family History Organizer's family member relationship to the patient, e.g. \"mother\", \"father\".", DataType: "CD"},
 }
 
 // GetEntryFields returns the hand-authored cdaDirectEntryFields catalog, in

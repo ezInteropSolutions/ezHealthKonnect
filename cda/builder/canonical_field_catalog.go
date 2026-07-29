@@ -58,33 +58,76 @@ func SectionCatalog(loader *cdaSchema.CDASchemaLoader) []CanonicalSectionInfo {
 }
 
 // SectionFieldCatalog returns every canonical field key buildEntry reads for
-// sectionKey, sourced live from the schema (cdaSchema.CDASectionDef.Fields)
-// — never duplicated/re-derived. Returns nil if sectionKey is unknown.
+// sectionKey's ENTRY-level fields, sourced live from the schema
+// (cdaSchema.CDASectionDef.Fields) — never duplicated/re-derived. For a
+// section with no RepeatingGroups this is the section's complete field
+// vocabulary; for a section that DOES declare one (e.g. Vital Signs), these
+// are specifically the fields shared once per entry (e.g. the Organizer's
+// own effectiveTime) — see SectionRepeatingGroupCatalog for the per-item
+// vocabulary used inside the loop. Returns nil if sectionKey is unknown.
 func SectionFieldCatalog(loader *cdaSchema.CDASchemaLoader, sectionKey string) []CanonicalFieldInfo {
 	sec := loader.GetSection(sectionKey)
 	if sec == nil {
 		return nil
 	}
-
 	out := make([]CanonicalFieldInfo, 0, len(sec.Fields)*2)
 	for _, f := range sec.Fields {
-		out = append(out, CanonicalFieldInfo{Key: f.Key, Label: f.USCDIElement, DataType: f.DataType, Conformance: f.Conformance})
-		// Display/System/Unit/Family companions inherit the parent field's
-		// conformance level — the schema doesn't level them independently
-		// (e.g. a SHALL code's display text isn't itself a separately-leveled
-		// SHALL/SHOULD field in ccda_2_1.json).
-		if f.XPathDisplay != "" {
-			out = append(out, CanonicalFieldInfo{Key: f.Key + "Display", Label: f.USCDIElement + " (display text)", DataType: "ST", Conformance: f.Conformance})
-		}
-		if f.XPathSystem != "" {
-			out = append(out, CanonicalFieldInfo{Key: f.Key + "System", Label: f.USCDIElement + " (code system OID)", DataType: "OID", Conformance: f.Conformance})
-		}
-		if f.XPathUnit != "" {
-			out = append(out, CanonicalFieldInfo{Key: f.Key + "Unit", Label: f.USCDIElement + " (unit)", DataType: "ST", Conformance: f.Conformance})
-		}
-		if f.XPathFamily != "" {
-			out = append(out, CanonicalFieldInfo{Key: f.Key + "Family", Label: f.USCDIElement + " (family/component)", DataType: "ST", Conformance: f.Conformance})
-		}
+		out = append(out, expandFieldWithCompanions(f)...)
+	}
+	return out
+}
+
+// SectionRepeatingGroupInfo describes one section's declared "loop" point —
+// the no-code Group By UI's per-item field picker needs both the group's own
+// canonical key (map_to_canonical's groupedItemsKey target, e.g.
+// "components") and its per-item field vocabulary, which is a DIFFERENT set
+// of canonical keys than the section's entry-level SectionFieldCatalog (e.g.
+// Vital Signs' per-component "vitalCode"/"value" vs. the organizer's own
+// "effectiveTime").
+type SectionRepeatingGroupInfo struct {
+	Key    string               `json:"key"`
+	Fields []CanonicalFieldInfo `json:"fields"`
+}
+
+// SectionRepeatingGroupCatalog returns sectionKey's declared RepeatingGroup
+// for the no-code Group By UI, or nil if the section doesn't declare one.
+// Only the first RepeatingGroup is exposed — every section declaring one
+// today (Vital Signs) has exactly one; a section needing multiple
+// independently-configurable loops would need this to become a slice, not
+// something the current schema/UI has a real case for yet.
+func SectionRepeatingGroupCatalog(loader *cdaSchema.CDASchemaLoader, sectionKey string) *SectionRepeatingGroupInfo {
+	sec := loader.GetSection(sectionKey)
+	if sec == nil || len(sec.RepeatingGroups) == 0 {
+		return nil
+	}
+	group := sec.RepeatingGroups[0]
+	fields := make([]CanonicalFieldInfo, 0, len(group.Fields)*2)
+	for _, f := range group.Fields {
+		fields = append(fields, expandFieldWithCompanions(f)...)
+	}
+	return &SectionRepeatingGroupInfo{Key: group.Key, Fields: fields}
+}
+
+// expandFieldWithCompanions projects one CDAFieldDef into its primary
+// CanonicalFieldInfo plus whichever Display/System/Unit/Family companions it
+// actually defines an XPath for — shared by SectionFieldCatalog and
+// SectionRepeatingGroupCatalog so the two never drift on this convention.
+// Companions inherit the parent field's conformance level — the schema
+// doesn't level them independently (e.g. a SHALL code's display text isn't
+// itself a separately-leveled SHALL/SHOULD field in ccda_2_1.json).
+func expandFieldWithCompanions(f *cdaSchema.CDAFieldDef) []CanonicalFieldInfo {
+	out := []CanonicalFieldInfo{{Key: f.Key, Label: f.USCDIElement, DataType: f.DataType, Conformance: f.Conformance}}
+	if f.XPathDisplay != "" {
+		out = append(out, CanonicalFieldInfo{Key: f.Key + "Display", Label: f.USCDIElement + " (display text)", DataType: "ST", Conformance: f.Conformance})
+	}
+	if f.XPathSystem != "" {
+		out = append(out, CanonicalFieldInfo{Key: f.Key + "System", Label: f.USCDIElement + " (code system OID)", DataType: "OID", Conformance: f.Conformance})
+	}
+	if f.XPathUnit != "" {
+		out = append(out, CanonicalFieldInfo{Key: f.Key + "Unit", Label: f.USCDIElement + " (unit)", DataType: "ST", Conformance: f.Conformance})
+	}
+	if f.XPathFamily != "" {
+		out = append(out, CanonicalFieldInfo{Key: f.Key + "Family", Label: f.USCDIElement + " (family/component)", DataType: "ST", Conformance: f.Conformance})
 	}
 	return out
 }
@@ -146,6 +189,7 @@ var headerBespokeFields = map[string][]CanonicalFieldInfo{
 	},
 	"author": {
 		{Key: "npi", Label: "NPI", DataType: "ST"},
+		{Key: "phone", Label: "Phone", DataType: "ST"},
 	},
 	"informant": {
 		{Key: "npi", Label: "NPI", DataType: "ST"},
@@ -184,6 +228,7 @@ func HeaderFieldCatalog(group string) []CanonicalFieldInfo {
 		return out
 	case "author":
 		out := headerMappingsToCatalog(authorScalarFields, "ST")
+		out = append(out, prefixKeys(headerMappingsToCatalog(patientAddressFields, "ST"), "address")...)
 		out = append(out, headerBespokeFields["author"]...)
 		return out
 	case "informant":

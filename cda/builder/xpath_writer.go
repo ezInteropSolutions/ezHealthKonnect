@@ -26,6 +26,7 @@
 package builder
 
 import (
+	"sort"
 	"strconv"
 	"strings"
 
@@ -241,13 +242,14 @@ func findOrCreateChild(parent *etree.Element, segment string, remaining []string
 	candidates := candidatesForSegment(parent, segment)
 
 	if pred != "" && len(remaining) > 0 && segmentHasPredicate(remaining[0]) {
+		lookahead := lookaheadPrefix(remaining)
 		for _, c := range candidates {
-			if _, ok := tryWalkElements(c, remaining); ok {
+			if _, ok := tryWalkElements(c, lookahead); ok {
 				return c
 			}
 		}
 		// No existing candidate already has the specific nested identity
-		// `remaining` asks for — this is a distinct sibling instance (e.g. a
+		// `lookahead` asks for — this is a distinct sibling instance (e.g. a
 		// second entryRelationship for a different nested observation
 		// type), not a reuse of an existing one. Fall through to create.
 	} else if len(candidates) > 0 {
@@ -262,9 +264,7 @@ func findOrCreateChild(parent *etree.Element, segment string, remaining []string
 	}
 	if conds := parseConditions(pred); len(conds) > 0 {
 		el := parent.CreateElement(tag)
-		for _, c := range conds {
-			applyPredicateConstraint(el, c.lhs, c.rhs)
-		}
+		applyPredicateConstraints(el, conds)
 		return el
 	}
 	// Unrecognized predicate form — degrade to a bare create by tag.
@@ -275,6 +275,44 @@ func findOrCreateChild(parent *etree.Element, segment string, remaining []string
 // predicate (as opposed to a bare tag name).
 func segmentHasPredicate(segment string) bool {
 	return strings.Contains(segment, "[")
+}
+
+// lookaheadPrefix returns the leading portion of remaining up through (and
+// including) its LAST predicated segment — the only part of the path that
+// can actually disambiguate between sibling instances sharing the same
+// outer predicate (e.g. Reaction vs Severity vs Status, all nested under an
+// entryRelationship[@typeCode='SUBJ',@inversionInd='true'] sibling,
+// distinguished only by their own nested observation[templateId/@root=...]).
+//
+// Trailing BARE-tag segments after that point (e.g. "effectiveTime", "text",
+// "telecom") never disambiguate anything — a bare tag is a plain find-or-
+// create against whichever candidate was already selected — and must NOT be
+// required to already exist. Requiring the full remaining path (including
+// those trailing segments) to pre-exist was a real bug: the very first time
+// a NEW field is added targeting a not-yet-written leaf under an already-
+// correctly-disambiguated element (e.g. Reaction Observation's own
+// effectiveTime, added after reaction/reactionDisplay/reactionSystem already
+// built that element via its shared value/@code|@displayName|@codeSystem
+// terminal), tryWalkElements would correctly report that leaf doesn't exist
+// yet — but findOrCreateChild misread that as "this candidate doesn't
+// match", spawning a whole duplicate sibling (a second entryRelationship +
+// observation) instead of just adding the new leaf to the correct existing
+// one. Confirmed via a live Test Pipeline run (2026-07) producing duplicate
+// entryRelationship/observation pairs for Reaction Observation, Problem
+// Status, and a fragmented multi-copy Advance Directive Custodian
+// participant — all new fields this session added under already-existing
+// predicate-disambiguated elements.
+func lookaheadPrefix(remaining []string) []string {
+	lastPredicated := -1
+	for i, seg := range remaining {
+		if segmentHasPredicate(seg) {
+			lastPredicated = i
+		}
+	}
+	if lastPredicated == -1 {
+		return nil
+	}
+	return remaining[:lastPredicated+1]
 }
 
 // splitPredicate splits "tag[predicate]" into ("tag", "predicate"), or
@@ -342,28 +380,123 @@ func predicateMatches(el *etree.Element, lhs, rhs string) bool {
 	return false
 }
 
-// applyPredicateConstraint writes the attribute(s) a freshly-created element
-// needs so it actually satisfies the condition that selected it — otherwise
-// a second WriteAtXPath call for a sibling field would fail to find it again
-// and create a duplicate.
-func applyPredicateConstraint(el *etree.Element, lhs, rhs string) {
-	if strings.HasPrefix(lhs, "@") {
-		el.CreateAttr(lhs[1:], rhs)
-		return
+// applyPredicateConstraints applies a full comma-AND condition list to a
+// freshly-created el, grouping conditions that target the SAME nested child
+// (e.g. "code/@code='11367-0',code/@codeSystem='2.16.840.1.113883.6.1'")
+// into ONE find-or-create pass rather than handling each condition
+// independently.
+//
+// Handling each condition independently (applying it in isolation, one at a
+// time) is correct when each condition targets a DIFFERENT child, or el's
+// own attributes, but breaks when two-plus conditions target the SAME
+// nested child: the first one creates that child with only its own
+// attribute set; the second one's "find an existing childTag where
+// @attrName already equals rhs" search then can't find that just-created
+// child (it doesn't have the SECOND attribute yet) and wrongly creates a
+// SEPARATE second child instead of adding to the first — confirmed via a
+// real schema validator run (2026-07): Tobacco Use's own <code> needs both
+// @code AND @codeSystem, and ended up as two sibling <code> elements instead
+// of one with both attributes.
+func applyPredicateConstraints(el *etree.Element, conds []condition) {
+	type group struct {
+		childTag string // "" means el's own attribute(s), not a nested child
+		conds    []condition
 	}
-	if idx := strings.LastIndex(lhs, "/@"); idx >= 0 {
-		childTag := lhs[:idx]
-		attrName := lhs[idx+2:]
+	var groups []group
+	indexByKey := map[string]int{}
+	for _, c := range conds {
+		key := ""
+		if !strings.HasPrefix(c.lhs, "@") {
+			if idx := strings.LastIndex(c.lhs, "/@"); idx >= 0 {
+				key = c.lhs[:idx]
+			}
+		}
+		if gi, ok := indexByKey[key]; ok {
+			groups[gi].conds = append(groups[gi].conds, c)
+			continue
+		}
+		indexByKey[key] = len(groups)
+		groups = append(groups, group{childTag: key, conds: []condition{c}})
+	}
+
+	for _, g := range groups {
+		if g.childTag == "" {
+			for _, c := range g.conds {
+				el.CreateAttr(c.lhs[1:], c.rhs)
+			}
+			continue
+		}
 		var child *etree.Element
-		for _, existing := range el.SelectElements(childTag) {
-			if existing.SelectAttrValue(attrName, "") == rhs {
+		for _, existing := range el.SelectElements(g.childTag) {
+			matchesAll := true
+			for _, c := range g.conds {
+				attrName := c.lhs[len(g.childTag)+2:] // strip "childTag/@"
+				if existing.SelectAttrValue(attrName, "") != c.rhs {
+					matchesAll = false
+					break
+				}
+			}
+			if matchesAll {
 				child = existing
 				break
 			}
 		}
 		if child == nil {
-			child = el.CreateElement(childTag)
-			child.CreateAttr(attrName, rhs)
+			child = el.CreateElement(g.childTag)
+			for _, c := range g.conds {
+				attrName := c.lhs[len(g.childTag)+2:] // strip "childTag/@"
+				child.CreateAttr(attrName, c.rhs)
+			}
 		}
+	}
+}
+
+// reorderChildrenByTag reorders el's direct child elements so tags listed in
+// order come first (in the order given), followed by every other existing
+// child in its original relative position — a stable sort, so multiple
+// children sharing one tag (e.g. two <given> elements) never get shuffled
+// relative to each other.
+//
+// Needed because this engine builds an element's children across several
+// independent passes (a field write via WriteAtXPath, then a later
+// StructuralTemplateIDs/injectTemplateID call, etc.) that append in
+// whichever order Go code happens to call them — not necessarily the fixed
+// sequence CDA's own XSD requires (confirmed via a real schema validator
+// run against this builder's own output, 2026-07: e.g. manufacturedProduct's
+// templateId is only known once a StructuralTemplateIDs anchor resolves,
+// which runs AFTER the plain field write that already created its sibling
+// manufacturedMaterial, leaving templateId appended in the wrong, invalid
+// position). Called with a short order list (even just {"templateId"}) at
+// the one anchor/element a real ordering bug was found on — not a sweeping
+// per-tag table applied everywhere, since most of this engine's output
+// already appends in valid schema order by construction.
+func reorderChildrenByTag(el *etree.Element, order []string) {
+	if el == nil {
+		return
+	}
+	children := el.ChildElements()
+	if len(children) < 2 {
+		return
+	}
+	rank := make(map[string]int, len(order))
+	for i, tag := range order {
+		rank[tag] = i
+	}
+	sort.SliceStable(children, func(i, j int) bool {
+		ri, iok := rank[children[i].Tag]
+		rj, jok := rank[children[j].Tag]
+		if !iok {
+			ri = len(order)
+		}
+		if !jok {
+			rj = len(order)
+		}
+		return ri < rj
+	})
+	for _, c := range children {
+		el.RemoveChild(c)
+	}
+	for _, c := range children {
+		el.AddChild(c)
 	}
 }

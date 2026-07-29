@@ -27,6 +27,15 @@ import (
 type BuildOptions struct {
 	OrgName   string           // custodian + fallback author organization name (legacy — see CustodianOptions.OrgName)
 	Custodian CustodianOptions // structured custodian fields — deployment-level constant config, not per-message source data (see cda.build step's own Custodian tab, not cda.map_to_canonical)
+
+	// TimezoneOffset is a "+HHMM"/"-HHMM" string (e.g. "-0500") applied to
+	// the internally-generated document effectiveTime and author time —
+	// deployment-level constant config, same rationale as OrgName/Custodian
+	// above, since these two timestamps are "now at build time", not
+	// per-message source data. Empty defaults to UTC ("+0000"); a malformed
+	// value falls back to UTC rather than erroring (see
+	// nowCDATimestamp/parseTimezoneOffset in time.go).
+	TimezoneOffset string
 }
 
 // CustodianOptions are the structured Custodian fields configurable
@@ -73,7 +82,7 @@ func BuildDocument(loader *cdaSchema.CDASchemaLoader, canonicalDoc map[string]in
 	root.CreateAttr("xmlns:xsi", "http://www.w3.org/2001/XMLSchema-instance")
 	root.CreateAttr("xsi:schemaLocation", "urn:hl7-org:v3 CDA.xsd")
 
-	writeDocumentBoilerplate(root, docMeta)
+	writeDocumentBoilerplate(root, docMeta, opts)
 
 	headerMap, _ := canonicalDoc["header"].(map[string]interface{})
 	writePatientHeader(root, headerMap)
@@ -101,8 +110,47 @@ func BuildDocument(loader *cdaSchema.CDASchemaLoader, canonicalDoc map[string]in
 		component.AddChild(buildSectionElement(sec, entries))
 	}
 
+	ensureIntervalEffectiveTimeXsiType(root)
+
 	doc.Indent(2)
 	return doc.WriteToString()
+}
+
+// ensureIntervalEffectiveTimeXsiType sets xsi:type="IVL_TS" on every
+// <effectiveTime> in the whole document that has a <low> and/or <high>
+// child but no xsi:type yet. CDA's base SXCM_TS type — the default,
+// unadorned declared type for effectiveTime almost everywhere it appears
+// (SubstanceAdministration, Act, Observation, ServiceEvent...) — only
+// supports a plain scalar shape (bare @value, no children); carrying
+// <low>/<high> children legally requires explicitly selecting the more
+// specific IVL_TS type via xsi:type. This engine builds every interval
+// effectiveTime (onsetDate/resolutionDate pairs, medication start/stop
+// dates, directive periods, documentationOf's own service period, ...) via
+// plain WriteAtXPath calls that create <low>/<high> as children with no
+// xsi:type at all — confirmed invalid via a real schema validator run
+// (2026-07): the anonymous "effectiveTime must have no children, because
+// the type's content type is empty" errors, PLUS (once xsi:type is
+// missing) several validators cascade the resulting confusion onto that
+// element's own later siblings too — this one fix was the root cause behind
+// several separately-reported-looking complaints on Allergy/Reaction/
+// Severity/Status/Tobacco Use's <value> (each sits right after an
+// effectiveTime-with-children sibling), not just the effectiveTime itself.
+//
+// Deliberately does NOT touch a scalar effectiveTime (bare @value, no
+// low/high) — that shape is already valid AS a plain, unadorned TS and
+// needs no override; only elements that actually have low/high children
+// are missing something. Run once on the whole document (not per-entry)
+// since this affects header-level effectiveTime (documentationOf/
+// serviceEvent) exactly the same way as entry-level ones.
+func ensureIntervalEffectiveTimeXsiType(root *etree.Element) {
+	for _, et := range root.FindElements(".//effectiveTime") {
+		if et.SelectAttrValue("xsi:type", "") != "" {
+			continue
+		}
+		if et.SelectElement("low") != nil || et.SelectElement("high") != nil {
+			et.CreateAttr("xsi:type", "IVL_TS")
+		}
+	}
 }
 
 func buildSectionElement(sec *cdaSchema.CDASectionDef, entries []map[string]interface{}) *etree.Element {
@@ -113,6 +161,7 @@ func buildSectionElement(sec *cdaSchema.CDASectionDef, entries []map[string]inte
 		if sec.TemplateIDExt != "" {
 			tid.CreateAttr("extension", sec.TemplateIDExt)
 		}
+		ensureR1CompatTemplateID(section, sec.TemplateID, sec.TemplateIDExt)
 	}
 	if sec.LOINCCode != "" {
 		code := section.CreateElement("code")
@@ -171,18 +220,31 @@ func containsString(list []string, s string) bool {
 
 // ─── Document-level boilerplate ─────────────────────────────────────────────
 
-func writeDocumentBoilerplate(root *etree.Element, meta *cdaSchema.DocumentTypeMetadata) {
+func writeDocumentBoilerplate(root *etree.Element, meta *cdaSchema.DocumentTypeMetadata, opts BuildOptions) {
+	// realmCode + typeId are the first two children the CDA schema allows
+	// before templateId (POCD_MT000040.ClinicalDocument's sequence is
+	// realmCode?, typeId, templateId*, id*, code, ...) — both were entirely
+	// missing before, which a real schema validator flags as invalid content
+	// starting at the very first templateId (confirmed via a real CDA
+	// validator run against this builder's own output, 2026-07).
+	root.CreateElement("realmCode").CreateAttr("code", "US")
+	typeID := root.CreateElement("typeId")
+	typeID.CreateAttr("root", "2.16.840.1.113883.1.3")
+	typeID.CreateAttr("extension", "POCD_HD000040")
+
 	// US Realm Header (CONF:1198-*, "Conforms to US Realm Header (V3) template
 	// urn:hl7ii:2.16.840.1.113883.10.20.22.1.1:2015-08-01") + document-type templateId.
 	realmHeader := root.CreateElement("templateId")
 	realmHeader.CreateAttr("root", "2.16.840.1.113883.10.20.22.1.1")
 	realmHeader.CreateAttr("extension", "2015-08-01")
+	ensureR1CompatTemplateID(root, "2.16.840.1.113883.10.20.22.1.1", "2015-08-01")
 	if meta != nil && meta.TemplateID != "" {
 		docTid := root.CreateElement("templateId")
 		docTid.CreateAttr("root", meta.TemplateID)
 		if meta.TemplateIDExt != "" {
 			docTid.CreateAttr("extension", meta.TemplateIDExt)
 		}
+		ensureR1CompatTemplateID(root, meta.TemplateID, meta.TemplateIDExt)
 	}
 
 	docID := fmt.Sprintf("ehk-%d", timeNowUnixNano())
@@ -199,8 +261,16 @@ func writeDocumentBoilerplate(root *etree.Element, meta *cdaSchema.DocumentTypeM
 	code.CreateAttr("codeSystem", "2.16.840.1.113883.6.1")
 	code.CreateAttr("codeSystemName", "LOINC")
 
-	root.CreateElement("effectiveTime").CreateAttr("value", nowCDATimestamp())
-	root.CreateElement("confidentialityCode").CreateAttr("code", "N")
+	root.CreateElement("effectiveTime").CreateAttr("value", nowCDATimestamp(opts.TimezoneOffset))
+	// "N" ("normal") confirmed as a real member of ValueSet HL7
+	// BasicConfidentialityKind (urn:oid:2.16.840.1.113883.1.11.16926, Table 5)
+	// via the IG PDF's own text — codeSystem is HL7Confidentiality
+	// (2.16.840.1.113883.5.25), not LOINC. Was previously missing entirely,
+	// which is almost certainly why a validator couldn't confirm this
+	// against the STATIC valueset despite "N" itself being correct.
+	confCode := root.CreateElement("confidentialityCode")
+	confCode.CreateAttr("code", "N")
+	confCode.CreateAttr("codeSystem", "2.16.840.1.113883.5.25")
 	root.CreateElement("languageCode").CreateAttr("code", "en-US")
 }
 
@@ -222,6 +292,7 @@ func writePatientHeader(root *etree.Element, header map[string]interface{}) {
 
 	if addr, ok := patientData["address"].(map[string]interface{}); ok {
 		addrEl := patientRole.CreateElement("addr")
+		addrEl.CreateAttr("use", "HP")
 		writeHeaderFields(addrEl, addr, patientAddressFields)
 	}
 
@@ -233,19 +304,62 @@ func writePatientHeader(root *etree.Element, header map[string]interface{}) {
 
 	writeHeaderFields(patientRole, patientData, patientScalarFields)
 	writeCodedFields(patientRole, patientData, patientCodedFields)
+
+	// patientScalarFields (name/birthTime/languageCommunication) and
+	// patientCodedFields (sex/race/ethnicity) are two independent
+	// field-mapping tables written via two separate calls, so together they
+	// can't produce CDA's required interleaved Patient sequence (name,
+	// administrativeGenderCode, birthTime, ..., raceCode, ethnicGroupCode,
+	// ..., languageCommunication) by call order alone — reorder once,
+	// after both have run, rather than trying to choreograph two unrelated
+	// lists into one combined order.
+	if patient := patientRole.SelectElement("patient"); patient != nil {
+		reorderChildrenByTag(patient, []string{
+			"name", "administrativeGenderCode", "birthTime",
+			"maritalStatusCode", "religiousAffiliationCode",
+			"raceCode", "ethnicGroupCode", "guardian", "birthplace",
+			"languageCommunication",
+		})
+	}
 }
 
 func writeAuthorHeader(root *etree.Element, header map[string]interface{}, opts BuildOptions) {
 	authorData, _ := header["author"].(map[string]interface{})
 
 	author := root.CreateElement("author")
-	author.CreateElement("time").CreateAttr("value", nowCDATimestamp())
+	author.CreateElement("time").CreateAttr("value", nowCDATimestamp(opts.TimezoneOffset))
 	assignedAuthor := author.CreateElement("assignedAuthor")
 
 	writeNPI(assignedAuthor, "id", authorData["npi"])
 	writeHeaderFields(assignedAuthor, authorData, authorScalarFields)
+	writeHeaderFields(assignedAuthor, authorData, authorCodedFields)
+
+	// addr/telecom reuse patientAddressFields verbatim — same helper, same
+	// convention writeCustodianHeader already established, no new XML-
+	// writing mechanism. Real SHALL requirements (US Realm Header,
+	// CONF:5452/5428) confirmed missing entirely via a real schema
+	// validator run (2026-07) — genuinely unsupported before this, not
+	// just unmapped.
+	if addr, ok := authorData["address"].(map[string]interface{}); ok {
+		addrEl := assignedAuthor.CreateElement("addr")
+		addrEl.CreateAttr("use", "WP")
+		writeHeaderFields(addrEl, addr, patientAddressFields)
+	}
+	if phone, ok := stringValue(authorData["phone"]); ok {
+		tel := assignedAuthor.CreateElement("telecom")
+		tel.CreateAttr("value", "tel:"+phone)
+		tel.CreateAttr("use", "WP")
+	}
 
 	assignedAuthor.CreateElement("representedOrganization").CreateElement("name").SetText(resolveOrgName(opts))
+
+	// assignedAuthor's schema sequence is id*, code?, addr*, telecom*,
+	// assignedPerson, representedOrganization? — addr/telecom are written
+	// AFTER assignedPerson above (simplest call order), so reorder once at
+	// the end rather than restructuring the write calls themselves.
+	// representedOrganization deliberately isn't listed — it already comes
+	// last by construction and belongs last per schema too.
+	reorderChildrenByTag(assignedAuthor, []string{"id", "code", "addr", "telecom", "assignedPerson", "assignedAuthoringDevice"})
 }
 
 // writeNPI writes a fixed-root/data-driven-extension <id> at xpath — the
@@ -296,17 +410,28 @@ func writeCustodianHeader(root *etree.Element, opts BuildOptions) {
 	// same helper, same convention, no new XML-writing mechanism. Optional
 	// data entry (see CustodianOptions' own doc comment for why these are
 	// not spec-asserted requirements).
-	if cust.Street != "" || cust.City != "" || cust.State != "" || cust.PostalCode != "" || cust.Country != "" {
-		addr := org.CreateElement("addr")
-		writeHeaderFields(addr, map[string]interface{}{
-			"street": cust.Street, "city": cust.City, "state": cust.State,
-			"postalCode": cust.PostalCode, "country": cust.Country,
-		}, patientAddressFields)
-	}
+	//
+	// telecom is written BEFORE addr — CustodianOrganization
+	// (COCT_MT090102UV.Organization, the type backing
+	// representedCustodianOrganization) declares its sequence as
+	// id*, name?, telecom?, addr?, i.e. the OPPOSITE order from every other
+	// org/person-ish element this file writes (author/patient both want
+	// addr before telecom) — confirmed missing via a real schema validator
+	// run (2026-07): "Invalid content was found starting with element
+	// 'telecom'. No child element is expected at this point" once addr had
+	// already been (wrongly) written first.
 	if cust.Phone != "" {
 		tel := org.CreateElement("telecom")
 		tel.CreateAttr("value", "tel:"+cust.Phone)
 		tel.CreateAttr("use", "WP")
+	}
+	if cust.Street != "" || cust.City != "" || cust.State != "" || cust.PostalCode != "" || cust.Country != "" {
+		addr := org.CreateElement("addr")
+		addr.CreateAttr("use", "WP")
+		writeHeaderFields(addr, map[string]interface{}{
+			"street": cust.Street, "city": cust.City, "state": cust.State,
+			"postalCode": cust.PostalCode, "country": cust.Country,
+		}, patientAddressFields)
 	}
 }
 

@@ -40,9 +40,13 @@ func writeHeaderFields(root *etree.Element, data map[string]interface{}, mapping
 	}
 }
 
+// Order matters: writeHeaderFields creates elements in list order (each
+// entry's first present field creates <patient> itself), and CDA's Patient
+// schema requires name before administrativeGenderCode/birthTime/... —
+// name-related fields MUST come first in this list, confirmed missing via a
+// real schema validator run against this builder's own output (2026-07)
+// which flagged <name> as invalid content once it followed <birthTime>.
 var patientScalarFields = []headerFieldMapping{
-	{"dateOfBirth", "patient/birthTime/@value"},
-	{"preferredLanguage", "patient/languageCommunication/languageCode/@code"},
 	// firstName/middleName use positional predicates (given[1]/given[2]) so
 	// two calls create two sibling <given> elements instead of one call
 	// overwriting the other — WriteAtXPath's existing [N] positional-predicate
@@ -50,6 +54,8 @@ var patientScalarFields = []headerFieldMapping{
 	{"firstName", "patient/name/given[1]"},
 	{"middleName", "patient/name/given[2]"},
 	{"lastName", "patient/name/family"},
+	{"dateOfBirth", "patient/birthTime/@value"},
+	{"preferredLanguage", "patient/languageCommunication/languageCode/@code"},
 }
 
 var patientAddressFields = []headerFieldMapping{
@@ -117,6 +123,22 @@ var patientCodedFields = []codedFieldMapping{
 	{"sex", "sexDisplay", "patient/administrativeGenderCode", "2.16.840.1.113883.5.1"},
 	{"race", "raceDisplay", "patient/raceCode", "2.16.840.1.113883.6.238"},
 	{"ethnicity", "ethnicityDisplay", "patient/ethnicGroupCode", "2.16.840.1.113883.6.238"},
+	{"maritalStatus", "maritalStatusDisplay", "patient/maritalStatusCode", "2.16.840.1.113883.5.2"},
+}
+
+// authorCodedFields covers assignedAuthor's own optional specialty/taxonomy
+// code (CONF:1198-16787/16788 — "Since the assignedAuthor is an
+// assignedPerson, the assignedAuthor SHOULD contain code"). Healthcare
+// Provider Taxonomy (HIPAA) is a DYNAMIC valueset per the IG (no fixed
+// codeSystem list to validate against at build time), so CodeSystem is left
+// for the canonical data itself to supply via a companion System key exactly
+// like every entry-level xpathSystem field already does — writeCodedFields'
+// fixed-CodeSystem model doesn't fit a DYNAMIC-bound field, so this uses
+// writeHeaderFields column-by-column instead of the coded-field helper.
+var authorCodedFields = []headerFieldMapping{
+	{"specialtyCode", "code/@code"},
+	{"specialtyCodeSystem", "code/@codeSystem"},
+	{"specialtyCodeDisplay", "code/@displayName"},
 }
 
 // ─── Repeating groups (one new element per array item) ──────────────────────

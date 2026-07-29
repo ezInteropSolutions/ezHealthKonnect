@@ -948,12 +948,20 @@ class PipelineBuilder {
             html += this.renderFHIRResources(resourcesCreated);
         }
 
-        // Copy buttons
+        // Copy buttons — only offer to copy an output that actually exists for
+        // THIS pipeline (a CDA-only pipeline like cda.map_to_canonical +
+        // cda.build has no FHIR bundle, and vice versa); "Copy Full Results"
+        // (raw JSON) is always available regardless of pipeline type.
         html += `
-            <div style="margin-top: 1rem; display: flex; gap: 0.5rem;">
+            <div style="margin-top: 1rem; display: flex; gap: 0.5rem; flex-wrap: wrap;">
+                ${fhirBundle ? `
                 <button id="copyBundleBtn" class="btn-copy">
                     <i class="fas fa-copy"></i> Copy FHIR Bundle
-                </button>
+                </button>` : ''}
+                ${this._lastTestCdaXML ? `
+                <button id="copyCdaXmlBtn" class="btn-copy">
+                    <i class="fas fa-copy"></i> Copy CCD/CDA XML
+                </button>` : ''}
                 <button id="copyResultsBtn" class="btn btn-secondary">
                     <i class="fas fa-file-code"></i> Copy Full Results
                 </button>
@@ -975,6 +983,11 @@ class PipelineBuilder {
             const copyBundleBtn = document.getElementById('copyBundleBtn');
             if (copyBundleBtn) {
                 copyBundleBtn.addEventListener('click', () => this.copyBundleToClipboard(fhirBundle));
+            }
+
+            const copyCdaXmlBtn = document.getElementById('copyCdaXmlBtn');
+            if (copyCdaXmlBtn) {
+                copyCdaXmlBtn.addEventListener('click', () => this.copyCdaXmlToClipboard(this._lastTestCdaXML));
             }
 
             const copyBtn = document.getElementById('copyResultsBtn');
@@ -1212,6 +1225,27 @@ class PipelineBuilder {
         } catch (error) {
             console.error('Failed to copy:', error);
             this.dragDropManager.showNotification('Failed to copy bundle', 'error');
+        }
+    }
+
+    /**
+     * Copy CCD/C-CDA XML to clipboard (mirrors copyBundleToClipboard for the
+     * FHIR side) — xml is this._lastTestCdaXML, the raw XML string a
+     * cda.build step's output already content-sniffed for, so no
+     * JSON.stringify/parse round trip is needed here.
+     */
+    async copyCdaXmlToClipboard(xml) {
+        if (!xml) {
+            this.dragDropManager.showNotification('No CCD/CDA XML to copy', 'warning');
+            return;
+        }
+
+        try {
+            await navigator.clipboard.writeText(xml);
+            this.dragDropManager.showNotification('CCD/CDA XML copied to clipboard', 'success');
+        } catch (error) {
+            console.error('Failed to copy:', error);
+            this.dragDropManager.showNotification('Failed to copy CDA XML', 'error');
         }
     }
 

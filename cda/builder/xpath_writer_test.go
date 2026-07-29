@@ -97,6 +97,56 @@ func TestWriteAtXPath_ChildAttributePredicate(t *testing.T) {
 	}
 }
 
+// TestWriteAtXPath_MultiConditionSameNestedChild_OneElementBothAttrs is the
+// Tobacco Use regression case: a predicate with TWO comma-AND conditions
+// that both target the SAME nested child ("code/@code" and
+// "code/@codeSystem") must produce ONE <code> element carrying both
+// attributes — a real schema validator found this producing two separate
+// sibling <code> elements instead, since each condition was independently
+// doing its own find-or-create pass against a child that didn't have the
+// OTHER attribute yet.
+func TestWriteAtXPath_MultiConditionSameNestedChild_OneElementBothAttrs(t *testing.T) {
+	root := newRoot()
+	path := "observation[code/@code='11367-0',code/@codeSystem='2.16.840.1.113883.6.1']/value/@code"
+	WriteAtXPath(root, path, "8517006")
+
+	obs := root.SelectElement("observation")
+	if obs == nil {
+		t.Fatal("expected observation element")
+	}
+	codes := obs.SelectElements("code")
+	if len(codes) != 1 {
+		t.Fatalf("expected exactly one <code> element, got %d", len(codes))
+	}
+	if got := codes[0].SelectAttrValue("code", ""); got != "11367-0" {
+		t.Errorf("code/@code = %q, want 11367-0", got)
+	}
+	if got := codes[0].SelectAttrValue("codeSystem", ""); got != "2.16.840.1.113883.6.1" {
+		t.Errorf("code/@codeSystem = %q, want 2.16.840.1.113883.6.1", got)
+	}
+}
+
+// TestWriteAtXPath_MultiConditionSameNestedChild_SecondFieldReusesElement
+// verifies a SECOND field targeting the same multi-condition predicated
+// path (e.g. socialHistory's smokingStatusEffectiveTime, alongside
+// smokingStatus) correctly finds and reuses the SAME observation/code the
+// first field's write already created, rather than creating a duplicate.
+func TestWriteAtXPath_MultiConditionSameNestedChild_SecondFieldReusesElement(t *testing.T) {
+	root := newRoot()
+	path := "observation[code/@code='11367-0',code/@codeSystem='2.16.840.1.113883.6.1']"
+	WriteAtXPath(root, path+"/value/@code", "8517006")
+	WriteAtXPath(root, path+"/effectiveTime/low/@value", "20200315")
+
+	observations := root.SelectElements("observation")
+	if len(observations) != 1 {
+		t.Fatalf("expected exactly one <observation> (second field reuses it), got %d", len(observations))
+	}
+	obs := observations[0]
+	if obs.FindElement("value") == nil || obs.FindElement("effectiveTime/low") == nil {
+		t.Errorf("expected both fields' writes on the SAME observation, got: %+v", obs)
+	}
+}
+
 func TestWriteAtXPath_EmptyValue_CreatesAnchorOnly(t *testing.T) {
 	root := newRoot()
 	el := WriteAtXPath(root, "act", "")
@@ -146,6 +196,67 @@ func TestWriteAtXPath_SamePredicateSiblings_DisambiguatedByNestedTemplateId(t *t
 	}
 }
 
+// TestWriteAtXPath_NewMultiSegmentTerminal_ReusesExistingDisambiguatedSibling
+// is the regression test for a real bug found via a live Test Pipeline run
+// (2026-07): a field targeting a brand-new, not-yet-written multi-segment
+// terminal (effectiveTime/low/@value) under an entryRelationship/observation
+// pair an EARLIER field already created (value/@code, matching the SAME
+// nested templateId predicate) must REUSE that existing pair, not spawn a
+// duplicate sibling. The old lookahead required the ENTIRE remaining path
+// (including the not-yet-existing terminal) to already exist before
+// reusing a candidate — which can never be true the first time a new
+// terminal is written — so it always concluded "no match" and duplicated.
+func TestWriteAtXPath_NewMultiSegmentTerminal_ReusesExistingDisambiguatedSibling(t *testing.T) {
+	root := newRoot()
+	base := "act/entryRelationship[@typeCode='MFST',@inversionInd='true']/observation[templateId/@root='%s']"
+
+	WriteAtXPath(root, fmt.Sprintf(base, "TID-REACTION")+"/value/@code", "247472004")
+	// A later field, same predicate-disambiguated element, brand-new
+	// multi-segment terminal that doesn't exist yet.
+	WriteAtXPath(root, fmt.Sprintf(base, "TID-REACTION")+"/effectiveTime/low/@value", "20100604")
+
+	act := root.FindElement("act")
+	rels := act.SelectElements("entryRelationship")
+	if len(rels) != 1 {
+		t.Fatalf("expected exactly ONE entryRelationship (second field reuses it), got %d", len(rels))
+	}
+	obs := rels[0].SelectElement("observation")
+	if obs == nil {
+		t.Fatal("expected nested observation")
+	}
+	if obs.SelectElement("value").SelectAttrValue("code", "") != "247472004" {
+		t.Errorf("expected value/@code=247472004 on the shared observation, got: %+v", obs)
+	}
+	if got := obs.FindElement("effectiveTime/low").SelectAttrValue("value", ""); got != "20100604" {
+		t.Errorf("expected effectiveTime/low/@value=20100604 on the SAME shared observation, got %q", got)
+	}
+}
+
+// TestWriteAtXPath_NewBareTagTerminal_ReusesExistingDisambiguatedSibling is
+// the same regression as above but for a single-segment bare-tag terminal
+// (e.g. Problem Status's "text") rather than a multi-segment one
+// (effectiveTime/low) — both were affected by the same root cause.
+func TestWriteAtXPath_NewBareTagTerminal_ReusesExistingDisambiguatedSibling(t *testing.T) {
+	root := newRoot()
+	base := "act/entryRelationship[@typeCode='REFR']/observation[templateId/@root='%s']"
+
+	WriteAtXPath(root, fmt.Sprintf(base, "TID-STATUS")+"/value/@code", "55561003")
+	WriteAtXPath(root, fmt.Sprintf(base, "TID-STATUS")+"/text", "Confirmed diagnosis.")
+
+	act := root.FindElement("act")
+	rels := act.SelectElements("entryRelationship")
+	if len(rels) != 1 {
+		t.Fatalf("expected exactly ONE entryRelationship (second field reuses it), got %d", len(rels))
+	}
+	obs := rels[0].SelectElement("observation")
+	if obs.SelectElement("value").SelectAttrValue("code", "") != "55561003" {
+		t.Errorf("expected value/@code=55561003, got: %+v", obs)
+	}
+	if obs.SelectElement("text").Text() != "Confirmed diagnosis." {
+		t.Errorf("expected text on the SAME shared observation, got: %+v", obs)
+	}
+}
+
 // TestTryFindAtXPath_BacktracksPastWrongSibling verifies the read-only
 // lookup used by StructuralTemplateAnchor processing doesn't dead-end on
 // the first same-predicate sibling — it must keep searching until it finds
@@ -166,6 +277,49 @@ func TestTryFindAtXPath_BacktracksPastWrongSibling(t *testing.T) {
 
 	if _, ok := TryFindAtXPath(root, "observation/entryRelationship[@typeCode='SUBJ',@inversionInd='true']/observation[templateId/@root='TID-NONEXISTENT']"); ok {
 		t.Error("expected not-found for a templateId root that was never written")
+	}
+}
+
+func TestReorderChildrenByTag_MovesListedTagsFirstPreservingRelativeOrder(t *testing.T) {
+	el := etree.NewElement("manufacturedProduct")
+	el.CreateElement("manufacturedMaterial").CreateAttr("marker", "material")
+	el.CreateElement("id").CreateAttr("marker", "id1")
+	el.CreateElement("templateId").CreateAttr("marker", "tid")
+	el.CreateElement("id").CreateAttr("marker", "id2")
+
+	reorderChildrenByTag(el, []string{"templateId", "id"})
+
+	got := el.ChildElements()
+	wantTags := []string{"templateId", "id", "id", "manufacturedMaterial"}
+	if len(got) != len(wantTags) {
+		t.Fatalf("expected %d children, got %d", len(wantTags), len(got))
+	}
+	for i, want := range wantTags {
+		if got[i].Tag != want {
+			t.Errorf("child %d: expected tag %q, got %q", i, want, got[i].Tag)
+		}
+	}
+	// The two <id> elements must keep THEIR OWN original relative order
+	// (id1 before id2) — a stable sort, not just "any id first".
+	if got[1].SelectAttrValue("marker", "") != "id1" || got[2].SelectAttrValue("marker", "") != "id2" {
+		t.Errorf("expected id1 before id2 (stable sort), got markers %q, %q", got[1].SelectAttrValue("marker", ""), got[2].SelectAttrValue("marker", ""))
+	}
+}
+
+func TestReorderChildrenByTag_NoOpWhenAlreadyInOrder(t *testing.T) {
+	el := etree.NewElement("act")
+	el.CreateElement("templateId")
+	el.CreateElement("code")
+	el.CreateElement("statusCode")
+
+	reorderChildrenByTag(el, []string{"templateId"})
+
+	got := el.ChildElements()
+	wantTags := []string{"templateId", "code", "statusCode"}
+	for i, want := range wantTags {
+		if got[i].Tag != want {
+			t.Errorf("child %d: expected tag %q, got %q", i, want, got[i].Tag)
+		}
 	}
 }
 

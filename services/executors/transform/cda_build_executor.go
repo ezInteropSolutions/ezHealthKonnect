@@ -15,8 +15,9 @@
 //   sourceField  — dot-path to the source data (default: "parsedCDA")
 //   inputFormat  — "canonical" (default) | "fhir_bundle"
 //   outputField  — dot-path to write CDA XML (default: "cdaXML")
-//   documentType — CCD | Discharge Summary | Referral Note | ... (default: "CCD")
-//   orgName      — custodian + fallback author organization name
+//   documentType   — CCD | Discharge Summary | Referral Note | ... (default: "CCD")
+//   orgName        — custodian + fallback author organization name
+//   timezoneOffset — "+HHMM"/"-HHMM" for document effectiveTime + author time (default: UTC)
 
 package transform
 
@@ -71,12 +72,13 @@ func NewCDABuildExecutor() *CDABuildExecutor {
 // inspecting saved pipeline step configs) can decode it the same way
 // Execute() does, without a second, drifting copy of this shape.
 type CdaBuildConfig struct {
-	SourceField  string              `json:"sourceField"`
-	InputFormat  string              `json:"inputFormat"`
-	OutputField  string              `json:"outputField"`
-	DocumentType string              `json:"documentType"`
-	OrgName      string              `json:"orgName"`
-	Custodian    CdaCustodianConfig  `json:"custodian,omitempty"`
+	SourceField    string             `json:"sourceField"`
+	InputFormat    string             `json:"inputFormat"`
+	OutputField    string             `json:"outputField"`
+	DocumentType   string             `json:"documentType"`
+	OrgName        string             `json:"orgName"`
+	TimezoneOffset string             `json:"timezoneOffset,omitempty"`
+	Custodian      CdaCustodianConfig `json:"custodian,omitempty"`
 }
 
 // CdaCustodianConfig is the cda.build step's structured Custodian tab —
@@ -148,7 +150,8 @@ func (e *CDABuildExecutor) Execute(
 	}
 
 	cdaXML, err := cdaBuilder.BuildDocument(e.schemaLoader, canonicalDoc, cfg.DocumentType, cdaBuilder.BuildOptions{
-		OrgName: cfg.OrgName,
+		OrgName:        cfg.OrgName,
+		TimezoneOffset: cfg.TimezoneOffset,
 		Custodian: cdaBuilder.CustodianOptions{
 			IdRoot: cfg.Custodian.IdRoot, IdExtension: cfg.Custodian.IdExtension, OrgName: cfg.Custodian.OrgName,
 			Street: cfg.Custodian.Street, City: cfg.Custodian.City, State: cfg.Custodian.State,

@@ -3816,6 +3816,7 @@ class CDABuildStepBuilder {
         const outputField  = esc(cfg.outputField  || 'cdaXML');
         const documentType = cfg.documentType || 'CCD';
         const orgName      = esc(cfg.orgName || '');
+        const timezoneOffset = esc(cfg.timezoneOffset || '');
 
         const formatOptions = [
             { value: 'canonical',   label: 'Canonical JSON (from cda.parse or cda.map_to_canonical)' },
@@ -3856,6 +3857,12 @@ class CDABuildStepBuilder {
                 <select id="cdaBuildDocType" class="form-select form-select-sm"
                     onchange="window._cdaBuildBuilder && window._cdaBuildBuilder.onDocTypeChange(this.value)">${docTypeOptions}</select>
                 <div style="font-size:0.72rem;color:#94a3b8;margin-top:0.25rem;">Determines which sections are SHALL/SHOULD and the document-level LOINC code/title — see the Requirements tab.</div>
+            </div>
+            <div class="config-group" style="margin-top:1.1rem;">
+                <label style="font-size:0.75rem;font-weight:600;text-transform:uppercase;color:#64748b;display:block;margin-bottom:0.4rem;">Timezone Offset</label>
+                <input id="cdaBuildTimezoneOffset" type="text" class="form-control form-control-sm" value="${timezoneOffset}"
+                    placeholder="+0000 or -0500 — blank = UTC" style="font-family:monospace;font-size:0.82rem;">
+                <div style="font-size:0.72rem;color:#94a3b8;margin-top:0.25rem;">Applied to the document's own effectiveTime and the author's time — both are generated at build time, so this controls which offset "now" is expressed in. Leave blank for UTC.</div>
             </div>
         </div>`;
     }
@@ -3998,6 +4005,7 @@ class CDABuildStepBuilder {
         if (pick('cdaBuildSourceField') !== null) cfg.sourceField = pick('cdaBuildSourceField') || 'parsedCDA';
         if (pick('cdaBuildOutputField') !== null) cfg.outputField = pick('cdaBuildOutputField') || 'cdaXML';
         if (pick('cdaBuildDocType') !== null) cfg.documentType = pick('cdaBuildDocType');
+        if (pick('cdaBuildTimezoneOffset') !== null) cfg.timezoneOffset = pick('cdaBuildTimezoneOffset');
 
         cfg.custodian = cfg.custodian || {};
         const custField = (domId, key) => { if (pick(domId) !== null) cfg.custodian[key] = pick(domId); };

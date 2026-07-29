@@ -36,17 +36,37 @@
 //
 //	outputField — dot-path to write the canonical JSON (default: "parsedCDA")
 //	header      — []{group: "patient"|"author", target, sourcePath,
-//	              transform?} — flat scalar header fields only (see
+//	              transform?} — flat scalar header fields (see
 //	              cda/builder/canonical_field_catalog.go's HeaderFieldCatalog
 //	              for the full target-key vocabulary per group, including the
-//	              "address.<key>" nesting convention for patient address).
-//	              informant/documentationOf/encompassingEncounter are
-//	              repeating/optional groups intentionally out of scope for
-//	              this step (cda.build already synthesizes a safe fallback
-//	              for documentationOf when absent).
+//	              "address.<key>" nesting convention for patient address),
+//	              plus one repeating exception: target "ids" (patientRole's
+//	              identifiers, e.g. MRN + SSN) accepts a SourcePath that
+//	              resolves to an already-shaped []{root,extension} array,
+//	              passed through untransformed (see applyHeaderField).
+//	              informant/documentationOf/encompassingEncounter remain
+//	              intentionally out of scope for this step (cda.build already
+//	              synthesizes a safe fallback for documentationOf when absent).
 //	sections    — []{sectionKey, rowsPath, fields: []{canonicalField,
 //	              sourcePath, fallbackPaths?, transform?, valueMap?,
-//	              literalValue?}}
+//	              literalValue?, condition?}, groupBy?, groupedItemsKey?,
+//	              entryFields?} — groupBy (one or more source columns)
+//	              buckets rows sharing that composite key into ONE entry's
+//	              repeating items (see cda/schema_types.go's RepeatingGroup —
+//	              the no-code producer for a section's "loop" points, e.g.
+//	              Vital Signs' 1..* components). entryFields (same shape as
+//	              fields) are resolved once per group, from the group's
+//	              first row, for organizer-level data shared across every
+//	              item rather than repeated per item (e.g. Vital Signs
+//	              Organizer's own effectiveTime). A field may instead set
+//	              relatedRows: {relatedRowsPath, joinLocalKey, joinRelatedKey,
+//	              fields} — the cross-table join (Option C): attaches rows
+//	              from a DIFFERENT pipeline array whose joinRelatedKey
+//	              matches this row's own joinLocalKey (e.g. Medications'
+//	              "indications", joined from a separate indication-records
+//	              array via a shared medicationId column) — mutually
+//	              exclusive with sourcePath/fallbackPaths/literalValue/
+//	              condition on that same field.
 package transform
 
 import (
@@ -54,6 +74,7 @@ import (
 	"encoding/json"
 	"log"
 	"strconv"
+	"strings"
 	"time"
 
 	"ezhealthkonnect/models"
@@ -88,6 +109,40 @@ type headerFieldRow struct {
 	Transform  string `json:"transform,omitempty"` // canonical_value_transforms.go transform name, applied before writing
 }
 
+// rowCondition is the "Block 2, mechanism 1" no-code condition: branch on
+// one of the row's OWN source values, rather than the field's normal
+// SourcePath/FallbackPaths/LiteralValue resolution. Deliberately narrow
+// (equality only) — mirrors services/cda_fhir/declarative_schema.go's
+// RowCondition on the parse side exactly, including that same deliberate
+// restriction (see that type's own doc comment for why "not a general
+// expression evaluator" is the point, not a limitation to work around).
+type rowCondition struct {
+	WhenPath         string `json:"whenPath"`
+	Equals           string `json:"equals"`
+	ThenLiteralValue string `json:"thenLiteralValue,omitempty"`
+	ThenTransform    string `json:"thenTransform,omitempty"`
+}
+
+// relatedRowsMapping is the "Block 3, Option C" cross-table join: attaches
+// every row from a DIFFERENT pipeline array (RelatedRowsPath, resolved
+// against the step's full inputData, NOT relative to the current row) whose
+// JoinRelatedKey value matches the current row's own JoinLocalKey value,
+// mapping each match through Fields into one item of the resulting array —
+// the no-code producer for a RepeatingGroup fed from a SEPARATE source table
+// rather than the same rowset a GroupBy composite key buckets. E.g.
+// Medications' Indication entryRelationship (0..* per medication,
+// CONF:1098-7536): the medications rowset has no indication columns of its
+// own, but a separate "indicationRecords" pipeline array (e.g. a second
+// Database Enrichment step's output) carries {medicationId, diagnosisCode,
+// diagnosisDisplay} rows — JoinLocalKey="medicationId" (on the medication
+// row), JoinRelatedKey="medicationId" (on the indication row).
+type relatedRowsMapping struct {
+	RelatedRowsPath string            `json:"relatedRowsPath"`
+	JoinLocalKey    string            `json:"joinLocalKey"`
+	JoinRelatedKey  string            `json:"joinRelatedKey"`
+	Fields          []fieldMappingRow `json:"fields"`
+}
+
 // fieldMappingRow maps one canonical schema field key (CDAFieldDef.Key, or
 // its +Display/+System/+Unit/+Family companion) to a source path relative to
 // one row.
@@ -98,6 +153,22 @@ type fieldMappingRow struct {
 	Transform      string            `json:"transform,omitempty"` // canonical_value_transforms.go transform name, applied before ValueMap
 	ValueMap       map[string]string `json:"valueMap,omitempty"`
 	LiteralValue   string            `json:"literalValue,omitempty"`
+
+	// Condition, when set and its WhenPath resolves to a value equal to
+	// Equals, replaces the field's normal resolution entirely (including
+	// "write nothing" when ThenLiteralValue is empty) — an explicit branch,
+	// not an additional fallback tier.
+	Condition *rowCondition `json:"condition,omitempty"`
+
+	// RelatedRows, when set, replaces ALL other resolution (SourcePath/
+	// FallbackPaths/LiteralValue/Condition are ignored): instead of writing
+	// entry[CanonicalField] = scalar, it writes
+	// entry[CanonicalField] = []interface{}{...} — one item per matching row
+	// from a DIFFERENT pipeline array (see relatedRowsMapping's own doc
+	// comment). Mutually exclusive with Condition in practice (a field is
+	// either a cross-table join or a scalar/branching one, never both) —
+	// checked first in applyFieldMapping.
+	RelatedRows *relatedRowsMapping `json:"relatedRows,omitempty"`
 }
 
 // sectionMappingRow maps one canonical section's entries from an array of
@@ -106,6 +177,40 @@ type sectionMappingRow struct {
 	SectionKey string            `json:"sectionKey"`
 	RowsPath   string            `json:"rowsPath"`
 	Fields     []fieldMappingRow `json:"fields"`
+
+	// GroupBy (Block 3, "Group By" — one or more source columns, a
+	// composite key) turns this section from "one row = one entry" into
+	// "rows sharing this key's value = one entry's repeating items" — the
+	// no-code producer for cda/builder's RepeatingGroup mechanism
+	// (cda/schema_types.go). A row missing one of the GroupBy values
+	// becomes its own singleton group (with a logged warning) rather than
+	// being silently dropped. Requires GroupedItemsKey.
+	GroupBy []string `json:"groupBy,omitempty"`
+
+	// GroupedItemsKey is the canonical field name each group's mapped rows
+	// are collected under (must match the target section's
+	// RepeatingGroup.Key in cda/schemas/ccda_2_1.json, e.g. "components" for
+	// Vital Signs) — required when GroupBy is set, ignored otherwise. Kept
+	// as explicit user configuration rather than an executor-side schema
+	// lookup so this step stays schema-agnostic at execution time (the
+	// no-code UI resolves the right value at CONFIGURATION time instead,
+	// from the same live catalog it already uses for canonical field
+	// targets).
+	GroupedItemsKey string `json:"groupedItemsKey,omitempty"`
+
+	// EntryFields (GroupBy mode only) are resolved ONCE per group — from the
+	// group's first-seen row, using the SAME applyFieldMapping primitive as
+	// Fields — and written directly onto the generated entry map, sibling to
+	// GroupedItemsKey, rather than into each item. This is the producer for
+	// a section's own organizer-level data that's shared across every
+	// component in the panel rather than repeated per component — e.g.
+	// Vital Signs Organizer's own effectiveTime (CONF:1198-7288, SHALL,
+	// "may be a timestamp or an interval that spans the effectiveTimes of
+	// the contained vital signs observations" — the real IG text explicitly
+	// describes it as panel-level, not per-component). Left empty for any
+	// GroupBy section with no organizer-level data to carry (the ordinary
+	// case) — zero effect when unset.
+	EntryFields []fieldMappingRow `json:"entryFields,omitempty"`
 }
 
 type mapToCanonicalConfig struct {
@@ -180,11 +285,30 @@ func (e *MapToCanonicalExecutor) Execute(
 // and, if a non-empty value is found, applies Transform (see
 // canonical_value_transforms.go) and writes the result to
 // canonicalDoc["header"][Group][Target].
+//
+// One deliberate exception to this step's "flat scalar header fields only"
+// scope (see file header comment): if SourcePath already resolves to an
+// array (a source system supplying a pre-shaped []{root,extension} list,
+// e.g. for patientRole's repeating "ids" — MRN + SSN as two entries), it's
+// passed through untransformed rather than dropped by stringifyValue's
+// scalar-only type switch. Transform/ValueMap don't apply to a repeating
+// value. This unblocks the one repeating header field the requirements
+// catalog already treats as SHALL-pre-populatable ("patientId" ->
+// headerKeyTranslation -> "ids") — informant/documentationOf/
+// encompassingEncounter remain out of scope; those need row-building
+// (multiple source rows -> multiple entries), not just an array passthrough.
 func applyHeaderField(canonicalDoc map[string]interface{}, inputData map[string]interface{}, h headerFieldRow) {
 	if h.Group == "" || h.Target == "" || h.SourcePath == "" {
 		return
 	}
-	if s, ok := stringifyValue(executors.GetFieldValue(inputData, h.SourcePath)); ok {
+	raw := executors.GetFieldValue(inputData, h.SourcePath)
+	if arr, ok := raw.([]interface{}); ok {
+		if len(arr) > 0 {
+			executors.UpdateFieldValue(canonicalDoc, "header."+h.Group+"."+h.Target, arr)
+		}
+		return
+	}
+	if s, ok := stringifyValue(raw); ok {
 		s = applyCanonicalTransform(h.Transform, s)
 		executors.UpdateFieldValue(canonicalDoc, "header."+h.Group+"."+h.Target, s)
 	}
@@ -193,20 +317,112 @@ func applyHeaderField(canonicalDoc map[string]interface{}, inputData map[string]
 // buildSectionEntries resolves sm.RowsPath to an array of source rows and
 // applies every field mapping to each one, skipping rows that produce no
 // mapped fields at all (empty entries would otherwise satisfy cda.build's
-// "SHALL section, zero entries" narrative-only path incorrectly).
+// "SHALL section, zero entries" narrative-only path incorrectly). When
+// sm.GroupBy is set, delegates to buildGroupedSectionEntries instead — a
+// completely separate code path so the (far more common) flat case is
+// unaffected in shape or behavior.
 func buildSectionEntries(inputData map[string]interface{}, sm sectionMappingRow) []interface{} {
 	rows := resolveRows(inputData, sm.RowsPath)
+	if len(sm.GroupBy) > 0 {
+		return buildGroupedSectionEntries(rows, sm, inputData)
+	}
 	entries := make([]interface{}, 0, len(rows))
 	for _, row := range rows {
 		entry := map[string]interface{}{}
 		for _, fm := range sm.Fields {
-			applyFieldMapping(entry, row, fm)
+			applyFieldMapping(entry, row, fm, inputData)
 		}
 		if len(entry) > 0 {
 			entries = append(entries, entry)
 		}
 	}
 	return entries
+}
+
+// groupKeySeparator joins composite GroupBy values into one internal bucket
+// key. Unit Separator (0x1F) is used specifically because it's vanishingly
+// unlikely to appear in real source data, unlike a plain "-" or "|" — two
+// different (column A, column B) combinations must never collide into the
+// same bucket key just because their concatenation happens to match.
+const groupKeySeparator = "\x1f"
+
+// buildGroupedSectionEntries is the no-code producer for cda/builder's
+// RepeatingGroup loop mechanism: buckets rows by the composite GroupBy key,
+// maps each row through the SAME per-row field-mapping table the flat case
+// uses (no separate field-mapping UI needed for the common case), and
+// collects each bucket's mapped items under sm.GroupedItemsKey — one
+// canonical entry per bucket. A row missing one of the GroupBy values
+// becomes its own singleton bucket (logged, not silently dropped) rather
+// than being excluded — see this function's own group-key resolution below.
+func buildGroupedSectionEntries(rows []map[string]interface{}, sm sectionMappingRow, inputData map[string]interface{}) []interface{} {
+	type bucket struct {
+		items    []interface{}
+		firstRow map[string]interface{}
+	}
+	order := make([]string, 0, len(rows))
+	buckets := make(map[string]*bucket, len(rows))
+	singletons := 0
+
+	for _, row := range rows {
+		key, complete := groupKey(row, sm.GroupBy)
+		if !complete {
+			singletons++
+			key = singletonGroupKey(singletons)
+			log.Printf("  ⚠️  [cda.map_to_canonical] section %q: row missing a Group By value — treated as its own group instead of being dropped", sm.SectionKey)
+		}
+		b, ok := buckets[key]
+		if !ok {
+			b = &bucket{firstRow: row}
+			buckets[key] = b
+			order = append(order, key)
+		}
+		item := map[string]interface{}{}
+		for _, fm := range sm.Fields {
+			applyFieldMapping(item, row, fm, inputData)
+		}
+		if len(item) > 0 {
+			b.items = append(b.items, item)
+		}
+	}
+
+	entries := make([]interface{}, 0, len(order))
+	for _, key := range order {
+		b := buckets[key]
+		if len(b.items) == 0 {
+			continue
+		}
+		entry := map[string]interface{}{sm.GroupedItemsKey: b.items}
+		for _, ef := range sm.EntryFields {
+			applyFieldMapping(entry, b.firstRow, ef, inputData)
+		}
+		entries = append(entries, entry)
+	}
+	return entries
+}
+
+// groupKey resolves every configured GroupBy column against row and joins
+// them into one composite bucket key. complete=false when ANY column is
+// missing/empty — the caller treats that row as its own singleton group
+// rather than silently excluding it or corrupting an existing group.
+func groupKey(row map[string]interface{}, groupBy []string) (key string, complete bool) {
+	parts := make([]string, 0, len(groupBy))
+	for _, col := range groupBy {
+		s, ok := stringifyValue(executors.GetFieldValue(row, col))
+		if !ok {
+			return "", false
+		}
+		parts = append(parts, s)
+	}
+	return strings.Join(parts, groupKeySeparator), true
+}
+
+// singletonGroupKey mints a bucket key guaranteed not to collide with any
+// real composite GroupBy key (real keys never start with "!singleton" +
+// groupKeySeparator — a real column value equal to this exact sentinel
+// would require deliberately crafted adversarial input, not realistic
+// source data).
+func singletonGroupKey(n int) string {
+	return "!singleton" + groupKeySeparator + strconv.Itoa(n)
 }
 
 func resolveRows(inputData map[string]interface{}, rowsPath string) []map[string]interface{} {
@@ -231,9 +447,29 @@ func resolveRows(inputData map[string]interface{}, rowsPath string) []map[string
 // TS format — see canonical_value_transforms.go), then ValueMap translates
 // the (possibly transformed) result — matching fhir_bundle_adapter.go's
 // kindCodeValue behavior, just with a normalization step ahead of it.
-func applyFieldMapping(entry map[string]interface{}, row map[string]interface{}, fm fieldMappingRow) {
+func applyFieldMapping(entry map[string]interface{}, row map[string]interface{}, fm fieldMappingRow, inputData map[string]interface{}) {
 	if fm.CanonicalField == "" {
 		return
+	}
+	if fm.RelatedRows != nil {
+		// Cross-table join (Block 3, Option C) — replaces ALL other
+		// resolution. Checked before Condition: a field is either a join or
+		// a scalar/branching field, never both.
+		if items := resolveRelatedRows(row, fm.RelatedRows, inputData); len(items) > 0 {
+			entry[fm.CanonicalField] = items
+		}
+		return
+	}
+	if fm.Condition != nil {
+		if s, ok := stringifyValue(executors.GetFieldValue(row, fm.Condition.WhenPath)); ok && s == fm.Condition.Equals {
+			// Explicit branch match — replaces normal resolution entirely,
+			// including "write nothing" when ThenLiteralValue is empty.
+			// Never falls through to SourcePath/FallbackPaths/LiteralValue.
+			if fm.Condition.ThenLiteralValue != "" {
+				entry[fm.CanonicalField] = mapValue(applyCanonicalTransform(fm.Condition.ThenTransform, fm.Condition.ThenLiteralValue), fm.ValueMap)
+			}
+			return
+		}
 	}
 	if s, ok := stringifyValue(executors.GetFieldValue(row, fm.SourcePath)); ok {
 		entry[fm.CanonicalField] = mapValue(applyCanonicalTransform(fm.Transform, s), fm.ValueMap)
@@ -248,6 +484,41 @@ func applyFieldMapping(entry map[string]interface{}, row map[string]interface{},
 	if fm.LiteralValue != "" {
 		entry[fm.CanonicalField] = mapValue(applyCanonicalTransform(fm.Transform, fm.LiteralValue), fm.ValueMap)
 	}
+}
+
+// resolveRelatedRows implements the cross-table join: resolves rr's OTHER
+// pipeline array (relative to inputData, NOT row), keeps only the rows whose
+// JoinRelatedKey value matches row's own JoinLocalKey value, and maps each
+// match through rr.Fields into one item — the SAME applyFieldMapping
+// primitive every other field mapping uses, so a joined row can itself use
+// Transform/ValueMap/Condition, just not ANOTHER nested RelatedRows (no
+// multi-hop joins in this first pass — one level is what every real case
+// identified so far needs). Returns nil (not an empty non-nil slice) when
+// row has no local key value or nothing matches — the caller only writes
+// the field when len > 0, so a medication with zero indications simply
+// doesn't get an "indications" key at all, matching the section's own 0..*
+// cardinality.
+func resolveRelatedRows(row map[string]interface{}, rr *relatedRowsMapping, inputData map[string]interface{}) []interface{} {
+	localKeyVal, ok := stringifyValue(executors.GetFieldValue(row, rr.JoinLocalKey))
+	if !ok {
+		return nil
+	}
+	relatedRows := resolveRows(inputData, rr.RelatedRowsPath)
+	items := make([]interface{}, 0)
+	for _, relRow := range relatedRows {
+		relKeyVal, ok := stringifyValue(executors.GetFieldValue(relRow, rr.JoinRelatedKey))
+		if !ok || relKeyVal != localKeyVal {
+			continue
+		}
+		item := map[string]interface{}{}
+		for _, fm := range rr.Fields {
+			applyFieldMapping(item, relRow, fm, inputData)
+		}
+		if len(item) > 0 {
+			items = append(items, item)
+		}
+	}
+	return items
 }
 
 func mapValue(s string, vm map[string]string) string {
