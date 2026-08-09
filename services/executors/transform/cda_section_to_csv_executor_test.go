@@ -1,4 +1,4 @@
-// services/executors/transform/cda_section_to_csv_executor_test.go
+﻿// services/executors/transform/cda_section_to_csv_executor_test.go
 package transform
 
 import (
@@ -196,7 +196,7 @@ func TestBuildCSVRows_ResolvesColumnsPerEntry(t *testing.T) {
 		},
 	}
 
-	rows := buildCSVRows(documentMap, cdaCSVSectionTemplates["medications"], "")
+	rows := buildCSVRows(documentMap, cdaCSVSectionTemplates["medications"], "", nil)
 	if len(rows) != 1 {
 		t.Fatalf("got %d rows, want 1", len(rows))
 	}
@@ -234,7 +234,7 @@ func TestBuildCSVRows_StampsSourceFileOnEveryRow(t *testing.T) {
 			},
 		},
 	}
-	rows := buildCSVRows(documentMap, cdaCSVSectionTemplates["medications"], "CCD_04_22_2026.3.xml")
+	rows := buildCSVRows(documentMap, cdaCSVSectionTemplates["medications"], "CCD_04_22_2026.3.xml", nil)
 	if len(rows) != 2 {
 		t.Fatalf("got %d rows, want 2", len(rows))
 	}
@@ -304,7 +304,7 @@ func TestBuildCSVRows_CodeMetadataAndUniversalColumns_ResolveOnRealShapedData(t 
 			},
 		},
 	}
-	rows := buildCSVRows(documentMap, cdaCSVSectionTemplates["socialHistory"], "")
+	rows := buildCSVRows(documentMap, cdaCSVSectionTemplates["socialHistory"], "", nil)
 	if len(rows) != 1 {
 		t.Fatalf("got %d rows, want 1", len(rows))
 	}
@@ -342,7 +342,7 @@ func TestBuildCSVRows_EntryId_FallsBackToRootWhenExtensionAbsent(t *testing.T) {
 			},
 		},
 	}
-	rows := buildCSVRows(documentMap, cdaCSVSectionTemplates["medications"], "")
+	rows := buildCSVRows(documentMap, cdaCSVSectionTemplates["medications"], "", nil)
 	if len(rows) != 1 {
 		t.Fatalf("got %d rows, want 1", len(rows))
 	}
@@ -477,7 +477,7 @@ func TestBuildCSVRows_NoEntries_ReturnsEmptyNotNil(t *testing.T) {
 	documentMap := map[string]interface{}{
 		"sectionsByKey": map[string]interface{}{},
 	}
-	rows := buildCSVRows(documentMap, cdaCSVSectionTemplates["medications"], "")
+	rows := buildCSVRows(documentMap, cdaCSVSectionTemplates["medications"], "", nil)
 	if rows == nil {
 		t.Error("rows is nil, want an empty (but non-nil) slice")
 	}
@@ -596,7 +596,7 @@ func TestBuildCSVRows_CareTeam_FlattensOrganizerAndReadsPerformer(t *testing.T) 
 			},
 		},
 	}
-	rows := buildCSVRows(documentMap, cdaCSVSectionTemplates["careTeam"], "")
+	rows := buildCSVRows(documentMap, cdaCSVSectionTemplates["careTeam"], "", nil)
 	if len(rows) != 1 {
 		t.Fatalf("got %d rows, want 1", len(rows))
 	}
@@ -630,7 +630,7 @@ func TestBuildCSVRows_FamilyHistory_RelationshipFallsBackToOrganizer(t *testing.
 			},
 		},
 	}
-	rows := buildCSVRows(documentMap, cdaCSVSectionTemplates["familyHistory"], "")
+	rows := buildCSVRows(documentMap, cdaCSVSectionTemplates["familyHistory"], "", nil)
 	if len(rows) != 1 {
 		t.Fatalf("got %d rows, want 1", len(rows))
 	}
@@ -667,7 +667,7 @@ func TestBuildCSVRows_ProblemName_ResolvesViaValueCode(t *testing.T) {
 			},
 		},
 	}
-	rows := buildCSVRows(documentMap, cdaCSVSectionTemplates["problems"], "")
+	rows := buildCSVRows(documentMap, cdaCSVSectionTemplates["problems"], "", nil)
 	if len(rows) != 1 {
 		t.Fatalf("got %d rows, want 1", len(rows))
 	}
@@ -708,7 +708,7 @@ func TestBuildCSVRows_MedicationSigAndComment_ScopedToDistinctTemplates(t *testi
 			},
 		},
 	}
-	rows := buildCSVRows(documentMap, cdaCSVSectionTemplates["medications"], "")
+	rows := buildCSVRows(documentMap, cdaCSVSectionTemplates["medications"], "", nil)
 	if len(rows) != 1 {
 		t.Fatalf("got %d rows, want 1", len(rows))
 	}
@@ -744,7 +744,7 @@ func TestUniversalEntryColumns_Comment_ResolvesAcrossAnySection(t *testing.T) {
 			},
 		},
 	}
-	rows := buildCSVRows(documentMap, cdaCSVSectionTemplates["problems"], "")
+	rows := buildCSVRows(documentMap, cdaCSVSectionTemplates["problems"], "", nil)
 	if len(rows) != 1 {
 		t.Fatalf("got %d rows, want 1", len(rows))
 	}
@@ -779,7 +779,7 @@ func TestBuildCSVRows_MedicationSig_FallsBackToInstructionV2(t *testing.T) {
 			},
 		},
 	}
-	rows := buildCSVRows(documentMap, cdaCSVSectionTemplates["medications"], "")
+	rows := buildCSVRows(documentMap, cdaCSVSectionTemplates["medications"], "", nil)
 	if len(rows) != 1 {
 		t.Fatalf("got %d rows, want 1", len(rows))
 	}
@@ -812,7 +812,7 @@ func TestBuildCSVRows_Medication_ApproachSiteMaxDoseAndIndication(t *testing.T) 
 			},
 		},
 	}
-	rows := buildCSVRows(documentMap, cdaCSVSectionTemplates["medications"], "")
+	rows := buildCSVRows(documentMap, cdaCSVSectionTemplates["medications"], "", nil)
 	if len(rows) != 1 {
 		t.Fatalf("got %d rows, want 1", len(rows))
 	}
@@ -872,7 +872,7 @@ func TestBuildCSVRows_Allergy_ReactionSeverityCriticality_AreSiblingRelationship
 			},
 		},
 	}
-	rows := buildCSVRows(documentMap, cdaCSVSectionTemplates["allergiesAndIntolerances"], "")
+	rows := buildCSVRows(documentMap, cdaCSVSectionTemplates["allergiesAndIntolerances"], "", nil)
 	if len(rows) != 1 {
 		t.Fatalf("got %d rows, want 1", len(rows))
 	}
@@ -923,7 +923,7 @@ func TestBuildCSVRows_Allergy_MultipleReactions_JoinedWithSemicolon(t *testing.T
 			},
 		},
 	}
-	rows := buildCSVRows(documentMap, cdaCSVSectionTemplates["allergiesAndIntolerances"], "")
+	rows := buildCSVRows(documentMap, cdaCSVSectionTemplates["allergiesAndIntolerances"], "", nil)
 	if len(rows) != 1 {
 		t.Fatalf("got %d rows, want 1", len(rows))
 	}
@@ -996,7 +996,7 @@ func TestBuildCSVRows_PayersInsurance_SubscriberId_PrefersHLDOverCOV(t *testing.
 			},
 		},
 	}
-	rows := buildCSVRows(documentMap, cdaCSVSectionTemplates["payersInsurance"], "")
+	rows := buildCSVRows(documentMap, cdaCSVSectionTemplates["payersInsurance"], "", nil)
 	if len(rows) != 1 {
 		t.Fatalf("got %d rows, want 1", len(rows))
 	}
@@ -1033,7 +1033,7 @@ func TestBuildCSVRows_PayersInsurance_SubscriberId_FallsBackToCOVWhenNoHLD(t *te
 			},
 		},
 	}
-	rows := buildCSVRows(documentMap, cdaCSVSectionTemplates["payersInsurance"], "")
+	rows := buildCSVRows(documentMap, cdaCSVSectionTemplates["payersInsurance"], "", nil)
 	if len(rows) != 1 {
 		t.Fatalf("got %d rows, want 1", len(rows))
 	}
@@ -1062,7 +1062,7 @@ func TestBuildCSVRows_EncounterPeriodStart_FallsBackToSinglePointTime(t *testing
 			},
 		},
 	}
-	rows := buildCSVRows(documentMap, cdaCSVSectionTemplates["encounters"], "")
+	rows := buildCSVRows(documentMap, cdaCSVSectionTemplates["encounters"], "", nil)
 	if len(rows) != 1 {
 		t.Fatalf("got %d rows, want 1", len(rows))
 	}
@@ -1113,7 +1113,7 @@ func TestBuildCSVRows_EncounterDiagnosis_OuterRelationshipTypeCodeIsUnconstraine
 			},
 		},
 	}
-	rows := buildCSVRows(documentMap, cdaCSVSectionTemplates["encounters"], "")
+	rows := buildCSVRows(documentMap, cdaCSVSectionTemplates["encounters"], "", nil)
 	if len(rows) != 1 {
 		t.Fatalf("got %d rows, want 1", len(rows))
 	}
@@ -1158,7 +1158,7 @@ func TestBuildCSVRows_Problem_AgeAtOnset_UsesSUBJInversionIndTrue(t *testing.T) 
 			},
 		},
 	}
-	rows := buildCSVRows(documentMap, cdaCSVSectionTemplates["problems"], "")
+	rows := buildCSVRows(documentMap, cdaCSVSectionTemplates["problems"], "", nil)
 	if len(rows) != 1 {
 		t.Fatalf("got %d rows, want 1", len(rows))
 	}
@@ -1255,7 +1255,7 @@ func TestBuildCSVRows_CustomColumnOverride_EndToEnd(t *testing.T) {
 	tmpl := mergeCustomColumns(cdaCSVSectionTemplates["problems"], []CSVColumn{
 		{Name: "ProblemName", Path: "entryRelationships[typeCode=SUBJ].entry.customField"},
 	})
-	rows := buildCSVRows(documentMap, tmpl, "")
+	rows := buildCSVRows(documentMap, tmpl, "", nil)
 	if len(rows) != 1 {
 		t.Fatalf("got %d rows, want 1", len(rows))
 	}

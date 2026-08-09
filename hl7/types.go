@@ -17,6 +17,10 @@ type ParseRequest struct {
 	// "decode"      – convert \F\→|  \S\→^  \T\→&  \R\→~  \E\→\  \H\/\N\→stripped
 	// "passthrough" – leave raw escape sequences as-is (default)
 	EscapeHandling string `json:"escapeHandling,omitempty"`
+	// ValidationLevel selects the hl7/validator conformance tier: "basic"
+	// (today's required-field-only check), "standard", or "strict". Falls
+	// back to config.HL7ValidationLevel when omitted.
+	ValidationLevel string `json:"validationLevel,omitempty"`
 }
 
 // ParseOptions controls optional behaviours during HL7 parsing.
@@ -256,6 +260,7 @@ type SchemaValidationResult struct {
 	FieldsValidated       int               `json:"fieldsValidated"`       // Number of fields validated
 	FieldsMissing         []string          `json:"fieldsMissing"`         // Required fields not found in message
 	FieldsExtra           []string          `json:"fieldsExtra"`           // Fields in message not defined in schema
+	SegmentErrors         []ValidationError `json:"segmentErrors"`         // Missing required segment errors
 	DataTypeErrors        []ValidationError `json:"dataTypeErrors"`        // Data type validation errors
 	CardinalityErrors     []ValidationError `json:"cardinalityErrors"`     // Cardinality validation errors
 	TableValidationErrors []ValidationError `json:"tableValidationErrors"` // Table value validation errors
@@ -352,10 +357,11 @@ const (
 	ErrorCodeInvalidFieldKey      = "INVALID_FIELD_KEY"
 	ErrorCodeInvalidComponentKey  = "INVALID_COMPONENT_KEY"
 	ErrorCodePositionGap          = "POSITION_GAP"
-	ErrorCodeInvalidDataType      = "INVALID_DATA_TYPE"
-	ErrorCodeCardinalityViolation = "CARDINALITY_VIOLATION"
-	ErrorCodeTableValueInvalid    = "TABLE_VALUE_INVALID"
-	ErrorCodeSequenceOutOfOrder   = "SEQUENCE_OUT_OF_ORDER"
+	ErrorCodeInvalidDataType        = "INVALID_DATA_TYPE"
+	ErrorCodeCardinalityViolation   = "CARDINALITY_VIOLATION"
+	ErrorCodeTableValueInvalid      = "TABLE_VALUE_INVALID"
+	ErrorCodeSequenceOutOfOrder     = "SEQUENCE_OUT_OF_ORDER"
+	ErrorCodeMissingRequiredSegment = "MISSING_REQUIRED_SEGMENT"
 )
 
 // ✅ NEW: Validation severity levels
@@ -393,6 +399,9 @@ const (
 	DataTypeXCN = "XCN" // Extended Composite Name
 	DataTypeFN  = "FN"  // Family Name
 	DataTypeSI  = "SI"  // Sequence ID
+	DataTypeNM  = "NM"  // Numeric
+	DataTypeDT  = "DT"  // Date
+	DataTypeTM  = "TM"  // Time
 )
 
 // ✅ NEW: Helper functions for position validation (to be implemented)

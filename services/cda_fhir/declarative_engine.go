@@ -12,6 +12,7 @@ package cdafhir
 import (
 	"fmt"
 	"reflect"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -52,6 +53,17 @@ type DeclarativeEngine struct {
 	// sharing this one engine instance.
 	emittedIDMu       sync.Mutex
 	emittedIDCounters map[string]int
+
+	// CoverageTracker records which section entries this engine actually
+	// built a resource attempt from, for the optional, per-interface CDA
+	// Coverage Audit feature. Same write-once-before-goroutine-fan-out
+	// pattern as PatientRef above, for the same reason: set once by
+	// DeclarativeMapDocument before the per-section goroutines launch, never
+	// written again, so no additional locking is needed on this field itself
+	// (the tracker's own internal state is separately mutex-protected — see
+	// services/executors/cda_coverage_tracker.go). Nil (the common case,
+	// audit disabled) makes every CDACoverageTracker method a no-op.
+	CoverageTracker *executors.CDACoverageTracker
 }
 
 // nextEmittedID returns a document-wide-unique, 1-based sequence number for
@@ -101,19 +113,25 @@ func (e *DeclarativeEngine) BuildResources(
 ) ([]map[string]interface{}, []SectionError) {
 	entryPath := buildEntryMatchPath(rule.SectionKey, rule.EntryMatch)
 	entryNodes := executors.ResolveCDAPaths(documentMap, entryPath, false)
+	flattened := wrapAsFlattenedEntries(entryNodes)
 	if rule.FlattenOrganizers {
-		entryNodes = flattenOrganizerEntries(entryNodes)
+		flattened = flattenOrganizerEntries(entryNodes)
 	}
 
 	var resources []map[string]interface{}
 	var errs []SectionError
 
-	for entryIdx, node := range entryNodes {
-		entryMap, ok := node.(map[string]interface{})
+	for entryIdx, fe := range flattened {
+		entryMap, ok := fe.node.(map[string]interface{})
 		if !ok {
 			continue
 		}
-		resource, extra, rowErrs := e.buildOneResource(entryMap, rule, entryIdx)
+		// coveragePrefix is always "" here (see this function's own
+		// zero-tracking callers), so the computed basePath is threaded for
+		// consistency only -- buildOneResource's own coveragePrefix==""
+		// short-circuit means it never actually matters.
+		basePath := sectionEntryBasePath("", fe.basePrefix, entryMap)
+		resource, extra, rowErrs := e.buildOneResource(entryMap, rule, entryIdx, "", basePath, "CDAEntry")
 		errs = append(errs, rowErrs...)
 		resources = append(resources, extra...)
 		if resource != nil {
@@ -122,6 +140,17 @@ func (e *DeclarativeEngine) BuildResources(
 	}
 
 	return resources, errs
+}
+
+// wrapAsFlattenedEntries lifts a plain node slice into []flattenedEntry with
+// no organizer prefix -- the non-FlattenOrganizers common case, sharing one
+// loop shape with the flattened case at each call site.
+func wrapAsFlattenedEntries(nodes []interface{}) []flattenedEntry {
+	out := make([]flattenedEntry, len(nodes))
+	for i, n := range nodes {
+		out[i] = flattenedEntry{node: n}
+	}
+	return out
 }
 
 // BuildResourcesForRules runs multiple MappingRules against the same
@@ -152,6 +181,38 @@ func (e *DeclarativeEngine) BuildResourcesForRules(
 	documentMap map[string]interface{},
 	rules []MappingRule,
 ) ([]map[string]interface{}, []SectionError) {
+	return e.BuildResourcesForRulesWithCoveragePrefix(documentMap, rules, "")
+}
+
+// BuildResourcesForRulesWithCoveragePrefix is BuildResourcesForRules, plus a
+// caller-supplied CDA Coverage Audit element-tracking prefix (see
+// recordElementCoverage, declarative_engine.go) threaded down to every row
+// this call resolves.
+//
+// Exists as a separate function, not a new BuildResourcesForRules parameter,
+// specifically to avoid touching the ~80 existing BuildResources/
+// BuildResourcesForRules call sites across declarative_engine_test.go/
+// declarative_oob_rules_test.go/declarative_oob_rules_corpus_test.go (none
+// of which set CoverageTracker or care about this) — same rationale
+// DeclarativeEngine.PatientRef's own doc comment already documents for a
+// different field.
+//
+// coveragePrefix must be the caller's own real, section-relative
+// CDAEntryKey (e.g. "vitalSigns#3") for the SPECIFIC entry documentMap
+// resolves against — this function has no way to compute that itself
+// (documentMap may be declarative_document_mapper.go's per-entry synthetic
+// single-entry wrapper, in which case entries resolved here would all
+// appear at index 0 regardless of which real entry is being processed; see
+// buildOneResource's own doc comment for the identical, already-fixed
+// problem at entry granularity). The one real caller,
+// declarative_document_mapper.go's outer per-entry loop, already computes
+// this exact key for its own entry-level Record() call and passes the same
+// value here — not two independently-computed prefixes that could drift.
+func (e *DeclarativeEngine) BuildResourcesForRulesWithCoveragePrefix(
+	documentMap map[string]interface{},
+	rules []MappingRule,
+	coveragePrefix string,
+) ([]map[string]interface{}, []SectionError) {
 	claimed := make(map[string]map[int]bool)
 
 	var allResources []map[string]interface{}
@@ -159,24 +220,26 @@ func (e *DeclarativeEngine) BuildResourcesForRules(
 
 	for _, rule := range rules {
 		allEntries := executors.ResolveCDAPaths(documentMap, "sectionsByKey."+rule.SectionKey+".entries[*]", false)
+		flattened := wrapAsFlattenedEntries(allEntries)
 		if rule.FlattenOrganizers {
-			allEntries = flattenOrganizerEntries(allEntries)
+			flattened = flattenOrganizerEntries(allEntries)
 		}
 		if claimed[rule.SectionKey] == nil {
 			claimed[rule.SectionKey] = make(map[int]bool)
 		}
 
-		for idx, entryNode := range allEntries {
-			if claimed[rule.SectionKey][idx] || !entryMatchesPredicate(entryNode, rule.EntryMatch) {
+		for idx, fe := range flattened {
+			if claimed[rule.SectionKey][idx] || !entryMatchesPredicate(fe.node, rule.EntryMatch) {
 				continue
 			}
 			claimed[rule.SectionKey][idx] = true
 
-			entryMap, ok := entryNode.(map[string]interface{})
+			entryMap, ok := fe.node.(map[string]interface{})
 			if !ok {
 				continue
 			}
-			resource, extra, rowErrs := e.buildOneResource(entryMap, rule, idx)
+			basePath := sectionEntryBasePath(coveragePrefix, fe.basePrefix, entryMap)
+			resource, extra, rowErrs := e.buildOneResource(entryMap, rule, idx, coveragePrefix, basePath, "CDAEntry")
 			allErrs = append(allErrs, rowErrs...)
 			allResources = append(allResources, extra...)
 			if resource != nil {
@@ -192,10 +255,49 @@ func (e *DeclarativeEngine) BuildResourcesForRules(
 // header (see MappingRule.HeaderPath's doc comment) instead of a section's
 // entries, producing at most one resource — header constructs are
 // inherently singular (one document has one author being mapped, one
-// custodian), unlike section entries which can repeat.
+// custodian), unlike section entries which can repeat. Coverage-tracking-
+// free convenience wrapper over BuildHeaderResourceWithCoveragePrefix; see
+// that function's own doc comment for the real behavior.
 func (e *DeclarativeEngine) BuildHeaderResource(
 	documentMap map[string]interface{},
 	rule MappingRule,
+) (map[string]interface{}, []map[string]interface{}, []SectionError) {
+	return e.BuildHeaderResourceWithCoveragePrefix(documentMap, rule, "")
+}
+
+// BuildHeaderResourceWithCoveragePrefix is BuildHeaderResource, plus CDA
+// Coverage Audit element-level recording -- the header-field counterpart to
+// BuildResourcesForRulesWithCoveragePrefix. coveragePrefixBase is a
+// "header.<construct>" literal (e.g. "header.patient") the caller supplies;
+// "" means "not wired up here" (every OTHER caller, including every
+// existing test) and behaves EXACTLY as before this function existed.
+//
+// Two header-specific wrinkles neither section entries nor
+// BuildResourcesForRulesWithCoveragePrefix have:
+//
+//  1. rule.HeaderPath=="authors" doesn't resolve through the translator at
+//     all -- WHICH raw <author> gets used is a Go predicate
+//     (firstAuthorWithPersonIndexed: "first author with a usable
+//     assignedPerson"), not a path segment. Its own real, selected index
+//     becomes both this construct's CDAEntryKey index (so an unselected
+//     author's raw content still shows as its OWN distinct, genuinely-
+//     missed unit -- services/cda_coverage/inventory.go's
+//     buildHeaderInventory walks every raw author, not just the selected
+//     one) and the literal "author[N]" basePath.
+//  2. Every other HeaderPath resolves via the SAME translator entries as
+//     the real value lookup (still done the untranslated way just below),
+//     but rooted at the new "CDAHeader" struct-kind -- e.g. resolving
+//     "encompassingEncounter.location.healthCareFacility" (the Location
+//     rule) yields a basePath several levels deeper than resolving bare
+//     "encompassingEncounter" (the Encounter rule), even though both
+//     share the SAME coveragePrefixBase ("header.encompassingEncounter")
+//     -- see this function's 5 real call sites in
+//     declarative_document_mapper.go for why that sharing is required
+//     (their typed roots physically overlap).
+func (e *DeclarativeEngine) BuildHeaderResourceWithCoveragePrefix(
+	documentMap map[string]interface{},
+	rule MappingRule,
+	coveragePrefixBase string,
 ) (map[string]interface{}, []map[string]interface{}, []SectionError) {
 	headerMap, ok := documentMap["header"].(map[string]interface{})
 	if !ok || headerMap == nil {
@@ -203,34 +305,63 @@ func (e *DeclarativeEngine) BuildHeaderResource(
 	}
 
 	var entryMap map[string]interface{}
-	switch rule.HeaderPath {
-	case "authors":
-		entryMap = firstAuthorWithPerson(headerMap)
-	default:
+	index := 0
+	var basePath, baseKind string
+
+	if rule.HeaderPath == "authors" {
+		var found bool
+		entryMap, index, found = firstAuthorWithPersonIndexed(headerMap)
+		if !found {
+			return nil, nil, nil
+		}
+		if coveragePrefixBase != "" {
+			// header_parser.go:158 -- root.SelectElements("author"), a
+			// direct, repeatable child of the document root itself; always
+			// index 0 relative to ITS OWN position (no further wrapper).
+			basePath = fmt.Sprintf("author[%d]", index)
+			baseKind = "CDAAuthor"
+		}
+	} else {
 		nodes := executors.ResolveCDAPaths(headerMap, rule.HeaderPath, false)
 		if len(nodes) == 0 {
 			return nil, nil, nil
 		}
 		entryMap, _ = nodes[0].(map[string]interface{})
-	}
-	if entryMap == nil {
-		return nil, nil, nil
+		if entryMap == nil {
+			return nil, nil, nil
+		}
+		if coveragePrefixBase != "" {
+			if node := executors.ResolveCDAPathTranslated(headerMap, rule.HeaderPath, "CDAHeader"); node.Translatable {
+				basePath, baseKind = node.XMLPath, node.Kind
+			}
+		}
 	}
 
-	return e.buildOneResource(entryMap, rule, 0)
+	coveragePrefix := ""
+	if coveragePrefixBase != "" {
+		coveragePrefix = executors.CDAEntryKey(coveragePrefixBase, index)
+		e.CoverageTracker.Record(coveragePrefix)
+	}
+
+	return e.buildOneResource(entryMap, rule, 0, coveragePrefix, basePath, baseKind)
 }
 
-// firstAuthorWithPerson returns the first element of headerMap["authors"]
-// whose assignedAuthor.assignedPerson carries at least one name — mirrors
+// firstAuthorWithPersonIndexed returns the first element of
+// headerMap["authors"] whose assignedAuthor.assignedPerson carries at least
+// one name, AND its own real index among every raw author present — mirrors
 // patient_mapper.go's MapAuthor loop ("return on first author with a
 // person") exactly. An existence check ("has a person", not "person equals
 // X"), which is why this is a small Go helper instead of an EntryMatch
-// bracket-predicate: that grammar only supports equality.
-func firstAuthorWithPerson(headerMap map[string]interface{}) map[string]interface{} {
+// bracket-predicate: that grammar only supports equality. The index is
+// needed by BuildHeaderResourceWithCoveragePrefix so an author that exists
+// in the raw document but was never selected still gets its own distinct,
+// genuinely-tracked coverage unit rather than silently sharing index 0 with
+// whichever author WAS selected.
+func firstAuthorWithPersonIndexed(headerMap map[string]interface{}) (entryMap map[string]interface{}, index int, ok bool) {
 	authors, _ := headerMap["authors"].([]interface{})
-	for _, a := range authors {
-		am, ok := a.(map[string]interface{})
-		if !ok {
+	for i, a := range authors {
+		am, isMap := a.(map[string]interface{})
+		if !isMap {
 			continue
 		}
 		assignedAuthor, _ := am["assignedAuthor"].(map[string]interface{})
@@ -242,10 +373,43 @@ func firstAuthorWithPerson(headerMap map[string]interface{}) map[string]interfac
 			continue
 		}
 		if names, _ := person["names"].([]interface{}); len(names) > 0 {
-			return am
+			return am, i, true
 		}
 	}
-	return nil
+	return nil, 0, false
+}
+
+// sectionEntryBasePath computes buildOneResource's basePath for a SECTION
+// entry (as opposed to a header construct, which BuildHeaderResourceWith
+// CoveragePrefix computes its own way) -- raw XML's <entry> directly wraps
+// exactly one of the 7 act tags (observation|act|organizer|
+// substanceAdministration|procedure|encounter|supply), which the typed
+// parser flattens away into entryMap's own top-level fields (code,
+// statusCode, effectiveTime, value, ...) -- see executors.
+// CDAEntryActTagPrefix's own doc comment. Every recorded key for THIS
+// entry's own fields must start from that wrapper segment, or it will never
+// match inventory.go's walkEntryElements (which walks the unflattened raw
+// XML and sees the wrapper as a real, present level, e.g.
+// "encounter[0].code[0]" not bare "code[0]"). Gated on coveragePrefix != ""
+// so a zero-tracking caller pays no extra cost.
+//
+// basePrefix (from flattenOrganizerEntries, e.g. "organizer[0].component[3]")
+// is prepended when this entry is itself a flattened organizer component --
+// without it, every component sibling under the same organizer would
+// collapse onto the identical "observation[0].code[0]"-style key (a real
+// bug found live: Vital Signs read as 0/45 clinical elements found despite
+// genuinely mapping several vitals correctly, because every one of them
+// recorded under the SAME collapsed key that never matched any single one
+// of the raw mirror's per-component inventory paths).
+func sectionEntryBasePath(coveragePrefix, basePrefix string, entryMap map[string]interface{}) string {
+	if coveragePrefix == "" {
+		return ""
+	}
+	prefix, ok := executors.CDAEntryActTagPrefix(entryMap)
+	if !ok {
+		return ""
+	}
+	return executors.JoinCDAXMLPath(basePrefix, prefix)
 }
 
 // buildOneResource applies every MappingRow in rule.Fields to one already-
@@ -263,13 +427,51 @@ func (e *DeclarativeEngine) buildOneResource(
 	entryMap map[string]interface{},
 	rule MappingRule,
 	entryIdx int,
+	coveragePrefix string,
+	basePath string,
+	baseKind string,
 ) (map[string]interface{}, []map[string]interface{}, []SectionError) {
+	// CDA Coverage Audit, ENTRY granularity is NOT recorded here. entryIdx is
+	// relative to whatever documentMap this call's caller resolved entries
+	// from — for declarative_document_mapper.go's live per-entry loop (the
+	// only production caller; every other caller is a direct-engine unit
+	// test that never sets CoverageTracker), that documentMap is a synthetic
+	// single-entry wrapper (see that loop's own comment on why), so entryIdx
+	// here is ALWAYS 0 regardless of which real entry is being processed —
+	// recording here would mark only "sectionKey#0" as touched no matter how
+	// many entries a section actually has. That loop already carries the one
+	// real, section-relative entryIdx (its own range variable) and records
+	// with it directly, unconditionally, for every entry it feeds into
+	// BuildResourcesForRules — see that loop's own CoverageTracker.Record
+	// call for the actual recording point.
+	//
+	// ELEMENT granularity has the identical problem and the identical fix:
+	// coveragePrefix is NOT derived from entryIdx here (that was tried and
+	// reverted — see git history/session notes if this comment is ever
+	// questioned) for exactly the same reason. It is instead threaded in as
+	// a parameter, sourced from the same real, section-relative key
+	// declarative_document_mapper.go's outer loop already computes for
+	// entry-level recording — see BuildResourcesForRulesWithCoveragePrefix,
+	// the entry point that actually carries it down to here. Empty string
+	// (every OTHER caller: BuildResources, BuildResourcesForRules, and thus
+	// every existing test) means "not wired up," and recordElementCoverage
+	// silently no-ops — zero behavioral change for any caller that doesn't
+	// opt in.
 	resource := map[string]interface{}{"resourceType": rule.FHIRResource}
 	var errs []SectionError
 	var extra []map[string]interface{}
 
+	// CDA Coverage Audit, element granularity: basePath/baseKind are already
+	// FINAL by the time they reach this function -- computed by the caller
+	// (sectionEntryBasePath for section entries; BuildHeaderResourceWith
+	// CoveragePrefix for header constructs), since the correct derivation
+	// differs by caller (CDAEntryActTagPrefix's entryType-based lookup only
+	// makes sense for CDAEntry-shaped nodes; a header construct has no
+	// entryType at all). Passed straight through to every row -- see
+	// sectionEntryBasePath's own doc comment for why section entries need
+	// this, and BuildHeaderResourceWithCoveragePrefix's for the header case.
 	for _, row := range rule.Fields {
-		if err := e.applyRow(resource, entryMap, row, &extra); err != nil {
+		if err := e.applyRow(resource, entryMap, row, &extra, coveragePrefix, basePath, baseKind); err != nil {
 			severity := "warning"
 			if row.Required || row.Conformance == "SHALL" {
 				severity = "error"
@@ -475,17 +677,45 @@ func buildEntryMatchPath(sectionKey, entryMatch string) string {
 // mirrors observation_mapper.go's flattenObservationEntries exactly. A
 // non-organizer node, or an organizer with no components, passes through
 // unchanged. See MappingRule.FlattenOrganizers' doc comment.
-func flattenOrganizerEntries(nodes []interface{}) []interface{} {
-	var flat []interface{}
+// flattenedEntry is one entry flattenOrganizerEntries produced, plus the
+// raw-XML basePath PREFIX it needs for CDA Coverage Audit element-level
+// recording. A flattened component's own act-tag prefix alone (e.g.
+// "observation[0]", from executors.CDAEntryActTagPrefix) would collide
+// across every sibling component under the same organizer -- raw XML has
+// each at its own "organizer[0].component[N].observation[0]" position, not
+// a bare "observation[0]" repeated identically for every one. BasePrefix is
+// "" for a pass-through (non-organizer) entry, where the normal
+// CDAEntryActTagPrefix(entryMap) computation alone is already correct.
+type flattenedEntry struct {
+	node       interface{}
+	basePrefix string
+}
+
+// flattenOrganizerEntries replaces an "organizer"-type entry with its own
+// nested component entries (one per <component>), for rules that opted in
+// via MappingRule.FlattenOrganizers (e.g. a Vital Signs Organizer wrapping
+// several individual vital-sign Observations, or a Results Organizer
+// wrapping several lab Result Observations). The organizer wrapper is
+// always index [0] relative to its own section entry (raw XML's <entry>
+// wraps exactly one act tag -- same reasoning as CDAEntryActTagPrefix's own
+// doc comment), so each flattened component's basePrefix is
+// "organizer[0].component[<its own real index>]".
+func flattenOrganizerEntries(nodes []interface{}) []flattenedEntry {
+	var flat []flattenedEntry
 	for _, node := range nodes {
 		nodeMap, ok := node.(map[string]interface{})
 		if ok && nodeMap["entryType"] == "organizer" {
 			if components, ok := nodeMap["components"].([]interface{}); ok && len(components) > 0 {
-				flat = append(flat, components...)
+				for idx, c := range components {
+					flat = append(flat, flattenedEntry{
+						node:       c,
+						basePrefix: "organizer[0].component[" + strconv.Itoa(idx) + "]",
+					})
+				}
 				continue
 			}
 		}
-		flat = append(flat, node)
+		flat = append(flat, flattenedEntry{node: node})
 	}
 	return flat
 }
@@ -580,7 +810,7 @@ func isNilValue(v interface{}) bool {
 // independent top-level resources too, not nested values. Most callers pass
 // nil: only buildOneResource (the top of the recursion) needs to actually
 // collect these.
-func (e *DeclarativeEngine) applyRow(resource map[string]interface{}, entryMap map[string]interface{}, row MappingRow, extraOut *[]map[string]interface{}) error {
+func (e *DeclarativeEngine) applyRow(resource map[string]interface{}, entryMap map[string]interface{}, row MappingRow, extraOut *[]map[string]interface{}, coveragePrefix, basePath, baseKind string) error {
 	if row.Disabled {
 		return nil
 	}
@@ -592,12 +822,28 @@ func (e *DeclarativeEngine) applyRow(resource map[string]interface{}, entryMap m
 		return nil
 	}
 
+	// CDA Coverage Audit, element granularity. translatedScope is ONLY
+	// computed when tracking is actually active (nil CoverageTracker or ""
+	// coveragePrefix are both "not wired up here" signals — see
+	// recordElementCoverage's own doc comment) — every other row in a
+	// document that hasn't opted in pays zero extra resolution cost. Also
+	// needed below by the CollectAll+Fields/EmitAsResource branches, which
+	// each recurse into further applyRow calls that need THEIR OWN basePath/
+	// baseKind continuing from wherever the specific match that owns them
+	// resolved to — computed once here, by index, and threaded down, rather
+	// than re-resolved once per branch.
+	var translatedScope []executors.CDAResolvedNode
+	if e.CoverageTracker != nil && coveragePrefix != "" {
+		translatedScope = executors.ResolveCDAPathsTranslated(entryMap, row.Scope, baseKind)
+		e.recordElementCoverage(entryMap, coveragePrefix, basePath, baseKind, translatedScope, row.Scope, row.SourcePath)
+	}
+
 	if row.CollectAll {
 		if row.EmitAsResource != "" {
-			return e.applyCollectAllEmitAsResource(resource, scopedNodes, row, extraOut)
+			return e.applyCollectAllEmitAsResource(resource, scopedNodes, row, extraOut, coveragePrefix, basePath, translatedScope)
 		}
 		if len(row.Fields) > 0 {
-			return e.applyCollectAllWithFields(resource, scopedNodes, row, extraOut)
+			return e.applyCollectAllWithFields(resource, scopedNodes, row, extraOut, coveragePrefix, basePath, translatedScope)
 		}
 
 		idx := 0
@@ -637,7 +883,8 @@ func (e *DeclarativeEngine) applyRow(resource map[string]interface{}, entryMap m
 		if !ok {
 			return nil
 		}
-		sub, refVal := e.buildEmittedSubResource(scopedMap, row, extraOut)
+		childBasePath, childBaseKind := childCoverageContext(basePath, translatedScope, 0)
+		sub, refVal := e.buildEmittedSubResource(scopedMap, row, extraOut, coveragePrefix, childBasePath, childBaseKind)
 		if sub == nil {
 			return nil
 		}
@@ -669,6 +916,67 @@ func (e *DeclarativeEngine) applyRow(resource map[string]interface{}, entryMap m
 	return nil
 }
 
+// recordElementCoverage records the XML-mirror element(s) row's Scope, and
+// (when set at this row's own level) Scope+SourcePath, resolve to — CDA
+// Coverage Audit's element-level tracking, see cda_element_translation.go.
+// A side channel to the row's real value resolution (resolveScope/
+// resolveRowSourceValue just above), deliberately kept separate so
+// element-level recording can never alter what value actually gets mapped,
+// only what gets recorded as "read."
+//
+// coveragePrefix is this row's entry's own CDAEntryKey (e.g. "vitalSigns#3")
+// — empty means this call site isn't wired up for element-level recording
+// (e.g. BuildHeaderResource, permanently out of scope — see that function's
+// own call site) and is a safe, silent no-op. basePath/baseKind place this
+// row correctly within nested recursion (e.g. inside a matched
+// entryRelationship's own act) — both are "" at the top level, where
+// entryMap already IS the entry root. translatedScope is row.Scope's own
+// ALREADY-COMPUTED translation (applyRow computes it once and passes it
+// here AND to whichever recursive branch needs it, rather than resolving
+// the same path twice).
+func (e *DeclarativeEngine) recordElementCoverage(entryMap map[string]interface{}, coveragePrefix, basePath, baseKind string, translatedScope []executors.CDAResolvedNode, scope, sourcePath string) {
+	if coveragePrefix == "" {
+		return
+	}
+	record := func(node executors.CDAResolvedNode) {
+		if node.Translatable && node.XMLPath != "" {
+			e.CoverageTracker.Record(coveragePrefix + "/" + executors.JoinCDAXMLPath(basePath, node.XMLPath))
+		}
+	}
+	for _, node := range translatedScope {
+		record(node)
+	}
+	if sourcePath == "" {
+		return
+	}
+	combined := sourcePath
+	if scope != "" {
+		combined = scope + "." + sourcePath
+	}
+	for _, node := range executors.ResolveCDAPathsTranslated(entryMap, combined, baseKind) {
+		record(node)
+	}
+}
+
+// childCoverageContext derives the basePath/baseKind a recursive applyRow
+// call should use for the idx-th match in translatedScope — that match's
+// own translated XMLPath (joined onto the parent's basePath) and Kind. All
+// three of: translatedScope being nil (tracking inactive for this call —
+// see applyRow's own comment), idx out of range, or that specific match not
+// being Translatable, safely return ("", "") — a recursive call with an
+// empty coveragePrefix downstream (unrelated to this) or empty basePath/
+// baseKind simply records nothing deeper, never guesses.
+func childCoverageContext(basePath string, translatedScope []executors.CDAResolvedNode, idx int) (childBasePath, childBaseKind string) {
+	if idx < 0 || idx >= len(translatedScope) {
+		return "", ""
+	}
+	node := translatedScope[idx]
+	if !node.Translatable {
+		return "", ""
+	}
+	return executors.JoinCDAXMLPath(basePath, node.XMLPath), node.Kind
+}
+
 // applyCollectAllWithFields implements MappingRow.Fields' "one sub-object
 // per Scope match" semantics — see that field's doc comment for why this
 // exists (two independent CollectAll rows can't be kept index-aligned;
@@ -677,7 +985,7 @@ func (e *DeclarativeEngine) applyRow(resource map[string]interface{}, entryMap m
 // every other row in this engine goes through — no special-cased recursion,
 // just a fresh subObj as the "resource" and the matched node as the
 // "entryMap" for that one recursive call.
-func (e *DeclarativeEngine) applyCollectAllWithFields(resource map[string]interface{}, scopedNodes []interface{}, row MappingRow, extraOut *[]map[string]interface{}) error {
+func (e *DeclarativeEngine) applyCollectAllWithFields(resource map[string]interface{}, scopedNodes []interface{}, row MappingRow, extraOut *[]map[string]interface{}, coveragePrefix, basePath string, translatedScope []executors.CDAResolvedNode) error {
 	// Seed idx from row.TargetPath's CURRENT length rather than always 0:
 	// EncounterMappingRules has two independent CollectAll+Fields rows
 	// (Scope="participants[*]", then Scope="performers[*]") both writing
@@ -693,11 +1001,17 @@ func (e *DeclarativeEngine) applyCollectAllWithFields(resource map[string]interf
 	if existing, ok := resource[row.TargetPath].([]interface{}); ok {
 		idx = len(existing)
 	}
-	for _, scoped := range scopedNodes {
+	for i, scoped := range scopedNodes {
 		scopedMap, ok := scoped.(map[string]interface{})
 		if !ok {
 			continue
 		}
+		// This specific match's own basePath/baseKind for CDA Coverage Audit
+		// — scopedMap is reached via translatedScope[i], the SAME index
+		// (both scopedNodes and translatedScope walk the identical
+		// wildcard/predicate fan-out over the identical Scope path, so they
+		// stay index-aligned — see applyRow's own translatedScope comment).
+		childBasePath, childBaseKind := childCoverageContext(basePath, translatedScope, i)
 		subObj := map[string]interface{}{}
 		for _, childRow := range row.Fields {
 			if childRow.EmitAsResource != "" {
@@ -705,7 +1019,7 @@ func (e *DeclarativeEngine) applyCollectAllWithFields(resource map[string]interf
 				// builds an INDEPENDENT resource (e.g. CareTeam's per-
 				// participant Practitioner), not a value inside subObj —
 				// subObj only gets a Reference to it.
-				if sub, refVal := e.buildEmittedSubResource(scopedMap, childRow, extraOut); sub != nil {
+				if sub, refVal := e.buildEmittedSubResource(scopedMap, childRow, extraOut, coveragePrefix, childBasePath, childBaseKind); sub != nil {
 					if extraOut != nil {
 						*extraOut = append(*extraOut, sub)
 					}
@@ -719,7 +1033,7 @@ func (e *DeclarativeEngine) applyCollectAllWithFields(resource map[string]interf
 			// normal, not a conformance violation worth surfacing at the
 			// resource level. Revisit if a future child row's Required/SHALL
 			// genuinely needs to be visible.
-			_ = e.applyRow(subObj, scopedMap, childRow, extraOut)
+			_ = e.applyRow(subObj, scopedMap, childRow, extraOut, coveragePrefix, childBasePath, childBaseKind)
 		}
 		if len(subObj) == 0 {
 			continue
@@ -748,17 +1062,18 @@ func (e *DeclarativeEngine) applyCollectAllWithFields(resource map[string]interf
 // 99397 sample data) of sibling question/answer observations, each
 // becoming its own Observation resource referenced from the parent's
 // hasMember[].
-func (e *DeclarativeEngine) applyCollectAllEmitAsResource(resource map[string]interface{}, scopedNodes []interface{}, row MappingRow, extraOut *[]map[string]interface{}) error {
+func (e *DeclarativeEngine) applyCollectAllEmitAsResource(resource map[string]interface{}, scopedNodes []interface{}, row MappingRow, extraOut *[]map[string]interface{}, coveragePrefix, basePath string, translatedScope []executors.CDAResolvedNode) error {
 	idx := 0
 	if existing, ok := resource[row.TargetPath].([]interface{}); ok {
 		idx = len(existing)
 	}
-	for _, scoped := range scopedNodes {
+	for i, scoped := range scopedNodes {
 		scopedMap, ok := scoped.(map[string]interface{})
 		if !ok {
 			continue
 		}
-		sub, refVal := e.buildEmittedSubResource(scopedMap, row, extraOut)
+		childBasePath, childBaseKind := childCoverageContext(basePath, translatedScope, i)
+		sub, refVal := e.buildEmittedSubResource(scopedMap, row, extraOut, coveragePrefix, childBasePath, childBaseKind)
 		if sub == nil {
 			continue
 		}
@@ -803,11 +1118,15 @@ func (e *DeclarativeEngine) applyCollectAllEmitAsResource(resource map[string]in
 // non-excluded-type caller, via EncounterMappingRules' nested-diagnosis row)
 // needs the explicit marker instead. Stripped before the bundle ships,
 // alongside "_cdaIds".
-func (e *DeclarativeEngine) buildEmittedSubResource(scopedMap map[string]interface{}, row MappingRow, extraOut *[]map[string]interface{}) (map[string]interface{}, map[string]interface{}) {
+func (e *DeclarativeEngine) buildEmittedSubResource(scopedMap map[string]interface{}, row MappingRow, extraOut *[]map[string]interface{}, coveragePrefix, basePath, baseKind string) (map[string]interface{}, map[string]interface{}) {
 	sub := map[string]interface{}{"resourceType": row.EmitAsResource}
 	var localExtra []map[string]interface{}
 	for _, childRow := range row.Fields {
-		_ = e.applyRow(sub, scopedMap, childRow, &localExtra)
+		// basePath/baseKind already describe scopedMap's own position
+		// relative to the true entry root -- computed by the caller (see
+		// childCoverageContext), passed straight through since childRow's
+		// Scope/SourcePath are resolved relative to scopedMap itself.
+		_ = e.applyRow(sub, scopedMap, childRow, &localExtra, coveragePrefix, basePath, baseKind)
 	}
 	if countRealKeys(sub) <= 1 {
 		return nil, nil

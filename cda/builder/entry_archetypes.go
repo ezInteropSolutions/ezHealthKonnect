@@ -84,7 +84,18 @@ var structuralElementOrder = []string{
 	// last purely because of JSON field-list order.
 	"text",
 	"statusCode",
-	"effectiveTime", "value", "routeCode", "doseQuantity", "quantity", "consumable",
+	"effectiveTime", "value",
+	// interpretationCode/methodCode/targetSiteCode are Observation-only tags
+	// that sit right after value in the base Observation sequence (value,
+	// interpretationCode?, methodCode?, targetSiteCode?, subject?, specimen?,
+	// performer*, author*, ...) — found via a live Test Pipeline run
+	// (2026-07) after adding Result Observation's interpretationCode/
+	// referenceRange: interpretationCode was landing AFTER author, same
+	// unlisted-vs-listed class of bug as text/performer/author above (once
+	// author became a listed tag, interpretationCode's own "unlisted, keeps
+	// construction order" fallback lost to author's fixed low rank).
+	"interpretationCode", "methodCode", "targetSiteCode",
+	"routeCode", "doseQuantity", "quantity", "consumable",
 	// performer precedes author in every CDA base type's fixed sequence
 	// (Act/Observation/Procedure/SubstanceAdministration/Encounter/Organizer
 	// all declare "..., performer*, author*, informant*, participant*, ...").
@@ -109,6 +120,110 @@ var structuralElementOrder = []string{
 	"author",
 }
 
+// buildEntryRoot creates the root element at entryElementPath (relative to
+// "entry/"), applies its tag's classCode/moodCode/statusCode boilerplate,
+// injects templateId, and stamps a generated <id> — the core construction
+// steps shared by buildEntry's own primary root and buildAlternateEntry's
+// single root (see AlternateEntryArchetype's own doc comment). Returns nil
+// if entryElementPath is empty (narrative-only sections have none).
+func buildEntryRoot(entryEl *etree.Element, entryElementPath, templateID, templateIDExt string) *etree.Element {
+	if entryElementPath == "" {
+		return nil
+	}
+	rootEl := WriteAtXPath(entryEl, stripEntryPrefix(entryElementPath), "")
+	applyTagBoilerplate(rootEl, lastSegmentTag(entryElementPath))
+	if templateID != "" {
+		injectTemplateID(rootEl, templateID, templateIDExt)
+	}
+	ensureGeneratedID(rootEl)
+	return rootEl
+}
+
+// applyStructuralTemplateAnchors is buildEntry's own StructuralTemplateIDs
+// loop, extracted so buildAlternateEntry can share it exactly rather than
+// duplicating it — the anchor-processing logic (templateId injection,
+// Fixed*/FixedStatusCode, the author/participant/default id-generation
+// switch, final reorder) has no dependency on which caller's entryEl it's
+// given.
+func applyStructuralTemplateAnchors(entryEl *etree.Element, anchors []cdaSchema.StructuralTemplateAnchor) {
+	for _, anchor := range anchors {
+		el, found := TryFindAtXPath(entryEl, stripEntryPrefix(anchor.Path))
+		if !found {
+			continue
+		}
+		applyTagBoilerplate(el, lastSegmentTag(anchor.Path))
+		injectTemplateID(el, anchor.TemplateID, anchor.TemplateIDExt)
+		if anchor.FixedCode != "" && el.SelectElement("code") == nil {
+			codeEl := el.CreateElement("code")
+			codeEl.CreateAttr("code", anchor.FixedCode)
+			if anchor.FixedCodeSystem != "" {
+				codeEl.CreateAttr("codeSystem", anchor.FixedCodeSystem)
+			}
+			if anchor.FixedCodeDisplay != "" {
+				codeEl.CreateAttr("displayName", anchor.FixedCodeDisplay)
+			}
+		}
+		if anchor.FixedStatusCode != "" {
+			if sc := el.SelectElement("statusCode"); sc != nil {
+				sc.CreateAttr("code", anchor.FixedStatusCode)
+			} else {
+				el.CreateElement("statusCode").CreateAttr("code", anchor.FixedStatusCode)
+			}
+		}
+		// "author" (Author Participation, templateId .4.119) and
+		// "participant" (e.g. Advance Directive's Verifier, Participant2
+		// type) are the anchor tags whose CDA base type has NO <id> in
+		// their content model at all (unlike act/observation/organizer/
+		// manufacturedProduct, which all permit id* and where
+		// ensureGeneratedID is correct) — calling it here would add an
+		// invalid stray <id> directly under <author>/<participant>.
+		// author additionally needs ensureAuthorParticipationShape's own
+		// fixup (a required <time> the canonical field catalog never
+		// supplies for an entry-level author, unlike the document-level
+		// author's real build-time nowCDATimestamp value); participant
+		// (Participant2: templateId*, functionCode?, time?, awarenessCode?,
+		// participantRole) has no such requirement — confirmed missing
+		// entirely via a live Test Pipeline run (2026-07) that found a
+		// stray <id> on Advance Directive's Verifier participant.
+		switch lastSegmentTag(anchor.Path) {
+		case "author":
+			ensureAuthorParticipationShape(el)
+		case "participant":
+			// no-op: no id, no other required fixup
+		default:
+			ensureGeneratedID(el)
+		}
+		// Reordered LAST, after templateId/code/id have all been added —
+		// not right after injectTemplateID — since code/id are only
+		// created above, well after a field write (e.g. reactionCode's
+		// own predicate-anchored xpath) may have already put <value> in
+		// as this element's first real content.
+		reorderChildrenByTag(el, structuralElementOrder)
+	}
+}
+
+// buildAlternateEntry builds one <entry> element for an AlternateEntryArchetype
+// — a section's second (or later), independent entry shape (see
+// AlternateEntryArchetype's own doc comment for the motivating case, Medical
+// Equipment's optional Procedure Activity Procedure2 entries).
+func buildAlternateEntry(sectionEl *etree.Element, alt *cdaSchema.AlternateEntryArchetype, record map[string]interface{}) *etree.Element {
+	entryEl := sectionEl.CreateElement("entry")
+	entryEl.CreateAttr("typeCode", "DRIV")
+
+	rootEl := buildEntryRoot(entryEl, alt.EntryElementPath, alt.EntryTemplateID, alt.EntryTemplateIDExt)
+
+	for _, field := range alt.Fields {
+		writeFieldValue(entryEl, field, record)
+	}
+
+	applyStructuralTemplateAnchors(entryEl, alt.StructuralTemplateIDs)
+
+	if rootEl != nil {
+		reorderChildrenByTag(rootEl, structuralElementOrder)
+	}
+	return entryEl
+}
+
 // buildEntry builds one <entry> element (appended to sectionEl) from a
 // single canonical record, using sec's schema metadata for templateIds and
 // every field's own XPath (via WriteAtXPath) for values — no per-section Go
@@ -121,8 +236,7 @@ func buildEntry(sectionEl *etree.Element, sec *cdaSchema.CDASectionDef, record m
 
 	var rootEl, obsEl *etree.Element
 	if sec.EntryElementPath != "" {
-		rootEl = WriteAtXPath(entryEl, stripEntryPrefix(sec.EntryElementPath), "")
-		applyTagBoilerplate(rootEl, lastSegmentTag(sec.EntryElementPath))
+		rootEl = buildEntryRoot(entryEl, sec.EntryElementPath, sec.EntryTemplateID, sec.EntryTemplateIDExt)
 		if sec.EntryStatusCodeOverride != "" {
 			if sc := rootEl.SelectElement("statusCode"); sc != nil {
 				sc.CreateAttr("code", sec.EntryStatusCodeOverride)
@@ -134,10 +248,6 @@ func buildEntry(sectionEl *etree.Element, sec *cdaSchema.CDASectionDef, record m
 		if sec.EntryMoodCodeOverride != "" {
 			rootEl.CreateAttr("moodCode", sec.EntryMoodCodeOverride)
 		}
-		if sec.EntryTemplateID != "" {
-			injectTemplateID(rootEl, sec.EntryTemplateID, sec.EntryTemplateIDExt)
-		}
-		ensureGeneratedID(rootEl)
 
 		if sec.ObservationElementPath != "" {
 			obsEl = WriteAtXPath(entryEl, stripEntryPrefix(sec.ObservationElementPath), "")
@@ -180,51 +290,7 @@ func buildEntry(sectionEl *etree.Element, sec *cdaSchema.CDASectionDef, record m
 	writeCodeTranslation(rootEl, sec.EntryCodeTranslationCode, sec.EntryCodeTranslationSystem, sec.EntryCodeTranslationDisplay)
 	writeCodeTranslation(obsEl, sec.ObsCodeTranslationCode, sec.ObsCodeTranslationSystem, sec.ObsCodeTranslationDisplay)
 
-	for _, anchor := range sec.StructuralTemplateIDs {
-		if el, found := TryFindAtXPath(entryEl, stripEntryPrefix(anchor.Path)); found {
-			applyTagBoilerplate(el, lastSegmentTag(anchor.Path))
-			injectTemplateID(el, anchor.TemplateID, anchor.TemplateIDExt)
-			if anchor.FixedCode != "" && el.SelectElement("code") == nil {
-				codeEl := el.CreateElement("code")
-				codeEl.CreateAttr("code", anchor.FixedCode)
-				if anchor.FixedCodeSystem != "" {
-					codeEl.CreateAttr("codeSystem", anchor.FixedCodeSystem)
-				}
-				if anchor.FixedCodeDisplay != "" {
-					codeEl.CreateAttr("displayName", anchor.FixedCodeDisplay)
-				}
-			}
-			// "author" (Author Participation, templateId .4.119) and
-			// "participant" (e.g. Advance Directive's Verifier, Participant2
-			// type) are the anchor tags whose CDA base type has NO <id> in
-			// their content model at all (unlike act/observation/organizer/
-			// manufacturedProduct, which all permit id* and where
-			// ensureGeneratedID is correct) — calling it here would add an
-			// invalid stray <id> directly under <author>/<participant>.
-			// author additionally needs ensureAuthorParticipationShape's own
-			// fixup (a required <time> the canonical field catalog never
-			// supplies for an entry-level author, unlike the document-level
-			// author's real build-time nowCDATimestamp value); participant
-			// (Participant2: templateId*, functionCode?, time?, awarenessCode?,
-			// participantRole) has no such requirement — confirmed missing
-			// entirely via a live Test Pipeline run (2026-07) that found a
-			// stray <id> on Advance Directive's Verifier participant.
-			switch lastSegmentTag(anchor.Path) {
-			case "author":
-				ensureAuthorParticipationShape(el)
-			case "participant":
-				// no-op: no id, no other required fixup
-			default:
-				ensureGeneratedID(el)
-			}
-			// Reordered LAST, after templateId/code/id have all been added —
-			// not right after injectTemplateID — since code/id are only
-			// created above, well after a field write (e.g. reactionCode's
-			// own predicate-anchored xpath) may have already put <value> in
-			// as this element's first real content.
-			reorderChildrenByTag(el, structuralElementOrder)
-		}
-	}
+	applyStructuralTemplateAnchors(entryEl, sec.StructuralTemplateIDs)
 
 	reorderChildrenByTag(rootEl, structuralElementOrder)
 	reorderChildrenByTag(obsEl, structuralElementOrder)
@@ -655,6 +721,10 @@ var knownCodeSystemNames = map[string]string{
 	"2.16.840.1.113883.6.26":       "UNII",
 	"2.16.840.1.113883.6.259":      "HealthcareServiceLocation",
 	"2.16.840.1.113883.3.26.1.1":   "NCI Thesaurus",
+	"2.16.840.1.113883.6.101":      "NUCC Health Care Provider Taxonomy",
+	"2.16.840.1.113883.5.1063":     "HL7ObservationValue",
+	"2.16.840.1.113883.5.83":       "ObservationInterpretation",
+	"2.16.840.1.113883.5.111":      "HL7RoleCode",
 }
 
 // injectCodeSystemName sets codeSystemName on el (the same element a field's

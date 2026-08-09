@@ -50,6 +50,7 @@ router.get('/stats', sessionAuth, canRead, (req, res) => {
 router.get('/:messageId',                     sessionAuth, canRead,  (req, res) => MessageController.getMessageDetail(req, res));
 router.get('/:messageId/lineage',             sessionAuth, canRead,  (req, res) => MessageController.getDataLineage(req, res));
 router.get('/:messageId/dedupe-suppressions', sessionAuth, canRead,  (req, res) => MessageController.getDedupeSuppressions(req, res));
+router.get('/:messageId/coverage-audit',      sessionAuth, canRead,  (req, res) => MessageController.getCoverageAudit(req, res));
 router.get('/:messageId/errors',              sessionAuth, canRead,  (req, res) => MessageController.getMessageErrors(req, res));
 router.get('/:messageId/logs',                sessionAuth, canRead,  (req, res) => MessageController.getMessageLogs(req, res));
 

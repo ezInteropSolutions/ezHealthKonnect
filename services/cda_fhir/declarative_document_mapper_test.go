@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -22,6 +23,7 @@ import (
 	cdadocument "ezhealthkonnect/cda/document"
 	cdafhir "ezhealthkonnect/services/cda_fhir"
 	mappinglog "ezhealthkonnect/services/cda_fhir/mapping_log"
+	"ezhealthkonnect/services/executors"
 
 	"github.com/beevik/etree"
 )
@@ -881,6 +883,25 @@ func TestDeclarativeMapDocument_AdditionalValues_SurfacesInMappingLog(t *testing
 		t.Errorf("MappingLog functionalStatus errors = %v, want none -- a warning must never populate Errors", fsLog.Errors)
 	}
 
+	// The same warning must also land on the specific entry's own EntryTrace
+	// (not just the section-level aggregate above) -- this is what lets the
+	// Mapping Log UI show the warning directly on the entry row it belongs
+	// to, instead of only as a disconnected section-level count. See
+	// EntryTrace.Warnings' doc comment (mapping_log/section_log.go).
+	if len(fsLog.Entries) != 1 {
+		t.Fatalf("MappingLog functionalStatus entries = %v, want exactly 1", fsLog.Entries)
+	}
+	entryWarnings := fsLog.Entries[0].Warnings
+	if len(entryWarnings) != 1 {
+		t.Fatalf("MappingLog functionalStatus entry[0].Warnings = %v, want exactly 1", entryWarnings)
+	}
+	if !strings.Contains(entryWarnings[0], "428171000124102") || !strings.Contains(entryWarnings[0], "Depression screening negative") {
+		t.Errorf("entry warning = %q, want it to name the dropped value's code+display", entryWarnings[0])
+	}
+	if strings.HasPrefix(entryWarnings[0], "entry ") {
+		t.Errorf("entry warning = %q, should not repeat the section-level \"entry N, \" prefix -- it's already scoped to this entry", entryWarnings[0])
+	}
+
 	// The bundle itself must be unaffected -- first value still wins.
 	var fsObs map[string]interface{}
 	entries, _ := out.FHIRBundle["entry"].([]interface{})
@@ -908,5 +929,745 @@ func TestDeclarativeMapDocument_AdditionalValues_SurfacesInMappingLog(t *testing
 	}
 	if fsObs["valueInteger"] != float64(0) {
 		t.Errorf("valueInteger = %v, want 0 (first value kept, unchanged behavior)", fsObs["valueInteger"])
+	}
+}
+
+// TestDeclarativeMapDocument_CoverageTracker_RecordsEachEntryDistinctly is
+// the regression proof for a bug where every entry beyond the first in a
+// section was recorded as "sectionKey#0" no matter its real position,
+// because buildOneResource's own entryIdx parameter is only ever correct
+// relative to declarative_document_mapper.go's per-entry synthetic
+// single-entry wrapper documentMap (see that loop's own comment) -- from
+// inside buildOneResource EVERY entry looks like "entry 0", regardless of
+// where it actually sits in the section. CDA Coverage Audit reports built
+// from this (services/cda_coverage/report.go) reported every entry past the
+// first as "never touched" even though mapping succeeded -- exactly what a
+// real 99397 CCD sample showed: Functional Status 1/14 entries "found", 13
+// false-positive gaps, despite the Mapping Log confirming all 14 were
+// mapped to real Observations. Fixed by moving the recording call to
+// declarative_document_mapper.go's outer loop, the one place that has the
+// real, section-relative entryIdx.
+func TestDeclarativeMapDocument_CoverageTracker_RecordsEachEntryDistinctly(t *testing.T) {
+	prevOutput := log.Writer()
+	log.SetOutput(io.Discard)
+	defer log.SetOutput(prevOutput)
+
+	score0, score1, score2 := 0, 1, 2
+	cdaDoc := &cdadocument.CDADocument{
+		SectionsByKey: map[string]*cdadocument.CDASection{
+			"functionalStatus": {
+				TemplateIds: []string{"2.16.840.1.113883.10.20.22.2.14"},
+				Title:       "Functional Status",
+				Entries: []cdadocument.CDAEntry{
+					{
+						EntryType:  "observation",
+						Code:       cdadocument.CDACode{Code: "54522-8", DisplayName: "Functional status", CodeSystem: "2.16.840.1.113883.6.1"},
+						StatusCode: "completed",
+						Value:      &cdadocument.CDAValue{Type: "INT", Integer: &score0},
+					},
+					{
+						EntryType:  "observation",
+						Code:       cdadocument.CDACode{Code: "54522-8", DisplayName: "Functional status", CodeSystem: "2.16.840.1.113883.6.1"},
+						StatusCode: "completed",
+						Value:      &cdadocument.CDAValue{Type: "INT", Integer: &score1},
+					},
+					{
+						EntryType:  "observation",
+						Code:       cdadocument.CDACode{Code: "54522-8", DisplayName: "Functional status", CodeSystem: "2.16.840.1.113883.6.1"},
+						StatusCode: "completed",
+						Value:      &cdadocument.CDAValue{Type: "INT", Integer: &score2},
+					},
+				},
+			},
+		},
+	}
+
+	tracker := executors.NewCDACoverageTracker()
+	mapper := cdafhir.NewGenericCDAFHIRMapper(nil, nil)
+	_, err := mapper.DeclarativeMapDocument(context.Background(), cdaDoc, cdafhir.CDAToFHIRConfig{CoverageTracker: tracker})
+	if err != nil {
+		t.Fatalf("DeclarativeMapDocument: %v", err)
+	}
+
+	for i := 0; i < 3; i++ {
+		key := executors.CDAEntryKey("functionalStatus", i)
+		if !tracker.Touched(key) {
+			t.Errorf("tracker.Touched(%q) = false, want true -- entry %d was never recorded as its own distinct key", key, i)
+		}
+	}
+	// Exactly 3 SECTION entry-level keys (no "/elementPath" suffix) -- the
+	// specific guarantee this test proves. Element-level keys
+	// (functionalStatus#0/code, .../value[0], etc.) are also expected in the
+	// snapshot now that CDA Coverage Audit's element-granularity recording
+	// (see declarative_engine.go's recordElementCoverage) is wired into the
+	// same plain-value applyRow branch this fixture's rows all use --
+	// counted here only to confirm they're present and correctly
+	// per-entry-distinct too (not asserting an exact total, which would make
+	// this test brittle against future rule/field additions to
+	// FunctionalStatusMappingRules). "header."-prefixed keys are filtered
+	// out entirely -- this fixture's zero-value Header still resolves
+	// CDAPatient/CDACustodian (non-pointer struct fields on CDAHeader,
+	// always present even zero-valued, unlike EncompassingEncounter/Authors
+	// which are pointer/slice fields that correctly produce nothing when
+	// absent), so header.patient#0/header.custodian#0 legitimately appear
+	// too -- real, correct "record on attempt" behavior (see
+	// BuildHeaderResourceWithCoveragePrefix), just outside THIS test's own
+	// stated concern (section-entry distinctness only).
+	snapshot := tracker.Snapshot()
+	entryLevelKeys := 0
+	elementLevelKeys := 0
+	for key := range snapshot {
+		if strings.HasPrefix(key, "header.") {
+			continue
+		}
+		if strings.Contains(key, "/") {
+			elementLevelKeys++
+			continue
+		}
+		entryLevelKeys++
+	}
+	if entryLevelKeys != 3 {
+		t.Errorf("tracker recorded %d section entry-level key(s), want exactly 3 (one per entry) -- got %v", entryLevelKeys, snapshot)
+	}
+	if elementLevelKeys == 0 {
+		t.Errorf("tracker recorded 0 element-level keys -- expected at least one per entry (code/statusCode/effectiveTime/value are all plain CDAEntry fields this fixture sets)")
+	}
+}
+
+// TestDeclarativeMapDocument_CoverageTracker_ElementLevel_VitalSigns is CDA
+// Coverage Audit Phase 1's actual proof of the feature this whole effort was
+// escalated for (see this session's plan, "element-level tracking"): not
+// just "was this entry touched," but "which of its OWN elements were." Vital
+// Signs (observationRule(), declarative_oob_rules.go) is the Phase 1 pilot
+// section specifically because its rules never cross an entryRelationship/
+// component boundary (confirmed by reading the rule) -- clean of the
+// data-dependent act-child case Phase 2 is scoped to handle instead.
+//
+// The negative assertion is the real proof, not the positive ones: this
+// fixture's entry carries a genuine, non-empty Performers value, but
+// observationRule() only ever maps Authors (via assignedEntityRoleRow) --
+// it has no row that reads Performers at all. If element-level recording
+// were accidentally too permissive (e.g. recording the whole entry as
+// "touched" and letting every field ride along), this would incorrectly
+// pass. It must specifically know Performers was never read.
+func TestDeclarativeMapDocument_CoverageTracker_ElementLevel_VitalSigns(t *testing.T) {
+	prevOutput := log.Writer()
+	log.SetOutput(io.Discard)
+	defer log.SetOutput(prevOutput)
+
+	cdaDoc := &cdadocument.CDADocument{
+		SectionsByKey: map[string]*cdadocument.CDASection{
+			"vitalSigns": {
+				TemplateIds: []string{"2.16.840.1.113883.10.20.22.2.4"},
+				Title:       "Vital Signs",
+				Entries: []cdadocument.CDAEntry{
+					{
+						EntryType:  "observation",
+						Code:       cdadocument.CDACode{Code: "8867-4", DisplayName: "Heart rate", CodeSystem: "2.16.840.1.113883.6.1"},
+						StatusCode: "completed",
+						Value:      &cdadocument.CDAValue{Type: "PQ", Quantity: &cdadocument.CDAQuantity{Value: "72", Unit: "/min"}},
+						// Never read by observationRule() -- see this test's
+						// own doc comment. Populated with real, non-empty
+						// data specifically so a false "touched" would be
+						// possible if element-level recording were too
+						// permissive.
+						Performers: []cdadocument.CDAPerformer{
+							{
+								TypeCode: "PRF",
+								AssignedEntity: cdadocument.CDAAssignedEntity{
+									Code: cdadocument.CDACode{Code: "163W00000X", DisplayName: "Registered Nurse"},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	tracker := executors.NewCDACoverageTracker()
+	mapper := cdafhir.NewGenericCDAFHIRMapper(nil, nil)
+	_, err := mapper.DeclarativeMapDocument(context.Background(), cdaDoc, cdafhir.CDAToFHIRConfig{CoverageTracker: tracker})
+	if err != nil {
+		t.Fatalf("DeclarativeMapDocument: %v", err)
+	}
+
+	snapshot := tracker.Snapshot()
+
+	// Positive: fields observationRule() genuinely reads must be recorded
+	// at element granularity, each under the entry's own key. Raw XML's
+	// <entry> directly wraps this entry's own act tag -- "observation" here
+	// (EntryType above) -- which the typed parser flattens away; recorded
+	// keys must include that "observation[0]." prefix (executors.
+	// CDAEntryActTagPrefix) to match inventory.go's walkEntryElements,
+	// which walks the unflattened raw XML and sees the wrapper as a real
+	// level (e.g. "observation[0].code[0]", never bare "code[0]").
+	for _, wantSuffix := range []string{"observation[0].code", "observation[0].statusCode", "observation[0].value"} {
+		found := false
+		for key := range snapshot {
+			if strings.HasPrefix(key, "vitalSigns#0") && strings.Contains(key, wantSuffix) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("no recorded key matches \"vitalSigns#0...%s\" -- got %v", wantSuffix, snapshot)
+		}
+	}
+
+	// Negative: the real proof. Performers has genuine data on this entry
+	// but no rule in observationRule() ever reads it.
+	for key := range snapshot {
+		if strings.Contains(key, "performer") {
+			t.Errorf("performer element incorrectly recorded as touched: %q (observationRule() never reads Performers) -- full snapshot %v", key, snapshot)
+		}
+	}
+}
+
+// TestDeclarativeMapDocument_CoverageTracker_ElementLevel_RecursiveActChild is
+// Phase 2's proof: element-level recording must work irrespective of which
+// section it is, including the hard case Phase 1 deliberately avoided --
+// entryRelationship-crossing rules where the nested act's own XML tag
+// (<observation>/<act>/<substanceAdministration>/...) can only be known from
+// the already-resolved node's own EntryType at walk time (xlActChild /
+// xlRenamedActChild in cda_element_translation.go), not from the mapping
+// path string alone. FunctionalStatusMappingRules()'s
+// assessmentScaleSupportingObservationRow (declarative_oob_rules.go) is a
+// real OOB rule with exactly this shape: Scope
+// "entryRelationships[typeCode=COMP].entry[templateId=...]" +
+// CollectAll+EmitAsResource. Negative assertion reuses Performers, the same
+// field the Vital Signs test (Phase 1) already proved is never read by any
+// rule in this family.
+func TestDeclarativeMapDocument_CoverageTracker_ElementLevel_RecursiveActChild(t *testing.T) {
+	prevOutput := log.Writer()
+	log.SetOutput(io.Discard)
+	defer log.SetOutput(prevOutput)
+
+	nestedScore0 := 3
+	nestedScore1 := 4
+
+	cdaDoc := &cdadocument.CDADocument{
+		SectionsByKey: map[string]*cdadocument.CDASection{
+			"functionalStatus": {
+				TemplateIds: []string{"2.16.840.1.113883.10.20.22.2.5.1"},
+				Title:       "Functional Status",
+				Entries: []cdadocument.CDAEntry{
+					{
+						EntryType:  "observation",
+						Code:       cdadocument.CDACode{Code: "54522-8", DisplayName: "Functional status", CodeSystem: "2.16.840.1.113883.6.1"},
+						StatusCode: "completed",
+						Value:      &cdadocument.CDAValue{Type: "CD", Code: &cdadocument.CDACode{Code: "LA6115-2", DisplayName: "Able to feed self", CodeSystem: "2.16.840.1.113883.6.1"}},
+						EntryRelationships: []cdadocument.CDAEntryRelationship{
+							{
+								TypeCode: "COMP",
+								Entry: cdadocument.CDAEntry{
+									EntryType:   "observation",
+									TemplateIds: []string{"2.16.840.1.113883.10.20.22.4.86"},
+									Code:        cdadocument.CDACode{Code: "72108-1", DisplayName: "Bathing", CodeSystem: "2.16.840.1.113883.6.1"},
+									StatusCode:  "completed",
+									Value:       &cdadocument.CDAValue{Type: "INT", Integer: &nestedScore0},
+									// Genuine data, but assessmentScaleSupportingObservationRow's
+									// Fields never include a Performers row -- see this
+									// test's negative assertion below (same field Phase
+									// 1's Vital Signs test already proved is never read).
+									Performers: []cdadocument.CDAPerformer{
+										{TypeCode: "PRF", AssignedEntity: cdadocument.CDAAssignedEntity{Code: cdadocument.CDACode{Code: "163W00000X", DisplayName: "Registered Nurse"}}},
+									},
+								},
+							},
+							{
+								TypeCode: "COMP",
+								Entry: cdadocument.CDAEntry{
+									EntryType:   "observation",
+									TemplateIds: []string{"2.16.840.1.113883.10.20.22.4.86"},
+									Code:        cdadocument.CDACode{Code: "72110-7", DisplayName: "Dressing upper body", CodeSystem: "2.16.840.1.113883.6.1"},
+									StatusCode:  "completed",
+									Value:       &cdadocument.CDAValue{Type: "INT", Integer: &nestedScore1},
+									Performers: []cdadocument.CDAPerformer{
+										{TypeCode: "PRF", AssignedEntity: cdadocument.CDAAssignedEntity{Code: cdadocument.CDACode{Code: "163W00000X", DisplayName: "Registered Nurse"}}},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	tracker := executors.NewCDACoverageTracker()
+	mapper := cdafhir.NewGenericCDAFHIRMapper(nil, nil)
+	_, err := mapper.DeclarativeMapDocument(context.Background(), cdaDoc, cdafhir.CDAToFHIRConfig{CoverageTracker: tracker})
+	if err != nil {
+		t.Fatalf("DeclarativeMapDocument: %v", err)
+	}
+
+	snapshot := tracker.Snapshot()
+
+	// The outer entry's own top-level key must still be recorded --
+	// unaffected by anything nested below it.
+	if !tracker.Touched(executors.CDAEntryKey("functionalStatus", 0)) {
+		t.Errorf("outer entry key functionalStatus#0 not recorded -- got %v", snapshot)
+	}
+
+	// Positive: the nested act-child's own fields must resolve through the
+	// act-tag insertion (observation[0], data-dependent on the nested
+	// entry's own EntryType), under BOTH sibling entryRelationships --
+	// proving childCoverageContext's index-zip isn't accidentally only
+	// recording the first CollectAll match. Leading "observation[0]." is
+	// the OUTER entry's own act-tag wrapper (EntryType="observation" above,
+	// see executors.CDAEntryActTagPrefix) -- every key starts there, not at
+	// the entry root, since raw XML's <entry> wraps it too.
+	for _, idx := range []int{0, 1} {
+		prefix := "observation[0].entryRelationship[" + strconv.Itoa(idx) + "].observation[0]"
+		for _, field := range []string{"code[0]", "statusCode[0]", "value[0]"} {
+			want := prefix + "." + field
+			found := false
+			for key := range snapshot {
+				if strings.HasPrefix(key, "functionalStatus#0") && strings.Contains(key, want) {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Errorf("no recorded key matches \"functionalStatus#0...%s\" -- got %v", want, snapshot)
+			}
+		}
+	}
+
+	// Negative: the real proof, same shape and same field as the Vital Signs
+	// test (Performers) but exercised through the recursive/act-child path --
+	// both nested entries carry genuine Performers data but
+	// assessmentScaleSupportingObservationRow's Fields never read it. (Note:
+	// interpretationCode is deliberately NOT used for this negative --
+	// observationRule()'s own top-level fields (declarative_oob_rules.go
+	// ~line 1643) DO read interpretationCode on the OUTER entry, so it
+	// legitimately shows up as
+	// "functionalStatus#0/observation[0].interpretationCode[0]" even
+	// though this fixture never sets it there -- Go's encoding/json
+	// omitempty is a no-op on non-pointer struct fields, so the zero-value
+	// CDACode is still present in the map and the rule still resolves.)
+	for key := range snapshot {
+		if strings.Contains(key, "performer") {
+			t.Errorf("performer element incorrectly recorded as touched: %q (assessmentScaleSupportingObservationRow never reads Performers) -- full snapshot %v", key, snapshot)
+		}
+	}
+}
+
+// TestDeclarativeMapDocument_CoverageTracker_ElementLevel_MultiSection_Encounters
+// reproduces a real production report: an Encounters entry showing 0
+// elements found at element granularity for FIELDS EncounterMappingRules()
+// genuinely reads (code/statusCode/effectiveTime), even though the SAME
+// document's mapped Encounter resource has real class/period/status values
+// -- proving the gap is in coverage RECORDING, not mapping. Deliberately
+// includes a SECOND section (vitalSigns) alongside encounters so
+// DeclarativeMapDocument's real per-section goroutine fan-out
+// (declarative_document_mapper.go's "go func(...)" per section) is
+// genuinely exercised with 2+ concurrent sections -- the single-section
+// fixtures every other test in this file uses never trigger real goroutine
+// contention, so a concurrency-only bug could hide behind them. Run with
+// `go test -race` to catch a real data race directly.
+func TestDeclarativeMapDocument_CoverageTracker_ElementLevel_MultiSection_Encounters(t *testing.T) {
+	prevOutput := log.Writer()
+	log.SetOutput(io.Discard)
+	defer log.SetOutput(prevOutput)
+
+	cdaDoc := &cdadocument.CDADocument{
+		SectionsByKey: map[string]*cdadocument.CDASection{
+			"encounters": {
+				TemplateIds: []string{"2.16.840.1.113883.10.20.22.2.22"},
+				Title:       "Encounters",
+				Entries: []cdadocument.CDAEntry{
+					{
+						EntryType:     "encounter",
+						ClassCode:     "ENC",
+						MoodCode:      "EVN",
+						Code:          cdadocument.CDACode{Code: "99213", DisplayName: "Office visit", CodeSystem: "2.16.840.1.113883.6.12"},
+						StatusCode:    "completed",
+						EffectiveTime: cdadocument.CDATimeRange{Low: cdadocument.CDATime{Value: "20260101"}},
+					},
+				},
+			},
+			"vitalSigns": {
+				TemplateIds: []string{"2.16.840.1.113883.10.20.22.2.4"},
+				Title:       "Vital Signs",
+				Entries: []cdadocument.CDAEntry{
+					{
+						EntryType:  "observation",
+						Code:       cdadocument.CDACode{Code: "8867-4", DisplayName: "Heart rate", CodeSystem: "2.16.840.1.113883.6.1"},
+						StatusCode: "completed",
+						Value:      &cdadocument.CDAValue{Type: "PQ", Quantity: &cdadocument.CDAQuantity{Value: "72", Unit: "/min"}},
+					},
+				},
+			},
+		},
+	}
+
+	for attempt := 0; attempt < 20; attempt++ {
+		tracker := executors.NewCDACoverageTracker()
+		mapper := cdafhir.NewGenericCDAFHIRMapper(nil, nil)
+		out, err := mapper.DeclarativeMapDocument(context.Background(), cdaDoc, cdafhir.CDAToFHIRConfig{CoverageTracker: tracker})
+		if err != nil {
+			t.Fatalf("attempt %d: DeclarativeMapDocument: %v", attempt, err)
+		}
+
+		// Confirm the mapping side genuinely produced a real Encounter
+		// resource with values sourced from code/statusCode/effectiveTime
+		// (the exact fields the element-level assertions below check were
+		// RECORDED) -- if this fails, the bug is in mapping, not coverage.
+		foundEncounter := false
+		entries, _ := out.FHIRBundle["entry"].([]interface{})
+		for _, e := range entries {
+			entryMap, ok := e.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			res, ok := entryMap["resource"].(map[string]interface{})
+			if !ok || res["resourceType"] != "Encounter" {
+				continue
+			}
+			foundEncounter = true
+			if res["class"] == nil {
+				t.Errorf("attempt %d: Encounter.class not set -- code[0] apparently not read by mapping either", attempt)
+			}
+			if res["period"] == nil {
+				t.Errorf("attempt %d: Encounter.period not set -- effectiveTime[0] apparently not read by mapping either", attempt)
+			}
+		}
+		if !foundEncounter {
+			t.Fatalf("attempt %d: no Encounter resource in output at all", attempt)
+		}
+
+		// Raw XML's <entry> directly wraps this entry's own act tag --
+		// "encounter" here (EntryType above) -- which the typed parser
+		// flattens away; recorded keys must include that "encounter[0]."
+		// prefix (executors.CDAEntryActTagPrefix) to match inventory.go's
+		// walkEntryElements, which walks the unflattened raw XML and sees
+		// the wrapper as a real level. An earlier, weaker version of this
+		// assertion (bare "/code" substring match) accidentally matched
+		// BOTH the correct shape and the pre-fix buggy bare-"code[0]"
+		// shape, so it never actually caught the real production bug this
+		// test was written to reproduce -- exact "encounter[0].code"-style
+		// substrings close that gap.
+		snapshot := tracker.Snapshot()
+		for _, wantSuffix := range []string{"encounter[0].code", "encounter[0].statusCode", "encounter[0].effectiveTime"} {
+			found := false
+			for key := range snapshot {
+				if strings.HasPrefix(key, "encounters#0") && strings.Contains(key, wantSuffix) {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Errorf("attempt %d: no recorded key matches \"encounters#0...%s\" -- got %v", attempt, wantSuffix, snapshot)
+			}
+		}
+	}
+}
+
+// TestDeclarativeMapDocument_CoverageTracker_ElementLevel_OrganizerFlattening
+// reproduces a second real production bug, found live right after the
+// entry-root act-tag fix above: a real Vital Signs Organizer entry (several
+// individual vital-sign Observations grouped under one <organizer>, the
+// common real-world C-CDA shape observationRule()'s FlattenOrganizers:true
+// exists for) showed 0/45 clinical elements found despite genuinely
+// mapping several vitals correctly. Cause: flattenOrganizerEntries expands
+// the organizer into its component observations, but EVERY flattened
+// sibling shared the exact same coveragePrefix+basePath ("vitalSigns#0" +
+// "observation[0]"), so distinct real observations (height, weight, heart
+// rate, ...) all collapsed onto the IDENTICAL recorded key
+// "vitalSigns#0/observation[0].code[0]" -- which could never match the raw
+// mirror's real per-component inventory paths
+// ("organizer[0].component[N].observation[0].code[0]").
+func TestDeclarativeMapDocument_CoverageTracker_ElementLevel_OrganizerFlattening(t *testing.T) {
+	prevOutput := log.Writer()
+	log.SetOutput(io.Discard)
+	defer log.SetOutput(prevOutput)
+
+	heartRate := "72"
+	weight := "68"
+
+	cdaDoc := &cdadocument.CDADocument{
+		SectionsByKey: map[string]*cdadocument.CDASection{
+			"vitalSigns": {
+				TemplateIds: []string{"2.16.840.1.113883.10.20.22.2.4"},
+				Title:       "Vital Signs",
+				Entries: []cdadocument.CDAEntry{
+					{
+						EntryType:  "organizer",
+						Code:       cdadocument.CDACode{Code: "46680005", DisplayName: "Vital signs", CodeSystem: "2.16.840.1.113883.6.96"},
+						StatusCode: "completed",
+						Components: []cdadocument.CDAEntry{
+							{
+								EntryType:  "observation",
+								Code:       cdadocument.CDACode{Code: "8867-4", DisplayName: "Heart rate", CodeSystem: "2.16.840.1.113883.6.1"},
+								StatusCode: "completed",
+								Value:      &cdadocument.CDAValue{Type: "PQ", Quantity: &cdadocument.CDAQuantity{Value: heartRate, Unit: "/min"}},
+							},
+							{
+								EntryType:  "observation",
+								Code:       cdadocument.CDACode{Code: "29463-7", DisplayName: "Body weight", CodeSystem: "2.16.840.1.113883.6.1"},
+								StatusCode: "completed",
+								Value:      &cdadocument.CDAValue{Type: "PQ", Quantity: &cdadocument.CDAQuantity{Value: weight, Unit: "kg"}},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	tracker := executors.NewCDACoverageTracker()
+	mapper := cdafhir.NewGenericCDAFHIRMapper(nil, nil)
+	out, err := mapper.DeclarativeMapDocument(context.Background(), cdaDoc, cdafhir.CDAToFHIRConfig{CoverageTracker: tracker})
+	if err != nil {
+		t.Fatalf("DeclarativeMapDocument: %v", err)
+	}
+
+	// Confirm the mapping side genuinely produced TWO distinct Observation
+	// resources (one per flattened component) -- if this fails, the bug is
+	// in mapping/flattening itself, not coverage.
+	entries, _ := out.FHIRBundle["entry"].([]interface{})
+	obsCount := 0
+	for _, e := range entries {
+		entryMap, ok := e.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if res, ok := entryMap["resource"].(map[string]interface{}); ok && res["resourceType"] == "Observation" {
+			obsCount++
+		}
+	}
+	if obsCount != 2 {
+		t.Fatalf("got %d Observation resources, want 2 (one per flattened organizer component)", obsCount)
+	}
+
+	snapshot := tracker.Snapshot()
+
+	// The two flattened components must get DISTINCTLY-indexed keys --
+	// "organizer[0].component[0]...." vs "organizer[0].component[1]....",
+	// never the same collapsed "observation[0]...." key for both.
+	for _, componentIdx := range []int{0, 1} {
+		prefix := "organizer[0].component[" + strconv.Itoa(componentIdx) + "].observation[0]"
+		for _, field := range []string{"code[0]", "statusCode[0]", "value[0]"} {
+			want := prefix + "." + field
+			found := false
+			for key := range snapshot {
+				if strings.HasPrefix(key, "vitalSigns#0") && strings.Contains(key, want) {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Errorf("no recorded key matches \"vitalSigns#0...%s\" -- got %v", want, snapshot)
+			}
+		}
+	}
+
+	// Negative: the two components must NOT collapse onto a shared bare
+	// "observation[0].code[0]" key with no organizer/component prefix --
+	// that collapsed shape is exactly the bug this test reproduces.
+	for key := range snapshot {
+		if strings.Contains(key, "vitalSigns#0/observation[0]") {
+			t.Errorf("key collapsed onto the bare (pre-fix, buggy) shape with no organizer/component prefix: %q -- full snapshot %v", key, snapshot)
+		}
+	}
+}
+
+// TestDeclarativeMapDocument_CoverageTracker_Header_Patient is the header-
+// field extension's positive+negative proof, matching the Vital Signs
+// test's own style: a field PatientMappingRules() genuinely reads (Names)
+// must be recorded; a field it never reads (Religion, confirmed by reading
+// PatientMappingRules() in full -- it reads ids/names/addresses/telecoms/
+// birthDate/gender/deceasedInd/maritalStatus/languages, never race/
+// ethnicity/religion) must NOT be, even though this fixture gives it real,
+// non-empty data.
+func TestDeclarativeMapDocument_CoverageTracker_Header_Patient(t *testing.T) {
+	prevOutput := log.Writer()
+	log.SetOutput(io.Discard)
+	defer log.SetOutput(prevOutput)
+
+	cdaDoc := &cdadocument.CDADocument{
+		Header: cdadocument.CDAHeader{
+			Patient: cdadocument.CDAPatient{
+				Names:    []cdadocument.CDAName{{Family: "Smith", Given: []string{"Jane"}}},
+				Religion: cdadocument.CDACode{Code: "1013", DisplayName: "Catholic", CodeSystem: "2.16.840.1.113883.5.1076"},
+			},
+		},
+	}
+
+	tracker := executors.NewCDACoverageTracker()
+	mapper := cdafhir.NewGenericCDAFHIRMapper(nil, nil)
+	_, err := mapper.DeclarativeMapDocument(context.Background(), cdaDoc, cdafhir.CDAToFHIRConfig{CoverageTracker: tracker})
+	if err != nil {
+		t.Fatalf("DeclarativeMapDocument: %v", err)
+	}
+
+	snapshot := tracker.Snapshot()
+
+	if !tracker.Touched(executors.CDAEntryKey("header.patient", 0)) {
+		t.Errorf("header.patient#0 not recorded -- got %v", snapshot)
+	}
+
+	found := false
+	for key := range snapshot {
+		if strings.HasPrefix(key, "header.patient#0") && strings.Contains(key, "patient[0].name[0]") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("no recorded key matches \"header.patient#0...patient[0].name[0]\" -- got %v", snapshot)
+	}
+
+	// Negative: the real proof -- religiousAffiliationCode has genuine data
+	// on this fixture but no row in PatientMappingRules() ever reads it.
+	for key := range snapshot {
+		if strings.Contains(strings.ToLower(key), "religio") {
+			t.Errorf("religion element incorrectly recorded as touched: %q (PatientMappingRules() never reads it) -- full snapshot %v", key, snapshot)
+		}
+	}
+}
+
+// TestDeclarativeMapDocument_CoverageTracker_Header_AuthorSelection is the
+// real proof for the author-selection edge case: raw XML can carry several
+// <author> elements, but firstAuthorWithPersonIndexed only ever selects the
+// first one with a usable assignedPerson (AuthorMappingRules()'s own
+// production behavior, unchanged by this session's work). Ground truth
+// means the UNSELECTED author's own real content must still show up as a
+// genuine gap, not be silently skipped just because the typed side never
+// looked at it.
+func TestDeclarativeMapDocument_CoverageTracker_Header_AuthorSelection(t *testing.T) {
+	prevOutput := log.Writer()
+	log.SetOutput(io.Discard)
+	defer log.SetOutput(prevOutput)
+
+	cdaDoc := &cdadocument.CDADocument{
+		Header: cdadocument.CDAHeader{
+			Authors: []cdadocument.CDAAuthor{
+				{
+					// Author 0: a device, no person -- firstAuthorWithPersonIndexed
+					// must skip this one.
+					AssignedAuthor: cdadocument.CDAAssignedAuthor{
+						AssignedAuthoringDevice: &cdadocument.CDADevice{SoftwareName: "Epic EHR"},
+					},
+				},
+				{
+					// Author 1: has a person -- this is the one that gets selected.
+					AssignedAuthor: cdadocument.CDAAssignedAuthor{
+						AssignedPerson: &cdadocument.CDAPerson{
+							Names: []cdadocument.CDAName{{Family: "Jones", Given: []string{"Robert"}}},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	tracker := executors.NewCDACoverageTracker()
+	mapper := cdafhir.NewGenericCDAFHIRMapper(nil, nil)
+	_, err := mapper.DeclarativeMapDocument(context.Background(), cdaDoc, cdafhir.CDAToFHIRConfig{CoverageTracker: tracker})
+	if err != nil {
+		t.Fatalf("DeclarativeMapDocument: %v", err)
+	}
+
+	snapshot := tracker.Snapshot()
+
+	// Author 1 (the selected one) must be recorded, with its own real name
+	// element.
+	if !tracker.Touched(executors.CDAEntryKey("header.author", 1)) {
+		t.Errorf("header.author#1 not recorded -- got %v", snapshot)
+	}
+	found := false
+	for key := range snapshot {
+		if strings.HasPrefix(key, "header.author#1") && strings.Contains(key, "author[1]") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("no recorded key matches \"header.author#1...author[1]\" -- got %v", snapshot)
+	}
+
+	// Author 0 (never selected) must NOT be recorded at all -- its device
+	// name is real content that genuinely was never looked at.
+	if tracker.Touched(executors.CDAEntryKey("header.author", 0)) {
+		t.Errorf("header.author#0 incorrectly recorded as touched -- it was never selected by firstAuthorWithPersonIndexed -- got %v", snapshot)
+	}
+	for key := range snapshot {
+		if strings.Contains(key, "author[0]") {
+			t.Errorf("found a key referencing the unselected author[0]: %q -- got %v", key, snapshot)
+		}
+	}
+}
+
+// TestDeclarativeMapDocument_CoverageTracker_Header_EncompassingEncounterSharing
+// proves EncompassingEncounterMappingRules and
+// EncompassingEncounterLocationMappingRules -- two separate
+// BuildHeaderResourceWithCoveragePrefix calls whose typed roots physically
+// overlap (Location resolves to a sub-node of Encounter) -- correctly share
+// ONE tracking unit ("header.encompassingEncounter#0"), not two disjoint
+// ones. Populates both the Encounter's own fields (Id) and its nested
+// Location/HealthCareFacility (Code) so both call sites' recordings are
+// exercised in the same run.
+func TestDeclarativeMapDocument_CoverageTracker_Header_EncompassingEncounterSharing(t *testing.T) {
+	prevOutput := log.Writer()
+	log.SetOutput(io.Discard)
+	defer log.SetOutput(prevOutput)
+
+	cdaDoc := &cdadocument.CDADocument{
+		Header: cdadocument.CDAHeader{
+			EncompassingEncounter: &cdadocument.CDAEncounter{
+				Id: cdadocument.CDAII{Root: "2.16.840.1.113883.19", Extension: "ENC-1"},
+				Location: &cdadocument.CDALocation{
+					HealthCareFacility: cdadocument.CDAHealthCareFacility{
+						Code: cdadocument.CDACode{Code: "1160-1", DisplayName: "Urgent Care Center", CodeSystem: "2.16.840.1.113883.6.259"},
+					},
+				},
+			},
+		},
+	}
+
+	tracker := executors.NewCDACoverageTracker()
+	mapper := cdafhir.NewGenericCDAFHIRMapper(nil, nil)
+	_, err := mapper.DeclarativeMapDocument(context.Background(), cdaDoc, cdafhir.CDAToFHIRConfig{CoverageTracker: tracker})
+	if err != nil {
+		t.Fatalf("DeclarativeMapDocument: %v", err)
+	}
+
+	snapshot := tracker.Snapshot()
+
+	sharedKey := executors.CDAEntryKey("header.encompassingEncounter", 0)
+	if !tracker.Touched(sharedKey) {
+		t.Errorf("%s not recorded -- got %v", sharedKey, snapshot)
+	}
+
+	// Both the Encounter's own field (via EncompassingEncounterMappingRules)
+	// AND the nested Location field (via
+	// EncompassingEncounterLocationMappingRules) must land under the SAME
+	// "header.encompassingEncounter#0" prefix -- proving the two call sites
+	// share one unit instead of drifting into two independently-numbered
+	// ones.
+	foundEncounterField := false
+	foundLocationField := false
+	for key := range snapshot {
+		if !strings.HasPrefix(key, "header.encompassingEncounter#0") {
+			if strings.HasPrefix(key, "header.encompassingEncounter") {
+				t.Errorf("key uses a DIFFERENT encompassingEncounter prefix than #0, proving the two call sites did NOT share one tracking unit: %q -- got %v", key, snapshot)
+			}
+			continue
+		}
+		if strings.Contains(key, "componentOf[0].encompassingEncounter[0].id") {
+			foundEncounterField = true
+		}
+		if strings.Contains(key, "healthCareFacility[0].code") {
+			foundLocationField = true
+		}
+	}
+	if !foundEncounterField {
+		t.Errorf("no recorded key matches the Encounter's own id field under the shared prefix -- got %v", snapshot)
+	}
+	if !foundLocationField {
+		t.Errorf("no recorded key matches the nested Location's healthCareFacility code under the shared prefix -- got %v", snapshot)
 	}
 }

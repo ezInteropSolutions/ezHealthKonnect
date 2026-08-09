@@ -182,7 +182,21 @@ func normalizeTitleToKey(el *etree.Element) string {
 	if titleEl == nil {
 		return ""
 	}
-	title := strings.ToLower(strings.TrimSpace(titleEl.Text()))
+	return NormalizeSectionTitleToKey(titleEl.Text())
+}
+
+// NormalizeSectionTitleToKey converts a raw section <title> string into the
+// same camelCase key resolveKey's third tier falls back to (titleKeyMap,
+// then generic camelCase). Exported so services/cda_coverage's own section
+// classifier (inventory.go's classifySection) can replicate this exact
+// tier instead of stopping after templateId/LOINC — that function's own
+// doc comment states classification must never drift between parsing and
+// auditing; leaving this third tier unreplicated was exactly that drift.
+func NormalizeSectionTitleToKey(rawTitle string) string {
+	title := strings.ToLower(strings.TrimSpace(rawTitle))
+	if title == "" {
+		return ""
+	}
 
 	if key, ok := titleKeyMap[title]; ok {
 		return key

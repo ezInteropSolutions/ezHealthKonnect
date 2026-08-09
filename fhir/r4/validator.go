@@ -428,14 +428,22 @@ func (v *FHIRR4Validator) validateCodingSystems(rt string, resource map[string]i
 func walkCodingSystems(node interface{}, path string, res *ResourceResult) {
 	switch val := node.(type) {
 	case map[string]interface{}:
-		// Detect a Coding object: has "code" or "display" alongside "system" (or missing "system")
-		_, hasCode := val["code"]
-		_, hasDisplay := val["display"]
+		// Detect a Coding object: has a STRING "code" or "display" alongside
+		// "system" (or missing "system"). The type check matters — Coding.code
+		// and Coding.display are always primitive strings, but plenty of
+		// resources have their OWN top-level field literally named "code"
+		// whose value is a CodeableConcept object, not a Coding (Condition.code,
+		// Observation.code, AllergyIntolerance.code, ...). An existence-only
+		// check treated the CodeableConcept's presence as "a Coding with no
+		// system", producing a false-positive coding-no-system warning on the
+		// resource itself for every one of those resource types.
+		_, codeIsString := val["code"].(string)
+		_, displayIsString := val["display"].(string)
 		_, hasSystem := val["system"]
-		isCoding := hasCode || hasDisplay
+		isCoding := codeIsString || displayIsString
 		if isCoding {
 			sys, _ := val["system"].(string)
-			if sys == "" && hasCode {
+			if sys == "" && codeIsString {
 				res.addWarning(issue("warning", "structure", "coding-no-system", path,
 					fmt.Sprintf("%s: Coding has a code but no system — code meaning is undefined", path)))
 			} else if sys != "" && !isAbsoluteSystemURI(sys) {

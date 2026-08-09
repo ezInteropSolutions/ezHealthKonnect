@@ -66,6 +66,8 @@ func (g *FHIRNarrativeGenerator) Generate(resource map[string]interface{}) strin
 		return GenerateCareTeamNarrative(resource)
 	case "ServiceRequest":
 		return GenerateServiceRequestNarrative(resource)
+	case "Location":
+		return GenerateLocationNarrative(resource)
 	default:
 		return ""
 	}
@@ -95,6 +97,33 @@ func fhirMap(m map[string]interface{}, key string) map[string]interface{} {
 		return v
 	}
 	return nil
+}
+
+// telecomSystemLabel converts a FHIR ContactPoint.system code to a
+// human-readable table-row label (e.g. "phone" -> "Phone"), the same
+// code-to-label convention patient_narrative.go's patientGenderLabel already
+// uses for Patient.gender. Falls back to the raw system value for anything
+// outside the standard ContactPointSystem ValueSet, so an unexpected value is
+// still shown rather than silently dropped.
+func telecomSystemLabel(system string) string {
+	switch system {
+	case "phone":
+		return "Phone"
+	case "fax":
+		return "Fax"
+	case "email":
+		return "Email"
+	case "pager":
+		return "Pager"
+	case "url":
+		return "URL"
+	case "sms":
+		return "SMS"
+	case "other":
+		return "Other"
+	default:
+		return system
+	}
 }
 
 // ccText extracts a human-readable label from a FHIR CodeableConcept.

@@ -238,7 +238,12 @@ class MessageManager {
             });
         }
 
-        // Send interface selector
+        // Send interface selector — defaults to the interface this messages
+        // page is already scoped to (this.currentInterfaceId), same as
+        // currentInterfaceSelect below, since this page is always
+        // interface-specific (see loadMessages()'s hard requirement) and the
+        // overwhelming common case is sending a test message to the
+        // interface you're already looking at.
         if (sendSelect) {
             sendSelect.innerHTML = '<option value="">Select Interface</option>';
             this.interfaces.forEach(interfaceItem => {
@@ -246,6 +251,9 @@ class MessageManager {
                 sendOption.value = interfaceItem.id;
                 const fmt = interfaceItem.sourceFormat || interfaceItem.messageType || interfaceItem.sourceType || '';
                 sendOption.textContent = fmt ? `${interfaceItem.name} (${fmt})` : interfaceItem.name;
+                if (interfaceItem.id === this.currentInterfaceId) {
+                    sendOption.selected = true;
+                }
                 sendSelect.appendChild(sendOption);
             });
         }
@@ -350,6 +358,20 @@ class MessageManager {
                       <i class="fas fa-exclamation-triangle" style="font-size:9px;"></i> Failed
                    </span>`
                 : '';
+            // CDA Coverage Audit — sections/entries in the source CCD that no
+            // pipeline step ever used (see the Journey tab's own "Coverage
+            // Audit" step for the full breakdown). Same amber theme as that
+            // step; only rendered for interfaces that opted in (has_coverage_gap
+            // is computed server-side only when cda_coverage_audit_config is set).
+            const coverageGapBadge = message.has_coverage_gap
+                ? `<span class="coverage-gap-badge" title="This message has unmapped source data — click for details"
+                      onclick="event.stopPropagation(); showMessageDetail('${message.message_id}')"
+                      style="cursor:pointer;display:inline-flex;align-items:center;gap:3px;
+                             background:#fef3c7;border:1px solid #f59e0b;border-radius:10px;
+                             padding:1px 7px;font-size:11px;font-weight:600;color:#92400e;margin-left:6px;">
+                      <i class="fas fa-clipboard-check" style="font-size:9px;"></i> Coverage Gap
+                   </span>`
+                : '';
             return `
             <tr class="message-row" onclick="showMessageDetail('${message.message_id}')">
                 <td>
@@ -358,7 +380,7 @@ class MessageManager {
                 </td>
                 <td>${message.interface_name}</td>
                 <td>${message.message_type || 'Unknown'}</td>
-                <td>${this.renderStatusBadge(message.status, message.delivery_status)}${dlqBadge}</td>
+                <td>${this.renderStatusBadge(message.status, message.delivery_status)}${dlqBadge}${coverageGapBadge}</td>
                 <td class="message-size">${this.formatBytes(message.message_size)}</td>
                 <td>
                     <div>${this.formatDateTime(message.received_at)}</div>
@@ -726,14 +748,15 @@ class MessageManager {
 
             container.innerHTML = '<div class="text-center"><i class="fas fa-spinner fa-spin"></i> Loading data lineage...</div>';
 
-            // Get lineage data from backend. Dedupe suppression lineage is a
-            // separate, independent concept (cross-message dedup, not message
-            // flow) and fetched in parallel — its own failure/emptiness (the
-            // common case: most messages have no cda.dedupe step or nothing
-            // was suppressed) must never block the main lineage view.
-            const [lineageResponse, dedupeResponse] = await Promise.all([
+            // Get lineage data from backend. Dedupe suppression lineage and CDA
+            // Coverage Audit reports are both separate, independent concepts
+            // fetched in parallel — their own failure/emptiness (the common
+            // case: most interfaces have no cda.dedupe step, or haven't opted
+            // into coverage tracking) must never block the main lineage view.
+            const [lineageResponse, dedupeResponse, coverageResponse] = await Promise.all([
                 fetch(`/api/messages/${messageId}/lineage`),
                 fetch(`/api/messages/${messageId}/dedupe-suppressions`).catch(() => null),
+                fetch(`/api/messages/${messageId}/coverage-audit`).catch(() => null),
             ]);
 
             if (!lineageResponse.ok) {
@@ -752,7 +775,13 @@ class MessageManager {
                 if (dedupeData && dedupeData.success) dedupeSuppressions = dedupeData.data || [];
             }
 
-            this.renderDataLineage(lineageData.data, dedupeSuppressions);
+            let coverageAudits = [];
+            if (coverageResponse && coverageResponse.ok) {
+                const coverageData = await coverageResponse.json().catch(() => null);
+                if (coverageData && coverageData.success) coverageAudits = coverageData.data || [];
+            }
+
+            this.renderDataLineage(lineageData.data, dedupeSuppressions, coverageAudits);
         } catch (error) {
             console.error('Failed to load data lineage:', error);
             document.getElementById('messageLineageView').innerHTML =
@@ -793,7 +822,7 @@ class MessageManager {
         }
     }
 
-    renderDataLineage(lineage, dedupeSuppressions = []) {
+    renderDataLineage(lineage, dedupeSuppressions = [], coverageAudits = []) {
         const container = document.getElementById('messageLineageView');
 
         if (!lineage.input) {
@@ -942,6 +971,153 @@ class MessageManager {
             });
         }
 
+        // CDA Coverage Audit — only shown when at least one destination's report
+        // has at least one missed item. Reports never carry clinical values,
+        // only structural location (section/category + entry position) — see
+        // services/cda_coverage's report.go doc comment. Off (empty array) for
+        // any interface that hasn't opted into the feature, or a fully-covered
+        // document, matching the Dedup Suppressions step's own convention.
+        const coverageGaps = (coverageAudits || []).filter(r => (r.categories || []).some(c => (c.missed || []).length > 0));
+        if (coverageGaps.length > 0) {
+            const multiDestination = coverageAudits.length > 1;
+            const reportHtml = coverageGaps.map((report, ri) => {
+                const destHeader = multiDestination
+                    ? `<div style="font-size:0.78rem;font-weight:600;color:#1e293b;margin:0.75rem 0 0.35rem;">${this.escapeHtml(report.connectorType || 'destination')} — ${this.escapeHtml(report.destination || '—')} (${report.deliveryOutcome})</div>`
+                    : '';
+                const catHtml = (report.categories || []).filter(c => (c.missed || []).length > 0).map((cat, ci) => {
+                    const rows = cat.missed.map((m, mi) => {
+                        // Element-level detail (see services/cda_coverage/
+                        // report.go's MissedItem.MissedElements) — an entry
+                        // can be fully "found" at entry level but still have
+                        // its own missed elements (e.g. effectiveTime never
+                        // read even though code/value were); absent entirely
+                        // for interfaces on entry-level granularity (the
+                        // default), rendering identically to before.
+                        const allElements = m.missedElements || [];
+                        const hasElementData = allElements.length > 0;
+                        // report.go's v3 split (element_classifier.go): CDA
+                        // RIM Participation wrappers (author/performer/
+                        // informant/participant/dataEnterer/custodian) and
+                        // pure spec plumbing (templateId/nullFlavor/
+                        // realmCode/structural wrapper nodes) are tagged
+                        // Administrative — hidden by default, revealed by
+                        // the global toggle below. "id" is deliberately NOT
+                        // in that set (clinically relevant).
+                        const clinicalElements = allElements.filter(g => !g.administrative);
+                        const adminOnlyEntry = hasElementData && clinicalElements.length === 0;
+                        const rowId = `covrow-${ri}-${ci}-${mi}`;
+                        // elementsFound/elementsTotal are `omitempty` on the Go
+                        // side (report.go) -- 0 is a real, common case (every
+                        // clinical element in this entry was missed) and gets
+                        // dropped from the JSON entirely, not sent as 0.
+                        // Default it back to 0 here rather than showing
+                        // "undefined".
+                        let summaryLabel = 'no element-level detail';
+                        if (hasElementData) {
+                            summaryLabel = m.elementsTotal
+                                ? `${m.elementsFound || 0}/${m.elementsTotal} elements used`
+                                : 'administrative fields only';
+                        }
+                        // Element table has two columns per the requested
+                        // layout: raw structural XPath (monospace, unambiguous)
+                        // and its mechanically-derived element name (title-cased
+                        // last path segment, see report.go's elementLabel) --
+                        // never a clinical value, matching this report's own
+                        // "location only" guarantee stated above.
+                        // table-layout:fixed + explicit column widths: without
+                        // this, table-layout:auto lets the long monospace
+                        // XPath column stretch as wide as its longest string
+                        // (100+ chars for deeply-nested paths), which pushes
+                        // the Element column off the visible/scrollable area
+                        // entirely instead of wrapping. word-break:break-all
+                        // on the XPath cell lets it wrap within its fixed
+                        // share of the width instead.
+                        const elementsBody = hasElementData ? `
+                            <table class="table table-sm mb-0" style="font-size:0.75rem;table-layout:fixed;width:100%;">
+                                <colgroup><col style="width:65%;"><col style="width:35%;"></colgroup>
+                                <thead>
+                                    <tr>
+                                        <th style="color:#94a3b8;font-weight:600;padding:0.2rem 0.5rem;">XPath</th>
+                                        <th style="color:#94a3b8;font-weight:600;padding:0.2rem 0.5rem;">Element</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    ${allElements.map(g => `
+                                        <tr ${g.administrative ? 'data-cov-admin="1" style="display:none;"' : ''}>
+                                            <td style="padding:0.2rem 0.5rem;color:#92400e;font-family:monospace;word-break:break-all;">${this.escapeHtml(g.path)}</td>
+                                            <td style="padding:0.2rem 0.5rem;color:#78716c;word-break:break-word;">${this.escapeHtml(g.label || '—')}</td>
+                                        </tr>`).join('')}
+                                </tbody>
+                            </table>` : '';
+                        return `
+                        <div ${adminOnlyEntry ? 'data-cov-admin="1" style="display:none;"' : ''} style="border:1px solid #fde68a;border-radius:6px;margin-bottom:0.35rem;overflow:hidden;">
+                            <button ${hasElementData ? `onclick="messageManager._toggleCoverageRow('${rowId}')"` : ''}
+                                    style="width:100%;display:flex;align-items:center;gap:0.5rem;padding:0.4rem 0.6rem;background:#fffbeb;border:none;text-align:left;${hasElementData ? 'cursor:pointer;' : 'cursor:default;'}">
+                                <span style="flex:1;font-size:0.8rem;color:#1e293b;">${this.escapeHtml(m.sectionTitle || m.sectionKey || 'Unclassified')} <span style="color:#94a3b8;">#${m.entryIndex}</span></span>
+                                <span style="font-size:0.72rem;color:#94a3b8;">${summaryLabel}</span>
+                                ${hasElementData ? `<svg id="${rowId}-chevron" style="width:14px;height:14px;color:#94a3b8;flex-shrink:0;transition:transform 0.15s;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>` : ''}
+                            </button>
+                            ${hasElementData ? `<div id="${rowId}-body" style="display:none;background:white;border-top:1px solid #fde68a;overflow-x:auto;">${elementsBody}</div>` : ''}
+                        </div>`;
+                    }).join('');
+                    // Prefer the category's summed CLINICAL element counts
+                    // (report.go v4+) over entry-level found/total whenever
+                    // present -- entry-level alone can read a misleading
+                    // "1/1 used" (100%) for a category whose entries still
+                    // have real element-level gaps, since an entry only
+                    // needs ONE field read to count as entry-level "found".
+                    const catLabel = cat.elementsTotal
+                        ? `${cat.elementsFound || 0}/${cat.elementsTotal} elements used`
+                        : `${cat.found}/${cat.total} used`;
+                    // Category-level collapse, mirroring the entry-level
+                    // pattern above (same _toggleCoverageRow handler, just
+                    // pointed at a "covcat-" id instead of "covrow-") --
+                    // collapsed by default so a category with many entries
+                    // (e.g. 10 Medications) doesn't dump all of them open at
+                    // once; the category HEADER itself (found/total,
+                    // elements used) is always visible either way.
+                    const catId = `covcat-${ri}-${ci}`;
+                    return `
+                        <div style="margin-bottom:0.5rem;">
+                            <button onclick="messageManager._toggleCoverageRow('${catId}')"
+                                    style="width:100%;display:flex;align-items:center;gap:0.5rem;padding:0.2rem 0;background:none;border:none;text-align:left;cursor:pointer;margin-bottom:0.25rem;">
+                                <span style="flex:1;font-size:0.78rem;color:#475569;"><strong>${this.escapeHtml(cat.category)}</strong> — ${catLabel}</span>
+                                <svg id="${catId}-chevron" style="width:14px;height:14px;color:#94a3b8;flex-shrink:0;transition:transform 0.15s;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+                            </button>
+                            <div id="${catId}-body" style="display:none;">${rows}</div>
+                        </div>`;
+                }).join('');
+                return destHeader + catHtml;
+            }).join('');
+
+            // Prefer elementCoveragePct (report.go v4+, document-wide
+            // CLINICAL element completeness) over overallCoveragePct
+            // (entry-level: "was this entry touched by ANY rule") whenever
+            // it's present -- entry-level alone can read a misleading 100%
+            // while real element-level gaps are visible in every section
+            // right below this header.
+            const reportPct = r => r.elementCoveragePct != null ? r.elementCoveragePct : (r.overallCoveragePct ?? 100);
+            const worstPct = Math.min(...coverageGaps.map(reportPct));
+            steps.push({
+                id: 'lj-coverage-audit',
+                color: '#f59e0b',
+                icon: 'M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2',
+                label: 'Coverage Audit',
+                status: multiDestination ? `${coverageGaps.length} destination(s) with gaps` : `${Math.round(worstPct)}% coverage`,
+                statusOk: false,
+                time: '',
+                detail: `
+                    <div style="font-size:0.78rem;color:#64748b;margin-bottom:0.35rem;">
+                        These items were present in the source document but never used by any step in this pipeline. Location only — no clinical values are stored here.
+                    </div>
+                    <label style="display:flex;align-items:center;gap:0.4rem;font-size:0.74rem;color:#78716c;margin-bottom:0.5rem;cursor:pointer;">
+                        <input type="checkbox" onchange="messageManager._toggleCoverageAdminVisibility(this.checked)" style="cursor:pointer;">
+                        Show administrative/structural fields too (author, performer, IDs, template metadata, etc.)
+                    </label>
+                    ${reportHtml}`
+            });
+        }
+
         if (target) {
             steps.push({
                 id: 'lj-target',
@@ -1004,6 +1180,37 @@ class MessageManager {
         const open = body.style.display === 'block';
         body.style.display = open ? 'none' : 'block';
         if (chevron) chevron.style.transform = open ? '' : 'rotate(180deg)';
+    }
+
+    // Shared collapse/expand toggle for Coverage Audit rows (see
+    // renderDataLineage's coverageGaps block) -- used for BOTH the
+    // category-level header ("covcat-..." ids, e.g. collapsing all of
+    // "Medications"' entries at once) and each individual entry row
+    // ("covrow-...", e.g. one Medication's element table), since both are
+    // the identical show/hide + chevron-rotate mechanic, just nested one
+    // level apart and pointed at different id prefixes. Same pattern as
+    // _toggleJourneyStep, kept as a separate method only because
+    // the id namespace ("covrow-...") and event target differ.
+    _toggleCoverageRow(id) {
+        const body = document.getElementById(id + '-body');
+        const chevron = document.getElementById(id + '-chevron');
+        if (!body) return;
+        const open = body.style.display === 'block';
+        body.style.display = open ? 'none' : 'block';
+        if (chevron) chevron.style.transform = open ? '' : 'rotate(180deg)';
+    }
+
+    // Global "show administrative/structural fields" toggle for the whole
+    // Coverage Audit step (see renderDataLineage's coverageGaps block).
+    // Every element/entry the server tagged Administrative (element_
+    // classifier.go) is rendered with data-cov-admin="1" and display:none
+    // up front -- toggling just flips that one attribute's display rather
+    // than re-rendering, since the full ground-truth data is already in the
+    // DOM (nothing was left out server-side, only hidden by default).
+    _toggleCoverageAdminVisibility(show) {
+        document.querySelectorAll('[data-cov-admin="1"]').forEach(el => {
+            el.style.display = show ? (el.tagName === 'TR' ? 'table-row' : 'block') : 'none';
+        });
     }
 
     _formatTypeName(type) {
@@ -1552,13 +1759,36 @@ class MessageManager {
                 ? e.resourceRefs.map(ref => `<span style="background:#eff6ff;color:#1e40af;padding:0.1rem 0.4rem;border-radius:3px;font-size:0.72rem;font-family:monospace;margin-right:0.3rem;display:inline-block;margin-bottom:0.2rem;">${this.escapeHtml(ref)}</span>`).join('')
                 : `<span style="color:#94a3b8;font-size:0.75rem;">not mapped</span>`;
             const codeText = e.code ? `${this.escapeHtml(e.code)}${e.codeSystem ? ' (' + this.escapeHtml(e.codeSystem) + ')' : ''}` : '—';
-            return `<tr style="border-bottom:1px solid #f1f5f9;">
+            // Entry-level warnings (e.g. "value: entry has more than one <value>;
+            // only the first was mapped ... -- not mapped: ..."), populated by
+            // EntryTrace.Warnings (mapping_log/section_log.go). Rendered as an
+            // always-visible row directly under the entry it belongs to, not a
+            // hover-only tooltip — the section-level warning badge above tells
+            // you a section has warnings, this tells you exactly which entry and
+            // what was actually dropped.
+            const hasEntryWarnings = e.warnings && e.warnings.length > 0;
+            const warningIcon = hasEntryWarnings
+                ? `<i class="fas fa-exclamation-triangle" style="color:#d97706;font-size:0.68rem;margin-left:0.4rem;" title="${e.warnings.length} warning${e.warnings.length > 1 ? 's' : ''} on this entry"></i>`
+                : '';
+            const mainTr = `<tr style="border-bottom:${hasEntryWarnings ? 'none' : '1px solid #f1f5f9'};">
                 <td style="padding:0.3rem 0.5rem;color:#94a3b8;font-size:0.75rem;">${e.entryIndex}</td>
                 <td style="padding:0.3rem 0.5rem;color:#6b7280;font-size:0.75rem;">${this.escapeHtml(e.entryType || '—')}</td>
                 <td style="padding:0.3rem 0.5rem;color:#6b7280;font-size:0.75rem;font-family:monospace;">${codeText}</td>
-                <td style="padding:0.3rem 0.5rem;color:#374151;font-size:0.78rem;">${this.escapeHtml(e.displayName || '—')}</td>
+                <td style="padding:0.3rem 0.5rem;color:#374151;font-size:0.78rem;">${this.escapeHtml(e.displayName || '—')}${warningIcon}</td>
                 <td style="padding:0.3rem 0.5rem;">${refsHTML}</td>
             </tr>`;
+            const warningTr = hasEntryWarnings
+                ? `<tr style="border-bottom:1px solid #f1f5f9;background:#fffbeb;">
+                    <td colspan="5" style="padding:0.3rem 0.5rem 0.45rem 1.6rem;">
+                        ${e.warnings.map(w => `
+                            <div style="display:flex;gap:0.4rem;align-items:flex-start;font-size:0.74rem;color:#92400e;">
+                                <i class="fas fa-exclamation-triangle" style="margin-top:0.15rem;flex-shrink:0;"></i>
+                                <span>${this.escapeHtml(w)}</span>
+                            </div>`).join('')}
+                    </td>
+                </tr>`
+                : '';
+            return mainTr + warningTr;
         };
 
         const entriesDetailTable = (entries) => `

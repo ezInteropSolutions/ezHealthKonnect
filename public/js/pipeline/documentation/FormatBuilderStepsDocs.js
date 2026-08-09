@@ -53,6 +53,7 @@
                     'Build a Patient (or any other) FHIR resource from a CSV file (via a File Parser step) with zero new Go code — only step configuration',
                     'Build a FHIR resource from a database query\'s result rows (via a Database Enrichment step)',
                     'Assemble a multi-resource Bundle from a non-CDA, non-HL7 source system by chaining several fhir.build steps into one Payload Builder (FHIR Bundle mode) step',
+                    'Populate a field conditionally (e.g. "if source code system is LOINC do X, else do Y") by computing/normalizing the value in an upstream if_then_else or switch_case step\'s set_value/set_field action, then reading the normalized result here with an ordinary sourcePath — no per-field conditional logic exists (or is needed) inside fhir.build itself; see the troubleshooting entry below for a worked example.',
                 ],
                 example: {
                     resourceType: 'Patient',
@@ -103,6 +104,11 @@
                         cause: 'Using two independent top-level fields entries with manual [0]/[1] indices instead of one repeatingGroups entry — independent rows can drift out of alignment across rows.',
                         fix: 'Use repeatingGroups instead: one rowsPath drives all of that group\'s fields together, so system/value (or given/family, etc.) from the same source row always land in the same array element.',
                     },
+                    {
+                        issue: 'I need "if source field A has value X, populate this field one way, else populate it another way" — fhir.build\'s field row has no condition/predicate option',
+                        cause: 'This is by design, not a gap: conditional branching already has a mature, general home at the pipeline level (if_then_else / switch_case step types), and duplicating that logic into fhir.build\'s own field-row schema would fragment the same concept across two step types instead of composing them.',
+                        fix: 'Add an if_then_else (or switch_case) step BEFORE this one. Its condition evaluates the source field, and its set_value action (e.g. {action: "set_value", targetField: "message.maritalStatusNormalized", value: "M"}) writes the resolved value onto a plain message.* field. Then this step\'s field row just reads it normally: {targetPath: "maritalStatus", sourcePath: "message.maritalStatusNormalized"} — no conditional logic needed here at all, since the upstream step already resolved which value applies.',
+                    },
                 ],
                 stepOutput: {
                     description: 'Available to every step after this one.',
@@ -117,6 +123,8 @@
                     'Build an ADT, ORU, or any other HL7 v2 message from a CSV file (via a File Parser step) with zero new Go code — only step configuration',
                     'Build an HL7 message from a database query\'s result rows (via a Database Enrichment step)',
                     'Emit repeating OBX (or NK1, IN1, ...) segments from an array of source rows, one segment instance per row',
+                    'Add a site-specific Z-segment (e.g. ZEM) with manually-defined field positions, optionally pre-filled from an existing inbound Z-segment template',
+                    'Group a single flat CSV (one row per analyte result) into OBR orders each with their own nested OBX results (groupBy + childSegments) — or nest a child segment under an already-nested JSON structure with no grouping needed at all',
                 ],
                 example: {
                     messageType: 'ADT',
@@ -150,7 +158,11 @@
                     { name: 'version', type: 'string', required: false, description: 'HL7 version. Default: "2.5.1".' },
                     { name: 'outputField', type: 'string', required: false, description: 'Pipeline field where the built HL7 message string is written. Default: "hl7Message" — prefix with "message." if a later step needs to read it; see the message-prefix troubleshooting entry below.' },
                     { name: 'sendingApplication / sendingFacility / receivingApplication / receivingFacility / processingId', type: 'string', required: false, description: 'MSH.3/MSH.4/MSH.5/MSH.6/MSH.11 overrides. sendingApplication defaults to "ezHealthKonnect", sendingFacility to "EHK", processingId to "P" — the same defaults the TCP/MLLP ACK generator uses.' },
-                    { name: 'segments', type: 'array', required: false, description: 'One entry per non-MSH segment, in message order: {segment, cardinality: "single"|"repeating", rowsPath? (repeating only, e.g. "message.labResults"), fields: [{fieldKey, sourcePath, fallbackPaths?, valueMap?, literalValue?}]}. fieldKey is fully-qualified (e.g. "PID.5.1"), matching GET /api/hl7/canonical-fields exactly. sourcePath should be "message.<field>" for a "single" segment (resolves against the whole inbound message) but is relative to one row (no "message." prefix) inside a "repeating" segment\'s fields.' },
+                    { name: 'segments', type: 'array', required: false, description: 'One entry per non-MSH segment, in message order: {segment, cardinality: "single"|"repeating", rowsPath? (repeating only, e.g. "message.labResults"), condition? ({field, operator, value|compareToField}), fields: [{fieldKey, sourcePath, fallbackPaths?, valueMap?, literalValue?, condition?}]}. fieldKey is fully-qualified (e.g. "PID.5.1"), matching GET /api/hl7/canonical-fields exactly. sourcePath should be "message.<field>" for a "single" segment (resolves against the whole inbound message) but is relative to one row (no "message." prefix) inside a "repeating" segment\'s fields.' },
+                    { name: 'segments[].condition / segments[].fields[].condition', type: 'object', required: false, description: 'Optional {field, operator, value} gate — same evaluator control.if_then_else/control.switch_case use (services/executors/condition.go). A segment condition decides whether that segment instance is built at all (once for "single", per-row for "repeating" — so one row of a repeating segment can be excluded without affecting the rest); a field condition decides whether just that field is populated. Evaluated against the row/segment data first, falling back to the top-level pipeline data for anything not found there — e.g. a repeating OBX row\'s condition can check either its own column or a top-level field like "message.country". Operators: equals, not_equals, contains, starts_with, ends_with, greater_than(_or_equal), less_than(_or_equal), exists, not_exists, regex_match, in_list.' },
+                    { name: 'segments[].groupBy', type: 'array', required: false, description: 'Repeating segments only. Buckets rowsPath\'s rows by these column(s) BEFORE building one instance per bucket instead of one per row — e.g. a single flat CSV of (orderId, testName, analyte, value) rows grouped by "orderId" becomes one OBR per distinct order instead of one per analyte row. This segment\'s own fields resolve from each bucket\'s FIRST row (e.g. testName); a row missing the groupBy column becomes its own singleton bucket rather than being dropped.' },
+                    { name: 'segments[].groupedItemsKey', type: 'string', required: false, description: 'Names the field a groupBy bucket\'s own rows are exposed under to childSegments (default "_rows"). Only meaningful when groupBy is set.' },
+                    { name: 'segments[].childSegments', type: 'array', required: false, description: 'Segments (same shape as segments[]) built immediately after EACH instance of this segment — the only way to correctly interleave e.g. OBX results under their own OBR before the next OBR, since HL7\'s flat wire format has no explicit nesting. A child\'s rowsPath/condition resolve against the parent\'s current row (or, when the parent used groupBy, that bucket\'s first row plus its groupedItemsKey) — set a child\'s rowsPath to "_rows" (or a custom groupedItemsKey) to iterate a groupBy\'d parent\'s own bucket, or to an already-nested field name (e.g. "results") when the source data arrives pre-nested and no groupBy is needed at all.' },
                 ],
                 troubleshooting: [
                     {
@@ -172,6 +184,16 @@
                         issue: 'A coded field (e.g. sex, status) doesn\'t match the target HL7 table\'s expected values',
                         cause: 'The source system\'s own vocabulary differs from the HL7 table this field is bound to (e.g. table 0001 Administrative Sex expects M/F/O/U/A/N) — this step does plain value copying by default, with no built-in code translation.',
                         fix: 'Add a Value Map on that field mapping (e.g. {"male": "M", "female": "F"}) to translate the raw source value before it\'s written.',
+                    },
+                    {
+                        issue: 'The "Add Segment" dropdown doesn\'t offer a segment I know is valid for this message type',
+                        cause: 'The picker defaults to only the segments grammatically reachable next, given what\'s already configured (e.g. EVN must be added before PID becomes reachable in ADT^A01) — a deliberately conservative, forward-only guardrail, not a full conformance validator.',
+                        fix: 'Use the "⚠ Add anyway (non-standard)" option in the same dropdown to pick from every segment in the schema regardless of position.',
+                    },
+                    {
+                        issue: 'A field I need isn\'t in the Field/Component picker at all',
+                        cause: 'No compiled HL7 schema encodes subcomponent-level detail (a 3rd dotted position, e.g. "PID.5.7.2") — the catalog genuinely stops at field+component, and Z-segments have no schema entry at all.',
+                        fix: 'Use the picker\'s "Custom / atomized path…" toggle to type the exact fieldKey (e.g. "PID.5.7.2", "ZEM.3") — validated against the same positional format hl7/builder.Segment.Set accepts, so it will resolve correctly at build time.',
                     },
                 ],
                 stepOutput: {

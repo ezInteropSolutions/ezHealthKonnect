@@ -26,14 +26,14 @@ type DocumentTypeRequirements struct {
 	DocumentType string                             `json:"documentType"`
 	Metadata     *cdaSchema.DocumentTypeMetadata     `json:"metadata,omitempty"`
 	Sections     []SectionRequirement                `json:"sections"`
-	HeaderGroups map[string][]HeaderFieldRequirement `json:"headerGroups"` // "patient" | "author" | "custodian"
+	HeaderGroups map[string][]HeaderFieldRequirement `json:"headerGroups"` // "patient" | "author" | "custodian" | "legalAuthenticator"
 }
 
 // headerRequirementGroups is the fixed set of header groups every document
 // type requires — CCD and every other C-CDA document type share the same
-// header structure (patient/author/custodian), unlike sections which vary
-// by document type.
-var headerRequirementGroups = []string{"patient", "author", "custodian"}
+// header structure (patient/author/custodian/legalAuthenticator), unlike
+// sections which vary by document type.
+var headerRequirementGroups = []string{"patient", "author", "custodian", "legalAuthenticator"}
 
 // GetDocumentTypeRequirements builds the combined requirements catalog for
 // documentType. Returns nil if documentType is unknown (mirrors

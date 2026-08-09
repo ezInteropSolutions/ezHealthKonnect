@@ -257,6 +257,57 @@ func TestWriteAtXPath_NewBareTagTerminal_ReusesExistingDisambiguatedSibling(t *t
 	}
 }
 
+// TestWriteAtXPath_NewNestedPredicateTerminal_ReusesExistingSingularAncestor
+// is the regression test for a real bug found via a live Test Pipeline run
+// (2026-07): a field targeting a brand-new terminal that is ITSELF predicated
+// (playingEntity[@classCode='PLC'], not just a bare tag) two levels below an
+// already-uniquely-identified singular ancestor (participant[@typeCode=
+// 'LOC']/participantRole[@classCode='SDLOC'] — there is only ever one such
+// pair per encounter, no disambiguation needed) must reuse that ancestor, not
+// spawn a duplicate. The old lookaheadPrefix (stopping at the LAST predicated
+// segment in remaining) required playingEntity to already exist before
+// reusing participant/participantRole — which can never be true the first
+// time that field runs — so it always concluded "no match" and duplicated
+// the entire participant/participantRole chain. Fixed by stopping at the
+// FIRST predicated segment instead (the shallowest, and only, real
+// discriminator).
+func TestWriteAtXPath_NewNestedPredicateTerminal_ReusesExistingSingularAncestor(t *testing.T) {
+	root := newRoot()
+	base := "encounter/participant[@typeCode='LOC']/participantRole[@classCode='SDLOC']"
+
+	WriteAtXPath(root, base+"/code/@code", "1160-1")
+	WriteAtXPath(root, base+"/addr/city", "Springfield")
+	// A later field, same already-unique participant/participantRole, a
+	// brand-new terminal that is ITSELF predicated (not a bare tag).
+	WriteAtXPath(root, base+"/playingEntity[@classCode='PLC']/name", "Springfield Medical Center Clinic")
+
+	enc := root.FindElement("encounter")
+	participants := enc.SelectElements("participant")
+	if len(participants) != 1 {
+		t.Fatalf("expected exactly ONE participant (third field reuses it), got %d", len(participants))
+	}
+	role := participants[0].SelectElement("participantRole")
+	if role == nil {
+		t.Fatal("expected participantRole")
+	}
+	if got := role.SelectElement("code").SelectAttrValue("code", ""); got != "1160-1" {
+		t.Errorf("expected code/@code=1160-1 on the shared participantRole, got %q", got)
+	}
+	if got := role.FindElement("addr/city").Text(); got != "Springfield" {
+		t.Errorf("expected addr/city=Springfield on the SAME shared participantRole, got %q", got)
+	}
+	pe := role.SelectElement("playingEntity")
+	if pe == nil {
+		t.Fatal("expected playingEntity on the SAME shared participantRole")
+	}
+	if pe.SelectAttrValue("classCode", "") != "PLC" {
+		t.Errorf("expected playingEntity/@classCode=PLC, got: %+v", pe.Attr)
+	}
+	if got := pe.SelectElement("name").Text(); got != "Springfield Medical Center Clinic" {
+		t.Errorf("expected playingEntity/name, got %q", got)
+	}
+}
+
 // TestTryFindAtXPath_BacktracksPastWrongSibling verifies the read-only
 // lookup used by StructuralTemplateAnchor processing doesn't dead-end on
 // the first same-predicate sibling — it must keep searching until it finds

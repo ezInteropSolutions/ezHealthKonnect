@@ -1,6 +1,7 @@
 // controllers/MessageController.js
 // Enhanced message management controller for interface-specific functionality
 const { goClient: _goClient } = require('../services/goBackendClient');
+const { hasCoverageGapSql } = require('../services/coverageGapSql');
 
 class MessageController {
     constructor() {
@@ -791,9 +792,18 @@ class MessageController {
 
             const userId = req.session.user.id;
 
-            // Verify user owns this interface
+            // Verify user owns this interface. coverage_audit_enabled gates whether
+            // the has_coverage_gap column below gets computed at all — keeps the
+            // "zero cost unless opted in" principle CDA Coverage Audit already
+            // commits to (V207 migration) intact for the messages list too.
+            // Disabled means NULL *or* the JSON literal null — the latter is what
+            // interfacesController.js's updateInterface now writes when a user
+            // explicitly unchecks the feature in the Edit modal (see the
+            // COALESCE-preserve-if-absent fix there); a plain IS NOT NULL check
+            // would treat that as still enabled.
             const interfaceCheck = await this.database.sequelize.query(`
-                SELECT id, name, status
+                SELECT id, name, status,
+                    (cda_coverage_audit_config IS NOT NULL AND cda_coverage_audit_config <> 'null'::jsonb) AS coverage_audit_enabled
                 FROM interfaces
                 WHERE id = :interfaceId AND user_id = :userId
             `, {
@@ -822,7 +832,8 @@ class MessageController {
                 dateFrom,
                 dateTo,
                 sortBy,
-                sortOrder
+                sortOrder,
+                coverageAuditEnabled: interfaceInfo.coverage_audit_enabled
             });
 
             // Check if dedicated table exists and has data, or if we need to fallback
@@ -841,7 +852,8 @@ class MessageController {
                     dateTo,
                     sortBy,
                     sortOrder,
-                    interfaceName: interfaceInfo.name
+                    interfaceName: interfaceInfo.name,
+                    coverageAuditEnabled: interfaceInfo.coverage_audit_enabled
                 });
 
                 result.interfaceInfo = {
@@ -895,7 +907,8 @@ class MessageController {
             dateTo,
             sortBy,
             sortOrder,
-            interfaceName
+            interfaceName,
+            coverageAuditEnabled
         } = options;
 
         const offset = (page - 1) * limit;
@@ -958,6 +971,7 @@ class MessageController {
                 mpe.last_error_message,
                 mpe.delivery_status,
                 mpe.delivery_attempts
+                ${coverageAuditEnabled ? ', ' + hasCoverageGapSql('mpe.message_id') + ' AS has_coverage_gap' : ', false AS has_coverage_gap'}
             FROM message_processing_enhanced mpe
             INNER JOIN interfaces i ON mpe.interface_id = i.id
             WHERE ${whereConditions.join(' AND ')}
@@ -2047,6 +2061,71 @@ class MessageController {
         } catch (error) {
             console.warn(`⚠️ getDedupeSuppressions: ${error.message}`);
             return res.status(500).json({ success: false, error: 'Failed to retrieve dedupe suppression lineage' });
+        }
+    }
+
+    // getCoverageAudit returns the CDA Coverage Audit report(s) for a message —
+    // one row per outbound destination (a pipeline can fan out to more than one
+    // connector.outbound step). Reads the dedicated cda_coverage_audits table
+    // directly (V207 migration) rather than unwrapping step_executions.step_output
+    // the way getDedupeSuppressions does above, since a coverage report isn't
+    // itself a pipeline step's output — it's built asynchronously, after
+    // delivery, by the background worker pool (see services/cda_coverage).
+    // Empty array (not 404) is the common case for interfaces that haven't
+    // opted into the feature, or a message that was fully covered — same
+    // "absence isn't an error" convention getDedupeSuppressions uses.
+    async getCoverageAudit(req, res) {
+        try {
+            await this.ensureDatabase();
+            const { messageId } = req.params;
+            const userId = req.session.user.id;
+
+            // DISTINCT ON step_id: a redelivered/re-run message can produce more
+            // than one historical row for the SAME destination (one per attempt).
+            // Only the latest report per destination is meaningful for "how many
+            // destinations have gaps right now" — older attempts are superseded,
+            // not additional destinations.
+            const rows = await this.database.sequelize.query(`
+                SELECT DISTINCT ON (ca.step_id)
+                       ca.step_id, ca.step_name, ca.connector_type, ca.destination,
+                       ca.delivery_outcome, ca.overall_coverage_pct, ca.category_stats, ca.created_at
+                FROM cda_coverage_audits ca
+                JOIN interfaces i ON i.id = ca.interface_id
+                WHERE ca.message_id = :messageId
+                  AND i.user_id = :userId
+                ORDER BY ca.step_id, ca.created_at DESC
+            `, {
+                replacements: { messageId, userId },
+                type: this.database.sequelize.QueryTypes.SELECT
+            });
+
+            const reports = rows.map(row => {
+                const stats = typeof row.category_stats === 'string' ? JSON.parse(row.category_stats) : row.category_stats;
+                return {
+                    stepId: row.step_id,
+                    stepName: row.step_name,
+                    connectorType: row.connector_type,
+                    destination: row.destination,
+                    deliveryOutcome: row.delivery_outcome,
+                    overallCoveragePct: row.overall_coverage_pct,
+                    // elementCoveragePct (report.go v4+) is the document-wide
+                    // CLINICAL element completeness -- null for reports from
+                    // an entry-granularity interface, or ones persisted
+                    // before this field existed. The UI should prefer this
+                    // over overallCoveragePct whenever it's non-null: entry-
+                    // level alone can read a misleading 100% while every
+                    // entry still has real element-level gaps (an entry only
+                    // needs ONE field read to count as entry-level "found").
+                    elementCoveragePct: stats?.elementCoveragePct ?? null,
+                    categories: stats?.categories || [],
+                    createdAt: row.created_at,
+                };
+            });
+
+            return res.json({ success: true, data: reports, count: reports.length });
+        } catch (error) {
+            console.warn(`⚠️ getCoverageAudit: ${error.message}`);
+            return res.status(500).json({ success: false, error: 'Failed to retrieve CDA coverage audit' });
         }
     }
 

@@ -171,3 +171,21 @@ func TestHeaderFieldCatalog_KnownGroups(t *testing.T) {
 		t.Errorf("expected HeaderFieldCatalog(\"custodian\") to remain nil, got: %+v", fields)
 	}
 }
+
+// TestSectionFieldCatalog_ExcludesSyntheticNarrativeRefField verifies
+// isSyntheticFieldKey actually filters "_narrativeRef" (engine-populated by
+// buildSectionElement, never something a real user should map by hand) out
+// of the guided cda.map_to_canonical picker — for both a section that
+// declares it directly (allergiesAndIntolerances) and one that only carries
+// it on an AlternateArchetype (medicalEquipment).
+func TestSectionFieldCatalog_ExcludesSyntheticNarrativeRefField(t *testing.T) {
+	loader := loadTestSchema(t)
+	for _, sectionKey := range []string{"allergiesAndIntolerances", "medicalEquipment"} {
+		fields := SectionFieldCatalog(loader, sectionKey)
+		for _, f := range fields {
+			if f.Key == "_narrativeRef" {
+				t.Errorf("expected %q's field catalog to exclude the synthetic \"_narrativeRef\" key, got: %+v", sectionKey, fields)
+			}
+		}
+	}
+}

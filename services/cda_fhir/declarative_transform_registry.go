@@ -142,6 +142,7 @@ func (r *DeclarativeTransformRegistry) register(name, description string, fn Dec
 
 func (r *DeclarativeTransformRegistry) registerBuiltins() {
 	r.register("string_direct", "Passes the value straight through unchanged, applying the row's value map (if any) first.", declarativeStringDirect)
+	r.register("string_prefix", "Prepends a fixed literal prefix (valueMap.prefix) to the resolved value — e.g. \"Patient/\" + id for a *.reference field.", declarativeStringPrefix)
 	r.register("cda_decimal_string_to_number", "Converts a CDA decimal attribute string (e.g. \".5\") into a real JSON number, since FHIR decimal fields reject a bare string.", declarativeCDADecimalStringToNumber)
 	r.register("cda_code_to_codeable_concept", "Converts a CDA coded element (code, display name, code system) into a structured FHIR CodeableConcept.", declarativeCodeToCodeableConcept)
 	r.register("cda_quantity_to_fhir", "Converts a CDA physical quantity (value + unit) into a FHIR Quantity.", declarativeQuantityToFHIR)
@@ -272,6 +273,27 @@ func declarativeStringDirect(value interface{}, vm map[string]string) (interface
 		}
 	}
 	return s, nil
+}
+
+// declarativeStringPrefix prepends a fixed literal prefix to the resolved
+// value — e.g. turning a bare id "12345" into the FHIR reference string
+// "Patient/12345" for a *.reference target path. Deliberate deviation from
+// this registry's usual "vm = per-value lookup table" convention (see
+// declarativeStringDirect above): a single fixed prefix has no per-value
+// table shape, so vm is used here as a one-key parameter bag (vm["prefix"])
+// instead of a value->value map.
+func declarativeStringPrefix(value interface{}, vm map[string]string) (interface{}, error) {
+	if value == nil {
+		return nil, nil
+	}
+	s, ok := value.(string)
+	if !ok {
+		s = fmt.Sprintf("%v", value)
+	}
+	if s == "" {
+		return nil, nil
+	}
+	return vm["prefix"] + s, nil
 }
 
 // declarativeCDADecimalStringToNumber parses a CDA decimal-as-string field

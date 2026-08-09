@@ -194,6 +194,9 @@ func (f *DefaultConnectorFactory) registerBuiltInConnectors() {
 	// Direct Messaging (DirectTrust SMTP+SMIME)
 	f.RegisterInbound("direct_messaging_inbound", NewDirectMessagingInboundConnector)
 	f.RegisterOutbound("direct_messaging_outbound", NewDirectMessagingOutboundConnector)
+
+	// Sink (store-only terminal target — no external I/O)
+	f.RegisterOutbound("sink_outbound", NewSinkOutboundConnector)
 }
 
 // -----------------------------------------------------------------------------

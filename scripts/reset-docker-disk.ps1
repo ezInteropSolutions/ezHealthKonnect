@@ -266,7 +266,10 @@ function Run-Restore {
     Write-Step "Creating volumes"
     docker volume create ezhealthkonnect_postgres_data | Out-Null
     docker volume create ezhealthkonnect_minio_data    | Out-Null
-    docker volume create ezhealthkonnect_ollama_data   | Out-Null
+    # Ollama models live on the Windows host at $HOME\.ollama (bind mount, survives wipes)
+    if (-not (Test-Path "$env:USERPROFILE\.ollama")) {
+        New-Item -ItemType Directory -Path "$env:USERPROFILE\.ollama" | Out-Null
+    }
     Write-OK "Volumes created"
 
     $backupDockerPath = Convert-ToDockerPath $BackupDir

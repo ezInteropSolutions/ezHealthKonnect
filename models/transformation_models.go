@@ -62,6 +62,43 @@ func GetLogLifecycleEventFn(ctx context.Context) LogLifecycleEventFn {
 	return nil
 }
 
+// CoverageAuditJob carries everything the async CDA Coverage Audit worker
+// needs for one delivery attempt (one outbound destination). Tracker is
+// typed interface{} rather than *executors.CDACoverageTracker — same
+// import-cycle reason as LogLifecycleEventFn above (services/executors
+// already imports models via ExecutorMetadata, so models cannot import it
+// back). The two real endpoints — OutboundConnectorExecutor, which submits
+// jobs, and the coverage-audit worker pool, which consumes them — both
+// already import services/executors and type-assert this field themselves.
+type CoverageAuditJob struct {
+	Tracker       interface{} // *executors.CDACoverageTracker
+	InterfaceID   string
+	MessageID     string
+	StepID        string
+	StepName      string
+	ConnectorType string
+	Destination   string
+	Outcome       string // "delivered" | "failed"
+}
+
+// CoverageAuditFn is injected into the pipeline context by the processing
+// engine, backed by the bounded worker pool, only when the owning
+// interface has CDA Coverage Audit enabled. OutboundConnectorExecutor calls
+// it once per delivery attempt (success or failure) so every destination
+// gets its own report — see outbound_connector_executor.go's
+// publishCoverageAudit. Returns false if the job was dropped (e.g. the
+// worker pool's queue was full) — non-fatal, logged by the caller, never
+// blocks or fails delivery. Mirrors the DeliveryStatusFn pattern above.
+type CoverageAuditFn func(job CoverageAuditJob) bool
+
+// GetCoverageAuditFn reads the CoverageAuditFn from context. Returns nil if not set.
+func GetCoverageAuditFn(ctx context.Context) CoverageAuditFn {
+	if fn, ok := ctx.Value("coverage_audit_fn").(CoverageAuditFn); ok {
+		return fn
+	}
+	return nil
+}
+
 // IsTestMode checks if the context indicates test mode execution
 func IsTestMode(ctx context.Context) bool {
 	if val, ok := ctx.Value(ContextKeyTestMode).(bool); ok {

@@ -38,6 +38,16 @@ type EntryTrace struct {
 	DisplayName  string   `json:"displayName,omitempty"`
 	EntryID      string   `json:"entryId,omitempty"` // "root:extension" of the entry's own first II, if present
 	ResourceRefs []string `json:"resourceRefs"`       // e.g. ["Observation/observation-3"], final post-renumbering refs
+	// Warnings holds this specific entry's own warning-severity SectionErrors
+	// (e.g. "value: entry has more than one <value>; only the first was
+	// mapped ..."), scoped to just this entry rather than the whole section.
+	// A duplicate of the same messages also lands in SectionLog.Warnings
+	// (with an "entry N, " prefix) for the section-level summary count/badge
+	// -- this field exists so the UI can show WHICH entry a warning belongs
+	// to without the reader having to parse an "entry N, field: msg" string
+	// back apart. Populated by declarative_document_mapper.go's per-entry
+	// loop from the same entryErrs this entry's iteration already computed.
+	Warnings []string `json:"warnings,omitempty"`
 
 	// Resources holds direct references to the FHIR resource maps this entry
 	// produced, set by the caller (document_mapper.go) at mapping time — before

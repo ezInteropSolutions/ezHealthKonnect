@@ -31,6 +31,7 @@ import (
 	"ezhealthkonnect/services/cda_fhir/assembly"
 	"ezhealthkonnect/services/cda_fhir/assembly/rules"
 	mappinglog "ezhealthkonnect/services/cda_fhir/mapping_log"
+	"ezhealthkonnect/services/executors"
 )
 
 // declarativeSectionRuleGroups groups every OOB *MappingRules() function's
@@ -155,6 +156,7 @@ func (m *GenericCDAFHIRMapper) DeclarativeMapDocument(
 	}
 
 	engine := NewDeclarativeEngine()
+	engine.CoverageTracker = config.CoverageTracker
 
 	var (
 		allResources []map[string]interface{}
@@ -167,7 +169,7 @@ func (m *GenericCDAFHIRMapper) DeclarativeMapDocument(
 
 	// ── Header resources (patient, author, custodian) ────────────────────────
 	patientRef := ""
-	if patientResource, _, _ := engine.BuildHeaderResource(documentMap, PatientMappingRules()[0]); patientResource != nil {
+	if patientResource, _, _ := engine.BuildHeaderResourceWithCoveragePrefix(documentMap, PatientMappingRules()[0], "header.patient"); patientResource != nil {
 		patientResource["id"] = "patient-1"
 		patientRef = "Patient/patient-1"
 		if config.ProfileMode != "base" {
@@ -193,11 +195,12 @@ func (m *GenericCDAFHIRMapper) DeclarativeMapDocument(
 	// below are race-free.
 	engine.PatientRef = patientRef
 
-	if authorResource, authorExtra, _ := engine.BuildHeaderResource(documentMap, AuthorMappingRules()[0]); authorResource != nil {
+	if authorResource, authorExtra, _ := engine.BuildHeaderResourceWithCoveragePrefix(documentMap, AuthorMappingRules()[0], "header.author"); authorResource != nil {
 		// Go's MapAuthor numbers the id by the matched author's ORIGINAL
 		// index in doc.Header.Authors (author-1, author-2, ...);
-		// firstAuthorWithPerson only returns the matched map, not its
-		// index. Hardcoding "author-1" is a narrow, deliberate
+		// firstAuthorWithPersonIndexed's own index return value is used for
+		// CDA Coverage Audit's coverage key (see that function), not for
+		// this resource id. Hardcoding "author-1" is a narrow, deliberate
 		// simplification — at most one Author resource is ever built per
 		// document, so global uniqueness (the only property this id needs
 		// to have, per the BP-panel-synthesis/CareTeam-Practitioner
@@ -218,12 +221,12 @@ func (m *GenericCDAFHIRMapper) DeclarativeMapDocument(
 		// InjectProfile called on them here too.
 		allResources = append(allResources, authorExtra...)
 	}
-	if custodianResource, _, _ := engine.BuildHeaderResource(documentMap, CustodianMappingRules()[0]); custodianResource != nil {
+	if custodianResource, _, _ := engine.BuildHeaderResourceWithCoveragePrefix(documentMap, CustodianMappingRules()[0], "header.custodian"); custodianResource != nil {
 		custodianResource["id"] = "custodian-1"
 		allResources = append(allResources, custodianResource)
 	}
 	encompassingLocationBuilt := false
-	if locationResource, locationExtra, _ := engine.BuildHeaderResource(documentMap, EncompassingEncounterLocationMappingRules()[0]); locationResource != nil {
+	if locationResource, locationExtra, _ := engine.BuildHeaderResourceWithCoveragePrefix(documentMap, EncompassingEncounterLocationMappingRules()[0], "header.encompassingEncounter"); locationResource != nil {
 		// componentOf/encompassingEncounter describes at most ONE facility for
 		// the whole document -- same singular-per-document reasoning as
 		// author-1/custodian-1, hardcoded here rather than going through the
@@ -242,7 +245,16 @@ func (m *GenericCDAFHIRMapper) DeclarativeMapDocument(
 	// matching in-section one (by shared CDA <id>, per the IG) can only be
 	// decided once section dispatch has produced that in-section Encounter,
 	// below. See EncompassingEncounterMappingRules' own doc comment for why.
-	encompassingEncounterCandidate, _, _ := engine.BuildHeaderResource(documentMap, EncompassingEncounterMappingRules()[0])
+	//
+	// Shares the SAME "header.encompassingEncounter" coverage prefix as the
+	// Location call above -- both calls' typed roots physically overlap
+	// (Location resolves to a sub-node of Encounter), so they must share one
+	// tracking unit or the same raw XML fields would be inventoried once but
+	// recorded under two disjoint, non-matching prefixes. Each computes its
+	// own basePath from its own HeaderPath via the same "CDAHeader"-rooted
+	// translation (see BuildHeaderResourceWithCoveragePrefix), so nothing
+	// double-tracks despite the shared prefix.
+	encompassingEncounterCandidate, _, _ := engine.BuildHeaderResourceWithCoveragePrefix(documentMap, EncompassingEncounterMappingRules()[0], "header.encompassingEncounter")
 
 	// ── Section resources (parallel, section-failure isolated) ───────────────
 	var sectionKeys []string
@@ -381,7 +393,28 @@ func (m *GenericCDAFHIRMapper) DeclarativeMapDocument(
 							sk: map[string]interface{}{"entries": []interface{}{entriesJSON[entryIdx]}},
 						},
 					}
-					entryResources, entryErrs := engine.BuildResourcesForRules(perEntryDoc, rules)
+
+					// CDA Coverage Audit: this loop is the one place with both
+					// sk (section key) and the REAL, section-relative entryIdx
+					// together — BuildResourcesForRules below only ever sees
+					// perEntryDoc's single-entry wrapper, so any index it
+					// works with internally is relative to that wrapper (always
+					// 0), never the real position in sec.Entries. Recorded
+					// unconditionally, not only on success: "was this entry
+					// considered by mapping logic" is the question this
+					// feature answers, independent of whether the fields
+					// inside happened to resolve to anything. See
+					// CoverageTracker's doc comment (services/executors/
+					// cda_coverage_tracker.go) and CDAEntryKey's.
+					coveragePrefix := executors.CDAEntryKey(sk, entryIdx)
+					engine.CoverageTracker.Record(coveragePrefix)
+
+					// Element-granularity recording (Phase 1) reuses this SAME
+					// key, not a second independently-computed one — see
+					// BuildResourcesForRulesWithCoveragePrefix's own doc
+					// comment (declarative_engine.go) for why plain
+					// BuildResourcesForRules can't safely derive this itself.
+					entryResources, entryErrs := engine.BuildResourcesForRulesWithCoveragePrefix(perEntryDoc, rules, coveragePrefix)
 					if deepLineage {
 						for _, res := range entryResources {
 							res["_cdaSection"] = sk
@@ -443,11 +476,17 @@ func (m *GenericCDAFHIRMapper) DeclarativeMapDocument(
 					// optional field's transform warning already produced
 					// one of these before this feature existed, it just had
 					// nowhere to surface.
+					// entryWarnings mirrors the same warning-severity entries into
+					// this entry's own EntryTrace (see that field's doc comment)
+					// so the Mapping Log UI can show a warning directly on the
+					// entry row it belongs to, not only as a section-level count.
+					var entryWarnings []string
 					for _, se := range entryErrs {
 						if se.Severity != "warning" {
 							continue
 						}
 						sb.AddWarning(fmt.Sprintf("entry %d, %s: %s", se.EntryIndex, se.FieldKey, se.Error))
+						entryWarnings = append(entryWarnings, se.FieldKey+": "+se.Error)
 					}
 
 					trace := mappinglog.EntryTrace{
@@ -457,6 +496,7 @@ func (m *GenericCDAFHIRMapper) DeclarativeMapDocument(
 						CodeSystem:  entry.Code.CodeSystem,
 						DisplayName: entry.Code.DisplayName,
 						Resources:   entryResources,
+						Warnings:    entryWarnings,
 					}
 					if trace.DisplayName == "" {
 						trace.DisplayName = displayNameFromResources(entryResources)

@@ -187,6 +187,18 @@ func (e *CDAToFHIRExecutor) Execute(
 		},
 	}
 
+	// CDA Coverage Audit: pass the per-message tracker (if tracking is
+	// enabled for this interface — see ExecutePipeline in
+	// transformation_pipeline_helpers.go, where it's attached) through to
+	// the declarative mapping engine. Same dual-location check as
+	// interfaceID above since inputData carries it directly only in
+	// ad-hoc/test invocations.
+	if v, ok := inputData["_coverageTracker"].(*executors.CDACoverageTracker); ok {
+		mapConfig.CoverageTracker = v
+	} else if msg, ok := inputData["message"].(map[string]interface{}); ok {
+		mapConfig.CoverageTracker, _ = msg["_coverageTracker"].(*executors.CDACoverageTracker)
+	}
+
 	// Prefer typed path: an earlier cda.parse/cda.dedupe step leaves
 	// *CDADocument inside the shared message object (findCDADocument,
 	// cda_document_resolution.go). DeclarativeMapDocument() uses zero XPath

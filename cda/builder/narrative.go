@@ -10,33 +10,61 @@
 package builder
 
 import (
+	"fmt"
+
 	cdaSchema "ezhealthkonnect/cda"
 	"github.com/beevik/etree"
 )
 
 // buildSectionNarrative creates a <text> element (appended to section)
 // containing a simple table: one column per field that has a non-empty
-// value in at least one entry, one row per entry.
-func buildSectionNarrative(section *etree.Element, sec *cdaSchema.CDASectionDef, entries []map[string]interface{}) {
+// value in at least one entry (across BOTH the section's own primary
+// entries and any AlternateArchetypes' entries), one row per entry. Each
+// row gets a unique @ID (sectionKey-N) — the anchor a "_narrativeRef"
+// synthetic field (see buildSectionElement) targets when a real entry field
+// needs to write <originalText><reference value="#id"/></originalText> or a
+// bare <reference value="#id"/> back to its own narrative row (CONF:16326,
+// 15593, 7658/15908, 8719, etc. — every C-CDA "SHOULD contain reference"
+// warning this session's Round 23 found shares this one root cause: the
+// narrative never had anything with an @ID for an entry to point at).
+//
+// Returns primaryRowIDs (parallel to entries) and altRowIDs (parallel to
+// altEntries, each altRowIDs[i] parallel to altEntries[i]) so the caller can
+// inject the right "#id" into each record before building its entry. Both
+// are nil when the section has no information at all (the existing "No
+// information available" fallback).
+func buildSectionNarrative(section *etree.Element, sec *cdaSchema.CDASectionDef, entries []map[string]interface{}, altEntries [][]map[string]interface{}) (primaryRowIDs []string, altRowIDs [][]string) {
 	text := section.CreateElement("text")
 
-	if len(entries) == 0 {
+	total := len(entries)
+	for _, ae := range altEntries {
+		total += len(ae)
+	}
+	if total == 0 {
 		text.CreateElement("paragraph").SetText("No information available.")
-		return
+		return nil, nil
 	}
 
 	var cols []*cdaSchema.CDAFieldDef
-	for _, f := range sec.Fields {
-		for _, e := range entries {
-			if s, ok := stringValue(e[f.Key]); ok && s != "" {
-				cols = append(cols, f)
-				break
+	addCols := func(fields []*cdaSchema.CDAFieldDef, es []map[string]interface{}) {
+		for _, f := range fields {
+			for _, e := range es {
+				if s, ok := stringValue(e[f.Key]); ok && s != "" {
+					cols = append(cols, f)
+					break
+				}
 			}
+		}
+	}
+	addCols(sec.Fields, entries)
+	for i, alt := range sec.AlternateArchetypes {
+		if i < len(altEntries) {
+			addCols(alt.Fields, altEntries[i])
 		}
 	}
 	if len(cols) == 0 {
 		text.CreateElement("paragraph").SetText("No information available.")
-		return
+		return nil, nil
 	}
 
 	table := text.CreateElement("table")
@@ -50,8 +78,12 @@ func buildSectionNarrative(section *etree.Element, sec *cdaSchema.CDASectionDef,
 	}
 
 	tbody := table.CreateElement("tbody")
-	for _, e := range entries {
+	rowNum := 0
+	writeRow := func(e map[string]interface{}) string {
+		rowNum++
+		rowID := fmt.Sprintf("%s-%d", sec.Key, rowNum)
 		row := tbody.CreateElement("tr")
+		row.CreateAttr("ID", rowID)
 		for _, f := range cols {
 			cell := row.CreateElement("td")
 			if display, ok := stringValue(e[f.Key+"Display"]); ok {
@@ -62,5 +94,21 @@ func buildSectionNarrative(section *etree.Element, sec *cdaSchema.CDASectionDef,
 				cell.SetText(v)
 			}
 		}
+		return rowID
 	}
+
+	primaryRowIDs = make([]string, len(entries))
+	for i, e := range entries {
+		primaryRowIDs[i] = writeRow(e)
+	}
+	altRowIDs = make([][]string, len(altEntries))
+	for i, ae := range altEntries {
+		ids := make([]string, len(ae))
+		for j, e := range ae {
+			ids[j] = writeRow(e)
+		}
+		altRowIDs[i] = ids
+	}
+
+	return primaryRowIDs, altRowIDs
 }

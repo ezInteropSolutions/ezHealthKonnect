@@ -462,7 +462,7 @@ class BasicInterfaceConfigManager {
             'tcp_mllp_outbound': 'hl7v2', 'file_writer': 'file',
             'postgresql_outbound': 'database', 'mysql_outbound': 'database',
             'sqlserver_outbound': 'database', 'oracle_outbound': 'database',
-            'mongodb_outbound': 'database',
+            'mongodb_outbound': 'database', 'sink_outbound': 'sink',
         };
         formData.sourceType = connectorToSourceType[inboundBuilderConfig.connectorType] || undefined;
         formData.targetType  = connectorToTargetType[outboundBuilderConfig.connectorType] || undefined;

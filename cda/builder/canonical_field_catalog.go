@@ -14,7 +14,11 @@
 // keys cda.build genuinely consumes, never a stale or invented vocabulary.
 package builder
 
-import cdaSchema "ezhealthkonnect/cda"
+import (
+	"strings"
+
+	cdaSchema "ezhealthkonnect/cda"
+)
 
 // CanonicalFieldInfo describes one canonical field key available as a
 // mapping target — for sections this includes the field's companion
@@ -64,7 +68,13 @@ func SectionCatalog(loader *cdaSchema.CDASchemaLoader) []CanonicalSectionInfo {
 // vocabulary; for a section that DOES declare one (e.g. Vital Signs), these
 // are specifically the fields shared once per entry (e.g. the Organizer's
 // own effectiveTime) — see SectionRepeatingGroupCatalog for the per-item
-// vocabulary used inside the loop. Returns nil if sectionKey is unknown.
+// vocabulary used inside the loop. Also includes any AlternateArchetypes'
+// own fields (e.g. Medical Equipment's optional Procedure Activity
+// Procedure2 shape) — these are a DIFFERENT entry shape under the SAME
+// sectionKey (see AlternateEntryArchetype's own doc comment), mapped via a
+// second sectionMappingRow with its own EntriesKey, so they belong in the
+// same picker as the section's primary fields. Returns nil if sectionKey is
+// unknown.
 func SectionFieldCatalog(loader *cdaSchema.CDASchemaLoader, sectionKey string) []CanonicalFieldInfo {
 	sec := loader.GetSection(sectionKey)
 	if sec == nil {
@@ -72,9 +82,29 @@ func SectionFieldCatalog(loader *cdaSchema.CDASchemaLoader, sectionKey string) [
 	}
 	out := make([]CanonicalFieldInfo, 0, len(sec.Fields)*2)
 	for _, f := range sec.Fields {
+		if isSyntheticFieldKey(f.Key) {
+			continue
+		}
 		out = append(out, expandFieldWithCompanions(f)...)
 	}
+	for _, alt := range sec.AlternateArchetypes {
+		for _, f := range alt.Fields {
+			if isSyntheticFieldKey(f.Key) {
+				continue
+			}
+			out = append(out, expandFieldWithCompanions(f)...)
+		}
+	}
 	return out
+}
+
+// isSyntheticFieldKey is true for engine-populated fields (e.g.
+// "_narrativeRef", auto-injected by buildSectionElement — see
+// document_builder.go) that a user should never see or map by hand in the
+// guided cda.map_to_canonical picker. The leading underscore is this
+// package's own convention for "not a real canonical data field."
+func isSyntheticFieldKey(key string) bool {
+	return strings.HasPrefix(key, "_")
 }
 
 // SectionRepeatingGroupInfo describes one section's declared "loop" point —
@@ -183,6 +213,10 @@ func prefixKeys(fields []CanonicalFieldInfo, prefix string) []CanonicalFieldInfo
 //   - informant's orgName (writePersonReference includeOrg=true): shares
 //     personItemFields for name, but org name is a bespoke addition specific
 //     to informants (documentationOf performers don't get one)
+//   - specialtyCode/specialtyCodeSystem/specialtyCodeDisplay
+//     (writePersonReference, both informant and documentationOfPerformer):
+//     CONF:1198-14842 — genuinely absent before Round 23, unlike every
+//     per-section author field which already has its own specialty code
 var headerBespokeFields = map[string][]CanonicalFieldInfo{
 	"patient": {
 		{Key: "phone", Label: "Phone", DataType: "ST"},
@@ -194,9 +228,15 @@ var headerBespokeFields = map[string][]CanonicalFieldInfo{
 	"informant": {
 		{Key: "npi", Label: "NPI", DataType: "ST"},
 		{Key: "orgName", Label: "Represented Organization Name", DataType: "ST"},
+		{Key: "specialtyCode", Label: "Specialty Code", DataType: "CD"},
+		{Key: "specialtyCodeSystem", Label: "Specialty Code System (OID)", DataType: "OID"},
+		{Key: "specialtyCodeDisplay", Label: "Specialty Code Display", DataType: "ST"},
 	},
 	"documentationOfPerformer": {
 		{Key: "npi", Label: "NPI", DataType: "ST"},
+		{Key: "specialtyCode", Label: "Specialty Code", DataType: "CD"},
+		{Key: "specialtyCodeSystem", Label: "Specialty Code System (OID)", DataType: "OID"},
+		{Key: "specialtyCodeDisplay", Label: "Specialty Code Display", DataType: "ST"},
 	},
 	"documentationOf": {
 		{Key: "effectiveTimeLow", Label: "Service Event Start", DataType: "TS"},

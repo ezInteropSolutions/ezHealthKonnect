@@ -141,9 +141,16 @@
           "xpath": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/entryRelationship[@typeCode='MFST',@inversionInd='true']/observation[templateId/@root='2.16.840.1.113883.10.20.22.4.9']/effectiveTime/low/@value"
         },
         {
+          "key": "reactionEffectiveTimeHigh",
+          "uscdiElement": "Reaction Resolution Date",
+          "conformance": "MAY",
+          "dataType": "TS",
+          "xpath": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/entryRelationship[@typeCode='MFST',@inversionInd='true']/observation[templateId/@root='2.16.840.1.113883.10.20.22.4.9']/effectiveTime/high/@value"
+        },
+        {
           "key": "severity",
           "uscdiElement": "Severity",
-          "conformance": "SHOULD",
+          "conformance": "MAY",
           "dataType": "CD",
           "valueSet": "SNOMED CT",
           "xpath": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/entryRelationship[@typeCode='SUBJ',@inversionInd='true']/observation[templateId/@root='2.16.840.1.113883.10.20.22.4.8']/value/@code",
@@ -163,11 +170,12 @@
         {
           "key": "criticality",
           "uscdiElement": "Criticality",
-          "conformance": "MAY",
+          "conformance": "SHOULD",
           "dataType": "CD",
-          "valueSet": "SNOMED CT",
+          "valueSet": "Criticality Observation (HL7ObservationValue: CRITL/CRITH/CRITU)",
           "xpath": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/entryRelationship[@typeCode='SUBJ',@inversionInd='true']/observation[templateId/@root='2.16.840.1.113883.10.20.22.4.145']/value/@code",
-          "xpathDisplay": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/entryRelationship[@typeCode='SUBJ',@inversionInd='true']/observation[templateId/@root='2.16.840.1.113883.10.20.22.4.145']/value/@displayName"
+          "xpathDisplay": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/entryRelationship[@typeCode='SUBJ',@inversionInd='true']/observation[templateId/@root='2.16.840.1.113883.10.20.22.4.145']/value/@displayName",
+          "xpathSystem": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/entryRelationship[@typeCode='SUBJ',@inversionInd='true']/observation[templateId/@root='2.16.840.1.113883.10.20.22.4.145']/value/@codeSystem"
         },
         {
           "key": "onsetDate",
@@ -229,6 +237,16 @@
           "xpath": "entry/act/author/assignedAuthor/id/@extension"
         },
         {
+          "key": "authorSpecialtyCode",
+          "uscdiElement": "Author Specialty",
+          "conformance": "SHOULD",
+          "dataType": "CE",
+          "valueSet": "Healthcare Provider Taxonomy (NUCC)",
+          "xpath": "entry/act/author/assignedAuthor/code/@code",
+          "xpathDisplay": "entry/act/author/assignedAuthor/code/@displayName",
+          "xpathSystem": "entry/act/author/assignedAuthor/code/@codeSystem"
+        },
+        {
           "key": "authorGiven",
           "uscdiElement": "Author Given Name",
           "conformance": "MAY",
@@ -248,6 +266,23 @@
           "conformance": "MAY",
           "dataType": "ST",
           "xpath": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/author/assignedAuthor/id/@extension"
+        },
+        {
+          "key": "authorSpecialtyCode",
+          "uscdiElement": "Author Specialty",
+          "conformance": "SHOULD",
+          "dataType": "CE",
+          "valueSet": "Healthcare Provider Taxonomy (NUCC)",
+          "xpath": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/author/assignedAuthor/code/@code",
+          "xpathDisplay": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/author/assignedAuthor/code/@displayName",
+          "xpathSystem": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/author/assignedAuthor/code/@codeSystem"
+        },
+        {
+          "key": "_narrativeRef",
+          "uscdiElement": "Narrative Reference (engine-populated — links the allergen code back to its own narrative table row)",
+          "conformance": "MAY",
+          "dataType": "ST",
+          "xpath": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/participant[@typeCode='CSM']/participantRole[@classCode='MANU']/playingEntity[@classCode='MMAT']/code/originalText/reference/@value"
         }
       ]
     },
@@ -325,6 +360,14 @@
           "xpath": "entry/substanceAdministration/effectiveTime/high/@value"
         },
         {
+          "key": "doseFrequencyValue",
+          "uscdiElement": "Dose Frequency (period)",
+          "conformance": "SHOULD",
+          "dataType": "PQ",
+          "xpath": "entry/substanceAdministration/effectiveTime[2]/period/@value",
+          "xpathUnit": "entry/substanceAdministration/effectiveTime[2]/period/@unit"
+        },
+        {
           "key": "authorGiven",
           "uscdiElement": "Information Source Given Name",
           "conformance": "MAY",
@@ -344,6 +387,16 @@
           "conformance": "MAY",
           "dataType": "ST",
           "xpath": "entry/substanceAdministration/author/assignedAuthor/id/@extension"
+        },
+        {
+          "key": "authorSpecialtyCode",
+          "uscdiElement": "Information Source Specialty",
+          "conformance": "SHOULD",
+          "dataType": "CE",
+          "valueSet": "Healthcare Provider Taxonomy (NUCC)",
+          "xpath": "entry/substanceAdministration/author/assignedAuthor/code/@code",
+          "xpathDisplay": "entry/substanceAdministration/author/assignedAuthor/code/@displayName",
+          "xpathSystem": "entry/substanceAdministration/author/assignedAuthor/code/@codeSystem"
         }
       ],
       "repeatingGroups": [
@@ -504,6 +557,13 @@
           "xpath": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/entryRelationship[@typeCode='REFR']/observation[templateId/@root='2.16.840.1.113883.10.20.22.4.6']/text"
         },
         {
+          "key": "_narrativeRef",
+          "uscdiElement": "Narrative Reference (engine-populated — links the Problem Status observation's text back to its own narrative table row)",
+          "conformance": "MAY",
+          "dataType": "ST",
+          "xpath": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/entryRelationship[@typeCode='REFR']/observation[templateId/@root='2.16.840.1.113883.10.20.22.4.6']/text/reference/@value"
+        },
+        {
           "key": "ageAtOnset",
           "uscdiElement": "Age at Onset",
           "conformance": "MAY",
@@ -554,6 +614,16 @@
           "xpath": "entry/act/author/assignedAuthor/id/@extension"
         },
         {
+          "key": "authorSpecialtyCode",
+          "uscdiElement": "Recorder Specialty",
+          "conformance": "SHOULD",
+          "dataType": "CE",
+          "valueSet": "Healthcare Provider Taxonomy (NUCC)",
+          "xpath": "entry/act/author/assignedAuthor/code/@code",
+          "xpathDisplay": "entry/act/author/assignedAuthor/code/@displayName",
+          "xpathSystem": "entry/act/author/assignedAuthor/code/@codeSystem"
+        },
+        {
           "key": "authorGiven",
           "uscdiElement": "Recorder Given Name",
           "conformance": "MAY",
@@ -573,6 +643,16 @@
           "conformance": "MAY",
           "dataType": "ST",
           "xpath": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/author/assignedAuthor/id/@extension"
+        },
+        {
+          "key": "authorSpecialtyCode",
+          "uscdiElement": "Recorder Specialty",
+          "conformance": "SHOULD",
+          "dataType": "CE",
+          "valueSet": "Healthcare Provider Taxonomy (NUCC)",
+          "xpath": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/author/assignedAuthor/code/@code",
+          "xpathDisplay": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/author/assignedAuthor/code/@displayName",
+          "xpathSystem": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/author/assignedAuthor/code/@codeSystem"
         }
       ]
     },
@@ -608,7 +688,8 @@
           "dataType": "CD",
           "valueSet": "LOINC",
           "xpath": "entry/organizer/component/observation/code/@code",
-          "xpathDisplay": "entry/organizer/component/observation/code/@displayName"
+          "xpathDisplay": "entry/organizer/component/observation/code/@displayName",
+          "xpathSystem": "entry/organizer/component/observation/code/@codeSystem"
         },
         {
           "key": "value",
@@ -645,6 +726,16 @@
           "conformance": "MAY",
           "dataType": "ST",
           "xpath": "entry/organizer/author/assignedAuthor/id/@extension"
+        },
+        {
+          "key": "authorSpecialtyCode",
+          "uscdiElement": "Author Specialty",
+          "conformance": "SHOULD",
+          "dataType": "CE",
+          "valueSet": "Healthcare Provider Taxonomy (NUCC)",
+          "xpath": "entry/organizer/author/assignedAuthor/code/@code",
+          "xpathDisplay": "entry/organizer/author/assignedAuthor/code/@displayName",
+          "xpathSystem": "entry/organizer/author/assignedAuthor/code/@codeSystem"
         }
       ],
       "repeatingGroups": [
@@ -665,7 +756,8 @@
               "dataType": "CD",
               "valueSet": "LOINC",
               "xpath": "code/@code",
-              "xpathDisplay": "code/@displayName"
+              "xpathDisplay": "code/@displayName",
+              "xpathSystem": "code/@codeSystem"
             },
             {
               "key": "value",
@@ -726,6 +818,16 @@
               "conformance": "MAY",
               "dataType": "ST",
               "xpath": "author/assignedAuthor/id/@extension"
+            },
+            {
+              "key": "authorSpecialtyCode",
+              "uscdiElement": "Author Specialty",
+              "conformance": "SHOULD",
+              "dataType": "CE",
+              "valueSet": "Healthcare Provider Taxonomy (NUCC)",
+              "xpath": "author/assignedAuthor/code/@code",
+              "xpathDisplay": "author/assignedAuthor/code/@displayName",
+              "xpathSystem": "author/assignedAuthor/code/@codeSystem"
             }
           ]
         }
@@ -758,7 +860,8 @@
           "dataType": "CD",
           "valueSet": "LOINC",
           "xpath": "entry/organizer/component/observation/code/@code",
-          "xpathDisplay": "entry/organizer/component/observation/code/@displayName"
+          "xpathDisplay": "entry/organizer/component/observation/code/@displayName",
+          "xpathSystem": "entry/organizer/component/observation/code/@codeSystem"
         },
         {
           "key": "resultValue",
@@ -777,11 +880,34 @@
           "xpath": "entry/organizer/component/observation/statusCode/@code"
         },
         {
-          "key": "referenceRange",
-          "uscdiElement": "Reference Range",
+          "key": "referenceRangeLow",
+          "uscdiElement": "Reference Range (Low)",
           "conformance": "SHOULD",
-          "dataType": "IVL_PQ",
-          "xpath": "entry/organizer/component/observation/referenceRange/observationRange/value"
+          "dataType": "PQ",
+          "xpath": "entry/organizer/component/observation/referenceRange/observationRange/value/low/@value",
+          "xpathUnit": "entry/organizer/component/observation/referenceRange/observationRange/value/low/@unit"
+        },
+        {
+          "key": "referenceRangeLowInclusive",
+          "uscdiElement": "Reference Range (Low) Inclusive Flag (HL7 V3 IVXB_PQ @inclusive — whether the low boundary value itself counts as part of the normal range; defaults to true per the base datatype when omitted, only written when a source system actually distinguishes inclusive/exclusive boundaries)",
+          "conformance": "MAY",
+          "dataType": "BL",
+          "xpath": "entry/organizer/component/observation/referenceRange/observationRange/value/low/@inclusive"
+        },
+        {
+          "key": "referenceRangeHigh",
+          "uscdiElement": "Reference Range (High)",
+          "conformance": "SHOULD",
+          "dataType": "PQ",
+          "xpath": "entry/organizer/component/observation/referenceRange/observationRange/value/high/@value",
+          "xpathUnit": "entry/organizer/component/observation/referenceRange/observationRange/value/high/@unit"
+        },
+        {
+          "key": "referenceRangeHighInclusive",
+          "uscdiElement": "Reference Range (High) Inclusive Flag (HL7 V3 IVXB_PQ @inclusive — whether the high boundary value itself counts as part of the normal range)",
+          "conformance": "MAY",
+          "dataType": "BL",
+          "xpath": "entry/organizer/component/observation/referenceRange/observationRange/value/high/@inclusive"
         },
         {
           "key": "authorGiven",
@@ -805,13 +931,24 @@
           "xpath": "entry/organizer/author/assignedAuthor/id/@extension"
         },
         {
+          "key": "authorSpecialtyCode",
+          "uscdiElement": "Performer Specialty",
+          "conformance": "SHOULD",
+          "dataType": "CE",
+          "valueSet": "Healthcare Provider Taxonomy (NUCC)",
+          "xpath": "entry/organizer/author/assignedAuthor/code/@code",
+          "xpathDisplay": "entry/organizer/author/assignedAuthor/code/@displayName",
+          "xpathSystem": "entry/organizer/author/assignedAuthor/code/@codeSystem"
+        },
+        {
           "key": "panelCode",
           "uscdiElement": "Result Panel Code",
           "conformance": "SHALL",
           "dataType": "CD",
           "valueSet": "LOINC, SNOMED CT",
           "xpath": "entry/organizer/code/@code",
-          "xpathDisplay": "entry/organizer/code/@displayName"
+          "xpathDisplay": "entry/organizer/code/@displayName",
+          "xpathSystem": "entry/organizer/code/@codeSystem"
         },
         {
           "key": "panelStatus",
@@ -853,7 +990,8 @@
               "dataType": "CD",
               "valueSet": "LOINC",
               "xpath": "code/@code",
-              "xpathDisplay": "code/@displayName"
+              "xpathDisplay": "code/@displayName",
+              "xpathSystem": "code/@codeSystem"
             },
             {
               "key": "resultValue",
@@ -883,8 +1021,10 @@
               "uscdiElement": "Result Interpretation",
               "conformance": "SHOULD",
               "dataType": "CD",
+              "valueSet": "Observation Interpretation (HL7)",
               "xpath": "interpretationCode/@code",
-              "xpathDisplay": "interpretationCode/@displayName"
+              "xpathDisplay": "interpretationCode/@displayName",
+              "xpathSystem": "interpretationCode/@codeSystem"
             },
             {
               "key": "methodCode",
@@ -903,11 +1043,34 @@
               "xpathDisplay": "targetSiteCode/@displayName"
             },
             {
-              "key": "referenceRange",
-              "uscdiElement": "Reference Range",
+              "key": "referenceRangeLow",
+              "uscdiElement": "Reference Range (Low)",
               "conformance": "SHOULD",
-              "dataType": "IVL_PQ",
-              "xpath": "referenceRange/observationRange/value"
+              "dataType": "PQ",
+              "xpath": "referenceRange/observationRange/value/low/@value",
+              "xpathUnit": "referenceRange/observationRange/value/low/@unit"
+            },
+            {
+              "key": "referenceRangeLowInclusive",
+              "uscdiElement": "Reference Range (Low) Inclusive Flag (HL7 V3 IVXB_PQ @inclusive)",
+              "conformance": "MAY",
+              "dataType": "BL",
+              "xpath": "referenceRange/observationRange/value/low/@inclusive"
+            },
+            {
+              "key": "referenceRangeHigh",
+              "uscdiElement": "Reference Range (High)",
+              "conformance": "SHOULD",
+              "dataType": "PQ",
+              "xpath": "referenceRange/observationRange/value/high/@value",
+              "xpathUnit": "referenceRange/observationRange/value/high/@unit"
+            },
+            {
+              "key": "referenceRangeHighInclusive",
+              "uscdiElement": "Reference Range (High) Inclusive Flag (HL7 V3 IVXB_PQ @inclusive)",
+              "conformance": "MAY",
+              "dataType": "BL",
+              "xpath": "referenceRange/observationRange/value/high/@inclusive"
             },
             {
               "key": "authorGiven",
@@ -929,6 +1092,16 @@
               "conformance": "MAY",
               "dataType": "ST",
               "xpath": "author/assignedAuthor/id/@extension"
+            },
+            {
+              "key": "authorSpecialtyCode",
+              "uscdiElement": "Performer Specialty",
+              "conformance": "SHOULD",
+              "dataType": "CE",
+              "valueSet": "Healthcare Provider Taxonomy (NUCC)",
+              "xpath": "author/assignedAuthor/code/@code",
+              "xpathDisplay": "author/assignedAuthor/code/@displayName",
+              "xpathSystem": "author/assignedAuthor/code/@codeSystem"
             }
           ]
         }
@@ -960,6 +1133,13 @@
           "dataType": "CD",
           "xpath": "entry/encounter/code/@code",
           "xpathDisplay": "entry/encounter/code/@displayName"
+        },
+        {
+          "key": "_narrativeRef",
+          "uscdiElement": "Narrative Reference (engine-populated — links the encounter code back to its own narrative table row)",
+          "conformance": "MAY",
+          "dataType": "ST",
+          "xpath": "entry/encounter/code/originalText/reference/@value"
         },
         {
           "key": "effectiveTime",
@@ -1013,13 +1193,6 @@
           "xpathSystem": "entry/encounter/performer/assignedEntity/code/@codeSystem"
         },
         {
-          "key": "locationName",
-          "uscdiElement": "Encounter Location Name",
-          "conformance": "SHOULD",
-          "dataType": "ST",
-          "xpath": "entry/encounter/participant[@typeCode='LOC']/participantRole[@classCode='SDLOC']/playingEntity[@classCode='PLC']/name"
-        },
-        {
           "key": "locationCode",
           "uscdiElement": "Encounter Location Type",
           "conformance": "SHALL",
@@ -1028,6 +1201,48 @@
           "xpath": "entry/encounter/participant[@typeCode='LOC']/participantRole[@classCode='SDLOC']/code/@code",
           "xpathDisplay": "entry/encounter/participant[@typeCode='LOC']/participantRole[@classCode='SDLOC']/code/@displayName",
           "xpathSystem": "entry/encounter/participant[@typeCode='LOC']/participantRole[@classCode='SDLOC']/code/@codeSystem"
+        },
+        {
+          "key": "locationStreet",
+          "uscdiElement": "Encounter Location Street",
+          "conformance": "MAY",
+          "dataType": "ST",
+          "xpath": "entry/encounter/participant[@typeCode='LOC']/participantRole[@classCode='SDLOC']/addr/streetAddressLine"
+        },
+        {
+          "key": "locationCity",
+          "uscdiElement": "Encounter Location City",
+          "conformance": "MAY",
+          "dataType": "ST",
+          "xpath": "entry/encounter/participant[@typeCode='LOC']/participantRole[@classCode='SDLOC']/addr/city"
+        },
+        {
+          "key": "locationState",
+          "uscdiElement": "Encounter Location State",
+          "conformance": "MAY",
+          "dataType": "ST",
+          "xpath": "entry/encounter/participant[@typeCode='LOC']/participantRole[@classCode='SDLOC']/addr/state"
+        },
+        {
+          "key": "locationPostalCode",
+          "uscdiElement": "Encounter Location Postal Code",
+          "conformance": "MAY",
+          "dataType": "ST",
+          "xpath": "entry/encounter/participant[@typeCode='LOC']/participantRole[@classCode='SDLOC']/addr/postalCode"
+        },
+        {
+          "key": "locationPhone",
+          "uscdiElement": "Encounter Location Phone",
+          "conformance": "MAY",
+          "dataType": "TEL",
+          "xpath": "entry/encounter/participant[@typeCode='LOC']/participantRole[@classCode='SDLOC']/telecom/@value"
+        },
+        {
+          "key": "locationName",
+          "uscdiElement": "Encounter Location Name",
+          "conformance": "SHOULD",
+          "dataType": "ST",
+          "xpath": "entry/encounter/participant[@typeCode='LOC']/participantRole[@classCode='SDLOC']/playingEntity[@classCode='PLC']/name"
         }
       ]
     },
@@ -1068,6 +1283,13 @@
           "xpath": "entry/procedure/code/originalText"
         },
         {
+          "key": "_narrativeRef",
+          "uscdiElement": "Narrative Reference (engine-populated — links the procedure code back to its own narrative table row)",
+          "conformance": "MAY",
+          "dataType": "ST",
+          "xpath": "entry/procedure/code/originalText/reference/@value"
+        },
+        {
           "key": "effectiveTime",
           "uscdiElement": "Procedure Date",
           "conformance": "SHOULD",
@@ -1088,7 +1310,50 @@
           "dataType": "CD",
           "valueSet": "Body Site",
           "xpath": "entry/procedure/targetSiteCode/@code",
-          "xpathDisplay": "entry/procedure/targetSiteCode/@displayName"
+          "xpathDisplay": "entry/procedure/targetSiteCode/@displayName",
+          "xpathSystem": "entry/procedure/targetSiteCode/@codeSystem"
+        },
+        {
+          "key": "performerNPI",
+          "uscdiElement": "Procedure Performer NPI",
+          "conformance": "SHALL",
+          "dataType": "ST",
+          "xpath": "entry/procedure/performer/assignedEntity/id/@extension"
+        },
+        {
+          "key": "performerStreet",
+          "uscdiElement": "Procedure Performer Street",
+          "conformance": "SHALL",
+          "dataType": "ST",
+          "xpath": "entry/procedure/performer/assignedEntity/addr/streetAddressLine"
+        },
+        {
+          "key": "performerCity",
+          "uscdiElement": "Procedure Performer City",
+          "conformance": "SHALL",
+          "dataType": "ST",
+          "xpath": "entry/procedure/performer/assignedEntity/addr/city"
+        },
+        {
+          "key": "performerState",
+          "uscdiElement": "Procedure Performer State",
+          "conformance": "SHALL",
+          "dataType": "ST",
+          "xpath": "entry/procedure/performer/assignedEntity/addr/state"
+        },
+        {
+          "key": "performerPostalCode",
+          "uscdiElement": "Procedure Performer Postal Code",
+          "conformance": "SHALL",
+          "dataType": "ST",
+          "xpath": "entry/procedure/performer/assignedEntity/addr/postalCode"
+        },
+        {
+          "key": "performerPhone",
+          "uscdiElement": "Procedure Performer Phone",
+          "conformance": "SHALL",
+          "dataType": "ST",
+          "xpath": "entry/procedure/performer/assignedEntity/telecom/@value"
         },
         {
           "key": "performerGiven",
@@ -1105,11 +1370,60 @@
           "xpath": "entry/procedure/performer/assignedEntity/assignedPerson/name/family"
         },
         {
-          "key": "performerNPI",
-          "uscdiElement": "Procedure Performer NPI",
+          "key": "performerOrgIdRoot",
+          "uscdiElement": "Procedure Performer Organization ID Root",
           "conformance": "MAY",
           "dataType": "ST",
-          "xpath": "entry/procedure/performer/assignedEntity/id/@extension"
+          "xpath": "entry/procedure/performer/assignedEntity/representedOrganization/id/@root"
+        },
+        {
+          "key": "performerOrgId",
+          "uscdiElement": "Procedure Performer Organization ID",
+          "conformance": "MAY",
+          "dataType": "ST",
+          "xpath": "entry/procedure/performer/assignedEntity/representedOrganization/id/@extension"
+        },
+        {
+          "key": "performerOrgName",
+          "uscdiElement": "Procedure Performer Organization",
+          "conformance": "SHOULD",
+          "dataType": "ST",
+          "xpath": "entry/procedure/performer/assignedEntity/representedOrganization/name"
+        },
+        {
+          "key": "performerOrgPhone",
+          "uscdiElement": "Procedure Performer Organization Phone",
+          "conformance": "SHOULD",
+          "dataType": "ST",
+          "xpath": "entry/procedure/performer/assignedEntity/representedOrganization/telecom/@value"
+        },
+        {
+          "key": "performerOrgStreet",
+          "uscdiElement": "Procedure Performer Organization Street",
+          "conformance": "SHOULD",
+          "dataType": "ST",
+          "xpath": "entry/procedure/performer/assignedEntity/representedOrganization/addr/streetAddressLine"
+        },
+        {
+          "key": "performerOrgCity",
+          "uscdiElement": "Procedure Performer Organization City",
+          "conformance": "SHOULD",
+          "dataType": "ST",
+          "xpath": "entry/procedure/performer/assignedEntity/representedOrganization/addr/city"
+        },
+        {
+          "key": "performerOrgState",
+          "uscdiElement": "Procedure Performer Organization State",
+          "conformance": "SHOULD",
+          "dataType": "ST",
+          "xpath": "entry/procedure/performer/assignedEntity/representedOrganization/addr/state"
+        },
+        {
+          "key": "performerOrgPostalCode",
+          "uscdiElement": "Procedure Performer Organization Postal Code",
+          "conformance": "SHOULD",
+          "dataType": "ST",
+          "xpath": "entry/procedure/performer/assignedEntity/representedOrganization/addr/postalCode"
         },
         {
           "key": "authorGiven",
@@ -1131,6 +1445,16 @@
           "conformance": "MAY",
           "dataType": "ST",
           "xpath": "entry/procedure/author/assignedAuthor/id/@extension"
+        },
+        {
+          "key": "authorSpecialtyCode",
+          "uscdiElement": "Author Specialty",
+          "conformance": "SHOULD",
+          "dataType": "CE",
+          "valueSet": "Healthcare Provider Taxonomy (NUCC)",
+          "xpath": "entry/procedure/author/assignedAuthor/code/@code",
+          "xpathDisplay": "entry/procedure/author/assignedAuthor/code/@displayName",
+          "xpathSystem": "entry/procedure/author/assignedAuthor/code/@codeSystem"
         }
       ]
     },
@@ -1155,6 +1479,14 @@
         {
           "path": "entry/substanceAdministration/author",
           "templateId": "2.16.840.1.113883.10.20.22.4.119"
+        },
+        {
+          "path": "entry/substanceAdministration/entryRelationship[@typeCode='COMP',@inversionInd='true']/act",
+          "templateId": "2.16.840.1.113883.10.20.22.4.118",
+          "fixedCode": "416118004",
+          "fixedCodeSystem": "2.16.840.1.113883.6.96",
+          "fixedCodeDisplay": "Administration",
+          "fixedStatusCode": "completed"
         }
       ],
       "fields": [
@@ -1262,6 +1594,30 @@
           "conformance": "MAY",
           "dataType": "ST",
           "xpath": "entry/substanceAdministration/author/assignedAuthor/id/@extension"
+        },
+        {
+          "key": "authorSpecialtyCode",
+          "uscdiElement": "Author Specialty",
+          "conformance": "SHOULD",
+          "dataType": "CE",
+          "valueSet": "Healthcare Provider Taxonomy (NUCC)",
+          "xpath": "entry/substanceAdministration/author/assignedAuthor/code/@code",
+          "xpathDisplay": "entry/substanceAdministration/author/assignedAuthor/code/@displayName",
+          "xpathSystem": "entry/substanceAdministration/author/assignedAuthor/code/@codeSystem"
+        },
+        {
+          "key": "seriesSequenceNumber",
+          "uscdiElement": "Series Sequence Number (this dose's position in a multi-dose series)",
+          "conformance": "MAY",
+          "dataType": "INT",
+          "xpath": "entry/substanceAdministration/entryRelationship[@typeCode='COMP',@inversionInd='true']/sequenceNumber/@value"
+        },
+        {
+          "key": "seriesAdministrationDate",
+          "uscdiElement": "Series Administration Date (nested Substance Administered Act)",
+          "conformance": "MAY",
+          "dataType": "TS",
+          "xpath": "entry/substanceAdministration/entryRelationship[@typeCode='COMP',@inversionInd='true']/act/effectiveTime/@value"
         }
       ]
     },
@@ -1284,6 +1640,18 @@
         },
         {
           "path": "entry/observation[code/@code='11367-0',code/@codeSystem='2.16.840.1.113883.6.1']/author",
+          "templateId": "2.16.840.1.113883.10.20.22.4.119"
+        },
+        {
+          "path": "entry/observation[templateId/@root='2.16.840.1.113883.10.20.22.4.78']",
+          "templateId": "2.16.840.1.113883.10.20.22.4.78",
+          "templateIdExtension": "2014-06-09",
+          "fixedCode": "72166-2",
+          "fixedCodeSystem": "2.16.840.1.113883.6.1",
+          "fixedCodeDisplay": "Tobacco smoking status NHIS"
+        },
+        {
+          "path": "entry/observation[templateId/@root='2.16.840.1.113883.10.20.22.4.78']/author",
           "templateId": "2.16.840.1.113883.10.20.22.4.119"
         }
       ],
@@ -1319,6 +1687,54 @@
           "conformance": "MAY",
           "dataType": "TS",
           "xpath": "entry/observation[code/@code='11367-0',code/@codeSystem='2.16.840.1.113883.6.1']/effectiveTime/high/@value"
+        },
+        {
+          "key": "smokingStatusCurrent",
+          "uscdiElement": "Current Smoking Status (Meaningful Use)",
+          "conformance": "SHOULD",
+          "dataType": "CD",
+          "valueSet": "Current Smoking Status",
+          "xpath": "entry/observation[templateId/@root='2.16.840.1.113883.10.20.22.4.78']/value/@code",
+          "xpathDisplay": "entry/observation[templateId/@root='2.16.840.1.113883.10.20.22.4.78']/value/@displayName",
+          "xpathSystem": "entry/observation[templateId/@root='2.16.840.1.113883.10.20.22.4.78']/value/@codeSystem"
+        },
+        {
+          "key": "smokingStatusCurrentEffectiveTime",
+          "uscdiElement": "Current Smoking Status Observation Date",
+          "conformance": "SHALL",
+          "dataType": "TS",
+          "xpath": "entry/observation[templateId/@root='2.16.840.1.113883.10.20.22.4.78']/effectiveTime/@value"
+        },
+        {
+          "key": "smokingStatusCurrentAuthorGiven",
+          "uscdiElement": "Current Smoking Status Author Given Name",
+          "conformance": "MAY",
+          "dataType": "ST",
+          "xpath": "entry/observation[templateId/@root='2.16.840.1.113883.10.20.22.4.78']/author/assignedAuthor/assignedPerson/name/given"
+        },
+        {
+          "key": "smokingStatusCurrentAuthorFamily",
+          "uscdiElement": "Current Smoking Status Author Family Name",
+          "conformance": "MAY",
+          "dataType": "ST",
+          "xpath": "entry/observation[templateId/@root='2.16.840.1.113883.10.20.22.4.78']/author/assignedAuthor/assignedPerson/name/family"
+        },
+        {
+          "key": "smokingStatusCurrentAuthorNPI",
+          "uscdiElement": "Current Smoking Status Author NPI",
+          "conformance": "MAY",
+          "dataType": "ST",
+          "xpath": "entry/observation[templateId/@root='2.16.840.1.113883.10.20.22.4.78']/author/assignedAuthor/id/@extension"
+        },
+        {
+          "key": "smokingStatusCurrentAuthorSpecialtyCode",
+          "uscdiElement": "Current Smoking Status Author Specialty",
+          "conformance": "SHOULD",
+          "dataType": "CE",
+          "valueSet": "Healthcare Provider Taxonomy (NUCC)",
+          "xpath": "entry/observation[templateId/@root='2.16.840.1.113883.10.20.22.4.78']/author/assignedAuthor/code/@code",
+          "xpathDisplay": "entry/observation[templateId/@root='2.16.840.1.113883.10.20.22.4.78']/author/assignedAuthor/code/@displayName",
+          "xpathSystem": "entry/observation[templateId/@root='2.16.840.1.113883.10.20.22.4.78']/author/assignedAuthor/code/@codeSystem"
         },
         {
           "key": "effectiveTime",
@@ -1371,6 +1787,16 @@
           "conformance": "MAY",
           "dataType": "ST",
           "xpath": "entry/observation[code/@code='11367-0',code/@codeSystem='2.16.840.1.113883.6.1']/author/assignedAuthor/id/@extension"
+        },
+        {
+          "key": "authorSpecialtyCode",
+          "uscdiElement": "Author Specialty",
+          "conformance": "SHOULD",
+          "dataType": "CE",
+          "valueSet": "Healthcare Provider Taxonomy (NUCC)",
+          "xpath": "entry/observation[code/@code='11367-0',code/@codeSystem='2.16.840.1.113883.6.1']/author/assignedAuthor/code/@code",
+          "xpathDisplay": "entry/observation[code/@code='11367-0',code/@codeSystem='2.16.840.1.113883.6.1']/author/assignedAuthor/code/@displayName",
+          "xpathSystem": "entry/observation[code/@code='11367-0',code/@codeSystem='2.16.840.1.113883.6.1']/author/assignedAuthor/code/@codeSystem"
         }
       ]
     },
@@ -1431,6 +1857,16 @@
           "conformance": "MAY",
           "dataType": "ST",
           "xpath": "entry/observation/author/assignedAuthor/id/@extension"
+        },
+        {
+          "key": "authorSpecialtyCode",
+          "uscdiElement": "Author Specialty",
+          "conformance": "SHOULD",
+          "dataType": "CE",
+          "valueSet": "Healthcare Provider Taxonomy (NUCC)",
+          "xpath": "entry/observation/author/assignedAuthor/code/@code",
+          "xpathDisplay": "entry/observation/author/assignedAuthor/code/@displayName",
+          "xpathSystem": "entry/observation/author/assignedAuthor/code/@codeSystem"
         }
       ]
     },
@@ -1493,6 +1929,16 @@
           "conformance": "MAY",
           "dataType": "ST",
           "xpath": "entry/observation/author/assignedAuthor/id/@extension"
+        },
+        {
+          "key": "authorSpecialtyCode",
+          "uscdiElement": "Author Specialty",
+          "conformance": "SHOULD",
+          "dataType": "CE",
+          "valueSet": "Healthcare Provider Taxonomy (NUCC)",
+          "xpath": "entry/observation/author/assignedAuthor/code/@code",
+          "xpathDisplay": "entry/observation/author/assignedAuthor/code/@displayName",
+          "xpathSystem": "entry/observation/author/assignedAuthor/code/@codeSystem"
         }
       ]
     },
@@ -1621,7 +2067,8 @@
           "dataType": "CD",
           "valueSet": "SNOMED CT, CPT",
           "xpath": "entry/observation/code/@code",
-          "xpathDisplay": "entry/observation/code/@displayName"
+          "xpathDisplay": "entry/observation/code/@displayName",
+          "xpathSystem": "entry/observation/code/@codeSystem"
         },
         {
           "key": "effectiveTime",
@@ -1673,6 +2120,16 @@
           "conformance": "MAY",
           "dataType": "ST",
           "xpath": "entry/observation/author/assignedAuthor/id/@extension"
+        },
+        {
+          "key": "authorSpecialtyCode",
+          "uscdiElement": "Author Specialty",
+          "conformance": "SHOULD",
+          "dataType": "CE",
+          "valueSet": "Healthcare Provider Taxonomy (NUCC)",
+          "xpath": "entry/observation/author/assignedAuthor/code/@code",
+          "xpathDisplay": "entry/observation/author/assignedAuthor/code/@displayName",
+          "xpathSystem": "entry/observation/author/assignedAuthor/code/@codeSystem"
         }
       ]
     },
@@ -1725,6 +2182,205 @@
           "dataType": "CS",
           "xpath": "entry/supply/statusCode/@code"
         }
+      ],
+      "alternateArchetypes": [
+        {
+          "entriesKey": "procedureEntries",
+          "entryElementPath": "entry/procedure",
+          "entryTemplateId": "2.16.840.1.113883.10.20.22.4.14",
+          "entryTemplateIdExtension": "2014-06-09",
+          "fields": [
+            {
+              "key": "equipmentProcedureCode",
+              "uscdiElement": "Equipment-Related Procedure",
+              "conformance": "SHALL",
+              "dataType": "CD",
+              "xpath": "entry/procedure/code/@code",
+              "xpathDisplay": "entry/procedure/code/@displayName",
+              "xpathSystem": "entry/procedure/code/@codeSystem"
+            },
+            {
+              "key": "equipmentProcedureStatus",
+              "uscdiElement": "Equipment-Related Procedure Status",
+              "conformance": "SHALL",
+              "dataType": "CS",
+              "xpath": "entry/procedure/statusCode/@code"
+            },
+            {
+              "key": "equipmentProcedureDate",
+              "uscdiElement": "Equipment-Related Procedure Date",
+              "conformance": "SHOULD",
+              "dataType": "TS",
+              "xpath": "entry/procedure/effectiveTime/@value"
+            },
+            {
+              "key": "equipmentProcedurePerformerNPI",
+              "uscdiElement": "Equipment-Related Procedure Performer NPI",
+              "conformance": "SHALL",
+              "dataType": "ST",
+              "xpath": "entry/procedure/performer/assignedEntity/id/@extension"
+            },
+            {
+              "key": "equipmentProcedurePerformerStreet",
+              "uscdiElement": "Equipment-Related Procedure Performer Street",
+              "conformance": "SHALL",
+              "dataType": "ST",
+              "xpath": "entry/procedure/performer/assignedEntity/addr/streetAddressLine"
+            },
+            {
+              "key": "equipmentProcedurePerformerCity",
+              "uscdiElement": "Equipment-Related Procedure Performer City",
+              "conformance": "SHALL",
+              "dataType": "ST",
+              "xpath": "entry/procedure/performer/assignedEntity/addr/city"
+            },
+            {
+              "key": "equipmentProcedurePerformerState",
+              "uscdiElement": "Equipment-Related Procedure Performer State",
+              "conformance": "SHALL",
+              "dataType": "ST",
+              "xpath": "entry/procedure/performer/assignedEntity/addr/state"
+            },
+            {
+              "key": "equipmentProcedurePerformerPostalCode",
+              "uscdiElement": "Equipment-Related Procedure Performer Postal Code",
+              "conformance": "SHALL",
+              "dataType": "ST",
+              "xpath": "entry/procedure/performer/assignedEntity/addr/postalCode"
+            },
+            {
+              "key": "equipmentProcedurePerformerPhone",
+              "uscdiElement": "Equipment-Related Procedure Performer Phone",
+              "conformance": "SHALL",
+              "dataType": "ST",
+              "xpath": "entry/procedure/performer/assignedEntity/telecom/@value"
+            },
+            {
+              "key": "equipmentProcedurePerformerGiven",
+              "uscdiElement": "Equipment-Related Procedure Performer Given Name",
+              "conformance": "MAY",
+              "dataType": "ST",
+              "xpath": "entry/procedure/performer/assignedEntity/assignedPerson/name/given"
+            },
+            {
+              "key": "equipmentProcedurePerformerFamily",
+              "uscdiElement": "Equipment-Related Procedure Performer Family Name",
+              "conformance": "MAY",
+              "dataType": "ST",
+              "xpath": "entry/procedure/performer/assignedEntity/assignedPerson/name/family"
+            },
+            {
+              "key": "equipmentProcedureTargetSiteCode",
+              "uscdiElement": "Equipment-Related Procedure Target Site",
+              "conformance": "SHOULD",
+              "dataType": "CD",
+              "valueSet": "Body Site",
+              "xpath": "entry/procedure/targetSiteCode/@code",
+              "xpathDisplay": "entry/procedure/targetSiteCode/@displayName",
+              "xpathSystem": "entry/procedure/targetSiteCode/@codeSystem"
+            },
+            {
+              "key": "equipmentProcedurePerformerOrgIdRoot",
+              "uscdiElement": "Equipment-Related Procedure Performer Organization ID Root",
+              "conformance": "MAY",
+              "dataType": "ST",
+              "xpath": "entry/procedure/performer/assignedEntity/representedOrganization/id/@root"
+            },
+            {
+              "key": "equipmentProcedurePerformerOrgId",
+              "uscdiElement": "Equipment-Related Procedure Performer Organization ID",
+              "conformance": "MAY",
+              "dataType": "ST",
+              "xpath": "entry/procedure/performer/assignedEntity/representedOrganization/id/@extension"
+            },
+            {
+              "key": "equipmentProcedurePerformerOrgName",
+              "uscdiElement": "Equipment-Related Procedure Performer Organization",
+              "conformance": "SHOULD",
+              "dataType": "ST",
+              "xpath": "entry/procedure/performer/assignedEntity/representedOrganization/name"
+            },
+            {
+              "key": "equipmentProcedurePerformerOrgPhone",
+              "uscdiElement": "Equipment-Related Procedure Performer Organization Phone",
+              "conformance": "SHOULD",
+              "dataType": "ST",
+              "xpath": "entry/procedure/performer/assignedEntity/representedOrganization/telecom/@value"
+            },
+            {
+              "key": "equipmentProcedurePerformerOrgStreet",
+              "uscdiElement": "Equipment-Related Procedure Performer Organization Street",
+              "conformance": "SHOULD",
+              "dataType": "ST",
+              "xpath": "entry/procedure/performer/assignedEntity/representedOrganization/addr/streetAddressLine"
+            },
+            {
+              "key": "equipmentProcedurePerformerOrgCity",
+              "uscdiElement": "Equipment-Related Procedure Performer Organization City",
+              "conformance": "SHOULD",
+              "dataType": "ST",
+              "xpath": "entry/procedure/performer/assignedEntity/representedOrganization/addr/city"
+            },
+            {
+              "key": "equipmentProcedurePerformerOrgState",
+              "uscdiElement": "Equipment-Related Procedure Performer Organization State",
+              "conformance": "SHOULD",
+              "dataType": "ST",
+              "xpath": "entry/procedure/performer/assignedEntity/representedOrganization/addr/state"
+            },
+            {
+              "key": "equipmentProcedurePerformerOrgPostalCode",
+              "uscdiElement": "Equipment-Related Procedure Performer Organization Postal Code",
+              "conformance": "SHOULD",
+              "dataType": "ST",
+              "xpath": "entry/procedure/performer/assignedEntity/representedOrganization/addr/postalCode"
+            },
+            {
+              "key": "equipmentProcedureAuthorGiven",
+              "uscdiElement": "Equipment-Related Procedure Author Given Name",
+              "conformance": "MAY",
+              "dataType": "ST",
+              "xpath": "entry/procedure/author/assignedAuthor/assignedPerson/name/given"
+            },
+            {
+              "key": "equipmentProcedureAuthorFamily",
+              "uscdiElement": "Equipment-Related Procedure Author Family Name",
+              "conformance": "MAY",
+              "dataType": "ST",
+              "xpath": "entry/procedure/author/assignedAuthor/assignedPerson/name/family"
+            },
+            {
+              "key": "equipmentProcedureAuthorNPI",
+              "uscdiElement": "Equipment-Related Procedure Author NPI",
+              "conformance": "MAY",
+              "dataType": "ST",
+              "xpath": "entry/procedure/author/assignedAuthor/id/@extension"
+            },
+            {
+              "key": "equipmentProcedureAuthorSpecialtyCode",
+              "uscdiElement": "Equipment-Related Procedure Author Specialty",
+              "conformance": "SHOULD",
+              "dataType": "CE",
+              "valueSet": "Healthcare Provider Taxonomy (NUCC)",
+              "xpath": "entry/procedure/author/assignedAuthor/code/@code",
+              "xpathDisplay": "entry/procedure/author/assignedAuthor/code/@displayName",
+              "xpathSystem": "entry/procedure/author/assignedAuthor/code/@codeSystem"
+            },
+            {
+              "key": "_narrativeRef",
+              "uscdiElement": "Narrative Reference (engine-populated — links the equipment procedure code back to its own narrative table row)",
+              "conformance": "MAY",
+              "dataType": "ST",
+              "xpath": "entry/procedure/code/originalText/reference/@value"
+            }
+          ],
+          "structuralTemplateIds": [
+            {
+              "path": "entry/procedure/author",
+              "templateId": "2.16.840.1.113883.10.20.22.4.119"
+            }
+          ]
+        }
       ]
     },
     {
@@ -1758,8 +2414,10 @@
           "uscdiElement": "Advance Directive Type",
           "conformance": "SHALL",
           "dataType": "CD",
+          "valueSet": "AdvanceDirectiveTypeCode",
           "xpath": "entry/observation/code/@code",
-          "xpathDisplay": "entry/observation/code/@displayName"
+          "xpathDisplay": "entry/observation/code/@displayName",
+          "xpathSystem": "entry/observation/code/@codeSystem"
         },
         {
           "key": "value",
@@ -1790,7 +2448,36 @@
           "dataType": "CD",
           "valueSet": "Personal And Legal Relationship Role Type",
           "xpath": "entry/observation/participant[@typeCode='CST']/participantRole[@classCode='AGNT']/code/@code",
-          "xpathDisplay": "entry/observation/participant[@typeCode='CST']/participantRole[@classCode='AGNT']/code/@displayName"
+          "xpathDisplay": "entry/observation/participant[@typeCode='CST']/participantRole[@classCode='AGNT']/code/@displayName",
+          "xpathSystem": "entry/observation/participant[@typeCode='CST']/participantRole[@classCode='AGNT']/code/@codeSystem"
+        },
+        {
+          "key": "custodianStreet",
+          "uscdiElement": "Custodian Street",
+          "conformance": "MAY",
+          "dataType": "ST",
+          "xpath": "entry/observation/participant[@typeCode='CST']/participantRole[@classCode='AGNT']/addr/streetAddressLine"
+        },
+        {
+          "key": "custodianCity",
+          "uscdiElement": "Custodian City",
+          "conformance": "MAY",
+          "dataType": "ST",
+          "xpath": "entry/observation/participant[@typeCode='CST']/participantRole[@classCode='AGNT']/addr/city"
+        },
+        {
+          "key": "custodianState",
+          "uscdiElement": "Custodian State",
+          "conformance": "MAY",
+          "dataType": "ST",
+          "xpath": "entry/observation/participant[@typeCode='CST']/participantRole[@classCode='AGNT']/addr/state"
+        },
+        {
+          "key": "custodianPostalCode",
+          "uscdiElement": "Custodian Postal Code",
+          "conformance": "MAY",
+          "dataType": "ST",
+          "xpath": "entry/observation/participant[@typeCode='CST']/participantRole[@classCode='AGNT']/addr/postalCode"
         },
         {
           "key": "custodianPhone",
@@ -1806,7 +2493,8 @@
           "dataType": "CD",
           "valueSet": "Healthcare Agent Qualifier Value Set",
           "xpath": "entry/observation/participant[@typeCode='CST']/participantRole[@classCode='AGNT']/playingEntity/code/@code",
-          "xpathDisplay": "entry/observation/participant[@typeCode='CST']/participantRole[@classCode='AGNT']/playingEntity/code/@displayName"
+          "xpathDisplay": "entry/observation/participant[@typeCode='CST']/participantRole[@classCode='AGNT']/playingEntity/code/@displayName",
+          "xpathSystem": "entry/observation/participant[@typeCode='CST']/participantRole[@classCode='AGNT']/playingEntity/code/@codeSystem"
         },
         {
           "key": "custodianName",
@@ -1814,6 +2502,23 @@
           "conformance": "MAY",
           "dataType": "ST",
           "xpath": "entry/observation/participant[@typeCode='CST']/participantRole[@classCode='AGNT']/playingEntity/name"
+        },
+        {
+          "key": "verifierTime",
+          "uscdiElement": "Advance Directive Verifier Time",
+          "conformance": "SHOULD",
+          "dataType": "TS",
+          "xpath": "entry/observation/participant[@typeCode='VRF']/time/@value"
+        },
+        {
+          "key": "verifierSpecialtyCode",
+          "uscdiElement": "Advance Directive Verifier Specialty",
+          "conformance": "SHOULD",
+          "dataType": "CE",
+          "valueSet": "Healthcare Provider Taxonomy (HIPAA)",
+          "xpath": "entry/observation/participant[@typeCode='VRF']/participantRole/code/@code",
+          "xpathDisplay": "entry/observation/participant[@typeCode='VRF']/participantRole/code/@displayName",
+          "xpathSystem": "entry/observation/participant[@typeCode='VRF']/participantRole/code/@codeSystem"
         },
         {
           "key": "verifierGiven",
@@ -1849,6 +2554,58 @@
           "conformance": "MAY",
           "dataType": "ST",
           "xpath": "entry/observation/author/assignedAuthor/id/@extension"
+        },
+        {
+          "key": "authorSpecialtyCode",
+          "uscdiElement": "Author Specialty",
+          "conformance": "SHOULD",
+          "dataType": "CE",
+          "valueSet": "Healthcare Provider Taxonomy (NUCC)",
+          "xpath": "entry/observation/author/assignedAuthor/code/@code",
+          "xpathDisplay": "entry/observation/author/assignedAuthor/code/@displayName",
+          "xpathSystem": "entry/observation/author/assignedAuthor/code/@codeSystem"
+        },
+        {
+          "key": "referencedDocumentIdRoot",
+          "uscdiElement": "Advance Directive Referenced External Document ID Root (CONF:1198-8692/8693/8695 — a scanned/filed copy of the physical directive, e.g. a POLST form; genuinely optional, only present when such a document actually exists)",
+          "conformance": "MAY",
+          "dataType": "ST",
+          "xpath": "entry/observation/reference[@typeCode='REFR']/externalDocument/id/@root"
+        },
+        {
+          "key": "referencedDocumentIdExtension",
+          "uscdiElement": "Advance Directive Referenced External Document ID Extension",
+          "conformance": "MAY",
+          "dataType": "ST",
+          "xpath": "entry/observation/reference[@typeCode='REFR']/externalDocument/id/@extension"
+        },
+        {
+          "key": "referencedDocumentContent",
+          "uscdiElement": "Advance Directive Referenced External Document Content (base64-embedded — the ED datatype's OTHER representation mode, an alternative to a URL reference: the actual scanned/filed document embedded inline rather than linked. Use this OR referencedDocumentURL, whichever matches how the source system actually holds the document — both are valid ED content, not mutually required.)",
+          "conformance": "MAY",
+          "dataType": "ST",
+          "xpath": "entry/observation/reference[@typeCode='REFR']/externalDocument/text"
+        },
+        {
+          "key": "referencedDocumentRepresentation",
+          "uscdiElement": "Advance Directive Referenced External Document Representation (ED datatype @representation — \"B64\" for base64-embedded binary content, the normal value whenever referencedDocumentContent is populated; \"TXT\" for literal inline plain text)",
+          "conformance": "MAY",
+          "dataType": "ST",
+          "xpath": "entry/observation/reference[@typeCode='REFR']/externalDocument/text/@representation"
+        },
+        {
+          "key": "referencedDocumentMediaType",
+          "uscdiElement": "Advance Directive Referenced External Document Media Type (e.g. application/pdf, image/tiff — IANA media type of the embedded/linked document)",
+          "conformance": "MAY",
+          "dataType": "ST",
+          "xpath": "entry/observation/reference[@typeCode='REFR']/externalDocument/text/@mediaType"
+        },
+        {
+          "key": "referencedDocumentURL",
+          "uscdiElement": "Advance Directive Referenced External Document URL (CONF:1198-8697/8698) — the ED datatype's pointer representation mode, an alternative to embedding referencedDocumentContent inline",
+          "conformance": "MAY",
+          "dataType": "ST",
+          "xpath": "entry/observation/reference[@typeCode='REFR']/externalDocument/text/reference/@value"
         }
       ]
     },
@@ -2057,6 +2814,16 @@
           "conformance": "MAY",
           "dataType": "ST",
           "xpath": "entry/observation/entryRelationship[@typeCode='SUBJ']/observation/author/assignedAuthor/id/@extension"
+        },
+        {
+          "key": "authorSpecialtyCode",
+          "uscdiElement": "Author Specialty",
+          "conformance": "SHOULD",
+          "dataType": "CE",
+          "valueSet": "Healthcare Provider Taxonomy (NUCC)",
+          "xpath": "entry/observation/entryRelationship[@typeCode='SUBJ']/observation/author/assignedAuthor/code/@code",
+          "xpathDisplay": "entry/observation/entryRelationship[@typeCode='SUBJ']/observation/author/assignedAuthor/code/@displayName",
+          "xpathSystem": "entry/observation/entryRelationship[@typeCode='SUBJ']/observation/author/assignedAuthor/code/@codeSystem"
         }
       ]
     },
@@ -2650,6 +3417,73 @@
           "conformance": "SHOULD",
           "dataType": "OID",
           "xpath": "ClinicalDocument/custodian/assignedCustodian/representedCustodianOrganization/id/@root"
+        }
+      ]
+    },
+    {
+      "key": "header.legalAuthenticator",
+      "uscdiClass": "LegalAuthenticator",
+      "displayName": "Legal Authenticator (Header)",
+      "loincCode": "",
+      "templateId": "",
+      "conformance": "SHOULD",
+      "isHeader": true,
+      "fields": [
+        {
+          "key": "legalAuthenticatorGiven",
+          "uscdiElement": "Legal Authenticator Given Name",
+          "conformance": "SHALL",
+          "dataType": "PN",
+          "xpath": "ClinicalDocument/legalAuthenticator/assignedEntity/assignedPerson/name/given"
+        },
+        {
+          "key": "legalAuthenticatorFamily",
+          "uscdiElement": "Legal Authenticator Family Name",
+          "conformance": "SHALL",
+          "dataType": "PN",
+          "xpath": "ClinicalDocument/legalAuthenticator/assignedEntity/assignedPerson/name/family"
+        },
+        {
+          "key": "legalAuthenticatorNPI",
+          "uscdiElement": "Legal Authenticator NPI",
+          "conformance": "SHOULD",
+          "dataType": "ST",
+          "xpath": "ClinicalDocument/legalAuthenticator/assignedEntity/id/@extension"
+        },
+        {
+          "key": "legalAuthenticatorAddressLine",
+          "uscdiElement": "Legal Authenticator Street",
+          "conformance": "SHALL",
+          "dataType": "ST",
+          "xpath": "ClinicalDocument/legalAuthenticator/assignedEntity/addr/streetAddressLine"
+        },
+        {
+          "key": "legalAuthenticatorCity",
+          "uscdiElement": "Legal Authenticator City",
+          "conformance": "SHALL",
+          "dataType": "ST",
+          "xpath": "ClinicalDocument/legalAuthenticator/assignedEntity/addr/city"
+        },
+        {
+          "key": "legalAuthenticatorState",
+          "uscdiElement": "Legal Authenticator State",
+          "conformance": "SHALL",
+          "dataType": "ST",
+          "xpath": "ClinicalDocument/legalAuthenticator/assignedEntity/addr/state"
+        },
+        {
+          "key": "legalAuthenticatorPostalCode",
+          "uscdiElement": "Legal Authenticator Postal Code",
+          "conformance": "SHALL",
+          "dataType": "ST",
+          "xpath": "ClinicalDocument/legalAuthenticator/assignedEntity/addr/postalCode"
+        },
+        {
+          "key": "legalAuthenticatorTelecom",
+          "uscdiElement": "Legal Authenticator Phone",
+          "conformance": "SHALL",
+          "dataType": "TEL",
+          "xpath": "ClinicalDocument/legalAuthenticator/assignedEntity/telecom/@value"
         }
       ]
     }

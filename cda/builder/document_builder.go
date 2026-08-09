@@ -28,6 +28,12 @@ type BuildOptions struct {
 	OrgName   string           // custodian + fallback author organization name (legacy — see CustodianOptions.OrgName)
 	Custodian CustodianOptions // structured custodian fields — deployment-level constant config, not per-message source data (see cda.build step's own Custodian tab, not cda.map_to_canonical)
 
+	// LegalAuthenticator configures the document's optional (0..1,
+	// CONF:1198-5579) legal signer — deployment-level constant config, same
+	// rationale as Custodian. Zero-value (no Given/Family) means "omit the
+	// element entirely" — see LegalAuthenticatorOptions' own doc comment.
+	LegalAuthenticator LegalAuthenticatorOptions
+
 	// TimezoneOffset is a "+HHMM"/"-HHMM" string (e.g. "-0500") applied to
 	// the internally-generated document effectiveTime and author time —
 	// deployment-level constant config, same rationale as OrgName/Custodian
@@ -53,11 +59,31 @@ type BuildOptions struct {
 // comment for why that's a deliberate, evidence-based omission rather than
 // an oversight.
 type CustodianOptions struct {
-	IdRoot      string // defaults to npiOID when empty — preserves current hardcoded behavior
-	IdExtension string // empty -> bare npiOID-rooted id, no extension (current behavior)
-	OrgName     string // falls back to resolveOrgName(opts) when empty (current behavior)
+	IdRoot                                   string // defaults to npiOID when empty — preserves current hardcoded behavior
+	IdExtension                              string // empty -> bare npiOID-rooted id, no extension (current behavior)
+	OrgName                                  string // falls back to resolveOrgName(opts) when empty (current behavior)
 	Street, City, State, PostalCode, Country string
-	Phone       string
+	Phone                                    string
+}
+
+// LegalAuthenticatorOptions are the structured fields configurable directly
+// on the cda.build step's own Legal Authenticator tab (services/executors/
+// transform/cda_build_executor.go's CdaLegalAuthenticatorConfig) — the
+// single person legally responsible for the document (CONF:1198-5579,
+// SHOULD 0..1), distinct from its author. Unlike CustodianOptions (SHALL
+// exactly one, always written, all-zero-value preserves pre-existing
+// hardcoded output), this element is genuinely optional and an incomplete
+// one (missing the SHALL assignedPerson/name) would be worse than omitting
+// it — so writeLegalAuthenticatorHeader only writes anything at all when
+// Given or Family is configured; every saved pipeline predating this
+// feature simply never gets a legalAuthenticator, matching prior behavior
+// exactly (there was none before).
+type LegalAuthenticatorOptions struct {
+	Given, Family                                            string
+	NPI                                                      string
+	SpecialtyCode, SpecialtyCodeSystem, SpecialtyCodeDisplay string
+	Street, City, State, PostalCode, Country                 string
+	Phone                                                    string
 }
 
 // BuildDocument converts canonicalDoc into a C-CDA 2.1 XML string for the
@@ -89,6 +115,7 @@ func BuildDocument(loader *cdaSchema.CDASchemaLoader, canonicalDoc map[string]in
 	writeAuthorHeader(root, headerMap, opts)
 	writeInformantsHeader(root, headerMap)
 	writeCustodianHeader(root, opts)
+	writeLegalAuthenticatorHeader(root, opts)
 	writeDocumentationOfHeader(root, headerMap)
 	writeEncompassingEncounterHeader(root, headerMap)
 
@@ -101,19 +128,89 @@ func BuildDocument(loader *cdaSchema.CDASchemaLoader, canonicalDoc map[string]in
 		if sec == nil {
 			continue
 		}
-		entries := extractEntries(sectionsMap, key)
+		secData, _ := sectionsMap[key].(map[string]interface{})
+		entries := extractSubEntries(secData, "entries")
+
+		altEntries := make([][]map[string]interface{}, len(sec.AlternateArchetypes))
+		hasAltEntries := false
+		for i, alt := range sec.AlternateArchetypes {
+			altEntries[i] = extractSubEntries(secData, alt.EntriesKey)
+			if len(altEntries[i]) > 0 {
+				hasAltEntries = true
+			}
+		}
+
 		isShall := containsString(sectionInfo.SHALL, key)
-		if len(entries) == 0 && !isShall {
+		if len(entries) == 0 && !hasAltEntries && !isShall {
 			continue
 		}
 		component := structuredBody.CreateElement("component")
-		component.AddChild(buildSectionElement(sec, entries))
+		component.AddChild(buildSectionElement(sec, entries, altEntries))
 	}
 
 	ensureIntervalEffectiveTimeXsiType(root)
+	ensureIntervalPQXsiType(root)
+	ensurePeriodicIntervalXsiType(root)
 
 	doc.Indent(2)
 	return doc.WriteToString()
+}
+
+// ensurePeriodicIntervalXsiType sets xsi:type="PIVL_TS", @operator="A", and
+// @institutionSpecified="true" on every <effectiveTime> in the whole
+// document that has a <period> child but no xsi:type yet — Medication
+// Activity's own recurring-dose frequency (CONF:1098-7513/9106/28499,
+// Figure 168's own worked example: <effectiveTime xsi:type="PIVL_TS"
+// institutionSpecified="true" operator="A"><period value="12" unit="h"/>
+// </effectiveTime>). SubstanceAdministration's base type permits effectiveTime
+// to repeat (0..*) — this second one is a SEPARATE element from the
+// medication's own start/stop effectiveTime (already covered by
+// ensureIntervalEffectiveTimeXsiType, which only ever matches low/high
+// children, never period), created via the field's own "effectiveTime[2]"
+// positional xpath predicate (see doseFrequencyValue in ccda_2_1.json) — the
+// SAME "no single field write owns the parent element" gap the other two
+// interval-xsi:type passes exist for, just for the period-only shape.
+// operator="A" (CONF:1098-9106, "average") and institutionSpecified="true"
+// are both fixed per the worked example — this schema only ever represents
+// a simple periodic frequency, never a complex multi-part schedule.
+func ensurePeriodicIntervalXsiType(root *etree.Element) {
+	for _, et := range root.FindElements(".//effectiveTime") {
+		if et.SelectAttrValue("xsi:type", "") != "" {
+			continue
+		}
+		if et.SelectElement("period") == nil {
+			continue
+		}
+		et.CreateAttr("xsi:type", "PIVL_TS")
+		et.CreateAttr("operator", "A")
+		et.CreateAttr("institutionSpecified", "true")
+	}
+}
+
+// ensureIntervalPQXsiType sets xsi:type="IVL_PQ" on every <value> in the
+// whole document that has a <low> and/or <high> child but no xsi:type yet —
+// the exact same shape/reason as ensureIntervalEffectiveTimeXsiType, just for
+// Result Observation's referenceRange/observationRange/value (CONF:1198-7150/
+// 7151/32175, Figure 212's own worked example: <value xsi:type="IVL_PQ">
+// <low value="34.9" unit="%"/><high value="44.5" unit="%"/></value>).
+// referenceRangeLow/referenceRangeHigh's own field writes only ever touch the
+// <low>/<high> children directly (their xpath targets .../value/low/@value
+// and .../value/high/@value), so writeFieldValue's injectValueXsiType never
+// fires for them (it only acts on an element literally tagged <value>) —
+// this is the same "no single field write owns the parent element" gap
+// ensureIntervalEffectiveTimeXsiType exists for, just on <value> instead of
+// <effectiveTime>. Scoped by the low/high-child check alone (mirroring that
+// function exactly) — safe because every OTHER <value> in this schema is a
+// scalar CD/PQ/CE with @code or @value attributes, never low/high children.
+func ensureIntervalPQXsiType(root *etree.Element) {
+	for _, v := range root.FindElements(".//value") {
+		if v.SelectAttrValue("xsi:type", "") != "" {
+			continue
+		}
+		if v.SelectElement("low") != nil || v.SelectElement("high") != nil {
+			v.CreateAttr("xsi:type", "IVL_PQ")
+		}
+	}
 }
 
 // ensureIntervalEffectiveTimeXsiType sets xsi:type="IVL_TS" on every
@@ -153,7 +250,11 @@ func ensureIntervalEffectiveTimeXsiType(root *etree.Element) {
 	}
 }
 
-func buildSectionElement(sec *cdaSchema.CDASectionDef, entries []map[string]interface{}) *etree.Element {
+// buildSectionElement builds one <component><section> element. altEntries,
+// if non-nil, must be parallel to sec.AlternateArchetypes — altEntries[i] is
+// AlternateArchetypes[i]'s own already-extracted rows (see
+// AlternateEntryArchetype's own doc comment).
+func buildSectionElement(sec *cdaSchema.CDASectionDef, entries []map[string]interface{}, altEntries [][]map[string]interface{}) *etree.Element {
 	section := etree.NewElement("section")
 	if sec.TemplateID != "" {
 		tid := section.CreateElement("templateId")
@@ -176,26 +277,55 @@ func buildSectionElement(sec *cdaSchema.CDASectionDef, entries []map[string]inte
 		section.CreateElement("title").SetText(sec.DisplayName)
 	}
 
-	buildSectionNarrative(section, sec, entries)
+	rowIDs, altRowIDs := buildSectionNarrative(section, sec, entries, altEntries)
 
-	for _, entry := range entries {
+	// Inject each entry's own narrative row ID (as "#id", ready for a
+	// "_narrativeRef" field's xpath to write straight into an
+	// originalText/reference or bare reference element) AFTER the narrative
+	// itself is built — buildSectionNarrative's own column scan runs first,
+	// against entries that don't have "_narrativeRef" set yet, so the
+	// synthetic key never leaks into the human-readable table as a column.
+	for i, entry := range entries {
+		if i < len(rowIDs) {
+			entry["_narrativeRef"] = "#" + rowIDs[i]
+		}
 		buildEntry(section, sec, entry)
+	}
+
+	for i := range sec.AlternateArchetypes {
+		if i >= len(altEntries) {
+			break
+		}
+		for j, record := range altEntries[i] {
+			if i < len(altRowIDs) && j < len(altRowIDs[i]) {
+				record["_narrativeRef"] = "#" + altRowIDs[i][j]
+			}
+			buildAlternateEntry(section, &sec.AlternateArchetypes[i], record)
+		}
 	}
 
 	return section
 }
 
 func extractEntries(sectionsMap map[string]interface{}, key string) []map[string]interface{} {
-	secData, ok := sectionsMap[key].(map[string]interface{})
-	if !ok {
+	secData, _ := sectionsMap[key].(map[string]interface{})
+	return extractSubEntries(secData, "entries")
+}
+
+// extractSubEntries reads one canonical sub-key (secData[subKey], e.g. the
+// section's own "entries" or an AlternateEntryArchetype's own EntriesKey)
+// and normalizes it to a typed slice — shared by extractEntries (primary
+// shape) and BuildDocument's alternate-archetype handling so both accept the
+// same two shapes: plain JSON-decoded []interface{}, or the typed
+// []map[string]interface{} a caller (e.g. the FHIR bundle adapter) may build
+// in-process without a JSON round-trip.
+func extractSubEntries(secData map[string]interface{}, subKey string) []map[string]interface{} {
+	if secData == nil {
 		return nil
 	}
-	rawEntries, ok := secData["entries"].([]interface{})
+	rawEntries, ok := secData[subKey].([]interface{})
 	if !ok {
-		// Also accept the typed shape ([]map[string]interface{}) a caller
-		// (e.g. the FHIR bundle adapter) may build in-process without a
-		// JSON round-trip.
-		if typed, ok := secData["entries"].([]map[string]interface{}); ok {
+		if typed, ok := secData[subKey].([]map[string]interface{}); ok {
 			return typed
 		}
 		return nil
@@ -435,19 +565,109 @@ func writeCustodianHeader(root *etree.Element, opts BuildOptions) {
 	}
 }
 
+// writeLegalAuthenticatorHeader writes <legalAuthenticator><time/>
+// <signatureCode code="S"/><assignedEntity>...</assignedEntity>
+// </legalAuthenticator> — the document's optional (SHOULD 0..1,
+// CONF:1198-5579/5580/5583) single legal signer, distinct from author.
+// Schema sequence for the document root is author, informant*, custodian,
+// informationRecipient*, legalAuthenticator?, ... (base CDA ClinicalDocument
+// content model) — called right after custodian in BuildDocument, matching
+// the real IG's own worked example (Figure 10).
+//
+// Only writes anything when a name is configured (Given or Family) — unlike
+// Custodian (SHALL exactly one, always written), legalAuthenticator is
+// genuinely optional, and an incomplete one (missing assignedPerson/name,
+// itself SHALL once the element exists at all) would be a schema violation
+// worse than omitting the whole element — every pipeline predating this
+// feature simply never gets one, matching prior behavior exactly (there was
+// none before).
+//
+// assignedEntity's own sequence (id*, code?, addr*, telecom*,
+// assignedPerson) is the SAME order as assignedAuthor (unlike
+// representedCustodianOrganization's reversed telecom-before-addr) —
+// written in that exact order directly below, so no reorder pass is needed
+// here (unlike writeAuthorHeader, which builds addr/telecom AFTER
+// assignedPerson by construction order and must reorder after the fact).
+func writeLegalAuthenticatorHeader(root *etree.Element, opts BuildOptions) {
+	la := opts.LegalAuthenticator
+	if la.Given == "" && la.Family == "" {
+		return
+	}
+
+	legalAuth := root.CreateElement("legalAuthenticator")
+	legalAuth.CreateElement("time").CreateAttr("value", nowCDATimestamp(opts.TimezoneOffset))
+	legalAuth.CreateElement("signatureCode").CreateAttr("code", "S")
+
+	assignedEntity := legalAuth.CreateElement("assignedEntity")
+	writeNPI(assignedEntity, "id", la.NPI)
+
+	if la.SpecialtyCode != "" {
+		code := assignedEntity.CreateElement("code")
+		code.CreateAttr("code", la.SpecialtyCode)
+		if la.SpecialtyCodeSystem != "" {
+			code.CreateAttr("codeSystem", la.SpecialtyCodeSystem)
+			injectCodeSystemName(code, la.SpecialtyCodeSystem)
+		}
+		if la.SpecialtyCodeDisplay != "" {
+			code.CreateAttr("displayName", la.SpecialtyCodeDisplay)
+		}
+	}
+
+	if la.Street != "" || la.City != "" || la.State != "" || la.PostalCode != "" || la.Country != "" {
+		addr := assignedEntity.CreateElement("addr")
+		addr.CreateAttr("use", "WP")
+		writeHeaderFields(addr, map[string]interface{}{
+			"street": la.Street, "city": la.City, "state": la.State,
+			"postalCode": la.PostalCode, "country": la.Country,
+		}, patientAddressFields)
+	}
+	if la.Phone != "" {
+		tel := assignedEntity.CreateElement("telecom")
+		tel.CreateAttr("value", "tel:"+la.Phone)
+		tel.CreateAttr("use", "WP")
+	}
+
+	assignedPerson := assignedEntity.CreateElement("assignedPerson")
+	name := assignedPerson.CreateElement("name")
+	if la.Given != "" {
+		name.CreateElement("given").SetText(la.Given)
+	}
+	if la.Family != "" {
+		name.CreateElement("family").SetText(la.Family)
+	}
+}
+
 // writePersonReference writes one <tag><assignedEntity>...</assignedEntity></tag>
 // element — the shape shared by document-level informants[] and
 // documentationOf performers[]: an optional NPI-rooted id (only when npi
 // data is present, unlike author's identity which always carries one),
-// optional name, and (informants only) an optional represented
-// organization. Returns the outer <tag> element so callers can add their
-// own tag-specific attributes (e.g. performer's fixed typeCode="PRF").
+// an optional specialty code (CONF:1198-14842 for documentationOf
+// performers — genuinely absent before this, unlike every per-section
+// author field which already has its own specialty code), optional name,
+// and (informants only) an optional represented organization. Written in
+// AssignedEntity's own real sequence (id, code, addr, telecom,
+// assignedPerson, representedOrganization — same order Round 20's
+// legalAuthenticator and Round 22's assignedEntity fix both already
+// established) — code MUST come before assignedPerson/name. Returns the
+// outer <tag> element so callers can add their own tag-specific attributes
+// (e.g. performer's fixed typeCode="PRF").
 func writePersonReference(root *etree.Element, tag string, person map[string]interface{}, includeOrg bool) *etree.Element {
 	el := root.CreateElement(tag)
 	assignedEntity := el.CreateElement("assignedEntity")
 
 	if npi, ok := stringValue(person["npi"]); ok {
 		writeNPI(assignedEntity, "id", npi)
+	}
+	if specialtyCode, ok := stringValue(person["specialtyCode"]); ok {
+		code := assignedEntity.CreateElement("code")
+		code.CreateAttr("code", specialtyCode)
+		if system, ok := stringValue(person["specialtyCodeSystem"]); ok {
+			code.CreateAttr("codeSystem", system)
+			injectCodeSystemName(code, system)
+		}
+		if display, ok := stringValue(person["specialtyCodeDisplay"]); ok {
+			code.CreateAttr("displayName", display)
+		}
 	}
 	writeHeaderFields(assignedEntity, person, personItemFields)
 	if includeOrg {

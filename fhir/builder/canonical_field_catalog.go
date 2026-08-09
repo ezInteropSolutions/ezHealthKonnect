@@ -31,6 +31,15 @@ type CanonicalFieldInfo struct {
 	Label    string `json:"label"`
 	DataType string `json:"dataType,omitempty"`
 	Required bool   `json:"required,omitempty"`
+	// ValueSetURL/BindingStrength surface fhir/r4's compiled terminology
+	// bindings (previously validator-internal only — fhir/r4/validator.go's
+	// validateTerminology was the sole consumer) to the fhir.build config UI,
+	// so a user can see a field is coded against a specific ValueSet before
+	// running a Test Pipeline or waiting on an external validator round.
+	// Only "required"/"extensible" bindings are ever populated — compiler.go
+	// deliberately drops "preferred"/"example" (no normative obligation).
+	ValueSetURL     string `json:"valueSetUrl,omitempty"`
+	BindingStrength string `json:"bindingStrength,omitempty"`
 }
 
 // ResourceTypeCatalog returns every distinct FHIR resource type compiled for
@@ -90,16 +99,26 @@ func FieldCatalog(version, resourceType, profile string) []CanonicalFieldInfo {
 		return nil
 	}
 
+	bindingByPath := make(map[string]r4.CompiledBinding, len(cp.Bindings))
+	for _, b := range cp.Bindings {
+		bindingByPath[b.Path] = b
+	}
+
 	prefix := resourceType + "."
 	out := make([]CanonicalFieldInfo, 0, len(cp.DataTypes))
 	for path, dataType := range cp.DataTypes {
 		key := strings.TrimPrefix(path, prefix)
-		out = append(out, CanonicalFieldInfo{
+		info := CanonicalFieldInfo{
 			Key:      key,
 			Label:    key,
 			DataType: dataType,
 			Required: cp.Required[path],
-		})
+		}
+		if b, ok := bindingByPath[path]; ok {
+			info.ValueSetURL = b.ValueSetURL
+			info.BindingStrength = b.BindingStrength
+		}
+		out = append(out, info)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Key < out[j].Key })
 	return out

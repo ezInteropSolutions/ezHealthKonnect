@@ -131,27 +131,46 @@ class PipelineBuilder {
                     const ifaceObj = interfaceData.data || interfaceData.interface || interfaceData;
                     // Store name for header
                     this.interfaceName = ifaceObj.name || ifaceObj.interface_name || null;
-                    // Resolve message type only if not already set from URL params
+                    // Resolve message type only if not already set from URL params.
+                    // Deliberately never GUESS a specific type here (this used to
+                    // default to a hardcoded 'ADT^A01') — a wrong guess can
+                    // silently match a REAL pipeline for a DIFFERENT message type
+                    // on multi-message-type interfaces and hide the others. If the
+                    // interface's own message_type isn't a real, specific value,
+                    // leave it unresolved and let the "first pipeline" fallback
+                    // below resolve to whatever actually exists.
                     if (!this.messageType || this.messageType === 'hl7v2') {
                         const dbMessageType = ifaceObj.message_type || ifaceObj.messageType;
                         this.messageType = (dbMessageType && dbMessageType !== 'hl7v2')
                             ? dbMessageType
-                            : 'ADT^A01';
+                            : null;
                     }
-                    console.log(`✅ Interface loaded: "${this.interfaceName}", messageType: ${this.messageType}`);
+                    console.log(`✅ Interface loaded: "${this.interfaceName}", messageType: ${this.messageType || '(unresolved)'}`);
                 } else {
-                    console.warn('⚠️ Failed to load interface, defaulting to ADT^A01');
-                    this.messageType = this.messageType || 'ADT^A01';
+                    console.warn('⚠️ Failed to load interface data');
                 }
 
-                // Try to load existing pipeline for interface/message type
-                this.pipeline = await window.pipelineAPI.loadPipelineByInterface(
-                    this.interfaceId,
-                    this.messageType
-                );
+                // Try to load existing pipeline for interface/message type — only
+                // when we have a real, specific message type to try.
+                if (this.messageType) {
+                    this.pipeline = await window.pipelineAPI.loadPipelineByInterface(
+                        this.interfaceId,
+                        this.messageType
+                    );
+                }
 
-                // Fallback: if not found by message type, pick the first pipeline for this interface
-                // (handles cases where interface.message_type is NULL but pipeline was saved with a specific type)
+                // Fetch every pipeline this interface has (one per message type)
+                // so the header switcher (renderMessageTypeSwitcher) can list them
+                // all, regardless of which one ends up loaded below.
+                try {
+                    this.availablePipelines = await window.pipelineAPI.listPipelinesForInterface(this.interfaceId);
+                } catch (e) {
+                    this.availablePipelines = [];
+                }
+
+                // Fallback: no messageType resolved yet, or that message type has
+                // no pipeline — load whatever pipeline actually exists for this
+                // interface instead of guessing.
                 if (!this.pipeline) {
                     const fallback = await window.pipelineAPI.loadFirstPipelineForInterface(this.interfaceId);
                     if (fallback) {
@@ -225,9 +244,7 @@ class PipelineBuilder {
             ifaceLink.title = `Back to interface: ${displayName}`;
         }
         if (msgEl) {
-            msgEl.textContent = this.messageType
-                ? `${this.messageType} Pipeline`
-                : 'Pipeline Builder';
+            this.renderMessageTypeSwitcher(msgEl);
         }
 
         // Update page title too
@@ -255,6 +272,45 @@ class PipelineBuilder {
             infoEl.textContent    = this.messageType;
             infoEl.style.display  = 'inline-block';
         }
+    }
+
+    /**
+     * Renders the breadcrumb's message-type slot as either plain text (0 or 1
+     * pipeline for this interface — nothing to switch between, matches this
+     * codebase's "don't show a dropdown when there's no real choice"
+     * convention) or a <select> switcher listing every message type this
+     * interface has a pipeline for. Fixes the gap where every "Open Pipeline"
+     * link in the app only passes interfaceId — with more than one pipeline,
+     * there was previously no in-builder way to reach anything but whichever
+     * one happened to load by default.
+     */
+    renderMessageTypeSwitcher(msgEl) {
+        const pipelines = this.availablePipelines || [];
+
+        if (pipelines.length <= 1) {
+            msgEl.textContent = this.messageType
+                ? `${this.messageType} Pipeline`
+                : 'Pipeline Builder';
+            return;
+        }
+
+        const current = this.messageType;
+        const options = pipelines
+            .map(p => p.message_type)
+            .filter(Boolean)
+            .sort()
+            .map(mt => `<option value="${mt}" ${mt === current ? 'selected' : ''}>${mt} Pipeline</option>`)
+            .join('');
+
+        msgEl.innerHTML = `<select class="breadcrumb-msgtype-select" title="Switch to another message type's pipeline">${options}</select>`;
+        const select = msgEl.querySelector('select');
+        select.addEventListener('change', (e) => {
+            const params = new URLSearchParams(window.location.search);
+            params.set('interfaceId', this.interfaceId);
+            params.set('messageType', e.target.value);
+            params.delete('pipelineId'); // switching by message type, not by a specific saved pipeline id
+            window.location.href = `${window.location.pathname}?${params.toString()}`;
+        });
     }
 
     /**
@@ -754,6 +810,22 @@ class PipelineBuilder {
             }
         }
 
+        // Find any hl7.build step's HL7 v2 message output, for a dedicated
+        // copy button — mirrors the fhirBundle fallback scan above rather
+        // than the CDA content-sniff, because hl7.build always writes its
+        // result under a fixed "hl7_message" step_output key regardless of
+        // the step's configured outputField destination (message.hl7Message,
+        // message.adtMessage, etc. all still land here).
+        this._lastTestHL7Message = null;
+        if (result.steps) {
+            for (const stepData of Object.values(result.steps)) {
+                if (typeof stepData?.step_output?.hl7_message === 'string' && stepData.step_output.hl7_message) {
+                    this._lastTestHL7Message = stepData.step_output.hl7_message;
+                    break;
+                }
+            }
+        }
+
         // Check if test passed
         const isSuccess = result.success === true;
 
@@ -782,6 +854,11 @@ class PipelineBuilder {
                 ${result.errors?.length > 0 ? `<p class="error-message"><strong>Errors:</strong> ${result.errors.length} error(s) occurred</p>` : ''}
             </div>
         `;
+
+        // The real outbound payload(s) — most authoritative "final output"
+        // signal available (see renderOutboundPayloads doc comment) — shown
+        // right after the pass/fail summary, ahead of the per-step list.
+        html += this.renderOutboundPayloads(result.outbound_payloads);
 
         // Render per-step results with pass/fail indicators
         console.log('[TestResults] result keys:', Object.keys(result));
@@ -962,6 +1039,10 @@ class PipelineBuilder {
                 <button id="copyCdaXmlBtn" class="btn-copy">
                     <i class="fas fa-copy"></i> Copy CCD/CDA XML
                 </button>` : ''}
+                ${this._lastTestHL7Message ? `
+                <button id="copyHl7MessageBtn" class="btn-copy">
+                    <i class="fas fa-copy"></i> Copy HL7 Message
+                </button>` : ''}
                 <button id="copyResultsBtn" class="btn btn-secondary">
                     <i class="fas fa-file-code"></i> Copy Full Results
                 </button>
@@ -990,10 +1071,37 @@ class PipelineBuilder {
                 copyCdaXmlBtn.addEventListener('click', () => this.copyCdaXmlToClipboard(this._lastTestCdaXML));
             }
 
+            const copyHl7MessageBtn = document.getElementById('copyHl7MessageBtn');
+            if (copyHl7MessageBtn) {
+                copyHl7MessageBtn.addEventListener('click', () => this.copyHL7MessageToClipboard(this._lastTestHL7Message));
+            }
+
             const copyBtn = document.getElementById('copyResultsBtn');
             if (copyBtn) {
                 copyBtn.addEventListener('click', () => this.copyResultsToClipboard(result));
             }
+
+            // Outbound payload tabs + per-tab copy buttons
+            document.querySelectorAll('.outbound-payload-tab').forEach(tab => {
+                tab.addEventListener('click', () => {
+                    const idx = tab.getAttribute('data-outbound-tab-index');
+                    document.querySelectorAll('.outbound-payload-tab').forEach(t => {
+                        const active = t === tab;
+                        t.classList.toggle('active', active);
+                        t.style.borderBottomColor = active ? 'var(--primary-color,#3b82f6)' : 'transparent';
+                        t.style.color = active ? 'var(--primary-color,#3b82f6)' : '#64748b';
+                    });
+                    document.querySelectorAll('.outbound-payload-panel').forEach(panel => {
+                        panel.style.display = panel.getAttribute('data-outbound-panel-index') === idx ? '' : 'none';
+                    });
+                });
+            });
+            document.querySelectorAll('.copy-outbound-payload-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const idx = parseInt(btn.getAttribute('data-outbound-copy-index'), 10);
+                    this.copyOutboundPayloadToClipboard(idx);
+                });
+            });
         }, 100);
 
         return html;
@@ -1074,6 +1182,62 @@ class PipelineBuilder {
     /**
      * Render transformed FHIR message output
      */
+    /**
+     * Renders the real outbound payload(s) — result.outbound_payloads,
+     * populated server-side from connector.outbound steps (or payload.builder
+     * as a fallback when the pipeline has no delivery step yet; see
+     * TransformationTestController.TestPipeline / extractOutboundPayloadEntry).
+     * Format-agnostic by design: works identically for a FHIR Bundle, an HL7
+     * v2 message, CDA XML, CSV, or anything else a pipeline might send —
+     * content is pretty-printed as JSON when it parses as JSON, shown as
+     * plain text otherwise. One tab per entry — a single-destination
+     * pipeline gets one tab, a fan-out to N destinations gets N, same code
+     * path either way.
+     */
+    renderOutboundPayloads(outboundPayloads) {
+        if (!Array.isArray(outboundPayloads) || outboundPayloads.length === 0) return '';
+
+        this._lastOutboundPayloads = outboundPayloads;
+
+        const tabHeaders = outboundPayloads.map((p, i) => `
+            <button class="outbound-payload-tab ${i === 0 ? 'active' : ''}" data-outbound-tab-index="${i}"
+                    style="padding:8px 14px;border:none;border-bottom:3px solid ${i === 0 ? 'var(--primary-color,#3b82f6)' : 'transparent'};
+                           background:transparent;cursor:pointer;font-size:13px;font-weight:600;
+                           color:${i === 0 ? 'var(--primary-color,#3b82f6)' : '#64748b'};white-space:nowrap;">
+                ${this.escapeHtml(p.step_name)}${p.connector_type ? ` <span style="font-weight:400;opacity:0.75;">(${this.escapeHtml(p.connector_type)})</span>` : ''}
+            </button>
+        `).join('');
+
+        const tabPanels = outboundPayloads.map((p, i) => {
+            const pretty = p.is_json ? (() => { try { return JSON.stringify(JSON.parse(p.content), null, 2); } catch (_) { return p.content; } })() : p.content;
+            return `
+                <div class="outbound-payload-panel" data-outbound-panel-index="${i}" style="${i === 0 ? '' : 'display:none;'}">
+                    <div style="margin-bottom: 0.75rem; color: #64748b; font-size: 0.875rem; display:flex; align-items:center; justify-content:space-between; gap:8px; flex-wrap:wrap;">
+                        <span><strong>Content-Type:</strong> ${this.escapeHtml(p.content_type || 'unknown')} | <strong>Size:</strong> ${p.size_bytes} bytes</span>
+                        <button class="btn-copy copy-outbound-payload-btn" data-outbound-copy-index="${i}" style="padding:4px 10px;font-size:12px;">
+                            <i class="fas fa-copy"></i> Copy This Payload
+                        </button>
+                    </div>
+                    <div class="message-output">
+                        <pre style="margin: 0; white-space: pre-wrap; word-wrap: break-word;">${this.escapeHtml(pretty)}</pre>
+                    </div>
+                </div>
+            `;
+        }).join('');
+
+        return `
+            <div class="outbound-payloads-section" style="margin-top:1rem;border:2px solid var(--primary-color,#3b82f6);border-radius:8px;overflow:hidden;">
+                <div style="padding:10px 14px;background:rgba(59,130,246,0.08);display:flex;align-items:center;gap:8px;">
+                    <i class="fas fa-paper-plane" style="color:var(--primary-color,#3b82f6);"></i>
+                    <strong style="font-size:14px;">Outbound Payload${outboundPayloads.length > 1 ? `s (${outboundPayloads.length})` : ''}</strong>
+                    <span style="font-size:12px;color:#64748b;margin-left:4px;">— what will actually be sent</span>
+                </div>
+                <div style="display:flex;border-bottom:1px solid var(--border-color,#e2e8f0);overflow-x:auto;">${tabHeaders}</div>
+                <div style="padding:12px 14px;">${tabPanels}</div>
+            </div>
+        `;
+    }
+
     renderTransformedMessage(bundle) {
         if (!bundle) return '';
 
@@ -1250,8 +1414,49 @@ class PipelineBuilder {
     }
 
     /**
+     * Copy an HL7 v2 message to clipboard (mirrors copyCdaXmlToClipboard for
+     * the HL7 v2 side) — message is this._lastTestHL7Message, the raw
+     * pipe-delimited string a hl7.build step's output was found under, so
+     * no JSON.stringify/parse round trip is needed here either.
+     */
+    async copyHL7MessageToClipboard(message) {
+        if (!message) {
+            this.dragDropManager.showNotification('No HL7 message to copy', 'warning');
+            return;
+        }
+
+        try {
+            await navigator.clipboard.writeText(message);
+            this.dragDropManager.showNotification('HL7 message copied to clipboard', 'success');
+        } catch (error) {
+            console.error('Failed to copy:', error);
+            this.dragDropManager.showNotification('Failed to copy HL7 message', 'error');
+        }
+    }
+
+    /**
      * Copy results to clipboard
      */
+    /**
+     * Copies one entry from result.outbound_payloads (see renderOutboundPayloads)
+     * by index. Copies the raw content string as-is — no re-serialization —
+     * so an HL7/CDA/CSV payload isn't accidentally mangled by a JSON round trip.
+     */
+    async copyOutboundPayloadToClipboard(index) {
+        const entry = this._lastOutboundPayloads?.[index];
+        if (!entry) {
+            this.dragDropManager.showNotification('No outbound payload to copy', 'warning');
+            return;
+        }
+        try {
+            await navigator.clipboard.writeText(entry.content);
+            this.dragDropManager.showNotification(`Outbound payload (${entry.step_name}) copied to clipboard`, 'success');
+        } catch (error) {
+            console.error('Failed to copy:', error);
+            this.dragDropManager.showNotification('Failed to copy outbound payload', 'error');
+        }
+    }
+
     async copyResultsToClipboard(result) {
         try {
             await navigator.clipboard.writeText(JSON.stringify(result, null, 2));

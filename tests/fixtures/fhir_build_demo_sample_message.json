@@ -1,0 +1,48 @@
+{
+  "patientIdentifiers": [
+    { "idSystem": "urn:oid:2.16.840.1.113883.19.5.99999.2", "idValue": "12345" }
+  ],
+  "dob": "1980-05-20",
+  "sexCode": "F",
+  "patientFamily": "Doe",
+  "patientGiven": "Mary",
+  "patientPhone": "555-0100",
+  "patientAddressLine": "123 Main St",
+  "patientAddressCity": "Springfield",
+  "patientAddressState": "IL",
+  "patientAddressPostalCode": "62704",
+
+  "encounterId": "enc-001",
+  "encounterStatus": "finished",
+  "encounterClassCode": "AMB",
+  "encounterPeriodStart": "2026-01-15T09:00:00Z",
+  "encounterPeriodEnd": "2026-01-15T09:45:00Z",
+
+  "conditionCodeSystem": "http://snomed.info/sct",
+  "conditionCode": "44054006",
+
+  "observationCode": "8310-5",
+  "observationDate": "2026-01-15T09:30:00Z",
+  "observationValue": "37.2",
+  "observationUnit": "Cel",
+
+  "drugCode": "197361",
+
+  "allergenCode": "7980",
+
+  "vaccineCode": "141",
+  "immunizationDate": "2026-01-15",
+
+  "practitionerNPI": "1234567890",
+  "practitionerFamily": "Smith",
+  "practitionerGiven": "Jane",
+  "practitionerPhone": "555-0200",
+  "practitionerGender": "female",
+
+  "orgNPI": "9876543210",
+  "orgName": "General Hospital",
+  "orgPhone": "555-0300",
+
+  "locationId": "loc-001",
+  "locationName": "Emergency Department"
+}

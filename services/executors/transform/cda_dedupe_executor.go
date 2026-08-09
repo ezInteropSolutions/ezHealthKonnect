@@ -157,6 +157,18 @@ func (e *CDADedupeExecutor) Execute(ctx context.Context, step *models.Transforma
 	crossMessageActive := cfg.CrossMessage && interfaceID != "" && patientKeyFound
 	trackLineage := cfg.TrackSuppressionLineage == nil || *cfg.TrackSuppressionLineage
 
+	// CDA Coverage Audit: resolved once per document. Passed into
+	// dedupeSectionEntries only (not applyCrossMessageDedupe, which operates
+	// on an already-in-document-deduped, re-indexed slice) — every entry
+	// cross-message dedup ever sees was already recorded, at its correct
+	// original document-order index, by dedupeSectionEntries first.
+	var coverageTracker *executors.CDACoverageTracker
+	if v, ok := inputData["_coverageTracker"].(*executors.CDACoverageTracker); ok {
+		coverageTracker = v
+	} else if msg, ok := inputData["message"].(map[string]interface{}); ok {
+		coverageTracker, _ = msg["_coverageTracker"].(*executors.CDACoverageTracker)
+	}
+
 	sectionStats := make(map[string]interface{}, len(sectionKeys))
 	totalRemoved := 0
 	for _, sectionKey := range sectionKeys {
@@ -173,7 +185,7 @@ func (e *CDADedupeExecutor) Execute(ctx context.Context, step *models.Transforma
 			continue
 		}
 		originalCount := len(section.Entries)
-		deduped, removed := dedupeSectionEntries(section.Entries, rule, cfg.Strategy)
+		deduped, removed := dedupeSectionEntries(section.Entries, rule, cfg.Strategy, sectionKey, coverageTracker)
 
 		crossRemoved := 0
 		var crossSuppressed []suppressedCrossMessageEntry
@@ -431,7 +443,7 @@ func (e *CDADedupeExecutor) resolveDocument(inputData map[string]interface{}, so
 // and returns the filtered slice plus how many were removed. Entries whose
 // key has ANY unresolved (empty) component are never deduplicated — safer
 // default for clinical data than risking a false-positive match.
-func dedupeSectionEntries(entries []cdadocument.CDAEntry, rule DedupeIdentityRule, strategy string) ([]cdadocument.CDAEntry, int) {
+func dedupeSectionEntries(entries []cdadocument.CDAEntry, rule DedupeIdentityRule, strategy string, sectionKey string, tracker *executors.CDACoverageTracker) ([]cdadocument.CDAEntry, int) {
 	type keyed struct {
 		entry      cdadocument.CDAEntry
 		key        string
@@ -440,6 +452,13 @@ func dedupeSectionEntries(entries []cdadocument.CDAEntry, rule DedupeIdentityRul
 
 	items := make([]keyed, len(entries))
 	for i, entry := range entries {
+		// CDA Coverage Audit: record at the ORIGINAL document-order index —
+		// this is the one place in the whole pipeline that sees every section
+		// entry before any filtering (in-document or cross-message) shifts
+		// indices, so it's the correct place to mark "this entry was examined"
+		// regardless of whether dedup ultimately keeps or drops it.
+		tracker.Record(executors.CDAEntryKey(sectionKey, i))
+
 		entryMap, err := marshalEntryMap(entry)
 		hasNull := err != nil
 		key := ""

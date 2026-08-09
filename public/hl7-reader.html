@@ -141,6 +141,28 @@
 
         .btn-sample:hover { background: #dbeafe; border-color: #93c5fd; }
 
+        .validation-level-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 0 16px 10px;
+        }
+
+        .validation-level-row label {
+            font-size: 11px;
+            color: #9ca3af;
+        }
+
+        .validation-level-select {
+            flex: 1;
+            padding: 6px 10px;
+            font-size: 12px;
+            border: 1px solid #d1d5db;
+            border-radius: 6px;
+            background: #fff;
+            color: #374151;
+        }
+
         /* Results panel */
         .results-panel {
             display: flex;
@@ -413,6 +435,15 @@
                         <button class="btn-sample" onclick="loadSample('orm_o01')">ORM^O01</button>
                     </div>
 
+                    <div class="validation-level-row">
+                        <label for="validationLevel"><i class="fas fa-shield-halved"></i> Validation:</label>
+                        <select id="validationLevel" class="validation-level-select" title="Basic: required-field check only (today's behavior). Standard: also checks missing segments, cardinality, data types, and code tables as warnings. Strict: same checks, but data-type/code-table issues escalate to errors.">
+                            <option value="basic">Basic — required fields only</option>
+                            <option value="standard" selected>Standard — full conformance (warnings)</option>
+                            <option value="strict">Strict — full conformance (errors)</option>
+                        </select>
+                    </div>
+
                     <div class="input-actions">
                         <button class="btn-parse" id="parseBtn" onclick="parseMessage()">
                             <i class="fas fa-magnifying-glass-plus"></i> Parse &amp; Analyze
@@ -516,11 +547,12 @@
             document.getElementById('metaBadges').innerHTML = '';
 
             try {
+                const validationLevel = document.getElementById('validationLevel').value;
                 const resp = await fetch('/api/hl7/parse', {
                     method: 'POST',
                     credentials: 'include',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ rawMessage: raw, useEnhanced: true })
+                    body: JSON.stringify({ rawMessage: raw, useEnhanced: true, validationLevel })
                 });
 
                 const result = await resp.json();

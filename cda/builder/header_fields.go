@@ -55,7 +55,22 @@ var patientScalarFields = []headerFieldMapping{
 	{"middleName", "patient/name/given[2]"},
 	{"lastName", "patient/name/family"},
 	{"dateOfBirth", "patient/birthTime/@value"},
+	// languageCommunication's own base type sequence is languageCode,
+	// modeCode?, proficiencyLevelCode?, preferenceInd? — all three must stay
+	// in THIS relative order below, all in patientScalarFields (not split
+	// across patientCodedFields, which writeCodedFields' own separate,
+	// LATER pass would put after preferenceInd, breaking the sequence) —
+	// confirmed via a real external validator run (2026-07) that this exact
+	// ordering rule applies here too, the same class of bug already hit for
+	// entryRelationship/sequenceNumber and AssignedEntity/id.
+	// languageProficiencySystem is a plain mappable companion field (same
+	// "codeSystem is just another canonical key" convention every section
+	// field already uses), not a Go-hardcoded constant — HL7
+	// LanguageAbilityProficiency is 2.16.840.1.113883.5.61.
 	{"preferredLanguage", "patient/languageCommunication/languageCode/@code"},
+	{"languageProficiency", "patient/languageCommunication/proficiencyLevelCode/@code"},
+	{"languageProficiencySystem", "patient/languageCommunication/proficiencyLevelCode/@codeSystem"},
+	{"languagePreferenceInd", "patient/languageCommunication/preferenceInd/@value"},
 }
 
 var patientAddressFields = []headerFieldMapping{

@@ -30,7 +30,7 @@ func TestDedupeSectionEntries_RemovesExactDuplicates_KeepsFirst(t *testing.T) {
 	}
 	rule := cdaDedupeIdentityRules["vitalSigns"]
 
-	result, removed := dedupeSectionEntries(entries, rule, "first")
+	result, removed := dedupeSectionEntries(entries, rule, "first", "vitalSigns", nil)
 	if removed != 1 {
 		t.Fatalf("removed = %d, want 1", removed)
 	}
@@ -49,7 +49,7 @@ func TestDedupeSectionEntries_LastStrategy_KeepsLatestOccurrence(t *testing.T) {
 	second.StatusCode = "completed" // this one should survive under "last"
 
 	rule := cdaDedupeIdentityRules["vitalSigns"]
-	result, removed := dedupeSectionEntries([]cdadocument.CDAEntry{first, second}, rule, "last")
+	result, removed := dedupeSectionEntries([]cdadocument.CDAEntry{first, second}, rule, "last", "vitalSigns", nil)
 	if removed != 1 {
 		t.Fatalf("removed = %d, want 1", removed)
 	}
@@ -64,7 +64,7 @@ func TestDedupeSectionEntries_NoDuplicates_NoneRemoved(t *testing.T) {
 		vitalEntry("8462-4", "20200101"), // different code (diastolic vs systolic)
 	}
 	rule := cdaDedupeIdentityRules["vitalSigns"]
-	result, removed := dedupeSectionEntries(entries, rule, "first")
+	result, removed := dedupeSectionEntries(entries, rule, "first", "vitalSigns", nil)
 	if removed != 0 || len(result) != 2 {
 		t.Fatalf("removed=%d len=%d, want removed=0 len=2", removed, len(result))
 	}
@@ -76,7 +76,7 @@ func TestDedupeSectionEntries_UnresolvedKey_NeverDeduped(t *testing.T) {
 	blank1 := cdadocument.CDAEntry{EffectiveTime: cdadocument.CDATimeRange{Value: cdadocument.CDATime{Value: "20200101"}}}
 	blank2 := cdadocument.CDAEntry{EffectiveTime: cdadocument.CDATimeRange{Value: cdadocument.CDATime{Value: "20200101"}}}
 	rule := cdaDedupeIdentityRules["vitalSigns"]
-	result, removed := dedupeSectionEntries([]cdadocument.CDAEntry{blank1, blank2}, rule, "first")
+	result, removed := dedupeSectionEntries([]cdadocument.CDAEntry{blank1, blank2}, rule, "first", "vitalSigns", nil)
 	if removed != 0 {
 		t.Errorf("removed = %d, want 0 (unresolved keys must never be deduped)", removed)
 	}
@@ -87,7 +87,7 @@ func TestDedupeSectionEntries_UnresolvedKey_NeverDeduped(t *testing.T) {
 
 func TestDedupeSectionEntries_EmptyInput_ReturnsEmptyNotNil(t *testing.T) {
 	rule := cdaDedupeIdentityRules["vitalSigns"]
-	result, removed := dedupeSectionEntries(nil, rule, "first")
+	result, removed := dedupeSectionEntries(nil, rule, "first", "vitalSigns", nil)
 	if removed != 0 {
 		t.Errorf("removed = %d, want 0", removed)
 	}

@@ -208,7 +208,20 @@ class FhirInterfaceHandler extends BaseInterfaceHandler {
     validateConfiguration() {
         const errors = [];
         const targetConfig = this.interfaceData.targetConfig || {};
-        const targetEndpoint = targetConfig.endpoint;
+        // 'baseUrl' is the field the live FHIR outbound UI actually renders and
+        // collects (ConnectorConfigBuilder.js _buildFHIROutboundUI, data-field=
+        // "baseUrl", shared by both http_outbound and http_fhir_outbound). 'endpoint',
+        // 'url', and 'fhirServerUrl' are older field names that only survive on
+        // interfaces saved before the UI was consolidated onto 'baseUrl' —
+        // this.config gets merged with, not replaced by, freshly-collected DOM
+        // fields (see ConfigUtils.mergeConfig in getConfig()), so legacy keys ride
+        // along indefinitely even though nothing in the current UI writes them
+        // anymore ('fhirServerUrl' specifically comes from this same class's own
+        // collectTargetConfig()/populateTargetFields() above, which are dead code
+        // against the current Edit modal but still describe real stored data
+        // shapes). Checking baseUrl first means validation matches what a user
+        // can actually see and edit today.
+        const targetEndpoint = targetConfig.baseUrl || targetConfig.endpoint || targetConfig.url || targetConfig.fhirServerUrl;
 
         if (!targetEndpoint || !targetEndpoint.trim()) {
             errors.push('FHIR Base URL is required');
@@ -220,9 +233,16 @@ class FhirInterfaceHandler extends BaseInterfaceHandler {
             }
         }
 
-        // Optional: Validate delivery mode if present
+        // Optional: Validate delivery mode if present. 'bundle' (all resources in one
+        // FHIR Bundle) and 'individual' (one request per resource) are the only two
+        // values this system ever actually produces — see FormFieldSchema.js's
+        // 'delivery' field group and InterfaceConfigComponents.js's collectTargetConfig,
+        // both radio-button UIs with exactly these two options and 'bundle' as the
+        // fallback default. The previous allowlist ('immediate'/'batch'/'queued')
+        // didn't match any value ever written anywhere, so every existing FHIR
+        // interface (which all default to 'bundle') failed this check.
         const deliveryMode = targetConfig.deliveryMode;
-        if (deliveryMode && !['immediate', 'batch', 'queued'].includes(deliveryMode)) {
+        if (deliveryMode && !['bundle', 'individual'].includes(deliveryMode)) {
             errors.push('Invalid delivery mode selected');
         }
 

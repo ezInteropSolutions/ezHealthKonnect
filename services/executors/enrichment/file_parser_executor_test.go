@@ -2361,6 +2361,128 @@ func TestParseCSVFromReaderChunked_Unit(t *testing.T) {
 
 // ─── End of Chunked / Streaming CSV tests ────────────────────────────────────
 
+// ─── File provenance ("_source_file") ────────────────────────────────────
+//
+// executeBatch has always stamped "_source_file" onto every record when
+// processing multiple local files in one step. These tests cover the same
+// stamping for the far more common single-file paths — "field" (a real
+// inbound connector, e.g. file_listener, delivering one file's content per
+// message) and "local_path" — which previously left every record with no
+// way to trace which file it came from.
+
+func TestFileParser_SourceFileProvenance_FieldSourceType_UsesMessageSourceFile(t *testing.T) {
+	executor := NewFileParserExecutor(nil, nil)
+	csv := "name,age\nAlice,30\nBob,25\n"
+
+	step := makeStep(map[string]interface{}{
+		"sourceField": "csvContent",
+		"fileFormat":  "csv",
+		"hasHeader":   true,
+	})
+	// _sourceFile is what processing/engine_message_processor.go stamps onto
+	// message.* once, before any pipeline step runs, for every message that
+	// arrived via a file-based inbound connector — mirror that shape here
+	// rather than a bare top-level field.
+	input := map[string]interface{}{
+		"message": map[string]interface{}{
+			"csvContent":  csv,
+			"_sourceFile": "patients.csv",
+		},
+	}
+
+	output, err := executor.Execute(context.Background(), step, input)
+	if err != nil {
+		t.Fatalf("Execute failed: %v", err)
+	}
+
+	records := getRecords(t, output, "_stepOutput.records")
+	if len(records) != 2 {
+		t.Fatalf("Expected 2 records, got %d", len(records))
+	}
+	for i, rec := range records {
+		if rec["_source_file"] != "patients.csv" {
+			t.Errorf("record %d: expected _source_file=patients.csv, got %v", i, rec["_source_file"])
+		}
+	}
+
+	execDetails, ok := output["_executionDetails"].(map[string]interface{})
+	if !ok {
+		t.Fatal("_executionDetails not found")
+	}
+	if execDetails["source_file"] != "patients.csv" {
+		t.Errorf("Expected execution details source_file=patients.csv, got %v", execDetails["source_file"])
+	}
+}
+
+func TestFileParser_SourceFileProvenance_FieldSourceType_AbsentWhenNoSourceFile(t *testing.T) {
+	executor := NewFileParserExecutor(nil, nil)
+	csv := "name,age\nAlice,30\n"
+
+	step := makeStep(map[string]interface{}{
+		"sourceField": "raw_file",
+		"fileFormat":  "csv",
+		"hasHeader":   true,
+	})
+	// No message._sourceFile at all (e.g. a hand-built test message, or
+	// content that never went through a file-based connector) — must not
+	// fabricate a _source_file value.
+	input := makeInput("raw_file", csv)
+
+	output, err := executor.Execute(context.Background(), step, input)
+	if err != nil {
+		t.Fatalf("Execute failed: %v", err)
+	}
+
+	records := getRecords(t, output, "_stepOutput.records")
+	if _, exists := records[0]["_source_file"]; exists {
+		t.Errorf("Expected no _source_file when message._sourceFile is absent, got %v", records[0]["_source_file"])
+	}
+
+	execDetails, _ := output["_executionDetails"].(map[string]interface{})
+	if _, exists := execDetails["source_file"]; exists {
+		t.Errorf("Expected no source_file in execution details, got %v", execDetails["source_file"])
+	}
+}
+
+func TestFileParser_SourceFileProvenance_LocalPath_UsesFileBaseName(t *testing.T) {
+	tmpFile, err := os.CreateTemp("", "fp_provenance_*.csv")
+	if err != nil {
+		t.Fatalf("failed to create temp file: %v", err)
+	}
+	t.Cleanup(func() { os.Remove(tmpFile.Name()) })
+	if _, err := tmpFile.WriteString("name,age\nAlice,30\n"); err != nil {
+		t.Fatalf("failed to write temp file: %v", err)
+	}
+	tmpFile.Close()
+
+	executor := NewFileParserExecutor(nil, nil)
+	step := makeStep(map[string]interface{}{
+		"sourceType": "local_path",
+		"filePath":   tmpFile.Name(),
+		"fileFormat": "csv",
+		"hasHeader":  true,
+	})
+
+	output, err := executor.Execute(context.Background(), step, map[string]interface{}{})
+	if err != nil {
+		t.Fatalf("Execute failed: %v", err)
+	}
+
+	records := getRecords(t, output, "_stepOutput.records")
+	expectedName := filepath.Base(tmpFile.Name())
+	if records[0]["_source_file"] != expectedName {
+		t.Errorf("Expected _source_file=%s, got %v", expectedName, records[0]["_source_file"])
+	}
+
+	execDetails, ok := output["_executionDetails"].(map[string]interface{})
+	if !ok {
+		t.Fatal("_executionDetails not found")
+	}
+	if execDetails["source_file"] != expectedName {
+		t.Errorf("Expected execution details source_file=%s, got %v", expectedName, execDetails["source_file"])
+	}
+}
+
 // getRecords extracts parsed records from the output at the given dot-path
 func getRecords(t *testing.T, output map[string]interface{}, path string) []map[string]interface{} {
 	t.Helper()

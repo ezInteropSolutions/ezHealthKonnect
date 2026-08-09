@@ -191,6 +191,22 @@ func (c *TransformationTestController) TestPipeline(ctx *gin.Context) {
 	stepNameCounts := make(map[string]int)                // Track duplicate step names
 	pipelineErrors := make([]map[string]interface{}, 0)  // Top-level error aggregation
 
+	// The actual outbound payload(s) — what will really be sent, not a
+	// guess based on output field names. connector.outbound is the source
+	// of truth (it's the real delivery point, ~seq 295 by convention); a
+	// pipeline that stops at payload.builder without a delivery step yet
+	// falls back to that instead; a pipeline that doesn't even have a
+	// payload.builder step yet — just a bare hl7.build/fhir.build/cda.build,
+	// the common case while a demo/new pipeline is still being built out —
+	// falls back one tier further to that build step's own output, so
+	// "Outbound Payload" still shows something real instead of silently
+	// disappearing. One entry per step that ran, in execution order — a
+	// pipeline with N destinations gets N entries, no special-casing for
+	// N==1 vs N>1.
+	connectorOutboundPayloads := make([]map[string]interface{}, 0)
+	payloadBuilderPayloads := make([]map[string]interface{}, 0)
+	buildStepPayloads := make([]map[string]interface{}, 0)
+
 	for _, stepLog := range result.ExecutionLog {
 		log.Printf("🔍 Processing step: '%s'", stepLog.StepName)
 
@@ -231,6 +247,22 @@ func (c *TransformationTestController) TestPipeline(ctx *gin.Context) {
 		// Some executors (e.g., Loop) store references to parent context that create cycles
 		safeStepOutput := breakCycles(stepOutput)
 
+		// Make this TEST-RESPONSE-ONLY copy safe for locked-down enterprise
+		// networks (corporate proxies, AV web-shields) before it's used for
+		// both stepData["step_output"] below AND the outbound_payloads
+		// extraction further down — one normalization point covers both.
+		// HL7 v2's wire format uses a bare "\r" (no "\n") as its segment
+		// delimiter, which is unusual enough in HTTP traffic that some
+		// content-inspection security software has been observed truncating
+		// the response body at the first one. CRLF is unambiguous in web
+		// traffic (every HTTP header uses it), so normalizing bare CR to
+		// CRLF here fixes that without touching a single byte of what
+		// actually gets sent over real MLLP/TCP delivery — this only affects
+		// the Test Pipeline JSON preview response.
+		if normalized, ok := crlfSafeForDisplay(safeStepOutput).(map[string]interface{}); ok {
+			safeStepOutput = normalized
+		}
+
 		// STANDARDIZED STRUCTURE: step_output + step_metadata (2 keys only)
 		// Errors are aggregated into a top-level "errors" array, NOT per-step
 		stepData := map[string]interface{}{
@@ -252,6 +284,25 @@ func (c *TransformationTestController) TestPipeline(ctx *gin.Context) {
 		log.Printf("  🏷️ Step name: '%s' -> '%s' (key: '%s')", stepLog.StepName, normalizedStepName, stepKey)
 
 		steps[stepKey] = stepData
+
+		// Capture the real outbound payload from connector.outbound (or
+		// payload.builder, or a bare build step, as fallbacks) — see comment
+		// above the slice declarations for why these step types specifically.
+		if stepLog.Success && stepLog.StepType == "connector.outbound" {
+			if entry := extractOutboundPayloadEntry(stepKey, "payload_full", safeStepOutput); entry != nil {
+				connectorOutboundPayloads = append(connectorOutboundPayloads, entry)
+			}
+		} else if stepLog.Success && stepLog.StepType == "payload.builder" {
+			if entry := extractOutboundPayloadEntry(stepKey, "payload", safeStepOutput); entry != nil {
+				payloadBuilderPayloads = append(payloadBuilderPayloads, entry)
+			}
+		} else if stepLog.Success {
+			if spec, ok := buildStepContentFields[stepLog.StepType]; ok {
+				if entry := extractBuildStepPayloadEntry(stepKey, spec, safeStepOutput); entry != nil {
+					buildStepPayloads = append(buildStepPayloads, entry)
+				}
+			}
+		}
 
 		// Collect errors into top-level array
 		stepSequence := 0
@@ -298,6 +349,21 @@ func (c *TransformationTestController) TestPipeline(ctx *gin.Context) {
 	// Add top-level errors array (all step errors aggregated)
 	if len(pipelineErrors) > 0 {
 		response["errors"] = pipelineErrors
+	}
+
+	// outbound_payloads: the real, distinct-from-full-results deliverable(s).
+	// connector.outbound wins whenever any ran (it's the true delivery
+	// point); payload.builder is the next tier when the pipeline has no
+	// delivery step configured yet; a bare build step (hl7.build/fhir.build/
+	// cda.build with neither of those) is the last tier, so a pipeline that's
+	// "just build a message" still shows its real output here instead of
+	// outbound_payloads silently being absent.
+	if len(connectorOutboundPayloads) > 0 {
+		response["outbound_payloads"] = connectorOutboundPayloads
+	} else if len(payloadBuilderPayloads) > 0 {
+		response["outbound_payloads"] = payloadBuilderPayloads
+	} else if len(buildStepPayloads) > 0 {
+		response["outbound_payloads"] = buildStepPayloads
 	}
 
 	// Include lightweight input/output metadata (without full payload to avoid huge responses)
@@ -898,6 +964,86 @@ func getMapKeys(m map[string]interface{}) []string {
 	return keys
 }
 
+// buildStepContentField describes where one "build" step type's real output
+// lives in its own step_output, and how to turn it into the plain string
+// extractBuildStepPayloadEntry's "content" needs.
+type buildStepContentField struct {
+	field       string // step_output key (already snake_cased by NormalizeStepOutput)
+	isObject    bool   // true when the raw value is a JSON object (needs json.Marshal), not already a string
+	contentType string
+}
+
+// buildStepContentFields is the data-driven mapping the third outbound_payloads
+// fallback tier (see comment above connectorOutboundPayloads) walks — adding a
+// future build step type means adding one row here, not a new function.
+var buildStepContentFields = map[string]buildStepContentField{
+	"hl7.build":  {field: "hl7_message", isObject: false, contentType: "x-application/hl7-v2+er7"},
+	"cda.build":  {field: "cda_xml", isObject: false, contentType: "application/xml"},
+	"fhir.build": {field: "fhir_resource", isObject: true, contentType: "application/fhir+json"},
+}
+
+// extractBuildStepPayloadEntry is extractOutboundPayloadEntry's counterpart
+// for the third fallback tier: a bare build step's raw output isn't already
+// shaped like a connector.outbound/payload.builder entry (no content_type/
+// connector_type fields of its own, and fhir.build's value is a JSON object
+// rather than an already-serialized string), so this reads spec.field
+// directly and marshals when spec.isObject says to, instead of reusing
+// extractOutboundPayloadEntry's stepOutput[contentField].(string) assumption.
+func extractBuildStepPayloadEntry(stepKey string, spec buildStepContentField, stepOutput map[string]interface{}) map[string]interface{} {
+	raw, exists := stepOutput[spec.field]
+	if !exists {
+		return nil
+	}
+
+	var content string
+	if spec.isObject {
+		b, err := json.Marshal(raw)
+		if err != nil || string(b) == "null" {
+			return nil
+		}
+		content = string(b)
+	} else {
+		s, ok := raw.(string)
+		if !ok || s == "" {
+			return nil
+		}
+		content = s
+	}
+
+	return map[string]interface{}{
+		"step_name":      stepKey,
+		"connector_type": "", // no real connector — this is the build step's own output, not a delivery
+		"content_type":   spec.contentType,
+		"content":        content,
+		"is_json":        json.Valid([]byte(content)),
+		"size_bytes":     len(content),
+	}
+}
+
+// extractOutboundPayloadEntry builds one outbound_payloads[] entry from a
+// connector.outbound or payload.builder step's already-normalized
+// step_output, keyed on contentField ("payload_full" for connector.outbound,
+// "payload" for payload.builder — see TestPipeline's two call sites). Returns
+// nil when the step didn't actually produce content (e.g. a connector.outbound
+// step whose config was invalid before content could be resolved) — such a
+// step contributes nothing to outbound_payloads rather than an empty entry.
+func extractOutboundPayloadEntry(stepKey, contentField string, stepOutput map[string]interface{}) map[string]interface{} {
+	content, ok := stepOutput[contentField].(string)
+	if !ok || content == "" {
+		return nil
+	}
+	contentType, _ := stepOutput["content_type"].(string)
+	connectorType, _ := stepOutput["connector_type"].(string)
+	return map[string]interface{}{
+		"step_name":      stepKey,
+		"connector_type": connectorType, // "" for a payload.builder fallback entry
+		"content_type":   contentType,
+		"content":        content,
+		"is_json":        json.Valid([]byte(content)),
+		"size_bytes":     len(content),
+	}
+}
+
 // getNestedValue retrieves a value from nested maps using dot notation
 // e.g., "enriched.empi" or "metadata.correlationId"
 func getNestedValue(data map[string]interface{}, path string) interface{} {
@@ -1456,6 +1602,50 @@ func (c *TransformationTestController) ValidateScript(ctx *gin.Context) {
 // Some executors (e.g., Loop) pass context maps that reference parent data, creating
 // cycles that cause json.Marshal to fail with "encountered a cycle via []interface{}".
 // The round-trip produces a clean copy with all cycles broken.
+// crlfSafeForDisplay recursively walks a JSON-shaped value (map, slice, or
+// string — the only types breakCycles' JSON round trip can ever produce) and
+// normalizes every bare "\r" to "\r\n" via normalizeBareCR. See the doc
+// comment at this function's call site for why.
+func crlfSafeForDisplay(v interface{}) interface{} {
+	switch val := v.(type) {
+	case string:
+		return normalizeBareCR(val)
+	case map[string]interface{}:
+		out := make(map[string]interface{}, len(val))
+		for k, sub := range val {
+			out[k] = crlfSafeForDisplay(sub)
+		}
+		return out
+	case []interface{}:
+		out := make([]interface{}, len(val))
+		for i, sub := range val {
+			out[i] = crlfSafeForDisplay(sub)
+		}
+		return out
+	default:
+		return v
+	}
+}
+
+// normalizeBareCR inserts "\n" after every "\r" that isn't already followed
+// by one, leaving existing "\r\n" pairs untouched (so content that already
+// uses CRLF, or has no CR at all, passes through unchanged).
+func normalizeBareCR(s string) string {
+	if !strings.Contains(s, "\r") {
+		return s
+	}
+	runes := []rune(s)
+	var b strings.Builder
+	b.Grow(len(s) + 8)
+	for i, r := range runes {
+		b.WriteRune(r)
+		if r == '\r' && (i+1 >= len(runes) || runes[i+1] != '\n') {
+			b.WriteRune('\n')
+		}
+	}
+	return b.String()
+}
+
 func breakCycles(data map[string]interface{}) map[string]interface{} {
 	if data == nil {
 		return map[string]interface{}{}

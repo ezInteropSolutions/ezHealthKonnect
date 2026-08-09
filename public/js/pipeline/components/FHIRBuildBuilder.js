@@ -35,6 +35,21 @@ class FHIRBuildBuilder {
         this._suggestError = '';
         this._suggestBusy = false;
 
+        // Extension picker (Feature 1) — reuses FhirExtensionCatalog's pure
+        // catalog data only, never its HL7-shaped ExtensionBuilder modal.
+        this._extPanelOpen = false;
+        this._extSearchText = '';
+
+        // Validate Against Sample (Feature 3) — "strict mode": reuses the
+        // real fhir/r4 validator via the existing Test Pipeline endpoint,
+        // scoped to just this resource, instead of a second rules engine.
+        this._validatePanelOpen = false;
+        this._validateSampleText = '';
+        this._validateBusy = false;
+        this._validateError = '';
+        this._validateResult = null;
+        this._validateIssueByRowKey = {};
+
         window._fhirBuildBuilder = this;
     }
 
@@ -75,11 +90,27 @@ class FHIRBuildBuilder {
             .map(p => `<option value="${esc(p)}" ${p === cfg.profile ? 'selected' : ''}>${esc(p)}</option>`)
             .join('');
 
+        const missingRequired = (typeof FHIRRequirementsHelper !== 'undefined')
+            ? FHIRRequirementsHelper.computeMissingRequired(this._fieldCatalog, cfg.fields, cfg.repeatingGroups)
+            : { total: 0, satisfied: 0, missing: [] };
+
         return `
         <div id="fhirBuildBuilder" class="cda-step-config">
             <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:6px;padding:0.65rem 0.85rem;margin-bottom:1rem;font-size:0.8rem;color:#1e40af;">
                 <strong>FHIR Resource Builder step.</strong> Maps CSV/DB/JSON fields directly onto one FHIR R4 resource.
                 Add one step per resource type, then use a Payload Builder (FHIR Bundle mode) step to assemble a Bundle.
+            </div>
+            ${typeof FHIRRequirementsHelper !== 'undefined' ? FHIRRequirementsHelper.renderCompletenessBanner(missingRequired) : ''}
+
+            <div class="config-group" style="margin-bottom:1.1rem;">
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0.5rem;">
+                    <label style="font-size:0.75rem;font-weight:600;text-transform:uppercase;color:#64748b;margin:0;">Validation</label>
+                    <button type="button" class="btn btn-sm btn-outline-secondary"
+                        onclick="window._fhirBuildBuilder && window._fhirBuildBuilder.toggleValidatePanel()"
+                        style="font-size:0.72rem;padding:0.15rem 0.5rem;">🛡️ Validate Against Sample</button>
+                </div>
+                <div style="font-size:0.7rem;color:#94a3b8;">The banner above checks field existence only ("loose"). This runs the real fhir/r4 validator (structure, cardinality, terminology bindings, constraints — "strict") against one sample message you provide.</div>
+                ${this._renderValidatePanel()}
             </div>
 
             <div class="config-group" style="margin-bottom:1.1rem;display:flex;gap:0.6rem;flex-wrap:wrap;">
@@ -112,6 +143,9 @@ class FHIRBuildBuilder {
                     <label style="font-size:0.75rem;font-weight:600;text-transform:uppercase;color:#64748b;margin:0;">Fields</label>
                     <div style="display:flex;gap:0.4rem;">
                         <button type="button" class="btn btn-sm btn-outline-secondary"
+                            onclick="window._fhirBuildBuilder && window._fhirBuildBuilder.toggleExtensionPanel()"
+                            style="font-size:0.72rem;padding:0.15rem 0.5rem;">🔌 Add Extension</button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary"
                             onclick="window._fhirBuildBuilder && window._fhirBuildBuilder.toggleSuggestPanel()"
                             style="font-size:0.72rem;padding:0.15rem 0.5rem;">✨ Suggest Mappings</button>
                         <button type="button" class="btn btn-sm btn-outline-primary"
@@ -119,15 +153,21 @@ class FHIRBuildBuilder {
                             style="font-size:0.72rem;padding:0.15rem 0.5rem;">+ Add Field</button>
                     </div>
                 </div>
+                ${this._renderExtensionPanel()}
                 ${this._renderSuggestPanel()}
                 <datalist id="fbbFieldTargets">
-                    ${this._fieldCatalog.map(f => `<option value="${esc(f.key)}">${esc(f.label || f.key)}${f.required ? ' (required)' : ''}</option>`).join('')}
+                    ${this._fieldCatalog.map(f => {
+                        const bits = [];
+                        if (f.required) bits.push('required');
+                        if (f.bindingStrength) bits.push(f.bindingStrength + ' binding');
+                        return `<option value="${esc(f.key)}">${esc(f.label || f.key)}${bits.length ? ' (' + bits.join(', ') + ')' : ''}</option>`;
+                    }).join('')}
                 </datalist>
                 <div style="font-size:0.7rem;color:#94a3b8;margin-bottom:0.5rem;">Flat/single-value element paths, e.g. <code>birthDate</code>, <code>identifier[0].value</code>.</div>
                 <div id="fbbFieldsContainer">
                     ${cfg.fields.length === 0
                         ? `<div style="text-align:center;padding:1rem;color:#94a3b8;font-size:0.8rem;border:1px dashed #cbd5e1;border-radius:6px;">No fields mapped yet.</div>`
-                        : this._renderFieldsTable(cfg.fields, 'fbbFieldTargets', -1)}
+                        : this._renderFieldsTable(cfg.fields, 'fbbFieldTargets', -1, this._validateIssueByRowKey)}
                 </div>
             </div>
 
@@ -173,13 +213,20 @@ class FHIRBuildBuilder {
 
     // ── Fields table (shared by top-level Fields and each group's Fields) ────
 
-    _renderFieldsTable(fields, datalistId, groupIndex) {
+    _renderFieldsTable(fields, datalistId, groupIndex, issuesByRowKey) {
         const esc = FHIRBuildBuilder._esc;
-        const rowsHtml = fields.map((f, fi) => `
+        const rowsHtml = fields.map((f, fi) => {
+            const rowKey = groupIndex === -1 ? `top:${fi}` : `group:${groupIndex}:${fi}`;
+            const issues = (issuesByRowKey || {})[rowKey];
+            const hasError = issues && issues.some(i => i.severity === 'error');
+            const badge = issues && issues.length
+                ? `<span title="${esc(issues.map(i => i.message).join('; '))}" style="color:${hasError ? '#dc2626' : '#d97706'};margin-left:4px;cursor:help;">${hasError ? '❌' : '⚠️'}</span>`
+                : '';
+            return `
             <tr data-field-index="${fi}">
                 <td>
                     <input type="text" class="form-control form-control-sm fbb-field-target"
-                        value="${esc(f.targetPath)}" list="${datalistId}" placeholder="e.g. birthDate" autocomplete="off">
+                        value="${esc(f.targetPath)}" list="${datalistId}" placeholder="e.g. birthDate" autocomplete="off">${badge}
                 </td>
                 <td>
                     <input type="text" class="form-control form-control-sm fbb-field-source"
@@ -211,7 +258,8 @@ class FHIRBuildBuilder {
                         onclick="window._fhirBuildBuilder && window._fhirBuildBuilder.removeField(${groupIndex}, ${fi})"
                         title="Remove field"><i class="fas fa-trash"></i></button>
                 </td>
-            </tr>`).join('');
+            </tr>`;
+        }).join('');
 
         return `
         <div style="overflow-x:auto;">
@@ -234,6 +282,294 @@ class FHIRBuildBuilder {
         this._syncDOMToConfig();
         this._step.config.fields.push({ targetPath: '', sourcePath: '' });
         this._rerender();
+    }
+
+    // ── Extension picker ──────────────────────────────────────────────────────
+    // Reuses FhirExtensionCatalog.js's pure catalog (search/getById/buildPath)
+    // ONLY — never ExtensionBuilder.js's modal, which is hard-wired to
+    // HL7-specific inputs (hl7Field/hl7DataType) this format-agnostic builder
+    // never has, and duplicates transform/sample-testing UI this builder's own
+    // Fields-table rows already provide per-row.
+    //
+    // Deliberately never copies a catalog entry's own "transform" field onto
+    // the new row: FhirExtensionCatalog's transform names (e.g.
+    // ce_to_codeableconcept, hl7_active_flag) belong to the older HL7-wizard
+    // transform vocabulary and have ZERO overlap with
+    // cdafhir.DeclarativeTransformRegistry (the registry fhir.build actually
+    // uses) — copying one would silently fail at build time
+    // (transformReg.Apply -> "unknown transform" -> field skipped, no error
+    // surfaced) while the dropdown shows a dead value it doesn't even list.
+
+    _renderExtensionPanel() {
+        if (!this._extPanelOpen) return '';
+        const esc = FHIRBuildBuilder._esc;
+        return `
+        <div style="border:1px dashed #94a3b8;border-radius:6px;padding:0.6rem 0.7rem;margin-bottom:0.6rem;background:#fafafa;">
+            <div style="font-size:0.72rem;color:#64748b;margin-bottom:0.4rem;">Search FHIR extensions (e.g. "race", "birth sex", "organ donor") — picking one adds a Fields row with the target path pre-filled; set its Source Path like any other field.</div>
+            <input id="fbbExtSearch" type="text" class="form-control form-control-sm"
+                placeholder="Search extensions…" value="${esc(this._extSearchText)}" autocomplete="off"
+                oninput="window._fhirBuildBuilder && window._fhirBuildBuilder.onExtensionSearch(this.value)"
+                style="margin-bottom:0.5rem;">
+            <div id="fbbExtResults" style="max-height:220px;overflow-y:auto;border:1px solid #e2e8f0;border-radius:6px;background:white;">
+                ${this._renderExtensionResults()}
+            </div>
+        </div>`;
+    }
+
+    _renderExtensionResults() {
+        if (typeof FhirExtensionCatalog === 'undefined') return '';
+        const esc = FHIRBuildBuilder._esc;
+        const cfg = this._step.config;
+        const results = FhirExtensionCatalog.search(this._extSearchText || '');
+        if (results.length === 0) {
+            return `<div style="padding:0.75rem;text-align:center;color:#94a3b8;font-size:0.8rem;">No extensions match.</div>`;
+        }
+        // Matches for the current resource type first — never hard-excludes
+        // others, since some catalog entries are resource-agnostic.
+        const sorted = [...results].sort((a, b) => {
+            const aMatch = (a.resources || []).includes(cfg.resourceType) ? 0 : 1;
+            const bMatch = (b.resources || []).includes(cfg.resourceType) ? 0 : 1;
+            return aMatch - bMatch;
+        });
+        return sorted.map(ext => `
+            <div class="fbb-ext-row" style="padding:0.5rem 0.7rem;cursor:pointer;border-bottom:1px solid #f1f5f9;display:flex;align-items:flex-start;justify-content:space-between;gap:0.5rem;"
+                onclick="window._fhirBuildBuilder && window._fhirBuildBuilder.addExtensionField('${esc(ext.id)}')"
+                onmouseover="this.style.background='#f0f9ff'" onmouseout="this.style.background=''">
+                <div style="flex:1;min-width:0;">
+                    <div style="font-size:0.82rem;font-weight:600;color:#1e3a8a;">${esc(ext.name)}</div>
+                    <div style="font-size:0.72rem;color:#64748b;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${esc(ext.url)}">${esc(ext.url)}</div>
+                </div>
+                <code style="background:#dbeafe;padding:2px 6px;border-radius:3px;font-size:0.7rem;color:#1e3a8a;white-space:nowrap;flex-shrink:0;">${esc(ext.valueType)}</code>
+            </div>`).join('');
+    }
+
+    onExtensionSearch(text) {
+        // Targeted update only — going through _rerender()'s full outerHTML
+        // replace would steal the search input's focus on every keystroke.
+        this._extSearchText = text;
+        const results = document.getElementById('fbbExtResults');
+        if (results) results.innerHTML = this._renderExtensionResults();
+    }
+
+    addExtensionField(extId) {
+        const ext = typeof FhirExtensionCatalog !== 'undefined' ? FhirExtensionCatalog.getById(extId) : null;
+        if (!ext) return;
+        this._syncDOMToConfig();
+        this._step.config.fields.push({
+            targetPath: FhirExtensionCatalog.buildPath('', ext.url, ext.valueType),
+            sourcePath: '',
+        });
+        this._extPanelOpen = false;
+        this._rerender();
+    }
+
+    toggleExtensionPanel() {
+        this._syncDOMToConfig();
+        this._extPanelOpen = !this._extPanelOpen;
+        this._rerender();
+    }
+
+    // ── Validate Against Sample ("strict mode") ──────────────────────────────
+    // "Loose" is the existence-only completeness banner above. "Strict" is
+    // this: run the CURRENT unsaved config through the real fhir.build
+    // executor + the real fhir/r4 validator (via the already-existing Test
+    // Pipeline endpoint, validation_level "strict" — structure, cardinality,
+    // terminology bindings, constraints), scoped to one sample message.
+    // Zero new backend code; this is 100% the same engine fhir_validation
+    // already runs in production, just surfaced earlier in the workflow.
+
+    _renderValidatePanel() {
+        if (!this._validatePanelOpen) return '';
+        const esc = FHIRBuildBuilder._esc;
+
+        let resultHtml = '';
+        if (this._validateResult) {
+            const r = this._validateResult;
+            const clean = r.errorCount === 0;
+            const bg = clean ? '#f0fdf4' : '#fef2f2';
+            const border = clean ? '#bbf7d0' : '#fecaca';
+            const color = clean ? '#166534' : '#991b1b';
+            const icon = clean ? 'fa-circle-check' : 'fa-triangle-exclamation';
+            const unattached = r.unattached || [];
+            resultHtml = `
+            <div style="background:${bg};border:1px solid ${border};border-radius:6px;padding:0.55rem 0.75rem;margin-top:0.5rem;font-size:0.78rem;color:${color};">
+                <div style="font-weight:600;"><i class="fas ${icon}"></i> ${r.errorCount} error(s), ${r.warningCount} warning(s) against the sample</div>
+                ${r.errorCount + r.warningCount > 0 ? `<div style="margin-top:0.3rem;font-weight:400;">Errors/warnings tied to a specific field are flagged on that row below.${unattached.length > 0 ? ' Resource-level findings with no single row:' : ''}</div>` : ''}
+                ${unattached.length > 0 ? `<div style="margin-top:0.2rem;">${unattached.map(u => `<div>${u.severity === 'error' ? '❌' : '⚠️'} ${esc(u.message)}${u.path ? ` <code>(${esc(u.path)})</code>` : ''}</div>`).join('')}</div>` : ''}
+            </div>`;
+        }
+
+        return `
+        <div style="border:1px dashed #94a3b8;border-radius:6px;padding:0.6rem 0.7rem;margin-top:0.6rem;background:#fafafa;">
+            <div style="font-size:0.72rem;color:#64748b;margin-bottom:0.4rem;">Paste ONE sample message — a JSON object, not an array (this runs the resource through fhir.build once, then validates the result).</div>
+            <textarea id="fbbValidateSample" class="form-control form-control-sm" rows="4"
+                placeholder='{"dob":"1980-05-20","sexCode":"F"}'
+                style="font-family:monospace;font-size:0.78rem;margin-bottom:0.4rem;">${esc(this._validateSampleText || '')}</textarea>
+            <div style="display:flex;align-items:center;gap:0.6rem;">
+                <button type="button" class="btn btn-sm btn-primary" style="font-size:0.72rem;"
+                    onclick="window._fhirBuildBuilder && window._fhirBuildBuilder.runValidateSample()">Validate</button>
+                ${this._validateError ? `<span style="font-size:0.72rem;color:#dc2626;">${esc(this._validateError)}</span>` : ''}
+                ${this._validateBusy ? `<span style="font-size:0.72rem;color:#64748b;">Running fhir.build + fhir_validation…</span>` : ''}
+            </div>
+            ${resultHtml}
+        </div>`;
+    }
+
+    toggleValidatePanel() {
+        this._syncDOMToConfig();
+        this._validatePanelOpen = !this._validatePanelOpen;
+        this._rerender();
+    }
+
+    runValidateSample() {
+        const root = document.getElementById('fhirBuildBuilder');
+        const textEl = root && root.querySelector('#fbbValidateSample');
+        this._validateSampleText = textEl ? textEl.value : this._validateSampleText;
+        this._validateError = '';
+
+        let sample;
+        try {
+            sample = JSON.parse(this._validateSampleText || '');
+            if (!sample || typeof sample !== 'object' || Array.isArray(sample)) {
+                throw new Error('Provide a single JSON object, not an array.');
+            }
+        } catch (e) {
+            this._validateError = 'Invalid sample: ' + e.message;
+            this._rerender();
+            return;
+        }
+
+        this._syncDOMToConfig();
+        const cfg = this._step.config;
+        this._validateBusy = true;
+        this._validateResult = null;
+        this._validateIssueByRowKey = {};
+        this._rerender();
+
+        // The synthetic build step's outputField MUST resolve under "message."
+        // regardless of what the real (possibly still-default "fhirResource")
+        // step config uses: the pipeline engine's step-chaining only merges a
+        // step's own output["message"] into the next step's context
+        // (transformation_pipeline_helpers.go) — a sibling top-level key like
+        // the default "fhirResource" is silently dropped between steps, so
+        // fhir_validation would report "No FHIR data found" even though the
+        // build itself succeeded. The real FHIR_BUILD_DEMO pipeline avoids this
+        // by explicitly configuring outputField as "message.fhirPatient" etc.;
+        // this ad-hoc 2-step check does the same, without touching the field
+        // the user actually configured (and will save).
+        const buildCfg = Object.assign({}, cfg, { outputField: 'message.fhirResource' });
+
+        fetch('/api/fhir/pipeline/test', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                test_message: JSON.stringify(sample),
+                pipeline: {
+                    interfaceId: 'fhir-build-validate-sample', messageType: 'TEST',
+                    execution_groups: [{
+                        steps: [
+                            { id: 'fbb-validate-build', stepName: 'Validate Sample Build', stepType: 'fhir.build', sequence: 10, enabled: true, config: buildCfg },
+                            {
+                                id: 'fbb-validate-check', stepName: 'Validate Sample Check', stepType: 'fhir_validation', sequence: 20, enabled: true,
+                                config: { profile: cfg.profile, fhir_version: cfg.version, validation_level: 'strict' },
+                            },
+                        ],
+                    }],
+                },
+            }),
+            signal: this._ac.signal,
+        })
+            .then(r => r.json())
+            .then(resp => {
+                this._validateBusy = false;
+                if (!resp || !resp.success) {
+                    this._validateError = (resp && (resp.error || resp.message)) || 'Validation request failed.';
+                    this._rerender();
+                    return;
+                }
+                const checkStep = resp.steps && resp.steps.validate_sample_check;
+                const out = (checkStep && checkStep.step_output) || {};
+                this._applyValidationResult(out.errors || [], out.warnings || []);
+                this._rerender();
+            })
+            .catch(() => {
+                this._validateBusy = false;
+                this._validateError = 'Validation request failed.';
+                this._rerender();
+            });
+    }
+
+    // Maps the flat errors/warnings string arrays fhir_validation returns
+    // back onto the specific Fields-table row(s) that likely caused each one.
+    _applyValidationResult(errors, warnings) {
+        const cfg = this._step.config;
+        const issuesByRowKey = {};
+        const unattached = [];
+        const process = (list, severity) => {
+            list.forEach(s => {
+                const parsed = FHIRBuildBuilder._parseIssueString(s, cfg.resourceType);
+                const rowKeys = this._matchIssueToRow(parsed.path);
+                if (rowKeys.length === 0) {
+                    unattached.push({ severity, message: parsed.message || s, path: parsed.path });
+                } else {
+                    rowKeys.forEach(k => {
+                        if (!issuesByRowKey[k]) issuesByRowKey[k] = [];
+                        issuesByRowKey[k].push({ severity, message: parsed.message || s, code: parsed.code });
+                    });
+                }
+            });
+        };
+        process(errors, 'error');
+        process(warnings, 'warning');
+        this._validateIssueByRowKey = issuesByRowKey;
+        this._validateResult = { errorCount: errors.length, warningCount: warnings.length, unattached };
+    }
+
+    // Structurally parses fhir_validation's fixed, code-owned wire format
+    // ("[code] ResourceType.path: message", see fmtIssue in
+    // services/executors/validation/fhir_validation_executor.go) — not fuzzy
+    // text matching. A resource-level/cross-field issue (e.g. a constraint
+    // with no single element path) falls through with path:"".
+    static _parseIssueString(s, resourceType) {
+        const m = /^\[([^\]]+)\]\s*(.*)$/.exec(s);
+        if (!m) return { code: '', path: '', message: s };
+        const code = m[1];
+        const rest = m[2];
+        const prefix = resourceType + '.';
+        if (rest.startsWith(prefix)) {
+            const sep = rest.indexOf(': ');
+            if (sep !== -1) {
+                return { code, path: rest.slice(prefix.length, sep), message: rest.slice(sep + 2) };
+            }
+        }
+        return { code, path: '', message: rest };
+    }
+
+    // Compares a resolved (failing) element path against every configured
+    // row's own targetPath — structural comparison (exact, nested-under, or
+    // parent-of), not text similarity. Array indices are stripped since a
+    // row's own targetPath rarely carries the same index the validator's
+    // resolved path does.
+    _matchIssueToRow(path) {
+        if (!path) return [];
+        const cfg = this._step.config;
+        const norm = (s) => String(s || '').replace(/\[\d+\]/g, '');
+        const relates = (rowPath) => {
+            if (!rowPath) return false;
+            const a = norm(rowPath), b = norm(path);
+            return a === b || b.startsWith(a + '.') || a.startsWith(b + '.');
+        };
+        const keys = [];
+        (cfg.fields || []).forEach((f, fi) => {
+            if (relates(f.targetPath)) keys.push('top:' + fi);
+        });
+        (cfg.repeatingGroups || []).forEach((rg, gi) => {
+            (rg.fields || []).forEach((f, fi) => {
+                const full = rg.targetPath ? `${rg.targetPath}.${f.targetPath}` : f.targetPath;
+                if (relates(full)) keys.push(`group:${gi}:${fi}`);
+            });
+        });
+        return keys;
     }
 
     // ── AI-assisted "Suggest Mappings" (design-time only) ────────────────────
@@ -362,7 +698,7 @@ class FHIRBuildBuilder {
             </datalist>
             ${(rg.fields || []).length === 0
                 ? `<div style="font-size:0.74rem;color:#94a3b8;margin-bottom:0.4rem;">No fields mapped yet.</div>`
-                : this._renderFieldsTableWithDatalist(rg.fields, datalistId, groupIndex)}
+                : this._renderFieldsTableWithDatalist(rg.fields, datalistId, groupIndex, this._validateIssueByRowKey)}
             <button type="button" class="btn btn-sm btn-outline-primary"
                 onclick="window._fhirBuildBuilder && window._fhirBuildBuilder.addGroupField(${groupIndex})"
                 style="font-size:0.72rem;padding:0.15rem 0.5rem;margin-top:0.4rem;">+ Add Field</button>
@@ -372,8 +708,8 @@ class FHIRBuildBuilder {
     // _renderFieldsTable hardcodes the datalist id to the shared top-level one;
     // group cards need their own scoped datalist id, so this thin wrapper lets
     // both call sites share the same row-rendering logic without duplicating it.
-    _renderFieldsTableWithDatalist(fields, datalistId, groupIndex) {
-        return this._renderFieldsTable(fields, datalistId, groupIndex);
+    _renderFieldsTableWithDatalist(fields, datalistId, groupIndex, issuesByRowKey) {
+        return this._renderFieldsTable(fields, datalistId, groupIndex, issuesByRowKey);
     }
 
     addRepeatingGroup() {
@@ -414,13 +750,23 @@ class FHIRBuildBuilder {
         this._profiles = [];
         this._loadProfiles(newType);
         this._loadFieldCatalog();
+        this._clearValidationResult();
         this._rerender();
     }
 
     onProfileOrVersionChange() {
         this._syncDOMToConfig();
         this._loadFieldCatalog();
+        this._clearValidationResult();
         this._rerender();
+    }
+
+    // A validation result/row-badge set from a previous resourceType/profile
+    // no longer applies (issue paths were resolved against a different
+    // schema) — clear it rather than leave a stale, misleading badge.
+    _clearValidationResult() {
+        this._validateResult = null;
+        this._validateIssueByRowKey = {};
     }
 
     // ── DOM <-> config sync ───────────────────────────────────────────────────

@@ -352,23 +352,25 @@
     table-layout: fixed; /* Fixed layout for consistent sizing */
 }
 
-/* FIXED: Optimize column widths for maximum data - 7 COLUMNS */
-.interfaces-table th:nth-child(1) { width: 18% !important; } /* Interface Name */
-.interfaces-table th:nth-child(2) { width: 12% !important; } /* Config Status */
-.interfaces-table th:nth-child(3) { width: 12% !important; } /* Runtime Status */
-.interfaces-table th:nth-child(4) { width: 12% !important; } /* Last Updated */
-.interfaces-table th:nth-child(5) { width: 14% !important; } /* Statistics */
-.interfaces-table th:nth-child(6) { width: 12% !important; } /* Last Activity */
-.interfaces-table th:nth-child(7) { width: 20% !important; } /* Actions - The 7th column! */
+/* Optimize column widths for maximum data - 8 COLUMNS (Created added) */
+.interfaces-table th:nth-child(1) { width: 17% !important; } /* Interface Name */
+.interfaces-table th:nth-child(2) { width: 9%  !important; } /* Config */
+.interfaces-table th:nth-child(3) { width: 11% !important; } /* Runtime */
+.interfaces-table th:nth-child(4) { width: 11% !important; } /* Created */
+.interfaces-table th:nth-child(5) { width: 11% !important; } /* Last Updated */
+.interfaces-table th:nth-child(6) { width: 13% !important; } /* Statistics */
+.interfaces-table th:nth-child(7) { width: 10% !important; } /* Activity */
+.interfaces-table th:nth-child(8) { width: 18% !important; } /* Actions */
 
-/* Ensure td columns match th columns - 7 COLUMNS */
-.interfaces-table td:nth-child(1) { width: 18% !important; } /* Interface Name */
-.interfaces-table td:nth-child(2) { width: 12% !important; } /* Config Status */
-.interfaces-table td:nth-child(3) { width: 12% !important; } /* Runtime Status */
-.interfaces-table td:nth-child(4) { width: 12% !important; } /* Last Updated */
-.interfaces-table td:nth-child(5) { width: 14% !important; } /* Statistics */
-.interfaces-table td:nth-child(6) { width: 12% !important; } /* Last Activity */
-.interfaces-table td:nth-child(7) { width: 20% !important; } /* Actions - Force visibility */
+/* Ensure td columns match th columns - 8 COLUMNS */
+.interfaces-table td:nth-child(1) { width: 17% !important; } /* Interface Name */
+.interfaces-table td:nth-child(2) { width: 9%  !important; } /* Config */
+.interfaces-table td:nth-child(3) { width: 11% !important; } /* Runtime */
+.interfaces-table td:nth-child(4) { width: 11% !important; } /* Created */
+.interfaces-table td:nth-child(5) { width: 11% !important; } /* Last Updated */
+.interfaces-table td:nth-child(6) { width: 13% !important; } /* Statistics */
+.interfaces-table td:nth-child(7) { width: 10% !important; } /* Activity */
+.interfaces-table td:nth-child(8) { width: 18% !important; } /* Actions - Force visibility */
 
 .interfaces-table thead {
     background: white;
@@ -379,16 +381,18 @@
 }
 
 .interfaces-table th {
-    padding: 10px 12px; /* Increased from 2px 6px */
+    padding: 10px 5px; /* Increased from 2px 6px */
     text-align: left;
     font-weight: 600;
     color: var(--navy-primary);
     font-size: 8px;
     text-transform: uppercase;
-    letter-spacing: 0.5px;
+    letter-spacing: 0.2px;
     border-right: 1px solid var(--pink-100);
     background: white;
     white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
     height: 45px; /* Increased from 18px */
     line-height: 1.3;
 }
@@ -428,7 +432,7 @@
 }
 
 /* Exception: Allow overflow for action column to show tooltips */
-.interfaces-table td:nth-child(7) {
+.interfaces-table td:nth-child(8) {
     overflow: visible !important;
     position: relative;
 }
@@ -484,6 +488,39 @@
     overflow: hidden;
     text-overflow: ellipsis;
     max-width: 100%; /* Changed from 180px to use full width */
+}
+
+.interface-id-line {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 9px;
+    color: var(--gray-400, #94a3b8);
+    line-height: 1.1;
+    white-space: nowrap;
+    overflow: hidden;
+}
+
+.interface-id-line code {
+    font-family: 'SFMono-Regular', Consolas, monospace;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 160px;
+}
+
+.copy-id-btn {
+    border: none;
+    background: none;
+    color: inherit;
+    cursor: pointer;
+    padding: 0 2px;
+    font-size: 9px;
+    line-height: 1;
+    flex-shrink: 0;
+}
+
+.copy-id-btn:hover {
+    color: var(--navy-primary, #1e3a8a);
 }
 
 /* FIXED: Status badges - better visibility */
@@ -843,7 +880,7 @@
     margin-bottom: 4px;
 }
 
-.form-group input,
+.form-group input:not([type="checkbox"]):not([type="radio"]),
 .form-group select,
 .form-group textarea {
     width: 100%;
@@ -1705,7 +1742,7 @@
 }
 .sort-arrow {
     display: inline-block;
-    margin-left: 5px;
+    margin-left: 3px;
     font-size: 0.7rem;
     color: #cbd5e1;
     vertical-align: middle;

@@ -123,30 +123,13 @@
         .alert-title { font-size: 13px; font-weight: 600; color: var(--text); margin-bottom: 3px; }
         .alert-meta { font-size: 12px; color: var(--muted); }
 
-        /* ── Settings form ───────────────────────────────────────────────────── */
-        .settings-card {
-            background: #fff; border: 1px solid var(--card-border); border-radius: 8px;
-            padding: 20px; max-width: 600px;
-        }
-        .form-group { margin-bottom: 16px; }
-        .form-group label { display: block; font-size: 12px; font-weight: 600; color: #374151; margin-bottom: 5px; }
-        .form-group input, .form-group select, .form-group textarea {
-            width: 100%; padding: 8px 12px; border: 1px solid #e5e7eb; border-radius: 6px;
-            font-size: 13px; color: var(--text); background: #fff; box-sizing: border-box;
-        }
-        .form-group input:focus, .form-group select:focus { outline: 2px solid #93c5fd; border-color: var(--navy); }
+        /* ── Shared buttons ──────────────────────────────────────────────────── */
         .btn-primary {
             display: inline-flex; align-items: center; gap: 6px;
             padding: 8px 16px; background: var(--navy); color: #fff;
             border: none; border-radius: 6px; font-size: 13px; font-weight: 600; cursor: pointer;
         }
         .btn-primary:hover { background: #1e40af; }
-        .btn-danger {
-            display: inline-flex; align-items: center; gap: 6px;
-            padding: 8px 16px; background: #dc2626; color: #fff;
-            border: none; border-radius: 6px; font-size: 13px; font-weight: 600; cursor: pointer;
-        }
-        .btn-danger:hover { background: #b91c1c; }
         .btn-ghost {
             padding: 7px 14px; background: #f3f4f6; color: #374151;
             border: 1px solid #e5e7eb; border-radius: 6px; font-size: 13px; cursor: pointer;
@@ -225,6 +208,10 @@
         .http-post { background:#dcfce7; color:#166534; padding:1px 6px; border-radius:3px; font-size:10px; font-weight:700; }
         .http-put  { background:#fef3c7; color:#92400e; padding:1px 6px; border-radius:3px; font-size:10px; font-weight:700; }
         .http-del  { background:#fee2e2; color:#991b1b; padding:1px 6px; border-radius:3px; font-size:10px; font-weight:700; }
+        .interface-meta { display:flex; align-items:center; gap:10px; font-size:11px; color:#94a3b8; margin:2px 0 0; flex-wrap:wrap; }
+        .interface-meta code { font-family:'SFMono-Regular', Consolas, monospace; }
+        .interface-meta .copy-id-btn { border:none; background:none; color:inherit; cursor:pointer; padding:0 2px; font-size:11px; }
+        .interface-meta .copy-id-btn:hover { color:var(--navy, #1e3a8a); }
     </style>
 </head>
 <body>
@@ -238,6 +225,7 @@
             <div class="page-header-title">
                 <h1 id="interfaceName">Loading…</h1>
                 <p id="interfaceDesc"></p>
+                <p id="interfaceMeta" class="interface-meta"></p>
             </div>
             <span class="status-pill draft" id="statusPill" style="display:none"></span>
             <a id="dlqDepthBadge" href="admin-dlq.html" title="Open Dead-Letter Queue"
@@ -268,9 +256,6 @@
                 </div>
                 <div class="leftnav-tab" data-tab="alerts" onclick="activateTab('alerts')">
                     <i class="fas fa-bell"></i> Alerts
-                </div>
-                <div class="leftnav-tab" data-tab="settings" onclick="activateTab('settings')">
-                    <i class="fas fa-gear"></i> Settings
                 </div>
             </div>
 
@@ -359,76 +344,6 @@
                     </div>
                 </div>
 
-                <!-- ── Tab: Settings ──────────────────────────────────────── -->
-                <div id="tab-settings" class="tab-section">
-                    <div class="section-header"><h2>Settings</h2></div>
-                    <div class="settings-card">
-                        <div class="form-group">
-                            <label>Interface Name</label>
-                            <input type="text" id="settingName" placeholder="Interface name">
-                        </div>
-                        <div class="form-group">
-                            <label>Description</label>
-                            <input type="text" id="settingDesc" placeholder="Optional description">
-                        </div>
-                        <div class="form-group">
-                            <label>Status</label>
-                            <select id="settingStatus">
-                                <option value="active">Active</option>
-                                <option value="paused">Paused</option>
-                                <option value="draft">Draft</option>
-                            </select>
-                        </div>
-                        <div class="form-group">
-                            <label>Error Threshold (%)</label>
-                            <input type="number" id="settingErrorThreshold" min="0" max="100" step="1" placeholder="10">
-                            <div style="font-size:11px;color:var(--muted);margin-top:4px">Default error rate threshold for this interface. Used when no per-interface alert rule is configured.</div>
-                        </div>
-                        <!-- Recovery Queue (DLQ) config -->
-                        <div style="margin-top:22px;padding-top:18px;border-top:1px solid var(--card-border)">
-                            <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px;">
-                                <i class="fas fa-exclamation-triangle" style="color:#d97706;font-size:13px;"></i>
-                                <span style="font-size:13px;font-weight:600;color:var(--text-primary)">Recovery Queue</span>
-                                <span style="font-size:11px;color:var(--muted)">— DLQ retry behaviour for this interface</span>
-                            </div>
-                            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
-                                <div class="form-group">
-                                    <label>Max Attempts</label>
-                                    <input type="number" id="dlqMaxAttempts" min="1" max="100" step="1" placeholder="10">
-                                    <div style="font-size:11px;color:var(--muted);margin-top:3px">Total delivery attempts before abandonment (default 10)</div>
-                                </div>
-                                <div class="form-group">
-                                    <label>Initial Delay (s)</label>
-                                    <input type="number" id="dlqInitialDelay" min="0" step="1" placeholder="30">
-                                    <div style="font-size:11px;color:var(--muted);margin-top:3px">Delay before first retry in seconds (default 30)</div>
-                                </div>
-                                <div class="form-group">
-                                    <label>Retry Delay (s)</label>
-                                    <input type="number" id="dlqRetryDelay" min="1" step="1" placeholder="60">
-                                    <div style="font-size:11px;color:var(--muted);margin-top:3px">Base delay between retries (default 60)</div>
-                                </div>
-                                <div class="form-group">
-                                    <label>Backoff Multiplier</label>
-                                    <input type="number" id="dlqBackoff" min="1" max="10" step="0.1" placeholder="2.0">
-                                    <div style="font-size:11px;color:var(--muted);margin-top:3px">Exponential backoff factor per attempt (default 2.0, max delay 24 h)</div>
-                                </div>
-                                <div class="form-group" style="grid-column:1/-1;">
-                                    <label>Payload Expires After (hours)</label>
-                                    <input type="number" id="dlqExpiresAfter" min="0" step="1" placeholder="0">
-                                    <div style="font-size:11px;color:var(--muted);margin-top:3px">Hours until an abandoned row's payload is purged. 0 = never expire.</div>
-                                </div>
-                            </div>
-                        </div>
-
-                        <div style="display:flex;gap:10px;margin-top:20px;padding-top:16px;border-top:1px solid var(--card-border)">
-                            <button class="btn-primary" onclick="saveSettings()">Save Changes</button>
-                            <button class="btn-danger" onclick="confirmDelete()" style="margin-left:auto">
-                                <i class="fas fa-trash"></i> Delete Interface
-                            </button>
-                        </div>
-                    </div>
-
-                </div>
             </div>
         </div>
     </div>

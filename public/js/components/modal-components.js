@@ -315,6 +315,93 @@
                                         <input type="hidden" id="editAcceptedMessageFamilies" value="">
                                     </div>
                                 </div>
+
+                                <!-- Error Threshold -->
+                                <div class="form-group" style="margin-top: 16px;">
+                                    <label class="form-label" for="editErrorThreshold" style="font-weight:600;color:#374151;font-size:13px;margin-bottom:4px;display:block;">
+                                        Error Threshold (%)
+                                    </label>
+                                    <input type="number" id="editErrorThreshold" min="0" max="100" step="1" placeholder="10"
+                                           style="width:100%;padding:7px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;color:#1f2937;">
+                                    <p style="font-size: 0.79rem; color: #6b7280; margin: 4px 0 0;">
+                                        Default error rate threshold for this interface. Used when no per-interface alert rule is configured.
+                                    </p>
+                                </div>
+
+                                <!-- Recovery Queue (DLQ) config -->
+                                <div class="form-group" style="margin-top: 16px;">
+                                    <div style="background: linear-gradient(to right, #fffbeb, #fff7ed); border-left: 3px solid #f59e0b; padding: 14px; border-radius: 6px;">
+                                        <label style="font-weight: 600; color: #92400e; font-size: 0.95rem; display: block; margin-bottom: 4px;">
+                                            &#9888; Recovery Queue (DLQ)
+                                        </label>
+                                        <p style="font-size: 0.82rem; color: #6b7280; margin: 0 0 12px;">
+                                            Retry behaviour for messages that fail delivery from this interface.
+                                        </p>
+                                        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+                                            <div>
+                                                <label style="font-size:12px;font-weight:600;color:#374151;display:block;margin-bottom:4px;">Max Attempts</label>
+                                                <input type="number" id="editDlqMaxAttempts" min="1" max="100" step="1" placeholder="10"
+                                                       style="width:100%;padding:6px 9px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;">
+                                            </div>
+                                            <div>
+                                                <label style="font-size:12px;font-weight:600;color:#374151;display:block;margin-bottom:4px;">Initial Delay (s)</label>
+                                                <input type="number" id="editDlqInitialDelay" min="0" step="1" placeholder="30"
+                                                       style="width:100%;padding:6px 9px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;">
+                                            </div>
+                                            <div>
+                                                <label style="font-size:12px;font-weight:600;color:#374151;display:block;margin-bottom:4px;">Retry Delay (s)</label>
+                                                <input type="number" id="editDlqRetryDelay" min="1" step="1" placeholder="60"
+                                                       style="width:100%;padding:6px 9px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;">
+                                            </div>
+                                            <div>
+                                                <label style="font-size:12px;font-weight:600;color:#374151;display:block;margin-bottom:4px;">Backoff Multiplier</label>
+                                                <input type="number" id="editDlqBackoff" min="1" max="10" step="0.1" placeholder="2.0"
+                                                       style="width:100%;padding:6px 9px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;">
+                                            </div>
+                                            <div style="grid-column:1/-1;">
+                                                <label style="font-size:12px;font-weight:600;color:#374151;display:block;margin-bottom:4px;">Payload Expires After (hours)</label>
+                                                <input type="number" id="editDlqExpiresAfter" min="0" step="1" placeholder="0"
+                                                       style="width:100%;padding:6px 9px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;">
+                                                <p style="font-size: 0.75rem; color: #6b7280; margin: 4px 0 0;">Hours until an abandoned row's payload is purged. 0 = never expire.</p>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- CDA Coverage Audit config -->
+                                <div class="form-group" style="margin-top: 16px;">
+                                    <div style="background: linear-gradient(to right, #fefce8, #fff7ed); border-left: 3px solid #f59e0b; padding: 14px; border-radius: 6px;">
+                                        <label style="display: flex; align-items: center; cursor: pointer; margin-bottom: 4px;">
+                                            <input type="checkbox" id="editCdaCoverageAuditEnabled"
+                                                   onchange="_toggleEditCoverageAuditNotify(this.checked)"
+                                                   style="margin-right: 8px; width: 16px; height: 16px; cursor: pointer; accent-color: #d97706;">
+                                            <span style="font-weight: 600; color: #92400e; font-size: 0.95rem;">&#128203; CDA Coverage Audit</span>
+                                        </label>
+                                        <p style="font-size: 0.82rem; color: #6b7280; margin: 0 0 10px;">
+                                            Flags CCD sections/entries never used by this pipeline. Off by default; only applies when this interface's input is CDA/CCD. A badge appears on affected messages; reports never contain clinical values, only which section/entry was never used.
+                                        </p>
+                                        <label style="display: flex; align-items: center; cursor: pointer; margin-bottom: 10px;">
+                                            <input type="checkbox" id="editCdaCoverageAuditElementLevel"
+                                                   style="margin-right: 8px; width: 15px; height: 15px; cursor: pointer; accent-color: #d97706;">
+                                            <span style="font-size: 0.82rem; color: #92400e;">Element-level detail <span style="color:#b45309;font-weight:600;">(beta)</span> — also flags which specific fields within a used entry (e.g. its effective time) were never read, not just whole unused entries. Applies across every section.</span>
+                                        </label>
+                                        <div id="editCdaCoverageAuditNotifyBlock" style="display:none;padding-top:10px;border-top:1px dashed #fbbf24;">
+                                            <div style="font-size:12px;font-weight:600;color:#92400e;margin-bottom:6px;">Notify (optional)</div>
+                                            <p style="font-size: 0.79rem; color: #6b7280; margin: 0 0 8px;">
+                                                The badge is always shown when enabled — this additionally pushes a notification through channels configured in Alerts settings when a gap is found, throttled by the cooldown below.
+                                            </p>
+                                            <div id="editCdaCoverageAuditChannelList" style="max-height:140px;overflow-y:auto;border:1px solid #fde68a;border-radius:6px;padding:6px 10px;background:#fff;">
+                                                <div style="font-size:11px;color:#6b7280;">Loading channels…</div>
+                                            </div>
+                                            <div style="margin-top:10px;max-width:220px;">
+                                                <label style="font-size:12px;font-weight:600;color:#374151;display:block;margin-bottom:4px;">Cooldown (minutes)</label>
+                                                <input type="number" id="editCdaCoverageAuditCooldownMinutes" min="1" step="1" placeholder="60"
+                                                       style="width:100%;padding:6px 9px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;">
+                                                <p style="font-size: 0.75rem; color: #6b7280; margin: 4px 0 0;">At most one notification per interface within this window (default 60).</p>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
                             </div>
 
                             <!-- Tab 2: Source (Inbound) Connector — powered by ConnectorConfigBuilder -->
@@ -457,9 +544,29 @@
         }
         const outboundContainer = document.getElementById('editOutboundConnectorContainer');
         if (outboundContainer && typeof ConnectorConfigBuilder !== 'undefined') {
+            // No connector.outbound pipeline step exists yet (e.g. sink-target interfaces,
+            // or ones built before the connector-step migration) — pick a fallback
+            // connectorType that matches this interface's OWN target_type instead of
+            // always assuming FHIR. Assuming 'http_outbound' unconditionally forced every
+            // sink/database/file-target interface without a step through FHIR-only
+            // validation ("FHIR Base URL is required") on every save, even for edits that
+            // have nothing to do with the target (e.g. just renaming, or toggling Error
+            // Threshold). 'sink_outbound' is the safe default when target_type itself is
+            // unknown/absent — SinkInterfaceHandler.validateConfiguration() always passes.
+            const TARGET_TYPE_TO_FALLBACK_CONNECTOR = {
+                fhir: 'http_outbound',
+                hl7v2: 'tcp_mllp_outbound',
+                hl7: 'tcp_mllp_outbound',
+                database: 'postgresql_outbound',
+                file: 'file_writer',
+                sink: 'sink_outbound',
+            };
+            const fallbackConnectorType = TARGET_TYPE_TO_FALLBACK_CONNECTOR[interfaceData.targetType]
+                || TARGET_TYPE_TO_FALLBACK_CONNECTOR[interfaceData.target_type]
+                || 'sink_outbound';
             const outboundStepCfg = interfaceData.outboundStepConfig && interfaceData.outboundStepConfig.connectorType
                 ? interfaceData.outboundStepConfig
-                : { connectorType: 'http_outbound', config: interfaceData.target_config || interfaceData.targetConfig || {} };
+                : { connectorType: fallbackConnectorType, config: interfaceData.target_config || interfaceData.targetConfig || {} };
             window._editOutboundBuilder = new ConnectorConfigBuilder(outboundContainer, outboundStepCfg, 'outbound');
             window._editOutboundBuilder.init();
             console.log('✅ Outbound ConnectorConfigBuilder initialized with:', outboundStepCfg);
@@ -494,6 +601,80 @@
             window.setFamilyFilterValue(families || null);
         }
 
+        // Error Threshold
+        const errThresholdEl = document.getElementById('editErrorThreshold');
+        if (errThresholdEl) errThresholdEl.value = interfaceData.error_threshold != null ? interfaceData.error_threshold : '';
+
+        // Recovery Queue (DLQ) config
+        const dlq = interfaceData.dlq_config || {};
+        const dlqMax = document.getElementById('editDlqMaxAttempts');
+        if (dlqMax) dlqMax.value = dlq.max_attempts != null ? dlq.max_attempts : '';
+        const dlqInit = document.getElementById('editDlqInitialDelay');
+        if (dlqInit) dlqInit.value = dlq.initial_delay_s != null ? dlq.initial_delay_s : '';
+        const dlqRetry = document.getElementById('editDlqRetryDelay');
+        if (dlqRetry) dlqRetry.value = dlq.retry_delay_s != null ? dlq.retry_delay_s : '';
+        const dlqBackoff = document.getElementById('editDlqBackoff');
+        if (dlqBackoff) dlqBackoff.value = dlq.backoff_multiplier != null ? dlq.backoff_multiplier : '';
+        const dlqExpires = document.getElementById('editDlqExpiresAfter');
+        if (dlqExpires) dlqExpires.value = dlq.expires_after_hours != null ? dlq.expires_after_hours : '';
+
+        // CDA Coverage Audit config — NULL (or JSON null) = disabled (default, V207/V209).
+        const coverageConfig = interfaceData.cda_coverage_audit_config;
+        const coverageEnabledEl = document.getElementById('editCdaCoverageAuditEnabled');
+        const isCoverageEnabled = !!(coverageConfig && typeof coverageConfig === 'object' && coverageConfig.enabled);
+        if (coverageEnabledEl) coverageEnabledEl.checked = isCoverageEnabled;
+        const coverageElementLevelEl = document.getElementById('editCdaCoverageAuditElementLevel');
+        if (coverageElementLevelEl) coverageElementLevelEl.checked = !!(coverageConfig && coverageConfig.granularity === 'element');
+        const coverageNotify = (coverageConfig && coverageConfig.notify) || {};
+        const coverageCooldownEl = document.getElementById('editCdaCoverageAuditCooldownMinutes');
+        if (coverageCooldownEl) coverageCooldownEl.value = coverageNotify.cooldown_minutes != null ? coverageNotify.cooldown_minutes : '';
+        if (typeof window._loadEditCoverageAuditChannels === 'function') {
+            window._loadEditCoverageAuditChannels(coverageNotify.channel_ids || []);
+        }
+        if (typeof window._toggleEditCoverageAuditNotify === 'function') {
+            window._toggleEditCoverageAuditNotify(isCoverageEnabled);
+        }
+    };
+
+    // Shows/hides the optional "Notify" sub-block based on whether CDA
+    // Coverage Audit itself is enabled — no point offering a channel picker
+    // for a disabled feature. Bound to the checkbox's onchange in the
+    // template above, and called once from populateEditForm on open.
+    window._toggleEditCoverageAuditNotify = function(enabled) {
+        const block = document.getElementById('editCdaCoverageAuditNotifyBlock');
+        if (block) block.style.display = enabled ? 'block' : 'none';
+    };
+
+    // Loads existing alert channels (same GET /api/alerts/channels endpoint
+    // alerts.html's own channel-assignment UI and this app's other coverage
+    // Audit UI already use) into a checkbox list, pre-checked from selectedIds.
+    // A small, deliberate duplicate of the same ~20 lines the old Settings-tab
+    // Coverage Audit UI used — not worth a shared module at this size.
+    window._loadEditCoverageAuditChannels = function(selectedIds) {
+        const el = document.getElementById('editCdaCoverageAuditChannelList');
+        if (!el) return;
+        fetch('/api/alerts/channels', { credentials: 'include' })
+            .then(function(r) { return r.json(); })
+            .then(function(res) {
+                const channels = (res && res.data) || [];
+                if (!channels.length) {
+                    el.innerHTML = '<div style="font-size:11px;color:#6b7280;">No alert channels configured yet — <a href="alerts.html" target="_blank">create one in Alerts settings</a>.</div>';
+                    return;
+                }
+                el.innerHTML = channels.map(function(ch) {
+                    const checked = selectedIds.indexOf(ch.id) !== -1;
+                    const iconClass = ch.channel_type === 'email' ? 'fa-envelope' : ch.channel_type === 'slack' ? 'fa-slack' : 'fa-globe';
+                    return '<label style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid #fef3c7;cursor:pointer;font-size:12px;">' +
+                        '<input type="checkbox" data-channel-id="' + ch.id + '" ' + (checked ? 'checked' : '') + ' style="width:auto;">' +
+                        '<i class="fab ' + iconClass + '" style="width:16px;color:#92400e;"></i>' +
+                        '<span>' + ch.name + '</span>' +
+                        '<span style="font-size:10px;color:#6b7280;margin-left:auto;">' + ch.channel_type + '</span>' +
+                    '</label>';
+                }).join('');
+            })
+            .catch(function() {
+                el.innerHTML = '<div style="font-size:11px;color:#6b7280;">Could not load alert channels.</div>';
+            });
     };
 
     /**

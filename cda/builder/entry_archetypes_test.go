@@ -926,3 +926,108 @@ func elementTags(els []*etree.Element) []string {
 	}
 	return tags
 }
+
+// TestBuildAlternateEntry_ProducesOwnRootShapeWithFields is an isolated,
+// synthetic-section spike for buildAlternateEntry (Medical Equipment's
+// Procedure Activity Procedure2 second entry shape is the real motivating
+// case — see AlternateEntryArchetype's own doc comment) — proven on its own
+// before depending on the real schema/BuildDocument path (already covered
+// end-to-end in document_builder_test.go).
+func TestBuildAlternateEntry_ProducesOwnRootShapeWithFields(t *testing.T) {
+	alt := &cdaSchema.AlternateEntryArchetype{
+		EntriesKey:         "procedureEntries",
+		EntryElementPath:   "procedure",
+		EntryTemplateID:    "2.16.840.1.113883.10.20.22.4.14",
+		EntryTemplateIDExt: "2014-06-09",
+		Fields: []*cdaSchema.CDAFieldDef{
+			{Key: "code", XPath: "procedure/code/@code"},
+			{Key: "status", XPath: "procedure/statusCode/@code"},
+		},
+	}
+	record := map[string]interface{}{"code": "87717006", "status": "completed"}
+
+	sectionEl := newTestSectionEl()
+	entryEl := buildAlternateEntry(sectionEl, alt, record)
+	if entryEl == nil {
+		t.Fatal("expected a non-nil <entry> element")
+	}
+
+	procEl := entryEl.SelectElement("procedure")
+	if procEl == nil {
+		t.Fatalf("expected a <procedure> root element, got: %+v", entryEl.ChildElements())
+	}
+	if procEl.SelectAttrValue("classCode", "") != "PROC" || procEl.SelectAttrValue("moodCode", "") != "EVN" {
+		t.Errorf("expected procedure tag boilerplate classCode=PROC moodCode=EVN, got: %+v", procEl.Attr)
+	}
+	tid := procEl.SelectElement("templateId")
+	if tid == nil || tid.SelectAttrValue("root", "") != "2.16.840.1.113883.10.20.22.4.14" || tid.SelectAttrValue("extension", "") != "2014-06-09" {
+		t.Errorf("expected Procedure Activity Procedure2's templateId, got: %+v", tid)
+	}
+	if procEl.SelectElement("id") == nil {
+		t.Error("expected a generated <id>")
+	}
+	codeEl := procEl.SelectElement("code")
+	if codeEl == nil || codeEl.SelectAttrValue("code", "") != "87717006" {
+		t.Errorf("expected code=87717006, got: %+v", codeEl)
+	}
+	statusEl := procEl.SelectElement("statusCode")
+	if statusEl == nil || statusEl.SelectAttrValue("code", "") != "completed" {
+		t.Errorf("expected statusCode=completed, got: %+v", statusEl)
+	}
+}
+
+// TestBuildEntry_StructuralTemplateAnchor_FixedStatusCode_OverridesTagDefault
+// verifies StructuralTemplateAnchor.FixedStatusCode (Immunization's nested
+// Substance Administered Act, CONF:1098-31505, SHALL statusCode="completed"
+// even though a bare "act" tag's own tagBoilerplate default is "active") —
+// isolated from the full immunizations schema so this one mechanism is
+// proven on its own.
+func TestBuildEntry_StructuralTemplateAnchor_FixedStatusCode_OverridesTagDefault(t *testing.T) {
+	sec := &cdaSchema.CDASectionDef{
+		Key:              "syntheticSeries",
+		EntryElementPath: "substanceAdministration",
+		StructuralTemplateIDs: []cdaSchema.StructuralTemplateAnchor{
+			{
+				Path:             "substanceAdministration/entryRelationship[@typeCode='COMP',@inversionInd='true']/act",
+				TemplateID:       "2.16.840.1.113883.10.20.22.4.118",
+				FixedCode:        "416118004",
+				FixedCodeSystem:  "2.16.840.1.113883.6.96",
+				FixedCodeDisplay: "Administration",
+				FixedStatusCode:  "completed",
+			},
+		},
+		Fields: []*cdaSchema.CDAFieldDef{
+			{Key: "seriesDate", XPath: "substanceAdministration/entryRelationship[@typeCode='COMP',@inversionInd='true']/act/effectiveTime/@value"},
+		},
+	}
+	record := map[string]interface{}{"seriesDate": "20240115"}
+
+	sectionEl := newTestSectionEl()
+	buildEntry(sectionEl, sec, record)
+
+	actEl := sectionEl.FindElement("entry/substanceAdministration/entryRelationship/act")
+	if actEl == nil {
+		doc := etree.NewDocument()
+		doc.SetRoot(sectionEl.Copy())
+		xml, _ := doc.WriteToString()
+		t.Fatalf("expected a nested <act>, got:\n%s", xml)
+	}
+	if actEl.SelectAttrValue("classCode", "") != "ACT" || actEl.SelectAttrValue("moodCode", "") != "EVN" {
+		t.Errorf("expected act tag boilerplate classCode=ACT moodCode=EVN, got: %+v", actEl.Attr)
+	}
+	statusEl := actEl.SelectElement("statusCode")
+	if statusEl == nil {
+		t.Fatal("expected a <statusCode> element")
+	}
+	if got := statusEl.SelectAttrValue("code", ""); got != "completed" {
+		t.Errorf("expected FixedStatusCode override to produce statusCode=completed (not act's default \"active\"), got %q", got)
+	}
+	codeEl := actEl.SelectElement("code")
+	if codeEl == nil || codeEl.SelectAttrValue("code", "") != "416118004" || codeEl.SelectAttrValue("codeSystem", "") != "2.16.840.1.113883.6.96" {
+		t.Errorf("expected the anchor's FixedCode (416118004/SNOMED), got: %+v", codeEl)
+	}
+	seqEl := sectionEl.FindElement("entry/substanceAdministration/entryRelationship")
+	if seqEl == nil || seqEl.SelectAttrValue("typeCode", "") != "COMP" || seqEl.SelectAttrValue("inversionInd", "") != "true" {
+		t.Errorf("expected entryRelationship typeCode=COMP inversionInd=true, got: %+v", seqEl)
+	}
+}

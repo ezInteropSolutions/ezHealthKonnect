@@ -84,6 +84,8 @@ class InterfacesController {
                     i.fhir_validation_policy,
                     i.accepted_message_families,
                     i.dlq_config,
+                    i.cda_coverage_audit_config,
+                    i.error_threshold,
                     i.total_processed,
                     i.successful_processed,
                     i.failed_processed,
@@ -166,6 +168,16 @@ class InterfacesController {
                     max_attempts: 10, initial_delay_s: 30,
                     retry_delay_s: 60, backoff_multiplier: 2.0, expires_after_hours: 0
                 },
+
+                // CDA Coverage Audit config (V207) — NULL stays null/falsy, unlike
+                // dlq_config above: this feature is meant to stay off until a user
+                // explicitly opts in, so it gets no default-object fallback.
+                cda_coverage_audit_config: this.parseJsonField(item.cda_coverage_audit_config) || null,
+                // error_threshold: previously selected nowhere and never returned
+                // here, so the old Settings-tab field always loaded blank even
+                // though a value may have been "saved" (itself a separate,
+                // now-fixed bug — see updateInterface below).
+                error_threshold: item.error_threshold != null ? item.error_threshold : null,
 
                 statistics: {
                     totalProcessed: item.total_processed || 0,
@@ -434,6 +446,8 @@ class InterfacesController {
                     i.last_processed_at, i.created_at, i.updated_at, i.version,
                     i.fhir_validation_policy,
                     i.dlq_config,
+                    i.cda_coverage_audit_config,
+                    i.error_threshold,
                     i.log_level, i.debug_logging, i.log_retention_days, i.retain_error_logs_forever,
                     i.deployment_mode, i.auto_start, i.deployment_delay_seconds,
                     u.email as created_by_email,
@@ -512,6 +526,16 @@ class InterfacesController {
                     max_attempts: 10, initial_delay_s: 30,
                     retry_delay_s: 60, backoff_multiplier: 2.0, expires_after_hours: 0
                 },
+
+                // CDA Coverage Audit config (V207) — NULL stays null/falsy, unlike
+                // dlq_config above: this feature is meant to stay off until a user
+                // explicitly opts in, so it gets no default-object fallback.
+                cda_coverage_audit_config: this.parseJsonField(item.cda_coverage_audit_config) || null,
+                // error_threshold: previously selected nowhere and never returned
+                // here, so the old Settings-tab field always loaded blank even
+                // though a value may have been "saved" (itself a separate,
+                // now-fixed bug — see updateInterface below).
+                error_threshold: item.error_threshold != null ? item.error_threshold : null,
 
                 // Deployment settings
                 deployment_mode: item.deployment_mode || 'manual',
@@ -1007,6 +1031,11 @@ class InterfacesController {
                 transformationMapping,
                 // Recovery Queue (DLQ) per-interface config
                 dlq_config,
+                // CDA Coverage Audit per-interface opt-in (V207) — null/undefined = disabled
+                cda_coverage_audit_config,
+                // Error Threshold — previously destructured nowhere, so it was
+                // never persisted despite the old Settings tab appearing to save it
+                error_threshold,
                 // Connector step IDs — write directly to transformation_steps (single source of truth)
                 inboundStepId,
                 outboundStepId,
@@ -1017,6 +1046,20 @@ class InterfacesController {
                 deployment_mode,
                 auto_start,
                 deployment_delay_seconds,
+                // status: corrected after finding a SECOND caller of this endpoint
+                // (handleEditInterface in interfaces.js, the "Edit Interface
+                // Configuration" modal opened from the Interfaces list) that has a
+                // real, working 6-stage lifecycle dropdown — draft/configured/
+                // testing/active/inactive/error — round-tripped directly through
+                // this exact column. That's a different, legitimate use of `status`
+                // than processing/engine.go's own (it force-resets status to
+                // 'inactive' for 'active'/'error' rows on every restart — a
+                // pre-existing conflict between "user-set lifecycle stage" and
+                // "engine's live running state" sharing one column, not something
+                // fixed here). Restored as COALESCE-preserve so this modal's save
+                // keeps working while the OTHER caller (interface-detail.html's
+                // Settings tab, which never sends this field) no longer forces it
+                // to 'inactive' on unrelated saves.
                 status,
                 // Logging settings (V33 + V59)
                 debug_logging,
@@ -1055,21 +1098,25 @@ class InterfacesController {
                 });
             }
 
-            // Apply connectivity defaults
-            const finalSourceConnectivity = sourceConnectivity || this.getDefaultConnectivity('source', sourceType);
-            const finalTargetConnectivity = targetConnectivity || this.getDefaultConnectivity('target', targetType);
-
             // OOB: Build V30 JSONB structures for connectivity columns
             // V30 migration changed source_connectivity and target_connectivity to JSONB: {type, config}
-            const sourceConnectivityJsonb = {
-                type: finalSourceConnectivity,
-                config: sourceConfig || {}
-            };
+            //
+            // Only build a real object when the request actually supplied something
+            // connectivity-related — otherwise pass null so the UPDATE's
+            // COALESCE(NULLIF(...)) below preserves whatever the interface already
+            // has. Fabricating a {type: <default>, config: {}} object for every
+            // save (the previous behavior) silently overwrote the interface's real
+            // connector config with a generic placeholder on every unrelated
+            // Settings-tab save — confirmed against a live interface where
+            // source_connectivity had been clobbered to {"type":"tcp","config":{}}
+            // despite its real pipeline being a file_listener connector.
+            const sourceConnectivityJsonb = (sourceConnectivity || sourceType || sourceConfig)
+                ? { type: sourceConnectivity || this.getDefaultConnectivity('source', sourceType), config: sourceConfig || {} }
+                : null;
 
-            const targetConnectivityJsonb = {
-                type: finalTargetConnectivity,
-                config: targetConfig || {}
-            };
+            const targetConnectivityJsonb = (targetConnectivity || targetType || targetConfig)
+                ? { type: targetConnectivity || this.getDefaultConnectivity('target', targetType), config: targetConfig || {} }
+                : null;
 
             console.log('🔧 V30 JSONB structures:', {
                 sourceConnectivityJsonb,
@@ -1093,68 +1140,170 @@ class InterfacesController {
                 userId
             });
 
-            // Add deployment settings to replacements (V32)
-            replacements.deployment_mode = deployment_mode || 'manual';
-            replacements.auto_start = auto_start === true || auto_start === 'true';
-            replacements.deployment_delay_seconds = parseInt(deployment_delay_seconds) || 0;
-            replacements.status = status || 'inactive';
+            // sourceType/targetType are legacy category labels derived client-side from the
+            // connector type (see connectorToSourceType/connectorToTargetType in
+            // interface-config-manager.js). That lookup table doesn't cover every OOB connector
+            // (e.g. sink_outbound), so the client can legitimately omit it — never let a missing
+            // value throw a Sequelize "no entry in the replacement map" error; preserve the
+            // existing column value instead, matching how source_config/target_config already
+            // fall back below.
+            // name/description: same "prepareJsonbReplacements carries an absent
+            // field through as undefined, not null" gap as messageType below.
+            // name keeps its `|| null` (empty name is meaningless; NOT NULL at
+            // the DB level, and COALESCE preserves the existing name rather than
+            // erroring if it's ever truly absent). description distinguishes
+            // "not sent" (undefined -> null -> preserved) from "sent as empty
+            // string" (a real, meaningful "user cleared it" value — written).
+            replacements.name = name || null;
+            replacements.description = description !== undefined ? description : null;
+
+            replacements.sourceType = sourceType || null;
+            replacements.targetType = targetType || null;
+            // messageType needs the identical treatment — prepareJsonbReplacements'
+            // spread carries an absent field through as the KEY present with an
+            // undefined VALUE, not a real null, and Sequelize's named-replacement
+            // binder treats that the same as the key being missing entirely (throws
+            // "no entry in the replacement map"). Explicit coercion required here;
+            // the UPDATE's COALESCE(:messageType, message_type) alone isn't enough.
+            replacements.messageType = messageType || null;
+
+            // Add deployment settings to replacements (V32). Every field below
+            // distinguishes "not sent" (undefined -> null -> UPDATE's COALESCE
+            // preserves the existing value) from "sent" (a real value -> written).
+            // Previously these defaulted to a hardcoded value whenever absent
+            // (e.g. deployment_mode || 'manual'), which silently reset them to
+            // that default on every save from any page that doesn't happen to
+            // collect that particular field — e.g. the Settings tab, which has
+            // no deployment-mode control at all, was resetting deployment_mode
+            // to 'manual' and auto_start to false on every single save.
+            replacements.deployment_mode = deployment_mode || null;
+            replacements.auto_start = auto_start === undefined
+                ? null
+                : (auto_start === true || auto_start === 'true');
+            replacements.deployment_delay_seconds = deployment_delay_seconds === undefined
+                ? null
+                : (parseInt(deployment_delay_seconds) || 0);
+
+            // status: see the destructure comment above — restored as
+            // preserve-if-absent (not the old unconditional "|| 'inactive'"),
+            // so handleEditInterface's real 6-stage lifecycle dropdown keeps
+            // working while a caller that never sends this field (like the
+            // Settings tab) no longer clobbers it to 'inactive' on every save.
+            // Known, pre-existing, NOT resolved here: processing/engine.go
+            // separately force-resets status to 'inactive' for 'active'/'error'
+            // rows on every engine restart/stop — a genuine conflict between
+            // this column's two meanings ("engine's live running state" vs
+            // "user-set workflow stage") that predates this fix and needs a
+            // real design decision, not a guess.
+            replacements.status = status || null;
 
             // Add logging settings to replacements (V33 + V59)
-            replacements.log_level = ['debug','info','warning','error','off'].includes(log_level) ? log_level : 'debug';
-            replacements.debug_logging = replacements.log_level !== 'off';
-            replacements.log_retention_days = parseInt(log_retention_days) || 30;
-            replacements.retain_error_logs_forever = retain_error_logs_forever !== false && retain_error_logs_forever !== 'false';
+            replacements.log_level = log_level === undefined
+                ? null
+                : (['debug','info','warning','error','off'].includes(log_level) ? log_level : 'debug');
+            replacements.debug_logging = replacements.log_level === null
+                ? null
+                : (replacements.log_level !== 'off');
+            replacements.log_retention_days = log_retention_days === undefined
+                ? null
+                : (parseInt(log_retention_days) || 30);
+            replacements.retain_error_logs_forever = retain_error_logs_forever === undefined
+                ? null
+                : (retain_error_logs_forever !== false && retain_error_logs_forever !== 'false');
 
-            // Recovery Queue (DLQ) config — merge with defaults so partial updates are safe
-            const defaultDLQConfig = {
-                max_attempts: 10, initial_delay_s: 30,
-                retry_delay_s: 60, backoff_multiplier: 2.0, expires_after_hours: 0
-            };
-            const incomingDLQ = (typeof dlq_config === 'object' && dlq_config !== null)
-                ? dlq_config
-                : (typeof dlq_config === 'string' ? JSON.parse(dlq_config) : {});
-            replacements.dlq_config = JSON.stringify({ ...defaultDLQConfig, ...incomingDLQ });
+            // Error Threshold — previously not written at all (see destructure
+            // comment above); now a real, working field.
+            replacements.error_threshold = error_threshold !== undefined ? error_threshold : null;
 
-            // FHIR Validation Policy (V66) — accept both camelCase and snake_case
+            // Recovery Queue (DLQ) config — merge with defaults so a save that
+            // sends a PARTIAL dlq_config object is safe. Only merge/write at all
+            // when the field was actually part of THIS request — previously this
+            // ran unconditionally, so any caller that doesn't send dlq_config
+            // (e.g. the Edit modal, before this change) silently reset every
+            // interface's DLQ config to hardcoded defaults on every single save.
+            replacements.dlq_config = null;
+            if (dlq_config !== undefined) {
+                const defaultDLQConfig = {
+                    max_attempts: 10, initial_delay_s: 30,
+                    retry_delay_s: 60, backoff_multiplier: 2.0, expires_after_hours: 0
+                };
+                const incomingDLQ = (typeof dlq_config === 'object' && dlq_config !== null)
+                    ? dlq_config
+                    : (typeof dlq_config === 'string' ? JSON.parse(dlq_config) : {});
+                replacements.dlq_config = JSON.stringify({ ...defaultDLQConfig, ...incomingDLQ });
+            }
+
+            // CDA Coverage Audit config (V207/V209) — needs to distinguish THREE
+            // states, not two: "not sent at all" (this editor doesn't know about
+            // the field — preserve whatever's already saved), "explicitly
+            // disabled" (the checkbox was unchecked and saved — really turn it
+            // off), and "sent with real config" (write it). A plain SQL NULL
+            // can't carry both of the first two meanings at once, so "explicitly
+            // disabled" is encoded as the JSON value `null` (a real, present
+            // JSONB value, not an absent replacement) while "not sent" stays a
+            // true SQL NULL. See the widened enabled-check everywhere this
+            // column is read: it must now treat both NULL and JSON `null` as
+            // disabled, not just NULL.
+            replacements.cda_coverage_audit_config = cda_coverage_audit_config === undefined
+                ? null
+                : JSON.stringify(cda_coverage_audit_config || null);
+
+            // FHIR Validation Policy (V66) — accept both camelCase and snake_case.
+            // undefined (neither alias sent) -> null -> COALESCE preserves the
+            // existing policy, same "don't reset on unrelated saves" reasoning
+            // as the deployment/logging fields above.
             const validPolicies = ['proceed', 'warn', 'reject', 'queue_review'];
             // snake_case takes precedence over camelCase alias (explicit API field wins)
-            const rawPolicy = fhir_validation_policy || fhirValidationPolicy || 'proceed';
-            replacements.fhir_validation_policy = validPolicies.includes(rawPolicy) ? rawPolicy : 'proceed';
+            const rawPolicy = fhir_validation_policy || fhirValidationPolicy;
+            replacements.fhir_validation_policy = rawPolicy === undefined
+                ? null
+                : (validPolicies.includes(rawPolicy) ? rawPolicy : 'proceed');
 
             console.log('📊 OOB Update - JSONB fields prepared:', {
                 sourceConnectivity: replacements.sourceConnectivity?.substring(0, 150),
                 targetConnectivity: replacements.targetConnectivity?.substring(0, 150)
             });
 
-            // V111: accepted_message_families — null = accept all
-            replacements.acceptedMessageFamilies = Array.isArray(acceptedMessageFamilies) && acceptedMessageFamilies.length > 0
-                ? JSON.stringify(acceptedMessageFamilies)
-                : null;
+            // V111: accepted_message_families — null = accept all. When this key
+            // isn't part of the request at all (no current caller has a UI control
+            // for it), preserve the existing filter via COALESCE below rather than
+            // silently resetting it to "accept all" on an unrelated save. A caller
+            // that explicitly wants to clear the filter should send an empty array
+            // — that still collapses to null here, which the COALESCE(NULLIF(...))
+            // below cannot distinguish from "not sent"; no current caller needs
+            // that distinction, so this is a known, accepted limitation, not a bug.
+            replacements.acceptedMessageFamilies = acceptedMessageFamilies === undefined
+                ? null
+                : (Array.isArray(acceptedMessageFamilies) && acceptedMessageFamilies.length > 0
+                    ? JSON.stringify(acceptedMessageFamilies)
+                    : null);
 
             await this.database.sequelize.query(`
                 UPDATE interfaces SET
-                    name = :name,
-                    description = :description,
-                    status = :status,
-                    source_type = :sourceType,
-                    source_connectivity = :sourceConnectivity::jsonb,
-                    target_type = :targetType,
-                    target_connectivity = :targetConnectivity::jsonb,
-                    message_type = :messageType,
+                    name = COALESCE(:name, name),
+                    description = COALESCE(:description, description),
+                    status = COALESCE(:status, status),
+                    source_type = COALESCE(:sourceType, source_type),
+                    source_connectivity = COALESCE(NULLIF(:sourceConnectivity::jsonb, '{}'::jsonb), source_connectivity),
+                    target_type = COALESCE(:targetType, target_type),
+                    target_connectivity = COALESCE(NULLIF(:targetConnectivity::jsonb, '{}'::jsonb), target_connectivity),
+                    message_type = COALESCE(:messageType, message_type),
                     source_config      = COALESCE(NULLIF(:sourceConfig::jsonb,      '{}'::jsonb), source_config),
                     target_config      = COALESCE(NULLIF(:targetConfig::jsonb,      '{}'::jsonb), target_config),
                     processing_rules   = COALESCE(NULLIF(:processingRules::jsonb,   '{}'::jsonb), processing_rules),
                     transformation_mapping = COALESCE(NULLIF(:transformationMapping::jsonb, '{}'::jsonb), transformation_mapping),
-                    deployment_mode = :deployment_mode,
-                    auto_start = :auto_start,
-                    deployment_delay_seconds = :deployment_delay_seconds,
-                    log_level = :log_level,
-                    debug_logging = :debug_logging,
-                    log_retention_days = :log_retention_days,
-                    retain_error_logs_forever = :retain_error_logs_forever,
-                    fhir_validation_policy = :fhir_validation_policy,
-                    accepted_message_families = :acceptedMessageFamilies::jsonb,
-                    dlq_config = :dlq_config::jsonb,
+                    deployment_mode = COALESCE(:deployment_mode, deployment_mode),
+                    auto_start = COALESCE(:auto_start, auto_start),
+                    deployment_delay_seconds = COALESCE(:deployment_delay_seconds, deployment_delay_seconds),
+                    log_level = COALESCE(:log_level, log_level),
+                    debug_logging = COALESCE(:debug_logging, debug_logging),
+                    log_retention_days = COALESCE(:log_retention_days, log_retention_days),
+                    retain_error_logs_forever = COALESCE(:retain_error_logs_forever, retain_error_logs_forever),
+                    fhir_validation_policy = COALESCE(:fhir_validation_policy, fhir_validation_policy),
+                    accepted_message_families = COALESCE(:acceptedMessageFamilies::jsonb, accepted_message_families),
+                    error_threshold = COALESCE(:error_threshold, error_threshold),
+                    dlq_config = COALESCE(:dlq_config::jsonb, dlq_config),
+                    cda_coverage_audit_config = COALESCE(:cda_coverage_audit_config::jsonb, cda_coverage_audit_config),
                     updated_by = :userId,
                     updated_at = CURRENT_TIMESTAMP
                 WHERE id = :interfaceId

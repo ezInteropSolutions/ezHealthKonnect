@@ -708,6 +708,16 @@ func (pe *ProcessingEngine) executeTransformationPipeline(
 			return uri
 		}))
 	}
+	// Inject CDA Coverage Audit callback so OutboundConnectorExecutor can hand
+	// off this message's tracker (if any — see ExecutePipeline in
+	// transformation_pipeline_helpers.go, where it's attached only for
+	// CDA-input messages on an interface that's opted in) to the bounded
+	// background worker pool after each delivery attempt. nil pool (feature
+	// never wired up via SetCoverageAuditPool) means this is never injected,
+	// so publishCoverageAudit's context lookup is a pure no-op.
+	if pe.coverageAuditPool != nil {
+		ctx = context.WithValue(ctx, "coverage_audit_fn", models.CoverageAuditFn(pe.coverageAuditPool.Submit))
+	}
 	// Inject lifecycle event callback so executors deep in services/executors/* (which
 	// cannot import package services — see models.LogLifecycleEventFn's doc comment)
 	// can still write STEP EXEC / CDA SECTION / DELIVER / DLQ entries into this message's

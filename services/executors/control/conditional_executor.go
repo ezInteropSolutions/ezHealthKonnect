@@ -7,7 +7,6 @@ import (
 	"ezhealthkonnect/services/executors"
 	"fmt"
 	"log"
-	"regexp"
 	"strings"
 	"time"
 )
@@ -308,102 +307,15 @@ func (e *IfThenElseExecutor) Execute(
 	return outputData, nil
 }
 
-// evaluateCondition evaluates a condition against data
+// evaluateCondition delegates to the shared executors.EvaluateCondition —
+// the same evaluator hl7.build's per-segment/per-field Condition also uses
+// (services/executors/condition.go), so every operator behaves identically
+// everywhere in the pipeline rather than each consumer maintaining its own
+// copy. This method (and the logging around field/compareValue it used to
+// do inline) is kept only as the thin call site control.SwitchCaseExecutor
+// and this file's other callers already depend on.
 func (e *IfThenElseExecutor) evaluateCondition(condition map[string]interface{}, data map[string]interface{}) (bool, error) {
-	field := getStringValue(condition, "field")
-	operator := getStringValue(condition, "operator")
-
-	// Get first field value - use shared HL7-aware resolver from base_executor
-	// This handles paths like "MSH.9", "PID.5.1" automatically
-	fieldValue := executors.GetNestedValue(data, field)
-
-	// Determine comparison value (constant or field)
-	var compareValue interface{}
-	compareToField := getStringValue(condition, "compareToField")
-	if compareToField != "" {
-		// Cross-field comparison - use shared HL7-aware resolver
-		compareValue = executors.GetNestedValue(data, compareToField)
-		log.Printf("   Comparing: %s (%v) %s %s (%v)", field, fieldValue, operator, compareToField, compareValue)
-	} else {
-		// Constant comparison
-		compareValue = condition["value"]
-		log.Printf("   Comparing: %s (%v) %s %v", field, fieldValue, operator, compareValue)
-	}
-
-	// Perform comparison
-	switch operator {
-	case "equals":
-		return fmt.Sprintf("%v", fieldValue) == fmt.Sprintf("%v", compareValue), nil
-
-	case "not_equals":
-		return fmt.Sprintf("%v", fieldValue) != fmt.Sprintf("%v", compareValue), nil
-
-	case "contains":
-		fieldStr := fmt.Sprintf("%v", fieldValue)
-		valueStr := fmt.Sprintf("%v", compareValue)
-		return strings.Contains(fieldStr, valueStr), nil
-
-	case "starts_with":
-		fieldStr := fmt.Sprintf("%v", fieldValue)
-		valueStr := fmt.Sprintf("%v", compareValue)
-		return strings.HasPrefix(fieldStr, valueStr), nil
-
-	case "ends_with":
-		fieldStr := fmt.Sprintf("%v", fieldValue)
-		valueStr := fmt.Sprintf("%v", compareValue)
-		return strings.HasSuffix(fieldStr, valueStr), nil
-
-	case "greater_than":
-		fieldNum := toFloat64(fieldValue)
-		valueNum := toFloat64(compareValue)
-		return fieldNum > valueNum, nil
-
-	case "greater_than_or_equal":
-		fieldNum := toFloat64(fieldValue)
-		valueNum := toFloat64(compareValue)
-		return fieldNum >= valueNum, nil
-
-	case "less_than":
-		fieldNum := toFloat64(fieldValue)
-		valueNum := toFloat64(compareValue)
-		return fieldNum < valueNum, nil
-
-	case "less_than_or_equal":
-		fieldNum := toFloat64(fieldValue)
-		valueNum := toFloat64(compareValue)
-		return fieldNum <= valueNum, nil
-
-	case "exists":
-		return fieldValue != nil, nil
-
-	case "not_exists":
-		return fieldValue == nil, nil
-
-	case "regex_match":
-		fieldStr := fmt.Sprintf("%v", fieldValue)
-		pattern := fmt.Sprintf("%v", compareValue)
-		matched, err := regexp.MatchString(pattern, fieldStr)
-		if err != nil {
-			return false, fmt.Errorf("invalid regex pattern: %v", err)
-		}
-		return matched, nil
-
-	case "in_list":
-		valueList, ok := compareValue.([]interface{})
-		if !ok {
-			return false, fmt.Errorf("value must be a list for 'in_list' operator")
-		}
-		fieldStr := fmt.Sprintf("%v", fieldValue)
-		for _, item := range valueList {
-			if fmt.Sprintf("%v", item) == fieldStr {
-				return true, nil
-			}
-		}
-		return false, nil
-
-	default:
-		return false, fmt.Errorf("unsupported operator: %s", operator)
-	}
+	return executors.EvaluateCondition(condition, data)
 }
 
 // executeAction executes a single action
@@ -1321,28 +1233,6 @@ func setNestedValue(data map[string]interface{}, path string, value interface{})
 	}
 
 	current[keys[len(keys)-1]] = value
-}
-
-// toFloat64 converts a value to float64
-func toFloat64(value interface{}) float64 {
-	switch v := value.(type) {
-	case float64:
-		return v
-	case float32:
-		return float64(v)
-	case int:
-		return float64(v)
-	case int32:
-		return float64(v)
-	case int64:
-		return float64(v)
-	case string:
-		var f float64
-		fmt.Sscanf(v, "%f", &f)
-		return f
-	default:
-		return 0
-	}
 }
 
 // getMapKeys returns the keys of a map for debugging

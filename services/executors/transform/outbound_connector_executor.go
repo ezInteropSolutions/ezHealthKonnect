@@ -98,6 +98,26 @@ func (e *OutboundConnectorExecutor) Execute(
 		return nil, fmt.Errorf("outbound connector requires connectorType in config")
 	}
 
+	// Resolve destination address — HTTP uses "endpoint", TCP uses "host"+"port", others vary.
+	// Hoisted up here (was previously computed only on the success path, after
+	// connector.Send()) so every exit point — including the three failure
+	// paths below — has a destination label available for CDA Coverage
+	// Audit's publishCoverageAudit, which needs to report per-destination
+	// regardless of delivery outcome.
+	destination := config.Config["endpoint"]
+	if destination == nil {
+		destination = config.Config["url"]
+	}
+	if destination == nil {
+		if host, ok := config.Config["host"].(string); ok {
+			if port, ok := config.Config["port"]; ok {
+				destination = fmt.Sprintf("%s:%v", host, port)
+			} else {
+				destination = host
+			}
+		}
+	}
+
 	log.Printf("  📤 Outbound Connector: type=%s", config.ConnectorType)
 
 	outputData := make(map[string]interface{})
@@ -147,6 +167,15 @@ func (e *OutboundConnectorExecutor) Execute(
 			"payload_size_bytes": len(content),
 			"content_type":       resolvedContentType,
 			"message":            "Dry-run: payload prepared but NOT sent (test mode)",
+			// Untruncated, unlike details.payload_preview below — the Test
+			// Pipeline "outbound payload" panel needs the real payload (a
+			// FHIR Bundle etc. is routinely well over 2000 chars), not a
+			// truncated preview. Lives in variables (-> step_output), not
+			// details (-> step_metadata), mirroring payload.builder's own
+			// step_output.payload, which is also never truncated — the
+			// TransformationTestController reads outbound content from
+			// step_output for both step types (extractOutboundPayloadEntry).
+			"payload_full": content,
 		}
 		details := map[string]interface{}{
 			"duration_ms":        durationMs,
@@ -174,6 +203,7 @@ func (e *OutboundConnectorExecutor) Execute(
 			msgID, _ := ctx.Value("message_id").(string)
 			fn(ifaceID, msgID, "failed", fmt.Sprintf("connector type '%s' not found", config.ConnectorType))
 		}
+		e.publishCoverageAudit(ctx, step, inputData, config.ConnectorType, destination, "failed")
 		return nil, fmt.Errorf("failed to create outbound connector '%s': %w", config.ConnectorType, err)
 	}
 
@@ -185,6 +215,7 @@ func (e *OutboundConnectorExecutor) Execute(
 			msgID, _ := ctx.Value("message_id").(string)
 			fn(ifaceID, msgID, "failed", fmt.Sprintf("connector initialization failed: %v", err))
 		}
+		e.publishCoverageAudit(ctx, step, inputData, config.ConnectorType, destination, "failed")
 		return nil, fmt.Errorf("failed to initialize connector '%s': %w", config.ConnectorType, err)
 	}
 	defer connector.Close()
@@ -229,6 +260,7 @@ func (e *OutboundConnectorExecutor) Execute(
 		if fn := models.GetDeliveryStatusFn(ctx); fn != nil {
 			fn(interfaceID, messageID, "failed", err.Error())
 		}
+		e.publishCoverageAudit(ctx, step, inputData, config.ConnectorType, destination, "failed")
 
 		// DELIVER RESULT (failure) lifecycle log point.
 		if logFn := models.GetLogLifecycleEventFn(ctx); logFn != nil {
@@ -297,20 +329,6 @@ func (e *OutboundConnectorExecutor) Execute(
 		"message_id":     outMsg.MessageID,
 		"bytes_sent":     len(content),
 	}
-	// Resolve destination address — HTTP uses "endpoint", TCP uses "host"+"port", others vary
-	destination := config.Config["endpoint"]
-	if destination == nil {
-		destination = config.Config["url"]
-	}
-	if destination == nil {
-		if host, ok := config.Config["host"].(string); ok {
-			if port, ok := config.Config["port"]; ok {
-				destination = fmt.Sprintf("%s:%v", host, port)
-			} else {
-				destination = host
-			}
-		}
-	}
 
 	// Persist exact sent payload to object storage (full content, no truncation).
 	// The URI is stored in the NDJSON log so the frontend can load the full payload on demand.
@@ -368,17 +386,19 @@ func (e *OutboundConnectorExecutor) Execute(
 
 	// Notify engine of delivery outcome — updates delivery_status in PostgreSQL directly
 	// Works for all 16 connector types; multiple outbound steps each write their own status
+	ack := ""
+	if result != nil {
+		ack = result.Acknowledgment
+	}
+	deliveryStatus := "delivered"
+	if result != nil && !result.Success {
+		deliveryStatus = "failed"
+	}
+	e.publishCoverageAudit(ctx, step, inputData, config.ConnectorType, destination, deliveryStatus)
+
 	if fn := models.GetDeliveryStatusFn(ctx); fn != nil {
 		interfaceID, _ := ctx.Value("interface_id").(string)
 		messageID, _ := ctx.Value("message_id").(string)
-		ack := ""
-		if result != nil {
-			ack = result.Acknowledgment
-		}
-		deliveryStatus := "delivered"
-		if result != nil && !result.Success {
-			deliveryStatus = "failed"
-		}
 		fn(interfaceID, messageID, deliveryStatus, ack)
 
 		// DELIVER RESULT (success) lifecycle log point.
@@ -394,6 +414,61 @@ func (e *OutboundConnectorExecutor) Execute(
 
 	log.Printf("  ✅ Outbound Connector delivery complete: %s (%d bytes)", config.ConnectorType, len(content))
 	return outputData, nil
+}
+
+// publishCoverageAudit hands the message's CDA Coverage Audit tracker off to
+// the async worker pool (via models.CoverageAuditFn, injected onto ctx the
+// same way delivery_status_fn/store_outbound_fn/log_lifecycle_event_fn
+// already are — see engine_message_processor.go) for this one delivery
+// attempt. Called from all 4 of Execute's exit points (3 failure, 1
+// success) so every destination gets a report regardless of outcome — see
+// the "after delivered/errored" requirement in the CDA Coverage Audit
+// design. Nil-safe no-op when the callback isn't registered (no worker pool
+// configured) or the tracker isn't present (audit disabled for this
+// interface, or the input wasn't CDA) — never adds latency or can fail
+// delivery: the return value is deliberately ignored here.
+func (e *OutboundConnectorExecutor) publishCoverageAudit(
+	ctx context.Context,
+	step *models.TransformationStep,
+	inputData map[string]interface{},
+	connectorType string, destination interface{}, outcome string,
+) {
+	fn := models.GetCoverageAuditFn(ctx)
+	if fn == nil {
+		return
+	}
+	msg, _ := inputData["message"].(map[string]interface{})
+	if msg == nil {
+		return
+	}
+	tracker, _ := msg["_coverageTracker"].(*executors.CDACoverageTracker)
+	if tracker == nil {
+		return // audit disabled for this interface, or non-CDA input
+	}
+	interfaceID, _ := ctx.Value("interface_id").(string)
+	messageID, _ := ctx.Value("message_id").(string)
+	fn(models.CoverageAuditJob{
+		Tracker:       tracker,
+		InterfaceID:   interfaceID,
+		MessageID:     messageID,
+		StepID:        step.ID,
+		StepName:      step.StepName,
+		ConnectorType: connectorType,
+		Destination:   destinationString(destination),
+		Outcome:       outcome,
+	})
+}
+
+// destinationString renders destination for display, avoiding the literal
+// "<nil>" fmt.Sprintf("%v", nil) would otherwise produce — connector types
+// whose config uses neither "endpoint"/"url" nor "host"+"port" (e.g. some
+// FHIR/HTTP variants) leave destination nil, which should read as empty in
+// a report, not as text.
+func destinationString(destination interface{}) string {
+	if destination == nil {
+		return ""
+	}
+	return fmt.Sprintf("%v", destination)
 }
 
 // resolveAndSerializeContent resolves contentField (or falls back to whole message)

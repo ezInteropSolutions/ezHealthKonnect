@@ -167,6 +167,23 @@ body {
     text-overflow: ellipsis;
 }
 
+.breadcrumb-msgtype-select {
+    color: #6366f1;
+    font-size: 0.82rem;
+    font-weight: 600;
+    border: 1px solid transparent;
+    background: transparent;
+    border-radius: 4px;
+    padding: 2px 4px;
+    cursor: pointer;
+    max-width: 180px;
+}
+
+.breadcrumb-msgtype-select:hover {
+    background: #ede9fe;
+    border-color: #ddd6fe;
+}
+
 /* ── Shortcut buttons ─────────────────────────────────────── */
 .btn-shortcut {
     display: inline-flex;

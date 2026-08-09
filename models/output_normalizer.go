@@ -277,6 +277,9 @@ func (n *OutputNormalizer) NormalizeStepOutput(output map[string]interface{}) ma
 	// - "result": user-controlled pivot/transform output (column names like "GLUC", ICD codes)
 	// - "fhirBundle": FHIR R4 resource tree — all keys MUST remain camelCase per the FHIR spec
 	//   (e.g. resourceType, birthDate, effectiveDateTime). Normalizing them breaks FHIR validators.
+	//   The wrapper KEY itself also stays "fhirBundle" (not "fhir_bundle") — an
+	//   established, intentional convention for its one known consumer
+	//   (cda_to_fhir_executor.go).
 	preserved := map[string]interface{}{}
 	for _, key := range []string{"result", "fhirBundle"} {
 		if v, ok := unwrapped[key]; ok {
@@ -285,12 +288,38 @@ func (n *OutputNormalizer) NormalizeStepOutput(output map[string]interface{}) ma
 		}
 	}
 
+	// "fhirResource": same FHIR-spec requirement as fhirBundle for its INTERNAL
+	// fields (a bare fhir.build pipeline with no payload.builder step has no
+	// fhirBundle at all, only this key) — but unlike fhirBundle, existing
+	// consumers already depend on the wrapper KEY normalizing to the usual
+	// "fhir_resource" snake_case (e.g. step_output.fhir_resource in
+	// tests/playwright/fhir-hl7-build-e2e.spec.js), so only the value is
+	// preserved here; the key still goes through NormalizeKey below.
+	// NormalizeStepOutput runs twice on the same data in practice
+	// (executeStepWithContext normalizes once building StepOutput.OutputData;
+	// TransformationTestController.TestPipeline normalizes again on that
+	// already-normalized data) — so by the second pass the key has already
+	// become "fhir_resource". Check both spellings so the second pass
+	// recognizes its own prior output and doesn't re-run NormalizeMap over
+	// the (by then still-camelCase, correctly preserved) value.
+	var preservedFhirResource interface{}
+	if v, ok := unwrapped["fhirResource"]; ok {
+		preservedFhirResource = v
+		delete(unwrapped, "fhirResource")
+	} else if v, ok := unwrapped["fhir_resource"]; ok {
+		preservedFhirResource = v
+		delete(unwrapped, "fhir_resource")
+	}
+
 	// Normalize all metadata keys (result_count, operation, duration_ms, etc.)
 	normalized := n.NormalizeMap(unwrapped)
 
 	// Restore preserved keys without key normalization
 	for key, val := range preserved {
 		normalized[key] = val
+	}
+	if preservedFhirResource != nil {
+		normalized["fhir_resource"] = preservedFhirResource
 	}
 
 	return normalized

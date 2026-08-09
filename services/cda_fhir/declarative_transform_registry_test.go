@@ -37,3 +37,35 @@ func TestDeclarativeTransformRegistry_InferTransform(t *testing.T) {
 		t.Error("InferTransform with an unknown pair should return an error, got nil")
 	}
 }
+
+func TestDeclarativeStringPrefix_PrependsConfiguredPrefix(t *testing.T) {
+	r := NewDeclarativeTransformRegistry()
+
+	result, err := r.Apply("string_prefix", "12345", map[string]string{"prefix": "Patient/"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != "Patient/12345" {
+		t.Errorf("string_prefix(\"12345\", prefix=\"Patient/\") = %v, want \"Patient/12345\"", result)
+	}
+}
+
+func TestDeclarativeStringPrefix_EmptyValueReturnsNil(t *testing.T) {
+	r := NewDeclarativeTransformRegistry()
+
+	result, err := r.Apply("string_prefix", "", map[string]string{"prefix": "Patient/"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != nil {
+		t.Errorf("string_prefix(\"\", ...) = %v, want nil (no dangling prefix-only write)", result)
+	}
+
+	result, err = r.Apply("string_prefix", nil, map[string]string{"prefix": "Patient/"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != nil {
+		t.Errorf("string_prefix(nil, ...) = %v, want nil", result)
+	}
+}

@@ -19,7 +19,6 @@ function activateTab(name) {
         else if (name === 'pipeline')  loadPipelineTab();
         else if (name === 'messages')  loadMessagesTab();
         else if (name === 'alerts')    loadAlertsTab();
-        else if (name === 'settings')  loadSettings();
     }
 }
 
@@ -48,6 +47,30 @@ function esc(s) {
     return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
+// YYYY-MM-DD using LOCAL date parts (not toISOString(), which is UTC-based
+// and can roll the date to the next/previous day for users off UTC+0) —
+// mirrors formatDateYMD in public/js/interfaces.js.
+function formatDateYMD(date) {
+    var y = date.getFullYear();
+    var m = String(date.getMonth() + 1).padStart(2, '0');
+    var d = String(date.getDate()).padStart(2, '0');
+    return y + '-' + m + '-' + d;
+}
+
+// Same date, plus local clock time — mirrors formatDateTimeYMD in interfaces.js.
+function formatDateTimeYMD(date) {
+    var time = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    return formatDateYMD(date) + ' ' + time;
+}
+
+function copyInterfaceId(id, btn) {
+    navigator.clipboard.writeText(id).then(function() {
+        var orig = btn.innerHTML;
+        btn.innerHTML = '<i class="fas fa-check"></i>';
+        setTimeout(function() { btn.innerHTML = orig; }, 1500);
+    });
+}
+
 // ── Load interface header info ─────────────────────────────────────────────────
 function loadInterfaceHeader() {
     if (!_interfaceId) {
@@ -63,6 +86,15 @@ function loadInterfaceHeader() {
             document.getElementById('interfaceName').textContent = iface.name || 'Unnamed Interface';
             document.getElementById('interfaceDesc').textContent = iface.description || '';
             document.title = (iface.name || 'Interface') + ' – ezHealthKonnect';
+
+            var createdText = iface.createdAt ? formatDateTimeYMD(new Date(iface.createdAt)) : 'Unknown';
+            var updatedText = iface.updatedAt ? formatDateTimeYMD(new Date(iface.updatedAt)) : 'Unknown';
+            document.getElementById('interfaceMeta').innerHTML =
+                '<span>ID: <code>' + esc(iface.id) + '</code> ' +
+                '<button class="copy-id-btn" onclick="copyInterfaceId(\'' + esc(iface.id) + '\', this)" title="Copy interface ID">' +
+                '<i class="fas fa-copy"></i></button></span>' +
+                '<span>Created: ' + createdText + '</span>' +
+                '<span>Updated: ' + updatedText + '</span>';
 
             var pill = document.getElementById('statusPill');
             // Runtime status (is it actually running right now) takes priority over
@@ -303,82 +335,14 @@ function openNewRuleForInterface() {
     window.location.href = 'alerts.html#rules?newFor=' + encodeURIComponent(_interfaceId);
 }
 
-// ── Settings ──────────────────────────────────────────────────────────────────
-function loadSettings() {
-    if (!_interfaceData) {
-        // Re-fetch if header hasn't populated yet
-        apiGet('/api/interfaces/' + _interfaceId)
-            .then(function(res) {
-                _interfaceData = res.data || res.interface || res;
-                populateSettingsForm();
-            });
-    } else {
-        populateSettingsForm();
-    }
-}
-
-function populateSettingsForm() {
-    if (!_interfaceData) return;
-    document.getElementById('settingName').value           = _interfaceData.name || '';
-    document.getElementById('settingDesc').value           = _interfaceData.description || '';
-    document.getElementById('settingStatus').value         = _interfaceData.interface_status || _interfaceData.status || 'draft';
-    document.getElementById('settingErrorThreshold').value = _interfaceData.error_threshold != null ? _interfaceData.error_threshold : '';
-
-    var dlq = _interfaceData.dlq_config || {};
-    document.getElementById('dlqMaxAttempts').value  = dlq.max_attempts       != null ? dlq.max_attempts       : '';
-    document.getElementById('dlqInitialDelay').value = dlq.initial_delay_s    != null ? dlq.initial_delay_s    : '';
-    document.getElementById('dlqRetryDelay').value   = dlq.retry_delay_s      != null ? dlq.retry_delay_s      : '';
-    document.getElementById('dlqBackoff').value      = dlq.backoff_multiplier != null ? dlq.backoff_multiplier : '';
-    document.getElementById('dlqExpiresAfter').value = dlq.expires_after_hours!= null ? dlq.expires_after_hours: '';
-}
-
-function saveSettings() {
-    var dlqConfig = {
-        max_attempts:        parseInt(document.getElementById('dlqMaxAttempts').value)  || null,
-        initial_delay_s:     parseInt(document.getElementById('dlqInitialDelay').value) || null,
-        retry_delay_s:       parseInt(document.getElementById('dlqRetryDelay').value)   || null,
-        backoff_multiplier:  parseFloat(document.getElementById('dlqBackoff').value)    || null,
-        expires_after_hours: parseInt(document.getElementById('dlqExpiresAfter').value) || 0,
-    };
-    // Strip nulls so Go backend uses its own defaults for unset fields
-    Object.keys(dlqConfig).forEach(function(k) { if (dlqConfig[k] === null) delete dlqConfig[k]; });
-
-    var body = {
-        name:            document.getElementById('settingName').value.trim(),
-        description:     document.getElementById('settingDesc').value.trim(),
-        interface_status:document.getElementById('settingStatus').value,
-        error_threshold: parseInt(document.getElementById('settingErrorThreshold').value) || null,
-        dlq_config:      dlqConfig,
-    };
-    if (!body.name) { showToast('Name is required', false); return; }
-    apiPut('/api/interfaces/' + _interfaceId, body)
-        .then(function(res) {
-            if (res.success || res.id) {
-                showToast('Settings saved', true);
-                _interfaceData = Object.assign(_interfaceData || {}, body);
-                document.getElementById('interfaceName').textContent = body.name;
-                // Update status pill
-                var pill = document.getElementById('statusPill');
-                pill.textContent = body.interface_status.toUpperCase();
-                pill.className   = 'status-pill ' + body.interface_status;
-            } else { showToast(res.error || 'Error saving settings', false); }
-        })
-        .catch(function() { showToast('Network error', false); });
-}
-
-async function confirmDelete() {
-    const ok = await AppDialogs.confirm('Delete this interface and all its data?<br>This cannot be undone.', { title: 'Delete Interface', type: 'danger', confirmText: 'Delete' });
-    if (!ok) return;
-    fetch('/api/interfaces/' + _interfaceId, { method: 'DELETE', credentials: 'include' })
-        .then(function(r) { return r.json(); })
-        .then(function(res) {
-            if (res.success) {
-                showToast('Interface deleted', true);
-                setTimeout(function() { window.location.href = 'interfaces.html'; }, 800);
-            } else { showToast(res.error || 'Delete failed', false); }
-        })
-        .catch(function() { showToast('Network error', false); });
-}
+// Settings tab (name/description/status inline editing, Error Threshold,
+// Recovery Queue/DLQ config, CDA Coverage Audit config, Delete Interface)
+// was removed — it duplicated the "Edit Interface Configuration" modal
+// (interfaces.html), which only ever sent the fields IT knew about, so
+// saving from either editor silently reset whatever the other one owned.
+// DLQ config / Error Threshold / CDA Coverage Audit now live on that modal's
+// Basic tab instead (see modal-components.js, interfaces.js). Interface
+// deletion remains available from the Interfaces list page, unchanged.
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 window.addEventListener('load', function() {

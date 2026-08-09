@@ -31,6 +31,33 @@ type RealHL7Schema struct {
 	Structure    []string                  `json:"structure"`
 	LoadedAt     time.Time                 `json:"-"`
 	FilePath     string                    `json:"-"`
+
+	// GroupTree preserves the schema's nested group structure (e.g. ORU_R01's
+	// "OBSERVATION" group repeating around a single OBX) that Segments/
+	// SegmentOrder deliberately flatten away for the inbound-parsing
+	// consumers those two fields already serve. Populated alongside them,
+	// never in place of them, by buildGroupTree — the hl7.build step's
+	// no-code UI (hl7/builder/field_catalog.go's SchemaTree/RequiredSpine/
+	// NextAllowedSegments) is the only consumer, since correct segment
+	// ordering/repeat-eligibility guardrails need real group context: a
+	// segment's own "repeat" flag is frequently "1" even though it sits
+	// inside a group whose "repeat" is "*" (one OBX per OBSERVATION group
+	// occurrence, but the group itself repeats per result).
+	GroupTree []*SchemaNode `json:"groupTree,omitempty"`
+}
+
+// SchemaNode is one node — segment or group — in a message schema's document
+// order, preserving the nesting real HL7 conformance tables express (a
+// segment's true repeat/require-ness is a function of itself AND every
+// ancestor group, not itself alone). Built once per loaded schema by
+// buildGroupTree; consumed read-only by hl7/builder/field_catalog.go.
+type SchemaNode struct {
+	Name     string        `json:"name"`             // segment name ("PID") or group name ("PATIENT RESULT")
+	Kind     string        `json:"kind"`             // "segment" | "group"
+	Usage    string        `json:"usage,omitempty"`  // R/O/C/... (own usage, not cumulative)
+	Repeat   string        `json:"repeat,omitempty"` // "1" | "*" (own repeat, not cumulative)
+	Sequence int           `json:"sequence"`         // document-order position; groups take their first child's sequence
+	Children []*SchemaNode `json:"children,omitempty"`
 }
 
 type RealSegmentDef struct {
@@ -38,6 +65,7 @@ type RealSegmentDef struct {
 	Description   string                  `json:"description"`
 	Usage         string                  `json:"usage"`
 	MaxUse        string                  `json:"maxUse"`
+	Repeat        string                  `json:"repeat"`
 	Sequence      int                     `json:"sequence"`
 	Fields        map[string]RealFieldDef `json:"fields"`
 	OrderedFields []string                `json:"orderedFields"`
@@ -490,6 +518,7 @@ func (rsl *RealSchemaLoader) convertOrderedRawSchema(raw *orderedmap.OrderedMap[
 			// HL7 schemas nest segments inside groups (e.g., PATIENT RESULT > PATIENT > segments > PID).
 			sequenceCounter := 0
 			rsl.extractSegmentsRecursive(structureMap, schema, &segmentCount, &sequenceCounter)
+			schema.GroupTree = buildGroupTree(structureMap)
 		}
 	} else if segmentsValue, exists := raw.Get("segments"); exists {
 		// Fallback: also support "segments" key for backward compatibility
@@ -508,6 +537,7 @@ func (rsl *RealSchemaLoader) convertOrderedRawSchema(raw *orderedmap.OrderedMap[
 					sequenceCounter++
 				}
 			}
+			schema.GroupTree = buildGroupTree(segmentsMap)
 		}
 	}
 
@@ -577,6 +607,82 @@ func (rsl *RealSchemaLoader) extractSegmentsRecursive(structureMap map[string]in
 	}
 }
 
+// buildGroupTree recursively converts a raw structure/segments map into an
+// ordered []*SchemaNode, preserving the group nesting extractSegmentsRecursive
+// deliberately discards (that function's flat Segments/SegmentOrder output
+// is exactly right for inbound parsing, which never needs to know a segment's
+// enclosing group — hl7.build's ordering/repeat guardrails do). Detects a
+// segment the same way extractSegmentsRecursive does (presence of "fields");
+// everything else with a "segments" child map is a group.
+//
+// Map iteration order in Go is randomized, and every level below the
+// top-level orderedmap decode already lost document order by the time it
+// reaches here (json.Unmarshal into map[string]interface{}) — so sibling
+// order is recovered the same way convertOrderedSegment recovers field
+// order: from each segment's own "sequence" value, sorting afterward. Groups
+// don't carry their own "sequence" in the raw schema, so a group's effective
+// position is its first descendant segment's sequence (firstChildSequence).
+func buildGroupTree(nodeMap map[string]interface{}) []*SchemaNode {
+	nodes := make([]*SchemaNode, 0, len(nodeMap))
+	for key, value := range nodeMap {
+		child, ok := value.(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		if _, hasFields := child["fields"].(map[string]interface{}); hasFields {
+			nodes = append(nodes, &SchemaNode{
+				Name:     key,
+				Kind:     "segment",
+				Usage:    rawStringField(child, "usage"),
+				Repeat:   rawStringField(child, "repeat"),
+				Sequence: extractSequenceFromRaw(child, 0),
+			})
+			continue
+		}
+
+		if segmentsValue, hasSegs := child["segments"].(map[string]interface{}); hasSegs {
+			children := buildGroupTree(segmentsValue)
+			nodes = append(nodes, &SchemaNode{
+				Name:     key,
+				Kind:     "group",
+				Usage:    rawStringField(child, "usage"),
+				Repeat:   rawStringField(child, "repeat"),
+				Children: children,
+				Sequence: firstChildSequence(children),
+			})
+		}
+	}
+	sort.SliceStable(nodes, func(i, j int) bool { return nodes[i].Sequence < nodes[j].Sequence })
+	return nodes
+}
+
+// firstChildSequence returns the lowest Sequence among children — a group's
+// own effective document position, since only leaf segments carry a real
+// "sequence" in the raw schema.
+func firstChildSequence(children []*SchemaNode) int {
+	min := -1
+	for _, c := range children {
+		if min == -1 || c.Sequence < min {
+			min = c.Sequence
+		}
+	}
+	if min == -1 {
+		return 0
+	}
+	return min
+}
+
+// rawStringField reads a string field from a raw JSON object map, returning
+// "" when absent or a different type (e.g. null) — the same tolerant
+// convention convertOrderedSegment/convertOrderedField already apply inline.
+func rawStringField(raw map[string]interface{}, key string) string {
+	if v, ok := raw[key].(string); ok {
+		return v
+	}
+	return ""
+}
+
 // convertOrderedSegment converts segment definition
 func (rsl *RealSchemaLoader) convertOrderedSegment(segmentName string, raw map[string]interface{}, defaultSequence int) (RealSegmentDef, error) {
 	extractedSequence := extractSequenceFromRaw(raw, defaultSequence)
@@ -599,6 +705,9 @@ func (rsl *RealSchemaLoader) convertOrderedSegment(segmentName string, raw map[s
 	}
 	if maxUse, ok := raw["maxUse"].(string); ok {
 		segment.MaxUse = maxUse
+	}
+	if repeat, ok := raw["repeat"].(string); ok {
+		segment.Repeat = repeat
 	}
 
 	// Check if fields exist and process them with proper positioning
@@ -985,6 +1094,20 @@ func ParseWithRealSchema(rawMessage string) *EnhancedParsedMessage {
 	}
 
 	return result
+}
+
+// ResolveSchemaForMessage resolves the same cached RealHL7Schema
+// ParseWithRealSchema uses internally, for callers outside package hl7 that
+// need the schema object itself (e.g. hl7/validator, which cannot be
+// imported here without creating an hl7 -> hl7/builder -> hl7 import cycle).
+// Does not parse the message body — only its MSH header, via the same
+// extractMessageInfoSimple ParseWithRealSchema already relies on.
+func ResolveSchemaForMessage(rawMessage string) (*RealHL7Schema, error) {
+	if realSchemaLoader == nil {
+		return nil, fmt.Errorf("schema loader not initialized")
+	}
+	version, messageType, triggerEvent := extractMessageInfoSimple(rawMessage)
+	return realSchemaLoader.LoadRealSchema(version, messageType, triggerEvent)
 }
 
 // enhanceWithRealSchema - Enhanced with proper position handling

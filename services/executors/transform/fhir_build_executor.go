@@ -56,6 +56,14 @@
 // fhir.build step per resource type, then feed each step's outputField into
 // an existing services/executors/payload.PayloadBuilderExecutor "fhir_bundle"
 // mode step.
+//
+// Conditional field population also needs no new code/mechanism here:
+// applyFieldRow has no per-field predicate on purpose. Compute/branch the
+// value upstream instead, in a services/executors/control if_then_else or
+// switch_case step (its set_field/set_value action writes a plain message.*
+// value on the matched branch), then this step's field row reads it with an
+// ordinary sourcePath. This composes rather than duplicating branching logic
+// into a second, field-row-shaped conditional schema.
 package transform
 
 import (

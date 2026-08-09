@@ -967,6 +967,10 @@ function getSortedInterfaces() {
                 av = ra; bv = rb;
                 break;
             }
+            case 'created':
+                av = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+                bv = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+                break;
             case 'lastUpdated':
                 av = a.lastUpdated ? new Date(a.lastUpdated).getTime() : 0;
                 bv = b.lastUpdated ? new Date(b.lastUpdated).getTime() : 0;
@@ -996,7 +1000,7 @@ function renderInterfacesTable() {
     if (filteredInterfaces.length === 0) {
         tbody.innerHTML = `
             <tr>
-                <td colspan="7" class="empty-state">
+                <td colspan="8" class="empty-state">
                     <div class="empty-icon">🔗</div>
                     <div><strong>No interfaces found</strong></div>
                     <div>Create your first HL7 processing interface</div>
@@ -1098,6 +1102,10 @@ function renderStatusBadge(iface) {
 
 // Create ultra compact table row
 function createCompactTableRow(interface) {
+    const created = interface.createdAt
+        ? formatCompactTime(new Date(interface.createdAt))
+        : { time: 'Unknown', date: '' };
+
     const lastUpdated = interface.lastUpdated
         ? formatCompactTime(new Date(interface.lastUpdated))
         : { time: 'Never', date: '' };
@@ -1122,6 +1130,12 @@ function createCompactTableRow(interface) {
                 <div class="interface-name-cell">
                     <div class="interface-name">${interface.name}</div>
                     <div class="interface-description">${interface.description}</div>
+                    <div class="interface-id-line" title="${interface.id}">
+                        <code>${interface.id}</code>
+                        <button class="copy-id-btn" onclick="event.stopPropagation(); copyInterfaceId('${interface.id}', this)" title="Copy interface ID">
+                            <i class="fas fa-copy"></i>
+                        </button>
+                    </div>
                     ${getSourceFormatBadge(interface)}
                 </div>
             </td>
@@ -1138,8 +1152,14 @@ function createCompactTableRow(interface) {
             </td>
             <td>
                 <div class="date-cell">
-                    <div class="date-time last-updated">${lastUpdated.time}</div>
+                    <div class="date-day">${created.date}</div>
+                    <div class="date-time">${created.time}</div>
+                </div>
+            </td>
+            <td>
+                <div class="date-cell">
                     <div class="date-day">${lastUpdated.date}</div>
+                    <div class="date-time last-updated">${lastUpdated.time}</div>
                 </div>
             </td>
             <td>
@@ -1173,6 +1193,16 @@ function createCompactTableRow(interface) {
             </td>
         </tr>
     `;
+}
+
+// Copy an interface's ID to the clipboard, with brief button feedback —
+// mirrors messageManager._copyContentById's pattern in messages.js.
+function copyInterfaceId(id, btn) {
+    navigator.clipboard.writeText(id).then(() => {
+        const orig = btn.innerHTML;
+        btn.innerHTML = '<i class="fas fa-check"></i>';
+        setTimeout(() => { btn.innerHTML = orig; }, 1500);
+    });
 }
 
 // Get mini icon-only action buttons — refined neutral-first design
@@ -1525,24 +1555,31 @@ document.addEventListener('click', (event) => {
     }
 });
 
-// Format time in ultra compact format
+// Format a date as YYYY-MM-DD using LOCAL date parts (not toISOString(), which
+// is UTC-based and can roll the date over to the next/previous day for users
+// away from UTC+0).
+function formatDateYMD(date) {
+    const y = date.getFullYear();
+    const m = String(date.getMonth() + 1).padStart(2, '0');
+    const d = String(date.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+}
+
+// Same YYYY-MM-DD date, plus a local time-of-day — used where a timestamp
+// (not just a date) is shown, e.g. the interface details modal's Timeline.
+function formatDateTimeYMD(date) {
+    const time = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    return `${formatDateYMD(date)} ${time}`;
+}
+
+// Format a date for the compact table's 2-line date-cell: YYYY-MM-DD on top,
+// clock time below — full timestamp, not a relative "2h ago" approximation
+// (there isn't room for relative + absolute date + time all in one narrow
+// column, and an exact timestamp is strictly more useful than a fuzzy one).
 function formatCompactTime(date) {
-    const now = new Date();
-    const diffMs = now - date;
-    const diffMins = Math.floor(diffMs / 60000);
-    const diffHours = Math.floor(diffMs / 3600000);
-    const diffDays = Math.floor(diffMs / 86400000);
-    
-    let timeText;
-    if (diffMins < 1) timeText = 'Now';
-    else if (diffMins < 60) timeText = `${diffMins}m`;
-    else if (diffHours < 24) timeText = `${diffHours}h`;
-    else if (diffDays < 7) timeText = `${diffDays}d`;
-    else timeText = `${Math.floor(diffDays / 7)}w`;
-    
     return {
-        time: timeText,
-        date: date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+        date: formatDateYMD(date),
+        time: date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     };
 }
 
@@ -2088,6 +2125,15 @@ function createDetailsContent(interface) {
                 <h4>Interface Information</h4>
                 <div class="details-table">
                     <div class="detail-row">
+                        <span class="detail-label">Interface ID</span>
+                        <span class="detail-value">
+                            <code style="font-size:11px;">${interface.id}</code>
+                            <button class="copy-id-btn" onclick="copyInterfaceId('${interface.id}', this)" title="Copy interface ID">
+                                <i class="fas fa-copy"></i>
+                            </button>
+                        </span>
+                    </div>
+                    <div class="detail-row">
                         <span class="detail-label">Name</span>
                         <span class="detail-value">${interface.name}</span>
                     </div>
@@ -2121,15 +2167,15 @@ function createDetailsContent(interface) {
                 <div class="details-table">
                     <div class="detail-row">
                         <span class="detail-label">Created</span>
-                        <span class="detail-value">${new Date(interface.createdAt).toLocaleString()}</span>
+                        <span class="detail-value">${formatDateTimeYMD(new Date(interface.createdAt))}</span>
                     </div>
                     <div class="detail-row">
                         <span class="detail-label">Last Updated</span>
-                        <span class="detail-value">${interface.lastUpdated ? new Date(interface.lastUpdated).toLocaleString() : 'Never'}</span>
+                        <span class="detail-value">${interface.lastUpdated ? formatDateTimeYMD(new Date(interface.lastUpdated)) : 'Never'}</span>
                     </div>
                     <div class="detail-row">
                         <span class="detail-label">Last Activity</span>
-                        <span class="detail-value">${interface.lastActivity ? new Date(interface.lastActivity).toLocaleString() : 'Never'}</span>
+                        <span class="detail-value">${interface.lastActivity ? formatDateTimeYMD(new Date(interface.lastActivity)) : 'Never'}</span>
                     </div>
                     <div class="detail-row">
                         <span class="detail-label">Created By</span>
@@ -2512,6 +2558,59 @@ async function handleEditInterface(event) {
             interfaceData.acceptedMessageFamilies = familiesInput.value ? JSON.parse(familiesInput.value) : null;
         } catch (e) {
             interfaceData.acceptedMessageFamilies = null;
+        }
+    }
+
+    // Always collect Error Threshold (not managed by config manager)
+    const errThresholdEl = document.getElementById('editErrorThreshold');
+    if (errThresholdEl) {
+        interfaceData.error_threshold = parseInt(errThresholdEl.value) || null;
+    }
+
+    // Always collect Recovery Queue (DLQ) config (not managed by config manager)
+    const dlqMaxEl = document.getElementById('editDlqMaxAttempts');
+    if (dlqMaxEl) {
+        const dlqConfig = {
+            max_attempts:        parseInt(document.getElementById('editDlqMaxAttempts')?.value)  || null,
+            initial_delay_s:     parseInt(document.getElementById('editDlqInitialDelay')?.value) || null,
+            retry_delay_s:       parseInt(document.getElementById('editDlqRetryDelay')?.value)   || null,
+            backoff_multiplier:  parseFloat(document.getElementById('editDlqBackoff')?.value)    || null,
+            expires_after_hours: parseInt(document.getElementById('editDlqExpiresAfter')?.value) || 0,
+        };
+        // Strip nulls so the backend fills in its own defaults for unset fields
+        Object.keys(dlqConfig).forEach(function(k) { if (dlqConfig[k] === null) delete dlqConfig[k]; });
+        interfaceData.dlq_config = dlqConfig;
+    }
+
+    // Always collect CDA Coverage Audit config (not managed by config manager).
+    // "notify" is only included when at least one channel is checked — the
+    // badge (always-on when enabled) doesn't need it, external notification
+    // is opt-in on top. Sending an explicit `null` here (not omitting the
+    // key) is what lets the backend tell "user unchecked this" apart from
+    // "this editor doesn't know about the field" — see interfacesController.js.
+    const coverageEnabledEl = document.getElementById('editCdaCoverageAuditEnabled');
+    if (coverageEnabledEl) {
+        if (coverageEnabledEl.checked) {
+            const coverageConfig = { enabled: true };
+            // "entry" (the original, default granularity) is left as the
+            // absence of this key, not an explicit value — matches every
+            // existing already-opted-in interface, which has no
+            // "granularity" key at all and must keep behaving exactly as
+            // before. Only "element" is ever written explicitly.
+            if (document.getElementById('editCdaCoverageAuditElementLevel')?.checked) {
+                coverageConfig.granularity = 'element';
+            }
+            const checkedChannels = Array.from(document.querySelectorAll('#editCdaCoverageAuditChannelList input[data-channel-id]:checked'))
+                .map(function(cb) { return cb.getAttribute('data-channel-id'); });
+            if (checkedChannels.length > 0) {
+                coverageConfig.notify = {
+                    channel_ids: checkedChannels,
+                    cooldown_minutes: parseInt(document.getElementById('editCdaCoverageAuditCooldownMinutes')?.value) || 60,
+                };
+            }
+            interfaceData.cda_coverage_audit_config = coverageConfig;
+        } else {
+            interfaceData.cda_coverage_audit_config = null;
         }
     }
 
@@ -3351,8 +3450,8 @@ async function activateInterfaceProcessing(interfaceId) {
             // Update delete button state in dropdown (disable it when active)
             updateDeleteButtonState(interfaceId, false);
         } else {
-            console.error('❌ Activation failed:', data.message);
-            showError(data.message || 'Failed to activate interface');
+            console.error('❌ Activation failed:', data.error || data.message);
+            showError(data.error || data.message || 'Failed to activate interface');
         }
     } catch (error) {
         console.error('❌ Activation error:', error);
@@ -3399,8 +3498,8 @@ async function pauseInterfaceProcessing(interfaceId) {
             // Immediately update status
             await updateInterfaceRuntimeStatus(interfaceId);
         } else {
-            console.error('❌ Pause failed:', data.message);
-            showError(data.message || 'Failed to pause interface');
+            console.error('❌ Pause failed:', data.error || data.message);
+            showError(data.error || data.message || 'Failed to pause interface');
         }
     } catch (error) {
         console.error('❌ Pause error:', error);
@@ -3457,8 +3556,8 @@ async function deactivateInterfaceProcessing(interfaceId) {
             // Update delete button state in dropdown (enable it when stopped)
             updateDeleteButtonState(interfaceId, true);
         } else {
-            console.error('❌ Stop failed:', data.message);
-            showError(data.message || 'Failed to stop interface');
+            console.error('❌ Stop failed:', data.error || data.message);
+            showError(data.error || data.message || 'Failed to stop interface');
         }
     } catch (error) {
         console.error('❌ Stop error:', error);

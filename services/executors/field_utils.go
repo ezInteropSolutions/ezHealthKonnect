@@ -214,7 +214,60 @@ func resolveCDADocumentFieldValue(data map[string]interface{}, path string) inte
 		return nil
 	}
 	rest := strings.TrimPrefix(path, cdaDocumentPathPrefix)
+
+	// CDA Coverage Audit: record which section entry this path touched, when
+	// tracking is enabled for this message. Nil-safe no-op otherwise — see
+	// cda_coverage_tracker.go. Recording happens here (path-string parsing),
+	// not inside cda_path_resolver.go, because "document.*" and "xml.*"
+	// address the same data with different path shapes; entry-level keys are
+	// the coarsest granularity both schemes agree on.
+	tracker, _ := data["_coverageTracker"].(*CDACoverageTracker)
+	if key, ok := extractCDAEntryKey(rest); ok {
+		tracker.Record(key)
+	}
+
 	return ResolveCDAPath(docMap, rest, false)
+}
+
+// documentEntryKeyPrefix is the fixed structural prefix every entry-indexed
+// "document.*" path uses (e.g. declarative_engine.go's
+// "sectionsByKey."+sectionKey+".entries[N]" construction). Parsing it back
+// out of a resolved path string is what lets resolveCDADocumentFieldValue
+// record CDA Coverage Audit hits without changing cda_path_resolver.go.
+const documentEntryKeyPrefix = "sectionsByKey."
+
+// extractCDAEntryKey parses "sectionsByKey.<sectionKey>.entries[<idx>]..."
+// (the relative form of a "document.*" path, after stripping "document.")
+// into a CDAEntryKey. Returns ok=false for anything that doesn't address one
+// concrete section entry — header paths, wildcard "[*]"/predicate segments,
+// or paths outside sectionsByKey entirely — which are out of scope for
+// entry-level tracking (see cda_coverage_tracker.go's doc comment).
+func extractCDAEntryKey(relPath string) (key string, ok bool) {
+	if !strings.HasPrefix(relPath, documentEntryKeyPrefix) {
+		return "", false
+	}
+	rest := relPath[len(documentEntryKeyPrefix):]
+	dot := strings.IndexByte(rest, '.')
+	if dot <= 0 {
+		return "", false
+	}
+	sectionKey := rest[:dot]
+
+	const entriesPrefix = "entries["
+	after := rest[dot+1:]
+	if !strings.HasPrefix(after, entriesPrefix) {
+		return "", false
+	}
+	after = after[len(entriesPrefix):]
+	closeIdx := strings.IndexByte(after, ']')
+	if closeIdx <= 0 {
+		return "", false
+	}
+	idx, err := strconv.Atoi(after[:closeIdx])
+	if err != nil {
+		return "", false // "[*]" wildcard or "[key=value]" predicate, not a single concrete entry
+	}
+	return CDAEntryKey(sectionKey, idx), true
 }
 
 // resolveCDAXMLMirrorFieldValue resolves an "xml.*" path against
@@ -222,6 +275,15 @@ func resolveCDADocumentFieldValue(data map[string]interface{}, path string) inte
 // cda/document/generic_xml.go). Same grammar as resolveCDADocumentFieldValue,
 // resolved against the mirror's "@attr"/auto-array-on-repeat shape instead of
 // the typed tree's.
+// CDA Coverage Audit intentionally does NOT record hits here: unlike the
+// typed "document.*" tree, the raw "xml.*" mirror has no structural
+// sectionKey/entryIndex prefix to parse back out of an arbitrary resolved
+// path (its shape mirrors the source XML's own nesting, not a
+// section-keyed, entry-indexed convention) — reconstructing one would need a
+// schema lookup per call, on a path form advanced/rare enough (most callers
+// use the "document.*" tree or the "sectionKey.field" short-path) that it's
+// not worth the cost. A step reading CDA data exclusively via "xml.*" paths
+// is invisible to coverage tracking; known v1 limitation.
 func resolveCDAXMLMirrorFieldValue(data map[string]interface{}, path string) interface{} {
 	xmlMap, ok := data["xml"].(map[string]interface{})
 	if !ok {
@@ -257,6 +319,12 @@ func resolveCDAFieldValue(data map[string]interface{}, path string) interface{} 
 	if first == nil {
 		return nil
 	}
+
+	// CDA Coverage Audit: this short-path form only ever reads entry 0 (see
+	// this function's own doc comment), so that's the entry it marks touched.
+	tracker, _ := data["_coverageTracker"].(*CDACoverageTracker)
+	tracker.Record(CDAEntryKey(sectionKey, 0))
+
 	return first[fieldKey]
 }
 

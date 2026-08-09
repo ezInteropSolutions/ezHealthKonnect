@@ -107,19 +107,20 @@
                     <table class="interfaces-table">
                         <thead>
                             <tr>
-                                <th class="th-sortable" onclick="sortBy('name')">Interface Name <span class="sort-arrow" id="sort-arrow-name">↕</span></th>
-                                <th class="th-sortable" onclick="sortBy('status')">Config Status <span class="sort-arrow" id="sort-arrow-status">↕</span></th>
-                                <th class="th-sortable" onclick="sortBy('runtime')">Runtime Status <span class="sort-arrow" id="sort-arrow-runtime">↕</span></th>
-                                <th class="th-sortable" onclick="sortBy('lastUpdated')">Last Updated <span class="sort-arrow" id="sort-arrow-lastUpdated">↕</span></th>
-                                <th class="th-sortable" onclick="sortBy('statistics')">Statistics <span class="sort-arrow" id="sort-arrow-statistics">↕</span></th>
-                                <th class="th-sortable" onclick="sortBy('lastActivity')">Last Activity <span class="sort-arrow" id="sort-arrow-lastActivity">↕</span></th>
-                                <th>Actions</th>
+                                <th class="th-sortable" onclick="sortBy('name')" title="Interface Name">Interface Name <span class="sort-arrow" id="sort-arrow-name">↕</span></th>
+                                <th class="th-sortable" onclick="sortBy('status')" title="Config Status">Config <span class="sort-arrow" id="sort-arrow-status">↕</span></th>
+                                <th class="th-sortable" onclick="sortBy('runtime')" title="Runtime Status">Runtime <span class="sort-arrow" id="sort-arrow-runtime">↕</span></th>
+                                <th class="th-sortable" onclick="sortBy('created')" title="Created">Created <span class="sort-arrow" id="sort-arrow-created">↕</span></th>
+                                <th class="th-sortable" onclick="sortBy('lastUpdated')" title="Last Updated">Last Updated <span class="sort-arrow" id="sort-arrow-lastUpdated">↕</span></th>
+                                <th class="th-sortable" onclick="sortBy('statistics')" title="Statistics">Statistics <span class="sort-arrow" id="sort-arrow-statistics">↕</span></th>
+                                <th class="th-sortable" onclick="sortBy('lastActivity')" title="Last Activity">Activity <span class="sort-arrow" id="sort-arrow-lastActivity">↕</span></th>
+                                <th title="Actions">Actions</th>
                             </tr>
                         </thead>
                         <tbody id="interfacesTableBody">
                             <!-- Ultra compact table rows populated by JavaScript -->
                             <tr>
-                                <td colspan="7">
+                                <td colspan="8">
                                     <div class="loading-card">
                                         <div class="loading-spinner"></div>
                                         <p>Loading interfaces...</p>

@@ -34,13 +34,13 @@ type DocumentTypeSectionInfo struct {
 
 // CDAProfileDef is the top-level schema document (ccda_2_1.json).
 type CDAProfileDef struct {
-	Profile              string                              `json:"profile"`
-	Version              string                              `json:"version"`
-	HL7Version           string                              `json:"hl7Version"`
-	DocumentTemplates     map[string]string                  `json:"documentTemplates"`     // OID → display name
-	DocumentTypeMetadata  map[string]DocumentTypeMetadata     `json:"documentTypeMetadata"`  // doc type → templateId/LOINC/title, for document construction
-	DocumentTypeSections  map[string]DocumentTypeSectionInfo  `json:"documentTypeSections"`  // doc type → section conformance lists
-	Sections              []*CDASectionDef                    `json:"sections"`
+	Profile              string                             `json:"profile"`
+	Version              string                             `json:"version"`
+	HL7Version           string                             `json:"hl7Version"`
+	DocumentTemplates    map[string]string                  `json:"documentTemplates"`    // OID → display name
+	DocumentTypeMetadata map[string]DocumentTypeMetadata    `json:"documentTypeMetadata"` // doc type → templateId/LOINC/title, for document construction
+	DocumentTypeSections map[string]DocumentTypeSectionInfo `json:"documentTypeSections"` // doc type → section conformance lists
+	Sections             []*CDASectionDef                   `json:"sections"`
 
 	// Built at load time — not in JSON.
 	sectionByKey        map[string]*CDASectionDef
@@ -50,19 +50,19 @@ type CDAProfileDef struct {
 
 // CDASectionDef defines a C-CDA section (allergies, medications, etc.).
 type CDASectionDef struct {
-	Key                string         `json:"key"`                        // e.g. "allergiesAndIntolerances"
-	USCDIClass         string         `json:"uscdiClass"`                 // USCDI class label
-	DisplayName        string         `json:"displayName"`                // Human-readable name
-	LOINCCode          string         `json:"loincCode"`                  // Section LOINC code
-	TemplateID         string         `json:"templateId"`                 // C-CDA 2.1 SHALL template OID
+	Key                string         `json:"key"`                           // e.g. "allergiesAndIntolerances"
+	USCDIClass         string         `json:"uscdiClass"`                    // USCDI class label
+	DisplayName        string         `json:"displayName"`                   // Human-readable name
+	LOINCCode          string         `json:"loincCode"`                     // Section LOINC code
+	TemplateID         string         `json:"templateId"`                    // C-CDA 2.1 SHALL template OID
 	TemplateIDExt      string         `json:"templateIdExtension,omitempty"` // @extension for TemplateID, e.g. "2015-08-01"
-	TemplateIDOptional string         `json:"templateIdOptional"`         // C-CDA 2.1 MAY template OID
-	Conformance        string         `json:"conformance"`                // SHALL / SHOULD / MAY
+	TemplateIDOptional string         `json:"templateIdOptional"`            // C-CDA 2.1 MAY template OID
+	Conformance        string         `json:"conformance"`                   // SHALL / SHOULD / MAY
 	EntryTemplateID    string         `json:"entryTemplateId,omitempty"`
 	EntryTemplateIDExt string         `json:"entryTemplateIdExtension,omitempty"` // @extension for EntryTemplateID
 	ObsTemplateID      string         `json:"observationTemplateId,omitempty"`
 	ObsTemplateIDExt   string         `json:"observationTemplateIdExtension,omitempty"` // @extension for ObsTemplateID
-	IsHeader           bool           `json:"isHeader,omitempty"`         // true for header pseudo-sections
+	IsHeader           bool           `json:"isHeader,omitempty"`                       // true for header pseudo-sections
 	Fields             []*CDAFieldDef `json:"fields"`
 
 	// EntryElementPath is the path (relative to "entry/") to this section's
@@ -204,8 +204,54 @@ type CDASectionDef struct {
 	// every section that doesn't need it — zero effect on existing sections.
 	RepeatingGroups []RepeatingGroup `json:"repeatingGroups,omitempty"`
 
+	// AlternateArchetypes lets one section (one <component><section>
+	// element) contain entries of more than one structural shape — the
+	// motivating case is C-CDA's Medical Equipment Section2 (CONF:1098-
+	// 31885/31886), which permits, alongside its primary Non-Medicinal
+	// Supply Activity entries (this section's own EntryElementPath/Fields),
+	// an ADDITIONAL, independent set of Procedure Activity Procedure (V2)
+	// entries — the SAME archetype the Procedures section already builds,
+	// reused here since the IG genuinely allows one template inside two
+	// different sections. Each alternate reads its own canonical sub-key
+	// (sections.<key>.<EntriesKey>), kept separate from the section's own
+	// top-level "entries" so cda.map_to_canonical can populate the two
+	// shapes independently with zero field-name collision risk. Absent/
+	// empty for every section that doesn't need a second shape.
+	AlternateArchetypes []AlternateEntryArchetype `json:"alternateArchetypes,omitempty"`
+
 	// Built at load time.
 	fieldByKey map[string]*CDAFieldDef
+}
+
+// AlternateEntryArchetype is one additional entry shape for a section that
+// needs more than the single EntryElementPath/Fields pair CDASectionDef
+// itself provides (see AlternateArchetypes' own doc comment for the
+// motivating case). Deliberately a small subset of CDASectionDef's own
+// knobs — only what's actually been needed so far (no
+// ObservationElementPath/RepeatingGroups — nothing built so far needs a
+// nested-observation anchor or a repeating loop on an alternate shape);
+// extend this struct, not buildEntry itself, if a future alternate needs
+// more. StructuralTemplateIDs was added once Medical Equipment's Procedure2
+// alternate needed its own Author Participation anchor (same mechanism
+// CDASectionDef.StructuralTemplateIDs already provides for the primary
+// shape).
+type AlternateEntryArchetype struct {
+	// EntriesKey is the canonical sub-key (sections.<sectionKey>.<EntriesKey>)
+	// this alternate's own rows live under — set by a SEPARATE
+	// cda.map_to_canonical sectionMappingRow sharing the same SectionKey but
+	// its own EntriesKey (see map_to_canonical_executor.go).
+	EntriesKey         string         `json:"entriesKey"`
+	EntryElementPath   string         `json:"entryElementPath"`
+	EntryTemplateID    string         `json:"entryTemplateId,omitempty"`
+	EntryTemplateIDExt string         `json:"entryTemplateIdExtension,omitempty"`
+	Fields             []*CDAFieldDef `json:"fields"`
+
+	// StructuralTemplateIDs mirrors CDASectionDef's own field of the same
+	// name exactly — third-level-and-deeper nested elements (e.g. an
+	// Author Participation anchor under this alternate's own root) that
+	// need their own <templateId>/FixedCode/FixedStatusCode but aren't
+	// reachable via EntryElementPath alone.
+	StructuralTemplateIDs []StructuralTemplateAnchor `json:"structuralTemplateIds,omitempty"`
 }
 
 // RepeatingGroup is the schema-driven, data-only counterpart to hand-writing
@@ -348,6 +394,16 @@ type StructuralTemplateAnchor struct {
 	FixedCode        string `json:"fixedCode,omitempty"`
 	FixedCodeSystem  string `json:"fixedCodeSystem,omitempty"`
 	FixedCodeDisplay string `json:"fixedCodeDisplay,omitempty"`
+
+	// FixedStatusCode overrides applyTagBoilerplate's own per-TAG statusCode
+	// default (e.g. "act" -> "active") on THIS anchor's element specifically —
+	// the anchor-scoped counterpart to CDASectionDef.EntryStatusCodeOverride.
+	// Needed because a handful of nested sub-templates assert a business-fixed
+	// statusCode that differs from their tag's usual default — e.g.
+	// Immunization's Substance Administered Act (templateId .4.118) is SHALL
+	// statusCode="completed" (CONF:1098-31505) even though a bare <act> tag
+	// otherwise defaults to "active".
+	FixedStatusCode string `json:"fixedStatusCode,omitempty"`
 }
 
 // CDAFieldDef defines one extractable field within a CDA section.
@@ -380,11 +436,11 @@ type CDAFieldDef struct {
 
 // C32MappingFile is the root of cda/schemas/c32_mapping.json.
 type C32MappingFile struct {
-	Version          string                 `json:"version"`
-	Source           string                 `json:"source"`
-	Description      string                 `json:"description"`
-	ProfileDetection C32ProfileDetection    `json:"profileDetection"`
-	Mappings         []*C32TemplateMapping  `json:"mappings"`
+	Version          string                `json:"version"`
+	Source           string                `json:"source"`
+	Description      string                `json:"description"`
+	ProfileDetection C32ProfileDetection   `json:"profileDetection"`
+	Mappings         []*C32TemplateMapping `json:"mappings"`
 }
 
 // C32ProfileDetection holds OIDs used to detect whether a document is C32 or HITSP.

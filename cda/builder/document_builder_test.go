@@ -55,7 +55,7 @@ func fullCanonicalDoc() map[string]interface{} {
 				map[string]interface{}{
 					"medicationAllergyCode": "7980", "medicationAllergyCodeDisplay": "Penicillin",
 					"medicationAllergyCodeSystem": "2.16.840.1.113883.6.88",
-					"reaction": "247472004", "reactionDisplay": "Hives",
+					"reaction":                    "247472004", "reactionDisplay": "Hives",
 					"severity": "moderate", "status": "Active", "onsetDate": "20100101",
 					"criticality": "high", "criticalityDisplay": "High risk",
 				},
@@ -72,7 +72,7 @@ func fullCanonicalDoc() map[string]interface{} {
 				map[string]interface{}{
 					"conditionCode": "44054006", "conditionCodeDisplay": "Diabetes mellitus type 2",
 					"conditionCodeSystem": "2.16.840.1.113883.6.96",
-					"status": "55561003", "onsetDate": "20190601",
+					"status":              "55561003", "onsetDate": "20190601",
 					"ageAtOnset": "45", "ageAtOnsetUnit": "a",
 				},
 			}},
@@ -92,7 +92,7 @@ func fullCanonicalDoc() map[string]interface{} {
 			"immunizations": map[string]interface{}{"entries": []interface{}{
 				map[string]interface{}{
 					"vaccineCode": "140", "vaccineCodeDisplay": "Influenza",
-					"vaccineCodeSystem": "2.16.840.1.113883.12.292",
+					"vaccineCodeSystem":  "2.16.840.1.113883.12.292",
 					"administrationDate": "20231001", "status": "completed",
 				},
 			}},
@@ -113,7 +113,7 @@ func fullCanonicalDoc() map[string]interface{} {
 				map[string]interface{}{
 					"procedureCode": "80146002", "procedureCodeDisplay": "Appendectomy",
 					"procedureCodeSystem": "2.16.840.1.113883.6.96",
-					"effectiveTime": "20230501", "status": "completed",
+					"effectiveTime":       "20230501", "status": "completed",
 				},
 			}},
 			"functionalStatus": map[string]interface{}{"entries": []interface{}{
@@ -711,8 +711,8 @@ func TestBuildDocument_VitalSignsMultiComponent(t *testing.T) {
 						map[string]interface{}{
 							"vitalCode": "8462-4", "vitalCodeDisplay": "Diastolic blood pressure",
 							"value": "80", "valueUnit": "mm[Hg]",
-							"componentEffectiveTime":  "20240115120000",
-							"interpretationCode":      "N",
+							"componentEffectiveTime":    "20240115120000",
+							"interpretationCode":        "N",
 							"interpretationCodeDisplay": "Normal",
 						},
 						map[string]interface{}{
@@ -1863,6 +1863,89 @@ func TestBuildDocument_CustodianTelecomBeforeAddr(t *testing.T) {
 	}
 }
 
+// TestBuildDocument_LegalAuthenticator_AbsentByDefault verifies that with a
+// zero-value LegalAuthenticatorOptions (every pipeline predating this
+// feature), no <legalAuthenticator> element is written at all — unlike
+// Custodian (SHALL exactly one, always written), this element is genuinely
+// optional (SHOULD 0..1, CONF:1198-5579) and an incomplete one would be a
+// schema violation worse than omitting it.
+func TestBuildDocument_LegalAuthenticator_AbsentByDefault(t *testing.T) {
+	loader := loadTestSchema(t)
+	xml, err := BuildDocument(loader, fullCanonicalDoc(), "CCD", BuildOptions{})
+	if err != nil {
+		t.Fatalf("BuildDocument failed: %v", err)
+	}
+	if strings.Contains(xml, "<legalAuthenticator>") {
+		t.Errorf("expected no <legalAuthenticator> when LegalAuthenticator is unset, got it present in: %s", xml)
+	}
+}
+
+// TestBuildDocument_LegalAuthenticator_FullConfig verifies the full
+// <legalAuthenticator><time/><signatureCode code="S"/><assignedEntity>
+// structure and child order (id, code, addr, telecom, assignedPerson — the
+// SAME order as assignedAuthor, unlike representedCustodianOrganization's
+// reversed telecom-before-addr) once a name is configured, per Figure 10's
+// worked example and CONF:1198-5580/5583/5585/5586/5589/5595/5597.
+func TestBuildDocument_LegalAuthenticator_FullConfig(t *testing.T) {
+	loader := loadTestSchema(t)
+	opts := BuildOptions{
+		LegalAuthenticator: LegalAuthenticatorOptions{
+			Given: "Patricia", Family: "Primary", NPI: "5555555555",
+			SpecialtyCode: "207QA0505X", SpecialtyCodeSystem: "2.16.840.1.113883.6.101", SpecialtyCodeDisplay: "Adult Medicine",
+			Street: "1004 Healthcare Drive", City: "Portland", State: "OR", PostalCode: "99123", Country: "US",
+			Phone: "5555551004",
+		},
+	}
+	xml, err := BuildDocument(loader, fullCanonicalDoc(), "CCD", opts)
+	if err != nil {
+		t.Fatalf("BuildDocument failed: %v", err)
+	}
+
+	idx := strings.Index(xml, "<legalAuthenticator>")
+	if idx == -1 {
+		t.Fatal("expected a <legalAuthenticator> element")
+	}
+	end := strings.Index(xml[idx:], "</legalAuthenticator>")
+	laXML := xml[idx : idx+end]
+
+	if !strings.Contains(laXML, "<time value=") {
+		t.Errorf("expected <time> in legalAuthenticator, got: %s", laXML)
+	}
+	if !strings.Contains(laXML, `<signatureCode code="S"/>`) {
+		t.Errorf(`expected <signatureCode code="S"/>, got: %s`, laXML)
+	}
+	if !strings.Contains(laXML, `root="2.16.840.1.113883.4.6"`) || !strings.Contains(laXML, `extension="5555555555"`) {
+		t.Errorf("expected NPI-rooted id, got: %s", laXML)
+	}
+	if !strings.Contains(laXML, `code="207QA0505X"`) || !strings.Contains(laXML, `codeSystem="2.16.840.1.113883.6.101"`) {
+		t.Errorf("expected specialty code+codeSystem, got: %s", laXML)
+	}
+	if !strings.Contains(laXML, "1004 Healthcare Drive") || !strings.Contains(laXML, "Portland") {
+		t.Errorf("expected address, got: %s", laXML)
+	}
+	if !strings.Contains(laXML, "tel:5555551004") {
+		t.Errorf("expected telecom, got: %s", laXML)
+	}
+	if !strings.Contains(laXML, "<given>Patricia</given>") || !strings.Contains(laXML, "<family>Primary</family>") {
+		t.Errorf("expected assignedPerson name, got: %s", laXML)
+	}
+
+	idIdx := strings.Index(laXML, "<id ")
+	codeIdx := strings.Index(laXML, "<code ")
+	addrIdx := strings.Index(laXML, "<addr ")
+	telIdx := strings.Index(laXML, "<telecom")
+	personIdx := strings.Index(laXML, "<assignedPerson>")
+	if !(idIdx < codeIdx && codeIdx < addrIdx && addrIdx < telIdx && telIdx < personIdx) {
+		t.Errorf("expected assignedEntity child order id, code, addr, telecom, assignedPerson, got: %s", laXML)
+	}
+
+	// Schema position: right after custodian, before documentationOf.
+	custodianEnd := strings.Index(xml, "</custodian>")
+	if custodianEnd == -1 || custodianEnd > idx {
+		t.Errorf("expected legalAuthenticator to come after custodian, got: %s", xml)
+	}
+}
+
 // TestBuildDocument_AuthorAddressAndTelecom verifies assignedAuthor's addr
 // and telecom — confirmed completely unsupported (not just unmapped) via a
 // real schema validator run (2026-07): US Realm Header SHALL contain at
@@ -2668,7 +2751,7 @@ func TestBuildDocument_CodeSystemNameAutoDerivedForCodedFields(t *testing.T) {
 					"severity": "255604002", "severityDisplay": "Mild", "severitySystem": "2.16.840.1.113883.6.96",
 					"allergyTypeCode": "419199007", "allergyTypeCodeDisplay": "Allergy to substance",
 					"allergyTypeCodeSystem": "2.16.840.1.113883.6.96",
-					"onsetDate":            "20100604",
+					"onsetDate":             "20100604",
 				},
 			}},
 			"socialHistory": map[string]interface{}{"entries": []interface{}{
@@ -2691,5 +2774,527 @@ func TestBuildDocument_CodeSystemNameAutoDerivedForCodedFields(t *testing.T) {
 	}
 	if wantCount != gotNamed {
 		t.Errorf("expected every codeSystem=\"2.16.840.1.113883.6.96\" to be immediately followed by codeSystemName=\"SNOMED CT\" (%d occurrences), got %d paired, full xml: %s", wantCount, gotNamed, xml)
+	}
+}
+
+// TestBuildDocument_MedicalEquipment_AlternateProcedureArchetype verifies
+// Medical Equipment Section2's optional second entry shape (CONF:1098-
+// 31885/31886, Procedure Activity Procedure V2 — the SAME archetype the
+// Procedures section builds) — a section producing entries of TWO different
+// structural shapes (the primary <supply> plus this alternate <procedure>)
+// inside ONE physical <section> element via AlternateEntryArchetype.
+func TestBuildDocument_MedicalEquipment_AlternateProcedureArchetype(t *testing.T) {
+	loader := loadTestSchema(t)
+	doc := fullCanonicalDoc()
+	sections := doc["sections"].(map[string]interface{})
+	sections["medicalEquipment"] = map[string]interface{}{
+		"entries": []interface{}{
+			map[string]interface{}{
+				"equipmentCode": "360008007", "equipmentCodeDisplay": "Wheelchair",
+				"status": "completed",
+			},
+		},
+		"procedureEntries": []interface{}{
+			map[string]interface{}{
+				"equipmentProcedureCode": "87717006", "equipmentProcedureCodeDisplay": "Insertion of cardiac pacemaker",
+				"equipmentProcedureCodeSystem":          "2.16.840.1.113883.6.96",
+				"equipmentProcedureStatus":              "completed",
+				"equipmentProcedureDate":                "20240301",
+				"equipmentProcedurePerformerNPI":        "1730123456",
+				"equipmentProcedurePerformerStreet":     "100 Innovation Drive",
+				"equipmentProcedurePerformerCity":       "Springfield",
+				"equipmentProcedurePerformerState":      "IL",
+				"equipmentProcedurePerformerPostalCode": "62701",
+				"equipmentProcedurePerformerPhone":      "tel:2175550100",
+				"equipmentProcedurePerformerGiven":      "Sarah",
+				"equipmentProcedurePerformerFamily":     "Kim",
+			},
+		},
+	}
+
+	xml, err := BuildDocument(loader, doc, "CCD", BuildOptions{})
+	if err != nil {
+		t.Fatalf("BuildDocument failed: %v", err)
+	}
+
+	if !strings.Contains(xml, `<supply`) {
+		t.Errorf("expected the primary <supply> entry to still be present, got:\n%s", xml)
+	}
+	if !strings.Contains(xml, `<procedure`) {
+		t.Fatalf("expected an alternate <procedure> entry, got:\n%s", xml)
+	}
+	if !strings.Contains(xml, `code="87717006"`) {
+		t.Errorf("expected the alternate procedure's own code, got:\n%s", xml)
+	}
+	if !strings.Contains(xml, `root="2.16.840.1.113883.10.20.22.4.14" extension="2014-06-09"`) {
+		t.Errorf("expected the alternate procedure to carry Procedure Activity Procedure (V2)'s templateId, got:\n%s", xml)
+	}
+	// Both shapes must land inside the SAME <section>, not two sections.
+	if strings.Count(xml, `code code="46264-8"`) != 1 {
+		t.Errorf("expected exactly one Medical Equipment section (LOINC 46264-8), got:\n%s", xml)
+	}
+
+	// CONF:1098-7722/7731/7732 (Procedure Activity Performer): assignedEntity
+	// SHALL contain id, addr, AND telecom — a real defect found via the
+	// external SITE validator (cvc-complex-type.2.4.a: assignedPerson
+	// appeared where id/addr/telecom were expected) when this alternate's
+	// performer only ever wrote assignedPerson. AssignedEntity's own base
+	// type sequence is id*, code?, addr*, telecom*, assignedPerson?,
+	// representedOrganization? — verify both presence AND order.
+	//
+	// Search from AFTER the narrative table, not the whole document —
+	// buildSectionNarrative (which runs before the entries) now includes a
+	// "Performer Phone" column since equipmentProcedurePerformerPhone has a
+	// value, so the bare string "tel:2175550100" ALSO appears earlier as
+	// plain narrative text (<td>tel:2175550100</td>), which a naive
+	// whole-document strings.Index would match instead of the real
+	// structured <telecom> element.
+	entryIdx := strings.Index(xml, `<procedure classCode="PROC"`)
+	if entryIdx == -1 {
+		t.Fatalf("expected the alternate <procedure> entry root, got:\n%s", xml)
+	}
+	entryXML := xml[entryIdx:]
+	idIdx := strings.Index(entryXML, `id root="2.16.840.1.113883.4.6" extension="1730123456"`)
+	addrIdx := strings.Index(entryXML, `<streetAddressLine>100 Innovation Drive</streetAddressLine>`)
+	telecomIdx := strings.Index(entryXML, `<telecom value="tel:2175550100"`)
+	givenIdx := strings.Index(entryXML, `<given>Sarah</given>`)
+	if idIdx == -1 || addrIdx == -1 || telecomIdx == -1 || givenIdx == -1 {
+		t.Fatalf("expected performer id/addr/telecom/given all present in the entry itself, got:\n%s", entryXML)
+	}
+	if !(idIdx < addrIdx && addrIdx < telecomIdx && telecomIdx < givenIdx) {
+		t.Errorf("expected assignedEntity child order id < addr < telecom < assignedPerson, got indices id=%d addr=%d telecom=%d given=%d", idIdx, addrIdx, telecomIdx, givenIdx)
+	}
+}
+
+// TestBuildDocument_MedicalEquipment_OnlyAlternateEntries_SectionStillBuilds
+// guards the section-skip logic BuildDocument itself does before calling
+// buildSectionElement: a MAY section with ZERO primary entries but real
+// alternate-archetype entries must still be emitted, not silently dropped —
+// the exact edge case a naive `len(entries) == 0 && !isShall` check (the
+// pre-existing logic, unaware of alternates) would get wrong.
+func TestBuildDocument_MedicalEquipment_OnlyAlternateEntries_SectionStillBuilds(t *testing.T) {
+	loader := loadTestSchema(t)
+	doc := fullCanonicalDoc()
+	sections := doc["sections"].(map[string]interface{})
+	sections["medicalEquipment"] = map[string]interface{}{
+		"procedureEntries": []interface{}{
+			map[string]interface{}{
+				"equipmentProcedureCode": "87717006", "equipmentProcedureStatus": "completed",
+			},
+		},
+	}
+
+	xml, err := BuildDocument(loader, doc, "CCD", BuildOptions{})
+	if err != nil {
+		t.Fatalf("BuildDocument failed: %v", err)
+	}
+	if !strings.Contains(xml, `code code="46264-8"`) {
+		t.Errorf("expected Medical Equipment section to still be built when only alternate entries are present, got:\n%s", xml)
+	}
+	if !strings.Contains(xml, `<procedure`) {
+		t.Errorf("expected the alternate procedure entry itself to be present, got:\n%s", xml)
+	}
+}
+
+// TestBuildDocument_Immunization_SeriesEntryRelationship verifies the
+// Immunization Activity (V3) series-tracking entryRelationship (CONF:1198-
+// 31510/31511/31512/31514) — a nested Substance Administered Act (templateId
+// .4.118, fixed code="416118004"/SNOMED "Administration", fixed
+// statusCode="completed" via StructuralTemplateAnchor.FixedStatusCode
+// overriding the "act" tag's own "active" default) alongside a
+// user-suppliable sequenceNumber marking this dose's position in a series.
+func TestBuildDocument_Immunization_SeriesEntryRelationship(t *testing.T) {
+	loader := loadTestSchema(t)
+	doc := fullCanonicalDoc()
+	sections := doc["sections"].(map[string]interface{})
+	sections["immunizations"] = map[string]interface{}{
+		"entries": []interface{}{
+			map[string]interface{}{
+				"vaccineCode": "43", "vaccineCodeDisplay": "Hepatitis B vaccine, adult dosage",
+				"administrationDate": "20240115", "status": "completed", "negationInd": "false",
+				"seriesSequenceNumber": "2", "seriesAdministrationDate": "20240115",
+			},
+		},
+	}
+
+	xml, err := BuildDocument(loader, doc, "CCD", BuildOptions{})
+	if err != nil {
+		t.Fatalf("BuildDocument failed: %v", err)
+	}
+
+	if !strings.Contains(xml, `typeCode="COMP"`) {
+		t.Fatalf("expected the series entryRelationship (typeCode=COMP), got:\n%s", xml)
+	}
+	if !strings.Contains(xml, `inversionInd="true"`) {
+		t.Errorf("expected inversionInd=\"true\" on the series entryRelationship, got:\n%s", xml)
+	}
+	if !strings.Contains(xml, `<sequenceNumber value="2"`) {
+		t.Errorf("expected sequenceNumber value=2, got:\n%s", xml)
+	}
+	// CONF:1198-31513/31514 list sequenceNumber (item c) BEFORE the nested
+	// Substance Administered Act (item d) — confirmed against the real IG's
+	// own XPath overview table too. entryRelationship isn't a
+	// StructuralTemplateAnchor (no automatic reorder pass runs on it), so
+	// field DECLARATION order alone determines this — a real external
+	// validator catch (cvc-complex-type.2.4.d: "Invalid content...
+	// 'sequenceNumber'. No child element is expected at this point") when
+	// seriesAdministrationDate was declared before seriesSequenceNumber.
+	seqIdx := strings.Index(xml, "<sequenceNumber")
+	actIdx := strings.Index(xml, `root="2.16.840.1.113883.10.20.22.4.118"`)
+	if seqIdx == -1 || actIdx == -1 || seqIdx > actIdx {
+		t.Errorf("expected <sequenceNumber> to precede the nested Substance Administered Act, got seqIdx=%d actIdx=%d", seqIdx, actIdx)
+	}
+	if !strings.Contains(xml, `root="2.16.840.1.113883.10.20.22.4.118"`) {
+		t.Errorf("expected the nested Substance Administered Act's templateId, got:\n%s", xml)
+	}
+	if !strings.Contains(xml, `code="416118004"`) || !strings.Contains(xml, `codeSystem="2.16.840.1.113883.6.96"`) {
+		t.Errorf("expected the fixed Administration code (SNOMED 416118004), got:\n%s", xml)
+	}
+	// Verify the FixedStatusCode override actually took effect ON THIS
+	// specific nested act (not just that "completed" appears somewhere in
+	// the document) — window the search to the ~200 chars right after this
+	// act's own templateId, where its own statusCode must land per
+	// structuralElementOrder (templateId, id, code, statusCode, ...).
+	tidIdx := strings.Index(xml, `root="2.16.840.1.113883.10.20.22.4.118"`)
+	if tidIdx == -1 {
+		t.Fatalf("expected to find the Substance Administered Act's templateId, got:\n%s", xml)
+	}
+	windowEnd := tidIdx + 400
+	if windowEnd > len(xml) {
+		windowEnd = len(xml)
+	}
+	window := xml[tidIdx:windowEnd]
+	if !strings.Contains(window, `<statusCode code="completed"`) {
+		t.Errorf("expected the Substance Administered Act's own statusCode to be \"completed\" (FixedStatusCode override, not the \"act\" tag's default \"active\"), got window:\n%s", window)
+	}
+}
+
+// TestBuildDocument_NarrativeReference_AllergyCodeLinksToOwnRow verifies
+// Round 23's narrative-ID + reference-linking mechanism (buildSectionNarrative
+// assigns each entry's own <tr ID="sectionKey-N">, buildSectionElement
+// injects "_narrativeRef" = "#sectionKey-N" into that same entry before
+// buildEntry runs, a "_narrativeRef"-keyed schema field writes it into
+// originalText/reference/@value) — CONF:16326 for Allergy specifically, the
+// same root cause behind 9 of Round 23's 16 real code gaps.
+func TestBuildDocument_NarrativeReference_AllergyCodeLinksToOwnRow(t *testing.T) {
+	loader := loadTestSchema(t)
+	doc := fullCanonicalDoc()
+
+	xml, err := BuildDocument(loader, doc, "CCD", BuildOptions{})
+	if err != nil {
+		t.Fatalf("BuildDocument failed: %v", err)
+	}
+
+	if !strings.Contains(xml, `<tr ID="allergiesAndIntolerances-1"`) {
+		t.Fatalf("expected the allergy narrative row to carry ID=\"allergiesAndIntolerances-1\", got:\n%s", xml)
+	}
+	if !strings.Contains(xml, `<reference value="#allergiesAndIntolerances-1"`) {
+		t.Errorf("expected the allergen code's originalText/reference to link back to its own narrative row, got:\n%s", xml)
+	}
+}
+
+// TestBuildDocument_NarrativeReference_MedicalEquipmentAlternateGetsOwnRow
+// verifies narrative row IDs are assigned across BOTH a section's primary
+// entries AND its AlternateArchetype entries from ONE shared, sequential
+// counter (not two independently-numbered pools that could collide) — the
+// pacemaker (alternate/procedure shape) gets row 2, right after the
+// wheelchair (primary/supply shape)'s row 1.
+func TestBuildDocument_NarrativeReference_MedicalEquipmentAlternateGetsOwnRow(t *testing.T) {
+	loader := loadTestSchema(t)
+	doc := fullCanonicalDoc()
+	sections := doc["sections"].(map[string]interface{})
+	sections["medicalEquipment"] = map[string]interface{}{
+		"entries": []interface{}{
+			map[string]interface{}{"equipmentCode": "360008007", "equipmentCodeDisplay": "Wheelchair", "status": "completed"},
+		},
+		"procedureEntries": []interface{}{
+			map[string]interface{}{"equipmentProcedureCode": "87717006", "equipmentProcedureCodeDisplay": "Insertion of cardiac pacemaker", "equipmentProcedureStatus": "completed"},
+		},
+	}
+
+	xml, err := BuildDocument(loader, doc, "CCD", BuildOptions{})
+	if err != nil {
+		t.Fatalf("BuildDocument failed: %v", err)
+	}
+
+	if !strings.Contains(xml, `<tr ID="medicalEquipment-1"`) {
+		t.Errorf("expected the wheelchair (primary) row to be medicalEquipment-1, got:\n%s", xml)
+	}
+	if !strings.Contains(xml, `<tr ID="medicalEquipment-2"`) {
+		t.Errorf("expected the pacemaker (alternate) row to be medicalEquipment-2, continuing the same sequential counter, got:\n%s", xml)
+	}
+	if !strings.Contains(xml, `<reference value="#medicalEquipment-2"`) {
+		t.Errorf("expected the pacemaker procedure's own originalText/reference to link to its own row, got:\n%s", xml)
+	}
+}
+
+// TestBuildDocument_PatientLanguageCommunication_ProficiencyAndPreferenceOrder
+// verifies languageCommunication's base type sequence (languageCode,
+// modeCode?, proficiencyLevelCode?, preferenceInd?) — all three new/existing
+// fields live in patientScalarFields specifically so they share ONE
+// construction pass (see that var's own doc comment for why splitting
+// proficiencyLevelCode into the separate, later-running patientCodedFields
+// pass would have broken this exact order).
+func TestBuildDocument_PatientLanguageCommunication_ProficiencyAndPreferenceOrder(t *testing.T) {
+	loader := loadTestSchema(t)
+	doc := fullCanonicalDoc()
+	header := doc["header"].(map[string]interface{})
+	patient := header["patient"].(map[string]interface{})
+	patient["preferredLanguage"] = "en"
+	patient["languageProficiency"] = "G"
+	patient["languageProficiencySystem"] = "2.16.840.1.113883.5.61"
+	patient["languagePreferenceInd"] = "true"
+
+	xml, err := BuildDocument(loader, doc, "CCD", BuildOptions{})
+	if err != nil {
+		t.Fatalf("BuildDocument failed: %v", err)
+	}
+
+	langIdx := strings.Index(xml, `<languageCode code="en"`)
+	profIdx := strings.Index(xml, `<proficiencyLevelCode code="G" codeSystem="2.16.840.1.113883.5.61"`)
+	prefIdx := strings.Index(xml, `<preferenceInd value="true"`)
+	if langIdx == -1 || profIdx == -1 || prefIdx == -1 {
+		t.Fatalf("expected languageCode, proficiencyLevelCode, and preferenceInd all present, got:\n%s", xml)
+	}
+	if !(langIdx < profIdx && profIdx < prefIdx) {
+		t.Errorf("expected languageCommunication child order languageCode < proficiencyLevelCode < preferenceInd, got indices lang=%d prof=%d pref=%d", langIdx, profIdx, prefIdx)
+	}
+}
+
+// TestBuildDocument_DocumentationOfPerformer_SpecialtyCode_OrderedBeforeName
+// verifies writePersonReference's new specialty code (CONF:1198-14842 — a
+// real gap, no code mechanism existed at all before Round 23, unlike every
+// per-section author field) lands on assignedEntity BEFORE assignedPerson,
+// per AssignedEntity's own real sequence (id, code, addr, telecom,
+// assignedPerson, representedOrganization).
+func TestBuildDocument_DocumentationOfPerformer_SpecialtyCode_OrderedBeforeName(t *testing.T) {
+	loader := loadTestSchema(t)
+	doc := fullCanonicalDoc()
+	header := doc["header"].(map[string]interface{})
+	docOf := header["documentationOf"].(map[string]interface{})
+	docOf["performers"] = []interface{}{
+		map[string]interface{}{
+			"given": "Sarah", "family": "Kim", "npi": "1730123456",
+			"specialtyCode": "207R00000X", "specialtyCodeSystem": "2.16.840.1.113883.6.101", "specialtyCodeDisplay": "Internal Medicine",
+		},
+	}
+
+	xml, err := BuildDocument(loader, doc, "CCD", BuildOptions{})
+	if err != nil {
+		t.Fatalf("BuildDocument failed: %v", err)
+	}
+
+	idIdx := strings.Index(xml, `<id root="2.16.840.1.113883.4.6" extension="1730123456"/>`)
+	codeIdx := strings.Index(xml, `<code code="207R00000X" codeSystem="2.16.840.1.113883.6.101"`)
+	nameIdx := strings.Index(xml, `<given>Sarah</given>`)
+	if idIdx == -1 || codeIdx == -1 || nameIdx == -1 {
+		t.Fatalf("expected documentationOf performer's id/code/name all present, got:\n%s", xml)
+	}
+	if !(idIdx < codeIdx && codeIdx < nameIdx) {
+		t.Errorf("expected assignedEntity child order id < code < assignedPerson, got indices id=%d code=%d name=%d", idIdx, codeIdx, nameIdx)
+	}
+}
+
+// TestBuildDocument_MedicalEquipmentAlternate_TargetSiteOrgAndAuthor verifies
+// the three fields the Procedure2 alternate archetype was missing relative
+// to the main Procedures section (targetSiteCode, representedOrganization,
+// Author Participation) — the last of which needed AlternateEntryArchetype
+// to grow its own StructuralTemplateIDs support (Round 23), reusing
+// applyStructuralTemplateAnchors rather than duplicating buildEntry's logic.
+func TestBuildDocument_MedicalEquipmentAlternate_TargetSiteOrgAndAuthor(t *testing.T) {
+	loader := loadTestSchema(t)
+	doc := fullCanonicalDoc()
+	sections := doc["sections"].(map[string]interface{})
+	sections["medicalEquipment"] = map[string]interface{}{
+		"procedureEntries": []interface{}{
+			map[string]interface{}{
+				"equipmentProcedureCode": "87717006", "equipmentProcedureStatus": "completed",
+				"equipmentProcedureTargetSiteCode": "43799004", "equipmentProcedureTargetSiteCodeDisplay": "Chest wall structure",
+				"equipmentProcedurePerformerOrgName": "ezHealthKonnect Demo",
+				"equipmentProcedureAuthorGiven":      "Sarah",
+				"equipmentProcedureAuthorFamily":     "Kim",
+				"equipmentProcedureAuthorNPI":        "1730123456",
+			},
+		},
+	}
+
+	xml, err := BuildDocument(loader, doc, "CCD", BuildOptions{})
+	if err != nil {
+		t.Fatalf("BuildDocument failed: %v", err)
+	}
+
+	if !strings.Contains(xml, `<targetSiteCode code="43799004" displayName="Chest wall structure"`) {
+		t.Errorf("expected the alternate procedure's targetSiteCode, got:\n%s", xml)
+	}
+	if !strings.Contains(xml, `<representedOrganization>`) || !strings.Contains(xml, `<name>ezHealthKonnect Demo</name>`) {
+		t.Errorf("expected the alternate procedure's representedOrganization, got:\n%s", xml)
+	}
+	// Search AFTER the pacemaker's own code — the document also has a
+	// header-level <author> (John Smith, from fullCanonicalDoc's fixture)
+	// that a plain first-match search would find instead.
+	pacemakerIdx := strings.Index(xml, `code="87717006"`)
+	if pacemakerIdx == -1 {
+		t.Fatalf("expected the pacemaker procedure's own code, got:\n%s", xml)
+	}
+	authorIdx := strings.Index(xml[pacemakerIdx:], `<author>`)
+	if authorIdx == -1 {
+		t.Fatalf("expected an <author> element on the alternate procedure, got:\n%s", xml)
+	}
+	authorIdx += pacemakerIdx
+	authorWindow := xml[authorIdx:min(authorIdx+500, len(xml))]
+	if !strings.Contains(authorWindow, `root="2.16.840.1.113883.10.20.22.4.119"`) {
+		t.Errorf("expected the alternate procedure's author to carry Author Participation's templateId, got:\n%s", authorWindow)
+	}
+	if !strings.Contains(authorWindow, `<given>Sarah</given>`) {
+		t.Errorf("expected the alternate procedure's author name, got:\n%s", authorWindow)
+	}
+}
+
+// TestBuildDocument_AdvanceDirective_ReferencedDocument_URLMode verifies the
+// externalDocument/text/reference/@value pointer mode (CONF:1198-8692/8697/
+// 8698) still works — the ED datatype's "point at something external" shape,
+// unchanged from when it was first added.
+func TestBuildDocument_AdvanceDirective_ReferencedDocument_URLMode(t *testing.T) {
+	loader := loadTestSchema(t)
+	doc := fullCanonicalDoc()
+	sections := doc["sections"].(map[string]interface{})
+	sections["advanceDirectives"] = map[string]interface{}{
+		"entries": []interface{}{
+			map[string]interface{}{
+				"directiveCode": "304251008", "value": "425392003",
+				"effectiveTimeLow": "20240101", "effectiveTimeHigh": "20991231",
+				"referencedDocumentIdRoot": "1.2.3.4.5", "referencedDocumentIdExtension": "DOC-001",
+				"referencedDocumentURL": "https://example.org/directives/DOC-001.pdf",
+			},
+		},
+	}
+
+	xml, err := BuildDocument(loader, doc, "CCD", BuildOptions{})
+	if err != nil {
+		t.Fatalf("BuildDocument failed: %v", err)
+	}
+
+	if !strings.Contains(xml, `<reference typeCode="REFR">`) {
+		t.Fatalf("expected the externalDocument reference wrapper, got:\n%s", xml)
+	}
+	if !strings.Contains(xml, `<id root="1.2.3.4.5" extension="DOC-001"/>`) {
+		t.Errorf("expected the externalDocument's own id, got:\n%s", xml)
+	}
+	if !strings.Contains(xml, `<reference value="https://example.org/directives/DOC-001.pdf"/>`) {
+		t.Errorf("expected the URL pointer reference, got:\n%s", xml)
+	}
+}
+
+// TestBuildDocument_AdvanceDirective_ReferencedDocument_Base64Mode verifies
+// the ED datatype's OTHER representation — inline embedded content, an
+// alternative to the URL pointer above. representation="B64" and mediaType
+// are attributes on the SAME <text> element the base64 payload is the text
+// CONTENT of (same "bare xpath = SetText" convention as
+// procedureCodeOriginalText/statusText) — id must still come before text
+// per externalDocument's own content model (id*, text?).
+func TestBuildDocument_AdvanceDirective_ReferencedDocument_Base64Mode(t *testing.T) {
+	loader := loadTestSchema(t)
+	doc := fullCanonicalDoc()
+	sections := doc["sections"].(map[string]interface{})
+	sections["advanceDirectives"] = map[string]interface{}{
+		"entries": []interface{}{
+			map[string]interface{}{
+				"directiveCode": "304251008", "value": "425392003",
+				"effectiveTimeLow": "20240101", "effectiveTimeHigh": "20991231",
+				"referencedDocumentIdRoot": "1.2.3.4.5", "referencedDocumentIdExtension": "DOC-002",
+				"referencedDocumentContent":        "JVBERi0xLjQKJeLjz9M=",
+				"referencedDocumentRepresentation": "B64",
+				"referencedDocumentMediaType":      "application/pdf",
+			},
+		},
+	}
+
+	xml, err := BuildDocument(loader, doc, "CCD", BuildOptions{})
+	if err != nil {
+		t.Fatalf("BuildDocument failed: %v", err)
+	}
+
+	if !strings.Contains(xml, `<text representation="B64" mediaType="application/pdf">JVBERi0xLjQKJeLjz9M=</text>`) {
+		t.Fatalf("expected the base64-embedded text element with its representation/mediaType attributes and content, got:\n%s", xml)
+	}
+	idIdx := strings.Index(xml, `<id root="1.2.3.4.5" extension="DOC-002"/>`)
+	textIdx := strings.Index(xml, `<text representation="B64"`)
+	if idIdx == -1 || textIdx == -1 {
+		t.Fatalf("expected both id and text present, got:\n%s", xml)
+	}
+	if !(idIdx < textIdx) {
+		t.Errorf("expected externalDocument child order id < text, got id=%d text=%d", idIdx, textIdx)
+	}
+}
+
+// TestBuildDocument_ResultObservation_ReferenceRangeInclusiveFlag verifies
+// the HL7 V3 IVXB_PQ @inclusive attribute on Result Observation's
+// referenceRange/observationRange/value low/high — a base-datatype-level
+// optional flag (not a C-CDA IG CONF requirement, so no validator ever
+// flags its absence) indicating whether the boundary VALUE ITSELF counts as
+// part of the normal range. Only written when a source system actually
+// distinguishes inclusive/exclusive boundaries — omitted, the HL7 default
+// (true) applies implicitly, same "don't fabricate what wasn't asked for"
+// judgment call as every other optional attribute in this schema.
+func TestBuildDocument_ResultObservation_ReferenceRangeInclusiveFlag(t *testing.T) {
+	loader := loadTestSchema(t)
+	doc := fullCanonicalDoc()
+	sections := doc["sections"].(map[string]interface{})
+	sections["results"] = map[string]interface{}{
+		"entries": []interface{}{
+			map[string]interface{}{
+				"testCode": "2345-7", "testCodeDisplay": "Glucose",
+				"resultValue": "95", "resultValueUnit": "mg/dL", "resultStatus": "completed",
+				"effectiveTime":     "20240101120000",
+				"referenceRangeLow": "70", "referenceRangeLowInclusive": "true",
+				"referenceRangeHigh": "99", "referenceRangeHighInclusive": "false",
+			},
+		},
+	}
+
+	xml, err := BuildDocument(loader, doc, "CCD", BuildOptions{})
+	if err != nil {
+		t.Fatalf("BuildDocument failed: %v", err)
+	}
+
+	if !strings.Contains(xml, `<low value="70" inclusive="true"`) {
+		t.Errorf("expected referenceRange low with value=70 and inclusive=true coexisting, got:\n%s", xml)
+	}
+	if !strings.Contains(xml, `<high value="99" inclusive="false"`) {
+		t.Errorf("expected referenceRange high with value=99 and inclusive=false coexisting, got:\n%s", xml)
+	}
+}
+
+// TestBuildDocument_ResultObservation_ReferenceRangeInclusiveFlag_OmittedWhenUnmapped
+// guards the default-omission case: when a record doesn't map the inclusive
+// flag at all, low/high must stay exactly as before (no fabricated
+// inclusive="true" the schema loader didn't actually decide) — a real
+// regression risk any time a new optional field is added alongside existing
+// ones on the same element.
+func TestBuildDocument_ResultObservation_ReferenceRangeInclusiveFlag_OmittedWhenUnmapped(t *testing.T) {
+	loader := loadTestSchema(t)
+	doc := fullCanonicalDoc()
+	sections := doc["sections"].(map[string]interface{})
+	sections["results"] = map[string]interface{}{
+		"entries": []interface{}{
+			map[string]interface{}{
+				"testCode": "2345-7", "testCodeDisplay": "Glucose",
+				"resultValue": "95", "resultValueUnit": "mg/dL", "resultStatus": "completed",
+				"effectiveTime":     "20240101120000",
+				"referenceRangeLow": "70", "referenceRangeHigh": "99",
+			},
+		},
+	}
+
+	xml, err := BuildDocument(loader, doc, "CCD", BuildOptions{})
+	if err != nil {
+		t.Fatalf("BuildDocument failed: %v", err)
+	}
+
+	if strings.Contains(xml, `inclusive=`) {
+		t.Errorf("expected no @inclusive attribute written when not mapped, got:\n%s", xml)
+	}
+	if !strings.Contains(xml, `<low value="70"/>`) || !strings.Contains(xml, `<high value="99"/>`) {
+		t.Errorf("expected referenceRange low/high still present without inclusive, got:\n%s", xml)
 	}
 }

@@ -2,6 +2,7 @@
 // Interface-specific table-per-interface management for ultimate performance isolation
 
 const crypto = require('crypto');
+const { hasCoverageGapSql } = require('./coverageGapSql');
 
 class InterfaceTableManager {
     constructor() {
@@ -429,7 +430,8 @@ class InterfaceTableManager {
             dateFrom,
             dateTo,
             sortBy = 'received_at',
-            sortOrder = 'DESC'
+            sortOrder = 'DESC',
+            coverageAuditEnabled
         } = options;
 
         const offset = (page - 1) * limit;
@@ -476,6 +478,15 @@ class InterfaceTableManager {
 
         // Standard schema — dropped columns: correlation_id, priority, raw_message, retry_count, max_retries (V60)
         let selectColumns = 'id, message_id, status, message_type, message_size, received_at, source_type, source_endpoint, processing_completed_at, processing_time_ms, parsed_at, parsing_time_ms, error_count, last_error_message, delivery_status, delivery_attempts, raw_content_uri, parsed_content_uri, transformed_content_uri';
+
+        // CDA Coverage Audit: only computed when the interface has opted in
+        // (interfaces.cda_coverage_audit_config IS NOT NULL) — zero cost for
+        // every interface that hasn't, matching the feature's own "off unless
+        // opted in" principle. message_id is correlated against tableName
+        // itself, which getInterfaceTableName() already sanitizes.
+        selectColumns += coverageAuditEnabled
+            ? `, ${hasCoverageGapSql(`${tableName}.message_id`)} AS has_coverage_gap`
+            : ', false AS has_coverage_gap';
 
         // PERFORMANCE QUERY: Only this interface's table
         const messagesQuery = `

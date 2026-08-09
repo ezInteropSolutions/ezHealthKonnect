@@ -52,7 +52,7 @@ services:
     ports:
       - "11434:11434"
     volumes:
-      - ollama_data:/root/.ollama
+      - ${USERPROFILE}/.ollama:/root/.ollama
     environment:
       - OLLAMA_KEEP_ALIVE=24h
     # GPU support: uncomment the block below and ensure nvidia-container-toolkit is installed
@@ -80,7 +80,7 @@ services:
       ollama:
         condition: service_healthy
     volumes:
-      - ollama_data:/root/.ollama
+      - ${USERPROFILE}/.ollama:/root/.ollama
     environment:
       - OLLAMA_HOST=http://ollama:11434
     entrypoint: >
@@ -244,9 +244,6 @@ volumes:
   minio_data:
     driver: local
 
-  # Ollama model cache — persists downloaded models across restarts
-  ollama_data:
-    driver: local
 
 # Network for services to communicate
 networks:

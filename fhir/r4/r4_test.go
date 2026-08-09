@@ -387,6 +387,58 @@ func TestValidator_Strict_ValidGenderCode(t *testing.T) {
 	assert.Empty(t, res.Errors)
 }
 
+// TestValidator_CodingSystemCheck_ResourceLevelCodeField_NotFlaggedAsCoding
+// regression-covers a false positive in walkCodingSystems: Condition.code,
+// Observation.code, and AllergyIntolerance.code are each a CodeableConcept
+// assigned to a resource field literally named "code" — that collided with
+// the walker's existence-only "has a code key => treat as a Coding" heuristic,
+// firing a bogus "Coding has a code but no system" warning on the resource
+// itself (path == the resource type, not a real element path) every time,
+// even when every actual Coding nested inside had a proper system.
+func TestValidator_CodingSystemCheck_ResourceLevelCodeField_NotFlaggedAsCoding(t *testing.T) {
+	initRegistry(t)
+	v := r4.NewFHIRR4Validator(r4.GetRegistry(), r4.GetTerminologyRegistry(), r4.GetConstraintRegistry())
+
+	condition := map[string]interface{}{
+		"resourceType": "Condition",
+		"id":           "cond-1",
+		"subject":      map[string]interface{}{"reference": "Patient/12345"},
+		"code": map[string]interface{}{
+			"coding": []interface{}{
+				map[string]interface{}{"system": "http://snomed.info/sct", "code": "44054006"},
+			},
+		},
+	}
+	res := v.ValidateResource(condition, r4.ValidationOptions{Level: r4.LevelStrict})
+	warningCodes := collectCodes(res.Warnings)
+	assert.NotContains(t, warningCodes, "coding-no-system",
+		"Condition.code (a CodeableConcept) must not be misidentified as a bare Coding missing its system")
+}
+
+// TestValidator_CodingSystemCheck_RealCodingMissingSystem_StillFlagged ensures
+// the fix didn't remove real detection: an actual Coding (system+code siblings,
+// nested under a field that is NOT itself named "code") with no system must
+// still be flagged.
+func TestValidator_CodingSystemCheck_RealCodingMissingSystem_StillFlagged(t *testing.T) {
+	initRegistry(t)
+	v := r4.NewFHIRR4Validator(r4.GetRegistry(), r4.GetTerminologyRegistry(), r4.GetConstraintRegistry())
+
+	condition := map[string]interface{}{
+		"resourceType": "Condition",
+		"id":           "cond-2",
+		"subject":      map[string]interface{}{"reference": "Patient/12345"},
+		"clinicalStatus": map[string]interface{}{
+			"coding": []interface{}{
+				map[string]interface{}{"code": "active"},
+			},
+		},
+	}
+	res := v.ValidateResource(condition, r4.ValidationOptions{Level: r4.LevelStrict})
+	warningCodes := collectCodes(res.Warnings)
+	assert.Contains(t, warningCodes, "coding-no-system",
+		"a genuine Coding with a code but no system must still be flagged")
+}
+
 func TestValidator_Strict_ObsDataAbsentViolation(t *testing.T) {
 	initRegistry(t)
 	v := r4.NewFHIRR4Validator(r4.GetRegistry(), r4.GetTerminologyRegistry(), r4.GetConstraintRegistry())

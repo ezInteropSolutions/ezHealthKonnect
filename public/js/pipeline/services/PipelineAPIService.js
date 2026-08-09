@@ -158,11 +158,21 @@ class PipelineAPIService {
     }
 
     /**
+     * List every pipeline (one per message type) for an interface — used to
+     * populate the message-type switcher in the Pipeline Builder header.
+     * Returns the raw list ({message_type, pipeline_name, ...} per row); does
+     * NOT fetch steps (list endpoint omits them, same as loadFirstPipelineForInterface).
+     */
+    async listPipelinesForInterface(interfaceId) {
+        const response = await this.request('GET', `/pipelines/interface/${interfaceId}`);
+        return response.pipelines || response.data || [];
+    }
+
+    /**
      * Load first pipeline for an interface regardless of message type (fallback)
      */
     async loadFirstPipelineForInterface(interfaceId) {
-        const response = await this.request('GET', `/pipelines/interface/${interfaceId}`);
-        const pipelines = response.pipelines || response.data || [];
+        const pipelines = await this.listPipelinesForInterface(interfaceId);
         if (pipelines.length > 0) {
             // Use message-type-specific endpoint to get actual steps (list endpoint omits them)
             const msgType = pipelines[0].message_type;

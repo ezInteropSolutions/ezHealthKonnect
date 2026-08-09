@@ -24,9 +24,11 @@ import (
 	"strings"
 	"time"
 
+	"ezhealthkonnect/fhir/r4"
 	"ezhealthkonnect/models"
 	"ezhealthkonnect/services/executors"
 	outboundformat "ezhealthkonnect/services/executors/format"
+	fhirnarrative "ezhealthkonnect/services/fhir_narrative"
 )
 
 // fhirBundleConfig holds config specific to the fhir_bundle mode.
@@ -51,6 +53,7 @@ type fhirBundleConfig struct {
 // PayloadBuilderExecutor constructs final wire payloads from pipeline data.
 type PayloadBuilderExecutor struct {
 	*executors.BaseExecutor
+	narrativeGen *fhirnarrative.FHIRNarrativeGenerator
 }
 
 // NewPayloadBuilderExecutor creates a new PayloadBuilderExecutor.
@@ -63,6 +66,7 @@ func NewPayloadBuilderExecutor() *PayloadBuilderExecutor {
 			Author:      "ezHealthKonnect",
 			Category:    "Output",
 		}),
+		narrativeGen: fhirnarrative.NewFHIRNarrativeGenerator(),
 	}
 }
 
@@ -340,7 +344,7 @@ func (e *PayloadBuilderExecutor) buildFHIRBundle(
 	includeRequest := bc.IncludeRequest || bundleType == "transaction" || bundleType == "batch"
 
 	// Resolve resources from pipeline paths
-	var entries []interface{}
+	var resources []map[string]interface{}
 	for _, path := range bc.ResourcePaths {
 		raw := executors.GetFieldValue(inputData, path)
 		if raw == nil {
@@ -370,20 +374,61 @@ func (e *PayloadBuilderExecutor) buildFHIRBundle(
 			}
 		}
 
-		entry := map[string]interface{}{
-			"resource": resource,
-		}
-
-		if includeRequest {
-			entry["request"] = buildBundleEntryRequest(bundleType, resource)
-		}
-
-		entries = append(entries, entry)
+		resources = append(resources, resource)
 	}
 
-	if len(entries) == 0 {
+	if len(resources) == 0 {
 		return "", "application/fhir+json",
 			fmt.Errorf("fhir_bundle: no resources resolved from resourcePaths %v", bc.ResourcePaths)
+	}
+
+	// Auto-generate a narrative (resource.text.div) for any resource that
+	// doesn't already have one — same "engine does the mechanical FHIR
+	// compliance work, never left for the user to map" precedent as fullUrl
+	// assignment below, and the exact sequencing the CDA→FHIR document mapper
+	// already establishes (declarative_document_mapper.go: narrative first,
+	// then AssembleEntries). A resource that already carries a text.div is
+	// left completely untouched (not just the div — the whole text object,
+	// including a status the source data set, e.g. "additional") rather than
+	// replaced with a freshly built {"status": "generated", ...} object.
+	for _, r := range resources {
+		if existing, ok := r["text"].(map[string]interface{}); ok {
+			if div, ok := existing["div"].(string); ok && div != "" {
+				continue
+			}
+		}
+		narrative := e.narrativeGen.Generate(r)
+		if narrative != "" {
+			r["text"] = map[string]interface{}{
+				"status": "generated",
+				"div":    narrative,
+			}
+		}
+	}
+
+	// AssembleEntries assigns every entry a urn:uuid: fullUrl and rewrites
+	// every "ResourceType/id" reference anywhere in any resource to match —
+	// the same already-validated logic services/cda_fhir's Bundle assembly
+	// uses (fhir/r4/bundle_assembler.go), reused here instead of maintaining
+	// a second, parallel fullUrl scheme. Using a single urn:uuid: scheme for
+	// every entry (rather than mixing in "{base}/ResourceType/id" for
+	// resources that happen to have their own id) avoids the exact class of
+	// "fullUrl does not match the full target URL" warning some validators
+	// raise when resolving a relative reference against a mixed-scheme Bundle.
+	entries := r4.AssembleEntries(resources)
+
+	if includeRequest {
+		for _, rawEntry := range entries {
+			entry, ok := rawEntry.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			resource, ok := entry["resource"].(map[string]interface{})
+			if !ok {
+				continue
+			}
+			entry["request"] = buildBundleEntryRequest(bundleType, resource)
+		}
 	}
 
 	// Build Bundle.id
@@ -397,8 +442,16 @@ func (e *PayloadBuilderExecutor) buildFHIRBundle(
 		"id":           bundleID,
 		"type":         bundleType,
 		"timestamp":    time.Now().UTC().Format(time.RFC3339),
-		"total":        len(entries),
 		"entry":        entries,
+	}
+	// FHIR constraint bun-1: total should only be present for searchset/history
+	// bundles. bundleType is validated above to one of
+	// collection|transaction|batch|document, none of which is searchset/history,
+	// so total is never set here — kept as an explicit conditional (rather than
+	// simply never setting it) so a future searchset/history mode addition
+	// doesn't silently reintroduce this bug.
+	if bundleType == "searchset" || bundleType == "history" {
+		bundle["total"] = len(entries)
 	}
 
 	body, err := json.Marshal(bundle)

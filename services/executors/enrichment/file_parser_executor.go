@@ -112,7 +112,13 @@ func (e *FileParserExecutor) Execute(
 	}
 
 	// ── Resolve raw file content ─────────────────────────────────
+	// sourceFileName carries file provenance through to the step's own output
+	// (stamped onto every record + metadata, below) — the same "_source_file"
+	// convention executeBatch already applies per-record. Left empty when no
+	// real file identity is available (e.g. a hand-built test message), in
+	// which case nothing is stamped rather than writing a misleading value.
 	var rawContent string
+	var sourceFileName string
 	switch config.SourceType {
 	case "local_path":
 		rawContent, err = e.resolveLocalFile(config.FilePath, config)
@@ -120,6 +126,7 @@ func (e *FileParserExecutor) Execute(
 			e.PostExecute(ctx, step, err, time.Since(start))
 			return inputData, err
 		}
+		sourceFileName = filepath.Base(config.FilePath)
 		// For local paths: use magic bytes to detect binary formats regardless of
 		// whatever fileFormat was configured (prevents xlsx being parsed as CSV).
 		if len(rawContent) >= 4 {
@@ -154,12 +161,22 @@ func (e *FileParserExecutor) Execute(
 			e.PostExecute(ctx, step, err, time.Since(start))
 			return inputData, err
 		}
+		sourceFileName = filepath.Base(rawURI)
 
 	default: // "field" or ""
 		rawContent, err = e.resolveSourceContent(config.SourceField, inputData)
 		if err != nil {
 			e.PostExecute(ctx, step, err, time.Since(start))
 			return inputData, fmt.Errorf("failed to resolve source content: %w", err)
+		}
+		// Content came from a pipeline field, most commonly an inbound
+		// connector (e.g. file_listener) delivering one file per message.
+		// The engine stamps that file's name onto message._sourceFile once,
+		// before any step runs (processing/engine_message_processor.go) —
+		// reuse it here rather than requiring every downstream step to know
+		// about that separate field itself.
+		if v, ok := executors.GetFieldValue(inputData, "message._sourceFile").(string); ok {
+			sourceFileName = v
 		}
 	}
 
@@ -215,6 +232,15 @@ func (e *FileParserExecutor) Execute(
 	log.Printf("✅ [FileParser] Parsed %d records with %d columns from %s format",
 		len(records), len(columns), config.FileFormat)
 
+	// Stamp file provenance onto every record — same "_source_file" key
+	// executeBatch already uses, so a downstream step can reference it
+	// identically regardless of which file_parser path produced the records.
+	if sourceFileName != "" {
+		for _, rec := range records {
+			rec["_source_file"] = sourceFileName
+		}
+	}
+
 	// Build metadata
 	metadata := map[string]interface{}{
 		"format":        config.FileFormat,
@@ -225,6 +251,9 @@ func (e *FileParserExecutor) Execute(
 	}
 	if config.SourceType == "local_path" {
 		metadata["file_path"] = config.FilePath
+	}
+	if sourceFileName != "" {
+		metadata["source_file"] = sourceFileName
 	}
 	if detectionResult != nil {
 		metadata["auto_detected"] = true
@@ -329,6 +358,12 @@ func (e *FileParserExecutor) executeStreamingLocalCSV(
 
 	log.Printf("✅ [StreamingCSV] chunk: %d records (offset %d→%d) has_more=%v parse_time=%dms",
 		len(records), streamConfig.Offset, nextOffset, hasMore, time.Since(start).Milliseconds())
+
+	// Same "_source_file" convention as the non-streaming path and executeBatch.
+	sourceFileName := filepath.Base(config.FilePath)
+	for _, rec := range records {
+		rec["_source_file"] = sourceFileName
+	}
 
 	chunkInfo := map[string]interface{}{
 		"chunk_size":  streamConfig.MaxRecords,

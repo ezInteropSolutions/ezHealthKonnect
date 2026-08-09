@@ -14,6 +14,7 @@ import (
 	"ezhealthkonnect/services"
 	"ezhealthkonnect/services/backpressure"
 	cdaSchemaLoader "ezhealthkonnect/cda"
+	cdacoverage "ezhealthkonnect/services/cda_coverage"
 	cdafhir "ezhealthkonnect/services/cda_fhir"
 	cdastorage "ezhealthkonnect/services/cda_storage"
 	cdaterminology "ezhealthkonnect/services/cda_terminology"
@@ -237,6 +238,23 @@ func main() {
 			processingEngine.SetCodeTemplateService(codeTemplateSvc)
 			log.Printf("📦 Code Template Service initialized (6 OOB libraries)")
 
+			// CDA COVERAGE AUDIT: bounded background worker pool, off the critical
+			// delivery path — see services/cda_coverage. Only ever does anything for
+			// interfaces that opt in (interfaces.cda_coverage_audit_config, V207) on
+			// CDA-input messages; every other interface pays nothing. objectStorageService
+			// nil (no object storage configured) disables the feature entirely, same
+			// guard as the mapping-log wiring right above.
+			var coverageAuditPool *cdacoverage.WorkerPool
+			if objectStorageService != nil {
+				if coverageSchemaLoader, err := cdaSchemaLoader.NewCDASchemaLoader("./cda/schemas"); err == nil {
+					coverageAuditPool = cdacoverage.NewWorkerPool(db, objectStorageService, coverageSchemaLoader)
+					processingEngine.SetCoverageAuditPool(coverageAuditPool)
+					log.Printf("📊 CDA Coverage Audit worker pool initialized")
+				} else {
+					log.Printf("⚠️  CDA Coverage Audit disabled: schema loader init failed: %v", err)
+				}
+			}
+
 			// DLQ SERVICE: write delivery failures, redrive via pipeline service
 			dlqSvc = connectors.NewDLQService(db)
 			processingEngine.SetDLQService(dlqSvc)
@@ -251,6 +269,15 @@ func main() {
 			notificationSvc := services.NewAlertNotificationService(db, credStore)
 			metricsCollector := services.NewMetricsCollector(db, notificationSvc)
 			metricsCollector.Start(context.Background())
+
+			// Wire the same notification dispatcher into CDA Coverage Audit so a
+			// gap-containing report can (optionally, per-interface — see
+			// cda_coverage_audit_config.notify) push an external notification via
+			// the existing alert_channels system, in addition to the always-on
+			// messages-list badge.
+			if coverageAuditPool != nil {
+				coverageAuditPool.SetNotificationService(notificationSvc)
+			}
 
 			// RETENTION ENFORCEMENT: mandatory HIPAA data retention — purges old messages,
 			// DLQ rows, quality scores, and pipeline history on a 1-hour schedule.

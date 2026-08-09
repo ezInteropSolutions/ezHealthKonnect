@@ -42,6 +42,7 @@ import (
 	"ezhealthkonnect/services/cda_fhir/assembly"
 	mappinglog "ezhealthkonnect/services/cda_fhir/mapping_log"
 	cdaterminology "ezhealthkonnect/services/cda_terminology"
+	"ezhealthkonnect/services/executors"
 	fhirnarrative "ezhealthkonnect/services/fhir_narrative"
 )
 
@@ -157,6 +158,13 @@ type CDAToFHIRConfig struct {
 	// Assembly controls the post-mapping assembly layer (deduplication, panel synthesis).
 	// Zero value = assembly enabled with all default rules active.
 	Assembly assembly.AssemblyConfig
+
+	// CoverageTracker is set by cda_to_fhir_executor.go from the message
+	// envelope's "_coverageTracker" key (see cda_coverage_tracker.go) only
+	// when the owning interface has opted into CDA Coverage Audit. nil
+	// (the common case) makes tracking a no-op — see DeclarativeEngine's
+	// own CoverageTracker field doc comment for how this is consumed.
+	CoverageTracker *executors.CDACoverageTracker
 }
 
 // ProcessingResult is the structured outcome written to _stepOutput.processingResult.

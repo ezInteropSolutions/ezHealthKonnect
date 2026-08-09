@@ -8,6 +8,7 @@ import (
 
 	"ezhealthkonnect/config"
 	"ezhealthkonnect/hl7"
+	hl7validator "ezhealthkonnect/hl7/validator"
 	"ezhealthkonnect/services/mapping"
 
 	"github.com/gin-gonic/gin"
@@ -23,6 +24,43 @@ func NewHL7Controller(cfg *config.Config) *HL7Controller {
 	return &HL7Controller{
 		config: cfg,
 	}
+}
+
+// applyConformanceValidation runs the hl7/validator conformance checks
+// (missing required segments, cardinality, data types, table/vocabulary
+// bindings) on top of the required-field validation ParseWithRealSchema
+// already populates on result.ValidationErrors, appending its findings in
+// place. levelOverride is the request's own ValidationLevel when present,
+// falling back to ctrl.config.HL7ValidationLevel. A no-op when result is
+// nil/unsuccessful, has no schema loaded, or the schema can't be re-resolved
+// (e.g. the ParseHL7Enhanced fallback path, which never has a RealHL7Schema
+// to validate against).
+func (ctrl *HL7Controller) applyConformanceValidation(result *hl7.EnhancedParsedMessage, rawMessage, levelOverride string) {
+	if result == nil || !result.Success || !result.SchemaLoaded {
+		return
+	}
+	level := strings.TrimSpace(levelOverride)
+	if level == "" {
+		level = ctrl.config.HL7ValidationLevel
+	}
+	schema, err := hl7.ResolveSchemaForMessage(rawMessage)
+	if err != nil || schema == nil {
+		return
+	}
+	cr := hl7validator.ValidateMessage(schema, result, hl7validator.ValidationOptions{
+		Level: hl7validator.ParseLevel(level),
+	})
+	result.ValidationErrors = append(result.ValidationErrors, cr.All()...)
+}
+
+// effectiveValidationLevel returns the request-level override when set,
+// otherwise the server default — the same precedence applyConformanceValidation
+// uses, surfaced here purely for accurate response metadata.
+func effectiveValidationLevel(configDefault, requestOverride string) string {
+	if v := strings.TrimSpace(requestOverride); v != "" {
+		return v
+	}
+	return configDefault
 }
 
 // ParseMessage handles HL7 message parsing requests
@@ -139,6 +177,11 @@ func (ctrl *HL7Controller) ParseMessage(c *gin.Context) {
         fmt.Printf("🔍 DEBUG: Segment order: %v\n", result.SegmentOrder)
     }
 
+    // Run HL7 v2 conformance validation (segments/cardinality/data
+    // types/table bindings) on top of the required-field check already
+    // baked into result.ValidationErrors above.
+    ctrl.applyConformanceValidation(result, req.RawMessage, req.ValidationLevel)
+
     // Determine parse method based on actual usage
     parseMethod := "basic"
     if result.SchemaLoaded {
@@ -160,7 +203,7 @@ func (ctrl *HL7Controller) ParseMessage(c *gin.Context) {
         Meta: &hl7.ParseMeta{
             ParsingTime:     parsingTime,
             DictionaryUsed:  result.DictionaryUsed,
-            ValidationLevel: ctrl.config.HL7ValidationLevel,
+            ValidationLevel: effectiveValidationLevel(ctrl.config.HL7ValidationLevel, req.ValidationLevel),
             ParserVersion:   "1.0.0",
             SchemaUsed:      result.SchemaLoaded,
             ParseMethod:     parseMethod,
@@ -180,8 +223,20 @@ func (ctrl *HL7Controller) ValidateMessage(c *gin.Context) {
 		return
 	}
 
-	// Parse and validate using enhanced parser
-	result := hl7.ParseHL7Enhanced(req.RawMessage)
+	// Parse with real schema when available, so conformance validation has a
+	// RealHL7Schema to check against — matching ParseMessage's own
+	// real-schema-first, basic-enhanced-fallback behavior for parity.
+	var result *hl7.EnhancedParsedMessage
+	if realLoader := hl7.GetRealSchemaLoader(); realLoader != nil {
+		result = hl7.ParseWithRealSchema(req.RawMessage)
+		if result == nil || !result.Success {
+			result = hl7.ParseHL7Enhanced(req.RawMessage)
+		}
+	} else {
+		result = hl7.ParseHL7Enhanced(req.RawMessage)
+	}
+
+	ctrl.applyConformanceValidation(result, req.RawMessage, req.ValidationLevel)
 
 	// Focus on validation results
 	validationResult := gin.H{
@@ -433,6 +488,8 @@ func (ctrl *HL7Controller) parseBatch(c *gin.Context, req hl7.ParseRequest) {
 				EscapeHandling: req.EscapeHandling,
 			})
 		}
+
+		ctrl.applyConformanceValidation(result, raw, req.ValidationLevel)
 
 		elapsed := time.Since(start)
 

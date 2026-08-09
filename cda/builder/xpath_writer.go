@@ -223,35 +223,34 @@ func candidatesForSegment(parent *etree.Element, segment string) []*etree.Elemen
 
 // findOrCreateChild resolves one path segment against parent's children,
 // creating a new child (with the predicate's constraint(s) already applied)
-// if no existing candidate — checked via the SAME backtracking search
-// tryWalkElements uses — already satisfies the rest of the path. See
-// walkElements' doc comment for why this lookahead matters.
+// if no existing candidate is compatible with the next segment's own
+// discriminator. See candidateCompatibleWithDiscriminator's doc comment for
+// what "compatible" means and why.
 //
-// The lookahead only ever runs when THIS segment itself carries a predicate
-// (pred != ""): a bare tag's candidatesForSegment is capped at one match by
-// construction (etree.SelectElement's own first-match semantics), so there
-// is never more than one real candidate to disambiguate between — running
-// the lookahead anyway would judge that lone candidate by whether it
-// ALREADY has the remaining path fully built, which is false the very first
-// time a second field starts writing through it (e.g. "act" itself, on a
-// second field's call, would otherwise look like a non-match purely because
-// the deeper node from THIS call hasn't been created yet) and incorrectly
-// spawn a duplicate.
+// The discriminator check only ever runs when THIS segment itself carries a
+// predicate (pred != ""): a bare tag's candidatesForSegment is capped at one
+// match by construction (etree.SelectElement's own first-match semantics),
+// so there is never more than one real candidate to disambiguate between —
+// running the check anyway would judge that lone candidate by whether it
+// conflicts with content that hasn't been written yet, which it structurally
+// cannot.
 func findOrCreateChild(parent *etree.Element, segment string, remaining []string) *etree.Element {
 	tag, pred := splitPredicate(segment)
 	candidates := candidatesForSegment(parent, segment)
 
 	if pred != "" && len(remaining) > 0 && segmentHasPredicate(remaining[0]) {
-		lookahead := lookaheadPrefix(remaining)
+		discriminatorTag, discriminatorPred := splitPredicate(remaining[0])
+		discriminatorConds := parseConditions(discriminatorPred)
 		for _, c := range candidates {
-			if _, ok := tryWalkElements(c, lookahead); ok {
+			if candidateCompatibleWithDiscriminator(c, discriminatorTag, discriminatorConds) {
 				return c
 			}
 		}
-		// No existing candidate already has the specific nested identity
-		// `lookahead` asks for — this is a distinct sibling instance (e.g. a
-		// second entryRelationship for a different nested observation
-		// type), not a reuse of an existing one. Fall through to create.
+		// Every existing candidate already has a CONFLICTING value for the
+		// next segment's own discriminator — this is a distinct sibling
+		// instance (e.g. a second entryRelationship for a different nested
+		// observation type), not a reuse of an existing one. Fall through
+		// to create.
 	} else if len(candidates) > 0 {
 		return candidates[0]
 	}
@@ -277,42 +276,64 @@ func segmentHasPredicate(segment string) bool {
 	return strings.Contains(segment, "[")
 }
 
-// lookaheadPrefix returns the leading portion of remaining up through (and
-// including) its LAST predicated segment — the only part of the path that
-// can actually disambiguate between sibling instances sharing the same
-// outer predicate (e.g. Reaction vs Severity vs Status, all nested under an
-// entryRelationship[@typeCode='SUBJ',@inversionInd='true'] sibling,
-// distinguished only by their own nested observation[templateId/@root=...]).
+// candidateCompatibleWithDiscriminator reports whether c (an existing
+// candidate at the CURRENT segment's level) could still host the NEXT
+// segment's own discriminator identity — true unless c already has an
+// EXISTING child of discriminatorTag whose attributes conflict with every
+// discriminatorCond. This is deliberately about CONFLICT, not mere absence:
 //
-// Trailing BARE-tag segments after that point (e.g. "effectiveTime", "text",
-// "telecom") never disambiguate anything — a bare tag is a plain find-or-
-// create against whichever candidate was already selected — and must NOT be
-// required to already exist. Requiring the full remaining path (including
-// those trailing segments) to pre-exist was a real bug: the very first time
-// a NEW field is added targeting a not-yet-written leaf under an already-
-// correctly-disambiguated element (e.g. Reaction Observation's own
-// effectiveTime, added after reaction/reactionDisplay/reactionSystem already
-// built that element via its shared value/@code|@displayName|@codeSystem
-// terminal), tryWalkElements would correctly report that leaf doesn't exist
-// yet — but findOrCreateChild misread that as "this candidate doesn't
-// match", spawning a whole duplicate sibling (a second entryRelationship +
-// observation) instead of just adding the new leaf to the correct existing
-// one. Confirmed via a live Test Pipeline run (2026-07) producing duplicate
+//   - c has no discriminatorTag child at all yet → compatible (nothing
+//     built there yet, safe to extend) — e.g. a first-time write of
+//     Encounter Service Delivery Location's playingEntity[@classCode='PLC']
+//     under an already-uniquely-identified participant/participantRole
+//     pair (there is only ever ONE such pair per encounter, so no
+//     disambiguation is even possible, let alone needed, at that level).
+//   - c has a discriminatorTag child that already matches every
+//     discriminatorCond → compatible (same identity) — e.g. a second field
+//     (Reaction Observation's own effectiveTime) targeting the SAME nested
+//     observation[templateId/@root=X] an earlier field already built.
+//   - c has a discriminatorTag child (or children) but NONE match →
+//     genuinely conflicting identity already present (e.g. Severity's own
+//     entryRelationship already has a nested observation[templateId=
+//     TID-SEVERITY], and Status's field now needs templateId=TID-STATUS on
+//     the SAME shared entryRelationship predicate) → NOT compatible, a
+//     distinct sibling must be created.
+//
+// No parseable conditions (discriminatorConds empty — e.g. a bare position
+// predicate) degrades to "presence alone can't conflict" — treated as
+// compatible, matching this function's conservative default of preferring
+// reuse over an unnecessary duplicate.
+//
+// Confirmed via two separate live Test Pipeline runs (2026-07): the earlier
+// lookaheadPrefix-based approach (requiring the ENTIRE remaining path,
+// including not-yet-written leaves, to already exist) produced duplicate
 // entryRelationship/observation pairs for Reaction Observation, Problem
 // Status, and a fragmented multi-copy Advance Directive Custodian
-// participant — all new fields this session added under already-existing
-// predicate-disambiguated elements.
-func lookaheadPrefix(remaining []string) []string {
-	lastPredicated := -1
-	for i, seg := range remaining {
-		if segmentHasPredicate(seg) {
-			lastPredicated = i
+// participant — fixed once, then recurred ONE level deeper (a duplicate
+// <participant>) the moment a new field's own terminal was ITSELF
+// predicated (playingEntity[@classCode='PLC']) rather than a bare tag,
+// because trimming the lookahead to stop earlier still asked "does this
+// exact content already exist," the wrong question for an element that can
+// never have more than one real instance in the first place. This
+// conflict-vs-absence check is not sensitive to how deep or how many
+// segments remain — it only ever needs to look at the immediate next
+// segment, because every genuinely different sibling identity in this
+// schema is discriminated by exactly one nested predicate immediately below
+// the shared wrapper.
+func candidateCompatibleWithDiscriminator(c *etree.Element, discriminatorTag string, discriminatorConds []condition) bool {
+	children := c.SelectElements(discriminatorTag)
+	if len(children) == 0 {
+		return true
+	}
+	if len(discriminatorConds) == 0 {
+		return true
+	}
+	for _, child := range children {
+		if allConditionsMatch(child, discriminatorConds) {
+			return true
 		}
 	}
-	if lastPredicated == -1 {
-		return nil
-	}
-	return remaining[:lastPredicated+1]
+	return false
 }
 
 // splitPredicate splits "tag[predicate]" into ("tag", "predicate"), or

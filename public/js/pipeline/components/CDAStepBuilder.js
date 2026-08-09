@@ -3748,6 +3748,7 @@ class CDABuildStepBuilder {
         if (!step.config) step.config = {};
         if (!step.config.documentType) step.config.documentType = 'CCD';
         if (!step.config.custodian) step.config.custodian = {};
+        if (!step.config.legalAuthenticator) step.config.legalAuthenticator = {};
 
         this._loadRequirements(step.config.documentType);
 
@@ -3757,6 +3758,7 @@ class CDABuildStepBuilder {
         ${this._renderTabButton('general', 'General')}
         ${this._renderTabButton('requirements', 'Requirements')}
         ${this._renderTabButton('custodian', 'Custodian')}
+        ${this._renderTabButton('legalAuthenticator', 'Legal Authenticator')}
     </div>
     <div id="cdaBuildTab-general" style="${this._activeTab === 'general' ? '' : 'display:none'}">
         ${this._renderGeneralTab(step.config)}
@@ -3767,6 +3769,9 @@ class CDABuildStepBuilder {
     <div id="cdaBuildTab-custodian" style="${this._activeTab === 'custodian' ? '' : 'display:none'}">
         ${this._renderCustodianTab(step.config)}
     </div>
+    <div id="cdaBuildTab-legalAuthenticator" style="${this._activeTab === 'legalAuthenticator' ? '' : 'display:none'}">
+        ${this._renderLegalAuthenticatorTab(step.config)}
+    </div>
 </div>`;
     }
 
@@ -3774,7 +3779,7 @@ class CDABuildStepBuilder {
 
     switchTab(tabName) {
         this._activeTab = tabName;
-        ['general', 'requirements', 'custodian'].forEach(t => {
+        ['general', 'requirements', 'custodian', 'legalAuthenticator'].forEach(t => {
             const panel = document.getElementById('cdaBuildTab-' + t);
             const btn = document.getElementById('cdaBuildTabBtn-' + t);
             if (panel) panel.style.display = (t === tabName) ? '' : 'none';
@@ -3988,12 +3993,55 @@ class CDABuildStepBuilder {
         </div>`;
     }
 
+    // ── Legal Authenticator tab ───────────────────────────────────────────────
+
+    _renderLegalAuthenticatorTab(cfg) {
+        const esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+        const la = cfg.legalAuthenticator || {};
+        const laReq = (this._requirements && this._requirements.headerGroups && this._requirements.headerGroups.legalAuthenticator) || [];
+        const reqByKey = {};
+        laReq.forEach(f => { reqByKey[f.key] = f; });
+        const badge = key => (reqByKey[key] && typeof CDARequirementsHelper !== 'undefined')
+            ? CDARequirementsHelper.renderConformanceBadge(reqByKey[key].conformance) : '';
+
+        const field = (id, label, value, key, placeholder) => `
+            <div class="config-group" style="margin-bottom:0.9rem;">
+                <label style="font-size:0.75rem;font-weight:600;text-transform:uppercase;color:#64748b;display:flex;align-items:center;gap:0.4rem;margin-bottom:0.4rem;">${esc(label)} ${badge(key)}</label>
+                <input id="${id}" type="text" class="form-control form-control-sm" value="${esc(value)}" placeholder="${esc(placeholder || '')}" style="font-size:0.82rem;">
+            </div>`;
+
+        return `
+        <div class="cda-step-config">
+            <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:6px;padding:0.65rem 0.85rem;margin-bottom:1rem;font-size:0.8rem;color:#1e40af;">
+                <strong>Legal Authenticator.</strong> The person who legally attests to this document's content — genuinely optional (SHOULD, 0..1). Leave Given Name and Family Name blank to omit this element entirely; once a name is provided, Address and Phone (if configured) are written as required children.
+            </div>
+            <div style="display:flex;gap:0.6rem;">
+                <div style="flex:1;">${field('cdaBuildLegalAuthGiven', 'Given Name', la.given, 'given')}</div>
+                <div style="flex:1;">${field('cdaBuildLegalAuthFamily', 'Family Name', la.family, 'family')}</div>
+            </div>
+            ${field('cdaBuildLegalAuthNPI', 'NPI', la.npi, 'npi')}
+            <div style="display:flex;gap:0.6rem;">
+                <div style="flex:1;">${field('cdaBuildLegalAuthSpecialtyCode', 'Specialty Code', la.specialtyCode, null, 'e.g. 208D00000X')}</div>
+                <div style="flex:1;">${field('cdaBuildLegalAuthSpecialtyDisplay', 'Specialty Display Name', la.specialtyCodeDisplay, null)}</div>
+                <div style="flex:1;">${field('cdaBuildLegalAuthSpecialtySystem', 'Specialty Code System (OID)', la.specialtyCodeSystem, null, '2.16.840.1.113883.6.101')}</div>
+            </div>
+            ${field('cdaBuildLegalAuthStreet', 'Street Address', la.street, 'street')}
+            <div style="display:flex;gap:0.6rem;">
+                <div style="flex:2;">${field('cdaBuildLegalAuthCity', 'City', la.city, 'city')}</div>
+                <div style="flex:1;">${field('cdaBuildLegalAuthState', 'State', la.state, 'state')}</div>
+                <div style="flex:1;">${field('cdaBuildLegalAuthPostalCode', 'Postal Code', la.postalCode, 'postalCode')}</div>
+            </div>
+            ${field('cdaBuildLegalAuthCountry', 'Country', la.country, null, 'US')}
+            ${field('cdaBuildLegalAuthPhone', 'Phone', la.phone, 'phone')}
+        </div>`;
+    }
+
     // ── collectConfig / destroy ──────────────────────────────────────────────
 
-    // Reads General + Custodian tab DOM values into step.config — split out
-    // from collectConfig() so onDocTypeChange can persist pending edits
-    // before switching document types without needing the full
-    // PropertiesPanel save flow.
+    // Reads General + Custodian + Legal Authenticator tab DOM values into
+    // step.config — split out from collectConfig() so onDocTypeChange can
+    // persist pending edits before switching document types without needing
+    // the full PropertiesPanel save flow.
     _collectGeneralAndCustodianTabs() {
         const root = document.getElementById('cdaBuildBuilder');
         if (!root || !this._step) return;
@@ -4025,6 +4073,21 @@ class CDABuildStepBuilder {
         custField('cdaBuildCustPostalCode', 'postalCode');
         custField('cdaBuildCustCountry', 'country');
         custField('cdaBuildCustPhone', 'phone');
+
+        cfg.legalAuthenticator = cfg.legalAuthenticator || {};
+        const laField = (domId, key) => { if (pick(domId) !== null) cfg.legalAuthenticator[key] = pick(domId); };
+        laField('cdaBuildLegalAuthGiven', 'given');
+        laField('cdaBuildLegalAuthFamily', 'family');
+        laField('cdaBuildLegalAuthNPI', 'npi');
+        laField('cdaBuildLegalAuthSpecialtyCode', 'specialtyCode');
+        laField('cdaBuildLegalAuthSpecialtyDisplay', 'specialtyCodeDisplay');
+        laField('cdaBuildLegalAuthSpecialtySystem', 'specialtyCodeSystem');
+        laField('cdaBuildLegalAuthStreet', 'street');
+        laField('cdaBuildLegalAuthCity', 'city');
+        laField('cdaBuildLegalAuthState', 'state');
+        laField('cdaBuildLegalAuthPostalCode', 'postalCode');
+        laField('cdaBuildLegalAuthCountry', 'country');
+        laField('cdaBuildLegalAuthPhone', 'phone');
     }
 
     _rerender() {

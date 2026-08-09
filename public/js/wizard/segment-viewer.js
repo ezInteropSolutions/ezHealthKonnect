@@ -46,6 +46,7 @@ class SegmentViewer {
         const segmentListHTML = `
             <div class="compact-segment-viewer">
                 ${this.renderCompactHeader(validationErrors, data.messageType, segments, data)}
+                ${this.renderMissingSegmentsBanner(validationErrors)}
                 ${this.renderSegmentTable(segments, validationErrors)}
             </div>
         `;
@@ -206,6 +207,27 @@ renderCompactHeader(validationErrors, messageType, segments, data) {
 
 // ✅ REMOVE: Delete the debugPositioning method entirely
 // debugPositioning() method removed - no longer needed
+
+    /**
+     * Missing required segments have no segment card to attach an error to
+     * (getSegmentsFromGroups only enumerates segments actually present in
+     * the message), so renderCompactHeader's error count alone can't say
+     * WHICH segment is missing. This banner surfaces those names directly.
+     */
+    renderMissingSegmentsBanner(validationErrors) {
+        const missing = validationErrors.filter(err => err.code === 'MISSING_REQUIRED_SEGMENT');
+        if (missing.length === 0) {
+            return '';
+        }
+        const names = missing.map(err => this.escapeHtml(err.segment || '?'));
+        return `
+            <div class="missing-segments-banner">
+                <i class="fas fa-triangle-exclamation"></i>
+                <span><strong>Missing Required Segment${names.length > 1 ? 's' : ''}:</strong> ${names.join(', ')}</span>
+            </div>
+        `;
+    }
+
     /**
      * ✅ NEW: Get dynamic schema information
      */

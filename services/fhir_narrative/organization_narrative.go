@@ -16,7 +16,7 @@ func GenerateOrganizationNarrative(r map[string]interface{}) string {
 
 	if telecom := fhirArr(r, "telecom"); len(telecom) > 0 {
 		if t, ok := telecom[0].(map[string]interface{}); ok {
-			rows += tableRow(fhirStr(t, "system"), fhirStr(t, "value"))
+			rows += tableRow(telecomSystemLabel(fhirStr(t, "system")), fhirStr(t, "value"))
 		}
 	}
 

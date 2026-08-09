@@ -103,10 +103,20 @@ func NewMapToCanonicalExecutor() *MapToCanonicalExecutor {
 // headerFieldRow maps one flat header target key (relative to
 // header.<Group>) to a source path in the pipeline's inputData.
 type headerFieldRow struct {
-	Group      string `json:"group"`               // "patient" | "author"
-	Target     string `json:"target"`              // dot-path relative to header.<Group>, e.g. "address.street"
-	SourcePath string `json:"sourcePath"`          // GetFieldValue-compatible path, relative to inputData
-	Transform  string `json:"transform,omitempty"` // canonical_value_transforms.go transform name, applied before writing
+	Group      string `json:"group"`      // "patient" | "author"
+	Target     string `json:"target"`     // dot-path relative to header.<Group>, e.g. "address.street"
+	SourcePath string `json:"sourcePath"` // GetFieldValue-compatible path, relative to inputData
+
+	// LiteralValue is used when SourcePath is empty — a fixed constant
+	// written regardless of per-message data (e.g. a coded field's own
+	// codeSystem OID, the same "codeSystem is just another mappable field,
+	// not a Go-hardcoded constant" convention every SECTION field's
+	// fieldMappingRow.LiteralValue already has — this was the one place
+	// that convention hadn't reached yet, found via a real gap: a header
+	// field needing a fixed companion codeSystem had no way to supply one).
+	LiteralValue string `json:"literalValue,omitempty"`
+
+	Transform string `json:"transform,omitempty"` // canonical_value_transforms.go transform name, applied before writing (SourcePath-driven rows only)
 }
 
 // rowCondition is the "Block 2, mechanism 1" no-code condition: branch on
@@ -177,6 +187,16 @@ type sectionMappingRow struct {
 	SectionKey string            `json:"sectionKey"`
 	RowsPath   string            `json:"rowsPath"`
 	Fields     []fieldMappingRow `json:"fields"`
+
+	// EntriesKey is the canonical sub-key (sections.<SectionKey>.<EntriesKey>)
+	// this mapping's entries are written to — defaults to "entries" (the
+	// ordinary case, one mapping per SectionKey). Set to a different value
+	// (e.g. "procedureEntries") when a section has more than one structural
+	// entry shape and needs a SECOND, independent sectionMappingRow sharing
+	// the same SectionKey but its own RowsPath/Fields — see
+	// cda/schema_types.go's AlternateEntryArchetype for the cda.build-side
+	// counterpart (its own EntriesKey must match this one exactly).
+	EntriesKey string `json:"entriesKey,omitempty"`
 
 	// GroupBy (Block 3, "Group By" — one or more source columns, a
 	// composite key) turns this section from "one row = one entry" into
@@ -253,9 +273,24 @@ func (e *MapToCanonicalExecutor) Execute(
 	sectionsOut := canonicalDoc["sections"].(map[string]interface{})
 	for _, sm := range cfg.Sections {
 		entries := buildSectionEntries(inputData, sm)
-		if len(entries) > 0 {
-			sectionsOut[sm.SectionKey] = map[string]interface{}{"entries": entries}
+		if len(entries) == 0 {
+			continue
 		}
+		entriesKey := sm.EntriesKey
+		if entriesKey == "" {
+			entriesKey = "entries"
+		}
+		// Merge into (rather than overwrite) an existing SectionKey entry —
+		// a section with an AlternateEntryArchetype is configured via TWO
+		// sectionMappingRows sharing the same SectionKey but different
+		// EntriesKey; overwriting would silently drop whichever one ran
+		// first (map assignment, not merge).
+		secData, ok := sectionsOut[sm.SectionKey].(map[string]interface{})
+		if !ok {
+			secData = map[string]interface{}{}
+			sectionsOut[sm.SectionKey] = secData
+		}
+		secData[entriesKey] = entries
 	}
 
 	durationMs := time.Since(start).Milliseconds()
@@ -298,7 +333,14 @@ func (e *MapToCanonicalExecutor) Execute(
 // encompassingEncounter remain out of scope; those need row-building
 // (multiple source rows -> multiple entries), not just an array passthrough.
 func applyHeaderField(canonicalDoc map[string]interface{}, inputData map[string]interface{}, h headerFieldRow) {
-	if h.Group == "" || h.Target == "" || h.SourcePath == "" {
+	if h.Group == "" || h.Target == "" {
+		return
+	}
+	if h.SourcePath == "" {
+		if h.LiteralValue == "" {
+			return
+		}
+		executors.UpdateFieldValue(canonicalDoc, "header."+h.Group+"."+h.Target, h.LiteralValue)
 		return
 	}
 	raw := executors.GetFieldValue(inputData, h.SourcePath)

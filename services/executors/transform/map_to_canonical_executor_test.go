@@ -236,6 +236,60 @@ func TestMapToCanonical_HeaderField_TransformApplied(t *testing.T) {
 	}
 }
 
+// TestMapToCanonical_HeaderField_LiteralValue_WrittenWhenSourcePathEmpty
+// verifies headerFieldRow.LiteralValue — a real gap found in Round 23: every
+// SECTION field already supported a fixed literalValue (no SourcePath
+// needed), but header fields had no equivalent at all (applyHeaderField's
+// old `if ... || h.SourcePath == "" { return }` guard made a
+// SourcePath-empty row a silent no-op regardless of any other field). Needed
+// for a header coded field's own fixed companion codeSystem (e.g. patient
+// languageCommunication/proficiencyLevelCode's HL7 LanguageAbilityProficiency
+// OID), the same "codeSystem is just another mappable field" convention
+// every section already has.
+func TestMapToCanonical_HeaderField_LiteralValue_WrittenWhenSourcePathEmpty(t *testing.T) {
+	config := map[string]interface{}{
+		"header": []interface{}{
+			map[string]interface{}{
+				"group":        "patient",
+				"target":       "languageProficiencySystem",
+				"sourcePath":   "",
+				"literalValue": "2.16.840.1.113883.5.61",
+			},
+		},
+	}
+
+	output := runMapToCanonical(t, config, map[string]interface{}{})
+	doc := canonicalDocFrom(t, output, "parsedCDA")
+	header := doc["header"].(map[string]interface{})
+	patient := header["patient"].(map[string]interface{})
+
+	if got := patient["languageProficiencySystem"]; got != "2.16.840.1.113883.5.61" {
+		t.Errorf("languageProficiencySystem = %v, want 2.16.840.1.113883.5.61 (LiteralValue should be written even with no SourcePath/inputData)", got)
+	}
+}
+
+// TestMapToCanonical_HeaderField_NoSourcePathNoLiteral_NoOp guards the
+// opposite edge: a row with neither SourcePath nor LiteralValue must stay a
+// silent no-op (matching pre-existing behavior for every already-saved
+// pipeline config with a stray blank header row), not somehow write an
+// empty string.
+func TestMapToCanonical_HeaderField_NoSourcePathNoLiteral_NoOp(t *testing.T) {
+	config := map[string]interface{}{
+		"header": []interface{}{
+			map[string]interface{}{"group": "patient", "target": "sex", "sourcePath": ""},
+		},
+	}
+
+	output := runMapToCanonical(t, config, map[string]interface{}{})
+	doc := canonicalDocFrom(t, output, "parsedCDA")
+	header, _ := doc["header"].(map[string]interface{})
+	if patient, ok := header["patient"].(map[string]interface{}); ok {
+		if _, present := patient["sex"]; present {
+			t.Errorf("expected no \"sex\" key written when both SourcePath and LiteralValue are empty, got: %v", patient)
+		}
+	}
+}
+
 // TestMapToCanonical_FallbackPaths_SecondPathUsedWhenFirstAbsent verifies
 // FallbackPaths tries each path in order until one resolves — a source
 // system with inconsistent column naming across rows.
@@ -981,5 +1035,64 @@ func TestMapToCanonical_CustomOutputField(t *testing.T) {
 	entries := sectionEntries(t, doc, "problems")
 	if len(entries) != 1 {
 		t.Fatalf("expected 1 problem entry, got %d", len(entries))
+	}
+}
+
+// TestMapToCanonical_EntriesKey_SecondSectionMappingRowMergesNotOverwrites
+// verifies the AlternateEntryArchetype counterpart on the map side: two
+// sectionMappingRows sharing the same SectionKey but different EntriesKey
+// (the ordinary case defaults to "entries") must both land in
+// sections.<key>, not have the second overwrite the first — the bug the
+// pre-existing `sectionsOut[sm.SectionKey] = map[string]interface{}{...}`
+// assignment had (map assignment, not merge).
+func TestMapToCanonical_EntriesKey_SecondSectionMappingRowMergesNotOverwrites(t *testing.T) {
+	config := map[string]interface{}{
+		"sections": []interface{}{
+			map[string]interface{}{
+				"sectionKey": "medicalEquipment",
+				"rowsPath":   "equipmentRecords",
+				"fields": []interface{}{
+					map[string]interface{}{"canonicalField": "equipmentCode", "sourcePath": "code"},
+				},
+			},
+			map[string]interface{}{
+				"sectionKey": "medicalEquipment",
+				"rowsPath":   "procedureRecords",
+				"entriesKey": "procedureEntries",
+				"fields": []interface{}{
+					map[string]interface{}{"canonicalField": "equipmentProcedureCode", "sourcePath": "code"},
+				},
+			},
+		},
+	}
+	inputData := map[string]interface{}{
+		"equipmentRecords": []interface{}{map[string]interface{}{"code": "360008007"}},
+		"procedureRecords": []interface{}{map[string]interface{}{"code": "87717006"}},
+	}
+
+	output := runMapToCanonical(t, config, inputData)
+	doc := canonicalDocFrom(t, output, "parsedCDA")
+	sections := doc["sections"].(map[string]interface{})
+	sec, ok := sections["medicalEquipment"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected medicalEquipment section to be present, sections=%v", sections)
+	}
+
+	primaryEntries, _ := sec["entries"].([]interface{})
+	if len(primaryEntries) != 1 {
+		t.Fatalf("expected 1 primary entry to survive (not overwritten by the second sectionMappingRow), got %d: %v", len(primaryEntries), sec)
+	}
+	primary, _ := primaryEntries[0].(map[string]interface{})
+	if primary["equipmentCode"] != "360008007" {
+		t.Errorf("expected primary entry's equipmentCode=360008007, got %v", primary["equipmentCode"])
+	}
+
+	altEntries, _ := sec["procedureEntries"].([]interface{})
+	if len(altEntries) != 1 {
+		t.Fatalf("expected 1 alternate procedureEntries entry, got %d: %v", len(altEntries), sec)
+	}
+	alt, _ := altEntries[0].(map[string]interface{})
+	if alt["equipmentProcedureCode"] != "87717006" {
+		t.Errorf("expected alternate entry's equipmentProcedureCode=87717006, got %v", alt["equipmentProcedureCode"])
 	}
 }

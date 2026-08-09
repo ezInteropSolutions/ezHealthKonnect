@@ -68,6 +68,27 @@ var headerKeyTranslation = map[string]map[string]string{
 		"custodianOrgName": "name",
 		"custodianId":      "id",
 	},
+	// legalAuthenticator's own translation table, unlike custodian's, DOES
+	// cover address/telecom — CONF:1198-5589/5595 genuinely require them
+	// (SHALL at least one) once the element exists at all, a real
+	// difference from custodian's own spec (which has no such requirement —
+	// see this file's header comment on why custodian's table deliberately
+	// omits them). writeLegalAuthenticatorHeader itself still treats
+	// addr/telecom as conditionally-written (only when configured), same as
+	// every other optional data-entry field in this package — the
+	// difference here is purely about what the Requirements-tab badge
+	// should HONESTLY tell a user filling this in, not a new enforcement
+	// mechanism.
+	"legalAuthenticator": {
+		"legalAuthenticatorGiven":       "given",
+		"legalAuthenticatorFamily":      "family",
+		"legalAuthenticatorNPI":         "npi",
+		"legalAuthenticatorAddressLine": "street",
+		"legalAuthenticatorCity":        "city",
+		"legalAuthenticatorState":       "state",
+		"legalAuthenticatorPostalCode":  "postalCode",
+		"legalAuthenticatorTelecom":     "phone",
+	},
 }
 
 // HeaderFieldRequirement is one canonical header field's conformance level,

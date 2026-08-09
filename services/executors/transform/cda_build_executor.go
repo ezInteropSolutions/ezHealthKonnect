@@ -72,13 +72,14 @@ func NewCDABuildExecutor() *CDABuildExecutor {
 // inspecting saved pipeline step configs) can decode it the same way
 // Execute() does, without a second, drifting copy of this shape.
 type CdaBuildConfig struct {
-	SourceField    string             `json:"sourceField"`
-	InputFormat    string             `json:"inputFormat"`
-	OutputField    string             `json:"outputField"`
-	DocumentType   string             `json:"documentType"`
-	OrgName        string             `json:"orgName"`
-	TimezoneOffset string             `json:"timezoneOffset,omitempty"`
-	Custodian      CdaCustodianConfig `json:"custodian,omitempty"`
+	SourceField        string                       `json:"sourceField"`
+	InputFormat        string                       `json:"inputFormat"`
+	OutputField        string                       `json:"outputField"`
+	DocumentType       string                       `json:"documentType"`
+	OrgName            string                       `json:"orgName"`
+	TimezoneOffset     string                       `json:"timezoneOffset,omitempty"`
+	Custodian          CdaCustodianConfig           `json:"custodian,omitempty"`
+	LegalAuthenticator CdaLegalAuthenticatorConfig  `json:"legalAuthenticator,omitempty"`
 }
 
 // CdaCustodianConfig is the cda.build step's structured Custodian tab —
@@ -98,6 +99,27 @@ type CdaCustodianConfig struct {
 	PostalCode  string `json:"postalCode,omitempty"`
 	Country     string `json:"country,omitempty"`
 	Phone       string `json:"phone,omitempty"`
+}
+
+// CdaLegalAuthenticatorConfig is the cda.build step's structured Legal
+// Authenticator tab — same "deployment-level constant config" rationale as
+// CdaCustodianConfig (see cda/builder/document_builder.go's
+// LegalAuthenticatorOptions doc comment). All-empty (Given and Family both
+// unset) means no legalAuthenticator is written at all — this element is
+// genuinely optional (SHOULD 0..1), unlike Custodian (SHALL exactly one).
+type CdaLegalAuthenticatorConfig struct {
+	Given               string `json:"given,omitempty"`
+	Family              string `json:"family,omitempty"`
+	NPI                 string `json:"npi,omitempty"`
+	SpecialtyCode       string `json:"specialtyCode,omitempty"`
+	SpecialtyCodeSystem string `json:"specialtyCodeSystem,omitempty"`
+	SpecialtyCodeDisplay string `json:"specialtyCodeDisplay,omitempty"`
+	Street              string `json:"street,omitempty"`
+	City                string `json:"city,omitempty"`
+	State               string `json:"state,omitempty"`
+	PostalCode          string `json:"postalCode,omitempty"`
+	Country             string `json:"country,omitempty"`
+	Phone               string `json:"phone,omitempty"`
 }
 
 // Execute reads the configured source, converts it to the canonical shape
@@ -156,6 +178,13 @@ func (e *CDABuildExecutor) Execute(
 			IdRoot: cfg.Custodian.IdRoot, IdExtension: cfg.Custodian.IdExtension, OrgName: cfg.Custodian.OrgName,
 			Street: cfg.Custodian.Street, City: cfg.Custodian.City, State: cfg.Custodian.State,
 			PostalCode: cfg.Custodian.PostalCode, Country: cfg.Custodian.Country, Phone: cfg.Custodian.Phone,
+		},
+		LegalAuthenticator: cdaBuilder.LegalAuthenticatorOptions{
+			Given: cfg.LegalAuthenticator.Given, Family: cfg.LegalAuthenticator.Family, NPI: cfg.LegalAuthenticator.NPI,
+			SpecialtyCode: cfg.LegalAuthenticator.SpecialtyCode, SpecialtyCodeSystem: cfg.LegalAuthenticator.SpecialtyCodeSystem,
+			SpecialtyCodeDisplay: cfg.LegalAuthenticator.SpecialtyCodeDisplay,
+			Street:               cfg.LegalAuthenticator.Street, City: cfg.LegalAuthenticator.City, State: cfg.LegalAuthenticator.State,
+			PostalCode: cfg.LegalAuthenticator.PostalCode, Country: cfg.LegalAuthenticator.Country, Phone: cfg.LegalAuthenticator.Phone,
 		},
 	})
 	if err != nil {

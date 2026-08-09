@@ -153,6 +153,14 @@ func (e *CDASectionToCSVExecutor) Execute(
 	// filename the outbound delivery step later gives the CSV file itself.
 	sourceFile := sourceFileFromInputData(inputData)
 
+	// CDA Coverage Audit: resolved once per document.
+	var coverageTracker *executors.CDACoverageTracker
+	if v, ok := inputData["_coverageTracker"].(*executors.CDACoverageTracker); ok {
+		coverageTracker = v
+	} else if msg, ok := inputData["message"].(map[string]interface{}); ok {
+		coverageTracker, _ = msg["_coverageTracker"].(*executors.CDACoverageTracker)
+	}
+
 	outputData := make(map[string]interface{}, len(inputData)+len(sectionKeys))
 	for k, v := range inputData {
 		outputData[k] = v
@@ -175,7 +183,7 @@ func (e *CDASectionToCSVExecutor) Execute(
 		if tmpl.NarrativeOnly {
 			rows, columns = buildNarrativeRow(documentMap, tmpl.SectionKey, sourceFile)
 		} else {
-			rows = buildCSVRows(documentMap, tmpl, sourceFile)
+			rows = buildCSVRows(documentMap, tmpl, sourceFile, coverageTracker)
 			columns = csvColumnsWithSourceFile(resolvedSectionColumns(tmpl))
 		}
 		csvText := writeCSV(columns, rows)
@@ -493,15 +501,22 @@ func stripCDANarrativeXML(narrativeXML string) string {
 // ingestion metadata, not the entry itself. A column whose path resolves to
 // nothing produces an empty cell — never an error — since most clinical
 // fields are legitimately optional per entry.
-func buildCSVRows(documentMap map[string]interface{}, tmpl CSVSectionTemplate, sourceFile string) []map[string]string {
+func buildCSVRows(documentMap map[string]interface{}, tmpl CSVSectionTemplate, sourceFile string, tracker *executors.CDACoverageTracker) []map[string]string {
 	columns := resolvedSectionColumns(tmpl)
 	entries := executors.ResolveCDAPaths(documentMap, "sectionsByKey."+tmpl.SectionKey+".entries[*]", false)
 	rows := make([]map[string]string, 0, len(entries))
-	for _, entryNode := range entries {
+	for i, entryNode := range entries {
 		entryMap, ok := entryNode.(map[string]interface{})
 		if !ok {
 			continue
 		}
+		// CDA Coverage Audit — see cda_coverage_tracker.go. Recorded at this
+		// wildcard-resolution index, which reflects document order as long as
+		// no upstream step (e.g. cda.dedupe) has already filtered/reindexed
+		// this section's entries — same known limitation as declarative_engine.go's
+		// buildOneResource.
+		tracker.Record(executors.CDAEntryKey(tmpl.SectionKey, i))
+
 		for _, row := range buildRowsForEntry(entryMap, columns) {
 			row["SourceFile"] = sourceFile
 			rows = append(rows, row)

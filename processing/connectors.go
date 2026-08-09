@@ -218,6 +218,8 @@ func MapLegacyConnectorType(legacyType string, direction string) string {
 			return "sftp_outbound"
 		case "ftp":
 			return "ftp_outbound"
+		case "sink":
+			return "sink_outbound"
 		}
 	}
 

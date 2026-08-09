@@ -248,6 +248,11 @@ class MapToCanonicalBuilder {
                         value="${esc(h.sourcePath)}" placeholder="e.g. patientFirstName" autocomplete="off">
                 </td>
                 <td>
+                    <input type="text" class="form-control form-control-sm m2c-header-literal"
+                        value="${esc(h.literalValue)}" placeholder="(fixed value)" autocomplete="off"
+                        title="Used only when Source Path is empty — a constant written regardless of per-message data (e.g. a coded field's own codeSystem OID)">
+                </td>
+                <td>
                     <select class="form-select form-select-sm m2c-header-transform" style="font-size:0.78rem;">
                         ${this._renderTransformOptions(h.transform)}
                     </select>
@@ -282,6 +287,7 @@ class MapToCanonicalBuilder {
                     <thead><tr>
                         <th style="font-size:0.7rem;color:#64748b;">Target Field</th>
                         <th style="font-size:0.7rem;color:#64748b;">Source Path</th>
+                        <th style="font-size:0.7rem;color:#64748b;">Literal Value</th>
                         <th style="font-size:0.7rem;color:#64748b;">Transform</th>
                         <th style="font-size:0.7rem;color:#64748b;">Requirement</th>
                         <th></th>
@@ -368,6 +374,12 @@ class MapToCanonicalBuilder {
                     title="Remove section"><i class="fas fa-trash"></i></button>
             </div>
             <div style="font-size:0.7rem;color:#94a3b8;margin-bottom:0.5rem;">Rows Path: pipeline field holding the array of source rows for this section (e.g. a File Parser step's "records" or a Database Enrichment step's "rows").</div>
+            <div style="display:flex;align-items:center;gap:0.6rem;margin-bottom:0.5rem;">
+                <label style="font-size:0.7rem;color:#94a3b8;white-space:nowrap;" title="Advanced — only needed when this section has more than one entry shape (e.g. Medical Equipment's alternate Procedure entries). Add a SECOND section card for the same section, give it its own Rows Path, and set its Entries Key to match the alternate shape's key. Leave blank for the ordinary case.">Entries Key (advanced)</label>
+                <input type="text" class="form-control form-control-sm m2c-entries-key" data-section-index="${sectionIndex}"
+                    value="${esc(sec.entriesKey || '')}" placeholder="entries (default)"
+                    style="flex:0 0 200px;font-family:monospace;font-size:0.78rem;">
+            </div>
             ${groupByHtml}
             ${itemFieldsSection}
             ${entryFieldsSection}
@@ -650,6 +662,8 @@ class MapToCanonicalBuilder {
             if (!h) return;
             h.target = row.querySelector('.m2c-header-target').value.trim();
             h.sourcePath = row.querySelector('.m2c-header-source').value.trim();
+            const literalEl = row.querySelector('.m2c-header-literal');
+            h.literalValue = literalEl && literalEl.value.trim() ? literalEl.value.trim() : undefined;
             const transformEl = row.querySelector('.m2c-header-transform');
             h.transform = transformEl && transformEl.value ? transformEl.value : undefined;
         });
@@ -660,6 +674,9 @@ class MapToCanonicalBuilder {
             if (!sec) return;
             const rowsPathEl = card.querySelector('.m2c-rows-path');
             if (rowsPathEl) sec.rowsPath = rowsPathEl.value.trim();
+
+            const entriesKeyEl = card.querySelector('.m2c-entries-key');
+            if (entriesKeyEl) sec.entriesKey = entriesKeyEl.value.trim() || undefined;
 
             const groupByEl = card.querySelector('.m2c-section-groupby');
             if (groupByEl) {

@@ -18,6 +18,7 @@ import (
 	"ezhealthkonnect/models"
 	"ezhealthkonnect/services"
 	"ezhealthkonnect/services/backpressure"
+	cdacoverage "ezhealthkonnect/services/cda_coverage"
 	cdastorage "ezhealthkonnect/services/cda_storage"
 	. "ezhealthkonnect/services/connectors" // Import connectors package for factory
 	"ezhealthkonnect/services/logger"
@@ -61,6 +62,13 @@ type ProcessingEngine struct {
 	// Populated at interface activation; read on every inbound message.
 	familyFilter   map[string][]string
 	familyFilterMu sync.RWMutex
+
+	// coverageAuditPool runs CDA Coverage Audit report-building off the
+	// critical delivery path — nil (the default, until SetCoverageAuditPool
+	// is called) means the coverage_audit_fn context callback is never
+	// injected, so OutboundConnectorExecutor's publishCoverageAudit is a
+	// pure no-op and the feature has zero effect anywhere.
+	coverageAuditPool *cdacoverage.WorkerPool
 }
 
 // InterfaceStatus tracks the status of an interface
@@ -326,6 +334,16 @@ func (pe *ProcessingEngine) SetDLQService(dlqSvc *DLQService) {
 	if pe.transformationService != nil {
 		pe.transformationService.GetExecutorRegistry().SetDLQService(dlqSvc)
 	}
+}
+
+// SetCoverageAuditPool wires the CDA Coverage Audit background worker pool
+// into the engine. Until this is called, engine_message_processor.go never
+// injects coverage_audit_fn onto the pipeline context, so
+// OutboundConnectorExecutor's publishCoverageAudit is always a no-op — safe
+// to leave unset entirely (e.g. in tests, or a deployment that hasn't
+// enabled the feature anywhere).
+func (pe *ProcessingEngine) SetCoverageAuditPool(pool *cdacoverage.WorkerPool) {
+	pe.coverageAuditPool = pool
 }
 
 // SetCDADocumentStore upgrades the cda.parse executor with a document store so that
